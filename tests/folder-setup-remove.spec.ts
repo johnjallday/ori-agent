@@ -184,6 +184,56 @@ test('fixture Remove asks once, Keep and Esc back out, and a removed setup stays
   expect(state.abandons).toHaveLength(1);
 });
 
+test('fixture a stopped setup whose folder was lost is removed without picking it again', async ({
+  page
+}) => {
+  // A restart drops a held folder, so the card asks for it again; Remove needs
+  // no folder and stays beside the headline.
+  const lost = { ...stoppedOffer(), needs_pick: true } as any;
+  lost.setup.stop_reason = 'install_failed';
+  const state = { removed: false, abandons: [] as any[] };
+  await page.route('**/api/personal-assistant/folder-digest', route =>
+    route.fulfill({
+      json: {
+        folder_digest: { chips, picker_available: false, ...(state.removed ? {} : { offer: lost }) }
+      }
+    })
+  );
+  await page.route(`**/api/personal-assistant/folder-digest/offers/${OFFER_ID}/abandon`, route => {
+    state.abandons.push(route.request().postDataJSON());
+    state.removed = true;
+    return route.fulfill({ json: { offer: { ...lost, status: 'abandoned' } } });
+  });
+  await page.goto('/?panel=today');
+  const card = page.locator('#personalAssistantFolderOffer');
+  await expect(card).toBeVisible();
+  // The headline asks for what the primary does, not for the plugin.
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    'Album-4 needs you to pick the folder again'
+  );
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'Ori no longer has Album-4 open'
+  );
+  await expect(card.getByRole('button', { name: 'Pick it again', exact: true })).toBeVisible();
+  const head = card.locator('#personalAssistantFolderOfferHeadActions');
+  await expect(head.getByRole('button')).toHaveText(['Remove']);
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/lost-folder-remove.png` });
+
+  await head.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'Remove this setup from Needs you?'
+  );
+  await expect(card.getByRole('button', { name: 'Pick it again', exact: true })).toHaveCount(0);
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/lost-folder-remove-confirm.png`
+    });
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(card).toBeHidden();
+  expect(state.abandons).toHaveLength(1);
+});
+
 test('fixture a refused Remove keeps the confirm and says why', async ({ page }) => {
   await mountStopped(page);
   let reason = 'setup_running';

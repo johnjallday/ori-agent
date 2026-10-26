@@ -1226,11 +1226,7 @@ function folderOfferViewWithoutLead(offer, options = {}) {
         offer.prerequisites_available &&
         offer.destination_blocker?.home_provider_key);
     if (view.needsPick)
-      return {
-        ...repickView(view, subject),
-        resume: status === 'awaiting_outcome',
-        actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
-      };
+      return { ...lostFolderSetupView(view, subject), resume: status === 'awaiting_outcome' };
     return {
       ...view,
       plan: null,
@@ -1286,11 +1282,10 @@ function folderOfferViewWithoutLead(offer, options = {}) {
   }
   if (view.visible && view.needsPick && status === 'awaiting_outcome') {
     return {
-      ...repickView(view, subject),
+      ...lostFolderSetupView(view, subject),
       // A confirmed setup whose folder was lost (a restart drops a held folder)
       // must still draw its way back; a decided card shows actions only then.
-      resume: true,
-      actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
+      resume: true
     };
   }
   if (view.visible && view.needsPick && !view.decided && offer.software) {
@@ -1873,6 +1868,21 @@ function repickView(view, subject) {
       { id: 'repick', label: 'Pick it again', style: 'primary', repick: true },
       { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
       { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+    ]
+  };
+}
+
+// lostFolderSetupView is a confirmed setup whose folder Ori no longer has: it
+// asks for the folder again, and the headline asks the same. One that stopped
+// keeps Remove, which needs no folder, so dropping it never means a pick first.
+function lostFolderSetupView(view, subject) {
+  const stopped = view.status === 'awaiting_outcome' && view.setup?.status === 'stopped';
+  return {
+    ...repickView(view, subject),
+    ...(stopped ? { setup: { ...view.setup, ask: SETUP_STOP_ASK.needs_pick } } : {}),
+    actions: [
+      { id: 'repick', label: 'Pick it again', style: 'primary', repick: true },
+      ...(stopped ? [REMOVE_SETUP] : [])
     ]
   };
 }

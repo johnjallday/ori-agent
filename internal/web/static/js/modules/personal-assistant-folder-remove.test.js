@@ -114,6 +114,49 @@ test('a stopped offer card carries Remove last, after the way forward', () => {
   assert.equal(view.resume, true);
 });
 
+test('a stopped setup whose folder was lost keeps Remove beside Pick it again', () => {
+  // A restart drops a held folder: the card asks for it again, but Remove needs
+  // no folder, so the user never has to pick one only to drop the setup.
+  for (const extra of [
+    {},
+    { destination_status: 'changed' },
+    { destination_status: 'unavailable' }
+  ]) {
+    const offer = stopped('install_failed', { needs_pick: true, ...extra });
+    const view = folderOfferView(offer);
+    const label = JSON.stringify(extra);
+    assert.deepEqual(
+      view.actions.map(action => action.id),
+      ['repick', 'remove'],
+      label
+    );
+    assert.equal(view.resume, true, label);
+    assert.match(view.question, /^Ori no longer has Album-4 open/, label);
+    // The headline asks for what the primary does, not for the plugin.
+    assert.equal(view.setup.ask, 'pick the folder again', label);
+    assert.equal(offerActionById(offer, '', 'remove')?.remove, true, label);
+    assert.deepEqual(
+      folderOfferView(offer, { confirm: 'remove' }).actions.map(action => action.id),
+      ['remove-confirm', 'remove-keep'],
+      label
+    );
+  }
+});
+
+test('a lost folder whose setup has not stopped offers no Remove', () => {
+  const ids = offer => folderOfferView(offer).actions.map(action => action.id);
+  assert.deepEqual(ids(stopped('failed', { needs_pick: true, setup: undefined })), ['repick']);
+  assert.deepEqual(
+    ids(
+      stopped('failed', {
+        needs_pick: true,
+        setup: { status: 'running', lines: lines(['working']) }
+      })
+    ),
+    ['repick']
+  );
+});
+
 test('the confirm names what stays, from the lines that finished', () => {
   const confirm = removeConfirmView(stopped('failed'));
   assert.match(confirm.question, /^Remove this setup from Needs you\? /);
