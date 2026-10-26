@@ -47,10 +47,14 @@ func firstBatchReportItems(offer FolderOffer, ws *workspace.Workspace, now time.
 	if offer.Setup != nil && offer.Setup.Intent.Inbox != nil && strings.TrimSpace(offer.Setup.Intent.Inbox.Agent.Name) != "" {
 		agent = strings.TrimSpace(offer.Setup.Intent.Inbox.Agent.Name)
 	}
+	// The batch's route was recorded at setup; it opens the workspace by the
+	// name it has now.
+	recorded, _, _ := splitWorkspaceRoute(batch.Route)
+	route := rerouteWorkspace(batch.Route, recorded, ws.FolderSlug)
 	item := TodayItem{
 		ID: "first-batch-" + offer.ID, Kind: TodayKindFirstBatchReport,
 		Attribution: truncateRunes(agent, 100), Workspace: truncateRunes(ws.Name, 120),
-		Route: batch.Route, ReportRoute: batch.Route, SourceAt: at, State: "finished",
+		Route: route, ReportRoute: route, SourceAt: at, State: "finished",
 		Ref: dailybrief.SourceRef{WorkspaceID: ws.ID, EntityType: "folder_offer", EntityID: offer.ID, Timestamp: at},
 	}
 	switch batch.Outcome {

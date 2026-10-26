@@ -1176,7 +1176,9 @@ function folderOfferViewWithoutLead(offer, options = {}) {
     ['project', 'home', 'group'].includes(offer?.outcome?.kind) &&
     folderReceiptView(offer).visible
   ) {
-    view.question = "Here's what I set up:";
+    view.question = workspaceGoneView(offer)
+      ? 'What the setup made, before it was deleted:'
+      : "Here's what I set up:";
     view.reason = '';
     view.capabilityDetail = ''; // the pre-setup install promise is no longer true
   }
@@ -2032,6 +2034,22 @@ export function folderReceiptView(offer, options = {}) {
     )
   )
     return { visible: false };
+  // A workspace deleted since its setup has nothing to open: the receipt stays
+  // as a record and the card says so, with Restore while it is in the Trash.
+  const gone = workspaceGoneView(offer);
+  if (gone)
+    return {
+      visible: true,
+      rows: rows.map(row => ({
+        kind: String(row.kind || ''),
+        name: String(row.name || ''),
+        detail: String(row.detail || '')
+      })),
+      route: '',
+      homeRoute: '',
+      openLabel: '',
+      gone
+    };
   // An inbox hire's first look is its first batch: the card leads to the review
   // of that batch (or File Janitor, when there was nothing to file). No model
   // task exists for it, so Start first look never appears.
@@ -2093,6 +2111,29 @@ export function folderReceiptView(offer, options = {}) {
     ...(map ? { map } : {}),
     ...(hireLook.visible ? { hireLook } : {}),
     ...(firstLook.visible ? { firstLook } : {})
+  };
+}
+
+// workspaceGoneView is a resolved offer whose workspace was deleted after its
+// setup (the server reads that live and drops the receipt's links): what the
+// card says instead of opening it, and the workspace Restore brings back from
+// the Trash. Null while the workspace is there.
+export function workspaceGoneView(offer) {
+  const gone = String(offer?.workspace_gone || '');
+  if (offer?.status !== 'resolved' || !['trashed', 'removed'].includes(gone)) return null;
+  const receipt = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
+  const name =
+    String(
+      receipt.find(row => row?.kind === 'workspace')?.name || offer?.subject?.name || ''
+    ).trim() || 'This workspace';
+  const workspaceId = gone === 'trashed' ? String(offer?.outcome?.workspace_id || '').trim() : '';
+  return {
+    name,
+    workspaceId,
+    restoreLabel: workspaceId ? `Restore ${name}` : '',
+    message: workspaceId
+      ? `${name} was deleted, so there is nothing to open. Restore it from the Trash to pick up where you left off, or show me the folder again to set it up afresh.`
+      : `${name} was deleted, so there is nothing to open. Show me the folder again to set it up afresh.`
   };
 }
 
@@ -2644,7 +2685,11 @@ const state = {
   // A Start first look (or Try again) click that is still in flight, and what
   // the last one was told when it did not start.
   firstLookBusy: false,
-  firstLookMessage: ''
+  firstLookMessage: '',
+  // A Restore of a receipt's deleted workspace still in flight, and what the
+  // last one was told when the workspace did not come back.
+  restoreBusy: false,
+  restoreMessage: ''
 };
 
 const prerequisites = createFolderPrerequisites({
@@ -3448,7 +3493,11 @@ function renderOffer(place) {
               state.offer.subject?.name ||
               'Workspace'
           },
-          receipt.homeName || receipt.group || receipt.batch ? ' is ready' : ' · Workspace ready'
+          receipt.gone
+            ? ' was deleted'
+            : receipt.homeName || receipt.group || receipt.batch
+              ? ' is ready'
+              : ' · Workspace ready'
         ])
       : view.setup
         ? segments([
@@ -3648,10 +3697,12 @@ function renderOffer(place) {
     }
   }
   if (els.actions) {
+    const restore = receipt.gone?.workspaceId ? receipt.gone : null;
     els.actions.hidden =
       view.decided &&
       !receipt.route &&
       !receipt.homeRoute &&
+      !restore &&
       !(firstLook.visible && firstLook.actions.length) &&
       (!view.resume || !(view.actions || []).length);
     const showView = !receipt.route && !receipt.homeRoute && (!view.decided || view.resume);
@@ -3663,8 +3714,9 @@ function renderOffer(place) {
       route: receipt.route || '',
       open: receipt.openLabel || '',
       home: receipt.homeRoute || '',
+      restore: restore?.workspaceId || '',
       actions: showView ? view.actions : null,
-      busy: actionBusy
+      busy: actionBusy || state.restoreBusy
     });
     const rebuild = els.actions.dataset.signature !== signature;
     els.actions.dataset.signature = signature;
@@ -3705,6 +3757,15 @@ function renderOffer(place) {
       open.href = receipt.route;
       open.textContent = receipt.openLabel;
       els.actions.append(open);
+    } else if (rebuild && restore) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-sm btn-primary';
+      button.dataset.folderAction = 'restore-workspace';
+      button.textContent = state.restoreBusy ? 'Restoring…' : restore.restoreLabel;
+      button.disabled = actionBusy || state.restoreBusy;
+      button.addEventListener('click', () => void restoreOutcomeWorkspace());
+      els.actions.append(button);
     }
     if (rebuild && receipt.homeRoute) {
       const home = document.createElement('a');
@@ -3754,6 +3815,8 @@ function renderOffer(place) {
         : '';
     const note =
       state.progress ||
+      state.restoreMessage ||
+      (receipt.gone ? receipt.gone.message : '') ||
       lookNote ||
       (view.setup
         ? view.setup.statusLine
@@ -4081,6 +4144,9 @@ function runAction(action) {
 // "Not reviewed", "No destination proposed") would read as state the card does
 // not know.
 export function folderDiagramVisible(offer, receiptVisible = false) {
+  // The scene draws the setup's result as it stands; a deleted workspace has
+  // none, and the card says so instead.
+  if (workspaceGoneView(offer)) return false;
   return Boolean(receiptVisible || offer?.setup?.visual || offer?.plan?.visual);
 }
 
@@ -4484,6 +4550,40 @@ async function stopFirstLook() {
   return stopped;
 }
 
+// workspaceNotRestored is what a Restore the server could not carry out says.
+// The server's own message can name a Trash path, so it is not shown.
+const workspaceNotRestored = name =>
+  `${name} could not be restored. It may have been emptied from the Trash, or another workspace now has its name.`;
+
+// restoreOutcomeWorkspace is Restore on a receipt whose workspace was deleted:
+// the workspace comes back from the Trash with everything its setup made, the
+// same as Undo after a delete on Home. The card then reads its offer again, so
+// its links come back from the server rather than from here.
+async function restoreOutcomeWorkspace() {
+  const gone = workspaceGoneView(state.offer);
+  if (!gone?.workspaceId || state.restoreBusy) return false;
+  const offerID = state.offer.id;
+  state.restoreBusy = true;
+  state.restoreMessage = '';
+  render();
+  let restored = false;
+  try {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(gone.workspaceId)}/restore`,
+      { method: 'POST' }
+    );
+    restored = response.ok;
+  } catch (_) {
+    restored = false;
+  }
+  state.restoreBusy = false;
+  if (!restored) state.restoreMessage = workspaceNotRestored(gone.name);
+  render();
+  await refreshFirstLook(offerID);
+  if (restored) void window.PersonalAssistantToday?.refresh?.();
+  return restored;
+}
+
 async function pollSetup() {
   const current = reviewResponseGuard(state.offer);
   const id = state.offer?.id;
@@ -4798,6 +4898,7 @@ async function load() {
     state.offer = state.digest?.offer || null;
     state.confirm = '';
     state.firstLookMessage = '';
+    state.restoreMessage = '';
     state.pinned = folderPinnedOffer(state);
     const prompt = firstFolderPromptView(state.digest, state.available);
     if (prompt.expand && !state.prompting) {

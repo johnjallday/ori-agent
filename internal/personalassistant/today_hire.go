@@ -53,7 +53,7 @@ func (s *TodayService) hireItems(ctx context.Context, userID string, now time.Ti
 	}
 	for _, record := range records {
 		ws, err := s.workspaces.Get(record.WorkspaceID)
-		if err != nil || ws == nil || ws.ID != record.WorkspaceID || !todaySafeSlug.MatchString(ws.FolderSlug) {
+		if err != nil || !todayWorkspaceOpens(ws, record.WorkspaceID) {
 			continue
 		}
 		n, w, d := hireTodayItems(record, ws, s.hireLookRunning, now)

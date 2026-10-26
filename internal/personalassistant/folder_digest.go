@@ -383,6 +383,10 @@ type FolderDigestDeps struct {
 	// FirstTaskView reads where a workspace's first look stands, from the
 	// canonical workspace record. Nil leaves offers without a first_task block.
 	FirstTaskView func(ctx context.Context, workspaceID string) (FolderFirstTaskView, bool)
+	// OutcomeWorkspace reads where the workspace a resolved offer made stands
+	// now: its current slug, or that it was deleted. ok is false when it cannot
+	// say. Nil leaves every receipt's links as they were recorded.
+	OutcomeWorkspace func(ctx context.Context, workspaceID string) (FolderOutcomeWorkspace, bool)
 	// OnResolved runs after a project outcome completes: the dossier
 	// producer learns from the offer and reports whether the fact was saved
 	// (FR35–FR39). Best-effort; its answer is recorded on the outcome.
@@ -741,6 +745,10 @@ type FolderOfferView struct {
 	// FirstTask is where the folder's first look stands, on a resolved project
 	// offer whose workspace has one. It is read live, never stored on the offer.
 	FirstTask *FolderFirstTaskView `json:"first_task,omitempty"`
+	// WorkspaceGone says the workspace a resolved offer made is no longer
+	// there (FolderWorkspaceTrashed or FolderWorkspaceRemoved), and its links
+	// are dropped from Outcome. It is read live, never stored on the offer.
+	WorkspaceGone string `json:"workspace_gone,omitempty"`
 }
 
 // FolderOfferRecognition is a single recognized project as a card names it,
@@ -2594,6 +2602,7 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 	if first, ok := s.firstTaskView(ctx, offer); ok {
 		v.FirstTask = &first
 	}
+	s.followOutcomeWorkspace(ctx, &v)
 	return v
 }
 

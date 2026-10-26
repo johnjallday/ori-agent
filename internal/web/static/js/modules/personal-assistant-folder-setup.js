@@ -1057,6 +1057,12 @@ function renderReferences() {
         rows.append(item);
       });
       slot.append(rows);
+      if (receipt.gone) {
+        const gone = document.createElement('p');
+        gone.className = 'personal-assistant-folder-context__note';
+        gone.textContent = receipt.gone.message;
+        slot.append(gone);
+      }
       if (receipt.route) {
         const link = document.createElement('a');
         link.href = receipt.route;

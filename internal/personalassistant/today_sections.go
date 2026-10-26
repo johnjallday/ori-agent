@@ -87,7 +87,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			continue
 		}
 		ws, err := s.workspaces.Get(offer.Outcome.WorkspaceID)
-		if err != nil || ws == nil || ws.ID != offer.Outcome.WorkspaceID || !todaySafeSlug.MatchString(ws.FolderSlug) {
+		if err != nil || !todayWorkspaceOpens(ws, offer.Outcome.WorkspaceID) {
 			continue
 		}
 		seen[ws.ID] = true
