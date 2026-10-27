@@ -63,6 +63,11 @@ func newDraftServerFixture(t *testing.T) *draftServerFixture {
 	if status != http.StatusCreated {
 		t.Fatalf("hire: %d %v", status, hired)
 	}
+	// The shared helper configured a Default model only so the hire could go
+	// through; the tests built on this fixture start with none, as before.
+	if err := builder.configManager.SetSystemModel("", ""); err != nil {
+		t.Fatalf("clear Default model: %v", err)
+	}
 	version := hired["personal_assistant"].(map[string]any)["state_version"]
 	if status, body := f.call(t, http.MethodPost, "/api/personal-assistant/hq", map[string]any{
 		"request_id": "draft-hq", "if_version": version, "name": "My HQ", "timezone": "UTC",

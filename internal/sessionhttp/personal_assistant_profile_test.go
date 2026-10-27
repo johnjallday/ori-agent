@@ -92,6 +92,30 @@ func TestCreatePersonalAssistantProfileUsesTheCanonicalEntrySpecOnly(t *testing.
 	}
 }
 
+// The hire saves the chosen model as the Default model before it creates the
+// profile, so the profile's own record — what the Agents page card shows —
+// carries that model from creation (PRD FR10). No second write is involved.
+func TestCreatePersonalAssistantProfileTakesTheDefaultModel(t *testing.T) {
+	handler, cleanup := profileTestHandler(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{
+		provider: "codex", model: "gpt-5.3-codex", reasoningEffort: "high",
+	})
+
+	if _, err := handler.CreatePersonalAssistantProfile(context.Background(), profileOptions("Atlas")); err != nil {
+		t.Fatalf("CreatePersonalAssistantProfile: %v", err)
+	}
+	record, found := handler.agentStore.GetAgent("Atlas")
+	if !found || record == nil {
+		t.Fatal("hired profile was not created")
+	}
+	if record.Settings.Provider != "codex" || record.Settings.Model != "gpt-5.3-codex" ||
+		record.Settings.ReasoningEffort != "high" {
+		t.Fatalf("profile settings = provider %q model %q effort %q, want the Default model",
+			record.Settings.Provider, record.Settings.Model, record.Settings.ReasoningEffort)
+	}
+}
+
 func TestCreatePersonalAssistantProfileStampsDurableProvenance(t *testing.T) {
 	handler, cleanup := profileTestHandler(t)
 	defer cleanup()

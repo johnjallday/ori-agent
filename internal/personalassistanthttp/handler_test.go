@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -594,6 +595,243 @@ func TestHandlerHire_RejectsMalformedOversizedAndUnknownJSONBeforeService(t *tes
 		if recorder.Code != http.StatusBadRequest || hirer.calls != 0 {
 			t.Fatalf("status=%d calls=%d body=%s", recorder.Code, hirer.calls, recorder.Body.String())
 		}
+	}
+}
+
+// recordingModelWriter is Settings → Default model for the hire tests. Every
+// write appends to a log shared with the hirer, so a test can see the order.
+type recordingModelWriter struct {
+	log             *[]string
+	provider, model string
+	effort          string
+	saveErr         error
+	saves           int
+}
+
+func (w *recordingModelWriter) GetSystemModel() (string, string) { return w.provider, w.model }
+func (w *recordingModelWriter) SetSystemModel(provider, model string) error {
+	w.provider, w.model = provider, model
+	return nil
+}
+func (w *recordingModelWriter) SetSystemReasoningEffort(effort string) error {
+	w.effort = effort
+	return nil
+}
+func (w *recordingModelWriter) Save() error {
+	if w.saveErr != nil {
+		return w.saveErr
+	}
+	w.saves++
+	*w.log = append(*w.log, "save "+w.provider+"/"+w.model)
+	return nil
+}
+func (w *recordingModelWriter) IsSystemModelConfigured() bool {
+	return w.provider != "" && w.model != ""
+}
+func (w *recordingModelWriter) GetSystemReasoningEffort() string {
+	return w.effort
+}
+
+type knownProviders map[string]bool
+
+func (p knownProviders) GetProvider(name string) (llm.Provider, error) {
+	if p[name] {
+		return nil, nil
+	}
+	return nil, errors.New("provider not registered")
+}
+
+type loggingHireService struct {
+	fakeHireService
+	log *[]string
+}
+
+func (f *loggingHireService) Hire(ctx context.Context, userID string, request personalassistant.HireRequest) (*personalassistant.HireResult, error) {
+	*f.log = append(*f.log, "hire")
+	return f.fakeHireService.Hire(ctx, userID, request)
+}
+
+func modelHireHandler(t *testing.T, stored string, writer *recordingModelWriter) (*Handler, *loggingHireService) {
+	t.Helper()
+	hirer := &loggingHireService{log: writer.log, fakeHireService: fakeHireService{result: &personalassistant.HireResult{
+		State: &personalassistant.State{
+			Status: personalassistant.StatusAwaitingHQ, AssistantID: "assistant-1",
+			DisplayName: "Atlas", GlobalAgentProfileName: "Atlas", StateVersion: 2,
+		},
+		NewlyHired: true,
+	}}}
+	reader := &fakeStateReader{projection: &personalassistant.Projection{
+		State: personalassistant.APIStateNeedsHire, HireRequestID: stored,
+	}}
+	handler := NewHandler(reader, fakeUserProvider{userID: "user-a"})
+	handler.SetHireService(hirer)
+	// No agent store: aligning the built-in assistant is logged and skipped.
+	handler.SetDefaultModelWriter(writer, knownProviders{"codex": true, "claude": true}, nil)
+	return handler, hirer
+}
+
+func postHire(handler *Handler, body string) *httptest.ResponseRecorder {
+	recorder := httptest.NewRecorder()
+	handler.Hire(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", strings.NewReader(body)))
+	return recorder
+}
+
+func TestHandlerHire_SavesTheChosenModelBeforeTheHire(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log}
+	handler, hirer := modelHireHandler(t, "", writer)
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas",`+
+		`"model":{"provider":"codex","model":"gpt-5.3-codex","reasoning_effort":"high"}}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Join(log, ",") != "save codex/gpt-5.3-codex,hire" || hirer.calls != 1 {
+		t.Fatalf("order = %v, hirer calls = %d; want the save before the hire", log, hirer.calls)
+	}
+	if writer.effort != "high" {
+		t.Fatalf("reasoning effort = %q, want high", writer.effort)
+	}
+	var response struct {
+		PersonalAssistant hireResponse `json:"personal_assistant"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := response.PersonalAssistant.DefaultModel
+	if got == nil || got.Provider != "codex" || got.Model != "gpt-5.3-codex" || got.ReasoningEffort != "high" {
+		t.Fatalf("default_model = %#v, want the saved model", got)
+	}
+}
+
+func TestHandlerHire_NormalizesProviderAndClearsReasoningOffCodex(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log, effort: "high"}
+	handler, _ := modelHireHandler(t, "", writer)
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas",`+
+		`"model":{"provider":"Anthropic","model":"claude-sonnet-5-5","reasoning_effort":"high"}}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if writer.provider != "claude" || writer.effort != "" {
+		t.Fatalf("saved provider %q effort %q, want claude with no reasoning level", writer.provider, writer.effort)
+	}
+	if strings.Contains(recorder.Body.String(), `"reasoning_effort":"high"`) {
+		t.Fatalf("response echoed a reasoning level for a non-Codex model: %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerHire_RefusesAModelItCannotSaveWithoutHiring(t *testing.T) {
+	cases := []struct {
+		name, body, code string
+		status           int
+		saveErr          error
+	}{
+		{"unregistered provider", `"model":{"provider":"ollama","model":"llama3"}`, "invalid_model", http.StatusBadRequest, nil},
+		{"empty model", `"model":{"provider":"codex","model":"  "}`, "model_required", http.StatusBadRequest, nil},
+		{"no model and none configured", `"mandate":""`, "model_required", http.StatusBadRequest, nil},
+		{"settings cannot be written", `"model":{"provider":"codex","model":"gpt-5.3-codex"}`, "model_save_failed", http.StatusServiceUnavailable, errors.New("disk full")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var log []string
+			writer := &recordingModelWriter{log: &log, saveErr: tc.saveErr}
+			handler, hirer := modelHireHandler(t, "", writer)
+			recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas",`+tc.body+`}`)
+			if recorder.Code != tc.status || hirer.calls != 0 {
+				t.Fatalf("status = %d hirer calls = %d, body=%s", recorder.Code, hirer.calls, recorder.Body.String())
+			}
+			var response hireErrorResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if response.Code != tc.code || strings.TrimSpace(response.Error) == "" {
+				t.Fatalf("response = %#v, want code %s with a message", response, tc.code)
+			}
+			if tc.saveErr == nil && writer.saves != 0 {
+				t.Fatalf("a refused model was saved %d time(s)", writer.saves)
+			}
+			if strings.Contains(recorder.Body.String(), "disk full") {
+				t.Fatal("response leaked the settings write error")
+			}
+		})
+	}
+}
+
+func TestHandlerHire_WithoutAModelProceedsOnAConfiguredDefault(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log, provider: "codex", model: "gpt-5.3-codex", effort: "medium"}
+	handler, hirer := modelHireHandler(t, "", writer)
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas"}`)
+	if recorder.Code != http.StatusCreated || hirer.calls != 1 || writer.saves != 0 {
+		t.Fatalf("status = %d hirer calls = %d saves = %d, body=%s", recorder.Code, hirer.calls, writer.saves, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"default_model":{"provider":"codex","model":"gpt-5.3-codex","reasoning_effort":"medium"}`) {
+		t.Fatalf("response did not echo the Default model: %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerHire_ReplayKeepsADefaultModelChangedSinceTheFirstAttempt(t *testing.T) {
+	var log []string
+	// Settings now say claude; the replay still carries the first attempt's codex.
+	writer := &recordingModelWriter{log: &log, provider: "claude", model: "claude-sonnet-5-5"}
+	handler, hirer := modelHireHandler(t, "request-1", writer)
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas",`+
+		`"model":{"provider":"codex","model":"gpt-5.3-codex"}}`)
+	if recorder.Code != http.StatusCreated || hirer.calls != 1 {
+		t.Fatalf("status = %d hirer calls = %d, body=%s", recorder.Code, hirer.calls, recorder.Body.String())
+	}
+	if writer.saves != 0 || writer.provider != "claude" {
+		t.Fatalf("replay overwrote the Default model: provider %q saves %d", writer.provider, writer.saves)
+	}
+	if !strings.Contains(recorder.Body.String(), `"provider":"claude"`) {
+		t.Fatalf("response must report the model actually in place: %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerHire_ReplayFillsInAMissingDefaultModel(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log}
+	handler, _ := modelHireHandler(t, "request-1", writer)
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas",`+
+		`"model":{"provider":"codex","model":"gpt-5.3-codex"}}`)
+	if recorder.Code != http.StatusCreated || writer.saves != 1 || writer.effort != "medium" {
+		t.Fatalf("status = %d saves = %d effort = %q, body=%s", recorder.Code, writer.saves, writer.effort, recorder.Body.String())
+	}
+}
+
+func TestHandlerHire_ResumeViewReplayNeedsNoModel(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log}
+	handler, hirer := modelHireHandler(t, "request-1", writer)
+	// The preset's resume view replays the stored hire with no picker.
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas"}`)
+	if recorder.Code != http.StatusCreated || hirer.calls != 1 || writer.saves != 0 {
+		t.Fatalf("status = %d hirer calls = %d saves = %d, body=%s", recorder.Code, hirer.calls, writer.saves, recorder.Body.String())
+	}
+}
+
+func TestHandlerHire_ConflictingRequestLeavesTheDefaultModelAlone(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log}
+	handler, hirer := modelHireHandler(t, "request-other", writer)
+	hirer.err = personalassistant.ErrConflict
+	hirer.result = nil
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas",`+
+		`"model":{"provider":"codex","model":"gpt-5.3-codex"}}`)
+	if recorder.Code != http.StatusConflict || writer.saves != 0 {
+		t.Fatalf("status = %d saves = %d, body=%s", recorder.Code, writer.saves, recorder.Body.String())
+	}
+}
+
+func TestHandlerHire_StateReadFailureSavesNothing(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log}
+	handler, hirer := modelHireHandler(t, "", writer)
+	handler.service = &fakeStateReader{err: errors.New("database locked")}
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas",`+
+		`"model":{"provider":"codex","model":"gpt-5.3-codex"}}`)
+	if recorder.Code != http.StatusServiceUnavailable || writer.saves != 0 || hirer.calls != 0 {
+		t.Fatalf("status = %d saves = %d hirer calls = %d", recorder.Code, writer.saves, hirer.calls)
 	}
 }
 

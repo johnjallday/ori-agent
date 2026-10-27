@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
@@ -293,6 +294,15 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssignment.SetCanonicalWriter(assignmentWriter)
 	b.personalAssignment.SetBriefService(briefService)
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
+	// The hire preset picks the model the assistant thinks with; the hire saves
+	// it as the Default model through the same write an agent edit uses.
+	if b.configManager != nil {
+		var providers agenthttp.ProviderAvailability
+		if b.llmFactory != nil {
+			providers = b.llmFactory
+		}
+		b.personalAssistantHandler.SetDefaultModelWriter(b.configManager, providers, b.st)
+	}
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
 	b.personalAssistantHandler.SetFirstLookActions(firstLookActionsHost{builder: b})
 	b.personalAssistantHandler.SetHireLookActions(hireLookActionsHost{builder: b})

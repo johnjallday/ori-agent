@@ -766,9 +766,31 @@ test.describe('Personal Assistant Foundation accessibility', () => {
         body: '{"personal_assistant":{"state":"needs_hire","state_version":1,"availability":{"model":{"status":"not_configured","available":false}}}}'
       })
     );
+    // The preset's model block: one provider with a recommended model.
+    await page.route('**/api/providers', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          providers: [{ name: 'openai', display_name: 'OpenAI', available: true }]
+        })
+      })
+    );
+    await page.route('**/api/settings/available-models?provider=openai', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          available: true,
+          model_options: [{ id: 'gpt-small', label: 'Small', recommended: true }]
+        })
+      })
+    );
+    const hireModels: unknown[] = [];
     await page.route('**/api/personal-assistant/hire', async route => {
       hireCalls += 1;
       requestIDs.push(route.request().postDataJSON().request_id);
+      hireModels.push(route.request().postDataJSON().model);
       await new Promise(resolve => setTimeout(resolve, 400));
       if (hireCalls === 1) {
         await route.fulfill({
@@ -799,9 +821,13 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(page.getByLabel('Plan my day')).toBeChecked();
     const mandate = page.getByLabel('What would make them useful this week? (optional)');
     await expect(mandate).toHaveAttribute('maxlength', '1000');
+    const modelGroup = page.getByRole('group', { name: 'Which AI should Assistant think with?' });
+    await expect(modelGroup).toBeVisible();
+    await expect(modelGroup.getByLabel('Provider')).toHaveValue('openai');
+    await expect(modelGroup.getByLabel('Model', { exact: true })).toHaveValue('gpt-small');
     // No confirmation checkbox: the boundary line sits above the one button.
     await expect(page.locator('#addAgentModal')).toContainText(
-      'Hiring creates your assistant. It does not create a workspace'
+      'Hiring creates your assistant and saves the model you chose as Ori’s Default model. It does not create a workspace'
     );
     const hire = page.getByRole('button', { name: 'Hire assistant' });
     await expect(hire).toBeEnabled();
@@ -826,6 +852,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     // The retry replays the same request, so it can never hire a second assistant.
     expect(requestIDs[0]).toBeTruthy();
     expect(requestIDs[1]).toBe(requestIDs[0]);
+    // Both attempts carry the model the block chose.
+    expect(hireModels).toEqual([
+      { provider: 'openai', model: 'gpt-small', reasoning_effort: '' },
+      { provider: 'openai', model: 'gpt-small', reasoning_effort: '' }
+    ]);
   });
 
   // Reduced motion is the ambient condition for this whole describe block

@@ -73,6 +73,29 @@ test('buildPersonalAssistantHirePayload normalizes one bounded confirmed hire', 
   });
 });
 
+test('buildPersonalAssistantHirePayload carries the chosen model', () => {
+  const payload = buildPersonalAssistantHirePayload({
+    requestId: 'request-1',
+    displayName: 'Atlas',
+    focusAreas: ['plan_my_day'],
+    model: { provider: ' codex ', model: ' gpt-5.3-codex ', reasoning_effort: 'high' }
+  });
+  assert.deepEqual(payload.model, {
+    provider: 'codex',
+    model: 'gpt-5.3-codex',
+    reasoning_effort: 'high'
+  });
+
+  // A resume replays the stored hire and has no picker: no model is sent, and
+  // a half-made choice is never sent either.
+  assert.equal('model' in buildPersonalAssistantHirePayload({ requestId: 'request-1' }), false);
+  assert.equal(
+    'model' in
+      buildPersonalAssistantHirePayload({ requestId: 'request-1', model: { provider: 'codex' } }),
+    false
+  );
+});
+
 test('buildPersonalAssistantHirePayload carries no Daily Brief rhythm', () => {
   // The rhythm moved to the Map's Build My HQ form, where a real workspace ID
   // exists to write it against. Hiring must not collect or promise it.
@@ -177,9 +200,10 @@ test('the hire offers the six focus areas with the wizard’s values and default
       ['something_else', false]
     ]
   );
-  assert.match(
+  // The hire now also saves the Default model, so the promise says so.
+  assert.equal(
     HIRE_BOUNDARY_COPY,
-    /^Hiring creates your assistant\. It does not create a workspace/
+    'Hiring creates your assistant and saves the model you chose as Ori’s Default model. It does not create a workspace, change any permission, or connect an account. Personal HQ — your assistant’s home base — is the next step, and nothing is created there until you confirm it.'
   );
 });
 
@@ -226,7 +250,12 @@ test('submitHire posts the payload once and reports a fresh hire', async () => {
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
       return jsonResponse(201, {
-        personal_assistant: { state: 'needs_hq', display_name: 'Atlas', resumed: false }
+        personal_assistant: {
+          state: 'needs_hq',
+          display_name: 'Atlas',
+          resumed: false,
+          default_model: { provider: 'codex', model: 'gpt-5.3-codex', reasoning_effort: 'medium' }
+        }
       });
     }
   });
@@ -238,6 +267,11 @@ test('submitHire posts the payload once and reports a fresh hire', async () => {
   assert.equal(result.resumed, false);
   assert.equal(result.needsHQ, true);
   assert.equal(result.state.display_name, 'Atlas');
+  assert.deepEqual(result.defaultModel, {
+    provider: 'codex',
+    model: 'gpt-5.3-codex',
+    reasoning_effort: 'medium'
+  });
 });
 
 test('submitHire treats a replay and personal_hq_required as success', async () => {
