@@ -1,0 +1,23 @@
+/* The shared Default model picker (modules/default-model-picker.js): the hire
+   preset's model block and the Today banner's Choose a model dialog. */
+
+/* API key provider tabs, shown when no provider is connected. */
+.default-model-picker .api-key-tabs .nav-link,
+.api-key-tabs .nav-link {
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
+.default-model-picker .api-key-tabs .nav-link.active,
+.api-key-tabs .nav-link.active {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-color: var(--border-color) var(--border-color) var(--bg-secondary);
+}
+
+.default-model-picker [hidden] {
+  display: none !important;
+}

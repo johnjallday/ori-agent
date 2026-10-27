@@ -34,6 +34,22 @@ const REASONING_VALUES = new Set(REASONING_LEVELS.map(level => level.value));
 export const LOADING_PROVIDERS_TEXT = 'Loading providers…';
 export const LOADING_MODELS_TEXT = 'Loading models…';
 export const NO_PROVIDER_TEXT = 'No AI provider is connected to Ori yet.';
+export const CONNECT_LEAD_TEXT =
+  'I need an AI connection to work. Add an API key below, or run Ollama, LM Studio, or MLX-LM for local AI.';
+export const CONNECT_NOTE_TEXT =
+  'Saving a key stores it in Ori’s settings now. Nothing else happens until you press Hire assistant.';
+// The cloud providers a key can connect, with the field POST /api/api-key
+// expects for each.
+export const API_KEY_TABS = Object.freeze([
+  { name: 'openai', label: 'OpenAI', field: 'openai_api_key', placeholder: 'sk-…' },
+  { name: 'anthropic', label: 'Anthropic', field: 'anthropic_api_key', placeholder: 'sk-ant-…' },
+  {
+    name: 'gemini',
+    label: 'Gemini',
+    field: 'gemini_api_key',
+    placeholder: 'Google AI Studio API key…'
+  }
+]);
 const PROVIDERS_ERROR_TEXT = 'Ori could not load the AI providers. Reload the page to try again.';
 const MODELS_ERROR_TEXT = 'Ori could not load this provider’s models. Choose it again to retry.';
 
@@ -127,7 +143,8 @@ export function createDefaultModelPicker({
     models: [],
     model: '',
     reasoning: reasoningFor(initial?.provider, initial?.reasoning_effort),
-    message: ''
+    message: '',
+    failed: false
   };
   let initialProvider = String(initial?.provider || '').trim();
   let initialModel = String(initial?.model || '').trim();
@@ -166,11 +183,119 @@ export function createDefaultModelPicker({
   const status = el('p', 'form-helper default-model-picker__status');
   status.id = `${idPrefix}-status`;
   status.setAttribute('role', 'status');
+  const connection = buildConnectionPanel();
+  root.appendChild(connection.panel);
   root.appendChild(providerField.wrap);
   root.appendChild(modelField.wrap);
   root.appendChild(reasoningField.wrap);
   root.appendChild(status);
   if (host) host.replaceChildren(root);
+
+  // The no-provider state: nothing is connected, so the selects have nothing
+  // to offer. The user adds an API key here (POST /api/api-key stores it in
+  // Ori's settings and nothing else), then the providers reload in place.
+  function buildConnectionPanel() {
+    const panel = el('div', 'default-model-picker__connect');
+    panel.id = `${idPrefix}-connect`;
+    panel.hidden = true;
+    const lead = el('p', 'form-helper');
+    lead.textContent = CONNECT_LEAD_TEXT;
+    const tabs = el('div', 'nav nav-tabs api-key-tabs mb-3');
+    tabs.setAttribute('role', 'tablist');
+    const inputs = {};
+    const tabButtons = {};
+    const select = name => {
+      Object.keys(inputs).forEach(key => {
+        const active = key === name;
+        inputs[key].wrap.hidden = !active;
+        tabButtons[key].className = active ? 'nav-link active' : 'nav-link';
+        tabButtons[key].setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+    };
+    API_KEY_TABS.forEach(tab => {
+      const button = el('button', 'nav-link');
+      button.type = 'button';
+      button.id = `${idPrefix}-tab-${tab.name}`;
+      button.setAttribute('role', 'tab');
+      button.textContent = tab.label;
+      button.addEventListener('click', () => select(tab.name));
+      tabs.appendChild(button);
+      tabButtons[tab.name] = button;
+      const wrap = el('div', 'mb-2');
+      wrap.setAttribute('role', 'tabpanel');
+      const input = el('input', 'form-control');
+      input.type = 'password';
+      input.id = `${idPrefix}-key-${tab.name}`;
+      input.setAttribute('autocomplete', 'off');
+      input.setAttribute('spellcheck', 'false');
+      input.setAttribute('placeholder', tab.placeholder);
+      input.setAttribute('aria-label', `${tab.label} API key`);
+      wrap.appendChild(input);
+      inputs[tab.name] = { wrap, input };
+    });
+    const save = el('button', 'btn btn-primary btn-sm');
+    save.type = 'button';
+    save.id = `${idPrefix}-save-key`;
+    save.textContent = 'Save key';
+    const local = el('p', 'form-helper');
+    local.textContent = 'Or run Ollama, LM Studio, or MLX-LM on this computer for local AI.';
+    const note = el('p', 'form-helper');
+    note.textContent = CONNECT_NOTE_TEXT;
+    const alert = el('div', 'alert alert-danger mt-2');
+    alert.id = `${idPrefix}-key-error`;
+    alert.setAttribute('role', 'alert');
+    alert.hidden = true;
+
+    save.addEventListener('click', async () => {
+      const body = {};
+      API_KEY_TABS.forEach(tab => {
+        const value = String(inputs[tab.name].input.value || '').trim();
+        if (value) body[tab.field] = value;
+      });
+      alert.hidden = true;
+      if (!Object.keys(body).length) {
+        alert.textContent = 'Enter an API key first.';
+        alert.hidden = false;
+        return;
+      }
+      save.disabled = true;
+      try {
+        const response = await fetchImpl('/api/api-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!response.ok) throw new Error(`api-key answered ${response.status}`);
+        API_KEY_TABS.forEach(tab => {
+          inputs[tab.name].input.value = '';
+        });
+        await reloadProviders();
+      } catch (_) {
+        alert.textContent = 'Ori could not save that key. Check it and try again.';
+        alert.hidden = false;
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    panel.appendChild(lead);
+    panel.appendChild(tabs);
+    API_KEY_TABS.forEach(tab => panel.appendChild(inputs[tab.name].wrap));
+    panel.appendChild(save);
+    panel.appendChild(local);
+    panel.appendChild(note);
+    panel.appendChild(alert);
+    select(API_KEY_TABS[0].name);
+    return { panel };
+  }
+
+  // Reload from the providers list, keeping what was chosen while it is still
+  // available. Declared here so the key panel can call it after a save.
+  function reloadProviders() {
+    if (state.provider) initialProvider = state.provider;
+    if (state.model) initialModel = state.model;
+    return loadProviders();
+  }
 
   function selection() {
     if (state.loading || !state.provider || !state.model) return null;
@@ -223,6 +348,13 @@ export function createDefaultModelPicker({
     reasoningField.select.value = reasoningFor('codex', state.reasoning);
     reasoningField.select.disabled = !codex;
     reasoningField.wrap.hidden = !codex;
+
+    // Nothing connected (and not just a failed load): offer the API-key entry
+    // instead of selects with nothing in them.
+    const needsConnection = !state.loading && !state.providers.length && !state.failed;
+    connection.panel.hidden = !needsConnection;
+    providerField.wrap.hidden = needsConnection;
+    modelField.wrap.hidden = needsConnection;
 
     status.textContent = state.message;
     status.hidden = !state.message;
@@ -283,6 +415,7 @@ export function createDefaultModelPicker({
     state.models = [];
     state.model = '';
     state.message = '';
+    state.failed = false;
     changed();
     let available = [];
     try {
@@ -294,6 +427,7 @@ export function createDefaultModelPicker({
     } catch (_) {
       if (mine !== generation) return;
       state.loading = false;
+      state.failed = true;
       state.message = PROVIDERS_ERROR_TEXT;
       changed();
       return;
@@ -323,18 +457,32 @@ export function createDefaultModelPicker({
     changed();
   });
 
-  const ready = loadProviders();
+  // A Default model already configured (set in Settings first, or kept across
+  // a re-hire) wins over the recommendation. A caller that passes `initial`
+  // has already decided; a failed read just falls back to the recommendation.
+  async function loadInitial() {
+    if (initial) return;
+    try {
+      const data = await getJSON(fetchImpl, '/api/settings/system-model');
+      if (data?.configured && data.provider && data.model) {
+        initialProvider = String(data.provider).trim();
+        initialModel = String(data.model).trim();
+        state.reasoning = reasoningFor(initialProvider, data.reasoning_effort);
+      }
+    } catch (_) {
+      // Nothing configured that we can read: the recommendation stands.
+    }
+  }
+
+  render();
+  const ready = loadInitial().then(loadProviders);
 
   return {
     ready,
     selection,
     // reload starts over from GET /api/providers, keeping what was chosen
     // when it is still available.
-    reload() {
-      if (state.provider) initialProvider = state.provider;
-      if (state.model) initialModel = state.model;
-      return loadProviders();
-    },
+    reload: reloadProviders,
     element: root
   };
 }
@@ -348,6 +496,7 @@ if (typeof window !== 'undefined') {
     formatModelOptionText,
     chooseProvider,
     chooseModel,
+    API_KEY_TABS,
     createDefaultModelPicker
   });
 }

@@ -193,7 +193,7 @@ test('the reasoning level shows and counts for Codex only', async () => {
   });
   await picker.ready;
   const reasoning = find(host, 'cr-model-reasoning');
-  const reasoningField = host.children[0].children[2];
+  const reasoningField = host.children[0].children[3];
   assert.equal(reasoningField.hidden, true);
 
   const providerSelect = find(host, 'cr-model-provider');
@@ -251,4 +251,141 @@ test('a failed provider load says so and selects nothing', async () => {
   await picker.ready;
   assert.equal(picker.selection(), null);
   assert.match(find(host, 'cr-model-status').textContent, /could not load the AI providers/);
+});
+
+// A fetch whose /api/providers answer can change, and which records bodies.
+function connectFetch() {
+  const state = { connected: false, posts: [], fail: false };
+  const fetchImpl = async (url, options = {}) => {
+    const json = body => ({ ok: true, status: 200, json: async () => body });
+    if (url === '/api/api-key') {
+      state.posts.push(JSON.parse(options.body));
+      if (state.fail) return { ok: false, status: 400, json: async () => ({}) };
+      state.connected = true;
+      return json({});
+    }
+    if (url === '/api/providers') {
+      return json({
+        providers: state.connected
+          ? [{ name: 'claude', display_name: 'Claude', available: true }]
+          : [{ name: 'openai', display_name: 'OpenAI', available: false }]
+      });
+    }
+    if (url === MODELS('claude')) {
+      return json({
+        available: true,
+        model_options: [{ id: 'claude-x', label: 'X', recommended: true }]
+      });
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  return { state, fetchImpl };
+}
+
+function mountConnect(fetchImpl, onChange = () => {}) {
+  const host = new FakeElement('div');
+  const picker = createDefaultModelPicker({
+    host,
+    idPrefix: 'cr-model',
+    fetchImpl,
+    documentImpl: fakeDocument,
+    onChange
+  });
+  return { host, picker };
+}
+
+const settle = () => new Promise(resolve => setTimeout(resolve, 10));
+
+test('no connected provider shows the API-key entry and selects nothing', async () => {
+  const { host, picker } = mountConnect(connectFetch().fetchImpl);
+  await picker.ready;
+  assert.equal(picker.selection(), null);
+  const connect = find(host, 'cr-model-connect');
+  assert.equal(connect.hidden, false);
+  assert.deepEqual(
+    ['openai', 'anthropic', 'gemini'].map(name => find(host, `cr-model-tab-${name}`).textContent),
+    ['OpenAI', 'Anthropic', 'Gemini']
+  );
+  assert.match(connect.children[0].textContent, /^I need an AI connection to work\./);
+  assert.match(
+    connect.children[connect.children.length - 2].textContent,
+    /Nothing else happens until you press Hire assistant\.$/
+  );
+});
+
+test('saving a key posts only the typed key, then reloads providers in place', async () => {
+  const { state, fetchImpl } = connectFetch();
+  const changes = [];
+  const { host, picker } = mountConnect(fetchImpl, selection => changes.push(selection));
+  await picker.ready;
+
+  // Nothing typed: no request, an error.
+  find(host, 'cr-model-save-key').listeners.click[0]();
+  await settle();
+  assert.equal(state.posts.length, 0);
+  assert.equal(find(host, 'cr-model-key-error').hidden, false);
+
+  find(host, 'cr-model-key-anthropic').value = ' sk-ant-123 ';
+  find(host, 'cr-model-save-key').listeners.click[0]();
+  await settle();
+  assert.deepEqual(state.posts, [{ anthropic_api_key: 'sk-ant-123' }]);
+  assert.equal(find(host, 'cr-model-key-anthropic').value, '', 'the key is not kept in the field');
+  assert.equal(find(host, 'cr-model-connect').hidden, true);
+  assert.deepEqual(picker.selection(), {
+    provider: 'claude',
+    model: 'claude-x',
+    reasoning_effort: ''
+  });
+  assert.deepEqual(changes[changes.length - 1], picker.selection());
+});
+
+test('a rejected key says so and leaves nothing selected', async () => {
+  const { state, fetchImpl } = connectFetch();
+  state.fail = true;
+  const { host, picker } = mountConnect(fetchImpl);
+  await picker.ready;
+  find(host, 'cr-model-key-openai').value = 'bad';
+  find(host, 'cr-model-save-key').listeners.click[0]();
+  await settle();
+  assert.match(find(host, 'cr-model-key-error').textContent, /could not save that key/);
+  assert.equal(picker.selection(), null);
+});
+
+test('a configured Default model wins over the recommendation without an initial', async () => {
+  const { picker } = mount({
+    routes: {
+      '/api/settings/system-model': {
+        provider: 'codex',
+        model: 'gpt-chosen',
+        reasoning_effort: 'high',
+        configured: true
+      },
+      '/api/providers': PROVIDERS,
+      [MODELS('codex')]: {
+        available: true,
+        model_options: [
+          { id: 'gpt-chosen', label: 'Chosen' },
+          { id: 'gpt-rec', label: 'Rec', recommended: true }
+        ]
+      }
+    }
+  });
+  await picker.ready;
+  assert.deepEqual(picker.selection(), {
+    provider: 'codex',
+    model: 'gpt-chosen',
+    reasoning_effort: 'high'
+  });
+});
+
+test('every non-Codex provider sends an empty reasoning level', async () => {
+  const { picker } = mount({
+    initial: { provider: 'openai', model: 'gpt-small', reasoning_effort: 'xhigh' },
+    routes: {
+      '/api/providers': PROVIDERS,
+      [MODELS('openai')]: { available: true, models: ['gpt-small'] }
+    }
+  });
+  await picker.ready;
+  assert.equal(picker.selection().reasoning_effort, '');
 });
