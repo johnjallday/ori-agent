@@ -4513,6 +4513,353 @@ const sessionManager = {
     return JSON.parse(JSON.stringify(value));
   },
 
+  usesUnifiedOrdinaryReview(view = this.teamView()) {
+    const context = this.workspaceCreatorContext;
+    if (context?.ordinaryReview?.accepted || context?.ordinaryReview?.result)
+      return Boolean(document.getElementById('workspaceCreationReviewPanel'));
+    return Boolean(
+      context?.mode === 'ordinary' &&
+      view?.isBlank &&
+      !this.importModeEnabled &&
+      !this.isGroupCreator() &&
+      !this.workspaceBuild &&
+      !context.folderOfferId &&
+      !context.onCreated &&
+      !context.postCreateAction &&
+      !window.SetupWorkspaceCreator?.isActive?.() &&
+      document.getElementById('workspaceCreationReviewPanel')
+    );
+  },
+
+  ordinaryCreationMapAvailable() {
+    const viewport = document.querySelector('[data-ws-map-viewport]');
+    return Boolean(
+      viewport?.getClientRects?.().length &&
+      window.innerWidth >= 980 &&
+      window.OriWorkspaceMap?.beginPlacement
+    );
+  },
+
+  async syncOrdinaryCreationReview(view = this.teamView()) {
+    const context = this.workspaceCreatorContext;
+    const host = document.getElementById('workspaceCreationReviewPanel');
+    const eligible = this.usesUnifiedOrdinaryReview(view);
+    if (host) {
+      host.hidden = !eligible;
+      host.setAttribute?.('tabindex', '-1');
+    }
+    const summary = document.getElementById('workspaceReviewSummary');
+    if (summary) summary.hidden = eligible;
+    if (!eligible) return;
+    let review = context.ordinaryReview;
+    if (!review)
+      review = context.ordinaryReview = {
+        automatic: false,
+        dirty: false,
+        message: '',
+        generation: context.generation
+      };
+    if (!review.modules) {
+      review.modules = Promise.all([
+        window.OriAssistedWorkspacePlacement ||
+          import('/js/modules/assisted-workspace-placement.js'),
+        window.OriWorkspaceCreationOperation ||
+          import('/js/modules/workspace-creation-operation.js')
+      ]);
+    }
+    try {
+      const [ui, api] = await review.modules;
+      if (
+        this.workspaceCreatorContext !== context ||
+        context.generation !== review.generation ||
+        !this.usesUnifiedOrdinaryReview()
+      )
+        return;
+      review.api = api;
+      if (!review.panel)
+        review.panel = ui.mountPlacementPanel(host, action => {
+          void this.actOnOrdinaryCreationReview(context, action).catch(error => {
+            if (this.workspaceCreatorContext !== context) return;
+            review.message = error.message;
+            void this.syncOrdinaryCreationReview();
+          });
+        });
+      if (!review.restored) {
+        review.restored = true;
+        try {
+          const reference = api.savedCreationReference(window.localStorage);
+          if (reference) {
+            review.reference = reference;
+            review.accepted = true;
+            review.message =
+              'Read the original confirmed creation before starting another workspace.';
+            void this.readOrdinaryCreationStatus(context);
+          }
+        } catch (error) {
+          review.accepted = true;
+          review.message = error.message;
+        }
+      }
+      const current = this.teamView();
+      const issues = document.getElementById('workspaceReviewIssues');
+      if (issues && (review.accepted || review.result)) issues.hidden = true;
+      const name = document.getElementById('folderNameInput')?.value || '';
+      const goal = document.getElementById('folderGoalInput')?.value || '';
+      const parent = document.getElementById('folderParentSelect');
+      const parentID = this.lockedParentId() || parent?.value || '';
+      const parentName = parentID
+        ? String(parent?.selectedOptions?.[0]?.textContent || context.parentName || parentID)
+        : '';
+      const team = current?.agentless
+        ? 'No agents will be created or attached.'
+        : (current?.roster || [])
+            .map(member =>
+              [
+                member.name,
+                member.lifecycle === 'reuse' ? 'saved agent' : 'new agent',
+                member.modelLabel
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            )
+            .join('; ');
+      review.panel.update({
+        ownerKind: 'ordinary',
+        name,
+        goal,
+        destination: parentID
+          ? `In group ${parentName} · Position does not change membership.`
+          : 'Standalone workspace · Position does not join a district.',
+        rows: [
+          {
+            label: 'Team',
+            value: team || 'No agents selected.',
+            action: 'team',
+            actionLabel: 'Edit team'
+          }
+        ],
+        facts: [
+          { label: 'Blueprint', value: 'Blank workspace' },
+          {
+            label: 'Purpose',
+            value:
+              document.getElementById('folderDescriptionInput')?.value ||
+              goal ||
+              'A workspace you can shape later.'
+          },
+          {
+            label: 'Now',
+            value: 'Create one workspace with the reviewed team. No scan or task is started.'
+          },
+          { label: 'Later', value: 'Add notes, files or work when you choose.' }
+        ],
+        reviewed: Boolean(name.trim() && current?.canContinueFromTeam),
+        canPlace: this.ordinaryCreationMapAvailable(),
+        canConfirm: !this.hasBlockingTeamIssue(),
+        automatic: review.automatic,
+        dirty: review.dirty,
+        busy: this.isCreatingFolder || review.reading || review.actionInFlight,
+        accepted: review.accepted,
+        result: review.result,
+        positionFailed: review.positionFailed,
+        canAbandonReview: ['reviewed', 'refused', 'abandoned'].includes(review.observedState),
+        mapHint: this.ordinaryCreationMapAvailable()
+          ? 'On the map, click a valid position or press Enter to create this workspace. Moving the preview does nothing. Escape returns here.'
+          : 'Map placement is unavailable here. Use automatic placement to finish without dragging or leaving this draft.',
+        message: review.message,
+        confirmLabel: 'Create workspace'
+      });
+      if (document.activeElement === host)
+        document.getElementById('workspaceCreationReviewTitle')?.focus();
+    } catch (error) {
+      if (this.workspaceCreatorContext === context)
+        this.showWorkspaceCreateError(
+          error.message || 'Workspace review is unavailable. Nothing was confirmed.'
+        );
+    }
+  },
+
+  async actOnOrdinaryCreationReview(context, { action, field, value }) {
+    const review = context.ordinaryReview;
+    if (
+      this.workspaceCreatorContext !== context ||
+      context.generation !== review?.generation ||
+      this.isCreatingFolder ||
+      review.reading ||
+      review.actionInFlight
+    )
+      return;
+    if (action === 'read-status') return this.readOrdinaryCreationStatus(context);
+    if (action === 'open' && review.result?.id) {
+      review.api.releaseCreationReference(window.localStorage, review.reference);
+      window.location.href = `/workspaces/${encodeURIComponent(review.result.folder_slug || review.result.id)}`;
+      return;
+    }
+    if (action === 'back' && (review.result || review.accepted)) {
+      if (review.result) review.api.releaseCreationReference(window.localStorage, review.reference);
+      this.hideWorkspaceCreatorModal();
+      return;
+    }
+    if (
+      action === 'abandon-review' &&
+      ['reviewed', 'refused', 'abandoned'].includes(review.observedState)
+    ) {
+      if (review.observedState === 'reviewed')
+        await review.api.abandonCreationOperation(fetch, review.reference);
+      review.api.releaseCreationReference(window.localStorage, review.reference);
+      review.accepted = false;
+      review.reference = null;
+      review.operationKey = '';
+      review.message =
+        'The unaccepted review was released. Review current choices before confirming.';
+      void this.syncOrdinaryCreationReview();
+      return;
+    }
+    if (action === 'retry-position' && review.result?.id && review.positionFailed) {
+      review.positionFailed =
+        (await window.OriWorkspaceMap?.retryPlacement?.(review.result.id, review.candidate)) !==
+        true;
+      review.message = review.positionFailed
+        ? 'The workspace exists. Only layout was retried; the position is still not saved.'
+        : 'The requested position is now saved. Only layout changed.';
+      if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+      return;
+    }
+    if (review.accepted || review.result) return;
+    if (action === 'dirty') {
+      review.dirty = true;
+      return;
+    }
+    if (action === 'edit' && ['name', 'mission'].includes(field)) {
+      const input = document.getElementById(
+        field === 'name' ? 'folderNameInput' : 'folderGoalInput'
+      );
+      if (!input) return;
+      review.dirty = false;
+      input.value = value;
+      if (field === 'mission') input.dataset.goalEdited = '1';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    } else if (action === 'team' || action === 'details' || action === 'back') {
+      this.goToWizardStep(action === 'details' ? 2 : 3);
+    } else if (action === 'suggested') {
+      review.automatic = true;
+      review.candidate = null;
+      this.abandonWorkspaceMapPlacement();
+      window.OriWorkspaceMap?.cancelBuild?.();
+      review.message =
+        'Automatic placement selected. Your material choices are unchanged; confirm explicitly below.';
+    } else if (action === 'cancel') {
+      if (review.reference) await review.api.abandonCreationOperation(fetch, review.reference);
+      this.hideWorkspaceCreatorModal();
+    } else if (action === 'place' && !review.dirty && this.ordinaryCreationMapAvailable()) {
+      review.automatic = false;
+      await this.submitOrdinaryCreationReview(context, 'place');
+    } else if (action === 'confirm' && review.automatic && !review.dirty) {
+      await this.submitOrdinaryCreationReview(context, 'confirm');
+    }
+    if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+  },
+
+  async submitOrdinaryCreationReview(context, action) {
+    const review = context.ordinaryReview;
+    if (this.workspaceCreatorContext !== context || review.actionInFlight) return;
+    review.actionInFlight = true;
+    void this.syncOrdinaryCreationReview();
+    try {
+      await this.createFolder({ reviewAction: action });
+    } finally {
+      review.actionInFlight = false;
+      if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+    }
+  },
+
+  async readOrdinaryCreationStatus(context) {
+    const review = context.ordinaryReview;
+    if (this.workspaceCreatorContext !== context || !review?.reference || review.reading) return;
+    review.reading = true;
+    try {
+      const outcome = await review.api.observeCreationOperation(fetch, review.reference);
+      if (this.workspaceCreatorContext !== context) return;
+      review.observedState = outcome.state;
+      if (outcome.state === 'complete') {
+        review.result = outcome.result.folder;
+        review.message =
+          'The original workspace is verified. Reading status did not create or start work.';
+      } else {
+        review.message =
+          outcome.message ||
+          'The original creation is not complete. Read status; do not create again. Closing is not undo.';
+      }
+    } finally {
+      review.reading = false;
+      if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+    }
+  },
+
+  async prepareOrdinaryCreationOperation(context, payload) {
+    const review = context.ordinaryReview;
+    const key = JSON.stringify(payload);
+    if (review.reference && review.operationKey === key) return review.reference;
+    if (review.reference) await review.api.abandonCreationOperation(fetch, review.reference);
+    if (this.workspaceCreatorContext !== context || context.generation !== review.generation)
+      return null;
+    const id = crypto.randomUUID();
+    const reference = await review.api.reviewCreationOperation(fetch, id, payload);
+    if (this.workspaceCreatorContext !== context || context.generation !== review.generation) {
+      await review.api.abandonCreationOperation?.(fetch, reference);
+      return null;
+    }
+    review.reference = reference;
+    review.operationKey = key;
+    return reference;
+  },
+
+  async showOrdinaryCreationOutcome(context, result, placement = null, placementResult = null) {
+    const review = context.ordinaryReview;
+    if (this.workspaceCreatorContext !== context || context.generation !== review.generation)
+      return;
+    review.accepted = true;
+    review.result = result?.folder || null;
+    review.candidate = placement?.candidate || null;
+    review.positionFailed = Boolean(review.result && placement && !placementResult?.saved);
+    review.message = review.result
+      ? review.positionFailed
+        ? 'Workspace created. Its requested position was not saved; automatic layout is shown. Retry position only when that point is available.'
+        : 'Workspace created with the reviewed team. No task or scan was started.'
+      : review.message ||
+        'Creation delivery is uncertain. Read the original operation; do not create again.';
+    const modal = document.getElementById('addFolderModal');
+    if (placement) {
+      if (!review.result) placement.phase = 'accepted';
+      window.OriWorkspaceMap?.endPlacement?.(placement.token);
+      if (modal?.dataset) {
+        delete modal.dataset.suspendedForMapPlacement;
+        modal.dataset.resumingFromMapPlacement = placement.token;
+      }
+      if (modal) {
+        modal.addEventListener(
+          'shown.bs.modal',
+          () => {
+            if (this.workspaceCreatorContext === context)
+              document
+                .querySelector('#workspaceCreationReviewPanel [data-placement-focus="status"]')
+                ?.focus();
+          },
+          { once: true }
+        );
+        bootstrap.Modal.getOrCreateInstance(modal).show();
+      }
+    }
+    this.wizardStep = this.wizardStepCount;
+    this.refreshWizardChrome();
+    if (review.result) {
+      this.notifyWorkspacesChanged({ workspaceId: review.result.id });
+      await this.loadFolders();
+      await window.OriHomeCockpit?.refreshQuietly?.();
+      await window.WorkspaceHub?.loadWorkspaces?.();
+    }
+  },
+
   nextWorkspaceMapPlacementToken() {
     this.workspaceMapPlacementSequence += 1;
     const random =
@@ -4528,7 +4875,13 @@ const sessionManager = {
       name: String(payload?.name || '').trim(),
       blueprintID: String(payload?.template_id || selectedTemplate?.id || '').trim(),
       blueprintBuiltin: selectedTemplate?.builtin === true,
-      groupName: String(origin?.group?.name || '').trim()
+      groupName: payload?.parent_id
+        ? String(
+            this.findFolderById(payload.parent_id, this.folders || [])?.name ||
+              (origin?.group?.id === payload.parent_id ? origin.group.name : '') ||
+              payload.parent_id
+          ).trim()
+        : ''
     };
   },
 
@@ -4546,8 +4899,12 @@ const sessionManager = {
     };
     if (payloadChanged) state.revision += 1;
     state.phase = 'starting';
+    state.creatorContext = this.workspaceCreatorContext;
+    state.creatorGeneration = this.workspaceCreatorContext?.generation;
     state.origin = this.cloneWorkspaceMapPlacementValue(options.origin || {});
-    state.candidate = this.cloneWorkspaceMapPlacementValue(options.candidate || null);
+    state.candidate = this.cloneWorkspaceMapPlacementValue(
+      options.candidate || existing?.candidate || null
+    );
     state.payload = payload;
     state.review = this.cloneWorkspaceMapPlacementValue(options.review || null);
     state.inFlight = null;
@@ -4555,7 +4912,17 @@ const sessionManager = {
 
     const activate = () => {
       if (this.workspaceMapPlacement !== state || state.phase !== 'starting') return;
+      if (
+        state.creatorContext &&
+        (this.workspaceCreatorContext !== state.creatorContext ||
+          state.creatorContext.generation !== state.creatorGeneration)
+      )
+        return;
       state.phase = 'placing';
+      if (state.creatorContext?.ordinaryReview && !this.ordinaryCreationMapAvailable()) {
+        this.returnFromWorkspaceMapPlacement(state.token, 'map-unavailable');
+        return;
+      }
       const map = window.OriWorkspaceMap;
       if (typeof map?.beginPlacement !== 'function') {
         this.returnFromWorkspaceMapPlacement(state.token, 'map-unavailable');
@@ -4567,6 +4934,16 @@ const sessionManager = {
         origin: this.cloneWorkspaceMapPlacementValue(state.origin),
         initialCandidate: this.cloneWorkspaceMapPlacementValue(state.candidate),
         preview: this.workspaceMapPlacementPreview(state.payload, state.origin),
+        mode: state.creatorContext?.ordinaryReview ? 'reviewed-setup' : 'create',
+        onCandidate: (token, point) => {
+          if (
+            this.workspaceMapPlacement === state &&
+            state.token === token &&
+            state.phase === 'placing'
+          ) {
+            state.candidate = this.cloneWorkspaceMapPlacementValue(point);
+          }
+        },
         onConfirm: (token, candidate) => this.confirmWorkspaceMapPlacement(token, candidate),
         onBack: (token, reason) => this.returnFromWorkspaceMapPlacement(token, reason || 'back')
       });
@@ -4609,7 +4986,9 @@ const sessionManager = {
       state.phase = 'review';
       if (mapUnavailable) {
         this.showWorkspaceCreateError(
-          'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+          state.creatorContext?.ordinaryReview
+            ? 'Map placement is unavailable. Your choices are kept. Use automatic placement to finish here.'
+            : 'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
         );
       }
       return true;
@@ -4631,10 +5010,18 @@ const sessionManager = {
           this.refreshWizardChrome();
           if (mapUnavailable) {
             this.showWorkspaceCreateError(
-              'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+              state.creatorContext?.ordinaryReview
+                ? 'Map placement is unavailable. Your choices are kept. Use automatic placement to finish here.'
+                : 'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
             );
           }
-          document.getElementById('wizardStep4Title')?.focus();
+          document
+            .getElementById(
+              state.creatorContext?.ordinaryReview
+                ? 'workspaceCreationReviewTitle'
+                : 'wizardStep4Title'
+            )
+            ?.focus();
         },
         { once: true }
       );
@@ -4675,6 +5062,12 @@ const sessionManager = {
   async confirmWorkspaceMapPlacement(token, candidate) {
     const state = this.workspaceMapPlacement;
     if (!state || state.token !== token || state.phase !== 'placing' || state.inFlight)
+      return false;
+    if (
+      state.creatorContext &&
+      (this.workspaceCreatorContext !== state.creatorContext ||
+        state.creatorContext.generation !== state.creatorGeneration)
+    )
       return false;
     state.candidate = this.cloneWorkspaceMapPlacementValue(candidate || state.candidate);
     if (!state.candidate) return false;
@@ -8240,6 +8633,9 @@ const sessionManager = {
 
   refreshWorkspaceReview() {
     const summary = document.getElementById('workspaceReviewSummary');
+    if (summary) summary.hidden = false;
+    const ordinaryHost = document.getElementById('workspaceCreationReviewPanel');
+    if (ordinaryHost) ordinaryHost.hidden = true;
     if (this.usesManagedGroupTemplate()) {
       if (summary) summary.innerHTML = window.GroupTemplateCreator.renderReceipt(this);
       document.getElementById('workspaceReviewIssues')?.replaceChildren();
@@ -8320,6 +8716,7 @@ const sessionManager = {
     window.SetupWorkspaceCreator?.refreshReview();
     // One card, one confirm: the placement is reviewed as Review is shown.
     if (!groupRoster) void this.ensureGroupRequirementReview();
+    void this.syncOrdinaryCreationReview(view);
   },
 
   renderOrdinaryGroupReceipt(view = null) {
@@ -9824,6 +10221,20 @@ const sessionManager = {
       }
     }
     if (onFinalStep) this.refreshWorkspaceReview();
+    const unifiedReview = onFinalStep && this.usesUnifiedOrdinaryReview();
+    document
+      .getElementById('addFolderModal')
+      ?.classList?.toggle?.('workspace-create-modal--unified-review', unifiedReview);
+    document
+      .getElementById('wizardStep4')
+      ?.setAttribute?.(
+        'aria-labelledby',
+        unifiedReview ? 'workspaceCreationReviewTitle' : 'wizardStep4Title'
+      );
+    const footer = document.querySelector(
+      '#addFolderModal > .modal-dialog > .modal-content > .modal-footer'
+    );
+    if (footer) footer.hidden = unifiedReview;
     this.syncWorkspaceBuildChosenTags();
     this.syncWorkspaceBuildPresentation();
     this.announceWorkspaceCreatorStep();
@@ -11587,7 +11998,11 @@ const sessionManager = {
     // A build remembers the furthest step, to resume there.
     if (this.workspaceBuild) this.scheduleWorkspaceBuildDraft({ user: false });
     if (!moveFocus) return;
-    const heading = document.getElementById(`wizardStep${this.wizardStep}Title`);
+    const heading =
+      this.isFinalWizardStep() && this.usesUnifiedOrdinaryReview()
+        ? document.getElementById('workspaceCreationReviewTitle') ||
+          document.getElementById('workspaceCreationReviewPanel')
+        : document.getElementById(`wizardStep${this.wizardStep}Title`);
     if (heading) heading.focus();
     else if (this.wizardStep === 2) document.getElementById('folderNameInput')?.focus();
   },
@@ -11795,6 +12210,13 @@ const sessionManager = {
 
   workspaceCreatorClosed() {
     const context = this.workspaceCreatorContext;
+    context?.ordinaryReview?.panel?.destroy();
+    const ordinaryReview = context?.ordinaryReview;
+    if (ordinaryReview?.reference && !ordinaryReview.accepted && !ordinaryReview.result) {
+      void ordinaryReview.api
+        ?.abandonCreationOperation(fetch, ordinaryReview.reference)
+        .catch(error => console.warn('Unaccepted workspace review could not be retired:', error));
+    }
     const placement = this.workspaceBuild?.placement;
     const focused = document.activeElement;
     const restoreFocus =
@@ -12872,6 +13294,16 @@ const sessionManager = {
       const started = window.OriWorkspaceMap?.beginPlacement?.({
         token: placement.token,
         mode: 'reviewed-setup',
+        actionCopy: {
+          confirmLabel: 'Create workspace & scan here',
+          pendingLabel: 'Creating workspace…',
+          instruction:
+            'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.',
+          pendingInstruction:
+            'Creating the reviewed workspace and preparing its filing scan. This position is locked.',
+          announcement:
+            'Setup reviewed. Click open ground or press Enter to create the workspace and scan. Escape returns to editing.'
+        },
         origin: {},
         initialCandidate: placement.candidate,
         preview: {
@@ -16691,7 +17123,8 @@ const sessionManager = {
       this.isCreatingFolder ||
       this.workspaceBuild?.preparationBusy ||
       this.workspaceBuild?.acceptedPreparation ||
-      this.workspaceBuild?.preparationUncertain
+      this.workspaceBuild?.preparationUncertain ||
+      this.workspaceCreatorContext?.ordinaryReview?.accepted
     )
       return;
     // A folder or link still being attached would be lost by a create that
@@ -16699,6 +17132,14 @@ const sessionManager = {
     // covers any other path that submits.
     if (this.workspaceBuildAttachmentPending()) return;
     const placement = options.placement || null;
+    const unifiedOrdinary = this.usesUnifiedOrdinaryReview();
+    const ordinaryReview = unifiedOrdinary ? this.workspaceCreatorContext.ordinaryReview : null;
+    if (
+      unifiedOrdinary &&
+      (!ordinaryReview?.api || (!placement && !['place', 'confirm'].includes(options.reviewAction)))
+    )
+      return;
+    if (ordinaryReview?.accepted || ordinaryReview?.dirty) return;
 
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -16779,6 +17220,12 @@ const sessionManager = {
       // rejection. Rendering the current state here is cheaper than that, and
       // the server still has the final say either way.
       const current = await window.ProjectTemplateCard?.recheckSelection?.();
+      if (
+        ordinaryReview &&
+        (this.workspaceCreatorContext?.ordinaryReview !== ordinaryReview ||
+          this.workspaceCreatorContext.generation !== ordinaryReview.generation)
+      )
+        return;
       if (current && current.state !== 'ready') {
         this.renderReviewReadiness();
         this.showWorkspaceCreateError(current.summary || 'This blueprint is not ready.', current);
@@ -16849,7 +17296,7 @@ const sessionManager = {
         !importEnabled &&
         !ordinaryGroup &&
         !placement &&
-        this.workspaceMapOrigin &&
+        (ordinaryReview ? options.reviewAction === 'place' : this.workspaceMapOrigin) &&
         !window.SetupWorkspaceCreator?.isActive?.();
       const pendingMapBuild = requestsMapPlacement
         ? window.OriWorkspaceMap?.getPendingBuild?.() || null
@@ -16857,7 +17304,7 @@ const sessionManager = {
       // Preserve the existing district-Build behavior through the ordinary
       // create owner: an explicit parent the reviewer chose still wins, but an
       // otherwise blank form carries its originating district in the one POST.
-      if (!payload.parent_id && pendingMapBuild?.group?.id) {
+      if (!ordinaryReview && !payload.parent_id && pendingMapBuild?.group?.id) {
         payload.parent_id = pendingMapBuild.group.id;
       }
       const lockedParent = this.lockedParentId();
@@ -16870,6 +17317,27 @@ const sessionManager = {
         }
         groupRequirementReady = await this.prepareGroupRequirementCommit(endpoint, payload);
         if (!groupRequirementReady && !requestsMapPlacement) return;
+      }
+
+      if (ordinaryReview) {
+        if (
+          this.workspaceCreatorContext !== creatorContext ||
+          creatorContext.generation !== creatorGeneration
+        )
+          return;
+        if (
+          placement &&
+          (JSON.stringify(payload) !== JSON.stringify(placement.payload) ||
+            ordinaryReview.operationKey !== JSON.stringify(payload))
+        ) {
+          placement.phase = 'placing';
+          this.returnFromWorkspaceMapPlacement(placement.token, 'review-changed');
+          this.showWorkspaceCreateError(
+            'The reviewed choices changed. Review them again before creating.'
+          );
+          return;
+        }
+        if (!(await this.prepareOrdinaryCreationOperation(creatorContext, payload))) return;
       }
 
       if (requestsMapPlacement) {
@@ -16899,7 +17367,46 @@ const sessionManager = {
       let response;
       let result = {};
 
-      while (true) {
+      if (ordinaryReview) {
+        ordinaryReview.accepted = true;
+        const outcome = await ordinaryReview.api.confirmCreationOperation(
+          fetch,
+          window.localStorage,
+          ordinaryReview.reference
+        );
+        if (
+          this.workspaceCreatorContext !== creatorContext ||
+          creatorContext.generation !== creatorGeneration
+        )
+          return;
+        ordinaryReview.observedState = outcome.state;
+        ordinaryReview.message = outcome.message;
+        if (outcome.state !== 'complete') {
+          if (outcome.state === 'refused' || outcome.state === 'abandoned') {
+            ordinaryReview.api.releaseCreationReference(
+              window.localStorage,
+              ordinaryReview.reference
+            );
+            ordinaryReview.accepted = false;
+            ordinaryReview.reference = null;
+            ordinaryReview.operationKey = '';
+            if (placement) {
+              placement.phase = 'placing';
+              this.returnFromWorkspaceMapPlacement(placement.token, 'review-refused');
+            }
+            this.showWorkspaceCreateError(
+              outcome.message || 'The request was refused. Review current choices before creating.'
+            );
+          } else {
+            await this.showOrdinaryCreationOutcome(creatorContext, null, placement);
+          }
+          return;
+        }
+        response = { ok: true, status: 201 };
+        result = outcome.result;
+      }
+
+      while (!ordinaryReview) {
         response = window.SetupWorkspaceCreator?.isActive()
           ? await window.SetupWorkspaceCreator.submit(requestPayload)
           : await fetch(endpoint, {
@@ -17165,9 +17672,11 @@ const sessionManager = {
           'warning'
         );
       }
-      if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
-      if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
-      window.OriTagInput?.clearTagPoolCache?.();
+      if (!ordinaryReview) {
+        if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
+        if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
+        window.OriTagInput?.clearTagPoolCache?.();
+      }
 
       const createdWorkspaceId =
         result && result.folder && result.folder.id ? String(result.folder.id) : '';
@@ -17191,11 +17700,16 @@ const sessionManager = {
           placementResult = await commitPlacement(createdWorkspaceId, {
             token: placement.token,
             revision: placement.revision,
+            ...(ordinaryReview ? { select: false } : {}),
             candidate: this.cloneWorkspaceMapPlacementValue(placement.candidate)
           });
         } else {
           placementResult = { saved: false, reason: 'map_unavailable' };
         }
+      }
+      if (ordinaryReview) {
+        await this.showOrdinaryCreationOutcome(creatorContext, result, placement, placementResult);
+        return;
       }
       const createdWorkspaceSlug =
         result && result.folder && result.folder.folder_slug
@@ -17526,6 +18040,10 @@ const sessionManager = {
       // problem and resubmit rather than rebuilding the team from scratch.
       if (!importEnabled) this.showWorkspaceCreateError(message);
       if (!error?.status) this.mirrorWorkspaceBuildError(message);
+      if (ordinaryReview?.accepted) {
+        ordinaryReview.message = message;
+        await this.showOrdinaryCreationOutcome(creatorContext, null, placement);
+      }
     } finally {
       this.isCreatingFolder = false;
       if (this.workspaceBuild) this.syncWorkspaceBuildPresentation();
@@ -17542,6 +18060,8 @@ const sessionManager = {
           ? 'Retry Confirmed Change'
           : this.workspaceCreateCtaLabel() || originalCreateLabel || 'Create';
       }
+      if (ordinaryReview && this.workspaceCreatorContext === creatorContext)
+        void this.syncOrdinaryCreationReview();
     }
   },
 

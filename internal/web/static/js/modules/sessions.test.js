@@ -40,6 +40,7 @@ function loadSessionManager(
       fetch: fetchImpl,
       console,
       URLSearchParams,
+      Event,
       crypto: { randomUUID: () => 'review-key' },
       setTimeout,
       clearTimeout
@@ -48,6 +49,182 @@ function loadSessionManager(
   );
   return window.sessionManager;
 }
+
+test('ordinary review edits use the existing canonical fields and reject replacement editor callbacks', async () => {
+  const events = [];
+  const name = { value: 'Original', dataset: {}, dispatchEvent: event => events.push(event.type) };
+  const goal = {
+    value: 'Original goal',
+    dataset: {},
+    dispatchEvent: event => events.push(event.type)
+  };
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Rendering/editing cannot call a provider or create');
+    },
+    {},
+    {
+      getElementById: id => ({ folderNameInput: name, folderGoalInput: goal })[id]
+    }
+  );
+  const context = { generation: 4, ordinaryReview: { generation: 4 } };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  await manager.actOnOrdinaryCreationReview(context, { action: 'dirty' });
+  assert.equal(context.ordinaryReview.dirty, true);
+  await manager.actOnOrdinaryCreationReview(context, {
+    action: 'edit',
+    field: 'name',
+    value: 'Reviewed name'
+  });
+  await manager.actOnOrdinaryCreationReview(context, {
+    action: 'edit',
+    field: 'mission',
+    value: 'Exact reviewed goal 日本語'
+  });
+  assert.equal(name.value, 'Reviewed name');
+  assert.equal(goal.value, 'Exact reviewed goal 日本語');
+  assert.equal(goal.dataset.goalEdited, '1');
+  assert.equal(context.ordinaryReview.dirty, false);
+  assert.deepEqual(events, ['input', 'input']);
+  manager.workspaceCreatorContext = { generation: 5 };
+  await manager.actOnOrdinaryCreationReview(context, {
+    action: 'edit',
+    field: 'name',
+    value: 'Late reply'
+  });
+  assert.equal(name.value, 'Reviewed name');
+});
+
+test('accepted ordinary creation cannot fall back to legacy POST when the picker projection resets', async () => {
+  let calls = 0;
+  const manager = loadSessionManager(
+    async () => {
+      calls++;
+      throw new Error('Accepted creation repeated');
+    },
+    {},
+    {
+      getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null)
+    }
+  );
+  manager.workspaceCreatorContext = {
+    ordinaryReview: { accepted: true, result: { id: 'proven' } }
+  };
+  manager.teamView = () => ({ isBlank: false });
+  assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+  await manager.createFolder();
+  assert.equal(calls, 0);
+});
+
+test('ordinary automatic selection clears geometry without editing the canonical draft or dispatching', async () => {
+  let cancelled = 0,
+    abandoned = 0;
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Selection cannot confirm');
+    },
+    { OriWorkspaceMap: { cancelBuild: () => cancelled++ } }
+  );
+  const context = { generation: 1, ordinaryReview: { generation: 1, candidate: { x: 38, y: 76 } } };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  manager.abandonWorkspaceMapPlacement = () => abandoned++;
+  await manager.actOnOrdinaryCreationReview(context, { action: 'suggested' });
+  assert.equal(context.ordinaryReview.automatic, true);
+  assert.equal(context.ordinaryReview.candidate, null);
+  assert.equal(cancelled, 1);
+  assert.equal(abandoned, 1);
+});
+
+test('ordinary review serializes double activation before asynchronous readiness checks', async () => {
+  const manager = loadSessionManager();
+  const context = { generation: 1, ordinaryReview: { generation: 1 } };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  let release,
+    calls = 0;
+  const waiting = new Promise(resolve => {
+    release = resolve;
+  });
+  manager.createFolder = async () => {
+    calls++;
+    await waiting;
+  };
+  const first = manager.submitOrdinaryCreationReview(context, 'confirm');
+  const second = manager.submitOrdinaryCreationReview(context, 'confirm');
+  assert.equal(calls, 1);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(context.ordinaryReview.actionInFlight, false);
+});
+
+test('an ordinary late saved review cannot install its reference in a replacement editor', async () => {
+  const manager = loadSessionManager();
+  let release;
+  const waiting = new Promise(resolve => {
+    release = resolve;
+  });
+  const context = {
+    generation: 2,
+    ordinaryReview: { generation: 2, api: { reviewCreationOperation: () => waiting } }
+  };
+  manager.workspaceCreatorContext = context;
+  const pending = manager.prepareOrdinaryCreationOperation(context, { name: 'Reviewed' });
+  manager.workspaceCreatorContext = { generation: 3 };
+  release({ id: 'operation', digest: 'digest' });
+  assert.equal(await pending, null);
+  assert.equal(context.ordinaryReview.reference, undefined);
+});
+
+test('ordinary position repair targets only the proven result and never repeats creation', async () => {
+  const repairs = [];
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Layout repair cannot create');
+    },
+    {
+      OriWorkspaceMap: {
+        retryPlacement: async (id, point) => {
+          repairs.push({ id, point });
+          return true;
+        }
+      }
+    }
+  );
+  const point = { x: 38, y: 76 };
+  const context = {
+    generation: 2,
+    ordinaryReview: {
+      generation: 2,
+      accepted: true,
+      result: { id: 'proven' },
+      positionFailed: true,
+      candidate: point
+    }
+  };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  await manager.actOnOrdinaryCreationReview(context, { action: 'retry-position' });
+  assert.deepEqual(repairs, [{ id: 'proven', point }]);
+  assert.equal(context.ordinaryReview.positionFailed, false);
+});
+
+test('a stale placement callback cannot submit a replacement ordinary editor', async () => {
+  const manager = loadSessionManager();
+  const old = { generation: 1 };
+  manager.workspaceCreatorContext = { generation: 2 };
+  manager.workspaceMapPlacement = {
+    token: 'old',
+    phase: 'placing',
+    creatorContext: old,
+    creatorGeneration: 1
+  };
+  manager.createFolder = async () => {
+    throw new Error('Stale callback submitted');
+  };
+  assert.equal(await manager.confirmWorkspaceMapPlacement('old', { x: 38, y: 76 }), false);
+});
 
 test('inbox entry transfers only references and opens the returned draft without generic model admission', async () => {
   const calls = [];

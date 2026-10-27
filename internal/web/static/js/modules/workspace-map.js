@@ -7939,6 +7939,9 @@
       (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
         claim(node.id, node);
       });
+      // A visible unbuilt HQ site is not a workspace or membership grant, but
+      // its drawn footprint must not be mistaken for empty placement ground.
+      if (lastWorldLayout.hqSite) claim(HQ_SITE_ID, lastWorldLayout.hqSite);
     }
     return occupied;
   }
@@ -9952,9 +9955,30 @@
     );
   }
 
+  function placementActionCopy(value) {
+    var input = value || {};
+    var defaults = {
+      confirmLabel: 'Create workspace here',
+      pendingLabel: 'Creating workspace…',
+      instruction:
+        'Click open ground or press Enter to create this reviewed workspace. Drag to pan; Escape returns to review. Position does not change membership.',
+      pendingInstruction: 'Creating the reviewed workspace. This position is locked.',
+      announcement:
+        'Setup reviewed. Click open ground or press Enter to create the workspace. Escape returns to editing.'
+    };
+    var copy = {};
+    Object.keys(defaults).forEach(function (key) {
+      copy[key] =
+        typeof input[key] === 'string' && input[key].trim()
+          ? input[key].trim().slice(0, 600)
+          : defaults[key];
+    });
+    return copy;
+  }
+
   function placementConfirmLabel(state) {
     if (state.mode === 'reviewed-setup' && !state.saving)
-      return state.submitting ? 'Creating workspace…' : 'Create workspace & scan here';
+      return state.submitting ? state.actionCopy.pendingLabel : state.actionCopy.confirmLabel;
     if (state.mode === 'draft' && !state.saving)
       return state.submitting ? 'Position locked' : 'Use this position';
     if (state.saving) return 'Saving position…';
@@ -9964,9 +9988,7 @@
   function placementInstructionText(state, problem) {
     if (problem) return problem;
     if (state.mode === 'reviewed-setup')
-      return state.submitting
-        ? 'Creating the reviewed workspace and preparing its filing scan. This position is locked.'
-        : 'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.';
+      return state.submitting ? state.actionCopy.pendingInstruction : state.actionCopy.instruction;
     if (state.mode === 'draft' && state.submitting)
       return 'The requested position is locked. Check setup status in the review; moving the pointer cannot change this confirmation.';
     if (state.mode === 'draft')
@@ -9996,7 +10018,7 @@
       '<button type="button" class="ws-map-placement-confirm" data-ws-map-placement-confirm' +
       (problem || state.submitting ? ' disabled' : '') +
       '>' +
-      placementConfirmLabel(state) +
+      escapeHtml(placementConfirmLabel(state)) +
       '</button></div></div>'
     );
   }
@@ -10187,10 +10209,7 @@
   function handlePlacementKey(container, event) {
     var state = placementSession;
     if (!state || state.container !== container) return false;
-    if (
-      state.mode !== 'create' &&
-      event.target?.closest?.('button, a, input, select, textarea, [contenteditable="true"]')
-    )
+    if (event.target?.closest?.('button, a, input, select, textarea, [contenteditable="true"]'))
       return false;
     if (
       event.key === 'Enter' &&
@@ -10400,6 +10419,7 @@
       candidate: suggestedPlacementPoint(options),
       // Opt-in only: ordinary wizard callers retain creation-on-click/Enter.
       mode: ['draft', 'reviewed-setup'].includes(options.mode) ? options.mode : 'create',
+      actionCopy: placementActionCopy(options.actionCopy),
       onCandidate: options.onCandidate,
       onSelect: options.onSelect,
       onConfirm: options.onConfirm,
@@ -10413,7 +10433,7 @@
     announce(
       container,
       placementSession.mode === 'reviewed-setup'
-        ? 'Setup reviewed. Click open ground or press Enter to create the workspace and scan. Escape returns to editing.'
+        ? placementSession.actionCopy.announcement
         : placementSession.mode === 'draft'
           ? 'Draft workspace. Choose a position; nothing is created until you confirm setup separately.'
           : 'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
@@ -10503,8 +10523,10 @@
       function () {
         var current = placementSession === state;
         if (current) {
-          selectedId = id;
-          pendingPlacementSelectionId = id;
+          if (opts.select !== false) {
+            selectedId = id;
+            pendingPlacementSelectionId = id;
+          }
           placementSession = null;
           announce(state.container, 'Workspace placed at ' + formatCoordinate(point));
         }

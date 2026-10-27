@@ -79,6 +79,11 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if path == "create-operations" || strings.HasPrefix(path, "create-operations/") {
+		h.handleWorkspaceCreationOperations(w, r, strings.TrimPrefix(path, "create-operations"))
+		return
+	}
+
 	// Import routes must be handled before generic workspace-id routing.
 	switch path {
 	case "import":
@@ -740,6 +745,24 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if operation := creationOperationFrom(r.Context()); operation != nil {
+		if wantsProject && !templateResolved {
+			// Reviewed creation never silently substitutes Blank for an
+			// unreadable declaration, unlike the legacy template-path API.
+			_ = orihttp.RespondBadRequest(w, "the reviewed blueprint is unavailable")
+			return
+		}
+		if templateResolved && resolvedTemplate.GroupRequirement != nil {
+			creationOperationError(w, http.StatusConflict, "creation_owner_mismatch", "This blueprint requires its existing group review and commit owner.")
+			return
+		}
+		sourceDigest, sourceErr := workspaceCreationSourceDigest(req, resolvedTemplate, templateResolved)
+		if sourceErr != nil || sourceDigest != operation.SourceDigest {
+			creationOperationError(w, http.StatusConflict, "creation_blueprint_changed", "The blueprint changed after review. Nothing was accepted; review the current setup before creating.")
+			return
+		}
+	}
+
 	var groupPlan *createWorkspaceGroupPlan
 	if templateResolved {
 		var handled bool
@@ -854,6 +877,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			// parent is never used as a temporary placement or membership claim.
 			ws.ParentID = groupPlan.claim.Operation.HomeWorkspaceID
 		}
+	}
+
+	if !h.acceptWorkspaceCreationOperation(w, r, ws, resolvedTemplate, templateResolved) {
+		return
 	}
 
 	seed, ok := h.selectCreateWorkspaceEntryAgent(r.Context(), w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate, strictFreshTemplate)

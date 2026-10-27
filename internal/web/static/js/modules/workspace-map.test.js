@@ -4348,6 +4348,11 @@ test('reviewed setup opts into one-click/Enter creation; hover, pan, blocked poi
       map.beginPlacement({
         token: 'setup',
         mode: 'reviewed-setup',
+        actionCopy: {
+          confirmLabel: 'Create workspace & scan here',
+          instruction:
+            'Click open ground or press Enter to create this reviewed workspace and scan.'
+        },
         initialCandidate: { x: 760, y: 456 },
         onConfirm: (_token, point) => {
           confirmed.push(point);
@@ -4392,6 +4397,85 @@ test('reviewed setup opts into one-click/Enter creation; hover, pan, blocked poi
     await flush();
     assert.equal(map.suspendDraftPlacement(), true);
   }
+});
+
+test('reviewed action copy is owner-supplied inert text and generic creation never claims a scan', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  map.beginPlacement({
+    token: 'generic',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 }
+  });
+  assert.match(harness.container.innerHTML, /Create workspace here/);
+  assert.doesNotMatch(harness.container.innerHTML, /scan|filing/i);
+  map.endPlacement('generic');
+  map.beginPlacement({
+    token: 'typed-owner',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 },
+    actionCopy: {
+      confirmLabel: '<img src=x onerror="alert(1)">',
+      instruction: 'Create the reviewed subject; membership remains unchanged.'
+    }
+  });
+  assert.match(harness.container.innerHTML, /&lt;img/);
+  assert.doesNotMatch(harness.container.innerHTML, /<img/);
+  assert.match(harness.container.innerHTML, /membership remains unchanged/);
+  assert.equal(patches.length, 0);
+});
+
+test('reviewed placement can save without selecting the result over its owner review', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  const selected = map.getSelectedId();
+  map.beginPlacement({
+    token: 'owner-result',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 }
+  });
+  const saved = await map.commitPlacement('proven-result', {
+    token: 'owner-result',
+    candidate: { x: 760, y: 456 },
+    select: false
+  });
+  assert.equal(saved.saved, true);
+  assert.equal(map.getSelectedId(), selected);
+  assert.equal(patches.length, 1);
+  mountWithCamera(map, harness, [
+    { id: 'distant', name: 'Distant' },
+    { id: 'proven-result', name: 'Result' }
+  ]);
+  assert.equal(map.getSelectedId(), selected, 'refresh must not launch a competing result context');
+});
+
+test('a suggested creation point avoids the visible unbuilt HQ footprint without creating a Home', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: {}, snap_to_grid: false }
+  });
+  map.setHQStatus(HQ_MISSING);
+  mountWithCamera(map, harness, []);
+  await flush();
+  const anchor = hqAnchor(map);
+  assert.equal(
+    map.beginPlacement({ token: 'avoid-site', mode: 'reviewed-setup', initialCandidate: anchor }),
+    true
+  );
+  const preview = harness.container.innerHTML.match(
+    /data-ws-map-placement-preview[^>]*left:([-\d.]+)px;top:([-\d.]+)px/
+  );
+  assert.ok(preview, 'a real placement preview is drawn on the HQ-only map');
+  assert.notDeepEqual(
+    { x: Number(preview[1]), y: Number(preview[2]) },
+    { x: anchor.x, y: anchor.y }
+  );
+  assert.equal(patches.length, 0);
 });
 
 test('draft-only placement selects geometry without invoking ordinary creation or writing layout', async () => {

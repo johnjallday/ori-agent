@@ -251,6 +251,14 @@ body:has(.assisted-placement-host--map:not([hidden])) .ws-map-placement-controls
   flex-wrap: wrap;
 }
 
+/* The decision-first review replaces the wizard's duplicate identity/progress
+   chrome, not its editable steps. Back restores those existing controls. */
+.workspace-create-modal--unified-review #workspaceCreatorKindChoice,
+.workspace-create-modal--unified-review #wizardStepper,
+.workspace-create-modal--unified-review #wizardStep4 > .workspace-wizard-step-heading {
+  display: none;
+}
+
 @media (max-width: 600px) {
   .assisted-placement {
     padding: 1rem;
