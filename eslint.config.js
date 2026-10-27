@@ -171,6 +171,7 @@ export default defineConfig([
       'internal/web/static/js/modules/folder-task-disclosure.js',
       'internal/web/static/js/modules/personal-assistant-hire.js',
       'internal/web/static/js/modules/default-model-picker.js',
+      'internal/web/static/js/modules/choose-model-dialog.js',
       'internal/web/static/js/modules/personal-assistant-hire-offer.js',
       'internal/web/static/js/modules/personal-assistant-needs-reveal.js',
       'internal/web/static/js/modules/meet-assistant-home-prompt.js',
