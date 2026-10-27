@@ -221,6 +221,37 @@ async function grabPointOn(page: Page, id: string): Promise<{ x: number; y: numb
   throw new Error(`no grabbable point on ${id} — it is covered`);
 }
 
+async function districtHandlePoint(page: Page, groupId: string) {
+  const handle = page.locator(`.ws-map-district[data-group-id="${groupId}"] [data-group-drag]`);
+  // A centered tall automatic district can still have its header clipped by
+  // the viewport. Also avoid the live controls inside the header itself.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await settleMapFrame(page);
+    const point = await handle.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      for (const fy of [0.5, 0.25, 0.75]) {
+        for (const fx of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+          const x = box.left + box.width * fx;
+          const y = box.top + box.height * fy;
+          const hit = document.elementFromPoint(x, y);
+          if (
+            hit &&
+            element.contains(hit) &&
+            (!hit.closest('button, a, input, select, textarea, [contenteditable="true"]') ||
+              hit.closest('button, a, input, select, textarea, [contenteditable="true"]') ===
+                element)
+          )
+            return { x, y };
+        }
+      }
+      return null;
+    });
+    if (point) return point;
+    await page.locator('[data-map-zoom-out]').click();
+  }
+  throw new Error(`no exposed drag handle for ${groupId}`);
+}
+
 async function districtSurfacePoint(page: Page, groupId: string) {
   const district = page.locator(`.ws-map-district[data-group-id="${groupId}"]`);
   const box = (await district.boundingBox())!;
@@ -841,6 +872,7 @@ test.describe('Coordinate Workspace Map', () => {
     await enableMapDrag(page);
 
     const district = page.locator(`.ws-map-district[data-group-id="${group}"]`);
+    const grab = await districtHandlePoint(page, group);
     const districtOrigin = await district.evaluate(el => ({
       x: Number.parseFloat((el as HTMLElement).style.left),
       y: Number.parseFloat((el as HTMLElement).style.top)
@@ -868,10 +900,7 @@ test.describe('Coordinate Workspace Map', () => {
       }
     });
 
-    const handle = district.locator('[data-group-drag]');
-    const grab = (await handle.boundingBox())!;
-    const x = grab.x + grab.width / 2;
-    const y = grab.y + grab.height / 2;
+    const { x, y } = grab;
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x, y + 300, { steps: 15 });
@@ -1029,8 +1058,10 @@ test.describe('Coordinate Workspace Map', () => {
     const beforeZoom = (await cameraOf(page)).zoom;
     await page.click('[data-map-zoom-in]');
     expect((await cameraOf(page)).zoom).toBeGreaterThan(beforeZoom);
-    const site = await emptyPointOn(page);
-    await page.mouse.click(site.x, site.y, { button: 'right' });
+    // Test the readonly command contract without an incidental pixel hit-test
+    // on a crowded, zooming shared map. Pointer menus are covered separately.
+    await page.locator('[data-ws-map-viewport]').focus();
+    await page.keyboard.press('Shift+F10');
     await expect(page.locator('[data-menu-action="build"]')).toHaveAttribute(
       'aria-disabled',
       'true'
