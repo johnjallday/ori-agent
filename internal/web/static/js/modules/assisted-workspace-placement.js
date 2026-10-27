@@ -100,25 +100,9 @@ export function placementPanelHTML(view = {}) {
     .join(', ');
   const folder = review?.folder || view.folder || {};
   const workspace = review?.workspace || draft;
-  if (view.onMap)
-    return `<section class="assisted-placement assisted-placement--position" aria-label="Place reviewed workspace">
-      <p class="assisted-placement__eyebrow">${view.prototype ? 'Prototype · ' : ''}2 · Place on map</p>
-      <h2>${escape(workspace.name || 'Your workspace')}</h2>
-      <dl class="assisted-placement__summary">
-        <dt>Team</dt><dd>${escape(teamText)}</dd>
-        <dt>Folder</dt><dd>${escape(folder.path || folder.name)} — linked, not moved</dd>
-        <dt>Next</dt><dd>Metadata-only filing review. No files moved.</dd>
-        <dt>Monitoring</dt><dd>${!review ? 'Review required — choose Edit setup.' : review.monitoring ? `On · watch for new files; daily catch-up at ${escape(review.terms?.daily_scan_local_time || 'the reviewed time')} (${escape(review.terms?.timezone || 'local time')}).` : 'Off · manual scans only.'}</dd>
-      </dl>
-      <p class="assisted-placement__hint">${view.candidate ? `Requested position: ${escape(view.candidate.x)}, ${escape(view.candidate.y)}.` : 'Click open ground or use Arrow keys, then Enter, to select a position.'} Standalone workspace; no district membership.</p>
-      <p class="assisted-placement__status" role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escape(view.message || '')}</p>
-      ${view.conflict ? `<button type="button" data-placement-action="reload-draft"${busy ? ' disabled' : ''}>Discard local edits &amp; load saved draft</button>` : ''}
-      <footer class="assisted-placement__footer">
-        <button type="button" data-placement-action="back"${busy ? ' disabled' : ''}>Edit setup</button>
-        <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>
-        <button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !view.candidate || !review || locked ? ' disabled' : ''}>Create workspace &amp; scan</button>
-      </footer>
-    </section>`;
+  // The reviewed map gesture is confirmation. No second panel competes with
+  // that step; accepted/progress/results above remain available afterwards.
+  if (view.onMap) return '';
   return `
     <section class="assisted-placement" aria-label="Review proposed workspace">
       <header class="assisted-placement__header">
@@ -182,10 +166,10 @@ export function placementPanelHTML(view = {}) {
       ${view.conflict ? `<button type="button" data-placement-action="reload-draft"${busy ? ' disabled' : ''}>Discard local edits &amp; load saved draft</button>` : ''}
       ${view.canRefresh ? '<button type="button" data-placement-action="review">Refresh permission review</button>' : ''}
       <div class="assisted-placement__navigation">
-        <button type="button" class="${view.automatic ? '' : 'assisted-placement__primary'}" data-placement-action="place"${!view.canPlace || !review || locked ? ' disabled' : ''}>Next: place on map</button>
+        <button type="button" class="${view.automatic ? '' : 'assisted-placement__primary'}" data-placement-action="place"${!view.canPlace || !review || locked ? ' disabled' : ''}>Place &amp; create on map</button>
         <button type="button" data-placement-action="suggested" aria-pressed="${Boolean(view.automatic)}"${disabled}>Use automatic placement</button>
       </div>
-      <p class="assisted-placement__hint">${view.automatic ? 'Automatic placement selected. Confirm below to create this reviewed setup.' : view.candidate ? 'Your previous position is kept. Continue to the map to use or adjust it.' : 'Next, choose a position on the map. Or use automatic placement without opening the map.'}</p>
+      <p class="assisted-placement__hint">${view.automatic ? 'Automatic placement selected. Confirm below to create this reviewed setup.' : view.candidate ? 'Your previous position is kept. On the map, click or press Enter to create this reviewed setup and scan.' : 'On the map, click a valid position or press Enter to create this reviewed setup and scan. Moving the preview does nothing. Escape returns here.'}</p>
       <footer class="assisted-placement__footer">
         <button type="button" data-placement-action="back"${busy ? ' disabled' : ''}>Back</button>
         <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>

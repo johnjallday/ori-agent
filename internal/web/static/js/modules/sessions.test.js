@@ -271,7 +271,7 @@ test('manual review cannot confirm before placement; automatic selection remains
   assert.equal(confirmations, 1);
 });
 
-test('inbox map callbacks select geometry only and ignore a superseded source generation', () => {
+test('reviewed inbox map gestures confirm once; previews and stale or changed reviews never create', async () => {
   let spec;
   const listeners = new Map();
   const emit = name => (listeners.get(name) || []).forEach(callback => callback());
@@ -313,7 +313,7 @@ test('inbox map callbacks select geometry only and ignore a superseded source ge
     ready: true,
     token: 'source-generation',
     candidate: null,
-    host: { classList: { add() {} } }
+    host: { classList: { add() {} }, contains: () => false }
   };
   const build = { session: { status: 'open', draft: { name: 'Inbox' } }, placement };
   manager.workspaceBuild = build;
@@ -321,31 +321,65 @@ test('inbox map callbacks select geometry only and ignore a superseded source ge
   manager.syncInboxWorkspacePlacement = () => {};
   manager.confirmWorkspaceBuildPreparation = () => {
     confirmations++;
+    build.acceptedPreparation = true;
   };
-  manager.workspaceBuildPreparationCurrent = () => true;
+  let reviewCurrent = true;
+  let returns = 0;
+  manager.returnInboxWorkspaceToReview = () => {
+    returns++;
+  };
+  manager.workspaceBuildPreparationCurrent = () => reviewCurrent;
   manager.placeInboxWorkspaceDraft();
   assert.equal(spec, undefined, 'placement waits for the opening transition');
   emit('shown.bs.modal');
-  assert.equal(spec.mode, 'draft');
-  assert.equal(spec.onConfirm, undefined);
+  assert.equal(spec.mode, 'reviewed-setup');
+  assert.equal(spec.onSelect, undefined);
   assert.deepEqual(JSON.parse(JSON.stringify(spec.origin)), {});
-  spec.onSelect(placement.token, { x: 12, y: 24 });
+  spec.onCandidate(placement.token, { x: 12, y: 24 });
   assert.deepEqual(JSON.parse(JSON.stringify(placement.candidate)), { x: 12, y: 24 });
   assert.equal(confirmations, 0);
   for (const flag of ['preparationBusy', 'preparationUncertain', 'acceptedPreparation']) {
     build[flag] = true;
     spec.onCandidate(placement.token, { x: 13, y: 24 });
-    spec.onSelect(placement.token, { x: 100, y: 200 });
+    assert.equal(await spec.onConfirm(placement.token, { x: 100, y: 200 }), false);
     assert.deepEqual(JSON.parse(JSON.stringify(placement.candidate)), { x: 12, y: 24 }, flag);
     delete build[flag];
   }
   spec.onCandidate(placement.token, { x: 13, y: 24 });
-  assert.equal(placement.candidate, null, 'nudges need their own selection before final consent');
+  assert.equal(placement.candidate.x, 13, 'nudges only remember geometry');
   manager.workspaceBuild = { session: { id: 'newer' }, placement: { candidate: null } };
-  spec.onSelect(placement.token, { x: 100, y: 200 });
+  assert.equal(await spec.onConfirm(placement.token, { x: 100, y: 200 }), false);
   assert.equal(manager.workspaceBuild.placement.candidate, null);
   assert.equal(confirmations, 0);
   manager.workspaceBuild = build;
+  reviewCurrent = false;
+  assert.equal(await spec.onConfirm(placement.token, { x: 50, y: 60 }), false);
+  assert.equal(returns, 1);
+  assert.equal(confirmations, 0);
+  reviewCurrent = true;
+  placement.onMap = false;
+  assert.equal(
+    await spec.onConfirm(placement.token, { x: 50, y: 60 }),
+    false,
+    'closed map callback cannot confirm'
+  );
+  placement.onMap = true;
+  manager.confirmWorkspaceBuildPreparation = () => {};
+  assert.equal(
+    await spec.onConfirm(placement.token, { x: 50, y: 60 }),
+    false,
+    'definite refusal returns to review'
+  );
+  assert.equal(returns, 2);
+  manager.confirmWorkspaceBuildPreparation = () => {
+    confirmations++;
+    build.acceptedPreparation = true;
+  };
+  assert.equal(await spec.onConfirm(placement.token, { x: 50, y: 60 }), true);
+  assert.equal(confirmations, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(placement.candidate)), { x: 50, y: 60 });
+  assert.equal(await spec.onConfirm(placement.token, { x: 70, y: 80 }), false);
+  assert.equal(confirmations, 1);
   build.session.status = 'abandoned';
   placement.onMap = false;
   spec = undefined;

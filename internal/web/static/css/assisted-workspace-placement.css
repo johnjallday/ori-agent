@@ -1,5 +1,5 @@
-/* Review first, then a compact positioning summary outside the map's
-   transformed world. Both present the same canonical draft. */
+/* Full setup review; on Map this host appears only for progress/results.
+   The reviewed placement click itself confirms creation. */
 .assisted-placement {
   --ap-paper: var(--ori-paper, var(--bg-secondary, #faf8f2));
   --ap-ink: var(--ori-ink, var(--text-primary, #20342d));
@@ -241,17 +241,7 @@
   filter: drop-shadow(0 0.5rem 1rem rgb(0 0 0 / 15%));
 }
 
-.assisted-placement--position {
-  padding: 1rem;
-}
-.assisted-placement--position .assisted-placement__hint {
-  margin-top: 0.75rem;
-}
-.assisted-placement--position .assisted-placement__primary {
-  width: 100%;
-}
-
-/* Keep geometry controls beside, not underneath, the compact summary. */
+/* While a confirmed setup is pending, keep its status clear of geometry. */
 body:has(.assisted-placement-host--map:not([hidden])) .ws-map-placement-controls {
   left: 1rem;
   right: calc(min(24rem, 34vw) + 1rem);

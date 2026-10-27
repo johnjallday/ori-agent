@@ -43,10 +43,10 @@ async function unobscured(control: Locator) {
   ).toBeTruthy();
 }
 
-async function accessibility(page: Page) {
+async function accessibility(page: Page, selector = '#assistedWorkspacePlacementPanel') {
   await page.addScriptTag({ content: axe });
-  const violations = await page.evaluate(async () => {
-    const result = await (window as any).axe.run('#assistedWorkspacePlacementPanel', {
+  const violations = await page.evaluate(async selector => {
+    const result = await (window as any).axe.run(selector, {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] }
     });
     return result.violations.map((item: any) => ({
@@ -54,7 +54,7 @@ async function accessibility(page: Page) {
       impact: item.impact,
       nodes: item.nodes.map((node: any) => node.target)
     }));
-  });
+  }, selector);
   expect(violations).toEqual([]);
 }
 
@@ -113,7 +113,7 @@ async function reviewAndCancel(
   if (map && !manual)
     await panel.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const confirm = panel.getByRole('button', {
-    name: manual ? 'Next: place on map' : 'Create workspace & scan',
+    name: manual ? 'Place & create on map' : 'Create workspace & scan',
     exact: true
   });
   await expect(confirm).toBeEnabled({ timeout: 30_000 });
@@ -168,16 +168,17 @@ async function reviewAndCancel(
     await expect(field).toHaveCount(0);
     const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
     await expect(canvas).toBeFocused();
+    await expect(panel).toBeHidden();
     await canvas.press('ArrowRight');
-    await canvas.press('Enter');
     await canvas.press('Tab');
     await expect(canvas).not.toBeFocused();
-    const create = panel.getByRole('button', { name: 'Create workspace & scan', exact: true });
+    const create = page.locator('[data-ws-map-placement-confirm]');
+    await expect(create).toHaveText('Create workspace & scan here');
     await expect(create).toBeEnabled();
     await unobscured(create);
-    await accessibility(page);
+    await accessibility(page, '[data-ws-map-placement-controls]');
     await capture(page, `${evidence}/a11y-${name}-placement.png`, tabZoom);
-    await panel.getByRole('button', { name: 'Edit setup', exact: true }).focus();
+    await page.locator('[data-ws-map-placement-back]').focus();
     await page.keyboard.press('Enter');
     await expect(field).toHaveValue(longName);
     await expect(goal).toHaveValue(

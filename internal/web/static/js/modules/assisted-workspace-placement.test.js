@@ -39,7 +39,8 @@ test('the primary surface describes all five comprehension facts without a map',
 
 test('manual placement begins with full review and no creation action', () => {
   const html = placementPanelHTML({ draft, team, folder, review, canPlace: true });
-  assert.match(html, /Next: place on map/);
+  assert.match(html, /Place &amp; create on map/);
+  assert.match(html, /click a valid position or press Enter to create/);
   assert.match(html, /Before you confirm/);
   assert.match(html, /data-placement-field="name"/);
   assert.doesNotMatch(html, /data-placement-action="confirm"/);
@@ -57,50 +58,16 @@ test('manual placement begins with full review and no creation action', () => {
     );
 });
 
-test('map step shows only the reviewed summary and explicit confirmation, never the editor', () => {
+test('map placement has no second confirmation panel; progress and outcomes still render', () => {
   const view = { draft, review, onMap: true, canConfirm: true, candidate: { x: 12, y: 24 } };
-  const html = placementPanelHTML(view);
-  for (const text of [
-    'Place reviewed workspace',
-    'File Curator',
-    '/synthetic/Music',
-    'Off · manual scans only.',
-    'Requested position: 12, 24',
-    'Edit setup',
-    'Create workspace &amp; scan'
-  ])
-    assert.ok(html.includes(text), text);
-  assert.doesNotMatch(
-    html,
-    /data-placement-field=|Choose agent|Choose folder|Before you confirm|Use automatic placement|Browse setup cards/
-  );
-  assert.doesNotMatch(html, /data-placement-action="confirm" disabled/);
-  for (const state of [
-    { candidate: null },
-    { review: null },
-    { canConfirm: false },
-    { busy: true },
-    { conflict: true },
-    { closed: true }
-  ])
-    assert.match(
-      placementPanelHTML({ ...view, ...state }),
-      /data-placement-action="confirm" disabled/
-    );
+  assert.equal(placementPanelHTML(view), '');
   assert.match(
-    placementPanelHTML({ ...view, review: null }),
-    /Review required — choose Edit setup/
+    placementPanelHTML({ ...view, accepted: true, busy: true }),
+    /Check confirmed setup/
   );
-  assert.doesNotMatch(
-    placementPanelHTML({
-      ...view,
-      review: {
-        ...review,
-        workspace: { name: '<img src=x>' },
-        folder: { path: '<script>bad</script>' }
-      }
-    }),
-    /<img|<script/
+  assert.match(
+    placementPanelHTML({ ...view, result: { outcome: 'no_eligible' } }),
+    /Workspace prepared/
   );
 });
 

@@ -12531,7 +12531,14 @@ const sessionManager = {
       );
     const choosingFolder = this.workspaceBuildPane()?.folderChooserOpen?.() || build.folderPending;
     const editing = build.collapsed || choosingFolder;
-    host.hidden = editing;
+    // Map click/Enter is the confirmation after the full review. Do not show
+    // a second setup panel; reveal this host only for progress/result/recovery.
+    host.hidden =
+      editing ||
+      (placement.onMap &&
+        !build.acceptedPreparation &&
+        !build.preparationUncertain &&
+        !placement.result);
     for (const id of [
       'workspaceBuildDraftSummary',
       'workspaceBuildFolderReview',
@@ -12856,6 +12863,7 @@ const sessionManager = {
       }
       const editable = () =>
         this.workspaceBuild === build &&
+        placement.onMap &&
         build.session.status === 'open' &&
         !build.preparationBusy &&
         !build.acceptedPreparation &&
@@ -12863,7 +12871,7 @@ const sessionManager = {
         !build.closeReady;
       const started = window.OriWorkspaceMap?.beginPlacement?.({
         token: placement.token,
-        mode: 'draft',
+        mode: 'reviewed-setup',
         origin: {},
         initialCandidate: placement.candidate,
         preview: {
@@ -12872,19 +12880,43 @@ const sessionManager = {
           blueprintBuiltin: true
         },
         onCandidate: (token, point) => {
-          if (!editable() || token !== placement.token || !placement.candidate) return;
-          if (point.x === placement.candidate.x && point.y === placement.candidate.y) return;
-          placement.candidate = null;
-          placement.message =
-            'Select the adjusted position with a click or Enter. Setup is still a separate confirmation.';
-          this.syncInboxWorkspacePlacement();
-        },
-        onSelect: (token, point) => {
           if (!editable() || token !== placement.token) return;
+          // Hover/nudging only remembers geometry. Map validates the clicked
+          // point again; this is neither consent nor a material draft edit.
           placement.candidate = { x: point.x, y: point.y };
-          placement.message =
-            'Position selected. Create workspace & scan applies the setup you reviewed. Nothing has been created yet.';
-          this.syncInboxWorkspacePlacement();
+        },
+        onConfirm: async (token, point) => {
+          if (!editable() || token !== placement.token) return false;
+          if (
+            placement.dirty ||
+            build.draftInFlight ||
+            build.draftConflict ||
+            build.draftError ||
+            !this.workspaceBuildPreparationCurrent()
+          ) {
+            placement.message = 'Review the current setup before placing it. Nothing was created.';
+            this.returnInboxWorkspaceToReview();
+            return false;
+          }
+          placement.candidate = { x: point.x, y: point.y };
+          await this.confirmWorkspaceBuildPreparation();
+          if (this.workspaceBuild !== build) return true;
+          if (!build.acceptedPreparation && !build.preparationUncertain && !placement.result) {
+            // Definite refusal requires review again, never another click
+            // against silently refreshed terms. Uncertain work stays locked.
+            placement.message = build.preparationMessage || 'Review the setup before trying again.';
+            this.returnInboxWorkspaceToReview();
+            return false;
+          }
+          const active = document.activeElement;
+          if (
+            placement.onMap &&
+            (active === document.body ||
+              active?.matches?.('[data-ws-map-viewport]') ||
+              placement.host.contains(active))
+          )
+            placement.host.querySelector('[data-placement-focus="status"]')?.focus();
+          return true;
         },
         onBack: token => {
           if (this.workspaceBuild === build && token === placement.token)
@@ -12898,7 +12930,7 @@ const sessionManager = {
       }
       placement.mode = 'map';
       placement.onMap = true;
-      placement.message = 'Choose a position. Your reviewed setup is unchanged.';
+      placement.message = '';
       placement.host.classList.add('assisted-placement-host--map');
       document.body.append(placement.host);
       this.syncWorkspaceBuildPresentation();

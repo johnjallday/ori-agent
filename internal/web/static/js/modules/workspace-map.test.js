@@ -4330,6 +4330,70 @@ test('reviewed placement previews the reviewed name/art and confirms one exact c
   assert.equal(map.endPlacement('custom-fallback'), true);
 });
 
+test('reviewed setup opts into one-click/Enter creation; hover, pan, blocked points and Escape never create', async () => {
+  for (const gesture of ['pointer', 'keyboard']) {
+    const { map, harness, patches } = buildHarness({
+      layout: {
+        schema_version: 1,
+        positions: { occupied: { x: 4800, y: 2800 } },
+        snap_to_grid: false
+      }
+    });
+    mountWithCamera(map, harness, [{ id: 'occupied', name: 'Existing workspace' }]);
+    await flush();
+    const confirmed = [];
+    let returned = 0;
+    let finish;
+    const begin = () =>
+      map.beginPlacement({
+        token: 'setup',
+        mode: 'reviewed-setup',
+        initialCandidate: { x: 760, y: 456 },
+        onConfirm: (_token, point) => {
+          confirmed.push(point);
+          return new Promise(resolve => {
+            finish = resolve;
+          });
+        },
+        onBack: () => returned++
+      });
+    begin();
+    assert.match(
+      harness.container.innerHTML,
+      /Create workspace &amp; scan here|Create workspace & scan here/
+    );
+    assert.match(harness.container.innerHTML, /Click open ground or press Enter to create/);
+    harness.fire('pointermove', pointerEvent(600, 250));
+    harness.fire('pointerdown', pointerEvent(600, 250));
+    harness.fire('pointermove', pointerEvent(660, 300));
+    harness.fire('pointerup', pointerEvent(660, 300));
+    assert.equal(confirmed.length, 0, 'pan is not a click');
+    harness.fire('keydown', keyEvent('Escape'));
+    assert.equal(returned, 1);
+    begin();
+    map._setLayoutForTest({ positions: { occupied: { x: 760, y: 456 } } }, 'ready');
+    mountWithCamera(map, harness, [{ id: 'occupied', name: 'Existing workspace' }]);
+    harness.fire('keydown', keyEvent('Enter'));
+    assert.equal(confirmed.length, 0, 'occupied point refuses confirmation');
+    map._setLayoutForTest({ positions: { occupied: { x: 4800, y: 2800 } } }, 'ready');
+    mountWithCamera(map, harness, [{ id: 'occupied', name: 'Existing workspace' }]);
+    if (gesture === 'pointer') {
+      const screen = map.camera.worldToScreen({ x: 760, y: 456 }, map.getCamera(), {
+        width: 1000,
+        height: 600
+      });
+      harness.fire('pointerdown', pointerEvent(screen.x, screen.y));
+      harness.fire('pointerup', pointerEvent(screen.x, screen.y));
+    } else harness.fire('keydown', keyEvent('Enter'));
+    harness.fire('keydown', keyEvent('Enter'));
+    assert.equal(confirmed.length, 1, 'pending creation cannot double-submit');
+    assert.equal(patches.length, 0, 'layout waits for the canonical created ID');
+    finish(true);
+    await flush();
+    assert.equal(map.suspendDraftPlacement(), true);
+  }
+});
+
 test('draft-only placement selects geometry without invoking ordinary creation or writing layout', async () => {
   const { map, harness, patches } = buildHarness({
     layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }

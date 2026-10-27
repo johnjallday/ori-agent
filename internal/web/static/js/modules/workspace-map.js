@@ -9946,13 +9946,15 @@
       'px">' +
       structure +
       '<span class="ws-map-placement-preview-name">' +
-      (state.mode === 'draft' ? 'Draft · ' : '') +
+      (state.mode !== 'create' ? 'Draft · ' : '') +
       escapeHtml(name) +
       '</span></div>'
     );
   }
 
   function placementConfirmLabel(state) {
+    if (state.mode === 'reviewed-setup' && !state.saving)
+      return state.submitting ? 'Creating workspace…' : 'Create workspace & scan here';
     if (state.mode === 'draft' && !state.saving)
       return state.submitting ? 'Position locked' : 'Use this position';
     if (state.saving) return 'Saving position…';
@@ -9961,6 +9963,10 @@
 
   function placementInstructionText(state, problem) {
     if (problem) return problem;
+    if (state.mode === 'reviewed-setup')
+      return state.submitting
+        ? 'Creating the reviewed workspace and preparing its filing scan. This position is locked.'
+        : 'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.';
     if (state.mode === 'draft' && state.submitting)
       return 'The requested position is locked. Check setup status in the review; moving the pointer cannot change this confirmation.';
     if (state.mode === 'draft')
@@ -10091,7 +10097,7 @@
     var problem = placementProblem(state.candidate);
     var status = problem ? 'blocked' : 'available';
     updatePlacementPresentation(container);
-    if (state.mode === 'draft' && typeof state.onCandidate === 'function') {
+    if (state.mode !== 'create' && typeof state.onCandidate === 'function') {
       state.onCandidate(state.token, { x: state.candidate.x, y: state.candidate.y }, problem);
     }
     // Pointer hover can emit dozens of events per second. Announce only a
@@ -10182,7 +10188,7 @@
     var state = placementSession;
     if (!state || state.container !== container) return false;
     if (
-      state.mode === 'draft' &&
+      state.mode !== 'create' &&
       event.target?.closest?.('button, a, input, select, textarea, [contenteditable="true"]')
     )
       return false;
@@ -10393,7 +10399,7 @@
       payload: placementPayload(options),
       candidate: suggestedPlacementPoint(options),
       // Opt-in only: ordinary wizard callers retain creation-on-click/Enter.
-      mode: options.mode === 'draft' ? 'draft' : 'create',
+      mode: ['draft', 'reviewed-setup'].includes(options.mode) ? options.mode : 'create',
       onCandidate: options.onCandidate,
       onSelect: options.onSelect,
       onConfirm: options.onConfirm,
@@ -10406,9 +10412,11 @@
     settleLayout();
     announce(
       container,
-      placementSession.mode === 'draft'
-        ? 'Draft workspace. Choose a position; nothing is created until you confirm setup separately.'
-        : 'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
+      placementSession.mode === 'reviewed-setup'
+        ? 'Setup reviewed. Click open ground or press Enter to create the workspace and scan. Escape returns to editing.'
+        : placementSession.mode === 'draft'
+          ? 'Draft workspace. Choose a position; nothing is created until you confirm setup separately.'
+          : 'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
     );
     return true;
   }
@@ -10417,7 +10425,8 @@
   // unfreezing a selected point. The current draft owner supplies plain text.
   function updateDraftPlacementName(token, name) {
     var state = placementSession;
-    if (!placementMatches(state, token) || state.mode !== 'draft' || state.submitting) return false;
+    if (!placementMatches(state, token) || state.mode === 'create' || state.submitting)
+      return false;
     state.payload.name = String(name || '');
     var preview = state.container.querySelector('.ws-map-placement-preview-name');
     var heading = state.container.querySelector('.ws-map-placement-copy strong');
@@ -10430,7 +10439,7 @@
   // setup confirmation is pending. This never confirms or writes anything.
   function setDraftPlacementPending(token, pending) {
     var state = placementSession;
-    if (!placementMatches(state, token) || state.mode !== 'draft' || state.saving) return false;
+    if (!placementMatches(state, token) || state.mode === 'create' || state.saving) return false;
     state.submitting = !!pending;
     updatePlacementPresentation(state.container);
     return true;
@@ -10440,7 +10449,7 @@
   // an opted-in draft editor; ordinary creation keeps its existing lifecycle.
   function suspendDraftPlacement() {
     var state = placementSession;
-    if (!state || state.mode !== 'draft') return false;
+    if (!state || state.mode === 'create') return false;
     finishPlacement(state.container, true);
     return true;
   }

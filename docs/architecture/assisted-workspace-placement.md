@@ -6,7 +6,7 @@ folder recipes and ordinary map/wizard creation keep their existing semantics.
 
 ## Authority
 
-The interaction is **propose → place/edit → review → explicitly confirm**.
+The interaction is **propose → review/edit → click to place and create**.
 The editable `WorkspaceBuildSession` is the only destination draft. Its
 `BuildDraft` is compiled by the existing normal creator and reviewed File
 Janitor preparation path. `FolderDigestService` owns the source offer;
@@ -184,32 +184,32 @@ already-recorded receipt do not rewrite it or emit a task message.
 
 ## Geometry, fallback and layout repair
 
-Add an explicitly opted-in draft-selection mode to `beginPlacement`; existing
-callers retain creation-on-click/Enter. In draft mode, ground clicks, arrow
-nudges and Enter select a candidate only. A translucent building has a visible
-Draft label and says **Standalone workspace — map position does not join a
-district**. Input keys in the adjacent panel belong to its controls, not the
-canvas. Selection uses existing snap/collision/camera rules. Candidate changes
-are UI-only and do not invalidate material server consent. The draft-only
-pending guard and owner callbacks freeze the requested point when confirmation
-starts. Only a definite pre-admission refusal restores editing; uncertain or
-accepted work stays locked. Switching away from Map can still show compact
-status without continuing or undoing setup. Delayed activation rechecks map
-visibility and the current editor/acceptance state.
+`beginPlacement` has explicit `reviewed-setup` mode for this host: a valid
+primary background click or Enter is the final consent to create the reviewed
+workspace and prepare its scan. The toolbar's **Create workspace & scan here**
+is the equivalent keyboard/touch control, not an additional required step.
+Ordinary create mode keeps its existing semantics; legacy `draft` mode remains
+selection-only. All modes use the same collision/snap/camera rules.
 
-The interaction is **review → place → explicitly create**, not placement with
-an open setup editor. Both assistant entries open the canonical full review
-first. **Review setup** offers **Next: place on map** only after current material
-choices have a fresh server review; navigation flushes edits and rechecks the
-same editor/review after modal suspension. It never creates resources.
+Both assistant entries open the full canonical review first. **Place & create
+on map** discloses the consequence of the next click and is available only
+with saved, current terms. Navigation flushes edits and rechecks the same
+editor/review after modal suspension; navigation itself creates nothing.
 
-Placement hides the modal/backdrop and replaces its editable panel with a
-compact read-only summary outside the transformed canvas. Name, team, exact
-folder, first action and monitoring remain visible. **Edit setup** returns to
-the full review with the same choices and valid candidate; reloading a conflict
-also returns there so revised choices cannot silently skip review. Ground
-click/Enter selects geometry only; **Create workspace & scan** is the distinct
-final action. The full editor and confirmation cannot compete while placing.
+While choosing a point there is no setup/confirmation side panel or modal
+backdrop. Only the Draft building and map toolbar remain, explicitly saying
+click/Enter creates and scans, and position does not join a district. Hover,
+arrow nudges and panning change geometry only. **Back to review** / Escape
+returns to the same choices and last preview, without creation. Input/control
+keys stay with their focused controls, not the canvas.
+
+The click callback rechecks current editor, live map, review, dirty/in-flight
+edits and accepted state before calling the existing preparation owner. A
+changed review or definite refusal returns to full review, never an automatic
+second attempt with new terms. Pending/uncertain/accepted work locks geometry
+and keeps its original claim. The panel appears only for progress, recovery
+or result after the click. Switching views can expose that same status without
+continuing or undoing setup.
 
 **Use automatic placement** is the no-map alternative, including on narrow
 screens, at 200% zoom, or with an unavailable map. It preserves material edits,
