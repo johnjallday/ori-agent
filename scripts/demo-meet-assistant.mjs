@@ -157,12 +157,13 @@ async function stagePreset() {
     '#cr-appearance-host',
     '#cr-focus-group',
     '#cr-mandate',
+    '#cr-model-group',
     '#createSubmit',
     '#cr-standard-form'
   ]) {
     check((await page.locator(id).count()) === 1, `preset renders ${id}`);
   }
-  for (const id of ['#cr-role', '#cr-model', '#cr-description', '#cr-favorite', '#cr-tags-host']) {
+  for (const id of ['#cr-role', '#cr-description', '#cr-favorite', '#cr-tags-host']) {
     check((await page.locator(id).count()) === 0, `preset omits ${id}`);
   }
   check(
@@ -194,6 +195,7 @@ async function stagePreset() {
 
   await page.locator('#cr-name').fill('Atlas');
   await page.locator('#cr-mandate').fill('Keep this week realistic.');
+  await chooseHireModel(page);
   await page.locator('#createSubmit').click();
   await page.waitForURL(url => url.pathname === '/' && url.search.includes('quest=build-hq'), {
     timeout: 20000
@@ -358,7 +360,28 @@ async function expectBlocked(page, x, y) {
   );
 }
 
+// The hire cannot go ahead without a model. The picker preselects a
+// recommended one when a provider is available; the driver waits for it and
+// fails loudly when the sandbox has no provider, rather than pressing a
+// disabled button. (ORI_DEMO_NO_CODEX=1 with no keys is the no-provider state.)
+async function chooseHireModel(page) {
+  await page.locator('#cr-model-group').waitFor();
+  await page
+    .waitForFunction(() => !document.getElementById('createSubmit')?.disabled, null, {
+      timeout: 15000
+    })
+    .catch(() => {});
+  check(
+    !(await page.locator('#createSubmit').isDisabled()),
+    `a model is selected on the preset (${await page
+      .locator('#cr-model')
+      .inputValue()
+      .catch(() => 'none')})`
+  );
+}
+
 async function hireAndLand(page) {
+  await chooseHireModel(page);
   await page.locator('#createSubmit').click();
   await page.waitForURL(url => url.pathname === '/' && url.search.includes('quest=build-hq'), {
     timeout: 20000
@@ -468,7 +491,11 @@ async function stageModal() {
   await page.goto(`${baseUrl}/`);
   await page.locator('#onboardingModal.show').waitFor({ timeout: 15000 });
   const label = await page.locator('#onboardingStepLabel').textContent();
-  check(label.trim() === 'Step 1 of 2', `the modal counts two phases ("${label.trim()}")`);
+  check(label.trim() === 'Step 1 of 1', `the modal counts one phase ("${label.trim()}")`);
+  check(
+    (await page.locator('#onboardingSystemModel').count()) === 0,
+    'the modal asks for no model: it is chosen with the hire'
+  );
   check(
     (await page.locator('label[for="onboardingAssistantName"]').textContent()).trim() ===
       'What should Ori be called?',
@@ -478,13 +505,6 @@ async function stageModal() {
   await page.locator('#onboardingUserName').fill('Sam');
   await shot(page, 'modal-welcome');
   await page.locator('#welcomeNextBtn').click();
-  await page.locator('#continueWithoutModelBtn').waitFor({ state: 'visible' });
-  check(
-    (await page.locator('#onboardingStepLabel').textContent()).trim() === 'Step 2 of 2',
-    'Model is the last phase'
-  );
-  await shot(page, 'modal-model');
-  await page.locator('#continueWithoutModelBtn').click();
   await page.waitForURL(url => url.pathname === '/' && !url.search.includes('hire'), {
     timeout: 15000
   });
@@ -658,19 +678,17 @@ async function checkHQBriefing(page) {
   check(!seen.guideOpen, "Ori's docked panel stays closed");
 }
 
-async function finishModalWithoutModel(page) {
+async function finishModal(page) {
   await page.goto(`${baseUrl}/`);
   await page.locator('#onboardingModal.show').waitFor({ timeout: 15000 });
   await page.locator('#onboardingUserName').fill('Sam');
   await page.locator('#welcomeNextBtn').click();
-  await page.locator('#continueWithoutModelBtn').waitFor({ state: 'visible' });
-  await page.locator('#continueWithoutModelBtn').click();
   await page.waitForURL(url => url.pathname === '/', { timeout: 15000 });
 }
 
 async function stageHome() {
   const page = await newPage();
-  await finishModalWithoutModel(page);
+  await finishModal(page);
 
   // Onboarding hands over to Ori's briefing: the centre of the screen, one
   // mission.

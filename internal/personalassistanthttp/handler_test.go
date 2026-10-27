@@ -728,7 +728,6 @@ func TestHandlerHire_RefusesAModelItCannotSaveWithoutHiring(t *testing.T) {
 	}{
 		{"unregistered provider", `"model":{"provider":"ollama","model":"llama3"}`, "invalid_model", http.StatusBadRequest, nil},
 		{"empty model", `"model":{"provider":"codex","model":"  "}`, "model_required", http.StatusBadRequest, nil},
-		{"no model and none configured", `"mandate":""`, "model_required", http.StatusBadRequest, nil},
 		{"settings cannot be written", `"model":{"provider":"codex","model":"gpt-5.3-codex"}`, "model_save_failed", http.StatusServiceUnavailable, errors.New("disk full")},
 	}
 	for _, tc := range cases {
@@ -767,6 +766,21 @@ func TestHandlerHire_WithoutAModelProceedsOnAConfiguredDefault(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"default_model":{"provider":"codex","model":"gpt-5.3-codex","reasoning_effort":"medium"}`) {
 		t.Fatalf("response did not echo the Default model: %s", recorder.Body.String())
+	}
+}
+
+// The preset enforces the model choice; the endpoint does not. A client that
+// sends none still hires, on no Default model: the legacy no-model hire.
+func TestHandlerHire_WithoutAModelAndNoDefaultStillHires(t *testing.T) {
+	var log []string
+	writer := &recordingModelWriter{log: &log}
+	handler, hirer := modelHireHandler(t, "", writer)
+	recorder := postHire(handler, `{"request_id":"request-1","display_name":"Atlas"}`)
+	if recorder.Code != http.StatusCreated || hirer.calls != 1 || writer.saves != 0 {
+		t.Fatalf("status = %d hirer calls = %d saves = %d, body=%s", recorder.Code, hirer.calls, writer.saves, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "default_model") {
+		t.Fatalf("response claimed a Default model that is not configured: %s", recorder.Body.String())
 	}
 }
 

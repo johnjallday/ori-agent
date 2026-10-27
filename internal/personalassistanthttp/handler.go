@@ -522,14 +522,15 @@ func (h *Handler) SetDefaultModelWriter(writer DefaultModelWriter, providers age
 }
 
 // applyHireModel saves the model the hire preset chose as Ori's Default model
-// before the assistant is provisioned, so a new hire cannot finish without one
-// (PRD FR9, decision 1A). It writes the refusal and returns false when the
-// hire must not go ahead.
+// before the assistant is provisioned (PRD FR9). It writes the refusal and
+// returns false when the hire must not go ahead.
+//
+// The preset enforces decision 1A: it will not send a hire without a model. The
+// server does not, so a client that sends no model still hires.
 //
 //   - A request whose id is not the relationship's stored hire is a new hire:
-//     its model is saved, and one with no model is refused unless a Default
-//     model is already configured (an older client, or a model set in
-//     Settings first).
+//     a model it carries is saved, and a request with none hires on the
+//     Default model in place, if any.
 //   - A replay of the stored hire only fills in a missing Default model. The
 //     first attempt already saved its choice, and a model changed in Settings
 //     since then must survive the replay. A replay with no model (the preset's
@@ -559,11 +560,12 @@ func (h *Handler) applyHireModel(w http.ResponseWriter, r *http.Request, userID 
 			return true
 		}
 	case body.Model == nil:
-		if h.defaultModel.IsSystemModelConfigured() {
-			return true
-		}
-		writeHireError(w, http.StatusBadRequest, "model_required", hireModelRequiredMessage, false, nil)
-		return false
+		// A request that names no model hires on whatever Default model is in
+		// place, or on none: the legacy no-model hire, which Home's Choose a
+		// model action covers. The preset is where a person must choose; it
+		// keeps Hire assistant disabled until they have, so a new user cannot
+		// finish without a model, while older API clients keep working.
+		return true
 	}
 	err := agenthttp.ApplySystemModel(h.defaultModel, h.defaultModelProviders, h.defaultModelAgents,
 		body.Model.Provider, body.Model.Model, body.Model.ReasoningEffort)

@@ -55,11 +55,6 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 	if builder.dailyBriefService == nil {
 		t.Fatal("expected dailyBriefService to be wired")
 	}
-	// A hire needs a Default model (the preset picks one), and these tests hire
-	// through the bare endpoint. Set in memory only, never saved.
-	if err := builder.configManager.SetSystemModel("claude_code", "sonnet"); err != nil {
-		t.Fatalf("SetSystemModel: %v", err)
-	}
 	return builder, srv.Handler()
 }
 

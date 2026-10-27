@@ -251,9 +251,8 @@ function stubModalDom({ search = '' } = {}) {
   for (const id of [
     'onboardingStepLabel',
     'onboardingProgressBar',
-    'onboardingModelError',
+    'onboardingWelcomeError',
     'onboarding-phase-0',
-    'onboarding-phase-1',
     'onboarding-phase-2'
   ]) {
     elements.set(id, make());
@@ -293,42 +292,45 @@ function stubModalDom({ search = '' } = {}) {
   };
 }
 
-// Onboarding is two phases now. Leaving Model closes it: no hire is ever sent
-// from the modal, and the browser goes Home to Ori's Mission 01 briefing (PRD
-// FR2).
-test('leaving the Model phase completes onboarding and hands over to the Mission 01 briefing', async () => {
-  for (const skipModel of [true, false]) {
-    const dom = stubModalDom();
-    const requests = [];
-    const priorFetch = globalThis.fetch;
-    globalThis.fetch = async url => {
-      requests.push(String(url));
-      return { ok: true, json: async () => ({}) };
-    };
-    try {
-      const manager = new OnboardingManager();
-      let hidden = 0;
-      manager.modalInstance = { hide: () => (hidden += 1) };
-      manager.saveSystemModel = async () => true;
-      await manager.advanceFromModel({ skipModel });
+// Onboarding is Welcome only now. Its Continue saves the names, timezone and
+// workspace folder, completes onboarding, and the browser goes Home to Ori's
+// Mission 01 briefing. No hire and no model is sent from the modal: the model
+// is chosen with the hire on the Agents page.
+function stubWelcomeSaves(manager) {
+  manager.saveWorkspaceRoot = async () => true;
+  manager.saveNames = async () => {};
+  manager.saveTimezone = async () => {};
+}
 
-      assert.deepEqual(requests, ['/api/onboarding/step', '/api/onboarding/complete']);
-      assert.equal(
-        requests.some(url => url.includes('/api/personal-assistant')),
-        false,
-        'the modal sent a hire request'
-      );
-      assert.equal(hidden, 1);
-      assert.deepEqual(dom.navigations, ['/?quest=meet-assistant&briefing=1']);
-      assert.equal(manager.modelConfigured, !skipModel);
-    } finally {
-      globalThis.fetch = priorFetch;
-      dom.restore();
+test('Welcome completes onboarding and hands over to the Mission 01 briefing', async () => {
+  const dom = stubModalDom();
+  const requests = [];
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    requests.push(String(url));
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    let hidden = 0;
+    manager.modalInstance = { hide: () => (hidden += 1) };
+    stubWelcomeSaves(manager);
+    await manager.advanceFromWelcome();
+
+    assert.deepEqual(requests, ['/api/onboarding/step', '/api/onboarding/complete']);
+    for (const url of requests) {
+      assert.equal(url.includes('/api/personal-assistant'), false, 'the modal sent a hire request');
+      assert.equal(url.includes('system-model'), false, 'the modal saved a model');
     }
+    assert.equal(hidden, 1);
+    assert.deepEqual(dom.navigations, ['/?quest=meet-assistant&briefing=1']);
+  } finally {
+    globalThis.fetch = priorFetch;
+    dom.restore();
   }
 });
 
-test('a failed completion keeps the modal open on Model and says so', async () => {
+test('a failed completion keeps the modal open on Welcome and says so', async () => {
   const dom = stubModalDom();
   const priorFetch = globalThis.fetch;
   globalThis.fetch = async url => ({
@@ -340,26 +342,45 @@ test('a failed completion keeps the modal open on Model and says so', async () =
     const manager = new OnboardingManager();
     let hidden = 0;
     manager.modalInstance = { hide: () => (hidden += 1) };
-    await manager.advanceFromModel({ skipModel: true });
+    stubWelcomeSaves(manager);
+    await manager.advanceFromWelcome();
 
     assert.equal(hidden, 0);
     assert.deepEqual(dom.navigations, []);
-    assert.match(dom.elements.get('onboardingModelError').textContent, /could not finish/i);
+    assert.match(dom.elements.get('onboardingWelcomeError').textContent, /could not finish/i);
   } finally {
     globalThis.fetch = priorFetch;
     dom.restore();
   }
 });
 
-test('the progress shell counts two onboarding phases', () => {
+test('an unconfirmed workspace folder stops Welcome before anything completes', async () => {
+  const dom = stubModalDom();
+  const requests = [];
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    requests.push(String(url));
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    stubWelcomeSaves(manager);
+    manager.saveWorkspaceRoot = async () => false;
+    await manager.advanceFromWelcome();
+    assert.deepEqual(requests, []);
+    assert.deepEqual(dom.navigations, []);
+  } finally {
+    globalThis.fetch = priorFetch;
+    dom.restore();
+  }
+});
+
+test('the progress shell counts one onboarding step', () => {
   const dom = stubModalDom();
   try {
     const manager = new OnboardingManager();
     manager.updateProgress(0);
-    assert.equal(dom.elements.get('onboardingStepLabel').textContent, 'Step 1 of 2');
-    assert.equal(dom.elements.get('onboardingProgressBar').style.width, '50%');
-    manager.updateProgress(1);
-    assert.equal(dom.elements.get('onboardingStepLabel').textContent, 'Step 2 of 2');
+    assert.equal(dom.elements.get('onboardingStepLabel').textContent, 'Step 1 of 1');
     assert.equal(dom.elements.get('onboardingProgressBar').style.width, '100%');
   } finally {
     dom.restore();

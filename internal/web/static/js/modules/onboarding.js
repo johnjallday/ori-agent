@@ -238,15 +238,16 @@ export function workspaceRootSetupView(state) {
 export class OnboardingManager {
   constructor() {
     this.currentPhase = 0;
-    // The modal's panels: Welcome, Model, and the first-assignment quest, which
-    // Home opens on its own and which is not an onboarding step.
+    // The modal's panel slots: Welcome (0), a retired slot (1), and the
+    // first-assignment quest (2), which Home opens on its own and which is not
+    // an onboarding step. The quest keeps its index so its markup is unchanged.
     this.totalPhases = 3;
-    // What the progress shell counts: onboarding itself is Welcome and Model.
-    // The assistant is hired afterwards, on the Agents page (Mission 01).
-    this.onboardingSteps = 2;
+    // What the progress shell counts: onboarding itself is Welcome only. The
+    // assistant, and the model it thinks with, are chosen afterwards on the
+    // Agents page (Mission 01).
+    this.onboardingSteps = 1;
     this.modal = null;
     this.modalInstance = null;
-    this.availableProviders = [];
     this.userName = '';
     this.assistantName = 'Ori';
     this.timezone = '';
@@ -310,20 +311,6 @@ export class OnboardingManager {
       welcomeNextBtn.addEventListener('click', () => this.advanceFromWelcome());
     }
 
-    // Phase 1: Model
-    const modelNextBtn = document.getElementById('modelNextBtn');
-    if (modelNextBtn) {
-      modelNextBtn.addEventListener('click', () => this.advanceFromModel());
-    }
-    document
-      .getElementById('continueWithoutModelBtn')
-      ?.addEventListener('click', () => this.advanceFromModel({ skipModel: true }));
-
-    const modelBackBtn = document.getElementById('modelBackBtn');
-    if (modelBackBtn) {
-      modelBackBtn.addEventListener('click', () => this.showPhase(0));
-    }
-
     document.querySelectorAll('[data-paf-add-row]').forEach(button => {
       button.addEventListener('click', () => this.addAssignmentRow(button.dataset.pafAddRow));
     });
@@ -367,35 +354,6 @@ export class OnboardingManager {
       skipLink.addEventListener('click', e => {
         e.preventDefault();
         this.skipOnboarding();
-      });
-    }
-
-    // API key toggle buttons
-    this.setupKeyToggle('toggleOpenaiKey', 'openaiApiKey');
-    this.setupKeyToggle('toggleAnthropicKey', 'anthropicApiKey');
-    this.setupKeyToggle('toggleGeminiKey', 'geminiApiKey');
-
-    // Save API key button
-    const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
-    if (saveApiKeyBtn) {
-      saveApiKeyBtn.addEventListener('click', () => this.saveApiKeyAndReload());
-    }
-
-    // Provider change handler
-    const providerSelect = document.getElementById('onboardingSystemProvider');
-    if (providerSelect) {
-      providerSelect.addEventListener('change', async e => {
-        this.clearModelError();
-        this.updateReasoningVisibility(e.target.value);
-        await this.loadModels(e.target.value);
-      });
-    }
-
-    const modelSelect = document.getElementById('onboardingSystemModel');
-    if (modelSelect) {
-      modelSelect.addEventListener('change', () => {
-        this.clearModelError();
-        this.updateModelStepState();
       });
     }
 
@@ -445,16 +403,6 @@ export class OnboardingManager {
         status.textContent = 'Changed. Continue to confirm this directory.';
         status.classList.remove('is-confirmed');
         status.classList.add('is-unconfirmed');
-      });
-    }
-  }
-
-  setupKeyToggle(btnId, inputId) {
-    const btn = document.getElementById(btnId);
-    if (btn) {
-      btn.addEventListener('click', () => {
-        const input = document.getElementById(inputId);
-        if (input) input.type = input.type === 'password' ? 'text' : 'password';
       });
     }
   }
@@ -688,284 +636,6 @@ export class OnboardingManager {
 
     if (selected) {
       select.value = selected;
-    }
-  }
-
-  async loadProviders() {
-    const providerSelect = document.getElementById('onboardingSystemProvider');
-    if (!providerSelect) return;
-
-    try {
-      const response = await fetch('/api/providers');
-      if (!response.ok) throw new Error('Failed to fetch providers');
-      const data = await response.json();
-      this.availableProviders = data.providers || [];
-
-      const available = this.availableProviders.filter(p => p.available);
-
-      if (available.length === 0) {
-        // No providers — show API key section instead
-        this.showApiKeySection();
-        return;
-      }
-
-      // Show model selection, hide API key section
-      const modelSection = document.getElementById('onboardingModelSelection');
-      const apiKeySection = document.getElementById('onboardingApiKeySection');
-      if (modelSection) modelSection.classList.remove('d-none');
-      if (apiKeySection) apiKeySection.classList.add('d-none');
-
-      // Populate provider dropdown
-      providerSelect.innerHTML = '<option value="">Select a provider…</option>';
-      const preferredLocalProvider = available.find(p =>
-        ['ollama', 'lmstudio', 'mlx_lm'].includes(p.name)
-      );
-
-      available.forEach(provider => {
-        const option = document.createElement('option');
-        option.value = provider.name;
-        option.textContent = provider.display_name;
-        providerSelect.appendChild(option);
-      });
-
-      // Prefer a local provider, otherwise choose the first usable provider so
-      // setup starts from a working default instead of an empty decision.
-      const defaultProvider = preferredLocalProvider || available[0];
-      providerSelect.value = defaultProvider.name;
-      this.updateReasoningVisibility(defaultProvider.name);
-      await this.loadModels(defaultProvider.name);
-    } catch (error) {
-      console.error('Error loading providers:', error);
-      this.showApiKeySection();
-    }
-  }
-
-  showApiKeySection() {
-    const modelSection = document.getElementById('onboardingModelSelection');
-    const apiKeySection = document.getElementById('onboardingApiKeySection');
-    const speechBubble = document.getElementById('modelSpeech');
-
-    if (modelSection) modelSection.classList.add('d-none');
-    if (apiKeySection) apiKeySection.classList.remove('d-none');
-    if (speechBubble) {
-      speechBubble.textContent =
-        'I need an AI connection to work. Add an API key below, or run Ollama, LM Studio, or MLX-LM for local AI.';
-    }
-    this.updateModelStepState();
-  }
-
-  async loadModels(providerName) {
-    const modelSelect = document.getElementById('onboardingSystemModel');
-    if (!modelSelect) return;
-
-    this.updateReasoningVisibility(providerName);
-    modelSelect.innerHTML = '<option value="">Loading models…</option>';
-    modelSelect.disabled = true;
-
-    if (!providerName) {
-      modelSelect.innerHTML = '<option value="">Select provider first…</option>';
-      this.updateModelStepState();
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `/api/settings/available-models?provider=${encodeURIComponent(providerName)}`
-      );
-      if (!response.ok) throw new Error('Failed to fetch models');
-      const data = await response.json();
-
-      if (!data.available) {
-        modelSelect.innerHTML = '<option value="">Provider not available</option>';
-        this.updateModelStepState();
-        return;
-      }
-
-      modelSelect.innerHTML = '<option value="">Select a model…</option>';
-      const modelOptions = this.normalizeModelOptions(data.model_options, data.models);
-      modelOptions.forEach(modelOption => {
-        const option = document.createElement('option');
-        option.value = modelOption.id;
-        option.textContent = this.formatModelOptionText(modelOption);
-        modelSelect.appendChild(option);
-      });
-
-      modelSelect.disabled = false;
-      const defaultModel = modelOptions.find(option => option.recommended) || modelOptions[0];
-      if (defaultModel) {
-        modelSelect.value = defaultModel.id;
-      }
-      this.updateModelStepState();
-    } catch (error) {
-      console.error('Error loading models:', error);
-      modelSelect.innerHTML = '<option value="">Error loading models</option>';
-      this.updateModelStepState();
-    }
-  }
-
-  normalizeModelOptions(rawModelOptions, fallbackModels) {
-    if (Array.isArray(rawModelOptions) && rawModelOptions.length > 0) {
-      return rawModelOptions
-        .filter(option => option && typeof option.id === 'string' && option.id.length > 0)
-        .map(option => ({
-          id: option.id,
-          label:
-            typeof option.label === 'string' && option.label.length > 0 ? option.label : option.id,
-          description: typeof option.description === 'string' ? option.description : '',
-          recommended: Boolean(option.recommended)
-        }));
-    }
-
-    const models = Array.isArray(fallbackModels) ? fallbackModels : [];
-    return models
-      .filter(model => typeof model === 'string' && model.length > 0)
-      .map(model => ({
-        id: model,
-        label: model,
-        description: '',
-        recommended: model.includes('haiku') || model.includes('4o-mini')
-      }));
-  }
-
-  formatModelOptionText(modelOption) {
-    const recommended = modelOption.recommended ? ' (Recommended)' : '';
-    if (modelOption.description) {
-      return `${modelOption.label}${recommended} — ${modelOption.description}`;
-    }
-    return `${modelOption.label}${recommended}`;
-  }
-
-  updateReasoningVisibility(providerName) {
-    const field = document.getElementById('onboardingSystemReasoningField');
-    const select = document.getElementById('onboardingSystemReasoning');
-    if (!field || !select) return;
-
-    if (providerName === 'codex') {
-      field.classList.remove('d-none');
-      select.disabled = false;
-    } else {
-      field.classList.add('d-none');
-      select.disabled = true;
-      select.value = 'medium';
-    }
-  }
-
-  clearModelError() {
-    const errorEl = document.getElementById('onboardingModelError');
-    if (!errorEl) return;
-    errorEl.textContent = '';
-    errorEl.classList.add('d-none');
-  }
-
-  showModelError(message) {
-    const errorEl = document.getElementById('onboardingModelError');
-    if (!errorEl) return;
-    errorEl.textContent = message;
-    errorEl.classList.remove('d-none');
-  }
-
-  hasUsableModelSelection() {
-    const provider = document.getElementById('onboardingSystemProvider')?.value || '';
-    const model = document.getElementById('onboardingSystemModel')?.value || '';
-    return Boolean(provider && model);
-  }
-
-  updateModelStepState() {
-    const nextBtn = document.getElementById('modelNextBtn');
-    if (!nextBtn) return;
-    nextBtn.disabled = !this.hasUsableModelSelection();
-  }
-
-  async saveSystemModel() {
-    const providerSelect = document.getElementById('onboardingSystemProvider');
-    const modelSelect = document.getElementById('onboardingSystemModel');
-    const reasoningSelect = document.getElementById('onboardingSystemReasoning');
-
-    const provider = providerSelect?.value;
-    const model = modelSelect?.value;
-    const reasoning_effort = provider === 'codex' ? reasoningSelect?.value || 'medium' : '';
-
-    if (!provider || !model) {
-      this.showModelError('Choose a provider and model before continuing, or use Set Up Later.');
-      return false;
-    }
-
-    try {
-      const response = await fetch('/api/settings/system-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, model, reasoning_effort })
-      });
-
-      if (!response.ok) throw new Error('Failed to save Default model');
-
-      const successAlert = document.getElementById('onboardingSystemModelSuccess');
-      if (successAlert) {
-        const label =
-          this.availableProviders.find(p => p.name === provider)?.display_name || provider;
-        const aName = this.assistantName || 'Ori';
-        successAlert.textContent = `${aName} will use ${label} (${model}).`;
-        successAlert.classList.remove('d-none');
-      }
-
-      if (typeof EventBus !== 'undefined') {
-        EventBus.emit('systemModel:changed', { provider, model });
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error saving system model:', error);
-      this.showModelError('Could not save the model yet. Check the provider, then try again.');
-      return false;
-    }
-  }
-
-  async saveApiKeyAndReload() {
-    const openaiKey = document.getElementById('openaiApiKey')?.value?.trim() || '';
-    const anthropicKey = document.getElementById('anthropicApiKey')?.value?.trim() || '';
-    const geminiKey = document.getElementById('geminiApiKey')?.value?.trim() || '';
-
-    const successEl = document.getElementById('apiKeySaveSuccess');
-    const errorEl = document.getElementById('apiKeySaveError');
-    const errorMsg = document.getElementById('apiKeySaveErrorMessage');
-
-    if (successEl) successEl.classList.add('d-none');
-    if (errorEl) errorEl.classList.add('d-none');
-
-    if (!openaiKey && !anthropicKey && !geminiKey) {
-      if (errorEl && errorMsg) {
-        errorMsg.textContent = 'Please enter at least one API key.';
-        errorEl.classList.remove('d-none');
-      }
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/api-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          openai_api_key: openaiKey || undefined,
-          anthropic_api_key: anthropicKey || undefined,
-          gemini_api_key: geminiKey || undefined
-        })
-      });
-
-      if (!response.ok) throw new Error('Failed to save API key');
-
-      if (successEl) successEl.classList.remove('d-none');
-
-      // Re-check providers after saving key
-      const speechBubble = document.getElementById('modelSpeech');
-      if (speechBubble) speechBubble.textContent = 'Got it! Now let’s pick a model.';
-
-      await this.loadProviders();
-    } catch (error) {
-      console.error('Error saving API key:', error);
-      if (errorEl && errorMsg) {
-        errorMsg.textContent = 'Failed to save API key. Please try again.';
-        errorEl.classList.remove('d-none');
-      }
     }
   }
 
@@ -1684,9 +1354,6 @@ export class OnboardingManager {
     }
 
     this.updateProgress(index);
-    if (index === 1) {
-      this.updateModelStepState();
-    }
   }
 
   updateProgress(index) {
@@ -1722,37 +1389,10 @@ export class OnboardingManager {
     await this.saveTimezone();
     await this.completeStep('step-welcome');
 
-    // Update speech bubble on model phase with user's name and assistant's name
-    const name = this.userName || 'friend';
-    const aName = this.assistantName || 'Ori';
-    const speechBubble = document.getElementById('modelSpeech');
-    if (speechBubble) {
-      speechBubble.textContent = `Great to meet you, ${name}! I’m ${aName}. Let’s pick the AI model I’ll use.`;
-    }
-
-    this.showPhase(1);
-
-    // Load providers when entering model phase
-    await this.loadProviders();
-    if (nextButton) {
-      nextButton.disabled = false;
-      nextButton.textContent = originalLabel;
-    }
-  }
-
-  async advanceFromModel({ skipModel = false } = {}) {
-    if (!skipModel) {
-      const modelSaved = await this.saveSystemModel();
-      if (!modelSaved) {
-        return;
-      }
-    }
-    this.modelConfigured = !skipModel;
-    await this.completeStep('step-model');
-
-    // Onboarding ends here. No hire is ever sent from this modal: it hands over
-    // to Ori's Mission 01 briefing on Home, which hires the assistant on the
-    // Agents page (PRD FR2).
+    // Welcome is the whole of onboarding. No hire and no model choice is made
+    // from this modal: it hands over to Ori's Mission 01 briefing on Home, which
+    // hires the assistant on the Agents page, where the model is chosen too.
+    this.clearWelcomeError();
     try {
       const response = await fetch('/api/onboarding/complete', {
         method: 'POST',
@@ -1761,11 +1401,29 @@ export class OnboardingManager {
       if (!response.ok) throw new Error(`onboarding completion failed (${response.status})`);
     } catch (error) {
       console.error('Error completing onboarding:', error);
-      this.showModelError('Ori could not finish setting up. Try again.');
+      this.showWelcomeError('Ori could not finish setting up. Try again.');
+      if (nextButton) {
+        nextButton.disabled = false;
+        nextButton.textContent = originalLabel;
+      }
       return;
     }
     this.modalInstance?.hide();
     window.location.href = MEET_ASSISTANT_BRIEFING_ROUTE;
+  }
+
+  clearWelcomeError() {
+    const errorEl = document.getElementById('onboardingWelcomeError');
+    if (!errorEl) return;
+    errorEl.textContent = '';
+    errorEl.classList.add('d-none');
+  }
+
+  showWelcomeError(message) {
+    const errorEl = document.getElementById('onboardingWelcomeError');
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.classList.remove('d-none');
   }
 
   async skipOnboarding() {

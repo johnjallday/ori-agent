@@ -162,6 +162,79 @@ func TestManager_AssistantProgress_BackwardCompatibleLoad(t *testing.T) {
 	}
 }
 
+// Onboarding is Welcome only: completing it never asks whether a model step ran.
+func TestManager_CompleteOnboardingNeedsOnlyTheWelcomeStep(t *testing.T) {
+	mgr := NewManager(filepath.Join(t.TempDir(), "app_state.json"))
+	if err := mgr.CompleteStep("step-welcome"); err != nil {
+		t.Fatalf("CompleteStep: %v", err)
+	}
+	if err := mgr.CompleteOnboarding(); err != nil {
+		t.Fatalf("CompleteOnboarding: %v", err)
+	}
+	state := mgr.GetState()
+	if !state.Completed || state.CompletedAt.IsZero() {
+		t.Fatalf("onboarding not complete after Welcome alone: %+v", state)
+	}
+	if len(state.StepsCompleted) != 1 || state.StepsCompleted[0] != "step-welcome" {
+		t.Fatalf("steps_completed = %v, want only step-welcome", state.StepsCompleted)
+	}
+}
+
+// Installs that finished the old Model phase carry step-model and step-done.
+// They load, stay complete, and the retired names are kept without effect.
+func TestManager_LegacyModelStepsLoadAndAreIgnored(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	legacy := map[string]any{
+		"onboarding": map[string]any{
+			"completed":       true,
+			"current_step":    3,
+			"steps_completed": []string{"step-welcome", "step-model", "step-done"},
+		},
+		"version": "v0.0.1",
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(statePath, data, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	mgr := NewManager(statePath)
+	state := mgr.GetState()
+	if !state.Completed {
+		t.Fatalf("legacy completed install reads as incomplete: %+v", state)
+	}
+	if len(state.StepsCompleted) != 3 {
+		t.Fatalf("steps_completed = %v, want the legacy values kept", state.StepsCompleted)
+	}
+
+	// A legacy install that finished Welcome but not the old Model phase still
+	// completes with one more call, with no model step involved.
+	pending := map[string]any{
+		"onboarding": map[string]any{
+			"completed":       false,
+			"current_step":    1,
+			"steps_completed": []string{"step-welcome"},
+		},
+		"version": "v0.0.1",
+	}
+	data, _ = json.Marshal(pending)
+	pendingPath := filepath.Join(t.TempDir(), "app_state.json")
+	if err := os.WriteFile(pendingPath, data, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	mgr = NewManager(pendingPath)
+	if mgr.GetState().Completed {
+		t.Fatal("a Welcome-only legacy install must still need onboarding")
+	}
+	if err := mgr.CompleteOnboarding(); err != nil {
+		t.Fatalf("CompleteOnboarding: %v", err)
+	}
+	if !mgr.GetState().Completed {
+		t.Fatal("completing without step-model did not complete onboarding")
+	}
+}
+
 // TestManager_Progression_SkippedQuestsPersistenceRoundTrip covers task 3.2:
 // a per-quest skip must survive an app_state.json reload, independent of
 // CompletedQuests and Dismissed.

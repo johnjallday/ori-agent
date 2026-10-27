@@ -434,13 +434,11 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
     await expect(page.locator('#onboardingModal')).toBeVisible();
-    // Onboarding is Welcome and Model. The hire is not in the modal.
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 2');
+    // Onboarding is Welcome only. Neither the hire nor the model is in the modal.
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 1');
     await expect(page.locator('#pafHireBtn')).toHaveCount(0);
     await page.locator('#onboardingUserName').fill('Jordan');
     await page.locator('#welcomeNextBtn').click();
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 2 of 2');
-    await page.locator('#continueWithoutModelBtn').click();
     await expect(page.locator('#onboardingModal')).toBeHidden();
     await expect.poll(() => onboardingComplete).toBe(true);
     expect(hireCalls).toBe(0);
