@@ -248,6 +248,9 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	if offer == nil {
 		return FolderOfferView{}, ErrFolderOfferNotFound
 	}
+	if offer.PlacementHandoff != nil {
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
 	if receipt := doc.Receipt(input.RequestID); receipt != nil {
 		if receipt.OfferID != offerID || receipt.Action != "setup" {
 			return FolderOfferView{}, ErrFolderOfferDecided
@@ -370,6 +373,9 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		item := d.Offer(offerID)
 		if item == nil {
 			return ErrFolderOfferNotFound
+		}
+		if item.PlacementHandoff != nil {
+			return ErrFolderOfferDecided
 		}
 		if item.Status == FolderOfferPending {
 			decided := now

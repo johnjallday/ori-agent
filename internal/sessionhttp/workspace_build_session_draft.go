@@ -29,6 +29,7 @@ type patchBuildDraftRequest struct {
 	Sync bool `json:"sync,omitempty"`
 	// Explicit fields also record clear-to-empty or change-back edits.
 	EditedFields []string `json:"edited_fields,omitempty"`
+	Monitoring   *bool    `json:"monitoring,omitempty"`
 }
 
 const buildMaxTeamState = 32 * 1024
@@ -91,6 +92,16 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 		}
 		if session.Version != req.Version {
 			return errBuildTurn{http.StatusConflict, "version"}
+		}
+		if session.PlacementSource != nil {
+			if draft.TemplateID != "file-janitor" || draft.Blank || draft.ParentID != "" || len(draft.ProjectConnection) > 0 {
+				return errBuildTurn{http.StatusConflict, "placement_only"}
+			}
+			if req.Monitoring != nil {
+				session.PlacementMonitoring = *req.Monitoring
+			}
+		} else if req.Monitoring != nil {
+			return errBuildTurn{http.StatusBadRequest, "placement_only"}
 		}
 		now := deps.Store.Now()
 		before := session.Draft
@@ -385,6 +396,9 @@ func (h *Handler) abandonWorkspaceBuildSession(w http.ResponseWriter, r *http.Re
 			return errBuildTurn{http.StatusNotFound, "not_found"}
 		}
 		if session.Status == personalassistant.WorkspaceBuildOpen {
+			if session.PlacementSource != nil && session.Version != req.Version {
+				return errBuildTurn{http.StatusConflict, "version"}
+			}
 			session.Status = personalassistant.WorkspaceBuildAbandoned
 			session.Settle()
 			session.Touch(deps.Store.Now())

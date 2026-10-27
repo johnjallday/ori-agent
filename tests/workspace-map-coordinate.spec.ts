@@ -87,20 +87,9 @@ async function reviewCreateWizard(page: Page, name: string) {
   await page.locator('#folderNameInput').fill(name);
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
-  // Blank now includes a proposed assistant. Review its setup through the
-  // same controls used by the create-workspace suite, without running it.
-  const batch = page.locator('[data-team-accept-all]');
-  if (await batch.isVisible()) await batch.click();
-  const pending = page
-    .locator('#workspaceTeamRoster .workspace-team-row')
-    .filter({ hasText: 'New · Needs setup' });
-  while ((await pending.count()) > 0) {
-    await pending.first().locator('[data-team-agent-setup]').click();
-    await expect(page.locator('#addAgentModal')).toBeVisible();
-    await page.locator('#createAgentBtn').click();
-    await expect(page.locator('#addAgentModal')).toBeHidden();
-    await expect(page.locator('#addFolderModal')).toBeVisible();
-  }
+  // Geometry does not need a team. Use the current explicit agentless choice,
+  // not the retired flat-roster selectors (which leave Ask Ori unfilled).
+  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
 }
@@ -136,6 +125,17 @@ async function anchors(page: Page) {
 const cameraOf = (page: Page) =>
   page.evaluate(() => (window as unknown as { OriWorkspaceMap: any }).OriWorkspaceMap.getCamera());
 
+async function settleMapFrame(page: Page) {
+  // Camera state changes before its queued DOM transform. Hit-test the painted
+  // frame, not a point a building may move under on the next animation frame.
+  await page.evaluate(
+    () =>
+      new Promise<void>(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+}
+
 /**
  * A viewport point that is genuinely empty world space.
  *
@@ -145,6 +145,7 @@ const cameraOf = (page: Page) =>
  * the world layer itself.
  */
 async function emptyPointOn(page: Page): Promise<{ x: number; y: number }> {
+  await settleMapFrame(page);
   const box = (await page.locator('.ws-map-canvas').boundingBox())!;
   const candidates = [
     [0.5, 0.25],
@@ -196,6 +197,7 @@ async function ownWorkspaceAt(page: Page): Promise<string> {
  * and the test then reports that dragging is broken when it is not.
  */
 async function grabPointOn(page: Page, id: string): Promise<{ x: number; y: number }> {
+  await settleMapFrame(page);
   const box = (await page.locator(`.ws-map-tile[data-ws-id="${id}"]`).boundingBox())!;
   const candidates = [
     [0.5, 0.5],
@@ -217,6 +219,37 @@ async function grabPointOn(page: Page, id: string): Promise<{ x: number; y: numb
     if (onTile) return point;
   }
   throw new Error(`no grabbable point on ${id} — it is covered`);
+}
+
+async function districtHandlePoint(page: Page, groupId: string) {
+  const handle = page.locator(`.ws-map-district[data-group-id="${groupId}"] [data-group-drag]`);
+  // A centered tall automatic district can still have its header clipped by
+  // the viewport. Also avoid the live controls inside the header itself.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await settleMapFrame(page);
+    const point = await handle.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      for (const fy of [0.5, 0.25, 0.75]) {
+        for (const fx of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+          const x = box.left + box.width * fx;
+          const y = box.top + box.height * fy;
+          const hit = document.elementFromPoint(x, y);
+          if (
+            hit &&
+            element.contains(hit) &&
+            (!hit.closest('button, a, input, select, textarea, [contenteditable="true"]') ||
+              hit.closest('button, a, input, select, textarea, [contenteditable="true"]') ===
+                element)
+          )
+            return { x, y };
+        }
+      }
+      return null;
+    });
+    if (point) return point;
+    await page.locator('[data-map-zoom-out]').click();
+  }
+  throw new Error(`no exposed drag handle for ${groupId}`);
 }
 
 async function districtSurfacePoint(page: Page, groupId: string) {
@@ -512,6 +545,10 @@ test.describe('Coordinate Workspace Map', () => {
     const preview = page.locator('[data-ws-map-placement-preview]');
     await expect(preview).toBeVisible();
 
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+    await settleMapFrame(page);
+    // Placement deliberately makes tiles pointer-transparent: target their
+    // painted footprint, not grabPointOn's normal draggable DOM target.
     const existing = page.locator('.ws-map-tile[data-ws-id]').first();
     const existingBox = (await existing.boundingBox())!;
     await page.mouse.click(
@@ -835,6 +872,7 @@ test.describe('Coordinate Workspace Map', () => {
     await enableMapDrag(page);
 
     const district = page.locator(`.ws-map-district[data-group-id="${group}"]`);
+    const grab = await districtHandlePoint(page, group);
     const districtOrigin = await district.evaluate(el => ({
       x: Number.parseFloat((el as HTMLElement).style.left),
       y: Number.parseFloat((el as HTMLElement).style.top)
@@ -862,10 +900,7 @@ test.describe('Coordinate Workspace Map', () => {
       }
     });
 
-    const handle = district.locator('[data-group-drag]');
-    const grab = (await handle.boundingBox())!;
-    const x = grab.x + grab.width / 2;
-    const y = grab.y + grab.height / 2;
+    const { x, y } = grab;
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x, y + 300, { steps: 15 });
@@ -1023,8 +1058,10 @@ test.describe('Coordinate Workspace Map', () => {
     const beforeZoom = (await cameraOf(page)).zoom;
     await page.click('[data-map-zoom-in]');
     expect((await cameraOf(page)).zoom).toBeGreaterThan(beforeZoom);
-    const site = await emptyPointOn(page);
-    await page.mouse.click(site.x, site.y, { button: 'right' });
+    // Test the readonly command contract without an incidental pixel hit-test
+    // on a crowded, zooming shared map. Pointer menus are covered separately.
+    await page.locator('[data-ws-map-viewport]').focus();
+    await page.keyboard.press('Shift+F10');
     await expect(page.locator('[data-menu-action="build"]')).toHaveAttribute(
       'aria-disabled',
       'true'
@@ -1425,7 +1462,9 @@ test.describe('Coordinate Workspace Map', () => {
       }
       const y = Math.max(0, ...bottoms) + 570;
       const make = async (name: string, kind = 'workspace') => {
+        if (kind === 'group') return createReviewedGroup(page, name);
         const res = await page.request.post('/api/workspaces', { data: { name, kind } });
+        expect(res.ok(), await res.text()).toBe(true);
         return (await res.json()).folder.id;
       };
       const group = await make(`District ${tag}`, 'group');

@@ -24,24 +24,26 @@ const (
 )
 
 type heldFolderObservation struct {
-	target      foldercontext.Target
-	binding     KnowledgeBinding
-	root        string
-	identity    string
-	result      folderdigest.Result
-	observation foldercontext.Observation
-	saved       bool // once consumed, this ID can never masquerade as fresh staging
+	placementSourceID string // only host-owned copies for a canonical inbox handoff
+	target            foldercontext.Target
+	binding           KnowledgeBinding
+	root              string
+	identity          string
+	result            folderdigest.Result
+	observation       foldercontext.Observation
+	saved             bool // once consumed, this ID can never masquerade as fresh staging
 }
 
 // FolderObservationService borrows the trusted picker/scan dependencies, never
 // the digest's mutating ScanChip/ScanPicked APIs. Paths remain process-local.
 type FolderObservationService struct {
-	digest      *FolderDigestService
-	mu          sync.Mutex
-	selections  map[string]heldFolderObservation
-	busy        map[string]bool
-	reviewGuard func(context.Context, FolderOffer) error
-	reviewLease func(foldercontext.Target) (func(), bool)
+	digest            *FolderDigestService
+	mu                sync.Mutex
+	selections        map[string]heldFolderObservation
+	busy              map[string]bool
+	reviewGuard       func(context.Context, FolderOffer) error
+	placementRevision func(context.Context, FolderOffer) (string, error)
+	reviewLease       func(foldercontext.Target) (func(), bool)
 	// buildGuard and buildLease vouch for reviews a workspace build owns
 	// (IsBuildReview), as reviewGuard and reviewLease do for a conversation's.
 	buildGuard func(context.Context, FolderOffer) error

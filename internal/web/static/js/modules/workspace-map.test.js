@@ -4330,6 +4330,287 @@ test('reviewed placement previews the reviewed name/art and confirms one exact c
   assert.equal(map.endPlacement('custom-fallback'), true);
 });
 
+test('reviewed setup opts into one-click/Enter creation; hover, pan, blocked points and Escape never create', async () => {
+  for (const gesture of ['pointer', 'keyboard']) {
+    const { map, harness, patches } = buildHarness({
+      layout: {
+        schema_version: 1,
+        positions: { occupied: { x: 4800, y: 2800 } },
+        snap_to_grid: false
+      }
+    });
+    mountWithCamera(map, harness, [{ id: 'occupied', name: 'Existing workspace' }]);
+    await flush();
+    const confirmed = [];
+    let returned = 0;
+    let finish;
+    const begin = () =>
+      map.beginPlacement({
+        token: 'setup',
+        mode: 'reviewed-setup',
+        initialCandidate: { x: 760, y: 456 },
+        onConfirm: (_token, point) => {
+          confirmed.push(point);
+          return new Promise(resolve => {
+            finish = resolve;
+          });
+        },
+        onBack: () => returned++
+      });
+    begin();
+    assert.match(
+      harness.container.innerHTML,
+      /Create workspace &amp; scan here|Create workspace & scan here/
+    );
+    assert.match(harness.container.innerHTML, /Click open ground or press Enter to create/);
+    harness.fire('pointermove', pointerEvent(600, 250));
+    harness.fire('pointerdown', pointerEvent(600, 250));
+    harness.fire('pointermove', pointerEvent(660, 300));
+    harness.fire('pointerup', pointerEvent(660, 300));
+    assert.equal(confirmed.length, 0, 'pan is not a click');
+    harness.fire('keydown', keyEvent('Escape'));
+    assert.equal(returned, 1);
+    begin();
+    map._setLayoutForTest({ positions: { occupied: { x: 760, y: 456 } } }, 'ready');
+    mountWithCamera(map, harness, [{ id: 'occupied', name: 'Existing workspace' }]);
+    harness.fire('keydown', keyEvent('Enter'));
+    assert.equal(confirmed.length, 0, 'occupied point refuses confirmation');
+    map._setLayoutForTest({ positions: { occupied: { x: 4800, y: 2800 } } }, 'ready');
+    mountWithCamera(map, harness, [{ id: 'occupied', name: 'Existing workspace' }]);
+    if (gesture === 'pointer') {
+      const screen = map.camera.worldToScreen({ x: 760, y: 456 }, map.getCamera(), {
+        width: 1000,
+        height: 600
+      });
+      harness.fire('pointerdown', pointerEvent(screen.x, screen.y));
+      harness.fire('pointerup', pointerEvent(screen.x, screen.y));
+    } else harness.fire('keydown', keyEvent('Enter'));
+    harness.fire('keydown', keyEvent('Enter'));
+    assert.equal(confirmed.length, 1, 'pending creation cannot double-submit');
+    assert.equal(patches.length, 0, 'layout waits for the canonical created ID');
+    finish(true);
+    await flush();
+    assert.equal(map.suspendDraftPlacement(), true);
+  }
+});
+
+test('draft-only placement selects geometry without invoking ordinary creation or writing layout', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  let creates = 0;
+  const selections = [];
+  let returns = 0;
+  map.beginPlacement({
+    token: 'draft-only',
+    mode: 'draft',
+    initialCandidate: { x: 760, y: 456 },
+    preview: { name: 'Music', groupName: 'Must not imply membership' },
+    onConfirm: () => creates++,
+    onSelect: (_token, point) => selections.push(point),
+    onBack: token => {
+      assert.equal(token, 'draft-only');
+      returns++;
+    }
+  });
+  assert.match(harness.container.innerHTML, /Draft · Music/);
+  assert.equal(map.updateDraftPlacementName('foreign-generation', 'Ignored'), false);
+  assert.equal(map.updateDraftPlacementName('draft-only', 'Edited music'), true);
+  assert.match(harness.container.innerHTML, /Use this position/);
+  assert.doesNotMatch(harness.container.innerHTML, /Create workspace here|Reviewed district/);
+  harness.fire('keydown', keyEvent('ArrowRight', { target: { closest: () => ({}) } }));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(selections)),
+    [{ x: 760, y: 456 }],
+    'input keys are not map nudges'
+  );
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(selections[1].x, 761);
+  harness.fire('pointerdown', pointerEvent(640, 260));
+  harness.fire('pointerup', pointerEvent(640, 260));
+  assert.equal(selections.length, 3);
+  assert.equal(creates, 0);
+  assert.equal(patches.length, 0);
+  assert.equal(map.suspendDraftPlacement(), true);
+  assert.equal(returns, 1);
+  assert.equal(map.suspendDraftPlacement(), false);
+  assert.equal(map.endPlacement('draft-only'), false);
+});
+
+test('explicit position repair checks current collision and map availability without creating or reparenting', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: {
+      schema_version: 1,
+      positions: { occupied: { x: 0, y: 0 }, built: { x: 380, y: 0 } },
+      snap_to_grid: false
+    }
+  });
+  mountWithCamera(map, harness, [
+    { id: 'occupied', name: 'Occupied' },
+    { id: 'built', name: 'Created' }
+  ]);
+  await flush();
+  assert.equal(await map.retryPlacement('built', { x: 0, y: 0 }), false);
+  assert.equal(patches.length, 0);
+  assert.equal(await map.retryPlacement('built', { x: 760, y: 456 }), true);
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].operations[0].op, 'set_positions');
+  assert.deepEqual(JSON.parse(JSON.stringify(patches[0].operations[0].positions.built)), {
+    x: 760,
+    y: 456
+  });
+  map.unmount(harness.container);
+  assert.equal(await map.retryPlacement('built', { x: 760, y: 456 }), false);
+  assert.equal(patches.length, 1);
+});
+
+test('pending draft confirmation freezes geometry but still permits a non-mutating view change', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const selections = [];
+  let returned = 0;
+  const point = { x: 760, y: 456 };
+  map.beginPlacement({
+    token: 'pending',
+    mode: 'draft',
+    initialCandidate: point,
+    onSelect: (_token, value) => selections.push(value),
+    onBack: () => returned++
+  });
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(map.setDraftPlacementPending('another', true), false);
+  assert.equal(map.setDraftPlacementPending('pending', true), true);
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(selections.length, 1);
+  assert.equal(map.setDraftPlacementPending('pending', false), true);
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.deepEqual(JSON.parse(JSON.stringify(selections)), [point, point]);
+  map.setDraftPlacementPending('pending', true);
+  assert.equal(map.suspendDraftPlacement(), true);
+  assert.equal(returned, 1);
+  assert.equal(patches.length, 0);
+  map.beginPlacement({ token: 'ordinary', initialCandidate: point });
+  assert.equal(
+    map.setDraftPlacementPending('ordinary', true),
+    false,
+    'ordinary creation keeps its own lifecycle'
+  );
+});
+
+test('occupation after draft selection refuses the exact point without inventing a replacement', async () => {
+  const { map, harness, patches, memberships } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const point = { x: 760, y: 456 };
+  let selected = 0;
+  map.beginPlacement({
+    token: 'reviewed',
+    mode: 'draft',
+    initialCandidate: point,
+    onSelect: () => selected++
+  });
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(selected, 1);
+  map._setLayoutForTest({ positions: { other: point } }, 'ready');
+  const rows = [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'other', name: 'Arrived later' },
+    { id: 'created', name: 'Prepared' }
+  ];
+  mountWithCamera(map, harness, rows);
+  const result = await map.commitPlacement('created', { token: 'reviewed', candidate: point });
+  assert.equal(result.saved, false);
+  assert.equal(result.reason, 'blocked');
+  assert.equal(await map.retryPlacement('created', point), false);
+  assert.equal(patches.length, 0);
+  map._setLayoutForTest({ positions: { other: { x: 1520, y: 456 } } }, 'ready');
+  mountWithCamera(map, harness, rows);
+  assert.equal(await map.retryPlacement('created', point), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(patches[0].operations[0].positions.created)), point);
+  assert.equal(memberships.length, 0);
+  assert.equal(patches.length, 1);
+});
+
+test('a late placement result after unmount cannot clear or select over a newer draft', async () => {
+  for (const ok of [true, false]) {
+    let finish;
+    const { map, harness, patches, memberships } = buildHarness({
+      patchResponse: () =>
+        new Promise(resolve => {
+          finish = resolve;
+        })
+    });
+    mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+    await flush();
+    assert.equal(
+      map.beginPlacement({ token: 'old', mode: 'draft', initialCandidate: { x: 760, y: 456 } }),
+      true
+    );
+    const pending = map.commitPlacement('created-old', {
+      token: 'old',
+      candidate: { x: 760, y: 456 }
+    });
+    await flush();
+    map.unmount(harness.container);
+    mountWithCamera(map, harness, [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'created-old', name: 'Already created' }
+    ]);
+    assert.equal(
+      map.beginPlacement({
+        token: 'new',
+        mode: 'draft',
+        initialCandidate: { x: 1520, y: 456 },
+        preview: { name: 'New draft' }
+      }),
+      true
+    );
+    const selected = map.getSelectedId();
+    finish({
+      ok,
+      status: ok ? 200 : 404,
+      json: async () => ({ result: { revision: 9, positions: patches[0].operations[0].positions } })
+    });
+    assert.equal((await pending).saved, ok);
+    assert.equal(
+      map.getSelectedId(),
+      selected,
+      'old completion must not select its workspace in the new context'
+    );
+    assert.equal(map.endPlacement('new'), true, 'the new draft survived either late result');
+    assert.equal(memberships.length, 0);
+    assert.equal(patches.length, 1);
+  }
+});
+
+test('ordinary placement remains explicit creation and cancellation cannot save a reserved site', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  let confirmations = 0;
+  map.beginPlacement({
+    token: 'ordinary-cancel',
+    initialCandidate: { x: 760, y: 456 },
+    onConfirm: () => confirmations++
+  });
+  assert.match(harness.container.innerHTML, /Create workspace here/);
+  assert.equal(map.updateDraftPlacementName('ordinary-cancel', 'Do not rename'), false);
+  assert.equal(map.suspendDraftPlacement(), false);
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('Escape'));
+  const result = await map.commitPlacement('not-created', { token: 'ordinary-cancel' });
+  assert.equal(result.saved, false);
+  assert.equal(result.reason, 'stale_placement');
+  assert.equal(confirmations, 0);
+  assert.equal(patches.length, 0);
+});
+
 test('reviewed pointer placement uses current screen/world camera math and shared snap rules', async () => {
   const { map, harness } = buildHarness({
     layout: {

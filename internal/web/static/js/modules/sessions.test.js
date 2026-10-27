@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import './folder-setup-visual.js';
+import { createPlacementCards } from './assisted-workspace-placement.js';
 import {
   loadInitialWorkspaceTree,
   loadOnboardingStatus,
@@ -38,6 +39,7 @@ function loadSessionManager(
       bootstrap: windowOverrides.bootstrap,
       fetch: fetchImpl,
       console,
+      URLSearchParams,
       crypto: { randomUUID: () => 'review-key' },
       setTimeout,
       clearTimeout
@@ -46,6 +48,573 @@ function loadSessionManager(
   );
   return window.sessionManager;
 }
+
+test('inbox entry transfers only references and opens the returned draft without generic model admission', async () => {
+  const calls = [];
+  const manager = loadSessionManager();
+  const session = {
+    id: 'build',
+    status: 'open',
+    draft: { name: 'Exact name' },
+    placement_source: { offer_id: 'offer', target: { conversation_id: 'chat' } }
+  };
+  manager.workspaceBuildApi = () => ({
+    fromInbox: async input => {
+      calls.push(input);
+      return { ok: true, body: { session } };
+    }
+  });
+  let opened;
+  manager.showAddWorkspaceModal = options => {
+    opened = options;
+  };
+  const input = {
+    offer_id: 'offer',
+    conversation_id: 'chat',
+    brief: ' exact\ngoal ',
+    monitoring: false
+  };
+  assert.equal(await manager.openInboxWorkspacePlacement(input, { mode: 'map' }), session);
+  assert.deepEqual(calls, [input]);
+  assert.equal(opened.inboxPlacement.session, session);
+  assert.equal(opened.inboxPlacement.mode, 'map');
+  assert.equal(opened.fixedKind, 'workspace');
+});
+
+test('a late inbox handoff cannot open a newer conversation or replace its editor', async () => {
+  let current = true;
+  let resolve;
+  const manager = loadSessionManager();
+  manager.workspaceBuildApi = () => ({
+    fromInbox: () =>
+      new Promise(done => {
+        resolve = done;
+      })
+  });
+  manager.showAddWorkspaceModal = () => assert.fail('late handoff opened an editor');
+  const pending = manager.openInboxWorkspacePlacement(
+    { offer_id: 'offer' },
+    { current: () => current }
+  );
+  current = false;
+  resolve({ ok: true, body: { session: { id: 'reserved' } } });
+  assert.equal(await pending, null);
+});
+
+test('inbox handoff cannot replace a suspended editor or an editor opened and closed during its reply', async () => {
+  const manager = loadSessionManager();
+  manager.workspaceBuild = { placement: { onMap: true } };
+  manager.workspaceBuildApi = () => ({
+    fromInbox: () => assert.fail('overlapping editor entered handoff')
+  });
+  await assert.rejects(manager.openInboxWorkspacePlacement({}), /current workspace editor/);
+  manager.workspaceBuild = null;
+  let resolve;
+  manager.workspaceBuildApi = () => ({
+    fromInbox: () =>
+      new Promise(done => {
+        resolve = done;
+      })
+  });
+  manager.showAddWorkspaceModal = () => assert.fail('late reply replaced another editor');
+  const pending = manager.openInboxWorkspacePlacement({});
+  manager.workspaceCreatorGeneration++;
+  resolve({ ok: true, body: { session: { id: 'saved' } } });
+  assert.equal(await pending, null);
+});
+
+test('placement conflict recovery explicitly reads the same draft and preserves local choices on failure or a late reply', async () => {
+  for (const outcome of ['current', 'failed', 'foreign', 'late']) {
+    const manager = loadSessionManager();
+    const build = {
+      session: { id: 'saved', status: 'open' },
+      placement: {},
+      draftConflict: true,
+      draftError: true,
+      janitorMonitoring: false
+    };
+    manager.workspaceBuild = build;
+    manager.syncWorkspaceBuildPresentation = () => {};
+    manager.readCurrentWorkspaceBuild = async input => {
+      assert.equal(input, build);
+      if (outcome === 'late') manager.workspaceBuild = {};
+      return {
+        ok: outcome !== 'failed',
+        body: {
+          session: {
+            id: outcome === 'foreign' ? 'other' : 'saved',
+            status: 'open',
+            placement_monitoring: true
+          }
+        }
+      };
+    };
+    let applied = 0;
+    manager.applyWorkspaceBuildSession = async (session, options) => {
+      assert.equal(options.resume, true);
+      assert.equal(session.id, 'saved');
+      applied++;
+    };
+    if (['failed', 'foreign'].includes(outcome))
+      await assert.rejects(manager.reloadInboxWorkspaceDraft(build), /local edits are still kept/);
+    else await manager.reloadInboxWorkspaceDraft(build);
+    assert.equal(applied, outcome === 'current' ? 1 : 0);
+    assert.equal(build.draftConflict, outcome !== 'current');
+    assert.equal(build.janitorMonitoring, outcome === 'current');
+  }
+});
+
+test('closing placement restores its source only while focus still belongs to the old editor', () => {
+  for (const focusedElsewhere of [false, true]) {
+    const focused = {};
+    const manager = loadSessionManager(undefined, {}, { activeElement: focused, body: {} });
+    let returned = 0;
+    manager.workspaceCreatorContext = {
+      inboxPlacement: {
+        onReturn: () => {
+          returned++;
+          return true;
+        }
+      }
+    };
+    manager.workspaceBuild = { placement: { host: { contains: () => !focusedElsewhere } } };
+    manager.abandonWorkspaceMapPlacement =
+      manager.flushWorkspaceBuildDraft =
+      manager.discardWorkspaceTeamDraft =
+        () => {};
+    manager.teardownWorkspaceBuild = () => {
+      manager.workspaceBuild = null;
+    };
+    manager.workspaceCreatorClosed();
+    assert.equal(returned, focusedElsewhere ? 0 : 1);
+  }
+});
+
+test('a refused or unverifiable inbox handoff has no ordinary-create fallback', async () => {
+  for (const result of [
+    { ok: false, body: { code: 'build_conflict', error: 'Resolve the other build first.' } },
+    { ok: true, body: { session: { id: 'wrong', placement_source: { offer_id: 'different' } } } }
+  ]) {
+    const manager = loadSessionManager();
+    manager.workspaceBuildApi = () => ({ fromInbox: async () => result });
+    manager.showAddWorkspaceModal = () => assert.fail('unverified draft opened');
+    await assert.rejects(manager.openInboxWorkspacePlacement({ offer_id: 'offer' }));
+  }
+});
+
+test('both inbox entries open review without automatically activating map placement', async () => {
+  for (const mode of ['map', 'suggested']) {
+    const host = { parentElement: {} };
+    const manager = loadSessionManager(
+      undefined,
+      {
+        OriAssistedWorkspacePlacement: {
+          createPlacementCards: () => ({}),
+          mountPlacementPanel: () => ({})
+        }
+      },
+      { getElementById: () => host }
+    );
+    const session = { id: 'current', status: 'open' };
+    manager.mountWorkspaceBuildPane = manager.syncWorkspaceBuildPresentation = () => {};
+    manager.newWorkspaceBuildState = () => ({});
+    manager.applyWorkspaceBuildSession = async value => {
+      manager.workspaceBuild.session = value;
+    };
+    manager.placeInboxWorkspaceDraft = () => assert.fail('review was skipped');
+    assert.equal(
+      await manager.startInboxWorkspacePlacement({ inboxPlacement: { session, mode } }),
+      true
+    );
+    assert.equal(manager.workspaceBuild.placement.ready, true);
+    assert.equal(manager.workspaceBuild.placement.onMap, undefined);
+  }
+});
+
+test('unreviewed, unsaved and conflicted setups cannot enter placement', () => {
+  for (const state of [
+    { current: false },
+    { dirty: true },
+    { draftInFlight: true },
+    { draftError: true },
+    { draftConflict: true }
+  ]) {
+    const manager = loadSessionManager();
+    manager.workspaceBuild = {
+      session: { status: 'open' },
+      placement: { ready: true, dirty: state.dirty },
+      ...state
+    };
+    manager.workspaceBuildPreparationCurrent = () => state.current !== false;
+    manager.hideWorkspaceCreatorModal = () => assert.fail('unreviewed placement opened');
+    manager.placeInboxWorkspaceDraft();
+    assert.equal(manager.workspaceBuild.placement.onMap, undefined);
+  }
+});
+
+test('manual review cannot confirm before placement; automatic selection remains inert', async () => {
+  const manager = loadSessionManager();
+  const placement = { mode: 'map', candidate: { x: 1, y: 2 } };
+  manager.workspaceBuild = { session: { status: 'open' }, placement };
+  let confirmations = 0;
+  manager.confirmWorkspaceBuildPreparation = async () => {
+    confirmations++;
+  };
+  manager.syncWorkspaceBuildPresentation = manager.returnInboxWorkspaceToReview = () => {};
+  await manager.actOnInboxWorkspacePlacement({ action: 'confirm' });
+  assert.equal(confirmations, 0);
+  await manager.actOnInboxWorkspacePlacement({ action: 'suggested' });
+  assert.equal(confirmations, 0);
+  assert.equal(placement.candidate, null);
+  assert.equal(placement.mode, 'suggested');
+  await manager.actOnInboxWorkspacePlacement({ action: 'confirm' });
+  assert.equal(confirmations, 1);
+});
+
+test('reviewed inbox map gestures confirm once; previews and stale or changed reviews never create', async () => {
+  let spec;
+  const listeners = new Map();
+  const emit = name => (listeners.get(name) || []).forEach(callback => callback());
+  let confirmations = 0;
+  const modal = {
+    dataset: {},
+    addEventListener: (name, callback) =>
+      listeners.set(name, [...(listeners.get(name) || []), callback]),
+    removeEventListener: (name, callback) =>
+      listeners.set(
+        name,
+        (listeners.get(name) || []).filter(item => item !== callback)
+      )
+  };
+  const manager = loadSessionManager(
+    undefined,
+    {
+      innerWidth: 1440,
+      OriWorkspaceMap: {
+        beginPlacement: value => {
+          spec = value;
+          return true;
+        }
+      },
+      setTimeout: callback => callback(),
+      bootstrap: {
+        Modal: {
+          getInstance: () => ({ _isTransitioning: true, hide: () => emit('hidden.bs.modal') })
+        }
+      }
+    },
+    {
+      getElementById: id => (id === 'addFolderModal' ? modal : null),
+      querySelector: () => ({ getClientRects: () => [{}] }),
+      body: { append() {} }
+    }
+  );
+  const placement = {
+    ready: true,
+    token: 'source-generation',
+    candidate: null,
+    host: { classList: { add() {} }, contains: () => false }
+  };
+  const build = { session: { status: 'open', draft: { name: 'Inbox' } }, placement };
+  manager.workspaceBuild = build;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.syncInboxWorkspacePlacement = () => {};
+  manager.confirmWorkspaceBuildPreparation = () => {
+    confirmations++;
+    build.acceptedPreparation = true;
+  };
+  let reviewCurrent = true;
+  let returns = 0;
+  manager.returnInboxWorkspaceToReview = () => {
+    returns++;
+  };
+  manager.workspaceBuildPreparationCurrent = () => reviewCurrent;
+  manager.placeInboxWorkspaceDraft();
+  assert.equal(spec, undefined, 'placement waits for the opening transition');
+  emit('shown.bs.modal');
+  assert.equal(spec.mode, 'reviewed-setup');
+  assert.equal(spec.onSelect, undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(spec.origin)), {});
+  spec.onCandidate(placement.token, { x: 12, y: 24 });
+  assert.deepEqual(JSON.parse(JSON.stringify(placement.candidate)), { x: 12, y: 24 });
+  assert.equal(confirmations, 0);
+  for (const flag of ['preparationBusy', 'preparationUncertain', 'acceptedPreparation']) {
+    build[flag] = true;
+    spec.onCandidate(placement.token, { x: 13, y: 24 });
+    assert.equal(await spec.onConfirm(placement.token, { x: 100, y: 200 }), false);
+    assert.deepEqual(JSON.parse(JSON.stringify(placement.candidate)), { x: 12, y: 24 }, flag);
+    delete build[flag];
+  }
+  spec.onCandidate(placement.token, { x: 13, y: 24 });
+  assert.equal(placement.candidate.x, 13, 'nudges only remember geometry');
+  manager.workspaceBuild = { session: { id: 'newer' }, placement: { candidate: null } };
+  assert.equal(await spec.onConfirm(placement.token, { x: 100, y: 200 }), false);
+  assert.equal(manager.workspaceBuild.placement.candidate, null);
+  assert.equal(confirmations, 0);
+  manager.workspaceBuild = build;
+  reviewCurrent = false;
+  assert.equal(await spec.onConfirm(placement.token, { x: 50, y: 60 }), false);
+  assert.equal(returns, 1);
+  assert.equal(confirmations, 0);
+  reviewCurrent = true;
+  placement.onMap = false;
+  assert.equal(
+    await spec.onConfirm(placement.token, { x: 50, y: 60 }),
+    false,
+    'closed map callback cannot confirm'
+  );
+  placement.onMap = true;
+  manager.confirmWorkspaceBuildPreparation = () => {};
+  assert.equal(
+    await spec.onConfirm(placement.token, { x: 50, y: 60 }),
+    false,
+    'definite refusal returns to review'
+  );
+  assert.equal(returns, 2);
+  manager.confirmWorkspaceBuildPreparation = () => {
+    confirmations++;
+    build.acceptedPreparation = true;
+  };
+  assert.equal(await spec.onConfirm(placement.token, { x: 50, y: 60 }), true);
+  assert.equal(confirmations, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(placement.candidate)), { x: 50, y: 60 });
+  assert.equal(await spec.onConfirm(placement.token, { x: 70, y: 80 }), false);
+  assert.equal(confirmations, 1);
+  build.session.status = 'abandoned';
+  placement.onMap = false;
+  spec = undefined;
+  manager.placeInboxWorkspaceDraft();
+  assert.equal(spec, undefined, 'a cancelled draft cannot reopen map placement');
+});
+
+test('Map disappearing or setup starting during modal suspension returns the same choices to review', () => {
+  for (const interruption of ['hidden', 'preparing', 'stale-review']) {
+    let hidden;
+    let visible = true;
+    let reviewCurrent = true;
+    let returned = 0;
+    const modal = {
+      dataset: {},
+      addEventListener: (_event, callback) => {
+        hidden = callback;
+      }
+    };
+    const manager = loadSessionManager(
+      undefined,
+      {
+        innerWidth: 1440,
+        OriWorkspaceMap: { beginPlacement: () => assert.fail('late placement activation') }
+      },
+      {
+        getElementById: () => modal,
+        querySelector: () => ({ getClientRects: () => (visible ? [{}] : []) })
+      }
+    );
+    const point = { x: 760, y: 456 };
+    const build = {
+      session: { status: 'open', draft: { name: 'Keep my choices' } },
+      placement: { ready: true, token: 'current', candidate: point }
+    };
+    manager.workspaceBuild = build;
+    manager.hideWorkspaceCreatorModal = () => {};
+    manager.workspaceBuildPreparationCurrent = () => reviewCurrent;
+    manager.returnInboxWorkspaceToReview = () => {
+      returned++;
+    };
+    manager.placeInboxWorkspaceDraft();
+    if (interruption === 'hidden') visible = false;
+    else if (interruption === 'preparing') build.preparationBusy = true;
+    else reviewCurrent = false;
+    hidden();
+    assert.equal(returned, 1);
+    assert.equal(build.placement.candidate, point);
+    assert.equal(build.session.draft.name, 'Keep my choices');
+  }
+});
+
+test('draft adoption does not transiently disable the next keyboard control before autosave settles', () => {
+  const manager = loadSessionManager();
+  const rendered = [];
+  const build = {
+    session: { status: 'open', draft: { name: 'Saved' } },
+    draftInFlight: Promise.resolve(),
+    placement: { host: { contains: () => false }, panel: { update: view => rendered.push(view) } }
+  };
+  manager.workspaceBuild = build;
+  manager.workspaceBuildPane = () => null;
+  manager.inboxWorkspacePlacementCards = () => [];
+  manager.workspaceBuildPreparationCurrent = () => false;
+  manager.syncInboxWorkspacePlacement();
+  assert.equal(rendered.length, 0);
+  build.draftInFlight = null;
+  manager.syncInboxWorkspacePlacement();
+  assert.equal(rendered.length, 1);
+  assert.equal(rendered[0].busy, false);
+  assert.equal(rendered[0].draft.name, 'Saved');
+});
+
+test('Back and slot navigation wait for queued material edits without claiming a later editor', async () => {
+  for (const action of ['back', 'agent', 'folder', 'place']) {
+    for (const replaced of [false, true]) {
+      const manager = loadSessionManager();
+      manager.workspaceBuild = { session: { status: 'open' }, placement: { onMap: true } };
+      let finish;
+      let returned = 0;
+      manager.flushWorkspaceBuildDraft = () =>
+        new Promise(resolve => {
+          finish = resolve;
+        });
+      manager.returnInboxWorkspaceToReview = () => {
+        returned++;
+      };
+      manager.placeInboxWorkspaceDraft = manager.returnInboxWorkspaceToReview;
+      manager.collapseWorkspaceBuild =
+        manager.goToWizardStep =
+        manager.openWorkspaceBuildFolderChooser =
+        manager.syncWorkspaceBuildPresentation =
+          () => {};
+      const moving = manager.actOnInboxWorkspacePlacement({ action });
+      assert.equal(returned, 0);
+      if (replaced) manager.workspaceBuild = {};
+      finish();
+      await moving;
+      assert.equal(returned, replaced ? 0 : 1);
+    }
+  }
+});
+
+test('placement reconciliation reads its exact build instead of invoking generic model admission', async () => {
+  const manager = loadSessionManager();
+  const ids = [];
+  manager.workspaceBuildApi = () => ({
+    read: async id => {
+      ids.push(id);
+      return { ok: true };
+    },
+    create: () => assert.fail('generic build admission')
+  });
+  await manager.readCurrentWorkspaceBuild({
+    session: { id: 'exact-build', placement_source: { offer_id: 'source' } }
+  });
+  assert.deepEqual(ids, ['exact-build']);
+});
+
+test('placement cards refuse hostile, cross-generation, stale and in-flight selections before setters', async () => {
+  for (const kind of [
+    'raw',
+    'foreign',
+    'stale',
+    'wrong-slot',
+    'dirty',
+    'saving',
+    'accepted',
+    'closed',
+    'hidden'
+  ]) {
+    const manager = loadSessionManager();
+    const cards = createPlacementCards(() => 'opaque-current');
+    cards.update(1, [{ kind: 'agent', id: 'Journal', label: 'Journal' }]);
+    const placement = { cards, cardsOpen: kind !== 'hidden', dirty: kind === 'dirty' };
+    manager.workspaceBuild = {
+      placement,
+      session: {
+        id: 'build',
+        version: kind === 'stale' ? 2 : 1,
+        status: kind === 'closed' ? 'abandoned' : 'open'
+      },
+      draftInFlight: kind === 'saving' ? Promise.resolve() : null,
+      acceptedPreparation: kind === 'accepted' ? {} : null
+    };
+    manager.syncWorkspaceBuildPresentation = () => {};
+    manager.findExistingRosterAgent = manager.attachWorkspaceBuildFolder = () =>
+      assert.fail(`${kind} reached a material setter`);
+    await manager.actOnInboxWorkspaceCard({
+      action: 'card-use',
+      slot: kind === 'wrong-slot' ? 'folder' : 'agent',
+      key:
+        kind === 'raw'
+          ? '{"name":"Journal","path":"/arbitrary"}'
+          : kind === 'foreign'
+            ? 'opaque-another-editor'
+            : 'opaque-current'
+    });
+    assert.match(placement.message, /Use a current setup card/);
+  }
+});
+
+test('assisted cancellation uses transition-safe close and never reopens a hidden map draft', () => {
+  for (const changedGeneration of [false, true]) {
+    const listeners = new Map();
+    const modal = {
+      dataset: {},
+      addEventListener: (name, callback) => listeners.set(name, callback),
+      removeEventListener: name => listeners.delete(name)
+    };
+    let hidden = 0;
+    const instance = { _isTransitioning: true, hide: () => hidden++ };
+    const manager = loadSessionManager(
+      undefined,
+      { setTimeout: callback => callback(), bootstrap: { Modal: { getInstance: () => instance } } },
+      { getElementById: () => modal }
+    );
+    manager.workspaceBuild = { placement: {}, session: { status: 'abandoned' } };
+    manager.workspaceCreatorContext = {};
+    manager.closeInboxWorkspacePlacement();
+    assert.equal(hidden, 0);
+    if (changedGeneration) manager.workspaceCreatorContext = {};
+    listeners.get('shown.bs.modal')();
+    assert.equal(hidden, changedGeneration ? 0 : 1);
+  }
+  const modal = { dataset: { suspendedForMapPlacement: 'draft' } };
+  const manager = loadSessionManager(undefined, {}, { getElementById: () => modal });
+  manager.workspaceBuild = { placement: { onMap: true }, session: { status: 'abandoned' } };
+  let closed = 0;
+  manager.workspaceCreatorClosed = () => {
+    closed++;
+  };
+  manager.hideWorkspaceCreatorModal = () => assert.fail('map cancellation reopened the modal');
+  manager.closeInboxWorkspacePlacement();
+  assert.equal(closed, 1);
+  assert.equal(modal.dataset.suspendedForMapPlacement, undefined);
+});
+
+test('placement monitoring alone changes the canonical draft sync key', async () => {
+  for (const placement of [true, false]) {
+    const manager = loadSessionManager();
+    const writes = [];
+    const build = {
+      session: { id: 'draft', status: 'open', version: 1 },
+      janitorMonitoring: false,
+      draftUser: true
+    };
+    manager.workspaceBuild = build;
+    manager.workspaceBuildDraftBody = () => ({
+      draft: { name: 'Same draft' },
+      version: build.session.version,
+      ...(placement ? { monitoring: build.janitorMonitoring } : {})
+    });
+    manager.workspaceBuildApi = () => ({
+      draft: async (_id, body) => {
+        writes.push(body);
+        return { ok: true, body: { session: { ...build.session, version: body.version + 1 } } };
+      }
+    });
+    manager.workspaceBuildPane = () => ({ applySession() {} });
+    manager.rememberWorkspaceBuildSession = () => {};
+    manager.syncWorkspaceBuildPresentation = () => {};
+    for (const mode of [false, true, false]) {
+      build.janitorMonitoring = mode;
+      build.draftUser = true;
+      await manager.flushWorkspaceBuildDraft({ force: true });
+    }
+    assert.equal(writes.length, placement ? 3 : 1);
+    if (placement)
+      assert.deepEqual(
+        writes.map(write => write.monitoring),
+        [false, true, false]
+      );
+  }
+});
 
 test('a copied workspace this build cannot restore blocks the ordinary import and says why', async () => {
   const elements = new Map([
@@ -5574,7 +6143,7 @@ function loadBuildWizard(timers = { setTimeout, clearTimeout }) {
   }
   vm.runInNewContext(
     source,
-    { window, document, Event, ...timers, console, fetch: async () => ({}) },
+    { window, document, Event, URLSearchParams, ...timers, console, fetch: async () => ({}) },
     { filename: 'sessions.js' }
   );
   const manager = window.sessionManager;
@@ -5941,6 +6510,17 @@ test('automatic permissions coalesce edits, preserve monitoring, and never confi
   assert.equal(build.draftUser, undefined);
 });
 
+test('a server draft version change invalidates even an otherwise identical permission review', async () => {
+  const f = permissionReviewFixture();
+  await f.manager.reviewWorkspaceBuildPreparation();
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), true);
+  f.build.session.version++;
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), false);
+  await f.manager.confirmWorkspaceBuildPreparation();
+  assert.equal(f.confirms(), 0, 'an old tab must obtain a new exact review');
+  assert.equal(f.build.session.draft.name, 'Reviewed inbox');
+});
+
 test('an expired held selection blocks preview and confirmation without losing the draft', async () => {
   const f = permissionReviewFixture();
   await f.manager.reviewWorkspaceBuildPreparation();
@@ -6128,6 +6708,29 @@ test('folder create chips and required groups lead to the current review, not an
   assert.equal(creates, 1, 'the no-folder flow keeps its existing explicit-create behavior');
 });
 
+test('confirmation locks draft geometry and only a definite pre-admission refusal unlocks it', async () => {
+  for (const refused of [false, true]) {
+    const f = permissionReviewFixture();
+    const locked = [];
+    f.window.OriWorkspaceMap = {
+      setDraftPlacementPending: (token, pending) => {
+        assert.equal(token, 'point-owner');
+        locked.push(pending);
+      }
+    };
+    f.build.placement = { token: 'point-owner' };
+    await f.manager.reviewWorkspaceBuildPreparation();
+    f.manager.workspaceBuildTransport.janitorPrepare = async () => ({
+      ok: false,
+      status: refused ? 409 : 503,
+      body: { code: refused ? 'review_changed' : 'upstream_timeout', error: 'Unavailable' }
+    });
+    await f.manager.confirmWorkspaceBuildPreparation();
+    assert.deepEqual(locked, refused ? [true, false] : [true]);
+    assert.equal(f.build.preparationUncertain, !refused);
+  }
+});
+
 test('an uncertain confirmation freezes its exact request even when a read sees no accepted operation yet', async () => {
   const f = permissionReviewFixture();
   await f.manager.reviewWorkspaceBuildPreparation();
@@ -6265,6 +6868,184 @@ test('lost preparation responses recover accepted identity and a double click se
   assert.equal(build.acceptedPreparation, true);
   assert.equal(build.janitorReview.workspace_id, 'exact-workspace');
   assert.equal(build.preparationBusy, false);
+});
+
+function observedPreparation() {
+  return {
+    state: 'prepared',
+    workspace_id: 'exact-workspace',
+    folder_slug: 'actual-workspace',
+    name: 'Observed workspace',
+    members: ['Actual Curator'],
+    preparation: {
+      workspace_id: 'exact-workspace',
+      operation_id: 'preparation',
+      result: {
+        operation_id: 'preparation:scan',
+        root_id: 'held-root',
+        privacy_mode: 'metadata_only',
+        outcome: 'batch',
+        batch_id: 'first-batch',
+        eligible_count: 1,
+        ineligible_count: 0,
+        completed_at: '2026-01-01T10:00:00Z'
+      }
+    }
+  };
+}
+
+test('a lost placement confirmation reads its real result without replaying setup or saving layout', async () => {
+  const { manager } = loadBuildWizard();
+  manager.workspaceBuildPreparationCurrent = () => true;
+  const build = manager.workspaceBuild;
+  build.session = { id: 'bound-build', status: 'open' };
+  build.placement = { candidate: { x: 760, y: 456 } };
+  build.janitorReview = { version: 4, review_revision: 'a'.repeat(64), monitoring: false };
+  manager.workspaceCreatorContext = {};
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.workspaceBuildPane = () => ({ setBusy() {} });
+  manager.notifyWorkspacesChanged = () => {};
+  let confirms = 0,
+    reads = 0;
+  manager.workspaceBuildTransport = {
+    janitorPrepare: async () => {
+      confirms++;
+      throw new Error('Lost reply');
+    },
+    janitorReview: async id => {
+      assert.equal(id, 'bound-build');
+      reads++;
+      return {
+        ok: true,
+        body: {
+          review: {
+            state: 'accepted',
+            version: 4,
+            review_revision: 'a'.repeat(64),
+            monitoring: false,
+            workspace_id: 'exact-workspace',
+            outcome: observedPreparation()
+          }
+        }
+      };
+    }
+  };
+  await manager.confirmWorkspaceBuildPreparation();
+  assert.equal(confirms, 1);
+  assert.equal(reads, 1);
+  assert.equal(build.placement.workspaceID, 'exact-workspace');
+  assert.equal(build.placement.result.batch_id, 'first-batch');
+  assert.equal(build.placement.resultName, 'Observed workspace');
+  assert.equal(
+    build.placement.positionFailed,
+    true,
+    'a status read does not write the requested point'
+  );
+  assert.match(build.placement.route, /^\/workspaces\/actual-workspace\?/);
+  await manager.readInboxWorkspacePreparation(build);
+  assert.equal(reads, 2);
+  assert.equal(confirms, 1);
+});
+
+test('failed or late saved-status reads keep the frozen request and cannot continue or claim another editor', async () => {
+  const manager = loadSessionManager();
+  const review = { version: 4, review_revision: 'a'.repeat(64), monitoring: false };
+  const build = {
+    session: { id: 'bound-build' },
+    placement: {},
+    janitorReview: review,
+    preparationUncertain: true
+  };
+  manager.workspaceBuild = build;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.notifyWorkspacesChanged = () => assert.fail('late or failed observation claimed success');
+  manager.workspaceBuildTransport = {
+    janitorReview: async () => ({ ok: false, status: 503 }),
+    janitorPrepare: () => assert.fail('a status read continued setup')
+  };
+  await manager.readInboxWorkspacePreparation();
+  assert.equal(build.janitorReview, review);
+  assert.equal(build.preparationUncertain, true);
+  assert.equal(build.placement.result, undefined);
+  assert.match(build.placement.message, /still uncertain/);
+  let finish;
+  manager.workspaceBuildTransport.janitorReview = () =>
+    new Promise(resolve => {
+      finish = resolve;
+    });
+  const reading = manager.readInboxWorkspacePreparation();
+  const newer = { placement: {}, session: { id: 'newer' } };
+  manager.workspaceBuild = newer;
+  finish({
+    ok: true,
+    body: {
+      review: {
+        state: 'accepted',
+        ...review,
+        workspace_id: 'exact-workspace',
+        outcome: observedPreparation()
+      }
+    }
+  });
+  await reading;
+  assert.equal(newer.placement.result, undefined);
+  assert.equal(build.placement.result, undefined);
+  assert.equal(build.janitorReview, review);
+});
+
+test('observed placement results refuse mismatched identities, operations and malformed receipts', () => {
+  for (const mismatch of ['workspace', 'operation', 'date', 'missing-result']) {
+    const manager = loadSessionManager();
+    const build = { placement: {} };
+    manager.workspaceBuild = build;
+    manager.notifyWorkspacesChanged = () => assert.fail('unproven result was announced');
+    const outcome = observedPreparation();
+    if (mismatch === 'workspace') outcome.workspace_id = 'foreign';
+    if (mismatch === 'operation') outcome.preparation.result.operation_id = 'foreign:scan';
+    if (mismatch === 'date') outcome.preparation.result.completed_at = 'invalid';
+    if (mismatch === 'missing-result') outcome.preparation.result = null;
+    assert.equal(
+      manager.adoptInboxWorkspaceObservedResult(build, {
+        workspace_id: 'exact-workspace',
+        outcome
+      }),
+      false
+    );
+    assert.equal(build.placement.result, undefined);
+    assert.equal(build.placement.reconciliationRequired, true);
+  }
+});
+
+test('position repair uses the proven id and original point and handles the map’s boolean contract', async () => {
+  for (const result of [true, false, 'throw']) {
+    let calls = 0;
+    const manager = loadSessionManager(undefined, {
+      OriWorkspaceMap: {
+        retryPlacement: async (id, point) => {
+          calls++;
+          assert.equal(id, 'proven-workspace');
+          assert.equal(point.x, 760);
+          if (result === 'throw') throw new Error('Offline');
+          return result;
+        }
+      }
+    });
+    manager.workspaceBuild = {
+      acceptedPreparation: true,
+      session: { status: 'created' },
+      placement: {
+        workspaceID: 'proven-workspace',
+        candidate: { x: 760, y: 456 },
+        positionFailed: true
+      }
+    };
+    manager.syncWorkspaceBuildPresentation = () => {};
+    manager.workspaceBuildApi = () => assert.fail('position repair called a setup API');
+    await manager.actOnInboxWorkspacePlacement({ action: 'retry-position' });
+    assert.equal(calls, 1);
+    assert.equal(manager.workspaceBuild.placement.positionFailed, result !== true);
+    assert.equal(manager.workspaceBuild.placement.saving, false);
+  }
 });
 
 test('the picker’s own default is never the user’s edit, and the assistant’s blueprint goes back', async () => {
@@ -7681,6 +8462,56 @@ test('a delayed suggestion is ignored after manual mode, without reviving the mo
   assert.equal(pauses.length, 1);
   assert.equal(pauses[0].proposal_id, 'proposal-1');
   assert.equal(nameInput.value, 'My manual name');
+});
+
+test('a refused placement pick recovers only its attachment version and fences other-tab material edits', async () => {
+  for (const changedElsewhere of ['none', 'draft', 'team']) {
+    const { manager } = prepareProposalWizard();
+    const build = manager.workspaceBuild;
+    build.placement = {};
+    build.session.proposal = null;
+    build.session.placement_source = { offer_id: 'source' };
+    build.session.draft = { name: 'My draft' };
+    const latest = {
+      ...build.session,
+      version: 5,
+      draft: { name: changedElsewhere === 'draft' ? 'Another tab' : 'My draft' },
+      team_state:
+        changedElsewhere === 'team'
+          ? { role_fills: [{ name: 'Another choice' }] }
+          : build.session.team_state
+    };
+    let reads = 0,
+      adopted = 0,
+      conflicts = 0;
+    manager.workspaceBuildApi = () => ({
+      folder: async () => ({
+        ok: false,
+        status: 409,
+        body: { code: 'folder', error: 'Incompatible folder.' }
+      }),
+      read: async id => {
+        assert.equal(id, 'b-1');
+        reads++;
+        return { ok: true, body: { session: latest } };
+      }
+    });
+    manager.adoptWorkspaceBuildSession = session => {
+      adopted++;
+      build.session = session;
+    };
+    manager.adoptWorkspaceBuildConflict = () => {
+      conflicts++;
+    };
+    manager.suggestWorkspaceBuildFolder = () => assert.fail('placement invoked inference');
+    await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+    assert.equal(reads, 1);
+    assert.equal(adopted, changedElsewhere === 'none' ? 1 : 0);
+    assert.equal(conflicts, changedElsewhere === 'none' ? 0 : 1);
+    assert.equal(build.session.folder.observation.id, 'obs-1');
+    assert.equal(build.folderPending, false);
+    assert.equal(build.placement.message, 'Incompatible folder.');
+  }
 });
 
 test('attachment suggests once; cancelled picking restores its trigger without stealing later focus', async () => {

@@ -290,6 +290,73 @@ test('a malformed success response cannot invent a prepared result', async () =>
   assert.doesNotMatch(host.textContent, /Your first review is ready/);
 });
 
+test('a newly linked empty folder retains its verified initial result through status repaint', async t => {
+  const doc = setup();
+  const previousLocation = window.location;
+  const previousHistory = window.history;
+  t.after(() => {
+    window.location = previousLocation;
+    window.history = previousHistory;
+  });
+  window.location = new URL('http://localhost/workspaces/synthetic');
+  window.history = {
+    replaceState(_state, _title, url) {
+      window.location = new URL(url);
+    }
+  };
+  const result = {
+    privacy_mode: 'metadata_only',
+    operation_id: 'accepted:scan',
+    root_id: 'root-1',
+    completed_at: '2026-10-26T12:00:00Z',
+    outcome: 'no_eligible',
+    eligible_count: 0,
+    ineligible_count: 0
+  };
+  let status = statusFixture();
+  status.settings.root_id = 'root-1';
+  status.settings.setup_preparation = { operation_id: 'accepted' };
+  panel.render(setupRequiredStatus);
+  panel._setSetupReview(attachedReview());
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push([String(url), options.method || 'GET']);
+    return {
+      ok: true,
+      json: async () => {
+        if (String(url).endsWith('/prepare-review'))
+          return { preparation: { workspace_id: 'ws-1', result } };
+        if (String(url).endsWith('/setup-review'))
+          return {
+            review: attachedReview({ state: 'prepared', operation_id: 'accepted', result })
+          };
+        if (String(url).endsWith('/file-janitor')) return { status };
+        return { batches: [], actions: [], candidates: [] };
+      }
+    };
+  };
+  const host = doc.createElement('div');
+  panel._renderSetupReview(host);
+  host
+    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    .click();
+  await settle();
+  await settle();
+  assert.match(text(doc), /Initial scan finished/);
+  assert.doesNotMatch(text(doc), /Not scanned in this session/);
+  assert.equal(window.location.searchParams.get('preparation'), 'accepted');
+  await panel.refresh();
+  assert.match(text(doc), /Initial scan finished/);
+  // An old review reply cannot relabel a subsequently replaced managed root.
+  status = { ...status, settings: { ...status.settings, root_id: 'replacement' } };
+  await panel.refresh();
+  assert.doesNotMatch(text(doc), /Initial scan finished/);
+  assert.deepEqual(
+    calls.filter(([, method]) => method !== 'GET'),
+    [['/api/workspaces/ws-1/file-janitor/prepare-review', 'POST']]
+  );
+});
+
 test('ambiguous attached folders require a choice before confirmation', () => {
   const doc = setup();
   panel._setSetupReview(

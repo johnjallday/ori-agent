@@ -90,6 +90,7 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 	// every call. Without a folder digest there is no chooser to offer.
 	if b.personalAssistantFolderDigest != nil {
 		deps.Folders = buildFolderObservations{builder: b}
+		deps.Placement = inboxBuildPlacement{builder: b}
 		// A recognized folder's Home plugin installs through the same
 		// reviewed-release service Home's folder card uses.
 		deps.HomeProvider = buildHomeProviders{
@@ -131,6 +132,14 @@ func (o buildFolderObservations) Observe(ctx context.Context, target folderconte
 		return nil, personalassistant.ErrFolderSelection
 	}
 	return service.Observe(ctx, target, mode, choice)
+}
+
+func (o buildFolderObservations) Resolve(ctx context.Context, target foldercontext.Target, id string) (*foldercontext.Observation, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.Resolve(ctx, target, id)
 }
 
 func (o buildFolderObservations) ResolveRoot(ctx context.Context, target foldercontext.Target, id string) (string, error) {

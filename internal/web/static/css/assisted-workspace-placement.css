@@ -1,0 +1,279 @@
+/* Full setup review; on Map this host appears only for progress/results.
+   The reviewed placement click itself confirms creation. */
+.assisted-placement {
+  --ap-paper: var(--ori-paper, var(--bg-secondary, #faf8f2));
+  --ap-ink: var(--ori-ink, var(--text-primary, #20342d));
+  --ap-muted: var(--text-secondary, #58685e);
+  --ap-line: var(--ori-border, var(--border-color, #c9d0c6));
+  --ap-accent: var(--accent-color, #376c54);
+  color: var(--ap-ink);
+  background: var(--ap-paper);
+  border: 1px solid var(--ap-line);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  max-width: 34rem;
+  margin-inline: auto;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.assisted-placement * {
+  box-sizing: border-box;
+}
+.assisted-placement h2,
+.assisted-placement h3,
+.assisted-placement p {
+  margin: 0;
+}
+.assisted-placement h2 {
+  font:
+    600 1.5rem/1.2 "Chakra Petch",
+    sans-serif;
+  margin-block: 0.35rem;
+  /* The full name remains in the labelled field and final review. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.assisted-placement h3 {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.assisted-placement__header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.assisted-placement__header p:last-child,
+.assisted-placement__hint,
+.assisted-placement small {
+  color: var(--ap-muted);
+  font-size: 0.8rem;
+}
+.assisted-placement__art {
+  width: 4.5rem;
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+.assisted-placement__art svg {
+  width: 100%;
+  height: auto;
+}
+.assisted-placement__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.assisted-placement__location {
+  padding-block: 0.75rem;
+  margin-block: 0.75rem !important;
+  border-block: 1px dashed var(--ap-line);
+  font-size: 0.78rem;
+}
+.assisted-placement__fields {
+  display: grid;
+  gap: 0.75rem;
+}
+.assisted-placement__fields > div {
+  display: grid;
+  gap: 0.25rem;
+}
+.assisted-placement__fields label {
+  font-weight: 600;
+}
+.assisted-placement input:not([type="checkbox"]),
+.assisted-placement textarea {
+  width: 100%;
+  padding: 0.55rem;
+  background: var(--ap-paper);
+  color: var(--ap-ink);
+  border: 1px solid var(--ap-line);
+  border-radius: 0.4rem;
+  font: inherit;
+}
+.assisted-placement textarea {
+  resize: vertical;
+}
+.assisted-placement button {
+  border: 1px solid var(--ap-line);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  min-height: 44px;
+  color: var(--ap-ink);
+  background: var(--ap-paper);
+  font: inherit;
+  cursor: pointer;
+}
+.assisted-placement button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.assisted-placement :focus-visible {
+  outline: 3px solid var(--ap-accent);
+  outline-offset: 3px;
+  scroll-margin-block: 1rem;
+}
+.assisted-placement__slots {
+  margin-block: 1rem;
+}
+.assisted-placement__slot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  border-top: 1px solid var(--ap-line);
+  padding-block: 0.75rem;
+}
+.assisted-placement__slot p {
+  font-size: 0.82rem;
+}
+.assisted-placement__slot button {
+  font-size: 0.78rem;
+}
+.assisted-placement__slot-actions {
+  display: grid;
+  gap: 0.35rem;
+}
+.assisted-placement__slot.is-drop-target {
+  outline: 2px dashed var(--ap-accent);
+  outline-offset: 3px;
+}
+.assisted-placement__cards {
+  margin-block: 0.65rem 1rem;
+}
+.assisted-placement__cards ul {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 13rem;
+  overflow: auto;
+  padding: 0.25rem;
+  margin: 0.5rem 0;
+  list-style: none;
+}
+.assisted-placement__cards button {
+  display: grid;
+  width: 100%;
+  text-align: start;
+  gap: 0.2rem;
+}
+.assisted-placement__cards button[aria-pressed="true"] {
+  border-color: var(--ap-accent);
+}
+.assisted-placement__number {
+  font:
+    500 0.8rem "Chakra Petch",
+    sans-serif;
+  color: var(--ap-muted);
+}
+.assisted-placement__monitoring {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.assisted-placement__monitoring input {
+  margin-top: 0.4rem;
+  accent-color: var(--ap-accent);
+}
+.assisted-placement__navigation,
+.assisted-placement__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 1rem 0.4rem;
+}
+.assisted-placement__review {
+  border-left: 3px solid var(--ap-accent);
+  padding-left: 0.85rem;
+  margin-top: 1.25rem;
+}
+.assisted-placement dl {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.45rem 0.65rem;
+  font-size: 0.8rem;
+  margin-block: 0.65rem 0;
+}
+.assisted-placement dt {
+  color: var(--ap-muted);
+  font-weight: 500;
+}
+.assisted-placement dd {
+  margin: 0;
+}
+.assisted-placement__goal {
+  white-space: pre-wrap;
+}
+.assisted-placement__status:not(:empty) {
+  border: 1px solid var(--ap-line);
+  padding: 0.65rem;
+  margin-top: 1rem;
+}
+.assisted-placement__footer {
+  justify-content: space-between;
+}
+.assisted-placement .assisted-placement__primary {
+  background: var(--ap-ink);
+  color: var(--ap-paper);
+  border-color: var(--ap-ink);
+  font-weight: 600;
+}
+
+.assisted-placement-host {
+  overflow: auto;
+  min-height: 0;
+  padding: 0.75rem;
+}
+.assisted-placement-host[hidden] {
+  display: none;
+}
+.assisted-placement-host--map {
+  position: fixed;
+  z-index: 1040;
+  top: 5rem;
+  right: 1rem;
+  width: min(24rem, 34vw);
+  max-height: calc(100dvh - 6rem);
+  overscroll-behavior: contain;
+  filter: drop-shadow(0 0.5rem 1rem rgb(0 0 0 / 15%));
+}
+
+/* While a confirmed setup is pending, keep its status clear of geometry. */
+body:has(.assisted-placement-host--map:not([hidden])) .ws-map-placement-controls {
+  left: 1rem;
+  right: calc(min(24rem, 34vw) + 1rem);
+  width: auto;
+  max-width: none;
+  transform: none;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .assisted-placement {
+    padding: 1rem;
+    border-radius: 0.75rem;
+  }
+  .assisted-placement__slot {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .assisted-placement__slot-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .assisted-placement__footer button {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assisted-placement *,
+  .assisted-placement *::before,
+  .assisted-placement *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

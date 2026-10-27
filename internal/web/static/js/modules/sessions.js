@@ -879,35 +879,19 @@ const sessionManager = {
     // leaving it to be overwritten on the next open, and invalidates any plan
     // request still in flight so a late response cannot repopulate a closed
     // wizard. Nothing was persisted, so nothing needs undoing (FR13).
+    let closingCreatorContext;
+    addFolderModal?.addEventListener('hide.bs.modal', () => {
+      closingCreatorContext = this.workspaceCreatorContext;
+    });
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
+      const closing = closingCreatorContext;
+      closingCreatorContext = null;
+      if (closing && this.workspaceCreatorContext !== closing) return;
       // Agent setup reuses the sibling Create New Agent modal. Map placement
       // is another, distinct in-draft navigation. Neither is cancellation.
       if (addFolderModal.dataset.suspendedForAgentSetup) return;
       if (addFolderModal.dataset.suspendedForMapPlacement) return;
-      void window.FileJanitorProtection?.creatorClosed?.().catch(error =>
-        this.showToast(error.message, 'warning')
-      );
-      this.abandonWorkspaceMapPlacement();
-      // The build session itself stays open on the server: closing is never
-      // abandoning, and the build can be resumed from the assistant's Today.
-      this.flushWorkspaceBuildDraft?.();
-      this.teardownWorkspaceBuild();
-      this.discardWorkspaceTeamDraft();
-      // A confirmed Group Template change whose response was lost may already
-      // be durable; closing must reveal canonical state rather than hide it.
-      if (this.workspaceCreatorContext?.groupTemplates?.pending) {
-        void this.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate();
-      }
-      // Closing without creating leaves the map exactly as it was: no workspace,
-      // no position record, no lingering placement mode (#292 FR-54). A pending
-      // coordinate that a successful create already consumed is gone by now, so
-      // this only ever clears an abandoned one.
-      this.workspaceMapOrigin = false;
-      this.workspaceCreatorContext = null;
-      this.pendingWorkspaceCreatorOptions = null;
-      if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.cancelBuild === 'function') {
-        window.OriWorkspaceMap.cancelBuild();
-      }
+      this.workspaceCreatorClosed();
     });
 
     // Once the dialog has finished opening, its controls have real layout. A
@@ -11785,11 +11769,13 @@ const sessionManager = {
         (await call('GET', '/api/personal-assistant')).body?.personal_assistant || null,
       availability: async () => (await call('GET', `${base}/availability`)).body || null,
       create: body => call('POST', base, body),
+      fromInbox: body => call('POST', `${base}/from-inbox`, body),
       turn: (id, body) => call('POST', sessionURL(id, 'turns'), body),
       pause: (id, body) => call('POST', sessionURL(id, 'pause'), body),
       draft: (id, body) => call('PATCH', sessionURL(id, 'draft'), body),
       abandon: (id, body) => call('POST', sessionURL(id, 'abandon'), body || {}),
-      folderChoices: () => call('GET', `${base}/folder-choices`),
+      folderChoices: id =>
+        call('GET', `${base}/folder-choices${id ? '?build_id=' + encodeURIComponent(id) : ''}`),
       folder: (id, body) => call('POST', sessionURL(id, 'folder'), body),
       detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body),
       link: (id, body) => call('POST', sessionURL(id, 'link'), body),
@@ -11805,6 +11791,51 @@ const sessionManager = {
       janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body),
       janitorDefer: (id, body) => call('POST', sessionURL(id, 'janitor-defer'), body)
     };
+  },
+
+  workspaceCreatorClosed() {
+    const context = this.workspaceCreatorContext;
+    const placement = this.workspaceBuild?.placement;
+    const focused = document.activeElement;
+    const restoreFocus =
+      placement &&
+      (!focused ||
+        focused === document.body ||
+        placement.host?.contains?.(focused) ||
+        document.getElementById('addFolderModal')?.contains?.(focused));
+    void window.FileJanitorProtection?.creatorClosed?.().catch(error =>
+      this.showToast(error.message, 'warning')
+    );
+    this.abandonWorkspaceMapPlacement();
+    // Closing keeps an unaccepted server draft; explicit abandonment is a
+    // separate, versioned operation. Neither repeats accepted work.
+    this.flushWorkspaceBuildDraft?.();
+    this.teardownWorkspaceBuild();
+    this.discardWorkspaceTeamDraft();
+    if (this.workspaceCreatorContext?.groupTemplates?.pending)
+      void this.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate();
+    this.workspaceMapOrigin = false;
+    this.workspaceCreatorContext = null;
+    this.pendingWorkspaceCreatorOptions = null;
+    window.OriWorkspaceMap?.cancelBuild?.();
+    if (restoreFocus) {
+      const restored = context?.inboxPlacement?.onReturn?.();
+      if (
+        !restored &&
+        (document.activeElement === focused || document.activeElement === document.body)
+      )
+        document.getElementById('personalAssistantLauncher')?.focus();
+    }
+  },
+
+  closeInboxWorkspacePlacement() {
+    const modal = document.getElementById('addFolderModal');
+    if (this.workspaceBuild?.placement?.onMap || modal?.dataset?.suspendedForMapPlacement) {
+      // The modal was already hidden for map navigation. Use the normal close
+      // cleanup without showing it again (or waiting for a second hidden event).
+      if (modal?.dataset) delete modal.dataset.suspendedForMapPlacement;
+      this.workspaceCreatorClosed();
+    } else this.hideWorkspaceCreatorModal();
   },
 
   guardWorkspaceBuildClose(event) {
@@ -12253,6 +12284,7 @@ const sessionManager = {
   // manual wizard exactly as it was, with no pane and nothing else requested.
   async maybeStartWorkspaceBuild(context) {
     this.teardownWorkspaceBuild();
+    if (context?.inboxPlacement) return this.startInboxWorkspacePlacement(context);
     const revision = Number(context?.buildRevision) || 0;
     const api = window.WorkspaceCreatorState;
     const pane = this.workspaceBuildPane();
@@ -12293,6 +12325,638 @@ const sessionManager = {
     }
     await this.openWorkspaceBuildSession({ firstMessage: context.buildFirstMessage });
     return true;
+  },
+
+  // Both assistant entry labels transfer to this same canonical owner. The
+  // handoff saves only a draft; it is never preparation or a create fallback.
+  async openInboxWorkspacePlacement(
+    input,
+    { mode = 'suggested', current = () => true, invoker, onReturn } = {}
+  ) {
+    if (!current()) return null;
+    if (
+      this.workspaceCreatorContext ||
+      this.workspaceBuild ||
+      document.getElementById('addFolderModal')?.classList.contains('show')
+    )
+      throw new Error(
+        'Finish or close the current workspace editor first. Its choices are unchanged.'
+      );
+    const generation = this.workspaceCreatorGeneration;
+    const result = await this.workspaceBuildApi().fromInbox(input);
+    // An unrelated editor may have opened (and even closed) during the read.
+    // The saved handoff remains recoverable, but must not take over that UI.
+    if (!current() || this.workspaceCreatorGeneration !== generation) return null;
+    if (!result.ok)
+      throw new Error(
+        result.body?.error?.message ||
+          result.body?.message ||
+          (typeof result.body?.error === 'string' ? result.body.error : '') ||
+          'The draft could not be opened. Reopen the current source review; do not create another workspace.'
+      );
+    const session = result.body?.session;
+    if (
+      !session?.id ||
+      session.placement_source?.offer_id !== input.offer_id ||
+      session.placement_source?.target?.conversation_id !== input.conversation_id
+    )
+      throw new Error(
+        'The saved draft could not be verified. Reopen this source review to reconcile it.'
+      );
+    if (session.status === 'abandoned')
+      throw new Error('This draft was cancelled. Pick the folder again to request a new setup.');
+    window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
+    this.showAddWorkspaceModal({
+      entryPoint: 'folder_digest',
+      blueprint: 'file-janitor',
+      name: session.draft?.name,
+      fixedKind: 'workspace',
+      invoker,
+      inboxPlacement: { session, mode, sourceCurrent: current, onReturn }
+    });
+    return session;
+  },
+
+  async startInboxWorkspacePlacement(context) {
+    const session = context.inboxPlacement.session;
+    const build = this.newWorkspaceBuildState(context, null, { folders: true });
+    this.workspaceBuild = build;
+    build.placement = {
+      token: this.nextWorkspaceMapPlacementToken(),
+      mode: context.inboxPlacement.mode,
+      candidate: null
+    };
+    build.janitorMonitoring = session.placement_monitoring === true;
+    // Both assistant entries start with the full setup review. Map placement
+    // is a separate, explicit step after the current choices have been reviewed.
+    const ui =
+      window.OriAssistedWorkspacePlacement ||
+      (await import('/js/modules/assisted-workspace-placement.js'));
+    if (this.workspaceBuild !== build) return false;
+    const host = document.getElementById('assistedWorkspacePlacementPanel');
+    build.placement.host = host;
+    build.placement.home = host.parentElement;
+    build.placement.cards = ui.createPlacementCards(() => this.nextWorkspaceMapPlacementToken());
+    build.placement.approvedFolders = new Map();
+    build.placement.panel = ui.mountPlacementPanel(host, action => {
+      void this.actOnInboxWorkspacePlacement(action).catch(error => {
+        if (this.workspaceBuild !== build) return;
+        build.placement.message =
+          error.message || 'This draft could not be updated. Your choices are kept.';
+        this.syncWorkspaceBuildPresentation();
+      });
+    });
+    this.mountWorkspaceBuildPane();
+    await this.applyWorkspaceBuildSession(session, { resume: true });
+    if (this.workspaceBuild !== build) return false;
+    build.placement.ready = true;
+    this.syncWorkspaceBuildPresentation();
+    return true;
+  },
+
+  inboxWorkspacePlacementCards(build) {
+    const placement = build.placement;
+    if (!placement.cards) return [];
+    const session = build.session;
+    const observation = session?.folder?.observation;
+    if (observation?.id && session.folder_path) {
+      placement.approvedFolders.set(observation.id, {
+        kind: 'folder',
+        id: observation.id,
+        label: observation.folder,
+        detail: session.folder_path,
+        expires: Date.parse(session.folder_expires_at)
+      });
+    }
+    if (!placement.cardsOpen) return [];
+    const choices = this.existingAgentRoster
+      .filter(agent => this.isExistingAgentAttachable(agent))
+      .slice(0, 48)
+      .map(agent => ({
+        kind: 'agent',
+        id: agent.name,
+        label: agent.name,
+        detail: 'Saved agent · File Curator slot'
+      }));
+    for (const [id, folder] of placement.approvedFolders) {
+      if (!(folder.expires > Date.now())) placement.approvedFolders.delete(id);
+      else choices.push(folder);
+    }
+    return placement.cards.update(session.version, choices);
+  },
+
+  async actOnInboxWorkspaceCard({ action, key, slot }) {
+    const build = this.workspaceBuild;
+    const placement = build?.placement;
+    const refuse = () => {
+      placement.message =
+        'Use a current setup card and its matching slot. Files, paths and cards from another draft cannot be used.';
+      this.syncWorkspaceBuildPresentation();
+    };
+    if (!placement) return;
+    if (
+      action === 'card-reject' ||
+      !placement.cardsOpen ||
+      placement.dirty ||
+      build.draftInFlight ||
+      build.draftUser !== undefined ||
+      build.draftConflict ||
+      this.workspaceBuildFolderLocked(build) ||
+      build.session?.status !== 'open'
+    ) {
+      refuse();
+      return;
+    }
+    if (action === 'card-select') {
+      const card = this.inboxWorkspacePlacementCards(build).find(card => card.key === key);
+      if (!card) {
+        refuse();
+        return;
+      }
+      placement.selectedCard = key;
+      placement.message = `${card.label} selected. Use the ${card.kind === 'agent' ? 'File Curator' : 'Linked folder'} slot button to apply it to this draft.`;
+      this.syncWorkspaceBuildPresentation();
+      placement.host.querySelector(`[data-placement-slot-use="${card.kind}"]`)?.focus();
+      return;
+    }
+    const card = placement.cards?.resolve(key, slot, build.session.version);
+    if (action !== 'card-use' || !card) {
+      refuse();
+      return;
+    }
+    placement.selectedCard = '';
+    placement.message = '';
+    if (card.kind === 'agent') {
+      const agent = this.findExistingRosterAgent(card.id);
+      const draft = this.ensureWorkspaceTeamDraft();
+      const api = window.CreateWorkspaceTeamDraft;
+      const held = api?.roleFilledBy?.(draft, card.id);
+      if (
+        !this.isExistingAgentAttachable(agent) ||
+        draft?.plan?.data?.templateId !== 'file-janitor' ||
+        this.workspaceRoleLockReason('file-curator') ||
+        (held && held !== 'file-curator')
+      ) {
+        refuse();
+        return;
+      }
+      if (held !== 'file-curator') {
+        // The same normal setters as Clear/Assign, synchronously coalesced into
+        // one canonical draft write. No profile settings travel with the card.
+        this.clearWorkspaceRole('file-curator');
+        this.assignWorkspaceRole('file-curator', card.id);
+        await this.flushWorkspaceBuildDraft({ force: true });
+      }
+      if (this.workspaceBuild !== build) return;
+      placement.message =
+        build.draftError || build.draftConflict
+          ? 'The team choice needs attention before you can confirm.'
+          : `${card.id} fills File Curator. Review the updated permissions before confirming.`;
+    } else if (build.session.folder?.observation?.id !== card.id) {
+      await this.attachWorkspaceBuildFolder({ mode: 'held', observationID: card.id });
+      if (this.workspaceBuild !== build) return;
+    }
+    this.syncWorkspaceBuildPresentation();
+  },
+
+  syncInboxWorkspacePlacement() {
+    const build = this.workspaceBuild;
+    const placement = build?.placement;
+    if (!placement?.panel) return;
+    const { host } = placement;
+    if (placement.onMap)
+      window.OriWorkspaceMap?.updateDraftPlacementName?.(
+        placement.token,
+        build.session?.draft?.name
+      );
+    const choosingFolder = this.workspaceBuildPane()?.folderChooserOpen?.() || build.folderPending;
+    const editing = build.collapsed || choosingFolder;
+    // Map click/Enter is the confirmation after the full review. Do not show
+    // a second setup panel; reveal this host only for progress/result/recovery.
+    host.hidden =
+      editing ||
+      (placement.onMap &&
+        !build.acceptedPreparation &&
+        !build.preparationUncertain &&
+        !placement.result);
+    for (const id of [
+      'workspaceBuildDraftSummary',
+      'workspaceBuildFolderReview',
+      'workspaceBuildCreationReview'
+    ]) {
+      const element = document.getElementById(id);
+      if (element) element.hidden = true;
+    }
+    const pane = document.getElementById('workspaceBuildPane');
+    if (pane) pane.hidden = !choosingFolder;
+    const back = document.getElementById('workspaceBuildReturnToReview');
+    if (back) back.hidden = !build.collapsed;
+    // Team editing is a subflow of this proposal, not a second Create button.
+    for (const id of ['wizardBackBtn', 'wizardNextBtn', 'createFolderBtn']) {
+      const button = document.getElementById(id);
+      if (button) button.hidden = true;
+    }
+    // The draft response is adopted before its in-flight promise settles.
+    // Do not briefly replace/disable the focused next field or button in that
+    // interval: native Tab has already moved there. The finally-render uses
+    // the same canonical response without interrupting keyboard navigation.
+    if (build.draftInFlight && !build.draftError && !build.draftConflict) return;
+    if (placement.dirty && host.contains(document.activeElement)) return;
+    const review =
+      this.workspaceBuildPreparationCurrent() ||
+      build.acceptedPreparation ||
+      build.preparationUncertain
+        ? build.janitorReview
+        : null;
+    const accepted = Boolean(build.acceptedPreparation || build.preparationUncertain);
+    const cards = this.inboxWorkspacePlacementCards(build);
+    const closed = build.session?.status !== 'open' && !accepted;
+    const draft = build.draftConflict
+      ? this.workspaceBuildDraftBody(true).draft
+      : build.session?.draft;
+    placement.panel.update({
+      conflict: Boolean(build.draftConflict),
+      closed,
+      cardsAvailable: Boolean(placement.cards),
+      cardsOpen: placement.cardsOpen,
+      cards,
+      selectedCard: cards.find(card => card.key === placement.selectedCard),
+      draft,
+      team: (draft?.role_staffing || []).map(role => ({
+        name: role.name,
+        action: role.mode
+      })),
+      folder: {
+        name: build.session?.folder?.observation?.folder,
+        path: build.session?.folder_path
+      },
+      review,
+      monitoring: build.janitorMonitoring,
+      accepted,
+      busy: Boolean(
+        build.preparationBusy ||
+        build.preparationReading ||
+        build.busy ||
+        build.draftInFlight ||
+        build.folderPending ||
+        placement.saving
+      ),
+      candidate: placement.candidate,
+      onMap: placement.onMap,
+      automatic: placement.mode !== 'map',
+      canPlace:
+        placement.ready &&
+        !placement.dirty &&
+        !editing &&
+        !accepted &&
+        !closed &&
+        !build.draftConflict &&
+        Boolean(review),
+      canConfirm:
+        placement.ready &&
+        !placement.dirty &&
+        !editing &&
+        (accepted || Boolean(review)) &&
+        (placement.onMap ? Boolean(placement.candidate) : placement.mode !== 'map'),
+      canRefresh:
+        !accepted &&
+        !closed &&
+        !build.draftConflict &&
+        !review &&
+        !build.janitorReviewRequest &&
+        !build.draftInFlight &&
+        !placement.dirty,
+      message: build.draftConflict
+        ? `This draft changed in another tab. Local edits have not replaced the saved draft. Load the saved draft to review its current choices. ${placement.message || ''}`
+        : closed
+          ? 'This draft was closed elsewhere. It cannot create anything; close this editor and return to the assistant.'
+          : placement.message ||
+            build.preparationMessage ||
+            'Review this setup, then choose its position. Nothing is created until Create workspace & scan.',
+      result: placement.result,
+      positionFailed: placement.positionFailed,
+      resultName: placement.resultName,
+      members: placement.members,
+      reconciliationRequired: placement.reconciliationRequired,
+      recoveryRoute: placement.recoveryRoute,
+      sourceReceiptPending: placement.sourceReceiptPending
+    });
+  },
+
+  async actOnInboxWorkspacePlacement({ action, field, value, key, slot }) {
+    const build = this.workspaceBuild;
+    const placement = build?.placement;
+    if (!placement || build.preparationBusy || build.preparationReading || placement.saving) return;
+    if (action === 'read-status') return this.readInboxWorkspacePreparation(build);
+    if (action.startsWith('card-')) return this.actOnInboxWorkspaceCard({ action, key, slot });
+    if (action === 'cards') {
+      if (
+        build.acceptedPreparation ||
+        build.preparationUncertain ||
+        placement.dirty ||
+        build.draftInFlight
+      )
+        return;
+      placement.cardsOpen = !placement.cardsOpen;
+      placement.selectedCard = '';
+      if (placement.cardsOpen && !this.existingAgentRosterLoaded)
+        await this.loadExistingAgentRoster();
+      if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
+      return;
+    }
+    if (action === 'reload-draft' && build.draftConflict) {
+      // Changed material choices must be seen in the full review before placing.
+      if (placement.onMap) this.returnInboxWorkspaceToReview();
+      await this.reloadInboxWorkspaceDraft(build);
+      return;
+    }
+    if (
+      action !== 'back' &&
+      (build.draftConflict ||
+        (build.session?.status !== 'open' &&
+          !build.acceptedPreparation &&
+          !build.preparationUncertain))
+    )
+      return;
+    if (action === 'dirty') {
+      placement.dirty = true;
+      this.noteWorkspaceBuildIntent();
+      const status = placement.host.querySelector('[role="status"]');
+      if (status)
+        status.textContent = 'Your edits need a fresh permission review before confirmation.';
+      return;
+    }
+    if (action === 'edit') {
+      if (build.acceptedPreparation || build.preparationUncertain) return;
+      placement.dirty = false;
+      placement.message = '';
+      this.noteWorkspaceBuildIntent();
+      if (field === 'monitoring') build.janitorMonitoring = value === true;
+      else {
+        const input = document.getElementById(
+          field === 'name' ? 'folderNameInput' : 'folderGoalInput'
+        );
+        if (!input || !['name', 'mission'].includes(field)) return;
+        input.value = value;
+        if (field === 'mission') input.dataset.goalEdited = '1';
+        this.markWorkspaceBuildEdited(field === 'name' ? 'name' : 'goal');
+      }
+      this.scheduleWorkspaceBuildDraft({ user: true });
+      await this.flushWorkspaceBuildDraft({ force: true });
+    } else if (action === 'confirm') {
+      if (
+        placement.dirty ||
+        (!build.acceptedPreparation &&
+          !build.preparationUncertain &&
+          (placement.onMap ? !placement.candidate : placement.mode === 'map'))
+      )
+        return;
+      await this.confirmWorkspaceBuildPreparation();
+    } else if (action === 'review') {
+      placement.message = '';
+      build.janitorReviewFailureKey = '';
+      await this.reviewWorkspaceBuildPreparation();
+    } else if (action === 'place') {
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build) return;
+      this.placeInboxWorkspaceDraft();
+    } else if (action === 'suggested') {
+      if (build.acceptedPreparation || build.preparationUncertain) return;
+      placement.mode = 'suggested';
+      placement.candidate = null;
+      placement.message = 'Ori will use automatic map layout. Your setup choices are unchanged.';
+      this.returnInboxWorkspaceToReview();
+    } else if (action === 'back') {
+      if (!build.acceptedPreparation && !build.preparationUncertain)
+        await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build) return;
+      if (placement.onMap && !placement.result) this.returnInboxWorkspaceToReview();
+      else this.closeInboxWorkspacePlacement();
+    } else if (action === 'agent' || action === 'folder') {
+      if (build.acceptedPreparation || build.preparationUncertain) return;
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build || build.draftError || build.draftConflict) return;
+      this.returnInboxWorkspaceToReview();
+      if (action === 'agent') {
+        this.collapseWorkspaceBuild({ focus: false });
+        this.goToWizardStep(3);
+      } else {
+        build.returnAfterFolderChoice = true;
+        void this.openWorkspaceBuildFolderChooser();
+      }
+    } else if (action === 'cancel') {
+      if (build.acceptedPreparation || build.preparationUncertain) return;
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build || build.draftError || build.draftConflict) return;
+      const result = await this.workspaceBuildApi().abandon(build.session.id, {
+        version: build.session.version
+      });
+      if (this.workspaceBuild !== build) return;
+      if (!result.ok || result.body?.session?.status !== 'abandoned')
+        throw new Error(
+          'The draft could not be cancelled. Read its current state before trying again.'
+        );
+      build.session = result.body.session;
+      this.closeInboxWorkspacePlacement();
+    } else if (action === 'open' && placement.route) {
+      window.location.href = placement.route;
+    } else if (action === 'open-settings' && placement.recoveryRoute) {
+      window.location.href = placement.recoveryRoute;
+    } else if (action === 'retry-position' && placement.workspaceID && placement.positionFailed) {
+      placement.saving = true;
+      this.syncWorkspaceBuildPresentation();
+      let saved = false;
+      try {
+        saved =
+          (await window.OriWorkspaceMap?.retryPlacement?.(
+            placement.workspaceID,
+            placement.candidate
+          )) === true;
+      } catch (_) {
+        /* The workspace survives a failed layout-only retry. */
+      }
+      if (this.workspaceBuild !== build) return;
+      placement.saving = false;
+      placement.positionFailed = !saved;
+      placement.message = saved
+        ? 'The requested map position is now saved.'
+        : 'Setup is complete; the requested position is still not saved. Open Map and retry when that point is available. Only layout was retried.';
+    }
+    if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
+  },
+
+  async reloadInboxWorkspaceDraft(build) {
+    if (this.workspaceBuild !== build || build.preparationBusy || build.preparationUncertain)
+      return;
+    const placement = build.placement;
+    placement.saving = true;
+    this.syncWorkspaceBuildPresentation();
+    try {
+      const result = await this.readCurrentWorkspaceBuild(build);
+      if (this.workspaceBuild !== build) return;
+      const session = result?.body?.session;
+      if (!result?.ok || session?.id !== build.session.id)
+        throw new Error('The saved draft could not be read. Your local edits are still kept.');
+      build.draftConflict = false;
+      build.draftError = false;
+      build.draftUser = undefined;
+      build.lastDraftKey = '';
+      build.janitorMonitoring = session.placement_monitoring === true;
+      placement.dirty = false;
+      placement.message = 'Loaded the saved draft. Review its current choices before confirming.';
+      await this.applyWorkspaceBuildSession(session, { resume: true });
+    } finally {
+      if (this.workspaceBuild === build) {
+        placement.saving = false;
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
+  },
+
+  placeInboxWorkspaceDraft() {
+    const build = this.workspaceBuild;
+    const placement = build?.placement;
+    if (
+      !placement?.ready ||
+      placement.onMap ||
+      placement.dirty ||
+      build.draftInFlight ||
+      build.draftError ||
+      build.draftConflict ||
+      build.session?.status !== 'open' ||
+      build.acceptedPreparation ||
+      build.preparationUncertain ||
+      build.preparationBusy ||
+      !this.workspaceBuildPreparationCurrent()
+    )
+      return;
+    const mapVisible = () => {
+      const viewport = document.querySelector('[data-ws-map-viewport]');
+      return Boolean(viewport?.getClientRects?.().length) && window.innerWidth >= 980;
+    };
+    if (!mapVisible()) {
+      placement.message =
+        'Use this compact review, or switch the workspace view to Map on a wider screen. Nothing was created.';
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
+    const modal = document.getElementById('addFolderModal');
+    modal.dataset.suspendedForMapPlacement = placement.token;
+    const activate = () => {
+      if (this.workspaceBuild !== build || build.session.status === 'abandoned' || build.closeReady)
+        return;
+      if (
+        build.session.status !== 'open' ||
+        build.acceptedPreparation ||
+        build.preparationUncertain ||
+        build.preparationBusy ||
+        !this.workspaceBuildPreparationCurrent()
+      ) {
+        this.returnInboxWorkspaceToReview();
+        return;
+      }
+      if (!mapVisible()) {
+        placement.message =
+          'Map view changed. Your setup choices and requested position are kept here.';
+        this.returnInboxWorkspaceToReview();
+        return;
+      }
+      const editable = () =>
+        this.workspaceBuild === build &&
+        placement.onMap &&
+        build.session.status === 'open' &&
+        !build.preparationBusy &&
+        !build.acceptedPreparation &&
+        !build.preparationUncertain &&
+        !build.closeReady;
+      const started = window.OriWorkspaceMap?.beginPlacement?.({
+        token: placement.token,
+        mode: 'reviewed-setup',
+        origin: {},
+        initialCandidate: placement.candidate,
+        preview: {
+          name: build.session.draft.name,
+          blueprintID: 'file-janitor',
+          blueprintBuiltin: true
+        },
+        onCandidate: (token, point) => {
+          if (!editable() || token !== placement.token) return;
+          // Hover/nudging only remembers geometry. Map validates the clicked
+          // point again; this is neither consent nor a material draft edit.
+          placement.candidate = { x: point.x, y: point.y };
+        },
+        onConfirm: async (token, point) => {
+          if (!editable() || token !== placement.token) return false;
+          if (
+            placement.dirty ||
+            build.draftInFlight ||
+            build.draftConflict ||
+            build.draftError ||
+            !this.workspaceBuildPreparationCurrent()
+          ) {
+            placement.message = 'Review the current setup before placing it. Nothing was created.';
+            this.returnInboxWorkspaceToReview();
+            return false;
+          }
+          placement.candidate = { x: point.x, y: point.y };
+          await this.confirmWorkspaceBuildPreparation();
+          if (this.workspaceBuild !== build) return true;
+          if (!build.acceptedPreparation && !build.preparationUncertain && !placement.result) {
+            // Definite refusal requires review again, never another click
+            // against silently refreshed terms. Uncertain work stays locked.
+            placement.message = build.preparationMessage || 'Review the setup before trying again.';
+            this.returnInboxWorkspaceToReview();
+            return false;
+          }
+          const active = document.activeElement;
+          if (
+            placement.onMap &&
+            (active === document.body ||
+              active?.matches?.('[data-ws-map-viewport]') ||
+              placement.host.contains(active))
+          )
+            placement.host.querySelector('[data-placement-focus="status"]')?.focus();
+          return true;
+        },
+        onBack: token => {
+          if (this.workspaceBuild === build && token === placement.token)
+            this.returnInboxWorkspaceToReview();
+        }
+      });
+      if (!started) {
+        placement.message = 'Map placement is unavailable. Your setup choices are kept here.';
+        this.returnInboxWorkspaceToReview();
+        return;
+      }
+      placement.mode = 'map';
+      placement.onMap = true;
+      placement.message = '';
+      placement.host.classList.add('assisted-placement-host--map');
+      document.body.append(placement.host);
+      this.syncWorkspaceBuildPresentation();
+    };
+    modal.addEventListener('hidden.bs.modal', activate, { once: true });
+    this.hideWorkspaceCreatorModal();
+  },
+
+  returnInboxWorkspaceToReview() {
+    const build = this.workspaceBuild;
+    const placement = build?.placement;
+    if (!placement) return;
+    window.OriWorkspaceMap?.endPlacement?.(placement.token);
+    placement.onMap = false;
+    placement.host.classList.remove('assisted-placement-host--map');
+    placement.home.insertBefore(placement.host, document.getElementById('workspaceBuildPane'));
+    const modal = document.getElementById('addFolderModal');
+    if (modal.dataset.suspendedForMapPlacement) {
+      delete modal.dataset.suspendedForMapPlacement;
+      modal.dataset.resumingFromMapPlacement = placement.token;
+      this.deferWorkspaceMapPlacement(() => {
+        if (this.workspaceBuild === build && build.session.status !== 'abandoned')
+          bootstrap.Modal.getOrCreateInstance(modal).show();
+      });
+    }
+    this.syncWorkspaceBuildPresentation();
   },
 
   mountWorkspaceBuildPane() {
@@ -12619,8 +13283,14 @@ const sessionManager = {
   sendWorkspaceBuildRestaff(build) {
     if (this.workspaceBuild !== build || !this.workspaceBuildAssisted()) return undefined;
     build.restaffPending = false;
-    if (build.session?.folder) return undefined;
+    if (build.session?.folder || build.session?.placement_source) return undefined;
     return this.sendWorkspaceBuildTurn({ text: '(I changed the blueprint)', auto: true });
+  },
+
+  readCurrentWorkspaceBuild(build) {
+    return build.session?.placement_source
+      ? this.workspaceBuildApi().read(build.session.id)
+      : this.workspaceBuildApi().create({ entry_point: build.context.entryPoint });
   },
 
   async reloadWorkspaceBuildSession({ revision = this.workspaceBuildRevision() } = {}) {
@@ -12628,7 +13298,7 @@ const sessionManager = {
     if (!build) return;
     let result;
     try {
-      result = await this.workspaceBuildApi().create({ entry_point: build.context.entryPoint });
+      result = await this.readCurrentWorkspaceBuild(build);
     } catch (_) {
       result = null;
     }
@@ -12697,6 +13367,7 @@ const sessionManager = {
       };
       pane.applySession(session);
       this.syncWorkspaceBuildPresentation();
+      if (build.placement) await this.readInboxWorkspacePreparation(build);
       return;
     }
     this.rememberWorkspaceBuildSession(session);
@@ -12754,6 +13425,22 @@ const sessionManager = {
       await this.restoreWorkspaceBuildTeam(session.team_state, session.team_patch, name, {
         current
       });
+    } else if (session.placement_source && Array.isArray(session.draft?.role_staffing)) {
+      await this.applyWorkspaceBuildTeamPatch(
+        {
+          mode: 'staffed',
+          roles: session.draft.role_staffing.map(role => ({
+            role_id: role.role_id,
+            mode: role.mode,
+            agent_name: role.name,
+            provider: role.provider,
+            model: role.model,
+            system_prompt: role.system_prompt
+          }))
+        },
+        name,
+        { animate: false, current }
+      );
     } else if (session.team_patch && (resume || applied.includes('team'))) {
       await this.applyWorkspaceBuildTeamPatch(session.team_patch, name, {
         animate: !resume,
@@ -12962,6 +13649,7 @@ const sessionManager = {
   // the wizard, as before.
   reviewOrEditWorkspaceBuild() {
     const build = this.workspaceBuild;
+    if (build?.placement && build.collapsed) return this.expandWorkspaceBuild();
     if (this.workspaceBuildFolderReviewAvailable()) {
       build.refining = false;
       build.planReviewOpen = true;
@@ -13611,6 +14299,7 @@ const sessionManager = {
         ? `${groupLine} · Workspace: ${name || 'not named yet'} · ${step}${attached}`
         : `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${attached}`;
     }
+    this.syncInboxWorkspacePlacement();
   },
 
   // workspaceBuildGroupLine names the group the chosen blueprint lives in, from
@@ -13639,6 +14328,14 @@ const sessionManager = {
     void this.pauseWorkspaceBuildSuggestion();
     if (this.workspaceBuild?.janitorReviewTimer)
       clearTimeout(this.workspaceBuild.janitorReviewTimer);
+    const placement = this.workspaceBuild?.placement;
+    if (placement?.host) {
+      window.OriWorkspaceMap?.endPlacement?.(placement.token);
+      placement.host.classList.remove('assisted-placement-host--map');
+      placement.home.insertBefore(placement.host, document.getElementById('workspaceBuildPane'));
+      placement.panel?.destroy();
+      placement.host.hidden = true;
+    }
     this.workspaceBuild = null;
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = null;
@@ -14202,6 +14899,8 @@ const sessionManager = {
     }
     const teamState = window.CreateWorkspaceTeamDraft?.serialize?.(this.teamDraft) || null;
     const body = { draft, version: Number(this.workspaceBuild?.session?.version) || 0 };
+    if (this.workspaceBuild?.session?.placement_source)
+      body.monitoring = this.workspaceBuild.janitorMonitoring === true;
     if (teamState) body.team_state = teamState;
     if (this.wizardStep >= 1 && this.wizardStep <= 4) body.step = this.wizardStep;
     if (sync) body.sync = true;
@@ -14240,6 +14939,7 @@ const sessionManager = {
     this.adoptWorkspaceBuildSession(session);
     build.draftConflict = true;
     build.draftError = true;
+    if (build.placement) build.placement.message = '';
     this.workspaceBuildPane()?.showLine(
       'This draft changed in another tab. Your edits are kept here. Review them before saving your draft over the newer version.',
       { chips: [{ id: 'sync_again', label: 'Save my draft' }] }
@@ -14271,7 +14971,8 @@ const sessionManager = {
       draft: body.draft,
       team: body.team_state,
       step: body.step,
-      edited: body.edited_fields
+      edited: body.edited_fields,
+      monitoring: body.monitoring
     });
     if (key === build.lastDraftKey) {
       this.syncWorkspaceBuildPresentation();
@@ -14299,9 +15000,7 @@ const sessionManager = {
       }
       if (this.workspaceBuild !== build) return;
       if (result?.status === 409 && result.body?.code === 'version') {
-        const reloaded = await this.workspaceBuildApi()
-          .create({ entry_point: build.context.entryPoint })
-          .catch(() => null);
+        const reloaded = await this.readCurrentWorkspaceBuild(build).catch(() => null);
         if (this.workspaceBuild !== build) return;
         if (!reloaded?.body?.session) {
           fail();
@@ -14496,7 +15195,9 @@ const sessionManager = {
     if (!pane.openFolderChooser()) return;
     let result;
     try {
-      result = await this.workspaceBuildApi().folderChoices();
+      result = await this.workspaceBuildApi().folderChoices(
+        build.session.placement_source ? build.session.id : ''
+      );
     } catch (_) {
       result = { ok: false, body: {} };
     }
@@ -14534,6 +15235,8 @@ const sessionManager = {
       body = { mode, chip };
     } else if (mode === 'picker') {
       body = { mode };
+    } else if (mode === 'held' && build.placement) {
+      body = { mode, observation_id: detail.observationID };
     } else if (mode !== 'path') {
       return;
     }
@@ -14599,10 +15302,30 @@ const sessionManager = {
       }
       const session = result?.body?.session || null;
       if (!result?.ok || !session) {
-        pane.showLine(
+        const message =
           String(result?.body?.error || '').trim() ||
-            'That folder could not be used. Try Add folder again; your draft is unchanged.'
-        );
+          'That folder could not be used. Try Add folder again; your draft is unchanged.';
+        if (build.placement) {
+          note = message;
+          build.placement.message = message;
+          // Reserving/releasing a picker advances the attachment version even
+          // when a selection is refused. Recover that version, not a new pick.
+          const latest = await this.workspaceBuildApi()
+            .read(build.session.id)
+            .catch(() => null);
+          if (this.workspaceBuild !== build) return;
+          const saved = latest?.body?.session;
+          if (latest?.ok && saved?.id === build.session.id) {
+            const sameChoices =
+              JSON.stringify(saved.draft) === JSON.stringify(build.session.draft) &&
+              JSON.stringify(saved.team_state) === JSON.stringify(build.session.team_state) &&
+              saved.folder?.observation?.id === build.session.folder?.observation?.id &&
+              Boolean(saved.placement_monitoring) === Boolean(build.session.placement_monitoring);
+            if (sameChoices && saved.status === 'open') this.adoptWorkspaceBuildSession(saved);
+            else this.adoptWorkspaceBuildConflict(saved);
+          }
+        }
+        pane.showLine(message);
         return;
       }
       if (Number(session.version) < Number(build.session?.version)) return;
@@ -14618,6 +15341,7 @@ const sessionManager = {
         build.attachmentRequestID = null;
         this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
         if (attaching) pane.setFolderBusy(false, note);
+        if (build.placement && note) build.placement.message = note;
         const active = document.activeElement;
         const focus =
           active === focusAtPick ||
@@ -14628,7 +15352,8 @@ const sessionManager = {
           this.finishWorkspaceBuildFolderChoice(build, { cancelled, focus });
         if (cancelled && !returned && focus && this.workspaceBuildAssisted())
           pane.closeFolderChooser?.({ focus: true });
-        if (attached) await this.suggestWorkspaceBuildFolder();
+        if (attached && !build.session.placement_source) await this.suggestWorkspaceBuildFolder();
+        else if (attached) this.syncWorkspaceBuildPresentation();
       }
     }
   },
@@ -15276,6 +16001,7 @@ const sessionManager = {
       build.closeReady ||
       build.resumeLine ||
       build.groupSwitchLine ||
+      build.placement?.dirty ||
       this.workspaceBuildFolderSelectionExpired(build) ||
       build.busy ||
       build.preparationBusy ||
@@ -15385,9 +16111,7 @@ const sessionManager = {
         return;
       if (!result?.ok) {
         if (result?.body?.code === 'review_changed') {
-          const latest = await this.workspaceBuildApi().create({
-            entry_point: build.context.entryPoint
-          });
+          const latest = await this.readCurrentWorkspaceBuild(build);
           if (this.workspaceBuild !== build || build.closing) return;
           if (
             latest?.body?.session?.id === build.session.id &&
@@ -15419,7 +16143,9 @@ const sessionManager = {
       build.acceptedPreparation = review.state === 'accepted';
       build.preparationMessage = build.acceptedPreparation
         ? 'An earlier confirmation was saved. Resume that exact workspace.'
-        : 'Review these permissions. Only the Create & scan folder button starts this work.';
+        : build.placement
+          ? 'Review these permissions. Only Create workspace & scan starts this work.'
+          : 'Review these permissions. Only the Create & scan folder button starts this work.';
     } catch (error) {
       if (this.workspaceBuild === build && request.key === this.workspaceBuildPreparationKey()) {
         build.janitorReviewFailureKey = request.key;
@@ -15433,6 +16159,110 @@ const sessionManager = {
     }
   },
 
+  workspaceBuildPreparedOutcome(body) {
+    const id = body?.workspace_id;
+    const slug = body?.folder_slug;
+    const preparation = body?.preparation;
+    const receipt = preparation?.result;
+    if (
+      typeof id !== 'string' ||
+      !id ||
+      typeof slug !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]*$/.test(slug) ||
+      preparation?.workspace_id !== id ||
+      !preparation.operation_id ||
+      receipt?.operation_id !== `${preparation.operation_id}:scan` ||
+      !receipt.root_id ||
+      receipt.privacy_mode !== 'metadata_only' ||
+      typeof receipt.completed_at !== 'string' ||
+      receipt.completed_at.startsWith('0001-') ||
+      !Number.isFinite(Date.parse(receipt.completed_at)) ||
+      !Number.isSafeInteger(receipt.eligible_count) ||
+      receipt.eligible_count < 0 ||
+      !Number.isSafeInteger(receipt.ineligible_count) ||
+      receipt.ineligible_count < 0 ||
+      !(
+        (receipt.outcome === 'batch' && receipt.batch_id) ||
+        (receipt.outcome === 'no_eligible' && receipt.eligible_count === 0 && !receipt.batch_id)
+      )
+    )
+      return null;
+    const params = new URLSearchParams({
+      panel: 'file-janitor',
+      tab: 'review',
+      preparation: preparation.operation_id
+    });
+    if (receipt.batch_id) params.set('batch_id', receipt.batch_id);
+    return { id, receipt, route: `/workspaces/${slug}?${params}` };
+  },
+
+  adoptInboxWorkspaceObservedResult(build, review) {
+    if (this.workspaceBuild !== build || !build.placement) return false;
+    const placement = build.placement;
+    const outcome = review?.outcome;
+    placement.recoveryRoute =
+      outcome?.workspace_id === review?.workspace_id &&
+      typeof outcome?.folder_slug === 'string' &&
+      /^[a-z0-9][a-z0-9-]*$/.test(outcome.folder_slug)
+        ? `/workspaces/${outcome.folder_slug}?panel=file-janitor&tab=review`
+        : '';
+    placement.sourceReceiptPending = outcome?.source_receipt_pending === true;
+    placement.reconciliationRequired = outcome?.state === 'reconciliation_required';
+    if (outcome?.state !== 'prepared') {
+      placement.message =
+        outcome?.message || 'The saved outcome is not yet available. No work was continued.';
+      return false;
+    }
+    const proven = this.workspaceBuildPreparedOutcome(outcome);
+    if (!proven || proven.id !== review.workspace_id) {
+      placement.reconciliationRequired = true;
+      placement.message =
+        'The saved result could not be verified. Read its status again; do not create another workspace.';
+      return false;
+    }
+    if (!placement.result && placement.candidate) placement.positionFailed = true;
+    placement.workspaceID = proven.id;
+    placement.result = proven.receipt;
+    placement.route = proven.route;
+    placement.resultName = outcome.name;
+    placement.members = outcome.members;
+    window.OriWorkspaceMap?.endPlacement?.(placement.token);
+    this.notifyWorkspacesChanged({ workspaceId: proven.id });
+    placement.message = placement.positionFailed
+      ? 'Setup is complete. The requested position has not been verified; retry position only. No setup work was continued.'
+      : 'The original filing review is saved. No setup or map position was changed by this status read.';
+    return true;
+  },
+
+  async readInboxWorkspacePreparation(build = this.workspaceBuild) {
+    if (!build?.placement || build.preparationReading || this.workspaceBuild !== build) return;
+    const review = build.janitorReview;
+    if (!review?.review_revision) return;
+    build.preparationReading = true;
+    this.syncWorkspaceBuildPresentation();
+    try {
+      const result = await this.workspaceBuildApi().janitorReview(build.session.id, {
+        version: review.version,
+        monitoring: Boolean(review.monitoring)
+      });
+      if (this.workspaceBuild !== build) return;
+      if (!result?.ok || result.body?.review?.state !== 'accepted')
+        throw new Error(
+          'The saved confirmation could not be read. Its outcome is still uncertain; nothing was continued.'
+        );
+      build.acceptedPreparation = true;
+      build.janitorReview = result.body.review;
+      this.adoptInboxWorkspaceObservedResult(build, result.body.review);
+    } catch (error) {
+      if (this.workspaceBuild === build) build.placement.message = error.message;
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.preparationReading = false;
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
+  },
+
   async confirmWorkspaceBuildPreparation() {
     const build = this.workspaceBuild;
     const review = build?.janitorReview;
@@ -15440,6 +16270,8 @@ const sessionManager = {
       !build ||
       !review?.review_revision ||
       build.busy ||
+      build.preparationReading ||
+      build.placement?.reconciliationRequired ||
       build.preparationBusy ||
       this.isCreatingFolder
     )
@@ -15479,6 +16311,8 @@ const sessionManager = {
     // Freeze this exact request even when both POST and recovery reads fail.
     build.preparationUncertain = true;
     build.preparationBusy = true;
+    if (build.placement)
+      window.OriWorkspaceMap?.setDraftPlacementPending?.(build.placement.token, true);
     build.preparationMessage =
       alreadyUncertain || build.acceptedPreparation
         ? 'Checking your previous confirmation and continuing its saved setup…'
@@ -15514,42 +16348,60 @@ const sessionManager = {
             'Preparation stopped. Keep this build; do not create another workspace.'
         );
       }
-      const receipt = result.body?.preparation?.result;
-      const id = result.body?.workspace_id;
-      const slug = result.body?.folder_slug;
-      if (
-        typeof slug !== 'string' ||
-        !slug ||
-        typeof id !== 'string' ||
-        !id ||
-        result.body?.preparation?.workspace_id !== id ||
-        !receipt?.operation_id ||
-        !receipt.root_id ||
-        receipt.privacy_mode !== 'metadata_only' ||
-        typeof receipt.completed_at !== 'string' ||
-        receipt.completed_at.startsWith('0001-') ||
-        !Number.isSafeInteger(receipt.eligible_count) ||
-        receipt.eligible_count < 0 ||
-        !Number.isSafeInteger(receipt.ineligible_count) ||
-        receipt.ineligible_count < 0 ||
-        !(
-          (receipt.outcome === 'batch' && receipt.batch_id) ||
-          (receipt.outcome === 'no_eligible' && receipt.eligible_count === 0 && !receipt.batch_id)
-        )
-      ) {
+      const proven = this.workspaceBuildPreparedOutcome(result.body);
+      if (!proven) {
         throw new Error(
           'The preparation response was incomplete. Checking its accepted identity; do not create another workspace.'
         );
       }
+      const { id, receipt, route } = proven;
       build.acceptedPreparation = true;
       this.notifyWorkspacesChanged({ workspaceId: id });
-      const params = new URLSearchParams({ panel: 'file-janitor', tab: 'review' });
-      if (result.body.preparation?.operation_id)
-        params.set('preparation', result.body.preparation.operation_id);
-      const batch = result.body.preparation?.result?.batch_id;
-      if (batch) params.set('batch_id', batch);
+      if (build.placement) {
+        const placement = build.placement;
+        placement.workspaceID = id;
+        placement.sourceReceiptPending = result.body.outcome?.source_receipt_pending === true;
+        placement.resultName = result.body.outcome?.name;
+        placement.members = result.body.outcome?.members;
+        placement.result = receipt;
+        placement.route = route;
+        if (placement.candidate) {
+          placement.saving = true;
+          let position;
+          try {
+            if (!placement.onMap)
+              window.OriWorkspaceMap?.beginPlacement?.({
+                token: placement.token,
+                mode: 'draft',
+                origin: {},
+                initialCandidate: placement.candidate,
+                preview: {
+                  name: build.session.draft?.name,
+                  blueprintID: 'file-janitor',
+                  blueprintBuiltin: true
+                }
+              });
+            position = await window.OriWorkspaceMap?.commitPlacement?.(id, {
+              token: placement.token,
+              candidate: placement.candidate
+            });
+          } catch (_) {
+            /* Setup already succeeded. Only position can be retried. */
+          }
+          if (this.workspaceBuild !== build) return;
+          placement.saving = false;
+          placement.positionFailed = position?.saved !== true;
+        }
+        placement.message = placement.positionFailed
+          ? 'Setup is complete, but the requested position was not saved. Retry position only; do not create another workspace.'
+          : placement.candidate
+            ? 'Setup is complete and the requested position is saved.'
+            : 'Setup is complete. Ori uses automatic map layout.';
+        this.syncWorkspaceBuildPresentation();
+        return;
+      }
       bootstrap.Modal.getInstance(document.getElementById('addFolderModal'))?.hide();
-      window.location.href = '/workspaces/' + encodeURIComponent(slug) + '?' + params.toString();
+      window.location.href = route;
     } catch (error) {
       build.preparationMessage =
         error.message || 'The response was lost. Checking the accepted operation…';
@@ -15576,6 +16428,7 @@ const sessionManager = {
             ? 'The connection was interrupted.'
             : String(error.message || 'The response was lost.').replace(/([^.?!])$/, '$1.');
           build.preparationMessage = `${detail} Your confirmation is saved. Retry preparation to check its result; no second workspace will be created.`;
+          if (build.placement) this.adoptInboxWorkspaceObservedResult(build, recovered.body.review);
         } else if (
           this.workspaceBuild === build &&
           refusedBeforeAcceptance &&
@@ -15599,9 +16452,7 @@ const sessionManager = {
           build.janitorReview = null;
           build.janitorReviewFailureKey = this.workspaceBuildPreparationKey();
           if (recovered.body?.code === 'review_changed') {
-            const latest = await this.workspaceBuildApi().create({
-              entry_point: build.context.entryPoint
-            });
+            const latest = await this.readCurrentWorkspaceBuild(build);
             if (this.workspaceBuild === build && latest?.body?.session?.id === build.session.id)
               this.adoptWorkspaceBuildConflict(latest.body.session);
           }
@@ -15612,6 +16463,8 @@ const sessionManager = {
     } finally {
       if (this.workspaceBuild === build) {
         build.preparationBusy = false;
+        if (build.placement && !build.acceptedPreparation && !build.preparationUncertain)
+          window.OriWorkspaceMap?.setDraftPlacementPending?.(build.placement.token, false);
         this.workspaceBuildPane()?.setBusy?.(false);
         if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = false;
         this.syncWorkspaceBuildPresentation();
@@ -17488,7 +18341,9 @@ const sessionManager = {
       const context = this.workspaceCreatorContext;
       const hideWhenShown = () => {
         // A prior dismissal must never close a newer creator generation.
-        if (this.workspaceCreatorContext === context) window.setTimeout(() => instance.hide(), 0);
+        window.setTimeout(() => {
+          if (this.workspaceCreatorContext === context) instance.hide();
+        }, 0);
       };
       element.addEventListener('shown.bs.modal', hideWhenShown, { once: true });
       element.addEventListener(

@@ -76,8 +76,8 @@ func (h *Handler) refuseClaimedBuildCreate(ctx context.Context, id string) error
 	if err != nil {
 		return err
 	}
-	if build := doc.Session(id); build != nil && build.Preparation != nil {
-		return errors.New("creation accepted")
+	if build := doc.Session(id); build != nil && (build.Preparation != nil || build.PlacementSource != nil) {
+		return errors.New("creation belongs to reviewed preparation")
 	}
 	return nil
 }
@@ -119,15 +119,23 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 		respondBuildPreparationError(w, "not_found", "Build not found.", http.StatusNotFound, nil)
 		return
 	}
+	release, ok := h.acquirePlacementBuild(w, r, id, "janitor-prepare")
+	if !ok {
+		return
+	}
+	defer release()
 	if claim := build.Preparation; claim != nil {
 		if build.Status == personalassistant.WorkspaceBuildAbandoned {
 			respondBuildPreparationError(w, "preparation_deferred", "This preparation was explicitly deferred. Open the workspace's current settings; its old confirmation cannot resume or create anything.", http.StatusConflict, map[string]any{"workspace_id": claim.WorkspaceID})
 			return
 		}
 		if !confirm {
+			outcome := h.ObserveWorkspaceBuildPreparation(owner, *build)
+			h.recordObservedBuildPreparation(r.Context(), owner, *build, &outcome)
 			_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "review": map[string]any{
 				"state": "accepted", "version": claim.BuildVersion, "review_revision": claim.ReviewRevision,
 				"monitoring": claim.Monitoring, "workspace_id": claim.WorkspaceID, "folder_slug": h.preparedBuildFolderSlug(owner, *build),
+				"outcome": outcome,
 			}})
 			return
 		}
@@ -136,6 +144,10 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 			return
 		}
 		h.prepareCreatedBuild(w, r, owner, *build, janitor, automation)
+		return
+	}
+	if build.PlacementSource != nil && request.Monitoring != build.PlacementMonitoring {
+		respondBuildPreparationError(w, "review_changed", "Review the draft's current monitoring choice.", http.StatusConflict, nil)
 		return
 	}
 	if build.Status != personalassistant.WorkspaceBuildOpen || build.Version != request.Version {
@@ -246,6 +258,9 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 		return refuse("team_changed", "The effective team cannot be reviewed.")
 	}
 	roles := projecttemplates.AgentRoleIDs(tpl.Agents)
+	if p.build.PlacementSource != nil && (len(roles) != 1 || len(staffing) != 1 || len(req.ExistingAgentNames) != 0 || req.ParentID != "" || staffing[roles[0]].Mode == "") {
+		return refuse("team_changed", "Choose one agent for the File Curator role in this standalone setup.")
+	}
 	savedNames := append([]string(nil), req.ExistingAgentNames...)
 	// Use the SAME effective spec/config functions as seedRoleStaffedAgents,
 	// not the blueprint's default roster. Vacancies create nothing; assignment
@@ -381,55 +396,13 @@ func (h *Handler) prepareCreatedBuild(w http.ResponseWriter, r *http.Request, ow
 	incomplete := func(code, message, stage string) {
 		respondBuildPreparationError(w, code, message, http.StatusConflict, map[string]any{"workspace_id": claim.WorkspaceID, "folder_slug": h.preparedBuildFolderSlug(owner, build), "stage": stage})
 	}
-	primary, primaryErr := h.workspaceTaskStore.Get(claim.WorkspaceID)
-	if primaryErr != nil || primary == nil {
-		incomplete("creation_unconfirmed", "The accepted workspace cannot be confirmed. Keep this build for reconciliation; it will not create another workspace.", "creation")
+	verified, failure := h.preparedBuildWorkspace(owner, build, janitor)
+	if failure != nil {
+		incomplete(failure.code, failure.message, failure.stage)
 		return
 	}
-	if (primary.Status != "" && primary.Status != workspace.StatusActive) ||
-		(primary.OwnerUserID != "" && primary.OwnerUserID != owner) {
-		incomplete("creation_changed", "The accepted workspace is no longer active or owned by you. No setup was resumed.", "creation")
-		return
-	}
-	ws, err := h.readReviewedWorkspace(claim.WorkspaceID)
-	if err != nil || ws == nil {
-		incomplete("creation_unconfirmed", "The accepted workspace cannot be confirmed. Keep this build for reconciliation; it will not create another workspace.", "creation")
-		return
-	}
-	workspaceOwner := strings.TrimSpace(ws.OwnerUserID)
-	if workspaceOwner == "" {
-		workspaceOwner = userprofile.LocalUserID
-	}
-	prov := ws.GetTemplateProvenance()
-	if workspaceOwner != owner || (ws.Status != "" && ws.Status != workspace.StatusActive) || prov == nil || prov.AssistantSetup == nil ||
-		prov.AssistantSetup.RunID != build.ID || prov.AssistantSetup.OperationID != claim.ID || prov.AssistantSetup.ReviewDigest != claim.ReviewRevision {
-		incomplete("creation_changed", "The accepted workspace is unavailable or its authority changed. No setup was resumed.", "creation")
-		return
-	}
-	marker := prov.AssistantSetup
-	teamRevision, teamErr := h.preparedWorkspaceTeamDigest(ws)
-	if teamErr != nil || teamRevision != marker.TeamRevision {
-		incomplete("team_changed", "The saved workspace team changed. Open the workspace and review its current setup.", "folder")
-		return
-	}
-	install, found := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
-	install.OwnedResources = nil
-	capabilityRevision, digestErr := digestJSON(install)
-	if !found || digestErr != nil || capabilityRevision != marker.CapabilityRevision {
-		incomplete("setup_changed", "File Janitor was removed or changed. Open the workspace's current settings; the old review cannot restore access.", "folder")
-		return
-	}
-	ref, err := ws.GetDirectoryReference(marker.FolderReferenceID)
-	if err != nil || ref == nil {
-		incomplete("folder_changed", "The accepted folder link changed. Open this workspace and review its current folder.", "folder")
-		return
-	}
-	root, err := janitor.ReviewSelectedSetup(ws.ID, ref.Path, prov.AutomationRecipes)
-	termsRevision, digestErr := digestJSON(root.Terms)
-	if err != nil || digestErr != nil || root.Revision != claim.RootRevision || termsRevision != claim.TermsRevision {
-		incomplete("folder_changed", "The folder or monitoring terms changed. Open this workspace for a fresh permission review.", "folder")
-		return
-	}
+	ws := verified.workspace
+	marker := ws.GetTemplateProvenance().AssistantSetup
 	if r.Context().Err() != nil {
 		incomplete("preparation_stopped", "The workspace was created. Preparation stopped before the next step; resume this workspace.", "folder")
 		return
@@ -483,5 +456,11 @@ func (h *Handler) prepareCreatedBuild(w http.ResponseWriter, r *http.Request, ow
 		incomplete("workspace_route_unconfirmed", "The scan result was saved, but this workspace's page route could not be confirmed. Open it from Home; do not create again.", "result")
 		return
 	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "workspace_id": ws.ID, "folder_slug": slug, "preparation": prepared})
+	outcome := h.ObserveWorkspaceBuildPreparation(owner, build)
+	if outcome.State != "prepared" {
+		incomplete("workspace_result_unconfirmed", "The saved setup result could not be verified. Read its current state; do not create again.", "result")
+		return
+	}
+	h.recordObservedBuildPreparation(r.Context(), owner, build, &outcome)
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "workspace_id": ws.ID, "folder_slug": slug, "preparation": prepared, "outcome": outcome})
 }

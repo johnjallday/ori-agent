@@ -655,19 +655,20 @@ type FolderDigestView struct {
 // FolderOfferView is an offer as the browser sees it: names and counts,
 // never a path.
 type FolderOfferView struct {
-	ReviewDigest   string                   `json:"review_digest,omitempty"`
-	ConversationID string                   `json:"conversation_id,omitempty"`
-	ID             string                   `json:"id"`
-	Status         FolderOfferStatus        `json:"status"`
-	Verdict        string                   `json:"verdict"`
-	Reason         string                   `json:"reason"`
-	Partial        bool                     `json:"partial,omitempty"`
-	ScannedAt      time.Time                `json:"scanned_at,omitempty"`
-	Folder         string                   `json:"folder"`
-	Chip           string                   `json:"chip,omitempty"`
-	Subject        FolderSubjectView        `json:"subject"`
-	ProjectsCount  int                      `json:"projects_count,omitempty"`
-	Portfolio      *FolderPortfolioEvidence `json:"portfolio,omitempty"`
+	PlacementHandoff *InboxPlacementHandoff   `json:"placement_handoff,omitempty"`
+	ReviewDigest     string                   `json:"review_digest,omitempty"`
+	ConversationID   string                   `json:"conversation_id,omitempty"`
+	ID               string                   `json:"id"`
+	Status           FolderOfferStatus        `json:"status"`
+	Verdict          string                   `json:"verdict"`
+	Reason           string                   `json:"reason"`
+	Partial          bool                     `json:"partial,omitempty"`
+	ScannedAt        time.Time                `json:"scanned_at,omitempty"`
+	Folder           string                   `json:"folder"`
+	Chip             string                   `json:"chip,omitempty"`
+	Subject          FolderSubjectView        `json:"subject"`
+	ProjectsCount    int                      `json:"projects_count,omitempty"`
+	Portfolio        *FolderPortfolioEvidence `json:"portfolio,omitempty"`
 	// Structure is the proposed group and its member workspaces, on an offer
 	// about a folder that holds several projects.
 	Structure *FolderStructure `json:"structure,omitempty"`
@@ -2612,7 +2613,8 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 // describeOffer projects capabilities without resolving execution authority.
 func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOffer, paused bool) FolderOfferView {
 	v := FolderOfferView{
-		ID: offer.ID, Status: offer.Status, Verdict: offer.Verdict, Reason: offer.Reason, Partial: offer.Partial, ScannedAt: offer.ScannedAt,
+		PlacementHandoff: offer.PlacementHandoff,
+		ID:               offer.ID, Status: offer.Status, Verdict: offer.Verdict, Reason: offer.Reason, Partial: offer.Partial, ScannedAt: offer.ScannedAt,
 		Folder: offer.FolderName, Chip: offer.Chip,
 		Subject: FolderSubjectView{
 			Name: offer.Subject.Name, Kind: offer.Subject.Kind, Shape: offer.Subject.Shape,

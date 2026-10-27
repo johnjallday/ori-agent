@@ -25,7 +25,14 @@ func decodeWorkspaceBuild(data []byte, owner KnowledgeOwner) (WorkspaceBuildDocu
 	if err := decoder.Decode(&struct{}{}); err != io.EOF || doc.Version < 1 || doc.Owner != owner {
 		return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 	}
-	legacy := doc.SchemaVersion >= 1 && doc.SchemaVersion < WorkspaceBuildSchemaVersion
+	legacy := doc.SchemaVersion >= 1 && doc.SchemaVersion < 4
+	if doc.SchemaVersion >= 1 && doc.SchemaVersion < 5 {
+		for _, session := range doc.Sessions {
+			if session.PlacementSource != nil || session.PlacementMonitoring {
+				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
+			}
+		}
+	}
 	if legacy {
 		for _, session := range doc.Sessions {
 			if session.Proposal != nil || session.EditedFields != nil || session.ContextVersion != 0 ||
@@ -49,10 +56,12 @@ func decodeWorkspaceBuild(data []byte, owner KnowledgeOwner) (WorkspaceBuildDocu
 		}
 	}
 	if legacy {
-		doc.SchemaVersion = WorkspaceBuildSchemaVersion
 		for i := range doc.Sessions {
 			doc.Sessions[i].ProtectLegacyBuildDraft()
 		}
+	}
+	if doc.SchemaVersion >= 1 && doc.SchemaVersion < WorkspaceBuildSchemaVersion {
+		doc.SchemaVersion = WorkspaceBuildSchemaVersion
 	}
 	if err := validateWorkspaceBuild(doc); err != nil {
 		return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt

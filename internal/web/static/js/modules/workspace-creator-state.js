@@ -93,6 +93,8 @@
       kind: fixedKind || requestedKind,
       fixedKind,
       entryPoint: String(options.entryPoint || '').trim(),
+      // Only the owner-scoped from-inbox response supplies this in-process handoff.
+      inboxPlacement: options.inboxPlacement || null,
       blueprint: String(options.blueprint || '').trim(),
       postCreateAction: String(options.postCreateAction || '').trim(),
       mapOrigin: Boolean(options.mapOrigin),
