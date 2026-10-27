@@ -77,7 +77,6 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await expect(page.locator('#onboardingModal')).toBeVisible();
     await page.locator('#onboardingUserName').fill('Jordan');
     await page.locator('#welcomeNextBtn').click();
-    await page.locator('#continueWithoutModelBtn').click();
     await expect(page.locator('#onboardingModal')).toBeHidden();
     await page.goto(hqPath);
     await expect(page.locator('#personalHQKnowledgeEntry')).toBeVisible();

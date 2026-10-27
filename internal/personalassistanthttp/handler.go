@@ -11,12 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/assistantsetup"
 	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
@@ -127,6 +129,9 @@ type Handler struct {
 	onFirstAssignmentCompleted func()
 	onHired                    func()
 	operations                 func() personalassistant.SourceAvailability
+	defaultModel               DefaultModelWriter
+	defaultModelProviders      agenthttp.ProviderAvailability
+	defaultModelAgents         store.Store
 }
 
 // NewHandler constructs a personal-assistant HTTP handler.
@@ -378,6 +383,9 @@ type hireRequest struct {
 	Appearance  *types.AgentAppearance `json:"appearance"`
 	Mandate     string                 `json:"mandate"`
 	FocusAreas  []string               `json:"focus_areas"`
+	// Model is the model the hire preset chose. It is saved as Ori's Default
+	// model before the assistant is provisioned; see applyHireModel.
+	Model *hireModelRequest `json:"model,omitempty"`
 
 	// Deprecated: a fresh hire collects no Daily Brief rhythm — the Map's HQ
 	// build form owns it, where it can be written against a real workspace ID.
@@ -408,6 +416,9 @@ type hireResponse struct {
 	HiredAt                *time.Time                              `json:"hired_at,omitempty"`
 	DailyBrief             *dailybrief.Config                      `json:"daily_brief,omitempty"`
 	Resumed                bool                                    `json:"resumed"`
+	// DefaultModel is Settings → Default model after a hire: the model the
+	// assistant now thinks with. Only the hire response carries it.
+	DefaultModel *defaultModelResponse `json:"default_model,omitempty"`
 }
 
 type hireErrorResponse struct {
@@ -434,6 +445,9 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, ok := h.currentUserID(w, r)
 	if !ok {
+		return
+	}
+	if !h.applyHireModel(w, r, userID, body) {
 		return
 	}
 	result, err := h.hirer.Hire(r.Context(), userID, personalassistant.HireRequest{
@@ -463,11 +477,131 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		h.onHired()
 	}
 	response := responseFromResult(result)
+	if response != nil {
+		response.DefaultModel = h.currentDefaultModel()
+	}
 	if result.Resumed {
 		orihttp.Success(w, map[string]any{"personal_assistant": response})
 		return
 	}
 	orihttp.Created(w, map[string]any{"personal_assistant": response})
+}
+
+// hireModelRequest is the Default model the hire preset chose: the same three
+// values a Settings → Default model save sends.
+type hireModelRequest struct {
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+type defaultModelResponse struct {
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
+// DefaultModelWriter is the slice of the configuration manager the hire needs
+// to save and report Settings → Default model. *config.Manager satisfies it.
+type DefaultModelWriter interface {
+	agenthttp.SystemModelWriter
+	IsSystemModelConfigured() bool
+	GetSystemReasoningEffort() string
+}
+
+// SetDefaultModelWriter wires the settings the Default model lives in, the
+// provider registry that vets a chosen provider, and the agent store whose
+// built-in assistant follows the Default model. Without a writer, a hire
+// neither saves nor requires a model, as before the hire carried one.
+func (h *Handler) SetDefaultModelWriter(writer DefaultModelWriter, providers agenthttp.ProviderAvailability, agents store.Store) {
+	if h != nil {
+		h.defaultModel = writer
+		h.defaultModelProviders = providers
+		h.defaultModelAgents = agents
+	}
+}
+
+// applyHireModel saves the model the hire preset chose as Ori's Default model
+// before the assistant is provisioned (PRD FR9). It writes the refusal and
+// returns false when the hire must not go ahead.
+//
+// The preset enforces decision 1A: it will not send a hire without a model. The
+// server does not, so a client that sends no model still hires.
+//
+//   - A request whose id is not the relationship's stored hire is a new hire:
+//     a model it carries is saved, and a request with none hires on the
+//     Default model in place, if any.
+//   - A replay of the stored hire only fills in a missing Default model. The
+//     first attempt already saved its choice, and a model changed in Settings
+//     since then must survive the replay. A replay with no model (the preset's
+//     resume view) finishes the hire it started.
+//   - A request that conflicts with a different stored hire changes nothing
+//     here; the hirer refuses it.
+func (h *Handler) applyHireModel(w http.ResponseWriter, r *http.Request, userID string, body hireRequest) bool {
+	if h.defaultModel == nil {
+		return true
+	}
+	stored := ""
+	if h.service != nil {
+		projection, err := h.service.Get(r.Context(), userID)
+		if err != nil {
+			writeHireError(w, http.StatusServiceUnavailable, "hire_unavailable", "Personal assistant hiring is temporarily unavailable. Retry this same request.", true, nil)
+			return false
+		}
+		if projection != nil {
+			stored = strings.TrimSpace(projection.HireRequestID)
+		}
+	}
+	switch requestID := strings.TrimSpace(body.RequestID); {
+	case stored != "" && stored != requestID:
+		return true
+	case stored != "":
+		if body.Model == nil || h.defaultModel.IsSystemModelConfigured() {
+			return true
+		}
+	case body.Model == nil:
+		// A request that names no model hires on whatever Default model is in
+		// place, or on none: the legacy no-model hire, which Home's Choose a
+		// model action covers. The preset is where a person must choose; it
+		// keeps Hire assistant disabled until they have, so a new user cannot
+		// finish without a model, while older API clients keep working.
+		return true
+	}
+	err := agenthttp.ApplySystemModel(h.defaultModel, h.defaultModelProviders, h.defaultModelAgents,
+		body.Model.Provider, body.Model.Model, body.Model.ReasoningEffort)
+	if err == nil {
+		return true
+	}
+	var unavailable *agenthttp.UnavailableProviderError
+	var saveFailure *agenthttp.SystemModelSaveError
+	switch {
+	case errors.Is(err, agenthttp.ErrSystemModelIncomplete):
+		writeHireError(w, http.StatusBadRequest, "model_required", hireModelRequiredMessage, false, nil)
+	case errors.As(err, &unavailable):
+		writeHireError(w, http.StatusBadRequest, "invalid_model",
+			unavailable.Provider+" is not available on this server. Choose another provider, or add its API key.", false, nil)
+	case errors.As(err, &saveFailure):
+		writeHireError(w, http.StatusServiceUnavailable, "model_save_failed",
+			"Ori could not save the Default model, so nothing was hired. Retry this same request.", true, nil)
+	default:
+		writeHireError(w, http.StatusBadRequest, "invalid_model",
+			"Ori cannot use that model: "+err.Error()+".", false, nil)
+	}
+	return false
+}
+
+const hireModelRequiredMessage = "Choose the model your assistant thinks with."
+
+func (h *Handler) currentDefaultModel() *defaultModelResponse {
+	if h.defaultModel == nil || !h.defaultModel.IsSystemModelConfigured() {
+		return nil
+	}
+	provider, model := h.defaultModel.GetSystemModel()
+	out := &defaultModelResponse{Provider: provider, Model: model}
+	if strings.EqualFold(provider, "codex") {
+		out.ReasoningEffort = h.defaultModel.GetSystemReasoningEffort()
+	}
+	return out
 }
 
 type recoveryRequest struct {

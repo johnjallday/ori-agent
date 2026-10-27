@@ -3,6 +3,7 @@ import {
   MEET_ASSISTANT_QUEST_ROUTE
 } from './personal-assistant-hire.js';
 import { safeTodayRoute } from './personal-assistant-panel.js';
+import { BANNER_BUTTON_LABEL, BANNER_TEXT, openChooseModelDialog } from './choose-model-dialog.js';
 import { prepareTodaysBrief } from './home-daily-brief.js';
 import {
   dailyBriefRowStatus,
@@ -54,6 +55,34 @@ export function needsHireBanner() {
     href: MEET_ASSISTANT_QUEST_ROUTE,
     trail: ' to start Today.'
   };
+}
+
+// modelUnavailableBanner is what Today says for an assistant that was hired
+// with no Default model to think with: the state, and the one way out.
+export function modelUnavailableBanner() {
+  return { text: BANNER_TEXT, buttonLabel: BANNER_BUTTON_LABEL };
+}
+
+// The Choose a model button opens the shared picker in a dialog. A saved model
+// is the Settings save, so the banner clears when Today is read again, with no
+// page reload.
+function renderModelUnavailableBanner(els) {
+  const banner = modelUnavailableBanner();
+  const text = document.createElement('span');
+  text.textContent = `${banner.text} `;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = 'paChooseModelBtn';
+  button.className = 'btn btn-sm btn-outline-secondary pa-choose-model-btn';
+  button.textContent = banner.buttonLabel;
+  button.addEventListener('click', () => {
+    // Today clears its banner, and the drawer reads the relationship again so its
+    // header and notice stop saying no model is configured.
+    void openChooseModelDialog({
+      onSaved: () => Promise.all([loadToday(), window.PersonalAssistantPanel?.refresh?.()])
+    });
+  });
+  els.banner.replaceChildren(text, button);
 }
 
 function renderNeedsHireBanner(els) {
@@ -1094,8 +1123,7 @@ function renderToday(today) {
   } else if (view.partial) {
     els.banner.textContent = partialTodaySummary(today);
   } else if (view.modelUnavailable) {
-    els.banner.textContent =
-      'Conversational answers are paused until a model is configured. Deterministic Today records remain available.';
+    renderModelUnavailableBanner(els);
   } else if (view.state === 'healthy_empty') {
     els.banner.textContent = '';
   } else {

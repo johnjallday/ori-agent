@@ -2,12 +2,14 @@ package agenthttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/store"
 )
 
 // SystemModelWriter is the slice of the configuration manager an agent edit
@@ -72,41 +74,93 @@ func (h *Handler) mirrorSystemModel(record *agent.Agent) *systemModelMirror {
 	provider := normalizeSystemProviderName(record.Settings.Provider)
 	model := strings.TrimSpace(record.Settings.Model)
 	out := &systemModelMirror{Provider: provider, Model: model}
-	if provider == "" || model == "" {
+	// The agent's reasoning level is already normalized for its provider, so an
+	// unknown value can only come from an older record.
+	err := ApplySystemModel(h.systemModel, h.providers, h.State, provider, model, record.Settings.ReasoningEffort)
+	var unavailable *UnavailableProviderError
+	switch {
+	case err == nil:
+		out.Mirrored = true
+	case errors.Is(err, ErrSystemModelIncomplete):
 		out.Reason = "the agent has no provider or model, so the Default model was left unchanged"
-		return out
+	case errors.As(err, &unavailable):
+		out.Reason = err.Error() + ", so the Default model was left unchanged"
+	default:
+		out.Reason = err.Error()
 	}
-	if h.providers != nil {
-		if _, err := h.providers.GetProvider(provider); err != nil {
-			out.Reason = fmt.Sprintf("provider %q is not available on this server, so the Default model was left unchanged", provider)
-			return out
+	return out
+}
+
+// ErrSystemModelIncomplete is ApplySystemModel's refusal of an empty provider
+// or model. It never clears the Default model; Settings is the only surface
+// that can do that.
+var ErrSystemModelIncomplete = errors.New("a provider and a model are both required")
+
+// UnavailableProviderError names a provider this server has not registered
+// (no API key or runtime), which the Settings page refuses too.
+type UnavailableProviderError struct {
+	Provider string
+}
+
+func (e *UnavailableProviderError) Error() string {
+	return fmt.Sprintf("provider %q is not available on this server", e.Provider)
+}
+
+// SystemModelSaveError is a failure to write settings.json after the values
+// passed validation: the request was fine and a retry may succeed. Its text is
+// the underlying error's.
+type SystemModelSaveError struct {
+	Err error
+}
+
+func (e *SystemModelSaveError) Error() string { return e.Err.Error() }
+func (e *SystemModelSaveError) Unwrap() error { return e.Err }
+
+// ApplySystemModel saves provider and model as Settings → Default model with
+// the checks a Settings save makes: the provider must be registered on this
+// server, the values must pass the settings validation, and the reasoning level
+// is kept for Codex only (default medium) and cleared for everyone else. After
+// the save the protected system assistant is aligned, as a Settings save does,
+// so the drawer talks on the new model without a restart.
+//
+// It is the one vetted write behind both the agent-edit mirror and the
+// personal assistant hire. It returns ErrSystemModelIncomplete,
+// *UnavailableProviderError, a settings validation error, or a
+// *SystemModelSaveError, and changes nothing on any of them except the last.
+func ApplySystemModel(writer SystemModelWriter, providers ProviderAvailability, st store.Store, provider, model, reasoningEffort string) error {
+	if writer == nil {
+		return errors.New("the Default model cannot be saved on this server")
+	}
+	provider = normalizeSystemProviderName(provider)
+	model = strings.TrimSpace(model)
+	if provider == "" || model == "" {
+		return ErrSystemModelIncomplete
+	}
+	if providers != nil {
+		if _, err := providers.GetProvider(provider); err != nil {
+			return &UnavailableProviderError{Provider: provider}
 		}
 	}
-	if err := h.systemModel.SetSystemModel(provider, model); err != nil {
-		out.Reason = err.Error()
-		return out
+	if err := writer.SetSystemModel(provider, model); err != nil {
+		return err
 	}
 	// The effort setting is Codex's; every other provider clears it, exactly as
-	// a save on the Settings page does. The agent's level is already normalized
-	// for its provider, so an unknown value can only come from an older record.
-	if err := h.systemModel.SetSystemReasoningEffort(systemReasoningEffortFor(provider, record.Settings.ReasoningEffort)); err != nil {
-		out.Reason = err.Error()
-		return out
+	// a save on the Settings page does.
+	if err := writer.SetSystemReasoningEffort(systemReasoningEffortFor(provider, reasoningEffort)); err != nil {
+		return err
 	}
-	if err := h.systemModel.Save(); err != nil {
-		out.Reason = err.Error()
-		return out
+	if err := writer.Save(); err != nil {
+		return &SystemModelSaveError{Err: err}
 	}
-	out.Mirrored = true
-	// The protected system assistant follows the System Model on every path.
-	if err := ensureSystemAssistantAgentWithSystemModel(h.State, provider, model); err != nil {
-		logger.Warn("Failed to align the system assistant after an agent edit changed the system model", logger.Fields{
+	// The protected system assistant follows the Default model on every path.
+	if err := ensureSystemAssistantAgentWithSystemModel(st, provider, model); err != nil {
+		logger.Warn("Failed to align the system assistant after the Default model changed", logger.Fields{
 			"provider": provider,
 			"model":    model,
 			"error":    err,
 		})
 	}
-	return out
+	return nil
 }
 
 // normalizeSystemProviderName maps an agent record's provider onto the name

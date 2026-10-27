@@ -1214,6 +1214,26 @@ test.describe('Agents single-agent editing', () => {
       })
     );
     await mockUnhiredAssistant(page);
+    // The preset's model block: one provider with a recommended model.
+    await page.route('**/api/providers', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          providers: [{ name: 'openai', display_name: 'OpenAI', available: true }]
+        })
+      })
+    );
+    await page.route('**/api/settings/available-models?provider=openai', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          available: true,
+          model_options: [{ id: 'gpt-small', label: 'Small', recommended: true }]
+        })
+      })
+    );
     await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#rosterList')).toBeVisible();
 
@@ -1235,6 +1255,13 @@ test.describe('Agents single-agent editing', () => {
     await expect(page.locator('#cr-focus-group')).toHaveClass(/is-ori-coachmark/);
 
     await callout.locator('[data-ori-spotlight-choice="done-choosing"]').click();
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText(
+      'Pick the AI they think with'
+    );
+    await expect(page.locator('#cr-model-group')).toHaveClass(/is-ori-coachmark/);
+    await expect(page.locator('#cr-model')).toHaveValue('gpt-small');
+
+    await callout.locator('[data-ori-spotlight-choice="keep-model"]').click();
     await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Hire them');
     await expect(page.locator('#createSubmit')).toBeFocused();
   });

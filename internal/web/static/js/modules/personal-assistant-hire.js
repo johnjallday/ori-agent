@@ -57,7 +57,7 @@ export const MANDATE_PLACEHOLDER =
 // The promise the hire makes, kept verbatim: it sits directly above the one
 // button that confirms the hire.
 export const HIRE_BOUNDARY_COPY =
-  'Hiring creates your assistant. It does not create a workspace, change any permission, or connect an account. Personal HQ — your assistant’s home base — is the next step, and nothing is created there until you confirm it.';
+  'Hiring creates your assistant and saves the model you chose as Ori’s Default model. It does not create a workspace, change any permission, or connect an account. Personal HQ — your assistant’s home base — is the next step, and nothing is created there until you confirm it.';
 
 // The focus areas a hire offers, with their defaults. The values are the
 // durable payload values the server validates.
@@ -93,15 +93,20 @@ export function personalAssistantResumeMessage(state = {}) {
 // It carries no Daily Brief rhythm: hiring creates the assistant profile and the
 // relationship only. The schedule belongs to the Map's Build My HQ form, where
 // it can be written against a real workspace ID.
+//
+// model is the preset's Default model choice ({ provider, model,
+// reasoning_effort }); the server saves it before the assistant is created.
+// The resume view replays a hire with no model and sends none.
 export function buildPersonalAssistantHirePayload({
   requestId,
   ifVersion = 0,
   displayName = DEFAULT_ASSISTANT_NAME,
   appearance = null,
   mandate = '',
-  focusAreas = []
+  focusAreas = [],
+  model = null
 } = {}) {
-  return {
+  const payload = {
     request_id: String(requestId || '').trim(),
     if_version: Number(ifVersion) || 0,
     display_name: String(displayName || '').trim(),
@@ -111,6 +116,14 @@ export function buildPersonalAssistantHirePayload({
       Boolean
     )
   };
+  if (model && model.provider && model.model) {
+    payload.model = {
+      provider: String(model.provider).trim(),
+      model: String(model.model).trim(),
+      reasoning_effort: String(model.reasoning_effort || '').trim()
+    };
+  }
+  return payload;
 }
 
 // personalAssistantNeedsHQ reports whether a relationship is hired but has no
@@ -188,9 +201,10 @@ const HIRE_NETWORK_ERROR =
 
 // submitHire posts one hire and reports what the server said.
 //
-// { ok, state, resumed, needsHQ, error, status, code }. A replay of a durable
-// hire (resumed) is a success, and so is a 409 personal_hq_required, which means
-// "already hired" and never "hire again".
+// { ok, state, resumed, needsHQ, defaultModel, error, status, code }. A replay
+// of a durable hire (resumed) is a success, and so is a 409
+// personal_hq_required, which means "already hired" and never "hire again".
+// defaultModel is the Default model in place after the hire, or null.
 export async function submitHire({ fetchImpl = globalThis.fetch, payload } = {}) {
   let response;
   try {
@@ -200,7 +214,14 @@ export async function submitHire({ fetchImpl = globalThis.fetch, payload } = {})
       body: JSON.stringify(payload || {})
     });
   } catch (_) {
-    return { ok: false, state: null, resumed: false, needsHQ: false, error: HIRE_NETWORK_ERROR };
+    return {
+      ok: false,
+      state: null,
+      resumed: false,
+      needsHQ: false,
+      defaultModel: null,
+      error: HIRE_NETWORK_ERROR
+    };
   }
   const body = await response.json().catch(() => ({}));
   if (response.ok) {
@@ -210,17 +231,19 @@ export async function submitHire({ fetchImpl = globalThis.fetch, payload } = {})
       state,
       resumed: state?.resumed === true,
       needsHQ: personalAssistantNeedsHQ(state),
+      defaultModel: state?.default_model || null,
       error: ''
     };
   }
   if (response.status === 409 && body?.code === 'personal_hq_required') {
-    return { ok: true, state: null, resumed: true, needsHQ: true, error: '' };
+    return { ok: true, state: null, resumed: true, needsHQ: true, defaultModel: null, error: '' };
   }
   return {
     ok: false,
     state: null,
     resumed: false,
     needsHQ: false,
+    defaultModel: null,
     status: response.status,
     code: String(body?.code || ''),
     error: String(body?.error || '').trim() || 'Could not finish hiring. Retry this same request.'

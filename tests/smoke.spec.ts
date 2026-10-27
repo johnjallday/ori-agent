@@ -225,7 +225,7 @@ test.describe('Onboarding', () => {
     await page.goto('/');
 
     await expect(page.locator('#onboardingModal')).toBeVisible();
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 2');
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 1');
     await expect(page.locator('#onboardingWorkspaceRootInput')).toHaveValue(
       '/tmp/ori-test-workspaces'
     );
@@ -239,19 +239,58 @@ test.describe('Onboarding', () => {
     await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
   });
 
-  test('auto-selects a recommended model before continuing', async ({ page }) => {
+  test('Welcome is the whole of onboarding: Continue ends it with no model and no hire', async ({
+    page
+  }) => {
     await installBaseOnboardingRoutes(page);
-    await page.route('**/api/providers', async route => {
-      await route.fulfill({
+    const finished = await watchOnboardingEnd(page);
+
+    await page.goto('/');
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 1');
+    // The model is chosen with the hire now, not in this modal.
+    await expect(page.locator('#onboardingSystemModel')).toHaveCount(0);
+    await expect(page.locator('#continueWithoutModelBtn')).toHaveCount(0);
+    await expect(page.locator('#onboardingModal')).not.toContainText(/REAPER|music|producer/i);
+    await page.locator('#onboardingUserName').fill('Jamie');
+    await page.locator('#welcomeNextBtn').click();
+
+    await expect(page.locator('#onboardingModal')).toBeHidden();
+    await expect.poll(() => finished.completed).toBe(true);
+    expect(finished.hires).toEqual([]);
+  });
+
+  // The model choice moved to Mission 01's hire preset on the Agents page.
+  async function openHirePreset(page, providers: unknown[], hirePayloads: unknown[] = []) {
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          providers: [{ name: 'ollama', display_name: 'Ollama', available: true }]
-        })
-      });
-    });
-    await page.route('**/api/settings/available-models?provider=ollama', async route => {
-      await route.fulfill({
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await page.route(/\/api\/personal-assistant$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"personal_assistant":{"state":"needs_hire","state_version":1,"availability":{"model":{"status":"not_configured","available":false}}}}'
+      })
+    );
+    await page.route('**/api/providers', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ providers })
+      })
+    );
+    await page.route('**/api/settings/system-model', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ provider: '', model: '', configured: false })
+      })
+    );
+    await page.route('**/api/settings/available-models?provider=ollama', route =>
+      route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
@@ -261,124 +300,61 @@ test.describe('Onboarding', () => {
             {
               id: 'llama-balanced',
               label: 'Llama Balanced',
-              description: 'Recommended',
+              description: 'Balanced',
               recommended: true
             }
           ]
         })
-      });
-    });
-
-    await page.goto('/');
-    await page.locator('#onboardingUserName').fill('Jamie');
-    await page.locator('#welcomeNextBtn').click();
-
-    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 2 of 2');
-    await expect(page.locator('#onboardingSystemProvider')).toHaveValue('ollama');
-    await expect(page.locator('#onboardingSystemModel')).toHaveValue('llama-balanced');
-    await expect(page.locator('#modelNextBtn')).toBeEnabled();
-    await expect(page.locator('#modelBackBtn')).toBeVisible();
-  });
-
-  test('offers a deterministic onboarding path when no model is configured', async ({ page }) => {
-    await installBaseOnboardingRoutes(page);
-    await page.route('**/api/providers', async route => {
-      await route.fulfill({
-        status: 200,
+      })
+    );
+    await page.route('**/api/personal-assistant/hire', route => {
+      hirePayloads.push(route.request().postDataJSON());
+      return route.fulfill({
+        status: 201,
         contentType: 'application/json',
-        body: JSON.stringify({ providers: [] })
+        body: JSON.stringify({ personal_assistant: { state: 'needs_hq', display_name: 'Atlas' } })
       });
     });
-    await page.route('**/api/project-templates', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ templates: [] })
-      });
-    });
+    await page.goto('/agents');
+    await page.locator('#newAgentBtn').click();
+  }
 
-    const finished = await watchOnboardingEnd(page);
-
-    await page.goto('/');
-    await page.locator('#welcomeNextBtn').click();
-
-    await expect(page.locator('#onboardingApiKeySection')).toBeVisible();
-    await expect(page.locator('#modelNextBtn')).toBeDisabled();
-    await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
-    await page.getByRole('button', { name: 'Continue without a model' }).click();
-    // Onboarding is Welcome and Model. Leaving Model closes it on Home; the
-    // assistant is hired afterwards, on the Agents page (Mission 01).
-    await expect(page.locator('#onboardingModal')).toBeHidden();
-    await expect.poll(() => finished.completed).toBe(true);
-    expect(finished.hires).toEqual([]);
-  });
-
-  test('a saved model ends onboarding with no hire and nothing domain-specific', async ({
+  test('the hire preset preselects a recommended model and sends it with the hire', async ({
     page
   }) => {
-    await installBaseOnboardingRoutes(page);
-    await page.route('**/api/providers', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          providers: [{ name: 'ollama', display_name: 'Ollama', available: true }]
-        })
-      });
-    });
-    await page.route('**/api/settings/available-models?provider=ollama', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          available: true,
-          model_options: [{ id: 'local-model', label: 'Local Model', recommended: true }]
-        })
-      });
-    });
-    await page.route('**/api/settings/system-model', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
-    await page.route('**/api/project-templates', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          templates: [
-            {
-              id: 'research-project',
-              name: 'Research Project',
-              description: 'Sources and synthesis.',
-              tags: ['research'],
-              readiness: { state: 'ready' }
-            },
-            {
-              id: 'plugin:audio:session',
-              name: 'REAPER Song',
-              description: 'A recording and production workspace.',
-              tags: ['music', 'reaper'],
-              readiness: { state: 'ready' }
-            }
-          ]
-        })
-      });
-    });
+    const payloads: any[] = [];
+    await openHirePreset(
+      page,
+      [{ name: 'ollama', display_name: 'Ollama', available: true }],
+      payloads
+    );
 
-    const finished = await watchOnboardingEnd(page);
+    await expect(page.locator('#cr-model-group')).toBeVisible();
+    await expect(page.locator('#cr-model-provider')).toHaveValue('ollama');
+    await expect(page.locator('#cr-model')).toHaveValue('llama-balanced');
+    const hire = page.getByRole('button', { name: 'Hire assistant' });
+    await expect(hire).toBeEnabled();
 
-    await page.goto('/');
-    await page.locator('#welcomeNextBtn').click();
-    await expect(page.locator('#modelNextBtn')).toBeEnabled();
-    await expect(page.locator('#onboardingModal')).not.toContainText(/REAPER|music|producer/i);
-    await page.locator('#modelNextBtn').click();
+    await hire.click();
+    await expect.poll(() => payloads.length).toBe(1);
+    expect(payloads[0].model).toEqual({
+      provider: 'ollama',
+      model: 'llama-balanced',
+      reasoning_effort: ''
+    });
+  });
 
-    await expect(page.locator('#onboardingModal')).toBeHidden();
-    await expect.poll(() => finished.completed).toBe(true);
-    expect(finished.hires).toEqual([]);
+  test('the hire preset offers an AI connection and keeps Hire disabled when no provider is available', async ({
+    page
+  }) => {
+    const payloads: any[] = [];
+    await openHirePreset(page, [], payloads);
+
+    await expect(page.locator('#cr-model-connect')).toBeVisible();
+    await expect(page.locator('#cr-model-provider')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Hire assistant' })).toBeDisabled();
+    await expect(page.locator('#cr-model-group')).toContainText('Nothing else happens until');
+    expect(payloads).toEqual([]);
   });
 });
 

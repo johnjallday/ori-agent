@@ -108,7 +108,7 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 | `provisioning_hq` | A confirmed HQ setup is partially applied and resumable | “Finishing your Personal HQ” | Resume the same HQ request (`resume_hq_setup`); inspect bounded failure |
 | `active` | Binding, HQ, and entry-agent instance resolve | Chosen name and “Your personal assistant” | Ask, assign, pause, edit agreement/profile, open HQ |
 | `paused` | Relationship exists but proactive/background behavior is paused | “Assistant paused” | Resume, inspect/edit, deterministic manual assignment |
-| active with no model | Healthy hire but no chat-capable model resolves | **“Hired — choose a model to chat”** | Choose model; deterministic first assignment and deterministic Daily Brief remain available |
+| active with no model | Healthy hire but no chat-capable model resolves | **“Hired — choose a model to chat”** | **Choose a model** (opens the shared picker in a dialog; Save is the Settings → Default model save, emits `systemModel:changed`, and the banner clears without a reload); deterministic first assignment and deterministic Daily Brief remain available |
 | `repair_needed` | A durable result exists but its known safe continuation failed, HQ/agent linkage is missing, foreign, or invalid, or the relationship row is absent while PAF provenance remains | “Assistant setup needs repair” with no invented identity | Retry deterministic repair, explicitly reconnect one validated orphan, choose replacement explicitly, or remain paused |
 
 `hiring` stays scoped to creating and finalizing the assistant profile and the
@@ -251,15 +251,28 @@ hire profile -> needs_hq -> Ori Map quest -> confirmed HQ setup -> active
 
 The hire is Mission 01, **Meet your assistant**
 (`tasks/prd-meet-your-assistant-mission.md`), not part of first-run onboarding:
-the onboarding modal ends after Welcome and Model and never sends a hire. While
+the onboarding modal ends after Welcome and never sends a hire or asks for a
+model: the model is chosen with the hire. While
 the relationship is `needs_hire` or `hiring`, the Agents page's own **New
 Agent** panel opens in a personal-assistant preset
 (`personal-assistant-hire.js`, rendered by `agents-roster.js`): the name
 (default **Assistant**), a suggested orchestrator face, the six focus areas, an
-optional mandate, and the boundary line directly above one **Hire assistant**
+optional mandate, a **model block** ("Which AI should {name} think with?":
+provider, model and, for Codex, a reasoning level, with the recommended model
+preselected), and the boundary line directly above one **Hire assistant**
 button. Pressing it is the one explicit confirmation; there is no separate
 checkbox. Nothing is sent before it. The name must be non-empty, bounded, plain
-text, and secret-safe. The request ID is created once per attempt and kept in
+text, and secret-safe. The preset keeps **Hire assistant** disabled until the
+name is non-empty and a provider and model are chosen. With no provider
+connected the block offers an API-key entry (OpenAI, Anthropic, Gemini) and
+names the local runtimes, and reloads the providers in place once a key is
+saved. The chosen model is **Ori's Default model**, not an assistant-only
+setting: the hire request carries it (`model: {provider, model,
+reasoning_effort}`) and the server saves it, as Settings → Default model does,
+before it creates the assistant. A save that fails hires nothing, a replay of
+the same request never overwrites a Default model changed since the first
+attempt, and a request that names no model still hires, on the Default model in
+place or on none. The request ID is created once per attempt and kept in
 `localStorage` (`ori.personalAssistantHireRequestId`), and a relationship's own
 `hire_request_id` wins over it, so a retry replays the same request. Ori's
 deterministic walkthrough (`meet-assistant-quest.js`) points at each control and
@@ -267,19 +280,19 @@ never acts on one. The Daily Brief rhythm is **not** collected here: it has no
 canonical workspace to be written against until HQ exists, so it moves to the
 Map's HQ build form.
 
-The walkthrough has six steps and is shown in Ori's own layer
+The walkthrough has seven steps and is shown in Ori's own layer
 (`ori-spotlight.js`). A single-click step is a spotlight: the page is dimmed and
 blocked except for a hole cut over the one control, and Ori's callout says what
 to press. Step 1 is on Home, on the Agents nav entry
 (`meet-assistant-home-prompt.js`). Step 2 is New Agent on the Agents page. Steps
-3 to 6 (the name, the face, the focus, Hire) are Ori's callout beside the form,
+3 to 7 (the name, the face, the focus, the model, Hire) are Ori's callout beside the form,
 pointing at each field, with nothing dimmed. The user presses and types
 everything; Not now (or Escape on a spotlight) always leaves, and nothing is
 skipped.
 
 First-run onboarding hands over to `/?quest=meet-assistant&briefing=1`
 (`MEET_ASSISTANT_BRIEFING_ROUTE`): Ori in the centre of a dimmed, inert Home
-with the Mission 01 card, its six steps, its reward and what it unlocks, and
+with the Mission 01 card, its seven steps, its reward and what it unlocks, and
 Start mission or Not now. Start mission opens step 1. Every other entry starts
 at step 1 directly, `/?quest=meet-assistant` (`MEET_ASSISTANT_QUEST_ROUTE`,
 `progression.MeetAssistantActionURL`): Home's mission card, Today's `needs_hire`
@@ -313,7 +326,7 @@ One final, confirmed hire then:
    unrelated name collision;
 3. persists the relationship, working agreement, and `HiredAt`; and
 4. transitions to `needs_hq`. Ordinary onboarding was already complete: it ends
-   after Model, before any hire.
+   after Welcome, before any hire.
 
 The hire creates **no** workspace, no Personal HQ designation, no Journal or
 other support profile, no workspace membership, no Daily Brief configuration,
@@ -608,7 +621,7 @@ at most once per quest.
 Before the hire, Home is quiet: the card shows Mission 01, and Today says only
 "Meet your assistant to start Today." Ori's briefing appears once, when
 onboarding hands over; after that, the card's Start (or Today's link) dims Home
-around the Agents nav entry at "Step 1 of 6 · Click Agents"
+around the Agents nav entry at "Step 1 of 7 · Click Agents"
 (`meet-assistant-home-prompt.js`). The navbar wraps rather than collapses, so
 the Agents entry can be lit at every width.
 

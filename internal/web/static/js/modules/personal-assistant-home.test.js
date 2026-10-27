@@ -7,6 +7,7 @@ import {
   declineBackupCoverage,
   MEETING_BADGES,
   meetingsSectionView,
+  modelUnavailableBanner,
   needsHireBanner,
   partialTodaySummary,
   personalAssistantLauncherCue,
@@ -362,6 +363,11 @@ test('Today view distinguishes active, paused, partial, no-model, empty, and fat
   assert.equal(personalAssistantTodayView({ state: 'paused' }).paused, true);
   assert.equal(personalAssistantTodayView({ state: 'partial' }).partial, true);
   assert.equal(personalAssistantTodayView({ state: 'model_unavailable' }).modelUnavailable, true);
+  // An assistant hired with no model says so, and offers the one way out.
+  assert.deepEqual(modelUnavailableBanner(), {
+    text: 'Hired — choose a model to chat.',
+    buttonLabel: 'Choose a model'
+  });
   assert.equal(personalAssistantTodayView({ state: 'healthy_empty' }).active, true);
   assert.equal(personalAssistantTodayView({ state: 'unavailable' }).unavailable, true);
 });

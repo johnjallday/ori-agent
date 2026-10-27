@@ -2849,6 +2849,10 @@
   // hire succeeds.
   var createAppearanceEditor = null;
 
+  // The hire preset's model block (default-model-picker.js). Nothing is saved
+  // until the hire request carries its selection.
+  var assistantModelPicker = null;
+
   // options.role fixes the role (the preset has no Role select; its assistant
   // is always an orchestrator), and options.allowedModes narrows the sources
   // offered.
@@ -2970,6 +2974,7 @@
     if (!modal || !inHireMode()) return;
     if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
     createAppearanceEditor = null;
+    assistantModelPicker = null;
     delete modal.dataset.agentCreateMode;
     modal.classList.remove('is-assistant-hire');
     var title = document.getElementById('addAgentModalTitleText');
@@ -3106,6 +3111,17 @@
       esc(current.mandate || '') +
       '</textarea>' +
       '</div>' +
+      // The model the assistant thinks with, which the hire saves as Ori's
+      // Default model. Last, where the recommended default rarely needs a touch.
+      '<fieldset class="mb-3 create-preset__model" id="cr-model-group">' +
+      '<legend class="form-label" id="cr-model-heading">' +
+      esc(assistantModelHeading(name)) +
+      '</legend>' +
+      '<div id="cr-model-host"></div>' +
+      '<p class="form-helper create-preset__model-scope" id="cr-model-scope">' +
+      esc(assistantModelScope(name)) +
+      '</p>' +
+      '</fieldset>' +
       '<p class="form-helper create-preset__boundary">' +
       esc(api.HIRE_BOUNDARY_COPY) +
       '</p>' +
@@ -3118,14 +3134,63 @@
 
     var nameInput = document.getElementById('cr-name');
     var submit = setHireButton(view.buttonLabel, submitAssistantHire);
-    // Hire is enabled whenever there is a name (PRD FR23); pressing it is the
-    // one confirmation the hire needs.
+    // Hire is enabled once there is a name and a model to think with (PRD FR8,
+    // decision 1A); pressing it is the one confirmation the hire needs.
     var syncSubmit = function () {
-      if (submit.getAttribute('aria-busy') !== 'true') submit.disabled = !nameInput.value.trim();
+      if (submit.getAttribute('aria-busy') !== 'true') submit.disabled = !assistantHireReady();
     };
-    nameInput.addEventListener('input', syncSubmit);
+    var syncName = function () {
+      var typed = nameInput.value.trim() || api.DEFAULT_ASSISTANT_NAME;
+      document.getElementById('cr-model-heading').textContent = assistantModelHeading(typed);
+      document.getElementById('cr-model-scope').textContent = assistantModelScope(typed);
+      syncSubmit();
+    };
+    nameInput.addEventListener('input', syncName);
+    mountAssistantModelPicker(syncSubmit);
     syncSubmit();
     document.getElementById('cr-standard-form').addEventListener('click', openCreateModal);
+  }
+
+  function assistantModelHeading(name) {
+    return 'Which AI should ' + name + ' think with?';
+  }
+
+  // Decision 3A in one sentence: one model, not an assistant-only setting.
+  function assistantModelScope(name) {
+    return (
+      name +
+      ' thinks with this model. It also becomes Ori’s default for new agents and AI features. ' +
+      'You can change it any time in Settings → Default model.'
+    );
+  }
+
+  // The shared picker module (default-model-picker.js) is a module script, read
+  // at use time like the hire seam. Without it the block says so and Hire stays
+  // disabled: a hire never goes ahead without a model.
+  function mountAssistantModelPicker(onChange) {
+    var host = document.getElementById('cr-model-host');
+    var pickerApi = window.OriDefaultModelPicker;
+    assistantModelPicker = null;
+    if (!host) return;
+    if (!pickerApi) {
+      host.innerHTML =
+        '<p class="form-helper">The model picker did not load. Reload the page to choose a model.</p>';
+      return;
+    }
+    assistantModelPicker = pickerApi.createDefaultModelPicker({
+      host: host,
+      idPrefix: 'cr-model',
+      onChange: onChange
+    });
+  }
+
+  function assistantModelSelection() {
+    return assistantModelPicker ? assistantModelPicker.selection() : null;
+  }
+
+  function assistantHireReady() {
+    var nameInput = document.getElementById('cr-name');
+    return !!nameInput && !!nameInput.value.trim() && !!assistantModelSelection();
   }
 
   // The view's title is the modal's (enterHireMode); the body says why.
@@ -3329,8 +3394,9 @@
     }
     submit.removeAttribute('aria-busy');
     submit.textContent = submit.dataset.label || submit.textContent;
-    var nameInput = document.getElementById('cr-name');
-    submit.disabled = !!nameInput && !nameInput.value.trim();
+    // The hire form needs a name and a model; the one-button repair views
+    // have neither field and stay pressable.
+    submit.disabled = !!document.getElementById('cr-name') && !assistantHireReady();
   }
 
   // A hire the server confirmed hands straight over to Build My HQ (PRD FR36),
@@ -3385,6 +3451,11 @@
       showCreateError('Tick at least one thing they should help with, or describe it below.');
       return;
     }
+    var model = assistantModelSelection();
+    if (!model) {
+      showCreateError('Choose the model your assistant thinks with.');
+      return;
+    }
     var current = assistant.state || {};
     var payload = api.buildPersonalAssistantHirePayload({
       requestId: api.getOrCreateHireRequestId(
@@ -3395,12 +3466,18 @@
       displayName: name,
       appearance: createAppearanceEditor ? createAppearanceEditor.createRequest() : null,
       mandate: mandate,
-      focusAreas: focusAreas
+      focusAreas: focusAreas,
+      model: model
     });
     showCreateError('');
     setAssistantBusy(true, 'Hiring your assistant…');
     api.submitHire({ payload: payload }).then(function (result) {
       if (result.ok) {
+        // The hire saved the Default model; every open surface that shows it
+        // hears so, exactly as after a Settings save.
+        if (result.defaultModel && window.EventBus && typeof window.EventBus.emit === 'function') {
+          window.EventBus.emit('systemModel:changed', result.defaultModel);
+        }
         finishAssistantHire(result.needsHQ);
         return;
       }

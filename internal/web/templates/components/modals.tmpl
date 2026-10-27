@@ -788,21 +788,6 @@
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
   }
 
-  /* API key provider tabs */
-  .api-key-tabs .nav-link {
-    color: var(--text-secondary);
-    border: 1px solid transparent;
-    border-radius: 6px 6px 0 0;
-    padding: 6px 14px;
-    font-size: 0.85rem;
-  }
-
-  .api-key-tabs .nav-link.active {
-    color: var(--text-primary);
-    background: var(--bg-secondary);
-    border-color: var(--border-color) var(--border-color) var(--bg-secondary);
-  }
-
   .onboarding-progress-shell {
     margin-bottom: 1.5rem;
   }
@@ -1005,11 +990,11 @@
       <div class="modal-body" style="color: var(--text-primary); padding: 2rem;">
         <div id="onboardingProgressShell" class="onboarding-progress-shell">
           <div class="d-flex align-items-center justify-content-between mb-2">
-            <span id="onboardingStepLabel" class="onboarding-step-label">Step 1 of 2</span>
+            <span id="onboardingStepLabel" class="onboarding-step-label">Step 1 of 1</span>
             <button type="button" class="onboarding-secondary-action" id="skipOnboardingLink">Set Up Later</button>
           </div>
-          <div class="progress onboarding-progress-track" role="progressbar" aria-label="Onboarding progress" aria-valuemin="1" aria-valuemax="2" aria-valuenow="1">
-            <div id="onboardingProgressBar" class="progress-bar" style="width: 50%;"></div>
+          <div class="progress onboarding-progress-track" role="progressbar" aria-label="Onboarding progress" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1">
+            <div id="onboardingProgressBar" class="progress-bar" style="width: 100%;"></div>
           </div>
         </div>
 
@@ -1103,6 +1088,7 @@
             Ori only scans the workspace directory you confirm. You can change it later in Settings.
           </div>
 
+          <div class="alert alert-danger d-none mb-3" id="onboardingWelcomeError" role="alert" aria-live="polite"></div>
           <div class="onboarding-actions onboarding-actions-end ori-hatch-reveal" id="welcomeBtnReveal">
             <button type="button" class="btn btn-primary onboarding-next-btn" id="welcomeNextBtn" style="padding: 8px 28px;">
               Continue
@@ -1110,120 +1096,10 @@
           </div>
         </div>
 
-        <!-- Phase 1: Model Setup -->
-        <div class="onboarding-phase d-none" id="onboarding-phase-1">
-          <div class="d-flex align-items-start mb-4">
-            <div class="ori-avatar">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-                <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344 L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513 L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700 L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474 L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z" fill="white"/>
-              </svg>
-            </div>
-            <div class="ori-speech" id="modelSpeech">
-              Let’s pick the AI model I’ll use.
-            </div>
-          </div>
-
-          <!-- Model selection (shown when providers are available) -->
-          <div id="onboardingModelSelection">
-            <p class="onboarding-model-help mb-3">Ori needs a model before it can answer tasks. I’ll choose a recommended default when one is available.</p>
-            <div class="mb-3">
-              <label for="onboardingSystemProvider" class="form-label" style="font-size: 0.85rem; font-weight: 500;">Provider</label>
-              <select class="form-select" id="onboardingSystemProvider" aria-label="Select AI provider">
-                <option value="">Loading providers…</option>
-              </select>
-            </div>
-
-            <div class="mb-3">
-              <label for="onboardingSystemModel" class="form-label" style="font-size: 0.85rem; font-weight: 500;">Model</label>
-              <select class="form-select" id="onboardingSystemModel" disabled aria-label="Select AI model">
-                <option value="">Select provider first…</option>
-              </select>
-            </div>
-
-            <div class="mb-3 d-none" id="onboardingSystemReasoningField">
-              <label for="onboardingSystemReasoning" class="form-label" style="font-size: 0.85rem; font-weight: 500;">Reasoning Level</label>
-              <select class="form-select" id="onboardingSystemReasoning" aria-label="Select reasoning level">
-                <option value="medium" selected>Medium (Recommended)</option>
-                <option value="high">High</option>
-                <option value="low">Low</option>
-                <option value="xhigh">XHigh (Deepest)</option>
-              </select>
-            </div>
-
-            <div class="alert alert-success d-none mb-3" id="onboardingSystemModelSuccess"></div>
-          </div>
-          <div class="alert alert-danger d-none mb-3" id="onboardingModelError" role="alert" aria-live="polite"></div>
-
-          <!-- API key section (shown when no providers available) -->
-          <div id="onboardingApiKeySection" class="d-none">
-            <ul class="nav nav-tabs api-key-tabs mb-3" role="tablist">
-              <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="tab-openai" data-bs-toggle="tab" data-bs-target="#panel-openai" type="button" role="tab" aria-selected="true">OpenAI</button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" id="tab-anthropic" data-bs-toggle="tab" data-bs-target="#panel-anthropic" type="button" role="tab" aria-selected="false">Anthropic</button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" id="tab-gemini" data-bs-toggle="tab" data-bs-target="#panel-gemini" type="button" role="tab" aria-selected="false">Gemini</button>
-              </li>
-            </ul>
-            <div class="tab-content">
-              <div class="tab-pane fade show active" id="panel-openai" role="tabpanel">
-                <div class="input-group mb-2">
-                  <input type="password" class="form-control" id="openaiApiKey" name="openai_api_key" autocomplete="off" spellcheck="false" placeholder="sk-…" aria-label="OpenAI API Key">
-                  <button class="btn btn-outline-secondary" type="button" id="toggleOpenaiKey" aria-label="Toggle visibility">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/></svg>
-                  </button>
-                </div>
-                <small class="text-muted">Get a key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a></small>
-              </div>
-              <div class="tab-pane fade" id="panel-anthropic" role="tabpanel">
-                <div class="input-group mb-2">
-                  <input type="password" class="form-control" id="anthropicApiKey" name="anthropic_api_key" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" aria-label="Anthropic API Key">
-                  <button class="btn btn-outline-secondary" type="button" id="toggleAnthropicKey" aria-label="Toggle visibility">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/></svg>
-                  </button>
-                </div>
-                <small class="text-muted">Get a key from <a href="https://console.anthropic.com/settings/keys" target="_blank">Anthropic Console</a></small>
-              </div>
-              <div class="tab-pane fade" id="panel-gemini" role="tabpanel">
-                <div class="input-group mb-2">
-                  <input type="password" class="form-control" id="geminiApiKey" name="gemini_api_key" autocomplete="off" spellcheck="false" placeholder="Google AI Studio API key…" aria-label="Gemini API Key">
-                  <button class="btn btn-outline-secondary" type="button" id="toggleGeminiKey" aria-label="Toggle visibility">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/></svg>
-                  </button>
-                </div>
-                <small class="text-muted">Generate a key in Google AI Studio</small>
-              </div>
-            </div>
-
-            <div class="mt-3">
-              <button type="button" class="btn btn-primary btn-sm" id="saveApiKeyBtn">Save Key</button>
-              <span class="text-muted small ms-2">or install <a href="https://ollama.com" target="_blank">Ollama</a> for local AI</span>
-            </div>
-
-            <div class="alert alert-success d-none mt-3" id="apiKeySaveSuccess">
-              API key saved! Loading providers…
-            </div>
-            <div class="alert alert-danger d-none mt-3" id="apiKeySaveError">
-              <span id="apiKeySaveErrorMessage">Failed to save API key.</span>
-            </div>
-          </div>
-
-          <div class="onboarding-actions mt-3">
-            <div class="d-flex align-items-center gap-3">
-              <button type="button" class="btn btn-outline-secondary" id="modelBackBtn">Back</button>
-              <button type="button" class="onboarding-secondary-action" id="continueWithoutModelBtn">Continue without a model</button>
-            </div>
-            <button type="button" class="btn btn-primary onboarding-next-btn" id="modelNextBtn" style="padding: 8px 28px;" disabled>
-              Continue
-            </button>
-          </div>
-        </div>
-
         <!-- Phase 2: the first-assignment quest (Plan my first day), opened from
              Home. It is not part of onboarding: the modal's onboarding ends after
-             Model, and the assistant is hired on the Agents page (Mission 01). -->
+             Welcome, and the assistant is hired, with its model, on the Agents
+             page (Mission 01). Slot 1 is retired; this panel keeps its id. -->
         <div class="onboarding-phase d-none" id="onboarding-phase-2">
           <div id="onboardingPersonalAssistantAssignment" class="d-none">
             <div class="d-flex align-items-start mb-3">

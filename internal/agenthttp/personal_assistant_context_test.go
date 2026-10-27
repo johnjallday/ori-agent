@@ -216,6 +216,28 @@ func TestAsk_PersonalAssistantNoModelFallbackNamesIdentityWithoutInventingAnswer
 	}
 }
 
+// Before the hire, the model is chosen with the hire, so a turn sent to a
+// relationship that has not hired yet is answered by the setup guidance, which
+// points to Meet your assistant and never to Settings. It stops before any
+// model is asked for, so no-model wording is never the pre-hire answer.
+func TestAsk_BeforeTheHireTheAnswerPointsToMeetYourAssistantNotSettings(t *testing.T) {
+	for _, state := range []string{"needs_hire", "hiring"} {
+		t.Run(state, func(t *testing.T) {
+			h := NewHomeAssistantAskHandler(HomeSnapshotSources{}, nil, nil)
+			h.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{
+				context: &PersonalAssistantWorkContext{State: state},
+			}, "user-a")
+			resp := h.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "summarize", Intent: "general_task"})
+			if strings.Contains(resp.Response, "Settings") {
+				t.Fatalf("pre-hire answer sends the user to Settings: %q", resp.Response)
+			}
+			if len(resp.Actions) != 1 || resp.Actions[0].Href != "/?quest=meet-assistant" || resp.Actions[0].Type != HomeActionNavigate {
+				t.Fatalf("pre-hire actions = %+v, want one that opens Mission 01", resp.Actions)
+			}
+		})
+	}
+}
+
 func TestRoute_PreHireStopsAtHire(t *testing.T) {
 	preHire := newHomeAssistantWorkspaceFixtureHandler(t)
 	preHire.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{

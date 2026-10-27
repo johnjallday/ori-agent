@@ -5,7 +5,6 @@
 <link rel="stylesheet" href="/css/tag-input.css">
 <link rel="stylesheet" href="/css/agents-roster.css">
 <link rel="stylesheet" href="/css/agent-hire.css">
-
 <!-- Bootstrap's .bg-light was dropped from the markup so the page does not flash
      the cool grey canvas before the theme script runs. It is not the whole fix:
      the theme script re-adds .bg-light/.bg-dark at runtime, so the cozy canvas
@@ -454,6 +453,9 @@
   <!-- Mission 01: the hire preset's requests and views (window.OriAssistantHire).
        agents-roster.js reads the seam at use time, never at load. -->
   <script type="module" src="/js/modules/personal-assistant-hire.js"></script>
+  <!-- Mission 01: the preset's model block, the shared Default model picker
+       (window.OriDefaultModelPicker), read at use time like the seam above. -->
+  <script type="module" src="/js/modules/default-model-picker.js"></script>
   <!-- Mission 01: Ori's blocking layer (window.OriSpotlight), which lights New
        Agent when the user arrives through the mission. Before the walkthrough:
        modules run in document order. -->

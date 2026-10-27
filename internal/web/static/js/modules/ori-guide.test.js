@@ -1260,6 +1260,7 @@ test('local coachmark keys are not server-addressable', () => {
     assistant_name: '/agents',
     assistant_face: '/agents',
     assistant_focus: '/agents',
+    assistant_model: '/agents',
     assistant_hire: '/agents'
   };
   assert.deepEqual(local.sort(), Object.keys(owners).sort());

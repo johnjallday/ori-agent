@@ -196,7 +196,7 @@ test('nothing while onboarding owns the screen, off Home, or under another inten
   assert.deepEqual(quiet.requests, [], 'an ineligible page still made requests');
 });
 
-test('the briefing names the user and Ori, the mission, its six steps and what it unlocks', () => {
+test('the briefing names the user and Ori, the mission, its seven steps and what it unlocks', () => {
   const copy = briefingCopy({
     onboarding: { user_name: 'Sam', assistant_name: 'Ori' },
     mission: MISSIONS[0],
@@ -208,7 +208,15 @@ test('the briefing names the user and Ori, the mission, its six steps and what i
   assert.equal(copy.reward, '+5 Craft');
   assert.equal(copy.title, 'Meet your assistant');
   assert.equal(copy.unlocks, 'Unlocks Build My HQ and 3 more missions.');
-  assert.deepEqual(copy.steps, ['Open Agents', 'Hire', 'Name', 'Face', 'Focus', 'Hire assistant']);
+  assert.deepEqual(copy.steps, [
+    'Open Agents',
+    'Hire',
+    'Name',
+    'Face',
+    'Focus',
+    'Model',
+    'Hire assistant'
+  ]);
   assert.equal(STEP_LABELS.length, TOTAL_STEPS);
   assert.equal(copy.startLabel, 'Start mission');
   assert.equal(copy.laterLabel, 'Not now');
@@ -252,7 +260,7 @@ test('the first step lights the Agents nav entry, and says why', async () => {
   const step = layer.calls.spotlight[0];
   assert.equal(step.coachmark, 'nav_agents');
   assert.equal(step.index, 1);
-  assert.equal(step.total, 6);
+  assert.equal(step.total, 7);
   assert.equal(step.title, 'Click Agents');
   assert.equal(step.body, 'Your assistant works from the Agents page.');
   assert.equal(step.guideName, 'Ori');
