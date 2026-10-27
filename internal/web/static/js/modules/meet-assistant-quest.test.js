@@ -149,12 +149,14 @@ function load({
     // A change event from a control inside the modal's form.
     change(control, value = 'x') {
       const inFocus = control === 'focus';
+      const inModel = control === 'model';
       const target = {
-        id: inFocus ? '' : control,
+        id: inFocus || inModel ? '' : control,
         value,
         closest: selector => {
           if (selector === '#addAgentForm') return {};
           if (selector === '#cr-focus-group') return inFocus ? {} : null;
+          if (selector === '#cr-model-group') return inModel ? {} : null;
           return null;
         }
       };
@@ -182,11 +184,11 @@ test('the walkthrough starts on the Agents page while the assistant is unhired',
     const { quest, calls } = load({ relationship });
     await settle();
     assert.equal(quest.isActive(), true, relationship);
-    // Step 1 is on Home; this page starts at Step 2 of 6.
+    // Step 1 is on Home; this page starts at Step 2 of 7.
     assert.deepEqual(steps(calls), [2]);
     const first = calls.presented[0];
     assert.equal(first.quest, 'meet-assistant');
-    assert.equal(first.total, 6);
+    assert.equal(first.total, 7);
     assert.equal(first.coachmark, 'new_agent');
     assert.match(first.answer, /^Press Hire\./);
     // skipGreeting: the guide's own greeting would land after and replace the step.
@@ -252,13 +254,36 @@ test('each form signal advances exactly one step, in order, to Hire', async () =
 
   loaded.change('cr-mandate', 'Keep it light.');
   assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6]);
+  const model = loaded.calls.presented.at(-1);
+  assert.equal(model.coachmark, 'assistant_model');
+  assert.match(model.answer, /AI they think with/);
+
+  // Choosing a model is the answer to the Model step.
+  loaded.change('model');
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6, 7]);
   const hire = loaded.calls.presented.at(-1);
   assert.equal(hire.coachmark, 'assistant_hire');
   assert.match(hire.answer, /no workspace, no permissions, no accounts/);
 
   // Nothing moves past Hire.
   loaded.change('focus');
-  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6]);
+  loaded.change('model');
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6, 7]);
+});
+
+test('the Model step names the AI and offers Keep this model', async () => {
+  const loaded = load();
+  await settle();
+  loaded.openCreate();
+  loaded.change('cr-name', 'Atlas');
+  loaded.change('focus');
+  loaded.change('cr-mandate', 'Keep it light.');
+  const model = loaded.calls.presented.at(-1);
+  assert.equal(model.index, 6);
+  assert.equal(model.total, 7);
+  assert.equal(model.coachmark, 'assistant_model');
+  assert.deepEqual([...model.choices.map(choice => choice.id)], ['keep-model']);
+  assert.deepEqual([...model.choices.map(choice => choice.label)], ['Keep this model']);
 });
 
 test('a step the form advanced to never takes focus out of the form', async () => {
@@ -289,7 +314,10 @@ test('the choices advance one step each and focus the control they name', async 
   loaded.choose('keep-face');
   loaded.choose('done-choosing');
   assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6]);
-  assert.equal(loaded.calls.presented.at(-1).focus, true, 'Done choosing hands focus to Hire');
+  assert.equal(loaded.calls.presented.at(-1).coachmark, 'assistant_model');
+  loaded.choose('keep-model');
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 5, 6, 7]);
+  assert.equal(loaded.calls.presented.at(-1).focus, true, 'Keep this model hands focus to Hire');
   assert.equal(loaded.calls.presented.at(-1).choices.length, 0);
 });
 
@@ -401,7 +429,7 @@ test('arriving from the Home step lights New Agent, with Ori’s panel left clos
     assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2']);
     const lit = loaded.calls.layer[0];
     assert.equal(lit.coachmark, 'new_agent');
-    assert.equal(lit.total, 6);
+    assert.equal(lit.total, 7);
     assert.equal(lit.title, 'Press Hire');
     assert.equal(lit.body, 'Your assistant starts as an agent like any other.');
     assert.equal(lit.note, 'Nothing is created until you press Hire assistant.');
@@ -474,6 +502,17 @@ test('the form’s steps are Ori’s callout beside the dialog, never the panel'
   loaded.choose('done-choosing');
   step = loaded.calls.layer.at(-1);
   assert.equal(step.index, 6);
+  assert.equal(step.coachmark, 'assistant_model');
+  assert.equal(step.title, 'Pick the AI they think with');
+  assert.equal(
+    step.body,
+    'A recommended model is already selected. Change it if you prefer another.'
+  );
+  assert.deepEqual([...step.choices.map(choice => choice.label)], ['Keep this model']);
+
+  loaded.choose('keep-model');
+  step = loaded.calls.layer.at(-1);
+  assert.equal(step.index, 7);
   assert.equal(step.title, 'Hire them');
   assert.equal(step.choices.length, 0);
 
@@ -482,7 +521,8 @@ test('the form’s steps are Ori’s callout beside the dialog, never the panel'
     'callout:3',
     'callout:4',
     'callout:5',
-    'callout:6'
+    'callout:6',
+    'callout:7'
   ]);
   assert.equal(loaded.calls.opened, 0);
   assert.deepEqual(loaded.calls.presented, []);

@@ -155,6 +155,13 @@
       local: true,
       group: true
     },
+    assistant_model: {
+      routes: ['/agents'],
+      selector: '#cr-model-group',
+      label: 'the AI your assistant thinks with',
+      local: true,
+      group: true
+    },
     assistant_hire: {
       routes: ['/agents'],
       selector: '#createSubmit',

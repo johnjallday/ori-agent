@@ -128,6 +128,26 @@ test.describe('Personal Assistant Foundation first value', () => {
         })
       })
     );
+    // The preset's model block: one provider with a recommended model.
+    await page.route('**/api/providers', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          providers: [{ name: 'openai', display_name: 'OpenAI', available: true }]
+        })
+      })
+    );
+    await page.route('**/api/settings/available-models?provider=openai', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          available: true,
+          model_options: [{ id: 'gpt-small', label: 'Small', recommended: true }]
+        })
+      })
+    );
     await page.route('**/api/personal-assistant/hire', async route => {
       hireCalls += 1;
       hireBody = route.request().postDataJSON();
@@ -451,7 +471,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(briefing.locator('.ori-spotlight__greeting')).toContainText(
       'let’s meet your assistant'
     );
-    await expect(briefing.locator('.ori-spotlight__step')).toHaveCount(6);
+    await expect(briefing.locator('.ori-spotlight__step')).toHaveCount(7);
     await expect(briefing.locator('[data-ori-spotlight="start"]')).toBeFocused();
     await expect(page.locator('#oriGuidePanel')).toBeHidden();
     await briefing.locator('[data-ori-spotlight="start"]').click();
@@ -460,7 +480,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     // presses themselves. The navbar wraps on a phone, so Agents is in reach.
     const callout = layer.locator('.ori-spotlight__callout');
     await expect(layer).toHaveAttribute('data-mode', 'spotlight');
-    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 6');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 7');
     await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Click Agents');
     await expect(page.locator('#navAgentsLink')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#navAgentsLink').click();
@@ -468,7 +488,7 @@ test.describe('Personal Assistant Foundation first value', () => {
 
     // Step 2: the same spotlight, on New Agent.
     await expect(layer).toHaveAttribute('data-mode', 'spotlight');
-    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 2 of 6');
+    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 2 of 7');
     await expect(page.locator('#newAgentBtn')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#newAgentBtn').click();
 
@@ -478,11 +498,11 @@ test.describe('Personal Assistant Foundation first value', () => {
     // per signal.
     const reply = page.locator('#oriGuideReply');
     const step = reply.locator('.ori-guide__quest-step');
-    await expect(step).toHaveText('Step 3 of 6');
+    await expect(step).toHaveText('Step 3 of 7');
     await expect(layer).toHaveCount(0);
     await expect(page.locator('#cr-name')).toBeFocused();
     await expect(page.locator('#cr-name')).toHaveClass(/is-ori-coachmark/);
-    for (const absent of ['#cr-role', '#cr-model', '#cr-description']) {
+    for (const absent of ['#cr-role', '#cr-description']) {
       await expect(page.locator(absent)).toHaveCount(0);
     }
     expect(
@@ -492,14 +512,18 @@ test.describe('Personal Assistant Foundation first value', () => {
     ).toBe(false);
     await page.locator('#cr-name').fill('Atlas');
     await page.locator('#cr-name').press('Tab');
-    await expect(step).toHaveText('Step 4 of 6');
+    await expect(step).toHaveText('Step 4 of 7');
     await expect(page.locator('#cr-appearance-host')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
-    await expect(step).toHaveText('Step 5 of 6');
+    await expect(step).toHaveText('Step 5 of 7');
     await expect(page.locator('#cr-focus-group')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#cr-mandate').fill('Keep the week realistic.');
     await page.locator('#cr-mandate').press('Tab');
-    await expect(step).toHaveText('Step 6 of 6');
+    await expect(step).toHaveText('Step 6 of 7');
+    await expect(page.locator('#cr-model-group')).toHaveClass(/is-ori-coachmark/);
+    await expect(page.locator('#cr-model')).toHaveValue('gpt-small');
+    await page.locator('#cr-model').selectOption('gpt-small');
+    await expect(step).toHaveText('Step 7 of 7');
     await expect(page.locator('#createSubmit')).toHaveClass(/is-ori-coachmark/);
     expect(hireCalls).toBe(0);
     await page.locator('#createSubmit').click();
@@ -510,6 +534,11 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(hireBody.display_name).toBe('Atlas');
     expect(hireBody.mandate).toBe('Keep the week realistic.');
     expect(hireBody.focus_areas).toContain('prepare_for_meetings');
+    expect(hireBody.model).toEqual({
+      provider: 'openai',
+      model: 'gpt-small',
+      reasoning_effort: ''
+    });
     expect(hireBody.request_id).toBeTruthy();
     expect(relationshipState).toBe('needs_hq');
     expect(hqSetupCalls).toBe(0);

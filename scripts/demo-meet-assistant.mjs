@@ -425,9 +425,13 @@ async function stageWalkthrough() {
 
   // Ticking a box is the form's own signal; it must not move focus to Hire.
   await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
-  const hire = await expectCallout(page, 6, '#createSubmit', 'Hire them');
+  await expectCallout(page, 6, '#cr-model-group', 'Pick the AI they think with');
+  await shot(page, 'walkthrough-6-model');
+  await chooseHireModel(page);
+  await page.locator('[data-ori-spotlight-choice="keep-model"]').click();
+  const hire = await expectCallout(page, 7, '#createSubmit', 'Hire them');
   check(hire.focused !== '#createSubmit', `focus stayed in the form (${hire.focused || 'body'})`);
-  await shot(page, 'walkthrough-6-hire');
+  await shot(page, 'walkthrough-7-hire');
 
   await hireAndLand(page);
   // The hire hands over to Ori's Mission 02 briefing.
@@ -624,8 +628,8 @@ async function checkBriefing(page) {
     `mission: ${seen.kicker} · ${seen.title}`
   );
   check(
-    seen.steps.join('|') === 'Open Agents|New Agent|Name|Face|Focus|Hire',
-    `six steps: ${seen.steps.join(', ')}`
+    seen.steps.join('|') === 'Open Agents|Hire|Name|Face|Focus|Model|Hire assistant',
+    `seven steps: ${seen.steps.join(', ')}`
   );
   check(
     /^Unlocks Build My HQ and 3 more missions\.$/.test(seen.unlocks),
@@ -767,8 +771,12 @@ async function stageHome() {
   await expectCallout(page, 5, '#cr-focus-group', 'Choose their focus');
   await shot(page, 'home-7-step-5-focus');
   await page.locator('[data-ori-spotlight-choice="done-choosing"]').click();
-  await expectCallout(page, 6, '#createSubmit', 'Hire them');
-  await shot(page, 'home-8-step-6-hire');
+  await expectCallout(page, 6, '#cr-model-group', 'Pick the AI they think with');
+  await shot(page, 'home-8-step-6-model');
+  await chooseHireModel(page);
+  await page.locator('[data-ori-spotlight-choice="keep-model"]').click();
+  await expectCallout(page, 7, '#createSubmit', 'Hire them');
+  await shot(page, 'home-8-step-7-hire');
   await hireAndLand(page);
 
   // The hand-over: Ori's Mission 02 briefing, in the same layer.

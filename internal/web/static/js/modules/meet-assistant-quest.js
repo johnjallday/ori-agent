@@ -50,12 +50,15 @@
   var STEP_NAME = 3;
   var STEP_FACE = 4;
   var STEP_FOCUS = 5;
-  var STEP_HIRE = 6;
-  var TOTAL_STEPS = 6;
+  // The AI the assistant thinks with: saved as Ori's Default model by the hire.
+  var STEP_MODEL = 6;
+  var STEP_HIRE = 7;
+  var TOTAL_STEPS = 7;
 
   var CHOICE_KEEP_NAME = 'keep-name';
   var CHOICE_KEEP_FACE = 'keep-face';
   var CHOICE_DONE_CHOOSING = 'done-choosing';
+  var CHOICE_KEEP_MODEL = 'keep-model';
 
   // Set by the Home step when the user presses the Agents nav entry
   // (MEET_ASSISTANT_GUIDED_FLAG in personal-assistant-hire.js; this script
@@ -176,6 +179,12 @@
     if (step === STEP_FOCUS) {
       return { answer: 'What should they help with this week? Tick what fits.', note: '' };
     }
+    if (step === STEP_MODEL) {
+      return {
+        answer: 'Pick the AI they think with. A recommended model is already selected.',
+        note: ''
+      };
+    }
     return {
       answer:
         'Hire them. This creates one assistant and nothing else: no workspace, no permissions, no accounts.',
@@ -202,6 +211,12 @@
         body: 'What should they help with this week? Tick what fits.'
       };
     }
+    if (step === STEP_MODEL) {
+      return {
+        title: 'Pick the AI they think with',
+        body: 'A recommended model is already selected. Change it if you prefer another.'
+      };
+    }
     return {
       title: 'Hire them',
       body: 'This creates one assistant and nothing else: no workspace, no permissions, no accounts.'
@@ -213,6 +228,7 @@
     if (step === STEP_NAME) return 'assistant_name';
     if (step === STEP_FACE) return 'assistant_face';
     if (step === STEP_FOCUS) return 'assistant_focus';
+    if (step === STEP_MODEL) return 'assistant_model';
     return 'assistant_hire';
   }
 
@@ -223,6 +239,7 @@
     if (step === STEP_NAME) return [{ id: CHOICE_KEEP_NAME, label: 'Keep this name' }];
     if (step === STEP_FACE) return [{ id: CHOICE_KEEP_FACE, label: 'Keep this face' }];
     if (step === STEP_FOCUS) return [{ id: CHOICE_DONE_CHOOSING, label: 'Done choosing' }];
+    if (step === STEP_MODEL) return [{ id: CHOICE_KEEP_MODEL, label: 'Keep this model' }];
     return [];
   }
 
@@ -441,6 +458,13 @@
       return;
     }
 
+    // Choosing a model is the answer to the Model step; it moves on to Hire.
+    var inModel = typeof target.closest === 'function' && target.closest('#cr-model-group');
+    if (inModel) {
+      if (state.step === STEP_MODEL) advanceTo(STEP_HIRE, false);
+      return;
+    }
+
     var inFocus = typeof target.closest === 'function' && target.closest('#cr-focus-group');
     var inMandate = target.id === 'cr-mandate';
     if (!inFocus && !inMandate) return;
@@ -459,6 +483,8 @@
     if (detail.choice === CHOICE_KEEP_NAME && state.step === STEP_NAME) advanceTo(STEP_FACE);
     else if (detail.choice === CHOICE_KEEP_FACE && state.step === STEP_FACE) advanceTo(STEP_FOCUS);
     else if (detail.choice === CHOICE_DONE_CHOOSING && state.step === STEP_FOCUS) {
+      advanceTo(STEP_MODEL);
+    } else if (detail.choice === CHOICE_KEEP_MODEL && state.step === STEP_MODEL) {
       advanceTo(STEP_HIRE);
     }
   }
@@ -529,6 +555,7 @@
     STEP_NAME: STEP_NAME,
     STEP_FACE: STEP_FACE,
     STEP_FOCUS: STEP_FOCUS,
+    STEP_MODEL: STEP_MODEL,
     STEP_HIRE: STEP_HIRE
   };
 

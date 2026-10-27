@@ -8,7 +8,7 @@
  *
  *   briefing   Right after first-run onboarding (?quest=meet-assistant&
  *              briefing=1), Ori sits in the centre of the dimmed page with the
- *              mission card: what it is, its six steps, what it unlocks. One
+ *              mission card: what it is, its seven steps, what it unlocks. One
  *              choice: Start mission, or Not now.
  *   step 1     Start mission, or the mission card's own Start, Today's banner,
  *              Ask Ori and the retired /?hire=1 (?quest=meet-assistant): the
@@ -32,17 +32,19 @@ import * as spotlightLayer from './ori-spotlight.js';
 
 export const PROMPT_QUEST = 'meet-assistant';
 
-// The whole walkthrough is six steps: this one, then five on the Agents page.
-export const TOTAL_STEPS = 6;
+// The whole walkthrough is seven steps: this one, then six on the Agents page.
+export const TOTAL_STEPS = 7;
 
-// The six clicks, as the briefing lists them. The Agents page's button reads
-// Hire; the preset's own button, the last click, reads Hire assistant.
+// The seven clicks, as the briefing lists them. The Agents page's button reads
+// Hire; the preset's own button, the last click, reads Hire assistant. Model is
+// the AI the assistant thinks with, which the hire saves as Ori's Default model.
 export const STEP_LABELS = Object.freeze([
   'Open Agents',
   'Hire',
   'Name',
   'Face',
   'Focus',
+  'Model',
   'Hire assistant'
 ]);
 
