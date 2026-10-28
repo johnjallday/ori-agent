@@ -32,6 +32,8 @@ Commands:
 Options:
   --reaper-source DIR   Clean REAPER plugin candidate worktree.
   --music-source DIR    Clean Music Project Management candidate worktree.
+  --music-ref REF       Export this existing Music commit/tag without switching
+                        or changing its source checkout (default: HEAD).
   --music-upgrade-source DIR
                         Arrangement or studio suite: a newer clean Music commit.
                         Arrangement: the Home is populated on --music-source and
@@ -98,6 +100,7 @@ keep_sandbox="${ORI_KEEP_REAPER_SANDBOX:-0}"
 open_browser=0
 reaper_source="${ORI_REAPER_PLUGIN_SOURCE:-}"
 music_source="${ORI_MUSIC_PLUGIN_SOURCE:-}"
+music_ref="HEAD"
 music_upgrade_source=""
 install_order="${ORI_MUSIC_REAPER_INSTALL_ORDER:-}"
 test_suite="legacy"
@@ -109,6 +112,11 @@ while [[ $# -gt 0 ]]; do
 	--reaper-source)
 		[[ $# -ge 2 ]] || fail "--reaper-source needs a directory"
 		reaper_source="$2"
+		shift 2
+		;;
+	--music-ref)
+		[[ $# -ge 2 ]] || fail "--music-ref needs an existing commit or tag"
+		music_ref="$2"
 		shift 2
 		;;
 	--music-source)
@@ -176,6 +184,7 @@ done
 if [[ -n "$install_order" && "$install_order" != "music-first" && "$install_order" != "reaper-first" && "$install_order" != "reaper-only" ]]; then
 	fail "--install-order must be music-first, reaper-first, or reaper-only"
 fi
+[[ "$music_ref" == "HEAD" || -n "$music_source" ]] || fail "--music-ref requires --music-source"
 if [[ -n "$music_source" && -z "$install_order" ]]; then
 	install_order="music-first"
 fi
@@ -263,10 +272,9 @@ if [[ -n "$music_source" ]]; then
 		fail "music source is not a Git worktree"
 	[[ -z "$(git -C "$music_root" status --porcelain --untracked-files=all)" ]] || \
 		fail "music source must be clean so its exact commit can be staged"
-	[[ -x "$music_root/scripts/validate-package.py" ]] || \
-		fail "music candidate has no executable scripts/validate-package.py"
-	music_revision="$(git -C "$music_root" rev-parse HEAD)"
-	music_tree="$(git -C "$music_root" rev-parse HEAD^{tree})"
+	music_revision="$(git -C "$music_root" rev-parse --verify --end-of-options "${music_ref}^{commit}" 2>/dev/null)" || \
+		fail "--music-ref does not resolve to an existing commit"
+	music_tree="$(git -C "$music_root" rev-parse "${music_revision}^{tree}")"
 fi
 upgrade_root=""
 upgrade_revision=""

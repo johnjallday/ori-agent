@@ -309,6 +309,25 @@ test('result navigation waits for the accepted owner to finish instead of swallo
   assert.match(ready, /data-placement-action="open">Open workspace/);
 });
 
+test('ordinary Group review and proven result retain Group terminology and no implied membership', () => {
+  const review = workspaceCreationReviewHTML({
+    ...blank,
+    subjectKind: 'group',
+    automatic: true,
+    confirmLabel: 'Create group'
+  });
+  assert.match(review, />Group name<\/label>/);
+  assert.match(review, />Purpose<\/label>/);
+  assert.match(review, />Create group<\/button>/);
+  const result = workspaceCreationReviewHTML({
+    result: { id: 'group-id', kind: 'group', name: 'Reviewed Group' }
+  });
+  assert.match(result, /Group created/);
+  assert.match(result, /Existing member workspaces are unchanged/);
+  assert.match(result, />Open group<\/button>/);
+  assert.doesNotMatch(result, /Standalone workspace|Workspace created/);
+});
+
 test('recognized setup projects fixed plan roles and optional first-task boundaries without borrowing ordinary authority', () => {
   const session = {
     plan: {

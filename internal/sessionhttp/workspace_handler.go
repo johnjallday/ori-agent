@@ -565,6 +565,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	groupIntent := req.GroupRequirementReview || req.GroupReviewToken != "" || req.IdempotencyKey != "" || req.GroupComposition != "" || req.CreateRequiredHome
+	if groupIntent {
+		w.Header().Set("X-Ori-Group-Commit-Phase", "not_accepted")
+		if req.TemplateID == "" && req.TemplatePath == "" {
+			respondGroupRequirementError(w, grouprequirements.ErrReviewStale)
+			return
+		}
+	}
 	if req.BuildSessionID != "" && buildPreparationContextFrom(r.Context()) == nil {
 		h.buildPreparationMu.Lock()
 		defer h.buildPreparationMu.Unlock()
@@ -1096,6 +1104,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if groupPlan != nil {
+		w.Header().Set("X-Ori-Group-Commit-Phase", "succeeded")
+	}
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
 
 	// A create that finishes a "Build with your assistant" session closes it

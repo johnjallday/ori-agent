@@ -177,6 +177,7 @@
         generation: Math.max(1, Number(context.generation) || 1) + 1,
         kind: next,
         review: null,
+        ordinaryReview: null,
         submitting: false,
         drafts: {
           workspace: cloneDraft(context.drafts?.workspace),

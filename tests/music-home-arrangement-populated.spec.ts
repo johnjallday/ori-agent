@@ -3,6 +3,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // Populated Music Production Home → Organize library → exact collection review →
 // one independent project activation, on a real isolated Ori host.
@@ -364,7 +365,8 @@ test('populated Home: Organize library → reviewed collection + one queued acti
       'Music Portfolio Manager'
     );
     await creator.getByRole('button', { name: 'Review →' }).click();
-    await creator.locator('#createFolderBtn').click();
+    // The verified result's Open follows the launcher's own folder-offer landing.
+    await confirmCreatorFinalAction(page, { open: true });
     await page.waitForURL(/\/assistant\?folder_offer_id=/, { timeout: 60_000 });
     expect(nativeDialogs).toEqual([]);
     const libraryURL = new URL(page.url()).pathname;

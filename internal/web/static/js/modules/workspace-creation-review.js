@@ -178,6 +178,7 @@ export function creationReviewNavigationHTML(view = {}) {
   return `<div class="assisted-placement__navigation">
     <button type="button" class="${view.automatic ? '' : 'assisted-placement__primary'}" data-placement-action="place"${!view.canPlace || !view.reviewed || view.dirty || locked ? ' disabled' : ''}>Place &amp; create on map</button>
     <button type="button" data-placement-action="suggested" aria-pressed="${Boolean(view.automatic)}"${locked ? ' disabled' : ''}>Use automatic placement</button>
+    ${view.canRefreshReview ? `<button type="button" data-placement-action="refresh-review"${locked || view.dirty ? ' disabled' : ''}>Refresh review</button>` : ''}
     </div><p class="assisted-placement__hint">${escapeReviewText(view.automatic ? 'Automatic placement selected. Confirm below to create this reviewed setup.' : view.mapHint)}</p>`;
 }
 
@@ -189,11 +190,12 @@ export function workspaceCreationReviewHTML(view = {}) {
   const locked = Boolean(view.busy || view.accepted || view.conflict || view.closed);
   const disabled = locked ? ' disabled' : '';
   const prefix = view.idPrefix || 'workspaceCreationReview';
+  const group = (view.result?.kind || view.subjectKind) === 'group';
   if (view.accepted || view.result) {
-    return `<section class="assisted-placement" aria-label="Workspace creation result">
-      <h2 id="${escapeReviewText(prefix)}Title" tabindex="-1">${escapeReviewText(view.resultTitle || (view.result ? 'Workspace created' : 'Check confirmed creation'))}</h2>
+    return `<section class="assisted-placement" aria-label="${group ? 'Group' : 'Workspace'} creation result">
+      <h2 id="${escapeReviewText(prefix)}Title" tabindex="-1">${escapeReviewText(view.resultTitle || (view.result ? (group ? 'Group created' : 'Workspace created') : 'Check confirmed creation'))}</h2>
       <p>${escapeReviewText(view.result?.name || '')}</p>
-      ${view.result ? `<p>${view.result.parent_id ? `Group: ${escapeReviewText(view.result.parent_id)}` : 'Standalone workspace'}</p><p>${view.result.agent_instances?.length ? `Assigned: ${view.result.agent_instances.map(member => escapeReviewText(member.name)).join(', ')}` : 'No agents attached.'}</p>` : ''}
+      ${view.result ? `<p>${group ? 'Group · Existing member workspaces are unchanged.' : view.result.parent_id ? `Group: ${escapeReviewText(view.resultParentName || view.result.parent_id)}` : 'Standalone workspace'}</p><p>${view.result.agent_instances?.length ? `Assigned: ${view.result.agent_instances.map(member => escapeReviewText(member.name)).join(', ')}` : 'No agents attached.'}</p>` : ''}
       <p role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escapeReviewText(view.message)}</p>
       ${view.result && view.nextSetup ? `<p><strong>Next setup:</strong> ${escapeReviewText(view.nextSetup)}. Open the workspace to continue; setup readiness has not been verified here.</p>` : ''}
       ${view.accepted && !view.result ? '<p>Work may already exist. Closing is not undo. Reading status never continues creation.</p>' : ''}
@@ -201,19 +203,19 @@ export function workspaceCreationReviewHTML(view = {}) {
         ${view.accepted && !view.result ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
         ${view.canAbandonReview && !view.result ? `<button type="button" data-placement-action="abandon-review"${view.busy ? ' disabled' : ''}>Release unaccepted review</button>` : ''}
         ${view.positionFailed && view.result ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
-        ${view.result ? `<button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>Open workspace</button>` : ''}
+        ${view.result ? `<button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>${group ? 'Open group' : 'Open workspace'}</button>` : ''}
         <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
       </div></section>`;
   }
-  return `<section class="assisted-placement" aria-label="Review proposed workspace">
+  return `<section class="assisted-placement" aria-label="Review proposed ${group ? 'group' : 'workspace'}">
     ${creationReviewHeaderHTML({ title: view.title || `Make room for ${view.name || 'your workspace'}`, titleId: `${prefix}Title`, note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art })}
     <div class="assisted-placement__fields">
-      <div><label for="${escapeReviewText(prefix)}Name">Workspace name</label><input id="${escapeReviewText(prefix)}Name" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${view.canEditName === false ? ' readonly' : ''}${disabled}></div>
-      <div><label for="${escapeReviewText(prefix)}Goal">Goal</label><textarea id="${escapeReviewText(prefix)}Goal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>
+      <div><label for="${escapeReviewText(prefix)}Name">${group ? 'Group name' : 'Workspace name'}</label><input id="${escapeReviewText(prefix)}Name" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${view.canEditName === false ? ' readonly' : ''}${disabled}></div>
+      <div><label for="${escapeReviewText(prefix)}Goal">${group ? 'Purpose' : 'Goal'}</label><textarea id="${escapeReviewText(prefix)}Goal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>
     </div>
     ${creationReviewSlotsHTML(view.rows, { locked })}
     <button type="button" data-placement-action="details"${disabled}>${escapeReviewText(view.detailsLabel || 'Edit details & advanced settings')}</button>
-    ${view.canChangeBlueprint === false ? '' : `<button type="button" data-placement-action="blueprint"${disabled}>Change blueprint</button>`}
+    ${view.canChangeBlueprint === false ? '' : `<button type="button" data-placement-action="blueprint"${disabled}>${group ? 'Change group blueprint' : 'Change blueprint'}</button>`}
     <section class="assisted-placement__review" aria-label="Before you confirm"><h3>Before you confirm</h3>
       <dl>${(view.facts || [])
         .map(

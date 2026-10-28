@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /** Only user gestures; installs no routes and fabricates no domain receipts. */
 export async function confirmReviewedCreation(page: Page, open = false) {
@@ -10,4 +10,33 @@ export async function confirmReviewedCreation(page: Page, open = false) {
   } else {
     await page.locator('#createFolderBtn').click();
   }
+}
+
+/**
+ * The one final gesture for whichever owner the creator is using. The shared
+ * review (ordinary, grouped project, ordinary Group or managed Home) is
+ * confirmed through automatic placement and its verified result is awaited;
+ * `open` then follows the result's own Open action. Guided/specialized owners
+ * that still render their own button keep that button.
+ */
+export async function confirmCreatorFinalAction(page: Page, { open = false } = {}) {
+  const review = page.locator('#workspaceCreationReviewPanel');
+  if (!(await review.isVisible())) {
+    await page.locator('#createFolderBtn').click();
+    return;
+  }
+  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const confirm = review.locator('[data-placement-action="confirm"]');
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect(
+    review.getByRole('heading', { name: /^(Workspace created|Group created|Home ready)$/ })
+  ).toBeVisible({ timeout: 20_000 });
+  if (open) await review.locator('[data-placement-action="open"]').click();
+}
+
+/** Follows the verified result's own Open action (after reading its reply). */
+export async function openCreatorResult(page: Page) {
+  const review = page.locator('#workspaceCreationReviewPanel');
+  if (await review.isVisible()) await review.locator('[data-placement-action="open"]').click();
 }

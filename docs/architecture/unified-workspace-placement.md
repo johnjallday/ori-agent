@@ -231,7 +231,8 @@ session or its Move mode. Read/history navigation never saves geometry.
 | Inbox File Janitor | janitor-review / janitor-prepare claim and linked scan receipt | retain exact source transfer, hold TTL, consumed attachment and empty-scan receipt |
 | Generic folder/link / software / recognized setup | source run or build plan owner, selected by actual proposal | retain source owner unless exact durable transfer is specifically implemented; no relaxation of from-inbox restrictions |
 | Ordinary Group / selected members | reviewed Group Manager or setup-journey group commit / returned group ID | member approval is separate, not geometry |
-| Managed Home / required Home | group-template or requirement review/commit / created versus reused identity | prerequisite survives cancellation of later child |
+| Grouped project (required/recommended/optional Home policy) | `createFolder` → requirement-owned POST with the review token/key for the current request; proof via `POST /api/workspaces/group-requirements/observe` | lookup reference retained before dispatch; only `not_accepted`, or a final Claim-phase refusal whose operation was never recorded, is a refusal; anything else is read, never replayed |
+| Managed Home / required Home | group-template or requirement review/commit / created versus reused identity; managed shared review proves via `POST /api/workspaces/group-templates/observe` | prerequisite survives cancellation of later child; reused Home is automatic-only and never positioned; a launcher's own landing is followed only on a success notice |
 | Music/REAPER / connection-only quests | existing Home, project connection and journey owners / canonical resources | no ordinary fallback, no implicit launch/live control; paired candidate acceptance required |
 | Import/continuity/HQ | existing import/adoption/designation owners / their receipts | truthful reuse/import, no forced placement, no bootstrap redesign |
 

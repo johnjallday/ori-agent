@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import './folder-setup-visual.js';
 import { createPlacementCards } from './assisted-workspace-placement.js';
+import * as groupedApi from './grouped-creation-operation.js';
 import {
   loadInitialWorkspaceTree,
   loadOnboardingStatus,
@@ -227,6 +228,54 @@ test('accepted ordinary creation cannot fall back to legacy POST when the picker
   assert.equal(calls, 0);
 });
 
+test('kind changes cannot discard an accepted, uncertain or retained reviewed operation', () => {
+  for (const review of [
+    { reference: { id: 'retained' } },
+    { accepted: true },
+    { result: { id: 'group' } },
+    { actionInFlight: true }
+  ]) {
+    const manager = loadSessionManager(undefined, {
+      WorkspaceCreatorState: {
+        switchCreatorKind: () => {
+          throw new Error('Must not replace retained owner');
+        }
+      }
+    });
+    manager.workspaceCreatorContext = { kind: 'workspace', ordinaryReview: review };
+    manager.syncWorkspaceCreatorPresentation = () => {};
+    assert.equal(manager.switchWorkspaceCreatorKind('group'), false);
+    assert.equal(manager.workspaceCreatorContext.ordinaryReview, review);
+  }
+});
+
+test('ordinary Group uses its existing roster owner while managed and selected-member Group actions stay separate', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null)
+    }
+  );
+  manager.workspaceCreatorContext = { mode: 'ordinary' };
+  manager.isGroupCreator = () => true;
+  manager.usesGroupRosterCreator = () => true;
+  manager.teamView = () => ({});
+  assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+  const material = manager.ordinaryCreationMaterialReview();
+  assert.match(material.now, /reviewed Group Manager/);
+  assert.match(material.facts[0].value, /does not grant access to member workspaces/);
+  manager.usesGroupRosterCreator = () => false;
+  assert.equal(manager.usesUnifiedOrdinaryReview(), false, 'managed Home keeps its own commit');
+  manager.usesGroupRosterCreator = () => true;
+  manager.workspaceCreatorContext.mode = 'selected-members';
+  assert.equal(
+    manager.usesUnifiedOrdinaryReview(),
+    false,
+    'member selection retains its approval owner'
+  );
+});
+
 test('ordinary build review retains manual fallback and exact generic sources without borrowing specialized setup authority', () => {
   const manager = loadSessionManager(
     undefined,
@@ -379,6 +428,354 @@ test('a definite ordinary refusal returns fresh roles to their existing owner wi
     ['step', 3],
     ['message', 'Review changed roles']
   ]);
+});
+
+function groupedFixture(responses) {
+  const values = new Map();
+  const localStorage = {
+    getItem: key => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  };
+  const calls = [];
+  const manager = loadSessionManager(
+    async (url, options = {}) => {
+      calls.push([url, options.method || 'GET', options.body ? JSON.parse(options.body) : null]);
+      const next = responses.shift();
+      if (!next) throw new Error(`unexpected ${url}`);
+      if (next.throw) throw new Error('lost');
+      return {
+        ok: next.status >= 200 && next.status < 300,
+        status: next.status,
+        headers: { get: name => (name === 'X-Ori-Group-Commit-Phase' ? next.phase || '' : '') },
+        json: async () => next.body
+      };
+    },
+    { localStorage }
+  );
+  const context = {
+    generation: 1,
+    ordinaryReview: { generation: 1, owner: 'grouped', groupedApi }
+  };
+  manager.workspaceCreatorContext = context;
+  manager.groupRequirementDraft = { review: { input_digest: 'a'.repeat(64) } };
+  return { manager, context, calls, localStorage };
+}
+
+const groupedPayload = () => ({
+  name: 'Field notes',
+  template_id: 'plugin:fixture:research',
+  group_composition: 'grouped',
+  group_review_token: 'reviewed-destination',
+  idempotency_key: 'one-operation'
+});
+const groupedComplete = () => ({
+  status: 200,
+  body: {
+    group_requirement_operation: {
+      state: 'complete',
+      workspace_id: 'child',
+      home_workspace_id: 'home',
+      operation_digest: 'b'.repeat(64),
+      layout_subject_new: true
+    },
+    folder: { id: 'child', kind: 'workspace', status: 'active', parent_id: 'home' }
+  }
+});
+
+test('grouped creation retains its exact lookup before the one requirement-owned POST and proves the result', async () => {
+  const { manager, context, calls, localStorage } = groupedFixture([
+    {
+      status: 201,
+      phase: 'succeeded',
+      body: { folder: { id: 'child' }, assistant_station_id: 'home' }
+    },
+    groupedComplete()
+  ]);
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload(),
+    { candidate: { x: 40, y: 80 } }
+  );
+  assert.equal(outcome.state, 'complete');
+  assert.equal(outcome.result.folder.parent_id, 'home', 'canonical observed folder replaces reply');
+  assert.deepEqual(
+    calls.map(([url, method]) => [url, method]),
+    [
+      ['/api/workspaces', 'POST'],
+      ['/api/workspaces/group-requirements/observe', 'POST']
+    ]
+  );
+  assert.deepEqual(calls[1][2], {
+    group_review_token: 'reviewed-destination',
+    idempotency_key: 'one-operation',
+    input_digest: 'a'.repeat(64)
+  });
+  assert.deepEqual(
+    groupedApi.savedGroupedCreationGeometry(localStorage, context.ordinaryReview.reference),
+    { candidate: { x: 40, y: 80 } }
+  );
+});
+
+test('grouped creation sends nothing when another confirmed grouped operation is retained', async () => {
+  const { manager, context, calls, localStorage } = groupedFixture([]);
+  groupedApi.retainGroupedCreationReference(localStorage, {
+    group_review_token: 'older-tab',
+    idempotency_key: 'older',
+    input_digest: 'c'.repeat(64)
+  });
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload()
+  );
+  assert.equal(outcome.state, 'not_sent');
+  assert.equal(calls.length, 0);
+  assert.equal(
+    groupedApi.savedGroupedCreationReference(localStorage).group_review_token,
+    'older-tab',
+    'the older tab reference is not erased'
+  );
+});
+
+test('only a pre-acceptance phase is a grouped refusal; other failures stay observational', async () => {
+  const unrecorded = { status: 404, body: { group_requirement_operation: { state: 'x' } } };
+  const recorded = { status: 202, body: { group_requirement_operation: { state: 'claimed' } } };
+  const claimRefusal = { status: 409, phase: 'outcome_unknown', body: { error: 'stale Home' } };
+  for (const [responses, state] of [
+    [[{ status: 409, phase: 'not_accepted', body: { error: 'Review again' } }], 'refused'],
+    [[{ status: 409, body: { error: 'conflict without phase' } }], 'outcome_unknown'],
+    [[{ status: 500, phase: 'accepted', body: { error: 'after claim' } }], 'outcome_unknown'],
+    [[{ throw: true }], 'outcome_unknown'],
+    // A final Claim refusal with no recorded operation accepted nothing.
+    [[claimRefusal, unrecorded], 'refused'],
+    [[claimRefusal, recorded], 'outcome_unknown']
+  ]) {
+    const { manager, context, calls, localStorage } = groupedFixture([...responses]);
+    const outcome = await manager.dispatchGroupedCreation(
+      context,
+      '/api/workspaces',
+      groupedPayload()
+    );
+    assert.equal(outcome.state, state);
+    assert.equal(
+      calls.filter(([url]) => url === '/api/workspaces').length,
+      1,
+      'no automatic retry or replacement creation'
+    );
+    assert.equal(calls.length, responses.length, 'only the original operation is read');
+    assert.ok(
+      groupedApi.savedGroupedCreationReference(localStorage),
+      'lookup stays until the owner releases it'
+    );
+  }
+});
+
+test('a grouped success reply that the journal cannot prove is not positioned', async () => {
+  const mismatch = groupedComplete();
+  mismatch.body.folder.id = 'same-name-other';
+  mismatch.body.group_requirement_operation.workspace_id = 'same-name-other';
+  const { manager, context } = groupedFixture([
+    { status: 201, phase: 'succeeded', body: { folder: { id: 'child' } } },
+    mismatch
+  ]);
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload()
+  );
+  assert.equal(outcome.state, 'outcome_unknown');
+  assert.equal(outcome.result, undefined);
+});
+
+test('import, post-create hires, assistant builds and Group creators keep their own owners', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null)
+    }
+  );
+  manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1 };
+  manager.isGroupCreator = () => false;
+  manager.groupRequirementDraft = { composition: 'grouped' };
+  const view = { payload: {} };
+  assert.equal(manager.groupedRequirementReviewEligible(view), true);
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), true);
+  // A legacy post-create assistant hire is not part of the reviewed request.
+  assert.equal(
+    manager.groupedRequirementReviewEligible({ payload: { assistant_hire: {} } }),
+    false
+  );
+  manager.workspaceBuild = { session: { id: 'build' } };
+  assert.equal(manager.groupedRequirementReviewEligible(view), false);
+  manager.workspaceBuild = null;
+  // Import keeps its real verb and duplicate handling; never a placement.
+  manager.importModeEnabled = true;
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), false);
+  manager.importModeEnabled = false;
+  // Launchers with their own callbacks keep their legacy return.
+  manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1, onCreated: () => {} };
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), false);
+  manager.workspaceCreatorContext = { mode: 'guided', generation: 1 };
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), false);
+});
+
+test('grouped results state the observed Home link and keep partial staffing partial', () => {
+  const manager = loadSessionManager();
+  manager.folders = [{ id: 'home', name: 'Research Program Home' }];
+  assert.equal(
+    manager.groupedCreationResultLine(
+      {
+        assistant_station_id: 'home',
+        team_completion: { state: 'partial', missing_required_roles: [{ role_id: 'lead' }] }
+      },
+      { parent_id: 'home' }
+    ),
+    'Linked to Home “Research Program Home”; the Home was not changed or moved. Its team setup is incomplete (1 required role missing). Complete the existing workspace team; Ori will not create another workspace.'
+  );
+  assert.equal(
+    manager.groupedCreationResultLine({ team_completion: { state: 'complete' } }, {}),
+    'Standalone: no Home link was made.'
+  );
+});
+
+test('a grouped result whose Home was created in the same operation is never positioned as one building', async () => {
+  const complete = groupedComplete();
+  complete.body.group_requirement_operation.requires_composite_layout = true;
+  const { manager, context } = groupedFixture([
+    { status: 201, phase: 'succeeded', body: { folder: { id: 'child' } } },
+    complete
+  ]);
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload(),
+    {
+      candidate: { x: 1, y: 2 }
+    }
+  );
+  assert.equal(outcome.state, 'complete');
+  assert.equal(outcome.compositeLayout, true);
+});
+
+test('a carried final receipt fences an older in-flight quiet review for another request', async () => {
+  let release;
+  const manager = loadSessionManager(
+    () =>
+      new Promise(resolve => {
+        release = () =>
+          resolve({
+            ok: true,
+            json: async () => ({
+              group_requirement_review: { state: 'ready_grouped', review_token: 'teamless' }
+            })
+          });
+      })
+  );
+  manager.workspaceCreatorContext = { generation: 1 };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+  manager.reviewedDestinationLine = () => '';
+  const reviewed = { name: 'Field notes', role_staffing: [{ role_id: 'lead' }] };
+  const reviewedKey = JSON.stringify({ ...reviewed, group_composition: 'grouped' });
+  const draft = {
+    composition: 'grouped',
+    reviewRequestSeq: 1,
+    review: { review_token: 'reviewed', payloadKey: reviewedKey, idempotencyKey: 'op' }
+  };
+  manager.groupRequirementDraft = draft;
+  const quiet = manager.prepareGroupRequirementCommit(
+    '/api/workspaces',
+    { name: 'Field notes' },
+    { quiet: true }
+  );
+  const final = { ...reviewed };
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', final), true);
+  assert.equal(final.group_review_token, 'reviewed');
+  release();
+  assert.equal(await quiet, false);
+  assert.equal(draft.review.review_token, 'reviewed', 'the late teamless reply is dropped');
+});
+
+test('grouped review is reviewed only by the receipt for the current request and never by a Home guess', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'folderNameInput' ? { value: 'Field notes' } : null)
+    }
+  );
+  const request = { payload: { name: 'Field notes', template_id: 'plugin:fixture:research' } };
+  manager.currentCreateRequest = () => request;
+  manager.currentCreationBlueprint = () => ({});
+  const material = {
+    now: 'Create one workspace with the reviewed team. No scan.',
+    later: 'Later.'
+  };
+  manager.groupRequirementDraft = {
+    composition: 'grouped',
+    projection: { home: { exists: false, proposed_name: 'Research Home' } }
+  };
+  let view = manager.groupedCreationReview(material);
+  assert.equal(view.reviewed, false);
+  assert.match(view.problem, /Prepare “Research Home” in Details first/);
+  assert.equal(view.row.actionLabel, 'Prepare Home in Details');
+
+  const key = JSON.stringify({ ...request.payload, group_composition: 'grouped' });
+  manager.groupRequirementDraft = {
+    composition: 'grouped',
+    projection: { home: { exists: true, name: 'Research Home', workspace_id: 'home' } },
+    review: {
+      review_token: 'token',
+      payloadKey: key,
+      home_name: 'Research Home',
+      home_workspace_id: 'home'
+    }
+  };
+  view = manager.groupedCreationReview(material);
+  assert.equal(view.reviewed, true);
+  assert.equal(view.homeWorkspaceID, 'home');
+  assert.match(view.destination, /existing Home “Research Home”.*position are unchanged/);
+  assert.match(view.now, /^Create one project workspace inside “Research Home”.* No scan\.$/);
+
+  manager.groupRequirementDraft.review.payloadKey = 'an older request';
+  assert.equal(manager.groupedCreationReview(material).reviewed, false);
+  // A refused quiet review for this exact request is stated, not awaited.
+  manager.groupRequirementDraft.quietReviewError = {
+    key,
+    message: 'Name belongs to a saved agent.'
+  };
+  assert.match(
+    manager.groupedCreationReview(material).problem,
+    /^Name belongs to a saved agent\. Change the team or details to review again\. Nothing was created\.$/
+  );
+  manager.groupRequirementDraft.quietReviewError = {
+    key,
+    message: 'you already have an agent named "X"; assign it or choose another name'
+  };
+  assert.match(
+    manager.groupedCreationReview(material).problem,
+    /^You already have an agent named "X"; assign it or choose another name\. Change the team/
+  );
+  manager.groupRequirementDraft.quietReviewError = { key: 'older', message: 'stale' };
+  assert.match(
+    manager.groupedCreationReview(material).problem,
+    /^Reviewing this exact destination/
+  );
+
+  const standaloneKey = JSON.stringify({ ...request.payload, group_composition: 'standalone' });
+  manager.groupRequirementDraft = {
+    composition: 'standalone',
+    projection: { home: { exists: true, name: 'Research Home', workspace_id: 'home' } },
+    review: { review_token: 'token', payloadKey: standaloneKey, selected_composition: 'standalone' }
+  };
+  view = manager.groupedCreationReview(material, 'Archive');
+  assert.equal(view.reviewed, true);
+  assert.equal(view.homeWorkspaceID, '', 'a standalone project gets no Home preview parent');
+  assert.match(view.destination, /^Standalone project in group Archive · No Home/);
+  assert.match(view.now, /^Create one standalone project workspace .* no Home link\./);
 });
 
 test('ordinary result metadata is read-only, exact-operation-bound and editor-fenced', async () => {
@@ -694,6 +1091,39 @@ test('ordinary position repair targets only the proven result and never repeats 
   await manager.actOnOrdinaryCreationReview(context, { action: 'retry-position' });
   assert.deepEqual(repairs, [{ id: 'proven', point }]);
   assert.equal(context.ordinaryReview.positionFailed, false);
+});
+
+test('return and re-enter fences an old map commit even when display fields stay unchanged', async () => {
+  const calls = [];
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: { beginPlacement: spec => calls.push(spec), endPlacement() {} }
+  });
+  const context = { generation: 8 };
+  manager.workspaceCreatorContext = context;
+  manager.refreshWizardChrome = () => {};
+  const first = manager.beginWorkspaceMapPlacement({
+    payload: { name: 'Same Home', kind: 'group' },
+    candidate: { x: 76, y: 228 },
+    groupHomeOwner: { reviewedKey: 'original-material' }
+  });
+  assert.equal(manager.returnFromWorkspaceMapPlacement(first.token, 'escape'), true);
+  const second = manager.beginWorkspaceMapPlacement({
+    payload: { name: 'Same Home', kind: 'group' },
+    groupHomeOwner: { reviewedKey: 'changed-role-or-review' }
+  });
+  assert.notEqual(second, first);
+  assert.notEqual(second.token, first.token);
+  assert.ok(second.revision > first.revision);
+  assert.deepEqual(JSON.parse(JSON.stringify(second.candidate)), { x: 76, y: 228 });
+  let dispatches = 0;
+  manager.confirmManagedHomeMapPlacement = async () => {
+    dispatches++;
+    return true;
+  };
+  assert.equal(await calls[0].onConfirm(first.token, { x: 76, y: 228 }), false);
+  assert.equal(dispatches, 0);
+  assert.equal(await calls[1].onConfirm(second.token, { x: 76, y: 228 }), true);
+  assert.equal(dispatches, 1);
 });
 
 test('a stale placement callback cannot submit a replacement ordinary editor', async () => {
@@ -2551,11 +2981,15 @@ function loadSessionManagerWithPlacementModal() {
     setTimeout: callback => callback(),
     OriWorkspaceMap: { beginPlacement: placement => placementCalls.push(placement) }
   };
+  const transition = { showing: false };
   const bootstrap = {
     Modal: {
       getOrCreateInstance() {
         return {
           hide() {
+            // Like Bootstrap: a hide requested mid-show is ignored.
+            if (transition.showing) return;
+            modalElement.emit('hide.bs.modal');
             visible = false;
             modalElement.emit('hidden.bs.modal');
           },
@@ -2579,8 +3013,26 @@ function loadSessionManagerWithPlacementModal() {
     },
     { filename: 'sessions.js' }
   );
-  return { manager: window.sessionManager, modalElement, placementCalls, reviewTitle };
+  return { manager: window.sessionManager, modalElement, placementCalls, reviewTitle, transition };
 }
+
+test('Place pressed while the editor is still showing waits, then hides once and starts the map', () => {
+  const { manager, modalElement, placementCalls, transition } =
+    loadSessionManagerWithPlacementModal();
+  manager.refreshWizardChrome = () => {};
+  manager.bindEvents();
+  transition.showing = true;
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    payload: { name: 'Fast Place' }
+  });
+  assert.equal(placement.phase, 'starting');
+  assert.equal(placementCalls.length, 0, 'no map while the editor is still covering it');
+  transition.showing = false;
+  modalElement.emit('shown.bs.modal');
+  assert.equal(placement.phase, 'placing');
+  assert.equal(placementCalls.length, 1);
+});
 
 test('Map placement suspends and resumes independently from sibling agent setup', () => {
   const { manager, modalElement, placementCalls, reviewTitle } =
@@ -3560,6 +4012,86 @@ test('a Home that already has its resource workspace opens it instead of creatin
   assert.match(errors.at(-1), /already has it/);
 });
 
+test('a pending requirement review cannot attach to a replaced editor/draft or overwrite an explicit edit', async () => {
+  for (const change of ['editor', 'draft', 'edit', 'late-network-error']) {
+    let resolve, reject;
+    const manager = loadSessionManager(
+      () =>
+        new Promise((yes, no) => {
+          resolve = yes;
+          reject = no;
+        })
+    );
+    manager.workspaceCreatorContext = { generation: 1 };
+    const draft = (manager.groupRequirementDraft = {
+      policy: 'required',
+      composition: 'grouped',
+      review: null,
+      quietReviewKey: 'original'
+    });
+    manager.refreshWorkspaceReview = () => {
+      throw new Error('late reply redrew the editor');
+    };
+    manager.refreshWizardChrome = () => {
+      throw new Error('late reply changed chrome');
+    };
+    const pending = manager.prepareGroupRequirementCommit(
+      '/api/workspaces',
+      { name: 'Original', template_id: 'exact-source' },
+      { quiet: true }
+    );
+    if (change === 'editor' || change === 'late-network-error')
+      manager.workspaceCreatorContext = { generation: 2 };
+    else if (change === 'draft') manager.groupRequirementDraft = { ...draft };
+    else manager.invalidateGroupRequirementReview();
+    if (change === 'late-network-error') reject(new Error('late network failure'));
+    else
+      resolve({
+        ok: true,
+        json: async () => ({
+          group_requirement_review: { state: 'ready_grouped', review_token: 'stale-token' }
+        })
+      });
+    assert.equal(await pending, false, change);
+    assert.equal(draft.review, null, change);
+  }
+});
+
+test('a newer requirement review survives an older same-editor reply arriving last', async () => {
+  const replies = [];
+  const manager = loadSessionManager(() => new Promise(resolve => replies.push(resolve)));
+  manager.workspaceCreatorContext = { generation: 1 };
+  manager.groupRequirementDraft = { policy: 'required', composition: 'grouped', review: null };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+  const first = manager.prepareGroupRequirementCommit(
+    '/api/workspaces',
+    { name: 'First', template_id: 'source' },
+    { quiet: true }
+  );
+  const second = manager.prepareGroupRequirementCommit(
+    '/api/workspaces',
+    { name: 'Second', template_id: 'source' },
+    { quiet: true }
+  );
+  replies[1]({
+    ok: true,
+    json: async () => ({
+      group_requirement_review: { state: 'ready_grouped', review_token: 'second-token' }
+    })
+  });
+  await second;
+  replies[0]({
+    ok: true,
+    json: async () => ({
+      group_requirement_review: { state: 'ready_grouped', review_token: 'first-token' }
+    })
+  });
+  await first;
+  assert.equal(manager.groupRequirementDraft.review.review_token, 'second-token');
+  assert.match(manager.groupRequirementDraft.review.payloadKey, /Second/);
+});
+
 test('group requirement creation reviews before committing and reuses only the exact receipt', async () => {
   const calls = [];
   const manager = loadSessionManager(async (url, options) => {
@@ -3636,6 +4168,17 @@ test('showing Review asks for the placement review once per exact request, and n
     asked.push({ endpoint, name: payload.name, quiet: options?.quiet });
     return false;
   };
+
+  // A loading agent plan has no settled team request to review yet.
+  manager.templateAgentPlan = null;
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 0);
+  manager.templateAgentPlan = { template_id: 'song' };
+  // Nor is a receipt replaced while the map holds it for the final gesture.
+  manager.workspaceMapPlacement = { phase: 'placing' };
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 0);
+  manager.workspaceMapPlacement = null;
 
   await manager.ensureGroupRequirementReview();
   assert.deepEqual(asked, [{ endpoint: '/api/workspaces', name: 'Night Drive', quiet: true }]);

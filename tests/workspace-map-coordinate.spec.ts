@@ -100,10 +100,19 @@ async function reviewCreateWizard(page: Page, name: string) {
   await expect(page.locator('#wizardStep4')).toBeVisible();
 }
 
+// Entering placement from the shared review is navigation only; it creates nothing.
+async function enterReviewedPlacement(page: Page) {
+  await page
+    .locator('#workspaceCreationReviewPanel')
+    .getByRole('button', { name: 'Place & create on map', exact: true })
+    .click();
+}
+
 async function completeCreateWizard(page: Page, name: string) {
   await reviewCreateWizard(page, name);
   const review = page.locator('#workspaceCreationReviewPanel');
-  if (await review.isVisible()) {
+  const reviewed = await review.isVisible();
+  if (reviewed) {
     await review.getByRole('button', { name: 'Place & create on map', exact: true }).click();
   } else {
     await page.locator('#createFolderBtn').click();
@@ -111,6 +120,15 @@ async function completeCreateWizard(page: Page, name: string) {
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   await page.locator('[data-ws-map-placement-confirm]').click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeHidden();
+  if (reviewed) {
+    // Preview removal precedes the deferred result-editor handoff. Wait for
+    // that actual canonical result, not an instantaneous visibility guess.
+    await expect(
+      review.getByRole('heading', { name: 'Workspace created', exact: true })
+    ).toBeVisible();
+    await review.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+  }
 }
 
 async function savePosition(page: Page, id: string, x: number, y: number) {
@@ -351,18 +369,15 @@ async function centerOnWorkspace(page: Page, id: string) {
   // cannot all be on screen at once, and the building this test wants may not
   // be reachable by pointer until the camera is already on it.
   await page.evaluate(workspaceId => {
-    (window as unknown as { OriHomeCockpit: { select(id: string): void } }).OriHomeCockpit.select(
-      workspaceId
-    );
+    (
+      window as unknown as {
+        OriHomeCockpit: { select(id: string, options: { openModal: boolean }): void };
+      }
+    ).OriHomeCockpit.select(workspaceId, { openModal: false });
   }, id);
   await page.waitForTimeout(300);
-  // Home opens the selected workspace's context modal. Keep the selection, but
-  // dismiss the modal before opening the canvas menu underneath it.
-  const contextModal = page.locator('#cockpitContextModal');
-  if (await contextModal.isVisible()) {
-    await page.keyboard.press('Escape');
-    await expect(contextModal).toBeHidden();
-  }
+  // This is fixture framing, not opening workspace context. The existing
+  // selector's explicit option avoids a competing modal over the canvas.
   // Nothing selected (a group child can resolve to its district) leaves Center
   // disabled: fall back to framing everything.
   if (!(await frameFromMenu(page, 'center'))) {
@@ -558,7 +573,11 @@ test.describe('Coordinate Workspace Map', () => {
     await page.mouse.click(site.x, site.y, { button: 'right' });
     await page.click('[data-menu-action="build"]');
     await reviewCreateWizard(page, `Blocked ${Date.now()}`);
-    await page.locator('#createFolderBtn').click();
+    // Entering placement from the shared review creates nothing.
+    await page
+      .locator('#workspaceCreationReviewPanel')
+      .getByRole('button', { name: 'Place & create on map', exact: true })
+      .click();
     const preview = page.locator('[data-ws-map-placement-preview]');
     await expect(preview).toBeVisible();
 
@@ -597,8 +616,13 @@ test.describe('Coordinate Workspace Map', () => {
     await page.locator('#cockpitCreateWorkspaceBtn').click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
     await reviewCreateWizard(page, `Header Map ${Date.now()}`);
-    await expect(page.locator('#createFolderBtn')).toContainText('Place');
-    await page.locator('#createFolderBtn').click();
+    // A visible Map offers the reviewed map action alongside automatic.
+    await expect(
+      page
+        .locator('#workspaceCreationReviewPanel')
+        .getByRole('button', { name: 'Place & create on map', exact: true })
+    ).toBeEnabled();
+    await enterReviewedPlacement(page);
     await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
     await page.locator('[data-ws-map-viewport]').press('Escape');
     await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -612,8 +636,14 @@ test.describe('Coordinate Workspace Map', () => {
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', 'tree');
     await page.locator('#cockpitCreateWorkspaceBtn').click();
     await reviewCreateWizard(page, `Header Tree ${Date.now()}`);
-    await expect(page.locator('#createFolderBtn')).toContainText('Create');
-    await expect(page.locator('#createFolderBtn')).not.toContainText('Place');
+    // No mounted Map: the complete automatic route, never a hidden-map capture.
+    const review = page.locator('#workspaceCreationReviewPanel');
+    await expect(
+      review.getByRole('button', { name: 'Place & create on map', exact: true })
+    ).toBeDisabled();
+    await expect(
+      review.getByRole('button', { name: 'Use automatic placement', exact: true })
+    ).toBeEnabled();
     await page.getByRole('button', { name: 'Close create workspace' }).click();
   });
 
@@ -625,7 +655,7 @@ test.describe('Coordinate Workspace Map', () => {
     await page.click('[data-menu-action="build"]');
     const name = '<img data-hostile-preview src=x>';
     await reviewCreateWizard(page, name);
-    await page.locator('#createFolderBtn').click();
+    await enterReviewedPlacement(page);
     const preview = page.locator('[data-ws-map-placement-preview]');
     await expect(preview).toContainText(name);
     await expect(preview.locator('[data-hostile-preview]')).toHaveCount(0);
@@ -659,7 +689,7 @@ test.describe('Coordinate Workspace Map', () => {
     await page.click('[data-menu-action="build"]');
     const name = `Cancelled preview ${Date.now()}`;
     await reviewCreateWizard(page, name);
-    await page.locator('#createFolderBtn').click();
+    await enterReviewedPlacement(page);
     await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-ws-map-placement-preview]')).toBeHidden();
@@ -1625,60 +1655,63 @@ test.describe('Coordinate Workspace Map', () => {
       await expect(page.locator('[data-menu-action="build"]')).toHaveCount(0);
     });
 
-    test('keyboard district Build preserves the real workspace and position on injected membership failure (#451)', async ({
+    test('keyboard district Build refuses a genuinely deleted reviewed parent before creation (#451)', async ({
       page
     }, testInfo) => {
       const { group } = await seedDistrict(page);
       await openMap(page);
       await centerOnWorkspace(page, group);
       await zoomTo(page, 1);
-      let attempted = 0;
-      await page.route('**/api/workspaces/*', async route => {
-        const req = route.request();
-        if (req.method() === 'PATCH' && req.postDataJSON()?.parent_id === group) {
-          attempted++;
-          await route.fulfill({
-            status: 404,
-            contentType: 'application/json',
-            body: JSON.stringify({ error: 'injected unavailable group' })
-          });
-        } else await route.continue();
-      });
       await districtOf(page, group).locator('.ws-map-district-tag').focus();
       await page.keyboard.press('Shift+F10');
       await page.locator('[data-menu-action="build"]').click();
-      const name = `Membership failure ${Date.now()}`;
-      await completeCreateWizard(page, name);
+      const name = `Unavailable destination ${Date.now()}`;
+      await reviewCreateWizard(page, name);
+      const review = page.locator('#workspaceCreationReviewPanel');
+      await expect(review).toContainText('In group');
+      await expect(page.locator('#folderParentSelect')).toHaveValue(group);
+      await expect(page.locator('#folderParentSelect')).toBeDisabled();
+      await review.getByRole('button', { name: 'Place & create on map', exact: true }).click();
       await expect(page.locator('#addFolderModal')).toBeHidden();
-      await expect.poll(() => attempted).toBe(1);
-      const live = page.locator('[data-map-live]');
-      await expect(live).toContainText('could not be added to');
-      await expect(live).toContainText('Its position is saved');
-      const feedback = await live.textContent();
-      await testInfo.attach('membership-failure-announcement', {
-        body: feedback!,
-        contentType: 'text/plain'
+      let attempts = 0;
+      let afterParentChange: Awaited<ReturnType<typeof listWorkspaces>> = [];
+      let layoutAfterParentChange: unknown;
+      // The destination is part of the reviewed create, not an after-the-fact
+      // membership PATCH. Change the real fixture owner while that final POST
+      // is held; no successful domain response or failure is manufactured.
+      await page.route('**/api/workspaces/create-operations/*/confirm', async route => {
+        attempts++;
+        const removed = await page.request.delete(
+          `/api/workspaces/${group}?confirm=true&delete_mode=group_only`
+        );
+        expect(removed.ok(), await removed.text()).toBe(true);
+        afterParentChange = await listWorkspaces(page);
+        layoutAfterParentChange = await (
+          await page.request.get('/api/workspace-map/layout')
+        ).json();
+        const real = await route.fetch();
+        expect(real.ok(), await real.text()).toBe(false);
+        await route.fulfill({ response: real });
       });
-      const built = (await listWorkspaces(page)).find(ws => ws.name === name)!;
-      expect(built.parent_id || '').toBe('');
-      const saved = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
-        .positions[built.id];
-      expect(saved).toEqual({ x: expect.any(Number), y: expect.any(Number) });
-      await page.reload();
-      await page.locator(`.ws-map-tile[data-ws-id="${built.id}"]`).waitFor();
-      expect((await listWorkspaces(page)).find(ws => ws.id === built.id)?.parent_id || '').toBe('');
-      expect(
-        (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions[
-          built.id
-        ]
-      ).toEqual(saved);
-      // After the real host reload, frame the retained building for evidence.
-      // Accessible-only feedback was attached above, not made into a fake toast.
-      await centerOnWorkspace(page, built.id);
+      await page.locator('[data-ws-map-placement-confirm]').click();
+      await expect(review).toBeVisible();
+      await expect(review).toContainText(/parent.*not found|group.*not found|parent.*unavailable/i);
+      await expect(review.locator('[data-placement-field="name"]')).toHaveValue(name);
+      expect(attempts).toBe(1);
+      expect(await listWorkspaces(page)).toEqual(afterParentChange);
+      expect((await listWorkspaces(page)).some(workspace => workspace.name === name)).toBe(false);
+      expect(await (await page.request.get('/api/workspace-map/layout')).json()).toEqual(
+        layoutAfterParentChange
+      );
       await page.screenshot({
-        path: testInfo.outputPath('membership-failure.png'),
+        path: testInfo.outputPath('reviewed-parent-refusal.png'),
         fullPage: true
       });
+      await page.reload();
+      expect((await listWorkspaces(page)).some(workspace => workspace.name === name)).toBe(false);
+      expect(await (await page.request.get('/api/workspace-map/layout')).json()).toEqual(
+        layoutAfterParentChange
+      );
     });
 
     test('a populated district is compact and never spans to a stale anchor (FR-16, FR-25)', async ({

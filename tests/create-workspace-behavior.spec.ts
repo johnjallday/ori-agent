@@ -4,6 +4,7 @@ import {
   routeReviewedCreation,
   confirmReviewedCreation
 } from './helpers/reviewed-creation-route-fixture';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 /**
  * E2E for the create-workspace "Agent behavior" consolidation.
@@ -760,7 +761,7 @@ test('the shared creator makes an ordinary Group through Details, Roster, and Re
     'One organizational group and its reviewed roster'
   );
   await expect(page.locator('#createFolderBtn')).toHaveText('Create group “Browser group”');
-  await page.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page);
   await expect.poll(() => payload).toBeDefined();
   expect(payload).toMatchObject({
     name: 'Browser group',
@@ -787,9 +788,10 @@ test('the shared creator makes an ordinary Group through Details, Roster, and Re
     version: 1,
     expectations: [{ index: 0, name: 'Browser group Manager', action: 'create' }]
   });
-  await expect(page.locator('#toastContainer .toast-action')).toHaveText(
-    'Open group / Manage team'
-  );
+  // The verified result offers opening the Group (its roster is managed there).
+  await expect(
+    page.locator('#workspaceCreationReviewPanel').getByRole('button', { name: 'Open group' })
+  ).toBeVisible();
 });
 
 test('creator lifecycle keeps ordinary drafts isolated across kind switches and cancellation', async ({
@@ -829,6 +831,12 @@ test('creator lifecycle keeps ordinary drafts isolated across kind switches and 
     'One organizational group and its reviewed roster'
   );
 
+  // The shared Review returns to Details through its labelled subflow; the
+  // kind choice lives on the editing steps, not over the final review.
+  await page
+    .locator('#workspaceCreationReviewPanel')
+    .getByRole('button', { name: 'Edit details & advanced settings' })
+    .click();
   await page.locator('#workspaceCreatorKindWorkspace').check();
   await expect(page.locator('#wizardStep1')).toBeVisible();
   await cardByLabel(page, 'Blank').click();

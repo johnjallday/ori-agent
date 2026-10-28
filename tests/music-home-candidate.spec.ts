@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // Exact-source acceptance for the locally staged Music Project Management
 // candidate. Run only through scripts/music-home-demo.sh so HOME, ORI_DATA_DIR,
@@ -191,9 +192,9 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
   await expect(summary).toContainText('music-project-management');
   await evidence(page, '04-music-home-review');
 
-  await creator.locator('#createFolderBtn').click();
-  await expect(creator).toBeHidden();
+  await confirmCreatorFinalAction(page, { open: true });
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
+  await expect(creator).toBeHidden();
 
   await expect.poll(async () => (await musicTemplate(request)).availability.state).toBe('reusable');
   const created = await workspaces(request);
@@ -281,7 +282,12 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
     `Use existing group “${RENAMED_GROUP}”`
   );
   await evidence(page, '06-music-home-renamed-reuse');
-  await reuseCreator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page);
+  // Reuse is never repositioned; the verified result simply closes.
+  await reuseCreator
+    .locator('#workspaceCreationReviewPanel')
+    .getByRole('button', { name: 'Close', exact: true })
+    .click();
   await expect(reuseCreator).toBeHidden();
 
   const finalWorkspaces = await workspaces(request);

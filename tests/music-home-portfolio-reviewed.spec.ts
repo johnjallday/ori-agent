@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // Run only in a disposable HOME, with NO local provider preinstalled. The UI
 // must preview and install the published release using Ori's reviewed registry.
@@ -125,7 +126,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   );
   await creator.getByRole('button', { name: 'Review →' }).click();
   await shot(page, '18-reviewed-release-home-review');
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page, { open: true });
   await page.waitForURL(/\/assistant\?folder_offer_id=/, { timeout: 30_000 });
   const homes = (await json(await request.get('/api/workspaces'))).folders.filter(
     (row: { kind: string }) => row.kind === 'group'

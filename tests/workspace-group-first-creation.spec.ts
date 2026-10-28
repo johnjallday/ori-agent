@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { confirmReviewedCreation } from './helpers/confirm-reviewed-creation';
 
 const PLUGIN_NAME = 'workspace-group-fixture';
 const TEMPLATE_ID = `plugin:${PLUGIN_NAME}:research-project`;
@@ -9,6 +10,8 @@ const RUN = Date.now().toString(36);
 const HOME_COORDINATOR = `Fixture Portfolio Coordinator ${RUN}`;
 const PROJECT_LEAD = `Fixture Research Lead ${RUN}`;
 const PROJECT_LEAD_TWO = `Fixture Research Lead Two ${RUN}`;
+const PROJECT_LEAD_MAPPED = `Fixture Mapped Lead ${RUN}`;
+const PROJECT_LEAD_REFUSED = `Fixture Refused Lead ${RUN}`;
 const WRONG_HOME_AGENT = `Wrong Home Agent ${RUN}`;
 const WRONG_PROJECT_AGENT = `Wrong Project Agent ${RUN}`;
 
@@ -16,6 +19,7 @@ let sourceRoot = '';
 let homeID = '';
 let projectID = '';
 let secondProjectID = '';
+let mappedProjectID = '';
 
 async function responseJSON(response: Awaited<ReturnType<APIRequestContext['get']>>) {
   const text = await response.text();
@@ -53,7 +57,9 @@ async function workspaceRoles(request: APIRequestContext, workspaceID: string) {
 }
 
 async function cleanupTopology(request: APIRequestContext) {
-  for (const [index, childID] of [projectID, secondProjectID].filter(Boolean).entries()) {
+  for (const [index, childID] of [projectID, secondProjectID, mappedProjectID]
+    .filter(Boolean)
+    .entries()) {
     const summary = await request
       .get(`/api/workspaces/${homeID}/assistant-program`)
       .then(response => response.json())
@@ -104,6 +110,8 @@ async function cleanupTopology(request: APIRequestContext) {
     HOME_COORDINATOR,
     PROJECT_LEAD,
     PROJECT_LEAD_TWO,
+    PROJECT_LEAD_MAPPED,
+    PROJECT_LEAD_REFUSED,
     WRONG_HOME_AGENT,
     WRONG_PROJECT_AGENT
   ]) {
@@ -432,21 +440,21 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
 
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
-  await expect(page.locator('#workspaceReviewSummary')).toContainText('Resulting hierarchy');
-  await expect(page.locator('#workspaceReviewSummary')).toContainText('Research Program Home');
-  await expect(page.locator('#workspaceReviewSummary')).toContainText(
-    `${HOME_COORDINATOR} · already staffed on the group`
-  );
-  await expect(page.locator('#workspaceReviewSummary')).toContainText(
-    'New project workspace · not created yet'
-  );
-  await expect(page.locator('#workspaceReviewSummary')).toContainText('Project team');
+  // The shared review names the exact existing Home before the final gesture;
+  // the requirement receipt for this request is what makes it reviewed.
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(review).toBeVisible();
+  await expect(review).toContainText('existing Home “Research Program Home”');
+  await expect(review).toContainText('Its name, roster and position are unchanged');
+  await expect(review).toContainText(`Portfolio Coordinator: ${HOME_COORDINATOR}`);
+  await expect(review).toContainText(PROJECT_LEAD);
+  await expect(review).toContainText('Create one project workspace inside “Research Program Home”');
   await page.screenshot({
     path: 'tasks/screenshots/workspace-group-first-creation/synthetic-review-hierarchy.png',
     fullPage: true
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator('#workspaceReviewSummary')).toBeVisible();
+  await expect(review).toBeVisible();
   const reviewOverflow = await page.locator('#addFolderModal .modal-content').evaluate(element => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth
@@ -457,11 +465,9 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
     fullPage: true
   });
   await page.setViewportSize({ width: 1280, height: 900 });
-  // One card, one confirm: the placement was reviewed as Review was shown, the
-  // card says so, and the one Create button commits it.
-  await expect(page.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
-  // The Research Lead was staged as Create on Team, so Review hires.
-  await expect(page.locator('#createFolderBtn')).toHaveText(`Hire and create “${projectName}”`);
+  expect(
+    (await workspaces(request)).some((item: { name?: string }) => item.name === projectName)
+  ).toBeFalsy();
 
   const createPromise = page.waitForResponse(
     response =>
@@ -469,7 +475,7 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
   const createResponse = await createPromise;
   expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
   const createPayload = createResponse.request().postDataJSON();
@@ -503,8 +509,15 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   expect((await agentNames(request)).filter(name => name === HOME_COORDINATOR)).toHaveLength(1);
   expect((await agentNames(request)).filter(name => name === PROJECT_LEAD)).toHaveLength(1);
 
+  // The canonical result names the observed Home link; it does not navigate.
+  await expect(review.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
+  await expect(review).toContainText('Linked to Home “Research Program Home”');
+  await page.screenshot({
+    path: 'tasks/evidence-unified-workspace-placement/group-4/grouped-project-result.png'
+  });
   const secondProjectName = `Field Notes Two ${RUN}`;
   const secondProjectLead = PROJECT_LEAD_TWO;
+  await review.getByRole('button', { name: 'Open workspace', exact: true }).click();
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
   await page.goto('/workspaces');
   await expect(creator).toBeHidden();
@@ -548,7 +561,8 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await page.locator('#createFolderBtn').click();
+  await expect(review).toContainText('existing Home “Research Program Home”');
+  await confirmReviewedCreation(page);
   const secondCreate = await secondCreatePromise;
   expect(secondCreate.ok(), await secondCreate.text()).toBeTruthy();
   const secondCreated = await secondCreate.json();
@@ -584,6 +598,202 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   ).toHaveLength(1);
   expect((await agentNames(request)).filter(name => name === HOME_COORDINATOR)).toHaveLength(1);
   expect((await agentNames(request)).filter(name => name === secondProjectLead)).toHaveLength(1);
+});
+
+test('a grouped project placed on the map keeps its Home, and a lost reply is only observed', async ({
+  page,
+  request
+}) => {
+  const projectName = `Mapped Field Notes ${RUN}`;
+  const layoutBefore = (await responseJSON(await request.get('/api/workspace-map/layout'))).layout;
+  const homeBefore = await responseJSON(await request.get(`/api/workspaces/${homeID}`));
+  const before = await workspaces(request);
+  await page.goto('/');
+  const homeFrame = page.locator(`.ws-map-district[data-group-id="${homeID}"]`).first();
+  const frameCorner = () =>
+    homeFrame.evaluate(element => {
+      const style = (element as HTMLElement).style;
+      const [left, top, width, height] = [style.left, style.top, style.width, style.height].map(
+        value => Number.parseFloat(value)
+      );
+      return { left, top, right: left + width, bottom: top + height };
+    });
+  await expect(homeFrame).toBeVisible();
+  const homeCornerBefore = await frameCorner();
+  await page.evaluate(() => {
+    // @ts-expect-error sessionManager is a page global.
+    window.sessionManager.showAddWorkspaceModal();
+  });
+  await page
+    .locator('#templatePicker')
+    .getByRole('radio', { name: 'Research Project', exact: true })
+    .click();
+  await page.locator('#wizardNextBtn').click();
+  await page.locator('#folderNameInput').fill(projectName);
+  const openProject = page.locator('#projectTemplateOpenAfterCreateToggle');
+  if (await openProject.isChecked()) await openProject.uncheck();
+  await page.locator('#wizardNextBtn').click();
+  await page
+    .locator('.ws-role-row[data-role-id="project_lead"]')
+    .getByRole('button', { name: 'Create an agent for Research Lead' })
+    .click();
+  await page.locator('[data-agent-create-field="name"]').fill(PROJECT_LEAD_MAPPED);
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await page.locator('#wizardNextBtn').click();
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(review).toContainText('existing Home “Research Program Home”');
+  const place = review.getByRole('button', { name: 'Place & create on map', exact: true });
+  await expect(place).toBeEnabled();
+
+  // The host really completes the creation; only its reply is lost.
+  let commits = 0;
+  await page.route('**/api/workspaces', async route => {
+    const body = route.request().postDataJSON?.();
+    if (route.request().method() === 'POST' && body?.group_review_token) {
+      commits++;
+      await route.fetch();
+      await route.abort('connectionreset');
+      return;
+    }
+    await route.continue();
+  });
+  await place.click();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
+  const confirm = page.locator('[data-ws-map-placement-confirm]');
+  await canvas.focus();
+  for (let n = 0; n < 30 && !(await confirm.isEnabled()); n++) await canvas.press('ArrowDown');
+  await expect(confirm).toHaveText('Create project here');
+  await expect(confirm).toBeEnabled();
+  await page.screenshot({
+    path: 'tasks/evidence-unified-workspace-placement/group-4/grouped-project-map.png'
+  });
+  expect(await workspaces(request)).toHaveLength(before.length);
+  const preview = page.locator('[data-ws-map-placement-preview]');
+  const candidate = await preview.evaluate(element => ({
+    x: Number.parseFloat((element as HTMLElement).style.left),
+    y: Number.parseFloat((element as HTMLElement).style.top)
+  }));
+  await canvas.press('Enter');
+
+  await expect(
+    review.getByRole('button', { name: 'Read saved status', exact: true })
+  ).toBeVisible();
+  await expect(review).toContainText('Closing is not undo');
+  expect(commits).toBe(1);
+  const created = (await workspaces(request)).filter(
+    (item: { name?: string }) => item.name === projectName
+  );
+  expect(created).toHaveLength(1);
+  mappedProjectID = created[0].id;
+
+  await review.getByRole('button', { name: 'Read saved status', exact: true }).click();
+  await expect(review.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
+  await expect(review).toContainText('Reading status did not create');
+  await expect(review).toContainText('Group: Research Program Home');
+  // Lost delivery happened before the client could save the requested point:
+  // the read reports it and offers geometry-only repair against the proof.
+  await expect(
+    review.getByRole('button', { name: 'Retry position only', exact: true })
+  ).toBeVisible();
+  await review.getByRole('button', { name: 'Retry position only', exact: true }).click();
+  await expect(review).toContainText('Only layout changed');
+  expect(commits).toBe(1);
+  const layoutAfter = (await responseJSON(await request.get('/api/workspace-map/layout'))).layout;
+  expect(layoutAfter.positions[mappedProjectID]).toEqual(candidate);
+  // An explicit point pins unpinned automatic neighbours where they are drawn
+  // (existing map policy); a saved Home anchor itself never changes.
+  if (layoutBefore.positions?.[homeID])
+    expect(layoutAfter.positions[homeID]).toEqual(layoutBefore.positions[homeID]);
+  const project = await responseJSON(await request.get(`/api/workspaces/${mappedProjectID}`));
+  expect(project).toMatchObject({ parent_id: homeID });
+  expect(project.agent_instances).toEqual([
+    expect.objectContaining({ name: PROJECT_LEAD_MAPPED, role_id: 'project_lead' })
+  ]);
+  const homeAfter = await responseJSON(await request.get(`/api/workspaces/${homeID}`));
+  expect(homeAfter.name).toBe(homeBefore.name);
+  expect(homeAfter.agent_instances).toEqual(homeBefore.agent_instances);
+
+  // A reload restores only the read-only reference; it never re-sends.
+  await page.unroute('**/api/workspaces');
+  await review.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.reload();
+  expect(await workspaces(request)).toHaveLength(before.length + 1);
+  // The Home is not relocated: its frame only grows to enclose the new member.
+  await expect(homeFrame).toBeVisible();
+  const homeCornerAfter = await frameCorner();
+  expect(homeCornerAfter.left).toBeLessThanOrEqual(homeCornerBefore.left);
+  expect(homeCornerAfter.top).toBeLessThanOrEqual(homeCornerBefore.top);
+  expect(homeCornerAfter.right).toBeGreaterThanOrEqual(homeCornerBefore.right);
+  expect(homeCornerAfter.bottom).toBeGreaterThanOrEqual(homeCornerBefore.bottom);
+});
+
+test('a source disabled after review refuses the final gesture, keeps edits and creates nothing', async ({
+  page,
+  request
+}) => {
+  const projectName = `Stale Home Notes ${RUN}`;
+  const before = await workspaces(request);
+  const agentsBefore = await agentNames(request);
+  await page.goto('/');
+  await page.evaluate(() => {
+    // @ts-expect-error sessionManager is a page global.
+    window.sessionManager.showAddWorkspaceModal();
+  });
+  await page
+    .locator('#templatePicker')
+    .getByRole('radio', { name: 'Research Project', exact: true })
+    .click();
+  await page.locator('#wizardNextBtn').click();
+  await page.locator('#folderNameInput').fill(projectName);
+  const openProject = page.locator('#projectTemplateOpenAfterCreateToggle');
+  if (await openProject.isChecked()) await openProject.uncheck();
+  await page.locator('#wizardNextBtn').click();
+  await page
+    .locator('.ws-role-row[data-role-id="project_lead"]')
+    .getByRole('button', { name: 'Create an agent for Research Lead' })
+    .click();
+  await page.locator('[data-agent-create-field="name"]').fill(PROJECT_LEAD_REFUSED);
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await page.locator('#wizardNextBtn').click();
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(review).toContainText('existing Home “Research Program Home”');
+  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const create = review.getByRole('button', { name: 'Create workspace', exact: true });
+  await expect(create).toBeEnabled();
+
+  // The blueprint's source is disabled after its destination was reviewed.
+  const disabled = await request.post(`/api/plugins/${PLUGIN_NAME}/disable`);
+  expect(disabled.ok(), await disabled.text()).toBeTruthy();
+  try {
+    let commits = 0;
+    page.on('request', sent => {
+      if (sent.method() === 'POST' && sent.postDataJSON?.()?.group_review_token) commits++;
+    });
+    await create.click();
+    // Readiness is re-read before dispatch; the recovery is offered inline.
+    await expect(page.locator('#workspaceReviewError')).toContainText(
+      "This blueprint's plugin is installed but disabled."
+    );
+    await expect(
+      page.locator('#workspaceReviewError').getByRole('button', { name: /Enable plugin/ })
+    ).toBeVisible();
+    expect(commits).toBe(0);
+    // Nothing was accepted: still the editable review, edits kept, no
+    // retained reference to read and no resources or agents.
+    await expect(review.getByRole('button', { name: 'Read saved status' })).toHaveCount(0);
+    await expect(review.locator('[data-placement-field="name"]')).toHaveValue(projectName);
+    expect(await workspaces(request)).toHaveLength(before.length);
+    expect(await agentNames(request)).toEqual(agentsBefore);
+    expect(
+      await page.evaluate(() => window.localStorage.getItem('ori:grouped-workspace-operation:v1'))
+    ).toBeNull();
+  } finally {
+    const enabled = await request.post(`/api/plugins/${PLUGIN_NAME}/enable`);
+    expect(enabled.ok(), await enabled.text()).toBeTruthy();
+  }
 });
 
 test('a cleared Home coordinator can be explicitly reassigned without creating a project', async ({

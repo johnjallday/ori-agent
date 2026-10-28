@@ -524,6 +524,12 @@ export class WorkspaceCommandView {
       if (this.groupTemplateStatusToken !== token || this.workspaceId() !== workspaceId)
         return null;
       this.groupTemplateStatus = status;
+      if (this.roleCreateForm && this.roleCreateTemplateNote) {
+        const note = document.querySelector(
+          '#agentCreateFormHost [data-agent-create-note="systemPrompt"]'
+        );
+        if (note) note.textContent = groupTemplateRolePromptNote(status);
+      }
       if (this.active) this.render();
       return this.groupTemplateStatus;
     });
@@ -5107,6 +5113,9 @@ export class WorkspaceCommandView {
         systemPrompt: proposed.system_prompt || ''
       }
     });
+    // A landing can open this form before the group's template status has
+    // loaded; ensureGroupTemplateStatus names the provider once it arrives.
+    this.roleCreateTemplateNote = templateInstructions;
 
     const createButton = document.getElementById('createAgentBtn');
     if (createButton) {

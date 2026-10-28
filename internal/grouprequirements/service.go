@@ -145,9 +145,12 @@ type Evaluation struct {
 
 type Review struct {
 	Evaluation
-	Token        string    `json:"review_token,omitempty"`
-	ReviewDigest string    `json:"review_digest,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	Token        string `json:"review_token,omitempty"`
+	ReviewDigest string `json:"review_digest,omitempty"`
+	// InputDigest is an opaque lookup witness for this original review. It
+	// permits read-only recovery without restoring material as executable input.
+	InputDigest string    `json:"input_digest,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`
 }
 
 type OperationStatus string
@@ -203,9 +206,12 @@ type Operation struct {
 	Status           OperationStatus `json:"status"`
 	ChildWorkspaceID string          `json:"child_workspace_id"`
 	HomeWorkspaceID  string          `json:"home_workspace_id,omitempty"`
-	ProjectLinkID    string          `json:"project_link_id,omitempty"`
-	AppliedAt        time.Time       `json:"applied_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	// HomeCreated is durable creation evidence for this exact operation. Older
+	// records omit it and cannot authorize moving a possibly reused Home.
+	HomeCreated   bool      `json:"home_created,omitempty"`
+	ProjectLinkID string    `json:"project_link_id,omitempty"`
+	AppliedAt     time.Time `json:"applied_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type ReceiptStore interface {
@@ -496,7 +502,7 @@ func (s *Service) Review(ctx context.Context, input Input) (Review, error) {
 	if err := s.receipts.SaveReceipt(ctx, receipt); err != nil {
 		return Review{}, ErrUnavailable
 	}
-	return Review{Evaluation: evaluation, Token: receipt.Token, ReviewDigest: receipt.ReviewDigest, ExpiresAt: receipt.ExpiresAt}, nil
+	return Review{Evaluation: evaluation, Token: receipt.Token, ReviewDigest: receipt.ReviewDigest, InputDigest: receipt.InputDigest, ExpiresAt: receipt.ExpiresAt}, nil
 }
 
 type Claim struct {
@@ -794,6 +800,7 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 			return Claim{}, ErrReviewStale
 		}
 		operation.HomeWorkspaceID = homeID
+		operation.HomeCreated = homeCreated
 		if receipt.OperationKind != OperationPrepareHome {
 			operation.ProjectLinkID = workspace.AssistantProjectLinkID(homeID, operation.ChildWorkspaceID)
 		}

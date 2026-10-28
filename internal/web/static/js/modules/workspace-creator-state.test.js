@@ -157,7 +157,13 @@ test('ordinary kind switching restores isolated drafts and invalidates final rev
     review: { token: 'stale-review' }
   });
 
+  initial.ordinaryReview = { generation: initial.generation, panel: { retained: true } };
   const switched = switchCreatorKind(initial, 'group');
+  assert.equal(
+    switched.context.ordinaryReview,
+    null,
+    'a renderer from the previous kind is not the new review owner'
+  );
   assert.equal(switched.changed, true);
   assert.equal(switched.context.kind, 'group');
   assert.equal(switched.context.review, null);

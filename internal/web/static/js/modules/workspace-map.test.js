@@ -4937,6 +4937,96 @@ test('a re-mount keeps the keyboard on a canvas that had it, so a Move survives 
   assert.equal(focused, 2);
 });
 
+test('reviewed ordinary Group previews its minimum frame, rejects another district and saves only its exact anchor', async () => {
+  const { map, harness, patches, memberships } = buildHarness({
+    layout: { schema_version: 1, positions: { existing: { x: 0, y: 0 } }, snap_to_grid: true }
+  });
+  const workspaces = [{ id: 'existing', name: 'Existing Group', kind: 'group' }];
+  mountWithCamera(map, harness, workspaces);
+  await flush();
+  let confirms = 0;
+  map.beginPlacement({
+    token: 'group-frame',
+    mode: 'reviewed-setup',
+    preview: { name: 'New Group', kind: 'group' },
+    initialCandidate: { x: 760, y: 456 },
+    onConfirm: () => confirms++
+  });
+  assert.match(harness.container.innerHTML, /ws-map-placement-preview--group/);
+  assert.match(harness.container.innerHTML, /width:176px;height:170px/);
+  const world = map.computeWorldLayout(workspaces, map.getLayoutState());
+  const district = world.districts.find(row => row.id === 'existing');
+  const occupied = { x: district.x + 24, y: district.y + 24 };
+  const screen = map.camera.worldToScreen(occupied, map.getCamera(), { width: 1000, height: 600 });
+  harness.fire('pointermove', pointerEvent(screen.x, screen.y));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(confirms, 0, 'another district is not empty Group ground');
+  const blocked = await map.commitPlacement('created-group', {
+    token: 'group-frame',
+    candidate: occupied
+  });
+  assert.equal(blocked.saved, false);
+  assert.equal(patches.length, 0);
+  assert.equal(memberships.length, 0);
+  map.beginPlacement({
+    token: 'group-open',
+    preview: { name: 'New Group', kind: 'group' },
+    initialCandidate: { x: 2280, y: 1520 }
+  });
+  const saved = await map.commitPlacement('created-group', {
+    token: 'group-open',
+    candidate: { x: 2280, y: 1520 }
+  });
+  assert.equal(saved.saved, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(patches[0].operations[0].positions['created-group'])),
+    { x: 2280, y: 1520 }
+  );
+  assert.equal(memberships.length, 0, 'geometry never chooses Group members');
+});
+
+test('reviewed child geometry cannot expand its named Group across an unrelated workspace', async () => {
+  const { map, harness, patches, memberships } = buildHarness({
+    layout: {
+      schema_version: 1,
+      positions: { member: { x: 0, y: 0 }, unrelated: { x: 380, y: 0 } }
+    }
+  });
+  mountWithCamera(map, harness, [
+    { id: 'parent', name: 'Reviewed parent', kind: 'group' },
+    { id: 'member', name: 'Existing member', parent_id: 'parent' },
+    { id: 'unrelated', name: 'Unrelated' }
+  ]);
+  await flush();
+  map.beginPlacement({
+    token: 'parent-frame',
+    preview: { name: 'Child', parentID: 'parent' },
+    initialCandidate: { x: 760, y: 0 }
+  });
+  const blocked = await map.commitPlacement('new-child', {
+    token: 'parent-frame',
+    candidate: { x: 760, y: 0 }
+  });
+  assert.equal(
+    blocked.saved,
+    false,
+    'the child itself fits, but its real parent frame would claim Unrelated'
+  );
+  assert.equal(patches.length, 0);
+  assert.equal(memberships.length, 0);
+  map.beginPlacement({
+    token: 'parent-adjacent',
+    preview: { name: 'Child', parentID: 'parent' },
+    initialCandidate: { x: 176, y: 0 }
+  });
+  const saved = await map.commitPlacement('new-child', {
+    token: 'parent-adjacent',
+    candidate: { x: 176, y: 0 }
+  });
+  assert.equal(saved.saved, true);
+  assert.equal(memberships.length, 0, 'the creation owner already decided the parent');
+});
+
 test('reviewed placement blocks full visible and collapsed footprints without writing a position', async () => {
   const { map, harness, patches } = buildHarness({
     layout: {
@@ -5135,7 +5225,15 @@ test('district Build saves a position then adds the new workspace to the chosen 
   buildFromDistrict(harness);
   assert.deepEqual(
     modalCalls.map(o => ({ ...o })),
-    [{ mapOrigin: true, entryPoint: 'workspace_map_build' }]
+    [
+      {
+        mapOrigin: true,
+        entryPoint: 'workspace_map_build',
+        parentId: 'grp',
+        parentName: 'Group A',
+        parentLocked: true
+      }
+    ]
   );
   assert.equal(requests.length, 0, 'no writes before creation');
 

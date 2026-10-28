@@ -206,20 +206,17 @@ test('Create Workspace builds and staffs the required Home before two project te
     }
   };
   const createReviewedProject = async (workspaceName: string, mapPlacement = false) => {
-    // One card, one confirm: the placement was reviewed as Review was shown and
-    // the card states it, so nothing here waits for a review of its own.
-    await expect(page.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
+    // The shared review names the reviewed Home before the one final gesture.
+    const review = page.locator('#workspaceCreationReviewPanel');
+    await expect(review).toContainText('existing Home “Music Production Home”');
     if (mapPlacement) {
-      // From the map the first press only begins placement; confirming there
-      // is the one that creates.
-      await page.locator('#createFolderBtn').click();
+      // Entering placement creates nothing; confirming on the map creates.
+      await review.getByRole('button', { name: 'Place & create on map', exact: true }).click();
       await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
       await captureEvidence(page, 'music-producer-07-map-placement.png');
     } else {
-      // The project roles were staged as Create on Team, so Review hires.
-      await expect(page.locator('#createFolderBtn')).toHaveText(
-        `Hire and create “${workspaceName}”`
-      );
+      await expect(review).toContainText(workspaceName);
+      await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
     }
 
     const createPromise = page.waitForResponse(
@@ -231,7 +228,7 @@ test('Create Workspace builds and staffs the required Home before two project te
     if (mapPlacement) {
       await page.locator('[data-ws-map-placement-confirm]').click();
     } else {
-      await page.locator('#createFolderBtn').click();
+      await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
     }
     const create = await createPromise;
     expect(create.ok(), await create.text()).toBeTruthy();
@@ -244,7 +241,12 @@ test('Create Workspace builds and staffs the required Home before two project te
       'producer',
       'songwriter'
     ]);
-    return create.json();
+    const body = await create.json();
+    // The verified result names the Home link; closing it is not undo.
+    await expect(review.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
+    await expect(review).toContainText('Linked to Home “Music Production Home”');
+    await review.getByRole('button', { name: 'Close', exact: true }).click();
+    return body;
   };
 
   try {
