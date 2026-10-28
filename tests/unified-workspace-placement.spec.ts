@@ -1,5 +1,10 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { startJanitorBuildModel } from './helpers/janitor-build-model';
+import { prepareFolderCreationRuntime, abandonOpenBuild } from './helpers/folder-first-runtime';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
 
 // Real server acceptance. No successful create/receipt/layout response is
 // fabricated. Run only against the isolated branch demo via scripts/e2e.sh.
@@ -11,6 +16,560 @@ async function resources(request: APIRequestContext) {
     agents: agents.agents.map((agent: { name: string }) => agent.name).sort()
   };
 }
+
+async function stageBlueprintRole(page: Page, role: string, name: string) {
+  const create = page
+    .locator('#workspaceRoleRoster')
+    .getByRole('button', { name: `Create an agent for ${role}`, exact: true });
+  await expect(create).toBeVisible();
+  await create.click();
+  const form = page.locator('#addAgentModal');
+  await expect(form).toBeVisible();
+  await form.locator('[data-agent-create-field="name"]').fill(name);
+  await form.locator('[data-agent-create-field="model"]').selectOption('ori-synthetic-model');
+  await form.getByRole('button', { name: 'Add to team', exact: true }).click();
+  await expect(form).toBeHidden();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+}
+
+async function captureOrdinaryReview(
+  page: Page,
+  review: ReturnType<Page['locator']>,
+  name: string
+) {
+  await expect(page.locator('#toastContainer').locator(':scope > *')).toHaveCount(0, {
+    timeout: 12000
+  });
+  await page.locator('#addFolderModal .modal-body').evaluate(element => {
+    element.scrollTop = 0;
+  });
+  await page.screenshot({
+    path: `tasks/evidence-unified-workspace-placement/group-2/${name}-review.png`
+  });
+  await review.locator('.assisted-placement__slots').evaluate(element => {
+    element.scrollIntoView({ block: 'start' });
+  });
+  await page.screenshot({
+    path: `tasks/evidence-unified-workspace-placement/group-2/${name}-review-team.png`
+  });
+  await review
+    .getByRole('button', { name: 'Create workspace', exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: `tasks/evidence-unified-workspace-placement/group-2/${name}-review-actions.png`
+  });
+}
+
+test.describe('ordinary blueprint review with a local catalog-only model fixture', () => {
+  test.skip(
+    process.env.ORI_TEST_REVIEW_BLUEPRINTS !== '1',
+    'requires isolated LM_STUDIO_BASE_URL=http://127.0.0.1:8940/v1; no paid provider'
+  );
+  let model: Awaited<ReturnType<typeof startJanitorBuildModel>> | undefined;
+  test.beforeAll(async ({ request }) => {
+    model = await startJanitorBuildModel();
+    const configured = await request.post('/api/settings/system-model', {
+      data: { provider: 'lmstudio', model: 'ori-synthetic-model' }
+    });
+    expect(configured.ok(), await configured.text()).toBeTruthy();
+    expect(
+      (await (await request.get('/api/personal-assistant')).json()).personal_assistant.state
+    ).toBe('needs_hire');
+  });
+  test.afterAll(async () => {
+    await model?.();
+  });
+
+  test('multi-role Research preserves saved definitions and stages new agents until explicit automatic confirmation without HQ', async ({
+    page,
+    request
+  }) => {
+    const suffix = randomUUID().slice(0, 8);
+    const savedName = `Saved Scout ${suffix}`;
+    // A separately confirmed prerequisite, not an effect of review/placement.
+    const saved = await request.post('/api/agents', {
+      data: {
+        name: savedName,
+        model: 'ori-synthetic-model',
+        llm_provider: 'lmstudio',
+        system_prompt: 'Keep this global saved definition exact. 日本語',
+        role: 'specialist'
+      }
+    });
+    expect(saved.ok(), await saved.text()).toBeTruthy();
+    const savedBefore = await (
+      await request.get(`/api/agents/${encodeURIComponent(savedName)}`)
+    ).json();
+    expect(savedBefore.model).toBe('ori-synthetic-model');
+    expect(savedBefore.system_prompt).toBe('Keep this global saved definition exact. 日本語');
+    const before = await resources(request);
+    await request.post('/api/onboarding/skip');
+    await page.goto('/');
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    await page.locator('.workspace-template-card', { hasText: 'Research Project' }).first().click();
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(`Research review ${suffix}`);
+    await page.locator('#wizardNextBtn').click();
+    for (const role of ['Research Lead', 'Synthesis Writer']) {
+      await stageBlueprintRole(page, role, `${role} ${suffix}`);
+    }
+    await page
+      .locator('#workspaceRoleRoster')
+      .getByRole('button', { name: 'Assign an agent to Source Scout', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: `Assign ${savedName} to Source Scout`, exact: true })
+      .click();
+    await page.locator('#wizardNextBtn').click();
+    const review = page.locator('#workspaceCreationReviewPanel');
+    await expect(review).toBeVisible();
+    await expect(review).toContainText(savedName);
+    await expect(review).toContainText('Research Lead');
+    await expect(review).toContainText('Source Scout');
+    await expect(review.getByRole('region', { name: 'Source Scout', exact: true })).toContainText(
+      'ori-synthetic-model'
+    );
+    await expect(review).toContainText('Synthesis Writer');
+    expect(await resources(request)).toEqual(before);
+    expect(model!.totalCalls()).toBe(0);
+    await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    await captureOrdinaryReview(page, review, 'research');
+    await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+    await expect(
+      review.getByRole('heading', { name: 'Workspace created', exact: true })
+    ).toBeVisible();
+    const id = await page.evaluate(
+      () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+    );
+    const canonical = await (await request.get(`/api/workspaces/${id}`)).json();
+    await review.screenshot({
+      path: 'tasks/evidence-unified-workspace-placement/group-2/research-result.png'
+    });
+    expect(canonical.agent_instances.map((agent: { name: string }) => agent.name).sort()).toEqual(
+      [savedName, `Research Lead ${suffix}`, `Synthesis Writer ${suffix}`].sort()
+    );
+    expect(canonical.tags).toContain('research');
+    expect(canonical.mission_state.mission_execution_count || 0).toBe(0);
+    const after = await resources(request);
+    expect(after.workspaces).toEqual([...before.workspaces, id].sort());
+    expect(after.agents).toEqual(
+      [...before.agents, `Research Lead ${suffix}`, `Synthesis Writer ${suffix}`].sort()
+    );
+    const savedAfter = await (
+      await request.get(`/api/agents/${encodeURIComponent(savedName)}`)
+    ).json();
+    // Runtime status/presentation are not the global definition; its version,
+    // model, prompt, capabilities, metadata and appearance must stay identical.
+    for (const key of Object.keys(savedBefore).filter(
+      key => !['status', 'presentation_role'].includes(key)
+    )) {
+      expect(savedAfter[key], `unchanged saved definition: ${key}`).toEqual(savedBefore[key]);
+    }
+    expect(model!.totalCalls()).toBe(0);
+  });
+
+  test('Calendar Ops from Tree leaves connection and first work for later with an optional vacant role', async ({
+    page,
+    request
+  }) => {
+    const before = await resources(request);
+    const suffix = randomUUID().slice(0, 8);
+    await request.post('/api/onboarding/skip');
+    await page.goto('/');
+    await page.locator('[data-cockpit-view="tree"]').click();
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    await page.locator('.workspace-template-card', { hasText: 'Calendar Ops' }).first().click();
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(`Calendar review ${suffix}`);
+    await page.locator('#wizardNextBtn').click();
+    await stageBlueprintRole(page, 'Scheduler', `Scheduler ${suffix}`);
+    await page.locator('#wizardNextBtn').click();
+    const review = page.locator('#workspaceCreationReviewPanel');
+    await expect(review).toContainText('Connect your calendar');
+    await expect(review).toContainText('Meeting Prep');
+    await expect(review).toContainText('No account or runtime access');
+    expect(await resources(request)).toEqual(before);
+    await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    await captureOrdinaryReview(page, review, 'calendar');
+    await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+    await expect(
+      review.getByRole('heading', { name: 'Workspace created', exact: true })
+    ).toBeVisible();
+    await expect(review).toContainText('Next setup:');
+    await expect(review).toContainText('Connect your calendar');
+    await expect(review).toContainText('setup readiness has not been verified');
+    await review.screenshot({
+      path: 'tasks/evidence-unified-workspace-placement/group-2/calendar-result.png'
+    });
+    const id = await page.evaluate(
+      () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+    );
+    const canonical = await (await request.get(`/api/workspaces/${id}`)).json();
+    expect(canonical.agent_instances.map((agent: { name: string }) => agent.name)).toEqual([
+      `Scheduler ${suffix}`
+    ]);
+    const bindings = canonical.mcp_bindings || [];
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0].alias).toBe('workspace-files');
+    expect(bindings[0].server_name).toBe('filesystem');
+    const directories = (await (await request.get(`/api/workspaces/${id}/directories`)).json())
+      .directories;
+    const primary = directories.find(
+      (directory: { id: string }) => directory.id === canonical.primary_directory_id
+    );
+    expect(primary).toBeTruthy();
+    expect(bindings[0].config.roots).toEqual([primary.path]);
+    expect(canonical.tasks.length).toBe(3);
+    expect(
+      canonical.tasks.every((task: { status: string }) => task.status === 'pending')
+    ).toBeTruthy();
+    const setupResponse = await request.get(`/api/workspaces/${id}/setup-wizard`);
+    expect(setupResponse.ok(), await setupResponse.text()).toBeTruthy();
+    const setupBody = await setupResponse.json();
+    expect((setupBody.setup || setupBody.data?.setup).state).toBe('not_started');
+    expect(await resources(request)).toEqual({
+      workspaces: [...before.workspaces, id].sort(),
+      agents: [...before.agents, `Scheduler ${suffix}`].sort()
+    });
+    expect(model!.totalCalls()).toBe(0);
+  });
+
+  for (const [blueprint, role] of [
+    ['Code Project', 'Development Assistant'],
+    ['Writing Project', 'Writing Coach']
+  ] as const) {
+    test(`${blueprint} saves the edited goal but leaves its first-work owner untouched until opening`, async ({
+      page,
+      request
+    }) => {
+      const before = await resources(request);
+      const suffix = randomUUID().slice(0, 8);
+      const goal = `Keep this first-work brief exact. 日本語 ${suffix}`;
+      await request.post('/api/onboarding/skip');
+      await page.goto('/');
+      await page.locator('#cockpitCreateWorkspaceBtn').click();
+      await page.locator('.workspace-template-card', { hasText: blueprint }).first().click();
+      await page.locator('#wizardNextBtn').click();
+      await page.locator('#folderNameInput').fill(`${blueprint} review ${suffix}`);
+      await page.locator('#folderGoalInput').fill(goal);
+      await page.locator('#wizardNextBtn').click();
+      await stageBlueprintRole(page, role, `${role} ${suffix}`);
+      await page.locator('#wizardNextBtn').click();
+      const review = page.locator('#workspaceCreationReviewPanel');
+      await expect(review).toContainText('existing goal and first-work flow');
+      await expect(review.locator('[data-placement-field="mission"]')).toHaveValue(goal);
+      expect(await resources(request)).toEqual(before);
+      await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+      await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+      await expect(
+        review.getByRole('heading', { name: 'Workspace created', exact: true })
+      ).toBeVisible();
+      const id = await page.evaluate(
+        () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+      );
+      const canonical = await (await request.get(`/api/workspaces/${id}`)).json();
+      expect(canonical.mission_state.mission).toBe(goal);
+      expect(canonical.mission_state.mission_execution_count || 0).toBe(0);
+      expect(canonical.mission_state.goal_first_run_state || '').toBe('');
+      expect(canonical.mission_state.last_mission_run_at).toBeUndefined();
+      expect(await resources(request)).toEqual({
+        workspaces: [...before.workspaces, id].sort(),
+        agents: [...before.agents, `${role} ${suffix}`].sort()
+      });
+      expect(model!.totalCalls()).toBe(0);
+    });
+  }
+
+  test('an unavailable deep link cannot silently create Blank; an explicit replacement remains usable', async ({
+    page,
+    request
+  }) => {
+    const before = await resources(request);
+    await request.post('/api/onboarding/skip');
+    await page.goto('/workspaces?create=1&blueprint=missing-unified-blueprint');
+    await expect(page.locator('#workspaceBlueprintRequestStatus')).toContainText(
+      'not create a Blank substitute'
+    );
+    await expect(page.locator('#wizardStep1')).toBeVisible();
+    expect(await resources(request)).toEqual(before);
+    await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
+    await expect(page.locator('#workspaceBlueprintRequestStatus')).toBeHidden();
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(`Explicit replacement ${randomUUID().slice(0, 8)}`);
+    await page.locator('#wizardNextBtn').click();
+    await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+    await page.locator('#wizardNextBtn').click();
+    const review = page.locator('#workspaceCreationReviewPanel');
+    expect(await resources(request)).toEqual(before);
+    await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+    await expect(
+      review.getByRole('heading', { name: 'Workspace created', exact: true })
+    ).toBeVisible();
+    const after = await resources(request);
+    expect(after.workspaces).toHaveLength(before.workspaces.length + 1);
+    expect(after.agents).toEqual(before.agents);
+    expect(model!.totalCalls()).toBe(0);
+  });
+
+  for (const entry of ['catalog', 'folder', 'deep-link'] as const) {
+    test(`custom ${entry} declaration keeps typed values through advanced editing and creates actual scaffold bytes without agents`, async ({
+      page,
+      request
+    }) => {
+      const sandbox = process.env.ORI_REVIEW_SANDBOX || '';
+      test.skip(!sandbox, 'requires the exact disposable demo root for filesystem assertions');
+      const sandboxRoot = realpathSync(sandbox);
+      expect(sandboxRoot.startsWith(realpathSync(tmpdir()) + sep)).toBeTruthy();
+      const source = realpathSync(mkdtempSync(join(tmpdir(), 'ori-review-blueprint-')));
+      const suffix = randomUUID().slice(0, 8);
+      const title = `Neutral blueprint ${suffix}`;
+      const bytes = 'RATE {{input.rate}} MODE {{input.mode}}\n';
+      let openRequests = 0;
+      page.on('request', request => {
+        if (request.method() === 'POST' && /\/project\/open$/.test(new URL(request.url()).pathname))
+          openRequests++;
+      });
+      writeFileSync(join(source, '{{name}}.cfg'), bytes, { mode: 0o600 });
+      writeFileSync(
+        join(source, 'template.json'),
+        JSON.stringify({
+          name: title,
+          description: 'A scoped project with typed document options.',
+          agents: [],
+          project_entry:
+            entry === 'catalog'
+              ? { relative_path: '{{name}}.cfg', open_after_create_default: false }
+              : undefined,
+          inputs: {
+            schema_version: 1,
+            title: 'Document options',
+            apply_to: ['{{name}}.cfg'],
+            fields: [
+              {
+                id: 'rate',
+                label: 'Rate',
+                type: 'number',
+                min: 1,
+                max: 100,
+                step: 1,
+                default: 24,
+                unit: 'units'
+              },
+              {
+                id: 'mode',
+                label: 'Document mode',
+                type: 'select',
+                default: 'draft',
+                options: [
+                  { value: 'draft', label: 'Draft' },
+                  { value: 'final', label: 'Final' }
+                ]
+              },
+              { id: 'brief', label: 'Brief', type: 'text', default: '' },
+              {
+                id: 'reference',
+                label: 'Reference link',
+                type: 'url',
+                default: 'https://example.invalid/default'
+              }
+            ]
+          }
+        }),
+        { mode: 0o600 }
+      );
+      const manifestBytes = readFileSync(join(source, 'template.json'), 'utf8');
+      let templateID = '';
+      if (entry !== 'folder') {
+        const imported = await request.post('/api/project-templates/import', {
+          data: { path: source, name: title }
+        });
+        expect(imported.ok(), await imported.text()).toBeTruthy();
+        templateID = (await imported.json()).template.id;
+      }
+      const before = await resources(request);
+      await request.post('/api/onboarding/skip');
+      if (entry === 'deep-link') {
+        await page.goto(`/workspaces?create=1&blueprint=${encodeURIComponent(templateID)}`);
+        await expect(page.getByRole('radio', { name: title, exact: true })).toHaveAttribute(
+          'aria-checked',
+          'true'
+        );
+        await expect(page).not.toHaveURL(/[?&](create|blueprint)=/);
+      } else {
+        await page.goto('/');
+        await page.locator('#cockpitCreateWorkspaceBtn').click();
+        if (entry === 'catalog')
+          await page.getByRole('radio', { name: title, exact: true }).click();
+      }
+      await page.locator('#wizardNextBtn').click();
+      if (entry === 'folder') {
+        await page.locator('#folderAdvancedDisclosure > summary').click();
+        await page.locator('#projectTemplatePathInput').fill(source);
+        await expect(page.getByLabel('Rate', { exact: true })).toBeVisible();
+      }
+      await page.locator('#folderNameInput').fill(`Typed workspace ${suffix}`);
+      if (entry === 'catalog') await page.locator('#projectTemplateOpenAfterCreateToggle').check();
+      await page.getByLabel('Rate', { exact: true }).fill('1000');
+      await page.locator('#wizardNextBtn').click();
+      await expect(page.locator('#wizardStep2')).toBeVisible();
+      await expect(
+        page
+          .getByRole('region', { name: 'Document options', exact: true })
+          .getByText('Rate must be between 1 and 100.', { exact: true })
+      ).toBeVisible();
+      expect(await resources(request)).toEqual(before);
+      await page.getByLabel('Rate', { exact: true }).fill('48');
+      await page.getByLabel('Document mode', { exact: true }).selectOption('final');
+      await page.getByLabel('Brief', { exact: true }).fill('Keep this exact brief 日本語');
+      await page
+        .getByLabel('Reference link', { exact: true })
+        .fill('https://example.invalid/reference');
+      await page.locator('#wizardNextBtn').click();
+      await page.locator('#wizardNextBtn').click();
+      const review = page.locator('#workspaceCreationReviewPanel');
+      await expect(review).toContainText('Rate: 48 units');
+      await expect(review).toContainText('Document mode: Final');
+      await expect(review).toContainText('Keep this exact brief 日本語');
+      await expect(review).toContainText('https://example.invalid/reference');
+      await review
+        .getByRole('button', { name: 'Edit details & advanced settings', exact: true })
+        .click();
+      await expect(page.getByLabel('Rate', { exact: true })).toHaveValue('48');
+      if (entry === 'catalog')
+        await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).toBeChecked();
+      await page.locator('#wizardNextBtn').click();
+      await page.locator('#wizardNextBtn').click();
+      expect(await resources(request)).toEqual(before);
+      await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+      await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+      await expect(
+        review.getByRole('heading', { name: 'Workspace created', exact: true })
+      ).toBeVisible();
+      const id = await page.evaluate(
+        () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+      );
+      const canonical = await (await request.get(`/api/workspaces/${id}`)).json();
+      expect(canonical.blueprint_inputs.values).toMatchObject({
+        rate: '48',
+        mode: 'final',
+        brief: 'Keep this exact brief 日本語',
+        reference: 'https://example.invalid/reference'
+      });
+      const directories = (await (await request.get(`/api/workspaces/${id}/directories`)).json())
+        .directories;
+      const project = directories.find(
+        (directory: { id: string }) => directory.id === canonical.primary_directory_id
+      );
+      expect(project).toBeTruthy();
+      const projectPath = realpathSync(project.path);
+      expect(projectPath.startsWith(sandboxRoot + sep)).toBeTruthy();
+      const file = readdirSync(projectPath).find(name => name.endsWith('.cfg'));
+      expect(file).toBeTruthy();
+      expect(readFileSync(join(projectPath, file!), 'utf8')).toBe('RATE 48 MODE final\n');
+      expect(readFileSync(join(source, '{{name}}.cfg'), 'utf8')).toBe(bytes);
+      expect(readFileSync(join(source, 'template.json'), 'utf8')).toBe(manifestBytes);
+      expect(canonical.agent_instances || []).toHaveLength(0);
+      expect(canonical.tasks || []).toHaveLength(0);
+      expect(canonical.scheduled_tasks || []).toHaveLength(0);
+      expect(openRequests).toBe(entry === 'catalog' ? 1 : 0);
+      await page.reload();
+      await expect(page.locator('#cockpitCreateWorkspaceBtn')).toBeVisible();
+      expect(openRequests).toBe(entry === 'catalog' ? 1 : 0);
+      expect(await resources(request)).toEqual({
+        workspaces: [...before.workspaces, id].sort(),
+        agents: before.agents
+      });
+      expect(model!.totalCalls()).toBe(0);
+    });
+  }
+});
+
+test.describe('ordinary assistant draft review with a real host and local model', () => {
+  test.skip(
+    process.env.ORI_TEST_REVIEW_BUILDS !== '1',
+    'requires the isolated loopback-only build runtime'
+  );
+  let model: Awaited<ReturnType<typeof startJanitorBuildModel>> | undefined;
+  test.beforeAll(async ({ request }) => {
+    model = await startJanitorBuildModel();
+    await prepareFolderCreationRuntime(request);
+  });
+  test.afterAll(async () => {
+    await model?.();
+  });
+  for (const scenario of ['ordinary', 'failure'] as const) {
+    test(`${scenario} model response cannot create; the explicit reviewed action owns completion`, async ({
+      page,
+      request
+    }) => {
+      await abandonOpenBuild(request);
+      const name = `Assisted notebook ${randomUUID().slice(0, 8)}`;
+      model!.scenario({ mode: scenario, createNow: true, name });
+      const before = await resources(request);
+      const calls = model!.calls();
+      await request.post('/api/onboarding/skip');
+      await page.goto('/');
+      await page.locator('#cockpitCreateWorkspaceBtn').click();
+      const composer = page.locator('#workspaceBuildComposerInput');
+      await expect(composer).toBeVisible();
+      await composer.fill('Propose an agentless notebook. Do not start any work.');
+      const turn = page.waitForResponse(response =>
+        /\/build-sessions\/[^/]+\/turns$/.test(new URL(response.url()).pathname)
+      );
+      await composer.press('Enter');
+      await turn;
+      if (scenario === 'failure') {
+        await page
+          .locator('#workspaceBuildPane')
+          .getByRole('button', { name: 'Set up manually', exact: true })
+          .click();
+        await expect(page.locator('#wizardStep2')).toBeVisible();
+        await page.locator('#folderNameInput').fill(name);
+        await page.locator('#wizardNextBtn').click();
+        await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+        await page.locator('#wizardNextBtn').click();
+      }
+      if (scenario === 'ordinary') await page.locator('#workspaceBuildEditDraftBtn').click();
+      const review = page.locator('#workspaceCreationReviewPanel');
+      await expect(review).toBeVisible();
+      await expect(
+        review.getByRole('textbox', { name: 'Workspace name', exact: true })
+      ).toHaveValue(name);
+      expect(await resources(request)).toEqual(before);
+      expect(model!.calls()).toBe(calls + 1);
+      const buildID = await page.evaluate(
+        () => (window as any).sessionManager.workspaceBuild.session.id
+      );
+      await review
+        .getByRole('textbox', { name: 'Goal', exact: true })
+        .fill('Keep this exact assisted brief 日本語');
+      await review.getByRole('textbox', { name: 'Goal', exact: true }).press('Tab');
+      await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+      await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+      await expect(
+        review.getByRole('heading', { name: 'Workspace created', exact: true })
+      ).toBeVisible();
+      const id = await page.evaluate(
+        () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+      );
+      const canonical = await (await request.get(`/api/workspaces/${id}`)).json();
+      expect(canonical.mission_state.mission).toBe('Keep this exact assisted brief 日本語');
+      expect(canonical.mission_state.mission_execution_count || 0).toBe(0);
+      expect(canonical.agent_instances || []).toHaveLength(0);
+      const finished = (
+        await (await request.get(`/api/workspaces/build-sessions/${buildID}`)).json()
+      ).session;
+      expect(finished.status).toBe('created');
+      expect(finished.created_workspace_id).toBe(id);
+      expect(await resources(request)).toEqual({
+        workspaces: [...before.workspaces, id].sort(),
+        agents: before.agents
+      });
+      expect(model!.calls()).toBe(calls + 1);
+    });
+  }
+});
 
 async function reviewBlank(request: APIRequestContext) {
   const id = randomUUID();

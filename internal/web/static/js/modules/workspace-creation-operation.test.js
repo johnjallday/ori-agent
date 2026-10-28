@@ -89,6 +89,24 @@ test('review submits the existing material request without normalizing away expl
   assert.deepEqual(sent, { id: reference.id, request: material });
 });
 
+test('a refused status retains the exact diagnostic without another confirmation or automatic retry', async () => {
+  const refusal = {
+    error: 'Review the changed roles.',
+    conflict: { type: 'team_readiness', fresh_plan: { revision: 'fresh' } }
+  };
+  let reads = 0;
+  const result = await observeCreationOperation(async (_url, options) => {
+    reads++;
+    assert.equal(options.method, undefined);
+    return response({ operation: operation('refused'), refusal });
+  }, reference);
+  assert.equal(reads, 1);
+  assert.equal(result.state, 'refused');
+  assert.equal(result.message, refusal.error);
+  assert.deepEqual(result.refusal, refusal);
+  assert.equal(result.result, null);
+});
+
 test('complete response requires the bound canonical operation and creation provenance, not HTTP success', async () => {
   const result = await confirmCreationOperation(
     async (_url, options) => {

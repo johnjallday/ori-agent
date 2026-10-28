@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { mockHiredAssistant } from './helpers/hired-assistant';
+import { abandonOpenBuild } from './helpers/folder-first-runtime';
 
 /**
  * Browser suite for the coordinate-based Workspace Map
@@ -81,6 +82,11 @@ async function listWorkspaces(
  * tests/create-workspace-behavior.spec.ts does.
  */
 async function reviewCreateWizard(page: Page, name: string) {
+  const manual = page.getByRole('button', { name: 'Set up manually', exact: true });
+  if (await manual.isVisible()) await manual.click();
+  // Manual return preserves the current build step; it need not reopen step 1.
+  const editBlueprint = page.locator('#wizardEditBlueprintBtn');
+  if (await editBlueprint.isVisible()) await editBlueprint.click();
   await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
@@ -96,7 +102,12 @@ async function reviewCreateWizard(page: Page, name: string) {
 
 async function completeCreateWizard(page: Page, name: string) {
   await reviewCreateWizard(page, name);
-  await page.locator('#createFolderBtn').click();
+  const review = page.locator('#workspaceCreationReviewPanel');
+  if (await review.isVisible()) {
+    await review.getByRole('button', { name: 'Place & create on map', exact: true }).click();
+  } else {
+    await page.locator('#createFolderBtn').click();
+  }
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   await page.locator('[data-ws-map-placement-confirm]').click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeHidden();
@@ -448,6 +459,9 @@ test.describe('Coordinate Workspace Map', () => {
   test('Build previews before create, then saves the displayed exact position (FR-47 – FR-53, metric 3)', async ({
     page
   }, testInfo) => {
+    // This isolated geometry case does not adopt an unrelated earlier fixture
+    // build. Resolve that owner explicitly before taking the before snapshot.
+    await abandonOpenBuild(page.request);
     await ensureWorkspace(page);
     await openMap(page);
     const before = new Set((await listWorkspaces(page)).map(ws => ws.id));
@@ -466,12 +480,15 @@ test.describe('Coordinate Workspace Map', () => {
 
     const name = `Built ${Date.now()}`;
     await reviewCreateWizard(page, name);
-    await expect(page.locator('#createFolderBtn')).toContainText('Place');
+    const place = page
+      .locator('#workspaceCreationReviewPanel')
+      .getByRole('button', { name: 'Place & create on map', exact: true });
+    await expect(place).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('review-before-placement.png'),
       fullPage: true
     });
-    await page.locator('#createFolderBtn').click();
+    await place.click();
 
     const preview = page.locator('[data-ws-map-placement-preview]');
     await expect(preview).toBeVisible();

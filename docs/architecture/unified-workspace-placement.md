@@ -179,6 +179,46 @@ rescans or extends a hold. Partial setup exposes its real owner and next action.
 Opening old receipts consumes no newer attachment and starts no work. Concurrent
 builds and foreign/stale sources fail closed with explicit conflict recovery.
 
+## Ordinary declaration and entry coverage
+
+The declaration catalog is not a list of interchangeable creation authorities.
+`workspace_creation_review_catalog_test.go` reads every shipped starter's actual
+role declarations and verifies inert plan/review behavior; the JS review/team
+contracts cover required, optional, automatic, saved, shared and read-only rows.
+The domain-neutral trusted plugin fixture additionally proves an exact source
+change refusal before resources exist. These contracts do not claim live plugin
+compatibility.
+
+| Declaration family | Ordinary coverage / real acceptance boundary |
+| --- | --- |
+| Blank | No-HQ/no-model real map and automatic creation; agentless requires the existing explicit choice |
+| `research-project` | Real saved/new multi-role mix, unchanged saved definition, two new profiles, no first-work execution |
+| `content-production` | Real final creation after scripted build turns; the scripted build service itself is UI-route coverage, not build-store acceptance |
+| `code-project`, `writing-project` | Real edited-goal creation without running first work; server goal contracts retain pending/read-consent semantics |
+| `calendar-ops` | Real Tree automatic creation; optional vacancy, pending tasks, scoped workspace-files binding and not-started setup |
+| `email-ops`, `github-ops`, `backup-and-recovery` | Catalog/preview contracts project their own setup steps; Calendar exercises the shared real setup-result observation adapter, not those external connections |
+| `personal-ops`, `daily-briefings`, `travels` | Shipped declaration/role and goal-inheritance contracts; ordinary task/goal effect families exercised above |
+| `file-janitor`, retired `downloads-janitor` | Declarations covered; source-backed filing retains the separate preparation owner and group-1 real acceptance; the retired alias is not reintroduced into listings |
+| User catalog, advanced folder, direct user-blueprint link | Real typed values and invalid-range refusal, return from advanced editing, exact scaffold bytes and unchanged source bytes |
+| Neutral plugin declaration | Real server contract tests, including exact changed-source refusal; no installation/live application claim |
+
+| Ordinary entry | Reachability / final action coverage |
+| --- | --- |
+| Home New Workspace | Real manual multi-role and source-free assistant success/failure-to-manual completion |
+| Workspaces hub URL | `/workspaces` currently redirects to Home; no claim that its dormant page is reachable |
+| Home Tree / non-map surface | Real Calendar automatic completion; hidden map cannot capture the draft |
+| Canvas Build | Real exact-coordinate final Enter with pre-consent resource/layout invariance and reload assertions |
+| Direct blueprint URL | Exact generation-fenced selection; real custom declaration and unavailable-link explicit replacement, never silent Blank |
+| Source-free assistant finish | Real host/build-store cases with a loopback scripted model; proposals never supply final consent and observation does not infer |
+| Folder/link/setup, Group, district, managed Home | Not ordinary adapters; remain separate integration/acceptance milestones |
+
+Result setup hints first prove operation/resource identity and then read the
+existing setup-wizard status. They do not mark setup ready. A busy accepted
+result disables navigation until its current owner finishes; an explicit native
+open preference runs only after direct confirmed creation, never status/reload
+or layout repair. Desktop launch and native picker acceptance are separate from
+the sandboxed host-request assertions.
+
 ## Verification boundary
 
 Inventory every declaration and entry; test projections declaration-first and

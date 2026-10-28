@@ -1,3 +1,5 @@
+export { creationTeamReviewRows } from './workspace-creation-review.js';
+
 import {
   creationReviewHeaderHTML,
   creationReviewSlotsHTML,

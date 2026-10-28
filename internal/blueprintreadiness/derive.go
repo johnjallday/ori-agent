@@ -245,6 +245,9 @@ func derivePluginOwned(template projecttemplates.Template, sources Sources) Read
 			Generation: installed.Generation,
 		}
 	}
+	if diagnostic := manifestDiagnostic(template); diagnostic != "" {
+		return manifestInvalidReadiness(OwnershipPlugin, diagnostic)
+	}
 	if len(template.IntakeRequirements) != 0 && !hasHostFeature(installed, plugin.HostFeatureBlueprintIntakeV1) {
 		return Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginUpdateRequired,
 			Summary:    "This blueprint's intake declaration needs a newer plugin version.",
@@ -583,6 +586,12 @@ func manifestDiagnostic(template projecttemplates.Template) string {
 	}
 	if template.HasInvalidSetupWizard() {
 		return template.SetupWizardError
+	}
+	if template.HasInvalidInputs() {
+		return template.InputsError
+	}
+	if template.HasInvalidProjectConnection() {
+		return template.ProjectConnectionError
 	}
 	if template.HasInvalidIntakeRequirements() {
 		return template.IntakeRequirementsError

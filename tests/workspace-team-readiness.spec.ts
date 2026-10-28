@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+import { confirmReviewedCreation } from './helpers/confirm-reviewed-creation';
 
 const SHOTS = 'tasks/screenshots/workspace-team-readiness';
 const SAVED_AGENT = 'File Curator';
@@ -102,14 +103,24 @@ test('a saved File Curator is suggested, assigned, and persisted without duplica
 
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
-  await expect(page.locator('#workspaceReviewSummary')).toContainText(SAVED_AGENT);
-  const created = page.waitForResponse(
-    response => response.url().endsWith('/api/workspaces') && response.request().method() === 'POST'
+  await expect(page.locator('#workspaceCreationReviewPanel')).toContainText(SAVED_AGENT);
+  const material = page.waitForRequest(
+    request =>
+      new URL(request.url()).pathname === '/api/workspaces/create-operations' &&
+      request.method() === 'POST'
   );
-  await page.locator('#createFolderBtn').click();
-  const response = await created;
-  expect(response.ok(), await response.text()).toBe(true);
-  const requestBody = response.request().postDataJSON();
+  const created = page
+    .waitForResponse(
+      response =>
+        /\/api\/workspaces\/create-operations\/[^/]+\/confirm$/.test(
+          new URL(response.url()).pathname
+        ) && response.request().method() === 'POST'
+    )
+    .then(async response => ({ response, body: await response.json() }));
+  await confirmReviewedCreation(page, true);
+  const { response, body } = await created;
+  expect(response.ok(), JSON.stringify(body)).toBe(true);
+  const requestBody = (await material).postDataJSON().request;
   expect(requestBody.team_intent).toEqual(expect.objectContaining({ version: 1, mode: 'staffed' }));
   expect(requestBody.role_staffing).toEqual([
     expect.objectContaining({
@@ -118,7 +129,6 @@ test('a saved File Curator is suggested, assigned, and persisted without duplica
       name: SAVED_AGENT
     })
   ]);
-  const body = await response.json();
   createdWorkspaceIds.push(body.folder.id);
   expect(body.folder.agent_instances).toEqual([
     expect.objectContaining({
@@ -149,16 +159,27 @@ test('Blank creates agentless only after the explicit choice', async ({ page }) 
     'Chat and agent work require adding one later'
   );
   await page.locator('#wizardNextBtn').click();
-  await expect(page.locator('#workspaceReviewSummary')).toContainText('Create without agents');
+  await expect(page.locator('#workspaceCreationReviewPanel')).toContainText(
+    'No agents will be created or attached.'
+  );
 
-  // Read the body when it arrives, before the successful create navigates away.
-  const created = page.waitForResponse(
-    response => response.url().endsWith('/api/workspaces') && response.request().method() === 'POST'
-  ).then(async response => ({ response, body: await response.json() }));
-  await page.locator('#createFolderBtn').click();
+  const material = page.waitForRequest(
+    request =>
+      new URL(request.url()).pathname === '/api/workspaces/create-operations' &&
+      request.method() === 'POST'
+  );
+  const created = page
+    .waitForResponse(
+      response =>
+        /\/api\/workspaces\/create-operations\/[^/]+\/confirm$/.test(
+          new URL(response.url()).pathname
+        ) && response.request().method() === 'POST'
+    )
+    .then(async response => ({ response, body: await response.json() }));
+  await confirmReviewedCreation(page, true);
   const { response, body } = await created;
   expect(response.ok(), JSON.stringify(body)).toBe(true);
-  const requestBody = response.request().postDataJSON();
+  const requestBody = (await material).postDataJSON().request;
   expect(requestBody.team_intent).toEqual(
     expect.objectContaining({ version: 1, mode: 'agentless' })
   );

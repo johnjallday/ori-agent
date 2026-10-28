@@ -1337,6 +1337,12 @@
         item.agent = {
           name: fill.name,
           role: saved ? text(saved.role) : '',
+          ...(text(fill.mode === FILL_ASSIGN ? saved?.model : fill.model)
+            ? { model: text(fill.mode === FILL_ASSIGN ? saved?.model : fill.model) }
+            : {}),
+          ...(text(fill.mode === FILL_ASSIGN ? saved?.provider : fill.provider)
+            ? { provider: text(fill.mode === FILL_ASSIGN ? saved?.provider : fill.provider) }
+            : {}),
           appearance: (saved && saved.appearance) || fill.appearance || null
         };
         // A filled role has nothing left to propose.

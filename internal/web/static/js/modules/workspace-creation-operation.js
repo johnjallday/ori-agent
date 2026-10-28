@@ -80,7 +80,15 @@ function operationView(body, reference, confirming = false) {
     state: operation.state,
     operation,
     result: operation.state === 'complete' ? result : null,
-    message: typeof body.error === 'string' ? body.error : '',
+    refusal: operation.state === 'refused' ? (confirming ? body : body.refusal) || null : null,
+    message:
+      typeof body.error === 'string'
+        ? body.error
+        : typeof body.message === 'string'
+          ? body.message
+          : typeof body.refusal?.error === 'string'
+            ? body.refusal.error
+            : '',
     observedWorkspace: body.observed_workspace || null
   };
 }

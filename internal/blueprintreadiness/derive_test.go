@@ -130,6 +130,42 @@ func TestDeriveInvalidManifestGuidanceFollowsOwnership(t *testing.T) {
 	}
 }
 
+func TestDeriveInvalidInputsAndProjectConnectionNeverAppearReady(t *testing.T) {
+	for _, kind := range []string{"inputs", "project_connection"} {
+		for _, ownership := range []Ownership{OwnershipUser, OwnershipBuiltin, OwnershipPlugin} {
+			t.Run(kind+"/"+string(ownership), func(t *testing.T) {
+				template := projecttemplates.Template{ID: "broken", Name: "Broken declaration"}
+				if kind == "inputs" {
+					template.InputsError = "invalid inputs declaration: URL default must be http or https"
+				} else {
+					template.ProjectConnectionError = "invalid project connection declaration: unsupported mode"
+				}
+				sources := Sources{ShippedBuiltin: shippedIDs("broken")}
+				switch ownership {
+				case OwnershipBuiltin:
+					template.Builtin = true
+				case OwnershipPlugin:
+					template.ID = "plugin:neutral:document"
+					template.PluginOwner = &workspace.PluginTemplateOwner{PluginID: "neutral", PluginVersion: "1.2.0", BlueprintID: "document", BlueprintVersion: 1}
+					sources.Installed = []plugin.InstalledPlugin{withBlueprint(installedPlugin("neutral", true), "document")}
+				}
+				got := Derive(template, sources)
+				assertReadiness(t, got, StateUnavailable, ownership, ReasonManifestInvalid)
+				if got.Creatable() {
+					t.Fatal("an unreadable declaration may not silently become a plain workspace")
+				}
+				if ownership == OwnershipUser {
+					if got.Diagnostic == "" || !hasAction(got, ActionEditTemplateManifest) {
+						t.Fatalf("author recovery was lost: %+v", got)
+					}
+				} else if got.Diagnostic != "" || hasAction(got, ActionEditTemplateManifest) {
+					t.Fatalf("non-author received technical authoring instructions: %+v", got)
+				}
+			})
+		}
+	}
+}
+
 func TestDeriveInvalidIntakeRequirementsBlockCreation(t *testing.T) {
 	got := Derive(projecttemplates.Template{
 		ID: "course", Name: "Course",

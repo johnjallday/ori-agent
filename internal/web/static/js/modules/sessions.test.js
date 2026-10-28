@@ -117,6 +117,285 @@ test('accepted ordinary creation cannot fall back to legacy POST when the picker
   assert.equal(calls, 0);
 });
 
+test('ordinary build review is available after model failure but never borrows a folder/link/setup owner', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null) }
+  );
+  manager.workspaceCreatorContext = { mode: 'ordinary' };
+  manager.isGroupCreator = () => false;
+  manager.teamView = () => ({ isBlank: true });
+  manager.workspaceBuild = { withdrawn: true };
+  assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+  assert.equal(manager.ordinaryBuildReviewProblem(), '');
+  for (const session of [{ folder: {} }, { link: {} }, { setup: {} }, { plan: { ready: true } }]) {
+    manager.workspaceBuild = { session };
+    assert.equal(manager.usesUnifiedOrdinaryReview(), false);
+  }
+  manager.workspaceBuild = { session: { id: 'build', version: 1, status: 'open' }, busy: true };
+  assert.match(manager.ordinaryBuildReviewProblem(), /Wait/);
+  manager.workspaceBuild.busy = false;
+  const key = manager.ordinaryCreationMaterialKey({ name: 'Exact draft' });
+  manager.workspaceBuild.session.version++;
+  assert.notEqual(manager.ordinaryCreationMaterialKey({ name: 'Exact draft' }), key);
+  manager.workspaceBuild.session.status = 'created';
+  assert.match(manager.ordinaryBuildReviewProblem(), /no longer open/);
+});
+
+test('a definite ordinary refusal returns fresh roles to their existing owner without confirming new terms', () => {
+  const events = [];
+  const draft = { plan: { blueprintKey: 'template:neutral' } };
+  const manager = loadSessionManager(undefined, {
+    CreateWorkspaceTeamDraft: {
+      setPlanReady: (_draft, key, plan) => events.push(['plan', key, plan.revision]),
+      markPlanConflict: (_draft, _message, details) => events.push(['conflict', details.kind])
+    }
+  });
+  const context = { ordinaryReview: {} };
+  manager.workspaceCreatorContext = context;
+  manager.ensureWorkspaceTeamDraft = () => draft;
+  manager.goToWizardStep = step => events.push(['step', step]);
+  manager.refreshWorkspaceReview = () => {};
+  manager.announceWorkspaceTeamChange = () => {};
+  manager.showWorkspaceCreateError = message => events.push(['message', message]);
+  manager.createFolder = () => {
+    throw new Error('Refusal cannot confirm changed terms');
+  };
+  manager.applyOrdinaryCreationRefusal(context, {
+    message: 'Review changed roles',
+    refusal: { conflict: { type: 'team_readiness', fresh_plan: { revision: 'fresh' } } }
+  });
+  assert.deepEqual(events, [
+    ['plan', 'template:neutral', 'fresh'],
+    ['conflict', 'team-readiness'],
+    ['step', 3],
+    ['message', 'Review changed roles']
+  ]);
+});
+
+test('ordinary result metadata is read-only, exact-operation-bound and editor-fenced', async () => {
+  const reference = { id: 'operation', digest: 'digest' };
+  const proven = { id: 'resource', name: 'Proven name' };
+  let current = {
+    ...proven,
+    blueprint_id: 'calendar-ops',
+    shared_data: {
+      workspace_creation_operation_id: reference.id,
+      workspace_creation_operation_digest: reference.digest
+    },
+    template_provenance: { setup_wizard: { steps: [{ title: 'Connect' }] } }
+  };
+  const calls = [];
+  const manager = loadSessionManager(async (url, options) => {
+    calls.push([url, options]);
+    return {
+      ok: true,
+      json: async () =>
+        url.endsWith('/setup-wizard')
+          ? {
+              success: true,
+              setup: {
+                workspace_id: proven.id,
+                applicable: true,
+                state: 'not_started',
+                current_step_id: 'connect',
+                steps: [{ id: 'connect', title: 'Connect' }]
+              }
+            }
+          : current
+    };
+  });
+  const context = { ordinaryReview: { reference } };
+  manager.workspaceCreatorContext = context;
+  assert.equal(await manager.observeOrdinaryCreationResource(context, proven), current);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], '/api/workspaces/resource');
+  assert.equal(calls[1][0], '/api/workspaces/resource/setup-wizard');
+  assert.ok(
+    calls.every(([, options]) => options.method === undefined),
+    'GET only, never a setup continuation'
+  );
+  assert.equal(
+    manager.ordinaryCreationSetupHint(current, context.ordinaryReview.setupObservation),
+    'Connect'
+  );
+  current = { ...current, shared_data: { workspace_creation_operation_id: 'foreign' } };
+  assert.equal(await manager.observeOrdinaryCreationResource(context, proven), proven);
+  assert.match(context.ordinaryReview.resourceObservationWarning, /could not be verified/);
+  manager.workspaceCreatorContext = { ordinaryReview: {} };
+  assert.equal(await manager.observeOrdinaryCreationResource(context, proven), null);
+});
+
+test('ordinary result hints read canonical saved setup without continuing or inferring readiness', () => {
+  const manager = loadSessionManager(async () => {
+    throw new Error('Projection must not request setup');
+  });
+  const resource = { id: 'canonical' };
+  const setup = {
+    workspace_id: resource.id,
+    applicable: true,
+    state: 'not_started',
+    current_step_id: 'connect',
+    steps: [
+      { id: 'connect', title: 'Connect your calendar' },
+      { id: 'configure', title: 'Map operations' }
+    ]
+  };
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), 'Connect your calendar');
+  setup.state = 'in_progress';
+  setup.current_step_id = 'configure';
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), 'Map operations');
+  setup.current_step_id = 'unknown';
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), 'Review saved blueprint setup');
+  setup.state = 'ready';
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), '');
+  assert.equal(manager.ordinaryCreationSetupHint({}, setup), '');
+  assert.equal(
+    manager.ordinaryCreationSetupHint({ id: 'foreign' }, { ...setup, state: 'not_started' }),
+    ''
+  );
+});
+
+test('ad-hoc folder declarations are fenced metadata, preserve owned input edits and cannot become Blank', () => {
+  const path = { value: '/synthetic/folder' };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'projectTemplatePathInput' ? path : null),
+      querySelector: () => null
+    }
+  );
+  manager.workspaceCreatorContext = { generation: 2 };
+  manager.isWorkspaceCreator = () => true;
+  manager.usesExistingProject = () => false;
+  manager.workspaceReviewDetailChoices = () => [];
+  const source = {
+    path: path.value,
+    source_digest: 'a'.repeat(64),
+    readiness: { state: 'ready' },
+    template: {
+      id: 'folder',
+      name: 'Neutral folder blueprint',
+      has_skeleton: false,
+      inputs: {
+        schema_version: 1,
+        fields: [
+          { id: 'rate', label: 'Rate', type: 'number', default: 24, min: 1, max: 100, step: 1 }
+        ]
+      }
+    }
+  };
+  manager.templateAgentPlan = { folder_template: source };
+  manager.applyFolderTemplateReview(source);
+  assert.equal(manager.currentCreationBlueprint().name, 'Neutral folder blueprint');
+  assert.equal(manager.folderTemplateReviewProblem(), '');
+  manager.blueprintInputsDraft.values.rate = '48';
+  manager.blueprintInputsDraft.touched.rate = true;
+  const key = manager.ordinaryCreationMaterialKey({ template_path: path.value });
+  const changed = {
+    ...source,
+    source_digest: 'b'.repeat(64),
+    template: {
+      ...source.template,
+      inputs: {
+        ...source.template.inputs,
+        fields: [{ ...source.template.inputs.fields[0], max: 40 }]
+      }
+    }
+  };
+  manager.templateAgentPlan = { folder_template: changed };
+  manager.applyFolderTemplateReview(changed);
+  assert.equal(
+    manager.blueprintInputsDraft.values.rate,
+    '48',
+    'server metadata cannot overwrite a human choice'
+  );
+  assert.match(manager.blueprintInputsProblem().message, /between 1 and 40/);
+  assert.notEqual(manager.ordinaryCreationMaterialKey({ template_path: path.value }), key);
+  const review = manager.ordinaryCreationMaterialReview();
+  assert.match(review.rows[0].detail, /no project scaffold/);
+  assert.doesNotMatch(review.now, /Scaffold/);
+  manager.templateAgentPlan = null;
+  assert.match(manager.folderTemplateReviewProblem(), /Wait/);
+  assert.equal(
+    manager.currentCreationBlueprint().name,
+    'Neutral folder blueprint',
+    'last display survives an in-flight check but cannot dispatch'
+  );
+  path.value = '/replacement';
+  assert.equal(manager.currentCreationBlueprint(), null);
+  assert.throws(() => manager.applyFolderTemplateReview(source), /could not be reviewed/);
+  path.value = source.path;
+  manager.workspaceCreatorContext = { generation: 3 };
+  assert.equal(manager.currentCreationBlueprint(), null, 'no old editor source adoption');
+});
+
+test('ordinary blueprint review reads typed inputs, resources and advanced choices without changing their owners', () => {
+  const template = {
+    id: 'custom:neutral',
+    name: 'Neutral blueprint',
+    has_skeleton: true,
+    starter_tasks: [{ description: 'Later task' }],
+    setup_wizard: { steps: [{ title: 'Connect account' }, { title: 'Review access' }] }
+  };
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Review cannot request a model or create');
+    },
+    {
+      ProjectTemplateCard: {
+        getSelectedTemplate: () => template,
+        shouldOpenAfterCreate: () => true
+      },
+      WorkspaceTagsCard: { getPayloadFields: () => ({ tags: ['custom', 'scope'] }) }
+    },
+    { querySelector: () => ({ dataset: { color: '#123456' } }) }
+  );
+  manager.usesExistingProject = () => false;
+  manager.blueprintInputReviewLines = () => ['Tempo: 104 BPM', 'Mode: File-only'];
+  manager.workspaceReviewDetailChoices = () => ['Opens the project after creation'];
+  const before = JSON.stringify(template);
+  const review = manager.ordinaryCreationMaterialReview();
+  assert.equal(review.blueprint, 'Neutral blueprint');
+  assert.ok(review.rows.some(row => row.label === 'Project files'));
+  assert.ok(review.facts.some(row => row.value === 'Tempo: 104 BPM'));
+  assert.ok(review.facts.some(row => row.value === 'custom, scope'));
+  assert.match(review.now, /Scaffold|starter tasks|opens after creation/);
+  assert.match(review.later, /Connect account → Review access/);
+  assert.match(review.later, /No account or runtime access/);
+  assert.equal(JSON.stringify(template), before);
+  template.has_skeleton = false;
+  const metadataOnly = manager.ordinaryCreationMaterialReview();
+  assert.equal(
+    metadataOnly.rows.some(row => row.label === 'Project files'),
+    false
+  );
+  assert.doesNotMatch(metadataOnly.now, /Scaffold/);
+  manager.usesExistingProject = () => true;
+  manager.existingProjectChoice = {
+    folderDisplay: '/synthetic/project',
+    entryName: 'song.rpp',
+    selectionToken: 'not-display-authority'
+  };
+  const linked = manager.ordinaryCreationMaterialReview();
+  assert.match(linked.rows[0].detail, /Linked, not moved or changed/);
+  assert.equal(linked.rows[0].value, '/synthetic/project');
+  assert.doesNotMatch(JSON.stringify(linked), /not-display-authority/);
+  assert.doesNotMatch(linked.now, /Scaffold/);
+});
+
+test('ordinary map review fingerprint includes the explicit open-project choice without executing it', () => {
+  const manager = loadSessionManager();
+  const payload = { name: 'Project', blueprint_inputs: { tempo: 104 } };
+  assert.notEqual(
+    manager.ordinaryCreationMaterialKey(payload, false),
+    manager.ordinaryCreationMaterialKey(payload, true)
+  );
+  assert.equal(payload.blueprint_inputs.tempo, 104);
+});
+
 test('ordinary automatic selection clears geometry without editing the canonical draft or dispatching', async () => {
   let cancelled = 0,
     abandoned = 0;
@@ -4657,6 +4936,15 @@ const catalogTemplate = {
   description: 'Synthesis docs, sources, weekly reading.'
 };
 
+test('a programmatic picker reset cannot resolve a missing launch source, but an explicit new choice can', () => {
+  const { manager } = nameAndDescriptionManager();
+  manager.workspaceCreatorContext.blueprintRequest = { id: 'missing', state: 'missing' };
+  manager.handleWorkspaceTemplateSelected({ blank: true, id: '' }, { programmatic: true });
+  assert.equal(manager.workspaceCreatorContext.blueprintRequest.state, 'missing');
+  manager.handleWorkspaceTemplateSelected({ blank: true, id: '' }, { programmatic: false });
+  assert.equal(manager.workspaceCreatorContext.blueprintRequest.state, 'cancelled');
+});
+
 test('every blueprint prefills its description, and switching replaces only the autofill (FR 13)', () => {
   const { manager, elements } = nameAndDescriptionManager();
   const description = elements.folderDescriptionInput;
@@ -6494,8 +6782,8 @@ test('the user’s first edit removes the tag; the assistant’s own edits do no
   assert.equal(manager.workspaceBuild.chosen.has('name'), false);
 });
 
-test('“create it” with a gate still closed says why and submits nothing', async () => {
-  const { manager } = loadBuildWizard();
+test('“create it” explains closed gates and otherwise opens review without manufacturing final consent', async () => {
+  const { manager, nodes } = loadBuildWizard();
   const lines = [];
   manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
   manager.workspaceBuildPane = () => ({
@@ -6520,8 +6808,94 @@ test('“create it” with a gate still closed says why and submits nothing', as
   manager.flushWorkspaceBuildDraft = async () => {};
   manager.creatorWizardSteps = () => [1, 2, 3, 4];
   manager.wizardStep = 4;
+  nodes.set('workspaceCreationReviewPanel', new BuildNode('div', 'workspaceCreationReviewPanel'));
+  manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1 };
+  manager.teamView = () => ({ isBlank: true });
+  manager.isGroupCreator = () => false;
+  let reviews = 0,
+    collapses = 0;
+  manager.syncOrdinaryCreationReview = async () => {
+    reviews++;
+  };
+  manager.collapseWorkspaceBuild = () => {
+    collapses++;
+    manager.workspaceBuild.collapsed = true;
+  };
   await manager.createFromWorkspaceBuild();
-  assert.equal(created, 1, 'with every gate open it runs the Create submit');
+  assert.equal(created, 0, 'a model proposal is not a final gesture');
+  assert.equal(reviews, 1);
+  assert.equal(collapses, 1);
+});
+
+function deferredBlueprintPicker(ids = []) {
+  const timers = [];
+  const f = loadBuildWizard({
+    setTimeout: callback => {
+      timers.push(callback);
+      return timers.length;
+    },
+    clearTimeout() {}
+  });
+  let selected = { blank: true, id: '' };
+  let clicks = 0;
+  const cards = ids.map(id => ({
+    dataset: { templateId: id },
+    click() {
+      clicks++;
+      selected = { id };
+    }
+  }));
+  f.document.querySelectorAll = selector => {
+    assert.equal(selector, '.workspace-template-card, .workspace-template-row');
+    return cards;
+  };
+  f.window.ProjectTemplateCard.getSelectedTemplate = () => selected;
+  f.manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1 };
+  f.manager.refreshWizardChrome = () => {};
+  f.manager.showWorkspaceCreateError = () => {};
+  return {
+    ...f,
+    cards,
+    timers,
+    clicks: () => clicks,
+    drain() {
+      while (timers.length) timers.shift()();
+    }
+  };
+}
+
+test('a missing hostile deep-link identifier cannot become Blank or a CSS selector', () => {
+  const f = deferredBlueprintPicker();
+  f.manager.preselectBlueprintCard('missing"] .not-a-selector');
+  assert.match(f.manager.blueprintRequestProblem(), /Checking/);
+  f.drain();
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest.state, 'missing');
+  assert.match(f.manager.blueprintRequestProblem(), /not create a Blank substitute/);
+  assert.equal(f.clicks(), 0);
+});
+
+test('late blueprint selection cannot redirect a replacement editor', () => {
+  const f = deferredBlueprintPicker();
+  f.manager.preselectBlueprintCard('research-project');
+  f.cards.push({
+    dataset: { templateId: 'research-project' },
+    click() {
+      throw new Error('Old timer selected a new editor');
+    }
+  });
+  f.manager.workspaceCreatorContext = { mode: 'ordinary', generation: 2 };
+  f.drain();
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest, undefined);
+});
+
+test('bare plugin deep links require one exact source; qualified links select only that source', () => {
+  const f = deferredBlueprintPicker(['plugin:first:project', 'plugin:second:project']);
+  f.manager.preselectBlueprintCard('project');
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest.state, 'ambiguous');
+  assert.equal(f.clicks(), 0);
+  f.manager.preselectBlueprintCard('plugin:second:project');
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest.state, 'selected');
+  assert.equal(f.clicks(), 1);
 });
 
 test('File Janitor conversational create opens a host review and cannot manufacture consent', async () => {

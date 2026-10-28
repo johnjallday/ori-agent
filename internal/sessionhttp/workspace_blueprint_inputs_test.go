@@ -241,8 +241,8 @@ func TestCreateWorkspaceRefusesInputsOutsideNewProjectMode(t *testing.T) {
 	})
 }
 
-// A blueprint whose declaration could not be understood offers no inputs, so
-// supplying them is refused rather than silently dropped.
+// An unreadable declaration is unavailable at the readiness gate, even before
+// supplied inputs are validated. It cannot silently become a plain workspace.
 func TestCreateWorkspaceRefusesInputsForAnUnusableDeclaration(t *testing.T) {
 	template := inputsTemplate()
 	template.Inputs = nil
@@ -253,8 +253,18 @@ func TestCreateWorkspaceRefusesInputsForAnUnusableDeclaration(t *testing.T) {
 		"name": "Night Drive", "template_id": fixture.template.ID, "group_composition": "standalone",
 		"group_requirement_review": true, "blueprint_inputs": map[string]any{"tempo": 96},
 	})
-	if code != http.StatusBadRequest || !strings.Contains(errorMessage(body), "inputs are unavailable") {
+	if code != http.StatusConflict || !strings.Contains(errorMessage(body), "No workspace was created") {
 		t.Fatalf("status=%d body=%v", code, body)
+	}
+	readiness, ok := body["readiness"].(map[string]any)
+	if !ok || readiness["state"] != "unavailable" || readiness["reason"] != "manifest_invalid" || readiness["ownership"] != "plugin" {
+		t.Fatalf("missing truthful readiness: %v", body)
+	}
+	if _, exposed := readiness["diagnostic"]; exposed {
+		t.Fatalf("plugin author diagnostics exposed to a non-author: %v", readiness)
+	}
+	if ids, err := fixture.store.List(); err != nil || len(ids) != 0 {
+		t.Fatalf("unreadable declaration created a fallback: %v %v", ids, err)
 	}
 }
 

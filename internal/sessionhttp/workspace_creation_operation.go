@@ -382,6 +382,10 @@ func (h *Handler) respondWorkspaceCreationOperation(w http.ResponseWriter, r *ht
 		switch view.State {
 		case "complete":
 			body["result"] = result
+		case "refused":
+			// Read-only recovery retains the original readiness/team diagnostic;
+			// observation must not POST again merely to recover lost error copy.
+			body["refusal"] = result
 		case "accepted", "reconciliation_required":
 			// Canonical existence is useful partial evidence, but it never
 			// upgrades an interrupted operation to complete or resumes work.

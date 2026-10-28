@@ -24,9 +24,83 @@ export function creationReviewHeaderHTML({
     </header><p class="assisted-placement__location">${escapeReviewText(destination)}</p>`;
 }
 
+// Consume the existing roster component's normalized rows. This projection
+// neither invents role fills nor changes the team's payload or saved profiles.
+export function creationTeamReviewRows(view = {}, roleRows = []) {
+  if (view.agentless)
+    return [
+      {
+        label: 'Team',
+        value: 'No agents will be created or attached.',
+        action: 'team',
+        actionLabel: 'Edit team'
+      }
+    ];
+  const scoped = view.isAssistantProgram
+    ? roleRows.filter(row => row.scope === 'project')
+    : roleRows;
+  if (scoped.length) {
+    return [
+      ...scoped.map(row => ({
+        label: row.label,
+        value: [
+          ...new Set(
+            [
+              row.state === 'empty' ? 'No agent assigned' : '',
+              row.tag?.label,
+              row.sourceLabel,
+              row.required ? 'Required' : 'Optional'
+            ].filter(Boolean)
+          )
+        ].join(' · '),
+        detail: [
+          row.state === 'filled'
+            ? [row.agent?.model, row.agent?.provider].filter(Boolean).join(' · ')
+            : row.proposed?.model
+              ? `Suggested model: ${row.proposed.model}`
+              : '',
+          row.scopeLine,
+          row.readOnlyReason
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        ...(row.readOnly ? {} : { action: 'team', actionLabel: 'Edit team' })
+      })),
+      ...(view.roleRoster?.unassigned || []).map(agent => ({
+        label: 'Also in this workspace',
+        value: `${agent.name} · saved agent`,
+        action: 'team',
+        actionLabel: 'Edit team'
+      }))
+    ];
+  }
+  const roster = Array.isArray(view.roster) ? view.roster : [];
+  return [
+    {
+      label: 'Team',
+      value: roster.length
+        ? roster
+            .map(member =>
+              [
+                member.name,
+                member.lifecycle === 'reuse' ? 'saved agent' : 'new agent',
+                member.modelLabel
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            )
+            .join('; ')
+        : view.planStatus === 'ready'
+          ? 'No agents will be created or attached.'
+          : 'Team choices are not yet reviewed.',
+      action: 'team',
+      actionLabel: 'Edit team'
+    }
+  ];
+}
+
 export function creationReviewSlotsHTML(rows = [], { locked = false, selectedCard } = {}) {
   return `<div class="assisted-placement__slots">${rows
-    .slice(0, 64)
     .map(
       (
         row,
@@ -53,6 +127,9 @@ export function creationReviewNavigationHTML(view = {}) {
     </div><p class="assisted-placement__hint">${escapeReviewText(view.automatic ? 'Automatic placement selected. Confirm below to create this reviewed setup.' : view.mapHint)}</p>`;
 }
 
+const reviewMaxLength = value =>
+  Number.isSafeInteger(value) && value >= 0 ? ` maxlength="${value}"` : '';
+
 export function workspaceCreationReviewHTML(view = {}) {
   if (view.onMap && !view.accepted && !view.result) return '';
   const locked = Boolean(view.busy || view.accepted || view.conflict || view.closed);
@@ -63,26 +140,27 @@ export function workspaceCreationReviewHTML(view = {}) {
       <p>${escapeReviewText(view.result?.name || '')}</p>
       ${view.result ? `<p>${view.result.parent_id ? `Group: ${escapeReviewText(view.result.parent_id)}` : 'Standalone workspace'}</p><p>${view.result.agent_instances?.length ? `Assigned: ${view.result.agent_instances.map(member => escapeReviewText(member.name)).join(', ')}` : 'No agents attached.'}</p>` : ''}
       <p role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escapeReviewText(view.message)}</p>
+      ${view.result && view.nextSetup ? `<p><strong>Next setup:</strong> ${escapeReviewText(view.nextSetup)}. Open the workspace to continue; setup readiness has not been verified here.</p>` : ''}
       ${view.accepted && !view.result ? '<p>Work may already exist. Closing is not undo. Reading status never continues creation.</p>' : ''}
       <div class="assisted-placement__footer">
         ${view.accepted && !view.result ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
         ${view.canAbandonReview && !view.result ? `<button type="button" data-placement-action="abandon-review"${view.busy ? ' disabled' : ''}>Release unaccepted review</button>` : ''}
         ${view.positionFailed && view.result ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
-        ${view.result ? '<button type="button" data-placement-action="open">Open workspace</button>' : ''}
+        ${view.result ? `<button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>Open workspace</button>` : ''}
         <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
       </div></section>`;
   }
   return `<section class="assisted-placement" aria-label="Review proposed workspace">
     ${creationReviewHeaderHTML({ title: `Make room for ${view.name || 'your workspace'}`, titleId: 'workspaceCreationReviewTitle', note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art })}
     <div class="assisted-placement__fields">
-      <div><label for="workspaceCreationReviewName">Workspace name</label><input id="workspaceCreationReviewName" data-placement-field="name" maxlength="200" value="${escapeReviewText(view.name)}"${disabled}></div>
-      <div><label for="workspaceCreationReviewGoal">Goal</label><textarea id="workspaceCreationReviewGoal" data-placement-field="mission" rows="2" maxlength="2000"${disabled}>${escapeReviewText(view.goal)}</textarea></div>
+      <div><label for="workspaceCreationReviewName">Workspace name</label><input id="workspaceCreationReviewName" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${disabled}></div>
+      <div><label for="workspaceCreationReviewGoal">Goal</label><textarea id="workspaceCreationReviewGoal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${disabled}>${escapeReviewText(view.goal)}</textarea></div>
     </div>
     ${creationReviewSlotsHTML(view.rows, { locked })}
     <button type="button" data-placement-action="details"${disabled}>Edit details &amp; advanced settings</button>
+    <button type="button" data-placement-action="blueprint"${disabled}>Change blueprint</button>
     <section class="assisted-placement__review" aria-label="Before you confirm"><h3>Before you confirm</h3>
       <dl>${(view.facts || [])
-        .slice(0, 64)
         .map(
           fact => `<dt>${escapeReviewText(fact.label)}</dt><dd>${escapeReviewText(fact.value)}</dd>`
         )

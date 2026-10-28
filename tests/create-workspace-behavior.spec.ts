@@ -1,5 +1,9 @@
 import { test, expect, Page } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import {
+  routeReviewedCreation,
+  confirmReviewedCreation
+} from './helpers/reviewed-creation-route-fixture';
 
 /**
  * E2E for the create-workspace "Agent behavior" consolidation.
@@ -225,15 +229,21 @@ test('Create mode shows four ordered steps and marks only the active one current
   await expect(page.locator('#wizardStep3Title')).toHaveText('Build your workspace team');
   // The final create action appears only on Review (FR11).
   await expect(page.locator('#createFolderBtn')).toBeHidden();
+  // This step-order contract does not require a provider or staged profile.
+  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
 
   await advanceToReviewFromTeam(page);
   await expect(current).toHaveAttribute('data-step', '4');
   await expect(page.locator('#wizardStep4Title')).toHaveText('Ready to create?');
-  await expect(page.locator('#createFolderBtn')).toBeVisible();
+  await expect(page.locator('#createFolderBtn')).toBeHidden();
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(
+    review.getByRole('button', { name: 'Place & create on map', exact: true })
+  ).toBeVisible();
   await expect(page.locator('#wizardNextBtn')).toBeHidden();
 
   // Back returns to Team and preserves the entered name (FR8).
-  await page.locator('#wizardBackBtn').click();
+  await review.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
   await page.locator('#wizardBackBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
@@ -518,7 +528,7 @@ test('checked project-open option posts exactly once after create and before nav
       body: JSON.stringify({ message: 'ok' })
     });
   });
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     calls.push('create');
     await route.fulfill({
       status: 201,
@@ -543,7 +553,7 @@ test('checked project-open option posts exactly once after create and before nav
   // which is the only step with the final create action (FR11).
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).toBeChecked();
   await advanceToReview(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/created-open');
 
   await expect.poll(() => calls).toEqual(['create', 'open']);
@@ -561,7 +571,7 @@ test('unchecked project-open option creates and navigates without an open reques
     openCalls += 1;
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
@@ -577,7 +587,7 @@ test('unchecked project-open option creates and navigates without an open reques
   await page.locator('#folderNameInput').fill('Created Closed');
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
   await advanceToReview(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/created-closed');
   await expect.poll(() => openCalls).toBe(0);
 });
@@ -596,7 +606,7 @@ test('project-open failure still navigates and shows a one-time retry notice', a
       body: JSON.stringify({ error: 'No default app is available.' })
     });
   });
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
@@ -611,7 +621,7 @@ test('project-open failure still navigates and shows a one-time retry notice', a
   await advanceToWorkspaceDetails(page);
   await page.locator('#folderNameInput').fill('Created Failure');
   await advanceToReview(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/created-failure');
   await expect.poll(() => openCalls).toBe(1);
   const storedNotice = await page.evaluate(() =>
@@ -669,7 +679,7 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
       body: JSON.stringify({ error: 'stubbed' })
     });
   });
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     captured.create = route.request().postDataJSON()?.workspace_preset;
     await route.fulfill({
       status: 400,
@@ -683,11 +693,8 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
   await advanceToWorkspaceDetails(page);
   await page.fill('#folderNameInput', 'E2E Preset WS');
   await page.fill('#folderDescriptionInput', 'e2e preset submission test');
-  await page.evaluate(() =>
-    (
-      window as unknown as { sessionManager: { createFolder: () => Promise<void> } }
-    ).sessionManager.createFolder()
-  );
+  await advanceToReview(page);
+  await confirmReviewedCreation(page);
   await expect.poll(() => captured.create).toBe('research');
 
   // IMPORT: enable import mode + a path, then submit again.
@@ -711,7 +718,7 @@ test('the shared creator makes an ordinary Group through Details, Roster, and Re
   page
 }) => {
   let payload: Record<string, unknown> | undefined;
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     if (route.request().method() !== 'POST') return route.continue();
     payload = route.request().postDataJSON();
     await route.fulfill({
@@ -878,6 +885,7 @@ test('Team attaches a saved agent and submits the complete team atomically', asy
       contentType: 'application/json',
       body: JSON.stringify({
         revision: 'blank-team-plan',
+        template_id: 'blank',
         has_agents: false,
         agents: [],
         warnings: []
@@ -923,7 +931,7 @@ test('Team attaches a saved agent and submits the complete team atomically', asy
   await expect(roster).toContainText('Data Miner');
 
   let payload: Record<string, unknown> | undefined;
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payload = route.request().postDataJSON();
     await route.fulfill({
       status: 201,
@@ -937,8 +945,12 @@ test('Team attaches a saved agent and submits the complete team atomically', asy
   // Create lives only on Review (FR11), and names the workspace (FR88).
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
-  await expect(page.locator('#createFolderBtn')).toHaveText('Create “Atomic Team”');
-  await page.locator('#createFolderBtn').click();
+  await expect(
+    page
+      .locator('#workspaceCreationReviewPanel')
+      .getByRole('textbox', { name: 'Workspace name', exact: true })
+  ).toHaveValue('Atomic Team');
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/atomic-team');
   expect(payload?.existing_agent_names).toEqual(['Research Scout', 'Data Miner']);
   expect(payload?.entry_agent_name).toBe('Research Scout');
@@ -1122,13 +1134,17 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   await expect(row.locator('.ws-role-tag--filled')).toHaveCount(1);
 
   let payload: Record<string, any> | undefined;
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payload = route.request().postDataJSON();
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify({
-        folder: { id: 'reviewed-session', folder_slug: 'reviewed-session' },
+        folder: {
+          id: 'reviewed-session',
+          folder_slug: 'reviewed-session',
+          agent_instances: [{ id: 'fixture-producer', name: 'Session Producer' }]
+        },
         seeded_starter_tasks: 0
       })
     });
@@ -1146,14 +1162,14 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
     };
     target.notifyToast = (message, type) => target.captureWorkspaceSuccessToast(message, type);
   });
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
   await expect.poll(() => payload).toBeTruthy();
-  await expect
-    .poll(() => successToasts)
-    .toContainEqual({
-      message: 'Workspace created with setup (Session Producer created and added).',
-      type: 'success'
-    });
+  const receipt = page.locator('#workspaceCreationReviewPanel');
+  await expect(
+    receipt.getByRole('heading', { name: 'Workspace created', exact: true })
+  ).toBeVisible();
+  await expect(receipt).toContainText('Assigned: Session Producer');
+  expect(successToasts).toEqual([], 'the observed receipt replaces a speculative creation toast');
 
   expect(payload?.team_intent).toEqual({
     version: 1,
@@ -1321,7 +1337,7 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   });
   let createAttempts = 0;
   const submittedRevisions: string[] = [];
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     createAttempts += 1;
     const payload = route.request().postDataJSON();
     submittedRevisions.push(payload.team_intent?.plan_revision);
@@ -1376,7 +1392,7 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
 
   await expect(page.locator('#wizardStep3')).toBeVisible();
   await expect(
@@ -1392,8 +1408,9 @@ test('a stale reviewed plan returns to Team with fresh setup and preserves the d
   await expect(page.locator('#agentSystemPrompt')).toHaveValue('After prompt');
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
   await advanceToReviewFromTeam(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
   await expect.poll(() => submittedRevisions).toHaveLength(2);
   expect(submittedRevisions).toEqual(['stale-before', 'stale-after']);
 });
@@ -1412,7 +1429,7 @@ test('a failed strict create retries the preserved role staffing request', async
     });
   });
   const payloads: Array<Record<string, any>> = [];
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payloads.push(route.request().postDataJSON());
     if (payloads.length === 1) {
       await route.fulfill({
@@ -1448,13 +1465,13 @@ test('a failed strict create retries the preserved role staffing request', async
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
 
   await expect(page.locator('#wizardStep4')).toBeVisible();
   await expect(page.locator('#workspaceReviewError')).toContainText(
     'Reviewed Lead” could not be created'
   );
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
   await expect.poll(() => payloads).toHaveLength(2);
   expect(payloads[1].team_intent).toEqual(payloads[0].team_intent);
   expect(payloads[1].role_staffing).toEqual(payloads[0].role_staffing);
@@ -1528,7 +1545,7 @@ test('required roles Ori fills on create never gate Team, and one Create sends n
 }) => {
   await routeAutoStaffedPlan(page);
   const payloads: Array<Record<string, any>> = [];
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payloads.push(route.request().postDataJSON());
     await route.fulfill({
       status: 201,
@@ -1572,7 +1589,7 @@ test('required roles Ori fills on create never gate Team, and one Create sends n
     page.locator('#workspaceReviewIssues .workspace-team-issue.is-blocking')
   ).toHaveCount(0);
 
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
   await expect.poll(() => payloads).toHaveLength(1);
   expect(payloads[0].team_intent).toEqual({
     version: 1,
@@ -1627,7 +1644,7 @@ test('server prompt validation keeps the reviewed role draft before any create',
     });
   });
   const payloads: Array<Record<string, any>> = [];
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payloads.push(route.request().postDataJSON());
     await route.fulfill({
       status: 400,
@@ -1653,7 +1670,7 @@ test('server prompt validation keeps the reviewed role draft before any create',
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
 
   await expect.poll(() => payloads).toHaveLength(1);
   await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -1707,7 +1724,7 @@ test('assigning a saved definition fills one role without mutating it', async ({
   await expect(role).toContainText('Your saved agent');
 
   let payload: Record<string, unknown> | undefined;
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payload = route.request().postDataJSON();
     await route.fulfill({
       status: 201,
@@ -1719,7 +1736,7 @@ test('assigning a saved definition fills one role without mutating it', async ({
     });
   });
   await advanceToReviewFromTeam(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
   await expect.poll(() => payload).toBeTruthy();
 
   expect(payload?.role_staffing).toEqual([
@@ -1779,7 +1796,7 @@ test('a required blueprint role cannot be excluded through the retired opt-out',
   await expect(page.locator('#wizardNextBtn')).toBeEnabled();
 
   let payload: Record<string, unknown> | undefined;
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payload = route.request().postDataJSON();
     await route.fulfill({
       status: 201,
@@ -1791,7 +1808,7 @@ test('a required blueprint role cannot be excluded through the retired opt-out',
     });
   });
   await advanceToReviewFromTeam(page);
-  await page.locator('#createFolderBtn').click({ force: true });
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/staffed-ws');
 
   expect(payload?.team_intent).toEqual({
@@ -2250,7 +2267,7 @@ test('changing blueprint keeps saved agents without treating a proposal as membe
   await expect(page.locator('#addFolderModal')).toBeVisible();
 
   let payload: Record<string, unknown> | undefined;
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     payload = route.request().postDataJSON();
     await route.fulfill({
       status: 201,
@@ -2263,7 +2280,7 @@ test('changing blueprint keeps saved agents without treating a proposal as membe
   });
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/dedup-ws');
 
   expect(payload?.existing_agent_names).toEqual(['Research Lead', 'Data Miner']);
@@ -2276,7 +2293,7 @@ test('changing blueprint keeps saved agents without treating a proposal as membe
   ]);
 });
 
-test('Review reads as a receipt: name once, blueprint as provenance, team summarized', async ({
+test('Review exposes editable identity, blueprint provenance and the effective team', async ({
   page
 }) => {
   await page.route('**/api/agents/dashboard/list**', async route => {
@@ -2316,22 +2333,23 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
   await page.locator('[data-existing-agent-add="Research Scout"]').click();
   await advanceToReviewFromTeam(page);
 
-  const receipt = page.locator('#workspaceReviewSummary');
+  const receipt = page.locator('#workspaceCreationReviewPanel');
+  await expect(receipt).toBeVisible();
+  const name = receipt.getByRole('textbox', { name: 'Workspace name', exact: true });
+  await expect(name).toHaveValue('Midnight Sessions');
+  await expect(name).toHaveCount(1);
+  await expect(receipt).toContainText('Research Project');
+  await expect(receipt.locator('.assisted-placement__slots > section')).toHaveCount(3);
 
-  // The workspace name appears once, as the primary value; the blueprint is
-  // provenance beneath it, not a second equal-weight row (FR78, FR79).
-  await expect(receipt.locator('.workspace-review-identity-name')).toHaveText('Midnight Sessions');
-  await expect(receipt).toContainText('Based on Research Project');
-  await expect(receipt).toContainText('Folder: midnight-sessions');
-  await expect(receipt.locator('.workspace-review-identity-name')).toHaveCount(1);
-
-  // The receipt distinguishes filled roles, optional vacancies, and saved
-  // teammates that were explicitly added outside a role.
-  await expect(receipt).toContainText(
-    'Reaper Producer · PROJECT LEAD · Reaper Producer · new agent will be created'
-  );
-  await expect(receipt).toContainText('Session Scout · SPECIALIST · Optional');
-  await expect(receipt).toContainText('Research Scout · Also in this workspace · Saved agent');
+  // Show actual holders, optional vacancies and extra saved teammates, not
+  // hidden legacy receipt text or a blueprint proposal treated as membership.
+  const lead = receipt.getByRole('region', { name: 'Reaper Producer', exact: true });
+  await expect(lead).toContainText('Reaper Producer · New agent · Required');
+  const optional = receipt.getByRole('region', { name: 'Session Scout', exact: true });
+  await expect(optional).toContainText('No agent assigned · Optional');
+  await expect(
+    receipt.getByRole('region', { name: 'Also in this workspace', exact: true })
+  ).toContainText('Research Scout · saved agent');
   await expect(receipt).toContainText('1 new agent will be created');
   await expect(receipt).toContainText('1 saved agent will be attached');
 
@@ -2348,22 +2366,22 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
   await expect(page.locator('#workspaceSetupPreview')).toBeHidden();
 
   // Edit round trips return to the owning step and preserve everything else.
-  await receipt.locator('[data-wizard-edit-step="3"]').click();
+  await lead.getByRole('button', { name: 'Edit team', exact: true }).click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
   await expect(page.locator('#workspaceRoleRoster .ws-role-row')).toHaveCount(2);
   await expect(page.locator('#workspaceRoleRoster .ws-role-roster__also-row')).toHaveCount(1);
   await advanceToReviewFromTeam(page);
-  await expect(receipt).toContainText('Midnight Sessions');
+  await expect(name).toHaveValue('Midnight Sessions');
 
-  // The identity card's own Edit (the Details card carries a second one).
-  const identityCard = receipt
-    .locator('.workspace-review-card')
-    .filter({ has: page.locator('.workspace-review-identity-name') });
-  await identityCard.locator('[data-wizard-edit-step="2"]').click();
+  await receipt
+    .getByRole('button', { name: 'Edit details & advanced settings', exact: true })
+    .click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await expect(page.locator('#folderNameInput')).toHaveValue('Midnight Sessions');
   await advanceToReview(page);
-  await expect(receipt).toContainText('Research Scout · Also in this workspace · Saved agent');
+  await expect(
+    receipt.getByRole('region', { name: 'Also in this workspace', exact: true })
+  ).toContainText('Research Scout · saved agent');
 });
 
 test('Review summarizes only the details that were actually chosen (FR81)', async ({ page }) => {
@@ -2418,7 +2436,7 @@ test('a failed create keeps the draft, shows the real error, and routes back (FR
   });
 
   let attempts = 0;
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     if (route.request().method() !== 'POST') return route.fallback();
     attempts += 1;
     if (attempts === 1) {
@@ -2447,7 +2465,7 @@ test('a failed create keeps the draft, shows the real error, and routes back (FR
   await page.locator('[data-existing-agent-add="Research Scout"]').click();
   await advanceToReviewFromTeam(page);
 
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
 
   // The modal stays open with the server's own message, focused and actionable.
   await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -2467,7 +2485,7 @@ test('a failed create keeps the draft, shows the real error, and routes back (FR
   // Resubmitting succeeds and the failure notice is gone.
   await advanceToReviewFromTeam(page);
   await expect(page.locator('#workspaceReviewError')).toBeHidden();
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/recovered-ws');
 });
 
@@ -2726,8 +2744,11 @@ test('the wizard never persists an agent before the workspace is created (FR68)'
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await advanceToReviewFromTeam(page);
 
-  // Cancel the whole wizard from Review.
-  await page.locator('#addFolderModal .modal-footer [data-bs-dismiss="modal"]').click();
+  // Cancel through the current review, keeping the no-early-write assertion.
+  await page
+    .locator('#workspaceCreationReviewPanel')
+    .getByRole('button', { name: 'Cancel draft', exact: true })
+    .click();
   await expect(page.locator('#addFolderModal')).toBeHidden();
 
   // The shared shell returns to its ordinary standalone contract after draft
@@ -2828,7 +2849,7 @@ async function routeExistingProjectBlueprint(
       }
     });
   });
-  await page.route('**/api/workspaces', async route => {
+  await routeReviewedCreation(page, async route => {
     if (route.request().method() !== 'POST') return route.fallback();
     requests.creates.push(route.request().postDataJSON());
     await route.fulfill({
@@ -2882,7 +2903,7 @@ test('several project files: pick one, Review states it, and create names it exa
   await expect(receipt).toContainText('Destination: Top level');
   await expect(receipt).toContainText('Ori will not move or change these files.');
 
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page, true);
   await page.waitForURL('**/workspaces/two-takes');
   expect(requests.creates).toHaveLength(1);
   expect(requests.creates[0].project_connection).toEqual({
@@ -2955,7 +2976,10 @@ test('an existing project names the workspace and starts with project opening of
   // Still the user's choice: turned on, the attached project opens after create.
   await openToggle.check();
   await advanceToReview(page);
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page);
+  const result = page.locator('#workspaceCreationReviewPanel');
+  await expect(result).toContainText('Workspace created');
+  await result.getByRole('button', { name: 'Open workspace', exact: true }).click();
   await page.waitForURL('**/workspaces/two-takes');
   expect(requests.creates).toHaveLength(1);
   expect(requests.creates[0].name).toBe('Bridge Sketch');
@@ -3077,9 +3101,13 @@ test('Details asks for a blueprint’s declared inputs, refuses a value it does 
   await expect(page.locator('#workspaceBlueprintInput-tempo-error')).toBeHidden();
 
   await advanceToReview(page);
-  const receipt = page.locator('[data-blueprint-inputs-receipt]');
-  await expect(receipt).toContainText('Session settings');
+  const receipt = page.locator('#workspaceCreationReviewPanel');
+  await expect(receipt).toBeVisible();
   await expect(receipt).toContainText('Tempo: 96 BPM');
   await expect(receipt).toContainText('Time signature: 3/4');
-  await expect(receipt.getByRole('button', { name: 'Edit' })).toBeVisible();
+  await receipt
+    .getByRole('button', { name: 'Edit details & advanced settings', exact: true })
+    .click();
+  await expect(tempo).toHaveValue('96');
+  await expect(signature).toHaveValue('3 4');
 });

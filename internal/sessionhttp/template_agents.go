@@ -63,6 +63,9 @@ type templateAgentPlan struct {
 	GroupRequirement      *templateGroupRequirementPlan `json:"group_requirement,omitempty"`
 	Agents                []templateAgentPlanItem       `json:"agents"`
 	Warnings              []string                      `json:"warnings,omitempty"`
+	// FolderTemplate is read-only source metadata for the existing ad-hoc
+	// template escape hatch. It is not a draft, execution plan, or revision input.
+	FolderTemplate *templateFolderReview `json:"folder_template,omitempty"`
 	// AutoStaffing says how each required role the user leaves empty is filled
 	// on create. It is not part of Revision: the create decides again, so a name
 	// taken in between changes the agent's name, not what was agreed.

@@ -42,6 +42,40 @@ function planAgent(name, overrides = {}) {
   };
 }
 
+test('role review projects actual staged and saved models without changing either profile or assignment payload', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  const saved = { name: 'Saved mixer', model: 'saved-model', provider: 'lmstudio' };
+  const before = JSON.stringify(saved);
+  Draft.setSavedRosterReady(draft, [saved]);
+  Draft.setRoleFill(draft, 'producer', {
+    mode: 'create',
+    name: 'Staged producer',
+    model: 'staged-model',
+    provider: 'lmstudio'
+  });
+  Draft.setRoleFill(draft, 'engineer', { mode: 'assign', name: saved.name });
+  const view = Draft.derive(draft);
+  assert.equal(
+    view.roleRoster.roles.find(role => role.role_id === 'producer').agent.model,
+    'staged-model'
+  );
+  assert.equal(
+    view.roleRoster.roles.find(role => role.role_id === 'engineer').agent.model,
+    'saved-model'
+  );
+  assert.equal(
+    view.roleRoster.roles.find(role => role.role_id === 'engineer').agent.provider,
+    'lmstudio'
+  );
+  assert.equal(view.payload.role_staffing.find(role => role.mode === 'assign').model, undefined);
+  assert.equal(JSON.stringify(saved), before);
+});
+
 function assistantProgramPlan() {
   return {
     id: 'studio-guide',
