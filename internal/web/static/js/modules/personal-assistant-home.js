@@ -220,7 +220,13 @@ export async function revealFolderReview(offerId, valid = () => true, win = wind
 
 // A build started from a placement refuses an abandon that does not name the
 // version the viewer saw (409 "version"), so the row's version rides along.
-export async function discardWorkspaceBuild(id, button, version = 0, fetchImpl = fetch, reload = loadToday) {
+export async function discardWorkspaceBuild(
+  id,
+  button,
+  version = 0,
+  fetchImpl = fetch,
+  reload = loadToday
+) {
   if (!id) return false;
   if (button) button.disabled = true;
   let ok = false;
