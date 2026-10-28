@@ -127,7 +127,9 @@ export async function reviewCreationOperation(fetcher, id, material) {
     throw new Error(
       typeof body.error === 'string'
         ? body.error
-        : 'The exact creation review could not be saved. Nothing new was confirmed.'
+        : typeof body.message === 'string'
+          ? body.message
+          : 'The exact creation review could not be saved. Nothing new was confirmed.'
     );
   return reference;
 }

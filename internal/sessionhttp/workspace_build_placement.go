@@ -182,7 +182,20 @@ func (h *Handler) acquirePlacementBuild(w http.ResponseWriter, r *http.Request, 
 	}
 	build := doc.Session(id)
 	if build == nil || build.PlacementSource == nil {
-		return noop, true
+		if action == "turns" {
+			// Reservation/application recheck the durable acceptance fence under
+			// the build-store lock. Do not hold a material-edit lease across
+			// network inference: explicit edits must invalidate a late reply.
+			if err := h.checkUnacceptedCreationBuild(r.Context(), owner, id); err != nil {
+				var refusal errBuildTurn
+				if errors.As(err, &refusal) {
+					creationOperationError(w, refusal.status, refusal.code, "Read the original accepted operation; this build cannot start inference.")
+				}
+				return nil, false
+			}
+			return noop, true
+		}
+		return h.acquireCreationBuild(w, r, owner, id)
 	}
 	// Owner-scoped cancellation creates nothing and must remain reachable
 	// after source detach/expiry. The abandon handler still refuses acceptance.

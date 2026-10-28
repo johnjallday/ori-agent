@@ -55,7 +55,8 @@ export function createPlacementCards(makeKey) {
 }
 
 export function placementPanelHTML(view = {}) {
-  if (view.ownerKind === 'ordinary') return workspaceCreationReviewHTML(view);
+  if (view.ownerKind === 'ordinary' || view.ownerKind === 'setup')
+    return workspaceCreationReviewHTML(view);
   const draft = view.draft || {};
   if (view.result)
     return `<section class="assisted-placement" aria-label="Workspace preparation result">
@@ -70,6 +71,7 @@ export function placementPanelHTML(view = {}) {
       ${view.sourceReceiptPending ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
       ${view.positionFailed ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
       <button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>Open filing review</button>
+      ${view.canDefer ? `<button type="button" data-placement-action="defer"${view.busy ? ' disabled' : ''}>Defer preparation</button>` : ''}
       <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
     </div></section>`;
   const saved = view.review?.outcome;
@@ -96,6 +98,7 @@ export function placementPanelHTML(view = {}) {
         <button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>
         ${view.recoveryRoute ? `<button type="button" data-placement-action="open-settings"${view.busy ? ' disabled' : ''}>Open existing filing review</button>` : ''}
         <button type="button" data-placement-action="confirm"${view.busy || view.reconciliationRequired || !view.review ? ' disabled' : ''}>Continue accepted setup</button>
+        ${view.canDefer ? `<button type="button" data-placement-action="defer"${view.busy ? ' disabled' : ''}>Defer preparation</button>` : ''}
         <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>${view.onMap ? 'Back to review' : 'Close'}</button>
       </div></section>`;
   const review = view.review;

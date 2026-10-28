@@ -357,6 +357,9 @@ type createWorkspaceRequest struct {
 	// the workspace exists the session is marked created and its summary is
 	// recorded on the workspace.
 	BuildSessionID string `json:"build_session_id,omitempty"`
+	// BuildReviewVersion binds an attached ordinary source to the current
+	// canonical draft. Recognized setup and File Janitor use their own claims.
+	BuildReviewVersion int64 `json:"build_review_version,omitempty"`
 	// Mission is the workspace goal typed in the create modal. When present,
 	// even empty, it wins over the template's default goal; when absent the
 	// template's goal (if any) applies.
@@ -566,6 +569,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		h.buildPreparationMu.Lock()
 		defer h.buildPreparationMu.Unlock()
 		if err := h.refuseClaimedBuildCreate(r.Context(), req.BuildSessionID); err != nil {
+			if errors.Is(err, errCreationBuildReviewRequired) {
+				creationOperationError(w, http.StatusConflict, "creation_build_review_required", err.Error())
+				return
+			}
 			respondBuildPreparationError(w, "creation_already_accepted", "This build has an accepted creation. Resume that preparation instead of creating again.", http.StatusConflict, nil)
 			return
 		}
@@ -756,8 +763,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			creationOperationError(w, http.StatusConflict, "creation_owner_mismatch", "This blueprint requires its existing group review and commit owner.")
 			return
 		}
-		sourceDigest, sourceErr := workspaceCreationSourceDigest(req, resolvedTemplate, templateResolved)
+		sourceDigest, sourceErr := h.creationSourceDigest(r.Context(), req, resolvedTemplate, templateResolved)
 		if sourceErr != nil || sourceDigest != operation.SourceDigest {
+			if req.BuildReviewVersion != 0 {
+				creationOperationError(w, http.StatusConflict, "creation_build_changed", errCreationBuildChanged.Error())
+				return
+			}
 			creationOperationError(w, http.StatusConflict, "creation_blueprint_changed", "The blueprint changed after review. Nothing was accepted; review the current setup before creating.")
 			return
 		}

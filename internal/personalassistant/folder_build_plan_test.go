@@ -66,6 +66,14 @@ func TestFolderBuildPlan_IsTheCardsPlanForTheBuildsFolderAndCreatesNothing(t *te
 		last.Offer.ConversationReview.Target != target {
 		t.Fatalf("planned request = %+v", last)
 	}
+	if plan.FirstTaskDeferred {
+		t.Fatal("a required first task was relabelled optional")
+	}
+	setup.intent.OptionalTaskPolicy = FolderOptionalSummaryPolicy
+	optional, err := service.BuildPlan(ctx, target, observation.ID, recognition.CandidateID, "My Demos")
+	if err != nil || optional == nil || !optional.FirstTaskDeferred || optional.SoftwareReview {
+		t.Fatalf("the host's optional-task disclosure was lost: %+v %v", optional, err)
+	}
 	// Reading it creates nothing.
 	after, err := f.store.Read(ctx, "local")
 	if err != nil || after.Version != before.Version || len(after.Offers) != len(before.Offers) {

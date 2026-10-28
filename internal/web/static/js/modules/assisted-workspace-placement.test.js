@@ -37,6 +37,27 @@ test('the primary surface describes all five comprehension facts without a map',
   assert.doesNotMatch(html, /data-placement-action="confirm" disabled/);
 });
 
+test('only the existing preparation owner can expose explicit defer after acceptance', () => {
+  for (const state of [
+    { accepted: true, review },
+    { result: { outcome: 'batch', eligible_count: 1 } }
+  ]) {
+    assert.doesNotMatch(placementPanelHTML(state), /data-placement-action="defer"/);
+    assert.match(
+      placementPanelHTML({ ...state, canDefer: true }),
+      /data-placement-action="defer">Defer preparation/
+    );
+    assert.match(
+      placementPanelHTML({ ...state, canDefer: true, busy: true }),
+      /data-placement-action="defer" disabled/
+    );
+  }
+  assert.doesNotMatch(
+    placementPanelHTML({ review, canDefer: true }),
+    /data-placement-action="defer"/
+  );
+});
+
 test('manual placement begins with full review and no creation action', () => {
   const html = placementPanelHTML({ draft, team, folder, review, canPlace: true });
   assert.match(html, /Place &amp; create on map/);

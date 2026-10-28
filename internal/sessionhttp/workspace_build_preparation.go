@@ -65,19 +65,32 @@ func respondBuildPreparationError(w http.ResponseWriter, code, message string, s
 // An ordinary create naming an accepted build may not race/recreate its exact
 // operation. Unknown/ordinary settled builds retain their legacy behavior.
 func (h *Handler) refuseClaimedBuildCreate(ctx context.Context, id string) error {
-	if h.workspaceBuild == nil {
-		return nil
-	}
 	owner, err := h.buildPreparationOwner(ctx)
 	if err != nil {
 		return err
+	}
+	accepted, err := h.acceptedCreationForBuild(ctx, owner, id)
+	if err != nil || accepted != "" {
+		return errors.New("creation belongs to an accepted attached-source operation")
+	}
+	if h.workspaceBuild == nil {
+		return nil
 	}
 	doc, err := h.workspaceBuild.Store.Read(ctx, owner)
 	if err != nil {
 		return err
 	}
-	if build := doc.Session(id); build != nil && (build.Preparation != nil || build.PlacementSource != nil) {
-		return errors.New("creation belongs to reviewed preparation")
+	if build := doc.Session(id); build != nil {
+		if build.Preparation != nil || build.PlacementSource != nil {
+			return errors.New("creation belongs to reviewed preparation")
+		}
+		if build.Folder != nil || build.Link != nil {
+			op := creationOperationFrom(ctx)
+			var request createWorkspaceRequest
+			if op == nil || json.Unmarshal([]byte(op.Request), &request) != nil || request.BuildReviewVersion < 1 {
+				return errCreationBuildReviewRequired
+			}
+		}
 	}
 	return nil
 }

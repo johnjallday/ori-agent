@@ -10318,6 +10318,9 @@
 
     canvas.addEventListener('pointermove', function (event) {
       if (placementSession !== state || state.submitting) return;
+      // The toolbar confirms the existing candidate. Moving onto its controls
+      // must not reinterpret their screen position as new map geometry.
+      if (!press && event.target?.closest?.('[data-ws-map-placement-controls]')) return;
       // Hover previews the candidate without treating it as a drag or flooding
       // the live region with every pixel crossed.
       if (!press || event.pointerId !== press.pointerId) {

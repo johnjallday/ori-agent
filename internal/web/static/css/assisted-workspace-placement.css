@@ -1,3 +1,9 @@
+/* Only the existing source owner's review replaces its old editor while
+   active; its underlying field setters and completion mounts stay intact. */
+.pa-folder--shared-review > :not([data-source-creation-review]) {
+  display: none !important;
+}
+
 /* Full setup review; on Map this host appears only for progress/results.
    The reviewed placement click itself confirms creation. */
 .assisted-placement {

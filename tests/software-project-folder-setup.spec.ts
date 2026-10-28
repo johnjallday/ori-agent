@@ -512,8 +512,28 @@ const list = async (page: Page, id: string) =>
   (await page.locator(`${id} li`).allTextContents()).map(line => line.replace(/\n/g, ' '));
 const buttons = (page: Page) =>
   card(page).locator('#personalAssistantFolderOfferActions').locator('button, a').allInnerTexts();
-const press = (page: Page, name: string) =>
-  card(page).getByRole('button', { name, exact: true }).click();
+const press = async (page: Page, name: string) => {
+  const action = card(page).getByRole('button', { name, exact: true, includeHidden: true });
+  const details = card(page).getByText('Setup details', { exact: true });
+  if (!(await action.isVisible()) && (await details.isVisible())) await details.click();
+  await action.click();
+};
+
+async function startAssessmentFromWorkspace(page: Page) {
+  // Unstarted work belongs in its workspace, not in a second Home prompt.
+  // Navigate through the proven receipt; observation/navigation stays inert.
+  await card(page).getByRole('link', { name: 'Open workspace', exact: true }).click();
+  // The new workspace restores its entry drawer after hydration. Close that
+  // actual, mounted drawer rather than racing the old page's disappearance.
+  await expect(page).toHaveURL(/\/workspaces\/[^/?#]+\/?$/);
+  await expect(page.locator('#workspaceFirstTaskBanner')).toBeVisible();
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  await closeAssistantDrawer(page);
+  await page
+    .locator('#workspaceFirstTaskBanner')
+    .getByRole('button', { name: 'Start assessment', exact: true })
+    .click();
+}
 
 async function review(page: Page, label = 'Review setup') {
   const response = page.waitForResponse(
@@ -609,13 +629,23 @@ test.describe('stored report handoff', () => {
       await card(page)
         .getByRole('button', { name: /^(Hire|Assign) & set up$/ })
         .click();
+      const reviewed = page.locator('[data-source-creation-review]');
+      await expect(reviewed).toBeVisible();
+      await reviewed.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+      await reviewed.locator('[data-placement-action="confirm"]').click();
       const accepted = await ok(await response);
+      await expect(
+        reviewed.getByRole('heading', { name: 'Workspace created', exact: true })
+      ).toBeVisible();
+      await reviewed.getByRole('button', { name: 'Close', exact: true }).click();
       const available = await lookIs(request, accepted.offer.id, ['seeded']);
       expect(available.can_start).toBe(true);
-      await expect(headline(page)).toContainText('Workspace ready');
-      await press(page, 'Start assessment');
+      await expect(headline(page)).toHaveText(`✓ ${project} is ready`);
+      await card(page).getByText('Setup details', { exact: true }).click();
+      await startAssessmentFromWorkspace(page);
       const look = await lookIs(request, accepted.offer.id, ['finished']);
       expect(await taskIDs(request, look.workspace_id)).toEqual([look.task_id]);
+      await comeBack(page);
       await expect(
         card(page).getByRole('link', { name: 'Open workspace', exact: true })
       ).toBeVisible();
@@ -874,7 +904,19 @@ test.describe('after the server was restarted', () => {
     provider.replies = ['tool', 'report'];
     await comeBack(page);
     await press(page, 'Hire & set up');
-    await expect(headline(page)).toContainText('Workspace ready', { timeout: 60_000 });
+    const reviewed = page.locator('[data-source-creation-review]');
+    await expect(reviewed).toBeVisible();
+    expect(await workspaceCount(request)).toBe(before.workspaces);
+    await reviewed.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    await reviewed.locator('[data-placement-action="confirm"]').click();
+    await expect(
+      reviewed.getByRole('heading', { name: 'Workspace created', exact: true })
+    ).toBeVisible({ timeout: 60_000 });
+    // Return to the same source-owned receipt and assessment controls. Closing
+    // this presentation neither executes the assessment nor creates again.
+    await reviewed.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(headline(page)).toHaveText('✓ widget is ready', { timeout: 60_000 });
+    await card(page).getByText('Setup details', { exact: true }).click();
     await expect(card(page).locator('.folder-visual')).toContainText('Assigned here');
     await expect(card(page).locator('.folder-visual')).toContainText(fixtureModel);
     const receipt = (await list(page, '#personalAssistantFolderReceipt')).join(' | ');
@@ -894,7 +936,7 @@ test.describe('after the server was restarted', () => {
     expect(resolved.outcome.first_look).toBeFalsy();
     expect(resolved.first_task.state).toBe('seeded');
     expect(provider.calls.filter(call => call.temperature === 0)).toHaveLength(0);
-    await press(page, 'Start assessment');
+    await startAssessmentFromWorkspace(page);
     // Nothing is run in the project: the reply that asked for a tool is thrown
     // away, and the look did not finish.
     const refused = await lookIs(request, resolved.id, ['failed', 'finished']);

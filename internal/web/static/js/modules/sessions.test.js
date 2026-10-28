@@ -50,6 +50,116 @@ function loadSessionManager(
   return window.sessionManager;
 }
 
+test('a deferred optional summary does not acquire the software owner or its names-only setter', () => {
+  const manager = loadSessionManager();
+  manager.workspaceBuild = {
+    session: {
+      status: 'open',
+      plan: { ready: true, first_task_deferred: true }
+    }
+  };
+  assert.equal(manager.workspaceBuildUsesSetupReview(), false);
+  manager.workspaceBuild.session.plan.software_review = true;
+  assert.equal(manager.workspaceBuildUsesSetupReview(), true);
+});
+
+test('recognized setup cannot be dispatched from legacy controls or assistant proposals before shared final consent', async () => {
+  let rendered = 0;
+  const manager = loadSessionManager(async () => {
+    throw new Error('No request before final consent');
+  });
+  manager.workspaceBuild = {
+    session: {
+      id: 'setup',
+      status: 'open',
+      version: 3,
+      plan: { ready: true, first_task_deferred: true, digest: 'exact' }
+    }
+  };
+  manager.workspaceBuild.session.plan.software_review = true;
+  manager.workspaceBuildPane = () => ({ setupBrief: () => 'Exact brief' });
+  manager.syncWorkspaceBuildPresentation = () => rendered++;
+  await manager.setUpWorkspaceBuild({ brief: 'proposed', create_now: true });
+  assert.equal(rendered, 1);
+  assert.equal(manager.workspaceBuild.setupReviewUI.editing, false);
+  manager.workspaceBuild.session.setup = { id: 'existing-owner-claim' };
+  assert.equal(
+    manager.workspaceBuildUsesSetupReview(),
+    false,
+    'existing setup continuation remains with its owner'
+  );
+});
+
+test('recognized setup rechecks the exact owner terms after draft flushing and never confirms a replacement version', async () => {
+  const manager = loadSessionManager(async () => {
+    throw new Error('No creation or model request');
+  });
+  const build = {
+    session: {
+      id: 'setup',
+      status: 'open',
+      version: 3,
+      plan: { ready: true, first_task_deferred: true, digest: 'exact' }
+    },
+    setupReviewUI: { automatic: true }
+  };
+  manager.workspaceBuild = build;
+  build.session.plan.software_review = true;
+  manager.workspaceBuildPane = () => ({ setupBrief: () => 'Exact brief' });
+  manager.workspaceBuildSetupPressable = () => true;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.flushWorkspaceBuildDraft = async () => {
+    build.session.version++;
+  };
+  let confirms = 0;
+  manager.setUpWorkspaceBuild = async () => confirms++;
+  await manager.actOnWorkspaceBuildSetupReview(build, { action: 'confirm' });
+  assert.equal(confirms, 0);
+  assert.match(build.setupReviewUI.message, /terms changed/);
+  manager.flushWorkspaceBuildDraft = async () => {};
+  await manager.actOnWorkspaceBuildSetupReview(build, { action: 'confirm' });
+  assert.equal(confirms, 1, 'only a new gesture on unchanged exact terms dispatches');
+  const replacement = { ...build, session: { ...build.session, id: 'other' } };
+  manager.workspaceBuild = replacement;
+  await manager.actOnWorkspaceBuildSetupReview(build, { action: 'confirm' });
+  assert.equal(confirms, 1, 'a replaced editor cannot confirm the old build');
+});
+
+test('software map confirmation delegates once to the original owner and rejects an obsolete creator generation', async () => {
+  let calls = 0;
+  const manager = loadSessionManager();
+  const build = { setupReviewUI: {}, session: { id: 'source' } };
+  const context = { generation: 7 };
+  manager.workspaceBuild = build;
+  manager.workspaceCreatorContext = context;
+  manager.workspaceBuildSetupPressable = () => true;
+  manager.workspaceBuildSetupNameCurrent = () => true;
+  manager.workspaceBuildSetupReviewKey = () => 'exact';
+  manager.workspaceBuildPane = () => ({ setupBrief: () => 'Exact brief' });
+  manager.setUpWorkspaceBuild = async () => {
+    calls++;
+    build.setupReviewUI.accepted = true;
+  };
+  manager.returnFromWorkspaceMapPlacement = () => {};
+  const placement = {
+    token: 'site',
+    revision: 1,
+    phase: 'placing',
+    creatorContext: context,
+    creatorGeneration: 7,
+    setupOwner: { build, key: 'exact' }
+  };
+  manager.workspaceMapPlacement = placement;
+  assert.equal(await manager.confirmWorkspaceMapPlacement('site', { x: 4, y: 9 }), true);
+  assert.equal(await manager.confirmWorkspaceMapPlacement('site', { x: 4, y: 9 }), false);
+  assert.equal(calls, 1);
+  placement.phase = 'placing';
+  placement.inFlight = null;
+  manager.workspaceCreatorContext = { generation: 8 };
+  assert.equal(await manager.confirmWorkspaceMapPlacement('site', { x: 4, y: 9 }), false);
+  assert.equal(calls, 1);
+});
+
 test('ordinary review edits use the existing canonical fields and reject replacement editor callbacks', async () => {
   const events = [];
   const name = { value: 'Original', dataset: {}, dispatchEvent: event => events.push(event.type) };
@@ -117,7 +227,7 @@ test('accepted ordinary creation cannot fall back to legacy POST when the picker
   assert.equal(calls, 0);
 });
 
-test('ordinary build review is available after model failure but never borrows a folder/link/setup owner', () => {
+test('ordinary build review retains manual fallback and exact generic sources without borrowing specialized setup authority', () => {
   const manager = loadSessionManager(
     undefined,
     {},
@@ -133,6 +243,22 @@ test('ordinary build review is available after model failure but never borrows a
     manager.workspaceBuild = { session };
     assert.equal(manager.usesUnifiedOrdinaryReview(), false);
   }
+  for (const source of [
+    { folder: { observation: { id: 'held' }, recognition: { verdict: 'none' } } },
+    { link: { observation: { id: 'link' } } }
+  ]) {
+    manager.workspaceBuild = { session: { id: 'build', version: 1, status: 'open', ...source } };
+    assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+    assert.equal(manager.ordinaryBuildReviewProblem(), '');
+  }
+  for (const session of [
+    { folder: { observation: { id: 'held' }, recognition: { verdict: 'project' } } },
+    { folder: { observation: { id: 'held' } }, draft: { template_id: 'file-janitor' } },
+    { placement_source: { offer_id: 'source' } }
+  ]) {
+    manager.workspaceBuild = { session };
+    assert.equal(manager.usesUnifiedOrdinaryReview(), false);
+  }
   manager.workspaceBuild = { session: { id: 'build', version: 1, status: 'open' }, busy: true };
   assert.match(manager.ordinaryBuildReviewProblem(), /Wait/);
   manager.workspaceBuild.busy = false;
@@ -141,6 +267,87 @@ test('ordinary build review is available after model failure but never borrows a
   assert.notEqual(manager.ordinaryCreationMaterialKey({ name: 'Exact draft' }), key);
   manager.workspaceBuild.session.status = 'created';
   assert.match(manager.ordinaryBuildReviewProblem(), /no longer open/);
+});
+
+test('clearing a redundant draft sync refreshes ordinary review readiness without sending another draft', async () => {
+  const manager = loadSessionManager();
+  const body = { draft: { name: 'Unchanged' } };
+  const build = {
+    session: { id: 'build', status: 'open' },
+    draftUser: false,
+    lastDraftKey: JSON.stringify({ draft: body.draft })
+  };
+  manager.workspaceBuild = build;
+  manager.workspaceBuildDraftBody = () => body;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.usesUnifiedOrdinaryReview = () => true;
+  let renders = 0;
+  manager.syncOrdinaryCreationReview = () => {
+    renders++;
+  };
+  manager.workspaceBuildApi = () => {
+    throw new Error('An unchanged draft must not write');
+  };
+  await manager.flushWorkspaceBuildDraft();
+  assert.equal(build.draftUser, undefined);
+  assert.equal(renders, 1);
+});
+
+test('refused source replacement only adopts an unchanged owner-bound version and never overwrites late local edits', async () => {
+  for (const change of [
+    'none',
+    'draft',
+    'folder',
+    'link',
+    'closed',
+    'late-edit',
+    'replaced-editor',
+    'older-version'
+  ]) {
+    const manager = loadSessionManager();
+    const session = {
+      id: 'build',
+      version: 3,
+      status: 'open',
+      draft: { name: 'Kept' },
+      folder: { observation: { id: 'held' } },
+      link: { observation: { id: 'link' } }
+    };
+    const build = { session };
+    manager.workspaceBuild = build;
+    let revision = 4;
+    manager.workspaceBuildRevision = () => revision;
+    const saved = structuredClone(session);
+    saved.version = 5;
+    if (change === 'draft') saved.draft.name = 'Other tab';
+    if (change === 'folder') saved.folder.observation.id = 'other';
+    if (change === 'link') saved.link.observation.id = 'other';
+    if (change === 'closed') saved.status = 'created';
+    if (change === 'older-version') saved.version = 2;
+    let resolve;
+    manager.workspaceBuildApi = () => ({
+      read: () =>
+        new Promise(done => {
+          resolve = done;
+        })
+    });
+    const adopted = [],
+      conflicts = [];
+    manager.adoptWorkspaceBuildSession = session => adopted.push(session);
+    manager.adoptWorkspaceBuildConflict = session => conflicts.push(session);
+    const pending = manager.recoverWorkspaceBuildAttachmentRefusal(build);
+    if (change === 'late-edit') revision++;
+    if (change === 'replaced-editor') manager.workspaceBuild = { session: { id: 'new' } };
+    resolve({ ok: true, body: { session: saved } });
+    await pending;
+    assert.equal(adopted.length, change === 'none' ? 1 : 0, change);
+    assert.equal(
+      conflicts.length,
+      ['draft', 'folder', 'link', 'closed'].includes(change) ? 1 : 0,
+      change
+    );
+    assert.equal(session.draft.name, 'Kept');
+  }
 });
 
 test('a definite ordinary refusal returns fresh roles to their existing owner without confirming new terms', () => {
@@ -9311,7 +9518,7 @@ test('folder review shows the actual effective team and constrains recognized pl
   assert.equal(prerequisites, 1);
 });
 
-test('the folder review primary says Hire and create when its draft team creates agents', () => {
+test('generic folder actions open review rather than claiming consent to create; recognized plans keep their own effects', () => {
   const { manager, nodes, window } = prepareProposalWizard();
   for (const id of [
     'workspaceBuildFolderPurpose',
@@ -9336,12 +9543,12 @@ test('the folder review primary says Hire and create when its draft team creates
   const action = () => nodes.get('workspaceBuildPlanReviewSetup').textContent;
 
   manager.syncWorkspaceBuildFolderReview();
-  assert.equal(action(), 'Hire and create');
+  assert.equal(action(), 'Review & place workspace');
 
   // A draft that creates nobody (Ask Ori reused, or saved agents attached).
   roleRoster = { total_count: 0, created_count: 0, auto_created_count: 0, roles: [] };
   manager.syncWorkspaceBuildFolderReview();
-  assert.equal(action(), 'Create workspace');
+  assert.equal(action(), 'Review & place workspace');
 
   // A recognized plan that names a hire keeps its own label.
   roleRoster = { ...roleRoster, created_count: 1 };

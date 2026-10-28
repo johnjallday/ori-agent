@@ -150,6 +150,18 @@ func (h *Handler) handleWorkspaceCreationOperations(w http.ResponseWriter, r *ht
 		return
 	}
 
+	var material createWorkspaceRequest
+	if err := json.Unmarshal([]byte(op.Request), &material); err != nil {
+		creationOperationError(w, http.StatusConflict, "creation_uncertain", "The original request is unreadable. Nothing can be resubmitted.")
+		return
+	}
+	if material.BuildReviewVersion != 0 {
+		release, ok := h.acquireCreationBuild(w, r, owner, material.BuildSessionID)
+		if !ok {
+			return
+		}
+		defer release()
+	}
 	// The normal pipeline validates again. It claims the journal immediately
 	// before its first domain effect, rather than on entry to this wrapper.
 	request := r.Clone(context.WithValue(r.Context(), creationOperationContextKey{}, op))
@@ -219,8 +231,12 @@ func (h *Handler) reviewWorkspaceCreationOperation(w http.ResponseWriter, r *htt
 			return
 		}
 	}
-	sourceDigest, err := workspaceCreationSourceDigest(request, template, resolved)
+	sourceDigest, err := h.creationSourceDigest(r.Context(), request, template, resolved)
 	if err != nil {
+		if request.BuildReviewVersion != 0 {
+			creationOperationError(w, http.StatusConflict, "creation_build_changed", errCreationBuildChanged.Error())
+			return
+		}
 		_ = orihttp.RespondBadRequest(w, "the blueprint review could not be serialized")
 		return
 	}
@@ -289,18 +305,39 @@ func (h *Handler) acceptWorkspaceCreationOperation(w http.ResponseWriter, r *htt
 		creationOperationError(w, http.StatusConflict, "creation_owner_mismatch", "This setup must use its existing reviewed action owner.")
 		return false
 	}
-	result, err := h.store.DB().ExecContext(r.Context(), `UPDATE workspace_creation_operations SET state='accepted',updated_at=CURRENT_TIMESTAMP
-		WHERE id=? AND owner_user_id=? AND request_digest=? AND state='reviewed'`, op.ID, op.Owner, op.Digest)
+	var req createWorkspaceRequest
+	if err := json.Unmarshal([]byte(op.Request), &req); err != nil {
+		creationOperationError(w, http.StatusConflict, "creation_uncertain", "The original request is unreadable.")
+		return false
+	}
+	claim := func() error {
+		result, err := h.store.DB().ExecContext(r.Context(), `UPDATE workspace_creation_operations SET state='accepted',updated_at=CURRENT_TIMESTAMP
+			WHERE id=? AND owner_user_id=? AND request_digest=? AND state='reviewed'
+			AND (?=0 OR NOT EXISTS (SELECT 1 FROM workspace_creation_operations other
+				WHERE other.owner_user_id=? AND other.id<>? AND other.state IN ('accepted','complete','reconciliation_required')
+				AND json_extract(other.request_json,'$.build_session_id')=?
+				AND json_extract(other.request_json,'$.build_review_version')>0))`, op.ID, op.Owner, op.Digest,
+			req.BuildReviewVersion, op.Owner, op.ID, req.BuildSessionID)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil || count != 1 {
+			return errors.New("the original operation or build already has an accepted creation")
+		}
+		op.claimed = true
+		return nil
+	}
+	var err error
+	if req.BuildReviewVersion != 0 {
+		err = h.acceptCreationBuild(r.Context(), op, req, claim)
+	} else {
+		err = claim()
+	}
 	if err != nil {
-		creationOperationError(w, http.StatusServiceUnavailable, "creation_unavailable", "Creation could not be accepted. Read the original operation before retrying.")
+		creationOperationError(w, http.StatusConflict, "creation_not_accepted", "Read the original operation and current draft before confirming; no new creation can be assumed.")
 		return false
 	}
-	count, err := result.RowsAffected()
-	if err != nil || count != 1 {
-		creationOperationError(w, http.StatusConflict, "creation_already_accepted", "Read the original operation; this request cannot create again.")
-		return false
-	}
-	op.claimed = true
 	ws.ID, ws.OwnerUserID = op.WorkspaceID, op.Owner
 	if ws.SharedData == nil {
 		ws.SharedData = make(map[string]any)

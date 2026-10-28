@@ -7,7 +7,8 @@ import {
   escapeReviewText,
   creationTeamReviewRows,
   creationReviewSlotsHTML,
-  creationReviewNavigationHTML
+  creationReviewNavigationHTML,
+  setupCreationReviewMaterial
 } from './workspace-creation-review.js';
 import { placementPanelHTML } from './assisted-workspace-placement.js';
 
@@ -306,6 +307,47 @@ test('result navigation waits for the accepted owner to finish instead of swallo
   assert.match(busy, /data-placement-action="open" disabled/);
   assert.doesNotMatch(ready, /data-placement-action="open" disabled/);
   assert.match(ready, /data-placement-action="open">Open workspace/);
+});
+
+test('recognized setup projects fixed plan roles and optional first-task boundaries without borrowing ordinary authority', () => {
+  const session = {
+    plan: {
+      hire: {
+        mode: 'bind',
+        agent_name: 'Saved Developer',
+        role_label: 'Development Assistant',
+        model: 'local'
+      },
+      first_task_deferred: true,
+      lines: [
+        { kind: 'workspace', name: 'Create the workspace', detail: 'Only the reviewed project' }
+      ]
+    },
+    folder: { observation: { id: 'held', folder: '<project>' } },
+    folder_path: '/display-only/project'
+  };
+  const material = setupCreationReviewMaterial(session, 'Exact brief 日本語');
+  assert.equal(material.rows[0].label, 'Development Assistant');
+  assert.match(material.rows[0].value, /Saved assignment/);
+  assert.ok(material.rows.every(row => !row.action));
+  assert.match(material.later, /prepared, not started/);
+  assert.deepEqual(material.facts, [
+    { label: 'Workspace', value: 'Create the workspace — Only the reviewed project' }
+  ]);
+  assert.match(material.destination, /Standalone/);
+  const html = workspaceCreationReviewHTML({
+    ...blank,
+    ...material,
+    idPrefix: 'sourceSetup',
+    canChangeBlueprint: false,
+    canEditName: false,
+    detailsLabel: 'Review the full plan'
+  });
+  assert.match(html, /id="sourceSetupName"/);
+  assert.match(html, /readonly/);
+  assert.match(html, /&lt;project&gt;/);
+  assert.doesNotMatch(html, /data-placement-action="blueprint"|File Curator|metadata scan/);
+  assert.match(html, /Review the full plan/);
 });
 
 test('the navigation shared with File Janitor preserves its distinct disclosure without baking it into Blank', () => {

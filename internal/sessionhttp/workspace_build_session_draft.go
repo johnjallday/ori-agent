@@ -415,6 +415,15 @@ func (h *Handler) abandonWorkspaceBuildSession(w http.ResponseWriter, r *http.Re
 		respondBuildUnavailable(w, buildReasonAssistantNotReady)
 		return
 	}
+	if result.Status == personalassistant.WorkspaceBuildAbandoned {
+		if closer, ok := deps.Folders.(interface {
+			CloseBuildSoftwareReviews(context.Context, string, string) error
+		}); ok {
+			if err := closer.CloseBuildSoftwareReviews(ctx, h.workspaceBuildUserID(ctx), id); err != nil {
+				logger.Info("Abandoned software review could not be closed", logger.Fields{"session_id": id, "error": err})
+			}
+		}
+	}
 	logger.Info("Workspace build abandoned", logger.Fields{"session_id": id})
 	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, nil)
 }

@@ -26,6 +26,7 @@
            fields; host plan lines and permission terms stay host-owned. -->
       <section id="workspaceBuildFolderReview" class="workspace-build-folder-review" aria-label="Workspace setup review" hidden>
         <div class="workspace-build-folder-review__body">
+          <section id="workspaceBuildSetupReview" aria-label="Review recognized workspace setup" hidden></section>
           <section id="workspaceBuildPlanReview" class="workspace-build-plan-review" aria-labelledby="workspaceBuildPlanReviewTitle" hidden>
             <div class="workspace-build-plan-review__decision">
             <p class="workspace-wizard-eyebrow">From your folder</p>
@@ -77,7 +78,7 @@
           </section>
           <section id="workspaceBuildCreationReview" class="workspace-build-review" aria-label="Review File Janitor creation" hidden></section>
         </div>
-        <div class="workspace-build-folder-review__footer">
+        <div id="workspaceBuildFolderReviewFooter" class="workspace-build-folder-review__footer">
           <p id="workspaceBuildFolderProblem" role="status" aria-live="polite"></p>
           <div class="workspace-build-plan-review__actions">
             <button type="button" id="workspaceBuildFolderSave" class="modern-btn modern-btn-primary" hidden>Save my draft</button>

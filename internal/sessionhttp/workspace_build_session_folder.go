@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -122,7 +123,7 @@ func (h *Handler) readBuildPlan(ctx context.Context, userID string, projection *
 		return nil, nil
 	}
 	recognition := session.Folder.Recognition
-	if !recognition.Recognized() || recognition.IntegrationKey == "" ||
+	if !recognition.Recognized() || (recognition.IntegrationKey == "" && recognition.Shape != string(folderdigest.ShapeCode)) ||
 		(session.Status != personalassistant.WorkspaceBuildOpen && session.Status != personalassistant.WorkspaceBuildPreparing) {
 		return nil, nil
 	}
@@ -135,8 +136,17 @@ func (h *Handler) readBuildPlan(ctx context.Context, userID string, projection *
 	}
 	target := buildFolderTarget(userID, projection, session.ID)
 	if recognition.OfferID != "" {
-		// Set it up moved the held pick to the build's own review.
+		// Explicit software review (or Set it up) moved the live pick to
+		// this build's canonical review. Observe that owner, never invent
+		// software evidence on a fresh metadata-only proposal.
 		target = personalassistant.BuildReviewTarget(target, session.ID)
+		if recognition.Shape == string(folderdigest.ShapeCode) {
+			view, err := deps.Folders.ReadSetup(ctx, target, recognition.OfferID)
+			if err != nil {
+				return nil, err
+			}
+			return personalassistant.BuildFolderPlanFromReview(view), nil
+		}
 	}
 	return deps.Folders.Plan(ctx, target, session.Folder.Observation.ID, recognition.CandidateID, strings.TrimSpace(session.Draft.Name))
 }

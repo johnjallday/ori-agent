@@ -174,6 +174,30 @@ func (o buildFolderObservations) ReviewSetup(ctx context.Context, draft folderco
 	return service.ReviewBuild(ctx, draft, sessionID, observationID, candidateID, workspaceName)
 }
 
+func (o buildFolderObservations) ReadSoftwareResult(ctx context.Context, userID, sessionID, workspaceID string) (*personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderOutcomeUnavailable
+	}
+	return service.ReadBuildSoftwareResult(ctx, userID, sessionID, workspaceID)
+}
+
+func (o buildFolderObservations) CloseBuildSoftwareReviews(ctx context.Context, userID, sessionID string) error {
+	service := o.service()
+	if service == nil {
+		return personalassistant.ErrFolderSelection
+	}
+	return service.CloseBuildSoftwareReviews(ctx, userID, sessionID)
+}
+
+func (o buildFolderObservations) ReviewSoftware(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName, requestID string, inspect bool) (personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderSelection
+	}
+	return service.ReviewBuildSoftware(ctx, draft, sessionID, observationID, candidateID, workspaceName, requestID, inspect)
+}
+
 func (o buildFolderObservations) StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName, brief string) (personalassistant.FolderOfferView, error) {
 	service := o.service()
 	if service == nil {

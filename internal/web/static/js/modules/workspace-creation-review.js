@@ -119,6 +119,60 @@ export function creationReviewSlotsHTML(rows = [], { locked = false, selectedCar
     .join('')}</div>`;
 }
 
+// A recognized plan's fixed rows are presentation only. The setup controller
+// retains its brief/name setters, readiness, source hold and exact commit.
+export function setupCreationReviewMaterial(session = {}, brief = '') {
+  const plan = session.plan || {};
+  const hire = plan.hire;
+  const rows = [];
+  if (hire)
+    rows.push({
+      label: hire.role_label || 'Plan-owned team',
+      value: `${hire.agent_name || hire.name || 'Agent named by the plan'} · ${hire.mode === 'bind' ? 'Saved assignment' : hire.mode === 'create' ? 'New agent' : 'Set by this plan'}`,
+      detail: [
+        hire.model,
+        plan.visual?.model?.provider,
+        'Fixed by the canonical setup plan; saved definitions are not edited.'
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    });
+  if (session.folder?.observation)
+    rows.push({
+      label: 'Selected folder',
+      value: session.folder.observation.folder || 'Held selection',
+      detail: [
+        session.folder_path,
+        'Linked in place, not moved. The displayed path is not selection authority.'
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    });
+  return {
+    rows,
+    goal: brief,
+    destination: plan.home?.name
+      ? `${plan.home.status === 'existing' ? 'Existing' : 'New'} Home: ${plan.home.name}. Geometry never changes this destination.`
+      : 'Standalone workspace · Position does not join a district.',
+    facts: (Array.isArray(plan.lines) ? plan.lines : []).map(line => ({
+      label:
+        {
+          workspace: 'Workspace',
+          folder: 'Linked folder',
+          agents: 'Team',
+          mode: 'Working mode',
+          task: 'First task',
+          home: 'Home',
+          placement: 'Placement'
+        }[line.kind] || 'Setup step',
+      value: [line.name, line.detail].filter(Boolean).join(' — ')
+    })),
+    later: plan.first_task_deferred
+      ? 'The first task is prepared, not started. Run it from the workspace when you choose.'
+      : 'This setup may run its disclosed first task. Review the exact host-owned steps above before confirming.'
+  };
+}
+
 export function creationReviewNavigationHTML(view = {}) {
   const locked = Boolean(view.busy || view.conflict || view.closed || view.accepted);
   return `<div class="assisted-placement__navigation">
@@ -134,9 +188,10 @@ export function workspaceCreationReviewHTML(view = {}) {
   if (view.onMap && !view.accepted && !view.result) return '';
   const locked = Boolean(view.busy || view.accepted || view.conflict || view.closed);
   const disabled = locked ? ' disabled' : '';
+  const prefix = view.idPrefix || 'workspaceCreationReview';
   if (view.accepted || view.result) {
     return `<section class="assisted-placement" aria-label="Workspace creation result">
-      <h2 id="workspaceCreationReviewTitle" tabindex="-1">${view.result ? 'Workspace created' : 'Check confirmed creation'}</h2>
+      <h2 id="${escapeReviewText(prefix)}Title" tabindex="-1">${escapeReviewText(view.resultTitle || (view.result ? 'Workspace created' : 'Check confirmed creation'))}</h2>
       <p>${escapeReviewText(view.result?.name || '')}</p>
       ${view.result ? `<p>${view.result.parent_id ? `Group: ${escapeReviewText(view.result.parent_id)}` : 'Standalone workspace'}</p><p>${view.result.agent_instances?.length ? `Assigned: ${view.result.agent_instances.map(member => escapeReviewText(member.name)).join(', ')}` : 'No agents attached.'}</p>` : ''}
       <p role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escapeReviewText(view.message)}</p>
@@ -151,14 +206,14 @@ export function workspaceCreationReviewHTML(view = {}) {
       </div></section>`;
   }
   return `<section class="assisted-placement" aria-label="Review proposed workspace">
-    ${creationReviewHeaderHTML({ title: `Make room for ${view.name || 'your workspace'}`, titleId: 'workspaceCreationReviewTitle', note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art })}
+    ${creationReviewHeaderHTML({ title: view.title || `Make room for ${view.name || 'your workspace'}`, titleId: `${prefix}Title`, note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art })}
     <div class="assisted-placement__fields">
-      <div><label for="workspaceCreationReviewName">Workspace name</label><input id="workspaceCreationReviewName" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${disabled}></div>
-      <div><label for="workspaceCreationReviewGoal">Goal</label><textarea id="workspaceCreationReviewGoal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${disabled}>${escapeReviewText(view.goal)}</textarea></div>
+      <div><label for="${escapeReviewText(prefix)}Name">Workspace name</label><input id="${escapeReviewText(prefix)}Name" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${view.canEditName === false ? ' readonly' : ''}${disabled}></div>
+      <div><label for="${escapeReviewText(prefix)}Goal">Goal</label><textarea id="${escapeReviewText(prefix)}Goal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>
     </div>
     ${creationReviewSlotsHTML(view.rows, { locked })}
-    <button type="button" data-placement-action="details"${disabled}>Edit details &amp; advanced settings</button>
-    <button type="button" data-placement-action="blueprint"${disabled}>Change blueprint</button>
+    <button type="button" data-placement-action="details"${disabled}>${escapeReviewText(view.detailsLabel || 'Edit details & advanced settings')}</button>
+    ${view.canChangeBlueprint === false ? '' : `<button type="button" data-placement-action="blueprint"${disabled}>Change blueprint</button>`}
     <section class="assisted-placement__review" aria-label="Before you confirm"><h3>Before you confirm</h3>
       <dl>${(view.facts || [])
         .map(

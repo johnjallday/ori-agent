@@ -126,6 +126,68 @@ An incomplete accepted operation exposes reconciliation rather than promising to
 finish arbitrary partly executed effects. Browser recovery retains the operation
 reference and reads it; it never retries ordinary creation on a lost reply.
 
+### Attached ordinary build sources
+
+An ordinary draft with a generic held folder or observed link retains its build
+and existing create/link completion owners. Its operation request includes
+`build_session_id` and exact `build_review_version`. The journal additionally
+binds the canonical path-free source witness. Review and final validation require
+an open current build with no setup/preparation claim, pending observer/inference
+or recognized-plan authority; a missing/expired hold never becomes Blank.
+
+Confirmation serializes that build's mutation/acceptance and rechecks under its
+existing store lock before the first effect. SQL accepts at most one operation
+for the same owner/build, even if another controller read an older sidecar or
+another operation UUID was reviewed. Accepted journal records fence later edits
+and plain-create bypass, independently of whether the build's invalidation or
+completion write succeeded. A failed write after acceptance is uncertainty,
+not permission to recreate. Build schema and folder hold lifetime are unchanged.
+
+A rejected replacement may still advance an observer reservation version. The
+client may read that same build and adopt only unchanged material choices and
+both source identities, while its local editor/revision remains current. It
+cannot re-pick, extend a hold, overwrite late edits or silently save over another
+tab. Returning from source editing refreshes the same shared review, including
+when a redundant draft sync clears without another write.
+
+Recognized Code builds request bounded software evidence only through explicit
+`POST /api/workspaces/build-sessions/{id}/software-review` (`mode: review`). The
+existing software owner inspects the selected source and retains its evidence,
+plan and final setup authority. Names-only `mode: adjust` uses that owner's
+adjustment operation, without rereading project contents. Both are current-build
+version fenced; neither accepts setup. The live pick moves to the existing
+build-review target, without renewing its lifetime or deriving authority from a
+path. Pending software review cancellation is not a saved decline. The read-only
+`software_review` capability distinguishes this owner from other deferred-task
+plans; an optional summary alone cannot select its names-only adjustment API.
+
+For settled software builds, `setup_result` reads the existing source journal's
+exact decided, resolved build/resource outcome. It is not a new persisted build
+receipt or execution endpoint. New-resource positioning additionally verifies
+the actual workspace's source marker; reused outcomes never authorize moving
+that resource. The existing map controller dispatches the exact source owner's
+setup action, then saves geometry once after canonical completion. Reading a
+result cannot repeat that position attempt; repair is explicitly layout-only.
+
+Recognized software/project plans, source offer/run commits and File Janitor
+preparation do not acquire ordinary creation authority through this adapter.
+Their separate confirmation and observation protocols still apply. In particular,
+`from-inbox` admission has not been generalized. The same inert review can be
+mounted inside a current Home/conversation source card. Its offer/thread/digest,
+name, brief and monitoring choices remain bound to that card's existing setup
+owner; it does not manufacture a build or source-transfer request. Returning from
+map restores that exact conversation rather than hydrating a replacement entry
+conversation. Its result verifies the canonical outcome and resource before
+saving geometry. Source receipt, attachment consumption, task controls and
+continuation remain with the existing controller.
+
+File Janitor's shared result and accepted/uncertain review retain the original
+explicit defer operation. A lost response is observed, not resubmitted; an actual
+accepted preparation failure can continue only the same saved preparation after
+explicit repair. Neither reading its status nor closing its presentation starts
+another scan or changes monitoring. Unstarted software assessment/summary work
+remains in the workspace and requires its separate Start action.
+
 ## Destination and layout policy
 
 Coordinates are geometry, never membership, access or staffing. Parent/group/Home

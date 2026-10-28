@@ -27,7 +27,8 @@ import {
   setupResultView as setupModalView,
   finishedRunWorkspace,
   arrangedStructure,
-  conversationFolderOfferView
+  conversationFolderOfferView,
+  sourceCreationReviewKey
 } from './personal-assistant-folder.js';
 
 // A finished Explore run is drawn where the Map's automatic layout puts it:
@@ -58,9 +59,31 @@ test('a run this page followed is drawn on the Map once it finished, without a p
       ''
     );
   }
-  // The module no longer asks the Map to place anything.
+  // A post-completion notification never asks for placement. The new shared
+  // review may explicitly position before consent, not after this receipt.
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /beginPlacement|placeCreatedOnWorkspaceMap/);
+  const notification = source.match(/function announceFinishedRun\([^]*?\n}\n/)[0];
+  assert.doesNotMatch(notification, /beginPlacement|placeCreatedOnWorkspaceMap/);
+  assert.doesNotMatch(source, /placeCreatedOnWorkspaceMap/);
+});
+
+test('source final-gesture key binds exact offer, thread, plan, names, brief and monitoring', () => {
+  const offer = {
+    id: 'offer',
+    conversation_id: 'thread',
+    plan: { digest: 'exact' },
+    software: { workspace_name: 'Reviewed' }
+  };
+  const key = sourceCreationReviewKey(offer, 'Exact 日本語', false);
+  for (const changed of [
+    { ...offer, id: 'other' },
+    { ...offer, conversation_id: 'other' },
+    { ...offer, plan: { digest: 'new' } },
+    { ...offer, software: { workspace_name: 'Changed' } }
+  ])
+    assert.notEqual(sourceCreationReviewKey(changed, 'Exact 日本語', false), key);
+  assert.notEqual(sourceCreationReviewKey(offer, 'New brief', false), key);
+  assert.notEqual(sourceCreationReviewKey(offer, 'Exact 日本語', true), key);
 });
 
 // The receipt says where the automatic layout put the building, with Move.

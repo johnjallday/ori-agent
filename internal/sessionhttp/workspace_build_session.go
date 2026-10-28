@@ -233,11 +233,13 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			mutate(h.postWorkspaceBuildFolder)
 		case action == "link" && r.Method == http.MethodPost:
 			mutate(h.postWorkspaceBuildLink)
+		case action == "software-review" && r.Method == http.MethodPost:
+			h.postWorkspaceBuildSoftwareReview(w, r, id)
 		case action == "setup" && r.Method == http.MethodPost:
 			mutate(h.postWorkspaceBuildSetup)
 		case action == "home-provider" && r.Method == http.MethodPost:
 			mutate(h.postWorkspaceBuildHomeProvider)
-		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "home-provider":
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "software-review" || action == "home-provider":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")
@@ -321,6 +323,8 @@ type buildSessionView struct {
 	Plan *personalassistant.BuildFolderPlan `json:"plan,omitempty"`
 	// SetupRun is the run Set it up started, line by line.
 	SetupRun *buildSetupRunView `json:"setup_run,omitempty"`
+	// SetupResult is read from the canonical source journal, never resumed.
+	SetupResult *personalassistant.FolderOfferView `json:"setup_result,omitempty"`
 	// FolderExpiresAt is when the server stops holding the attached folder's
 	// pick (foldercontext.SelectionTTL after it was observed).
 	FolderExpiresAt *time.Time `json:"folder_expires_at,omitempty"`
@@ -348,13 +352,26 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 			Plan:                  h.workspaceBuildPlan(ctx, userID, nil, session),
 			SetupRun:              h.readBuildSetupRun(ctx, userID, nil, session),
 		}
+		if session.Status == personalassistant.WorkspaceBuildCreated && session.CreatedWorkspaceID != "" && h.workspaceBuild != nil {
+			if reader, ok := h.workspaceBuild.Folders.(interface {
+				ReadSoftwareResult(context.Context, string, string, string) (*personalassistant.FolderOfferView, error)
+			}); ok {
+				if result, err := reader.ReadSoftwareResult(ctx, userID, session.ID, session.CreatedWorkspaceID); err == nil {
+					built.SetupResult = result
+				}
+			}
+		}
 		if session.Folder != nil && (session.Status == personalassistant.WorkspaceBuildOpen || session.Status == personalassistant.WorkspaceBuildPreparing) {
 			expires := session.Folder.Observation.ScannedAt.Add(foldercontext.SelectionTTL).UTC()
 			deps := h.workspaceBuild
 			if deps != nil && deps.Folders != nil && deps.Assistant != nil {
 				projection, err := deps.Assistant(ctx, userID)
 				if err == nil && projection != nil {
-					root, resolveErr := deps.Folders.ResolveRoot(ctx, buildFolderTarget(userID, projection, session.ID), session.Folder.Observation.ID)
+					target := buildFolderTarget(userID, projection, session.ID)
+					if session.Folder.Recognition != nil && session.Folder.Recognition.OfferID != "" {
+						target = personalassistant.BuildReviewTarget(target, session.ID)
+					}
+					root, resolveErr := deps.Folders.ResolveRoot(ctx, target, session.Folder.Observation.ID)
 					if resolveErr != nil || strings.TrimSpace(root) == "" {
 						// The TTL is an upper bound: restart, removal or a changed
 						// assistant scope can lose the held selection sooner.
@@ -611,6 +628,9 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		if session.Status != personalassistant.WorkspaceBuildOpen {
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
+		if err := h.checkUnacceptedCreationBuild(ctx, userID, id); err != nil {
+			return err
+		}
 		admitted = false
 		now := deps.Store.Now()
 		if automatic {
@@ -686,6 +706,9 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		}
 		if session.Status != personalassistant.WorkspaceBuildOpen {
 			return errBuildTurn{http.StatusConflict, "closed"}
+		}
+		if err := h.checkUnacceptedCreationBuild(ctx, userID, id); err != nil {
+			return err
 		}
 		if session.InferenceID != staged.InferenceID || session.ContextVersion != staged.ContextVersion {
 			result = cloneBuildSession(*session)

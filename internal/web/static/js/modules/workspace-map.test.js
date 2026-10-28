@@ -4428,6 +4428,36 @@ test('reviewed action copy is owner-supplied inert text and generic creation nev
   assert.equal(patches.length, 0);
 });
 
+test('hovering placement toolbar preserves the reviewed candidate instead of moving it under the button', async () => {
+  const { map, harness } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  const candidates = [],
+    confirmed = [];
+  map.beginPlacement({
+    token: 'toolbar-site',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 },
+    onCandidate: (_token, point) => candidates.push(point),
+    onConfirm: (_token, point) => {
+      confirmed.push(point);
+      return true;
+    }
+  });
+  const before = candidates.length;
+  harness.fire('pointermove', {
+    ...pointerEvent(0, 0),
+    target: { closest: selector => (selector === '[data-ws-map-placement-controls]' ? {} : null) }
+  });
+  assert.equal(candidates.length, before, 'toolbar hover must not emit a new material position');
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(confirmed.length, 1);
+  assert.equal(confirmed[0].x, 760);
+  assert.equal(confirmed[0].y, 456);
+});
+
 test('reviewed placement can save without selecting the result over its owner review', async () => {
   const { map, harness, patches } = buildHarness({
     layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
