@@ -34,7 +34,7 @@ func (s *TodayService) unfinishedBuildItem(ctx context.Context, userID string, o
 	return TodayItem{
 		ID: open.ID, Kind: "workspace_build", Title: "Finish building " + name,
 		Detail: "Your assistant kept what you set up so far.", SourceAt: open.UpdatedAt,
-		Actions: []string{"resume", "discard"},
+		Actions: []string{"resume", "discard"}, Version: open.Version,
 	}, true
 }
 

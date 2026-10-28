@@ -68,6 +68,8 @@ type TodayItem struct {
 	// place rather than by opening a route ("resume", "discard" for an
 	// unfinished build). Absent for every other item.
 	Actions []string `json:"actions,omitempty"`
+	// Version is the unfinished build's version, which its Discard must name.
+	Version int64 `json:"version,omitempty"`
 	// Workspace names the workspace the item's work lives in, beside the
 	// agent in Attribution (a hired agent's report).
 	Workspace string `json:"workspace,omitempty"`

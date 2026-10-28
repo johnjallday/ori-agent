@@ -158,7 +158,7 @@ func TestTodayService_AnUnfinishedBuildAsksToBeFinished(t *testing.T) {
 	}
 	item := got.NeedsYou.Items[0]
 	if item.Kind != "workspace_build" || item.ID != "build-1" || item.Title != "Finish building Newsletter Desk" ||
-		strings.Join(item.Actions, ",") != "resume,discard" {
+		strings.Join(item.Actions, ",") != "resume,discard" || item.Version != 2 {
 		t.Fatalf("build item = %+v", item)
 	}
 
