@@ -149,6 +149,7 @@ export function todaySectionItems(section) {
       // line have in-place controls.
       if (row.kind === 'workspace_build') {
         row.id = String(item?.id || '').trim();
+        row.version = Number(item?.version) || 0;
         row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
           WORKSPACE_BUILD_ACTIONS.includes(action)
         );
@@ -217,19 +218,28 @@ export async function revealFolderReview(offerId, valid = () => true, win = wind
   return true;
 }
 
-async function discardWorkspaceBuild(id, button) {
-  if (!id) return;
+// A build started from a placement refuses an abandon that does not name the
+// version the viewer saw (409 "version"), so the row's version rides along.
+export async function discardWorkspaceBuild(id, button, version = 0, fetchImpl = fetch, reload = loadToday) {
+  if (!id) return false;
   if (button) button.disabled = true;
+  let ok = false;
   try {
-    await fetch(`/api/workspaces/build-sessions/${encodeURIComponent(id)}/abandon`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: '{}'
-    });
+    const response = await fetchImpl(
+      `/api/workspaces/build-sessions/${encodeURIComponent(id)}/abandon`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(version ? { version } : {})
+      }
+    );
+    ok = Boolean(response?.ok);
   } catch (_) {
     // Today re-reads either way; an item that is still open simply stays.
   }
-  void loadToday();
+  if (!ok) window.showToast?.('Couldn’t discard this. Reload and try again.', 'error');
+  void reload();
+  return ok;
 }
 
 // Whether an item's own timestamp falls on the viewer's current day.
@@ -713,7 +723,7 @@ function renderCompactRows(list, rows, skipCards = false) {
         button.textContent = action === 'resume' ? 'Resume' : 'Discard';
         button.addEventListener('click', () => {
           if (action === 'resume') resumeWorkspaceBuild();
-          else void discardWorkspaceBuild(row.id, button);
+          else void discardWorkspaceBuild(row.id, button, row.version);
         });
         actions.append(button);
       }

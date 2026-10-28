@@ -23,6 +23,7 @@ import {
   todayStripView,
   todayLabel,
   todaySectionItems,
+  discardWorkspaceBuild,
   todayThreeSectionView,
   todaySectionRows
 } from './personal-assistant-home.js';
@@ -117,6 +118,7 @@ test('an unfinished build keeps its id and only the controls Today knows', () =>
         id: 'build-1',
         kind: 'workspace_build',
         title: 'Finish building Newsletter Desk',
+        version: 4,
         actions: ['resume', 'discard', 'delete_everything']
       },
       { id: 'o1', kind: 'folder_offer', title: 'Look at Documents', actions: ['resume'] }
@@ -124,8 +126,26 @@ test('an unfinished build keeps its id and only the controls Today knows', () =>
   });
   assert.equal(build.id, 'build-1');
   assert.deepEqual(build.actions, ['resume', 'discard']);
+  assert.equal(build.version, 4);
   assert.equal('actions' in other, false, 'other rows stay links');
   assert.equal(other.id, 'o1');
+});
+
+test('Discard names the build version the row carried', async () => {
+  let sent;
+  const ok = await discardWorkspaceBuild(
+    'build-1',
+    null,
+    4,
+    async (url, init) => {
+      sent = { url, body: JSON.parse(init.body) };
+      return { ok: true };
+    },
+    () => {}
+  );
+  assert.equal(ok, true);
+  assert.match(sent.url, /build-sessions\/build-1\/abandon$/);
+  assert.deepEqual(sent.body, { version: 4 });
 });
 
 test('the protection line offers Check protection and a quiet Not now, nothing else', () => {
