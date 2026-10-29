@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
@@ -287,6 +288,7 @@ type TodayService struct {
 	followUps          todayFollowUpReader
 	setup              todaySpecialistSetupReader
 	janitorResults     JanitorResultReader
+	curatorProtection  filecuratorguidance.ProtectionReader
 	folderReceipts     FolderReceiptReader
 	folderDigest       FolderDigestReader
 	secondBrain        SecondBrainTodayReader
@@ -338,6 +340,16 @@ func (s *TodayService) SetSpecialistSetupReader(reader todaySpecialistSetupReade
 func (s *TodayService) SetJanitorResultReader(reader JanitorResultReader) {
 	if s != nil {
 		s.janitorResults = reader
+	}
+}
+
+// SetFileCuratorProtectionReader lets an inbox hire's first-batch report lead
+// with a backup suggestion from the folder's stored protection fact, the same
+// read the review console and the curator's chat use. Unset, the report is
+// exactly what it was without it. Startup wiring only.
+func (s *TodayService) SetFileCuratorProtectionReader(reader filecuratorguidance.ProtectionReader) {
+	if s != nil {
+		s.curatorProtection = reader
 	}
 }
 

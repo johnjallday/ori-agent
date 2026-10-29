@@ -3,10 +3,14 @@ package personalassistant
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -108,7 +112,7 @@ func TestFirstBatchReport_CountsActionsAndNoPath(t *testing.T) {
 	ws := &workspace.Workspace{ID: "ws-desktop", Name: "Desktop", FolderSlug: "desktop"}
 	now := offer.Outcome.FirstLook.At.Add(time.Minute)
 
-	needs, handled := firstBatchReportItems(offer, ws, now)
+	needs, handled := firstBatchReportItems(context.Background(), offer, ws, now, nil)
 	if !handled || len(needs) != 1 {
 		t.Fatalf("items = %+v handled %v", needs, handled)
 	}
@@ -140,7 +144,7 @@ func TestFirstBatchReport_CountsActionsAndNoPath(t *testing.T) {
 		look.Batch = &FolderFirstBatch{Outcome: outcome, Route: "/workspaces/desktop?panel=file-janitor"}
 		outcomeCopy.FirstLook = &look
 		changed.Outcome = &outcomeCopy
-		needs, _ := firstBatchReportItems(changed, ws, now)
+		needs, _ := firstBatchReportItems(context.Background(), changed, ws, now, nil)
 		if len(needs) != 1 || needs[0].Title != want.title || strings.Join(needs[0].Actions, ",") != want.actions || needs[0].State != want.state {
 			t.Fatalf("%s item = %+v", outcome, needs)
 		}
@@ -148,8 +152,109 @@ func TestFirstBatchReport_CountsActionsAndNoPath(t *testing.T) {
 
 	// A report older than a folder receipt is shown no more; no first-look
 	// item stands in for it either.
-	if needs, handled := firstBatchReportItems(offer, ws, now.Add(8*24*time.Hour)); !handled || len(needs) != 0 {
+	if needs, handled := firstBatchReportItems(context.Background(), offer, ws, now.Add(8*24*time.Hour), nil); !handled || len(needs) != 0 {
 		t.Fatalf("an old report = %+v handled %v", needs, handled)
+	}
+}
+
+// fakeFirstBatchProtection is the stored protection read, recording who asked.
+type fakeFirstBatchProtection struct {
+	fact       filecuratorguidance.ProtectionFact
+	err        error
+	user, read string
+}
+
+func (f *fakeFirstBatchProtection) ReadProtection(_ context.Context, user, id string) (filecuratorguidance.ProtectionFact, error) {
+	f.user, f.read = user, id
+	return f.fact, f.err
+}
+
+// An unmet protection fact leads the Ready report with a backup suggestion and
+// Check protection; covered, unavailable, another workspace's fact or a failed
+// read leave the report as it was, and the other outcomes never change.
+func TestFirstBatchReport_LeadsWithBackupWhenProtectionIsUnmet(t *testing.T) {
+	ready := FolderFirstBatch{Outcome: FolderFirstBatchReady, BatchID: "batch-1", Eligible: 23, NeedsReview: 4,
+		Route: "/workspaces/desktop?panel=file-janitor&batch_id=batch-1"}
+	f, offerID := resolvedInboxHire(t, ready)
+	offer, _ := storedFirstBatch(t, f, offerID)
+	ws := &workspace.Workspace{ID: "ws-desktop", Name: "Desktop", FolderSlug: "desktop"}
+	now := offer.Outcome.FirstLook.At.Add(time.Minute)
+	ctx := context.Background()
+	title := "File Curator prepared a first batch for Desktop: 23 files proposed for filing, 4 need your review."
+
+	for state, evidence := range map[string]string{
+		"not_covered": "This folder is not in the backup evidence Ori observes. Other backups may exist.",
+		"unknown":     "Protection is unknown. Missing evidence does not mean there is no backup.",
+		"configured":  "A backup source is configured, but Ori has not observed a completed backup.",
+	} {
+		reader := &fakeFirstBatchProtection{fact: filecuratorguidance.ProtectionFact{WorkspaceID: "ws-desktop", State: state}}
+		needs, handled := firstBatchReportItems(ctx, offer, ws, now, reader)
+		if !handled || len(needs) != 1 {
+			t.Fatalf("%s: items = %+v handled %v", state, needs, handled)
+		}
+		item := needs[0]
+		if item.Suggestion == nil || item.Suggestion.Text != "Back up Desktop before the first filing batch" || item.Suggestion.Evidence != evidence ||
+			strings.Join(item.Actions, ",") != "check_protection,review_batch,not_now" || item.Title != title {
+			t.Fatalf("%s: item = %+v suggestion %+v", state, item, item.Suggestion)
+		}
+		// The owner reads it; an ownerless workspace is the local user's.
+		if reader.user != "local" || reader.read != "ws-desktop" {
+			t.Fatalf("%s: read as %q for %q", state, reader.user, reader.read)
+		}
+	}
+
+	owned := &workspace.Workspace{ID: "ws-desktop", Name: "Desktop", FolderSlug: "desktop", OwnerUserID: "someone"}
+	reader := &fakeFirstBatchProtection{fact: filecuratorguidance.ProtectionFact{WorkspaceID: "ws-desktop", State: "unknown"}}
+	if needs, _ := firstBatchReportItems(ctx, offer, owned, now, reader); len(needs) != 1 || needs[0].Suggestion == nil || reader.user != "someone" {
+		t.Fatalf("owned workspace: %+v read as %q", needs, reader.user)
+	}
+
+	for name, reader := range map[string]*fakeFirstBatchProtection{
+		"covered":         {fact: filecuratorguidance.ProtectionFact{WorkspaceID: "ws-desktop", State: "covered"}},
+		"unavailable":     {fact: filecuratorguidance.ProtectionFact{WorkspaceID: "ws-desktop", State: "unavailable"}},
+		"other workspace": {fact: filecuratorguidance.ProtectionFact{WorkspaceID: "ws-other", State: "not_covered"}},
+		"read error":      {fact: filecuratorguidance.ProtectionFact{WorkspaceID: "ws-desktop", State: "not_covered"}, err: errors.New("store down")},
+	} {
+		needs, _ := firstBatchReportItems(ctx, offer, ws, now, reader)
+		if len(needs) != 1 || needs[0].Suggestion != nil || strings.Join(needs[0].Actions, ",") != "review_batch,not_now" || needs[0].Title != title {
+			t.Fatalf("%s: item = %+v", name, needs)
+		}
+	}
+
+	// Empty and failed scans never lead with backup, whatever the fact.
+	unmet := &fakeFirstBatchProtection{fact: filecuratorguidance.ProtectionFact{WorkspaceID: "ws-desktop", State: "not_covered"}}
+	for outcome, actions := range map[string]string{FolderFirstBatchEmpty: "open_janitor,not_now", FolderFirstBatchFailed: "retry"} {
+		changed := offer
+		look := *offer.Outcome.FirstLook
+		outcomeCopy := *offer.Outcome
+		look.Batch = &FolderFirstBatch{Outcome: outcome, Route: "/workspaces/desktop?panel=file-janitor"}
+		outcomeCopy.FirstLook = &look
+		changed.Outcome = &outcomeCopy
+		needs, _ := firstBatchReportItems(ctx, changed, ws, now, unmet)
+		if len(needs) != 1 || needs[0].Suggestion != nil || strings.Join(needs[0].Actions, ",") != actions {
+			t.Fatalf("%s item = %+v", outcome, needs)
+		}
+	}
+}
+
+// The card's evidence line is the review console's sentence for the same
+// state, word for word: the Go table equals the JS protectionSentence.
+func TestFirstBatchReport_ProtectionSentencesMatchTheReviewConsole(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "web", "static", "js", "modules", "file-janitor-protection.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := map[string]string{}
+	for _, match := range regexp.MustCompile(`case '([a-z_]+)':\s*return '([^']+)';`).FindAllStringSubmatch(string(source), -1) {
+		js[match[1]] = match[2]
+	}
+	if len(firstBatchProtectionSentences) != 3 {
+		t.Fatalf("unmet states = %v", firstBatchProtectionSentences)
+	}
+	for state, sentence := range firstBatchProtectionSentences {
+		if js[state] != sentence {
+			t.Fatalf("%s: Go %q, JS %q", state, sentence, js[state])
+		}
 	}
 }
 
@@ -163,7 +268,7 @@ func TestFirstBatchReport_NotNowTakesItAwayAndKeepsTheBatch(t *testing.T) {
 	if batch == nil || batch.DismissedAt == nil || batch.BatchID != "batch-1" {
 		t.Fatalf("batch after Not now = %+v", batch)
 	}
-	if needs, handled := firstBatchReportItems(offer, &workspace.Workspace{ID: "ws-desktop", Name: "Desktop"}, offer.Outcome.FirstLook.At.Add(time.Minute)); !handled || len(needs) != 0 {
+	if needs, handled := firstBatchReportItems(ctx, offer, &workspace.Workspace{ID: "ws-desktop", Name: "Desktop"}, offer.Outcome.FirstLook.At.Add(time.Minute), nil); !handled || len(needs) != 0 {
 		t.Fatalf("a dismissed report = %+v", needs)
 	}
 	// A repeated Not now is a replay; another user's or an unknown offer is not found.

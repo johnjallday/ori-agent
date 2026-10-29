@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 )
 
 // Goal-run output contract (workspace-goal-suggestions FR14-FR18, FR21).
@@ -439,4 +441,83 @@ func MissionSuggestionContext(s MissionTaskSuggestion, runID string) map[string]
 		"confidence":      s.Confidence,
 		"run_id":          runID,
 	}
+}
+
+// Precondition kinds, ticket actions and who wrote a precondition's ticket
+// (backup-first FR10, FR11). The shelf maps an action id to its button.
+const (
+	MissionPreconditionBackup    = "backup_protection"
+	MissionActionCheckProtection = "check_protection"
+	MissionSuggestionSourceModel = "model"
+	MissionSuggestionSourceHost  = "host"
+)
+
+// backupPreconditionFirstStep is the backup task's first step (PRD §6.2), and
+// backupPreconditionWhy its reason. Neither claims a backup exists or not.
+const (
+	backupPreconditionFirstStep = "Press Back up and approve one metadata read."
+	backupPreconditionWhy       = "Filing moves the originals, so a recovery copy of this folder should exist first."
+)
+
+// BackupPrecondition is a File Janitor folder's backup precondition: unmet
+// while its stored protection fact is not_covered, unknown or configured (a
+// saved configuration is not a completed backup). Its statement is the fact's
+// own prompt wording. false for covered, unavailable or an unnamed folder.
+func BackupPrecondition(folderName string, fact filecuratorguidance.ProtectionFact) (MissionPrecondition, bool) {
+	folder := missionPromptLine(folderName)
+	switch fact.State {
+	case "not_covered", "unknown", "configured":
+	default:
+		return MissionPrecondition{}, false
+	}
+	// Prompt() opens with its own heading; the section supplies one.
+	statement := strings.TrimSpace(fact.Prompt())
+	if _, body, headed := strings.Cut(statement, "\n"); headed && strings.HasPrefix(statement, "## ") {
+		statement = strings.TrimSpace(body)
+	}
+	if folder == "" || statement == "" {
+		return MissionPrecondition{}, false
+	}
+	return MissionPrecondition{
+		Kind:               MissionPreconditionBackup,
+		Statement:          statement,
+		SuggestedTitle:     "Back up " + folder + " before the first filing batch",
+		SuggestedFirstStep: backupPreconditionFirstStep,
+		Why:                backupPreconditionWhy,
+		Action:             MissionActionCheckProtection,
+	}, true
+}
+
+// HostPreconditionSuggestion is the ticket the host stores for an unmet
+// precondition the run's answer left out (backup-first FR11): its own title,
+// reason and first step, the fact as evidence, high priority.
+func HostPreconditionSuggestion(p MissionPrecondition) MissionTaskSuggestion {
+	return MissionTaskSuggestion{
+		Title: p.SuggestedTitle, Why: p.Why, Evidence: p.Statement,
+		Priority: "high", Confidence: "high", Effort: "small", FirstStep: p.SuggestedFirstStep,
+	}
+}
+
+// MatchMissionPrecondition is the precondition a suggestion's title meets,
+// compared after NormalizeSuggestionTitle.
+func MatchMissionPrecondition(title string, preconditions []MissionPrecondition) (MissionPrecondition, bool) {
+	key := NormalizeSuggestionTitle(title)
+	for _, p := range preconditions {
+		if key != "" && NormalizeSuggestionTitle(p.SuggestedTitle) == key {
+			return p, true
+		}
+	}
+	return MissionPrecondition{}, false
+}
+
+// TagMissionPrecondition marks a suggested ticket's context as meeting a
+// precondition: which one, the button it offers, and who wrote it.
+func TagMissionPrecondition(context map[string]any, p MissionPrecondition, source string) map[string]any {
+	if context == nil {
+		context = map[string]any{}
+	}
+	context["precondition"] = p.Kind
+	context["action"] = p.Action
+	context["source"] = source
+	return context
 }

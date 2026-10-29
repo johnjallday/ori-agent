@@ -504,6 +504,13 @@ body.home-command-page .home-command-bridge * {
   justify-self: start;
 }
 
+/* Check protection could not open protection; nothing changed. */
+.first-look-report__error {
+  margin: 0;
+  color: var(--hc-alert);
+  font-size: 12px;
+}
+
 /* Where the hired agent's building sits on the Map, and Move (FR23). The same
    row closes a folder setup's receipt. */
 .first-look-report__map,

@@ -121,7 +121,8 @@ function renderCapabilityMarkdown(value) {
 
 // A Backlog ticket a goal run suggested carries source_type goal_suggestion
 // and its reason in context.goal_suggestion (workspace-goal-suggestions FR15).
-// Returns that reason, or null for any other ticket.
+// Returns that reason, or null for any other ticket. action names the button a
+// ticket that meets a host precondition offers (backup-first FR15).
 export function goalSuggestionOf(task) {
   if (!task || task.source_type !== 'goal_suggestion') return null;
   const reason = (task.context && task.context.goal_suggestion) || {};
@@ -132,8 +133,26 @@ export function goalSuggestionOf(task) {
     firstStep: text('first_step'),
     suggestedAgent: text('suggested_agent'),
     effort: text('effort'),
-    confidence: text('confidence')
+    confidence: text('confidence'),
+    action: text('action')
   };
+}
+
+// The buttons a suggestion's action id offers, keyed by id so the next host
+// precondition adds one entry here and nothing in the card.
+const BACKLOG_SUGGESTION_ACTIONS = {
+  check_protection: { label: 'Back up', attribute: 'data-cmd-backlog-check-protection' }
+};
+
+// coveredSentence is what a covered folder's ticket says in place of Check
+// protection: the stored evidence's time, in the viewer's local time.
+export function coveredSentence(observedAt) {
+  const at = new Date(observedAt || '');
+  if (Number.isNaN(at.getTime()) || at.getFullYear() < 2000) return 'Covered';
+  return (
+    'Covered · evidence observed ' +
+    at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  );
 }
 
 // Clamp an HQ station's fractional map coordinate into [0,1]. Non-finite input
@@ -6777,6 +6796,11 @@ export class WorkspaceCommandView {
         this.runBacklogDelete(deleteBtn.getAttribute('data-cmd-backlog-item'));
         return;
       }
+      const checkProtectionBtn = event.target.closest('[data-cmd-backlog-check-protection]');
+      if (checkProtectionBtn) {
+        this.runBacklogCheckProtection(checkProtectionBtn.getAttribute('data-cmd-backlog-item'));
+        return;
+      }
       const notUsefulBtn = event.target.closest('[data-cmd-backlog-not-useful]');
       if (notUsefulBtn) {
         this.openBacklogNotUseful(notUsefulBtn.getAttribute('data-cmd-backlog-item'));
@@ -7038,6 +7062,7 @@ export class WorkspaceCommandView {
           escapeHtml(id) +
           '">Not useful</button>'
       : '';
+    const actionControl = suggestion ? this.backlogSuggestionActionHTML(id, suggestion) : '';
     return (
       '<div class="ws-cmd-drawer-preview-head">' +
       '<span class="ws-cmd-drawer-preview-state tone-neutral">' +
@@ -7050,6 +7075,7 @@ export class WorkspaceCommandView {
       '</div>' +
       body +
       '<div class="ws-cmd-drawer-preview-actions">' +
+      actionControl +
       promoteControl +
       notUsefulControl +
       moveControls +
@@ -7095,6 +7121,64 @@ export class WorkspaceCommandView {
           '</details>'
         : '')
     );
+  }
+
+  // A suggestion that meets a host precondition leads its action row with that
+  // precondition's button, and says on the card why it could not open.
+  backlogSuggestionActionHTML(id, suggestion) {
+    const action = BACKLOG_SUGGESTION_ACTIONS[suggestion.action];
+    if (!action) return '';
+    const state = this.backlogSuggestionAction || {};
+    const mine = state.id === id;
+    // A folder found covered says so in place of the button; the ticket stays
+    // as it is (FR17: no automatic closing).
+    if (mine && state.covered)
+      return (
+        '<span class="ws-cmd-backlog-action-covered" role="status">' +
+        escapeHtml(coveredSentence(state.observedAt)) +
+        '</span>'
+      );
+    return (
+      '<button type="button" class="ws-cmd-drawer-action" ' +
+      action.attribute +
+      ' data-cmd-backlog-item="' +
+      escapeHtml(id) +
+      '"' +
+      (mine && state.busy ? ' disabled' : '') +
+      '>' +
+      escapeHtml(action.label) +
+      '</button>' +
+      (mine && state.error
+        ? '<p class="ws-cmd-backlog-action-error" role="alert">' + escapeHtml(state.error) + '</p>'
+        : '')
+    );
+  }
+
+  // Check protection reads the ticket's workspace protection fact and opens
+  // its destination with no review trip (backup-first FR16). It changes
+  // nothing; a destination it cannot open is said on the card, and a folder
+  // already covered is said instead of opening anything.
+  async runBacklogCheckProtection(itemId) {
+    const id = String(itemId || '').trim();
+    if (!id || this.backlogSuggestionAction?.busy) return;
+    const protection =
+      this.protection || (typeof window !== 'undefined' ? window.FileJanitorProtection : null);
+    this.backlogSuggestionAction = { id, busy: true, error: '' };
+    this.renderBacklogDrawerBody();
+    const next = { id, busy: false, error: '' };
+    try {
+      if (!protection?.readProtection || !protection?.openDestination)
+        throw new Error('Protection is unavailable for this folder.');
+      const fact = await protection.readProtection(this.backlogItemOwner(id));
+      if (fact.state === 'covered') {
+        next.covered = true;
+        next.observedAt = fact.observed_at || '';
+      } else await protection.openDestination(fact.destination);
+    } catch (failure) {
+      next.error = failure?.message || 'Protection is unavailable for this folder.';
+    }
+    this.backlogSuggestionAction = next;
+    this.renderBacklogDrawerBody();
   }
 
   // Not useful asks for an optional one-line reason, then removes the

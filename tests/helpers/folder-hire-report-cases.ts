@@ -177,6 +177,7 @@ export type FirstBatchItem = {
   attribution?: string;
   workspace?: string;
   actions?: string[];
+  suggestion?: { text: string; evidence?: string };
   report_route?: string;
   ref: { entity_id: string; workspace_id: string; entity_type?: string };
 };

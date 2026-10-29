@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  checkReportProtection,
   finishedAgo,
   firstLookReportAction,
   firstLookReportView,
   isFirstLookReportKind,
   mapPlacementView,
+  mountFirstLookReports,
   reportedLine
 } from './first-look-report.js';
 
@@ -227,6 +229,194 @@ test('a first batch report posts Not now and Retry to its own setup, and Review 
     ['/api/personal-assistant/first-batch/offer-1/dismiss', 'POST', '{}'],
     ['/api/personal-assistant/first-batch/offer-1/retry', 'POST', '{}']
   ]);
+});
+
+// The host's backup suggestion for a folder with no backup (backup-first FR1).
+const backupBatchReport = (overrides = {}) =>
+  batchReport({
+    suggestion: {
+      text: 'Back up Downloads before the first filing batch',
+      evidence: 'Protection is unknown. Missing evidence does not mean there is no backup.'
+    },
+    actions: ['check_protection', 'review_batch', 'not_now'],
+    ...overrides
+  });
+
+test('a first batch with no backup leads with the suggestion and Check protection', () => {
+  const view = firstLookReportView(backupBatchReport(), now);
+  assert.equal(view.workspaceId, 'ws-downloads');
+  assert.deepEqual(view.suggestion, {
+    text: 'Back up Downloads before the first filing batch',
+    evidence: 'Protection is unknown. Missing evidence does not mean there is no backup.'
+  });
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label, action.primary, action.href || '']),
+    [
+      ['check_protection', 'Back up', true, ''],
+      [
+        'review_batch',
+        'Review batch',
+        false,
+        '/workspaces/downloads?panel=file-janitor&batch_id=batch-1'
+      ],
+      ['not_now', 'Not now', false, '']
+    ]
+  );
+  // Without the action, or without a suggestion, the card is as it was.
+  for (const overrides of [{ actions: ['review_batch', 'not_now'] }, { suggestion: null }]) {
+    const plain = firstLookReportView(backupBatchReport(overrides), now);
+    assert.equal(plain.suggestion, null);
+    assert.deepEqual(
+      plain.actions.map(action => [action.id, action.primary]),
+      [
+        ['review_batch', true],
+        ['not_now', false]
+      ]
+    );
+  }
+  // A failed scan never offers it.
+  const failed = firstLookReportView(
+    backupBatchReport({ state: 'failed', actions: ['retry', 'check_protection'] }),
+    now
+  );
+  assert.equal(failed.suggestion, null);
+  assert.deepEqual(
+    failed.actions.map(action => action.id),
+    ['retry']
+  );
+});
+
+test('Check protection posts nothing', async () => {
+  const calls = [];
+  const fetchImpl = async url => {
+    calls.push(url);
+    return { ok: true, json: async () => ({}) };
+  };
+  const view = firstLookReportView(backupBatchReport(), now);
+  assert.equal((await firstLookReportAction(view, 'check_protection', fetchImpl)).ok, false);
+  assert.deepEqual(calls, []);
+});
+
+test('Check protection reads the fact, then opens its destination', async () => {
+  const view = firstLookReportView(backupBatchReport(), now);
+  const steps = [];
+  const protection = {
+    readProtection: async id => {
+      steps.push(['read', id]);
+      return { workspace_id: id, destination: { kind: 'chooser' } };
+    },
+    openDestination: async target => steps.push(['open', target.kind])
+  };
+  assert.equal(await checkReportProtection(view, protection), '');
+  assert.deepEqual(steps, [
+    ['read', 'ws-downloads'],
+    ['open', 'chooser']
+  ]);
+  const unavailable = {
+    readProtection: async () => {
+      throw new Error('Protection is unavailable for this folder.');
+    },
+    openDestination: async () => assert.fail('opened without a fact')
+  };
+  assert.equal(
+    await checkReportProtection(view, unavailable),
+    'Protection is unavailable for this folder.'
+  );
+  assert.equal(
+    await checkReportProtection(view, undefined),
+    'Protection is unavailable for this folder.'
+  );
+});
+
+// A small DOM stub: enough of an element for the card and its buttons.
+function stubDocument() {
+  const make = tag => {
+    const node = {
+      tagName: tag.toUpperCase(),
+      children: [],
+      dataset: {},
+      attributes: {},
+      listeners: {},
+      parentElement: null,
+      className: '',
+      textContent: '',
+      disabled: false,
+      setAttribute(name, value) {
+        node.attributes[name] = value;
+      },
+      addEventListener(type, fn) {
+        node.listeners[type] = fn;
+      },
+      append(...items) {
+        for (const item of items) {
+          if (typeof item !== 'object') continue;
+          item.parentElement = node;
+          node.children.push(item);
+        }
+      },
+      replaceChildren(...items) {
+        node.children = [];
+        node.append(...items);
+      },
+      remove() {
+        const siblings = node.parentElement?.children;
+        if (siblings) siblings.splice(siblings.indexOf(node), 1);
+      },
+      all() {
+        return node.children.flatMap(child => [child, ...child.all()]);
+      },
+      querySelectorAll(selector) {
+        return node.all().filter(child => matches(child, selector));
+      },
+      querySelector(selector) {
+        return node.querySelectorAll(selector)[0] || null;
+      },
+      closest(selector) {
+        for (let at = node; at; at = at.parentElement) if (matches(at, selector)) return at;
+        return null;
+      }
+    };
+    return node;
+  };
+  const matches = (node, selector) =>
+    selector.startsWith('.')
+      ? node.className.split(' ').includes(selector.slice(1))
+      : node.tagName === selector.toUpperCase();
+  return { createElement: make };
+}
+
+test('a Check protection that cannot open says so on the card and re-enables it', async () => {
+  const doc = stubDocument();
+  const host = doc.createElement('div');
+  let done = 0;
+  let fail = true;
+  const protection = {
+    readProtection: async id => {
+      if (fail) throw new Error('Protection is unavailable for this folder.');
+      return { workspace_id: id, destination: { kind: 'chooser' } };
+    },
+    openDestination: async () => {}
+  };
+  mountFirstLookReports(host, [backupBatchReport()], {
+    doc,
+    now,
+    protection,
+    onDone: () => done++
+  });
+  const card = host.children[0];
+  const check = card
+    .querySelectorAll('button')
+    .find(b => b.dataset.firstLookAction === 'check_protection');
+  await check.listeners.click();
+  const alert = card.querySelector('.first-look-report__error');
+  assert.equal(alert.textContent, 'Protection is unavailable for this folder.');
+  assert.equal(alert.attributes.role, 'alert');
+  assert.equal(check.disabled, false);
+  // A later success clears the sentence; neither reloads Today.
+  fail = false;
+  await check.listeners.click();
+  assert.equal(card.querySelector('.first-look-report__error'), null);
+  assert.equal(done, 0);
 });
 
 test('Home reads Today before Personal HQ exists, so a hire reports there without a second Build link', () => {

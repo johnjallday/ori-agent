@@ -184,6 +184,36 @@ test('the first batch is reported under Needs you on Home and in the drawer, and
     /prepared a first batch for Downloads: \d+ files? proposed for filing, \d+ needs? your review\./
   );
   await expectFirstBatchCard(page, item!, 'batch');
+
+  // No backup is observed for the sandbox's Downloads (not_covered), so the
+  // card leads with the host's backup suggestion and Back up, before Review
+  // batch, and Back up opens the chooser without posting.
+  expect(item!.actions).toEqual(['check_protection', 'review_batch', 'not_now']);
+  expect(item!.suggestion?.text).toBe('Back up Downloads before the first filing batch');
+  expect(item!.suggestion?.evidence).toMatch(
+    /^(This folder is not in the backup evidence Ori observes\.|Protection is unknown\.|A backup source is configured)/
+  );
+  await page.goto('/');
+  await openDrawer(page);
+  const card = page
+    .locator(`#personalAssistantNeedsYouReports article[data-look-id="${item!.ref.entity_id}"]`)
+    .first();
+  await expect(card).toContainText('Suggests first');
+  await expect(card).toContainText(item!.suggestion!.text);
+  await expect(card).toContainText(item!.suggestion!.evidence!);
+  await expect(card.locator('[data-first-look-action]')).toHaveText([
+    'Back up',
+    'Review batch',
+    'Not now'
+  ]);
+  const posts: string[] = [];
+  page.on('request', request => {
+    if (request.method() === 'POST') posts.push(request.url());
+  });
+  await card.getByRole('button', { name: 'Back up', exact: true }).click();
+  await expect(page.locator('#protectFoldersChooser')).toBeVisible({ timeout: 10_000 });
+  expect(posts.filter(url => url.includes('/first-batch/'))).toEqual([]);
+
   await page.goto('/');
   await openDrawer(page);
   const link = page
