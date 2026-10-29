@@ -114,10 +114,14 @@ inbox_pid=""
 cleanup() {
 	if [[ -n "$inbox_pid" ]]; then
 		kill "$inbox_pid" >/dev/null 2>&1 || true
+		wait "$inbox_pid" 2>/dev/null || true
+		inbox_pid=""
 	fi
 	./scripts/stop-demo-server.sh "$port" >/dev/null 2>&1 || true
 	if [[ -n "$fixture_pid" ]]; then
 		kill "$fixture_pid" >/dev/null 2>&1 || true
+		wait "$fixture_pid" 2>/dev/null || true
+		fixture_pid=""
 	fi
 }
 trap cleanup EXIT
