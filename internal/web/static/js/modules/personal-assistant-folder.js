@@ -1335,6 +1335,14 @@ export function blockedFolderSetupAction(offer) {
 // the link reviews the other hire in place; nothing is created.
 export function folderOfferView(offer, options = {}) {
   const view = folderOfferViewWithoutLead(offer, options);
+  const homeID = folderHomeMapTarget(offer);
+  if (view.visible && homeID && offer.setup?.status !== 'running') {
+    view.actions = [
+      ...(view.actions || []),
+      { id: 'show-home-map', label: 'Show on map', style: 'link', homeMap: 'show', homeID },
+      { id: 'move-home-map', label: 'Move group', style: 'link', homeMap: 'move', homeID }
+    ];
+  }
   // Remove asked, and the card still offers it: the confirm replaces the actions.
   // A card that moved on (the run restarted) simply shows itself again.
   if (options?.confirm === 'remove' && view.visible && (view.actions || []).some(a => a.remove))
@@ -4365,6 +4373,10 @@ async function repickConversationReview(offer) {
 
 function runAction(action) {
   if (conversationReviewLoading()) return;
+  if (action.homeMap) {
+    void navigateFolderHomeMap(action.homeID, action.homeMap);
+    return;
+  }
   if (action.forget) {
     void forgetDecline(action.forget);
     return;
@@ -4713,6 +4725,40 @@ function sourceReviewKey() {
   return sourceCreationReviewKey(state.offer, briefFor(state.offer), monitoringChosen(state.offer));
 }
 
+export function folderHomeMapTarget(offer) {
+  if (offer?.destination_status === 'changed' || offer?.destination_status === 'unavailable')
+    return '';
+  const home = offer?.home_result;
+  if (home) return ['ready', 'partial'].includes(home.state) ? String(home.home_id || '') : '';
+  const destination = offer?.plan?.destination;
+  return destination?.kind === 'home' && destination.status === 'existing'
+    ? String(destination.workspace_id || '')
+    : '';
+}
+
+async function navigateFolderHomeMap(homeID, action) {
+  const offer = state.offer;
+  const current = reviewResponseGuard(offer);
+  if (!homeID || !offer?.id) return;
+  try {
+    const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(offer.id)}`, {
+      cache: 'no-store'
+    });
+    const payload = await response.json();
+    if (!current()) return;
+    if (!response.ok || folderHomeMapTarget(payload?.folder_digest?.offer) !== homeID)
+      throw new Error('The original Home is no longer available. Nothing was moved.');
+    // Navigation deliberately ends this editor lifetime. A reload never claims
+    // to retain a source draft or a candidate; only explicit Map movement follows.
+    window.location.href = `/?view=map&${action === 'move' ? 'move' : 'show_on_map'}=${encodeURIComponent(homeID)}`;
+  } catch (error) {
+    if (current()) {
+      showError(error.message);
+      render();
+    }
+  }
+}
+
 export function sourceHomeReviewPlan(plan) {
   return Boolean(plan?.visual?.entity?.kind === 'home' && plan.destination?.kind === 'home');
 }
@@ -4830,6 +4876,8 @@ function renderSourceCreationReview() {
       openLabel: review.home
         ? `Go to ${review.result?.name || 'Music Production Home'}`
         : undefined,
+      canShowOnMap: Boolean(review.home && review.result?.id),
+      canMoveGroup: Boolean(review.home && review.result?.id),
       positionFailed: review.positionFailed,
       busy: review.observing,
       message:
@@ -4909,6 +4957,10 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     review.observeFailed = false;
     await pollSetup();
     render();
+    return;
+  }
+  if ((action === 'show-map' || action === 'move-group') && review.home && review.result?.id) {
+    await navigateFolderHomeMap(review.result.id, action === 'move-group' ? 'move' : 'show');
     return;
   }
   if (action === 'retry-position' && review.result?.id && review.positionFailed) {
@@ -5045,6 +5097,8 @@ async function observeSourceCreationResult(review) {
     review.homeRoute = home?.route;
     review.existing = review.home ? !createdHere : outcome.existing === true;
     await window.OriHomeCockpit?.refreshQuietly?.();
+    if (!sourceReviewCurrent(review)) return;
+    if (review.home) await window.OriHomeCockpit?.refreshLibraryBadges?.({ force: true });
     if (!sourceReviewCurrent(review)) return;
     review.positionUnproven = Boolean(review.candidate && !review.existing && !createdHere);
     if (review.candidate && createdHere && !review.positionAttempted) {

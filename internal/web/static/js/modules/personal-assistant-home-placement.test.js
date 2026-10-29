@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { sourceHomePlacementResult, sourceHomeReviewPlan } from './personal-assistant-folder.js';
+import {
+  sourceHomePlacementResult,
+  sourceHomeReviewPlan,
+  folderHomeMapTarget
+} from './personal-assistant-folder.js';
 import { workspaceCreationReviewHTML } from './workspace-creation-review.js';
 
 const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
@@ -199,6 +203,28 @@ test('changed material or replacement editor refuses final gesture without setup
     assert.equal(await c.placement().onConfirm(c.review().token, { x: 20, y: 20 }), false);
     assert.equal(c.effects.setup, 0);
   }
+});
+
+test('reused/history Home navigation requires canonical identity, never the name or later project', () => {
+  assert.equal(
+    folderHomeMapTarget({
+      home_result: { state: 'ready', home_id: 'canonical-home', name: 'Same name' },
+      outcome: { workspace_id: 'later-song' }
+    }),
+    'canonical-home'
+  );
+  assert.equal(
+    folderHomeMapTarget({
+      plan: { destination: { kind: 'home', status: 'existing', workspace_id: 'canonical-home' } }
+    }),
+    'canonical-home'
+  );
+  for (const state of ['unproven', 'unavailable'])
+    assert.equal(folderHomeMapTarget({ home_result: { state, home_id: 'namesake' } }), '');
+  assert.equal(
+    folderHomeMapTarget({ outcome: { workspace_id: 'song', name: 'Music Production Home' } }),
+    ''
+  );
 });
 
 test('shared renderer uses truthful owner labels and escapes Home names', () => {

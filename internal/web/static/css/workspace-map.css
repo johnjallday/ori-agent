@@ -962,6 +962,20 @@
 .ws-map-district-header > * {
   pointer-events: auto;
 }
+/* Empty/minimum frames still need a readable identity. Keep the familiar
+   controls on a second row instead of squeezing the Home name to zero width. */
+.ws-map-district.is-compact .ws-map-district-header {
+  flex-wrap: wrap;
+}
+.ws-map-district.is-compact .ws-map-district-tag {
+  flex: 0 0 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  color: var(--ws-ink);
+}
+.ws-map-district.is-compact .ws-map-district-name {
+  max-width: 100%;
+}
 /* Sentence case: this is clickable AND it renders a user-authored group name,
    which uppercase flattened. Names keep their author's casing. */
 .ws-map-district-tag {
