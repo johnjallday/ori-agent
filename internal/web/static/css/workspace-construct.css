@@ -3132,6 +3132,30 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   color: var(--wc-ink-dim);
   font-size: 11px;
 }
+/* A single song's plan: the Home's half, then its Portfolio Manager's. */
+.workspace-create-modal
+  .workspace-build-plan__lines
+  li.pa-folder__plan-section[data-section="home"] {
+  padding: 4px 2px 0;
+  border: 0;
+  background: none;
+}
+.workspace-create-modal
+  .workspace-build-plan__lines
+  li.pa-folder__plan-section[data-section="handoff"] {
+  margin-top: 6px;
+}
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-section-title {
+  display: block;
+  grid-column: 1 / -1;
+  font-weight: 700;
+}
+.workspace-create-modal
+  .workspace-build-plan__lines
+  .pa-folder__plan-text
+  .pa-folder__plan-section-title {
+  grid-column: auto;
+}
 /* The ring: empty until the run reaches the line (its glyph is hidden), then
    its glyph in the state's colour, then filled on done. */
 .workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-icon {

@@ -227,3 +227,193 @@ test('setupLineKindIcon names an icon for every kind the host plans with', () =>
   assert.equal(shared.setupLineKindIcon(''), 'bi-dot');
   assert.equal(shared.setupLineKindIcon(undefined), 'bi-dot');
 });
+
+// A single song's plan, as the host words it (FR5), in the browser's shape.
+function handoffLines(shared, { homeLines = true, handoff = {} } = {}) {
+  return shared.setupLinesView([
+    { kind: 'integration', name: 'Uses the installed reviewed REAPER integration' },
+    { kind: 'provider', name: 'Uses the installed reviewed Music Project Management plugin' },
+    ...(homeLines
+      ? [
+          { kind: 'home', name: 'Creates your Music Production Home' },
+          { kind: 'agents', name: 'Adds the agents the Home requires' }
+        ]
+      : []),
+    { kind: 'library', name: 'Lists Album-5 in the Home’s library' },
+    {
+      kind: 'handoff',
+      name: 'Your Portfolio Manager then opens Album-5',
+      detail: 'Right after the Home is ready, under this one Set up.',
+      ...handoff
+    },
+    { kind: 'workspace', name: 'Creates a Reaper Song workspace named Album-5' },
+    { kind: 'folder', name: 'Linked where it is; nothing is moved, copied or run' },
+    { kind: 'mode', name: 'Uses File-only mode' },
+    { kind: 'agents', name: 'Adds the agents this blueprint requires' },
+    { kind: 'task', name: 'An optional read-only summary' }
+  ]);
+}
+
+test('a single song’s plan reads as the Home’s half, then its Portfolio Manager’s', () => {
+  const { shared, document } = load();
+  const names = { home: 'Music Production Home', song: 'Album-5' };
+  const list = document.createElement('ul');
+  shared.renderSetupLines(list, handoffLines(shared), document, { sections: names });
+  assert.equal(list.dataset.sections, 'handoff');
+  const rows = list.children.map(item => [item.dataset.section || '', item.dataset.kind]);
+  assert.deepEqual(rows.slice(0, 6), [
+    ['home', 'section'],
+    ['', 'integration'],
+    ['', 'provider'],
+    ['', 'home'],
+    ['', 'agents'],
+    ['', 'library']
+  ]);
+  assert.deepEqual(rows[6], ['handoff', 'handoff']);
+  assert.equal(list.children.length, 12, 'one heading row, eleven plan lines');
+  const heading = list.children[0].children[0];
+  assert.equal(heading.textContent, 'Your assistant sets up Music Production Home');
+  assert.equal(heading.getAttribute('role'), 'heading');
+  // The handoff line heads the second half and is still a plan line.
+  const handoff = list.children[6];
+  assert.equal(handoff.className, 'pa-folder__plan-section');
+  const title = handoff.children[1].children[0];
+  assert.equal(title.getAttribute('role'), 'heading');
+  assert.equal(title.textContent, 'Your Portfolio Manager then opens Album-5');
+
+  // OQ1: nothing to create for the Home, so the assistant adds the song to it.
+  shared.renderSetupLines(list, handoffLines(shared, { homeLines: false }), document, {
+    sections: names
+  });
+  assert.equal(
+    list.children[0].textContent,
+    'Your assistant adds Album-5 to Music Production Home'
+  );
+  assert.equal(list.children.length, 10);
+
+  // A plan that hands nothing over is drawn exactly as before.
+  const plain = shared.setupLinesView([{ kind: 'workspace', name: 'Creates a workspace' }]);
+  shared.renderSetupLines(list, plain, document, { sections: names });
+  assert.equal(list.dataset.sections, undefined);
+  assert.deepEqual(
+    list.children.map(item => item.dataset.kind),
+    ['workspace']
+  );
+});
+
+test('the handoff line shows each state of the Portfolio Manager’s open', () => {
+  const { shared, document } = load();
+  const names = { home: 'Music Production Home', song: 'Album-5' };
+  const states = [
+    ['waiting', 'Your Portfolio Manager then opens Album-5', '○', 'Waiting'],
+    ['working', 'Portfolio Manager is opening Album-5…', '◔', 'In progress'],
+    ['done', 'Portfolio Manager opened Album-5', '✓', 'Done'],
+    ['failed', 'Your Portfolio Manager then opens Album-5', '!', 'Did not finish']
+  ];
+  // The run keeps the plan's words; the card says what the state means (FR19).
+  for (const [state, name, glyph, word] of states) {
+    const list = document.createElement('ul');
+    shared.renderSetupLines(
+      list,
+      handoffLines(shared, {
+        handoff: { state, name: 'Your Portfolio Manager then opens Album-5', detail: '' }
+      }),
+      document,
+      { sections: names }
+    );
+    const handoff = list.children.find(item => item.dataset.section === 'handoff');
+    assert.equal(handoff.dataset.state, state, state);
+    assert.equal(handoff.textContent, `${glyph}${name} — ${word}`, state);
+  }
+  // Words the card does not recognize, or another song's, are shown as they are.
+  assert.equal(
+    shared.handoffLineName({ name: 'Opens it later', state: 'done' }, 'Album-5'),
+    'Opens it later'
+  );
+  assert.equal(
+    shared.handoffLineName(
+      { name: 'Your Music Portfolio Manager then opens Album-6', state: 'done' },
+      'Album-5'
+    ),
+    'Your Music Portfolio Manager then opens Album-6'
+  );
+  assert.equal(
+    shared.handoffLineName(
+      { name: 'Your Music Portfolio Manager then opens Album-5', state: 'working' },
+      'Album-5'
+    ),
+    'Music Portfolio Manager is opening Album-5…'
+  );
+});
+
+test('handoffNames reads the Home and the song from a plan, a run or a build plan', () => {
+  const { shared } = load();
+  const plain = value => JSON.parse(JSON.stringify(value));
+  const visual = { entity: { kind: 'workspace', name: 'Album-5' } };
+  assert.deepEqual(
+    plain(
+      shared.handoffNames({ destination: { status: 'new', name: 'Music Production Home' }, visual })
+    ),
+    { home: 'Music Production Home', song: 'Album-5' }
+  );
+  // The build pane's plan names its Home under home.
+  assert.deepEqual(
+    plain(
+      shared.handoffNames({ home: { name: 'Music Production Home', status: 'existing' }, visual })
+    ),
+    { home: 'Music Production Home', song: 'Album-5' }
+  );
+  assert.deepEqual(plain(shared.handoffNames(null)), { home: '', song: '' });
+  // Without names the headings still read plainly.
+  assert.equal(
+    shared.handoffSections(handoffLines(shared), {}).heading,
+    'Your assistant sets up your Home'
+  );
+  // Home first: the picture is the Home, so the song is the handoff line's.
+  const suggested = {
+    destination: { status: 'new', name: 'Music Production Home' },
+    visual: { entity: { kind: 'home', name: 'Music Production Home' } },
+    lines: handoffLines(shared, {
+      handoff: { name: 'Your Portfolio Manager then suggests opening Album-5' }
+    })
+  };
+  assert.deepEqual(plain(shared.handoffNames(suggested)), {
+    home: 'Music Production Home',
+    song: 'Album-5'
+  });
+  assert.deepEqual(plain(shared.handoffLineParts(suggested.lines)), {
+    manager: 'Your Portfolio Manager',
+    song: 'Album-5'
+  });
+  assert.equal(shared.handoffLineParts([{ kind: 'workspace', name: 'Creates' }]), null);
+});
+
+test('a suggested open names its states, and each card draws its own half', () => {
+  const { shared, document } = load();
+  const names = { home: 'Music Production Home', song: 'Album-5' };
+  const suggests = 'Your Portfolio Manager then suggests opening Album-5';
+  assert.equal(
+    shared.handoffLineName({ name: suggests, state: 'working' }, 'Album-5'),
+    'Portfolio Manager is opening Album-5…'
+  );
+  assert.equal(
+    shared.handoffLineName({ name: suggests, state: 'done' }, 'Album-5'),
+    'Portfolio Manager opened Album-5'
+  );
+  const lines = handoffLines(shared, { handoff: { name: suggests } });
+  const list = document.createElement('ul');
+  // The assistant's card: the Home's half, closed by the manager's suggestion.
+  shared.renderSetupLines(list, lines, document, { sections: names, half: 'home' });
+  assert.equal(list.dataset.sections, 'handoff');
+  assert.deepEqual(
+    list.children.map(item => item.dataset.kind),
+    ['section', 'integration', 'provider', 'home', 'agents', 'library', 'handoff']
+  );
+  // The Home's card: only what opening the song does, with no headings.
+  shared.renderSetupLines(list, lines, document, { sections: names, half: 'song' });
+  assert.equal(list.dataset.sections, undefined);
+  assert.deepEqual(
+    list.children.map(item => item.dataset.kind),
+    ['workspace', 'folder', 'mode', 'agents', 'task']
+  );
+});

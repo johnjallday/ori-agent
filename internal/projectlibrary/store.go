@@ -210,6 +210,13 @@ func (s *Store) mutateWithPolicy(scope Scope, expected int64, op operation, poli
 // scan that began under an installed provider may only publish candidates if
 // that exact provider still matches at the final persistence boundary.
 func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, policy func(*workspace.AssistantProgramState, *workspace.Workspace) bool, fn func(*Document) (string, error)) (OperationReceipt, bool, error) {
+	return s.mutateWithHomeEffect(scope, expected, op, policy, fn, nil)
+}
+
+// mutateWithHomeEffect is mutateWithHomePolicy with an effect on the Home's own
+// state that is saved in the same Home write as the document, after fn
+// succeeded; a failing effect saves neither. A replayed operation runs neither.
+func (s *Store) mutateWithHomeEffect(scope Scope, expected int64, op operation, policy func(*workspace.AssistantProgramState, *workspace.Workspace) bool, fn func(*Document) (string, error), effect func(*workspace.AssistantProgramState) error) (OperationReceipt, bool, error) {
 	if s == nil || s.workspaces == nil || !scope.valid() || expected < 0 || fn == nil ||
 		!validText(op.key, 160) || op.key == "" || !validText(op.action, 80) || op.action == "" ||
 		!validText(op.digest, 160) || op.digest == "" || expected == 0 {
@@ -276,6 +283,11 @@ func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, 
 		encoded, err := json.Marshal(doc)
 		if err != nil || len(encoded) > maxDocumentBytes {
 			return ErrLimit
+		}
+		if effect != nil {
+			if err := effect(state); err != nil {
+				return fmt.Errorf("%w: %w", ErrConflict, err)
+			}
 		}
 		state.ProjectLibrary = encoded
 		home.SetAssistantProgramState(state)

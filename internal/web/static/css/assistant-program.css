@@ -343,6 +343,78 @@
   }
 }
 
+/* The Home manager's suggestion to open a song the assistant brought here: the
+   one press that makes its workspace and hires its assistant. */
+.assistant-program-suggestions[hidden] {
+  display: none;
+}
+.assistant-program-suggestion {
+  margin: 1rem 0;
+  padding: 1.1rem 1.25rem;
+  color: var(--assistant-ink);
+  background: var(--assistant-panel);
+  border: 1px solid var(--assistant-line);
+  border-left: 4px solid var(--assistant-amber);
+  border-radius: 3px 12px 12px 3px;
+}
+.assistant-program-suggestion h2 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+.assistant-program-suggestion p {
+  max-width: 62ch;
+  margin: 0 0 0.6rem;
+  color: var(--assistant-muted);
+  line-height: 1.5;
+}
+.assistant-program-suggestion-hire strong {
+  color: var(--assistant-ink);
+}
+.assistant-program-suggestion-brief {
+  display: grid;
+  gap: 0.3rem;
+  max-width: 62ch;
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+}
+.assistant-program-suggestion-brief small {
+  color: var(--assistant-muted);
+  font-weight: 400;
+}
+.assistant-program-suggestion-lines {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 70ch;
+  margin: 0 0 0.9rem;
+  padding: 0;
+  list-style: none;
+}
+.assistant-program-suggestion-lines li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.assistant-program-suggestion-lines .pa-folder__plan-text {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.assistant-program-suggestion-lines small {
+  color: var(--assistant-muted);
+}
+.assistant-program-suggestion-status:empty {
+  display: none;
+}
+.assistant-program-suggestion-status {
+  margin: 0.6rem 0 0;
+}
+@media (max-width: 700px) {
+  .assistant-program-suggestion-actions .modern-btn {
+    width: 100%;
+  }
+}
+
 /* While setup is unfinished the hero keeps the name, stage and level but gives
    the page back to the next step. Relationship progress is unchanged. */
 .assistant-program-page.is-setup-first .assistant-program-hero {

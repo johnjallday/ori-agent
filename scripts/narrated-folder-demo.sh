@@ -7,7 +7,7 @@
 # folder ("Ori Music Demo") under the sandbox's Documents.
 #
 # Usage:
-#   ./scripts/narrated-folder-demo.sh <mode> --reaper-source DIR [--music-source DIR] [--port PORT]
+#   ./scripts/narrated-folder-demo.sh <mode> --reaper-source DIR [--music-source DIR [--music-ref REF]] [--port PORT]
 #
 #   installed            both candidates are installed, and Ori treats those
 #                        exact local copies as the reviewed releases.
@@ -20,6 +20,8 @@
 #
 # installed and integration-missing need --music-source; it must be at least
 # the reviewed Music Project Management floor (internal/reviewedintegration).
+# --music-ref exports that existing commit or tag (a release at or above the
+# floor) instead of the checkout's HEAD, without switching the checkout.
 #
 # Sources default to ORI_REAPER_PLUGIN_SOURCE and ORI_MUSIC_PLUGIN_SOURCE, as
 # for scripts/reaper-demo.sh, which this wraps; both must be clean Git
@@ -42,11 +44,12 @@ fail() {
 mode="${1:-}"
 case "$mode" in
 installed | integration-missing | provider-missing) ;;
-*) fail "usage: $0 <installed|integration-missing|provider-missing> --reaper-source DIR [--music-source DIR] [--port PORT]" ;;
+*) fail "usage: $0 <installed|integration-missing|provider-missing> --reaper-source DIR [--music-source DIR [--music-ref REF]] [--port PORT]" ;;
 esac
 shift
 reaper_source="${ORI_REAPER_PLUGIN_SOURCE:-}"
 music_source="${ORI_MUSIC_PLUGIN_SOURCE:-}"
+music_ref=""
 port=8952
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -56,6 +59,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--music-source)
 		music_source="${2:-}"
+		shift 2
+		;;
+	--music-ref)
+		music_ref="${2:-}"
+		[[ -n "$music_ref" ]] || fail "--music-ref needs an existing commit or tag"
 		shift 2
 		;;
 	--port)
@@ -84,6 +92,9 @@ log="$sandbox/narrated-demo.log"
 args=(serve --reaper-source "$reaper_source" --port "$port" --sandbox "$sandbox")
 if [[ "$mode" != "provider-missing" ]]; then
 	args+=(--music-source "$music_source" --install-order music-first)
+	if [[ -n "$music_ref" ]]; then
+		args+=(--music-ref "$music_ref")
+	fi
 fi
 "$root/scripts/reaper-demo.sh" "${args[@]}" >"$log" 2>&1 &
 demo_pid=$!

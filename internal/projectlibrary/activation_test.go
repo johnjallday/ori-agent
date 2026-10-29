@@ -1085,3 +1085,240 @@ func TestActivation_RevocationAndSameNamedReplacementRefuseReviewedCreator(t *te
 		})
 	}
 }
+
+// A song opened with a goal is created with it, in the creator's one write.
+func TestActivation_RealCreatorCreatesTheSongWithItsReviewedGoal(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.ReviewWithGoal(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song", "  Get this\tsong   ready to mix ")
+	if err != nil {
+		t.Fatalf("goal review: %v", err)
+	}
+	saved, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, ok := findReview(saved, review.Token, "activate_project")
+	if !ok || receipt.Activation.Goal != "Get this song ready to mix" {
+		t.Fatalf("the review did not bind the normalized goal: %+v", receipt.Activation)
+	}
+	result, err := service.Commit(t.Context(), scope, "single", review.Token, "goal-song")
+	if err != nil {
+		t.Fatalf("goal commit: %v", err)
+	}
+	child, err := file.Get(result.WorkspaceID)
+	if err != nil || child.Mission != "Get this song ready to mix" || !child.GoalFirstRunPending {
+		t.Fatalf("the song was not created with its goal: %+v %v", child, err)
+	}
+}
+
+// Without a goal the binding, its digest and the creator's request are exactly
+// what they were before goals existed.
+func TestActivation_NoGoalKeepsTheBindingAndRequestUnchanged(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, ok := findReview(saved, review.Token, "activate_project")
+	if !ok || receipt.Activation.Goal != "" {
+		t.Fatalf("no goal was asked for: %+v", receipt.Activation)
+	}
+	encoded, err := json.Marshal(*receipt.Activation)
+	if err != nil || strings.Contains(string(encoded), `"goal"`) {
+		t.Fatalf("an empty goal changed the binding's JSON: %s %v", encoded, err)
+	}
+	if request := activationRequest(review.Token, *receipt.Activation); request.Goal != "" {
+		t.Fatalf("an empty goal reached the creator: %+v", request)
+	}
+	result, err := service.Commit(t.Context(), scope, "single", review.Token, "no-goal-song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := file.Get(result.WorkspaceID)
+	if err != nil || child.Mission != "" || child.GoalFirstRunPending {
+		t.Fatalf("a song opened without a goal got one: %+v %v", child, err)
+	}
+}
+
+// A replay under the same key that carries another goal is refused; the song
+// keeps the goal its own commit was reviewed with.
+func TestActivation_ReplayWithAnotherGoalIsRefused(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReviewWithGoal(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song", strings.Repeat("g", maxActivationGoalRunes+1)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("an over-long goal was reviewed: %v", err)
+	}
+	mix, err := service.ReviewWithGoal(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song", "Mix it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err = a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	master, err := service.ReviewWithGoal(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song", "Master it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Commit(t.Context(), scope, "single", master.Token, "open:goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Commit(t.Context(), scope, "single", mix.Token, "open:goal"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a replay with another goal was accepted: %v", err)
+	}
+	replay, err := service.Commit(t.Context(), scope, "single", master.Token, "open:goal")
+	if err != nil || !replay.Replay || replay.WorkspaceID != result.WorkspaceID {
+		t.Fatalf("the reviewed replay: %+v %v", replay, err)
+	}
+	child, err := file.Get(result.WorkspaceID)
+	if err != nil || child.Mission != "Master it" {
+		t.Fatalf("the song's goal: %+v %v", child, err)
+	}
+	ids, err := file.List()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("a second song was made: %v %v", ids, err)
+	}
+}
+
+// FR13: a song a folder setup opened leaves the Home one setup-open receipt,
+// written with the song's catalog link and naming it; a replay adds none.
+func TestActivation_SetupOpenReceiptIsWrittenWithTheLink(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:offer-1:single", ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a setup open without its offer: %v", err)
+	}
+	result, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:offer-1:single", "offer-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts := func() []workspace.AssistantPortfolioSetupOpenReceipt {
+		home, err := file.Get(scope.HomeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return home.GetAssistantProgramState().Portfolio.SetupOpenReceipts
+	}
+	got := receipts()
+	saved, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := sessionEntry(saved, "single").Link
+	if len(got) != 1 || got[0].OfferID != "offer-1" || got[0].EntryID != "single" || link == nil ||
+		got[0].LinkID != link.LinkID || got[0].LinkID != result.LinkID || got[0].ProjectWorkspaceID != result.WorkspaceID || got[0].RecordedAt.IsZero() {
+		t.Fatalf("receipts = %+v link = %+v result = %+v", got, link, result)
+	}
+	replay, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:offer-1:single", "offer-1")
+	if err != nil || !replay.Replay || len(receipts()) != 1 {
+		t.Fatalf("replay = %+v %v receipts = %+v", replay, err, receipts())
+	}
+	// The Open row's commit records none.
+	if home, _ := file.Get(scope.HomeID); home.GetAssistantProgramState().Portfolio.SetupOpenReceipts[0].OfferID != "offer-1" {
+		t.Fatal("the receipt changed")
+	}
+}
+
+// A setup-open receipt that cannot be kept saves neither it nor the link.
+func TestActivation_SetupOpenReceiptAndLinkAreOneWrite(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:bad", "offer/with/a/path"); err == nil {
+		t.Fatal("an invalid receipt was accepted")
+	}
+	saved, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionEntry(saved, "single").Link != nil || len(home.GetAssistantProgramState().Portfolio.SetupOpenReceipts) != 0 {
+		t.Fatalf("half a write was saved: link=%+v receipts=%+v", sessionEntry(saved, "single").Link, home.GetAssistantProgramState().Portfolio.SetupOpenReceipts)
+	}
+}
+
+// The review's digest covers the goal: a stored review whose goal alone was
+// changed afterwards commits nothing; the same review with its own goal does.
+func TestActivation_ReviewTokenBindsTheGoal(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.ReviewWithGoal(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song", "Mix it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setGoal := func(key, goal string) {
+		t.Helper()
+		current, err := a.library.Read(scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := a.library.mutate(scope, current.Revision, operation{key: key, action: "test_set_goal", digest: key},
+			func(doc *Document) (string, error) {
+				for i := range doc.Reviews {
+					if doc.Reviews[i].Token == review.Token {
+						doc.Reviews[i].Activation.Goal = goal
+						doc.Reviews[i].Revision = doc.Revision + 1
+					}
+				}
+				return key, nil
+			}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setGoal("tamper", "Master it")
+	if _, err := service.Commit(t.Context(), scope, "single", review.Token, "open:bound"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a review whose goal changed was committed: %v", err)
+	}
+	if ids, err := file.List(); err != nil || len(ids) != 1 {
+		t.Fatalf("a song was made: %v %v", ids, err)
+	}
+	setGoal("restore", "Mix it")
+	result, err := service.Commit(t.Context(), scope, "single", review.Token, "open:bound")
+	if err != nil {
+		t.Fatalf("the review with its own goal: %v", err)
+	}
+	if child, err := file.Get(result.WorkspaceID); err != nil || child.Mission != "Mix it" {
+		t.Fatalf("the song's goal: %+v %v", child, err)
+	}
+}

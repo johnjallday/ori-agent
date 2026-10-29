@@ -279,6 +279,14 @@ func (f *fakeFolderDigest) ResolveJourney(_ context.Context, _ string, offerID s
 	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferResolved}, nil
 }
 
+func (f *fakeFolderDigest) HomeSuggestions(_ context.Context, _ string, homeID string) ([]personalassistant.FolderOfferView, error) {
+	f.continuationHomes = append(f.continuationHomes, homeID)
+	if homeID != "verified-home" {
+		return []personalassistant.FolderOfferView{}, nil
+	}
+	return []personalassistant.FolderOfferView{{ID: "offer-song", Status: personalassistant.FolderOfferPending, Folder: "Album-5"}}, nil
+}
+
 func (f *fakeFolderDigest) PortfolioContinuations(_ context.Context, _ string, homeID string) ([]personalassistant.FolderContinuation, error) {
 	f.continuationHomes = append(f.continuationHomes, homeID)
 	if homeID != "verified-home" {
@@ -800,6 +808,37 @@ func TestFolderContinuations_ReadOnlyOpaqueAndStrict(t *testing.T) {
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Fatalf("%s => %d, want 405", method, w.Code)
 		}
+	}
+}
+
+// The Home's suggestions read takes one Home ID, like the continuations read.
+func TestFolderHomeSuggestions_ReadOnlyAndStrict(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	const route = "/api/personal-assistant/folder-digest/home-suggestions"
+	get := func(method, target string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.GetFolderHomeSuggestions(w, httptest.NewRequest(method, target, nil))
+		return w
+	}
+	ok := get(http.MethodGet, route+"?home_id=verified-home")
+	if ok.Code != http.StatusOK || !strings.Contains(ok.Body.String(), `"suggestions":[{`) || !strings.Contains(ok.Body.String(), `"offer-song"`) {
+		t.Fatalf("status=%d body=%s", ok.Code, ok.Body.String())
+	}
+	if w := get(http.MethodGet, route+"?home_id=someone-elses-home"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"suggestions":[]`) {
+		t.Fatalf("foreign Home: %d %s", w.Code, w.Body.String())
+	}
+	before := len(fake.continuationHomes)
+	for _, target := range []string{route, route + "?home_id=", route + "?home_id=verified-home&path=/Users/me/Music"} {
+		if w := get(http.MethodGet, target); w.Code != http.StatusBadRequest {
+			t.Fatalf("%s => %d, want 400", target, w.Code)
+		}
+	}
+	if len(fake.continuationHomes) != before {
+		t.Fatalf("a refused request reached the service: %v", fake.continuationHomes[before:])
+	}
+	if w := get(http.MethodPost, route+"?home_id=verified-home"); w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST => %d, want 405", w.Code)
 	}
 }
 

@@ -71,6 +71,7 @@
     assistant: 'bi-person-badge',
     task: 'bi-clipboard-check',
     library: 'bi-collection',
+    handoff: 'bi-person-check',
     songs: 'bi-music-note-list',
     profile: 'bi-sliders',
     unavailable: 'bi-dash-circle',
@@ -84,15 +85,113 @@
     return SETUP_LINE_KIND_ICONS[String(kind || '').trim()] || 'bi-dot';
   }
 
+  // handoffSections splits a single song's lines at its handoff line: what the
+  // assistant does for the Home, under a heading naming the Home, then what the
+  // Home's Portfolio Manager does for the song, under the handoff line itself.
+  // With nothing to create for the Home, the first heading says the song is
+  // added to it. names is { home, song } from the plan's destination and
+  // visual. null for a plan that hands nothing over.
+  function handoffSections(lines, names = {}) {
+    const at = lines.findIndex(line => line.kind === 'handoff');
+    if (at < 0) return null;
+    const first = lines.slice(0, at);
+    const home = String(names?.home || '').trim() || 'your Home';
+    const song = String(names?.song || '').trim();
+    const creates = first.some(line => line.kind === 'home' || line.kind === 'agents');
+    return {
+      heading:
+        creates || !song
+          ? `Your assistant sets up ${home}`
+          : `Your assistant adds ${song} to ${home}`,
+      first,
+      handoff: lines[at],
+      rest: lines.slice(at + 1)
+    };
+  }
+
+  const HANDOFF_LINE = /^Your (.+) then (?:opens|suggests opening) (.+)$/;
+
+  // handoffLineName is the handoff line's words for its state (FR19): the plan
+  // says "Your Portfolio Manager then suggests opening Album-5"; while it works,
+  // "Portfolio Manager is opening Album-5…"; once done, "Portfolio Manager
+  // opened Album-5". A waiting or failed line keeps the plan's words, and a
+  // line not worded that way is shown as it is. The run never stores these
+  // words, so a resumed plan is still the one that was confirmed.
+  function handoffLineName(line, song) {
+    const name = String(line?.name || '');
+    const title = String(song || '').trim();
+    const match = title ? name.match(HANDOFF_LINE) : null;
+    if (!match || match[2] !== title) return name;
+    if (line.state === 'working') return `${match[1]} is opening ${title}…`;
+    if (line.state === 'done') return `${match[1]} opened ${title}`;
+    return name;
+  }
+
+  // handoffLineParts reads the manager ("Your Portfolio Manager") and the song
+  // from a plan's handoff line; null when there is none or it is worded
+  // otherwise.
+  function handoffLineParts(lines) {
+    const line = (Array.isArray(lines) ? lines : []).find(item => item?.kind === 'handoff');
+    const match = String(line?.name || '').match(HANDOFF_LINE);
+    return match ? { manager: `Your ${match[1]}`, song: match[2] } : null;
+  }
+
+  // handoffNames reads the Home and song a plan or run view names: the
+  // destination it goes into, and the workspace it creates or, when the
+  // picture is of the Home, the song its handoff line names.
+  function handoffNames(source) {
+    const entity = source?.visual?.entity;
+    const song =
+      entity?.kind === 'workspace'
+        ? String(entity?.name || '').trim()
+        : handoffLineParts(source?.lines)?.song || '';
+    return {
+      home: String(source?.destination?.name || source?.home?.name || '').trim(),
+      song
+    };
+  }
+
   // renderSetupLines draws a plan or a run's lines into a list. The state is a
   // glyph and a visually hidden word, never colour alone. With
   // options.kindIcons each row also leads with its kind's icon (the build
   // pane's checklist); Home's card and the mission card keep their plain rows.
+  // A single song's plan is drawn in two sections (handoffSections), named
+  // from options.sections ({ home, song }). options.half draws one of them:
+  // 'home' (the assistant's card: the Home's lines, closed by the handoff
+  // line) or 'song' (the Home's suggestion: what opening the song does).
   function renderSetupLines(list, lines, doc = document, options = {}) {
     if (!list) return;
     list.replaceChildren();
+    let sections = handoffSections(lines, options.sections);
+    if (sections && options.half === 'song') {
+      lines = sections.rest;
+      sections = null;
+    } else if (sections && options.half === 'home') {
+      lines = [...sections.first, sections.handoff];
+    }
+    if (sections) {
+      list.dataset.sections = 'handoff';
+      const heading = doc.createElement('li');
+      heading.className = 'pa-folder__plan-section';
+      heading.dataset.kind = 'section';
+      heading.dataset.section = 'home';
+      const title = doc.createElement('span');
+      title.className = 'pa-folder__plan-section-title';
+      title.setAttribute('role', 'heading');
+      title.setAttribute('aria-level', '4');
+      title.textContent = sections.heading;
+      heading.append(title);
+      list.append(heading);
+    } else {
+      delete list.dataset.sections;
+    }
     lines.forEach(line => {
       const item = doc.createElement('li');
+      if (sections && line === sections.handoff) {
+        // The handoff line heads the second section and keeps its progress.
+        item.className = 'pa-folder__plan-section';
+        item.dataset.section = 'handoff';
+      }
       item.dataset.kind = line.kind || 'other';
       if (line.state) item.dataset.state = line.state;
       if (options.kindIcons) {
@@ -110,7 +209,16 @@
       icon.textContent = line.state ? SETUP_LINE_GLYPHS[line.state][0] : '•';
       const body = doc.createElement('span');
       body.className = 'pa-folder__plan-text';
-      body.append(line.name);
+      if (sections && line === sections.handoff) {
+        const title = doc.createElement('span');
+        title.className = 'pa-folder__plan-section-title';
+        title.setAttribute('role', 'heading');
+        title.setAttribute('aria-level', '4');
+        title.textContent = handoffLineName(line, options.sections?.song);
+        body.append(title);
+      } else {
+        body.append(line.name);
+      }
       if (line.detail) {
         const detail = doc.createElement('small');
         detail.textContent = line.detail;
@@ -221,6 +329,10 @@
   globalThis.OriFolderPlanLines = {
     setupLinesView,
     satisfiedLinesView,
+    handoffSections,
+    handoffNames,
+    handoffLineName,
+    handoffLineParts,
     renderSetupLines,
     setupLineKindIcon,
     hireView

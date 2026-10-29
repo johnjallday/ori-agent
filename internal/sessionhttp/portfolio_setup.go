@@ -66,6 +66,25 @@ func (h *Handler) portfolioHomeTemplate(ctx context.Context, providerPluginID st
 	return matches[0], nil
 }
 
+// PortfolioHomeManager is the primary Home role the provider's reviewed Home
+// template declares (its manager's name before the Home exists), or "" when
+// the template cannot be read.
+func (h *Handler) PortfolioHomeManager(ctx context.Context, providerPluginID string) string {
+	if h == nil {
+		return ""
+	}
+	entry, err := h.portfolioHomeTemplate(ctx, providerPluginID)
+	if err != nil || entry.RequiredHomeRoles == nil {
+		return ""
+	}
+	for _, role := range entry.RequiredHomeRoles.Roles {
+		if role.Primary && strings.TrimSpace(role.Label) != "" {
+			return strings.TrimSpace(role.Label)
+		}
+	}
+	return ""
+}
+
 // ReviewPortfolioHome reviews creating the provider's Home through the same
 // handler the Create Group modal posts to.
 func (h *Handler) ReviewPortfolioHome(ctx context.Context, providerPluginID string) (PortfolioHomeReview, error) {
@@ -168,6 +187,92 @@ func (h *Handler) portfolioLibraryScope(ownerUserID, homeID string) (projectlibr
 // PortfolioLibraryState reads the Home's library for the folder: whether it is
 // on, the active root that covers the folder, and that root's last listing.
 func (h *Handler) PortfolioLibraryState(ownerUserID, homeID, folder string) (PortfolioLibraryState, error) {
+	return h.libraryStateFor(ownerUserID, homeID, folder, false)
+}
+
+// SongLibraryState is PortfolioLibraryState for one song's own folder: a root
+// of this Home that already covers the song (an earlier collection's) counts,
+// so no second root is connected for it (OQ4).
+func (h *Handler) SongLibraryState(ownerUserID, homeID, folder string) (PortfolioLibraryState, error) {
+	return h.libraryStateFor(ownerUserID, homeID, folder, true)
+}
+
+// ErrLibrarySongNotListed means the Home's library does not list the song's
+// folder exactly once.
+var ErrLibrarySongNotListed = errors.New("the song is not listed exactly once")
+
+// FindPortfolioSong is the one catalog entry the Home's library lists for the
+// song's folder: the root itself, or its folder under a covering root.
+func (h *Handler) FindPortfolioSong(ownerUserID, homeID, folder string) (string, error) {
+	scope, err := h.portfolioLibraryScope(ownerUserID, homeID)
+	if err != nil {
+		return "", err
+	}
+	doc, err := h.assistantLibraryStore().Read(scope)
+	if err != nil {
+		return "", err
+	}
+	root, relative := songRoot(doc, h.inactiveRoots(scope.HomeID), folder, true)
+	if root == nil {
+		return "", ErrLibrarySongNotListed
+	}
+	found := ""
+	for _, entry := range doc.Entries {
+		for _, observed := range entry.Observations {
+			if observed.RootID == root.ID && observed.RelativeFolder == relative {
+				if found != "" && found != entry.ID {
+					return "", ErrLibrarySongNotListed
+				}
+				found = entry.ID
+			}
+		}
+	}
+	if found == "" {
+		return "", ErrLibrarySongNotListed
+	}
+	return found, nil
+}
+
+func (h *Handler) inactiveRoots(homeID string) map[string]bool {
+	inactive := map[string]bool{}
+	if station, err := h.workspaceTaskStore.Get(homeID); err == nil && station != nil {
+		for _, id := range station.GetAssistantProgramState().ProjectLibraryInactiveRoots {
+			inactive[id] = true
+		}
+	}
+	return inactive
+}
+
+// songRoot is the active root whose folder is exactly folder, or, when cover,
+// the nearest active root folder holds it in, with folder relative to it.
+func songRoot(doc projectlibrary.Document, inactive map[string]bool, folder string, cover bool) (*projectlibrary.Root, string) {
+	folder = filepath.Clean(folder)
+	var best *projectlibrary.Root
+	relative := ""
+	for i := range doc.Roots {
+		root := &doc.Roots[i]
+		if root.RevokedAt != nil || inactive[root.ID] {
+			continue
+		}
+		path := filepath.Clean(root.Path)
+		if path == folder {
+			return root, ""
+		}
+		if !cover || !strings.HasPrefix(folder, path+string(filepath.Separator)) {
+			continue
+		}
+		if best == nil || len(path) > len(filepath.Clean(best.Path)) {
+			rel, err := filepath.Rel(path, folder)
+			if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+				continue
+			}
+			best, relative = root, rel
+		}
+	}
+	return best, relative
+}
+
+func (h *Handler) libraryStateFor(ownerUserID, homeID, folder string, cover bool) (PortfolioLibraryState, error) {
 	scope, err := h.portfolioLibraryScope(ownerUserID, homeID)
 	if err != nil {
 		return PortfolioLibraryState{}, err
@@ -185,19 +290,7 @@ func (h *Handler) PortfolioLibraryState(ownerUserID, homeID, folder string) (Por
 		return PortfolioLibraryState{}, err
 	}
 	state := PortfolioLibraryState{Initialized: true}
-	inactive := map[string]bool{}
-	if station, getErr := h.workspaceTaskStore.Get(scope.HomeID); getErr == nil && station != nil {
-		for _, id := range station.GetAssistantProgramState().ProjectLibraryInactiveRoots {
-			inactive[id] = true
-		}
-	}
-	folder = filepath.Clean(folder)
-	var root *projectlibrary.Root
-	for i := range doc.Roots {
-		if doc.Roots[i].RevokedAt == nil && !inactive[doc.Roots[i].ID] && filepath.Clean(doc.Roots[i].Path) == folder {
-			root = &doc.Roots[i]
-		}
-	}
+	root, _ := songRoot(doc, h.inactiveRoots(scope.HomeID), folder, cover)
 	if root == nil {
 		return state, nil
 	}

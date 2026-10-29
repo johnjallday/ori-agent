@@ -43,6 +43,7 @@ func (s *FolderDigestService) attachSetupRun(offer FolderOffer, v *FolderOfferVi
 		PlanDigest: run.PlanDigest, Status: run.Status, StopReason: run.StopReason, EntryCandidates: append([]string(nil), run.EntryCandidates...),
 		Lines: append([]FolderPlanLine(nil), run.Lines...), Brief: run.Brief,
 		Visual: CloneFolderSetupVisual(run.Visual), HomeUpgrade: cloneFolderHomeLink(run.HomeUpgrade),
+		SuggestedIn: cloneFolderHomeLink(run.SuggestedIn),
 	}
 	if run.Hire != nil {
 		hire := *run.Hire
@@ -354,8 +355,12 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			Intent: offer.Setup.Intent, Destination: offer.Setup.Intent.Destination, Hire: offer.Setup.Hire,
 			Visual: CloneFolderSetupVisual(offer.Setup.Visual),
 		}
-		// A resume carries on with the brief the run was started with.
-		brief = offer.Setup.Brief
+		// A resume carries on with the brief the run was started with, except
+		// a single song's open: its brief is asked in the Home, on that press.
+		homeOpen := input.Open && !offer.Setup.Opening && brief != "" && hasPlanLineKind(offer.Setup.Lines, FolderPlanHandoff)
+		if !homeOpen {
+			brief = offer.Setup.Brief
+		}
 		if plan.Destination != nil {
 			guard, ok := s.deps.Setup.(FolderSetupDestinationGuard)
 			request := s.setupRequest(ctx, userID, *offer)
@@ -414,14 +419,24 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 				lines[i].State = FolderLineWaiting
 			}
 		}
-		runID := ""
+		runID, homeID, opening := "", "", false
 		if item.Setup != nil {
-			runID = item.Setup.RunID
+			// A resume keeps the run and the Home an earlier pass built or joined,
+			// so the Home is found again, never mistaken for a stranger's. A
+			// single song's Open is its own press after Set up: pressing it (or
+			// answering which file to open) starts the Portfolio Manager's open,
+			// and every later pass keeps going there.
+			runID, homeID = item.Setup.RunID, item.Setup.HomeID
+			opening = item.Setup.Opening || input.Open || input.EntryName != ""
+		} else if input.Open && HomeSuggestionReady(plan) {
+			// A later song into a ready Home: the Home's manager lists and opens
+			// it on its own suggestion, in one press made in the Home.
+			opening = true
 		}
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
-			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
-			Visual: CloneFolderSetupVisual(plan.Visual), Monitoring: monitoring,
+			RunID: runID, HomeID: homeID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
+			Visual: CloneFolderSetupVisual(plan.Visual), Monitoring: monitoring, Opening: opening,
 		}
 		if plan.Hire != nil {
 			hire := *plan.Hire
@@ -471,6 +486,7 @@ func (s *FolderDigestService) runSetup(parent context.Context, userID string, of
 	if offer.Setup != nil {
 		request.Brief = offer.Setup.Brief
 		request.Monitoring = offer.Setup.Monitoring
+		request.Open = offer.Setup.Opening
 	}
 	if review := offer.ConversationReview; review != nil {
 		request.WorkspaceName = review.WorkspaceName
@@ -520,6 +536,17 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
 		}
 		return
+	}
+	if isHandoffSetup(*offer) {
+		// A single song its Home's manager opened resolves to the song, proved
+		// against the Home, the link and the Home's setup-open receipt.
+		if _, err := s.ResolveHandoff(ctx, userID, offerID, "setup-"+offerID+"-handoff"); err != nil {
+			logger.Warn("Single-song setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
+			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+			return
+		}
+		s.linkOptionalLook(ctx, userID, offerID)
+		return // Setup consent never starts the optional project task.
 	}
 	if offer.Portfolio != nil {
 		// A collection resolves to its Home through the same proofs the
@@ -599,6 +626,7 @@ func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID s
 		}
 		run.EntryCandidates = append([]string(nil), u.EntryCandidates...)
 		run.HomeUpgrade = cloneFolderHomeLink(u.HomeUpgrade)
+		run.SuggestedIn = cloneFolderHomeLink(u.SuggestedIn)
 		return nil
 	})
 	if errors.Is(err, errFolderReplay) {

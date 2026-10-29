@@ -429,6 +429,131 @@ func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan 
 	return plan.Stamped()
 }
 
+// HandoffFacts are what a single song's plan is built from: the Home it is
+// listed in, read as a collection's plan reads it, and the song itself, read as
+// a single project's plan reads it.
+type HandoffFacts struct {
+	Home PortfolioFacts
+	Song PlanFacts
+	// SongName is the catalog target the run opens: the song folder's own name.
+	SongName string
+	// ManagerName is the Home's primary role, who opens the song.
+	ManagerName string
+}
+
+// HandoffOpenDetail says where the Home's manager takes it from: in the Home,
+// where the user decides whether to open the song and hire its assistant.
+const HandoffOpenDetail = "In the Home, you choose whether to open it and hire its assistant."
+
+// BuildHandoffPlan lists every consequence of a single song's setup, for a
+// song whose Home lists its projects. The assistant's Set up does the first
+// section: it sets up (or joins) the Home and lists the song there. The handoff
+// line says the Home's manager then suggests opening it; the lines after it are
+// what that Open does, pressed in the Home. The digest covers both, so the
+// Open is held to the plan the user saw. The intent is a portfolio intent that
+// opens exactly that song.
+func BuildHandoffPlan(facts HandoffFacts) personalassistant.FolderSetupPlan {
+	home, song := facts.Home, facts.Song
+	manager := strings.TrimSpace(facts.ManagerName)
+	intent := personalassistant.FolderSetupIntent{
+		OptionalTaskPolicy: personalassistant.FolderOptionalSummaryPolicy,
+		Portfolio:          true, Placement: "grouped", HomeTemplate: home.HomeTemplate, SharedProjects: true,
+		OpensProjects: []string{facts.SongName},
+		Integration:   song.Integration.State, IntegrationPlugin: song.Integration.PluginID, IntegrationVersion: song.Integration.Version,
+		Provider: home.Provider.State, ProviderPlugin: home.Provider.PluginID, ProviderVersion: home.Provider.Version,
+	}
+	lines := []personalassistant.FolderPlanLine{pluginLine(personalassistant.FolderPlanIntegration, "integration", song.Integration)}
+	provider := pluginLine(personalassistant.FolderPlanProvider, "plugin", home.Provider)
+	if provider.Detail == "" {
+		provider.Detail = "It provides the Home this workspace belongs to."
+	}
+	lines = append(lines, provider)
+	if !home.HomeExists {
+		intent.CreatesHome = true
+		lines = append(lines, personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanHome, Name: "Creates your " + home.HomeName,
+			Detail: "Your later projects of this kind join it.",
+		})
+	}
+	if !home.HomeExists || !home.HomeStaffed {
+		intent.StaffsHome = true
+		lines = append(lines, personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanAgents, Name: "Adds the agents the Home requires",
+			Detail: manager + " keeps track of the whole collection.",
+		})
+	}
+	if home.Profile != nil {
+		line, grants := profileLine(home.Profile, !home.HomeExists)
+		lines = append(lines, line)
+		intent.SetsProfile, intent.GrantsTemplates = true, grants
+	}
+	// T6, as for a collection: a Home this Set up creates reads song facts; an
+	// existing Home reads them only when its own switch is on.
+	intent.GrantsSongDetails = !home.HomeExists
+	intent.ReadsSongDetails = !home.HomeExists || home.SongDetails == SongDetailsOn
+	library := libraryDetailNamesOnly
+	if intent.ReadsSongDetails {
+		library = libraryDetailSongDetails(home.AppName)
+	}
+	lines = append(lines,
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanLibrary, Name: "Lists " + facts.SongName + " in the Home's library", Detail: library},
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHandoff, Name: "Your " + manager + " then suggests opening " + facts.SongName, Detail: HandoffOpenDetail},
+	)
+	where := " as a separate project in new Home “" + home.HomeName + "”"
+	if home.HomeExists {
+		where = " as a separate project in Home “" + home.HomeName + "”"
+	}
+	mode := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanMode, Name: "Uses File-only mode"}
+	if song.AppInstalled {
+		mode.Detail = "Ori does not control " + song.AppName + "."
+	} else {
+		mode.Detail = song.AppName + " itself is not installed here; File-only mode works without it."
+	}
+	if strings.HasPrefix(song.Integration.Source, "Local development copy") || strings.HasPrefix(home.Provider.Source, "Local development copy") {
+		mode.Detail += " Local development copy — not release-verified."
+	}
+	// D9: the project assistant is hired once and shared, and this Set up is
+	// the consent that covers the later songs too.
+	later := "the later " + pluralLabel(song.BlueprintLabel) + " you open in this Home"
+	agents := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds the agents this blueprint requires",
+		Detail: "Its assistant is shared: the same one joins " + later + "."}
+	if home.Sharing == SharingOff {
+		agents.Detail = "Its assistant is shared, and this turns adding it to " + later + " back on."
+	}
+	intent.GrantsConsent = home.Sharing != SharingOn
+	lines = append(lines,
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: "Creates a " + song.BlueprintLabel + " workspace named " + song.WorkspaceName + where},
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: FolderLinkLine},
+		mode,
+		agents,
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanTask, Name: FirstLookLine},
+	)
+	plan := personalassistant.NewFolderSetupPlan(lines)
+	plan.Intent = intent
+	plan.Destination = home.Destination
+	if song.Hire != nil {
+		hire := *song.Hire
+		plan.Hire = &hire
+	}
+	plan.BriefDefault = song.BriefDefault
+	// The assistant's Set up makes (or reuses) the Home; the song is the Home
+	// manager's to open, later, in the Home.
+	operation := personalassistant.FolderSoftwareCreate
+	if home.HomeExists {
+		operation = personalassistant.FolderSoftwareReuse
+	}
+	plan.Visual = &personalassistant.FolderSetupVisual{
+		RequirementsChecked: true,
+		Model:               song.Model,
+		Entity:              &personalassistant.FolderSetupEntity{Kind: "home", Name: home.HomeName, Operation: operation},
+		Plugins: []personalassistant.FolderSetupPlugin{
+			PluginVisual(personalassistant.FolderPlanIntegration, song.Integration),
+			PluginVisual(personalassistant.FolderPlanProvider, home.Provider),
+		},
+	}
+	return plan.Stamped()
+}
+
 // countPhrase is "1 Studio song" or "200 Studio songs" for a blueprint label.
 func countPhrase(n int, label string) string {
 	if n == 1 {

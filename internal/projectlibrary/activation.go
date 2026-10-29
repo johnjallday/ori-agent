@@ -72,6 +72,7 @@ func activationRequest(token string, binding ActivationBinding) projectconnectio
 	return projectconnection.Request{
 		ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: token,
 		EntryName: binding.ProjectFile, WorkspaceName: binding.WorkspaceName, GroupComposition: "grouped",
+		Goal: binding.Goal,
 	}
 }
 
@@ -165,8 +166,16 @@ func (r activationResolver) Resolve(token string) (string, error) {
 // write is a short-lived Home review; no selection grant, child, link, role or
 // source file is created. An ambiguous folder requires an explicit file name.
 func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID string, expected int64, selectedFile, workspaceName string) (ActivationReview, error) {
+	return s.ReviewWithGoal(ctx, scope, entryID, expected, selectedFile, workspaceName, "")
+}
+
+// ReviewWithGoal is Review for a project created with a goal. The goal is
+// bound into the review and the creator's input digest, so its commit creates
+// exactly that goal and a replay carrying another one is refused.
+func (s *ActivationService) ReviewWithGoal(ctx context.Context, scope Scope, entryID string, expected int64, selectedFile, workspaceName, goal string) (ActivationReview, error) {
+	goal = normalizeActivationGoal(goal)
 	if s == nil || s.inspector == nil || s.creator == nil || expected < 1 || entryID == "" || !validText(entryID, 160) ||
-		!validText(selectedFile, 255) || !validText(workspaceName, 128) || workspaceName == "" {
+		!validText(selectedFile, 255) || !validText(workspaceName, 128) || workspaceName == "" || !validActivationGoal(goal) {
 		return ActivationReview{}, ErrUnavailable
 	}
 	a := s.inspector
@@ -233,7 +242,7 @@ func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID str
 		RootID: root.ID, RootRevision: root.Revision, RelativeFolder: observed.RelativeFolder,
 		FolderIdentity: observed.FileIdentity, ProjectFile: selectedFile, ProjectFileIdentity: fileIdentity, WorkspaceName: workspaceName,
 		BlueprintID: eligible.BlueprintID, ProviderFingerprint: provider.ComponentFingerprint,
-		ProviderGeneration: provider.EvidenceGeneration(), ProviderInstalledAt: provider.InstalledAt}
+		ProviderGeneration: provider.EvidenceGeneration(), ProviderInstalledAt: provider.InstalledAt, Goal: goal}
 	resolver := activationResolver{inspector: a, scope: scope, token: token, binding: binding, ctx: ctx}
 	creator := s.creator(resolver)
 	if creator == nil {
@@ -281,6 +290,20 @@ func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID str
 // library's independent Home write succeeds; ObservedResult/Observe detect
 // that exact run on retry so no second project is ever created for it.
 func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, token, key string) (ActivationResult, error) {
+	return s.commit(ctx, scope, entryID, token, key, "")
+}
+
+// CommitSetupOpen is Commit for a song a folder setup's one Set up has the
+// Home's manager open: the Home's setup-open receipt for offerID is written in
+// the same Home write as the song's catalog link (FR13).
+func (s *ActivationService) CommitSetupOpen(ctx context.Context, scope Scope, entryID, token, key, offerID string) (ActivationResult, error) {
+	if offerID == "" || !validText(offerID, 160) {
+		return ActivationResult{}, ErrConflict
+	}
+	return s.commit(ctx, scope, entryID, token, key, offerID)
+}
+
+func (s *ActivationService) commit(ctx context.Context, scope Scope, entryID, token, key, setupOfferID string) (ActivationResult, error) {
 	if s == nil || s.inspector == nil || s.creator == nil || entryID == "" || token == "" || key == "" ||
 		!validText(entryID, 160) || !validText(token, 160) || !validText(key, 160) {
 		return ActivationResult{}, ErrConflict
@@ -378,7 +401,14 @@ func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, to
 		return ActivationResult{}, ErrUnavailable
 	}
 	var accepted ExactLink
-	_, _, err = a.library.mutateWithHomePolicy(scope, doc.Revision, operation{key: key, action: "activate_project", digest: digest},
+	var setupOpen func(*workspace.AssistantProgramState) error
+	if setupOfferID != "" {
+		setupOpen = func(state *workspace.AssistantProgramState) error {
+			return state.RecordSetupOpen(workspace.AssistantPortfolioSetupOpenReceipt{OfferID: setupOfferID, EntryID: entryID,
+				LinkID: accepted.LinkID, ProjectWorkspaceID: accepted.WorkspaceID, RecordedAt: a.library.now().UTC()})
+		}
+	}
+	_, _, err = a.library.mutateWithHomeEffect(scope, doc.Revision, operation{key: key, action: "activate_project", digest: digest},
 		func(state *workspace.AssistantProgramState, _ *workspace.Workspace) bool {
 			owner := state.HomeProvider
 			if owner == nil && state.GroupTemplate != nil {
@@ -419,7 +449,7 @@ func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, to
 				}
 			}
 			return "", ErrConflict
-		})
+		}, setupOpen)
 	if err != nil {
 		return ActivationResult{}, err // Child remains recoverable; never create another run silently.
 	}

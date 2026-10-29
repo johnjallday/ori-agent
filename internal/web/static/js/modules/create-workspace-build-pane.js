@@ -631,16 +631,21 @@
           ? plan.lines
           : [];
     // A plugin the plan reports as ready is checked off before the run.
-    const lines = shared
-      ? shared.satisfiedLinesView(shared.setupLinesView(source), plan?.needs)
-      : [];
+    // A single song's steps here are its Home's; opening it is the Home
+    // manager's suggestion, made in the Home.
+    const all = shared ? shared.satisfiedLinesView(shared.setupLinesView(source), plan?.needs) : [];
+    const handoffAt = all.findIndex(line => line.kind === 'handoff');
+    const lines = handoffAt < 0 ? all : all.slice(0, handoffAt + 1);
     const note =
       !lines.length && plan && plan.ready !== true
         ? COPY.planUnavailable(text(plan.unavailable), text(plan.unavailable_subject))
         : '';
     els.plan.hidden = !lines.length && !note;
     if (lines.length) {
-      shared.renderSetupLines(els.planLines, lines, document, { kindIcons: true });
+      shared.renderSetupLines(els.planLines, lines, document, {
+        kindIcons: true,
+        sections: shared.handoffNames(plan)
+      });
     } else els.planLines.textContent = '';
     els.planLines.hidden = !lines.length;
     const already = lines.filter(line => line.state === 'already').length;
@@ -679,6 +684,8 @@
     const plan = session.plan;
     const shared = globalThis.OriFolderPlanLines;
     if (!plan || plan.ready !== true || session.setup || !shared?.hireView) return null;
+    // A single song is hired in its Home, not here.
+    if (shared.handoffLineParts?.(plan.lines)) return null;
     return shared.hireView(plan, planProjectName() || 'this folder', { needs: plan.needs });
   }
 
@@ -839,7 +846,12 @@
       session.plan?.visual?.model || session.plan?.readiness?.model
     );
     const missingModel = !session.setup && model?.state === 'missing';
-    const fallback = planHireView()?.confirmLabel || COPY.setUp;
+    // A single song's press sets up its Home.
+    const handoffHome = globalThis.OriFolderPlanLines?.handoffLineParts?.(session.plan?.lines)
+      ? globalThis.OriFolderPlanLines.handoffNames(session.plan).home
+      : '';
+    const fallback =
+      planHireView()?.confirmLabel || (handoffHome ? `Set up ${handoffHome}` : COPY.setUp);
     els.setupButton.textContent =
       globalThis.OriFolderSetupVisual?.requirementsActionLabel(session.plan, fallback) || fallback;
     els.setupButton.hidden ||= missingModel;

@@ -228,6 +228,123 @@ func TestBuildPortfolioPlanListsTheWholeCollectionSetup(t *testing.T) {
 	}
 }
 
+func handoffFacts() HandoffFacts {
+	home := portfolioFacts()
+	home.FolderName, home.Projects, home.IntegrationProjects = "Album-5", 1, 1
+	song := baseFacts()
+	song.BlueprintLabel, song.WorkspaceName, song.FolderName = "Reaper Song", "Album-5", "Album-5"
+	song.Integration = *home.Integration
+	song.Hire = &personalassistant.FolderHire{Mode: personalassistant.FolderHireCreate, RoleLabel: "REAPER Assistant", AgentName: "REAPER Assistant"}
+	song.BriefDefault = "Get this song ready to mix"
+	song.Model = &personalassistant.FolderSetupModel{State: "configured", Provider: "openai", Name: "gpt-5-mini", Settings: "system"}
+	return HandoffFacts{Home: home, Song: song, SongName: "Album-5", ManagerName: "Portfolio Manager"}
+}
+
+// FR5: a fresh Home's single song is the collection plan's Home lines for a
+// portfolio of one, then the handoff, then the single project plan's lines.
+func TestBuildHandoffPlanListsTheHomeThenTheManagersOpen(t *testing.T) {
+	plan := BuildHandoffPlan(handoffFacts())
+	if got := kindsOf(plan); got != "integration,provider,home,agents,library,handoff,workspace,folder,mode,agents,task" {
+		t.Fatalf("order = %s", got)
+	}
+	want := []personalassistant.FolderPlanLine{
+		{Kind: "integration", Name: "Installs and enables the reviewed REAPER integration 0.9.0", Detail: "From johnjallday/reaper-plugin, checked before it is enabled."},
+		{Kind: "provider", Name: "Installs and enables the reviewed Music Project Management plugin 0.1.1", Detail: "From johnjallday/music-project-management, checked before it is enabled."},
+		{Kind: "home", Name: "Creates your Music Production Home", Detail: "Your later projects of this kind join it."},
+		{Kind: "agents", Name: "Adds the agents the Home requires", Detail: "Portfolio Manager keeps track of the whole collection."},
+		{Kind: "library", Name: "Lists Album-5 in the Home's library", Detail: "Reads each REAPER project's tempo, length and track count. Nothing is moved, copied or changed."},
+		{Kind: "handoff", Name: "Your Portfolio Manager then suggests opening Album-5", Detail: HandoffOpenDetail},
+		{Kind: "workspace", Name: "Creates a Reaper Song workspace named Album-5 as a separate project in new Home “Music Production Home”"},
+		{Kind: "folder", Name: FolderLinkLine},
+		{Kind: "mode", Name: "Uses File-only mode", Detail: "Ori does not control REAPER."},
+		{Kind: "agents", Name: "Adds the agents this blueprint requires", Detail: "Its assistant is shared: the same one joins the later Reaper Songs you open in this Home."},
+		{Kind: "task", Name: FirstLookLine},
+	}
+	for i := range want {
+		if plan.Lines[i] != want[i] {
+			t.Errorf("line %d = %+v, want %+v", i, plan.Lines[i], want[i])
+		}
+	}
+	intent := plan.Intent
+	if !intent.Portfolio || !intent.CreatesHome || !intent.StaffsHome || !intent.GrantsConsent || !intent.SharedProjects ||
+		!intent.ReadsSongDetails || !intent.GrantsSongDetails || intent.Placement != "grouped" ||
+		intent.OptionalTaskPolicy != personalassistant.FolderOptionalSummaryPolicy ||
+		strings.Join(intent.OpensProjects, ",") != "Album-5" || intent.HomeTemplate != "plugin-home:mpm:music-producer-assistant" ||
+		intent.Integration != personalassistant.FolderInstallInstall || intent.IntegrationPlugin != "reaper-plugin" ||
+		intent.Provider != personalassistant.FolderInstallInstall || intent.ProviderPlugin != "mpm" {
+		t.Fatalf("intent = %+v", intent)
+	}
+	// The assistant's card pictures the Home it makes; the song is opened later,
+	// in the Home. The hire and its brief stay for the Home's suggestion.
+	visual := plan.Visual
+	if visual == nil || visual.Entity == nil || visual.Entity.Kind != "home" || visual.Entity.Name != "Music Production Home" ||
+		visual.Entity.Operation != personalassistant.FolderSoftwareCreate || len(visual.Plugins) != 2 ||
+		visual.Model == nil || visual.Model.Name != "gpt-5-mini" || visual.Placement != "grouped" {
+		t.Fatalf("visual = %+v", visual)
+	}
+	if plan.Hire == nil || plan.Hire.RoleLabel != "REAPER Assistant" || plan.BriefDefault != "Get this song ready to mix" || !plan.OptionalTask {
+		t.Fatalf("hire = %+v brief = %q optional = %v", plan.Hire, plan.BriefDefault, plan.OptionalTask)
+	}
+}
+
+// OQ1: with the Home there and staffed, the first section is only the
+// plugins and the library line, and nothing new is promised for the Home.
+func TestBuildHandoffPlanForAnExistingStaffedHome(t *testing.T) {
+	facts := handoffFacts()
+	facts.Home.HomeExists, facts.Home.HomeStaffed, facts.Home.Sharing = true, true, SharingOn
+	facts.Home.Provider.State, facts.Song.Integration.State = personalassistant.FolderInstallReady, personalassistant.FolderInstallReady
+	plan := BuildHandoffPlan(facts)
+	if got := kindsOf(plan); got != "integration,provider,library,handoff,workspace,folder,mode,agents,task" {
+		t.Fatalf("existing staffed Home = %s", got)
+	}
+	if got := line(plan, personalassistant.FolderPlanWorkspace).Name; got != "Creates a Reaper Song workspace named Album-5 as a separate project in Home “Music Production Home”" {
+		t.Fatalf("workspace line = %q", got)
+	}
+	if d := line(plan, personalassistant.FolderPlanLibrary).Detail; d != libraryDetailNamesOnly {
+		t.Fatalf("an existing Home without its song-details switch reads them: %q", d)
+	}
+	if plan.Visual.Entity.Kind != "home" || plan.Visual.Entity.Operation != personalassistant.FolderSoftwareReuse {
+		t.Fatalf("an existing Home's picture = %+v", plan.Visual.Entity)
+	}
+	intent := plan.Intent
+	if intent.CreatesHome || intent.StaffsHome || intent.GrantsConsent || intent.GrantsSongDetails || intent.ReadsSongDetails ||
+		!intent.Portfolio || strings.Join(intent.OpensProjects, ",") != "Album-5" {
+		t.Fatalf("intent = %+v", intent)
+	}
+	// Switched off on the Home: this Set up turns it back on, as the single
+	// song's plan says today.
+	facts.Home.Sharing = SharingOff
+	plan = BuildHandoffPlan(facts)
+	if !plan.Intent.GrantsConsent || !strings.Contains(plan.Lines[len(plan.Lines)-2].Detail, "back on") {
+		t.Fatalf("switched off = %+v %+v", plan.Intent, plan.Lines)
+	}
+	// An existing Home that is not staffed gets its agents, never a second Home.
+	facts.Home.HomeStaffed = false
+	if got := kindsOf(BuildHandoffPlan(facts)); got != "integration,provider,agents,library,handoff,workspace,folder,mode,agents,task" {
+		t.Fatalf("unstaffed existing Home = %s", got)
+	}
+}
+
+// A card is held to the song it opens and to what the Home lines promised.
+func TestBuildHandoffPlanDigestMovesWithTheSongAndTheHome(t *testing.T) {
+	base := BuildHandoffPlan(handoffFacts()).Digest
+	other := handoffFacts()
+	other.SongName = "Album-6"
+	existing := handoffFacts()
+	existing.Home.HomeExists, existing.Home.HomeStaffed = true, true
+	for name, digest := range map[string]string{"another song": BuildHandoffPlan(other).Digest, "an existing Home": BuildHandoffPlan(existing).Digest} {
+		if base == "" || digest == "" || digest == base {
+			t.Errorf("%s: %s vs %s", name, digest, base)
+		}
+	}
+	// The hire and its brief are outside the digest, as on every hire card.
+	rebriefed := handoffFacts()
+	rebriefed.Song.BriefDefault = "Something else"
+	if BuildHandoffPlan(rebriefed).Digest != base {
+		t.Error("the brief changed the digest")
+	}
+}
+
 func TestBuildPortfolioPlanNamesTheAssistantOnceItIsKnown(t *testing.T) {
 	facts := portfolioFacts()
 	facts.AssistantName = "REAPER Assistant"

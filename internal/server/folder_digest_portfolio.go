@@ -246,11 +246,7 @@ func (h *folderSetupHost) bindPortfolioModel(plan personalassistant.FolderSetupP
 		plan.Visual.Model = h.portfolioModel()
 		for i := range plan.Lines {
 			if plan.Lines[i].Kind == personalassistant.FolderPlanAgents {
-				if model := plan.Visual.Model; model.State == "configured" {
-					plan.Lines[i].Detail += " New agents use the configured Default model: " + model.Provider + " · " + model.Name + "."
-				} else {
-					plan.Lines[i].Detail += " Configure a Default model for these new agents before setup."
-				}
+				plan.Lines[i].Detail += homeAgentsModelSentence(plan.Visual.Model)
 			}
 		}
 		if model := plan.Visual.Model; model.State == "configured" {
@@ -261,6 +257,14 @@ func (h *folderSetupHost) bindPortfolioModel(plan personalassistant.FolderSetupP
 		}
 	}
 	return plan.Stamped(), nil
+}
+
+// homeAgentsModelSentence says which model the Home's new agents get.
+func homeAgentsModelSentence(model *personalassistant.FolderSetupModel) string {
+	if model.State == "configured" {
+		return " New agents use the configured Default model: " + model.Provider + " · " + model.Name + "."
+	}
+	return " Configure a Default model for these new agents before setup."
 }
 
 func (h *folderSetupHost) portfolioModel() *personalassistant.FolderSetupModel {

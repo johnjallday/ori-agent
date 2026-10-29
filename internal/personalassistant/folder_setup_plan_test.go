@@ -53,3 +53,27 @@ func TestNewFolderSetupPlanStampsDigestAndCopies(t *testing.T) {
 		t.Fatal("plan aliases the caller's slice")
 	}
 }
+
+// The songs a card promised to open are part of what it was confirmed for,
+// whether or not anything else of the intent is bound.
+func TestFolderPlanDigestBindsTheProjectsItOpens(t *testing.T) {
+	stamp := func(policy string, opens ...string) string {
+		plan := NewFolderSetupPlan(samplePlanLines())
+		plan.Intent = FolderSetupIntent{Portfolio: true, OptionalTaskPolicy: policy, OpensProjects: opens}
+		return plan.Stamped().Digest
+	}
+	for _, policy := range []string{"", FolderOptionalSummaryPolicy} {
+		none, five, six := stamp(policy), stamp(policy, "Album-5"), stamp(policy, "Album-6")
+		if none == "" || five == "" || six == "" || none == five || five == six {
+			t.Fatalf("policy %q: none=%s five=%s six=%s", policy, none, five, six)
+		}
+		if again := stamp(policy, "Album-5"); again != five {
+			t.Fatalf("policy %q: the same promise stamped differently", policy)
+		}
+	}
+	for _, bad := range [][]string{{"Albums/Album-5"}, {"../Album-5"}, {" Album-5"}, {""}, {"Album-5", "Album-5"}, {`C:\Album-5`}} {
+		if digest := stamp("", bad...); digest != "" {
+			t.Errorf("%q is no plain folder name, yet the plan can be confirmed", bad)
+		}
+	}
+}
