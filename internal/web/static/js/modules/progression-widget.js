@@ -31,6 +31,7 @@ import {
   FOLDER_QUEST_ACTION_URL,
   folderOfferView,
   folderOutcomeNote,
+  handoffNames,
   renderSetupLines
 } from './personal-assistant-folder.js';
 
@@ -713,7 +714,10 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     const planLines = offer.setup?.lines || offer.plan?.lines || [];
     const plan = el('first-mission-offer-plan');
     if (plan) {
-      renderSetupLines(plan, planLines);
+      const raw = currentFolderOffer();
+      renderSetupLines(plan, planLines, document, {
+        sections: handoffNames(raw?.setup || raw?.plan)
+      });
       plan.hidden = !planLines.length;
       plan.setAttribute('aria-label', offer.hire?.linesHeading || 'What Set up does');
     }

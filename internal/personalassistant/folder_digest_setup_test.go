@@ -207,6 +207,26 @@ func TestFolderSetup_StaleDigestIsRefusedWithTheFreshPlan(t *testing.T) {
 	}
 }
 
+// A card that promised to open one song is stale once the plan would open
+// another, even though every line reads the same.
+func TestFolderSetup_ACardHeldToTheSongItOpens(t *testing.T) {
+	f := newOneCardFixture(t)
+	f.setup.intent = FolderSetupIntent{Portfolio: true, OpensProjects: []string{"Desktop"}}
+	current, err := f.service.Current(context.Background(), "local")
+	if err != nil || current.Offer == nil || current.Offer.Plan == nil {
+		t.Fatalf("current = %+v %v", current.Offer, err)
+	}
+	shown := current.Offer.Plan.Digest
+	f.setup.intent.OpensProjects = []string{"Another song"}
+	view, err := f.service.StartSetup(context.Background(), "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: shown})
+	if !errors.Is(err, ErrFolderPlanChanged) || view.Plan == nil || view.Plan.Digest == shown {
+		t.Fatalf("err = %v plan = %+v", err, view.Plan)
+	}
+	if f.setup.runCount() != 0 || f.stored(t).Status != FolderOfferPending {
+		t.Fatal("a refused click must change nothing")
+	}
+}
+
 func TestFolderSetup_ClickRecordsTheYesRunsAndResolves(t *testing.T) {
 	f := newOneCardFixture(t)
 	ctx := context.Background()

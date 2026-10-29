@@ -251,7 +251,8 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
 // setupLinesView normalizes the server's plan or run lines for rendering, and
 // renderSetupLines draws them: the shared plan lines the Create Workspace build
 // pane draws too (folder-plan-lines.js).
-export const { setupLinesView, renderSetupLines, hireView } = globalThis.OriFolderPlanLines;
+export const { setupLinesView, renderSetupLines, hireView, handoffNames } =
+  globalThis.OriFolderPlanLines;
 
 const SETUP_STOP_COPY = {
   plan_changed:
@@ -3913,7 +3914,10 @@ function renderOffer(place) {
     // Ticking watching adds its fifth line before the click; a run carries its own.
     if (!view.setup && view.plan?.lines && view.hire?.monitoring && monitoringChosen(state.offer))
       lines = [...lines, { kind: 'mode', name: view.hire.monitoring.line, detail: '', state: '' }];
-    renderSetupLines(els.plan, lines);
+    // A single song's plan is the Home's half, then its Portfolio Manager's.
+    renderSetupLines(els.plan, lines, document, {
+      sections: handoffNames(state.offer?.setup || state.offer?.plan)
+    });
     els.plan.hidden = !lines.length;
     els.plan.dataset.mode = view.setup ? view.setup.status : look?.visible ? 'look' : 'plan';
     setText(els.lookNote, look?.visible ? look.footnote : '');

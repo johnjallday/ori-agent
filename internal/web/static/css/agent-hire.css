@@ -319,6 +319,25 @@
   border-color: var(--primary-color);
 }
 
+/* A single song's plan: the Home's half, then its Portfolio Manager's. */
+.agent-hire-card .pa-folder__plan li.pa-folder__plan-section {
+  padding: 4px 2px 0;
+  border: 0;
+  background: none;
+}
+
+.agent-hire-card .pa-folder__plan li.pa-folder__plan-section[data-section="handoff"] {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  border-radius: 0;
+}
+
+.agent-hire-card .pa-folder__plan-section-title {
+  display: block;
+  font-weight: 700;
+}
+
 .agent-hire-card .pa-folder__plan li[data-state="working"] .pa-folder__plan-icon {
   color: var(--warning-color, #d97706);
   animation: agent-hire-plan-working 1.2s ease-in-out infinite;

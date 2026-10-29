@@ -15778,7 +15778,7 @@ const sessionManager = {
         list,
         satisfied(shared.setupLinesView(plan.lines), plan.needs),
         document,
-        { kindIcons: true }
+        { kindIcons: true, sections: shared.handoffNames?.(plan) }
       );
     }
     for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {

@@ -640,7 +640,10 @@
         : '';
     els.plan.hidden = !lines.length && !note;
     if (lines.length) {
-      shared.renderSetupLines(els.planLines, lines, document, { kindIcons: true });
+      shared.renderSetupLines(els.planLines, lines, document, {
+        kindIcons: true,
+        sections: shared.handoffNames(plan)
+      });
     } else els.planLines.textContent = '';
     els.planLines.hidden = !lines.length;
     const already = lines.filter(line => line.state === 'already').length;

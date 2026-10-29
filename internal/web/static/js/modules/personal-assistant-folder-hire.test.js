@@ -201,6 +201,39 @@ test('a plan without a hire, or with one the card does not know, keeps the Set u
   assert.equal(collection.hire, null);
 });
 
+// FR3, FR8: a single song its Home's Portfolio Manager opens is still the
+// song's hire card, and Adjust still opens the plugin's step-by-step quest,
+// never the collection's Create Group modal.
+test('a single song’s handoff plan keeps the hire card and Adjust opens the quest', () => {
+  const offer = hireOffer(
+    {},
+    {
+      plan: {
+        ...hireOffer().plan,
+        destination: { status: 'new', name: 'Music Production Home' },
+        visual: { entity: { kind: 'workspace', name: 'My Song', operation: 'create' } },
+        lines: [
+          { kind: 'home', name: 'Creates your Music Production Home' },
+          { kind: 'library', name: 'Lists My Song in the Home’s library' },
+          { kind: 'handoff', name: 'Your Portfolio Manager then opens My Song' },
+          { kind: 'workspace', name: 'Creates a REAPER Song workspace named My Song' },
+          { kind: 'task', name: 'An optional read-only summary' }
+        ]
+      }
+    }
+  );
+  const view = folderOfferView(offer);
+  assert.equal(text(view.headline), 'Hire Song Assistant for My Song');
+  assert.ok(view.hire.brief, 'the brief question stays');
+  assert.equal(view.hire.adjust.journey, true);
+  assert.equal(view.hire.adjust.adjustStructure, undefined);
+  assert.equal(view.plan.lines.length, 5);
+  assert.deepEqual(
+    view.plan.lines.map(line => line.kind),
+    ['home', 'library', 'handoff', 'workspace', 'task']
+  );
+});
+
 test('after Adjust… the hire keeps its plan beside Continue setup', () => {
   const view = folderOfferView(hireOffer({}, { status: 'awaiting_outcome', decision: 'yes' }));
   assert.deepEqual(

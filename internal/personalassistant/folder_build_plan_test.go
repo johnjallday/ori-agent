@@ -123,3 +123,53 @@ func TestFolderBuildPlan_IsTheCardsPlanForTheBuildsFolderAndCreatesNothing(t *te
 		t.Fatalf("an expired pick: %v", err)
 	}
 }
+
+// 2A: the build pane shows a single song's two-section plan exactly as Home's
+// card does: every line in order, the Home and the song to head its sections,
+// and the handoff intent held by the digest.
+func TestFolderBuildPlan_CarriesTheSongsHandoffPlan(t *testing.T) {
+	f, service, target := observationFixture(t)
+	ctx := context.Background()
+	song := filepath.Join(f.home, "Music", "Album-5")
+	writeFolderFiles(t, song, "Album-5.rpp")
+	lines := []FolderPlanLine{
+		{Kind: FolderPlanIntegration, Name: "Uses the installed reviewed REAPER integration"},
+		{Kind: FolderPlanProvider, Name: "Uses the installed reviewed Music Project Management plugin"},
+		{Kind: FolderPlanLibrary, Name: "Lists Album-5 in the Home's library"},
+		{Kind: FolderPlanHandoff, Name: "Your Portfolio Manager then opens Album-5", Detail: "Right after the Home is ready, under this one Set up."},
+		{Kind: FolderPlanWorkspace, Name: "Creates a Reaper Song workspace named Album-5 as a separate project in Home “Music Production Home”"},
+		{Kind: FolderPlanTask, Name: "An optional read-only summary, available for you to start after setup"},
+	}
+	setup := &fakeFolderSetup{
+		lines:       lines,
+		visual:      &FolderSetupVisual{Entity: &FolderSetupEntity{Kind: "workspace", Name: "Album-5", Operation: "create"}},
+		destination: &FolderSetupDestination{Status: "existing", Name: "Music Production Home", Kind: "plugin", WorkspaceID: "home-1"},
+		intent: FolderSetupIntent{Integration: FolderInstallReady, Provider: FolderInstallReady, Placement: "grouped",
+			Portfolio: true, OpensProjects: []string{"Album-5"}, OptionalTaskPolicy: FolderOptionalSummaryPolicy},
+	}
+	f.service.deps.Setup = setup
+	observation := observeSelected(t, f, service, target, song)
+	recognition, err := service.Recognize(ctx, target, observation.ID)
+	if err != nil || !recognition.Recognized() {
+		t.Fatalf("recognition = %+v %v", recognition, err)
+	}
+	plan, err := service.BuildPlan(ctx, target, observation.ID, recognition.CandidateID, "")
+	if err != nil || !plan.Ready || len(plan.Lines) != len(lines) {
+		t.Fatalf("plan = %+v %v", plan, err)
+	}
+	for i := range lines {
+		if plan.Lines[i] != lines[i] {
+			t.Fatalf("line %d = %+v, want %+v", i, plan.Lines[i], lines[i])
+		}
+	}
+	if plan.Home == nil || plan.Home.Name != "Music Production Home" || plan.Visual == nil || plan.Visual.Entity.Name != "Album-5" ||
+		plan.Placement != "grouped" || !plan.FirstTaskDeferred {
+		t.Fatalf("section names = %+v %+v %q", plan.Home, plan.Visual, plan.Placement)
+	}
+	// The digest the pane confirms is the one that opens this song.
+	setup.intent.OpensProjects = []string{"Album-6"}
+	other, err := service.BuildPlan(ctx, target, observation.ID, recognition.CandidateID, "")
+	if err != nil || other.Digest == plan.Digest {
+		t.Fatalf("another song kept the digest: %v", err)
+	}
+}

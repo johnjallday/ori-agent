@@ -441,6 +441,12 @@ func (h *folderSetupHost) plan(ctx context.Context, req personalassistant.Folder
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
 	}
+	// One song whose Home lists its projects is a portfolio of one: the Home
+	// lists it and its Portfolio Manager opens it. Decided here, once, and
+	// recorded in the intent the run is held to.
+	if handoffOffer(req.Offer, target) {
+		return h.handoffPlan(ctx, req, target)
+	}
 	facts, err := h.facts(ctx, req, target)
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
@@ -504,6 +510,17 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 	target, err := h.target(req.Offer)
 	if err != nil {
 		return err
+	}
+	// The run reads the plan's decision and never re-decides from the folder:
+	// a song planned the old way, or a handoff plan for an offer that is no
+	// longer one, is a changed plan.
+	handoff := handoffOffer(req.Offer, target)
+	opens := req.Plan.Intent.Portfolio && len(req.Plan.Intent.OpensProjects) == 1
+	if handoff != opens || (!handoff && req.Plan.Intent.Portfolio) {
+		return personalassistant.ErrFolderPlanChanged
+	}
+	if handoff {
+		return h.handoffRun(ctx, req, target)
 	}
 	defer h.forget(req.UserID, target.entry)
 	b := h.builder

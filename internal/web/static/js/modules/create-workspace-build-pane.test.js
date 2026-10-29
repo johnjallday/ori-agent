@@ -1038,6 +1038,43 @@ test('a recognized folder’s plan is the host’s lines, with the reason behind
   assert.equal(block().hidden, true);
 });
 
+// 2A: a single song's plan reads in the pane as on Home's card: the Home's
+// half under a heading naming it, then the half its Portfolio Manager opens.
+test('a single song’s plan is the Home’s half, then its Portfolio Manager’s', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const plan = {
+    ready: true,
+    digest: 'digest-handoff',
+    home: { name: 'Music Production Home', status: 'existing' },
+    visual: { entity: { kind: 'workspace', name: 'Album-5', operation: 'create' } },
+    lines: [
+      { kind: 'integration', name: 'Uses the installed reviewed REAPER integration' },
+      { kind: 'library', name: 'Lists Album-5 in the Home’s library' },
+      { kind: 'handoff', name: 'Your Portfolio Manager then opens Album-5' },
+      { kind: 'workspace', name: 'Creates a Reaper Song workspace named Album-5' }
+    ]
+  };
+  pane.applySession({ transcript: [], folder: { observation }, plan });
+  const list = root.querySelectorAll('ul').find(node => node.id === 'workspaceBuildPlanLines');
+  assert.deepEqual(
+    list.children.map(item => [item.dataset.section || '', item.dataset.kind]),
+    [
+      ['home', 'section'],
+      ['', 'integration'],
+      ['', 'library'],
+      ['handoff', 'handoff'],
+      ['', 'workspace']
+    ]
+  );
+  assert.equal(
+    list.children[0].textContent,
+    'Your assistant adds Album-5 to Music Production Home'
+  );
+  // The handoff row keeps the checklist's kind icon and its own glyph.
+  assert.equal(list.children[3].children[0].children[0].className, 'bi bi-person-check');
+});
+
 // The sketch above the lines: the Home and the workspace Set it up leaves
 // behind, from the plan's facts and the kinds of its lines, never the model.
 test('legacy build plans keep full lines and parent facts without guessing a visual destination', () => {

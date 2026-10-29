@@ -150,6 +150,44 @@ test('run milestones use applicable line evidence, not timers, profiles or first
   );
 });
 
+// A single song's run staffs its Home before the handoff and the hired song
+// after it: the Home's agents being done says nothing about the hire.
+test('a single song’s run reads the hire’s staffing after the handoff line only', () => {
+  const lines = state => [
+    { kind: 'home', name: 'Creates your Music Production Home', state: 'done' },
+    { kind: 'agents', name: 'Adds the agents the Home requires', state: 'done' },
+    { kind: 'library', name: 'Lists Album-5 in the Home’s library', state: 'done' },
+    { kind: 'handoff', name: 'Portfolio Manager is opening Album-5…', state: 'working' },
+    { kind: 'workspace', name: 'Creates a Reaper Song workspace named Album-5', state },
+    { kind: 'agents', name: 'Adds the agents this blueprint requires', state }
+  ];
+  const view = state =>
+    visualView({
+      offer: { plan, setup: { lines: lines(state), visual: plan.visual, hire: plan.hire } }
+    });
+  assert.equal(view('waiting').agent.progress, undefined, 'the Home’s agents are not the hire');
+  assert.equal(view('waiting').entity.status, 'Proposed · new');
+  assert.equal(view('done').agent.progress, 'Staffing complete · membership awaits receipt');
+  assert.equal(view('done').entity.status, 'Created');
+  const stages = globalThis.OriFolderSetupVisual.setupMilestones({ lines: lines('waiting') });
+  assert.deepEqual(
+    stages.map(row => [row.kind, row.label, row.state]).filter(([kind]) => kind === 'handoff'),
+    [['handoff', 'Home manager', 'working']]
+  );
+  const effects = globalThis.OriFolderSetupVisual.reviewConsequences({
+    lines: [
+      {
+        kind: 'handoff',
+        name: 'Your Portfolio Manager then opens Album-5',
+        detail: 'Right after the Home is ready, under this one Set up.'
+      }
+    ]
+  });
+  assert.deepEqual(effects, [
+    'Your Portfolio Manager then opens Album-5. Right after the Home is ready, under this one Set up.'
+  ]);
+});
+
 test('resolved visuals trust structured canonical receipts, never hire names or receipt prose', () => {
   const offer = {
     status: 'resolved',

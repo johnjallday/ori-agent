@@ -92,8 +92,12 @@
           }
         : null;
     const setup = offer?.setup;
-    const done = kind =>
-      list(setup?.lines).some(line => line.kind === kind && line.state === 'done');
+    // A single song's plan staffs its Home before the handoff line; the hire's
+    // own lines are the ones after it.
+    const setupLines = list(setup?.lines);
+    const handoffAt = setupLines.findIndex(line => line.kind === 'handoff');
+    const hireLines = handoffAt < 0 ? setupLines : setupLines.slice(handoffAt + 1);
+    const done = kind => hireLines.some(line => line.kind === kind && line.state === 'done');
     if (entity && done(entity.kind)) {
       entity.status = proposed.operation === 'reuse' ? 'Reused' : 'Created';
       entity.complete = true;
@@ -615,6 +619,7 @@
           'task',
           'profile',
           'library',
+          'handoff',
           'songs',
           'assistant',
           'arrangement',
@@ -683,6 +688,7 @@
       assistant: 'Shared-agent setup',
       profile: 'Home profile',
       library: 'Library',
+      handoff: 'Home manager',
       songs: 'Listed projects'
     };
     return list(setup?.lines)

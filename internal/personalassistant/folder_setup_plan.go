@@ -27,6 +27,10 @@ const (
 	FolderPlanLibrary   = "library"
 	FolderPlanSongs     = "songs"
 	FolderPlanAssistant = "assistant"
+	// FolderPlanHandoff heads a single song's second half: once the Home has
+	// listed it, the Home's Portfolio Manager opens it under the same Set up.
+	// The workspace, folder, mode, agents and task lines after it are that open.
+	FolderPlanHandoff = "handoff"
 	// The Home's profile: which applications are on this computer, and whether
 	// one of their templates folders is listed. Present only when the Home's
 	// installed package declares a profile.
@@ -170,6 +174,10 @@ type FolderSetupIntent struct {
 	Portfolio     bool `json:"portfolio,omitempty"`
 	StaffsHome    bool `json:"staffs_home,omitempty"`
 	GrantsConsent bool `json:"grants_consent,omitempty"`
+	// OpensProjects are the catalog targets the run opens once they are listed,
+	// in order, each a plain folder name (never a path). A single song's plan
+	// holds exactly its own name; a collection's opens none.
+	OpensProjects []string `json:"opens_projects,omitempty"`
 	// SharedProjects says some of the collection's projects can be opened with
 	// the shared assistant; a collection of other formats is listed only.
 	SharedProjects bool `json:"shared_projects,omitempty"`
@@ -513,7 +521,32 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 			stamped.Digest = hex.EncodeToString(sum[:])
 		}
 	}
+	if opens := stamped.Intent.OpensProjects; len(opens) > 0 {
+		// The projects a card promised to open are held to it, whatever else the
+		// digest covers; a promise to open a path is no plan at all.
+		stamped.Intent.OpensProjects = append([]string(nil), opens...)
+		encoded, err := json.Marshal(opens)
+		if err != nil || !validOpensProjects(opens) {
+			stamped.Digest = ""
+		} else {
+			sum := sha256.Sum256(append([]byte(stamped.Digest+"\x00opens\x00"), encoded...))
+			stamped.Digest = hex.EncodeToString(sum[:])
+		}
+	}
 	return stamped
+}
+
+// validOpensProjects accepts plain, distinct folder names only.
+func validOpensProjects(names []string) bool {
+	seen := map[string]bool{}
+	for _, name := range names {
+		if strings.TrimSpace(name) != name || name == "" || name == "." || name == ".." || len(name) > 255 ||
+			strings.ContainsAny(name, "/\\\x00\r\n") || seen[name] {
+			return false
+		}
+		seen[name] = true
+	}
+	return true
 }
 
 // recipePlanDigest binds a built-in recipe's whole intent into the digest the
