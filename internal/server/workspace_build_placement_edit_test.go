@@ -145,6 +145,18 @@ func TestInboxPlacementEditing_RemovedSavedAgentInvalidatesFinalConsentWithoutWr
 	}
 }
 
+// canonicalFolderPath is the path a selected folder is stored under: the
+// picker resolves symlinks, and on macOS the fixture HOME sits under /var,
+// which is a link to /private/var.
+func canonicalFolderPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
 func TestInboxPlacementEditing_TrustedReplacementRetainsMonitoringAndRejectsIncompatibleOrReplacedRoots(t *testing.T) {
 	f := newDraftServerFixture(t)
 	build, _ := seedEditableInbox(t, f)
@@ -171,7 +183,7 @@ func TestInboxPlacementEditing_TrustedReplacementRetainsMonitoringAndRejectsInco
 			t.Fatalf("replace: %d %v", status, response)
 		}
 		build = response["session"].(map[string]any)
-		if build["placement_monitoring"] != true || build["folder_path"] != currentPath || build["proposal"] != nil || build["draft"].(map[string]any)["template_id"] != "file-janitor" {
+		if build["placement_monitoring"] != true || build["folder_path"] != canonicalFolderPath(t, currentPath) || build["proposal"] != nil || build["draft"].(map[string]any)["template_id"] != "file-janitor" {
 			t.Fatalf("replacement changed intent: %v", build)
 		}
 		observation := build["folder"].(map[string]any)["observation"].(map[string]any)
@@ -196,7 +208,7 @@ func TestInboxPlacementEditing_TrustedReplacementRetainsMonitoringAndRejectsInco
 		t.Fatalf("incompatible root replaced inbox: %d %v", status, response)
 	}
 	status, latest := f.call(t, http.MethodGet, "/api/workspaces/build-sessions/"+id, nil)
-	if status != http.StatusOK || latest["session"].(map[string]any)["folder_path"] != currentPath || latest["session"].(map[string]any)["folder"].(map[string]any)["observation"].(map[string]any)["id"] != initial {
+	if status != http.StatusOK || latest["session"].(map[string]any)["folder_path"] != canonicalFolderPath(t, currentPath) || latest["session"].(map[string]any)["folder"].(map[string]any)["observation"].(map[string]any)["id"] != initial {
 		t.Fatalf("failed selection altered last valid folder: %d %v", status, latest)
 	}
 	beforeDraft, _ := json.Marshal(build["draft"])

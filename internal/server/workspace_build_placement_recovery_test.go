@@ -52,7 +52,7 @@ func TestInboxPlacementRecovery_LostHoldsKeepEditsButRequireTrustedRepick(t *tes
 	}
 	build = response["session"].(map[string]any)
 	afterDraft, _ = json.Marshal(build["draft"])
-	if string(beforeDraft) != string(afterDraft) || build["placement_monitoring"] != true || build["folder_path"] != root ||
+	if string(beforeDraft) != string(afterDraft) || build["placement_monitoring"] != true || build["folder_path"] != canonicalFolderPath(t, root) ||
 		build["folder"].(map[string]any)["observation"].(map[string]any)["id"] == original {
 		t.Fatalf("re-pick lost choices or reused old authority: %v", build)
 	}
