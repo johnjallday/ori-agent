@@ -115,9 +115,11 @@ type MissionPrecondition struct {
 	Kind string
 	// Statement is the host's own wording of the fact, stored metadata only.
 	Statement string
-	// SuggestedTitle and SuggestedFirstStep are the task that meets it.
+	// SuggestedTitle and SuggestedFirstStep are the task that meets it, and
+	// Why the host's own reason, written on a ticket the host stores itself.
 	SuggestedTitle     string
 	SuggestedFirstStep string
+	Why                string
 	// Action is the id of the button the ticket offers, e.g. check_protection.
 	Action string
 }

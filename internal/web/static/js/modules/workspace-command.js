@@ -144,6 +144,17 @@ const BACKLOG_SUGGESTION_ACTIONS = {
   check_protection: { label: 'Check protection', attribute: 'data-cmd-backlog-check-protection' }
 };
 
+// coveredSentence is what a covered folder's ticket says in place of Check
+// protection: the stored evidence's time, in the viewer's local time.
+export function coveredSentence(observedAt) {
+  const at = new Date(observedAt || '');
+  if (Number.isNaN(at.getTime()) || at.getFullYear() < 2000) return 'Covered';
+  return (
+    'Covered · evidence observed ' +
+    at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  );
+}
+
 // Clamp an HQ station's fractional map coordinate into [0,1]. Non-finite input
 // (a corrupt saved value) collapses to 0 so a station can never render or
 // persist off-field (FR11/FR13).
@@ -7119,6 +7130,14 @@ export class WorkspaceCommandView {
     if (!action) return '';
     const state = this.backlogSuggestionAction || {};
     const mine = state.id === id;
+    // A folder found covered says so in place of the button; the ticket stays
+    // as it is (FR17: no automatic closing).
+    if (mine && state.covered)
+      return (
+        '<span class="ws-cmd-backlog-action-covered" role="status">' +
+        escapeHtml(coveredSentence(state.observedAt)) +
+        '</span>'
+      );
     return (
       '<button type="button" class="ws-cmd-drawer-action" ' +
       action.attribute +
@@ -7137,7 +7156,8 @@ export class WorkspaceCommandView {
 
   // Check protection reads the ticket's workspace protection fact and opens
   // its destination with no review trip (backup-first FR16). It changes
-  // nothing; a destination it cannot open is said on the card.
+  // nothing; a destination it cannot open is said on the card, and a folder
+  // already covered is said instead of opening anything.
   async runBacklogCheckProtection(itemId) {
     const id = String(itemId || '').trim();
     if (!id || this.backlogSuggestionAction?.busy) return;
@@ -7145,16 +7165,19 @@ export class WorkspaceCommandView {
       this.protection || (typeof window !== 'undefined' ? window.FileJanitorProtection : null);
     this.backlogSuggestionAction = { id, busy: true, error: '' };
     this.renderBacklogDrawerBody();
-    let error = '';
+    const next = { id, busy: false, error: '' };
     try {
       if (!protection?.readProtection || !protection?.openDestination)
         throw new Error('Protection is unavailable for this folder.');
       const fact = await protection.readProtection(this.backlogItemOwner(id));
-      await protection.openDestination(fact.destination);
+      if (fact.state === 'covered') {
+        next.covered = true;
+        next.observedAt = fact.observed_at || '';
+      } else await protection.openDestination(fact.destination);
     } catch (failure) {
-      error = failure?.message || 'Protection is unavailable for this folder.';
+      next.error = failure?.message || 'Protection is unavailable for this folder.';
     }
-    this.backlogSuggestionAction = { id, busy: false, error };
+    this.backlogSuggestionAction = next;
     this.renderBacklogDrawerBody();
   }
 

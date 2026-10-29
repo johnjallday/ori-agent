@@ -185,6 +185,159 @@ func TestMissionBridge_NoBackupPreconditionOtherwise(t *testing.T) {
 	}
 }
 
+const answerWithoutBackup = `{"items": [
+	{"kind": "task", "title": "Review the installer pile", "why": "Old installers", "evidence": "12 .dmg files", "priority": "medium"},
+	{"kind": "task", "title": "Sort screenshots by month", "why": "Many screenshots", "evidence": "40 .png files", "priority": "low"}
+]}`
+
+// answerWithBackupSecond names the backup task, but not first.
+const answerWithBackupSecond = `{"items": [
+	{"kind": "task", "title": "Review the installer pile", "why": "Old installers", "evidence": "12 .dmg files", "priority": "medium"},
+	{"kind": "task", "title": "Back up Downloads before the first filing batch", "why": "Model reason", "evidence": "Not covered", "priority": "medium"}
+]}`
+
+func backlogOrder(t *testing.T, wsStore workspace.Store, id string) []string {
+	t.Helper()
+	items, err := workspace.NewBacklogService(wsStore).List(id, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := make([]string, 0, len(items))
+	for _, item := range items {
+		titles = append(titles, item.Task.Description)
+	}
+	return titles
+}
+
+// FR11, FR12: an answer that leaves the backup task out still gets it, from
+// the host: tagged source "host", high priority, counted, and first in the
+// Backlog ahead of work that was already there.
+func TestMissionBridge_HostStoresTheBackupTaskTheAnswerLeftOut(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := makeJanitorMissionWorkspace(t, wsStore)
+	if _, err := workspace.NewBacklogService(wsStore).Create(workspace.BacklogCreateInput{WorkspaceID: ws.ID, Description: "My own idea"}); err != nil {
+		t.Fatal(err)
+	}
+	bridge, _ := bridgeWithRunner(t, wsStore, answerWithoutBackup)
+	bridge.SetCuratorProtectionReader(&stubCuratorProtection{state: "configured"})
+	if _, err := bridge.TriggerMissionRun(context.Background(), ws.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := wsStore.Get(ws.ID)
+	tickets := backupTickets(fresh)
+	if len(tickets) != 1 {
+		t.Fatalf("backup tickets = %d", len(tickets))
+	}
+	ticket := tickets[0]
+	reason, _ := ticket.Context[workspace.MissionSuggestionContextKey].(map[string]any)
+	if reason["precondition"] != "backup_protection" || reason["action"] != "check_protection" || reason["source"] != "host" ||
+		reason["first_step"] != "Open Check protection and approve one metadata read." ||
+		reason["why"] != "Filing moves the originals, so a recovery copy of this folder should exist first." {
+		t.Fatalf("host ticket context = %#v", reason)
+	}
+	if ticket.Priority != 2 || ticket.Description != backupTitle || !strings.Contains(ticket.Details, "**First step:** Open Check protection") {
+		t.Fatalf("host ticket = %q priority %d details %q", ticket.Description, ticket.Priority, ticket.Details)
+	}
+	// Never a drive, provider or destination in copy (PRD §6.2).
+	if strings.Contains(strings.ToLower(ticket.Details), "time machine") {
+		t.Fatalf("host ticket names a provider: %q", ticket.Details)
+	}
+	if record := fresh.MissionRuns[0]; record.TasksCreated != 3 || !record.Succeeded {
+		t.Fatalf("run record = %+v (two answered tasks and the host's)", record)
+	}
+	if got := backlogOrder(t, wsStore, ws.ID); len(got) != 4 || got[0] != backupTitle || got[1] != "My own idea" {
+		t.Fatalf("Backlog order = %q", got)
+	}
+
+	// A second run with the ticket still open adds none, on either path.
+	if _, err := bridge.TriggerMissionRun(context.Background(), ws.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ = wsStore.Get(ws.ID)
+	if got := len(backupTickets(fresh)); got != 1 {
+		t.Fatalf("backup tickets after a second run = %d", got)
+	}
+}
+
+// FR12: the model's own backup ticket leads the Backlog too, wherever the
+// answer put it, and the host adds no second one.
+func TestMissionBridge_ModelBackupTaskLeadsTheBacklog(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := makeJanitorMissionWorkspace(t, wsStore)
+	bridge, _ := bridgeWithRunner(t, wsStore, answerWithBackupSecond)
+	bridge.SetCuratorProtectionReader(&stubCuratorProtection{state: "not_covered"})
+	if _, err := bridge.TriggerMissionRun(context.Background(), ws.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := wsStore.Get(ws.ID)
+	tickets := backupTickets(fresh)
+	if len(tickets) != 1 {
+		t.Fatalf("backup tickets = %d", len(tickets))
+	}
+	if reason, _ := tickets[0].Context[workspace.MissionSuggestionContextKey].(map[string]any); reason["source"] != "model" || reason["why"] != "Model reason" {
+		t.Fatalf("model ticket context = %#v", reason)
+	}
+	if got := backlogOrder(t, wsStore, ws.ID); len(got) != 2 || got[0] != backupTitle {
+		t.Fatalf("Backlog order = %q", got)
+	}
+	if record := fresh.MissionRuns[0]; record.TasksCreated != 2 {
+		t.Fatalf("run record = %+v", record)
+	}
+}
+
+// A covered folder, or no reader, gets no host ticket either.
+func TestMissionBridge_NoHostBackupTaskWithoutAnUnmetFact(t *testing.T) {
+	for name, reader := range map[string]*stubCuratorProtection{"covered": {state: "covered"}, "no reader": nil} {
+		t.Run(name, func(t *testing.T) {
+			wsStore := workspace.NewInMemoryStore()
+			ws := makeJanitorMissionWorkspace(t, wsStore)
+			bridge, _ := bridgeWithRunner(t, wsStore, answerWithoutBackup)
+			if reader != nil {
+				bridge.SetCuratorProtectionReader(reader)
+			}
+			if _, err := bridge.TriggerMissionRun(context.Background(), ws.ID, 1); err != nil {
+				t.Fatal(err)
+			}
+			fresh, _ := wsStore.Get(ws.ID)
+			if got := len(backupTickets(fresh)); got != 0 {
+				t.Fatalf("backup tickets = %d", got)
+			}
+		})
+	}
+}
+
+// FR13: Not useful on the backup ticket, then a run with the fact still unmet
+// and an answer that names it again: no ticket on the model path or the host's.
+func TestMissionBridge_NotUsefulOnTheBackupTaskHolds(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := makeJanitorMissionWorkspace(t, wsStore)
+	reader := &stubCuratorProtection{state: "unknown"}
+	host, _ := bridgeWithRunner(t, wsStore, answerWithoutBackup)
+	host.SetCuratorProtectionReader(reader)
+	if _, err := host.TriggerMissionRun(context.Background(), ws.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := wsStore.Get(ws.ID)
+	tickets := backupTickets(fresh)
+	if len(tickets) != 1 {
+		t.Fatalf("backup tickets = %d", len(tickets))
+	}
+	if err := workspace.NewBacklogService(wsStore).DismissSuggestion(ws.ID, tickets[0].ID, "I file by hand first"); err != nil {
+		t.Fatal(err)
+	}
+	for _, answer := range []string{answerWithBackup, answerWithoutBackup} {
+		bridge, _ := bridgeWithRunner(t, wsStore, answer)
+		bridge.SetCuratorProtectionReader(reader)
+		if _, err := bridge.TriggerMissionRun(context.Background(), ws.ID, 2); err != nil {
+			t.Fatal(err)
+		}
+		fresh, _ = wsStore.Get(ws.ID)
+		if got := backupTickets(fresh); len(got) != 0 {
+			t.Fatalf("a dismissed backup task came back: %+v", got)
+		}
+	}
+}
+
 // A backup task already open, or dismissed as Not useful, is not asked for
 // again: the prompt carries no precondition for it.
 func TestMissionBridge_BackupPreconditionSkipsOpenOrDismissedTask(t *testing.T) {

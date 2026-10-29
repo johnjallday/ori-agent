@@ -452,8 +452,12 @@ const (
 	MissionSuggestionSourceHost  = "host"
 )
 
-// backupPreconditionFirstStep is the backup task's first step (PRD §6.2).
-const backupPreconditionFirstStep = "Open Check protection and approve one metadata read."
+// backupPreconditionFirstStep is the backup task's first step (PRD §6.2), and
+// backupPreconditionWhy its reason. Neither claims a backup exists or not.
+const (
+	backupPreconditionFirstStep = "Open Check protection and approve one metadata read."
+	backupPreconditionWhy       = "Filing moves the originals, so a recovery copy of this folder should exist first."
+)
 
 // BackupPrecondition is a File Janitor folder's backup precondition: unmet
 // while its stored protection fact is not_covered, unknown or configured (a
@@ -479,8 +483,19 @@ func BackupPrecondition(folderName string, fact filecuratorguidance.ProtectionFa
 		Statement:          statement,
 		SuggestedTitle:     "Back up " + folder + " before the first filing batch",
 		SuggestedFirstStep: backupPreconditionFirstStep,
+		Why:                backupPreconditionWhy,
 		Action:             MissionActionCheckProtection,
 	}, true
+}
+
+// HostPreconditionSuggestion is the ticket the host stores for an unmet
+// precondition the run's answer left out (backup-first FR11): its own title,
+// reason and first step, the fact as evidence, high priority.
+func HostPreconditionSuggestion(p MissionPrecondition) MissionTaskSuggestion {
+	return MissionTaskSuggestion{
+		Title: p.SuggestedTitle, Why: p.Why, Evidence: p.Statement,
+		Priority: "high", Confidence: "high", Effort: "small", FirstStep: p.SuggestedFirstStep,
+	}
 }
 
 // MatchMissionPrecondition is the precondition a suggestion's title meets,

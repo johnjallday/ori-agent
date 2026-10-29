@@ -450,12 +450,8 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 		record.NextWhy = output.NextWhy
 	}
 	now := time.Now()
-	for _, suggestion := range suggestions {
-		reason := workspace.MissionSuggestionContext(suggestion, runID)
-		if precondition, ok := workspace.MatchMissionPrecondition(suggestion.Title, preconditions); ok {
-			reason = workspace.TagMissionPrecondition(reason, precondition, workspace.MissionSuggestionSourceModel)
-		}
-		if _, err := b.backlog.Create(workspace.BacklogCreateInput{
+	create := func(suggestion workspace.MissionTaskSuggestion, reason map[string]any) (*workspace.Task, bool) {
+		created, err := b.backlog.Create(workspace.BacklogCreateInput{
 			WorkspaceID: workspaceID,
 			Description: missionTicketTitle(suggestion.Title),
 			Details:     workspace.MissionSuggestionDetails(suggestion, runID, now),
@@ -465,15 +461,81 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 			Context: map[string]any{
 				workspace.MissionSuggestionContextKey: reason,
 			},
-		}); err != nil {
+		})
+		if err != nil {
 			logger.Warn("mission bridge: create suggested ticket", logger.Fields{
 				"workspace_id": workspaceID, "run_id": runID, "title": suggestion.Title, "error": err,
 			})
-			continue
+			return nil, false
 		}
 		record.TasksCreated++
+		return created, true
 	}
+	// met holds the preconditions a ticket of this run answers; first, those
+	// tickets, which lead the Backlog.
+	met := map[string]bool{}
+	var first []string
+	for _, suggestion := range suggestions {
+		reason := workspace.MissionSuggestionContext(suggestion, runID)
+		precondition, isPrecondition := workspace.MatchMissionPrecondition(suggestion.Title, preconditions)
+		if isPrecondition {
+			reason = workspace.TagMissionPrecondition(reason, precondition, workspace.MissionSuggestionSourceModel)
+		}
+		if created, ok := create(suggestion, reason); ok && isPrecondition {
+			met[precondition.Kind] = true
+			first = append(first, created.ID)
+		}
+	}
+	// An unmet precondition the answer left out is still suggested: compiled
+	// code storing a suggestion, which every autonomy level allows (FR11). Not
+	// when its task is open or dismissed (known), whatever the answer said.
+	for _, precondition := range preconditions {
+		if met[precondition.Kind] {
+			continue
+		}
+		if _, skip := known[workspace.NormalizeSuggestionTitle(precondition.SuggestedTitle)]; skip {
+			continue
+		}
+		suggestion := workspace.HostPreconditionSuggestion(precondition)
+		reason := workspace.TagMissionPrecondition(workspace.MissionSuggestionContext(suggestion, runID), precondition, workspace.MissionSuggestionSourceHost)
+		if created, ok := create(suggestion, reason); ok {
+			met[precondition.Kind] = true
+			first = append(first, created.ID)
+			logger.Info("mission bridge: stored the precondition task the answer left out", logger.Fields{
+				"workspace_id": workspaceID, "run_id": runID, "precondition": precondition.Kind,
+			})
+		}
+	}
+	b.placeBacklogFirst(workspaceID, runID, first)
 	return nil
+}
+
+// placeBacklogFirst moves a run's precondition tickets to the top of this
+// workspace's Backlog order (FR12), keeping the rest in their order. Order is
+// a rank, not priority, and Reorder takes the whole list. A failure leaves
+// the order as Create made it; the tickets still carry high priority.
+func (b *MissionBridge) placeBacklogFirst(workspaceID, runID string, first []string) {
+	if len(first) == 0 {
+		return
+	}
+	items, err := b.backlog.List(workspaceID, false)
+	if err != nil {
+		logger.Warn("mission bridge: list Backlog to place precondition first", logger.Fields{"workspace_id": workspaceID, "run_id": runID, "error": err})
+		return
+	}
+	leading := map[string]bool{}
+	for _, id := range first {
+		leading[id] = true
+	}
+	order := append([]string{}, first...)
+	for _, item := range items {
+		if item.OwningWorkspaceID == workspaceID && !leading[item.Task.ID] {
+			order = append(order, item.Task.ID)
+		}
+	}
+	if _, err := b.backlog.Reorder(workspaceID, order); err != nil {
+		logger.Warn("mission bridge: place precondition first in Backlog", logger.Fields{"workspace_id": workspaceID, "run_id": runID, "error": err})
+	}
 }
 
 // unreadableAnswerFindingTitle is stable so repeated failures merge into one

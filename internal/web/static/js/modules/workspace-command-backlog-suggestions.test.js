@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WorkspaceCommandView, goalSuggestionOf } from './workspace-command.js';
+import { WorkspaceCommandView, coveredSentence, goalSuggestionOf } from './workspace-command.js';
 
 // Goal-run suggestions in the Backlog drawer (workspace-goal-suggestions FR20).
 // Same headless fixture as workspace-command-backlog.test.js.
@@ -216,6 +216,39 @@ test('Check protection reads the owning workspace fact and opens its destination
   ]);
   assert.deepEqual(view.backlogSuggestionAction, { id: 'b1', busy: false, error: '' });
   assert.ok(!view.backlogDrawerPreviewHTML().includes('role="alert"'));
+});
+
+test('a covered folder says Covered with its evidence time instead of the button, and opens nothing', async () => {
+  const observed = '2026-10-28T08:30:00Z';
+  const view = makeView([backup]);
+  view.protection = {
+    readProtection: async id => ({
+      workspace_id: id,
+      state: 'covered',
+      observed_at: observed,
+      destination: { kind: 'chooser' }
+    }),
+    openDestination: async () => assert.fail('a covered folder opened protection')
+  };
+  view.backlogDrawerSelectedId = 'b1';
+  await view.runBacklogCheckProtection('b1');
+  const html = view.backlogDrawerPreviewHTML();
+  const local = new Date(observed).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  });
+  assert.ok(
+    html.includes(
+      '<span class="ws-cmd-backlog-action-covered" role="status">Covered · evidence observed ' +
+        local +
+        '</span>'
+    ),
+    html
+  );
+  assert.ok(!html.includes('data-cmd-backlog-check-protection'), 'the button is replaced');
+  // The ticket is left alone: Not useful and Delete are still offered.
+  assert.match(html, /data-cmd-backlog-not-useful data-cmd-backlog-item="b1">Not useful</);
+  assert.equal(coveredSentence(''), 'Covered');
 });
 
 test('a Check protection that cannot open says so on the card and changes nothing', async () => {
