@@ -140,6 +140,9 @@ type FolderOutcome struct {
 	// FirstTaskID is trusted ownership of a seeded optional task, not a claim
 	// that setup started it. Legacy automatic-start records stay separate.
 	FirstTaskID string `json:"first_task_id,omitempty"`
+	// OpenedBy names the Home's manager who opened a single song its setup
+	// listed (the Portfolio Manager); empty for every other outcome.
+	OpenedBy string `json:"opened_by,omitempty"`
 }
 
 // FolderPortfolioEvidence is the bounded, path-free count seen at scan time.

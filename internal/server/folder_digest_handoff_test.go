@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -51,7 +52,7 @@ func TestFolderHandoff_OnlyASongWhoseHomeListsProjectsIsHandedOver(t *testing.T)
 }
 
 // FR2: the run reads the plan's decision. A song planned the old way is a
-// changed plan, and until the open is wired the handoff fails closed (2.8).
+// changed plan; a handoff plan reaches the song's own run.
 func TestFolderHandoff_TheRunIsHeldToThePlansDecision(t *testing.T) {
 	f := newDraftServerFixture(t)
 	host := &folderSetupHost{builder: f.builder}
@@ -63,8 +64,15 @@ func TestFolderHandoff_TheRunIsHeldToThePlansDecision(t *testing.T) {
 	}
 	handoff := old
 	handoff.Plan.Intent = personalassistant.FolderSetupIntent{Portfolio: true, Placement: "grouped", OpensProjects: []string{"Album-5"}}
-	if err := host.Run(t.Context(), handoff); !errors.Is(err, foldersetup.ErrPortfolioNotWired) {
-		t.Fatalf("the unwired handoff did not fail closed: %v", err)
+	handoff.Update = func(context.Context, personalassistant.FolderSetupUpdate) error { return nil }
+	if err := host.Run(t.Context(), handoff); errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+		t.Fatalf("a handoff plan was refused as changed: %v", err)
+	}
+	// A collection-shaped plan for a song that is not one is a changed plan.
+	manuscript := personalassistant.FolderSetupRequest{UserID: "local", Offer: songOffer("Book", string(folderdigest.ShapeManuscript), "main.tex"),
+		Plan: handoff.Plan, Update: handoff.Update}
+	if err := host.Run(t.Context(), manuscript); err == nil {
+		t.Fatal("a handoff intent ran for an offer that is no song")
 	}
 	if ids, err := f.builder.workspaceFileStore.List(); err != nil {
 		t.Fatal(err)

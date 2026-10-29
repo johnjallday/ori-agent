@@ -82,6 +82,12 @@ type LibraryOpenInput struct {
 	Key string
 	// Goal, when set, is the normalized goal the song is created with.
 	Goal string
+	// WorkspaceName, when set, names the new workspace as the caller's review
+	// named it; empty names it after the row.
+	WorkspaceName string
+	// SetupOfferID, when set, is the folder setup whose one Set up opens the
+	// song: the Home's setup-open receipt is written with the song's link.
+	SetupOfferID string
 	// SeedFirstTask, when set, seeds the song's first task in place of the
 	// Open row's brief-less one; it reports whether the song has it.
 	SeedFirstTask func(songID, format string) bool
@@ -102,13 +108,24 @@ type LibraryOpenResult struct {
 	FirstTask bool   `json:"first_task"`
 }
 
+// libraryActivation is one reviewed creation of a listed song: the row, the
+// chosen file, the name and goal it is created with, and the commit's key.
+type libraryActivation struct {
+	EntryID       string
+	SelectedFile  string
+	WorkspaceName string
+	Goal          string
+	Key           string
+	SetupOfferID  string
+}
+
 // libraryOpener is the library's own read and reviewed creator for one song.
 type libraryOpener interface {
 	Exists(scope projectlibrary.Scope, entryID string) (bool, error)
 	Eligibility(ctx context.Context, scope projectlibrary.Scope, entryID string) (projectlibrary.ActivationEligibility, error)
-	// Activate reviews and commits exactly that review, creating the song with
-	// goal when one is set; key makes a retry replay.
-	Activate(ctx context.Context, scope projectlibrary.Scope, entryID, selectedFile, goal, key string) (string, error)
+	// Activate reviews and commits exactly that review; its key makes a retry
+	// replay.
+	Activate(ctx context.Context, scope projectlibrary.Scope, activation libraryActivation) (string, error)
 	// Format is the project format the catalog observed for the row.
 	Format(scope projectlibrary.Scope, entryID string) string
 }
@@ -147,8 +164,8 @@ func (o reviewedLibraryOpener) Eligibility(ctx context.Context, scope projectlib
 	return o.inspector.Eligibility(ctx, scope, entryID)
 }
 
-func (o reviewedLibraryOpener) Activate(ctx context.Context, scope projectlibrary.Scope, entryID, selectedFile, goal, key string) (string, error) {
-	return o.h.activateLibrarySong(ctx, o.activator, scope, entryID, selectedFile, goal, key)
+func (o reviewedLibraryOpener) Activate(ctx context.Context, scope projectlibrary.Scope, activation libraryActivation) (string, error) {
+	return o.h.activateLibrarySong(ctx, o.activator, scope, activation)
 }
 
 func (o reviewedLibraryOpener) Format(scope projectlibrary.Scope, entryID string) string {
@@ -270,7 +287,8 @@ func (h *Handler) openLibraryProject(ctx context.Context, scope projectlibrary.S
 			return LibraryOpenResult{}, &LibraryOpenStop{Reason: LibraryOpenNeedsModel,
 				Message: "Set up a model so the assistant can work on this song, then open it again."}
 		}
-		workspaceID, err := opener.Activate(ctx, scope, in.EntryID, in.SelectedFile, in.Goal, in.Key)
+		workspaceID, err := opener.Activate(ctx, scope, libraryActivation{EntryID: in.EntryID, SelectedFile: in.SelectedFile,
+			WorkspaceName: in.WorkspaceName, Goal: in.Goal, Key: in.Key, SetupOfferID: in.SetupOfferID})
 		if err != nil {
 			return LibraryOpenResult{}, err
 		}
@@ -334,36 +352,50 @@ func containsName(names []string, name string) bool {
 
 // activateLibrarySong is the library's own reviewed creator: review, then the
 // commit of exactly that review, keyed by the request so a retry replays.
-func (h *Handler) activateLibrarySong(ctx context.Context, activator *projectlibrary.ActivationService, scope projectlibrary.Scope, entryID, selectedFile, goal, key string) (string, error) {
+func (h *Handler) activateLibrarySong(ctx context.Context, activator *projectlibrary.ActivationService, scope projectlibrary.Scope, activation libraryActivation) (string, error) {
 	doc, err := h.assistantLibraryStore().Read(scope)
 	if err != nil {
 		return "", err
 	}
-	name := ""
+	name := strings.TrimSpace(activation.WorkspaceName)
 	for _, entry := range doc.Entries {
-		if entry.ID != entryID {
+		if entry.ID != activation.EntryID || name != "" {
 			continue
 		}
 		// The row's own name: what the user saved, else its folder's name (the
-		// library's search rows use the same rule).
+		// library's search rows use the same rule); a root that is itself the
+		// song is named after the root's own folder.
 		name = strings.TrimSpace(entry.Fields.DisplayName)
 		for _, observed := range entry.Observations {
-			if name == "" && observed.RelativeFolder != "" {
+			switch {
+			case name != "":
+			case observed.RelativeFolder != "":
 				name = filepath.Base(observed.RelativeFolder)
+			default:
+				for _, root := range doc.Roots {
+					if root.ID == observed.RootID && root.RevokedAt == nil {
+						name = filepath.Base(root.Path)
+					}
+				}
 			}
 		}
 	}
-	if name == "" {
+	if name == "" || name == "." || name == string(filepath.Separator) {
 		return "", projectlibrary.ErrConflict
 	}
 	if runes := []rune(name); len(runes) > 128 {
 		name = string(runes[:128])
 	}
-	review, err := activator.ReviewWithGoal(ctx, scope, entryID, doc.Revision, selectedFile, name, goal)
+	review, err := activator.ReviewWithGoal(ctx, scope, activation.EntryID, doc.Revision, activation.SelectedFile, name, activation.Goal)
 	if err != nil {
 		return "", err
 	}
-	result, err := activator.Commit(ctx, scope, entryID, review.Token, key)
+	var result projectlibrary.ActivationResult
+	if activation.SetupOfferID != "" {
+		result, err = activator.CommitSetupOpen(ctx, scope, activation.EntryID, review.Token, activation.Key, activation.SetupOfferID)
+	} else {
+		result, err = activator.Commit(ctx, scope, activation.EntryID, review.Token, activation.Key)
+	}
 	if err != nil {
 		return "", err
 	}

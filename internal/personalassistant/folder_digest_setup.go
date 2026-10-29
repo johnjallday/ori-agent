@@ -414,13 +414,15 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 				lines[i].State = FolderLineWaiting
 			}
 		}
-		runID := ""
+		runID, homeID := "", ""
 		if item.Setup != nil {
-			runID = item.Setup.RunID
+			// A resume keeps the run and the Home an earlier pass built or joined,
+			// so the Home is found again, never mistaken for a stranger's.
+			runID, homeID = item.Setup.RunID, item.Setup.HomeID
 		}
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
-			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
+			RunID: runID, HomeID: homeID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
 			Visual: CloneFolderSetupVisual(plan.Visual), Monitoring: monitoring,
 		}
 		if plan.Hire != nil {
@@ -520,6 +522,17 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
 		}
 		return
+	}
+	if isHandoffSetup(*offer) {
+		// A single song its Home's manager opened resolves to the song, proved
+		// against the Home, the link and the Home's setup-open receipt.
+		if _, err := s.ResolveHandoff(ctx, userID, offerID, "setup-"+offerID+"-handoff"); err != nil {
+			logger.Warn("Single-song setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
+			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+			return
+		}
+		s.linkOptionalLook(ctx, userID, offerID)
+		return // Setup consent never starts the optional project task.
 	}
 	if offer.Portfolio != nil {
 		// A collection resolves to its Home through the same proofs the

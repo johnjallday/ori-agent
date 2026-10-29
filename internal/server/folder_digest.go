@@ -93,6 +93,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		Tidier:      b.newFolderTidyRunner(),
 		Journey:     folderJourneyVerifier{builder: b},
 		HomeJourney: folderHomeVerifier{builder: b},
+		Handoff:     folderHandoffVerifier{builder: b},
 		Setup:       setupHost,
 		FirstTask:   folderFirstTaskSeeder{builder: b},
 		FirstLook:   folderFirstLookStarter{builder: b},

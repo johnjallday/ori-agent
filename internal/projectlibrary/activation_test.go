@@ -1199,6 +1199,81 @@ func TestActivation_ReplayWithAnotherGoalIsRefused(t *testing.T) {
 	}
 }
 
+// FR13: a song a folder setup opened leaves the Home one setup-open receipt,
+// written with the song's catalog link and naming it; a replay adds none.
+func TestActivation_SetupOpenReceiptIsWrittenWithTheLink(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:offer-1:single", ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a setup open without its offer: %v", err)
+	}
+	result, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:offer-1:single", "offer-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts := func() []workspace.AssistantPortfolioSetupOpenReceipt {
+		home, err := file.Get(scope.HomeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return home.GetAssistantProgramState().Portfolio.SetupOpenReceipts
+	}
+	got := receipts()
+	saved, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := sessionEntry(saved, "single").Link
+	if len(got) != 1 || got[0].OfferID != "offer-1" || got[0].EntryID != "single" || link == nil ||
+		got[0].LinkID != link.LinkID || got[0].LinkID != result.LinkID || got[0].ProjectWorkspaceID != result.WorkspaceID || got[0].RecordedAt.IsZero() {
+		t.Fatalf("receipts = %+v link = %+v result = %+v", got, link, result)
+	}
+	replay, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:offer-1:single", "offer-1")
+	if err != nil || !replay.Replay || len(receipts()) != 1 {
+		t.Fatalf("replay = %+v %v receipts = %+v", replay, err, receipts())
+	}
+	// The Open row's commit records none.
+	if home, _ := file.Get(scope.HomeID); home.GetAssistantProgramState().Portfolio.SetupOpenReceipts[0].OfferID != "offer-1" {
+		t.Fatal("the receipt changed")
+	}
+}
+
+// A setup-open receipt that cannot be kept saves neither it nor the link.
+func TestActivation_SetupOpenReceiptAndLinkAreOneWrite(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CommitSetupOpen(t.Context(), scope, "single", review.Token, "open:bad", "offer/with/a/path"); err == nil {
+		t.Fatal("an invalid receipt was accepted")
+	}
+	saved, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionEntry(saved, "single").Link != nil || len(home.GetAssistantProgramState().Portfolio.SetupOpenReceipts) != 0 {
+		t.Fatalf("half a write was saved: link=%+v receipts=%+v", sessionEntry(saved, "single").Link, home.GetAssistantProgramState().Portfolio.SetupOpenReceipts)
+	}
+}
+
 // The review's digest covers the goal: a stored review whose goal alone was
 // changed afterwards commits nothing; the same review with its own goal does.
 func TestActivation_ReviewTokenBindsTheGoal(t *testing.T) {

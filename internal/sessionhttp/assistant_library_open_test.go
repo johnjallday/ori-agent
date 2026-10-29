@@ -31,6 +31,7 @@ type fakeOpener struct {
 	activations []string
 	keys        []string
 	goals       []string
+	names       []string
 	activateErr error
 }
 
@@ -47,10 +48,11 @@ func (f *fakeOpener) Eligibility(_ context.Context, _ projectlibrary.Scope, entr
 	return f.rows[entryID], nil
 }
 
-func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, entryID, selectedFile, goal, key string) (string, error) {
+func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, activation libraryActivation) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.keys, f.goals = append(f.keys, key), append(f.goals, goal)
+	entryID, selectedFile := activation.EntryID, activation.SelectedFile
+	f.keys, f.goals, f.names = append(f.keys, activation.Key), append(f.goals, activation.Goal), append(f.names, activation.WorkspaceName)
 	if f.activateErr != nil {
 		return "", f.activateErr
 	}
@@ -348,7 +350,7 @@ func TestOpenLibrarySong_WithoutAConsentAddsNoAgent(t *testing.T) {
 func TestOpenLibrarySong_LeavesASongsOwnAgentAlone(t *testing.T) {
 	f := newOpenFixture(t)
 	f.grant(t)
-	if _, err := f.opener.Activate(context.Background(), projectlibrary.Scope{}, "two", "", "", "earlier"); err != nil {
+	if _, err := f.opener.Activate(context.Background(), projectlibrary.Scope{}, libraryActivation{EntryID: "two", Key: "earlier"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.handler.assistantWorkspaceRoleStaffer(context.Background(), "song-two", []RoleStaffingFill{{RoleID: "reaper-assistant", Mode: "create", Name: "REAPER Assistant · Song 002"}}); err != nil {

@@ -204,6 +204,9 @@ type FolderCreateResult struct {
 	// (a retried click) and was reused.
 	Created bool
 	Receipt []FolderReceiptRow
+	// OpenedBy names the Home's manager who opened a single song (its primary
+	// Home role); empty for every other setup.
+	OpenedBy string
 	// FirstBatch is an inbox setup's first metadata-only batch, as File Janitor
 	// recorded it. Nil for every other setup.
 	FirstBatch *FolderFirstBatch
@@ -255,6 +258,15 @@ type FolderTidier interface {
 // offered folder, owner and blueprint. It never trusts a browser workspace ID.
 type FolderJourneyVerifier interface {
 	VerifiedProject(ctx context.Context, userID, runID, folderPath, blueprintID, integrationKey string, acceptedAfter time.Time) (FolderCreateResult, error)
+}
+
+// FolderHandoffVerifier re-reads, from canonical state, the song a single
+// song's setup had its Home's manager open: the plan's Home, a child whose
+// folder is the offered folder, their reciprocal link, the Home's setup-open
+// receipt for this offer, and the child's canonical page. Nothing it returns
+// comes from the run's own report.
+type FolderHandoffVerifier interface {
+	VerifiedHandoff(ctx context.Context, userID, offerID, homeID, folderPath string, acceptedAfter time.Time) (FolderCreateResult, error)
 }
 
 // FolderHomeVerifier re-reads the canonical Group Template Home, not a
@@ -370,6 +382,7 @@ type FolderDigestDeps struct {
 	// Journey verifies the plugin's created project before resolving a card.
 	Journey     FolderJourneyVerifier
 	HomeJourney FolderHomeVerifier
+	Handoff     FolderHandoffVerifier
 	// Setup plans and runs a recognized project's one-card setup. Nil keeps the
 	// step-by-step journey as the only path.
 	Setup FolderSetupRunner
@@ -1909,6 +1922,10 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 	if offer == nil {
 		return FolderOfferView{}, ErrFolderOfferNotFound
 	}
+	if isHandoffSetup(*offer) {
+		// A browser-named workspace never resolves a single song's setup.
+		return s.ResolveHandoff(ctx, userID, offerID, input.RequestID)
+	}
 	if receipt := doc.Receipt(input.RequestID); receipt != nil {
 		if receipt.OfferID != offerID {
 			return FolderOfferView{}, ErrFolderOfferDecided
@@ -2000,6 +2017,11 @@ func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offe
 	offer := doc.Offer(offerID)
 	if offer == nil {
 		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	if isHandoffSetup(*offer) {
+		// A single song resolves only through its own proofs; a browser Home
+		// ID never applies to it.
+		return s.ResolveHandoff(ctx, userID, offerID, input.RequestID)
 	}
 	if receipt := doc.Receipt(input.RequestID); receipt != nil {
 		if receipt.OfferID != offerID || receipt.Action != "portfolio" {
@@ -2163,9 +2185,16 @@ func (s *FolderDigestService) PortfolioSetupRoot(ctx context.Context, userID, of
 	if offer == nil {
 		return "", "", ErrFolderOfferNotFound
 	}
-	if offer.Status != FolderOfferAwaitingOutcome || offer.Portfolio == nil || offer.DecidedAt == nil || offer.CapabilitySuppressed ||
-		offer.Setup == nil || offer.Setup.Status != FolderSetupRunning || offer.Setup.HomeID != homeID || !offer.Subject.IsRoot ||
-		!s.isRunning(offerID) {
+	if offer.Status != FolderOfferAwaitingOutcome || offer.DecidedAt == nil || offer.CapabilitySuppressed ||
+		offer.Setup == nil || offer.Setup.Status != FolderSetupRunning || offer.Setup.HomeID != homeID || !s.isRunning(offerID) {
+		return "", "", ErrFolderWorkspaceRefused
+	}
+	if offer.Portfolio == nil {
+		// A single song its Home's manager opens: the root is the song's own
+		// folder (3A), never the folder it was found in.
+		return s.heldSongFolder(*offer)
+	}
+	if !offer.Subject.IsRoot {
 		return "", "", ErrFolderWorkspaceRefused
 	}
 	canonical, identity, loss := s.heldPortfolioFolder(*offer)
@@ -2202,6 +2231,31 @@ func (s *FolderDigestService) heldPortfolioFolder(offer FolderOffer) (root, iden
 		return "", "", FolderContinuationChanged
 	}
 	return canonical, offer.RootIdentity, ""
+}
+
+// heldSongFolder is a single song's own folder for the library root, when the
+// run's plan opens exactly that song and the server-held folder is still the
+// one the scan named (its canonical path's key). Its directory identity is read
+// now and pins the folder from here on.
+func (s *FolderDigestService) heldSongFolder(offer FolderOffer) (string, string, error) {
+	opens := offer.Setup.Intent.OpensProjects
+	if !offer.Setup.Intent.Portfolio || len(opens) != 1 || opens[0] != offer.Subject.Name ||
+		offer.Subject.Kind != FolderChoiceProject || offer.Choice != FolderChoiceProject {
+		return "", "", ErrFolderWorkspaceRefused
+	}
+	path, err := s.subjectPathOf(offer)
+	if err != nil {
+		return "", "", ErrFolderPathLost
+	}
+	canonical, err := s.deps.ValidateRoot(path)
+	if err != nil || canonical != filepath.Clean(path) || FolderKey(canonical) != offer.Subject.Key {
+		return "", "", ErrFolderPathLost
+	}
+	identity, err := portfolioDirectoryIdentity(canonical)
+	if err != nil {
+		return "", "", ErrFolderPathLost
+	}
+	return canonical, identity, nil
 }
 
 func portfolioDirectoryIdentity(path string) (string, error) {
@@ -2284,6 +2338,10 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 	offer := doc.Offer(offerID)
 	if offer == nil {
 		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	if isHandoffSetup(*offer) {
+		// No plugin quest ran for a single song its Home's manager opened.
+		return s.ResolveHandoff(ctx, userID, offerID, input.RequestID)
 	}
 	if receipt := doc.Receipt(input.RequestID); receipt != nil {
 		if receipt.OfferID != offerID || receipt.Action != "journey" {

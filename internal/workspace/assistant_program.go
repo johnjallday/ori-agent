@@ -281,6 +281,9 @@ type AssistantPortfolioState struct {
 	OperationReceipts        []AssistantPortfolioOperationReceipt        `json:"operation_receipts,omitempty"`
 	HandoffReviewReceipts    []AssistantPortfolioHandoffReviewReceipt    `json:"handoff_review_receipts,omitempty"`
 	HandoffOperationReceipts []AssistantPortfolioHandoffOperationReceipt `json:"handoff_operation_receipts,omitempty"`
+	// SetupOpenReceipts are the songs a folder setup's one Set up had the Home's
+	// manager open, each written in the same Home write as the song's link.
+	SetupOpenReceipts []AssistantPortfolioSetupOpenReceipt `json:"setup_open_receipts,omitempty"`
 }
 
 type AssistantReflectionState struct {
@@ -461,6 +464,7 @@ func CloneAssistantPortfolioState(source AssistantPortfolioState) AssistantPortf
 		}
 	}
 	clone.HandoffOperationReceipts = append([]AssistantPortfolioHandoffOperationReceipt(nil), source.HandoffOperationReceipts...)
+	clone.SetupOpenReceipts = append([]AssistantPortfolioSetupOpenReceipt(nil), source.SetupOpenReceipts...)
 	return clone
 }
 

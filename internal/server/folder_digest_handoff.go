@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -81,8 +80,16 @@ func (h *folderSetupHost) handoffPlan(ctx context.Context, req personalassistant
 	if song.FolderName == "" {
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable
 	}
+	manager := managerName(home)
+	if home == nil && h.builder.sessionHandler != nil {
+		// Before the Home exists its reviewed template names the manager, so the
+		// card says the name the Home will give it (AC9).
+		if declared := h.builder.sessionHandler.PortfolioHomeManager(ctx, provider.PluginID); declared != "" {
+			manager = declared
+		}
+	}
 	plan := foldersetup.BuildHandoffPlan(foldersetup.HandoffFacts{
-		Home: homeFacts, Song: song, SongName: song.FolderName, ManagerName: managerName(home),
+		Home: homeFacts, Song: song, SongName: song.FolderName, ManagerName: manager,
 	})
 	return h.bindHandoffModel(plan)
 }
@@ -113,8 +120,7 @@ func (h *folderSetupHost) bindHandoffModel(plan personalassistant.FolderSetupPla
 }
 
 // handoffRun drives a single song's setup: the collection run for a portfolio
-// of one, then the Portfolio Manager's open. Until the open is wired it fails
-// closed, so no card can half-run.
-func (h *folderSetupHost) handoffRun(_ context.Context, req personalassistant.FolderSetupRequest, _ setupTarget) error {
-	return fmt.Errorf("%w: the Portfolio Manager's open of %q", foldersetup.ErrPortfolioNotWired, strings.Join(req.Plan.Intent.OpensProjects, ", "))
+// of one, then the Portfolio Manager's open (songRun).
+func (h *folderSetupHost) handoffRun(ctx context.Context, req personalassistant.FolderSetupRequest, target setupTarget) error {
+	return h.songRun(ctx, req, target)
 }

@@ -142,6 +142,58 @@ type PortfolioReceiptFacts struct {
 	Listed      ScanOutcome
 	// Shared says the collection has projects the shared assistant can join.
 	Shared bool
+	// Opened is the song the Home's manager opened, for a single song's plan.
+	Opened *OpenOutcome
+}
+
+// OpenInput is one listed project the run opens: the Home's catalog entry and,
+// when its folder holds several project files, the one the user chose. The
+// host's opener adds the rest (the key, the goal, the first task).
+type OpenInput struct {
+	HomeID       string
+	EntryID      string
+	SelectedFile string
+}
+
+// OpenOutcome is what opening one project did, as the library's own open
+// service reports it. Created is false when an earlier pass already made the
+// workspace (connected): this pass only finished what was missing.
+type OpenOutcome struct {
+	EntryID     string
+	WorkspaceID string
+	LinkID      string
+	Route       string
+	Created     bool
+	// Staffing is how the project role was filled: added, joined, already, or
+	// why not (none, off, not_shared, consent_stale, assistant_missing).
+	Staffing  string
+	AgentName string
+	FirstTask bool
+}
+
+// OpenStop is an open that asks the user first (needs_choice with its
+// candidates, consent_stale, needs_model) or that the row's own state refuses.
+// Nothing was made.
+type OpenStop struct {
+	Reason     string
+	Candidates []string
+	Detail     string
+}
+
+func (s *OpenStop) Error() string { return "foldersetup: open stopped: " + s.Reason + ": " + s.Detail }
+
+// ErrOpenNotListed means the Home's catalog holds no single entry for the
+// project the plan promised to open.
+var ErrOpenNotListed = errors.New("foldersetup: the project to open is not listed exactly once")
+
+// Opener is the Home's manager opening a project its library lists, through
+// the same reviewed open the library's Open row uses. It never creates a
+// second workspace for a project that is already open.
+type Opener interface {
+	// Find is the catalog entry the root the run connected for folderName lists
+	// as itself; ErrOpenNotListed when there is not exactly one.
+	Find(ctx context.Context, homeID, folderName string) (string, error)
+	Open(ctx context.Context, in OpenInput) (OpenOutcome, error)
 }
 
 // Receipts reads back, from canonical state, what the run made.
@@ -162,7 +214,9 @@ type PortfolioRunner struct {
 	// SongDetails is required when the plan grants the song-details consent.
 	SongDetails SongDetails
 	// Profile is required when the plan showed the Home's profile line.
-	Profile  Profile
+	Profile Profile
+	// Opener is required when the plan opens projects (a single song's plan).
+	Opener   Opener
 	Receipts Receipts
 	// Folder is the collection folder's server-held path.
 	Folder   string
@@ -181,6 +235,9 @@ type PortfolioConfig struct {
 	// the reviewed template is this run's own (a pass that stopped right after
 	// creating it), never a stranger's.
 	AcceptedAfter time.Time
+	// EntryName is the project file the user chose when an earlier pass stopped
+	// at needs_choice.
+	EntryName string
 }
 
 // ErrPortfolioNotWired means the host left out a seam the plan needs.
@@ -190,12 +247,13 @@ var ErrPortfolioNotWired = errors.New("foldersetup: the portfolio run is not wir
 func (p *PortfolioRunner) Run(ctx context.Context, cfg PortfolioConfig) (Result, error) {
 	if p == nil || p.Homes == nil || p.Staffing == nil || p.Library == nil || p.Receipts == nil || p.Progress == nil ||
 		(cfg.Plan.Intent.GrantsConsent && p.Sharing == nil) || (cfg.Plan.Intent.GrantsSongDetails && p.SongDetails == nil) ||
-		(cfg.Plan.Intent.SetsProfile && p.Profile == nil) {
+		(cfg.Plan.Intent.SetsProfile && p.Profile == nil) || (len(cfg.Plan.Intent.OpensProjects) > 0 && p.Opener == nil) {
 		return Result{}, ErrPortfolioNotWired
 	}
 	state := &run{
-		Runner: &Runner{Install: p.Install, Providers: p.Providers, Progress: p.Progress, NewKey: p.NewKey},
-		cfg:    Config{Plan: cfg.Plan},
+		Runner:    &Runner{Install: p.Install, Providers: p.Providers, Progress: p.Progress, NewKey: p.NewKey},
+		cfg:       Config{Plan: cfg.Plan},
+		entryName: cfg.EntryName,
 	}
 	state.lines = append([]personalassistant.FolderPlanLine(nil), cfg.Plan.Lines...)
 	for i := range state.lines {
@@ -217,7 +275,7 @@ func (p *PortfolioRunner) Run(ctx context.Context, cfg PortfolioConfig) (Result,
 		if halt.detail != "" {
 			cause = halt
 		}
-		return portfolio.finish(ctx, personalassistant.FolderSetupStopped, halt.reason, nil, cause)
+		return portfolio.finish(ctx, personalassistant.FolderSetupStopped, halt.reason, halt.candidates, cause)
 	case errors.Is(err, ErrNeedsPick):
 		return portfolio.finish(ctx, personalassistant.FolderSetupStopped, personalassistant.FolderStopNeedsPick, nil, nil)
 	default:
@@ -234,21 +292,33 @@ type portfolioRun struct {
 	// homeCreated and added are what this run made, for the receipt.
 	homeCreated bool
 	added       []string
+	// opened is the song this pass opened (or finished opening).
+	opened *OpenOutcome
 }
 
 // record writes the run's state with its Home and (once known) its receipt.
 func (s *portfolioRun) record(ctx context.Context, status, reason string) error {
+	return s.recordAsking(ctx, status, reason, nil)
+}
+
+// recordAsking also carries the files a needs_choice stop asks between, and
+// the one chosen on an earlier pass.
+func (s *portfolioRun) recordAsking(ctx context.Context, status, reason string, candidates []string) error {
 	return s.Progress.Update(ctx, Update{
 		Lines: append([]personalassistant.FolderPlanLine(nil), s.lines...), Status: status, StopReason: reason,
 		HomeID: s.homeID, Receipt: append([]personalassistant.FolderReceiptRow(nil), s.receipt...),
+		EntryName: s.entryName, EntryCandidates: candidates,
 	})
 }
 
-func (s *portfolioRun) finish(ctx context.Context, status, reason string, _ []string, cause error) (Result, error) {
+func (s *portfolioRun) finish(ctx context.Context, status, reason string, candidates []string, cause error) (Result, error) {
 	if status == personalassistant.FolderSetupStopped {
+		// A stop that asks the user something leaves the line it was on waiting
+		// for the answer; any other leaves it failed.
 		next := personalassistant.FolderLineFailed
 		switch reason {
-		case personalassistant.FolderStopNeedsPick, personalassistant.FolderStopNeedsModel:
+		case personalassistant.FolderStopNeedsPick, personalassistant.FolderStopNeedsModel, personalassistant.FolderStopNeedsChoice,
+			personalassistant.FolderStopConsentStale, personalassistant.FolderStopAssistantMissing:
 			next = personalassistant.FolderLineWaiting
 		}
 		for i := range s.lines {
@@ -257,8 +327,39 @@ func (s *portfolioRun) finish(ctx context.Context, status, reason string, _ []st
 			}
 		}
 	}
-	err := s.record(context.WithoutCancel(ctx), status, reason)
+	err := s.recordAsking(context.WithoutCancel(ctx), status, reason, candidates)
 	return Result{Status: status, StopReason: reason, Cause: cause}, err
+}
+
+// handoffAt is the index of a single song's handoff line, or len(lines): the
+// lines before it are the Home's, the lines after it the opened song's.
+func (s *portfolioRun) handoffAt() int {
+	for i := range s.lines {
+		if s.lines[i].Kind == personalassistant.FolderPlanHandoff {
+			return i
+		}
+	}
+	return len(s.lines)
+}
+
+// setKind moves the Home's lines of a kind; a single song's plan has a second
+// agents line after its handoff, which belongs to the open.
+func (s *portfolioRun) setKind(kind, state string) {
+	for i := 0; i < s.handoffAt(); i++ {
+		if s.lines[i].Kind == kind {
+			s.lines[i].State = state
+		}
+	}
+}
+
+// setOpen moves the handoff line itself or the opened song's line of a kind.
+func (s *portfolioRun) setOpen(kind, state string) {
+	at := s.handoffAt()
+	for i := at; i < len(s.lines); i++ {
+		if s.lines[i].Kind == kind {
+			s.lines[i].State = state
+		}
+	}
 }
 
 func (s *portfolioRun) working(ctx context.Context, kind string) error {
@@ -306,9 +407,12 @@ func (s *portfolioRun) drive(ctx context.Context) error {
 	if err := s.guard(ctx); err != nil {
 		return err
 	}
+	if err := s.open(ctx); err != nil {
+		return err
+	}
 	rows, err := s.runner.Receipts.Receipt(ctx, s.homeID, PortfolioReceiptFacts{
 		HomeCreated: s.homeCreated || (s.cfg.Plan.Intent.CreatesHome && s.cfg.HomeID != ""), AddedAgents: s.added, Listed: listed,
-		Shared: s.cfg.Plan.Intent.SharedProjects,
+		Shared: s.cfg.Plan.Intent.SharedProjects, Opened: s.opened,
 	})
 	if err != nil {
 		return failed("could not read back what was set up: " + err.Error())
@@ -485,6 +589,11 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 	if err != nil {
 		return ScanOutcome{}, failed("could not read the Home's library: " + err.Error())
 	}
+	if current.RootID != "" && !s.cfg.Plan.Intent.CreatesHome && len(s.cfg.Plan.Intent.OpensProjects) > 0 {
+		// OQ4: a root of this Home already covers the song; no second root is
+		// connected and the song's own entry is opened from it.
+		s.markAlreadyListed()
+	}
 	if current.Scanned && current.RootID != "" {
 		s.done(personalassistant.FolderPlanLibrary)
 		return ScanOutcome{Listed: current.Listed, Partial: current.Partial}, nil
@@ -557,6 +666,93 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 	}
 	s.done(personalassistant.FolderPlanLibrary)
 	return listed, s.record(ctx, personalassistant.FolderSetupRunning, "")
+}
+
+// AlreadyListedDetail is the library line's detail when a root of the Home
+// already lists the song.
+const AlreadyListedDetail = "Already listed."
+
+func (s *portfolioRun) markAlreadyListed() {
+	for i := 0; i < s.handoffAt(); i++ {
+		if s.lines[i].Kind == personalassistant.FolderPlanLibrary {
+			s.lines[i].Detail = AlreadyListedDetail
+		}
+	}
+}
+
+// open is the Home's manager opening the song the plan promised, once the
+// Home is ready, listed and fenced, through the library's own reviewed open.
+// A pass after an earlier one made the workspace finishes what is missing and
+// never makes a second one. A stop that asks the user leaves its lines waiting.
+func (s *portfolioRun) open(ctx context.Context) error {
+	opens := s.cfg.Plan.Intent.OpensProjects
+	if len(opens) == 0 {
+		return nil
+	}
+	if len(opens) != 1 {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "a song's plan opens exactly one project"}
+	}
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
+	s.setOpen(personalassistant.FolderPlanHandoff, personalassistant.FolderLineWorking)
+	s.setOpen(personalassistant.FolderPlanWorkspace, personalassistant.FolderLineWorking)
+	if err := s.record(ctx, personalassistant.FolderSetupRunning, ""); err != nil {
+		return err
+	}
+	entryID, err := s.runner.Opener.Find(ctx, s.homeID, opens[0])
+	if errors.Is(err, ErrOpenNotListed) {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the library does not list the song exactly once"}
+	}
+	if err != nil || entryID == "" {
+		return failed("could not find the listed song: " + errText(err))
+	}
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
+	outcome, err := s.runner.Opener.Open(ctx, OpenInput{HomeID: s.homeID, EntryID: entryID, SelectedFile: s.entryName})
+	var asked *OpenStop
+	switch {
+	case errors.As(err, &asked):
+		switch asked.Reason {
+		case personalassistant.FolderStopNeedsChoice, personalassistant.FolderStopNeedsModel,
+			personalassistant.FolderStopConsentStale, personalassistant.FolderStopPlanChanged:
+			return &stop{reason: asked.Reason, candidates: asked.Candidates, detail: asked.Detail}
+		}
+		return failed("the song could not be opened: " + asked.Reason + ": " + asked.Detail)
+	case err != nil:
+		return failed("the song could not be opened: " + err.Error())
+	case outcome.WorkspaceID == "" || outcome.EntryID != entryID:
+		return failed("the open did not name the song's workspace")
+	}
+	for _, kind := range []string{personalassistant.FolderPlanWorkspace, personalassistant.FolderPlanFolder, personalassistant.FolderPlanMode} {
+		s.setOpen(kind, personalassistant.FolderLineDone)
+	}
+	switch outcome.Staffing {
+	case "added", "joined", "already":
+		s.setOpen(personalassistant.FolderPlanAgents, personalassistant.FolderLineDone)
+	case personalassistant.FolderStopConsentStale, personalassistant.FolderStopAssistantMissing:
+		s.setOpen(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking)
+		return &stop{reason: outcome.Staffing}
+	default:
+		s.setOpen(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking)
+		return failed("the song's shared assistant was not added: " + outcome.Staffing)
+	}
+	if !outcome.FirstTask {
+		s.setOpen(personalassistant.FolderPlanTask, personalassistant.FolderLineWorking)
+		return failed("the song's first task was not seeded")
+	}
+	s.setOpen(personalassistant.FolderPlanTask, personalassistant.FolderLineDone)
+	s.setOpen(personalassistant.FolderPlanHandoff, personalassistant.FolderLineDone)
+	s.opened = &outcome
+	return s.record(ctx, personalassistant.FolderSetupRunning, "")
+}
+
+func errText(err error) string {
+	if err == nil {
+		return "no entry"
+	}
+	return err.Error()
 }
 
 // share records the standing consent the plan's assistant line asked for. A Home
