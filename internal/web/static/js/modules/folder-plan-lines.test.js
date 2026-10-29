@@ -310,11 +310,14 @@ test('the handoff line shows each state of the Portfolio Manager’s open', () =
     ['done', 'Portfolio Manager opened Album-5', '✓', 'Done'],
     ['failed', 'Your Portfolio Manager then opens Album-5', '!', 'Did not finish']
   ];
+  // The run keeps the plan's words; the card says what the state means (FR19).
   for (const [state, name, glyph, word] of states) {
     const list = document.createElement('ul');
     shared.renderSetupLines(
       list,
-      handoffLines(shared, { handoff: { state, name, detail: '' } }),
+      handoffLines(shared, {
+        handoff: { state, name: 'Your Portfolio Manager then opens Album-5', detail: '' }
+      }),
       document,
       { sections: names }
     );
@@ -322,6 +325,25 @@ test('the handoff line shows each state of the Portfolio Manager’s open', () =
     assert.equal(handoff.dataset.state, state, state);
     assert.equal(handoff.textContent, `${glyph}${name} — ${word}`, state);
   }
+  // Words the card does not recognize, or another song's, are shown as they are.
+  assert.equal(
+    shared.handoffLineName({ name: 'Opens it later', state: 'done' }, 'Album-5'),
+    'Opens it later'
+  );
+  assert.equal(
+    shared.handoffLineName(
+      { name: 'Your Music Portfolio Manager then opens Album-6', state: 'done' },
+      'Album-5'
+    ),
+    'Your Music Portfolio Manager then opens Album-6'
+  );
+  assert.equal(
+    shared.handoffLineName(
+      { name: 'Your Music Portfolio Manager then opens Album-5', state: 'working' },
+      'Album-5'
+    ),
+    'Music Portfolio Manager is opening Album-5…'
+  );
 });
 
 test('handoffNames reads the Home and the song from a plan, a run or a build plan', () => {

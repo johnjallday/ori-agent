@@ -43,7 +43,9 @@ func (r handoffReceipts) Receipt(_ context.Context, homeID string, facts folders
 		for _, agent := range facts.AddedAgents {
 			added = added || strings.EqualFold(agent, name)
 		}
-		row := personalassistant.FolderReceiptRow{Kind: "agent", Name: name, Detail: manager + ", already there", Assigned: true}
+		// The manager is the Home's member, not the song's: Assigned is
+		// membership of the workspace this receipt is about.
+		row := personalassistant.FolderReceiptRow{Kind: "agent", Name: name, Detail: manager + ", already there"}
 		if added {
 			row.Detail = manager + ", added"
 		}

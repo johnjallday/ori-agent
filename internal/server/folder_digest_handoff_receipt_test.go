@@ -62,6 +62,10 @@ func TestHandoffReceipts_ReadTheSongsSetupBackInOrder(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("receipt =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+	// Only the song's own assistant is membership of the song's workspace.
+	if rows[1].Assigned || !rows[4].Assigned {
+		t.Fatalf("assigned = manager %v, song assistant %v", rows[1].Assigned, rows[4].Assigned)
+	}
 	if rows[3].Route != "/workspaces/album-5" || rows[3].Operation != "create" || !strings.HasSuffix(rows[0].Route, "#projectLibraryPanel") {
 		t.Fatalf("routes = %+v", rows)
 	}

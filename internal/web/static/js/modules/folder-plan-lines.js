@@ -109,6 +109,22 @@
     };
   }
 
+  // handoffLineName is the handoff line's words for its state (FR19): the plan
+  // says "Your Portfolio Manager then opens Album-5"; while it works, "Portfolio
+  // Manager is opening Album-5…"; once done, "Portfolio Manager opened
+  // Album-5". A waiting or failed line keeps the plan's words, and a line not
+  // worded that way is shown as it is. The run never stores these words, so a
+  // resumed plan is still the one that was confirmed.
+  function handoffLineName(line, song) {
+    const name = String(line?.name || '');
+    const title = String(song || '').trim();
+    const match = title ? name.match(/^Your (.+) then opens (.+)$/) : null;
+    if (!match || match[2] !== title) return name;
+    if (line.state === 'working') return `${match[1]} is opening ${title}…`;
+    if (line.state === 'done') return `${match[1]} opened ${title}`;
+    return name;
+  }
+
   // handoffNames reads the Home and song a plan or run view names: the
   // destination it goes into and the workspace it creates.
   function handoffNames(source) {
@@ -173,7 +189,7 @@
         title.className = 'pa-folder__plan-section-title';
         title.setAttribute('role', 'heading');
         title.setAttribute('aria-level', '4');
-        title.textContent = line.name;
+        title.textContent = handoffLineName(line, options.sections?.song);
         body.append(title);
       } else {
         body.append(line.name);
@@ -290,6 +306,7 @@
     satisfiedLinesView,
     handoffSections,
     handoffNames,
+    handoffLineName,
     renderSetupLines,
     setupLineKindIcon,
     hireView

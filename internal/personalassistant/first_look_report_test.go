@@ -119,6 +119,30 @@ func TestFirstLookReport_AFinishedHiredLookNeedsYou(t *testing.T) {
 	}
 }
 
+// FR18: a song its Home's Portfolio Manager opened says so first in the
+// report; Start this and Not now are unchanged, and any other hire reads as before.
+func TestFirstLookReport_NamesThePortfolioManagerWhoOpenedTheSong(t *testing.T) {
+	r := newReportFixture(t, assessmentReport)
+	offer := r.stored(t)
+	outcome := *offer.Outcome
+	outcome.Parent = &FolderSetupDestination{Status: "existing", WorkspaceID: "home-1", Name: "Music Production Home"}
+	outcome.OpenedBy = "Portfolio Manager"
+	offer.Outcome = &outcome
+	ws, _ := r.workspaces.Get("quest-project")
+	needs, _, _, _ := firstLookReportItems(offer, ws, "/workspaces/my-song", r.now)
+	if len(needs) != 1 || needs[0].Detail != "Your Portfolio Manager opened My Song in Music Production Home. "+
+		"A Flask service that serves a school's timetable. It has three apps and a pytest suite." ||
+		strings.Join(needs[0].Actions, ",") != "start_this,not_now" {
+		t.Fatalf("handoff report = %+v", needs)
+	}
+	// Without the manager, or without the Home, nothing is added.
+	outcome.OpenedBy = ""
+	offer.Outcome = &outcome
+	if plain, _, _, _ := firstLookReportItems(offer, ws, "/workspaces/my-song", r.now); len(plain) != 1 || strings.Contains(plain[0].Detail, "opened") {
+		t.Fatalf("non-handoff report = %+v", plain)
+	}
+}
+
 // The evidence is the agent's reason only: not the task named again (with or
 // without code marks), not the closing line, and not Ori's own note on what
 // the report was based on.

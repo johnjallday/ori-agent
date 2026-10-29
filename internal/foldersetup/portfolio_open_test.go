@@ -238,6 +238,39 @@ func TestPortfolioRunOpensASongAnExistingRootAlreadyLists(t *testing.T) {
 	}
 }
 
+// AC3: a second song fed into the staffed Home touches neither the Home nor
+// its manager; it connects its own root, lists it, and the same shared
+// assistant joins it.
+func TestPortfolioRunAddsASecondSongToTheHome(t *testing.T) {
+	w := newPortfolioWorld()
+	w.homeID, w.missing, w.initialized, w.sharing = "home-1", nil, true, SharingOn
+	o := newWorldOpener(w)
+	o.entries = map[string]string{"Album-5": "entry-6"}
+	o.staffing = "joined"
+	result, progress := runPortfolio(t, w, songPlan(true), func(r *PortfolioRunner, cfg *PortfolioConfig) {
+		r.Opener = o
+		cfg.HomeID = "home-1"
+	})
+	if result.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("result = %+v cause=%v", result, result.Cause)
+	}
+	for _, call := range []string{"home:commit", "home:review", "library:on", "consent:grant"} {
+		if w.called(call) {
+			t.Fatalf("the second song repeated %s: %v", call, w.log)
+		}
+	}
+	if !w.called("root:connect") || !w.called("scan:commit") || o.workspaces != 1 {
+		t.Fatalf("calls = %v workspaces = %d", w.log, o.workspaces)
+	}
+	if w.receiptFacts == nil || w.receiptFacts.HomeCreated || len(w.receiptFacts.AddedAgents) != 0 ||
+		w.receiptFacts.Opened == nil || w.receiptFacts.Opened.Staffing != "joined" {
+		t.Fatalf("receipt facts = %+v", w.receiptFacts)
+	}
+	if got := lineOrder(progress.last()); strings.Contains(got, "=waiting") || strings.Contains(got, "=failed") {
+		t.Fatalf("lines = %s", got)
+	}
+}
+
 // A plan that opens a song cannot run without the opener.
 func TestPortfolioRunRefusesToOpenWithoutAnOpener(t *testing.T) {
 	w := newPortfolioWorld()

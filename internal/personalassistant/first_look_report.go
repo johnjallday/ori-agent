@@ -194,7 +194,24 @@ func firstLookReportItems(offer FolderOffer, ws *workspace.Workspace, route stri
 	if parent := offer.Outcome.Parent; parent != nil {
 		item.Home = truncateRunes(strings.TrimSpace(parent.Name), 120)
 	}
+	if opened := handoffSentence(offer, ws); opened != "" {
+		// FR18: a song its Home's manager opened says so, before the look's own words.
+		item.Detail = truncateRunes(opened+" "+item.Detail, 400)
+	}
 	return []TodayItem{item}, nil, nil, true
+}
+
+// handoffSentence is "Your Portfolio Manager opened Album-5 in Music
+// Production Home." for a song its Home's manager opened; "" otherwise.
+func handoffSentence(offer FolderOffer, ws *workspace.Workspace) string {
+	if offer.Outcome == nil || ws == nil {
+		return ""
+	}
+	manager := strings.TrimSpace(offer.Outcome.OpenedBy)
+	if manager == "" || offer.Outcome.Parent == nil || strings.TrimSpace(offer.Outcome.Parent.Name) == "" {
+		return ""
+	}
+	return "Your " + manager + " opened " + strings.TrimSpace(ws.Name) + " in " + strings.TrimSpace(offer.Outcome.Parent.Name) + "."
 }
 
 func findTask(ws *workspace.Workspace, id string) *workspace.Task {
