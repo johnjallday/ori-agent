@@ -296,10 +296,26 @@ type ActivationBinding struct {
 	ProviderInstalledAt time.Time `json:"provider_installed_at,omitempty"`
 	CreatorInputDigest  string    `json:"creator_input_digest"`
 	CreatorOwnerDigest  string    `json:"creator_owner_digest"`
+	// Goal is the normalized goal the project is created with, part of the
+	// creator's reviewed input; empty creates it without one, as before.
+	Goal string `json:"goal,omitempty"`
+}
+
+// maxActivationGoalRunes is the creator's own bound on a project's goal.
+const maxActivationGoalRunes = 300
+
+// normalizeActivationGoal folds a goal to one line, as the creator does.
+func normalizeActivationGoal(goal string) string {
+	return strings.Join(strings.Fields(goal), " ")
+}
+
+func validActivationGoal(goal string) bool {
+	return goal == normalizeActivationGoal(goal) && utf8.RuneCountInString(goal) <= maxActivationGoalRunes &&
+		validText(goal, 4*maxActivationGoalRunes)
 }
 
 func (b ActivationBinding) valid() bool {
-	return b.EntryID != "" && validText(b.EntryID, 160) && b.EntryRevision > 0 &&
+	return validActivationGoal(b.Goal) && b.EntryID != "" && validText(b.EntryID, 160) && b.EntryRevision > 0 &&
 		b.RootID != "" && validText(b.RootID, 160) && b.RootRevision > 0 &&
 		validRelative(b.RelativeFolder) && b.FolderIdentity != "" && validText(b.FolderIdentity, 160) &&
 		b.ProjectFile != "" && len(b.ProjectFile) <= 255 && validText(b.ProjectFile, 255) &&

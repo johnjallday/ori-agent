@@ -30,6 +30,7 @@ type fakeOpener struct {
 	rows        map[string]projectlibrary.ActivationEligibility
 	activations []string
 	keys        []string
+	goals       []string
 	activateErr error
 }
 
@@ -46,10 +47,10 @@ func (f *fakeOpener) Eligibility(_ context.Context, _ projectlibrary.Scope, entr
 	return f.rows[entryID], nil
 }
 
-func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, entryID, selectedFile, key string) (string, error) {
+func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, entryID, selectedFile, goal, key string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.keys = append(f.keys, key)
+	f.keys, f.goals = append(f.keys, key), append(f.goals, goal)
 	if f.activateErr != nil {
 		return "", f.activateErr
 	}
@@ -58,7 +59,7 @@ func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, entryID
 	song := &agentworkspace.Workspace{ID: id, Name: "Song " + entryID, FolderSlug: id, OwnerUserID: "local",
 		Status: agentworkspace.StatusActive, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	song.SetAssistantProjectLink(&agentworkspace.AssistantProjectLink{
-		StationWorkspaceID: openHomeID, ProjectProvider: openProvider(),
+		ID: agentworkspace.AssistantProjectLinkID(openHomeID, id), StationWorkspaceID: openHomeID, ProjectProvider: openProvider(),
 		ProjectRoles: []agentworkspace.AssistantProgramRoleSpec{{ID: "reaper-assistant", Label: "REAPER Assistant",
 			Scope: agentworkspace.AssistantRoleScopeProject, Required: true, Primary: true}},
 	})
@@ -347,7 +348,7 @@ func TestOpenLibrarySong_WithoutAConsentAddsNoAgent(t *testing.T) {
 func TestOpenLibrarySong_LeavesASongsOwnAgentAlone(t *testing.T) {
 	f := newOpenFixture(t)
 	f.grant(t)
-	if _, err := f.opener.Activate(context.Background(), projectlibrary.Scope{}, "two", "", "earlier"); err != nil {
+	if _, err := f.opener.Activate(context.Background(), projectlibrary.Scope{}, "two", "", "", "earlier"); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.handler.assistantWorkspaceRoleStaffer(context.Background(), "song-two", []RoleStaffingFill{{RoleID: "reaper-assistant", Mode: "create", Name: "REAPER Assistant · Song 002"}}); err != nil {
@@ -398,5 +399,106 @@ func TestOpenLibrarySong_NeedsAModelBeforeMakingAHalfStaffedSong(t *testing.T) {
 	code, payload = f.open(t, openHomeID, "four", `{"request_id":"r4"}`)
 	if code != http.StatusConflict || payload["reason"] != "consent_stale" || len(f.opener.activations) != before {
 		t.Fatalf("stale team = %d %v", code, payload)
+	}
+}
+
+// The folder card's run opens a song through the same service, in process:
+// the song is created with its goal and gets the caller's first task; a second
+// pass finishes it without making it again.
+func TestOpenPortfolioProject_CarriesTheGoalAndTheCallersFirstTask(t *testing.T) {
+	f := newOpenFixture(t)
+	f.grant(t)
+	var seeded []string
+	in := LibraryOpenInput{EntryID: "two", Key: "open:offer-1:two", Goal: "Get this song ready to mix",
+		SeedFirstTask: func(songID, format string) bool {
+			seeded = append(seeded, songID+":"+format)
+			return true
+		}}
+	result, err := f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, in)
+	if err != nil || !result.Created || result.WorkspaceID != "song-two" || result.Route != "/workspaces/song-two" ||
+		result.LinkID != agentworkspace.AssistantProjectLinkID(openHomeID, "song-two") ||
+		result.Staffing != openStaffingAdded || result.AgentName != "REAPER Assistant" || !result.FirstTask {
+		t.Fatalf("open = %+v %v", result, err)
+	}
+	if strings.Join(f.opener.goals, ",") != in.Goal || strings.Join(f.opener.keys, ",") != in.Key {
+		t.Fatalf("activation goals=%v keys=%v", f.opener.goals, f.opener.keys)
+	}
+	if strings.Join(seeded, ",") != "song-two:reaper" || strings.Join(f.fileOnly, ",") != "song-two" {
+		t.Fatalf("seeded=%v fileOnly=%v", seeded, f.fileOnly)
+	}
+	song, _ := f.store.Get("song-two")
+	for i := range song.Tasks {
+		if isFolderFirstTask(&song.Tasks[i]) {
+			t.Fatalf("the Open row's brief-less task was seeded too: %+v", song.Tasks[i])
+		}
+	}
+	again, err := f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, in)
+	if err != nil || again.Created || again.WorkspaceID != "song-two" || again.Staffing != openStaffingAlready || len(f.opener.activations) != 1 {
+		t.Fatalf("second pass = %+v %v activations=%v", again, err, f.opener.activations)
+	}
+}
+
+// The Open row passes no goal and keeps its own JSON: no link ID is shown.
+func TestOpenLibrarySong_RowPassesNoGoalAndShowsNoLink(t *testing.T) {
+	f := newOpenFixture(t)
+	f.grant(t)
+	code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`)
+	if code != http.StatusOK || len(f.opener.goals) != 1 || f.opener.goals[0] != "" {
+		t.Fatalf("open = %d %v goals=%q", code, payload, f.opener.goals)
+	}
+	if _, shown := payload["link_id"]; shown {
+		t.Fatalf("the Open row's response changed shape: %v", payload)
+	}
+}
+
+// Every stop comes back typed, and none makes a song.
+func TestOpenPortfolioProject_StopsAreTypedAndMakeNothing(t *testing.T) {
+	f := newOpenFixture(t)
+	f.grant(t)
+	open := func(in LibraryOpenInput) error {
+		t.Helper()
+		if in.Key == "" {
+			in.Key = "open:offer-1:" + in.EntryID
+		}
+		_, err := f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, in)
+		return err
+	}
+	var stop *LibraryOpenStop
+	if err := open(LibraryOpenInput{EntryID: "one"}); !errors.As(err, &stop) || stop.Reason != LibraryOpenNeedsChoice ||
+		strings.Join(stop.ProjectFiles, ",") != "Song 001.rpp,Song 001 alt.rpp" {
+		t.Fatalf("needs choice = %v", err)
+	}
+	if err := open(LibraryOpenInput{EntryID: "one", SelectedFile: "Other.rpp"}); !errors.Is(err, ErrLibraryFileNotOffered) {
+		t.Fatalf("unoffered file = %v", err)
+	}
+	if err := open(LibraryOpenInput{EntryID: "ableton"}); !errors.As(err, &stop) || stop.Reason != "project_provider_unavailable" ||
+		stop.Message != "A compatible installed project integration is required." {
+		t.Fatalf("row state = %v", err)
+	}
+	if err := open(LibraryOpenInput{EntryID: "missing"}); !errors.Is(err, ErrLibraryProjectNotFound) {
+		t.Fatalf("missing row = %v", err)
+	}
+	if _, err := f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, LibraryOpenInput{EntryID: "two"}); !errors.Is(err, ErrPortfolioSetupUnavailable) {
+		t.Fatalf("no key = %v", err)
+	}
+	if _, err := f.handler.OpenPortfolioProject(t.Context(), "someone-else", openHomeID, LibraryOpenInput{EntryID: "two", Key: "k"}); !errors.Is(err, ErrPortfolioSetupUnavailable) {
+		t.Fatalf("another owner = %v", err)
+	}
+	f.handler.staffingModelReady = func() bool { return false }
+	team := projectlibrary.ProjectTeam{PluginID: "reaper-plugin", BlueprintID: "reaper-song", Digest: openDigest,
+		Roles: []agentworkspace.AssistantProgramRoleSpec{{ID: "reaper-assistant", Label: "REAPER Assistant", Required: true}}}
+	f.handler.projectTeamOverride = func(projectlibrary.Scope, *agentworkspace.Workspace) (projectlibrary.ProjectTeam, bool) {
+		return team, true
+	}
+	if err := open(LibraryOpenInput{EntryID: "two"}); !errors.As(err, &stop) || stop.Reason != LibraryOpenNeedsModel {
+		t.Fatalf("needs model = %v", err)
+	}
+	team.Digest = strings.Repeat("c", 64)
+	if err := open(LibraryOpenInput{EntryID: "two"}); !errors.As(err, &stop) || stop.Reason != LibraryOpenConsentStale ||
+		!strings.Contains(stop.Message, "Review the updated assistant on this Home") {
+		t.Fatalf("stale consent = %v", err)
+	}
+	if len(f.opener.activations) != 0 {
+		t.Fatalf("a stop made a song: %v", f.opener.activations)
 	}
 }

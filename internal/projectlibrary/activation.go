@@ -72,6 +72,7 @@ func activationRequest(token string, binding ActivationBinding) projectconnectio
 	return projectconnection.Request{
 		ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: token,
 		EntryName: binding.ProjectFile, WorkspaceName: binding.WorkspaceName, GroupComposition: "grouped",
+		Goal: binding.Goal,
 	}
 }
 
@@ -165,8 +166,16 @@ func (r activationResolver) Resolve(token string) (string, error) {
 // write is a short-lived Home review; no selection grant, child, link, role or
 // source file is created. An ambiguous folder requires an explicit file name.
 func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID string, expected int64, selectedFile, workspaceName string) (ActivationReview, error) {
+	return s.ReviewWithGoal(ctx, scope, entryID, expected, selectedFile, workspaceName, "")
+}
+
+// ReviewWithGoal is Review for a project created with a goal. The goal is
+// bound into the review and the creator's input digest, so its commit creates
+// exactly that goal and a replay carrying another one is refused.
+func (s *ActivationService) ReviewWithGoal(ctx context.Context, scope Scope, entryID string, expected int64, selectedFile, workspaceName, goal string) (ActivationReview, error) {
+	goal = normalizeActivationGoal(goal)
 	if s == nil || s.inspector == nil || s.creator == nil || expected < 1 || entryID == "" || !validText(entryID, 160) ||
-		!validText(selectedFile, 255) || !validText(workspaceName, 128) || workspaceName == "" {
+		!validText(selectedFile, 255) || !validText(workspaceName, 128) || workspaceName == "" || !validActivationGoal(goal) {
 		return ActivationReview{}, ErrUnavailable
 	}
 	a := s.inspector
@@ -233,7 +242,7 @@ func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID str
 		RootID: root.ID, RootRevision: root.Revision, RelativeFolder: observed.RelativeFolder,
 		FolderIdentity: observed.FileIdentity, ProjectFile: selectedFile, ProjectFileIdentity: fileIdentity, WorkspaceName: workspaceName,
 		BlueprintID: eligible.BlueprintID, ProviderFingerprint: provider.ComponentFingerprint,
-		ProviderGeneration: provider.EvidenceGeneration(), ProviderInstalledAt: provider.InstalledAt}
+		ProviderGeneration: provider.EvidenceGeneration(), ProviderInstalledAt: provider.InstalledAt, Goal: goal}
 	resolver := activationResolver{inspector: a, scope: scope, token: token, binding: binding, ctx: ctx}
 	creator := s.creator(resolver)
 	if creator == nil {
