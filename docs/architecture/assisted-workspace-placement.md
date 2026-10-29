@@ -1,6 +1,6 @@
 # Assisted File Janitor placement
 
-Status: implementation contract (not a claim of shipped behavior).
+Status: Implemented (merged in #731).
 Scope: the built-in inbox-folder proposal only. Music Home, REAPER, generic
 folder recipes and ordinary map/wizard creation keep their existing semantics.
 The same review/placement presentation for every other creation owner is

@@ -9,7 +9,7 @@ Personal workflow implementations live in a separate local repository; read
 
 **Ori Agent** is a modular framework for building tool-calling AI agents. The system provides multi-agent orchestration, workspace collaboration, MCP (Model Context Protocol) integration, skills management, and HTTP interfaces for building autonomous AI systems.
 
-**Key Design Philosophy**: Tool capabilities are provided via MCP servers and skills, not plugins. The legacy plugin system has been removed.
+**Key Design Philosophy**: Tool capabilities are provided via MCP servers and skills. Plugins are bundles of those: Ori installs Claude Code- and Codex-compatible plugins (`internal/plugin/`), registering their MCP servers and skills, plus an optional sandboxed Workspace Surface. The old gRPC plugin system that ran tools in-process is gone; see `docs/plugins.md`.
 
 ## Build & Development Commands
 
@@ -108,7 +108,8 @@ make lint-new      # CI's changed-code ratchet; not the whole-tree baseline
 - MCP servers are configured per workspace and managed via `internal/mcp/`
 - Skills are managed via `internal/skills/` and `internal/skillshttp/`
 - Internal tool interface: `toolapi.Tool` in `internal/toolapi/tool.go`
-- The legacy gRPC plugin system has been fully removed
+- **Plugins** (`internal/plugin/`, `internal/pluginhttp/`, `internal/pluginworkspace/`) install Claude Code-/Codex-compatible bundles from a path, git URL or marketplace. Their MCP servers and skills go into the registries above; a plugin may also contribute a Workspace Surface (sandboxed UI behind Ori's host broker, protocol in `docs/architecture/plugin-workspace-surfaces-v1.md`). Plugins also provide Homes and blueprints, and the update checker keeps them current. See `docs/plugins.md`.
+- The legacy gRPC plugin system (in-process tool binaries) has been removed; do not confuse it with the plugin installer above
 
 **2. Modular HTTP Handler Pattern**
 Each domain has dedicated handler modules in `internal/*http/`:
@@ -137,6 +138,7 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - `externalagentshttp` - External agent integrations
 - `modelcategoryhttp` - Model category configuration and auto-categorization
 - `cliagenthttp` - CLI agent execution
+- `pluginhttp` - Plugin install/uninstall, marketplaces, per-workspace enablement
 
 **3. LLM Provider Abstraction** (`internal/llm/`)
 - Factory pattern supports multiple providers: `factory.go`
@@ -216,6 +218,7 @@ Tool Execution → Result → UI Rendering
 - `internal/toolapi/` - Internal tool interface definitions
 - `internal/mcp/` - MCP server integration
 - `internal/skills/` - Skills management
+- `internal/plugin/` - Plugin installer, marketplaces, Workspace Surfaces, update checks
 - `internal/workspace/` - Multi-agent workspace system
 - `internal/orchestration/` - Multi-agent orchestration
 - `internal/web/` - Web server, templates, static files

@@ -1,7 +1,7 @@
 # Unified workspace review and placement
 
-Status: implementation contract; acceptance evidence lives in the feature findings,
-not in this document. This extends the interaction described in
+Status: Implemented (merged in #734); acceptance evidence lives in the feature
+findings, not in this document. This extends the interaction described in
 [assisted workspace placement](assisted-workspace-placement.md), not its filesystem
 or scan authority. Existing specialized protocols remain authoritative.
 

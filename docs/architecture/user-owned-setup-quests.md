@@ -1,6 +1,6 @@
 # User-owned setup quests
 
-Status: implementation contract for Issue #464. The product clarification
+Status: Implemented for Issue #464 (merged in #468). The product clarification
 approved as **Go A** keeps all five v1 setup steps required, exactly once, in
 their current order. This document records the checkout observed before product
 code changed and the additive contract selected for implementation.

@@ -3,9 +3,9 @@
 Status: frozen implementation contract (task 1.5, 2026-10-20), amended
 2026-10-21 before any release to add owner-added folders (§3.4, §4.5) at the
 owner's request. Product scope is
-`tasks/prd-reaper-studio.md` (decisions 1A, 2A, 3A). Nothing here is
-implemented until the checklist says so, and no companion source, release or
-reviewed floor exists for it yet.
+`tasks/prd-reaper-studio.md` (decisions 1A, 2A, 3A). Ori host support is
+implemented (merged in #683) and verified against fixture plugins; no companion
+source, release or reviewed floor exists for it yet.
 
 This document is the only planning text the REAPER and Music builders receive
 besides their own checklists. Only the Ori integration owner changes it; every
