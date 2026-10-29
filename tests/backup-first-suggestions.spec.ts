@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 // Backup-first suggestions: after File Curator is hired for an inbox folder
 // with no observed backup, a goal run in its workspace suggests the recovery
-// copy first, and the Backlog ticket's Check protection opens protection. In
+// copy first, and the Backlog ticket's Back up opens protection. In
 // a real browser against the real server and store.
 //
 // Run it with its own wrapper, which serves the inbox-folder sandbox
@@ -134,7 +134,7 @@ test.beforeAll(async ({ request }) => {
 
 let downloads = '';
 
-test("the model's backup task leads the Backlog and its Check protection opens the chooser", async ({
+test("the model's backup task leads the Backlog and its Back up opens the chooser", async ({
   page,
   request
 }) => {
@@ -168,17 +168,17 @@ test("the model's backup task leads the Backlog and its Check protection opens t
   await expect(backlog(page).first()).toHaveText(backupTitle('Downloads'), { timeout: 30_000 });
   await backlog(page).first().click();
   const actions = page.locator('.ws-cmd-drawer-preview-actions');
-  await expect(actions.locator('button').first()).toHaveText('Check protection');
-  // An ordinary suggestion offers no Check protection.
+  await expect(actions.locator('button').first()).toHaveText('Back up');
+  // An ordinary suggestion offers no Back up.
   await backlog(page).filter({ hasText: 'Review the installer pile' }).click();
-  await expect(actions.getByRole('button', { name: 'Check protection' })).toHaveCount(0);
+  await expect(actions.getByRole('button', { name: 'Back up', exact: true })).toHaveCount(0);
 
   await backlog(page).first().click();
   const posts: string[] = [];
   page.on('request', r => {
     if (r.method() !== 'GET') posts.push(r.url());
   });
-  await actions.getByRole('button', { name: 'Check protection' }).click();
+  await actions.getByRole('button', { name: 'Back up', exact: true }).click();
   await expect(page.locator('#protectFoldersChooser')).toBeVisible({ timeout: 10_000 });
   expect(posts.filter(url => /backlog|tickets|first-batch/.test(url))).toEqual([]);
 });
@@ -246,9 +246,7 @@ test('when the answer leaves the backup task out, the host adds it first in the 
   await page.goto('/workspaces/desktop?panel=backlog');
   await expect(backlog(page).first()).toHaveText(backupTitle('Desktop'), { timeout: 30_000 });
   await backlog(page).first().click();
-  await expect(page.locator('.ws-cmd-drawer-preview-actions button').first()).toHaveText(
-    'Check protection'
-  );
+  await expect(page.locator('.ws-cmd-drawer-preview-actions button').first()).toHaveText('Back up');
 });
 
 test('a covered File Janitor folder gets no backup suggestion on either surface', async ({

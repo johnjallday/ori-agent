@@ -55,7 +55,7 @@ bridge and one entry in the shelf's action map.
   local user's, and the fact counts only when its `WorkspaceID` matches. A fact
   that is `not_covered`, `unknown` or `configured` (a configuration is not a
   completed backup) yields "Back up <workspace> before the first filing batch"
-  with the first step "Open Check protection and approve one metadata read."
+  with the first step "Press Back up and approve one metadata read."
   `covered`, `unavailable`, a failed read, no reader or another workspace kind
   yields none. So does a task that is already open or was dismissed as Not
   useful. A hired agent's first look never carries preconditions. The read is
@@ -65,11 +65,13 @@ bridge and one entry in the shelf's action map.
   and `source: "model"`. A precondition the answer left out, whose title is not
   open or dismissed, is stored by the host as one ticket with the same keys and
   `source: "host"`, high priority, counted in the run record and logged at info.
-  This is compiled code storing a suggestion, which every autonomy level allows.
+  So is one whose run failed or answered unreadably: the fact is the host's own
+  and needs no model. This is compiled code storing a suggestion, which every
+  autonomy level allows.
 - The run's precondition tickets are moved to the top of the Backlog order
   (`BacklogService.Reorder`; order is a rank, not priority). On the Backlog
   shelf, a ticket whose action is `check_protection` leads its action row with
-  **Check protection**. That button reads `GET
+  **Back up**. That button reads `GET
 /api/workspaces/{id}/file-janitor/protection` and opens the chooser or the
   Backup & Recovery console with no review-return trip. A `covered` fact
   replaces the button with "Covered · evidence observed <local time>". Nothing

@@ -162,7 +162,7 @@ const backup = {
     context: {
       goal_suggestion: {
         why: 'Nothing protects the originals',
-        first_step: 'Open Check protection and approve one metadata read.',
+        first_step: 'Press Back up and approve one metadata read.',
         precondition: 'backup_protection',
         action: 'check_protection',
         source: 'host',
@@ -182,14 +182,14 @@ test('only a suggestion with the check_protection action leads with Check protec
   const actions = html.slice(html.indexOf('ws-cmd-drawer-preview-actions'));
   assert.match(
     actions,
-    /^ws-cmd-drawer-preview-actions"><button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-check-protection data-cmd-backlog-item="b1">Check protection<\/button>/
+    /^ws-cmd-drawer-preview-actions"><button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-check-protection data-cmd-backlog-item="b1">Back up<\/button>/
   );
   assert.ok(
-    actions.indexOf('Check protection') < actions.indexOf('Not useful'),
-    'Check protection comes before Not useful'
+    actions.indexOf('>Back up</button>') < actions.indexOf('Not useful'),
+    'Back up comes before Not useful'
   );
   view.backlogDrawerSelectedId = 's1';
-  assert.ok(!view.backlogDrawerPreviewHTML().includes('Check protection'));
+  assert.ok(!view.backlogDrawerPreviewHTML().includes('>Back up</button>'));
   // An unknown action id offers no button.
   const unknown = structuredClone(backup);
   unknown.task.context.goal_suggestion.action = 'launch_rockets';

@@ -121,22 +121,24 @@ When File Curator's first batch for a newly hired folder is ready, the same
 stored fact decides whether Home's **Needs you** card leads with **Back up
 <folder> before the first filing batch**. It does so when the folder is not
 covered, protection is unknown, or a source is configured without an observed
-completion. The card shows the review's sentence for that state, then **Check
-protection**, **Review batch** and **Not now**. A covered or unavailable folder
-gets the card as before. No model is called to build it. **Not now** takes the
-card away; the review's own Check protection note is unaffected. The card
-lives for the folder receipt's seven days.
+completion. The card shows the review's sentence for that state, then **Back
+up**, **Review batch** and **Not now**. A covered or unavailable folder gets the
+card as before. No model is called to build it. **Not now** takes the card away;
+the review's own Check protection note is unaffected. The card lives for the
+folder receipt's seven days.
 
 In the File Janitor workspace, a goal run (on first open or **Run now**) is told
 the same fact and suggests the backup task first. If its answer leaves the task
-out, Ori adds it itself, first in the Backlog. The ticket's **Check protection**
-opens the chooser or the Backup & Recovery console. If the folder is already
-covered by then, the ticket shows **Covered** with the evidence time instead of
-the button; it is not closed for you. **Not useful** on the ticket stops later
-goal runs from suggesting it again.
+out, or the run fails or answers unreadably, Ori adds it itself, first in the
+Backlog. The ticket's **Back up** opens the chooser or the Backup & Recovery
+console. If the folder is already covered by then, the ticket shows **Covered**
+with the evidence time instead of the button; it is not closed for you. **Not
+useful** on the ticket stops later goal runs from suggesting it again.
 
-From Home and the Backlog, Check protection opens protection directly, with no
-review to return to, so it creates no return record.
+**Back up** opens the same place as the review's Check protection; it does not
+run a backup or approve anything by itself. From Home and the Backlog it opens
+protection directly, with no review to return to, so it creates no return
+record.
 
 ## Set up Time Machine in Ori
 

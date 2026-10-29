@@ -252,7 +252,7 @@ test('a first batch with no backup leads with the suggestion and Check protectio
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label, action.primary, action.href || '']),
     [
-      ['check_protection', 'Check protection', true, ''],
+      ['check_protection', 'Back up', true, ''],
       [
         'review_batch',
         'Review batch',

@@ -141,7 +141,7 @@ export function goalSuggestionOf(task) {
 // The buttons a suggestion's action id offers, keyed by id so the next host
 // precondition adds one entry here and nothing in the card.
 const BACKLOG_SUGGESTION_ACTIONS = {
-  check_protection: { label: 'Check protection', attribute: 'data-cmd-backlog-check-protection' }
+  check_protection: { label: 'Back up', attribute: 'data-cmd-backlog-check-protection' }
 };
 
 // coveredSentence is what a covered folder's ticket says in place of Check

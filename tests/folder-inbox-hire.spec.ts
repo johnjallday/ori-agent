@@ -186,8 +186,8 @@ test('the first batch is reported under Needs you on Home and in the drawer, and
   await expectFirstBatchCard(page, item!, 'batch');
 
   // No backup is observed for the sandbox's Downloads (not_covered), so the
-  // card leads with the host's backup suggestion and Check protection, before
-  // Review batch, and Check protection opens the chooser without posting.
+  // card leads with the host's backup suggestion and Back up, before Review
+  // batch, and Back up opens the chooser without posting.
   expect(item!.actions).toEqual(['check_protection', 'review_batch', 'not_now']);
   expect(item!.suggestion?.text).toBe('Back up Downloads before the first filing batch');
   expect(item!.suggestion?.evidence).toMatch(
@@ -202,7 +202,7 @@ test('the first batch is reported under Needs you on Home and in the drawer, and
   await expect(card).toContainText(item!.suggestion!.text);
   await expect(card).toContainText(item!.suggestion!.evidence!);
   await expect(card.locator('[data-first-look-action]')).toHaveText([
-    'Check protection',
+    'Back up',
     'Review batch',
     'Not now'
   ]);
@@ -210,7 +210,7 @@ test('the first batch is reported under Needs you on Home and in the drawer, and
   page.on('request', request => {
     if (request.method() === 'POST') posts.push(request.url());
   });
-  await card.getByRole('button', { name: 'Check protection' }).click();
+  await card.getByRole('button', { name: 'Back up', exact: true }).click();
   await expect(page.locator('#protectFoldersChooser')).toBeVisible({ timeout: 10_000 });
   expect(posts.filter(url => url.includes('/first-batch/'))).toEqual([]);
 

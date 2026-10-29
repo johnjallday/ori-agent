@@ -455,7 +455,7 @@ const (
 // backupPreconditionFirstStep is the backup task's first step (PRD §6.2), and
 // backupPreconditionWhy its reason. Neither claims a backup exists or not.
 const (
-	backupPreconditionFirstStep = "Open Check protection and approve one metadata read."
+	backupPreconditionFirstStep = "Press Back up and approve one metadata read."
 	backupPreconditionWhy       = "Filing moves the originals, so a recovery copy of this folder should exist first."
 )
 

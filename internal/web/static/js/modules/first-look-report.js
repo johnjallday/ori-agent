@@ -178,8 +178,7 @@ function firstBatchReportView(item, now) {
       : null;
   const route = String(item.report_route || '').trim();
   const actions = [];
-  if (suggestion)
-    actions.push({ id: 'check_protection', label: 'Check protection', primary: true });
+  if (suggestion) actions.push({ id: 'check_protection', label: 'Back up', primary: true });
   if (!failed && isFileJanitorReviewRoute(route)) {
     if (offered.includes('review_batch'))
       actions.push({

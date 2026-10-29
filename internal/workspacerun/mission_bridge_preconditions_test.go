@@ -80,7 +80,7 @@ func bridgeWithRunner(t *testing.T, wsStore workspace.Store, result string) (*Mi
 const backupTitle = "Back up Downloads before the first filing batch"
 
 const answerWithBackup = `{"items": [
-	{"kind": "task", "title": "Back up Downloads before the first filing batch.", "why": "Nothing protects the originals", "evidence": "Protection is not covered", "priority": "high", "first_step": "Open Check protection and approve one metadata read."},
+	{"kind": "task", "title": "Back up Downloads before the first filing batch.", "why": "Nothing protects the originals", "evidence": "Protection is not covered", "priority": "high", "first_step": "Press Back up and approve one metadata read."},
 	{"kind": "task", "title": "Review the installer pile", "why": "Old installers", "evidence": "12 .dmg files", "priority": "medium"}
 ]}`
 
@@ -114,7 +114,7 @@ func TestMissionBridge_FileJanitorRunCarriesTheBackupPrecondition(t *testing.T) 
 	for _, want := range []string{
 		"## Preconditions\n",
 		"- As of 2026-10-29T09:00:00Z (stored metadata only, not a new check): The approved File Janitor folder is not covered",
-		`Suggested task: "` + backupTitle + `". First step: Open Check protection and approve one metadata read.`,
+		`Suggested task: "` + backupTitle + `". First step: Press Back up and approve one metadata read.`,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt lacks %q:\n%s", want, prompt)
@@ -231,11 +231,11 @@ func TestMissionBridge_HostStoresTheBackupTaskTheAnswerLeftOut(t *testing.T) {
 	ticket := tickets[0]
 	reason, _ := ticket.Context[workspace.MissionSuggestionContextKey].(map[string]any)
 	if reason["precondition"] != "backup_protection" || reason["action"] != "check_protection" || reason["source"] != "host" ||
-		reason["first_step"] != "Open Check protection and approve one metadata read." ||
+		reason["first_step"] != "Press Back up and approve one metadata read." ||
 		reason["why"] != "Filing moves the originals, so a recovery copy of this folder should exist first." {
 		t.Fatalf("host ticket context = %#v", reason)
 	}
-	if ticket.Priority != 2 || ticket.Description != backupTitle || !strings.Contains(ticket.Details, "**First step:** Open Check protection") {
+	if ticket.Priority != 2 || ticket.Description != backupTitle || !strings.Contains(ticket.Details, "**First step:** Press Back up") {
 		t.Fatalf("host ticket = %q priority %d details %q", ticket.Description, ticket.Priority, ticket.Details)
 	}
 	// Never a drive, provider or destination in copy (PRD §6.2).
@@ -256,6 +256,52 @@ func TestMissionBridge_HostStoresTheBackupTaskTheAnswerLeftOut(t *testing.T) {
 	fresh, _ = wsStore.Get(ws.ID)
 	if got := len(backupTickets(fresh)); got != 1 {
 		t.Fatalf("backup tickets after a second run = %d", got)
+	}
+}
+
+// A run that fails before it answers, or answers unreadably, still leaves the
+// backup task: the fact is the host's own and needs no model. The run stays a
+// failure, and a second failed run adds no second ticket.
+func TestMissionBridge_FailedRunStillStoresTheBackupTask(t *testing.T) {
+	for name, runner := range map[string]*stubOriAgentTaskRunner{
+		"no answer":  {err: errors.New("The task prompt exceeds the model's 8192-token context window even after trimming.")},
+		"unreadable": {result: "I looked around and everything seems fine."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wsStore := workspace.NewInMemoryStore()
+			ws := makeJanitorMissionWorkspace(t, wsStore)
+			if _, err := workspace.NewBacklogService(wsStore).Create(workspace.BacklogCreateInput{WorkspaceID: ws.ID, Description: "My own idea"}); err != nil {
+				t.Fatal(err)
+			}
+			runStore := NewMemoryStore()
+			executors := NewExecutorRegistry()
+			executors.Register(ExecutorKindOriAgent, NewOriAgentExecutor(runner))
+			service := NewService(runStore, NewProfileRegistry(), executors, NewLocalEnvironmentManager(t.TempDir()), NewValidator(), nil)
+			bridge := NewMissionBridge(MissionBridgeConfig{RunStore: runStore, Service: service, WorkspaceStore: wsStore,
+				OpportunityStore: workspace.NewOpportunityStore(wsStore), Backlog: workspace.NewBacklogService(wsStore)})
+			bridge.SetCuratorProtectionReader(&stubCuratorProtection{state: "not_covered"})
+
+			for cycle := 1; cycle <= 2; cycle++ {
+				if _, err := bridge.TriggerMissionRun(context.Background(), ws.ID, cycle); err == nil {
+					t.Fatalf("run %d: the failure was not reported", cycle)
+				}
+			}
+			fresh, _ := wsStore.Get(ws.ID)
+			tickets := backupTickets(fresh)
+			if len(tickets) != 1 {
+				t.Fatalf("backup tickets = %d", len(tickets))
+			}
+			if reason, _ := tickets[0].Context[workspace.MissionSuggestionContextKey].(map[string]any); reason["source"] != "host" || reason["action"] != "check_protection" {
+				t.Fatalf("context = %#v", reason)
+			}
+			if got := backlogOrder(t, wsStore, ws.ID); len(got) != 2 || got[0] != backupTitle {
+				t.Fatalf("Backlog order = %q", got)
+			}
+			first, second := fresh.MissionRuns[1], fresh.MissionRuns[0]
+			if first.Succeeded || first.TasksCreated != 1 || second.Succeeded || second.TasksCreated != 0 {
+				t.Fatalf("run records = %+v / %+v", first, second)
+			}
+		})
 	}
 }
 

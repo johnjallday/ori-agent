@@ -352,8 +352,13 @@ func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runI
 	// answered is read even when execution reported an error, because
 	// partial output is more useful than nothing.
 	var parseErr error
+	stored := false
 	if execErr == nil || strings.TrimSpace(result) != "" {
 		parseErr = b.storeMissionOutput(workspaceID, runID, result, &record, preconditions)
+		stored = parseErr == nil
+	}
+	if !stored {
+		b.storeUnansweredPreconditions(workspaceID, runID, &record, preconditions)
 	}
 	if parseErr != nil {
 		logger.Warn("mission bridge: goal run answer could not be read", logger.Fields{
@@ -432,14 +437,7 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 		}
 	}
 
-	known := map[string]struct{}{}
-	if ws, err := b.workspaceStore.Get(workspaceID); err == nil {
-		known = workspace.OpenWorkTitles(ws)
-		// A suggestion the user dismissed is never suggested again (FR18).
-		for key := range ws.DismissedSuggestionKeys() {
-			known[key] = struct{}{}
-		}
-	}
+	known := b.knownSuggestionTitles(workspaceID)
 	suggestions, duplicates, dropped := workspace.SelectMissionSuggestions(output.Tasks, known, taskLimit)
 	record.DuplicatesSkipped += duplicates
 	record.DroppedByCap += dropped
@@ -450,27 +448,6 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 		record.NextWhy = output.NextWhy
 	}
 	now := time.Now()
-	create := func(suggestion workspace.MissionTaskSuggestion, reason map[string]any) (*workspace.Task, bool) {
-		created, err := b.backlog.Create(workspace.BacklogCreateInput{
-			WorkspaceID: workspaceID,
-			Description: missionTicketTitle(suggestion.Title),
-			Details:     workspace.MissionSuggestionDetails(suggestion, runID, now),
-			Priority:    workspace.MissionSuggestionPriority(suggestion.Priority),
-			SourceType:  workspace.TicketSourceGoalSuggestion,
-			SourceID:    runID,
-			Context: map[string]any{
-				workspace.MissionSuggestionContextKey: reason,
-			},
-		})
-		if err != nil {
-			logger.Warn("mission bridge: create suggested ticket", logger.Fields{
-				"workspace_id": workspaceID, "run_id": runID, "title": suggestion.Title, "error": err,
-			})
-			return nil, false
-		}
-		record.TasksCreated++
-		return created, true
-	}
 	// met holds the preconditions a ticket of this run answers; first, those
 	// tickets, which lead the Backlog.
 	met := map[string]bool{}
@@ -481,14 +458,33 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 		if isPrecondition {
 			reason = workspace.TagMissionPrecondition(reason, precondition, workspace.MissionSuggestionSourceModel)
 		}
-		if created, ok := create(suggestion, reason); ok && isPrecondition {
+		if created, ok := b.createSuggestedTicket(workspaceID, runID, now, record, suggestion, reason); ok && isPrecondition {
 			met[precondition.Kind] = true
 			first = append(first, created.ID)
 		}
 	}
-	// An unmet precondition the answer left out is still suggested: compiled
-	// code storing a suggestion, which every autonomy level allows (FR11). Not
-	// when its task is open or dismissed (known), whatever the answer said.
+	first = append(first, b.storeHostPreconditions(workspaceID, runID, now, record, preconditions, met, known)...)
+	b.placeBacklogFirst(workspaceID, runID, first)
+	return nil
+}
+
+// storeUnansweredPreconditions is a run with no answer to store, because it
+// failed or answered unreadably: its unmet preconditions are still suggested,
+// since they are the host's own facts and need no model.
+func (b *MissionBridge) storeUnansweredPreconditions(workspaceID, runID string, record *workspace.MissionRunRecord, preconditions []workspace.MissionPrecondition) {
+	if len(preconditions) == 0 {
+		return
+	}
+	first := b.storeHostPreconditions(workspaceID, runID, time.Now(), record, preconditions, nil, b.knownSuggestionTitles(workspaceID))
+	b.placeBacklogFirst(workspaceID, runID, first)
+}
+
+// storeHostPreconditions stores one ticket for each unmet precondition no
+// ticket of this run met: compiled code storing a suggestion, which every
+// autonomy level allows (FR11). Not when its task is open or dismissed
+// (known), whatever the answer said. It returns the tickets it made.
+func (b *MissionBridge) storeHostPreconditions(workspaceID, runID string, now time.Time, record *workspace.MissionRunRecord, preconditions []workspace.MissionPrecondition, met map[string]bool, known map[string]struct{}) []string {
+	var made []string
 	for _, precondition := range preconditions {
 		if met[precondition.Kind] {
 			continue
@@ -498,16 +494,51 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 		}
 		suggestion := workspace.HostPreconditionSuggestion(precondition)
 		reason := workspace.TagMissionPrecondition(workspace.MissionSuggestionContext(suggestion, runID), precondition, workspace.MissionSuggestionSourceHost)
-		if created, ok := create(suggestion, reason); ok {
-			met[precondition.Kind] = true
-			first = append(first, created.ID)
-			logger.Info("mission bridge: stored the precondition task the answer left out", logger.Fields{
+		if created, ok := b.createSuggestedTicket(workspaceID, runID, now, record, suggestion, reason); ok {
+			made = append(made, created.ID)
+			logger.Info("mission bridge: stored a precondition task the run did not answer", logger.Fields{
 				"workspace_id": workspaceID, "run_id": runID, "precondition": precondition.Kind,
 			})
 		}
 	}
-	b.placeBacklogFirst(workspaceID, runID, first)
-	return nil
+	return made
+}
+
+// knownSuggestionTitles are the titles a run must not suggest again: open
+// work and what the user dismissed (FR18).
+func (b *MissionBridge) knownSuggestionTitles(workspaceID string) map[string]struct{} {
+	ws, err := b.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return map[string]struct{}{}
+	}
+	known := workspace.OpenWorkTitles(ws)
+	for key := range ws.DismissedSuggestionKeys() {
+		known[key] = struct{}{}
+	}
+	return known
+}
+
+// createSuggestedTicket stores one suggestion as a Backlog ticket and counts it.
+func (b *MissionBridge) createSuggestedTicket(workspaceID, runID string, now time.Time, record *workspace.MissionRunRecord, suggestion workspace.MissionTaskSuggestion, reason map[string]any) (*workspace.Task, bool) {
+	created, err := b.backlog.Create(workspace.BacklogCreateInput{
+		WorkspaceID: workspaceID,
+		Description: missionTicketTitle(suggestion.Title),
+		Details:     workspace.MissionSuggestionDetails(suggestion, runID, now),
+		Priority:    workspace.MissionSuggestionPriority(suggestion.Priority),
+		SourceType:  workspace.TicketSourceGoalSuggestion,
+		SourceID:    runID,
+		Context: map[string]any{
+			workspace.MissionSuggestionContextKey: reason,
+		},
+	})
+	if err != nil {
+		logger.Warn("mission bridge: create suggested ticket", logger.Fields{
+			"workspace_id": workspaceID, "run_id": runID, "title": suggestion.Title, "error": err,
+		})
+		return nil, false
+	}
+	record.TasksCreated++
+	return created, true
 }
 
 // placeBacklogFirst moves a run's precondition tickets to the top of this

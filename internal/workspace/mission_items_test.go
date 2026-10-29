@@ -20,7 +20,7 @@ func TestBackupPrecondition_UnmetStatesOnly(t *testing.T) {
 		p, ok := BackupPrecondition("Downloads", fact(state))
 		if !ok || p.Kind != "backup_protection" || p.Action != "check_protection" ||
 			p.SuggestedTitle != "Back up Downloads before the first filing batch" ||
-			p.SuggestedFirstStep != "Open Check protection and approve one metadata read." {
+			p.SuggestedFirstStep != "Press Back up and approve one metadata read." {
 			t.Fatalf("%s: %+v %v", state, p, ok)
 		}
 		// The fact's own prompt wording, without its heading.
