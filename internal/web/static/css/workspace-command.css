@@ -7330,6 +7330,15 @@ button.ws-cmd-rpg-class-card:focus-visible {
   min-width: 0;
 }
 
+/* A precondition button that could not open its destination; nothing changed. */
+.ws-cmd-backlog-action-error {
+  flex: 1 0 100%;
+  order: 98;
+  margin: 0;
+  font-size: 11px;
+  color: var(--ws-alert);
+}
+
 .ws-cmd-backlog-promote-confirm {
   display: flex;
   flex-direction: column;

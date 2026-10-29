@@ -58,7 +58,8 @@ test('goalSuggestionOf reads a suggestion and ignores other tickets', () => {
     firstStep: 'Collect five on-brand posts',
     suggestedAgent: 'Writer',
     effort: 'small',
-    confidence: 'medium'
+    confidence: 'medium',
+    action: ''
   });
   assert.equal(goalSuggestionOf(ordinary.task), null);
   assert.equal(goalSuggestionOf(null), null);
@@ -149,4 +150,93 @@ test('a failed Not useful keeps the form open with the reason', async () => {
   assert.equal(view.backlogNotUsefulId, 's1');
   assert.equal(view.backlogNotUsefulReason, 'keep me');
   assert.equal(view.backlogNotUsefulBusy, false);
+});
+
+// A suggestion that meets the backup precondition (backup-first FR15).
+const backup = {
+  task: {
+    id: 'b1',
+    description: 'Back up Downloads before the first filing batch',
+    source_type: 'goal_suggestion',
+    source_id: 'run-2',
+    context: {
+      goal_suggestion: {
+        why: 'Nothing protects the originals',
+        first_step: 'Open Check protection and approve one metadata read.',
+        precondition: 'backup_protection',
+        action: 'check_protection',
+        source: 'host',
+        run_id: 'run-2'
+      }
+    }
+  },
+  owning_workspace_id: 'w1',
+  owning_workspace_name: 'Downloads'
+};
+
+test('only a suggestion with the check_protection action leads with Check protection', () => {
+  const view = makeView([backup, suggested]);
+  assert.equal(goalSuggestionOf(backup.task).action, 'check_protection');
+  view.backlogDrawerSelectedId = 'b1';
+  const html = view.backlogDrawerPreviewHTML();
+  const actions = html.slice(html.indexOf('ws-cmd-drawer-preview-actions'));
+  assert.match(
+    actions,
+    /^ws-cmd-drawer-preview-actions"><button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-check-protection data-cmd-backlog-item="b1">Check protection<\/button>/
+  );
+  assert.ok(
+    actions.indexOf('Check protection') < actions.indexOf('Not useful'),
+    'Check protection comes before Not useful'
+  );
+  view.backlogDrawerSelectedId = 's1';
+  assert.ok(!view.backlogDrawerPreviewHTML().includes('Check protection'));
+  // An unknown action id offers no button.
+  const unknown = structuredClone(backup);
+  unknown.task.context.goal_suggestion.action = 'launch_rockets';
+  const other = makeView([unknown]);
+  other.backlogDrawerSelectedId = 'b1';
+  assert.ok(!other.backlogDrawerPreviewHTML().includes('data-cmd-backlog-check-protection'));
+});
+
+test('Check protection reads the owning workspace fact and opens its destination', async () => {
+  const steps = [];
+  const view = makeView([backup]);
+  view.protection = {
+    readProtection: async id => {
+      steps.push(['read', id]);
+      return { workspace_id: id, state: 'unknown', destination: { kind: 'chooser' } };
+    },
+    openDestination: async target => steps.push(['open', target.kind])
+  };
+  view.backlogDrawerSelectedId = 'b1';
+  await view.runBacklogCheckProtection('b1');
+  assert.deepEqual(steps, [
+    ['read', 'w1'],
+    ['open', 'chooser']
+  ]);
+  assert.deepEqual(view.backlogSuggestionAction, { id: 'b1', busy: false, error: '' });
+  assert.ok(!view.backlogDrawerPreviewHTML().includes('role="alert"'));
+});
+
+test('a Check protection that cannot open says so on the card and changes nothing', async () => {
+  const view = makeView([backup]);
+  view.protection = {
+    readProtection: async () => {
+      throw new Error('Protection is unavailable for this folder.');
+    },
+    openDestination: async () => assert.fail('opened without a fact')
+  };
+  view.backlogDrawerSelectedId = 'b1';
+  await view.runBacklogCheckProtection('b1');
+  const html = view.backlogDrawerPreviewHTML();
+  assert.match(
+    html,
+    /<p class="ws-cmd-backlog-action-error" role="alert">Protection is unavailable for this folder\.<\/p>/
+  );
+  assert.match(html, /data-cmd-backlog-check-protection data-cmd-backlog-item="b1">/);
+  assert.ok(!/data-cmd-backlog-check-protection[^>]*disabled/.test(html), 'it can be tried again');
+  // Without the protection module at all, the same sentence.
+  const bare = makeView([backup]);
+  await bare.runBacklogCheckProtection('b1');
+  assert.equal(bare.backlogSuggestionAction.error, 'Protection is unavailable for this folder.');
 });

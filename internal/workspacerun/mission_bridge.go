@@ -10,8 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -37,6 +39,59 @@ type MissionBridge struct {
 	backlog          *workspace.BacklogService
 	maxOpenInContext int           // cap on how many opportunities we feed into the prompt
 	executionTimeout time.Duration // upper bound on a single mission run
+	// curatorProtection reads a File Janitor folder's stored protection fact
+	// for its backup precondition. Optional; set once at startup.
+	curatorProtection filecuratorguidance.ProtectionReader
+}
+
+// SetCuratorProtectionReader lets a File Janitor workspace's goal runs carry
+// its folder's backup precondition (backup-first FR9). The reader needs the
+// Today scope, which exists only after the bridge, so it is set here rather
+// than in MissionBridgeConfig. Unset, goal runs are what they were without it.
+// Startup wiring only.
+func (b *MissionBridge) SetCuratorProtectionReader(reader filecuratorguidance.ProtectionReader) {
+	if b != nil {
+		b.curatorProtection = reader
+	}
+}
+
+// missionPreconditions are the host facts a goal run must answer first. A
+// File Janitor workspace whose folder has no observed backup has one, unless
+// its task is already open or the user dismissed it. A failed or foreign read
+// is none: the run goes on as it would without the reader.
+func (b *MissionBridge) missionPreconditions(ctx context.Context, ws *workspace.Workspace) []workspace.MissionPrecondition {
+	if b.curatorProtection == nil {
+		return nil
+	}
+	if _, ok := ws.FileCurator(); !ok {
+		return nil
+	}
+	userID := ws.OwnerUserID
+	if userID == "" {
+		userID = userprofile.LocalUserID
+	}
+	fact, err := b.curatorProtection.ReadProtection(ctx, userID, ws.ID)
+	if err != nil {
+		logger.Warn("mission bridge: protection fact could not be read; no precondition", logger.Fields{
+			"workspace_id": ws.ID, "error": err,
+		})
+		return nil
+	}
+	if fact.WorkspaceID != ws.ID {
+		return nil
+	}
+	precondition, ok := workspace.BackupPrecondition(ws.Name, fact)
+	if !ok {
+		return nil
+	}
+	key := workspace.NormalizeSuggestionTitle(precondition.SuggestedTitle)
+	if _, open := workspace.OpenWorkTitles(ws)[key]; open {
+		return nil
+	}
+	if _, dismissed := ws.DismissedSuggestionKeys()[key]; dismissed {
+		return nil
+	}
+	return []workspace.MissionPrecondition{precondition}
 }
 
 // agentStoreReader is a small interface so MissionBridge depends only on what
@@ -177,6 +232,11 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 		// allows later: the user agreed to a look, not to changes.
 		autonomy = workspace.AutonomyWatch
 	}
+	// The ordering rule applies to ordinary goal runs only (backup-first FR14).
+	var preconditions []workspace.MissionPrecondition
+	if origin != workspace.MissionOriginHireFirstLook {
+		preconditions = b.missionPreconditions(ctx, ws)
+	}
 
 	systemPrompt := workspace.BuildMissionSystemPrompt(workspace.MissionPromptInputs{
 		WorkspaceManagerPrompt: basePrompt,
@@ -190,6 +250,7 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 		RecentlyCompleted:      recentlyCompleted,
 		DismissedTitles:        ws.DismissedSuggestionTitles(),
 		Origin:                 origin,
+		Preconditions:          preconditions,
 	})
 
 	// Build a synthetic task to feed into the OriAgentExecutor. The task is
@@ -262,13 +323,14 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 	}
 
 	execute := func() error {
-		return b.executeMissionRun(ctx, workspaceID, run.ID, opts)
+		return b.executeMissionRun(ctx, workspaceID, run.ID, opts, preconditions)
 	}
 	return run.ID, execute, nil
 }
 
 // executeMissionRun runs a created goal run to completion and records it.
-func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runID string, opts workspace.MissionRunOptions) error {
+// preconditions are those its prompt carried.
+func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runID string, opts workspace.MissionRunOptions, preconditions []workspace.MissionPrecondition) error {
 	runCtx, cancel := context.WithTimeout(ctx, b.executionTimeout)
 	defer cancel()
 
@@ -291,7 +353,7 @@ func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runI
 	// partial output is more useful than nothing.
 	var parseErr error
 	if execErr == nil || strings.TrimSpace(result) != "" {
-		parseErr = b.storeMissionOutput(workspaceID, runID, result, &record)
+		parseErr = b.storeMissionOutput(workspaceID, runID, result, &record, preconditions)
 	}
 	if parseErr != nil {
 		logger.Warn("mission bridge: goal run answer could not be read", logger.Fields{
@@ -339,8 +401,9 @@ func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runI
 // items as Backlog tickets (deduped, capped, unassigned), finding items as
 // Action Center opportunities (capped; the store merges recurring titles).
 // It fills the record's counts and returns an error only when the answer
-// could not be read at all, after recording its tail for the user.
-func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, record *workspace.MissionRunRecord) error {
+// could not be read at all, after recording its tail for the user. A ticket
+// that meets one of the run's preconditions is tagged with it.
+func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, record *workspace.MissionRunRecord, preconditions []workspace.MissionPrecondition) error {
 	output, err := workspace.ParseMissionRunOutput(workspaceID, runID, result)
 	if err != nil {
 		record.ParseStatus = workspace.MissionParseFailed
@@ -388,6 +451,10 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 	}
 	now := time.Now()
 	for _, suggestion := range suggestions {
+		reason := workspace.MissionSuggestionContext(suggestion, runID)
+		if precondition, ok := workspace.MatchMissionPrecondition(suggestion.Title, preconditions); ok {
+			reason = workspace.TagMissionPrecondition(reason, precondition, workspace.MissionSuggestionSourceModel)
+		}
 		if _, err := b.backlog.Create(workspace.BacklogCreateInput{
 			WorkspaceID: workspaceID,
 			Description: missionTicketTitle(suggestion.Title),
@@ -396,7 +463,7 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 			SourceType:  workspace.TicketSourceGoalSuggestion,
 			SourceID:    runID,
 			Context: map[string]any{
-				workspace.MissionSuggestionContextKey: workspace.MissionSuggestionContext(suggestion, runID),
+				workspace.MissionSuggestionContextKey: reason,
 			},
 		}); err != nil {
 			logger.Warn("mission bridge: create suggested ticket", logger.Fields{

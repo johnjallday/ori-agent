@@ -451,6 +451,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		}
 		// An inbox hire's first-batch report leads with backup from the same fact.
 		todayService.SetFileCuratorProtectionReader(protection)
+		// So do a File Janitor workspace's goal runs. The bridge is built in
+		// Phase 22.5, before the Today scope this reader needs.
+		if b.missionBridge != nil {
+			b.missionBridge.SetCuratorProtectionReader(protection)
+		}
 	}
 	// The protection line: stored coverage of adopted folders, and its one
 	// sticky "Not now" kept in the folder digest (wired above).

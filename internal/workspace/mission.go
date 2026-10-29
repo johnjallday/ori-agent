@@ -102,6 +102,24 @@ type MissionPromptInputs struct {
 	// Origin is what started the run (MissionOrigin*). A hired agent's first
 	// look gets its own framing and output contract.
 	Origin string
+	// Preconditions are host facts that an unmet step must come before any
+	// other work (backup-first FR7). Empty adds nothing to the prompt.
+	Preconditions []MissionPrecondition
+}
+
+// MissionPrecondition is one host-observed fact the run must answer first,
+// with the task that meets it. It is keyed by string ids, so a new kind needs
+// a filler in the bridge and nothing here.
+type MissionPrecondition struct {
+	// Kind names the fact, e.g. MissionPreconditionBackup.
+	Kind string
+	// Statement is the host's own wording of the fact, stored metadata only.
+	Statement string
+	// SuggestedTitle and SuggestedFirstStep are the task that meets it.
+	SuggestedTitle     string
+	SuggestedFirstStep string
+	// Action is the id of the button the ticket offers, e.g. check_protection.
+	Action string
 }
 
 // MissionWorkItem is one ticket as a goal run sees it.
@@ -332,6 +350,8 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 		b.WriteString("\n")
 	}
 
+	writeMissionPreconditions(&b, in.Preconditions)
+
 	b.WriteString("--- OUTPUT ---\n\n")
 	if hireLook {
 		writeHireFirstLookOutput(&b)
@@ -348,6 +368,22 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	b.WriteString("If nothing is worth suggesting, answer {\"items\": []}.\n")
 
 	return b.String()
+}
+
+// writeMissionPreconditions is the "## Preconditions" section (backup-first
+// FR8): each fact as the host states it with the task that meets it, and the
+// rule that those tasks come before any other work. Nothing when there are none.
+func writeMissionPreconditions(b *strings.Builder, preconditions []MissionPrecondition) {
+	if len(preconditions) == 0 {
+		return
+	}
+	b.WriteString("## Preconditions\n")
+	b.WriteString("The host observed these facts about this workspace. Each is unmet and has a task that should come before any other work.\n")
+	for _, p := range preconditions {
+		fmt.Fprintf(b, "- %s\n", missionPromptLine(p.Statement))
+		fmt.Fprintf(b, "  Suggested task: %q. First step: %s\n", missionPromptLine(p.SuggestedTitle), missionPromptLine(p.SuggestedFirstStep))
+	}
+	b.WriteString("Suggest each precondition's task before any other work, using its suggested title exactly and its first step: list them first among your items, and if your answer names a \"next\" task, name the first of them. Skip one only if it is listed above as dismissed.\n\n")
 }
 
 // writeHireFirstLookOutput is a first look's output contract: a short summary,

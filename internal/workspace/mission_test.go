@@ -122,6 +122,37 @@ func TestBuildMissionSystemPrompt_ItemsContract(t *testing.T) {
 	}
 }
 
+// backup-first FR8: no preconditions, no section; with one, the section states
+// the fact and the task and the rule, just before the output contract, and
+// nothing else in the prompt moves.
+func TestBuildMissionSystemPrompt_PreconditionsSection(t *testing.T) {
+	base := MissionPromptInputs{Mission: "Keep Downloads tidy.", CycleOrdinal: 1, DismissedTitles: []string{"Sort old installers"}}
+	without := BuildMissionSystemPrompt(base)
+	if strings.Contains(without, "Preconditions") {
+		t.Fatalf("a run with no preconditions has the section:\n%s", without)
+	}
+	with := base
+	with.Preconditions = []MissionPrecondition{{
+		Kind:               MissionPreconditionBackup,
+		Statement:          "As of 2026-10-29T09:00:00Z (stored metadata only, not a new check): Protection is unknown.",
+		SuggestedTitle:     "Back up Downloads before the first filing batch",
+		SuggestedFirstStep: "Open Check protection and approve one metadata read.",
+		Action:             MissionActionCheckProtection,
+	}}
+	got := BuildMissionSystemPrompt(with)
+	section := "## Preconditions\n" +
+		"The host observed these facts about this workspace. Each is unmet and has a task that should come before any other work.\n" +
+		"- As of 2026-10-29T09:00:00Z (stored metadata only, not a new check): Protection is unknown.\n" +
+		"  Suggested task: \"Back up Downloads before the first filing batch\". First step: Open Check protection and approve one metadata read.\n" +
+		"Suggest each precondition's task before any other work, using its suggested title exactly and its first step: list them first among your items, and if your answer names a \"next\" task, name the first of them. Skip one only if it is listed above as dismissed.\n\n"
+	if !strings.Contains(got, section+"--- OUTPUT ---\n") {
+		t.Fatalf("section missing or misplaced:\n%s", got)
+	}
+	if strings.Replace(got, section, "", 1) != without {
+		t.Fatal("the section moved something else in the prompt")
+	}
+}
+
 // FR18/FR19: existing and dismissed work is listed so it is not suggested
 // again, agents are named for suggested_agent, and what the run may do while
 // it looks follows the autonomy level.
