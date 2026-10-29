@@ -3016,6 +3016,25 @@ function loadSessionManagerWithPlacementModal() {
   return { manager: window.sessionManager, modalElement, placementCalls, reviewTitle, transition };
 }
 
+test('Place pressed while returning from the Map is honoured once the review is back', () => {
+  const { manager, modalElement, placementCalls } = loadSessionManagerWithPlacementModal();
+  manager.refreshWizardChrome = () => {};
+  manager.bindEvents();
+  const returning = { phase: 'resuming', token: 'previous', revision: 1 };
+  manager.workspaceMapPlacement = returning;
+  assert.equal(
+    manager.beginWorkspaceMapPlacement({ payload: { name: 'Again' }, origin: {} }),
+    null,
+    'not started over a returning placement'
+  );
+  assert.equal(placementCalls.length, 0);
+  // The existing return finishes on shown; the queued press then starts once.
+  returning.phase = 'review';
+  modalElement.emit('shown.bs.modal');
+  assert.equal(placementCalls.length, 1);
+  assert.equal(manager.workspaceMapPlacement.phase, 'placing');
+});
+
 test('Place pressed while the editor is still showing waits, then hides once and starts the map', () => {
   const { manager, modalElement, placementCalls, transition } =
     loadSessionManagerWithPlacementModal();

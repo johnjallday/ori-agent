@@ -3,6 +3,9 @@
 Status: implementation contract (not a claim of shipped behavior).
 Scope: the built-in inbox-folder proposal only. Music Home, REAPER, generic
 folder recipes and ordinary map/wizard creation keep their existing semantics.
+The same review/placement presentation for every other creation owner is
+specified in [unified-workspace-placement.md](unified-workspace-placement.md);
+this File Janitor permission and preparation contract is unchanged by it.
 
 ## Authority
 

@@ -182,14 +182,15 @@ func (h *Handler) acquirePlacementBuild(w http.ResponseWriter, r *http.Request, 
 	}
 	build := doc.Session(id)
 	if build == nil || build.PlacementSource == nil {
-		if action == "turns" {
+		if action == "turns" || action == "folder" || action == "link" {
 			// Reservation/application recheck the durable acceptance fence under
 			// the build-store lock. Do not hold a material-edit lease across
-			// network inference: explicit edits must invalidate a late reply.
+			// network inference or a folder/link observation: explicit edits,
+			// pause and detach must invalidate a late reply or attachment.
 			if err := h.checkUnacceptedCreationBuild(r.Context(), owner, id); err != nil {
 				var refusal errBuildTurn
 				if errors.As(err, &refusal) {
-					creationOperationError(w, refusal.status, refusal.code, "Read the original accepted operation; this build cannot start inference.")
+					creationOperationError(w, refusal.status, refusal.code, "Read the original accepted operation; this build cannot change or start inference.")
 				}
 				return nil, false
 			}

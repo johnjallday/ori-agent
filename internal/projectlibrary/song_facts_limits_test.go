@@ -310,7 +310,9 @@ func TestSongFacts_AnOlderHomeOpensNothingAndKeepsTodaysTurn(t *testing.T) {
 
 func TestSongFacts_AnAbletonCollectionGetsNoFactsButABrief(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Songs")
-	base := time.Date(2026, time.September, 28, 10, 0, 0, 0, time.UTC)
+	// Relative to the real clock the brief uses: a fixed date fell out of the
+	// 30-day window on 2026-10-28 and turned this test into a time bomb.
+	base := time.Now().UTC().AddDate(0, 0, -2).Truncate(time.Hour)
 	for i := 0; i < 3; i++ {
 		writeSong(t, dir, fmt.Sprintf("Set %d", i), "Set.als", []byte("ableton"), base.Add(time.Duration(i)*time.Hour))
 	}

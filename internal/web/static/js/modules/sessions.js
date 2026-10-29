@@ -4760,9 +4760,7 @@ const sessionManager = {
               goal ||
               'A workspace you can shape later.'
           },
-          ...(current?.roleSummary
-            ? [{ label: 'Team consequences', value: current.roleSummary }]
-            : []),
+          ...(current?.roleSummary ? [{ label: 'Team', value: current.roleSummary }] : []),
           ...material.facts,
           { label: 'Now', value: material.now },
           { label: 'Later', value: material.later }
@@ -5142,7 +5140,10 @@ const sessionManager = {
     if (action === 'read-status') return this.readOrdinaryCreationStatus(context);
     if (action === 'open' && review.result?.id) {
       this.releaseCreationReviewReference(review);
-      window.location.href = `/workspaces/${encodeURIComponent(review.result.folder_slug || review.result.id)}`;
+      // Workspace pages are routed by slug; resolve it rather than use the ID.
+      const slug = String(review.result.folder_slug || '').trim();
+      if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+      else await this.openExistingResourceWorkspace(review.result.id);
       return;
     }
     if (action === 'back' && (review.result || review.accepted)) {
@@ -5555,7 +5556,7 @@ const sessionManager = {
     );
     review.message = review.result
       ? [
-          'Workspace created. No task or scan was started by placement.',
+          `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No task or scan was started by placement.`,
           review.owner === 'grouped' ? this.groupedCreationResultLine(result, review.result) : '',
           Number(result.seeded_starter_tasks) > 0
             ? `${result.seeded_starter_tasks} starter tasks saved for later.`
@@ -5753,6 +5754,21 @@ const sessionManager = {
   beginWorkspaceMapPlacement(options = {}) {
     const existing = this.workspaceMapPlacement;
     if (existing?.phase === 'committing') return null;
+    if (existing?.phase === 'resuming') {
+      // Place pressed while the editor is still returning from the Map (for
+      // example Enter right after Escape): honour it once that return is done
+      // instead of silently dropping the keypress.
+      document.getElementById('addFolderModal')?.addEventListener(
+        'shown.bs.modal',
+        () =>
+          this.deferWorkspaceMapPlacement(() => {
+            if (this.workspaceMapPlacement === existing && existing.phase === 'review')
+              this.beginWorkspaceMapPlacement(options);
+          }),
+        { once: true }
+      );
+      return null;
+    }
     if (existing && existing.phase !== 'review') return null;
     const payload = this.cloneWorkspaceMapPlacementValue(options.payload || {});
     // Re-entry keeps geometry, never an old preview's commit callback. Even
@@ -15345,7 +15361,10 @@ const sessionManager = {
           : 'The requested position is saved. Only layout changed.';
         if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
       } else if (action === 'open' && state.result?.id) {
-        window.location.href = `/workspaces/${encodeURIComponent(state.result.folder_slug || state.result.id)}`;
+        // Workspace pages are routed by slug; resolve it rather than use the ID.
+        const slug = String(state.result.folder_slug || '').trim();
+        if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+        else await this.openExistingResourceWorkspace(state.result.id);
       } else if (action === 'back') this.hideWorkspaceCreatorModal();
       return;
     }
@@ -19042,13 +19061,25 @@ const sessionManager = {
       if (ordinaryReview) {
         ordinaryReview.accepted = true;
         const groupedOwner = ordinaryReview.owner === 'grouped';
-        const outcome = groupedOwner
-          ? await this.dispatchGroupedCreation(creatorContext, endpoint, requestPayload, placement)
-          : await ordinaryReview.api.confirmCreationOperation(
-              fetch,
-              window.localStorage,
-              ordinaryReview.reference
-            );
+        let outcome;
+        try {
+          outcome = groupedOwner
+            ? await this.dispatchGroupedCreation(
+                creatorContext,
+                endpoint,
+                requestPayload,
+                placement
+              )
+            : await ordinaryReview.api.confirmCreationOperation(
+                fetch,
+                window.localStorage,
+                ordinaryReview.reference
+              );
+        } catch (error) {
+          // Only retention can throw here, before anything is sent (for
+          // example another tab's confirmed operation is still retained).
+          outcome = { state: 'not_sent', message: error?.message || 'Nothing was sent.' };
+        }
         if (
           this.workspaceCreatorContext !== creatorContext ||
           creatorContext.generation !== creatorGeneration
@@ -19063,6 +19094,16 @@ const sessionManager = {
             this.returnFromWorkspaceMapPlacement(placement.token, 'review-refused');
           }
           this.showWorkspaceCreateError(outcome.message);
+          // A retained confirmed operation (from another tab) comes first:
+          // release this tab's unsent review and show that original read-only.
+          if (!groupedOwner && ordinaryReview.reference)
+            void ordinaryReview.api
+              .abandonCreationOperation(fetch, ordinaryReview.reference)
+              .catch(() => {});
+          ordinaryReview.reference = null;
+          ordinaryReview.operationKey = '';
+          ordinaryReview.observedState = '';
+          ordinaryReview.restored = false;
           return;
         }
         if (outcome.state !== 'complete') {

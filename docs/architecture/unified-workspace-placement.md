@@ -236,6 +236,18 @@ session or its Move mode. Read/history navigation never saves geometry.
 | Music/REAPER / connection-only quests | existing Home, project connection and journey owners / canonical resources | no ordinary fallback, no implicit launch/live control; paired candidate acceptance required |
 | Import/continuity/HQ | existing import/adoption/designation owners / their receipts | truthful reuse/import, no forced placement, no bootstrap redesign |
 
+Each owner retains its lookup reference before dispatch. If another confirmed
+operation is still retained (for example by another tab), nothing is sent: the
+unsent review is released and the retained original is shown read-only until
+its result is closed. A Place pressed while the editor is still returning from
+the Map is honoured once that return completes, never silently dropped. A
+re-check of the same blueprint keeps the person's explicit open-project choice;
+a refused destination review is stated, never left as an endless "reviewing".
+
+Occupancy for a new subject's preview, suggestion and repair includes the
+visible unbuilt HQ site. Moving an existing building ignores it, because that
+unsaved site simply re-flows to the next free slot.
+
 A replaced/expired selection retains material edits and requires a trusted re-pick;
 failed/cancelled replacement retains the prior valid selection. Repaint never
 rescans or extends a hold. Partial setup exposes its real owner and next action.

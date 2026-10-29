@@ -4738,7 +4738,10 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     return;
   }
   if (action === 'open' && review.result?.id) {
-    window.location.href = `/workspaces/${encodeURIComponent(review.result.folder_slug || review.result.id)}`;
+    // Workspace pages are routed by slug; resolve it rather than use the ID.
+    const slug = String(review.result.folder_slug || '').trim();
+    if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+    else await window.sessionManager?.openExistingResourceWorkspace?.(review.result.id);
     return;
   }
   if (action === 'back' || action === 'cancel' || action === 'details') {
