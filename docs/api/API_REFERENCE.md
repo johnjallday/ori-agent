@@ -2154,6 +2154,49 @@ An offer the user sent to the step-by-step journey (**Adjust…**, so `awaiting_
 
 The same action sets up a **collection** offer (`portfolio`) when its reviewed Home provider resolves: the plan lists the provider, the integration (only when some folders are projects it opens), the Home, its agents, the library listing and the shared assistant, and the run builds the Home, staffs its required roles, starts its library, connects the folder, scans it once and records the Home's standing staffing consent. It lists the projects and makes **no** project workspace. The finished offer's `outcome.receipt` rows (`home`, `library`, `assistant`) name what was made; the `library` row says "Listed N … so far" after a partial scan. A single-song run records the same consent on its Home, so its project role is filled by the Home's one shared assistant: created by the first song (receipt detail `added`), bound by later ones (`joined`).
 
+### Home-phase observation and map placement
+
+A Music single-song setup first stops successfully at `setup.status: "stopped"`,
+`setup.stop_reason: "handoff_ready"`, before any project Open. A collection can
+resolve with a Home and library but no project workspaces. Repeating the
+single-song setup confirmation at that boundary observes the original run;
+explicit later Open remains a separate action. Other failed continuations keep
+their existing source-owned recovery.
+
+When supported by the setup adapter, an accepted Home-producing offer includes
+an additive, read-only `home_result` on setup responses and named digest reads:
+
+```json
+{
+  "offer_id": "<accepted offer>",
+  "request_id": "<original accepted request>",
+  "plan_digest": "<accepted plan digest>",
+  "state": "ready",
+  "home_id": "<canonical Home ID>",
+  "name": "Music Production Home",
+  "route": "/workspaces/<Home slug>/assistant",
+  "created_by_this_operation": true,
+  "layout_subject_new": true
+}
+```
+
+States are `ready` (verified Home plus persisted successful phase), `partial`
+(verified Home, incomplete phase), `unproven` (no sufficient operation proof,
+including legacy records), and `unavailable` (no valid current target).
+`home_id`, `name` and `route` are optional. The accepted request/digest binding and
+canonical managed-Home provenance determine creation, never the planned name or
+an HTTP success. Only a ready result created by this exact operation has
+`layout_subject_new: true`; reuse or another tab's confirmation does not gain
+that authority. No managed-Home review token or idempotency key is exposed.
+
+This projection does not accept a map coordinate or grant a new setup action.
+The live reviewed editor separately uses the existing layout API, only after
+matching its accepted source/request/digest and refreshing actual map state.
+Status/history reads never create, continue, staff, scan, open, repair progress,
+or save geometry. Setup success is distinct from position success; a retained
+position-only retry revalidates proof and occupancy without repeating setup.
+A lost candidate after reload requires explicit group movement instead.
+
 ### A Folder of Projects: the proposed group
 
 A folder with no project marker of its own and two or more immediate subfolders that are each a project (software repositories aside, which keep the candidate choice above) is a **collection**. Ori answers it with one proposal: a workspace group and one linked workspace per subfolder. The proposal is the `structure` record, built from directory entries only, and it is the same record wherever the folder is shown:

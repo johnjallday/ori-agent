@@ -4759,6 +4759,9 @@ async function navigateFolderHomeMap(homeID, action) {
       throw new Error('The original Home is no longer available. Nothing was moved.');
     // Navigation deliberately ends this editor lifetime. A reload never claims
     // to retain a source draft or a candidate; only explicit Map movement follows.
+    // Persist the drawer as closed, so navigation does not restore it over the
+    // district (especially on narrow screens) that the user asked to reveal.
+    window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
     window.location.href = `/?view=map&${action === 'move' ? 'move' : 'show_on_map'}=${encodeURIComponent(homeID)}`;
   } catch (error) {
     if (current()) {
@@ -4951,6 +4954,12 @@ function renderSourceCreationReview() {
     review.actionLabel = 'Set up Home';
     projection.destination = `${offer.plan.destination.status === 'new' ? 'New' : 'Existing'} Home: ${offer.plan.destination.name}. Position changes no membership or access.`;
     const handoffAt = offer.plan.lines.findIndex(line => line.kind === 'handoff');
+    if (handoffAt >= 0 && offer.plan.hire && projection.rows[0]) {
+      // This is the deferred song's hire, not the Home's Portfolio Manager.
+      projection.rows[0].label = `Later project · ${projection.rows[0].label}`;
+      projection.rows[0].detail +=
+        ' Assigned only when you explicitly open the project, not by this Home setup.';
+    }
     projection.facts = projection.facts.map((fact, index) => ({
       ...fact,
       label:
@@ -4966,11 +4975,14 @@ function renderSourceCreationReview() {
     ...projection,
     ownerKind: 'setup',
     idPrefix: 'sourceCreationReview',
-    name:
-      state.workspaceName ||
-      offer.software?.workspace_name ||
-      offer.plan?.visual?.entity?.name ||
-      offer.subject?.name,
+    name: review.home
+      ? offer.plan.destination.name
+      : state.workspaceName ||
+        offer.software?.workspace_name ||
+        offer.plan?.visual?.entity?.name ||
+        offer.subject?.name,
+    showGoal: !review.home || Boolean(projection.goal),
+    goalLabel: review.home ? 'Later project goal' : undefined,
     nameMaxLength: 120,
     goalMaxLength: 2000,
     canEditName: Boolean(offer.software && offer.plan?.visual?.entity?.operation === 'create'),

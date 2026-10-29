@@ -1,4 +1,9 @@
-import { test, expect as baseExpect, type APIRequestContext } from '@playwright/test';
+import { test, expect as baseExpect } from '@playwright/test';
+import {
+  musicHomeSnapshot as snapshot,
+  musicHomeResourceCounts as resourceCounts,
+  openMusicHomeReview
+} from './helpers/music-home-placement';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -21,30 +26,6 @@ test.afterEach(async () => {
     restoreFault = null;
   }
 });
-
-async function snapshot(request: APIRequestContext) {
-  const body = await (await request.get('/api/workspaces')).json();
-  const agents = await (await request.get('/api/agents')).json();
-  const layout = await (await request.get('/api/workspace-map/layout')).json();
-  return {
-    workspaces: body.workspaces.sort((a: any, b: any) => a.id.localeCompare(b.id)),
-    agents: agents.agents.sort((a: any, b: any) => a.name.localeCompare(b.name)),
-    positions: layout.layout.positions || {}
-  };
-}
-
-async function resourceCounts(request: APIRequestContext, homeID: string) {
-  const state = await snapshot(request);
-  const base = `/api/workspaces/${homeID}/assistant-program/library`;
-  const roots = await (await request.get(`${base}/roots`)).json();
-  const projects = await (await request.get(`${base}/projects`)).json();
-  return {
-    workspaces: state.workspaces.map((w: any) => [w.id, w.kind, w.parent_id]),
-    agents: state.agents.map((a: any) => a.name),
-    roots: (roots.roots || []).map((root: any) => root.id).sort(),
-    projects: projects.rows.map((row: any) => [row.id, row.connection]).sort()
-  };
-}
 
 test('single-song reviewed empty Home is positioned before any project Open', async ({
   page,
@@ -135,20 +116,7 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     if (r.method() === 'POST' && /folder-digest\/offers\/[^/]+\/setup$/.test(r.url())) setupPosts++;
     if (r.method() === 'POST' && /\/(turns|chat|completions)$/.test(r.url())) inferencePosts++;
   });
-  await page.goto('/?panel=today&folder=show');
-  await page.locator('.folder-path-entry__input:visible').first().fill(song);
-  await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
-  const existingReview = page.getByRole('button', {
-    name: 'Open Ori Music Demo review',
-    exact: true
-  });
-  const first = page.getByRole('button', { name: /^(Set up|Prepare) Music Production Home$/ });
-  await expect(first.or(existingReview)).toBeVisible({ timeout: 30_000 });
-  if (await existingReview.isVisible()) await existingReview.click();
-  await expect(first).toBeVisible({ timeout: 30_000 });
-  await first.click();
-  const review = page.locator('[data-source-creation-review]:visible');
-  await expect(review).toBeVisible();
+  const review = await openMusicHomeReview(page, song);
   await expect(review).toContainText('does not open its workspace');
   if (fault === 'two-tabs') {
     const source = (await (await request.get('/api/personal-assistant/folder-digest')).json())
@@ -273,9 +241,16 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     faultInjected = true;
   }
   await page.locator('[data-ws-map-viewport]').focus();
-  if (process.env.MUSIC_HOME_PLACEMENT_CONFIRM === 'pointer')
-    await page.locator('[data-ws-map-placement-confirm]').click();
-  else {
+  if (process.env.MUSIC_HOME_PLACEMENT_CONFIRM === 'pointer') {
+    const box = await preview.boundingBox();
+    expect(box).not.toBeNull();
+    const hovering = await snapshot(request);
+    await page.mouse.move(box!.x + 1, box!.y + 1);
+    expect(await snapshot(request)).toEqual(hovering);
+    expect(setupPosts).toBe(0);
+    // A real background click, not just the toolbar's pointer alternative.
+    await page.mouse.click(box!.x + 1, box!.y + 1);
+  } else {
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
   }
@@ -695,8 +670,11 @@ test('collection library Opens keep the explicitly positioned Home and earlier c
   const priorChildren = before.workspaces.filter((w: any) => w.parent_id === home.id).length;
   await page.goto(`/?view=map&move=${home.id}`);
   await expect(page.locator('[data-map-live]')).toContainText('Move is on');
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Enter');
+  // An automatic district can sit beside HQ; one step right is not necessarily
+  // a free site. Deliberately move into open ground rather than bypass collision.
+  for (let step = 0; step < 16; step++)
+    await page.locator('[data-ws-map-viewport]').press('ArrowUp');
+  await page.locator('[data-ws-map-viewport]').press('Enter');
   await expect.poll(async () => (await snapshot(request)).positions[home.id]).toBeTruthy();
   const positioned = await snapshot(request);
   const library = await (
@@ -757,7 +735,8 @@ test('collection library Opens keep the explicitly positioned Home and earlier c
   });
 });
 
-test('collection automatic setup finishes a Home library without project buildings or a map', async ({
+const collectionOnMap = process.env.MUSIC_HOME_PLACEMENT_COLLECTION_MAP === '1';
+test(`collection ${collectionOnMap ? 'map' : 'automatic'} setup finishes a Home library without project buildings`, async ({
   page,
   request
 }) => {
@@ -766,7 +745,7 @@ test('collection automatic setup finishes a Home library without project buildin
     'MUSIC_HOME_PLACEMENT_COLLECTION names a synthetic collection in a fresh candidate sandbox'
   );
   test.setTimeout(120_000);
-  await page.setViewportSize({ width: 720, height: 900 });
+  await page.setViewportSize({ width: collectionOnMap ? 1440 : 720, height: 1000 });
   const before = await snapshot(request);
   expect(before.workspaces.filter((w: any) => w.kind === 'group')).toHaveLength(0);
   await page.goto('/?panel=today&folder=show');
@@ -778,16 +757,33 @@ test('collection automatic setup finishes a Home library without project buildin
   await page.getByRole('button', { name: 'Set up', exact: true }).click({ timeout: 15_000 });
   const review = page.locator('[data-source-creation-review]:visible');
   await expect(review).toBeVisible();
-  await expect(
-    review.getByRole('button', { name: 'Place & set up on map', exact: true })
-  ).toBeDisabled();
-  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  await expect(review.getByRole('textbox', { name: 'Group name', exact: true })).toHaveValue(
+    'Music Production Home'
+  );
+  await expect(review.getByRole('textbox', { name: 'Purpose', exact: true })).toHaveCount(0);
+  const place = review.getByRole('button', { name: 'Place & set up on map', exact: true });
+  let candidate: { x: number; y: number } | undefined;
+  if (collectionOnMap) {
+    await place.click();
+    const canvas = page.locator('[data-ws-map-viewport]');
+    for (let step = 0; step < 4; step++) await canvas.press('ArrowDown');
+    candidate = await page.locator('[data-ws-map-placement-preview]').evaluate(element => ({
+      x: parseFloat((element as HTMLElement).style.left),
+      y: parseFloat((element as HTMLElement).style.top)
+    }));
+  } else {
+    await expect(place).toBeDisabled();
+    await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  }
   expect(await snapshot(request)).toEqual(before);
-  await page.screenshot({ path: `${evidence}/collection-automatic-review.png` });
+  await page.screenshot({
+    path: `${evidence}/collection-${collectionOnMap ? 'map' : 'automatic'}-review.png`
+  });
   const acceptedResponse = page.waitForResponse(r =>
     /folder-digest\/offers\/[^/]+\/setup$/.test(r.url())
   );
-  await review.getByRole('button', { name: 'Set up Home', exact: true }).click();
+  if (collectionOnMap) await page.locator('[data-ws-map-viewport]').press('Enter');
+  else await review.getByRole('button', { name: 'Set up Home', exact: true }).click();
   const accepted = await (await acceptedResponse).json();
   await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible({
     timeout: 60_000
@@ -797,7 +793,9 @@ test('collection automatic setup finishes a Home library without project buildin
   expect(homes).toHaveLength(1);
   expect(after.workspaces.length).toBe(before.workspaces.length + 1);
   expect(after.workspaces.filter((w: any) => w.parent_id === homes[0].id)).toHaveLength(0);
-  expect(after.positions).toEqual(before.positions);
+  if (collectionOnMap) expect(after.positions[homes[0].id]).toEqual(candidate);
+  else expect(after.positions).toEqual(before.positions);
+  expect((await resourceCounts(request, homes[0].id)).projects).toHaveLength(5);
   const digest = await (
     await request.get(`/api/personal-assistant/folder-digest?offer_id=${accepted.offer.id}`)
   ).json();

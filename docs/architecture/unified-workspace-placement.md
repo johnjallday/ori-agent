@@ -261,13 +261,31 @@ canonical status only; a lost candidate is not replayed. Existing Homes offer
 **Show on map** and explicit **Move group** instead of another create/place flow.
 Show reveals/selects the district; Move enters its existing gesture, including
 empty/collapsed districts, with no geometry write until explicitly committed.
+Navigation closes the assistant drawer rather than restoring it over the target.
+A compact Home is framed with its identity, controls and asynchronously loaded
+library badge, rather than retaining an unreadable overview zoom; that camera
+change is not saved. The reviewed Group name is the Home's canonical destination,
+not the source song's name. A source-song brief is labeled **Later project goal**;
+its REAPER Assistant row is explicitly a later-project assignment, not the Home's
+Portfolio Manager or a hire performed by this press.
+
+Manual source placement requires a visible, writable mounted Map at desktop
+width. Tree, narrow/touch layouts and 200% browser zoom retain the explicit
+automatic alternative; a hidden map cannot capture confirmation. Escape before
+acceptance returns the same review/candidate without domain effects.
 
 Setup success and position success are separate. A rejected or uncertain layout
 save preserves the Home and discloses automatic layout. **Retry position only**
 revalidates identity and current occupancy, writes only the retained point, and
 never repeats domain setup. A now-occupied point requires explicit movement or
 keeping automatic layout, not a silently substituted manual coordinate. Editor
-generation and map tokens fence late callbacks, focus and selection. Later
+generation and map tokens fence late callbacks, focus and selection. A saved
+matching point acknowledges a lost reply without another PATCH; a different saved
+point requires explicit Move, never overwrite by a stale repair. A duplicate
+single-song setup at `handoff_ready` observes the original operation, even when
+another tab finishes during plan checking. It does not restart Home setup or
+transfer creation authority to that tab. Explicit later Open stays separate.
+Later
 project Open keeps its existing automatic child placement, membership and task
 semantics without moving saved Home/prior-child anchors. Catalog entries are not
 buildings; geometry conveys no access, staffing or membership.

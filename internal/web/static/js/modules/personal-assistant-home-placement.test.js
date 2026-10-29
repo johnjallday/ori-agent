@@ -8,7 +8,10 @@ import {
   sourceHomeReviewPlan,
   folderHomeMapTarget
 } from './personal-assistant-folder.js';
-import { workspaceCreationReviewHTML } from './workspace-creation-review.js';
+import {
+  workspaceCreationReviewHTML,
+  setupCreationReviewMaterial
+} from './workspace-creation-review.js';
 
 const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
 // Execute the real source controller, isolating only browser/owner I/O. Domain
@@ -123,7 +126,7 @@ function controller() {
   );
   vm.runInContext(
     code.replaceAll('export function ', 'function ') +
-      '\nglobalThis.harness = { startOneCardSetup, actOnSourceCreationReview, observeSourceCreationResult, renderSourceCreationReview, sourceReviewMapAvailable, review: () => sourceCreationReview };',
+      '\nglobalThis.harness = { startOneCardSetup, actOnSourceCreationReview, observeSourceCreationResult, renderSourceCreationReview, navigateFolderHomeMap, sourceReviewMapAvailable, review: () => sourceCreationReview };',
     context
   );
   return { ...context.harness, context, state, effects, placement: () => placement };
@@ -214,6 +217,39 @@ test('a withdrawn or changed Home plan returns to source review without stale te
     assert.equal(c.effects.setup, 0);
     assert.equal(c.effects.position, 0);
   }
+});
+
+test('Home identity is not the source song name and its later goal is not a Home purpose', async () => {
+  const c = controller();
+  await c.startOneCardSetup({});
+  c.state.workspaceName = 'The source song';
+  c.state.offer.plan.lines = [];
+  c.state.offer.plan.brief_default = 'Goal for the later project';
+  c.context.briefFor = () => null;
+  c.context.setupCreationReviewMaterial = setupCreationReviewMaterial;
+  c.context.handoffFirstPressLabel = () => '';
+  c.context.handoffLineParts = () => null;
+  c.context.elements = () => ({ offer: { classList: { toggle() {} }, querySelector: () => ({}) } });
+  let view;
+  c.review().panel = {
+    update(value) {
+      view = value;
+    }
+  };
+  c.renderSourceCreationReview();
+  assert.equal(view.name, 'Music Home');
+  assert.equal(view.canEditName, false);
+  assert.equal(view.goal, 'Goal for the later project');
+  assert.equal(view.goalLabel, 'Later project goal');
+  assert.equal(view.canEditGoal, false);
+  c.state.offer.plan.brief_default = '';
+  c.renderSourceCreationReview();
+  assert.equal(view.showGoal, false, 'a collection does not invent an empty Home-purpose question');
+  c.state.offer.plan.lines = [{ kind: 'handoff', name: 'Open later' }];
+  c.state.offer.plan.hire = { role_label: 'REAPER Assistant', mode: 'create' };
+  c.renderSourceCreationReview();
+  assert.equal(view.rows[0].label, 'Later project · REAPER Assistant');
+  assert.match(view.rows[0].detail, /not by this Home setup/);
 });
 
 test('enter, hover and Back retain review and candidate with no domain effects; final gesture dispatches once', async () => {
@@ -324,6 +360,21 @@ test('reused/history Home navigation requires canonical identity, never the name
     folderHomeMapTarget({ outcome: { workspace_id: 'song', name: 'Music Production Home' } }),
     ''
   );
+});
+
+test('verified Show navigation closes the drawer instead of restoring it over the Home', async () => {
+  const c = controller();
+  await c.startOneCardSetup({});
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
+  c.context.window.location = { href: '' };
+  let closes = 0;
+  c.context.window.PersonalAssistantPanel.close = () => closes++;
+  await c.navigateFolderHomeMap('home', 'show');
+  assert.equal(closes, 1);
+  assert.equal(c.context.window.location.href, '/?view=map&show_on_map=home');
+  assert.equal(c.effects.setup, 1);
+  assert.equal(c.effects.position, 0);
 });
 
 async function failedPosition() {

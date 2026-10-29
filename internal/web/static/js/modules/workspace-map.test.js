@@ -5042,6 +5042,37 @@ test('Show and Move reveal empty and collapsed Home districts without a position
   }
 });
 
+test('revealing a compact Home frames readable header controls without saving the camera or geometry', async () => {
+  const savedCamera = { center_x: 0, center_y: 0, zoom: 0.26 };
+  const { map, harness, patches } = buildHarness({
+    layout: {
+      schema_version: 1,
+      revision: 1,
+      positions: { home: { x: 760, y: 380 } },
+      viewport: savedCamera
+    }
+  });
+  harness.canvas.clientWidth = 330;
+  harness.canvas.clientHeight = 300;
+  mountWithCamera(map, harness, [
+    {
+      id: 'home',
+      kind: 'group',
+      name: 'Music Home',
+      group_template: { kind: 'managed_home', name: 'Music Home' }
+    }
+  ]);
+  await flush();
+  assert.equal(map.getCamera().zoom, 0.26);
+  assert.equal(map.reveal('home'), true);
+  assert.ok(map.getCamera().zoom > 0.7 && map.getCamera().zoom <= 1);
+  assert.ok(map.getCamera().centerY < 465, 'the header/badge are included above the frame');
+  await flush();
+  assert.equal(patches.length, 0);
+  assert.deepEqual({ ...map.getLayoutState().viewport }, { centerX: 0, centerY: 0, zoom: 0.26 });
+  assert.deepEqual({ ...map.getLayoutState().positions.home }, { x: 760, y: 380 });
+});
+
 test('explicit Home Move uses the cluster transaction, not membership or separate member moves', async () => {
   const { map, harness, patches } = await mountedCluster({ enableDrag: false });
   assert.equal(map.beginMove('grp'), true);

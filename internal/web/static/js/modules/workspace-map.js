@@ -703,6 +703,7 @@
   var LIBRARY_SHELF_ROUTE = /^\/workspaces\/[^/?#\s]+\/assistant#projectLibraryProposals$/;
   // World-space room for the badge line: a 44px touch target plus the row gap.
   var LIBRARY_BADGE_CLEARANCE = 48;
+  var COMPACT_HOME_HEADER_CLEARANCE = 116;
 
   function setLibraryBadges(snapshot) {
     libraryBadges = Object.create(null);
@@ -2021,7 +2022,7 @@
       var template = district.ws && district.ws.group_template;
       var headerRoom =
         template && template.kind === 'managed_home' && template.name && district.width < 320
-          ? 116
+          ? COMPACT_HOME_HEADER_CLEARANCE
           : 0;
       var chromeRoom = badgeRoom + headerRoom;
       include(district.x, district.y - chromeRoom, district.width, district.height + chromeRoom);
@@ -10548,15 +10549,35 @@
     var id = String(workspaceId || '').trim();
     if (!container || !id || placementSession || moveState || layoutState.status !== 'ready')
       return false;
+    var district = renderedDistrict(id);
     var drawn =
-      renderedDistrict(id) ||
+      district ||
       ((lastWorldLayout && lastWorldLayout.nodes) || []).some(function (node) {
         return node.id === id;
       });
     if (!drawn) return false;
     applySelection(container, (lastMount.state && lastMount.state.workspaces) || [], id, options);
     var anchor = selectedNodeAnchor();
-    if (anchor) setCamera(centerOn(camera, anchor), container, { persist: false });
+    var template = district && district.ws && district.ws.group_template;
+    if (district && district.width < 320 && template && template.kind === 'managed_home') {
+      // Show the empty Home, not a tiny district left at Fit-all's zoom. Its
+      // identity/actions must remain reachable on narrow screens. Reserve the
+      // badge line even if its asynchronous read has not returned yet.
+      var chromeRoom = COMPACT_HOME_HEADER_CLEARANCE + LIBRARY_BADGE_CLEARANCE;
+      var bounds = {
+        minX: district.x,
+        minY: district.y - chromeRoom,
+        maxX: district.x + district.width,
+        maxY: district.y + district.height
+      };
+      var framed = fitBounds(
+        bounds,
+        viewportSize(container.querySelector('[data-ws-map-viewport]')),
+        16
+      );
+      framed.zoom = Math.min(1, framed.zoom);
+      setCamera(framed, container, { persist: false });
+    } else if (anchor) setCamera(centerOn(camera, anchor), container, { persist: false });
     return true;
   }
 

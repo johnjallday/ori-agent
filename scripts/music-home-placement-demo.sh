@@ -2,12 +2,16 @@
 # Real-candidate Music Home placement acceptance, always in a fresh sandbox.
 # Usage: ./scripts/music-home-placement-demo.sh --case CASE --port PORT \
 #   --reaper-source DIR --music-source DIR --music-ref REF
-# CASE: single, pointer, later, collection, accept, layout, ack, occupied, partial,
-#       stale, two-tabs, competing-home, disabled-provider, deleted-home, missing-model
+# CASE: single, pointer, later, collection, collection-map, accept, layout, ack, occupied, partial,
+#       stale, two-tabs, competing-home, disabled-provider, deleted-home, missing-model,
+#       a11y-light, a11y-dark, a11y-touch, a11y-tree, a11y-zoom
 # Uses an invented credential and a refused loopback endpoint: no paid inference.
 set -euo pipefail
 root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
+# Each explicit case owns these flags; an old shell export must not add a fault.
+unset MUSIC_HOME_PLACEMENT_FAULT MUSIC_HOME_PLACEMENT_CONFIRM MUSIC_HOME_PLACEMENT_COLLECTION \
+	MUSIC_HOME_PLACEMENT_LIBRARY MUSIC_HOME_PLACEMENT_SECOND_SONG MUSIC_HOME_PLACEMENT_A11Y MUSIC_HOME_PLACEMENT_COLLECTION_MAP
 case_name=single
 port=8956
 sources=()
@@ -21,7 +25,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 case "$case_name" in
-single | pointer | later | collection | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model) ;;
+single | pointer | later | collection | collection-map | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
 *) echo "unknown case: $case_name" >&2; exit 2 ;;
 esac
 [[ "$port" =~ ^[0-9]+$ ]] || { echo 'port must be numeric' >&2; exit 2; }
@@ -67,22 +71,34 @@ grep -Fxq "worktree=$root" "$sandbox/.ori-demo-owner" || { echo 'sandbox owner d
 printf 'CASE=%s SANDBOX=%s\n' "$case_name" "$sandbox"
 args=(--port "$port" --env "MUSIC_HOME_PLACEMENT_SONG=$sandbox/Documents/Ori Music Demo")
 pattern=single-song
+spec=tests/music-home-map-placement.spec.ts
 case "$case_name" in
+a11y-*)
+	args+=(--env "MUSIC_HOME_PLACEMENT_A11Y=${case_name#a11y-}")
+	spec=tests/music-home-map-placement.a11y.spec.ts
+	pattern='source Home' ;;
 pointer) args+=(--env MUSIC_HOME_PLACEMENT_CONFIRM=pointer) ;;
 later)
 	"$root/scripts/smoke.sh" showfolder "http://localhost:$port" seed-song "$sandbox" Documents 'Second Song'
 	args+=(--env "MUSIC_HOME_PLACEMENT_SECOND_SONG=$sandbox/Documents/Second Song")
 	pattern='single-song|existing Home' ;;
 accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model) args+=(--env "MUSIC_HOME_PLACEMENT_FAULT=$case_name") ;;
-collection)
+collection | collection-map)
 	for name in 'Song One' 'Song Two' 'Song Three' 'Song Four' 'Song Five'; do
 		"$root/scripts/smoke.sh" showfolder "http://localhost:$port" seed-song "$sandbox" Desktop "$name"
 	done
 	args=(--port "$port" --env "MUSIC_HOME_PLACEMENT_COLLECTION=$sandbox/Desktop")
-	pattern='collection automatic' ;;
+	pattern='collection automatic setup'
+	if [[ "$case_name" == collection-map ]]; then
+		args+=(--env MUSIC_HOME_PLACEMENT_COLLECTION_MAP=1)
+		pattern='collection map setup'
+	fi ;;
 esac
-"$root/scripts/e2e.sh" "${args[@]}" tests/music-home-map-placement.spec.ts -- --workers=1 -g "$pattern"
-if [[ "$case_name" == collection ]]; then
+# Playwright clears its output directory on startup. Keep it in this owned
+# sandbox so it cannot erase another run (notably ci-local's README capture).
+output="$sandbox/evidence/placement-results"
+"$root/scripts/e2e.sh" "${args[@]}" "$spec" -- --workers=1 -g "$pattern" --output "$output"
+if [[ "$case_name" == collection || "$case_name" == collection-map ]]; then
 	"$root/scripts/e2e.sh" --port "$port" --env MUSIC_HOME_PLACEMENT_LIBRARY=1 \
-		tests/music-home-map-placement.spec.ts -- --workers=1 -g 'collection library'
+		tests/music-home-map-placement.spec.ts -- --workers=1 -g 'collection library' --output "$output"
 fi

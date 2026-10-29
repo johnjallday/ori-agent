@@ -53,6 +53,7 @@ while true; do sleep 1; done
         self.assertIn("MUSIC_HOME_PLACEMENT_FAULT=ack", calls)
         self.assertIn(f"MUSIC_HOME_PLACEMENT_SONG={self.sandbox.resolve()}/Documents/Ori Music Demo", calls)
         self.assertIn("stop-demo-server.sh\n9998", calls)
+        self.assertIn(f"--output\n{self.sandbox.resolve()}/evidence/placement-results", calls)
 
     def test_collection_runs_two_executed_subsets_without_irrelevant_skips(self):
         result = self.run_case("collection")
@@ -63,6 +64,26 @@ while true; do sleep 1; done
         self.assertIn("collection automatic", calls)
         self.assertIn("collection library", calls)
         self.assertIn("MUSIC_HOME_PLACEMENT_LIBRARY=1", calls)
+
+    def test_collection_map_runs_real_setup_before_library_opens(self):
+        result = self.run_case("collection-map")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertIn("MUSIC_HOME_PLACEMENT_COLLECTION_MAP=1", calls)
+        self.assertIn("collection map setup", calls)
+        self.assertIn("collection library", calls)
+        self.assertEqual(calls.count("seed-song\n"), 5)
+
+    def test_a11y_case_is_explicit_and_discards_ambient_fault(self):
+        self.env["MUSIC_HOME_PLACEMENT_FAULT"] = "occupied"
+        self.env["MUSIC_HOME_PLACEMENT_COLLECTION_MAP"] = "1"
+        self.stub("e2e.sh", 'printf "%s\\n" "AMBIENT=${MUSIC_HOME_PLACEMENT_FAULT:-none} MAP=${MUSIC_HOME_PLACEMENT_COLLECTION_MAP:-none}" "$@" >> "$TRACE"\n')
+        result = self.run_case("a11y-touch")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertIn("AMBIENT=none MAP=none", calls)
+        self.assertIn("MUSIC_HOME_PLACEMENT_A11Y=touch", calls)
+        self.assertIn("tests/music-home-map-placement.a11y.spec.ts", calls)
 
     def test_bad_case_launches_nothing(self):
         result = self.run_case("not-a-case")

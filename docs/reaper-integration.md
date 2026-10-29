@@ -46,11 +46,41 @@ An existing external project stays where it is. Ori does not move it or write Or
 
 Feeding a folder to the assistant (**Show me a folder**) is the shortest path. When the reviewed releases can be resolved, the card lists every consequence and **Set up** runs it on the server; **Adjust…** opens the step-by-step quests above instead.
 
-- **A REAPER song** (a folder with one `.rpp`) is a portfolio of one, and the Home comes first. Your assistant's card sets up (or joins) Music Production Home: it installs what is missing, builds the Home and its Portfolio Manager if there is none, connects the song's own folder to the Home's library and lists the song. The folder around it is never connected, listed or read. **Set up Music Production Home** stops there, and the card says **Go to Music Production Home**. In the Home, the Portfolio Manager's card suggests opening the song: it shows who it hires, asks what the assistant should do, and lists what opening does. Its one press, **Open <song> & hire**, has the Portfolio Manager open the song through the library's own reviewed open (the one behind the library row's **Open**): the song's workspace in File-only mode with your brief as its goal, the shared REAPER Assistant, and a first read-only task for you to start. No model is asked anything during setup. A later song, once the Home is ready and staffed, sets nothing up on the assistant's card: it only says **Go to** the Home, where the same suggestion waits; the Needs-you row links there too. The Home keeps a record of the songs a setup opened, and the receipt and the Needs-you report name the Portfolio Manager. A song folder with two `.rpp` files asks once which one; a missing Default model stops before any workspace is made, and **Try again** finishes the same run.
+- **A REAPER song** (a folder with one `.rpp`) is a portfolio of one, and the Home comes first. Your assistant's card sets up (or joins) Music Production Home: it installs what is missing, builds the Home and its Portfolio Manager if there is none, connects the song's own folder to the Home's library and lists the song. The folder around it is never connected, listed or read. **Set up Music Production Home** stops there, and the card says **Go to Music Production Home**. In the Home, the Portfolio Manager's card suggests opening the song: it shows who it hires, asks what the assistant should do, and lists what opening does. Its one press, **Open <song> & hire**, has the Portfolio Manager open the song through the library's own reviewed open (the one behind the library row's **Open**): the song's workspace in File-only mode with your brief as its goal, the shared REAPER Assistant, and a first read-only task for you to start. Placement adds no model call; optional library briefing can still attempt a configured model call independently. A later song, once the Home is ready and staffed, sets nothing up on the assistant's card: it only says **Go to** the Home, where the same suggestion waits; the Needs-you row links there too. The Home keeps a record of the songs a setup opened, and the receipt and the Needs-you report name the Portfolio Manager. A song folder with two `.rpp` files asks once which one; a missing Default model stops before any workspace is made, and **Try again** finishes the same run.
 - **A portfolio** (a folder of song folders, for example 200 of them): installs both plugins, builds the Home and its Portfolio Manager, starts the Home's library, connects the folder and lists every song — names and project files only. Listing makes **no** song workspace.
 - **Opening a song** from the Home's library (**Open** on its row) makes that song's workspace, records File-only mode, adds the REAPER Assistant and starts its first task. A song folder with two `.rpp` files asks which one first.
 - **One REAPER Assistant per Home.** Pressing Set up is a standing consent: the first song creates "REAPER Assistant" (or the next free name, never someone else's agent of that name) and every later song gets that same agent. The roster shows it once, with its songs. A change to its model or prompt on the Agents page reaches every song it works on, except a song where you changed that song's own copy. The Home's library panel has a switch, "Add my REAPER Assistant to songs I open": off, songs still open (File-only) with no agent. After a plugin update changes the project team, the Home asks once — **Review the updated assistant** — before more songs get it. A song that already has its own agent keeps it.
 - None of this opens REAPER or turns on live control: Ori-assisted mode stays its own review inside each song.
+
+### Place the Home before opening projects
+
+For a new Home, **Set up** opens the reviewed Home setup. **Group name** is the
+Home's read-only name, not the song's name; **Later project goal** belongs to the
+song that can be opened afterwards. Its **Later project · REAPER Assistant** row
+is assigned only on that explicit Open, not by Home setup. Choose **Place & set up on map** to preview
+an empty group frame. Enter, a valid map click, or **Set up Home here** confirms
+that same reviewed setup once. Hovering, panning and Back/Escape do not set
+anything up. **Use automatic placement** clears the manual point and still
+requires **Set up Home**; it also works in Tree or narrow/zoomed layouts where
+manual placement is unavailable.
+
+**Home ready** means the Home/library phase succeeded, not that a song workspace
+was opened. A library can list many songs while the map has no project buildings.
+Use **Go to Music Production Home** for the Portfolio Manager/library and its
+separate Open action. Later projects use automatic placement inside the Home;
+the saved Home anchor and previously placed projects stay where they were.
+
+An existing Home offers **Show on map** and **Move group**, never automatic
+repositioning. Show reveals the actual district; Move starts the normal group
+movement gesture, with Escape to cancel. Neither alone saves geometry.
+
+If setup succeeds but saving the position fails, the Home remains real and uses
+its automatic layout. **Retry position only** checks the original Home and point
+again without reinstalling, hiring, scanning or opening a song. An occupied or
+independently changed position requires explicit Move, not a substituted point.
+A lost setup reply is observed, not resent. Reload/history never replays a manual
+point; use Show/Move if that in-memory choice is gone. An incomplete setup keeps
+its actual resources and source-owned recovery, rather than claiming Home ready.
 
 ## File-only and Ori-assisted modes
 

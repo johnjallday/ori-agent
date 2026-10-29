@@ -9,7 +9,8 @@
 .assisted-placement {
   --ap-paper: var(--ori-paper, var(--bg-secondary, #faf8f2));
   --ap-ink: var(--ori-ink, var(--text-primary, #20342d));
-  --ap-muted: var(--text-secondary, #58685e);
+  /* Match this surface's ink/paper pair, including the assistant's dark paper. */
+  --ap-muted: color-mix(in srgb, var(--ap-ink) 78%, var(--ap-paper));
   --ap-line: var(--ori-border, var(--border-color, #c9d0c6));
   --ap-accent: var(--accent-color, #376c54);
   color: var(--ap-ink);
