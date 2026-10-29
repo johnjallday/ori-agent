@@ -176,7 +176,7 @@ export function setupCreationReviewMaterial(session = {}, brief = '') {
 export function creationReviewNavigationHTML(view = {}) {
   const locked = Boolean(view.busy || view.conflict || view.closed || view.accepted);
   return `<div class="assisted-placement__navigation">
-    <button type="button" class="${view.automatic ? '' : 'assisted-placement__primary'}" data-placement-action="place"${!view.canPlace || !view.reviewed || view.dirty || locked ? ' disabled' : ''}>Place &amp; create on map</button>
+    <button type="button" class="${view.automatic ? '' : 'assisted-placement__primary'}" data-placement-action="place"${!view.canPlace || !view.reviewed || view.dirty || locked ? ' disabled' : ''}>${escapeReviewText(view.placeLabel || 'Place & create on map')}</button>
     <button type="button" data-placement-action="suggested" aria-pressed="${Boolean(view.automatic)}"${locked ? ' disabled' : ''}>Use automatic placement</button>
     ${view.canRefreshReview ? `<button type="button" data-placement-action="refresh-review"${locked || view.dirty ? ' disabled' : ''}>Refresh review</button>` : ''}
     </div><p class="assisted-placement__hint">${escapeReviewText(view.automatic ? 'Automatic placement selected. Confirm below to create this reviewed setup.' : view.mapHint)}</p>`;
@@ -203,7 +203,9 @@ export function workspaceCreationReviewHTML(view = {}) {
         ${view.accepted && !view.result ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
         ${view.canAbandonReview && !view.result ? `<button type="button" data-placement-action="abandon-review"${view.busy ? ' disabled' : ''}>Release unaccepted review</button>` : ''}
         ${view.positionFailed && view.result ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
-        ${view.result ? `<button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>${group ? 'Open group' : 'Open workspace'}</button>` : ''}
+        ${view.result ? `<button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>${escapeReviewText(view.openLabel || (group ? 'Open group' : 'Open workspace'))}</button>` : ''}
+        ${view.canShowOnMap ? `<button type="button" data-placement-action="show-map"${view.busy ? ' disabled' : ''}>Show on map</button>` : ''}
+        ${view.canMoveGroup ? `<button type="button" data-placement-action="move-group"${view.busy ? ' disabled' : ''}>Move group</button>` : ''}
         <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
       </div></section>`;
   }
@@ -211,7 +213,7 @@ export function workspaceCreationReviewHTML(view = {}) {
     ${creationReviewHeaderHTML({ title: view.title || `Make room for ${view.name || 'your workspace'}`, titleId: `${prefix}Title`, note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art })}
     <div class="assisted-placement__fields">
       <div><label for="${escapeReviewText(prefix)}Name">${group ? 'Group name' : 'Workspace name'}</label><input id="${escapeReviewText(prefix)}Name" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${view.canEditName === false ? ' readonly' : ''}${disabled}></div>
-      <div><label for="${escapeReviewText(prefix)}Goal">${group ? 'Purpose' : 'Goal'}</label><textarea id="${escapeReviewText(prefix)}Goal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>
+      ${view.showGoal === false ? '' : `<div><label for="${escapeReviewText(prefix)}Goal">${escapeReviewText(view.goalLabel || (group ? 'Purpose' : 'Goal'))}</label><textarea id="${escapeReviewText(prefix)}Goal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>`}
     </div>
     ${creationReviewSlotsHTML(view.rows, { locked })}
     <button type="button" data-placement-action="details"${disabled}>${escapeReviewText(view.detailsLabel || 'Edit details & advanced settings')}</button>

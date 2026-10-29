@@ -118,6 +118,17 @@ func TestGroupTemplateHome_ObservationNeverCreatesResumesOrAdoptsAReplacement(t 
 	if err := handler.groupRequirements.Mark(t.Context(), operation, grouprequirements.OperationSucceeded); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.Update(homeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.GroupTemplate = nil
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, outcome := observeGroupHome(t, handler, request); code != http.StatusOK || outcome["layout_subject_new"] != false {
+		t.Fatalf("bare Home ID became creation proof: %d %v", code, outcome)
+	}
 	if err := store.Update(homeID, func(home *workspace.Workspace) error { home.Status = workspace.StatusTrashed; return nil }); err != nil {
 		t.Fatal(err)
 	}

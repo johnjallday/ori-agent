@@ -228,7 +228,13 @@ func runPortfolio(t *testing.T, w *portfolioWorld, plan personalassistant.Folder
 
 func TestPortfolioRunSetsUpAFreshCollectionInOrder(t *testing.T) {
 	w := newPortfolioWorld()
-	result, progress := runPortfolio(t, w, portfolioPlanFor(freshFacts()), nil)
+	opener := newWorldOpener(w)
+	result, progress := runPortfolio(t, w, portfolioPlanFor(freshFacts()), func(r *PortfolioRunner, _ *PortfolioConfig) {
+		r.Opener = opener
+	})
+	if len(opener.opens) != 0 || opener.workspaces != 0 {
+		t.Fatal("catalog-only setup opened a project")
+	}
 	if result.Status != personalassistant.FolderSetupDone {
 		t.Fatalf("result = %+v cause=%v", result, result.Cause)
 	}

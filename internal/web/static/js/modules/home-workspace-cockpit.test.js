@@ -26,6 +26,7 @@ import {
   cockpitPrimaryActionView,
   parseViewFromQuery,
   moveDeepLinkTarget,
+  showMapDeepLinkTarget,
   searchForView,
   readCount,
   formatCount,
@@ -150,6 +151,12 @@ test('parseViewFromQuery: the query is authoritative when it carries a valid vie
   // Case and surrounding whitespace must not defeat a legitimate deep link.
   assert.equal(parseViewFromQuery('?view=TREE'), VIEW_TREE);
   assert.equal(parseViewFromQuery('?view=%20tree%20'), VIEW_TREE);
+});
+
+test('Show on map deep links name a district independently from explicit Move', () => {
+  assert.equal(showMapDeepLinkTarget('?show_on_map=home'), 'home');
+  assert.equal(showMapDeepLinkTarget('?move=home'), '');
+  assert.equal(moveDeepLinkTarget('?show_on_map=home'), '');
 });
 
 test('moveDeepLinkTarget: a folder setup’s Move link names the workspace to move', () => {

@@ -357,6 +357,10 @@ export function moveDeepLinkTarget(search) {
   return String(new URLSearchParams(String(search || '')).get('move') || '').trim();
 }
 
+export function showMapDeepLinkTarget(search) {
+  return String(new URLSearchParams(String(search || '')).get('show_on_map') || '').trim();
+}
+
 /**
  * Build the search string for a view change.
  *
@@ -4728,11 +4732,13 @@ import {
         state.error = null;
         state.refreshError = false;
         pruneTreeTabs();
+        return true;
       } catch (err) {
         state.refreshError = true;
         // A failed background refresh keeps the last good data on screen rather
         // than blanking a working cockpit.
         console.warn('home-workspace-cockpit: background refresh failed', err);
+        return false;
       } finally {
         state.inFlight = null;
         renderAreaStatus();
@@ -5094,6 +5100,7 @@ import {
   window.OriHomeCockpit = {
     refresh,
     refreshQuietly,
+    refreshLibraryBadges,
     getState: () => state,
     setView: applyView,
     setSignal: applySignal,
@@ -5149,17 +5156,19 @@ import {
     return state.onboardingGate;
   }
 
-  // A folder setup's Move link (`?move=<id>`): the automatic layout placed the
-  // building, so once the Map has drawn it, it is selected with Move on. The
-  // parameter is dropped either way, so a reload never re-enters the move.
+  // Source-owned Show/Move links select a real building or district. Entry
+  // writes no geometry; consume the parameters so reload never re-enters Move.
   let moveDeepLinkRetries = 0;
   function consumeMoveDeepLink() {
-    const id = moveDeepLinkTarget(window.location.search);
+    const moveID = moveDeepLinkTarget(window.location.search);
+    const id = moveID || showMapDeepLinkTarget(window.location.search);
     if (!id) return;
     const started =
       state.view === VIEW_MAP &&
       Boolean(findWorkspace(state.flattened, id)) &&
-      Boolean(window.OriWorkspaceMap?.beginMove?.(id));
+      Boolean(
+        moveID ? window.OriWorkspaceMap?.beginMove?.(id) : window.OriWorkspaceMap?.reveal?.(id)
+      );
     if (started) {
       selectItem(id, { fromMap: true, openModal: false });
       // The arrow keys go to the canvas, whatever the rail drew meanwhile.
@@ -5171,6 +5180,7 @@ import {
     }
     const url = new URL(window.location.href);
     url.searchParams.delete('move');
+    url.searchParams.delete('show_on_map');
     window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
   }
 

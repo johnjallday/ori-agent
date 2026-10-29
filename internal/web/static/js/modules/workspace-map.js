@@ -354,6 +354,30 @@
       });
   }
 
+  // A position-only repair reads the current shared layout before checking
+  // occupancy. Never let an old owner or an older read repaint a newer editor.
+  async function refreshLayout(options) {
+    var current = options && options.current;
+    var seq = ++layoutRequestSeq;
+    try {
+      var response = await fetch(LAYOUT_ENDPOINT, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response || !response.ok) return false;
+      var data = await response.json();
+      if (!data || !data.layout || seq !== layoutRequestSeq || (current && !current()))
+        return false;
+      if (Number(data.layout.revision || 0) < layoutState.revision) return false;
+      applyLayoutPayload(data.layout);
+      layoutState.status = 'ready';
+      settleLayout();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /**
    * Send one partial update and reconcile against what the server committed.
    *
@@ -679,6 +703,7 @@
   var LIBRARY_SHELF_ROUTE = /^\/workspaces\/[^/?#\s]+\/assistant#projectLibraryProposals$/;
   // World-space room for the badge line: a 44px touch target plus the row gap.
   var LIBRARY_BADGE_CLEARANCE = 48;
+  var COMPACT_HOME_HEADER_CLEARANCE = 116;
 
   function setLibraryBadges(snapshot) {
     libraryBadges = Object.create(null);
@@ -1359,7 +1384,39 @@
       if (saved[tile.id]) recordCluster(tile.groupId, saved[tile.id]);
     });
 
-    var nodes = grid.tiles.map(function (tile) {
+    // A Home can be deliberately positioned while its library has no opened
+    // projects. Until a member has its own saved anchor, that Home anchor is
+    // the automatic cluster's origin, not a stale populated-group coordinate.
+    // Resolve its unsited members oldest-first so opening another song cannot
+    // reorder previous automatic anchors. Saved members always retain the
+    // existing member-owned geometry rule; no persisted geometry is migrated.
+    var homeMembers = Object.create(null);
+    grid.districts.forEach(function (district) {
+      var template = district.ws && district.ws.group_template;
+      var homeAnchor = safePoint(savedInput[district.id]);
+      if (!template || template.kind !== 'managed_home' || !homeAnchor) return;
+      var members = grid.tiles.filter(function (tile) {
+        return tile.groupId === district.id;
+      });
+      if (!members.length) return;
+      members.sort(function (a, b) {
+        var first = Date.parse(a.ws.created_at || '') || 0;
+        var second = Date.parse(b.ws.created_at || '') || 0;
+        return first - second || String(a.id).localeCompare(String(b.id));
+      });
+      homeMembers[district.id] = members;
+      if (!placedByGroup[district.id]) {
+        placedByGroup[district.id] = {
+          minX: homeAnchor.x + DISTRICT_PAD_X,
+          maxY: homeAnchor.y + DISTRICT_PAD_Y - CELL_H
+        };
+      }
+    });
+    var orderedTiles = grid.tiles.map(function (tile) {
+      var members = homeMembers[tile.groupId];
+      return members && members.length ? members.shift() : tile;
+    });
+    var nodes = orderedTiles.map(function (tile) {
       var anchor = saved[tile.id];
       var isSaved = !!anchor;
       if (!anchor) {
@@ -1960,7 +2017,15 @@
       // itself sits above the frame. Reserve that line, or Fit all on a narrow
       // screen frames the badge off the top edge of the map.
       var badgeRoom = district && libraryBadges[district.id] ? LIBRARY_BADGE_CLEARANCE : 0;
-      include(district.x, district.y - badgeRoom, district.width, district.height + badgeRoom);
+      // Compact Home headers wrap identity above their controls. Fit/reveal
+      // includes that chrome without moving any saved frame/member anchor.
+      var template = district.ws && district.ws.group_template;
+      var headerRoom =
+        template && template.kind === 'managed_home' && template.name && district.width < 320
+          ? COMPACT_HOME_HEADER_CLEARANCE
+          : 0;
+      var chromeRoom = badgeRoom + headerRoom;
+      include(district.x, district.y - chromeRoom, district.width, district.height + chromeRoom);
     });
     if (hqSite) include(hqSite.x, hqSite.y, CELL_W, CELL_H);
     if (minX === Infinity) {
@@ -2150,6 +2215,9 @@
   // layout record and has no fake workspace id; persistence starts only after
   // sessions.js creates the real workspace.
   var placementSession = null;
+  // Retain only the last editor's return/focus owner after its save finishes.
+  // Starting a newer placement or explicit move invalidates an older return.
+  var placementReturnOwner = '';
 
   // measured:false marks the DEFAULT_VIEWPORT fallback. Panning and drawing are
   // happy with a placeholder size, but framing is not: a fit computed against
@@ -2164,7 +2232,7 @@
     return { width: width, height: height, measured: true };
   }
 
-  function setCamera(next, container) {
+  function setCamera(next, container, options) {
     // Every pan, zoom, fit, centre and reset lands here, which makes it the one
     // place that can honestly say "the camera moved". An open context menu is
     // anchored to a screen point, so it stops meaning anything the moment the
@@ -2175,7 +2243,7 @@
       ? clampCamera(next, world)
       : { centerX: next.centerX, centerY: next.centerY, zoom: clampZoom(next.zoom) };
     applyCamera(container);
-    scheduleCameraSave();
+    if (!options || options.persist !== false) scheduleCameraSave();
   }
 
   /**
@@ -2752,6 +2820,7 @@
       ' ws-map-theme-' +
       theme +
       (collapsed ? ' is-collapsed' : '') +
+      (templateType && width < 320 ? ' is-compact' : '') +
       (conflict ? ' is-conflicted' : '') +
       (ws.id === placementHighlightGroupId ? ' is-placement-highlighted' : '') +
       '" role="group" aria-label="' +
@@ -10473,21 +10542,54 @@
     if (canvas.focus) canvas.focus();
   }
 
-  // beginMove selects one drawn building, centres the view on it and turns
-  // Move on, so its arrow-key move is one keypress away. false when the Map is
-  // not ready or does not draw that building.
+  // Reveal a real building or district (including an empty/collapsed Home).
+  // Navigation is not a layout write, nor consent to complete a move.
+  function reveal(workspaceId, options) {
+    var container = lastMount && lastMount.container;
+    var id = String(workspaceId || '').trim();
+    if (!container || !id || placementSession || moveState || layoutState.status !== 'ready')
+      return false;
+    var district = renderedDistrict(id);
+    var drawn =
+      district ||
+      ((lastWorldLayout && lastWorldLayout.nodes) || []).some(function (node) {
+        return node.id === id;
+      });
+    if (!drawn) return false;
+    applySelection(container, (lastMount.state && lastMount.state.workspaces) || [], id, options);
+    var anchor = selectedNodeAnchor();
+    var template = district && district.ws && district.ws.group_template;
+    if (district && district.width < 320 && template && template.kind === 'managed_home') {
+      // Show the empty Home, not a tiny district left at Fit-all's zoom. Its
+      // identity/actions must remain reachable on narrow screens. Reserve the
+      // badge line even if its asynchronous read has not returned yet.
+      var chromeRoom = COMPACT_HOME_HEADER_CLEARANCE + LIBRARY_BADGE_CLEARANCE;
+      var bounds = {
+        minX: district.x,
+        minY: district.y - chromeRoom,
+        maxX: district.x + district.width,
+        maxY: district.y + district.height
+      };
+      var framed = fitBounds(
+        bounds,
+        viewportSize(container.querySelector('[data-ws-map-viewport]')),
+        16
+      );
+      framed.zoom = Math.min(1, framed.zoom);
+      setCamera(framed, container, { persist: false });
+    } else if (anchor) setCamera(centerOn(camera, anchor), container, { persist: false });
+    return true;
+  }
+
+  // beginMove reuses the same building/district keyboard transaction as the
+  // map's own controls. Entry/cancel never save a point or change membership.
   function beginMove(workspaceId, options) {
     var container = lastMount && lastMount.container;
     var id = String(workspaceId || '').trim();
     if (!container || !id || layoutState.status !== 'ready' || placementSession) return false;
-    var drawn = ((lastWorldLayout && lastWorldLayout.nodes) || []).some(function (node) {
-      return node.id === id;
-    });
-    if (!drawn) return false;
+    if (!reveal(id, options)) return false;
+    placementReturnOwner = '';
     var workspaces = (lastMount.state && lastMount.state.workspaces) || [];
-    applySelection(container, workspaces, id, options);
-    var anchor = selectedNodeAnchor();
-    if (anchor) setCamera(centerOn(camera, anchor), container);
     setMoveMode(container, true);
     var canvas = container.querySelector('[data-ws-map-viewport]');
     if (canvas && canvas.focus) canvas.focus();
@@ -10508,6 +10610,7 @@
     if (!container || !token || layoutState.status !== 'ready') return false;
     if (placementSession && !placementMatches(placementSession, options)) return false;
     var previousMoveMode = moveModeEnabled;
+    placementReturnOwner = token;
     closeContextMenu({ restoreFocus: false });
     closeHarvestPopover({ restoreFocus: false });
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
@@ -10799,10 +10902,18 @@
     // geometry only, with current collision/readiness checks, never a new site.
     var explicit = reviewedPoint !== undefined;
     var point = explicit ? safePoint(reviewedPoint) : failedPlacements[workspaceId];
+    var viewport = lastMount && lastMount.container.querySelector('[data-ws-map-viewport]');
     if (
       !point ||
       (explicit &&
         (!lastMount ||
+          lastMount.container.isConnected === false ||
+          (viewport && viewport.getClientRects && !viewport.getClientRects().length) ||
+          placementSession ||
+          moveState ||
+          dragState ||
+          clusterDrag ||
+          resizeState ||
           isMapReadOnly() ||
           placementProblem(
             point,
@@ -11252,6 +11363,7 @@
     // placed the building, so this selects it, centres it and turns Move on.
     // Arrow keys move it and Enter saves; Escape or leaving writes nothing.
     beginMove: beginMove,
+    reveal: reveal,
     // The City Economy's read-only view of a tile. The Map never fetches or
     // writes any of this: the host hands it a snapshot on mount and these draw
     // from it (city-economy FR35, FR36). Exported so the badge and pile can be
@@ -11441,6 +11553,16 @@
     suspendDraftPlacement: suspendDraftPlacement,
     setDraftPlacementPending: setDraftPlacementPending,
     endPlacement: endPlacement,
+    canReturnFromPlacement: function (token) {
+      return (
+        placementReturnOwner === token &&
+        (!placementSession || placementMatches(placementSession, token)) &&
+        !moveState &&
+        !dragState &&
+        !clusterDrag &&
+        !resizeState
+      );
+    },
     cancelPlacement: cancelPlacement,
     commitPlacement: commitPlacement,
     // Legacy Build seam retained for older callers while the shared wizard now
@@ -11504,6 +11626,7 @@
     // The one reconciled layout state both surfaces read. Exposed so Home and
     // the /workspaces launcher can reflect "positions cannot be saved right
     // now" without each keeping its own copy (FR-4, FR-105).
+    refreshLayout: refreshLayout,
     getLayoutState: function () {
       var groups = Object.create(null);
       Object.keys(layoutState.groups).forEach(function (id) {

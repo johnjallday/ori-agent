@@ -740,7 +740,8 @@ type FolderOfferView struct {
 	Tidied *FolderTidiedView `json:"tidied,omitempty"`
 	// HomeUpgrade is the Home whose package upgrade must come first: the Home
 	// provider needs an update, and that Home still uses the installed release.
-	HomeUpgrade *FolderHomeLink `json:"home_upgrade,omitempty"`
+	HomeUpgrade *FolderHomeLink   `json:"home_upgrade,omitempty"`
+	HomeResult  *FolderHomeResult `json:"home_result,omitempty"`
 	// Lead is the host's choice between a folder's two hires (a project beside
 	// loose files): the reason this one leads, and the other hire one click away.
 	Lead                   *FolderLead        `json:"lead,omitempty"`
@@ -2782,6 +2783,7 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 // pending project offer's Set up would carry out, which can depend on the user.
 func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer FolderOffer, paused bool) FolderOfferView {
 	v := s.view(ctx, offer, paused)
+	s.attachHomeResult(ctx, userID, offer, &v)
 	if review := offer.ConversationReview; review != nil {
 		v.Operation = review.Operation
 		if review.Destination != nil {

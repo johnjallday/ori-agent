@@ -136,6 +136,29 @@ func (h *Handler) CommitPortfolioHome(ctx context.Context, review PortfolioHomeR
 	return response.GroupTemplate.HomeWorkspaceID, nil
 }
 
+// ObservePortfolioHome reads the original Home-only operation using its exact
+// retained envelope. It cannot execute or resume any part of folder setup.
+func (h *Handler) ObservePortfolioHome(ctx context.Context, review PortfolioHomeReview, key string) (string, bool, error) {
+	if h == nil {
+		return "", false, ErrPortfolioSetupUnavailable
+	}
+	var response struct {
+		Home struct {
+			State   string `json:"state"`
+			ID      string `json:"home_workspace_id"`
+			Created bool   `json:"layout_subject_new"`
+		} `json:"group_template"`
+	}
+	err := h.postInProcess(ctx, "/api/workspaces/group-templates/observe", groupTemplateHomeRequest{
+		GroupTemplateID: review.GroupTemplateID, Revision: review.Revision, Name: review.Name,
+		GroupReviewToken: review.Token, IdempotencyKey: key,
+	}, h.ObserveGroupTemplateHome, &response)
+	if err != nil || response.Home.State != "home_ready" || response.Home.ID == "" {
+		return "", false, ErrPortfolioSetupUnavailable
+	}
+	return response.Home.ID, response.Home.Created, nil
+}
+
 // postInProcess sends one JSON body to a handler as the browser would and
 // decodes its success payload.
 func (h *Handler) postInProcess(ctx context.Context, path string, body any, handle http.HandlerFunc, out any) error {

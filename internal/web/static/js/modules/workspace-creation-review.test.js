@@ -369,6 +369,27 @@ test('recognized setup projects fixed plan roles and optional first-task boundar
   assert.match(html, /Review the full plan/);
 });
 
+test('source owners can label a later goal or omit an irrelevant goal without changing other reviews', () => {
+  const view = {
+    ...blank,
+    subjectKind: 'group',
+    goal: 'Later work',
+    goalLabel: '<Later project goal>',
+    canEditGoal: false
+  };
+  const html = workspaceCreationReviewHTML(view);
+  assert.match(html, /&lt;Later project goal&gt;/);
+  assert.match(html, /textarea[^>]*readonly/);
+  assert.doesNotMatch(
+    workspaceCreationReviewHTML({ ...view, showGoal: false }),
+    /<textarea|for="workspaceCreationReviewGoal"/
+  );
+  assert.match(
+    workspaceCreationReviewHTML({ ...blank, subjectKind: 'group' }),
+    />Purpose<\/label>/
+  );
+});
+
 test('the navigation shared with File Janitor preserves its distinct disclosure without baking it into Blank', () => {
   const html = creationReviewNavigationHTML({
     ...blank,

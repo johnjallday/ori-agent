@@ -404,6 +404,65 @@ test('an empty district uses its saved anchor at the documented minimum size (#3
   assert.equal(district.sizingMode, 'auto');
 });
 
+test('a positioned managed Home keeps its automatic first and later project anchors without writing geometry', () => {
+  const map = loadOriWorkspaceMap();
+  const geo = map.districtGeometry;
+  const home = { id: 'home', kind: 'group', group_template: { kind: 'managed_home' } };
+  const first = { id: 'z-first', parent_id: 'home', created_at: '2026-01-01T00:00:00Z' };
+  const second = { id: 'a-second', parent_id: 'home', created_at: '2026-01-02T00:00:00Z' };
+  const positions = { home: { x: 800, y: 900 }, outside: { x: -500, y: -500 } };
+  const input = JSON.stringify(positions);
+  const one = map.computeWorldLayout([home, first, { id: 'outside' }], { positions });
+  const two = map.computeWorldLayout([second, { id: 'outside' }, first, home], { positions });
+  const a = one.nodes.find(node => node.id === first.id);
+  const b = two.nodes.find(node => node.id === first.id);
+  assert.deepEqual({ x: a.x, y: a.y }, { x: 800 + geo.padX, y: 900 + geo.padY });
+  assert.deepEqual({ x: b.x, y: b.y }, { x: a.x, y: a.y });
+  assert.equal(two.districts.find(d => d.id === home.id).x, 800);
+  assert.equal(two.districts.find(d => d.id === home.id).y, 900);
+  assert.equal(
+    JSON.stringify(positions),
+    input,
+    'automatic inheritance never rewrites persisted geometry'
+  );
+  const savedMember = map.computeWorldLayout([home, first], {
+    positions: { ...positions, [first.id]: { x: 50, y: 60 } }
+  });
+  assert.equal(
+    savedMember.nodes.find(node => node.id === first.id).x,
+    50,
+    'saved members still own geometry, even with a stale Home anchor'
+  );
+  const third = { id: '0-third', parent_id: 'home', created_at: '2026-01-03T00:00:00Z' };
+  const pinned = { ...positions, [first.id]: { x: 50, y: 60 } };
+  const beforeThird = map.computeWorldLayout([home, first, second], { positions: pinned });
+  const afterThird = map.computeWorldLayout([third, second, home, first], { positions: pinned });
+  const original = beforeThird.nodes.find(node => node.id === second.id);
+  const later = afterThird.nodes.find(node => node.id === second.id);
+  assert.deepEqual(
+    { x: later.x, y: later.y },
+    { x: original.x, y: original.y },
+    'unsited projects remain stable beside already saved members'
+  );
+});
+
+test('Fit includes a compact Home identity header without changing its saved anchor', () => {
+  const map = loadOriWorkspaceMap();
+  const world = map.computeWorldLayout(
+    [
+      {
+        id: 'home',
+        kind: 'group',
+        group_template: { kind: 'managed_home', name: 'Music Production Home' }
+      }
+    ],
+    { positions: { home: { x: 800, y: 900 } } }
+  );
+  assert.equal(world.districts[0].x, 800);
+  assert.equal(world.districts[0].y, 900);
+  assert.ok(world.bounds.minY <= 900 - 116, 'wrapped header participates in framing, not geometry');
+});
+
 test('the first unsited member inherits its empty group Map location', () => {
   const map = loadOriWorkspaceMap();
   const geo = map.districtGeometry;
@@ -4582,6 +4641,56 @@ test('explicit position repair checks current collision and map availability wit
   assert.equal(patches.length, 1);
 });
 
+test('position repair reads current shared occupancy and never chooses a substitute', async () => {
+  const layout = {
+    schema_version: 1,
+    revision: 1,
+    positions: { occupied: { x: 0, y: 0 }, home: { x: 380, y: 0 } }
+  };
+  const { map, harness, patches } = buildHarness({ layout });
+  mountWithCamera(map, harness, [{ id: 'occupied' }, { id: 'home', kind: 'group' }]);
+  await flush();
+  layout.revision = 2;
+  layout.positions.occupied = { x: 760, y: 456 };
+  assert.equal(await map.refreshLayout({ current: () => true }), true);
+  assert.equal(await map.retryPlacement('home', { x: 760, y: 456 }, { kind: 'group' }), false);
+  assert.equal(patches.length, 0);
+  assert.equal(map.getLayoutState().revision, 2);
+});
+
+test('a stale owner or older layout read cannot roll the map back', async () => {
+  const layout = { schema_version: 1, revision: 1, positions: {} };
+  const { map, harness } = buildHarness({ layout });
+  mountWithCamera(map, harness, [{ id: 'home', kind: 'group' }]);
+  await flush();
+  layout.revision = 2;
+  assert.equal(await map.refreshLayout({ current: () => false }), false);
+  assert.equal(map.getLayoutState().revision, 1);
+  map._setLayoutForTest({ schema_version: 1, revision: 3, positions: {} }, 'ready');
+  assert.equal(await map.refreshLayout({ current: () => true }), false);
+  assert.equal(map.getLayoutState().revision, 3);
+});
+
+test('position repair cannot interrupt a newer map editor', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'home', kind: 'group' }]);
+  await flush();
+  assert.equal(
+    map.beginPlacement({ token: 'newer', mode: 'draft', initialCandidate: { x: 900, y: 900 } }),
+    true
+  );
+  assert.equal(await map.retryPlacement('home', { x: 760, y: 456 }, { kind: 'group' }), false);
+  assert.equal(patches.length, 0);
+  assert.equal(map.canReturnFromPlacement('older'), false);
+  assert.equal(map.canReturnFromPlacement('newer'), true);
+  assert.equal(map.endPlacement('newer'), true, 'repair did not clear the newer editor');
+  assert.equal(
+    map.canReturnFromPlacement('older'),
+    false,
+    'finishing a new editor does not revive an old return'
+  );
+});
+
 test('pending draft confirmation freezes geometry but still permits a non-mutating view change', async () => {
   const { map, harness, patches } = buildHarness();
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
@@ -4907,6 +5016,73 @@ test('Move on a building the automatic layout placed selects it with Move on and
   harness.fire('keydown', keyEvent('Escape'));
   await flush();
   assert.equal(patches.length, 0, 'leaving the move keeps the automatic layout');
+});
+
+test('Show and Move reveal empty and collapsed Home districts without a position write', async () => {
+  for (const collapsed of [false, true]) {
+    const { map, harness, patches } = buildHarness({
+      layout: {
+        schema_version: 1,
+        revision: 1,
+        positions: { home: { x: 760, y: 380 } },
+        groups: { home: { collapsed } }
+      }
+    });
+    mountWithCamera(map, harness, [{ id: 'home', kind: 'group', name: 'Music Home' }]);
+    await flush();
+    assert.equal(map.reveal('home'), true);
+    assert.equal(map.getSelectedId(), 'home');
+    assert.equal(harness.control('[data-map-drag]').getAttribute('aria-pressed'), 'false');
+    assert.equal(map.beginMove('home'), true);
+    assert.equal(harness.control('[data-map-drag]').getAttribute('aria-pressed'), 'true');
+    harness.fire('keydown', keyEvent('ArrowRight'));
+    harness.fire('keydown', keyEvent('Escape'));
+    await flush();
+    assert.equal(patches.length, 0);
+  }
+});
+
+test('revealing a compact Home frames readable header controls without saving the camera or geometry', async () => {
+  const savedCamera = { center_x: 0, center_y: 0, zoom: 0.26 };
+  const { map, harness, patches } = buildHarness({
+    layout: {
+      schema_version: 1,
+      revision: 1,
+      positions: { home: { x: 760, y: 380 } },
+      viewport: savedCamera
+    }
+  });
+  harness.canvas.clientWidth = 330;
+  harness.canvas.clientHeight = 300;
+  mountWithCamera(map, harness, [
+    {
+      id: 'home',
+      kind: 'group',
+      name: 'Music Home',
+      group_template: { kind: 'managed_home', name: 'Music Home' }
+    }
+  ]);
+  await flush();
+  assert.equal(map.getCamera().zoom, 0.26);
+  assert.equal(map.reveal('home'), true);
+  assert.ok(map.getCamera().zoom > 0.7 && map.getCamera().zoom <= 1);
+  assert.ok(map.getCamera().centerY < 465, 'the header/badge are included above the frame');
+  await flush();
+  assert.equal(patches.length, 0);
+  assert.deepEqual({ ...map.getLayoutState().viewport }, { centerX: 0, centerY: 0, zoom: 0.26 });
+  assert.deepEqual({ ...map.getLayoutState().positions.home }, { x: 760, y: 380 });
+});
+
+test('explicit Home Move uses the cluster transaction, not membership or separate member moves', async () => {
+  const { map, harness, patches } = await mountedCluster({ enableDrag: false });
+  assert.equal(map.beginMove('grp'), true);
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].operations.at(-1).op, 'translate_group');
+  assert.equal(patches[0].operations.at(-1).group_id, 'grp');
+  assert.equal(JSON.stringify(patches).includes('parent'), false);
 });
 
 test('a re-mount keeps the keyboard on a canvas that had it, so a Move survives a refresh', async () => {

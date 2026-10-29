@@ -202,7 +202,8 @@ Layout subjects must match the actual newly created resources:
 | Standalone workspace | One workspace footprint / exact returned workspace ID |
 | Child of existing group/Home | Child footprint / new child only; parent unchanged |
 | Ordinary new Group | Group frame / returned group ID; explicit member approval separate |
-| New Home plus project | Reviewed composite footprint, with named new IDs and relative geometry; reject unsupported composition rather than preview one building |
+| New Music Home, before any project Open | Empty group frame / exact provenance-verified Home ID at the Home-ready phase |
+| New Home plus project in one action | Reviewed composite footprint, with named new IDs and relative geometry; reject unsupported composition rather than preview one building |
 | Reused Home plus new child | New child only; never move/rename/restaff reused Home |
 | Catalog/library-only records | No invented workspace or placement; show actual catalog outcome |
 | Import or reuse only | Real Import / Use existing verb; no mandatory placement or “created” result |
@@ -221,6 +222,73 @@ Explicit repair targets only the proven ID(s) and requested geometry, rechecks
 collisions and never repeats create, reparent, staffing, grants, first tasks,
 scans or application opening. Late layout callbacks cannot reset a newer map
 session or its Move mode. Read/history navigation never saves geometry.
+
+## Music source Home-first boundary
+
+A single-song or collection source keeps its existing folder setup owner. The
+shared review offers **Place & set up on map** or **Use automatic placement**;
+choosing either mode is not consent. A valid map click/Enter (**Set up Home
+here**), or the automatic review's final setup action, accepts the exact source
+plan once. Preview is an empty group frame, not a song/album building. All
+plugin, staffing, profile, folder and library effects disclosed by that plan
+remain intact, including its scan. No new inference or permissions come from
+placement. Unsupported Home name/team editing is not offered.
+
+For a single song, stopped `handoff_ready` is successful **Home-phase** completion:
+the library lists the song, but its later Open has not happened. A collection can
+finish with a populated library and zero project workspaces. Do not wait for a
+resolved song outcome or position the later song ID as the Home. Earlier stops
+remain partial and expose only their original owner's explicit continuation.
+
+The existing setup stores a bounded, versioned, server-only lookup witness for
+the managed-Home operation **before** its commit: exact review envelope and
+idempotency key, bound to the enclosing owner/offer, accepted request and plan
+digest. It is not another execution journal. Read-only Home-phase observation
+uses the managed-Home operation receipt plus the canonical live owned Home and
+its group-template provenance. A bare ID, name, timestamp, planned `CreatesHome`,
+or HTTP success is insufficient. Reused Homes are verified against the accepted
+canonical destination and never acquire new-subject authority. Old records
+without a witness remain unproven; malformed/unknown witness versions fail
+closed. Missing, foreign, trashed or ambiguous Homes are unavailable, not an
+invitation to recreate or adopt a namesake.
+
+Creation followed by failed progress persistence remains observable through the
+pre-commit witness, but no persisted ready phase means no normal final position
+write. Reading status never repairs progress or resumes create/staff/connect/
+scan/Open. Only the current live confirmed editor can save its retained exact
+candidate once after ready proof and a real map refresh. Reload/history restores
+canonical status only; a lost candidate is not replayed. Existing Homes offer
+**Show on map** and explicit **Move group** instead of another create/place flow.
+Show reveals/selects the district; Move enters its existing gesture, including
+empty/collapsed districts, with no geometry write until explicitly committed.
+Navigation closes the assistant drawer rather than restoring it over the target.
+A compact Home is framed with its identity, controls and asynchronously loaded
+library badge, rather than retaining an unreadable overview zoom; that camera
+change is not saved. The reviewed Group name is the Home's canonical destination,
+not the source song's name. A source-song brief is labeled **Later project goal**;
+its REAPER Assistant row is explicitly a later-project assignment, not the Home's
+Portfolio Manager or a hire performed by this press.
+
+Manual source placement requires a visible, writable mounted Map at desktop
+width. Tree, narrow/touch layouts and 200% browser zoom retain the explicit
+automatic alternative; a hidden map cannot capture confirmation. Escape before
+acceptance returns the same review/candidate without domain effects.
+
+Setup success and position success are separate. A rejected or uncertain layout
+save preserves the Home and discloses automatic layout. **Retry position only**
+revalidates identity and current occupancy, writes only the retained point, and
+never repeats domain setup. A now-occupied point requires explicit movement or
+keeping automatic layout, not a silently substituted manual coordinate. Editor
+generation and map tokens fence late callbacks, focus and selection. A saved
+matching point acknowledges a lost reply without another PATCH; a different saved
+point requires explicit Move, never overwrite by a stale repair. A duplicate
+single-song setup at `handoff_ready` observes the original operation, even when
+another tab finishes during plan checking. It does not restart Home setup or
+transfer creation authority to that tab. Explicit later Open stays separate.
+Later
+project Open keeps its existing automatic child placement, membership and task
+semantics without moving saved Home/prior-child anchors. Catalog entries are not
+buildings; geometry conveys no access, staffing or membership.
 
 ## Adapter and recovery matrix
 

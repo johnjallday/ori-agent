@@ -270,7 +270,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	default:
 		return FolderOfferView{}, ErrFolderOfferDecided
 	}
-	if s.isRunning(offerID) {
+	if s.isRunning(offerID) || completedHomePhase(*offer, input) {
 		return s.viewFor(ctx, userID, *offer, binding.Paused), nil
 	}
 	release, guardErr := s.acquireConversationReview(ctx, *offer)
@@ -374,6 +374,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	now := s.now()
 	entryName := input.EntryName
 	var started FolderOffer
+	observeOnly := false
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
 		item := d.Offer(offerID)
 		if item == nil {
@@ -381,6 +382,12 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		if item.PlacementHandoff != nil {
 			return ErrFolderOfferDecided
+		}
+		// Another press can finish its Home phase while this caller is checking
+		// the old plan. Such a duplicate observes; only Open crosses the boundary.
+		if completedHomePhase(*item, input) {
+			started, observeOnly = *item, true
+			return nil
 		}
 		if item.Status == FolderOfferPending {
 			decided := now
@@ -420,6 +427,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			}
 		}
 		runID, homeID, opening := "", "", false
+		var homeOperation *FolderSetupHomeOperation
 		if item.Setup != nil {
 			// A resume keeps the run and the Home an earlier pass built or joined,
 			// so the Home is found again, never mistaken for a stranger's. A
@@ -427,6 +435,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			// answering which file to open) starts the Portfolio Manager's open,
 			// and every later pass keeps going there.
 			runID, homeID = item.Setup.RunID, item.Setup.HomeID
+			homeOperation = item.Setup.HomeOperation
 			opening = item.Setup.Opening || input.Open || input.EntryName != ""
 		} else if input.Open && HomeSuggestionReady(plan) {
 			// A later song into a ready Home: the Home's manager lists and opens
@@ -435,7 +444,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
-			RunID: runID, HomeID: homeID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
+			RunID: runID, HomeID: homeID, HomeOperation: homeOperation, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
 			Visual: CloneFolderSetupVisual(plan.Visual), Monitoring: monitoring, Opening: opening,
 		}
 		if plan.Hire != nil {
@@ -455,12 +464,21 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	if !s.claimRun(offerID) {
+	if observeOnly || !s.claimRun(offerID) {
 		return s.viewFor(ctx, userID, started, binding.Paused), nil
 	}
 	// The run outlives the request: keep its values, drop its cancellation.
 	go s.runSetup(context.WithoutCancel(ctx), userID, started, path, plan, entryName)
 	return s.viewFor(ctx, userID, started, binding.Paused), nil
+}
+
+// Home-ready is a successful phase, not a stopped step to retry. A stale tab's
+// original Set up press must not restart it; the later explicit Open remains
+// the owner of project effects, and failed Open continuations are unchanged.
+func completedHomePhase(offer FolderOffer, input FolderSetupInput) bool {
+	return offer.Setup != nil && isHandoffSetup(offer) && !offer.Setup.Opening &&
+		offer.Setup.Status == FolderSetupStopped && offer.Setup.StopReason == FolderStopHandoffReady &&
+		!input.Open && input.EntryName == ""
 }
 
 func hasPlanLineKind(lines []FolderPlanLine, kind string) bool {
