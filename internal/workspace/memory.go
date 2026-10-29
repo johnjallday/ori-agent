@@ -180,17 +180,6 @@ func (d MemoryDocument) UnstructuredLines() []string {
 	return out
 }
 
-// entryLineIndexes maps entry index -> physical line index.
-func (d MemoryDocument) entryLineIndexes() []int {
-	var idx []int
-	for i, l := range d.lines {
-		if l.entry != nil {
-			idx = append(idx, i)
-		}
-	}
-	return idx
-}
-
 // memoryPromptGuidance is the standing instruction about how to use workspace
 // memory. Injected wherever the memory_write / memory_forget tools are
 // available (mission runs, workspace chat) so the agent knows what the store

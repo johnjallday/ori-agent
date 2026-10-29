@@ -663,33 +663,6 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
-func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
-	baseSlug = Slugify(baseSlug)
-	if baseSlug == "" {
-		baseSlug = "untitled"
-	}
-
-	const maxAttempts = 1000
-	for suffix := 2; suffix < 2+maxAttempts; suffix++ {
-		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
-		existsOnDisk, err := pathExists(filepath.Join(parentDir, candidate))
-		if err != nil {
-			// Stat failed for a reason other than NotExist (permissions, I/O).
-			// Returning the candidate would risk a collision the caller cannot
-			// detect — skip and try the next suffix instead.
-			logger.Warn("slug suffix stat failed, trying next",
-				logger.Fields{"parent": parentDir, "candidate": candidate, "error": err})
-			continue
-		}
-		if !existsOnDisk {
-			return candidate
-		}
-	}
-
-	// All numeric suffixes exhausted; use a timestamp-based fallback.
-	return appendWorkspaceSlugSuffix(baseSlug, int(time.Now().UnixNano()))
-}
-
 // globalSlugConflictLocked checks the registered workspace namespace before any
 // filesystem mutation. Callers must hold s.mu.
 func (s *FileStore) globalSlugConflictLocked(slug, workspaceID, parentDir string) *FolderSlugConflictError {

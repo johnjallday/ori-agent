@@ -629,25 +629,6 @@ func (s *FolderObservationService) Structure(ctx context.Context, target folderc
 	return proposal
 }
 
-// folderOfferCapabilityWorkspace names the workspace a recognized offer's
-// capability would make, whether or not that capability is offered right now.
-func folderOfferCapabilityWorkspace(offer FolderOffer) (string, bool) {
-	if offer.Portfolio != nil {
-		if row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape)); ok && row.Offer != nil && row.Offer.HomeName != "" {
-			return row.Offer.HomeName, true
-		}
-		return "", false
-	}
-	if offer.Verdict != string(folderdigest.KindProject) || offer.Subject.Kind != FolderChoiceProject {
-		return "", false
-	}
-	row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)
-	if !ok {
-		return "", false
-	}
-	return row.Blueprint.Label + " workspace", true
-}
-
 // folderAvailabilitySubject names what an unavailable offer waits on: the
 // shape's Home for a collection or an unverified provider, else the integration.
 func folderAvailabilitySubject(offer FolderOffer, reason string) string {

@@ -140,20 +140,3 @@ func getStringSlice(raw map[string]any, keys ...string) []string {
 	}
 	return nil
 }
-
-func getBool(raw map[string]any, keys ...string) bool {
-	for _, key := range keys {
-		val, ok := raw[key]
-		if !ok {
-			continue
-		}
-		switch typed := val.(type) {
-		case bool:
-			return typed
-		case string:
-			normalized := strings.TrimSpace(strings.ToLower(typed))
-			return normalized == "true" || normalized == "yes" || normalized == "1"
-		}
-	}
-	return false
-}

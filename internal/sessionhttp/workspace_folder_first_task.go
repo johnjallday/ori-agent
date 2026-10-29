@@ -81,31 +81,6 @@ func (h *Handler) setupWizardOpening(workspaceID string) bool {
 	return !progress.WasMigrated() && !progress.HasBeenOpened() && !progress.IsDismissed()
 }
 
-// folderFirstTaskStartsOnClick says whether Start first look would start the
-// first task now. The receipt only promises that when it is true: the task has
-// an agent, has not been started or consumed, and no setup dialog is still to
-// open.
-func (h *Handler) folderFirstTaskStartsOnClick(ws *agentworkspace.Workspace) bool {
-	if ws == nil {
-		return false
-	}
-	for i := range ws.Tasks {
-		task := &ws.Tasks[i]
-		if !isFolderFirstTask(task) {
-			continue
-		}
-		if _, consumed := task.Context[taskContextFolderFirstTaskConsumedAt]; consumed {
-			return false
-		}
-		assignee := strings.TrimSpace(task.To)
-		if !waitsToStart(task) || assignee == "" || strings.EqualFold(assignee, "unassigned") {
-			return false
-		}
-		return !h.setupWizardOpening(ws.ID) && h.firstTaskRecipeReason(task) == ""
-	}
-	return false
-}
-
 // firstTaskRecipeReason reports why a first task seeded under a host recipe
 // could not be run within the recipe's restriction right now, or "" when it
 // could (and for a task with no recipe). A task it refuses is never started

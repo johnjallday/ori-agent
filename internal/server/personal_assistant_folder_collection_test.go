@@ -3,7 +3,6 @@ package server
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -59,52 +58,6 @@ func seedAlbumsCollectionVariant(t *testing.T, exact bool) string {
 		}
 	}
 	return root
-}
-
-// assertProposedAlbums checks a structure as a browser receives it: the whole
-// collection proposed as a plain group, because this server has neither the
-// Home's provider nor the integration installed. Both are known from what is on
-// this computer, so the answer does not depend on a release lookup.
-func assertProposedAlbums(t *testing.T, structure map[string]any, root string) {
-	t.Helper()
-	group := structure["group"].(map[string]any)
-	if group["type"] != "group" || group["name"] != "Music" || group["destination_state"] != "new" ||
-		group["home_name"] != "Music Production Home" || group["availability"] != "provider_not_installed" || group["home_available"] != true {
-		t.Fatalf("group: %v", group)
-	}
-	members := structure["members"].([]any)
-	sessions := 0
-	for _, item := range members {
-		member := item.(map[string]any)
-		if member["included"] != true || member["name"] == "" || member["candidate_id"] == "" {
-			t.Fatalf("member: %v", member)
-		}
-		if member["type_label"] == "REAPER session" {
-			sessions++
-			if member["availability"] != "integration_not_installed" || member["blueprint_id"] != nil {
-				t.Fatalf("a session with nothing installed must be a plain workspace for now: %v", member)
-			}
-		} else if member["type_label"] != "Plain workspace" || member["name"] != "Logic Sketch" || member["availability"] != nil {
-			t.Fatalf("plain member: %v", member)
-		}
-	}
-	if len(members) != 6 || sessions != 5 || structure["projects"] != float64(5) {
-		t.Fatalf("%d members, %d sessions, projects %v", len(members), sessions, structure["projects"])
-	}
-	notes := structure["notes"].([]any)
-	if len(notes) != 2 || notes[0] != "Music Production Home is not installed; a plain group is proposed instead." ||
-		notes[1] != "REAPER integration is not installed; it can be added later." {
-		t.Fatalf("notes: %v", notes)
-	}
-	encoded, err := json.Marshal(structure)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{root, os.Getenv("HOME"), "rel_path", "identity", "marker_name"} {
-		if strings.Contains(string(encoded), forbidden) {
-			t.Fatalf("the structure carries %q: %s", forbidden, encoded)
-		}
-	}
 }
 
 // folderTreeHash is every file under root: its name, size, time and bytes. A
