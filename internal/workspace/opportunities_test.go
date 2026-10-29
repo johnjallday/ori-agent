@@ -358,7 +358,6 @@ func TestWorkspace_MissionFields_RoundTrip(t *testing.T) {
 	ws.MissionEnabled = true
 	ws.AutonomyPolicy = AutonomyPropose
 	ws.MissionExecutionCount = 3
-	ws.NotificationPolicy = &NotificationPolicy{MinPriority: "medium", OnFindings: "if_any"}
 	ws.Cadence = &ScheduleConfig{Type: ScheduleMonthly, DayOfMonth: 15, TimeOfDay: "09:00"}
 
 	raw, err := json.Marshal(ws)
@@ -381,9 +380,6 @@ func TestWorkspace_MissionFields_RoundTrip(t *testing.T) {
 	if got.Cadence == nil || got.Cadence.Type != ScheduleMonthly || got.Cadence.DayOfMonth != 15 {
 		t.Errorf("Cadence not preserved: %+v", got.Cadence)
 	}
-	if got.NotificationPolicy == nil || got.NotificationPolicy.MinPriority != "medium" {
-		t.Errorf("NotificationPolicy not preserved: %+v", got.NotificationPolicy)
-	}
 }
 
 func TestWorkspace_LegacyJSON_LoadsWithZeroMissionFields(t *testing.T) {
@@ -404,6 +400,26 @@ func TestWorkspace_LegacyJSON_LoadsWithZeroMissionFields(t *testing.T) {
 	}
 	if len(ws.Opportunities) != 0 {
 		t.Errorf("Opportunities = %v; want empty", ws.Opportunities)
+	}
+}
+
+// Workspaces written while the never-read notification_policy field existed
+// must still load; the stored value is simply dropped.
+func TestWorkspace_StoredNotificationPolicy_StillLoads(t *testing.T) {
+	stored := `{"id":"ws-1","name":"Old","mission":"Watch releases","mission_enabled":true,"notification_policy":{"min_priority":"medium","on_findings":"if_any"},"status":"active","created_at":"2025-01-01T00:00:00Z","updated_at":"2025-01-01T00:00:00Z"}`
+	var ws Workspace
+	if err := json.Unmarshal([]byte(stored), &ws); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if ws.Mission != "Watch releases" || !ws.MissionEnabled {
+		t.Errorf("goal fields lost: mission=%q enabled=%v", ws.Mission, ws.MissionEnabled)
+	}
+	raw, err := json.Marshal(&ws)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "notification_policy") {
+		t.Errorf("re-saved workspace still carries notification_policy: %s", raw)
 	}
 }
 

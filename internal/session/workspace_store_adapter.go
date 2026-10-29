@@ -449,7 +449,6 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		MissionEnabled:          ws.MissionEnabled,
 		AutonomyPolicy:          ws.AutonomyPolicy,
 		Cadence:                 ws.Cadence,
-		NotificationPolicy:      ws.NotificationPolicy,
 		LastMissionRunAt:        ws.LastMissionRunAt,
 		NextMissionRunAt:        ws.NextMissionRunAt,
 		MissionExecutionCount:   ws.MissionExecutionCount,
@@ -492,7 +491,6 @@ type workspaceMissionState struct {
 	MissionEnabled          bool                            `json:"mission_enabled,omitempty"`
 	AutonomyPolicy          workspace.AutonomyPolicy        `json:"autonomy_policy,omitempty"`
 	Cadence                 *workspace.ScheduleConfig       `json:"cadence,omitempty"`
-	NotificationPolicy      *workspace.NotificationPolicy   `json:"notification_policy,omitempty"`
 	LastMissionRunAt        *time.Time                      `json:"last_mission_run_at,omitempty"`
 	NextMissionRunAt        *time.Time                      `json:"next_mission_run_at,omitempty"`
 	MissionExecutionCount   int                             `json:"mission_execution_count,omitempty"`
@@ -723,7 +721,6 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 			agentWS.MissionEnabled = mission.MissionEnabled
 			agentWS.AutonomyPolicy = mission.AutonomyPolicy
 			agentWS.Cadence = mission.Cadence
-			agentWS.NotificationPolicy = mission.NotificationPolicy
 			agentWS.LastMissionRunAt = mission.LastMissionRunAt
 			agentWS.NextMissionRunAt = mission.NextMissionRunAt
 			agentWS.MissionExecutionCount = mission.MissionExecutionCount

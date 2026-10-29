@@ -47,16 +47,6 @@ const (
 	AutonomyPropose AutonomyPolicy = "propose"
 )
 
-// NotificationPolicy describes when a mission run's findings should reach the user
-// (today via the Action Center; future channels are out of scope for v1).
-type NotificationPolicy struct {
-	// MinPriority filters which findings enter the Action Center. Below this, the
-	// finding is still recorded against the run but suppressed from the global inbox.
-	MinPriority string `json:"min_priority,omitempty"` // low | medium | high | critical
-	// OnFindings controls whether the run notifies at all on a given cycle.
-	OnFindings string `json:"on_findings,omitempty"` // always | if_any | never
-}
-
 // SideEffect classifies what a tool call does so the autonomy gate can allow or
 // deny it. Bindings carry a DefaultSideEffect plus optional per-tool overrides.
 type SideEffect string
@@ -231,15 +221,14 @@ type Workspace struct {
 	// Mission fields — workspace-level proactive goal carried out by the entry
 	// agent (Workspace Manager) on cadence. All fields are optional; a workspace
 	// with MissionEnabled = false (the zero value) behaves exactly as before.
-	Mission               string              `json:"mission,omitempty"`
-	Cadence               *ScheduleConfig     `json:"cadence,omitempty"`
-	AutonomyPolicy        AutonomyPolicy      `json:"autonomy_policy,omitempty"` // defaults to AutonomyPropose when MissionEnabled is true
-	NotificationPolicy    *NotificationPolicy `json:"notification_policy,omitempty"`
-	MissionEnabled        bool                `json:"mission_enabled,omitempty"`
-	LastMissionRunAt      *time.Time          `json:"last_mission_run_at,omitempty"`
-	NextMissionRunAt      *time.Time          `json:"next_mission_run_at,omitempty"`
-	MissionExecutionCount int                 `json:"mission_execution_count,omitempty"`
-	MissionFailureCount   int                 `json:"mission_failure_count,omitempty"`
+	Mission               string          `json:"mission,omitempty"`
+	Cadence               *ScheduleConfig `json:"cadence,omitempty"`
+	AutonomyPolicy        AutonomyPolicy  `json:"autonomy_policy,omitempty"` // defaults to AutonomyPropose when MissionEnabled is true
+	MissionEnabled        bool            `json:"mission_enabled,omitempty"`
+	LastMissionRunAt      *time.Time      `json:"last_mission_run_at,omitempty"`
+	NextMissionRunAt      *time.Time      `json:"next_mission_run_at,omitempty"`
+	MissionExecutionCount int             `json:"mission_execution_count,omitempty"`
+	MissionFailureCount   int             `json:"mission_failure_count,omitempty"`
 	// MissionCadenceHeartbeat keeps the cadence timer fixed when event triggers
 	// fire the mission: event-fired runs still count (LastMissionRunAt,
 	// counters) but leave NextMissionRunAt untouched, so the cadence acts as a

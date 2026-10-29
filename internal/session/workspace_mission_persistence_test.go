@@ -36,10 +36,6 @@ func missionWorkspace(now time.Time) *workspace.Workspace {
 			Type:      workspace.ScheduleDaily,
 			TimeOfDay: "09:00",
 		},
-		NotificationPolicy: &workspace.NotificationPolicy{
-			MinPriority: "medium",
-			OnFindings:  "if_any",
-		},
 		LastMissionRunAt:        &last,
 		NextMissionRunAt:        &next,
 		MissionExecutionCount:   7,
@@ -67,9 +63,6 @@ func TestWorkspaceStoreAdapter_MissionRoundTrips(t *testing.T) {
 	}
 	if got.Cadence == nil || got.Cadence.Type != workspace.ScheduleDaily || got.Cadence.TimeOfDay != "09:00" {
 		t.Fatalf("cadence = %+v, want a daily 09:00 schedule", got.Cadence)
-	}
-	if got.NotificationPolicy == nil || got.NotificationPolicy.MinPriority != "medium" {
-		t.Fatalf("notification policy = %+v, want min priority medium", got.NotificationPolicy)
 	}
 	if got.MissionCadenceHeartbeat != true {
 		t.Fatalf("expected the cadence heartbeat flag to survive")
@@ -136,7 +129,7 @@ func TestWorkspaceStoreAdapter_NoMissionStaysAbsent(t *testing.T) {
 	}))
 
 	if got.Mission != "" || got.MissionEnabled || got.Cadence != nil ||
-		got.NotificationPolicy != nil || got.NextMissionRunAt != nil {
+		got.NextMissionRunAt != nil {
 		t.Fatalf("expected no goal configuration, got %+v", got)
 	}
 }

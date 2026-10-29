@@ -182,7 +182,6 @@ default, changing only the day or time when needed:
 {
   "cadence": { "type": "monthly", "day_of_month": 1, "time_of_day": "09:00" },
   "autonomy_policy": "watch",
-  "notification_policy": { "min_priority": "medium", "on_findings": "if_any" },
   "mission_enabled": true
 }
 ```
