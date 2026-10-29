@@ -441,19 +441,17 @@ type HandoffFacts struct {
 	ManagerName string
 }
 
-// HandoffOpenDetail says when the Home's manager opens the song; with the Home
-// already there, HandoffListedDetail.
-const (
-	HandoffOpenDetail   = "Right after the Home is ready, under this one Set up."
-	HandoffListedDetail = "Right after the song is listed, under this one Set up."
-)
+// HandoffOpenDetail says where the Home's manager takes it from: in the Home,
+// where the user decides whether to open the song and hire its assistant.
+const HandoffOpenDetail = "In the Home, you choose whether to open it and hire its assistant."
 
-// BuildHandoffPlan lists every consequence of Set up on one song whose Home
-// lists its projects: the assistant sets up (or joins) the Home and lists the
-// song there, then the Home's manager opens it, under the one consent. The
-// first section is the collection plan's Home lines for a portfolio of one; the
-// second, headed by the handoff line, is the single project plan's lines. The
-// intent is a portfolio intent that opens exactly that song.
+// BuildHandoffPlan lists every consequence of a single song's setup, for a
+// song whose Home lists its projects. The assistant's Set up does the first
+// section: it sets up (or joins) the Home and lists the song there. The handoff
+// line says the Home's manager then suggests opening it; the lines after it are
+// what that Open does, pressed in the Home. The digest covers both, so the
+// Open is held to the plan the user saw. The intent is a portfolio intent that
+// opens exactly that song.
 func BuildHandoffPlan(facts HandoffFacts) personalassistant.FolderSetupPlan {
 	home, song := facts.Home, facts.Song
 	manager := strings.TrimSpace(facts.ManagerName)
@@ -497,13 +495,9 @@ func BuildHandoffPlan(facts HandoffFacts) personalassistant.FolderSetupPlan {
 	if intent.ReadsSongDetails {
 		library = libraryDetailSongDetails(home.AppName)
 	}
-	when := HandoffOpenDetail
-	if home.HomeExists && home.HomeStaffed {
-		when = HandoffListedDetail
-	}
 	lines = append(lines,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanLibrary, Name: "Lists " + facts.SongName + " in the Home's library", Detail: library},
-		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHandoff, Name: "Your " + manager + " then opens " + facts.SongName, Detail: when},
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHandoff, Name: "Your " + manager + " then suggests opening " + facts.SongName, Detail: HandoffOpenDetail},
 	)
 	where := " as a separate project in new Home “" + home.HomeName + "”"
 	if home.HomeExists {
@@ -542,10 +536,16 @@ func BuildHandoffPlan(facts HandoffFacts) personalassistant.FolderSetupPlan {
 		plan.Hire = &hire
 	}
 	plan.BriefDefault = song.BriefDefault
+	// The assistant's Set up makes (or reuses) the Home; the song is the Home
+	// manager's to open, later, in the Home.
+	operation := personalassistant.FolderSoftwareCreate
+	if home.HomeExists {
+		operation = personalassistant.FolderSoftwareReuse
+	}
 	plan.Visual = &personalassistant.FolderSetupVisual{
 		RequirementsChecked: true,
 		Model:               song.Model,
-		Entity:              &personalassistant.FolderSetupEntity{Kind: "workspace", Name: song.WorkspaceName, Operation: personalassistant.FolderSoftwareCreate},
+		Entity:              &personalassistant.FolderSetupEntity{Kind: "home", Name: home.HomeName, Operation: operation},
 		Plugins: []personalassistant.FolderSetupPlugin{
 			PluginVisual(personalassistant.FolderPlanIntegration, song.Integration),
 			PluginVisual(personalassistant.FolderPlanProvider, home.Provider),

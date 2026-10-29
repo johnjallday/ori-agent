@@ -1038,9 +1038,10 @@ test('a recognized folder’s plan is the host’s lines, with the reason behind
   assert.equal(block().hidden, true);
 });
 
-// 2A: a single song's plan reads in the pane as on Home's card: the Home's
-// half under a heading naming it, then the half its Portfolio Manager opens.
-test('a single song’s plan is the Home’s half, then its Portfolio Manager’s', () => {
+// 2A, Home first: a single song's plan reads in the pane as on Home's card:
+// the Home's half under a heading naming it, closed by the Portfolio Manager's
+// suggestion; the song's own lines are the Home's card.
+test('a single song’s plan is the Home’s half, closed by its Portfolio Manager’s', () => {
   const { pane, root } = loadPane();
   pane.mount({ assistant, folders: true });
   const plan = {
@@ -1063,8 +1064,7 @@ test('a single song’s plan is the Home’s half, then its Portfolio Manager’
       ['home', 'section'],
       ['', 'integration'],
       ['', 'library'],
-      ['handoff', 'handoff'],
-      ['', 'workspace']
+      ['handoff', 'handoff']
     ]
   );
   assert.equal(

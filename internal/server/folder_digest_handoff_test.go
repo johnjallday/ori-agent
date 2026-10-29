@@ -127,7 +127,7 @@ func TestFolderHandoff_PlanOnTheRealHost(t *testing.T) {
 	if got := strings.Join(kinds, ","); got != "integration,provider,home,agents,library,handoff,workspace,folder,mode,agents,task" {
 		t.Fatalf("new Home plan = %s", got)
 	}
-	if plan.Lines[5].Name != "Your Portfolio Manager then opens Album-5" ||
+	if plan.Lines[5].Name != "Your Portfolio Manager then suggests opening Album-5" ||
 		plan.Lines[6].Name != "Creates a REAPER song workspace named Album-5 as a separate project in new Home “Music Production Home”" {
 		t.Fatalf("lines = %+v", plan.Lines)
 	}
@@ -168,5 +168,16 @@ func TestFolderHandoff_PlanOnTheRealHost(t *testing.T) {
 		existing.Lines[5].Name != "Creates a REAPER song workspace named Album-5 as a separate project in Home “Music Production Home”" ||
 		existing.Digest == plan.Digest {
 		t.Fatalf("existing Home = %+v %+v", existing.Intent, existing.Lines)
+	}
+	// A Home not yet staffed is set up from the assistant's card; only a ready
+	// Home leads there instead.
+	if plan.SuggestedIn != nil || existing.SuggestedIn != nil {
+		t.Fatalf("a Home still to set up was offered as the place to open: %+v %+v", plan.SuggestedIn, existing.SuggestedIn)
+	}
+	if route, ok := homeSuggestionsRoute(&workspace.Workspace{FolderSlug: "music-production-home"}); !ok || route != "/workspaces/music-production-home/assistant" {
+		t.Fatalf("Home route = %q %v", route, ok)
+	}
+	if _, ok := homeSuggestionsRoute(&workspace.Workspace{FolderSlug: "../x"}); ok {
+		t.Fatal("a non-canonical slug made a route")
 	}
 }

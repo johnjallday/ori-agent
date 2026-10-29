@@ -72,8 +72,42 @@ func songPlan(existing bool) personalassistant.FolderSetupPlan {
 func runSong(t *testing.T, w *portfolioWorld, o *worldOpener, plan personalassistant.FolderSetupPlan, entry string) (Result, *recorder) {
 	t.Helper()
 	return runPortfolio(t, w, plan, func(r *PortfolioRunner, cfg *PortfolioConfig) {
-		r.Opener, cfg.EntryName = o, entry
+		r.Opener, cfg.EntryName, cfg.Open = o, entry, true
 	})
+}
+
+// Two presses, one workspace each: Set up builds the Home and lists the song,
+// then stops at handoff_ready with the song's half waiting; Open has the
+// Portfolio Manager open it, repeating none of the Home's work.
+func TestPortfolioRunStopsAtTheHandoffUntilOpenIsPressed(t *testing.T) {
+	w := newPortfolioWorld()
+	o := newWorldOpener(w)
+	result, progress := runPortfolio(t, w, songPlan(false), func(r *PortfolioRunner, _ *PortfolioConfig) { r.Opener = o })
+	if result.Status != personalassistant.FolderSetupStopped || result.StopReason != personalassistant.FolderStopHandoffReady || result.Cause != nil {
+		t.Fatalf("set up = %+v", result)
+	}
+	if len(o.opens) != 0 || o.called("open:find:Album-5") {
+		t.Fatalf("the song was opened before Open was pressed: %v", w.log)
+	}
+	// The shared assistant's standing consent comes with the Open, where it is
+	// disclosed, never with the Home's Set up.
+	if w.called("consent:grant") {
+		t.Fatalf("Set up granted the song's shared assistant: %v", w.log)
+	}
+	if got := lineOrder(progress.last()); got != "integration=done,provider=done,home=done,agents=done,library=done,handoff=waiting,"+
+		"workspace=waiting,folder=waiting,mode=waiting,agents=waiting,task=waiting" {
+		t.Fatalf("lines after Set up = %s", got)
+	}
+	homeWork := len(w.log)
+	result, _ = runSong(t, w, o, songPlan(false), "")
+	if result.Status != personalassistant.FolderSetupDone || o.workspaces != 1 || !w.called("consent:grant") {
+		t.Fatalf("open = %+v calls = %v", result, w.log)
+	}
+	for _, call := range w.log[homeWork:] {
+		if call == "home:commit" || call == "root:connect" || call == "library:on" || call == "staff:Portfolio Manager" {
+			t.Fatalf("Open repeated the Home's %s: %v", call, w.log[homeWork:])
+		}
+	}
 }
 
 // lineOrder is each line's kind and state in order: a song's plan has two agents lines.
@@ -226,7 +260,7 @@ func TestPortfolioRunOpensASongAnExistingRootAlreadyLists(t *testing.T) {
 	plan := songPlan(true)
 	result, progress := runPortfolio(t, w, plan, func(r *PortfolioRunner, cfg *PortfolioConfig) {
 		r.Opener = o
-		cfg.HomeID = "home-1"
+		cfg.HomeID, cfg.Open = "home-1", true
 	})
 	if result.Status != personalassistant.FolderSetupDone || w.called("root:connect") || w.called("root:review") {
 		t.Fatalf("result = %+v calls = %v", result, w.log)
@@ -249,7 +283,7 @@ func TestPortfolioRunAddsASecondSongToTheHome(t *testing.T) {
 	o.staffing = "joined"
 	result, progress := runPortfolio(t, w, songPlan(true), func(r *PortfolioRunner, cfg *PortfolioConfig) {
 		r.Opener = o
-		cfg.HomeID = "home-1"
+		cfg.HomeID, cfg.Open = "home-1", true
 	})
 	if result.Status != personalassistant.FolderSetupDone {
 		t.Fatalf("result = %+v cause=%v", result, result.Cause)

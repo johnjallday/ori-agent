@@ -57,8 +57,19 @@ func (h *folderSetupHost) songRun(ctx context.Context, req personalassistant.Fol
 		Opener:              opener,
 		Receipts: handoffReceipts{host: h, song: strings.TrimSpace(req.Offer.Subject.Name), label: target.row.Blueprint.Label,
 			opener: opener},
-		Folder:   req.Path,
-		Progress: progressFunc(req.Update),
+		Folder: req.Path,
+		Progress: progressFunc(func(ctx context.Context, update personalassistant.FolderSetupUpdate) error {
+			// Stopped at the hand-off, the song waits in its Home: the run names
+			// the Home's page, where its manager suggests opening it.
+			if update.StopReason == personalassistant.FolderStopHandoffReady && update.HomeID != "" && b.workspaceStore != nil {
+				if home, err := b.workspaceStore.Get(update.HomeID); err == nil {
+					if route, ok := homeSuggestionsRoute(home); ok {
+						update.SuggestedIn = &personalassistant.FolderHomeLink{Name: home.Name, Route: route}
+					}
+				}
+			}
+			return req.Update(ctx, update)
+		}),
 	}
 	if req.Plan.Intent.Provider != "" {
 		runner.Providers = homeProviderInstaller{setup: folderHomeProviderSetup{builder: b}, key: provider.Key}
@@ -79,7 +90,7 @@ func (h *folderSetupHost) songRun(ctx context.Context, req personalassistant.Fol
 	if req.Plan.Intent.SetsProfile {
 		runner.Profile = folderProfileStep{handler: b.sessionHandler, userID: req.UserID, offerID: req.Offer.ID}
 	}
-	config := foldersetup.PortfolioConfig{Plan: req.Plan, EntryName: req.EntryName}
+	config := foldersetup.PortfolioConfig{Plan: req.Plan, EntryName: req.EntryName, Open: req.Open}
 	if req.Offer.Setup != nil {
 		config.HomeID = req.Offer.Setup.HomeID
 	}

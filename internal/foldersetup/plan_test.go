@@ -253,7 +253,7 @@ func TestBuildHandoffPlanListsTheHomeThenTheManagersOpen(t *testing.T) {
 		{Kind: "home", Name: "Creates your Music Production Home", Detail: "Your later projects of this kind join it."},
 		{Kind: "agents", Name: "Adds the agents the Home requires", Detail: "Portfolio Manager keeps track of the whole collection."},
 		{Kind: "library", Name: "Lists Album-5 in the Home's library", Detail: "Reads each REAPER project's tempo, length and track count. Nothing is moved, copied or changed."},
-		{Kind: "handoff", Name: "Your Portfolio Manager then opens Album-5", Detail: "Right after the Home is ready, under this one Set up."},
+		{Kind: "handoff", Name: "Your Portfolio Manager then suggests opening Album-5", Detail: HandoffOpenDetail},
 		{Kind: "workspace", Name: "Creates a Reaper Song workspace named Album-5 as a separate project in new Home “Music Production Home”"},
 		{Kind: "folder", Name: FolderLinkLine},
 		{Kind: "mode", Name: "Uses File-only mode", Detail: "Ori does not control REAPER."},
@@ -274,10 +274,10 @@ func TestBuildHandoffPlanListsTheHomeThenTheManagersOpen(t *testing.T) {
 		intent.Provider != personalassistant.FolderInstallInstall || intent.ProviderPlugin != "mpm" {
 		t.Fatalf("intent = %+v", intent)
 	}
-	// FR7: the card's picture is the song, created inside the Home, with both
-	// plugins and the hire's model; the hire and its brief stay (FR3).
+	// The assistant's card pictures the Home it makes; the song is opened later,
+	// in the Home. The hire and its brief stay for the Home's suggestion.
 	visual := plan.Visual
-	if visual == nil || visual.Entity == nil || visual.Entity.Kind != "workspace" || visual.Entity.Name != "Album-5" ||
+	if visual == nil || visual.Entity == nil || visual.Entity.Kind != "home" || visual.Entity.Name != "Music Production Home" ||
 		visual.Entity.Operation != personalassistant.FolderSoftwareCreate || len(visual.Plugins) != 2 ||
 		visual.Model == nil || visual.Model.Name != "gpt-5-mini" || visual.Placement != "grouped" {
 		t.Fatalf("visual = %+v", visual)
@@ -303,8 +303,8 @@ func TestBuildHandoffPlanForAnExistingStaffedHome(t *testing.T) {
 	if d := line(plan, personalassistant.FolderPlanLibrary).Detail; d != libraryDetailNamesOnly {
 		t.Fatalf("an existing Home without its song-details switch reads them: %q", d)
 	}
-	if d := line(plan, personalassistant.FolderPlanHandoff).Detail; d != HandoffListedDetail {
-		t.Fatalf("a ready Home's handoff detail = %q", d)
+	if plan.Visual.Entity.Kind != "home" || plan.Visual.Entity.Operation != personalassistant.FolderSoftwareReuse {
+		t.Fatalf("an existing Home's picture = %+v", plan.Visual.Entity)
 	}
 	intent := plan.Intent
 	if intent.CreatesHome || intent.StaffsHome || intent.GrantsConsent || intent.GrantsSongDetails || intent.ReadsSongDetails ||

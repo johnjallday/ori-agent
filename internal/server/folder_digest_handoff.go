@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/url"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -91,7 +92,22 @@ func (h *folderSetupHost) handoffPlan(ctx context.Context, req personalassistant
 	plan := foldersetup.BuildHandoffPlan(foldersetup.HandoffFacts{
 		Home: homeFacts, Song: song, SongName: song.FolderName, ManagerName: manager,
 	})
+	if personalassistant.HomeSuggestionReady(plan) {
+		// The Home is ready: its manager suggests the song there, and the
+		// assistant's card only leads to it.
+		if route, ok := homeSuggestionsRoute(home); ok {
+			plan.SuggestedIn = &personalassistant.FolderHomeLink{Name: home.Name, Route: route}
+		}
+	}
 	return h.bindHandoffModel(plan)
+}
+
+// homeSuggestionsRoute is a Home's own page, where its manager's suggestions are.
+func homeSuggestionsRoute(home *workspace.Workspace) (string, bool) {
+	if home == nil || !workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) {
+		return "", false
+	}
+	return "/workspaces/" + url.PathEscape(home.FolderSlug) + "/assistant", true
 }
 
 // bindHandoffModel says which model the Home's new agents use, on the Home's

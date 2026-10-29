@@ -109,28 +109,45 @@
     };
   }
 
+  const HANDOFF_LINE = /^Your (.+) then (?:opens|suggests opening) (.+)$/;
+
   // handoffLineName is the handoff line's words for its state (FR19): the plan
-  // says "Your Portfolio Manager then opens Album-5"; while it works, "Portfolio
-  // Manager is opening Album-5…"; once done, "Portfolio Manager opened
-  // Album-5". A waiting or failed line keeps the plan's words, and a line not
-  // worded that way is shown as it is. The run never stores these words, so a
-  // resumed plan is still the one that was confirmed.
+  // says "Your Portfolio Manager then suggests opening Album-5"; while it works,
+  // "Portfolio Manager is opening Album-5…"; once done, "Portfolio Manager
+  // opened Album-5". A waiting or failed line keeps the plan's words, and a
+  // line not worded that way is shown as it is. The run never stores these
+  // words, so a resumed plan is still the one that was confirmed.
   function handoffLineName(line, song) {
     const name = String(line?.name || '');
     const title = String(song || '').trim();
-    const match = title ? name.match(/^Your (.+) then opens (.+)$/) : null;
+    const match = title ? name.match(HANDOFF_LINE) : null;
     if (!match || match[2] !== title) return name;
     if (line.state === 'working') return `${match[1]} is opening ${title}…`;
     if (line.state === 'done') return `${match[1]} opened ${title}`;
     return name;
   }
 
+  // handoffLineParts reads the manager ("Your Portfolio Manager") and the song
+  // from a plan's handoff line; null when there is none or it is worded
+  // otherwise.
+  function handoffLineParts(lines) {
+    const line = (Array.isArray(lines) ? lines : []).find(item => item?.kind === 'handoff');
+    const match = String(line?.name || '').match(HANDOFF_LINE);
+    return match ? { manager: `Your ${match[1]}`, song: match[2] } : null;
+  }
+
   // handoffNames reads the Home and song a plan or run view names: the
-  // destination it goes into and the workspace it creates.
+  // destination it goes into, and the workspace it creates or, when the
+  // picture is of the Home, the song its handoff line names.
   function handoffNames(source) {
+    const entity = source?.visual?.entity;
+    const song =
+      entity?.kind === 'workspace'
+        ? String(entity?.name || '').trim()
+        : handoffLineParts(source?.lines)?.song || '';
     return {
       home: String(source?.destination?.name || source?.home?.name || '').trim(),
-      song: String(source?.visual?.entity?.name || '').trim()
+      song
     };
   }
 
@@ -139,11 +156,19 @@
   // options.kindIcons each row also leads with its kind's icon (the build
   // pane's checklist); Home's card and the mission card keep their plain rows.
   // A single song's plan is drawn in two sections (handoffSections), named
-  // from options.sections ({ home, song }).
+  // from options.sections ({ home, song }). options.half draws one of them:
+  // 'home' (the assistant's card: the Home's lines, closed by the handoff
+  // line) or 'song' (the Home's suggestion: what opening the song does).
   function renderSetupLines(list, lines, doc = document, options = {}) {
     if (!list) return;
     list.replaceChildren();
-    const sections = handoffSections(lines, options.sections);
+    let sections = handoffSections(lines, options.sections);
+    if (sections && options.half === 'song') {
+      lines = sections.rest;
+      sections = null;
+    } else if (sections && options.half === 'home') {
+      lines = [...sections.first, sections.handoff];
+    }
     if (sections) {
       list.dataset.sections = 'handoff';
       const heading = doc.createElement('li');
@@ -307,6 +332,7 @@
     handoffSections,
     handoffNames,
     handoffLineName,
+    handoffLineParts,
     renderSetupLines,
     setupLineKindIcon,
     hireView

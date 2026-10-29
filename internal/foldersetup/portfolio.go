@@ -238,6 +238,9 @@ type PortfolioConfig struct {
 	// EntryName is the project file the user chose when an earlier pass stopped
 	// at needs_choice.
 	EntryName string
+	// Open says the user pressed the song's Open. Without it a single song's
+	// run stops at handoff_ready once its Home is ready and lists the song.
+	Open bool
 }
 
 // ErrPortfolioNotWired means the host left out a seam the plan needs.
@@ -318,7 +321,7 @@ func (s *portfolioRun) finish(ctx context.Context, status, reason string, candid
 		next := personalassistant.FolderLineFailed
 		switch reason {
 		case personalassistant.FolderStopNeedsPick, personalassistant.FolderStopNeedsModel, personalassistant.FolderStopNeedsChoice,
-			personalassistant.FolderStopConsentStale, personalassistant.FolderStopAssistantMissing:
+			personalassistant.FolderStopConsentStale, personalassistant.FolderStopAssistantMissing, personalassistant.FolderStopHandoffReady:
 			next = personalassistant.FolderLineWaiting
 		}
 		for i := range s.lines {
@@ -400,6 +403,15 @@ func (s *portfolioRun) drive(ctx context.Context) error {
 	listed, err := s.library(ctx)
 	if err != nil {
 		return err
+	}
+	if len(s.cfg.Plan.Intent.OpensProjects) > 0 && !s.cfg.Open {
+		// The Home is ready and lists the song. Opening it, and the shared
+		// assistant's standing consent that comes with it, is the user's own
+		// next press, on the Portfolio Manager's suggestion in the Home.
+		if err := s.guard(ctx); err != nil {
+			return err
+		}
+		return &stop{reason: personalassistant.FolderStopHandoffReady}
 	}
 	if err := s.share(ctx); err != nil {
 		return err

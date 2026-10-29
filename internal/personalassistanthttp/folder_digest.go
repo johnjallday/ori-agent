@@ -37,6 +37,7 @@ type FolderDigestService interface {
 	PortfolioProvider(ctx context.Context, userID, offerID string) (string, error)
 	ProjectSelectionPath(ctx context.Context, userID, offerID string) (string, error)
 	PortfolioContinuations(ctx context.Context, userID, homeID string) ([]personalassistant.FolderContinuation, error)
+	HomeSuggestions(ctx context.Context, userID, homeID string) ([]personalassistant.FolderOfferView, error)
 	ResolveExistingHome(ctx context.Context, userID, offerID, requestID string) (personalassistant.FolderOfferView, error)
 	StartSetup(ctx context.Context, userID, offerID string, input personalassistant.FolderSetupInput) (personalassistant.FolderOfferView, error)
 	ChooseCandidate(ctx context.Context, userID, offerID string, input personalassistant.FolderCandidateInput) (personalassistant.FolderOfferView, error)
@@ -600,6 +601,8 @@ type folderSetupRequest struct {
 	Brief      string `json:"brief"`
 	// Monitoring is an inbox folder's watching checkbox; absent is off.
 	Monitoring bool `json:"monitoring"`
+	// Open is the press on a single song's Open once its Home is ready.
+	Open bool `json:"open"`
 }
 
 // SetupFolderDigest is the click on Set up (Hire and start). The body carries
@@ -621,7 +624,7 @@ func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req folderSetupRequest
-	if !decodeFolderDigestBody(w, r, &req, "request_id", "plan_digest", "entry_name", "brief", "monitoring") {
+	if !decodeFolderDigestBody(w, r, &req, "request_id", "plan_digest", "entry_name", "brief", "monitoring", "open") {
 		return
 	}
 	userID, ok := h.currentUserID(w, r)
@@ -630,6 +633,7 @@ func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
 	}
 	offer, err := h.folderDigest.StartSetup(r.Context(), userID, offerID, personalassistant.FolderSetupInput{
 		RequestID: req.RequestID, PlanDigest: req.PlanDigest, EntryName: req.EntryName, Brief: req.Brief, Monitoring: req.Monitoring,
+		Open: req.Open,
 	})
 	if errors.Is(err, personalassistant.ErrFolderPlanChanged) {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
@@ -685,23 +689,7 @@ func (h *Handler) GetFolderContinuations(w http.ResponseWriter, r *http.Request)
 	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if h == nil || h.folderDigest == nil {
-		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
-		return
-	}
-	query := r.URL.Query()
-	for key := range query {
-		if key != "home_id" {
-			orihttp.BadRequest(w, "Only a Home id is accepted")
-			return
-		}
-	}
-	homeID := strings.TrimSpace(query.Get("home_id"))
-	if homeID == "" || len(homeID) > 128 {
-		orihttp.BadRequest(w, "A Home id is required")
-		return
-	}
-	userID, ok := h.currentUserID(w, r)
+	userID, homeID, ok := h.folderHomeQuery(w, r)
 	if !ok {
 		return
 	}
@@ -711,6 +699,48 @@ func (h *Handler) GetFolderContinuations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	orihttp.Success(w, map[string]any{"continuations": continuations})
+}
+
+// GetFolderHomeSuggestions lists the songs a Home's manager suggests opening,
+// for the Home's own card. Like the continuations read, it accepts one Home ID
+// and nothing else and returns offer views (names, never a path); the open is
+// the same Set up press the assistant's card makes.
+func (h *Handler) GetFolderHomeSuggestions(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	userID, homeID, ok := h.folderHomeQuery(w, r)
+	if !ok {
+		return
+	}
+	suggestions, err := h.folderDigest.HomeSuggestions(r.Context(), userID, homeID)
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"suggestions": suggestions})
+}
+
+// folderHomeQuery reads a Home read's only parameter and the current user.
+func (h *Handler) folderHomeQuery(w http.ResponseWriter, r *http.Request) (userID, homeID string, ok bool) {
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return "", "", false
+	}
+	query := r.URL.Query()
+	for key := range query {
+		if key != "home_id" {
+			orihttp.BadRequest(w, "Only a Home id is accepted")
+			return "", "", false
+		}
+	}
+	homeID = strings.TrimSpace(query.Get("home_id"))
+	if homeID == "" || len(homeID) > 128 {
+		orihttp.BadRequest(w, "A Home id is required")
+		return "", "", false
+	}
+	userID, ok = h.currentUserID(w, r)
+	return userID, homeID, ok
 }
 
 // ResolveFolderExistingHome records the owner's existing Home as the outcome of

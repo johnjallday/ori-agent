@@ -28,7 +28,7 @@ const (
 	FolderPlanSongs     = "songs"
 	FolderPlanAssistant = "assistant"
 	// FolderPlanHandoff heads a single song's second half: once the Home has
-	// listed it, the Home's Portfolio Manager opens it under the same Set up.
+	// listed it, the Home's Portfolio Manager suggests opening it, in the Home.
 	// The workspace, folder, mode, agents and task lines after it are that open.
 	FolderPlanHandoff = "handoff"
 	// The Home's profile: which applications are on this computer, and whether
@@ -91,6 +91,10 @@ const (
 	// names it). The upgrade changes the reviewed Home, so the remaining steps
 	// are then reviewed again (Continue setup), never resumed on the old plan.
 	FolderStopHomeUpgrade = "home_upgrade_required"
+	// FolderStopHandoffReady: a single song's Home is ready and lists it; the
+	// Home's Portfolio Manager opens it when the user presses Open. Nothing
+	// failed and nothing waits on a repair.
+	FolderStopHandoffReady = "handoff_ready"
 )
 
 // FolderHomeLink names a Home and the page where its owner reviews the Home's
@@ -418,6 +422,10 @@ type FolderSetupPlan struct {
 	// unless the user ticks it. Like the brief it is not in the digest: the
 	// tick travels in the setup request, and the plan only names the time.
 	Monitoring *FolderMonitoringOffer `json:"monitoring,omitempty"`
+	// SuggestedIn is the ready Home whose manager suggests a single song: the
+	// assistant's card leads there, and the open is pressed in the Home. Like
+	// the hire it is not in the digest; the lines already name the Home.
+	SuggestedIn *FolderHomeLink `json:"suggested_in,omitempty"`
 	// Intent is the machine-readable promise behind the lines; server only.
 	Intent FolderSetupIntent `json:"-"`
 }
@@ -501,6 +509,7 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 		monitoring := *p.Monitoring
 		stamped.Monitoring = &monitoring
 	}
+	stamped.SuggestedIn = cloneFolderHomeLink(p.SuggestedIn)
 	if p.Destination != nil {
 		destination := *p.Destination
 		stamped.Destination = &destination
@@ -577,6 +586,9 @@ type FolderSetupUpdate struct {
 	// HomeUpgrade names the Home a FolderStopHomeUpgrade stop waits on; every
 	// other update clears it.
 	HomeUpgrade *FolderHomeLink
+	// SuggestedIn names the Home a FolderStopHandoffReady stop waits in; every
+	// other update clears it.
+	SuggestedIn *FolderHomeLink
 	// keepLines makes the service keep the stored lines and change only the
 	// status; the service uses it to record a stop it decided on itself.
 	keepLines bool
@@ -602,6 +614,10 @@ type FolderSetupRequest struct {
 	// Monitoring is the user's tick on an inbox folder's watching checkbox, set
 	// only for Run.
 	Monitoring bool
+	// Open says the user pressed a single song's Open (now or on an earlier
+	// pass): the run goes on to the Portfolio Manager's open. Without it the
+	// run stops at handoff_ready once the Home is ready.
+	Open bool
 	// Plan is the confirmed plan a Run is held to.
 	Plan FolderSetupPlan
 	// Software is set for a built-in software offer: what the service holds
@@ -642,6 +658,9 @@ type FolderSetupInput struct {
 	// Monitoring is the tick on an inbox folder's watching checkbox; false
 	// leaves the reviewed monitoring approval unset.
 	Monitoring bool
+	// Open is the press on a single song's Open once its Home is ready: the
+	// Home's Portfolio Manager opens the song (a second, separate press).
+	Open bool
 }
 
 // FolderSetupView is a run as the browser sees it.
@@ -656,6 +675,8 @@ type FolderSetupView struct {
 	Destination     *FolderSetupDestination `json:"destination,omitempty"`
 	// HomeUpgrade is the Home a home_upgrade_required stop waits on.
 	HomeUpgrade *FolderHomeLink `json:"home_upgrade,omitempty"`
+	// SuggestedIn is the Home a handoff_ready stop waits in.
+	SuggestedIn *FolderHomeLink `json:"suggested_in,omitempty"`
 	// Hire and Brief are who the run hired and the goal it was given.
 	Hire  *FolderHire `json:"hire,omitempty"`
 	Brief string      `json:"brief,omitempty"`
@@ -748,7 +769,7 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	if len(run.HomeID) > 200 || strings.ContainsAny(run.HomeID, "/\\\x00\r\n") || len(run.Receipt) > folderSetupMaxLines {
 		return fmt.Errorf("%w: setup home", errFolderDigestInvalid)
 	}
-	if !validFolderHomeLink(run.HomeUpgrade) {
+	if !validFolderHomeLink(run.HomeUpgrade) || !validFolderHomeLink(run.SuggestedIn) {
 		return fmt.Errorf("%w: setup home upgrade", errFolderDigestInvalid)
 	}
 	if brief, err := NormalizeFolderBrief(run.Brief); err != nil || brief != run.Brief {
@@ -799,10 +820,15 @@ type FolderSetupRun struct {
 	Hire  *FolderHire `json:"hire,omitempty"`
 	// Monitoring is whether the user ticked watching on an inbox folder's card.
 	Monitoring bool `json:"monitoring,omitempty"`
+	// Opening is set once the user pressed a single song's Open: from then on
+	// every pass of the run goes on to the Portfolio Manager's open.
+	Opening bool `json:"opening,omitempty"`
 	// HomeID and Receipt are a portfolio run's Home and what it read back from
 	// canonical state when it finished; the offer resolves to that Home.
 	HomeID  string             `json:"home_id,omitempty"`
 	Receipt []FolderReceiptRow `json:"receipt,omitempty"`
 	// HomeUpgrade is the Home a home_upgrade_required stop waits on.
 	HomeUpgrade *FolderHomeLink `json:"home_upgrade,omitempty"`
+	// SuggestedIn is the Home a handoff_ready stop waits in.
+	SuggestedIn *FolderHomeLink `json:"suggested_in,omitempty"`
 }

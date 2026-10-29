@@ -188,6 +188,29 @@ test('a single song’s run reads the hire’s staffing after the handoff line o
   ]);
 });
 
+// Home first: before the Home's open starts, the assistant shows the Home
+// alone — no hire badge, and no effects of the song's half.
+test('a single song’s plan or waiting hand-off shows the Home, not the hire', () => {
+  const songLines = [
+    { kind: 'home', name: 'Creates your Music Production Home' },
+    { kind: 'handoff', name: 'Your Portfolio Manager then suggests opening Album-5' },
+    { kind: 'workspace', name: 'Creates a Reaper Song workspace named Album-5' }
+  ];
+  assert.equal(visualView({ offer: { plan: { ...plan, lines: songLines } } }).agent, null);
+  const waiting = songLines.map((line, index) => ({ ...line, state: index ? 'waiting' : 'done' }));
+  assert.equal(
+    visualView({ offer: { plan, setup: { lines: waiting, visual: plan.visual, hire: plan.hire } } })
+      .agent,
+    null
+  );
+  const effects = globalThis.OriFolderSetupVisual.reviewConsequences({
+    ...plan,
+    lines: songLines
+  });
+  assert.equal(effects.length, 2);
+  assert.ok(effects.every(effect => !effect.startsWith('Creates a Reaper Song workspace')));
+});
+
 test('resolved visuals trust structured canonical receipts, never hire names or receipt prose', () => {
   const offer = {
     status: 'resolved',

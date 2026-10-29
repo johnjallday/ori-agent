@@ -1298,6 +1298,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		const folderDigest = "/api/personal-assistant/folder-digest"
 		mux.HandleFunc("GET "+folderDigest, s.Handlers.PersonalAssistant.GetFolderDigest)
 		mux.HandleFunc("GET "+folderDigest+"/continuations", s.Handlers.PersonalAssistant.GetFolderContinuations)
+		mux.HandleFunc("GET "+folderDigest+"/home-suggestions", s.Handlers.PersonalAssistant.GetFolderHomeSuggestions)
 		mux.HandleFunc("POST "+folderDigest+"/prompted", s.Handlers.PersonalAssistant.PromptedFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/scan", s.Handlers.PersonalAssistant.ScanFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/picker", s.Handlers.PersonalAssistant.PickFolderDigest)

@@ -12,6 +12,7 @@ import {
   folderDiagramVisible,
   folderFirstLookAvailable,
   folderFirstLookOpen,
+  handoffFirstPressLabel,
   isInboxFolderOffer,
   hireLookView,
   hireView,
@@ -67,6 +68,86 @@ test('stop families keep distinct reviewed recovery actions and never guess a pl
     assert.ok(!view.actions.some(action => action.label === 'Retry update'));
     if (reason === 'needs_choice') assert.equal(view.actions[0].entry, 'Actual.rpp');
   }
+});
+
+// Home first: after Set up the Home is ready and lists the song; the card
+// leads to the Home, where its Portfolio Manager suggests opening it.
+const handoffStop = (extra = {}) => ({
+  status: 'stopped',
+  stop_reason: 'handoff_ready',
+  destination: { status: 'new', name: 'Music Production Home' },
+  lines: [
+    { kind: 'home', name: 'Creates your Music Production Home', state: 'done' },
+    { kind: 'library', name: 'Lists Album-5 in the Home’s library', state: 'done' },
+    {
+      kind: 'handoff',
+      name: 'Your Music Portfolio Manager then suggests opening Album-5',
+      state: 'waiting'
+    },
+    { kind: 'workspace', name: 'Creates a REAPER song workspace', state: 'waiting' }
+  ],
+  ...extra
+});
+
+test('a single song whose Home is ready leads to the Home', () => {
+  const view = setupRunView(
+    handoffStop({
+      suggested_in: { name: 'Music Production Home', route: '/workspaces/music-home/assistant' }
+    }),
+    'Album-5'
+  );
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label, action.href]),
+    [
+      ['go-home', 'Go to Music Production Home', '/workspaces/music-home/assistant'],
+      ['remove', 'Remove', undefined]
+    ]
+  );
+  assert.equal(view.ask, 'open it in its Home');
+  // The Home's steps are all done, so no "2 of 4" count of the song's steps.
+  assert.match(
+    view.question,
+    /^Music Production Home is ready and lists Album-5\. Your Music Portfolio Manager suggests opening it there/
+  );
+  assert.doesNotMatch(view.question, /handoff_ready/);
+});
+
+test('a stopped song whose Home page cannot be named keeps its Open here', () => {
+  for (const suggested of [undefined, { name: 'Home', route: 'https://elsewhere.example/x' }]) {
+    const view = setupRunView(handoffStop({ suggested_in: suggested }), 'Album-5');
+    assert.deepEqual(
+      view.actions.map(action => [action.id, action.label]),
+      [
+        ['open-song', 'Open Album-5'],
+        ['remove', 'Remove']
+      ]
+    );
+    // Not the chooser's `open`: this press runs the one-card setup with open.
+    assert.equal(view.actions[0].openSong, true);
+    assert.equal(view.actions[0].open, undefined);
+  }
+  // The press posts the open; the chooser's `open` branch never sees it.
+  assert.match(source, /if \(action\?\.openSong\) body\.open = true;/);
+});
+
+test('a single song’s first press is named for the Home it sets up, not the song', () => {
+  const plan = (lines, existing) => ({
+    destination: { status: existing ? 'existing' : 'new', name: 'Music Production Home' },
+    visual: { entity: { kind: 'workspace', name: 'Night Drive', operation: 'create' } },
+    lines
+  });
+  const handoff = { kind: 'handoff', name: 'Your Portfolio Manager then opens Night Drive' };
+  assert.equal(
+    handoffFirstPressLabel(
+      plan([{ kind: 'home', name: 'Creates your Music Production Home' }, handoff])
+    ),
+    'Set up Music Production Home'
+  );
+  assert.equal(
+    handoffFirstPressLabel(plan([{ kind: 'library', name: 'Lists Night Drive' }, handoff], true)),
+    'Add Night Drive to Music Production Home'
+  );
+  assert.equal(handoffFirstPressLabel(plan([{ kind: 'workspace', name: 'Creates X' }])), '');
 });
 
 const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
@@ -201,37 +282,80 @@ test('a plan without a hire, or with one the card does not know, keeps the Set u
   assert.equal(collection.hire, null);
 });
 
-// FR3, FR8: a single song its Home's Portfolio Manager opens is still the
-// song's hire card, and Adjust still opens the plugin's step-by-step quest,
-// never the collection's Create Group modal.
-test('a single song’s handoff plan keeps the hire card and Adjust opens the quest', () => {
-  const offer = hireOffer(
+// Home first: a single song's card sets up its Home with a plain Set up (the
+// hire is the Home manager's suggestion, asked in the Home), and Adjust still
+// opens the plugin's step-by-step quest, never the Create Group modal.
+const handoffOffer = plan =>
+  hireOffer(
     {},
     {
       plan: {
         ...hireOffer().plan,
         destination: { status: 'new', name: 'Music Production Home' },
-        visual: { entity: { kind: 'workspace', name: 'My Song', operation: 'create' } },
+        visual: { entity: { kind: 'home', name: 'Music Production Home', operation: 'create' } },
         lines: [
           { kind: 'home', name: 'Creates your Music Production Home' },
           { kind: 'library', name: 'Lists My Song in the Home’s library' },
-          { kind: 'handoff', name: 'Your Portfolio Manager then opens My Song' },
+          { kind: 'handoff', name: 'Your Portfolio Manager then suggests opening My Song' },
           { kind: 'workspace', name: 'Creates a REAPER Song workspace named My Song' },
           { kind: 'task', name: 'An optional read-only summary' }
-        ]
+        ],
+        ...plan
       }
     }
   );
-  const view = folderOfferView(offer);
-  assert.equal(text(view.headline), 'Hire Song Assistant for My Song');
-  assert.ok(view.hire.brief, 'the brief question stays');
-  assert.equal(view.hire.adjust.journey, true);
-  assert.equal(view.hire.adjust.adjustStructure, undefined);
-  assert.equal(view.plan.lines.length, 5);
+
+test('a single song’s card sets up its Home, without the hire', () => {
+  const view = folderOfferView(handoffOffer());
+  assert.equal(view.hire, null);
+  assert.equal(text(view.headline), 'My Song looks like a REAPER song project.');
+  assert.match(view.question, /^Set up Music Production Home for My Song\?/);
+  assert.equal(view.actions[0].label, 'Set up Music Production Home');
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.journey === true]),
+    [
+      ['setup', false],
+      ['adjust', true],
+      ['no', false],
+      ['later', false]
+    ]
+  );
+  assert.equal(view.actions[1].adjustStructure, undefined);
   assert.deepEqual(
     view.plan.lines.map(line => line.kind),
-    ['home', 'library', 'handoff', 'workspace', 'task']
+    ['home', 'library', 'handoff']
   );
+});
+
+test('a later song, with its Home ready, only leads to the Home', () => {
+  const view = folderOfferView(
+    handoffOffer({
+      lines: [
+        { kind: 'library', name: 'Lists My Song in the Home’s library' },
+        { kind: 'handoff', name: 'Your Portfolio Manager then suggests opening My Song' },
+        { kind: 'workspace', name: 'Creates a REAPER Song workspace named My Song' }
+      ],
+      suggested_in: { name: 'Music Production Home', route: '/workspaces/music-home/assistant' }
+    })
+  );
+  assert.equal(text(view.headline), 'My Song belongs in Music Production Home');
+  assert.match(
+    view.question,
+    /Your Portfolio Manager there suggests opening it.*Nothing is set up here\./
+  );
+  assert.equal(view.plan, null);
+  assert.equal(view.hire, null);
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.href]),
+    [
+      ['go-home', '/workspaces/music-home/assistant'],
+      ['no', undefined]
+    ]
+  );
+});
+
+test('a single song’s first press skips the source review; its brief is asked in the Home', () => {
+  assert.match(source, /!handoffLineParts\(state\.offer\.plan\?\.lines\)/);
 });
 
 test('after Adjust… the hire keeps its plan beside Continue setup', () => {

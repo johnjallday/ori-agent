@@ -111,7 +111,13 @@
       parent = 'Separate workspace · no parent Home';
     else if (['new', 'existing'].includes(destination?.status) && text(destination.name))
       parent = `${destination.status === 'new' ? 'Proposed new' : 'Existing'} ${destination.kind === 'group' ? 'group' : destination.kind === 'project' ? 'project' : 'Home'} · ${destination.name}`;
-    const hire = offer?.setup?.hire || plan?.hire;
+    // A single song handed to its Home is hired there, on its manager's
+    // suggestion: until that open starts, the assistant's picture is the Home.
+    const handedOver =
+      handoffAt >= 0
+        ? !['working', 'done', 'failed'].includes(setupLines[handoffAt].state)
+        : !setup && list(plan?.lines).some(line => line.kind === 'handoff');
+    const hire = handedOver ? null : offer?.setup?.hire || plan?.hire;
     const agent =
       hire && ['create', 'bind', 'pending'].includes(hire.mode)
         ? {
@@ -598,7 +604,11 @@
     if (!plan) return [];
     const effects = [];
     const plugins = list(plan.visual?.plugins);
-    for (const line of list(plan.lines)) {
+    // A single song's effects here are its Home's; opening the song is the
+    // Home manager's suggestion, with its own effects there.
+    const lines = list(plan.lines);
+    const handoffAt = lines.findIndex(line => line.kind === 'handoff');
+    for (const line of handoffAt < 0 ? lines : lines.slice(0, handoffAt + 1)) {
       if (['integration', 'provider'].includes(line.kind)) {
         const plugin = plugins.find(row => row.kind === line.kind);
         if (plugin?.operation === 'ready') continue;
@@ -634,6 +644,7 @@
     }
     // A first look that calls no model (an inbox folder's first batch) spends
     // no tokens and reads no file contents.
+    if (handoffAt >= 0) return effects.filter(Boolean);
     if (plan.optional_task === true)
       effects.push(
         'Setup makes the optional summary available. It does not start it or spend its model tokens.'

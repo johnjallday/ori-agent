@@ -369,4 +369,51 @@ test('handoffNames reads the Home and the song from a plan, a run or a build pla
     shared.handoffSections(handoffLines(shared), {}).heading,
     'Your assistant sets up your Home'
   );
+  // Home first: the picture is the Home, so the song is the handoff line's.
+  const suggested = {
+    destination: { status: 'new', name: 'Music Production Home' },
+    visual: { entity: { kind: 'home', name: 'Music Production Home' } },
+    lines: handoffLines(shared, {
+      handoff: { name: 'Your Portfolio Manager then suggests opening Album-5' }
+    })
+  };
+  assert.deepEqual(plain(shared.handoffNames(suggested)), {
+    home: 'Music Production Home',
+    song: 'Album-5'
+  });
+  assert.deepEqual(plain(shared.handoffLineParts(suggested.lines)), {
+    manager: 'Your Portfolio Manager',
+    song: 'Album-5'
+  });
+  assert.equal(shared.handoffLineParts([{ kind: 'workspace', name: 'Creates' }]), null);
+});
+
+test('a suggested open names its states, and each card draws its own half', () => {
+  const { shared, document } = load();
+  const names = { home: 'Music Production Home', song: 'Album-5' };
+  const suggests = 'Your Portfolio Manager then suggests opening Album-5';
+  assert.equal(
+    shared.handoffLineName({ name: suggests, state: 'working' }, 'Album-5'),
+    'Portfolio Manager is opening Album-5…'
+  );
+  assert.equal(
+    shared.handoffLineName({ name: suggests, state: 'done' }, 'Album-5'),
+    'Portfolio Manager opened Album-5'
+  );
+  const lines = handoffLines(shared, { handoff: { name: suggests } });
+  const list = document.createElement('ul');
+  // The assistant's card: the Home's half, closed by the manager's suggestion.
+  shared.renderSetupLines(list, lines, document, { sections: names, half: 'home' });
+  assert.equal(list.dataset.sections, 'handoff');
+  assert.deepEqual(
+    list.children.map(item => item.dataset.kind),
+    ['section', 'integration', 'provider', 'home', 'agents', 'library', 'handoff']
+  );
+  // The Home's card: only what opening the song does, with no headings.
+  shared.renderSetupLines(list, lines, document, { sections: names, half: 'song' });
+  assert.equal(list.dataset.sections, undefined);
+  assert.deepEqual(
+    list.children.map(item => item.dataset.kind),
+    ['workspace', 'folder', 'mode', 'agents', 'task']
+  );
 });

@@ -51,7 +51,13 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		if err != nil {
 			out.UnavailableSources = appendSource(out.UnavailableSources, "folder offers")
 		} else if view.Offer != nil && (view.Offer.Status == FolderOfferPending || view.Offer.Status == FolderOfferAwaitingOutcome) {
-			needs = append(needs, TodayItem{ID: view.Offer.ID, Kind: "folder_offer", Title: "Look at " + view.Offer.Folder})
+			item := TodayItem{ID: view.Offer.ID, Kind: "folder_offer", Title: "Look at " + view.Offer.Folder}
+			if home := folderOfferSuggestedIn(*view.Offer); home != nil {
+				// A song waiting in its Home is the Home's suggestion: the row leads
+				// there, where the open is pressed.
+				item.Title, item.Route = "Open "+view.Offer.Subject.Name+" in "+home.Name, home.Route
+			}
+			needs = append(needs, item)
 		}
 	}
 	notesWorking, notesNeeds, notesDone := s.secondBrainItems(ctx, userID, now)

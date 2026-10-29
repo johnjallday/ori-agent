@@ -251,7 +251,7 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
 // setupLinesView normalizes the server's plan or run lines for rendering, and
 // renderSetupLines draws them: the shared plan lines the Create Workspace build
 // pane draws too (folder-plan-lines.js).
-export const { setupLinesView, renderSetupLines, hireView, handoffNames } =
+export const { setupLinesView, renderSetupLines, hireView, handoffNames, handoffLineParts } =
   globalThis.OriFolderPlanLines;
 
 const SETUP_STOP_COPY = {
@@ -270,8 +270,49 @@ const SETUP_STOP_COPY = {
     'Your shared agent was approved for an older version of this blueprint. Completed work is kept; Continue setup to review staffing yourself.',
   assistant_missing:
     'The shared agent this Home used is no longer available. Completed work is kept; Continue setup to choose the agent yourself.',
+  // A single song's Home is ready and lists it; its manager suggests opening
+  // it, in the Home.
+  handoff_ready: (subject, setup) =>
+    `${homeSuggestionLink(setup)?.name || String(setup?.destination?.name || '').trim() || 'Your Home'} is ready and lists ${subject}. ${handoffManager(setup)} suggests opening it there, with its own assistant.`,
   failed: 'A step did not finish.'
 };
+
+// handoffFirstPressLabel is what a single song's Set up does: the song itself
+// is opened on its own press later, so this press sets up (or adds the song
+// to) the Home. "" for any other plan.
+export function handoffFirstPressLabel(plan) {
+  const lines = Array.isArray(plan?.lines) ? plan.lines : [];
+  const at = lines.findIndex(line => line?.kind === 'handoff');
+  if (at < 0) return '';
+  const { home, song } = handoffNames(plan);
+  const homeName = home || 'the Home';
+  const creates = lines.slice(0, at).some(line => line?.kind === 'home' || line?.kind === 'agents');
+  return creates || !song ? `Set up ${homeName}` : `Add ${song} to ${homeName}`;
+}
+
+// handoffManager is "Your Portfolio Manager" as the run's handoff line names
+// the Home's manager.
+function handoffManager(setup) {
+  return handoffLineParts(setup?.lines)?.manager || 'Your Portfolio Manager';
+}
+
+// A Home's own page, where its manager's suggestions are.
+const HOME_SUGGESTION_ROUTE = /^\/workspaces\/[A-Za-z0-9._~%-]+\/assistant$/;
+
+// homeSuggestionLink is the ready Home a single song waits in ({ name, route }):
+// the plan's, before anything is pressed, or the stopped run's. null when the
+// song is not the Home's suggestion or its page cannot be opened.
+export function homeSuggestionLink(source) {
+  const link = source?.suggested_in;
+  const name = String(link?.name || '').trim();
+  const route = String(link?.route || '').trim();
+  return name && HOME_SUGGESTION_ROUTE.test(route) ? { name, route } : null;
+}
+
+// goToHomeAction leads to the Home where the song's open is pressed.
+function goToHomeAction(home) {
+  return { id: 'go-home', label: `Go to ${home.name}`, style: 'primary', href: home.route };
+}
 
 // A collection's run stops in the same ways; only what is already true differs.
 const PORTFOLIO_STOP_COPY = {
@@ -345,6 +386,7 @@ const SETUP_STOP_ASK = {
   interrupted: 'finish setup',
   consent_stale: 'review its shared agent',
   assistant_missing: 'choose its agent',
+  handoff_ready: 'open it in its Home',
   member_failed: 'continue creating its workspaces',
   failed: 'retry a step that did not finish'
 };
@@ -430,9 +472,25 @@ function softwareStoppedActions(reason) {
   }
 }
 
-function stoppedActions(reason, setup) {
+function stoppedActions(reason, setup, subject = '') {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
   switch (reason) {
+    case 'handoff_ready': {
+      // The open is pressed in the Home, on its manager's suggestion. A run
+      // whose Home page cannot be named keeps the open here.
+      const home = homeSuggestionLink(setup);
+      if (home) return [goToHomeAction(home)];
+      return [
+        {
+          id: 'open-song',
+          label: subject ? `Open ${subject}` : 'Open the song',
+          style: 'primary',
+          oneCard: true,
+          // Not `open`: that flag reopens the folder chooser.
+          openSong: true
+        }
+      ];
+    }
     case 'plan_changed':
       return [{ ...CONTINUE_SETUP, label: 'Review changed setup', style: 'primary' }];
     case 'consent_stale':
@@ -510,8 +568,17 @@ export function setupRunView(
     };
   }
   const reason = String(setup?.stop_reason || 'failed');
-  const finished = lines.filter(line => line.state === 'done').length;
-  const progress = lines.length ? `${finished} of ${lines.length} steps finished. ` : '';
+  // Waiting at the hand-off, the steps here are the Home's: the song's are
+  // the Home manager's suggestion, not unfinished work of this setup.
+  const handoffAt = lines.findIndex(line => line.kind === 'handoff');
+  const counted = reason === 'handoff_ready' && handoffAt >= 0 ? lines.slice(0, handoffAt) : lines;
+  const finished = counted.filter(line => line.state === 'done').length;
+  const progress =
+    reason === 'handoff_ready' && counted.length && finished === counted.length
+      ? ''
+      : counted.length
+        ? `${finished} of ${counted.length} steps finished. `
+        : '';
   let sentence =
     (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
   if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
@@ -526,7 +593,7 @@ export function setupRunView(
       ? softwareStoppedActions(reason)
       : inbox
         ? inboxStoppedActions(reason)
-        : stoppedActions(reason, setup || {});
+        : stoppedActions(reason, setup || {}, subject);
   return {
     status,
     lines,
@@ -923,10 +990,32 @@ function capabilityConfirmView(offer, base, subject) {
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const continuing = base.status === 'awaiting_outcome';
+  // A single song is its Home's: this card sets up the Home (or, with the Home
+  // ready, only leads there), and the hire is the Home manager's suggestion.
+  const handoff = !run && handoffLineParts(offer.plan?.lines);
   const hire =
-    hasPlan && !portfolio && (continuing || !base.decided)
+    hasPlan && !portfolio && !handoff && (continuing || !base.decided)
       ? hireView(offer.plan, subject, { needs: offer.needs })
       : null;
+  const suggestedIn = handoff && !base.decided ? homeSuggestionLink(offer.plan) : null;
+  if (suggestedIn)
+    return {
+      ...base,
+      headline: segments([{ text: subject }, ' belongs in ', { text: suggestedIn.name }]),
+      question: `${handoff.manager} there suggests opening it, with its own assistant. Nothing is set up here.`,
+      recognitionLine: '',
+      needsLine: '',
+      capabilityDetail: '',
+      reason: '',
+      actions: [
+        goToHomeAction(suggestedIn),
+        { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
+      ],
+      resume: false,
+      plan: null,
+      hire: null,
+      setup: null
+    };
   const decline = {
     id: 'no',
     label: String(capability.decline_label || 'No thanks'),
@@ -955,8 +1044,9 @@ function capabilityConfirmView(offer, base, subject) {
     actions = [
       {
         id: 'setup',
-        // The plan above says what happens, so the button is the plain verb.
-        label: 'Set up',
+        // The plan above says what happens, so the button is the plain verb;
+        // a single song's names the Home it sets up.
+        label: handoffFirstPressLabel(offer.plan) || 'Set up',
         style: 'primary',
         oneCard: true
       },
@@ -990,7 +1080,9 @@ function capabilityConfirmView(offer, base, subject) {
           : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
   let question = portfolio
     ? String(capability.question || `Set up a ${capability.workspace}?`)
-    : `Set up ${subject} as a ${capability.workspace}?`;
+    : handoff
+      ? `Set up ${handoffNames(offer.plan).home || 'its Home'} for ${subject}?`
+      : `Set up ${subject} as a ${capability.workspace}?`;
   if (hasPlan) question += ' Here is everything Set up will do:';
   // A hire asks its one question in its own field; this line says what the
   // folder was recognized as.
@@ -1039,7 +1131,16 @@ function capabilityConfirmView(offer, base, subject) {
     reason: run ? '' : String(capability.evidence || base.reason),
     actions,
     resume: continuing,
-    plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
+    plan: hasPlan
+      ? {
+          // A single song's lines here end at its hand-off: the rest is the
+          // Home manager's suggestion.
+          lines: handoff
+            ? planLines.slice(0, planLines.findIndex(line => line.kind === 'handoff') + 1)
+            : planLines,
+          digest: String(offer.plan?.digest || '')
+        }
+      : null,
     hire,
     setup: run
   };
@@ -3914,9 +4015,11 @@ function renderOffer(place) {
     // Ticking watching adds its fifth line before the click; a run carries its own.
     if (!view.setup && view.plan?.lines && view.hire?.monitoring && monitoringChosen(state.offer))
       lines = [...lines, { kind: 'mode', name: view.hire.monitoring.line, detail: '', state: '' }];
-    // A single song's plan is the Home's half, then its Portfolio Manager's.
+    // A single song's plan here is the Home's half, closed by its Portfolio
+    // Manager's suggestion; the song's own half is the Home's card.
     renderSetupLines(els.plan, lines, document, {
-      sections: handoffNames(state.offer?.setup || state.offer?.plan)
+      sections: handoffNames(state.offer?.setup || state.offer?.plan),
+      half: 'home'
     });
     els.plan.hidden = !lines.length;
     els.plan.dataset.mode = view.setup ? view.setup.status : look?.visible ? 'look' : 'plan';
@@ -4641,7 +4744,19 @@ function renderSourceCreationReview() {
     offer = state.offer,
     parent = elements()?.offer;
   if (!parent) return;
-  const active = review && sourceReviewCurrent(review) && !review.editing;
+  // A reviewed setup that stopped (a single song's Home ready for Open, or a
+  // stop that needs the user) is the card's own to show, with its actions;
+  // the review no longer waits for a result there.
+  if (
+    review &&
+    sourceReviewCurrent(review) &&
+    review.pending &&
+    !review.result &&
+    offer?.setup?.status === 'stopped'
+  )
+    sourceCreationReview = null;
+  const active =
+    sourceCreationReview === review && review && sourceReviewCurrent(review) && !review.editing;
   parent.classList.toggle('pa-folder--shared-review', Boolean(active));
   let host = parent.querySelector('[data-source-creation-review]');
   if (!active) {
@@ -4697,6 +4812,8 @@ function renderSourceCreationReview() {
     : 'Create workspace & start first task';
   if (offer.plan?.visual?.entity?.operation === 'reuse')
     review.actionLabel = 'Prepare existing workspace';
+  const firstPress = handoffFirstPressLabel(offer.plan);
+  if (firstPress) review.actionLabel = firstPress;
   review.panel.update({
     ...projection,
     ownerKind: 'setup',
@@ -4887,10 +5004,13 @@ async function observeSourceCreationResult(review) {
 
 // Confirm the displayed plan only; the server rechecks it and runs the setup.
 async function startOneCardSetup(action) {
+  // A single song's first press sets up its Home, whose place is fixed; the
+  // song's name and goal are asked in the Home, on its manager's suggestion.
   if (
     state.offer?.status === 'pending' &&
     state.offer.plan?.digest &&
-    !isInboxFolderOffer(state.offer)
+    !isInboxFolderOffer(state.offer) &&
+    !handoffLineParts(state.offer.plan?.lines)
   ) {
     if (!action?.reviewedSourceKey) {
       if (!sourceCreationReview || !sourceReviewCurrent(sourceCreationReview)) {
@@ -4941,6 +5061,8 @@ async function startOneCardSetup(action) {
   try {
     const body = { plan_digest: digest };
     if (action?.entry) body.entry_name = action.entry;
+    // A single song's Open: the Home is ready; its Portfolio Manager opens it.
+    if (action?.openSong) body.open = true;
     // The brief the user typed; untouched, the server applies the plan's own
     // default, and a cleared field is sent empty for the same default.
     const brief = offer.plan?.brief_default ? briefFor(offer) : null;

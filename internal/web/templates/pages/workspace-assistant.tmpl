@@ -310,6 +310,7 @@
     import { ProjectLibraryPanel } from '/js/modules/project-library.js';
     import { HomeProfilePanel } from '/js/modules/home-profile.js';
     import { HomeResourceWorkspacesPanel, templatesEvidence } from '/js/modules/home-resource-workspaces.js';
+    import { HomeSongSuggestions } from '/js/modules/home-song-suggestions.js';
     const page = new AssistantProgramPage({
       workspaceId: {{.Extra.WorkspaceID}},
       workspaceSlug: {{.Extra.WorkspaceSlug}}
@@ -321,6 +322,11 @@
       const profile = new HomeProfilePanel({workspaceId: page.workspaceId, program: page.program});
       void profile.init();
       if (page.program?.is_station) {
+        // The Home's manager suggests opening songs the assistant brought here.
+        void new HomeSongSuggestions({
+          workspaceId: page.workspaceId,
+          anchor: document.getElementById('projectSetupNext')
+        }).init();
         void new HomeResourceWorkspacesPanel({
           workspaceId: page.workspaceId,
           onLoad: summaries => profile.setCatalogTemplates(templatesEvidence(summaries))
