@@ -449,6 +449,8 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		if b.runtimeResolver != nil {
 			b.runtimeResolver.SetCuratorProtectionReader(protection)
 		}
+		// An inbox hire's first-batch report leads with backup from the same fact.
+		todayService.SetFileCuratorProtectionReader(protection)
 	}
 	// The protection line: stored coverage of adopted folders, and its one
 	// sticky "Not now" kept in the folder digest (wired above).

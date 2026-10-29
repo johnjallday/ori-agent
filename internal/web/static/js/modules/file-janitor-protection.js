@@ -208,6 +208,44 @@ export function createProtectionTrips(win) {
     }
     win.location.href = withNonce(route);
   }
+  // readProtection is a workspace's stored protection fact, as the review
+  // console reads it; it throws when the fact or its destination is missing.
+  async function readProtection(workspaceId) {
+    const unavailable = new Error('Protection is unavailable for this folder.');
+    if (!ID.test(workspaceId || '')) throw unavailable;
+    let fact = null;
+    try {
+      const response = await win.fetch(
+        '/api/workspaces/' + encodeURIComponent(workspaceId) + '/file-janitor/protection'
+      );
+      if (response.ok) fact = await response.json();
+    } catch (_) {
+      fact = null;
+    }
+    if (fact?.workspace_id !== workspaceId || !fact.root_generation || !fact.destination)
+      throw unavailable;
+    return fact;
+  }
+  // Home's report card and the Backlog shelf have no review to restore, so
+  // they open the destination with no trip: none is created, read or cleared.
+  async function openDestination(target) {
+    if (target?.kind === 'chooser') {
+      if (!win.OriProtectFolders?.open) throw new Error('The protection chooser is unavailable.');
+      await win.OriProtectFolders.open();
+      return;
+    }
+    let route;
+    try {
+      route = consoleRoute(target);
+    } catch (_) {
+      throw new Error('That Backup & Recovery destination is unavailable.');
+    }
+    if (target.workspace_id === win.currentWorkspaceId && win.BackupRecoveryConsole?.open) {
+      win.BackupRecoveryConsole.open({ tab: 'overview' });
+      return;
+    }
+    win.location.href = route;
+  }
   async function returnToReview() {
     const trip = read();
     if (!trip)
@@ -325,6 +363,8 @@ export function createProtectionTrips(win) {
     consume,
     scrub,
     openBackup,
+    openDestination,
+    readProtection,
     createRoute: () => withNonce('/?create=1&blueprint=backup-and-recovery'),
     returnToReview,
     returnButton,

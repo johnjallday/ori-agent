@@ -14,9 +14,17 @@ export const HIRE_LOOK_REPORT_KIND = 'hire_first_look_report';
 // An inbox folder's File Curator reports its first batch through the same card
 // (folder-inbox-hire), keyed by its setup: Review batch (or Open File Janitor
 // when there was nothing to file), Not now, and Retry for a scan that did not
-// complete.
+// complete. When the folder has no backup it leads with the host's backup
+// suggestion and Check protection, which opens protection and posts nothing.
 export const FIRST_BATCH_REPORT_KIND = 'folder_first_batch';
-const REPORT_ACTIONS = ['start_this', 'not_now', 'retry', 'review_batch', 'open_janitor'];
+const REPORT_ACTIONS = [
+  'start_this',
+  'not_now',
+  'retry',
+  'review_batch',
+  'open_janitor',
+  'check_protection'
+];
 // A task's own page in a workspace, and nothing else.
 const REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
 // A workspace's own page, and nothing else.
@@ -150,7 +158,8 @@ export function firstLookReportView(item, now = new Date()) {
 
 // firstBatchReportView is an inbox hire's report: the host's sentence with the
 // batch's counts, and one primary that opens the review (a link, never a post),
-// or Retry for a first scan that did not complete.
+// or Retry for a first scan that did not complete. A backup suggestion, when
+// the host made one, comes first with Check protection as the primary.
 function firstBatchReportView(item, now) {
   const failed = item.state === 'failed';
   if (item.state !== 'finished' && !failed) return null;
@@ -158,14 +167,27 @@ function firstBatchReportView(item, now) {
   if (!LOOK_ID.test(lookId)) return null;
   const agent = String(item.attribution || '').trim() || 'File Curator';
   const workspace = String(item.workspace || '').trim();
+  const workspaceId = String(item.ref?.workspace_id || '').trim();
   const offered = (Array.isArray(item.actions) ? item.actions : []).filter(action =>
     REPORT_ACTIONS.includes(action)
   );
+  const text = String(item.suggestion?.text || '').trim();
+  const suggestion =
+    !failed && text && offered.includes('check_protection') && WORKSPACE_ID.test(workspaceId)
+      ? { text, evidence: String(item.suggestion?.evidence || '').trim() }
+      : null;
   const route = String(item.report_route || '').trim();
   const actions = [];
+  if (suggestion)
+    actions.push({ id: 'check_protection', label: 'Check protection', primary: true });
   if (!failed && isFileJanitorReviewRoute(route)) {
     if (offered.includes('review_batch'))
-      actions.push({ id: 'review_batch', label: 'Review batch', primary: true, href: route });
+      actions.push({
+        id: 'review_batch',
+        label: 'Review batch',
+        primary: !suggestion,
+        href: route
+      });
     else if (offered.includes('open_janitor'))
       actions.push({ id: 'open_janitor', label: 'Open File Janitor', primary: true, href: route });
   }
@@ -176,12 +198,13 @@ function firstBatchReportView(item, now) {
   return {
     kind: 'batch',
     lookId,
+    workspaceId,
     agent,
     initials: initialsOf(agent) || 'FC',
     meta: [workspace, failed ? '' : finishedAgo(item.source_at, now)].filter(Boolean).join(' · '),
     title: String(item.title || '').trim(),
     summary: String(item.detail || '').trim(),
-    suggestion: null,
+    suggestion,
     actions,
     report: null,
     map: mapPlacementView({ agent, home: item.home, workspaceId: item.ref?.workspace_id })
@@ -342,12 +365,44 @@ export function reportedLine(agent, folder) {
   return `${who} finished its first look${where ? ` at ${where}` : ''}. It's under Needs you, with what it suggests first.`;
 }
 
+// checkReportProtection is Check protection: it reads the workspace's stored
+// protection fact and opens its destination, with no review trip. It posts
+// nothing and returns the sentence to show when protection cannot be opened.
+export async function checkReportProtection(view, protection) {
+  try {
+    if (!protection?.readProtection || !protection?.openDestination)
+      throw new Error('Protection is unavailable for this folder.');
+    const fact = await protection.readProtection(view.workspaceId);
+    await protection.openDestination(fact.destination);
+    return '';
+  } catch (error) {
+    return error?.message || 'Protection is unavailable for this folder.';
+  }
+}
+
+function showReportError(card, doc, message) {
+  card?.querySelector('.first-look-report__error')?.remove();
+  if (!card || !message) return;
+  const notice = doc.createElement('p');
+  notice.className = 'first-look-report__error';
+  notice.setAttribute('role', 'alert');
+  notice.textContent = message;
+  card.append(notice);
+}
+
 // mountFirstLookReports draws every report among a section's raw Today items
-// into host and returns how many it drew. onDone runs after an action posted.
+// into host and returns how many it drew. onDone runs after an action posted;
+// Check protection posts nothing, so it does not call it.
 export function mountFirstLookReports(
   host,
   items,
-  { doc = document, now = new Date(), onDone, fetchImpl } = {}
+  {
+    doc = document,
+    now = new Date(),
+    onDone,
+    fetchImpl,
+    protection = globalThis.window?.FileJanitorProtection
+  } = {}
 ) {
   if (!host) return 0;
   const views = (Array.isArray(items) ? items : [])
@@ -361,6 +416,14 @@ export function mountFirstLookReports(
           buttons.forEach(control => {
             control.disabled = true;
           });
+          if (action === 'check_protection') {
+            const card = button?.closest?.('.first-look-report');
+            showReportError(card, doc, await checkReportProtection(view, protection));
+            buttons.forEach(control => {
+              control.disabled = false;
+            });
+            return;
+          }
           const result = await firstLookReportAction(view, action, fetchImpl);
           if (!result.ok)
             buttons.forEach(control => {

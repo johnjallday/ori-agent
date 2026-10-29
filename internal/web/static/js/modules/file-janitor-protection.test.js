@@ -186,6 +186,75 @@ test('typed backup and return routes reject arbitrary destinations and revalidat
   assert.equal(trips.read(), null);
 });
 
+test('openDestination opens the chooser or a console with no trip record', async () => {
+  const { win, values, trips } = fixture();
+  const opened = [];
+  win.OriProtectFolders = { open: async options => opened.push(options) };
+  await trips.openDestination({ kind: 'chooser' });
+  assert.deepEqual(opened, [undefined]);
+
+  // This workspace's console opens in place; another workspace's by its route.
+  const inPlace = [];
+  win.BackupRecoveryConsole = { open: options => inPlace.push(options) };
+  await trips.openDestination({ kind: 'workspace', workspace_id: 'filing', slug: 'filing' });
+  assert.deepEqual(inPlace, [{ tab: 'overview' }]);
+  await trips.openDestination({ kind: 'workspace', workspace_id: 'backup', slug: 'my-backups' });
+  assert.equal(win.location.href, '/workspaces/my-backups?panel=backup-recovery');
+
+  assert.equal(values.size, 0);
+  assert.equal(trips.read(), null);
+});
+
+test('openDestination refuses an invalid target or a missing chooser and changes nothing', async () => {
+  const { win, values, trips } = fixture();
+  const before = win.location.href;
+  for (const target of [
+    null,
+    { kind: 'url', route: '//evil.test' },
+    { kind: 'workspace', workspace_id: 'backup', slug: '../other' }
+  ]) {
+    await assert.rejects(trips.openDestination(target), /destination is unavailable\.$/);
+  }
+  await assert.rejects(trips.openDestination({ kind: 'chooser' }), /chooser is unavailable\.$/);
+  assert.equal(win.location.href, before);
+  assert.equal(values.size, 0);
+});
+
+test('readProtection returns the workspace fact and refuses a missing or foreign one', async () => {
+  const { win, trips } = fixture();
+  const fact = {
+    workspace_id: 'filing',
+    root_generation: 'root',
+    state: 'unknown',
+    destination: { kind: 'chooser' }
+  };
+  const asked = [];
+  win.fetch = async url => {
+    asked.push(url);
+    return { ok: true, json: async () => fact };
+  };
+  assert.deepEqual(await trips.readProtection('filing'), fact);
+  assert.deepEqual(asked, ['/api/workspaces/filing/file-janitor/protection']);
+  for (const [id, reply] of [
+    ['../x', fact],
+    ['other', fact],
+    ['filing', { ...fact, destination: null }],
+    ['filing', { ...fact, root_generation: '' }]
+  ]) {
+    win.fetch = async () => ({ ok: true, json: async () => reply });
+    await assert.rejects(
+      trips.readProtection(id),
+      /^Error: Protection is unavailable for this folder\.$/
+    );
+  }
+  win.fetch = async () => ({ ok: false, json: async () => fact });
+  await assert.rejects(trips.readProtection('filing'), /unavailable for this folder/);
+  win.fetch = async () => {
+    throw new Error('offline');
+  };
+  await assert.rejects(trips.readProtection('filing'), /unavailable for this folder/);
+});
+
 test('dismissal survives reload per binding and storage failure honestly falls back to memory', () => {
   const { trips, win, input } = fixture();
   assert.equal(trips.dismiss(input.bindingId), true);

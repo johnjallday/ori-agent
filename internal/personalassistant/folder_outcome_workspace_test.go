@@ -136,7 +136,7 @@ func TestFirstBatchReport_OpensTheBatchByTheWorkspacesCurrentName(t *testing.T) 
 	f, offerID := resolvedInboxHire(t, readyDesktopBatch)
 	offer, _ := storedFirstBatch(t, f, offerID)
 	ws := &workspace.Workspace{ID: "ws-desktop", Name: "Desktop", FolderSlug: "desktop-files"}
-	needs, _ := firstBatchReportItems(offer, ws, offer.Outcome.FirstLook.At.Add(time.Minute))
+	needs, _ := firstBatchReportItems(context.Background(), offer, ws, offer.Outcome.FirstLook.At.Add(time.Minute), nil)
 	want := "/workspaces/desktop-files?panel=file-janitor&batch_id=batch-1"
 	if len(needs) != 1 || needs[0].Route != want || needs[0].ReportRoute != want {
 		t.Fatalf("report = %+v", needs)
