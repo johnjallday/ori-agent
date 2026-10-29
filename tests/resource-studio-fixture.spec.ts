@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { confirmCreatorFinalAction, openCreatorResult } from './helpers/confirm-reviewed-creation';
 
 // Host journey for a resource workspace (REAPER Studio) against the TEST
 // FIXTURE plugins in tests/fixtures/resource-studio/. Run only through
@@ -140,12 +141,13 @@ test('Set up creates the one Studio under the Home', async ({ page, request }) =
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page);
   const committed = await commit;
   expect(committed.ok(), await committed.text()).toBeTruthy();
   createPayload = committed.request().postDataJSON();
   const created = await committed.json();
   studioID = created.folder.id;
+  await openCreatorResult(page);
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
 
   const studio = await json(await request.get(`/api/workspaces/${studioID}`));

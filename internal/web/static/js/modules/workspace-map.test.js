@@ -4348,6 +4348,11 @@ test('reviewed setup opts into one-click/Enter creation; hover, pan, blocked poi
       map.beginPlacement({
         token: 'setup',
         mode: 'reviewed-setup',
+        actionCopy: {
+          confirmLabel: 'Create workspace & scan here',
+          instruction:
+            'Click open ground or press Enter to create this reviewed workspace and scan.'
+        },
         initialCandidate: { x: 760, y: 456 },
         onConfirm: (_token, point) => {
           confirmed.push(point);
@@ -4392,6 +4397,115 @@ test('reviewed setup opts into one-click/Enter creation; hover, pan, blocked poi
     await flush();
     assert.equal(map.suspendDraftPlacement(), true);
   }
+});
+
+test('reviewed action copy is owner-supplied inert text and generic creation never claims a scan', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  map.beginPlacement({
+    token: 'generic',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 }
+  });
+  assert.match(harness.container.innerHTML, /Create workspace here/);
+  assert.doesNotMatch(harness.container.innerHTML, /scan|filing/i);
+  map.endPlacement('generic');
+  map.beginPlacement({
+    token: 'typed-owner',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 },
+    actionCopy: {
+      confirmLabel: '<img src=x onerror="alert(1)">',
+      instruction: 'Create the reviewed subject; membership remains unchanged.'
+    }
+  });
+  assert.match(harness.container.innerHTML, /&lt;img/);
+  assert.doesNotMatch(harness.container.innerHTML, /<img/);
+  assert.match(harness.container.innerHTML, /membership remains unchanged/);
+  assert.equal(patches.length, 0);
+});
+
+test('hovering placement toolbar preserves the reviewed candidate instead of moving it under the button', async () => {
+  const { map, harness } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  const candidates = [],
+    confirmed = [];
+  map.beginPlacement({
+    token: 'toolbar-site',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 },
+    onCandidate: (_token, point) => candidates.push(point),
+    onConfirm: (_token, point) => {
+      confirmed.push(point);
+      return true;
+    }
+  });
+  const before = candidates.length;
+  harness.fire('pointermove', {
+    ...pointerEvent(0, 0),
+    target: { closest: selector => (selector === '[data-ws-map-placement-controls]' ? {} : null) }
+  });
+  assert.equal(candidates.length, before, 'toolbar hover must not emit a new material position');
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(confirmed.length, 1);
+  assert.equal(confirmed[0].x, 760);
+  assert.equal(confirmed[0].y, 456);
+});
+
+test('reviewed placement can save without selecting the result over its owner review', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  const selected = map.getSelectedId();
+  map.beginPlacement({
+    token: 'owner-result',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 }
+  });
+  const saved = await map.commitPlacement('proven-result', {
+    token: 'owner-result',
+    candidate: { x: 760, y: 456 },
+    select: false
+  });
+  assert.equal(saved.saved, true);
+  assert.equal(map.getSelectedId(), selected);
+  assert.equal(patches.length, 1);
+  mountWithCamera(map, harness, [
+    { id: 'distant', name: 'Distant' },
+    { id: 'proven-result', name: 'Result' }
+  ]);
+  assert.equal(map.getSelectedId(), selected, 'refresh must not launch a competing result context');
+});
+
+test('a suggested creation point avoids the visible unbuilt HQ footprint without creating a Home', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: {}, snap_to_grid: false }
+  });
+  map.setHQStatus(HQ_MISSING);
+  mountWithCamera(map, harness, []);
+  await flush();
+  const anchor = hqAnchor(map);
+  assert.equal(
+    map.beginPlacement({ token: 'avoid-site', mode: 'reviewed-setup', initialCandidate: anchor }),
+    true
+  );
+  const preview = harness.container.innerHTML.match(
+    /data-ws-map-placement-preview[^>]*left:([-\d.]+)px;top:([-\d.]+)px/
+  );
+  assert.ok(preview, 'a real placement preview is drawn on the HQ-only map');
+  assert.notDeepEqual(
+    { x: Number(preview[1]), y: Number(preview[2]) },
+    { x: anchor.x, y: anchor.y }
+  );
+  assert.equal(patches.length, 0);
 });
 
 test('draft-only placement selects geometry without invoking ordinary creation or writing layout', async () => {
@@ -4823,6 +4937,96 @@ test('a re-mount keeps the keyboard on a canvas that had it, so a Move survives 
   assert.equal(focused, 2);
 });
 
+test('reviewed ordinary Group previews its minimum frame, rejects another district and saves only its exact anchor', async () => {
+  const { map, harness, patches, memberships } = buildHarness({
+    layout: { schema_version: 1, positions: { existing: { x: 0, y: 0 } }, snap_to_grid: true }
+  });
+  const workspaces = [{ id: 'existing', name: 'Existing Group', kind: 'group' }];
+  mountWithCamera(map, harness, workspaces);
+  await flush();
+  let confirms = 0;
+  map.beginPlacement({
+    token: 'group-frame',
+    mode: 'reviewed-setup',
+    preview: { name: 'New Group', kind: 'group' },
+    initialCandidate: { x: 760, y: 456 },
+    onConfirm: () => confirms++
+  });
+  assert.match(harness.container.innerHTML, /ws-map-placement-preview--group/);
+  assert.match(harness.container.innerHTML, /width:176px;height:170px/);
+  const world = map.computeWorldLayout(workspaces, map.getLayoutState());
+  const district = world.districts.find(row => row.id === 'existing');
+  const occupied = { x: district.x + 24, y: district.y + 24 };
+  const screen = map.camera.worldToScreen(occupied, map.getCamera(), { width: 1000, height: 600 });
+  harness.fire('pointermove', pointerEvent(screen.x, screen.y));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(confirms, 0, 'another district is not empty Group ground');
+  const blocked = await map.commitPlacement('created-group', {
+    token: 'group-frame',
+    candidate: occupied
+  });
+  assert.equal(blocked.saved, false);
+  assert.equal(patches.length, 0);
+  assert.equal(memberships.length, 0);
+  map.beginPlacement({
+    token: 'group-open',
+    preview: { name: 'New Group', kind: 'group' },
+    initialCandidate: { x: 2280, y: 1520 }
+  });
+  const saved = await map.commitPlacement('created-group', {
+    token: 'group-open',
+    candidate: { x: 2280, y: 1520 }
+  });
+  assert.equal(saved.saved, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(patches[0].operations[0].positions['created-group'])),
+    { x: 2280, y: 1520 }
+  );
+  assert.equal(memberships.length, 0, 'geometry never chooses Group members');
+});
+
+test('reviewed child geometry cannot expand its named Group across an unrelated workspace', async () => {
+  const { map, harness, patches, memberships } = buildHarness({
+    layout: {
+      schema_version: 1,
+      positions: { member: { x: 0, y: 0 }, unrelated: { x: 380, y: 0 } }
+    }
+  });
+  mountWithCamera(map, harness, [
+    { id: 'parent', name: 'Reviewed parent', kind: 'group' },
+    { id: 'member', name: 'Existing member', parent_id: 'parent' },
+    { id: 'unrelated', name: 'Unrelated' }
+  ]);
+  await flush();
+  map.beginPlacement({
+    token: 'parent-frame',
+    preview: { name: 'Child', parentID: 'parent' },
+    initialCandidate: { x: 760, y: 0 }
+  });
+  const blocked = await map.commitPlacement('new-child', {
+    token: 'parent-frame',
+    candidate: { x: 760, y: 0 }
+  });
+  assert.equal(
+    blocked.saved,
+    false,
+    'the child itself fits, but its real parent frame would claim Unrelated'
+  );
+  assert.equal(patches.length, 0);
+  assert.equal(memberships.length, 0);
+  map.beginPlacement({
+    token: 'parent-adjacent',
+    preview: { name: 'Child', parentID: 'parent' },
+    initialCandidate: { x: 176, y: 0 }
+  });
+  const saved = await map.commitPlacement('new-child', {
+    token: 'parent-adjacent',
+    candidate: { x: 176, y: 0 }
+  });
+  assert.equal(saved.saved, true);
+  assert.equal(memberships.length, 0, 'the creation owner already decided the parent');
+});
+
 test('reviewed placement blocks full visible and collapsed footprints without writing a position', async () => {
   const { map, harness, patches } = buildHarness({
     layout: {
@@ -5021,7 +5225,15 @@ test('district Build saves a position then adds the new workspace to the chosen 
   buildFromDistrict(harness);
   assert.deepEqual(
     modalCalls.map(o => ({ ...o })),
-    [{ mapOrigin: true, entryPoint: 'workspace_map_build' }]
+    [
+      {
+        mapOrigin: true,
+        entryPoint: 'workspace_map_build',
+        parentId: 'grp',
+        parentName: 'Group A',
+        parentLocked: true
+      }
+    ]
   );
   assert.equal(requests.length, 0, 'no writes before creation');
 

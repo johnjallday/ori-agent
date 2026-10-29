@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 import {
   prepareFolderCreationRuntime,
-  attachFirst,
+  attachFirst as attachFolderInBuild,
   resources,
   currentBuild,
   inbox
@@ -18,6 +18,40 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+// These cases exercise the generic model-proposal owner, not deterministic
+// inbox recognition. Obtain that state through a real independently declined
+// Home offer. Fresh extra entries make it an actual dump offer, but remain
+// unsettled for filing so the one old invoice is still the eligible result.
+async function attachFirst(
+  page: Page,
+  request: APIRequestContext,
+  root: string,
+  unsent = '',
+  beforeAttach?: () => Promise<void>
+) {
+  for (let index = 0; index < 24; index++)
+    writeFileSync(
+      join(root, `recent-${index}.${['txt', 'csv', 'png', 'zip', 'docx', 'pdf'][index % 6]}`),
+      'synthetic fresh fixture',
+      { mode: 0o600 }
+    );
+  const picked = await request.post('/api/folder-picker/select-path', { data: { path: root } });
+  expect(picked.ok(), await picked.text()).toBeTruthy();
+  const scan = await request.post('/api/personal-assistant/folder-digest/scan', {
+    data: { selection_token: (await picked.json()).selection_token }
+  });
+  expect(scan.ok(), await scan.text()).toBeTruthy();
+  const offer = (await scan.json()).offer;
+  expect(offer.status).toBe('pending');
+  const declined = await request.post(
+    `/api/personal-assistant/folder-digest/offers/${offer.id}/decide`,
+    { data: { decision: 'no', request_id: randomUUID() } }
+  );
+  expect(declined.ok(), await declined.text()).toBeTruthy();
+  return attachFolderInBuild(page, request, root, unsent, beforeAttach);
+}
 
 test.describe('attached creation with a scripted local model', () => {
   test.skip(
@@ -33,10 +67,21 @@ test.describe('attached creation with a scripted local model', () => {
     await stopModel?.();
   });
 
+  async function janitorReview(page: Page) {
+    const review = page.locator('#assistedWorkspacePlacementPanel');
+    await expect(review).toBeVisible();
+    const automatic = review.getByRole('button', { name: 'Use automatic placement', exact: true });
+    if (await automatic.isVisible()) await automatic.click();
+    return review;
+  }
+
   async function editDraftTeam(page: Page, name: string) {
-    await page.getByRole('button', { name: 'Edit team', exact: true }).click();
+    const shared = page.locator('#assistedWorkspacePlacementPanel');
+    if (await shared.isVisible()) await shared.locator('[data-placement-action="agent"]').click();
+    else await page.getByRole('button', { name: 'Edit team', exact: true }).click();
     const roster = page.locator('#workspaceRoleRoster');
     const clear = roster.getByRole('button', { name: 'Clear File Curator', exact: true });
+    await expect(roster).toBeVisible();
     if (await clear.isVisible()) await clear.click();
     await roster
       .getByRole('button', { name: 'Create an agent for File Curator', exact: true })
@@ -65,7 +110,7 @@ test.describe('attached creation with a scripted local model', () => {
       });
       await attachFirst(page, request, root);
       const primary = page.locator('#workspaceBuildPlanReviewSetup');
-      await expect(primary).toHaveText('Create workspace');
+      await expect(primary).toHaveText('Review & place workspace');
       await expect(primary).toBeEnabled();
       const name = `Reviewed notebook ${Date.now()}`;
       await page.locator('#workspaceBuildPlanName').fill(name);
@@ -75,10 +120,17 @@ test.describe('attached creation with a scripted local model', () => {
       expect(await resources(request)).toEqual(before);
       const build = await currentBuild(request);
       const response = page.waitForResponse(
-        r => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/workspaces'
+        r =>
+          r.request().method() === 'POST' &&
+          /\/create-operations\/[^/]+\/confirm$/.test(new URL(r.url()).pathname)
       );
       await page.screenshot({ path: testInfo.outputPath('folder-ordinary-review.png') });
       await primary.click();
+      const review = page.locator('#workspaceCreationReviewPanel');
+      for (let step = 0; step < 4 && !(await review.isVisible()); step++)
+        await page.locator('#wizardNextBtn').click();
+      await expect(review).toBeVisible();
+      await review.getByRole('button', { name: 'Place & create on map', exact: true }).click();
       const preview = page.locator('[data-ws-map-placement-preview]');
       await expect(preview).toBeVisible();
       await page.locator('[data-ws-map-viewport]').focus();
@@ -255,9 +307,9 @@ test.describe('attached creation with a scripted local model', () => {
       expect(attached.ok(), await attached.text()).toBeTruthy();
       const replaced = (await attached.json()).session;
       held.release();
-      await expect
-        .poll(async () => (await currentBuild(request)).proposal.id)
-        .toBe(replaced.proposal.id);
+      expect(replaced.folder.recognition.shape).toBe('inbox');
+      expect(replaced.proposal).toBeUndefined();
+      await expect.poll(async () => (await currentBuild(request)).proposal?.id || '').toBe('');
       await expect(page.locator('#workspaceBuildStatus')).not.toContainText(
         'Suggesting a workspace'
       );
@@ -318,19 +370,23 @@ test.describe('attached creation with a scripted local model', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     const before = await resources(request);
     await attachFirst(page, request, inbox('Downloads'));
-    await expect(page.locator('#workspaceBuildFolderTeam')).toContainText('Synthetic Curator');
+    const offer = await janitorReview(page);
+    await expect(offer).toContainText('Synthetic Curator');
     const folder = (await currentBuild(request)).folder.observation.id;
-    await page.locator('#workspaceBuildPlanName').fill('Reviewed folder draft');
+    await page.locator('#assistedPlacementName').fill('Reviewed folder draft');
+    await page.locator('#assistedPlacementName').blur();
     await editDraftTeam(page, 'Reviewed Curator');
-    await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
-    await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('Reviewed folder draft');
-    await expect(page.locator('#workspaceBuildFolderTeam')).toContainText('Reviewed Curator');
+    await expect(offer).toBeVisible();
+    await expect(page.locator('#assistedPlacementName')).toHaveValue('Reviewed folder draft');
+    await expect(offer).toContainText('Reviewed Curator');
     await expect
       .poll(async () => (await currentBuild(request)).draft.role_staffing?.[0]?.name)
       .toBe('Reviewed Curator');
     expect((await currentBuild(request)).folder.observation.id).toBe(folder);
-    await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Create & scan folder');
-    await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeEnabled();
+    await expect(offer.locator('[data-placement-action="confirm"]')).toHaveText(
+      'Create workspace & scan'
+    );
+    await expect(offer.locator('[data-placement-action="confirm"]')).toBeEnabled();
     expect(await resources(request)).toEqual(before);
     // The mode button can leave the pointer over the toast (which pauses its
     // expiry). Move away before waiting for a clean screenshot.
@@ -351,9 +407,9 @@ test.describe('attached creation with a scripted local model', () => {
       const before = await resources(request);
       const modelCalls = stopModel!.calls();
       await attachFirst(page, request, root);
-      const offer = page.locator('#workspaceBuildCreationReview');
-      const confirm = page.locator('#workspaceBuildPlanReviewSetup');
-      await expect(confirm).toHaveText('Create & scan folder');
+      const offer = await janitorReview(page);
+      const confirm = offer.locator('[data-placement-action="confirm"]');
+      await expect(confirm).toHaveText('Create workspace & scan');
       await expect(confirm).toBeEnabled();
       await expect(offer.getByRole('checkbox')).not.toBeChecked();
       const original = await currentBuild(request);
@@ -380,17 +436,17 @@ test.describe('attached creation with a scripted local model', () => {
       }
       const editedName = `Reviewed inbox ${monitoring ? 'watch' : 'manual'} ${Date.now()}`;
       const editedAgent = `Reviewed Curator ${Date.now()}`;
-      await page.locator('#workspaceBuildPlanName').fill(editedName);
+      await page.locator('#assistedPlacementName').fill(editedName);
+      await page.locator('#assistedPlacementName').blur();
       if (!monitoring) await editDraftTeam(page, editedAgent);
       if (monitoring) {
         await offer.getByRole('checkbox').check();
-        await expect(offer).toContainText('Daily scan at');
+        await expect(offer).toContainText('daily catch-up');
       }
-      await expect(confirm).toHaveText('Create & scan folder');
+      await expect(confirm).toHaveText('Create workspace & scan');
       await expect(confirm).toBeEnabled();
-      await expect(page.locator('#workspaceBuildPlanName')).toHaveValue(editedName);
-      if (!monitoring)
-        await expect(page.locator('#workspaceBuildFolderTeam')).toContainText(editedAgent);
+      await expect(page.locator('#assistedPlacementName')).toHaveValue(editedName);
+      if (!monitoring) await expect(offer).toContainText(editedAgent);
       expect((await currentBuild(request)).folder.observation.id).toBe(
         original.folder.observation.id
       );
@@ -409,13 +465,13 @@ test.describe('attached creation with a scripted local model', () => {
       expect(await resources(request)).toEqual(before);
       expect(existsSync(join(root, 'Filed'))).toBeFalsy();
       expect(stopModel!.calls() - modelCalls).toBe(1);
-      await offer.getByText('Folder details', { exact: true }).click();
       await expect(offer).toContainText(root);
-      await expect(offer).toContainText('No file contents are opened');
+      await expect(offer).toContainText('No file contents.');
       await page.screenshot({ path: testInfo.outputPath('create-permission-review.png') });
       if (monitoring) {
         await page.setViewportSize({ width: 390, height: 844 });
         expect((await offer.boundingBox())!.width).toBeLessThanOrEqual(390);
+        await confirm.scrollIntoViewIfNeeded();
         await expect(confirm).toBeInViewport();
         await page.screenshot({ path: testInfo.outputPath('create-permission-narrow.png') });
       }
@@ -443,18 +499,22 @@ test.describe('attached creation with a scripted local model', () => {
       await page.keyboard.down('Enter');
       await page.keyboard.up('Enter');
       if (!monitoring) {
-        await expect(confirm).toHaveText('Retry preparation');
-        await expect(confirm).toBeEnabled();
-        expect(lostResponse).toBeTruthy();
-        await expect(page.locator('#workspaceBuildPlanName')).toBeHidden();
+        await expect.poll(() => lostResponse).toBe(true);
+        await expect(
+          offer.getByRole('heading', { name: 'Workspace prepared', exact: true })
+        ).toBeVisible();
+        await expect(page.locator('#assistedPlacementName')).toHaveCount(0);
         await page.screenshot({ path: testInfo.outputPath('lost-response-recovery.png') });
-        await confirm.click();
       }
+      await expect(
+        offer.getByRole('heading', { name: 'Workspace prepared', exact: true })
+      ).toBeVisible();
+      await offer.getByRole('button', { name: 'Open filing review', exact: true }).click();
       await expect(page).toHaveURL(/panel=file-janitor/, { timeout: 20000 });
       await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
       await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
       expect(pickerCalls).toBe(0);
-      expect(confirmations).toBe(monitoring ? 1 : 2); // one initial admission, plus explicit recovery only
+      expect(confirmations).toBe(1); // lost delivery is observed, never resubmitted
       const workspaces = (await (await request.get('/api/workspaces')).json()).folders;
       const created = workspaces.filter((ws: { name: string }) => ws.name === editedName);
       expect(created).toHaveLength(1);
@@ -488,8 +548,9 @@ test.describe('attached creation with a scripted local model', () => {
     const before = await resources(request);
     const calls = stopModel!.calls();
     await attachFirst(page, request, root);
-    const confirm = page.locator('#workspaceBuildPlanReviewSetup');
-    await expect(confirm).toHaveText('Create & scan folder');
+    const offer = await janitorReview(page);
+    const confirm = offer.locator('[data-placement-action="confirm"]');
+    await expect(confirm).toHaveText('Create workspace & scan');
     await expect(confirm).toBeEnabled();
     const build = await currentBuild(request);
     // A real filesystem conflict after the read-only review. Do not mock the
@@ -502,9 +563,9 @@ test.describe('attached creation with a scripted local model', () => {
     const failure = await failed.json();
     const workspaceID = failure.details.workspace_id;
     expect(workspaceID).toBeTruthy();
-    await expect(confirm).toHaveText('Retry preparation');
+    await expect(confirm).toHaveText('Continue accepted setup');
     await expect(confirm).toBeEnabled();
-    await expect(page.locator('#workspaceBuildCreationReview')).toContainText(/Filed|filing/i);
+    await expect(offer).toContainText(/Filed|filing/i);
     const accepted = (
       await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json()
     ).session;
@@ -515,6 +576,10 @@ test.describe('attached creation with a scripted local model', () => {
     await page.screenshot({ path: testInfo.outputPath('accepted-preparation-failure.png') });
     renameSync(join(root, 'Filed'), join(root, 'kept-blocker.txt'));
     await confirm.click();
+    await expect(
+      offer.getByRole('heading', { name: 'Workspace prepared', exact: true })
+    ).toBeVisible();
+    await offer.getByRole('button', { name: 'Open filing review', exact: true }).click();
     await expect(page).toHaveURL(/panel=file-janitor/, { timeout: 20_000 });
     await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
     const after = (await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json())
@@ -567,13 +632,21 @@ test.describe('attached creation with a scripted local model', () => {
         .click();
       await page.locator('#workspaceBuildWithBtn').click();
       const name = `Manual delayed inbox ${Date.now()}`;
+      // A manual purpose change can leave its required role vacant while
+      // inference is still held. Fill that existing roster before a canonical
+      // permission review can be produced; do not invent an early review.
       await page.locator('#workspaceBuildPlanName').fill(name);
       await editDraftTeam(page, `Manual delayed curator ${Date.now()}`);
-      const confirm = page.locator('#workspaceBuildPlanReviewSetup');
-      await expect(confirm).toHaveText('Create & scan folder');
+      const offer = await janitorReview(page);
+      const confirm = offer.locator('[data-placement-action="confirm"]');
+      await expect(confirm).toHaveText('Create workspace & scan');
       await expect(confirm).toBeEnabled();
       const build = await currentBuild(request);
       await confirm.click();
+      await expect(
+        offer.getByRole('heading', { name: 'Workspace prepared', exact: true })
+      ).toBeVisible();
+      await offer.getByRole('button', { name: 'Open filing review', exact: true }).click();
       await expect(page).toHaveURL(/panel=file-janitor/, { timeout: 20_000 });
       const accepted = (
         await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json()
@@ -603,9 +676,9 @@ test.describe('attached creation with a scripted local model', () => {
   }, testInfo) => {
     const root = inbox();
     await attachFirst(page, request, root);
-    const offer = page.locator('#workspaceBuildCreationReview');
-    const confirm = page.locator('#workspaceBuildPlanReviewSetup');
-    await expect(confirm).toHaveText('Create & scan folder');
+    const offer = await janitorReview(page);
+    const confirm = offer.locator('[data-placement-action="confirm"]');
+    await expect(confirm).toHaveText('Create workspace & scan');
     await expect(confirm).toBeEnabled();
     const before = (await (await request.get('/api/workspaces')).json()).folders
       .map((ws: { id: string }) => ws.id)
@@ -618,8 +691,8 @@ test.describe('attached creation with a scripted local model', () => {
       .sort();
     expect(after).toEqual(before);
     expect(existsSync(join(root + '-moved', 'Filed'))).toBeFalsy();
-    await expect(page.locator('#workspaceBuildFolderChange')).toBeVisible();
-    await expect(page.locator('#workspaceBuildPlanName')).toBeVisible();
+    await expect(offer.locator('[data-placement-action="folder"]')).toBeVisible();
+    await expect(page.locator('#assistedPlacementName')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('lost-selection-repair.png') });
   });
   test('explicit defer keeps the saved workspace/result and allows a separate build', async ({
@@ -628,8 +701,9 @@ test.describe('attached creation with a scripted local model', () => {
   }, testInfo) => {
     const root = inbox();
     await attachFirst(page, request, root);
-    const confirm = page.locator('#workspaceBuildPlanReviewSetup');
-    await expect(confirm).toHaveText('Create & scan folder');
+    const offer = await janitorReview(page);
+    const confirm = offer.locator('[data-placement-action="confirm"]');
+    await expect(confirm).toHaveText('Create workspace & scan');
     await expect(confirm).toBeEnabled();
     let accepted:
       | { workspace_id: string; folder_slug: string; preparation: { result: { batch_id: string } } }
@@ -648,10 +722,10 @@ test.describe('attached creation with a scripted local model', () => {
     await expect(
       page.getByRole('button', { name: 'Defer preparation', exact: true })
     ).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Open workspace', exact: true })).toHaveAttribute(
-      'href',
-      `/workspaces/${accepted!.folder_slug}?panel=file-janitor`
-    );
+    await expect(
+      offer.getByRole('button', { name: 'Open filing review', exact: true })
+    ).toBeVisible();
+    expect(accepted!.folder_slug).toBeTruthy();
     await page.screenshot({ path: testInfo.outputPath('explicit-defer.png') });
     await page.getByRole('button', { name: 'Defer preparation', exact: true }).click();
     await expect(page.locator('#addFolderModal')).not.toBeVisible();

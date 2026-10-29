@@ -1363,7 +1363,9 @@ function open(trigger, options = {}) {
   // Commander can change on the Roles view, so it is read again too.
   void refresh();
   void recipients()?.refresh?.();
-  void hydrateEntryConversation({ force: true });
+  // A source-owned review returning from Map already retains its exact live
+  // conversation. Rehydrating the entry here would replace that editor.
+  if (options.preserveConversation !== true) void hydrateEntryConversation({ force: true });
   void refreshWorkspaceContext();
   void readTodayForThisPage();
   try {

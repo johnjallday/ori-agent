@@ -1,3 +1,9 @@
+/* Only the existing source owner's review replaces its old editor while
+   active; its underlying field setters and completion mounts stay intact. */
+.pa-folder--shared-review > :not([data-source-creation-review]) {
+  display: none !important;
+}
+
 /* Full setup review; on Map this host appears only for progress/results.
    The reviewed placement click itself confirms creation. */
 .assisted-placement {
@@ -249,6 +255,14 @@ body:has(.assisted-placement-host--map:not([hidden])) .ws-map-placement-controls
   max-width: none;
   transform: none;
   flex-wrap: wrap;
+}
+
+/* The decision-first review replaces the wizard's duplicate identity/progress
+   chrome, not its editable steps. Back restores those existing controls. */
+.workspace-create-modal--unified-review #workspaceCreatorKindChoice,
+.workspace-create-modal--unified-review #wizardStepper,
+.workspace-create-modal--unified-review #wizardStep4 > .workspace-wizard-step-heading {
+  display: none;
 }
 
 @media (max-width: 600px) {

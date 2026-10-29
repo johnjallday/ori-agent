@@ -12,6 +12,7 @@
   const LIST_URL = '/api/workspaces/group-templates';
   const REVIEW_URL = '/api/workspaces/group-templates/review';
   const COMMIT_URL = '/api/workspaces/group-templates/commit';
+  const OBSERVE_URL = '/api/workspaces/group-templates/observe';
   const GENERAL_ID = 'general';
   const USABLE = ['creatable', 'reusable'];
 
@@ -417,12 +418,69 @@
       );
   }
 
+  let sharedReviewModule;
+
+  async function syncSharedReview(manager) {
+    const context = manager?.workspaceCreatorContext;
+    if (!managedActive(manager)) return;
+    sharedReviewModule ||= import('/js/modules/managed-home-review.js');
+    const adapter = await sharedReviewModule;
+    if (manager.workspaceCreatorContext === context) {
+      await adapter.syncManagedHomeReview(manager, window.GroupTemplateCreator);
+    }
+  }
+
+  async function restoreSharedReview(manager) {
+    const context = manager?.workspaceCreatorContext;
+    if (chooserMode(manager) !== 'full') return false;
+    try {
+      if (!window.localStorage?.getItem('ori:managed-home-operation:v1')) return false;
+    } catch (_) {
+      return false;
+    }
+    sharedReviewModule ||= import('/js/modules/managed-home-review.js');
+    const adapter = await sharedReviewModule;
+    if (manager.workspaceCreatorContext !== context) return false;
+    return adapter.restoreManagedHomeReview(manager, window.GroupTemplateCreator);
+  }
+
+  async function confirmSharedPlacement(manager, placement) {
+    const adapter = await sharedReviewModule;
+    return adapter.confirmManagedHomeReview(
+      manager,
+      window.GroupTemplateCreator,
+      placement.groupHomeOwner.reviewedKey,
+      placement
+    );
+  }
+
+  function suspendSharedReview(manager) {
+    const ui = manager?.workspaceCreatorContext?.groupTemplates?.sharedReview;
+    ui?.panel?.destroy();
+    if (ui) ui.panel = null;
+  }
+
+  function openSharedResult(manager, home, notice) {
+    const folder = (manager.folders || []).find(item => item.id === home.id);
+    const slug = home.folder_slug || folder?.folder_slug;
+    if (!slug) return false;
+    if (notice) storeLandingNotice(home.id, notice);
+    window.location.href = landingURL(slug, notice?.roleId);
+    return true;
+  }
+
   function setFill(manager, roleId, fill) {
     const context = manager?.workspaceCreatorContext;
     const entry = selectedManaged(context);
     const role = homeRoles(entry).find(item => item.role_id === roleId);
     const next = normalizeFill(fill);
-    if (!role || !next.name || context?.groupTemplates?.pending) return false;
+    if (
+      !role ||
+      !next.name ||
+      context?.groupTemplates?.pending ||
+      context?.groupTemplates?.sharedReview?.accepted
+    )
+      return false;
     if (!roleEditable(entry, role) || fillNameProblem(manager, roleId, next.name)) return false;
     fillsFor(context, entry).set(roleId, next);
     return true;
@@ -431,7 +489,12 @@
   function clearFill(manager, roleId) {
     const context = manager?.workspaceCreatorContext;
     const entry = selectedManaged(context);
-    if (!entry || context?.groupTemplates?.pending) return false;
+    if (
+      !entry ||
+      context?.groupTemplates?.pending ||
+      context?.groupTemplates?.sharedReview?.accepted
+    )
+      return false;
     return fillsFor(context, entry).delete(roleId);
   }
 
@@ -483,7 +546,16 @@
         primary: Boolean(role.primary),
         state: fill || holder ? 'filled' : 'empty',
         // A staged face shows on the row before anything is created.
-        agent: holder || (fill ? { name: fill.name, appearance: fill.appearance || null } : null),
+        agent:
+          holder ||
+          (fill
+            ? {
+                name: fill.name,
+                appearance: fill.appearance || null,
+                ...(fill.model ? { model: fill.model } : {}),
+                ...(fill.provider ? { provider: fill.provider } : {})
+              }
+            : null),
         source: holder ? 'group' : fill?.mode === FILL_ASSIGN ? 'assigned' : 'created'
       };
       if (readOnlyReason) {
@@ -586,6 +658,7 @@
     const state = stateFor(context);
     if (!state || (!force && state.status !== 'idle')) return;
     const token = ++state.loadToken;
+    const previous = selectedManaged(context);
     state.status = 'loading';
     render(manager);
     try {
@@ -601,26 +674,51 @@
         state.items.unshift({ id: GENERAL_ID, kind: 'ordinary_group', name: 'General' });
       }
       const selected = state.items.find(item => item.id === state.selectedId);
-      if (!isSelectable(selected)) state.selectedId = GENERAL_ID;
+      if (!selected && previous) {
+        // Keep the explicit source intent and edits, not a General substitute.
+        // This unavailable catalog projection can never authorize a commit.
+        state.items.push({
+          ...previous,
+          availability: { state: 'unavailable', actions: ['retry'] }
+        });
+      } else if (!selected && !previous) state.selectedId = GENERAL_ID;
       state.status = 'ready';
     } catch (error) {
       if (manager.workspaceCreatorContext !== context || state.loadToken !== token) return;
       state.status = 'error';
       state.items = [{ id: GENERAL_ID, kind: 'ordinary_group', name: 'General' }];
-      state.selectedId = GENERAL_ID;
+      if (previous) {
+        state.items.push({
+          ...previous,
+          availability: { state: 'unavailable', actions: ['retry'] }
+        });
+      } else state.selectedId = GENERAL_ID;
       state.error = error?.message || 'Group templates could not be loaded.';
     }
-    manager.refreshWizardChrome?.();
+    await restoreSharedReview(manager);
+    if (manager.workspaceCreatorContext === context) manager.refreshWizardChrome?.();
   }
 
   function select(manager, id) {
     const context = manager?.workspaceCreatorContext;
     const state = stateFor(context);
     const next = state?.items.find(item => item.id === id);
-    if (!state || !isSelectable(next) || state.pending) return false;
+    if (
+      !state ||
+      !isSelectable(next) ||
+      state.pending ||
+      state.sharedReview?.accepted ||
+      context?.ordinaryReview?.reference ||
+      context?.ordinaryReview?.accepted ||
+      context?.ordinaryReview?.actionInFlight ||
+      context?.submitting
+    )
+      return false;
     if (chooserMode(manager) === 'general-only' && isManaged(next)) return false;
     const previous = selectedEntry(context);
     if (previous?.id === next.id) return false;
+    state.sharedReview?.panel?.destroy();
+    state.sharedReview = null;
     const input = document.getElementById('folderNameInput');
     // Each template keeps its own typed name so switching never carries one
     // template's name into another's consent.
@@ -1016,10 +1114,12 @@
     const context = manager?.workspaceCreatorContext;
     const state = stateFor(context);
     const entry = selectedManaged(context);
-    if (!state || !entry || state.pending) return;
+    if (!state || !entry || !isSelectable(entry) || state.pending) return;
     const name = currentName();
     const key = reviewKey(entry, name);
-    if (state.review?.key === key && state.review.status !== 'error') return;
+    // An error is not an instruction to repeat a request on every redraw.
+    // Explicit refresh (or a material change) is the next review boundary.
+    if (state.review?.key === key) return;
     const review = { key, status: 'loading', data: null, error: '' };
     state.review = review;
     manager.refreshWorkspaceReview?.();
@@ -1053,6 +1153,12 @@
     const state = manager?.workspaceCreatorContext?.groupTemplates;
     const entry = selectedManaged(manager?.workspaceCreatorContext);
     if (!state || !entry) return true;
+    if (
+      !isSelectable(entry) ||
+      state.catalogUnavailable ||
+      ['loading', 'error'].includes(state.status)
+    )
+      return false;
     if (state.pending) return true;
     return state.review?.status === 'ready' && state.review.key === reviewKey(entry, currentName());
   }
@@ -1257,7 +1363,7 @@
     return roleId ? `${path}?role=${encodeURIComponent(roleId)}` : path;
   }
 
-  async function submit(manager) {
+  async function submit(manager, options = {}) {
     const context = manager?.workspaceCreatorContext;
     const state = stateFor(context);
     const entry = selectedManaged(context);
@@ -1283,6 +1389,20 @@
       };
     }
     const pending = state.pending;
+    // Shared presentation receives only this existing owner's frozen envelope.
+    // A restored observation-only reference must never dispatch it.
+    if (pending.observationOnly) return false;
+    if (typeof options.onAccepted === 'function') {
+      try {
+        options.onAccepted(Object.freeze({ request: Object.freeze({ ...pending.request }) }));
+      } catch (error) {
+        state.pending = null;
+        manager.showWorkspaceCreateError?.(
+          error?.message || 'The confirmed reference could not be retained. Nothing was sent.'
+        );
+        return false;
+      }
+    }
     let landingOverride = '';
     const createBtn = document.getElementById('createFolderBtn');
     manager.isCreatingFolder = true;
@@ -1307,7 +1427,20 @@
       }
       if (manager.workspaceCreatorContext !== context) return false;
       if (response.status === 400 || response.status === 409) {
-        // A definite refusal consumed nothing: return to a fresh review.
+        if (
+          options.onResult &&
+          response.headers?.get?.('X-Ori-Group-Commit-Phase') !== 'not_accepted'
+        ) {
+          pending.uncertain = true;
+          throw new Error(
+            body?.group_template?.summary ||
+              body?.error ||
+              'The original Home operation may already have effects. Read its saved status.'
+          );
+        }
+        // Only the existing owner's explicit pre-Claim proof is a definite
+        // refusal for shared review. Legacy callers retain their old route.
+        options.onRefused?.();
         state.pending = null;
         state.review = {
           key: reviewKey(entry, name),
@@ -1327,14 +1460,37 @@
             'The confirmed group could not be verified.'
         );
       }
-      const result = body.group_template;
+      let result = body.group_template;
+      if (options.onResult) {
+        // Verify the original journal/resource before even staffing roles.
+        // A 200 with a name or arbitrary Home ID is not completion proof.
+        const observed = await fetch(OBSERVE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(pending.request)
+        });
+        const proof = (await observed.json().catch(() => ({})))?.group_template;
+        if (manager.workspaceCreatorContext !== context) return false;
+        if (
+          observed.status !== 200 ||
+          proof?.state !== 'home_ready' ||
+          proof.home_workspace_id !== result.home_workspace_id
+        ) {
+          pending.uncertain = true;
+          throw new Error(
+            proof?.summary ||
+              'The original Home outcome is not yet verifiable. Read saved status; do not create again.'
+          );
+        }
+        result = { ...result, layout_subject_new: proof.layout_subject_new === true };
+      }
       // Only a Home this operation created receives the launcher's post-create
       // adoption (Map settle/focus without coordinate writes). A reused Home is
       // never re-placed, re-parented, or treated as newly created. Managed
       // templates are unavailable to selected-member launchers, so no member
       // move can ride this callback.
       if (
-        result.created_by_this_operation &&
+        (options.onResult ? result.layout_subject_new : result.created_by_this_operation) &&
         typeof context.onCreated === 'function' &&
         !context.selection
       ) {
@@ -1358,15 +1514,35 @@
           );
         }
       }
-      const staffing = Array.isArray(pending.staffing) ? pending.staffing : [];
+      const changedToReuse =
+        options.onResult && !result.layout_subject_new && !state.review?.data?.reuse;
+      // Another path may have made the canonical Home after review. Its name,
+      // roster and position are not new terms we can silently confirm.
+      const staffing = !changedToReuse && Array.isArray(pending.staffing) ? pending.staffing : [];
       if (createBtn && staffing.length) createBtn.textContent = 'Staffing roles…';
       const outcomes = await fillRoles(result.home_workspace_id, staffing);
+      if (manager.workspaceCreatorContext !== context) return false;
       await manager.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate?.();
+      if (manager.workspaceCreatorContext !== context) return false;
       const folder = (manager.folders || []).find(
         item => String(item?.id) === String(result.home_workspace_id)
       );
+      const notice = changedToReuse
+        ? {
+            tone: 'info',
+            title: 'Review the existing Home',
+            message:
+              'A canonical Home already exists. Its roster and position were left unchanged; open it to review staffing under its current terms.',
+            roleId: ''
+          }
+        : landingNotice(result, entry, staffing, outcomes, pending.request.name);
+      if (typeof options.onResult === 'function') {
+        await options.onResult({ result, folder, notice, outcomes, landing: landingOverride });
+        if (manager.workspaceCreatorContext !== context) return false;
+        state.pending = null;
+        return true;
+      }
       state.pending = null;
-      const notice = landingNotice(result, entry, staffing, outcomes, pending.request.name);
       const modalElement = document.getElementById('addFolderModal');
       if (modalElement) bootstrap.Modal.getInstance(modalElement)?.hide();
       manager.resetAddWorkspaceModalForm?.();
@@ -1391,7 +1567,9 @@
     } catch (error) {
       if (manager.workspaceCreatorContext === context) {
         manager.showWorkspaceCreateError?.(
-          `${error?.message || 'The confirmed request did not return.'} Retry the same confirmed change; Ori will not create a second group.`
+          options.onResult
+            ? `${error?.message || 'The confirmed request did not return.'} Read the original saved status; reading never resumes staffing or setup.`
+            : `${error?.message || 'The confirmed request did not return.'} Retry the same confirmed change; Ori will not create a second group.`
         );
       }
       return false;
@@ -1445,6 +1623,10 @@
     ensureReview,
     canSubmit,
     ctaLabel,
-    submit
+    submit,
+    syncSharedReview,
+    confirmSharedPlacement,
+    suspendSharedReview,
+    openSharedResult
   };
 })();

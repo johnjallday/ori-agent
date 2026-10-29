@@ -27,6 +27,9 @@ func (h *Handler) requireGroupParent(ctx context.Context, parentID string) error
 	if err != nil {
 		return err
 	}
+	if parent == nil || parent.Status == session.WorkspaceStatusTrashed || parent.Status == session.WorkspaceStatusMissing {
+		return session.ErrWorkspaceNotFound
+	}
 	if !parent.IsGroup() {
 		return errParentWorkspaceMustBeGroup
 	}

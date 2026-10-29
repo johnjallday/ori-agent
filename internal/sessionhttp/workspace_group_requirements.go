@@ -37,7 +37,17 @@ func (h *Handler) prepareCreateWorkspaceGroupRequirement(
 	request createWorkspaceRequest,
 	template projecttemplates.Template,
 ) (projecttemplates.Template, *createWorkspaceGroupPlan, bool) {
+	groupIntent := request.GroupReviewToken != "" || request.IdempotencyKey != "" || request.GroupComposition != "" || request.CreateRequiredHome
+	if template.GroupRequirement != nil || groupIntent {
+		w.Header().Set("X-Ori-Group-Commit-Phase", "not_accepted")
+	}
 	if template.GroupRequirement == nil {
+		if groupIntent && !request.GroupRequirementReview {
+			// A removed/changed policy is not permission to reinterpret an old
+			// group receipt as an ordinary, unjournaled creation.
+			respondGroupRequirementError(w, grouprequirements.ErrReviewStale)
+			return projecttemplates.Template{}, nil, true
+		}
 		if request.GroupRequirementReview {
 			_ = orihttp.RespondSuccess(w, map[string]any{"group_requirement_review": grouprequirements.Review{
 				Evaluation: grouprequirements.Evaluation{
@@ -76,11 +86,13 @@ func (h *Handler) prepareCreateWorkspaceGroupRequirement(
 		_ = orihttp.RespondSuccess(w, map[string]any{"group_requirement_review": review})
 		return template, nil, true
 	}
+	w.Header().Set("X-Ori-Group-Commit-Phase", "outcome_unknown")
 	claim, claimErr := h.groupRequirements.Claim(ctx, input, request.GroupReviewToken, request.IdempotencyKey)
 	if claimErr != nil {
 		respondGroupRequirementError(w, claimErr)
 		return projecttemplates.Template{}, nil, true
 	}
+	w.Header().Set("X-Ori-Group-Commit-Phase", "accepted")
 	return claim.EffectiveTemplate, &createWorkspaceGroupPlan{claim: claim, sourceTemplate: template}, false
 }
 
@@ -321,6 +333,10 @@ func (h *Handler) prepareWorkspaceProjectGroupRequirement(
 	template projecttemplates.Template,
 ) (projecttemplates.Template, *createWorkspaceGroupPlan, bool) {
 	if template.GroupRequirement == nil {
+		if !request.GroupRequirementReview && (request.GroupReviewToken != "" || request.IdempotencyKey != "" || request.GroupComposition != "" || request.CreateRequiredHome) {
+			respondGroupRequirementError(w, grouprequirements.ErrReviewStale)
+			return projecttemplates.Template{}, nil, true
+		}
 		if request.GroupRequirementReview {
 			_ = orihttp.RespondSuccess(w, map[string]any{"group_requirement_review": grouprequirements.Review{
 				Evaluation: grouprequirements.Evaluation{State: grouprequirements.StateLegacy, Summary: "This template uses its existing placement behavior."},

@@ -673,8 +673,14 @@ func TestWorkspaceBuildPreparation_OrdinaryCreateStillGrantsNothing(t *testing.T
 	}
 	w := httptest.NewRecorder()
 	f.h.HandleWorkspaces(w, httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(payload)))
-	if w.Code != http.StatusCreated {
+	// An attached-source build is created only through its reviewed
+	// operation; the legacy request is refused before any effect.
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "creation_build_review_required") {
 		t.Fatalf("ordinary create: %d %s", w.Code, w.Body.String())
+	}
+	workspaces, err := f.h.store.ListWorkspaces(context.Background())
+	if err != nil || len(workspaces) != 0 {
+		t.Fatalf("refused ordinary create left workspaces: %d, %v", len(workspaces), err)
 	}
 	if _, err := os.Stat(filepath.Join(f.root, "Filed")); !os.IsNotExist(err) {
 		t.Fatal("ordinary create granted File Janitor permission")

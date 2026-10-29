@@ -1,3 +1,12 @@
+export { creationTeamReviewRows } from './workspace-creation-review.js';
+
+import {
+  creationReviewHeaderHTML,
+  creationReviewSlotsHTML,
+  creationReviewNavigationHTML,
+  workspaceCreationReviewHTML
+} from './workspace-creation-review.js';
+
 // Presentation only. The sessions controller supplies its canonical draft/review
 // and handles intentions. This module never fetches, creates, grants or scans.
 const escape = value =>
@@ -46,6 +55,8 @@ export function createPlacementCards(makeKey) {
 }
 
 export function placementPanelHTML(view = {}) {
+  if (view.ownerKind === 'ordinary' || view.ownerKind === 'setup')
+    return workspaceCreationReviewHTML(view);
   const draft = view.draft || {};
   if (view.result)
     return `<section class="assisted-placement" aria-label="Workspace preparation result">
@@ -60,6 +71,7 @@ export function placementPanelHTML(view = {}) {
       ${view.sourceReceiptPending ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
       ${view.positionFailed ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
       <button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>Open filing review</button>
+      ${view.canDefer ? `<button type="button" data-placement-action="defer"${view.busy ? ' disabled' : ''}>Defer preparation</button>` : ''}
       <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
     </div></section>`;
   const saved = view.review?.outcome;
@@ -86,14 +98,13 @@ export function placementPanelHTML(view = {}) {
         <button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>
         ${view.recoveryRoute ? `<button type="button" data-placement-action="open-settings"${view.busy ? ' disabled' : ''}>Open existing filing review</button>` : ''}
         <button type="button" data-placement-action="confirm"${view.busy || view.reconciliationRequired || !view.review ? ' disabled' : ''}>Continue accepted setup</button>
+        ${view.canDefer ? `<button type="button" data-placement-action="defer"${view.busy ? ' disabled' : ''}>Defer preparation</button>` : ''}
         <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>${view.onMap ? 'Back to review' : 'Close'}</button>
       </div></section>`;
   const review = view.review;
   const busy = Boolean(view.busy);
   const locked = busy || view.accepted || view.conflict || view.closed;
   const disabled = locked ? ' disabled' : '';
-  const art =
-    globalThis.OriWorkspaceBuildingArt?.svgForVariant?.('depot', { context: 'map' }) || '';
   const team = review?.team || view.team || [];
   const teamText = team
     .map(member => `${member.name} · ${member.action === 'create' ? 'new agent' : 'saved agent'}`)
@@ -105,13 +116,13 @@ export function placementPanelHTML(view = {}) {
   if (view.onMap) return '';
   return `
     <section class="assisted-placement" aria-label="Review proposed workspace">
-      <header class="assisted-placement__header">
-        <div class="assisted-placement__art" aria-hidden="true">${art}</div>
-        <div><p class="assisted-placement__eyebrow">${view.prototype ? 'Prototype · ' : ''}1 · Review setup</p>
-          <h2>Make room for ${escape(draft.name || 'your folder')}</h2>
-          <p>Suggested by your assistant. Nothing is created until you confirm.</p></div>
-      </header>
-      <p class="assisted-placement__location">Standalone workspace · Position does not join a district.</p>
+      ${creationReviewHeaderHTML({
+        title: `Make room for ${draft.name || 'your folder'}`,
+        note: 'Suggested by your assistant. Nothing is created until you confirm.',
+        destination: 'Standalone workspace · Position does not join a district.',
+        prototype: view.prototype,
+        art: 'depot'
+      })}
       <div class="assisted-placement__fields">
         <div><label for="assistedPlacementName">Workspace name</label><input id="assistedPlacementName" name="name" data-placement-field="name" maxlength="200" value="${escape(draft.name)}"${disabled}></div>
         <div><label for="assistedPlacementGoal">Goal</label><textarea id="assistedPlacementGoal" name="mission" data-placement-field="mission" rows="2" maxlength="2000"${disabled}>${escape(draft.mission)}</textarea></div>
@@ -125,24 +136,32 @@ export function placementPanelHTML(view = {}) {
       </div>`
           : ''
       }
-      <div class="assisted-placement__slots">
-        <section aria-label="File Curator role" class="assisted-placement__slot" data-placement-slot="agent">
-          <span class="assisted-placement__number" aria-hidden="true">01</span>
-          <div><h3>File Curator</h3><p>${escape(teamText || 'Choose an agent')}</p></div>
-          <div class="assisted-placement__slot-actions"><button type="button" data-placement-action="agent"${disabled}>Choose agent</button>
-          ${view.selectedCard?.kind === 'agent' ? `<button type="button" data-placement-action="card-use" data-placement-slot-use="agent"${disabled}>Use selected agent</button>` : ''}</div>
-        </section>
-        <section aria-label="Linked folder" class="assisted-placement__slot" data-placement-slot="folder">
-          <span class="assisted-placement__number" aria-hidden="true">02</span>
-          <div><h3>Linked folder</h3><p>${escape(folder.name || 'Choose a folder')}</p><small>${escape(folder.path)}</small></div>
-          <div class="assisted-placement__slot-actions"><button type="button" data-placement-action="folder"${disabled}>Choose folder</button>
-          ${view.selectedCard?.kind === 'folder' ? `<button type="button" data-placement-action="card-use" data-placement-slot-use="folder"${disabled}>Use selected folder</button>` : ''}</div>
-        </section>
-        <section aria-label="First action" class="assisted-placement__slot">
-          <span class="assisted-placement__number" aria-hidden="true">03</span>
-          <div><h3>Prepare a filing review</h3><p>A metadata-only scan. You approve any filing separately.</p></div>
-        </section>
-      </div>
+      ${creationReviewSlotsHTML(
+        [
+          {
+            label: 'File Curator',
+            ariaLabel: 'File Curator role',
+            value: teamText || 'Choose an agent',
+            slot: 'agent',
+            action: 'agent',
+            actionLabel: 'Choose agent'
+          },
+          {
+            label: 'Linked folder',
+            value: folder.name || 'Choose a folder',
+            detail: folder.path,
+            slot: 'folder',
+            action: 'folder',
+            actionLabel: 'Choose folder'
+          },
+          {
+            label: 'Prepare a filing review',
+            ariaLabel: 'First action',
+            value: 'A metadata-only scan. You approve any filing separately.'
+          }
+        ],
+        { locked, selectedCard: view.selectedCard }
+      )}
       <label class="assisted-placement__monitoring"><input type="checkbox" data-placement-field="monitoring"${view.monitoring ? ' checked' : ''}${disabled}> Also watch for new files and run a daily catch-up</label>
       <p class="assisted-placement__hint">${view.monitoring ? 'Monitoring is selected. Review the exact schedule below before confirming.' : 'Monitoring is off. No background scans will be enabled.'}</p>
       <section class="assisted-placement__review" aria-label="Before you confirm">
@@ -165,11 +184,7 @@ export function placementPanelHTML(view = {}) {
       <p class="assisted-placement__status" role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escape(view.message || '')}</p>
       ${view.conflict ? `<button type="button" data-placement-action="reload-draft"${busy ? ' disabled' : ''}>Discard local edits &amp; load saved draft</button>` : ''}
       ${view.canRefresh ? '<button type="button" data-placement-action="review">Refresh permission review</button>' : ''}
-      <div class="assisted-placement__navigation">
-        <button type="button" class="${view.automatic ? '' : 'assisted-placement__primary'}" data-placement-action="place"${!view.canPlace || !review || locked ? ' disabled' : ''}>Place &amp; create on map</button>
-        <button type="button" data-placement-action="suggested" aria-pressed="${Boolean(view.automatic)}"${disabled}>Use automatic placement</button>
-      </div>
-      <p class="assisted-placement__hint">${view.automatic ? 'Automatic placement selected. Confirm below to create this reviewed setup.' : view.candidate ? 'Your previous position is kept. On the map, click or press Enter to create this reviewed setup and scan.' : 'On the map, click a valid position or press Enter to create this reviewed setup and scan. Moving the preview does nothing. Escape returns here.'}</p>
+      ${creationReviewNavigationHTML({ ...view, reviewed: Boolean(review), mapHint: view.candidate ? 'Your previous position is kept. On the map, click or press Enter to create this reviewed setup and scan.' : 'On the map, click a valid position or press Enter to create this reviewed setup and scan. Moving the preview does nothing. Escape returns here.' })}
       <footer class="assisted-placement__footer">
         <button type="button" data-placement-action="back"${busy ? ' disabled' : ''}>Back</button>
         <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>

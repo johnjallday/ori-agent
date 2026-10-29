@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // Reviewed Home package upgrade (docs/architecture/independent-program-homes.md
 // §6.1) between two exact Music candidates. Run only through
@@ -92,9 +93,9 @@ test('a Home-pinned package is reviewed in place on Plugins and upgraded from it
     MANAGER_NAME
   );
   await creator.getByRole('button', { name: 'Review →' }).click();
-  await creator.locator('#createFolderBtn').click();
-  await expect(creator).toBeHidden();
+  await confirmCreatorFinalAction(page, { open: true });
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
+  await expect(creator).toBeHidden();
   const homes = (await json(await request.get('/api/workspaces'))).folders.filter(
     (row: { kind: string }) => row.kind === 'group'
   );

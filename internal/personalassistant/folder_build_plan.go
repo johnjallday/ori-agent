@@ -27,13 +27,19 @@ type BuildFolderHome struct {
 // the folder a workspace build attached: the host's lines and their digest,
 // what they need, the Home and the placement. Reading it creates nothing.
 type BuildFolderPlan struct {
-	Visual    *FolderSetupVisual `json:"visual,omitempty"`
-	Readiness *FolderSetupVisual `json:"readiness,omitempty"`
-	Lines     []FolderPlanLine   `json:"lines"`
-	Digest    string             `json:"digest,omitempty"`
-	Needs     []BuildFolderNeed  `json:"needs,omitempty"`
-	Home      *BuildFolderHome   `json:"home,omitempty"`
-	Placement string             `json:"placement,omitempty"`
+	// FirstTaskDeferred projects the host contract, not execution authority:
+	// software assessment and optional summaries are seeded but not started.
+	// SoftwareReview identifies the existing evidence-reviewed software owner;
+	// deferred summaries alone do not authorize its names-only adjustment API.
+	SoftwareReview    bool               `json:"software_review,omitempty"`
+	FirstTaskDeferred bool               `json:"first_task_deferred,omitempty"`
+	Visual            *FolderSetupVisual `json:"visual,omitempty"`
+	Readiness         *FolderSetupVisual `json:"readiness,omitempty"`
+	Lines             []FolderPlanLine   `json:"lines"`
+	Digest            string             `json:"digest,omitempty"`
+	Needs             []BuildFolderNeed  `json:"needs,omitempty"`
+	Home              *BuildFolderHome   `json:"home,omitempty"`
+	Placement         string             `json:"placement,omitempty"`
 	// Evidence is the digest's own reason for the suggestion, the "Why this
 	// suggestion?" line: what it saw, never a path.
 	Evidence string `json:"evidence,omitempty"`
@@ -74,7 +80,7 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 		}
 		return &BuildFolderPlan{Lines: []FolderPlanLine{}, Unavailable: reason, UnavailableSubject: folderAvailabilitySubject(offer, reason)}
 	}
-	if offer.Structure != nil || offer.Portfolio != nil || !isProjectCapabilityOffer(offer) {
+	if offer.Structure != nil || offer.Portfolio != nil || (!isProjectCapabilityOffer(offer) && !isSoftwareOffer(offer)) {
 		return unavailable(""), nil
 	}
 	s.recheckSetupFacts(ctx, target, offer)
@@ -107,7 +113,9 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 		return plan, nil
 	}
 	plan := &BuildFolderPlan{
-		Lines: append([]FolderPlanLine(nil), view.Plan.Lines...), Digest: view.Plan.Digest,
+		SoftwareReview:    view.Plan.Intent.Software != nil,
+		FirstTaskDeferred: view.Plan.OptionalTask || view.Plan.Intent.Software != nil,
+		Lines:             append([]FolderPlanLine(nil), view.Plan.Lines...), Digest: view.Plan.Digest,
 		Placement: view.Plan.Intent.Placement, Evidence: view.Reason, Ready: true,
 		Needs:  folderPlanNeeds(offer.Subject, view.Plan.Intent),
 		Visual: CloneFolderSetupVisual(view.Plan.Visual),

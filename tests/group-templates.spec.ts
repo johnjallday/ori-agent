@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // Real-server acceptance for Group Templates against a domain-neutral fixture.
 // Each run installs a uniquely named copy of the fixture plugin, so its program
@@ -218,7 +219,10 @@ test('a person creates a named group with its coordinator left empty and lands o
   await expect(summary).toContainText(
     'This group will have no Portfolio Coordinator until you set one up.'
   );
-  const create = page.locator('#createFolderBtn');
+  const sharedReview = page.locator('#workspaceCreationReviewPanel');
+  await expect(sharedReview).toContainText('No project workspace is created');
+  await sharedReview.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const create = sharedReview.locator('[data-placement-action="confirm"]');
   await expect(create).toHaveText(`Create group “${GROUP_NAME}” only`);
   await expect(create).toBeEnabled();
   const roleWrites: string[] = [];
@@ -226,6 +230,10 @@ test('a person creates a named group with its coordinator left empty and lands o
     if (sent.method() === 'PUT' && sent.url().includes('/roles/')) roleWrites.push(sent.url());
   });
   await create.click();
+  await expect(
+    sharedReview.getByRole('heading', { name: 'Home ready', exact: true })
+  ).toBeVisible();
+  await sharedReview.getByRole('button', { name: 'Open group', exact: true }).click();
 
   // The person lands on the new group with the empty coordinator's setup open:
   // no prompt box, because the template's instructions are applied by Ori.
@@ -313,7 +321,10 @@ test('choosing the template again reuses the group unchanged and staffs its miss
     'This existing group will be reused unchanged and Portfolio Coordinator will be staffed.'
   );
   await expect(summary).toContainText(`Portfolio Coordinator · Create “${staffed}”`);
-  const create = page.locator('#createFolderBtn');
+  const sharedReview = page.locator('#workspaceCreationReviewPanel');
+  await expect(sharedReview).toContainText('Name, members and position are preserved');
+  await sharedReview.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const create = sharedReview.locator('[data-placement-action="confirm"]');
   await expect(create).toHaveText(`Use existing group “${GROUP_NAME}” and staff 1 role`);
   const commit = page.waitForRequest(
     sent =>
@@ -335,12 +346,15 @@ test('choosing the template again reuses the group unchanged and staffs its miss
     'name',
     'revision'
   ]);
-  expect((await fill).postDataJSON()).toEqual({
-    mode: 'create',
-    name: staffed,
-    provider: '',
-    model: ''
-  });
+  // The staged agent's reviewed appearance travels with its fill (unchanged
+  // behavior since agent appearance shipped); staffing terms are exact.
+  const filled = (await fill).postDataJSON();
+  expect(Object.keys(filled).sort()).toEqual(['appearance', 'mode', 'model', 'name', 'provider']);
+  expect(filled).toMatchObject({ mode: 'create', name: staffed, provider: '', model: '' });
+  await expect(
+    sharedReview.getByRole('heading', { name: 'Home ready', exact: true })
+  ).toBeVisible();
+  await sharedReview.getByRole('button', { name: 'Open group', exact: true }).click();
 
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
   await expect(page.locator('.ws-cmd-group-template')).toContainText(
@@ -512,19 +526,17 @@ test('a project blueprint reuses the renamed template group for two independent 
         response.request().postDataJSON()?.group_requirement_review === true
     );
     await page.locator('#wizardNextBtn').click();
-    const review = page.locator('#workspaceReviewSummary');
-    await expect(review).toContainText(homeName);
-    await expect(review).toContainText(templateMeta);
-    await expect(review).toContainText(`${coordinator} · already staffed on the group`);
+    const review = page.locator('#workspaceCreationReviewPanel');
+    await expect(review).toContainText(`existing Home “${homeName}”`);
+    await expect(review).toContainText(`Portfolio Coordinator: ${coordinator}`);
     expect((await placement).ok()).toBeTruthy();
-    await expect(page.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
     const commit = page.waitForResponse(
       response =>
         new URL(response.url()).pathname === '/api/workspaces' &&
         response.request().method() === 'POST' &&
         Boolean(response.request().postDataJSON()?.group_review_token)
     );
-    await page.locator('#createFolderBtn').click();
+    await confirmCreatorFinalAction(page);
     const committed = await commit;
     expect(committed.ok(), await committed.text()).toBeTruthy();
     const payload = committed.request().postDataJSON();
@@ -533,8 +545,9 @@ test('a project blueprint reuses the renamed template group for two independent 
     ]);
     const body = await committed.json();
     expect(body.assistant_station_id).toBe(homeID);
-    // Creation hands off to the new workspace; let that navigation settle
+    // The verified result opens the new workspace; let that navigation settle
     // before the next project starts from Home.
+    await review.locator('[data-placement-action="open"]').click();
     await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
     const project = await json(await request.get(`/api/workspaces/${body.folder.id}`));
     expect(project).toMatchObject({ parent_id: homeID });
@@ -614,7 +627,19 @@ test('the template chooser and review fit a phone-width viewport', async ({
   expect(teamOverflow).toEqual({ page: false, dialog: false });
   await page.screenshot({ path: testInfo.outputPath('group-template-team-mobile.png') });
   await page.locator('#wizardNextBtn').click();
-  await expect(page.locator('[data-group-template-review-status]')).toBeVisible();
+  // The shared review is the visible final surface; at phone width it is the
+  // complete automatic route (no Map) and must not overflow.
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(review).toBeVisible();
+  await expect(review.locator('[data-placement-action="place"]')).toBeDisabled();
+  const reviewOverflow = await page.evaluate(() => {
+    const body = document.querySelector('#addFolderModal .modal-body') as HTMLElement | null;
+    return {
+      page: document.documentElement.scrollWidth > window.innerWidth,
+      dialog: body ? body.scrollWidth > body.clientWidth : true
+    };
+  });
+  expect(reviewOverflow).toEqual({ page: false, dialog: false });
   await page.screenshot({ path: testInfo.outputPath('group-template-review-mobile.png') });
   await page.keyboard.press('Escape');
   await expect(page.locator('#addFolderModal')).toBeHidden();
@@ -691,8 +716,15 @@ test('hostile and long source labels stay literal and keyboard-operable at phone
       await expect(summary).toContainText(longName);
       expect(await summary.locator('img, script, b').count()).toBe(0);
       // The final action names the long group but stays one line inside the dialog.
+      // Choosing automatic placement only reveals it; nothing is created.
+      await page
+        .locator('#workspaceCreationReviewPanel')
+        .getByRole('button', { name: 'Use automatic placement', exact: true })
+        .click();
       const cta = await page.evaluate(() => {
-        const button = document.getElementById('createFolderBtn')!.getBoundingClientRect();
+        const button = document
+          .querySelector('#workspaceCreationReviewPanel [data-placement-action="confirm"]')!
+          .getBoundingClientRect();
         const dialog = document
           .querySelector('#addFolderModal .modal-content')!
           .getBoundingClientRect();

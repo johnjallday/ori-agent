@@ -7900,8 +7900,12 @@
     return positions;
   }
 
-  /** Every committed anchor other than `excludeId`'s own. */
-  function occupiedAnchors(excludeId) {
+  /**
+   * Every committed anchor other than `excludeId`'s own. `newSubject` also
+   * claims the unbuilt HQ site for a new placement; moving an existing
+   * building ignores it, because that unsaved site simply re-flows.
+   */
+  function occupiedAnchors(excludeId, newSubject) {
     var occupied = [];
     function claim(nodeId, anchor) {
       if (!anchor || nodeId === excludeId) return;
@@ -7939,6 +7943,9 @@
       (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
         claim(node.id, node);
       });
+      // A visible unbuilt HQ site is not a workspace or membership grant, but
+      // its drawn footprint must not be mistaken for empty placement ground.
+      if (newSubject && lastWorldLayout.hqSite) claim(HQ_SITE_ID, lastWorldLayout.hqSite);
     }
     return occupied;
   }
@@ -7948,8 +7955,8 @@
    * Cheap enough to call on every pointermove/keystroke for live feedback —
    * same recompute-per-move cost the readout coordinate already pays.
    */
-  function wouldOverlapOccupied(point, excludeId) {
-    return occupiedAnchors(excludeId).some(function (anchor) {
+  function wouldOverlapOccupied(point, excludeId, newSubject) {
+    return occupiedAnchors(excludeId, newSubject).some(function (anchor) {
       return footprintsOverlap(point, anchor);
     });
   }
@@ -7969,6 +7976,39 @@
    * already been committed by the workspace owner through parent_id; the Map
    * merely gives a new record with no user-selected site a legible location.
    */
+  // Project only the already reviewed parent's frame. This is geometry, never
+  // a destination picker or membership write; both automatic and reviewed
+  // child positioning use the same existing district-frame policy.
+  function groupCandidateConflict(groupId, workspaceId, point, world) {
+    var layout = world || lastWorldLayout;
+    if (!layout) return { blocked: true, reason: 'unavailable', name: 'the selected Group' };
+    var district = (layout.districts || []).find(function (row) {
+      return row.id === groupId;
+    });
+    if (!district)
+      return { blocked: true, reason: 'unavailable', name: 'the selected Group frame' };
+    var members = (layout.nodes || [])
+      .concat(layout.hiddenNodes || [])
+      .filter(function (node) {
+        return node.groupId === groupId && node.id !== workspaceId;
+      })
+      .map(function (node) {
+        return { x: node.x, y: node.y };
+      });
+    members.push(point);
+    var frame = district.expandedFrame || district;
+    var presentation =
+      district.sizingMode === 'custom' && district.customFrame
+        ? { sizingMode: 'custom', frame: district.customFrame }
+        : { sizingMode: 'auto', frame: null };
+    var projected = effectiveDistrictFrame({
+      anchor: frame,
+      members: members,
+      presentation: presentation
+    });
+    return frameConflict(projected, groupId, layout);
+  }
+
   function groupMemberPlacement(groupId, workspaceId, world) {
     var layout = world || lastWorldLayout;
     if (!groupId || !workspaceId || !layout) return null;
@@ -8013,16 +8053,7 @@
       ) {
         return false;
       }
-      var projectedMembers = members.map(function (node) {
-        return { x: node.x, y: node.y };
-      });
-      projectedMembers.push(point);
-      var projectedFrame = effectiveDistrictFrame({
-        anchor: { x: frame.x, y: frame.y },
-        members: projectedMembers,
-        presentation: presentation
-      });
-      return !frameConflict(projectedFrame, groupId, layout).blocked;
+      return !groupCandidateConflict(groupId, workspaceId, point, layout).blocked;
     }
 
     function scanInterior(origin) {
@@ -8133,8 +8164,8 @@
    * in a fixed order at equal distance, so the same drop always resolves the
    * same way. No other building is moved to make room (FR-74).
    */
-  function resolveDropAnchor(id, point, accept) {
-    var occupied = occupiedAnchors(id);
+  function resolveDropAnchor(id, point, accept, newSubject) {
+    var occupied = occupiedAnchors(id, newSubject);
     // accept, when given, refuses a free anchor for a reason of the caller's
     // own (a placed member's district may not cover a neighbour).
     function overlapsOccupied(candidate) {
@@ -9919,6 +9950,24 @@
     var state = placementSession;
     if (!state || !state.candidate) return '';
     var name = String((state.payload && state.payload.name) || 'New workspace').trim();
+    if (state.payload && state.payload.kind === 'group') {
+      return (
+        '<div class="ws-map-placement-preview ws-map-placement-preview--group' +
+        (placementProblem(state.candidate) ? ' is-invalid' : '') +
+        '" data-ws-map-placement-preview aria-hidden="true" style="left:' +
+        state.candidate.x +
+        'px;top:' +
+        state.candidate.y +
+        'px;width:' +
+        DISTRICT_MIN_W +
+        'px;height:' +
+        DISTRICT_MIN_H +
+        'px">' +
+        '<span class="ws-map-placement-preview-name">New Group · ' +
+        escapeHtml(name) +
+        '</span></div>'
+      );
+    }
     var art = window.OriWorkspaceBuildingArt;
     var variant =
       art && typeof art.variantForBlueprint === 'function'
@@ -9952,9 +10001,30 @@
     );
   }
 
+  function placementActionCopy(value) {
+    var input = value || {};
+    var defaults = {
+      confirmLabel: 'Create workspace here',
+      pendingLabel: 'Creating workspace…',
+      instruction:
+        'Click open ground or press Enter to create this reviewed workspace. Drag to pan; Escape returns to review. Position does not change membership.',
+      pendingInstruction: 'Creating the reviewed workspace. This position is locked.',
+      announcement:
+        'Setup reviewed. Click open ground or press Enter to create the workspace. Escape returns to editing.'
+    };
+    var copy = {};
+    Object.keys(defaults).forEach(function (key) {
+      copy[key] =
+        typeof input[key] === 'string' && input[key].trim()
+          ? input[key].trim().slice(0, 600)
+          : defaults[key];
+    });
+    return copy;
+  }
+
   function placementConfirmLabel(state) {
     if (state.mode === 'reviewed-setup' && !state.saving)
-      return state.submitting ? 'Creating workspace…' : 'Create workspace & scan here';
+      return state.submitting ? state.actionCopy.pendingLabel : state.actionCopy.confirmLabel;
     if (state.mode === 'draft' && !state.saving)
       return state.submitting ? 'Position locked' : 'Use this position';
     if (state.saving) return 'Saving position…';
@@ -9964,9 +10034,7 @@
   function placementInstructionText(state, problem) {
     if (problem) return problem;
     if (state.mode === 'reviewed-setup')
-      return state.submitting
-        ? 'Creating the reviewed workspace and preparing its filing scan. This position is locked.'
-        : 'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.';
+      return state.submitting ? state.actionCopy.pendingInstruction : state.actionCopy.instruction;
     if (state.mode === 'draft' && state.submitting)
       return 'The requested position is locked. Check setup status in the review; moving the pointer cannot change this confirmation.';
     if (state.mode === 'draft')
@@ -9996,12 +10064,12 @@
       '<button type="button" class="ws-map-placement-confirm" data-ws-map-placement-confirm' +
       (problem || state.submitting ? ' disabled' : '') +
       '>' +
-      placementConfirmLabel(state) +
+      escapeHtml(placementConfirmLabel(state)) +
       '</button></div></div>'
     );
   }
 
-  function placementProblem(point, excludeId) {
+  function placementProblem(point, excludeId, kind, parentID) {
     if (
       !point ||
       !isSafeCoordinate(point.x) ||
@@ -10011,7 +10079,48 @@
     ) {
       return 'Choose a position inside the map.';
     }
-    return wouldOverlapOccupied(point, excludeId || '')
+    var group =
+      kind === 'group' ||
+      (!kind && placementSession && placementSession.payload.kind === 'group') ||
+      (excludeId &&
+        lastWorldLayout &&
+        (lastWorldLayout.districts || []).some(function (district) {
+          return district.id === excludeId;
+        }));
+    if (group) {
+      var conflict = frameConflict(
+        {
+          x: point.x,
+          y: point.y,
+          width: DISTRICT_MIN_W,
+          height: DISTRICT_MIN_H
+        },
+        excludeId || '',
+        lastWorldLayout
+      );
+      if (conflict.blocked)
+        return (
+          'That Group frame overlaps ' +
+          conflict.name +
+          '. Choose open ground; membership is unchanged.'
+        );
+    }
+    var reviewedParent = parentID || (placementSession && placementSession.payload.parent_id);
+    if (!group && reviewedParent) {
+      var destination = groupCandidateConflict(
+        reviewedParent,
+        excludeId || '',
+        point,
+        lastWorldLayout
+      );
+      if (destination.blocked)
+        return destination.reason === 'unavailable'
+          ? 'The reviewed Group frame is unavailable. Back to review and use automatic placement; no destination has changed.'
+          : 'That position would expand the reviewed Group across ' +
+              destination.name +
+              '. Choose another point; membership is unchanged.';
+    }
+    return wouldOverlapOccupied(point, excludeId || '', true)
       ? 'That position overlaps an existing workspace. Choose open ground.'
       : '';
   }
@@ -10040,6 +10149,8 @@
     var preview = options.preview && typeof options.preview === 'object' ? options.preview : {};
     return {
       name: preview.name,
+      kind: preview.kind === 'group' ? 'group' : 'workspace',
+      parent_id: preview.parentID || '',
       blueprint_id: preview.blueprintID,
       blueprint_builtin: preview.blueprintBuiltin === true,
       group_name: preview.groupName
@@ -10047,7 +10158,14 @@
   }
 
   function suggestedPlacementPoint(spec) {
+    var payload = placementPayload(spec);
     var point = safePoint(spec && (spec.candidate || spec.initialCandidate));
+    if (!point && payload.parent_id)
+      point = groupMemberPlacement(
+        payload.parent_id,
+        'reviewed-draft:' + String(spec.token || ''),
+        lastWorldLayout
+      );
     if (!point) {
       point = {
         x: camera.centerX - CELL_W / 2,
@@ -10058,8 +10176,15 @@
     // A suggestion may move to the nearest open anchor. Once the user chooses
     // a point, confirmation validates that exact geometry and never resolves it
     // behind their back.
-    if (placementProblem(point)) {
-      var safe = resolveDropAnchor('', point);
+    if (placementProblem(point, '', payload.kind, payload.parent_id)) {
+      var safe = resolveDropAnchor(
+        '',
+        point,
+        function (candidate) {
+          return !placementProblem(candidate, '', payload.kind, payload.parent_id);
+        },
+        true
+      );
       point = { x: safe.x, y: safe.y };
     }
     return point;
@@ -10187,10 +10312,7 @@
   function handlePlacementKey(container, event) {
     var state = placementSession;
     if (!state || state.container !== container) return false;
-    if (
-      state.mode !== 'create' &&
-      event.target?.closest?.('button, a, input, select, textarea, [contenteditable="true"]')
-    )
+    if (event.target?.closest?.('button, a, input, select, textarea, [contenteditable="true"]'))
       return false;
     if (
       event.key === 'Enter' &&
@@ -10299,6 +10421,9 @@
 
     canvas.addEventListener('pointermove', function (event) {
       if (placementSession !== state || state.submitting) return;
+      // The toolbar confirms the existing candidate. Moving onto its controls
+      // must not reinterpret their screen position as new map geometry.
+      if (!press && event.target?.closest?.('[data-ws-map-placement-controls]')) return;
       // Hover previews the candidate without treating it as a drag or flooding
       // the live region with every pixel crossed.
       if (!press || event.pointerId !== press.pointerId) {
@@ -10400,6 +10525,7 @@
       candidate: suggestedPlacementPoint(options),
       // Opt-in only: ordinary wizard callers retain creation-on-click/Enter.
       mode: ['draft', 'reviewed-setup'].includes(options.mode) ? options.mode : 'create',
+      actionCopy: placementActionCopy(options.actionCopy),
       onCandidate: options.onCandidate,
       onSelect: options.onSelect,
       onConfirm: options.onConfirm,
@@ -10413,7 +10539,7 @@
     announce(
       container,
       placementSession.mode === 'reviewed-setup'
-        ? 'Setup reviewed. Click open ground or press Enter to create the workspace and scan. Escape returns to editing.'
+        ? placementSession.actionCopy.announcement
         : placementSession.mode === 'draft'
           ? 'Draft workspace. Choose a position; nothing is created until you confirm setup separately.'
           : 'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
@@ -10503,8 +10629,10 @@
       function () {
         var current = placementSession === state;
         if (current) {
-          selectedId = id;
-          pendingPlacementSelectionId = id;
+          if (opts.select !== false) {
+            selectedId = id;
+            pendingPlacementSelectionId = id;
+          }
           placementSession = null;
           announce(state.container, 'Workspace placed at ' + formatCoordinate(point));
         }
@@ -10567,7 +10695,19 @@
     }
     var manager = typeof window !== 'undefined' ? window.sessionManager : null;
     if (manager && typeof manager.showAddWorkspaceModal === 'function') {
-      manager.showAddWorkspaceModal({ mapOrigin: true, entryPoint: 'workspace_map_build' });
+      manager.showAddWorkspaceModal({
+        mapOrigin: true,
+        entryPoint: 'workspace_map_build',
+        // Choosing Build in this district is an explicit destination intent,
+        // not membership inferred from the eventual placement coordinate.
+        ...(buildState.group
+          ? {
+              parentId: buildState.group.id,
+              parentName: buildState.group.name,
+              parentLocked: true
+            }
+          : {})
+      });
       return;
     }
     // No modal available (an older page): keep the map usable rather than
@@ -10598,7 +10738,7 @@
     // Two buildings may not be committed to the same anchor, and a snapped
     // build click lands on the grid exactly like a snapped drop does — so
     // placement resolves collisions through the same rule (FR-72).
-    var target = resolveDropAnchor(workspaceId, point);
+    var target = resolveDropAnchor(workspaceId, point, undefined, true);
     point = { x: target.x, y: target.y };
     var built = {};
     built[workspaceId] = point;
@@ -10653,7 +10793,7 @@
     failedPlacements[workspaceId] = { x: point.x, y: point.y };
   }
 
-  function retryFailedPlacement(workspaceId, reviewedPoint) {
+  function retryFailedPlacement(workspaceId, reviewedPoint, options) {
     // Assisted recovery may know the requested point even when the successful
     // setup reply was lost before commitPlacement ran. This explicit retry is
     // geometry only, with current collision/readiness checks, never a new site.
@@ -10661,7 +10801,15 @@
     var point = explicit ? safePoint(reviewedPoint) : failedPlacements[workspaceId];
     if (
       !point ||
-      (explicit && (!lastMount || isMapReadOnly() || placementProblem(point, workspaceId)))
+      (explicit &&
+        (!lastMount ||
+          isMapReadOnly() ||
+          placementProblem(
+            point,
+            workspaceId,
+            options && options.kind,
+            options && options.parentID
+          )))
     )
       return Promise.resolve(false);
     var retry = {};

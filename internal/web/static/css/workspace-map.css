@@ -655,6 +655,20 @@
   border-color: var(--ws-danger, #d9534f);
   box-shadow: 0 0 24px rgba(217, 83, 79, 0.36);
 }
+.ws-map-placement-preview--group {
+  align-items: flex-start;
+  padding: 10px;
+  border: 2px dashed var(--ws-faction);
+  border-radius: 8px;
+  background: var(--ws-bg-2);
+  box-sizing: border-box;
+}
+.ws-map-placement-preview--group::before {
+  display: none;
+}
+.ws-map-placement-preview--group.is-invalid {
+  border-color: var(--ws-danger, #d9534f);
+}
 .ws-map-placement-preview-name {
   max-width: 142px;
   overflow: hidden;

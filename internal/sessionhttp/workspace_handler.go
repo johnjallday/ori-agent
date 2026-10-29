@@ -79,6 +79,11 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if path == "create-operations" || strings.HasPrefix(path, "create-operations/") {
+		h.handleWorkspaceCreationOperations(w, r, strings.TrimPrefix(path, "create-operations"))
+		return
+	}
+
 	// Import routes must be handled before generic workspace-id routing.
 	switch path {
 	case "import":
@@ -352,6 +357,9 @@ type createWorkspaceRequest struct {
 	// the workspace exists the session is marked created and its summary is
 	// recorded on the workspace.
 	BuildSessionID string `json:"build_session_id,omitempty"`
+	// BuildReviewVersion binds an attached ordinary source to the current
+	// canonical draft. Recognized setup and File Janitor use their own claims.
+	BuildReviewVersion int64 `json:"build_review_version,omitempty"`
 	// Mission is the workspace goal typed in the create modal. When present,
 	// even empty, it wins over the template's default goal; when absent the
 	// template's goal (if any) applies.
@@ -557,10 +565,22 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	groupIntent := req.GroupRequirementReview || req.GroupReviewToken != "" || req.IdempotencyKey != "" || req.GroupComposition != "" || req.CreateRequiredHome
+	if groupIntent {
+		w.Header().Set("X-Ori-Group-Commit-Phase", "not_accepted")
+		if req.TemplateID == "" && req.TemplatePath == "" {
+			respondGroupRequirementError(w, grouprequirements.ErrReviewStale)
+			return
+		}
+	}
 	if req.BuildSessionID != "" && buildPreparationContextFrom(r.Context()) == nil {
 		h.buildPreparationMu.Lock()
 		defer h.buildPreparationMu.Unlock()
 		if err := h.refuseClaimedBuildCreate(r.Context(), req.BuildSessionID); err != nil {
+			if errors.Is(err, errCreationBuildReviewRequired) {
+				creationOperationError(w, http.StatusConflict, "creation_build_review_required", err.Error())
+				return
+			}
 			respondBuildPreparationError(w, "creation_already_accepted", "This build has an accepted creation. Resume that preparation instead of creating again.", http.StatusConflict, nil)
 			return
 		}
@@ -740,6 +760,28 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if operation := creationOperationFrom(r.Context()); operation != nil {
+		if wantsProject && !templateResolved {
+			// Reviewed creation never silently substitutes Blank for an
+			// unreadable declaration, unlike the legacy template-path API.
+			_ = orihttp.RespondBadRequest(w, "the reviewed blueprint is unavailable")
+			return
+		}
+		if templateResolved && resolvedTemplate.GroupRequirement != nil {
+			creationOperationError(w, http.StatusConflict, "creation_owner_mismatch", "This blueprint requires its existing group review and commit owner.")
+			return
+		}
+		sourceDigest, sourceErr := h.creationSourceDigest(r.Context(), req, resolvedTemplate, templateResolved)
+		if sourceErr != nil || sourceDigest != operation.SourceDigest {
+			if req.BuildReviewVersion != 0 {
+				creationOperationError(w, http.StatusConflict, "creation_build_changed", errCreationBuildChanged.Error())
+				return
+			}
+			creationOperationError(w, http.StatusConflict, "creation_blueprint_changed", "The blueprint changed after review. Nothing was accepted; review the current setup before creating.")
+			return
+		}
+	}
+
 	var groupPlan *createWorkspaceGroupPlan
 	if templateResolved {
 		var handled bool
@@ -854,6 +896,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			// parent is never used as a temporary placement or membership claim.
 			ws.ParentID = groupPlan.claim.Operation.HomeWorkspaceID
 		}
+	}
+
+	if !h.acceptWorkspaceCreationOperation(w, r, ws, resolvedTemplate, templateResolved) {
+		return
 	}
 
 	seed, ok := h.selectCreateWorkspaceEntryAgent(r.Context(), w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate, strictFreshTemplate)
@@ -1058,6 +1104,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if groupPlan != nil {
+		w.Header().Set("X-Ori-Group-Commit-Phase", "succeeded")
+	}
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
 
 	// A create that finishes a "Build with your assistant" session closes it

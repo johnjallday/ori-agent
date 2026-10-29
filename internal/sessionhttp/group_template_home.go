@@ -203,6 +203,10 @@ func (h *Handler) ReviewGroupTemplateHome(w http.ResponseWriter, r *http.Request
 // CommitGroupTemplateHome handles POST /api/workspaces/group-templates/commit.
 // It applies one reviewed Home-only consequence and reports canonical state.
 func (h *Handler) CommitGroupTemplateHome(w http.ResponseWriter, r *http.Request) {
+	// Only this pre-Claim phase proves a definite refusal applied nothing.
+	// A Claim error can follow Home creation/journal writes, so 400/409 alone
+	// must never authorize discarding an uncertain operation or fresh consent.
+	w.Header().Set("X-Ori-Group-Commit-Phase", "not_accepted")
 	request, ok := decodeGroupTemplateHomeRequest(w, r, true)
 	if !ok {
 		return
@@ -211,11 +215,13 @@ func (h *Handler) CommitGroupTemplateHome(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	w.Header().Set("X-Ori-Group-Commit-Phase", "outcome_unknown")
 	claim, err := h.groupRequirements.Claim(r.Context(), input, request.GroupReviewToken, request.IdempotencyKey)
 	if err != nil {
 		respondGroupRequirementError(w, err)
 		return
 	}
+	w.Header().Set("X-Ori-Group-Commit-Phase", "accepted")
 	homeID := strings.TrimSpace(claim.Operation.HomeWorkspaceID)
 	home, err := h.workspaceTaskStore.Get(homeID)
 	state := home.GetAssistantProgramState()
@@ -239,13 +245,15 @@ func (h *Handler) CommitGroupTemplateHome(w http.ResponseWriter, r *http.Request
 	if !createdByThisOperation {
 		summary = "An existing group was reused unchanged. No project workspace or team was created."
 	}
+	w.Header().Set("X-Ori-Group-Commit-Phase", "succeeded")
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success": true,
 		"group_template": map[string]any{
 			"state": "home_ready", "summary": summary,
 			"home_workspace_id": home.ID, "home_name": home.Name,
 			"home_created": claim.HomeCreated, "created_by_this_operation": createdByThisOperation,
-			"name_applied": createdByThisOperation, "idempotent_replay": claim.Replayed,
+			"layout_subject_new": claim.Operation.HomeCreated && createdByThisOperation,
+			"name_applied":       createdByThisOperation, "idempotent_replay": claim.Replayed,
 		},
 	})
 }

@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+import { confirmCreatorFinalAction, openCreatorResult } from './helpers/confirm-reviewed-creation';
 
 // Exact-source acceptance for Group Templates with the published REAPER plugin
 // 0.5.2 (commit 9fde099d, blueprint reaper-song v6). Opt-in: run it only against
@@ -261,11 +262,12 @@ for (const [index, song] of ['First Song', 'Second Song'].entries()) {
         response.request().method() === 'POST' &&
         Boolean(response.request().postDataJSON()?.group_review_token)
     );
-    await creator.locator('#createFolderBtn').click();
+    await confirmCreatorFinalAction(page);
     const committed = await commit;
     expect(committed.ok(), await committed.text()).toBeTruthy();
     const body = await committed.json();
     expect(body.assistant_station_id).toBe(homeID);
+    await openCreatorResult(page);
     await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
 
     const project = await json(await request.get(`/api/workspaces/${body.folder.id}`));
@@ -322,7 +324,11 @@ test('Create Group reuses the renamed Music Production group unchanged', async (
   await creator.getByRole('button', { name: 'Review →' }).click();
   await expect(creator.locator('#createFolderBtn')).toHaveText(`Use existing group “${renamed}”`);
   await evidence(page, '07-reuse-renamed');
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page);
+  await creator
+    .locator('#workspaceCreationReviewPanel')
+    .getByRole('button', { name: 'Close', exact: true })
+    .click();
   await expect(creator).toBeHidden();
   expect((await folders(request)).map(folder => folder.id).sort()).toEqual(
     beforeFolders.map(folder => folder.id).sort()

@@ -364,6 +364,8 @@ function ptcIsBlocked(template) {
 }
 
 let ptcSelected = PTC_BLANK;
+// The project entry whose open-after-create default was last applied.
+let ptcOpenDefaultKey = '';
 let ptcQuests = [];
 let ptcQuestForTemplate = () => null;
 // Replaced by the shared link module once quest discovery loads.
@@ -658,7 +660,16 @@ function ptcUpdateUI() {
   );
   if (els.openAfterCreate) els.openAfterCreate.hidden = !hasEntry;
   if (els.openAfterCreateToggle) {
-    els.openAfterCreateToggle.checked = hasEntry ? Boolean(entry.open_after_create_default) : false;
+    // The blueprint default applies when the project entry changes. Re-reading
+    // the same selection (readiness recheck before Create) keeps the person's
+    // explicit choice instead of silently changing reviewed terms.
+    const key = hasEntry ? `${ptcSelected.id || ''}\n${entry.relative_path}` : '';
+    if (key !== ptcOpenDefaultKey) {
+      els.openAfterCreateToggle.checked = hasEntry
+        ? Boolean(entry.open_after_create_default)
+        : false;
+      ptcOpenDefaultKey = key;
+    }
   }
 }
 

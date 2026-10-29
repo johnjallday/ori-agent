@@ -379,9 +379,14 @@ func linkCreateFixture(t *testing.T, templateID string) (*buildFixture, *workspa
 
 func createFromBuild(t *testing.T, f *buildFixture, build personalassistant.WorkspaceBuildSession, templateID, name string) string {
 	t.Helper()
-	status, body := f.do(t, http.MethodPost, "/api/workspaces", map[string]any{"name": name, "template_id": templateID, "build_session_id": build.ID})
-	if status != http.StatusCreated {
-		t.Fatalf("create: %d %+v", status, body)
+	material := map[string]any{"name": name, "template_id": templateID, "build_session_id": build.ID}
+	if build.Folder != nil || build.Link != nil {
+		material["build_review_version"] = build.Version
+	}
+	id, digest := reviewCreationOperation(t, f.handler, material)
+	response, body := creationOperationRequest(t, f.handler, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create: %d %+v", response.Code, body)
 	}
 	return body["folder"].(map[string]any)["id"].(string)
 }
@@ -426,7 +431,7 @@ func TestWorkspaceBuildLink_CreateBindsTheRepositoryAfterTheToolStep(t *testing.
 	f.withLinks(&fakeBuildLinks{observation: testRepoLink()})
 	build := f.start(t)
 	_, body := f.attachLink(t, build, "https://github.com/acme/widgets")
-	_ = sessionOf(t, body)
+	build = sessionOf(t, body)
 
 	id := createFromBuild(t, f, build, githubOpsTemplateID, "widgets")
 	if !*toolsRan {
@@ -465,7 +470,8 @@ func TestWorkspaceBuildLink_OtherBlueprintsKeepTheLinkAsASourceOnly(t *testing.T
 	f, files, _ := linkCreateFixture(t, "code-project")
 	f.withLinks(&fakeBuildLinks{observation: testRepoLink()})
 	build := f.start(t)
-	_, _ = f.attachLink(t, build, "https://github.com/acme/widgets")
+	_, body := f.attachLink(t, build, "https://github.com/acme/widgets")
+	build = sessionOf(t, body)
 	id := createFromBuild(t, f, build, "code-project", "widgets")
 	stored, err := files.Get(id)
 	if err != nil {

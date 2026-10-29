@@ -1145,3 +1145,248 @@ test('reuse receipt and button name the roles it staffs; fills follow the unchan
   const landing = JSON.parse(env.window.sessionStorage.getItem('ori:group-template-landing'));
   assert.equal(landing.message, 'My Studio reused. Second Lead staffed.');
 });
+
+test('shared result seam proves the original Home before staffing and does not navigate or reset', async () => {
+  const original = staffingFetch();
+  const env = environment({
+    fetch: async (url, options, count) =>
+      url.endsWith('/observe')
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              group_template: {
+                state: 'home_ready',
+                home_workspace_id: 'home-9',
+                layout_subject_new: true
+              }
+            })
+          }
+        : original(url, options, count)
+  });
+  const creator = staffingCreator(env.api);
+  creator.folders = [{ id: 'home-9', folder_slug: 'lab' }];
+  let resets = 0;
+  creator.resetAddWorkspaceModalForm = () => {
+    resets++;
+  };
+  env.element('folderNameInput').value = 'Lab';
+  env.api.seedFills(creator);
+  await env.api.ensureReview(creator);
+  let envelope, completed;
+  const ok = await env.api.submit(creator, {
+    onAccepted(pending) {
+      envelope = asData(pending.request);
+      assert.equal(
+        env.api.setFill(creator, 'coordinator', { mode: 'create', name: 'Late replacement' }),
+        false
+      );
+    },
+    onResult(result) {
+      completed = asData(result);
+    }
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(
+    env.calls.map(call => call.url),
+    [
+      '/api/workspaces/group-templates/review',
+      '/api/workspaces/group-templates/commit',
+      '/api/workspaces/group-templates/observe',
+      '/api/workspaces/home-9/roles/coordinator'
+    ]
+  );
+  assert.deepEqual(JSON.parse(env.calls[1].options.body), envelope);
+  assert.deepEqual(
+    JSON.parse(env.calls[2].options.body),
+    envelope,
+    'observation binds the same original request'
+  );
+  assert.equal(completed.result.layout_subject_new, true);
+  assert.equal(completed.result.home_workspace_id, 'home-9');
+  assert.equal(completed.outcomes[0].ok, true);
+  assert.equal(env.window.location.href, '');
+  assert.equal(resets, 0);
+});
+
+test('shared 409 discards consent only with explicit pre-Claim refusal proof', async () => {
+  for (const phase of ['not_accepted', 'outcome_unknown', 'accepted', null]) {
+    const original = staffingFetch();
+    const env = environment({
+      fetch: async (url, options, count) =>
+        url.endsWith('/commit')
+          ? {
+              ok: false,
+              status: 409,
+              headers: { get: () => phase },
+              json: async () => ({ error: 'This review changed.' })
+            }
+          : original(url, options, count)
+    });
+    const creator = staffingCreator(env.api);
+    env.element('folderNameInput').value = 'Lab';
+    env.api.seedFills(creator);
+    await env.api.ensureReview(creator);
+    let refused = 0;
+    assert.equal(
+      await env.api.submit(creator, {
+        onResult() {},
+        onRefused() {
+          refused++;
+        }
+      }),
+      false
+    );
+    assert.equal(refused, phase === 'not_accepted' ? 1 : 0, String(phase));
+    assert.equal(
+      Boolean(creator.workspaceCreatorContext.groupTemplates.pending),
+      phase !== 'not_accepted',
+      String(phase)
+    );
+    assert.equal(
+      env.calls.some(call => call.options.method === 'PUT'),
+      false
+    );
+  }
+});
+
+test('unproven shared Home response never staffs another resource or navigates', async () => {
+  const original = staffingFetch();
+  const env = environment({
+    fetch: async (url, options, count) =>
+      url.endsWith('/observe')
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              group_template: { state: 'home_ready', home_workspace_id: 'unrelated-home' }
+            })
+          }
+        : original(url, options, count)
+  });
+  const creator = staffingCreator(env.api);
+  env.element('folderNameInput').value = 'Lab';
+  env.api.seedFills(creator);
+  await env.api.ensureReview(creator);
+  let completed = false;
+  assert.equal(
+    await env.api.submit(creator, {
+      onResult() {
+        completed = true;
+      }
+    }),
+    false
+  );
+  assert.equal(completed, false);
+  assert.equal(
+    env.calls.some(call => call.options.method === 'PUT'),
+    false
+  );
+  assert.equal(creator.workspaceCreatorContext.groupTemplates.pending.uncertain, true);
+  assert.equal(env.window.location.href, '');
+});
+
+test('catalog disappearance or failure retains the selected managed intent and its staged fills, never General', async () => {
+  for (const result of ['unavailable', 'missing', 'network']) {
+    const env = environment({
+      fetch: async () => {
+        if (result === 'network') throw new Error('catalog offline');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            group_templates:
+              result === 'missing' ? [] : [managed({ availability: { state: 'unavailable' } })]
+          })
+        };
+      }
+    });
+    const creator = staffingCreator(env.api, managed());
+    env.api.setFill(creator, 'coordinator', {
+      mode: 'create',
+      name: 'Retained Choice',
+      provider: 'lmstudio',
+      model: 'reviewed-model'
+    });
+    await env.api.load(creator, { force: true });
+    assert.equal(creator.workspaceCreatorContext.groupTemplates.selectedId, managed().id, result);
+    assert.equal(env.api.managedActive(creator), true, result);
+    assert.equal(env.api.canSubmit(creator), false, result);
+    assert.equal(env.api.stagedFill(creator, 'coordinator').name, 'Retained Choice', result);
+    assert.equal(
+      env.calls.some(call => call.options.method === 'POST' || call.options.method === 'PUT'),
+      false,
+      result
+    );
+  }
+});
+
+test('an errored same-material review does not retry on redraw; explicit refresh can review it again', async () => {
+  let available = false;
+  const env = environment({
+    fetch: async () => ({
+      ok: available,
+      status: available ? 200 : 503,
+      json: async () =>
+        available
+          ? { group_template_review: { review_token: 'current-token' } }
+          : { error: 'source unavailable' }
+    })
+  });
+  const creator = staffingCreator(env.api);
+  env.element('folderNameInput').value = 'Retained Home';
+  await env.api.ensureReview(creator);
+  for (let n = 0; n < 10; n++) await env.api.ensureReview(creator);
+  assert.equal(env.calls.length, 1);
+  assert.equal(creator.workspaceCreatorContext.groupTemplates.review.status, 'error');
+  available = true;
+  creator.workspaceCreatorContext.groupTemplates.review = null; // explicit refresh intention
+  await env.api.ensureReview(creator);
+  assert.equal(env.calls.length, 2);
+  assert.equal(creator.workspaceCreatorContext.groupTemplates.review.status, 'ready');
+});
+
+test('shared new-Home review does not staff or adopt a concurrently reused Home under changed terms', async () => {
+  const original = staffingFetch();
+  const env = environment({
+    fetch: async (url, options, count) =>
+      url.endsWith('/observe')
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              group_template: {
+                state: 'home_ready',
+                home_workspace_id: 'home-9',
+                layout_subject_new: false
+              }
+            })
+          }
+        : original(url, options, count)
+  });
+  const creator = staffingCreator(env.api);
+  env.element('folderNameInput').value = 'Requested New Home';
+  env.api.seedFills(creator);
+  await env.api.ensureReview(creator);
+  let adopted = 0,
+    completed;
+  creator.workspaceCreatorContext.onCreated = () => {
+    adopted++;
+  };
+  assert.equal(
+    await env.api.submit(creator, {
+      onResult(result) {
+        completed = result;
+      }
+    }),
+    true
+  );
+  assert.equal(adopted, 0);
+  assert.equal(
+    env.calls.some(call => call.options.method === 'PUT'),
+    false
+  );
+  assert.equal(completed.result.layout_subject_new, false);
+  assert.match(completed.notice.message, /roster and position were left unchanged/);
+  assert.equal(env.window.location.href, '');
+});

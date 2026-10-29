@@ -239,18 +239,14 @@ async function createGroupedSong(page: Page, request: APIRequestContext, index: 
   for (const [label, name] of team) await createProjectRoleAgent(page, label, name);
 
   await creator.locator('#wizardNextBtn').click();
-  await expect(creator.locator('#workspaceReviewSummary')).toContainText('Reaper Song');
-  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
-    `Tempo: ${118 + index} BPM`
-  );
-  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
-    `${MANAGER_NAME} · already staffed on the group`
-  );
+  // The shared review names the reused Home and the typed inputs before the
+  // one requirement-owned confirmation; nothing exists until then.
+  const review = creator.locator('#workspaceCreationReviewPanel');
+  await expect(review).toContainText('Reaper Song');
+  await expect(review).toContainText(`Tempo: ${118 + index} BPM`);
+  await expect(review).toContainText(`existing Home “${HOME_NAME}”`);
+  await expect(review).toContainText(MANAGER_NAME);
   if (index === 0) await evidence(page, '04-grouped-song-review');
-
-  // One card, one confirm: the placement was reviewed as Review was shown and
-  // the card states it; the one Create button commits.
-  await expect(creator.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
 
   const commitResponse = page.waitForResponse(
     response =>
@@ -258,11 +254,15 @@ async function createGroupedSong(page: Page, request: APIRequestContext, index: 
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await creator.locator('#createFolderBtn').click();
+  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
   const committed = await commitResponse;
   expect(committed.ok(), await committed.text()).toBeTruthy();
   const body = await committed.json();
   expect(body.assistant_station_id).toBe(homeID);
+  await expect(review.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
+  await expect(review).toContainText(`Linked to Home “${HOME_NAME}”`);
+  await review.getByRole('button', { name: 'Open workspace', exact: true }).click();
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
 
   const project = await json(await request.get(`/api/workspaces/${body.folder.id}`));
@@ -558,8 +558,11 @@ test('two REAPER projects share one independently staffed Home and one manager',
   );
   await creator.getByRole('button', { name: 'Review →' }).click();
   await evidence(page, '01-independent-home-review');
-  await creator.locator('#createFolderBtn').click();
-  await expect(creator).toBeHidden();
+  const homeReview = creator.locator('#workspaceCreationReviewPanel');
+  await homeReview.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  await homeReview.locator('[data-placement-action="confirm"]').click();
+  await expect(homeReview.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible();
+  await homeReview.getByRole('button', { name: 'Open group', exact: true }).click();
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
 
   const created = await workspaces(request);
@@ -1005,17 +1008,11 @@ test('REAPER alone creates only an explicit Home-free standalone variant', async
   const team = PROJECT_ROLES.map(role => [role.label, `${projectName} ${role.label}`]);
   for (const [label, name] of team) await createProjectRoleAgent(page, label, name);
   await creator.locator('#wizardNextBtn').click();
-  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
-    'No Home or Assistant Program membership'
-  );
-  await expect(creator.locator('#workspaceReviewSummary')).toContainText('Tempo: 127 BPM');
+  const review = creator.locator('#workspaceCreationReviewPanel');
+  await expect(review).toContainText('Standalone project');
+  await expect(review).toContainText('No Home or program membership');
+  await expect(review).toContainText('Tempo: 127 BPM');
   await evidence(page, '01-standalone-review');
-
-  // One card, one confirm: the placement was reviewed as Review was shown and
-  // the card states it; the one Create button commits.
-  await expect(creator.locator('#workspaceReviewReadiness')).toContainText(
-    'Reviewed destination: standalone'
-  );
 
   const commitResponse = page.waitForResponse(
     response =>
@@ -1023,10 +1020,14 @@ test('REAPER alone creates only an explicit Home-free standalone variant', async
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await creator.locator('#createFolderBtn').click();
+  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
   const committed = await commitResponse;
   expect(committed.ok(), await committed.text()).toBeTruthy();
   const body = await committed.json();
+  await expect(review.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
+  await expect(review).toContainText('Standalone: no Home link was made.');
+  await review.getByRole('button', { name: 'Open workspace', exact: true }).click();
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
 
   const all = await workspaces(request);

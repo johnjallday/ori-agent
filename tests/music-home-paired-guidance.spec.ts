@@ -8,6 +8,7 @@ import {
   writeFileSync
 } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { confirmCreatorFinalAction, openCreatorResult } from './helpers/confirm-reviewed-creation';
 import { createHash } from 'node:crypto';
 
 // A small exact-source acceptance for the current single-role REAPER blueprint.
@@ -115,7 +116,7 @@ test('paired candidates preserve order and create only the declared local projec
   await group.getByRole('button', { name: 'Continue →' }).click();
   await group.getByRole('button', { name: 'Review →' }).click();
   await screenshot(page, 'guidance-home-review');
-  await group.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page, { open: true });
   await expect(group).toBeHidden();
   const homes = (await json(await request.get('/api/workspaces'))).folders.filter(
     (row: { kind: string }) => row.kind === 'group'
@@ -179,11 +180,12 @@ test('paired candidates preserve order and create only the declared local projec
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page);
   const committed = await commit;
   expect(committed.ok(), await committed.text()).toBeTruthy();
   const created = await committed.json();
   const projectID = created.folder.id;
+  await openCreatorResult(page);
   const project = workspaceFile(projectID);
   expect(project.data.assistant_project_link).toMatchObject({
     station_workspace_id: homeID,

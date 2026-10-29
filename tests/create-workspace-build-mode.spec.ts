@@ -2,19 +2,24 @@ import { test, expect, Page, Route } from '@playwright/test';
 import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assistant';
 import { installLocalCdn } from './helpers/offline-cdn';
 import { checkNextActionReflow } from './helpers/next-action-reflow';
+import { startJanitorBuildModel } from './helpers/janitor-build-model';
+import { prepareFolderCreationRuntime } from './helpers/folder-first-runtime';
 
 /**
  * E2E for "Build with your assistant" (tasks/prd-build-with-your-assistant.md):
  * Create Workspace with one active surface and one shared draft.
  *
  * The build-session endpoints are answered by a scripted fake in this file, so
- * no model runs; everything else — Home, the wizard and its setters, the team
- * plan, map placement, and the final Create — is the real server. The fake
+ * no live model runs. A loopback fixture supplies model metadata and any
+ * retained first-work calls after explicit workspace navigation. Everything
+ * else — Home, the wizard and its setters, the team plan, map placement, and
+ * the final Create — is the real server. The fake
  * keeps the server's contract: one open build, versions, server chip ids, form
  * edits said back, and a blueprint switch reported as `blueprint_changed`.
  *
  * Run against a fresh sandbox (a demoed one taints slug uniqueness):
- *   ./scripts/demo-server.sh 8931 "$TMPDIR/ori-e2e.<n>"
+ *   LM_STUDIO_BASE_URL=http://127.0.0.1:8940/v1 ORI_DEMO_NO_CODEX=1 \
+ *     ./scripts/demo-server.sh 8931 "$TMPDIR/ori-e2e.<n>"
  *   ./scripts/e2e.sh tests/create-workspace-build-mode.spec.ts -- --workers=1
  */
 
@@ -386,6 +391,10 @@ async function choose(page: Page, label: string) {
 // Home's create ends on the map. A sandbox that already holds workspaces may
 // put the first candidate on occupied ground, so nudge until it is open.
 async function placeOnMap(page: Page) {
+  const review = page.locator('#workspaceCreationReviewPanel');
+  if (!(await review.isVisible())) await page.locator('#workspaceBuildEditDraftBtn').click();
+  await expect(review).toBeVisible();
+  await review.getByRole('button', { name: 'Place & create on map', exact: true }).click();
   const preview = page.locator('[data-ws-map-placement-preview]');
   await expect(preview).toBeVisible();
   const occupied = async () => /\bis-invalid\b/.test((await preview.getAttribute('class')) || '');
@@ -417,6 +426,19 @@ async function assisted(page: Page) {
   );
   await expect(folder ? page.locator('#workspaceBuildFolderReview') : pane(page)).toBeVisible();
 }
+
+// Isolated demo only: model metadata for the real final create, not a paid
+// inference dependency. Build turns are still the explicit route fixture below.
+let catalogModel: Awaited<ReturnType<typeof startJanitorBuildModel>>;
+test.beforeAll(async ({ request }) => {
+  catalogModel = await startJanitorBuildModel({ nonBuildReply: { items: [] } });
+  // The real creation gate also needs a real build owner. A UI-only hired
+  // assistant response cannot supply that server authority.
+  await prepareFolderCreationRuntime(request);
+});
+test.afterAll(async () => {
+  await catalogModel?.();
+});
 
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
@@ -594,9 +616,18 @@ test('golden path: three turns and no form clicks create the workspace the build
     { text: 'Creating it now.', createNow: true }
   ]);
   const created: RequestBody[] = [];
+  const reviewed = new Map<string, RequestBody>();
   page.on('request', request => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/workspaces') {
-      created.push(request.postDataJSON());
+    if (request.method() !== 'POST') return;
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/workspaces/create-operations') {
+      const body = request.postDataJSON();
+      reviewed.set(body.id, body.request);
+    } else if (/\/create-operations\/[^/]+\/confirm$/.test(path)) {
+      const id = path.split('/').at(-2)!;
+      const material = reviewed.get(id);
+      expect(material).toBeTruthy();
+      created.push(material!);
     }
   });
 
@@ -618,6 +649,7 @@ test('golden path: three turns and no form clicks create the workspace the build
   await expect(pane(page)).toContainText('a new Content Lead and a new Brand Copywriter');
 
   await say(page, 'create it');
+  expect(created).toHaveLength(0, 'the model proposal is not final consent');
   await placeOnMap(page);
   await expect.poll(() => created.length).toBe(1);
 
@@ -647,7 +679,7 @@ test('golden path: three turns and no form clicks create the workspace the build
     .poll(async () => {
       const response = await page.request.get('/api/workspaces');
       const body = await response.json();
-      const list = Array.isArray(body) ? body : body.workspaces || [];
+      const list = Array.isArray(body) ? body : body.workspaces || body.folders || [];
       return list.some((workspace: RequestBody) => workspace.name === name);
     })
     .toBe(true);
@@ -655,6 +687,8 @@ test('golden path: three turns and no form clicks create the workspace the build
   const workspace = (collection.workspaces || collection.folders).find(
     (item: RequestBody) => item.name === name
   );
+  const canonical = await (await page.request.get(`/api/workspaces/${workspace.id}`)).json();
+  expect(canonical.mission_state.mission_execution_count || 0).toBe(0);
   const team = await (await page.request.get(`/api/workspaces/${workspace.id}/agents`)).json();
   expect(team.agents.map((agent: RequestBody) => agent.name)).toEqual(
     expect.arrayContaining(['Content Lead', 'Brand Copywriter'])

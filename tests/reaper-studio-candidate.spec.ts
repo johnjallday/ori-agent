@@ -11,6 +11,7 @@ import {
   writeFileSync
 } from 'node:fs';
 import { basename, join, relative } from 'node:path';
+import { confirmCreatorFinalAction, openCreatorResult } from './helpers/confirm-reviewed-creation';
 
 // REAPER Studio against the EXACT committed REAPER and Music candidates, on a
 // disposable Ori host. Run only through
@@ -270,10 +271,11 @@ async function createSong(page: Page, request: APIRequestContext, name: string) 
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page);
   const committed = await commit;
   expect(committed.ok(), await committed.text()).toBeTruthy();
   saved.songID = (await committed.json()).folder.id;
+  await openCreatorResult(page);
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
   const song = await json(await request.get(`/api/workspaces/${saved.songID}`));
   expect(song.parent_id).toBe(saved.homeID);
@@ -313,11 +315,12 @@ async function setUpStudio(page: Page, request: APIRequestContext) {
       response.request().method() === 'POST' &&
       Boolean(response.request().postDataJSON()?.group_review_token)
   );
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page);
   const committed = await commit;
   expect(committed.ok(), await committed.text()).toBeTruthy();
   const payload = committed.request().postDataJSON();
   saved.studioID = (await committed.json()).folder.id;
+  await openCreatorResult(page);
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
   const studio = await json(await request.get(`/api/workspaces/${saved.studioID}`));
   expect(studio.parent_id).toBe(saved.homeID);

@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // Run only through the Music candidate sandbox. Five disposable project folders
 // under its HOME make the actual chip scanner offer a portfolio. No native
@@ -119,7 +120,7 @@ test('a local-only provider cannot resolve a portfolio offer or grant a discover
   );
   await creator.getByRole('button', { name: 'Review →' }).click();
   await shot(page, '13-portfolio-home-review');
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page, { open: true });
   await expect(creator).toBeHidden();
   const homes = (await json(await request.get('/api/workspaces'))).folders.filter(
     (row: { kind: string; id: string }) => row.kind === 'group'

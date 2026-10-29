@@ -23,6 +23,8 @@ Commands:
 
 Options:
   --source DIR      Clean Music Project Management candidate worktree.
+  --source-ref REF  Export this existing commit/tag without switching or changing
+                    the source checkout (default: HEAD).
   --reaper-source DIR  Optional clean REAPER candidate, exported and built only in the
                        disposable sandbox for the paired portfolio-reviewed test, or
                        for the home-profile suite, where it lists fixture templates.
@@ -35,7 +37,9 @@ Options:
   --restart-check   In a reviewed test only (portfolio-reviewed needs --reaper-source),
                     restart this sandbox's server once when the browser requests
                     it (never user state).
-  --suite NAME      Browser test suite: home (default), portfolio (local refusal),
+  --suite NAME      Browser test suite: home (default), reviewed-placement
+                    (shared managed-Home review/recovery; local candidate),
+                    portfolio (local refusal),
                     portfolio-reviewed (published release; test only),
                     manager-notifications (scan digest, badge and Manager
                     suggestions on the published release; test only),
@@ -79,6 +83,7 @@ serve | test)
 esac
 
 plugin_source="${ORI_MUSIC_PLUGIN_SOURCE:-}"
+candidate_ref="HEAD"
 reaper_source=""
 upgrade_source=""
 port="${ORI_MUSIC_HOME_DEMO_PORT:-8931}"
@@ -95,6 +100,11 @@ while [[ $# -gt 0 ]]; do
 	--source)
 		[[ $# -ge 2 ]] || fail "--source needs a directory"
 		plugin_source="$2"
+		shift 2
+		;;
+	--source-ref)
+		[[ $# -ge 2 ]] || fail "--source-ref needs an existing commit or tag"
+		candidate_ref="$2"
 		shift 2
 		;;
 	--reaper-source)
@@ -176,8 +186,8 @@ if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 fi
 [[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ||
 	"$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" || "$test_suite" == "package-upgrade" ||
-	"$test_suite" == "home-profile" ]] || \
-	fail "--suite needs home, portfolio, portfolio-reviewed, manager-notifications, onboarding, package-upgrade or home-profile"
+	"$test_suite" == "home-profile" || "$test_suite" == "reviewed-placement" ]] || \
+	fail "--suite needs home, reviewed-placement, portfolio, portfolio-reviewed, manager-notifications, onboarding, package-upgrade or home-profile"
 if { [[ "$test_suite" == "package-upgrade" ]] && [[ -z "$upgrade_source" ]]; } ||
 	{ [[ "$test_suite" != "package-upgrade" ]] && [[ -n "$upgrade_source" ]]; }; then
 	fail "--suite package-upgrade and --upgrade-source go together"
@@ -207,11 +217,9 @@ git -C "$plugin_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 	fail "music plugin source is not a Git worktree"
 [[ -z "$(git -C "$plugin_root" status --porcelain --untracked-files=all)" ]] || \
 	fail "music plugin source must be clean so its exact commit can be staged"
-[[ -x "$plugin_root/scripts/validate-package.py" ]] || \
-	fail "candidate has no executable scripts/validate-package.py"
-
-candidate_revision="$(git -C "$plugin_root" rev-parse HEAD)"
-candidate_tree="$(git -C "$plugin_root" rev-parse HEAD^{tree})"
+candidate_revision="$(git -C "$plugin_root" rev-parse --verify --end-of-options "${candidate_ref}^{commit}" 2>/dev/null)" || \
+	fail "--source-ref does not resolve to an existing commit"
+candidate_tree="$(git -C "$plugin_root" rev-parse "${candidate_revision}^{tree}")"
 upgrade_root=""
 upgrade_revision=""
 if [[ -n "$upgrade_source" ]]; then
@@ -437,7 +445,7 @@ assert plugin.get("skill_paths", {}).get("music-project-management") == "skills/
 assert enabled.get("enabled") is True and enabled.get("name") == plugin.get("name"), "plugin enable failed"
 PY
 fi
-source_skill_sha256="$(shasum -a 256 "$plugin_root/skills/music-project-management/SKILL.md" | awk '{print $1}')"
+source_skill_sha256="$(git -C "$plugin_root" show "$candidate_revision:skills/music-project-management/SKILL.md" | shasum -a 256 | awk '{print $1}')"
 staged_skill_sha256="$(shasum -a 256 "$skill_root/SKILL.md" | awk '{print $1}')"
 [[ "$source_skill_sha256" == "$staged_skill_sha256" ]] || fail "disposable exported skill differs from clean candidate"
 
@@ -461,7 +469,9 @@ fi
 if [[ "$mode" == "test" ]]; then
 	printf 'Running Music Production Home %s acceptance (provider: %s)...\n' "$test_suite" "$provider_mode"
 	playwright_file="tests/music-home-candidate.spec.ts"
-	if [[ "$test_suite" == "portfolio" ]]; then
+	if [[ "$test_suite" == "reviewed-placement" ]]; then
+		playwright_file="tests/unified-managed-home-review.spec.ts"
+	elif [[ "$test_suite" == "portfolio" ]]; then
 		playwright_file="tests/music-home-portfolio.spec.ts"
 	elif [[ "$test_suite" == "portfolio-reviewed" ]]; then
 		playwright_file="tests/music-home-portfolio-reviewed.spec.ts"

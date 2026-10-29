@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import './folder-setup-visual.js';
 import { createPlacementCards } from './assisted-workspace-placement.js';
+import * as groupedApi from './grouped-creation-operation.js';
 import {
   loadInitialWorkspaceTree,
   loadOnboardingStatus,
@@ -40,6 +41,7 @@ function loadSessionManager(
       fetch: fetchImpl,
       console,
       URLSearchParams,
+      Event,
       crypto: { randomUUID: () => 'review-key' },
       setTimeout,
       clearTimeout
@@ -48,6 +50,1097 @@ function loadSessionManager(
   );
   return window.sessionManager;
 }
+
+test('a deferred optional summary does not acquire the software owner or its names-only setter', () => {
+  const manager = loadSessionManager();
+  manager.workspaceBuild = {
+    session: {
+      status: 'open',
+      plan: { ready: true, first_task_deferred: true }
+    }
+  };
+  assert.equal(manager.workspaceBuildUsesSetupReview(), false);
+  manager.workspaceBuild.session.plan.software_review = true;
+  assert.equal(manager.workspaceBuildUsesSetupReview(), true);
+});
+
+test('recognized setup cannot be dispatched from legacy controls or assistant proposals before shared final consent', async () => {
+  let rendered = 0;
+  const manager = loadSessionManager(async () => {
+    throw new Error('No request before final consent');
+  });
+  manager.workspaceBuild = {
+    session: {
+      id: 'setup',
+      status: 'open',
+      version: 3,
+      plan: { ready: true, first_task_deferred: true, digest: 'exact' }
+    }
+  };
+  manager.workspaceBuild.session.plan.software_review = true;
+  manager.workspaceBuildPane = () => ({ setupBrief: () => 'Exact brief' });
+  manager.syncWorkspaceBuildPresentation = () => rendered++;
+  await manager.setUpWorkspaceBuild({ brief: 'proposed', create_now: true });
+  assert.equal(rendered, 1);
+  assert.equal(manager.workspaceBuild.setupReviewUI.editing, false);
+  manager.workspaceBuild.session.setup = { id: 'existing-owner-claim' };
+  assert.equal(
+    manager.workspaceBuildUsesSetupReview(),
+    false,
+    'existing setup continuation remains with its owner'
+  );
+});
+
+test('recognized setup rechecks the exact owner terms after draft flushing and never confirms a replacement version', async () => {
+  const manager = loadSessionManager(async () => {
+    throw new Error('No creation or model request');
+  });
+  const build = {
+    session: {
+      id: 'setup',
+      status: 'open',
+      version: 3,
+      plan: { ready: true, first_task_deferred: true, digest: 'exact' }
+    },
+    setupReviewUI: { automatic: true }
+  };
+  manager.workspaceBuild = build;
+  build.session.plan.software_review = true;
+  manager.workspaceBuildPane = () => ({ setupBrief: () => 'Exact brief' });
+  manager.workspaceBuildSetupPressable = () => true;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.flushWorkspaceBuildDraft = async () => {
+    build.session.version++;
+  };
+  let confirms = 0;
+  manager.setUpWorkspaceBuild = async () => confirms++;
+  await manager.actOnWorkspaceBuildSetupReview(build, { action: 'confirm' });
+  assert.equal(confirms, 0);
+  assert.match(build.setupReviewUI.message, /terms changed/);
+  manager.flushWorkspaceBuildDraft = async () => {};
+  await manager.actOnWorkspaceBuildSetupReview(build, { action: 'confirm' });
+  assert.equal(confirms, 1, 'only a new gesture on unchanged exact terms dispatches');
+  const replacement = { ...build, session: { ...build.session, id: 'other' } };
+  manager.workspaceBuild = replacement;
+  await manager.actOnWorkspaceBuildSetupReview(build, { action: 'confirm' });
+  assert.equal(confirms, 1, 'a replaced editor cannot confirm the old build');
+});
+
+test('software map confirmation delegates once to the original owner and rejects an obsolete creator generation', async () => {
+  let calls = 0;
+  const manager = loadSessionManager();
+  const build = { setupReviewUI: {}, session: { id: 'source' } };
+  const context = { generation: 7 };
+  manager.workspaceBuild = build;
+  manager.workspaceCreatorContext = context;
+  manager.workspaceBuildSetupPressable = () => true;
+  manager.workspaceBuildSetupNameCurrent = () => true;
+  manager.workspaceBuildSetupReviewKey = () => 'exact';
+  manager.workspaceBuildPane = () => ({ setupBrief: () => 'Exact brief' });
+  manager.setUpWorkspaceBuild = async () => {
+    calls++;
+    build.setupReviewUI.accepted = true;
+  };
+  manager.returnFromWorkspaceMapPlacement = () => {};
+  const placement = {
+    token: 'site',
+    revision: 1,
+    phase: 'placing',
+    creatorContext: context,
+    creatorGeneration: 7,
+    setupOwner: { build, key: 'exact' }
+  };
+  manager.workspaceMapPlacement = placement;
+  assert.equal(await manager.confirmWorkspaceMapPlacement('site', { x: 4, y: 9 }), true);
+  assert.equal(await manager.confirmWorkspaceMapPlacement('site', { x: 4, y: 9 }), false);
+  assert.equal(calls, 1);
+  placement.phase = 'placing';
+  placement.inFlight = null;
+  manager.workspaceCreatorContext = { generation: 8 };
+  assert.equal(await manager.confirmWorkspaceMapPlacement('site', { x: 4, y: 9 }), false);
+  assert.equal(calls, 1);
+});
+
+test('ordinary review edits use the existing canonical fields and reject replacement editor callbacks', async () => {
+  const events = [];
+  const name = { value: 'Original', dataset: {}, dispatchEvent: event => events.push(event.type) };
+  const goal = {
+    value: 'Original goal',
+    dataset: {},
+    dispatchEvent: event => events.push(event.type)
+  };
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Rendering/editing cannot call a provider or create');
+    },
+    {},
+    {
+      getElementById: id => ({ folderNameInput: name, folderGoalInput: goal })[id]
+    }
+  );
+  const context = { generation: 4, ordinaryReview: { generation: 4 } };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  await manager.actOnOrdinaryCreationReview(context, { action: 'dirty' });
+  assert.equal(context.ordinaryReview.dirty, true);
+  await manager.actOnOrdinaryCreationReview(context, {
+    action: 'edit',
+    field: 'name',
+    value: 'Reviewed name'
+  });
+  await manager.actOnOrdinaryCreationReview(context, {
+    action: 'edit',
+    field: 'mission',
+    value: 'Exact reviewed goal 日本語'
+  });
+  assert.equal(name.value, 'Reviewed name');
+  assert.equal(goal.value, 'Exact reviewed goal 日本語');
+  assert.equal(goal.dataset.goalEdited, '1');
+  assert.equal(context.ordinaryReview.dirty, false);
+  assert.deepEqual(events, ['input', 'input']);
+  manager.workspaceCreatorContext = { generation: 5 };
+  await manager.actOnOrdinaryCreationReview(context, {
+    action: 'edit',
+    field: 'name',
+    value: 'Late reply'
+  });
+  assert.equal(name.value, 'Reviewed name');
+});
+
+test('accepted ordinary creation cannot fall back to legacy POST when the picker projection resets', async () => {
+  let calls = 0;
+  const manager = loadSessionManager(
+    async () => {
+      calls++;
+      throw new Error('Accepted creation repeated');
+    },
+    {},
+    {
+      getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null)
+    }
+  );
+  manager.workspaceCreatorContext = {
+    ordinaryReview: { accepted: true, result: { id: 'proven' } }
+  };
+  manager.teamView = () => ({ isBlank: false });
+  assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+  await manager.createFolder();
+  assert.equal(calls, 0);
+});
+
+test('kind changes cannot discard an accepted, uncertain or retained reviewed operation', () => {
+  for (const review of [
+    { reference: { id: 'retained' } },
+    { accepted: true },
+    { result: { id: 'group' } },
+    { actionInFlight: true }
+  ]) {
+    const manager = loadSessionManager(undefined, {
+      WorkspaceCreatorState: {
+        switchCreatorKind: () => {
+          throw new Error('Must not replace retained owner');
+        }
+      }
+    });
+    manager.workspaceCreatorContext = { kind: 'workspace', ordinaryReview: review };
+    manager.syncWorkspaceCreatorPresentation = () => {};
+    assert.equal(manager.switchWorkspaceCreatorKind('group'), false);
+    assert.equal(manager.workspaceCreatorContext.ordinaryReview, review);
+  }
+});
+
+test('ordinary Group uses its existing roster owner while managed and selected-member Group actions stay separate', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null)
+    }
+  );
+  manager.workspaceCreatorContext = { mode: 'ordinary' };
+  manager.isGroupCreator = () => true;
+  manager.usesGroupRosterCreator = () => true;
+  manager.teamView = () => ({});
+  assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+  const material = manager.ordinaryCreationMaterialReview();
+  assert.match(material.now, /reviewed Group Manager/);
+  assert.match(material.facts[0].value, /does not grant access to member workspaces/);
+  manager.usesGroupRosterCreator = () => false;
+  assert.equal(manager.usesUnifiedOrdinaryReview(), false, 'managed Home keeps its own commit');
+  manager.usesGroupRosterCreator = () => true;
+  manager.workspaceCreatorContext.mode = 'selected-members';
+  assert.equal(
+    manager.usesUnifiedOrdinaryReview(),
+    false,
+    'member selection retains its approval owner'
+  );
+});
+
+test('ordinary build review retains manual fallback and exact generic sources without borrowing specialized setup authority', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null) }
+  );
+  manager.workspaceCreatorContext = { mode: 'ordinary' };
+  manager.isGroupCreator = () => false;
+  manager.teamView = () => ({ isBlank: true });
+  manager.workspaceBuild = { withdrawn: true };
+  assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+  assert.equal(manager.ordinaryBuildReviewProblem(), '');
+  for (const session of [{ folder: {} }, { link: {} }, { setup: {} }, { plan: { ready: true } }]) {
+    manager.workspaceBuild = { session };
+    assert.equal(manager.usesUnifiedOrdinaryReview(), false);
+  }
+  for (const source of [
+    { folder: { observation: { id: 'held' }, recognition: { verdict: 'none' } } },
+    { link: { observation: { id: 'link' } } }
+  ]) {
+    manager.workspaceBuild = { session: { id: 'build', version: 1, status: 'open', ...source } };
+    assert.equal(manager.usesUnifiedOrdinaryReview(), true);
+    assert.equal(manager.ordinaryBuildReviewProblem(), '');
+  }
+  for (const session of [
+    { folder: { observation: { id: 'held' }, recognition: { verdict: 'project' } } },
+    { folder: { observation: { id: 'held' } }, draft: { template_id: 'file-janitor' } },
+    { placement_source: { offer_id: 'source' } }
+  ]) {
+    manager.workspaceBuild = { session };
+    assert.equal(manager.usesUnifiedOrdinaryReview(), false);
+  }
+  manager.workspaceBuild = { session: { id: 'build', version: 1, status: 'open' }, busy: true };
+  assert.match(manager.ordinaryBuildReviewProblem(), /Wait/);
+  manager.workspaceBuild.busy = false;
+  const key = manager.ordinaryCreationMaterialKey({ name: 'Exact draft' });
+  manager.workspaceBuild.session.version++;
+  assert.notEqual(manager.ordinaryCreationMaterialKey({ name: 'Exact draft' }), key);
+  manager.workspaceBuild.session.status = 'created';
+  assert.match(manager.ordinaryBuildReviewProblem(), /no longer open/);
+});
+
+test('clearing a redundant draft sync refreshes ordinary review readiness without sending another draft', async () => {
+  const manager = loadSessionManager();
+  const body = { draft: { name: 'Unchanged' } };
+  const build = {
+    session: { id: 'build', status: 'open' },
+    draftUser: false,
+    lastDraftKey: JSON.stringify({ draft: body.draft })
+  };
+  manager.workspaceBuild = build;
+  manager.workspaceBuildDraftBody = () => body;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.usesUnifiedOrdinaryReview = () => true;
+  let renders = 0;
+  manager.syncOrdinaryCreationReview = () => {
+    renders++;
+  };
+  manager.workspaceBuildApi = () => {
+    throw new Error('An unchanged draft must not write');
+  };
+  await manager.flushWorkspaceBuildDraft();
+  assert.equal(build.draftUser, undefined);
+  assert.equal(renders, 1);
+});
+
+test('refused source replacement only adopts an unchanged owner-bound version and never overwrites late local edits', async () => {
+  for (const change of [
+    'none',
+    'draft',
+    'folder',
+    'link',
+    'closed',
+    'late-edit',
+    'replaced-editor',
+    'older-version'
+  ]) {
+    const manager = loadSessionManager();
+    const session = {
+      id: 'build',
+      version: 3,
+      status: 'open',
+      draft: { name: 'Kept' },
+      folder: { observation: { id: 'held' } },
+      link: { observation: { id: 'link' } }
+    };
+    const build = { session };
+    manager.workspaceBuild = build;
+    let revision = 4;
+    manager.workspaceBuildRevision = () => revision;
+    const saved = structuredClone(session);
+    saved.version = 5;
+    if (change === 'draft') saved.draft.name = 'Other tab';
+    if (change === 'folder') saved.folder.observation.id = 'other';
+    if (change === 'link') saved.link.observation.id = 'other';
+    if (change === 'closed') saved.status = 'created';
+    if (change === 'older-version') saved.version = 2;
+    let resolve;
+    manager.workspaceBuildApi = () => ({
+      read: () =>
+        new Promise(done => {
+          resolve = done;
+        })
+    });
+    const adopted = [],
+      conflicts = [];
+    manager.adoptWorkspaceBuildSession = session => adopted.push(session);
+    manager.adoptWorkspaceBuildConflict = session => conflicts.push(session);
+    const pending = manager.recoverWorkspaceBuildAttachmentRefusal(build);
+    if (change === 'late-edit') revision++;
+    if (change === 'replaced-editor') manager.workspaceBuild = { session: { id: 'new' } };
+    resolve({ ok: true, body: { session: saved } });
+    await pending;
+    assert.equal(adopted.length, change === 'none' ? 1 : 0, change);
+    assert.equal(
+      conflicts.length,
+      ['draft', 'folder', 'link', 'closed'].includes(change) ? 1 : 0,
+      change
+    );
+    assert.equal(session.draft.name, 'Kept');
+  }
+});
+
+test('a definite ordinary refusal returns fresh roles to their existing owner without confirming new terms', () => {
+  const events = [];
+  const draft = { plan: { blueprintKey: 'template:neutral' } };
+  const manager = loadSessionManager(undefined, {
+    CreateWorkspaceTeamDraft: {
+      setPlanReady: (_draft, key, plan) => events.push(['plan', key, plan.revision]),
+      markPlanConflict: (_draft, _message, details) => events.push(['conflict', details.kind])
+    }
+  });
+  const context = { ordinaryReview: {} };
+  manager.workspaceCreatorContext = context;
+  manager.ensureWorkspaceTeamDraft = () => draft;
+  manager.goToWizardStep = step => events.push(['step', step]);
+  manager.refreshWorkspaceReview = () => {};
+  manager.announceWorkspaceTeamChange = () => {};
+  manager.showWorkspaceCreateError = message => events.push(['message', message]);
+  manager.createFolder = () => {
+    throw new Error('Refusal cannot confirm changed terms');
+  };
+  manager.applyOrdinaryCreationRefusal(context, {
+    message: 'Review changed roles',
+    refusal: { conflict: { type: 'team_readiness', fresh_plan: { revision: 'fresh' } } }
+  });
+  assert.deepEqual(events, [
+    ['plan', 'template:neutral', 'fresh'],
+    ['conflict', 'team-readiness'],
+    ['step', 3],
+    ['message', 'Review changed roles']
+  ]);
+});
+
+function groupedFixture(responses) {
+  const values = new Map();
+  const localStorage = {
+    getItem: key => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  };
+  const calls = [];
+  const manager = loadSessionManager(
+    async (url, options = {}) => {
+      calls.push([url, options.method || 'GET', options.body ? JSON.parse(options.body) : null]);
+      const next = responses.shift();
+      if (!next) throw new Error(`unexpected ${url}`);
+      if (next.throw) throw new Error('lost');
+      return {
+        ok: next.status >= 200 && next.status < 300,
+        status: next.status,
+        headers: { get: name => (name === 'X-Ori-Group-Commit-Phase' ? next.phase || '' : '') },
+        json: async () => next.body
+      };
+    },
+    { localStorage }
+  );
+  const context = {
+    generation: 1,
+    ordinaryReview: { generation: 1, owner: 'grouped', groupedApi }
+  };
+  manager.workspaceCreatorContext = context;
+  manager.groupRequirementDraft = { review: { input_digest: 'a'.repeat(64) } };
+  return { manager, context, calls, localStorage };
+}
+
+const groupedPayload = () => ({
+  name: 'Field notes',
+  template_id: 'plugin:fixture:research',
+  group_composition: 'grouped',
+  group_review_token: 'reviewed-destination',
+  idempotency_key: 'one-operation'
+});
+const groupedComplete = () => ({
+  status: 200,
+  body: {
+    group_requirement_operation: {
+      state: 'complete',
+      workspace_id: 'child',
+      home_workspace_id: 'home',
+      operation_digest: 'b'.repeat(64),
+      layout_subject_new: true
+    },
+    folder: { id: 'child', kind: 'workspace', status: 'active', parent_id: 'home' }
+  }
+});
+
+test('grouped creation retains its exact lookup before the one requirement-owned POST and proves the result', async () => {
+  const { manager, context, calls, localStorage } = groupedFixture([
+    {
+      status: 201,
+      phase: 'succeeded',
+      body: { folder: { id: 'child' }, assistant_station_id: 'home' }
+    },
+    groupedComplete()
+  ]);
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload(),
+    { candidate: { x: 40, y: 80 } }
+  );
+  assert.equal(outcome.state, 'complete');
+  assert.equal(outcome.result.folder.parent_id, 'home', 'canonical observed folder replaces reply');
+  assert.deepEqual(
+    calls.map(([url, method]) => [url, method]),
+    [
+      ['/api/workspaces', 'POST'],
+      ['/api/workspaces/group-requirements/observe', 'POST']
+    ]
+  );
+  assert.deepEqual(calls[1][2], {
+    group_review_token: 'reviewed-destination',
+    idempotency_key: 'one-operation',
+    input_digest: 'a'.repeat(64)
+  });
+  assert.deepEqual(
+    groupedApi.savedGroupedCreationGeometry(localStorage, context.ordinaryReview.reference),
+    { candidate: { x: 40, y: 80 } }
+  );
+});
+
+test('grouped creation sends nothing when another confirmed grouped operation is retained', async () => {
+  const { manager, context, calls, localStorage } = groupedFixture([]);
+  groupedApi.retainGroupedCreationReference(localStorage, {
+    group_review_token: 'older-tab',
+    idempotency_key: 'older',
+    input_digest: 'c'.repeat(64)
+  });
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload()
+  );
+  assert.equal(outcome.state, 'not_sent');
+  assert.equal(calls.length, 0);
+  assert.equal(
+    groupedApi.savedGroupedCreationReference(localStorage).group_review_token,
+    'older-tab',
+    'the older tab reference is not erased'
+  );
+});
+
+test('only a pre-acceptance phase is a grouped refusal; other failures stay observational', async () => {
+  const unrecorded = { status: 404, body: { group_requirement_operation: { state: 'x' } } };
+  const recorded = { status: 202, body: { group_requirement_operation: { state: 'claimed' } } };
+  const claimRefusal = { status: 409, phase: 'outcome_unknown', body: { error: 'stale Home' } };
+  for (const [responses, state] of [
+    [[{ status: 409, phase: 'not_accepted', body: { error: 'Review again' } }], 'refused'],
+    [[{ status: 409, body: { error: 'conflict without phase' } }], 'outcome_unknown'],
+    [[{ status: 500, phase: 'accepted', body: { error: 'after claim' } }], 'outcome_unknown'],
+    [[{ throw: true }], 'outcome_unknown'],
+    // A final Claim refusal with no recorded operation accepted nothing.
+    [[claimRefusal, unrecorded], 'refused'],
+    [[claimRefusal, recorded], 'outcome_unknown']
+  ]) {
+    const { manager, context, calls, localStorage } = groupedFixture([...responses]);
+    const outcome = await manager.dispatchGroupedCreation(
+      context,
+      '/api/workspaces',
+      groupedPayload()
+    );
+    assert.equal(outcome.state, state);
+    assert.equal(
+      calls.filter(([url]) => url === '/api/workspaces').length,
+      1,
+      'no automatic retry or replacement creation'
+    );
+    assert.equal(calls.length, responses.length, 'only the original operation is read');
+    assert.ok(
+      groupedApi.savedGroupedCreationReference(localStorage),
+      'lookup stays until the owner releases it'
+    );
+  }
+});
+
+test('a grouped success reply that the journal cannot prove is not positioned', async () => {
+  const mismatch = groupedComplete();
+  mismatch.body.folder.id = 'same-name-other';
+  mismatch.body.group_requirement_operation.workspace_id = 'same-name-other';
+  const { manager, context } = groupedFixture([
+    { status: 201, phase: 'succeeded', body: { folder: { id: 'child' } } },
+    mismatch
+  ]);
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload()
+  );
+  assert.equal(outcome.state, 'outcome_unknown');
+  assert.equal(outcome.result, undefined);
+});
+
+test('import, post-create hires, assistant builds and Group creators keep their own owners', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'workspaceCreationReviewPanel' ? {} : null)
+    }
+  );
+  manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1 };
+  manager.isGroupCreator = () => false;
+  manager.groupRequirementDraft = { composition: 'grouped' };
+  const view = { payload: {} };
+  assert.equal(manager.groupedRequirementReviewEligible(view), true);
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), true);
+  // A legacy post-create assistant hire is not part of the reviewed request.
+  assert.equal(
+    manager.groupedRequirementReviewEligible({ payload: { assistant_hire: {} } }),
+    false
+  );
+  manager.workspaceBuild = { session: { id: 'build' } };
+  assert.equal(manager.groupedRequirementReviewEligible(view), false);
+  manager.workspaceBuild = null;
+  // Import keeps its real verb and duplicate handling; never a placement.
+  manager.importModeEnabled = true;
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), false);
+  manager.importModeEnabled = false;
+  // Launchers with their own callbacks keep their legacy return.
+  manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1, onCreated: () => {} };
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), false);
+  manager.workspaceCreatorContext = { mode: 'guided', generation: 1 };
+  assert.equal(manager.usesUnifiedOrdinaryReview(view), false);
+});
+
+test('grouped results state the observed Home link and keep partial staffing partial', () => {
+  const manager = loadSessionManager();
+  manager.folders = [{ id: 'home', name: 'Research Program Home' }];
+  assert.equal(
+    manager.groupedCreationResultLine(
+      {
+        assistant_station_id: 'home',
+        team_completion: { state: 'partial', missing_required_roles: [{ role_id: 'lead' }] }
+      },
+      { parent_id: 'home' }
+    ),
+    'Linked to Home “Research Program Home”; the Home was not changed or moved. Its team setup is incomplete (1 required role missing). Complete the existing workspace team; Ori will not create another workspace.'
+  );
+  assert.equal(
+    manager.groupedCreationResultLine({ team_completion: { state: 'complete' } }, {}),
+    'Standalone: no Home link was made.'
+  );
+});
+
+test('a grouped result whose Home was created in the same operation is never positioned as one building', async () => {
+  const complete = groupedComplete();
+  complete.body.group_requirement_operation.requires_composite_layout = true;
+  const { manager, context } = groupedFixture([
+    { status: 201, phase: 'succeeded', body: { folder: { id: 'child' } } },
+    complete
+  ]);
+  const outcome = await manager.dispatchGroupedCreation(
+    context,
+    '/api/workspaces',
+    groupedPayload(),
+    {
+      candidate: { x: 1, y: 2 }
+    }
+  );
+  assert.equal(outcome.state, 'complete');
+  assert.equal(outcome.compositeLayout, true);
+});
+
+test('a carried final receipt fences an older in-flight quiet review for another request', async () => {
+  let release;
+  const manager = loadSessionManager(
+    () =>
+      new Promise(resolve => {
+        release = () =>
+          resolve({
+            ok: true,
+            json: async () => ({
+              group_requirement_review: { state: 'ready_grouped', review_token: 'teamless' }
+            })
+          });
+      })
+  );
+  manager.workspaceCreatorContext = { generation: 1 };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+  manager.reviewedDestinationLine = () => '';
+  const reviewed = { name: 'Field notes', role_staffing: [{ role_id: 'lead' }] };
+  const reviewedKey = JSON.stringify({ ...reviewed, group_composition: 'grouped' });
+  const draft = {
+    composition: 'grouped',
+    reviewRequestSeq: 1,
+    review: { review_token: 'reviewed', payloadKey: reviewedKey, idempotencyKey: 'op' }
+  };
+  manager.groupRequirementDraft = draft;
+  const quiet = manager.prepareGroupRequirementCommit(
+    '/api/workspaces',
+    { name: 'Field notes' },
+    { quiet: true }
+  );
+  const final = { ...reviewed };
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', final), true);
+  assert.equal(final.group_review_token, 'reviewed');
+  release();
+  assert.equal(await quiet, false);
+  assert.equal(draft.review.review_token, 'reviewed', 'the late teamless reply is dropped');
+});
+
+test('grouped review is reviewed only by the receipt for the current request and never by a Home guess', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'folderNameInput' ? { value: 'Field notes' } : null)
+    }
+  );
+  const request = { payload: { name: 'Field notes', template_id: 'plugin:fixture:research' } };
+  manager.currentCreateRequest = () => request;
+  manager.currentCreationBlueprint = () => ({});
+  const material = {
+    now: 'Create one workspace with the reviewed team. No scan.',
+    later: 'Later.'
+  };
+  manager.groupRequirementDraft = {
+    composition: 'grouped',
+    projection: { home: { exists: false, proposed_name: 'Research Home' } }
+  };
+  let view = manager.groupedCreationReview(material);
+  assert.equal(view.reviewed, false);
+  assert.match(view.problem, /Prepare “Research Home” in Details first/);
+  assert.equal(view.row.actionLabel, 'Prepare Home in Details');
+
+  const key = JSON.stringify({ ...request.payload, group_composition: 'grouped' });
+  manager.groupRequirementDraft = {
+    composition: 'grouped',
+    projection: { home: { exists: true, name: 'Research Home', workspace_id: 'home' } },
+    review: {
+      review_token: 'token',
+      payloadKey: key,
+      home_name: 'Research Home',
+      home_workspace_id: 'home'
+    }
+  };
+  view = manager.groupedCreationReview(material);
+  assert.equal(view.reviewed, true);
+  assert.equal(view.homeWorkspaceID, 'home');
+  assert.match(view.destination, /existing Home “Research Home”.*position are unchanged/);
+  assert.match(view.now, /^Create one project workspace inside “Research Home”.* No scan\.$/);
+
+  manager.groupRequirementDraft.review.payloadKey = 'an older request';
+  assert.equal(manager.groupedCreationReview(material).reviewed, false);
+  // A refused quiet review for this exact request is stated, not awaited.
+  manager.groupRequirementDraft.quietReviewError = {
+    key,
+    message: 'Name belongs to a saved agent.'
+  };
+  assert.match(
+    manager.groupedCreationReview(material).problem,
+    /^Name belongs to a saved agent\. Change the team or details to review again\. Nothing was created\.$/
+  );
+  manager.groupRequirementDraft.quietReviewError = {
+    key,
+    message: 'you already have an agent named "X"; assign it or choose another name'
+  };
+  assert.match(
+    manager.groupedCreationReview(material).problem,
+    /^You already have an agent named "X"; assign it or choose another name\. Change the team/
+  );
+  manager.groupRequirementDraft.quietReviewError = { key: 'older', message: 'stale' };
+  assert.match(
+    manager.groupedCreationReview(material).problem,
+    /^Reviewing this exact destination/
+  );
+
+  const standaloneKey = JSON.stringify({ ...request.payload, group_composition: 'standalone' });
+  manager.groupRequirementDraft = {
+    composition: 'standalone',
+    projection: { home: { exists: true, name: 'Research Home', workspace_id: 'home' } },
+    review: { review_token: 'token', payloadKey: standaloneKey, selected_composition: 'standalone' }
+  };
+  view = manager.groupedCreationReview(material, 'Archive');
+  assert.equal(view.reviewed, true);
+  assert.equal(view.homeWorkspaceID, '', 'a standalone project gets no Home preview parent');
+  assert.match(view.destination, /^Standalone project in group Archive · No Home/);
+  assert.match(view.now, /^Create one standalone project workspace .* no Home link\./);
+});
+
+test('ordinary result metadata is read-only, exact-operation-bound and editor-fenced', async () => {
+  const reference = { id: 'operation', digest: 'digest' };
+  const proven = { id: 'resource', name: 'Proven name' };
+  let current = {
+    ...proven,
+    blueprint_id: 'calendar-ops',
+    shared_data: {
+      workspace_creation_operation_id: reference.id,
+      workspace_creation_operation_digest: reference.digest
+    },
+    template_provenance: { setup_wizard: { steps: [{ title: 'Connect' }] } }
+  };
+  const calls = [];
+  const manager = loadSessionManager(async (url, options) => {
+    calls.push([url, options]);
+    return {
+      ok: true,
+      json: async () =>
+        url.endsWith('/setup-wizard')
+          ? {
+              success: true,
+              setup: {
+                workspace_id: proven.id,
+                applicable: true,
+                state: 'not_started',
+                current_step_id: 'connect',
+                steps: [{ id: 'connect', title: 'Connect' }]
+              }
+            }
+          : current
+    };
+  });
+  const context = { ordinaryReview: { reference } };
+  manager.workspaceCreatorContext = context;
+  assert.equal(await manager.observeOrdinaryCreationResource(context, proven), current);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], '/api/workspaces/resource');
+  assert.equal(calls[1][0], '/api/workspaces/resource/setup-wizard');
+  assert.ok(
+    calls.every(([, options]) => options.method === undefined),
+    'GET only, never a setup continuation'
+  );
+  assert.equal(
+    manager.ordinaryCreationSetupHint(current, context.ordinaryReview.setupObservation),
+    'Connect'
+  );
+  current = { ...current, shared_data: { workspace_creation_operation_id: 'foreign' } };
+  assert.equal(await manager.observeOrdinaryCreationResource(context, proven), proven);
+  assert.match(context.ordinaryReview.resourceObservationWarning, /could not be verified/);
+  manager.workspaceCreatorContext = { ordinaryReview: {} };
+  assert.equal(await manager.observeOrdinaryCreationResource(context, proven), null);
+});
+
+test('ordinary result hints read canonical saved setup without continuing or inferring readiness', () => {
+  const manager = loadSessionManager(async () => {
+    throw new Error('Projection must not request setup');
+  });
+  const resource = { id: 'canonical' };
+  const setup = {
+    workspace_id: resource.id,
+    applicable: true,
+    state: 'not_started',
+    current_step_id: 'connect',
+    steps: [
+      { id: 'connect', title: 'Connect your calendar' },
+      { id: 'configure', title: 'Map operations' }
+    ]
+  };
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), 'Connect your calendar');
+  setup.state = 'in_progress';
+  setup.current_step_id = 'configure';
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), 'Map operations');
+  setup.current_step_id = 'unknown';
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), 'Review saved blueprint setup');
+  setup.state = 'ready';
+  assert.equal(manager.ordinaryCreationSetupHint(resource, setup), '');
+  assert.equal(manager.ordinaryCreationSetupHint({}, setup), '');
+  assert.equal(
+    manager.ordinaryCreationSetupHint({ id: 'foreign' }, { ...setup, state: 'not_started' }),
+    ''
+  );
+});
+
+test('ad-hoc folder declarations are fenced metadata, preserve owned input edits and cannot become Blank', () => {
+  const path = { value: '/synthetic/folder' };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'projectTemplatePathInput' ? path : null),
+      querySelector: () => null
+    }
+  );
+  manager.workspaceCreatorContext = { generation: 2 };
+  manager.isWorkspaceCreator = () => true;
+  manager.usesExistingProject = () => false;
+  manager.workspaceReviewDetailChoices = () => [];
+  const source = {
+    path: path.value,
+    source_digest: 'a'.repeat(64),
+    readiness: { state: 'ready' },
+    template: {
+      id: 'folder',
+      name: 'Neutral folder blueprint',
+      has_skeleton: false,
+      inputs: {
+        schema_version: 1,
+        fields: [
+          { id: 'rate', label: 'Rate', type: 'number', default: 24, min: 1, max: 100, step: 1 }
+        ]
+      }
+    }
+  };
+  manager.templateAgentPlan = { folder_template: source };
+  manager.applyFolderTemplateReview(source);
+  assert.equal(manager.currentCreationBlueprint().name, 'Neutral folder blueprint');
+  assert.equal(manager.folderTemplateReviewProblem(), '');
+  manager.blueprintInputsDraft.values.rate = '48';
+  manager.blueprintInputsDraft.touched.rate = true;
+  const key = manager.ordinaryCreationMaterialKey({ template_path: path.value });
+  const changed = {
+    ...source,
+    source_digest: 'b'.repeat(64),
+    template: {
+      ...source.template,
+      inputs: {
+        ...source.template.inputs,
+        fields: [{ ...source.template.inputs.fields[0], max: 40 }]
+      }
+    }
+  };
+  manager.templateAgentPlan = { folder_template: changed };
+  manager.applyFolderTemplateReview(changed);
+  assert.equal(
+    manager.blueprintInputsDraft.values.rate,
+    '48',
+    'server metadata cannot overwrite a human choice'
+  );
+  assert.match(manager.blueprintInputsProblem().message, /between 1 and 40/);
+  assert.notEqual(manager.ordinaryCreationMaterialKey({ template_path: path.value }), key);
+  const review = manager.ordinaryCreationMaterialReview();
+  assert.match(review.rows[0].detail, /no project scaffold/);
+  assert.doesNotMatch(review.now, /Scaffold/);
+  manager.templateAgentPlan = null;
+  assert.match(manager.folderTemplateReviewProblem(), /Wait/);
+  assert.equal(
+    manager.currentCreationBlueprint().name,
+    'Neutral folder blueprint',
+    'last display survives an in-flight check but cannot dispatch'
+  );
+  path.value = '/replacement';
+  assert.equal(manager.currentCreationBlueprint(), null);
+  assert.throws(() => manager.applyFolderTemplateReview(source), /could not be reviewed/);
+  path.value = source.path;
+  manager.workspaceCreatorContext = { generation: 3 };
+  assert.equal(manager.currentCreationBlueprint(), null, 'no old editor source adoption');
+});
+
+test('ordinary blueprint review reads typed inputs, resources and advanced choices without changing their owners', () => {
+  const template = {
+    id: 'custom:neutral',
+    name: 'Neutral blueprint',
+    has_skeleton: true,
+    starter_tasks: [{ description: 'Later task' }],
+    setup_wizard: { steps: [{ title: 'Connect account' }, { title: 'Review access' }] }
+  };
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Review cannot request a model or create');
+    },
+    {
+      ProjectTemplateCard: {
+        getSelectedTemplate: () => template,
+        shouldOpenAfterCreate: () => true
+      },
+      WorkspaceTagsCard: { getPayloadFields: () => ({ tags: ['custom', 'scope'] }) }
+    },
+    { querySelector: () => ({ dataset: { color: '#123456' } }) }
+  );
+  manager.usesExistingProject = () => false;
+  manager.blueprintInputReviewLines = () => ['Tempo: 104 BPM', 'Mode: File-only'];
+  manager.workspaceReviewDetailChoices = () => ['Opens the project after creation'];
+  const before = JSON.stringify(template);
+  const review = manager.ordinaryCreationMaterialReview();
+  assert.equal(review.blueprint, 'Neutral blueprint');
+  assert.ok(review.rows.some(row => row.label === 'Project files'));
+  assert.ok(review.facts.some(row => row.value === 'Tempo: 104 BPM'));
+  assert.ok(review.facts.some(row => row.value === 'custom, scope'));
+  assert.match(review.now, /Scaffold|starter tasks|opens after creation/);
+  assert.match(review.later, /Connect account → Review access/);
+  assert.match(review.later, /No account or runtime access/);
+  assert.equal(JSON.stringify(template), before);
+  template.has_skeleton = false;
+  const metadataOnly = manager.ordinaryCreationMaterialReview();
+  assert.equal(
+    metadataOnly.rows.some(row => row.label === 'Project files'),
+    false
+  );
+  assert.doesNotMatch(metadataOnly.now, /Scaffold/);
+  manager.usesExistingProject = () => true;
+  manager.existingProjectChoice = {
+    folderDisplay: '/synthetic/project',
+    entryName: 'song.rpp',
+    selectionToken: 'not-display-authority'
+  };
+  const linked = manager.ordinaryCreationMaterialReview();
+  assert.match(linked.rows[0].detail, /Linked, not moved or changed/);
+  assert.equal(linked.rows[0].value, '/synthetic/project');
+  assert.doesNotMatch(JSON.stringify(linked), /not-display-authority/);
+  assert.doesNotMatch(linked.now, /Scaffold/);
+});
+
+test('ordinary map review fingerprint includes the explicit open-project choice without executing it', () => {
+  const manager = loadSessionManager();
+  const payload = { name: 'Project', blueprint_inputs: { tempo: 104 } };
+  assert.notEqual(
+    manager.ordinaryCreationMaterialKey(payload, false),
+    manager.ordinaryCreationMaterialKey(payload, true)
+  );
+  assert.equal(payload.blueprint_inputs.tempo, 104);
+});
+
+test('ordinary automatic selection clears geometry without editing the canonical draft or dispatching', async () => {
+  let cancelled = 0,
+    abandoned = 0;
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Selection cannot confirm');
+    },
+    { OriWorkspaceMap: { cancelBuild: () => cancelled++ } }
+  );
+  const context = { generation: 1, ordinaryReview: { generation: 1, candidate: { x: 38, y: 76 } } };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  manager.abandonWorkspaceMapPlacement = () => abandoned++;
+  await manager.actOnOrdinaryCreationReview(context, { action: 'suggested' });
+  assert.equal(context.ordinaryReview.automatic, true);
+  assert.equal(context.ordinaryReview.candidate, null);
+  assert.equal(cancelled, 1);
+  assert.equal(abandoned, 1);
+});
+
+test('ordinary review serializes double activation before asynchronous readiness checks', async () => {
+  const manager = loadSessionManager();
+  const context = { generation: 1, ordinaryReview: { generation: 1 } };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  let release,
+    calls = 0;
+  const waiting = new Promise(resolve => {
+    release = resolve;
+  });
+  manager.createFolder = async () => {
+    calls++;
+    await waiting;
+  };
+  const first = manager.submitOrdinaryCreationReview(context, 'confirm');
+  const second = manager.submitOrdinaryCreationReview(context, 'confirm');
+  assert.equal(calls, 1);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(context.ordinaryReview.actionInFlight, false);
+});
+
+test('an ordinary late saved review cannot install its reference in a replacement editor', async () => {
+  const manager = loadSessionManager();
+  let release;
+  const waiting = new Promise(resolve => {
+    release = resolve;
+  });
+  const context = {
+    generation: 2,
+    ordinaryReview: { generation: 2, api: { reviewCreationOperation: () => waiting } }
+  };
+  manager.workspaceCreatorContext = context;
+  const pending = manager.prepareOrdinaryCreationOperation(context, { name: 'Reviewed' });
+  manager.workspaceCreatorContext = { generation: 3 };
+  release({ id: 'operation', digest: 'digest' });
+  assert.equal(await pending, null);
+  assert.equal(context.ordinaryReview.reference, undefined);
+});
+
+test('ordinary position repair targets only the proven result and never repeats creation', async () => {
+  const repairs = [];
+  const manager = loadSessionManager(
+    async () => {
+      throw new Error('Layout repair cannot create');
+    },
+    {
+      OriWorkspaceMap: {
+        retryPlacement: async (id, point) => {
+          repairs.push({ id, point });
+          return true;
+        }
+      }
+    }
+  );
+  const point = { x: 38, y: 76 };
+  const context = {
+    generation: 2,
+    ordinaryReview: {
+      generation: 2,
+      accepted: true,
+      result: { id: 'proven' },
+      positionFailed: true,
+      candidate: point
+    }
+  };
+  manager.workspaceCreatorContext = context;
+  manager.syncOrdinaryCreationReview = () => {};
+  await manager.actOnOrdinaryCreationReview(context, { action: 'retry-position' });
+  assert.deepEqual(repairs, [{ id: 'proven', point }]);
+  assert.equal(context.ordinaryReview.positionFailed, false);
+});
+
+test('return and re-enter fences an old map commit even when display fields stay unchanged', async () => {
+  const calls = [];
+  const manager = loadSessionManager(undefined, {
+    OriWorkspaceMap: { beginPlacement: spec => calls.push(spec), endPlacement() {} }
+  });
+  const context = { generation: 8 };
+  manager.workspaceCreatorContext = context;
+  manager.refreshWizardChrome = () => {};
+  const first = manager.beginWorkspaceMapPlacement({
+    payload: { name: 'Same Home', kind: 'group' },
+    candidate: { x: 76, y: 228 },
+    groupHomeOwner: { reviewedKey: 'original-material' }
+  });
+  assert.equal(manager.returnFromWorkspaceMapPlacement(first.token, 'escape'), true);
+  const second = manager.beginWorkspaceMapPlacement({
+    payload: { name: 'Same Home', kind: 'group' },
+    groupHomeOwner: { reviewedKey: 'changed-role-or-review' }
+  });
+  assert.notEqual(second, first);
+  assert.notEqual(second.token, first.token);
+  assert.ok(second.revision > first.revision);
+  assert.deepEqual(JSON.parse(JSON.stringify(second.candidate)), { x: 76, y: 228 });
+  let dispatches = 0;
+  manager.confirmManagedHomeMapPlacement = async () => {
+    dispatches++;
+    return true;
+  };
+  assert.equal(await calls[0].onConfirm(first.token, { x: 76, y: 228 }), false);
+  assert.equal(dispatches, 0);
+  assert.equal(await calls[1].onConfirm(second.token, { x: 76, y: 228 }), true);
+  assert.equal(dispatches, 1);
+});
+
+test('a stale placement callback cannot submit a replacement ordinary editor', async () => {
+  const manager = loadSessionManager();
+  const old = { generation: 1 };
+  manager.workspaceCreatorContext = { generation: 2 };
+  manager.workspaceMapPlacement = {
+    token: 'old',
+    phase: 'placing',
+    creatorContext: old,
+    creatorGeneration: 1
+  };
+  manager.createFolder = async () => {
+    throw new Error('Stale callback submitted');
+  };
+  assert.equal(await manager.confirmWorkspaceMapPlacement('old', { x: 38, y: 76 }), false);
+});
 
 test('inbox entry transfers only references and opens the returned draft without generic model admission', async () => {
   const calls = [];
@@ -1888,11 +2981,15 @@ function loadSessionManagerWithPlacementModal() {
     setTimeout: callback => callback(),
     OriWorkspaceMap: { beginPlacement: placement => placementCalls.push(placement) }
   };
+  const transition = { showing: false };
   const bootstrap = {
     Modal: {
       getOrCreateInstance() {
         return {
           hide() {
+            // Like Bootstrap: a hide requested mid-show is ignored.
+            if (transition.showing) return;
+            modalElement.emit('hide.bs.modal');
             visible = false;
             modalElement.emit('hidden.bs.modal');
           },
@@ -1916,8 +3013,45 @@ function loadSessionManagerWithPlacementModal() {
     },
     { filename: 'sessions.js' }
   );
-  return { manager: window.sessionManager, modalElement, placementCalls, reviewTitle };
+  return { manager: window.sessionManager, modalElement, placementCalls, reviewTitle, transition };
 }
+
+test('Place pressed while returning from the Map is honoured once the review is back', () => {
+  const { manager, modalElement, placementCalls } = loadSessionManagerWithPlacementModal();
+  manager.refreshWizardChrome = () => {};
+  manager.bindEvents();
+  const returning = { phase: 'resuming', token: 'previous', revision: 1 };
+  manager.workspaceMapPlacement = returning;
+  assert.equal(
+    manager.beginWorkspaceMapPlacement({ payload: { name: 'Again' }, origin: {} }),
+    null,
+    'not started over a returning placement'
+  );
+  assert.equal(placementCalls.length, 0);
+  // The existing return finishes on shown; the queued press then starts once.
+  returning.phase = 'review';
+  modalElement.emit('shown.bs.modal');
+  assert.equal(placementCalls.length, 1);
+  assert.equal(manager.workspaceMapPlacement.phase, 'placing');
+});
+
+test('Place pressed while the editor is still showing waits, then hides once and starts the map', () => {
+  const { manager, modalElement, placementCalls, transition } =
+    loadSessionManagerWithPlacementModal();
+  manager.refreshWizardChrome = () => {};
+  manager.bindEvents();
+  transition.showing = true;
+  const placement = manager.beginWorkspaceMapPlacement({
+    origin: { entryPoint: 'workspace_map_build', kind: 'canvas' },
+    payload: { name: 'Fast Place' }
+  });
+  assert.equal(placement.phase, 'starting');
+  assert.equal(placementCalls.length, 0, 'no map while the editor is still covering it');
+  transition.showing = false;
+  modalElement.emit('shown.bs.modal');
+  assert.equal(placement.phase, 'placing');
+  assert.equal(placementCalls.length, 1);
+});
 
 test('Map placement suspends and resumes independently from sibling agent setup', () => {
   const { manager, modalElement, placementCalls, reviewTitle } =
@@ -2897,6 +4031,86 @@ test('a Home that already has its resource workspace opens it instead of creatin
   assert.match(errors.at(-1), /already has it/);
 });
 
+test('a pending requirement review cannot attach to a replaced editor/draft or overwrite an explicit edit', async () => {
+  for (const change of ['editor', 'draft', 'edit', 'late-network-error']) {
+    let resolve, reject;
+    const manager = loadSessionManager(
+      () =>
+        new Promise((yes, no) => {
+          resolve = yes;
+          reject = no;
+        })
+    );
+    manager.workspaceCreatorContext = { generation: 1 };
+    const draft = (manager.groupRequirementDraft = {
+      policy: 'required',
+      composition: 'grouped',
+      review: null,
+      quietReviewKey: 'original'
+    });
+    manager.refreshWorkspaceReview = () => {
+      throw new Error('late reply redrew the editor');
+    };
+    manager.refreshWizardChrome = () => {
+      throw new Error('late reply changed chrome');
+    };
+    const pending = manager.prepareGroupRequirementCommit(
+      '/api/workspaces',
+      { name: 'Original', template_id: 'exact-source' },
+      { quiet: true }
+    );
+    if (change === 'editor' || change === 'late-network-error')
+      manager.workspaceCreatorContext = { generation: 2 };
+    else if (change === 'draft') manager.groupRequirementDraft = { ...draft };
+    else manager.invalidateGroupRequirementReview();
+    if (change === 'late-network-error') reject(new Error('late network failure'));
+    else
+      resolve({
+        ok: true,
+        json: async () => ({
+          group_requirement_review: { state: 'ready_grouped', review_token: 'stale-token' }
+        })
+      });
+    assert.equal(await pending, false, change);
+    assert.equal(draft.review, null, change);
+  }
+});
+
+test('a newer requirement review survives an older same-editor reply arriving last', async () => {
+  const replies = [];
+  const manager = loadSessionManager(() => new Promise(resolve => replies.push(resolve)));
+  manager.workspaceCreatorContext = { generation: 1 };
+  manager.groupRequirementDraft = { policy: 'required', composition: 'grouped', review: null };
+  manager.refreshWorkspaceReview = () => {};
+  manager.refreshWizardChrome = () => {};
+  const first = manager.prepareGroupRequirementCommit(
+    '/api/workspaces',
+    { name: 'First', template_id: 'source' },
+    { quiet: true }
+  );
+  const second = manager.prepareGroupRequirementCommit(
+    '/api/workspaces',
+    { name: 'Second', template_id: 'source' },
+    { quiet: true }
+  );
+  replies[1]({
+    ok: true,
+    json: async () => ({
+      group_requirement_review: { state: 'ready_grouped', review_token: 'second-token' }
+    })
+  });
+  await second;
+  replies[0]({
+    ok: true,
+    json: async () => ({
+      group_requirement_review: { state: 'ready_grouped', review_token: 'first-token' }
+    })
+  });
+  await first;
+  assert.equal(manager.groupRequirementDraft.review.review_token, 'second-token');
+  assert.match(manager.groupRequirementDraft.review.payloadKey, /Second/);
+});
+
 test('group requirement creation reviews before committing and reuses only the exact receipt', async () => {
   const calls = [];
   const manager = loadSessionManager(async (url, options) => {
@@ -2973,6 +4187,17 @@ test('showing Review asks for the placement review once per exact request, and n
     asked.push({ endpoint, name: payload.name, quiet: options?.quiet });
     return false;
   };
+
+  // A loading agent plan has no settled team request to review yet.
+  manager.templateAgentPlan = null;
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 0);
+  manager.templateAgentPlan = { template_id: 'song' };
+  // Nor is a receipt replaced while the map holds it for the final gesture.
+  manager.workspaceMapPlacement = { phase: 'placing' };
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 0);
+  manager.workspaceMapPlacement = null;
 
   await manager.ensureGroupRequirementReview();
   assert.deepEqual(asked, [{ endpoint: '/api/workspaces', name: 'Night Drive', quiet: true }]);
@@ -4479,6 +5704,15 @@ const catalogTemplate = {
   builtin: true,
   description: 'Synthesis docs, sources, weekly reading.'
 };
+
+test('a programmatic picker reset cannot resolve a missing launch source, but an explicit new choice can', () => {
+  const { manager } = nameAndDescriptionManager();
+  manager.workspaceCreatorContext.blueprintRequest = { id: 'missing', state: 'missing' };
+  manager.handleWorkspaceTemplateSelected({ blank: true, id: '' }, { programmatic: true });
+  assert.equal(manager.workspaceCreatorContext.blueprintRequest.state, 'missing');
+  manager.handleWorkspaceTemplateSelected({ blank: true, id: '' }, { programmatic: false });
+  assert.equal(manager.workspaceCreatorContext.blueprintRequest.state, 'cancelled');
+});
 
 test('every blueprint prefills its description, and switching replaces only the autofill (FR 13)', () => {
   const { manager, elements } = nameAndDescriptionManager();
@@ -6317,8 +7551,8 @@ test('the user’s first edit removes the tag; the assistant’s own edits do no
   assert.equal(manager.workspaceBuild.chosen.has('name'), false);
 });
 
-test('“create it” with a gate still closed says why and submits nothing', async () => {
-  const { manager } = loadBuildWizard();
+test('“create it” explains closed gates and otherwise opens review without manufacturing final consent', async () => {
+  const { manager, nodes } = loadBuildWizard();
   const lines = [];
   manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
   manager.workspaceBuildPane = () => ({
@@ -6343,8 +7577,94 @@ test('“create it” with a gate still closed says why and submits nothing', as
   manager.flushWorkspaceBuildDraft = async () => {};
   manager.creatorWizardSteps = () => [1, 2, 3, 4];
   manager.wizardStep = 4;
+  nodes.set('workspaceCreationReviewPanel', new BuildNode('div', 'workspaceCreationReviewPanel'));
+  manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1 };
+  manager.teamView = () => ({ isBlank: true });
+  manager.isGroupCreator = () => false;
+  let reviews = 0,
+    collapses = 0;
+  manager.syncOrdinaryCreationReview = async () => {
+    reviews++;
+  };
+  manager.collapseWorkspaceBuild = () => {
+    collapses++;
+    manager.workspaceBuild.collapsed = true;
+  };
   await manager.createFromWorkspaceBuild();
-  assert.equal(created, 1, 'with every gate open it runs the Create submit');
+  assert.equal(created, 0, 'a model proposal is not a final gesture');
+  assert.equal(reviews, 1);
+  assert.equal(collapses, 1);
+});
+
+function deferredBlueprintPicker(ids = []) {
+  const timers = [];
+  const f = loadBuildWizard({
+    setTimeout: callback => {
+      timers.push(callback);
+      return timers.length;
+    },
+    clearTimeout() {}
+  });
+  let selected = { blank: true, id: '' };
+  let clicks = 0;
+  const cards = ids.map(id => ({
+    dataset: { templateId: id },
+    click() {
+      clicks++;
+      selected = { id };
+    }
+  }));
+  f.document.querySelectorAll = selector => {
+    assert.equal(selector, '.workspace-template-card, .workspace-template-row');
+    return cards;
+  };
+  f.window.ProjectTemplateCard.getSelectedTemplate = () => selected;
+  f.manager.workspaceCreatorContext = { mode: 'ordinary', generation: 1 };
+  f.manager.refreshWizardChrome = () => {};
+  f.manager.showWorkspaceCreateError = () => {};
+  return {
+    ...f,
+    cards,
+    timers,
+    clicks: () => clicks,
+    drain() {
+      while (timers.length) timers.shift()();
+    }
+  };
+}
+
+test('a missing hostile deep-link identifier cannot become Blank or a CSS selector', () => {
+  const f = deferredBlueprintPicker();
+  f.manager.preselectBlueprintCard('missing"] .not-a-selector');
+  assert.match(f.manager.blueprintRequestProblem(), /Checking/);
+  f.drain();
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest.state, 'missing');
+  assert.match(f.manager.blueprintRequestProblem(), /not create a Blank substitute/);
+  assert.equal(f.clicks(), 0);
+});
+
+test('late blueprint selection cannot redirect a replacement editor', () => {
+  const f = deferredBlueprintPicker();
+  f.manager.preselectBlueprintCard('research-project');
+  f.cards.push({
+    dataset: { templateId: 'research-project' },
+    click() {
+      throw new Error('Old timer selected a new editor');
+    }
+  });
+  f.manager.workspaceCreatorContext = { mode: 'ordinary', generation: 2 };
+  f.drain();
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest, undefined);
+});
+
+test('bare plugin deep links require one exact source; qualified links select only that source', () => {
+  const f = deferredBlueprintPicker(['plugin:first:project', 'plugin:second:project']);
+  f.manager.preselectBlueprintCard('project');
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest.state, 'ambiguous');
+  assert.equal(f.clicks(), 0);
+  f.manager.preselectBlueprintCard('plugin:second:project');
+  assert.equal(f.manager.workspaceCreatorContext.blueprintRequest.state, 'selected');
+  assert.equal(f.clicks(), 1);
 });
 
 test('File Janitor conversational create opens a host review and cannot manufacture consent', async () => {
@@ -8760,7 +10080,7 @@ test('folder review shows the actual effective team and constrains recognized pl
   assert.equal(prerequisites, 1);
 });
 
-test('the folder review primary says Hire and create when its draft team creates agents', () => {
+test('generic folder actions open review rather than claiming consent to create; recognized plans keep their own effects', () => {
   const { manager, nodes, window } = prepareProposalWizard();
   for (const id of [
     'workspaceBuildFolderPurpose',
@@ -8785,12 +10105,12 @@ test('the folder review primary says Hire and create when its draft team creates
   const action = () => nodes.get('workspaceBuildPlanReviewSetup').textContent;
 
   manager.syncWorkspaceBuildFolderReview();
-  assert.equal(action(), 'Hire and create');
+  assert.equal(action(), 'Review & place workspace');
 
   // A draft that creates nobody (Ask Ori reused, or saved agents attached).
   roleRoster = { total_count: 0, created_count: 0, auto_created_count: 0, roles: [] };
   manager.syncWorkspaceBuildFolderReview();
-  assert.equal(action(), 'Create workspace');
+  assert.equal(action(), 'Review & place workspace');
 
   // A recognized plan that names a hire keeps its own label.
   roleRoster = { ...roleRoster, created_count: 1 };

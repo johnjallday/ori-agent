@@ -893,6 +893,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/group-templates", s.Handlers.Session.ListGroupTemplates)
 		mux.HandleFunc("POST /api/workspaces/group-templates/review", s.Handlers.Session.ReviewGroupTemplateHome)
 		mux.HandleFunc("POST /api/workspaces/group-templates/commit", s.Handlers.Session.CommitGroupTemplateHome)
+		mux.HandleFunc("POST /api/workspaces/group-templates/observe", s.Handlers.Session.ObserveGroupTemplateHome)
+		mux.HandleFunc("POST /api/workspaces/group-requirements/observe", s.Handlers.Session.ObserveWorkspaceGroupCreation)
 
 		// Generic assistant-program routes are explicit so they cannot be
 		// swallowed by the legacy workspace subtree router.

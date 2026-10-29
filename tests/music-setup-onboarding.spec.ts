@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // The whole guided journey, in one disposable HOME, on PUBLISHED releases:
 //   ./scripts/music-home-demo.sh test --suite onboarding --provider reviewed --source <clean Music export>
@@ -122,7 +123,7 @@ test('collection → guided catalog → reviewed REAPER install → exact song �
   await creator.getByRole('button', { name: 'Continue →' }).click();
   await creator.getByRole('button', { name: 'Continue →' }).click();
   await creator.getByRole('button', { name: 'Review →' }).click();
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page, { open: true });
   // No "continue?" dialog: creating the Home lands in its library.
   await page.waitForURL(/\/assistant\?folder_offer_id=/, { timeout: 60_000 });
   const homes = (await json(await request.get('/api/workspaces'))).folders.filter(

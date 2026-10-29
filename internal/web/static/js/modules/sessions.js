@@ -419,7 +419,12 @@ const sessionManager = {
     });
     document.getElementById('workspaceGroupTemplateOptions')?.addEventListener('change', event => {
       const choice = event.target.closest('[name="workspace-group-template"]');
-      if (choice?.checked) window.GroupTemplateCreator?.select(this, choice.value);
+      if (choice?.checked) {
+        const selected = window.GroupTemplateCreator?.select(this, choice.value);
+        if (selected && this.usesManagedGroupTemplate()) {
+          void window.GroupTemplateCreator?.syncSharedReview?.(this);
+        }
+      }
     });
 
     document.getElementById('workspaceProjectChoice')?.addEventListener('change', event => {
@@ -457,7 +462,9 @@ const sessionManager = {
     document
       .getElementById('addFolderModal')
       ?.addEventListener('workspace-template-selected', event => {
-        this.handleWorkspaceTemplateSelected(event?.detail?.template || null);
+        this.handleWorkspaceTemplateSelected(event?.detail?.template || null, {
+          programmatic: event?.detail?.programmatic === true
+        });
       });
 
     document.getElementById('workspaceBlankAgentlessToggle')?.addEventListener('change', event => {
@@ -4513,6 +4520,1098 @@ const sessionManager = {
     return JSON.parse(JSON.stringify(value));
   },
 
+  ordinaryBuildReviewEligible() {
+    const build = this.workspaceBuild;
+    const session = build?.session;
+    return Boolean(
+      build &&
+      (!session?.folder || Boolean(session.folder.observation?.id)) &&
+      (!session?.link || Boolean(session.link.observation?.id)) &&
+      (!session?.folder?.recognition?.verdict || session.folder.recognition.verdict === 'none') &&
+      !session?.placement_source &&
+      !this.workspaceBuildPreparationEligible() &&
+      !session?.setup &&
+      !session?.plan?.ready &&
+      !build.acceptedPreparation &&
+      !build.preparationUncertain &&
+      !build.preparationBusy
+    );
+  },
+
+  ordinaryBuildReviewProblem() {
+    const build = this.workspaceBuild;
+    if (!build) return '';
+    if (!this.ordinaryBuildReviewEligible()) return 'Use this setup’s existing review owner.';
+    if (
+      build.closing ||
+      build.closeReady ||
+      (build.session?.status && build.session.status !== 'open')
+    )
+      return 'This build is no longer open. Read its saved outcome before creating.';
+    if (build.resumeLine || build.groupSwitchLine)
+      return 'Resolve the existing build choice before reviewing creation.';
+    if (build.session?.folder && this.workspaceBuildFolderSelectionExpired(build))
+      return 'The folder selection is unavailable or expired. Choose the folder again; your edits are kept.';
+    if (this.workspaceBuildAttachmentPending(build))
+      return 'Wait for the source selection to finish before reviewing creation.';
+    if (
+      build.busy ||
+      build.suggestionRequest ||
+      build.suggestionStarting ||
+      ['pending', 'running'].includes(build.session?.proposal?.status)
+    )
+      return 'Wait for the current assistant request, or switch to manual editing.';
+    if (build.draftError || build.draftConflict)
+      return 'Resolve the saved draft conflict before confirming creation. Your edits are kept.';
+    if (build.draftInFlight || build.draftUser !== undefined)
+      return 'Wait for the latest draft edits to be saved.';
+    return '';
+  },
+
+  usesUnifiedOrdinaryReview(view = this.teamView()) {
+    const context = this.workspaceCreatorContext;
+    if (context?.ordinaryReview?.accepted || context?.ordinaryReview?.result)
+      return Boolean(document.getElementById('workspaceCreationReviewPanel'));
+    const template = window.ProjectTemplateCard?.getSelectedTemplate?.() || this.workspaceTemplate;
+    const ordinaryGroup = this.isGroupCreator() && this.usesGroupRosterCreator();
+    const ordinaryBlueprint = this.groupRequirementDraft
+      ? this.groupedRequirementReviewEligible(view)
+      : ordinaryGroup ||
+        ((view?.isBlank || template?.id || this.templateFolderOverridePath) &&
+          !view?.isAssistantProgram);
+    return Boolean(
+      context?.mode === 'ordinary' &&
+      ordinaryBlueprint &&
+      !this.importModeEnabled &&
+      (!this.isGroupCreator() || ordinaryGroup) &&
+      (!this.workspaceBuild || this.ordinaryBuildReviewEligible()) &&
+      !context.folderOfferId &&
+      !context.onCreated &&
+      !context.postCreateAction &&
+      !window.SetupWorkspaceCreator?.isActive?.() &&
+      document.getElementById('workspaceCreationReviewPanel')
+    );
+  },
+
+  // A grouped-project blueprint keeps its requirement-owned review token and
+  // commit; the shared review only presents it. A post-create assistant hire
+  // or an assistant build keeps its existing legacy owner.
+  groupedRequirementReviewEligible(view = this.teamView()) {
+    return Boolean(
+      this.groupRequirementDraft &&
+      !this.isGroupCreator() &&
+      !this.workspaceBuild &&
+      !view?.payload?.assistant_hire
+    );
+  },
+
+  ordinaryCreationMapAvailable() {
+    // A nested Group needs its enclosing frame policy, not a standalone
+    // minimum rectangle. Keep its complete automatic route until reviewed.
+    if (
+      this.isGroupCreator() &&
+      (this.lockedParentId() || document.getElementById('folderParentSelect')?.value)
+    )
+      return false;
+    const viewport = document.querySelector('[data-ws-map-viewport]');
+    return Boolean(
+      viewport?.getClientRects?.().length &&
+      window.innerWidth >= 980 &&
+      window.OriWorkspaceMap?.beginPlacement
+    );
+  },
+
+  async syncOrdinaryCreationReview(view = this.teamView()) {
+    const context = this.workspaceCreatorContext;
+    const host = document.getElementById('workspaceCreationReviewPanel');
+    const eligible = this.usesUnifiedOrdinaryReview(view);
+    if (host) {
+      host.hidden = !eligible;
+      host.setAttribute?.('tabindex', '-1');
+    }
+    const summary = document.getElementById('workspaceReviewSummary');
+    if (summary) summary.hidden = eligible;
+    if (!eligible) return;
+    let review = context.ordinaryReview;
+    if (!review)
+      review = context.ordinaryReview = {
+        automatic: false,
+        dirty: false,
+        message: '',
+        generation: context.generation
+      };
+    if (!review.modules) {
+      review.modules = Promise.all([
+        window.OriAssistedWorkspacePlacement ||
+          import('/js/modules/assisted-workspace-placement.js'),
+        window.OriWorkspaceCreationOperation ||
+          import('/js/modules/workspace-creation-operation.js'),
+        window.OriGroupedCreationOperation || import('/js/modules/grouped-creation-operation.js')
+      ]);
+    }
+    try {
+      const [ui, api, groupedApi] = await review.modules;
+      if (
+        this.workspaceCreatorContext !== context ||
+        context.generation !== review.generation ||
+        !this.usesUnifiedOrdinaryReview()
+      )
+        return;
+      review.api = api;
+      review.groupedApi = groupedApi;
+      // The final owner is frozen once anything is accepted. Before that, a
+      // blueprint change releases an unaccepted ordinary review instead of
+      // carrying it to the requirement-owned commit (or the reverse).
+      const owner = this.groupRequirementDraft ? 'grouped' : 'ordinary';
+      if (!review.accepted && !review.result && review.owner !== owner) {
+        if (review.owner === 'ordinary' && review.reference)
+          void api.abandonCreationOperation(fetch, review.reference).catch(() => {});
+        review.reference = null;
+        review.operationKey = '';
+        review.observedState = '';
+        review.owner = owner;
+      }
+      if (!review.panel)
+        review.panel = ui.mountPlacementPanel(host, action => {
+          void this.actOnOrdinaryCreationReview(context, action).catch(error => {
+            if (this.workspaceCreatorContext !== context) return;
+            review.message = error.message;
+            void this.syncOrdinaryCreationReview();
+          });
+        });
+      if (!review.restored) {
+        review.restored = true;
+        try {
+          const reference = api.savedCreationReference(window.localStorage);
+          const groupedReference = reference
+            ? null
+            : groupedApi.savedGroupedCreationReference(window.localStorage);
+          if (reference || groupedReference) {
+            review.owner = reference ? 'ordinary' : 'grouped';
+            review.reference = reference || groupedReference;
+            review.candidate = groupedReference
+              ? groupedApi.savedGroupedCreationGeometry(window.localStorage, groupedReference)
+                  ?.candidate || null
+              : review.candidate;
+            review.accepted = true;
+            review.message =
+              'Read the original confirmed creation before starting another workspace.';
+            void this.readOrdinaryCreationStatus(context);
+          }
+        } catch (error) {
+          review.accepted = true;
+          review.message = error.message;
+        }
+      }
+      const current = this.teamView();
+      const issues = document.getElementById('workspaceReviewIssues');
+      if (issues && (review.accepted || review.result)) issues.hidden = true;
+      const name = document.getElementById('folderNameInput')?.value || '';
+      const group = this.isGroupCreator();
+      const goal =
+        document.getElementById(group ? 'folderDescriptionInput' : 'folderGoalInput')?.value || '';
+      const parent = document.getElementById('folderParentSelect');
+      const parentID = this.lockedParentId() || parent?.value || '';
+      const parentName = parentID
+        ? String(parent?.selectedOptions?.[0]?.textContent || context.parentName || parentID)
+        : '';
+      const roleRows = window.WorkspaceRoleRoster?.rowsFrom(current?.roleRoster) || [];
+      const material = this.ordinaryCreationMaterialReview();
+      const identityProblem = review.accepted ? '' : this.workspaceIdentityProblem();
+      const blocked =
+        Boolean(identityProblem || this.ordinaryBuildReviewProblem()) ||
+        this.blueprintSelectionBlocked() ||
+        Boolean(this.blueprintInputsProblem() || this.existingProjectProblem());
+      const grouped =
+        review.owner === 'grouped' && !review.accepted && !review.result
+          ? this.groupedCreationReview(material, parentName)
+          : null;
+      if (grouped) {
+        material.rows.unshift(grouped.row);
+        material.facts.unshift(...grouped.facts);
+        material.now = grouped.now;
+        material.later = grouped.later;
+      }
+      const mapAvailable = this.ordinaryCreationMapAvailable() && (!grouped || grouped.reviewed);
+      review.panel.update({
+        ownerKind: 'ordinary',
+        subjectKind: group ? 'group' : 'workspace',
+        name,
+        goal,
+        destination: grouped
+          ? grouped.destination
+          : review.owner === 'grouped'
+            ? 'The reviewed Home or standalone destination of the original grouped creation.'
+            : group
+              ? `New Group${parentID ? ` in ${parentName}` : ''} · Position does not select or move member workspaces.`
+              : parentID
+                ? `In group ${parentName} · Position does not change membership.`
+                : 'Standalone workspace · Position does not join a district.',
+        nameMaxLength: document.getElementById('folderNameInput')?.maxLength,
+        goalMaxLength: document.getElementById(group ? 'folderDescriptionInput' : 'folderGoalInput')
+          ?.maxLength,
+        rows: [...ui.creationTeamReviewRows(current || {}, roleRows), ...material.rows],
+        facts: [
+          { label: 'Blueprint', value: material.blueprint },
+          {
+            label: 'Purpose',
+            value:
+              document.getElementById('folderDescriptionInput')?.value ||
+              goal ||
+              'A workspace you can shape later.'
+          },
+          ...(current?.roleSummary ? [{ label: 'Team', value: current.roleSummary }] : []),
+          ...material.facts,
+          { label: 'Now', value: material.now },
+          { label: 'Later', value: material.later }
+        ],
+        reviewed: Boolean(
+          name.trim() && current?.canContinueFromTeam && !blocked && (!grouped || grouped.reviewed)
+        ),
+        canPlace: mapAvailable,
+        canConfirm: !this.hasBlockingTeamIssue() && !blocked && (!grouped || grouped.reviewed),
+        automatic: review.automatic,
+        dirty: review.dirty,
+        busy: this.isCreatingFolder || review.reading || review.actionInFlight,
+        accepted: review.accepted,
+        result: review.result,
+        resultParentName: review.result?.parent_id
+          ? this.findFolderById(review.result.parent_id, this.folders || [])?.name || ''
+          : '',
+        nextSetup: this.ordinaryCreationSetupHint(review.result, review.setupObservation),
+        positionFailed: review.positionFailed,
+        canAbandonReview: ['reviewed', 'refused', 'abandoned'].includes(review.observedState),
+        mapHint: mapAvailable
+          ? `On the map, click a valid position or press Enter to create this ${group ? 'Group' : 'workspace'}. Moving the preview does nothing. Escape returns here.`
+          : grouped && !grouped.reviewed
+            ? 'Placement opens after the destination is reviewed. Nothing is created until your final confirmation.'
+            : 'Map placement is unavailable here. Use automatic placement to finish without dragging or leaving this draft.',
+        message:
+          identityProblem ||
+          this.blueprintRequestProblem() ||
+          this.folderTemplateReviewProblem() ||
+          this.ordinaryBuildReviewProblem() ||
+          review.message ||
+          grouped?.problem,
+        confirmLabel: group ? 'Create group' : 'Create workspace'
+      });
+      if (document.activeElement === host)
+        document.getElementById('workspaceCreationReviewTitle')?.focus();
+    } catch (error) {
+      if (this.workspaceCreatorContext === context)
+        this.showWorkspaceCreateError(
+          error.message || 'Workspace review is unavailable. Nothing was confirmed.'
+        );
+    }
+  },
+
+  // Project the existing wizard owner's scoped status, never picker guesses or
+  // a second setup planner. Opening/resuming stays with that owner.
+  ordinaryCreationSetupHint(resource, setup) {
+    if (
+      !resource?.id ||
+      setup?.workspace_id !== resource.id ||
+      setup.applicable !== true ||
+      setup.state === 'ready'
+    )
+      return '';
+    return (
+      (Array.isArray(setup.steps)
+        ? setup.steps.find(step => step.id === setup.current_step_id)?.title
+        : '') || 'Review saved blueprint setup'
+    );
+  },
+
+  currentTemplateFolderPath() {
+    return String(
+      document.getElementById('projectTemplatePathInput')?.value ||
+        this.templateFolderOverridePath ||
+        ''
+    ).trim();
+  },
+
+  currentFolderTemplateReview() {
+    const source = this.folderTemplateReview;
+    return source?.path === this.currentTemplateFolderPath() &&
+      source.generation === this.workspaceCreatorContext?.generation
+      ? source
+      : null;
+  },
+
+  currentCreationBlueprint() {
+    if (this.currentTemplateFolderPath())
+      return this.currentFolderTemplateReview()?.template || null;
+    return this.workspaceTemplate || window.ProjectTemplateCard?.getSelectedTemplate?.();
+  },
+
+  folderTemplateReviewProblem() {
+    if (!this.currentTemplateFolderPath()) return '';
+    const source = this.currentFolderTemplateReview();
+    if (
+      !source ||
+      this.templateAgentPlan?.folder_template?.path !== source.path ||
+      this.templateAgentPlan?.folder_template?.source_digest !== source.source_digest
+    )
+      return 'Wait for the selected folder template to be checked, or retry its selection.';
+    const template = source.template;
+    if (
+      template?.group_requirement ||
+      template?.assistant_program ||
+      template?.program_home_owner ||
+      template?.setup_quest
+    ) {
+      return 'This folder declares a specialized creation owner. Import it as a blueprint and use its supported setup; it cannot be created as Blank.';
+    }
+    return source.readiness?.state === 'ready'
+      ? ''
+      : source.readiness?.summary ||
+          'This folder template is not ready. Import it as a blueprint to review its recovery options.';
+  },
+
+  applyFolderTemplateReview(source) {
+    if (
+      !source ||
+      source.path !== this.currentTemplateFolderPath() ||
+      !source.template ||
+      !source.source_digest
+    )
+      throw new Error(
+        'The selected folder template could not be reviewed. Retry or import it as a blueprint.'
+      );
+    const previous = this.currentFolderTemplateReview();
+    this.folderTemplateReview = { ...source, generation: this.workspaceCreatorContext?.generation };
+    if (previous?.source_digest !== source.source_digest) {
+      if (!source.template.inputs_error)
+        this.resetBlueprintInputsDraft(source.template, { preserveTouched: Boolean(previous) });
+      this.renderBlueprintInputs();
+    }
+  },
+
+  ordinaryCreationMaterialReview() {
+    if (this.isGroupCreator())
+      return {
+        blueprint: 'General Group',
+        rows: [],
+        facts: [
+          {
+            label: 'Manager access',
+            value:
+              'Group-owned files and notes only. Membership does not grant access to member workspaces.'
+          }
+        ],
+        now: 'Create one Group with its reviewed Group Manager. Existing workspaces and saved agent profiles are unchanged.',
+        later:
+          'Add members through their separate approval. Position never selects members or changes access.'
+      };
+    const template = this.currentCreationBlueprint();
+    const folderTemplate = String(
+      document.getElementById('projectTemplatePathInput')?.value || ''
+    ).trim();
+    const blueprint =
+      folderTemplate && !template?.id
+        ? 'Folder template'
+        : template?.blank || !template?.id
+          ? 'Blank workspace'
+          : template.name || template.id;
+    const rows = [];
+    if (this.usesExistingProject()) {
+      const choice = this.existingProjectChoice || {};
+      rows.push({
+        label: 'Existing project',
+        value: choice.folderDisplay || 'Choose a project folder',
+        detail: [choice.entryName || choice.review?.entryName, 'Linked, not moved or changed.']
+          .filter(Boolean)
+          .join(' · '),
+        action: 'details',
+        actionLabel: 'Edit project selection'
+      });
+    } else if (folderTemplate) {
+      rows.push({
+        label: 'Folder template',
+        value: folderTemplate,
+        detail:
+          template?.has_skeleton === true
+            ? 'Copies template files into a new managed project; the source is not linked or moved.'
+            : template
+              ? 'Uses the declared blueprint metadata; no project scaffold is declared.'
+              : 'Checking the selected source; no source is confirmed yet.',
+        action: 'details',
+        actionLabel: 'Edit folder template'
+      });
+    } else if (template?.has_skeleton === true) {
+      rows.push({
+        label: 'Project files',
+        value: `Create a new managed project from ${blueprint}.`,
+        detail: 'Existing source files are not imported or moved.',
+        action: 'details',
+        actionLabel: 'Edit project settings'
+      });
+    }
+    const session = this.workspaceBuild?.session;
+    const attached = session?.folder?.observation;
+    if (attached) {
+      rows.push({
+        label: 'Attached folder',
+        value: attached.folder || 'Selected folder',
+        detail: [
+          session.folder_path,
+          'Linked in place, not copied or moved. No file contents are read by creation.'
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        action: 'source-folder',
+        actionLabel: 'Change folder'
+      });
+    }
+    const link = this.buildLinkReceiptView(session, template);
+    if (link) {
+      rows.push({
+        label: 'Attached link',
+        value: link.name,
+        detail: `${link.kind} · ${link.url} · ${link.note}`,
+        action: 'source-link',
+        actionLabel: 'Edit link'
+      });
+    }
+    const facts = this.blueprintInputReviewLines().map(value => ({
+      label: 'Blueprint setting',
+      value
+    }));
+    if (folderTemplate) {
+      facts.push({
+        label: 'Folder template readiness',
+        value:
+          this.folderTemplateReviewProblem() ||
+          'The selected declaration is readable; no source access or setup is granted by this review.'
+      });
+      if (template?.project_connection)
+        facts.push({
+          label: 'Existing project options',
+          value:
+            'Import this folder as a blueprint to use its existing-project selector. This advanced folder option creates a new project only.'
+        });
+    }
+    const tags = window.WorkspaceTagsCard?.getPayloadFields?.().tags;
+    if (Array.isArray(tags) && tags.length) facts.push({ label: 'Tags', value: tags.join(', ') });
+    const color = document.querySelector('#addFolderModal .folder-color-btn.active')?.dataset
+      ?.color;
+    if (color) facts.push({ label: 'Color', value: color });
+    const details = this.workspaceReviewDetailChoices();
+    if (details.length) facts.push({ label: 'Advanced choices', value: details.join(' · ') });
+    const steps = Array.isArray(template?.setup_wizard?.steps) ? template.setup_wizard.steps : [];
+    const later = steps.length
+      ? `Setup remains separate: ${steps.map(step => step.title || step.id).join(' → ')}. No account or runtime access is granted here.`
+      : 'Add notes, files or work when you choose. Opening the workspace retains its existing goal and first-work flow.';
+    const tasks = Array.isArray(template?.starter_tasks) ? template.starter_tasks.length : 0;
+    const now = [
+      'Create one workspace with the reviewed team.',
+      attached ? 'Link the selected folder in place; do not move or change its files.' : '',
+      link ? link.note : '',
+      template?.has_skeleton === true && !this.usesExistingProject()
+        ? 'Scaffold its project files.'
+        : '',
+      tasks ? `Save applicable blueprint starter tasks for later (${tasks} declared).` : '',
+      window.ProjectTemplateCard?.shouldOpenAfterCreate?.()
+        ? 'Request that the selected project opens after creation.'
+        : '',
+      'No scan or task is started by placement.'
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return { blueprint, rows, facts, now, later };
+  },
+
+  // Inert projection of the requirement-owned destination. Only the server's
+  // review receipt for the current request makes it reviewed; a coordinate
+  // never chooses the Home, and preparing a Home stays a separate action.
+  groupedCreationReview(material, parentName = '') {
+    const draft = this.groupRequirementDraft;
+    const projection = draft?.projection || this.templateAgentPlan?.group_requirement || {};
+    const request = this.currentCreateRequest();
+    const key = request
+      ? JSON.stringify({ ...request.payload, group_composition: draft?.composition })
+      : '';
+    const review =
+      draft?.review?.review_token && draft.review.payloadKey === key ? draft.review : null;
+    const homeName = String(
+      review?.home_name ||
+        projection.home?.name ||
+        projection.home?.proposed_name ||
+        this.currentCreationBlueprint()?.group_requirement?.default_home_name ||
+        'its Home'
+    );
+    const roles = Array.isArray(projection.required_home_roles?.roles)
+      ? projection.required_home_roles.roles
+      : [];
+    const homeRoles = roles.length
+      ? roles.map(role => `${role.label}: ${role.agent?.name || 'missing on the Home'}`).join(' · ')
+      : 'No Home roles are declared.';
+    const grouped = draft?.composition === 'grouped';
+    const homeMissing = grouped && projection.home?.exists === false && !draft.preparedHome;
+    let destination = 'Choose grouped or standalone placement in Details. Nothing is created yet.';
+    let problem = '';
+    if (grouped && homeMissing) {
+      destination = `Requires Home “${homeName}”, which does not exist yet.`;
+      problem = `Prepare “${homeName}” in Details first. It has its own confirmation, creates no project, and stays if you cancel this project later.`;
+    } else if (grouped) {
+      destination = `In ${draft.preparedHome ? 'prepared' : 'existing'} Home “${homeName}” · Its name, roster and position are unchanged. Position does not change membership.`;
+    } else if (draft?.composition === 'standalone') {
+      destination = `Standalone project${parentName ? ` in group ${parentName}` : ''} · No Home or program membership. Position does not join a district.`;
+    }
+    // Server refusals are clauses ("you already have…"); state them as a sentence.
+    const refused = String(
+      draft?.quietReviewError?.key === key ? draft.quietReviewError.message : ''
+    ).trim();
+    const refusal = refused
+      ? `${refused[0].toUpperCase()}${refused.slice(1)}${/[.!?]$/.test(refused) ? '' : '.'}`
+      : '';
+    if (!problem && refusal && !review)
+      problem = `${refusal} Change the team or details to review again. Nothing was created.`;
+    if (!problem && draft?.composition && !review)
+      problem =
+        'Reviewing this exact destination… Nothing is created until your final confirmation.';
+    const firstSentence = /^Create one workspace with the reviewed team\.\s*/;
+    return {
+      reviewed: Boolean(review && !homeMissing),
+      problem,
+      destination,
+      homeWorkspaceID: grouped ? String(review?.home_workspace_id || '') : '',
+      homeName,
+      row: {
+        label: 'Destination',
+        value: grouped
+          ? homeName
+          : draft?.composition === 'standalone'
+            ? 'Standalone'
+            : 'Not chosen',
+        detail: draft?.preparedHome
+          ? 'Prepared earlier with its own confirmation; already persisted and not undone by Cancel.'
+          : grouped
+            ? homeMissing
+              ? 'Proposed Home · not created.'
+              : 'Existing Home · reused, not moved.'
+            : 'Chosen in Details.',
+        action: 'details',
+        actionLabel: homeMissing ? 'Prepare Home in Details' : 'Edit destination'
+      },
+      facts: grouped ? [{ label: 'Home roles', value: homeRoles }] : [],
+      now: grouped
+        ? `Create one project workspace inside “${homeName}” with the reviewed project team and link it to that Home. ${material.now.replace(firstSentence, '')}`
+        : `Create one standalone project workspace with the reviewed team and no Home link. ${material.now.replace(firstSentence, '')}`,
+      later: [
+        material.later,
+        grouped && roles.some(role => !role.agent?.name)
+          ? 'Empty Home roles stay with the Home’s own role setup.'
+          : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+    };
+  },
+
+  ordinaryCreationMaterialKey(
+    payload,
+    openProject = window.ProjectTemplateCard?.shouldOpenAfterCreate?.() === true
+  ) {
+    // Native project opening keeps its existing owner. Bind its reviewed UI
+    // choice to this handoff too, without teaching status reads to open apps.
+    return JSON.stringify({
+      payload,
+      openProject,
+      folderSource: this.currentTemplateFolderPath()
+        ? this.currentFolderTemplateReview()?.source_digest || ''
+        : undefined,
+      build: this.workspaceBuild?.session
+        ? { id: this.workspaceBuild.session.id, version: this.workspaceBuild.session.version }
+        : undefined
+    });
+  },
+
+  async actOnOrdinaryCreationReview(context, { action, field, value }) {
+    const review = context.ordinaryReview;
+    if (
+      this.workspaceCreatorContext !== context ||
+      context.generation !== review?.generation ||
+      this.isCreatingFolder ||
+      review.reading ||
+      review.actionInFlight
+    )
+      return;
+    if (action === 'read-status') return this.readOrdinaryCreationStatus(context);
+    if (action === 'open' && review.result?.id) {
+      this.releaseCreationReviewReference(review);
+      // Workspace pages are routed by slug; resolve it rather than use the ID.
+      const slug = String(review.result.folder_slug || '').trim();
+      if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+      else await this.openExistingResourceWorkspace(review.result.id);
+      return;
+    }
+    if (action === 'back' && (review.result || review.accepted)) {
+      if (review.result) this.releaseCreationReviewReference(review);
+      this.hideWorkspaceCreatorModal();
+      return;
+    }
+    if (
+      action === 'abandon-review' &&
+      ['reviewed', 'refused', 'abandoned'].includes(review.observedState)
+    ) {
+      if (review.observedState === 'reviewed' && review.owner !== 'grouped')
+        await review.api.abandonCreationOperation(fetch, review.reference);
+      this.releaseCreationReviewReference(review);
+      review.accepted = false;
+      review.reference = null;
+      review.operationKey = '';
+      review.message =
+        'The unaccepted review was released. Review current choices before confirming.';
+      this.syncWorkspaceCreatorPresentation();
+      void this.syncOrdinaryCreationReview();
+      return;
+    }
+    if (action === 'retry-position' && review.result?.id && review.positionFailed) {
+      review.positionFailed =
+        (await window.OriWorkspaceMap?.retryPlacement?.(review.result.id, review.candidate, {
+          kind: review.result.kind,
+          parentID: review.result.parent_id
+        })) !== true;
+      review.message = review.positionFailed
+        ? 'The workspace exists. Only layout was retried; the position is still not saved.'
+        : 'The requested position is now saved. Only layout changed.';
+      if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+      return;
+    }
+    if (review.accepted || review.result) return;
+    if (action === 'source-folder' || action === 'source-link') {
+      if (this.workspaceBuild) this.workspaceBuild.ordinarySourceEdit = context;
+      this.expandWorkspaceBuild();
+      if (action === 'source-folder') await this.openWorkspaceBuildFolderChooser();
+      else this.workspaceBuildPane()?.openLinkField?.();
+      return;
+    }
+    if (action === 'dirty') {
+      review.dirty = true;
+      return;
+    }
+    if (action === 'edit' && ['name', 'mission'].includes(field)) {
+      const input = document.getElementById(
+        field === 'name'
+          ? 'folderNameInput'
+          : this.isGroupCreator()
+            ? 'folderDescriptionInput'
+            : 'folderGoalInput'
+      );
+      if (!input) return;
+      review.dirty = false;
+      input.value = value;
+      if (field === 'mission') input.dataset.goalEdited = '1';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    } else if (
+      action === 'team' ||
+      action === 'details' ||
+      action === 'back' ||
+      action === 'blueprint'
+    ) {
+      this.goToWizardStep(action === 'blueprint' ? 1 : action === 'details' ? 2 : 3);
+    } else if (action === 'suggested') {
+      review.automatic = true;
+      review.candidate = null;
+      this.abandonWorkspaceMapPlacement();
+      window.OriWorkspaceMap?.cancelBuild?.();
+      review.message =
+        'Automatic placement selected. Your material choices are unchanged; confirm explicitly below.';
+    } else if (action === 'cancel') {
+      if (review.reference && review.owner !== 'grouped')
+        await review.api.abandonCreationOperation(fetch, review.reference);
+      this.hideWorkspaceCreatorModal();
+    } else if (action === 'place' && !review.dirty && this.ordinaryCreationMapAvailable()) {
+      review.automatic = false;
+      await this.submitOrdinaryCreationReview(context, 'place');
+    } else if (action === 'confirm' && review.automatic && !review.dirty) {
+      await this.submitOrdinaryCreationReview(context, 'confirm');
+    }
+    if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+  },
+
+  // Each owner keeps its own lookup store; releasing one never erases another
+  // tab's newer reference (both stores compare the exact original identity).
+  releaseCreationReviewReference(review) {
+    if (!review?.reference) return;
+    if (review.owner === 'grouped')
+      review.groupedApi?.releaseGroupedCreationReference(window.localStorage, review.reference);
+    else review.api?.releaseCreationReference(window.localStorage, review.reference);
+  },
+
+  async readGroupedCreationStatus(context) {
+    const review = context.ordinaryReview;
+    const outcome = await review.groupedApi.observeGroupedCreation(fetch, review.reference);
+    if (this.workspaceCreatorContext !== context) return;
+    review.observedState = outcome.state;
+    if (outcome.state !== 'complete') {
+      review.message = `${outcome.message} Do not create again; closing is not undo.`;
+      return;
+    }
+    review.result = await this.observeOrdinaryCreationResource(context, outcome.result);
+    if (this.workspaceCreatorContext !== context) return;
+    const parts = [
+      'The original workspace is verified. Reading status did not create, staff, link or start work.'
+    ];
+    if (review.candidate && review.result?.id) {
+      const response = await fetch('/api/workspace-map/layout', { cache: 'no-store' });
+      const layout = response.ok ? (await response.json().catch(() => ({})))?.layout : null;
+      if (this.workspaceCreatorContext !== context) return;
+      const position = layout?.positions?.[review.result.id];
+      review.positionFailed = Boolean(layout && !position);
+      parts.push(
+        !layout
+          ? 'Its position could not be read; nothing was moved.'
+          : !position
+            ? 'Its requested position is not saved; automatic layout remains. Retry position only to use that exact point.'
+            : position.x === review.candidate.x && position.y === review.candidate.y
+              ? 'Its requested position is saved.'
+              : 'It has a different saved position, which this read left unchanged.'
+      );
+    }
+    review.message = [...parts, review.resourceObservationWarning].filter(Boolean).join(' ');
+  },
+
+  async submitOrdinaryCreationReview(context, action) {
+    const review = context.ordinaryReview;
+    if (this.workspaceCreatorContext !== context || review.actionInFlight) return;
+    review.actionInFlight = true;
+    void this.syncOrdinaryCreationReview();
+    try {
+      await this.createFolder({ reviewAction: action });
+    } finally {
+      review.actionInFlight = false;
+      if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+    }
+  },
+
+  async readOrdinaryCreationStatus(context) {
+    const review = context.ordinaryReview;
+    if (this.workspaceCreatorContext !== context || !review?.reference || review.reading) return;
+    review.reading = true;
+    try {
+      if (review.owner === 'grouped') {
+        await this.readGroupedCreationStatus(context);
+        return;
+      }
+      const outcome = await review.api.observeCreationOperation(fetch, review.reference);
+      if (this.workspaceCreatorContext !== context) return;
+      review.observedState = outcome.state;
+      if (outcome.state === 'complete') {
+        review.result = await this.observeOrdinaryCreationResource(context, outcome.result.folder);
+        if (this.workspaceCreatorContext !== context) return;
+        review.message = [
+          'The original workspace is verified. Reading status did not create or start work.',
+          review.resourceObservationWarning
+        ]
+          .filter(Boolean)
+          .join(' ');
+      } else {
+        review.message =
+          outcome.message ||
+          'The original creation is not complete. Read status; do not create again. Closing is not undo.';
+      }
+    } finally {
+      review.reading = false;
+      if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
+    }
+  },
+
+  applyOrdinaryCreationRefusal(context, outcome) {
+    if (this.workspaceCreatorContext !== context) return;
+    const body = outcome.refusal || {};
+    const message =
+      outcome.message ||
+      body.error ||
+      body.message ||
+      'The request was refused. Review current choices before creating.';
+    const fresh = body.conflict?.fresh_plan || body.template_agent_plan;
+    const teamRefusal = [
+      'team_readiness',
+      'template_agent_plan',
+      'template_agent_override',
+      'template_agent_review_invalid',
+      'role_staffing'
+    ].includes(body.conflict?.type);
+    if (fresh || teamRefusal) {
+      const api = window.CreateWorkspaceTeamDraft;
+      const draft = this.ensureWorkspaceTeamDraft();
+      if (fresh) {
+        this.templateAgentPlan = fresh;
+        api?.setPlanReady?.(draft, draft?.plan?.blueprintKey || this.currentBlueprintKey(), fresh);
+      }
+      api?.markPlanConflict?.(
+        draft,
+        message,
+        body.conflict?.type === 'team_readiness'
+          ? { ...body.conflict, kind: 'team-readiness' }
+          : body.conflict || {}
+      );
+      this.goToWizardStep(3);
+      this.refreshWorkspaceReview();
+      this.announceWorkspaceTeamChange(message);
+    }
+    context.ordinaryReview.message = message;
+    this.showWorkspaceCreateError(message, body.readiness);
+  },
+
+  async prepareOrdinaryCreationOperation(context, payload) {
+    const review = context.ordinaryReview;
+    const key = this.ordinaryCreationMaterialKey(payload);
+    if (review.reference && review.operationKey === key) return review.reference;
+    if (review.reference) await review.api.abandonCreationOperation(fetch, review.reference);
+    if (this.workspaceCreatorContext !== context || context.generation !== review.generation)
+      return null;
+    const id = crypto.randomUUID();
+    const reference = await review.api.reviewCreationOperation(fetch, id, payload);
+    if (this.workspaceCreatorContext !== context || context.generation !== review.generation) {
+      await review.api.abandonCreationOperation?.(fetch, reference);
+      return null;
+    }
+    review.reference = reference;
+    review.observedState = 'reviewed';
+    review.operationKey = key;
+    return reference;
+  },
+
+  // The creation receipt proves identity; this separate GET projects saved
+  // blueprint/setup metadata missing from the legacy create response. It never
+  // continues setup or adopts a same-name/reserved/different operation resource.
+  async observeOrdinaryCreationResource(context, proven) {
+    const review = context?.ordinaryReview;
+    if (this.workspaceCreatorContext !== context || !review) return null;
+    review.resourceObservationWarning = '';
+    review.setupObservation = null;
+    // A grouped result was already proven by its requirement-owned journal
+    // read; the ordinary journal stamps its own operation markers instead.
+    const ordinaryProof = review.owner !== 'grouped';
+    try {
+      if (
+        !proven?.id ||
+        (ordinaryProof && (!review.reference?.id || !review.reference?.digest)) ||
+        (!ordinaryProof && !review.reference?.group_review_token)
+      )
+        throw new Error('Missing proven operation');
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(proven.id)}`, {
+        cache: 'no-store'
+      });
+      const current = await response.json();
+      if (this.workspaceCreatorContext !== context) return null;
+      if (
+        !response.ok ||
+        current.id !== proven.id ||
+        (ordinaryProof &&
+          (current.shared_data?.workspace_creation_operation_id !== review.reference?.id ||
+            current.shared_data?.workspace_creation_operation_digest !==
+              review.reference?.digest)) ||
+        (!ordinaryProof && current.parent_id !== proven.parent_id)
+      ) {
+        throw new Error('Current resource could not be verified');
+      }
+      if (current.blueprint_id) {
+        try {
+          const setupResponse = await fetch(
+            `/api/workspaces/${encodeURIComponent(current.id)}/setup-wizard`,
+            { cache: 'no-store' }
+          );
+          const body = await setupResponse.json();
+          if (this.workspaceCreatorContext !== context) return null;
+          const setup = body.setup || body.data?.setup;
+          if (
+            !setupResponse.ok ||
+            body.success !== true ||
+            setup?.workspace_id !== current.id ||
+            typeof setup.applicable !== 'boolean' ||
+            typeof setup.state !== 'string'
+          )
+            throw new Error('Setup status unreadable');
+          review.setupObservation = setup;
+        } catch {
+          if (this.workspaceCreatorContext !== context) return null;
+          review.resourceObservationWarning =
+            'Saved blueprint setup status could not be read. Open the workspace to review it; no readiness is claimed.';
+        }
+      }
+      return current;
+    } catch {
+      if (this.workspaceCreatorContext !== context) return null;
+      review.resourceObservationWarning =
+        'Current workspace setup details could not be verified. No setup readiness is claimed.';
+      return proven;
+    }
+  },
+
+  // Observed membership and team outcome only; partial staffing stays partial.
+  groupedCreationResultLine(result, resource) {
+    const homeID = String(result?.assistant_station_id || resource?.parent_id || '');
+    const home = homeID ? this.findFolderById(homeID, this.folders || []) : null;
+    const team = result?.team_completion;
+    const missing = Array.isArray(team?.missing_required_roles)
+      ? team.missing_required_roles.length
+      : 0;
+    return [
+      result?.assistant_station_id
+        ? `Linked to Home “${home?.name || 'its Home'}”; the Home was not changed or moved.`
+        : 'Standalone: no Home link was made.',
+      team && team.state !== 'complete'
+        ? `Its team setup is ${team.state === 'unknown' ? 'not yet verified' : 'incomplete'}${missing ? ` (${missing} required role${missing === 1 ? '' : 's'} missing)` : ''}. Complete the existing workspace team; Ori will not create another workspace.`
+        : ''
+    ]
+      .filter(Boolean)
+      .join(' ');
+  },
+
+  // The requirement-owned commit is the only grouped dispatcher. Its lookup
+  // reference is retained first (otherwise nothing is sent); a definite pre-
+  // acceptance refusal releases it, while any other outcome is only observed.
+  async dispatchGroupedCreation(context, endpoint, payload, placement) {
+    const review = context.ordinaryReview;
+    const draft = this.groupRequirementDraft;
+    let reference;
+    try {
+      reference = review.groupedApi.retainGroupedCreationReference(
+        window.localStorage,
+        {
+          group_review_token: payload.group_review_token,
+          idempotency_key: payload.idempotency_key,
+          input_digest: draft?.review?.input_digest
+        },
+        placement?.candidate
+          ? { candidate: this.cloneWorkspaceMapPlacementValue(placement.candidate) }
+          : null
+      );
+    } catch (error) {
+      return {
+        state: 'not_sent',
+        message: error?.message || 'The confirmation could not be retained. Nothing was sent.'
+      };
+    }
+    review.reference = reference;
+    review.candidate = placement?.candidate
+      ? this.cloneWorkspaceMapPlacementValue(placement.candidate)
+      : null;
+    let response;
+    let body = {};
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      body = await response.json().catch(() => ({}));
+    } catch {
+      return {
+        state: 'outcome_unknown',
+        message:
+          'Creation delivery is unknown. Read the original grouped creation; do not create again. Closing is not undo.'
+      };
+    }
+    const phase = response.headers?.get?.('X-Ori-Group-Commit-Phase') || '';
+    if (!response.ok || body.error) {
+      const refused = {
+        state: 'refused',
+        refusal: body,
+        message:
+          body.group_requirement?.summary ||
+          body.error ||
+          body.message ||
+          'The request was refused before anything was accepted. Review current choices.'
+      };
+      if (phase === 'not_accepted') return refused;
+      // A refusal during Claim is definite only when its operation was never
+      // recorded: this reply is final, so no later effect can follow from it.
+      if (phase === 'outcome_unknown') {
+        const observed = await review.groupedApi.observeGroupedCreation(fetch, reference);
+        if (observed.missing) return refused;
+      }
+      return {
+        state: 'outcome_unknown',
+        message: `${body.group_requirement?.summary || body.error || 'The confirmed creation did not finish cleanly.'} Read the original grouped creation; do not create again.`
+      };
+    }
+    const observed = await review.groupedApi.observeGroupedCreation(fetch, reference);
+    if (observed.state !== 'complete' || observed.result.id !== body.folder?.id)
+      return { state: 'outcome_unknown', message: observed.message };
+    return {
+      state: 'complete',
+      result: { ...body, folder: observed.result },
+      compositeLayout: observed.proof?.requires_composite_layout === true
+    };
+  },
+
+  async showOrdinaryCreationOutcome(context, result, placement = null, placementResult = null) {
+    const review = context.ordinaryReview;
+    if (this.workspaceCreatorContext !== context || context.generation !== review.generation)
+      return;
+    review.accepted = true;
+    review.result = result?.folder
+      ? await this.observeOrdinaryCreationResource(context, result.folder)
+      : null;
+    if (this.workspaceCreatorContext !== context) return;
+    review.candidate = placement?.candidate || null;
+    const compositeUnsupported = placementResult?.reason === 'composite_unsupported';
+    review.positionFailed = Boolean(
+      review.result && placement && !placementResult?.saved && !compositeUnsupported
+    );
+    review.message = review.result
+      ? [
+          `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No task or scan was started by placement.`,
+          review.owner === 'grouped' ? this.groupedCreationResultLine(result, review.result) : '',
+          Number(result.seeded_starter_tasks) > 0
+            ? `${result.seeded_starter_tasks} starter tasks saved for later.`
+            : '',
+          typeof result.project_warning === 'string' ? result.project_warning : '',
+          review.resourceObservationWarning,
+          ...(Array.isArray(result.agent_warnings)
+            ? result.agent_warnings.filter(warning => typeof warning === 'string')
+            : []),
+          review.projectOpenRequested
+            ? 'An application open request was sent; live runtime readiness is not verified.'
+            : '',
+          review.positionFailed
+            ? 'Its requested position was not saved; automatic layout is shown. Retry position only when that point is available.'
+            : '',
+          compositeUnsupported
+            ? 'A Home was created in the same operation, so this single position was not applied; automatic layout keeps the Home and project together.'
+            : ''
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : review.message ||
+        'Creation delivery is uncertain. Read the original operation; do not create again.';
+    const modal = document.getElementById('addFolderModal');
+    if (placement) {
+      if (!review.result) placement.phase = 'accepted';
+      window.OriWorkspaceMap?.endPlacement?.(placement.token);
+      if (modal?.dataset) {
+        delete modal.dataset.suspendedForMapPlacement;
+        modal.dataset.resumingFromMapPlacement = placement.token;
+      }
+      if (modal) {
+        modal.addEventListener(
+          'shown.bs.modal',
+          () => {
+            if (this.workspaceCreatorContext === context)
+              document
+                .querySelector('#workspaceCreationReviewPanel [data-placement-focus="status"]')
+                ?.focus();
+          },
+          { once: true }
+        );
+        bootstrap.Modal.getOrCreateInstance(modal).show();
+      }
+    }
+    this.wizardStep = this.wizardStepCount;
+    this.refreshWizardChrome();
+    if (review.result) {
+      this.notifyWorkspacesChanged({ workspaceId: review.result.id });
+      await this.loadFolders();
+      await window.OriHomeCockpit?.refreshQuietly?.();
+      await window.WorkspaceHub?.loadWorkspaces?.();
+    }
+  },
+
   nextWorkspaceMapPlacementToken() {
     this.workspaceMapPlacementSequence += 1;
     const random =
@@ -4522,40 +5621,193 @@ const sessionManager = {
     return `${random}-${this.workspaceMapPlacementSequence}`;
   },
 
-  workspaceMapPlacementPreview(payload, origin) {
+  workspaceMapPlacementPreview(payload, origin, reviewedParentID = '') {
     const selectedTemplate = window.ProjectTemplateCard?.getSelectedTemplate?.() || null;
+    const parentID = String(reviewedParentID || payload?.parent_id || '');
     return {
       name: String(payload?.name || '').trim(),
+      kind: payload?.kind === 'group' ? 'group' : 'workspace',
+      parentID,
       blueprintID: String(payload?.template_id || selectedTemplate?.id || '').trim(),
       blueprintBuiltin: selectedTemplate?.builtin === true,
-      groupName: String(origin?.group?.name || '').trim()
+      groupName: parentID
+        ? String(
+            this.findFolderById(parentID, this.folders || [])?.name ||
+              (origin?.group?.id === parentID ? origin.group.name : '') ||
+              parentID
+          ).trim()
+        : ''
     };
+  },
+
+  beginManagedHomeMapPlacement(context, reviewedKey) {
+    const ui = context?.groupTemplates?.sharedReview;
+    if (
+      this.workspaceCreatorContext !== context ||
+      !ui ||
+      ui.accepted ||
+      ui.busy ||
+      !this.usesManagedGroupTemplate() ||
+      !this.ordinaryCreationMapAvailable() ||
+      window.GroupTemplateCreator.isReusable(window.GroupTemplateCreator.selectedManaged(context))
+    )
+      return null;
+    ui.automatic = false;
+    return this.beginWorkspaceMapPlacement({
+      payload: { kind: 'group', name: document.getElementById('folderNameInput')?.value || '' },
+      groupHomeOwner: { reviewedKey },
+      origin: { entryPoint: context.entryPoint },
+      actionCopy: {
+        confirmLabel: 'Create & staff Home here',
+        pendingLabel: 'Preparing reviewed Home…',
+        instruction:
+          'Click open ground or press Enter to create this Home and staff its reviewed roles. No project, task, runtime access or application opening. Escape returns to review.',
+        pendingInstruction: 'Observing the original Home operation. This frame is locked.',
+        announcement: 'Home reviewed. Choose its Group frame; existing workspaces stay unchanged.'
+      }
+    });
+  },
+
+  async finishManagedHomePlacement(context, placement, ui) {
+    if (
+      this.workspaceCreatorContext !== context ||
+      this.workspaceMapPlacement !== placement ||
+      !ui.result?.id
+    )
+      return;
+    this.completeWorkspaceMapPlacement(placement.token, ui.result.id);
+    if (!ui.layoutSubjectNew) {
+      ui.message += ' The canonical Home was reused; its existing position was not changed.';
+      return;
+    }
+    if (ui.positionAttempted) return;
+    ui.positionAttempted = true;
+    let saved = false;
+    try {
+      const outcome = await window.OriWorkspaceMap?.commitPlacement?.(ui.result.id, {
+        token: placement.token,
+        revision: placement.revision,
+        select: false,
+        candidate: this.cloneWorkspaceMapPlacementValue(placement.candidate)
+      });
+      saved = outcome?.saved === true;
+    } catch (_) {
+      /* Creation remains canonical; only positioning failed. */
+    }
+    ui.positionFailed = !saved;
+    ui.message += saved
+      ? ' Its reviewed Group frame position was saved.'
+      : ' Its position was not saved; automatic layout remains. Retry position only to use the original point without repeating creation or staffing.';
+    this.notifyWorkspacesChanged({ workspaceId: ui.result.id });
+  },
+
+  resumeManagedHomeReview(context, placement) {
+    if (this.workspaceCreatorContext !== context || this.workspaceMapPlacement !== placement)
+      return;
+    window.OriWorkspaceMap?.endPlacement?.(placement.token);
+    const ui = context.groupTemplates?.sharedReview;
+    placement.inFlight = null;
+    if (!ui?.result) placement.phase = ui?.accepted ? 'accepted' : 'review';
+    const modal = document.getElementById('addFolderModal');
+    if (!modal) return;
+    delete modal.dataset.suspendedForMapPlacement;
+    this.deferWorkspaceMapPlacement(() => {
+      if (this.workspaceCreatorContext !== context || this.workspaceMapPlacement !== placement)
+        return;
+      modal.dataset.resumingFromMapPlacement = placement.token;
+      modal.addEventListener(
+        'shown.bs.modal',
+        () => {
+          if (this.workspaceCreatorContext === context) {
+            document
+              .querySelector('#workspaceCreationReviewPanel [data-placement-focus="status"]')
+              ?.focus();
+          }
+        },
+        { once: true }
+      );
+      bootstrap.Modal.getOrCreateInstance(modal).show();
+    });
+  },
+
+  async confirmManagedHomeMapPlacement(state, candidate) {
+    if (
+      this.workspaceCreatorContext !== state.creatorContext ||
+      state.creatorContext?.generation !== state.creatorGeneration
+    )
+      return false;
+    state.candidate = this.cloneWorkspaceMapPlacementValue(candidate || state.candidate);
+    if (!state.candidate) return false;
+    state.inFlight = { token: state.token, revision: state.revision };
+    state.phase = 'committing';
+    try {
+      return await window.GroupTemplateCreator.confirmSharedPlacement(this, state);
+    } finally {
+      if (this.workspaceMapPlacement === state && state.phase === 'committing') {
+        state.inFlight = null;
+        state.phase = 'placing';
+        this.returnFromWorkspaceMapPlacement(state.token, 'review-changed');
+      }
+    }
   },
 
   beginWorkspaceMapPlacement(options = {}) {
     const existing = this.workspaceMapPlacement;
     if (existing?.phase === 'committing') return null;
+    if (existing?.phase === 'resuming') {
+      // Place pressed while the editor is still returning from the Map (for
+      // example Enter right after Escape): honour it once that return is done
+      // instead of silently dropping the keypress.
+      document.getElementById('addFolderModal')?.addEventListener(
+        'shown.bs.modal',
+        () =>
+          this.deferWorkspaceMapPlacement(() => {
+            if (this.workspaceMapPlacement === existing && existing.phase === 'review')
+              this.beginWorkspaceMapPlacement(options);
+          }),
+        { once: true }
+      );
+      return null;
+    }
     if (existing && existing.phase !== 'review') return null;
     const payload = this.cloneWorkspaceMapPlacementValue(options.payload || {});
-    const payloadChanged =
-      existing && JSON.stringify(existing.payload || {}) !== JSON.stringify(payload || {});
-    const state = existing || {
+    // Re-entry keeps geometry, never an old preview's commit callback. Even
+    // unchanged display fields may now carry a new canonical review/role plan.
+    // A fresh token and state fence events queued by the prior Map lifetime.
+    const state = {
       token: this.nextWorkspaceMapPlacementToken(),
-      revision: Number(options.revision) || 1,
+      revision: existing ? existing.revision + 1 : Number(options.revision) || 1,
       createdWorkspaceID: ''
     };
-    if (payloadChanged) state.revision += 1;
     state.phase = 'starting';
+    state.creatorContext = this.workspaceCreatorContext;
+    state.creatorGeneration = this.workspaceCreatorContext?.generation;
     state.origin = this.cloneWorkspaceMapPlacementValue(options.origin || {});
-    state.candidate = this.cloneWorkspaceMapPlacementValue(options.candidate || null);
+    state.candidate = this.cloneWorkspaceMapPlacementValue(
+      options.candidate || existing?.candidate || null
+    );
     state.payload = payload;
+    state.setupOwner = options.setupOwner || null;
+    state.groupHomeOwner = options.groupHomeOwner || null;
+    state.actionCopy = this.cloneWorkspaceMapPlacementValue(options.actionCopy || null);
     state.review = this.cloneWorkspaceMapPlacementValue(options.review || null);
+    state.previewParentID = String(options.previewParentID || '');
     state.inFlight = null;
     this.workspaceMapPlacement = state;
 
     const activate = () => {
       if (this.workspaceMapPlacement !== state || state.phase !== 'starting') return;
+      if (
+        state.creatorContext &&
+        (this.workspaceCreatorContext !== state.creatorContext ||
+          state.creatorContext.generation !== state.creatorGeneration)
+      )
+        return;
       state.phase = 'placing';
+      if (state.creatorContext?.ordinaryReview && !this.ordinaryCreationMapAvailable()) {
+        this.returnFromWorkspaceMapPlacement(state.token, 'map-unavailable');
+        return;
+      }
       const map = window.OriWorkspaceMap;
       if (typeof map?.beginPlacement !== 'function') {
         this.returnFromWorkspaceMapPlacement(state.token, 'map-unavailable');
@@ -4566,7 +5818,47 @@ const sessionManager = {
         revision: state.revision,
         origin: this.cloneWorkspaceMapPlacementValue(state.origin),
         initialCandidate: this.cloneWorkspaceMapPlacementValue(state.candidate),
-        preview: this.workspaceMapPlacementPreview(state.payload, state.origin),
+        preview: this.workspaceMapPlacementPreview(
+          state.payload,
+          state.origin,
+          state.previewParentID
+        ),
+        mode:
+          state.creatorContext?.ordinaryReview || state.setupOwner || state.groupHomeOwner
+            ? 'reviewed-setup'
+            : 'create',
+        actionCopy:
+          state.actionCopy ||
+          (state.setupOwner
+            ? {
+                confirmLabel: 'Create & prepare workspace here',
+                pendingLabel: 'Preparing reviewed workspace…',
+                instruction:
+                  'Click open ground or press Enter to create and prepare this software workspace. Its first task waits for you to start it. Escape returns to review.',
+                pendingInstruction: 'Observing the original setup. This position is locked.',
+                announcement:
+                  'Software setup reviewed. Click open ground or press Enter to create and prepare; no assessment starts.'
+              }
+            : state.payload.kind === 'group'
+              ? {
+                  confirmLabel: 'Create group here',
+                  pendingLabel: 'Creating reviewed Group…',
+                  instruction:
+                    'Click open ground or press Enter to create this Group and its reviewed Manager. Position selects no members. Escape returns to review.',
+                  pendingInstruction: 'Creating the reviewed Group. This frame is locked.',
+                  announcement:
+                    'Group reviewed. Choose its empty frame; existing workspaces are unchanged.'
+                }
+              : undefined),
+        onCandidate: (token, point) => {
+          if (
+            this.workspaceMapPlacement === state &&
+            state.token === token &&
+            state.phase === 'placing'
+          ) {
+            state.candidate = this.cloneWorkspaceMapPlacementValue(point);
+          }
+        },
         onConfirm: (token, candidate) => this.confirmWorkspaceMapPlacement(token, candidate),
         onBack: (token, reason) => this.returnFromWorkspaceMapPlacement(token, reason || 'back')
       });
@@ -4584,7 +5876,23 @@ const sessionManager = {
     // activated Place on map therefore cannot fall through into the Map.
     modalElement.dataset.suspendedForMapPlacement = state.token;
     modalElement.addEventListener('hidden.bs.modal', activate, { once: true });
-    modalAPI.getOrCreateInstance?.(modalElement)?.hide();
+    // Bootstrap ignores hide() while the editor is still showing (for example
+    // right after a nested agent dialog returns). hide.bs.modal fires
+    // synchronously when a hide begins; otherwise hide once showing finishes.
+    let hiding = false;
+    const markHiding = () => (hiding = true);
+    modalElement.addEventListener('hide.bs.modal', markHiding, { once: true });
+    const instance = modalAPI.getOrCreateInstance?.(modalElement);
+    instance?.hide();
+    if (!hiding) {
+      modalElement.addEventListener(
+        'shown.bs.modal',
+        () => {
+          if (this.workspaceMapPlacement === state && state.phase === 'starting') instance?.hide();
+        },
+        { once: true }
+      );
+    } else modalElement.removeEventListener?.('hide.bs.modal', markHiding);
     return state;
   },
 
@@ -4609,7 +5917,9 @@ const sessionManager = {
       state.phase = 'review';
       if (mapUnavailable) {
         this.showWorkspaceCreateError(
-          'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+          state.creatorContext?.ordinaryReview
+            ? 'Map placement is unavailable. Your choices are kept. Use automatic placement to finish here.'
+            : 'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
         );
       }
       return true;
@@ -4627,14 +5937,25 @@ const sessionManager = {
         () => {
           if (this.workspaceMapPlacement !== state || state.phase !== 'resuming') return;
           state.phase = 'review';
+          if (state.setupOwner) this.syncWorkspaceBuildPresentation();
           this.wizardStep = this.wizardStepCount;
           this.refreshWizardChrome();
           if (mapUnavailable) {
             this.showWorkspaceCreateError(
-              'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
+              state.creatorContext?.ordinaryReview
+                ? 'Map placement is unavailable. Your choices are kept. Use automatic placement to finish here.'
+                : 'Map placement is unavailable. Retry after the map finishes loading, or cancel this workspace.'
             );
           }
-          document.getElementById('wizardStep4Title')?.focus();
+          document
+            .getElementById(
+              state.setupOwner
+                ? 'workspaceSetupReviewTitle'
+                : state.groupHomeOwner || state.creatorContext?.ordinaryReview
+                  ? 'workspaceCreationReviewTitle'
+                  : 'wizardStep4Title'
+            )
+            ?.focus();
         },
         { once: true }
       );
@@ -4675,6 +5996,14 @@ const sessionManager = {
   async confirmWorkspaceMapPlacement(token, candidate) {
     const state = this.workspaceMapPlacement;
     if (!state || state.token !== token || state.phase !== 'placing' || state.inFlight)
+      return false;
+    if (state.setupOwner) return this.confirmWorkspaceBuildSetupPlacement(state, candidate);
+    if (state.groupHomeOwner) return this.confirmManagedHomeMapPlacement(state, candidate);
+    if (
+      state.creatorContext &&
+      (this.workspaceCreatorContext !== state.creatorContext ||
+        state.creatorContext.generation !== state.creatorGeneration)
+    )
       return false;
     state.candidate = this.cloneWorkspaceMapPlacementValue(candidate || state.candidate);
     if (!state.candidate) return false;
@@ -4816,7 +6145,12 @@ const sessionManager = {
   },
 
   invalidateGroupRequirementReview() {
-    if (!this.groupRequirementDraft?.review) return;
+    if (!this.groupRequirementDraft) return;
+    // Edits also fence a review still in flight, before it has a receipt.
+    this.groupRequirementDraft.reviewRequestSeq =
+      (this.groupRequirementDraft.reviewRequestSeq || 0) + 1;
+    this.groupRequirementDraft.quietReviewKey = '';
+    if (!this.groupRequirementDraft.review) return;
     if (window.CreateWorkspacePlacementDraft?.invalidateReview) {
       window.CreateWorkspacePlacementDraft.invalidateReview(this.groupRequirementDraft);
     } else {
@@ -4839,6 +6173,9 @@ const sessionManager = {
       this.groupRequirementDraft.review = null;
       this.groupRequirementDraft.preparedHome = null;
     }
+    this.groupRequirementDraft.reviewRequestSeq =
+      (this.groupRequirementDraft.reviewRequestSeq || 0) + 1;
+    this.groupRequirementDraft.quietReviewKey = '';
     this.syncWorkspaceDestinationControl();
     // Team and placement are one reviewed composition. A standalone choice
     // replaces scoped program roles with project-local agents, so no stale team
@@ -5086,6 +6423,7 @@ const sessionManager = {
         return;
       }
       this.templateAgentPlan = data;
+      if (templatePath) this.applyFolderTemplateReview(data.folder_template);
       if (
         mayOpenExisting &&
         !this.workspaceBuildAssisted() &&
@@ -8240,6 +9578,9 @@ const sessionManager = {
 
   refreshWorkspaceReview() {
     const summary = document.getElementById('workspaceReviewSummary');
+    if (summary) summary.hidden = false;
+    const ordinaryHost = document.getElementById('workspaceCreationReviewPanel');
+    if (ordinaryHost) ordinaryHost.hidden = true;
     if (this.usesManagedGroupTemplate()) {
       if (summary) summary.innerHTML = window.GroupTemplateCreator.renderReceipt(this);
       document.getElementById('workspaceReviewIssues')?.replaceChildren();
@@ -8247,8 +9588,10 @@ const sessionManager = {
       document.getElementById('workspaceReviewReadiness')?.replaceChildren();
       this.renderSetupPreview(null);
       if (this.isFinalWizardStep()) void window.GroupTemplateCreator.ensureReview(this);
+      void window.GroupTemplateCreator.syncSharedReview?.(this);
       return;
     }
+    window.GroupTemplateCreator?.suspendSharedReview?.(this);
     if (this.isGroupCreator() && !this.usesGroupRosterCreator()) {
       if (summary) summary.innerHTML = this.renderOrdinaryGroupReceipt();
       document.getElementById('workspaceReviewIssues')?.replaceChildren();
@@ -8320,6 +9663,7 @@ const sessionManager = {
     window.SetupWorkspaceCreator?.refreshReview();
     // One card, one confirm: the placement is reviewed as Review is shown.
     if (!groupRoster) void this.ensureGroupRequirementReview();
+    void this.syncOrdinaryCreationReview(view);
   },
 
   renderOrdinaryGroupReceipt(view = null) {
@@ -9504,6 +10848,18 @@ const sessionManager = {
     const context = this.workspaceCreatorContext;
     const api = window.WorkspaceCreatorState;
     if (!context || !api?.switchCreatorKind) return false;
+    if (
+      context.ordinaryReview?.reference ||
+      context.ordinaryReview?.accepted ||
+      context.ordinaryReview?.result ||
+      context.submitting ||
+      context.ordinaryReview?.actionInFlight ||
+      context.groupTemplates?.pending ||
+      context.groupTemplates?.sharedReview?.accepted
+    ) {
+      this.syncWorkspaceCreatorPresentation();
+      return false;
+    }
     this.captureWorkspaceCreatorDetailsDraft(context.kind);
     const switched = api.switchCreatorKind(context, nextKind);
     if (!switched.changed) {
@@ -9511,6 +10867,7 @@ const sessionManager = {
       return false;
     }
     const nextContext = switched.context;
+    context.ordinaryReview?.panel?.destroy?.();
     // A first switch carries the user's identity into the other mode, then the
     // two drafts diverge. This retains deliberate text without reusing a
     // Workspace-specific parent/team/review as Group consent.
@@ -9579,15 +10936,25 @@ const sessionManager = {
     const guidedCreator = context?.mode === 'guided' && Boolean(context?.guided);
     const ordinaryGroup = kind === 'group' && !importMode;
 
+    const kindLocked = Boolean(
+      fixedKind ||
+      context?.ordinaryReview?.reference ||
+      context?.ordinaryReview?.accepted ||
+      context?.ordinaryReview?.result ||
+      context?.submitting ||
+      context?.ordinaryReview?.actionInFlight ||
+      context?.groupTemplates?.pending ||
+      context?.groupTemplates?.sharedReview?.accepted
+    );
     if (workspaceChoice) {
       workspaceChoice.checked = kind === 'workspace';
-      workspaceChoice.disabled = Boolean(fixedKind);
+      workspaceChoice.disabled = kindLocked;
     }
     if (groupChoice) {
       groupChoice.checked = kind === 'group';
-      groupChoice.disabled = Boolean(fixedKind);
+      groupChoice.disabled = kindLocked;
     }
-    if (kindChoice) kindChoice.setAttribute('aria-disabled', String(Boolean(fixedKind)));
+    if (kindChoice) kindChoice.setAttribute('aria-disabled', String(kindLocked));
     if (fixedNotice) {
       const copy = importMode
         ? 'Import creates a Workspace. Group import is not available.'
@@ -9595,7 +10962,9 @@ const sessionManager = {
           ? 'This operation creates a Group and keeps that choice fixed.'
           : fixedKind === 'workspace'
             ? 'This operation creates a Workspace and keeps that choice fixed.'
-            : '';
+            : context?.ordinaryReview?.reference
+              ? 'The current operation keeps this kind fixed. Release an unaccepted review or read the confirmed result before starting another kind.'
+              : '';
       fixedNotice.textContent = copy;
       fixedNotice.hidden = !copy;
     }
@@ -9699,6 +11068,7 @@ const sessionManager = {
   // Renders the wizard chrome for the current mode + step. Import remains a
   // single-step workflow and never exposes Create-only progress or review UI.
   refreshWizardChrome() {
+    this.syncBlueprintRequestStatus();
     const importMode = Boolean(this.importModeEnabled);
     const visibleSteps = this.creatorWizardSteps();
     const step = importMode ? 2 : this.wizardStep;
@@ -9824,6 +11194,21 @@ const sessionManager = {
       }
     }
     if (onFinalStep) this.refreshWorkspaceReview();
+    const unifiedReview =
+      onFinalStep && (this.usesUnifiedOrdinaryReview() || this.usesManagedGroupTemplate());
+    document
+      .getElementById('addFolderModal')
+      ?.classList?.toggle?.('workspace-create-modal--unified-review', unifiedReview);
+    document
+      .getElementById('wizardStep4')
+      ?.setAttribute?.(
+        'aria-labelledby',
+        unifiedReview ? 'workspaceCreationReviewTitle' : 'wizardStep4Title'
+      );
+    const footer = document.querySelector(
+      '#addFolderModal > .modal-dialog > .modal-content > .modal-footer'
+    );
+    if (footer) footer.hidden = unifiedReview;
     this.syncWorkspaceBuildChosenTags();
     this.syncWorkspaceBuildPresentation();
     this.announceWorkspaceCreatorStep();
@@ -9867,7 +11252,11 @@ const sessionManager = {
   // nothing the catalog can fail to provide.
   blueprintSelectionBlocked() {
     if (!this.isWorkspaceCreator()) return false;
-    return Boolean(window.ProjectTemplateCard?.isSelectionBlocked?.());
+    return Boolean(
+      window.ProjectTemplateCard?.isSelectionBlocked?.() ||
+      this.blueprintRequestProblem() ||
+      this.folderTemplateReviewProblem()
+    );
   },
 
   // Whether the team draft currently carries an issue that prevents building a
@@ -10282,15 +11671,28 @@ const sessionManager = {
     if (!draft || window.SetupWorkspaceCreator?.isActive()) return true;
     payload.group_composition = draft.composition;
     const payloadKey = JSON.stringify(payload);
+    const creatorContext = this.workspaceCreatorContext;
+    const reviewedComposition = draft.composition;
     const carryReview = () => {
       payload.group_review_token = draft.review.review_token;
       payload.idempotency_key = draft.review.idempotencyKey;
       return true;
     };
     if (draft.review?.payloadKey === payloadKey && draft.review.review_token) {
-      return quiet ? false : carryReview();
+      if (quiet) return false;
+      // The final gesture binds this receipt. An older in-flight quiet review
+      // for another request must not replace it afterwards.
+      draft.reviewRequestSeq = (draft.reviewRequestSeq || 0) + 1;
+      return carryReview();
     }
 
+    const sequence = (draft.reviewRequestSeq || 0) + 1;
+    draft.reviewRequestSeq = sequence;
+    const ownsReview = () =>
+      this.workspaceCreatorContext === creatorContext &&
+      this.groupRequirementDraft === draft &&
+      draft.reviewRequestSeq === sequence &&
+      draft.composition === reviewedComposition;
     const requestReview = async () => {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -10298,6 +11700,7 @@ const sessionManager = {
         body: JSON.stringify({ ...payload, group_requirement_review: true })
       });
       const body = await response.json().catch(() => ({}));
+      if (!ownsReview()) return null;
       if (!response.ok || body.error) {
         const failure = new Error(body.error || 'Placement review failed.');
         // The review validates an attached project too; its fix is on Details.
@@ -10307,7 +11710,14 @@ const sessionManager = {
       return body.group_requirement_review || {};
     };
 
-    const review = await requestReview();
+    let review;
+    try {
+      review = await requestReview();
+    } catch (error) {
+      if (!ownsReview()) return false;
+      throw error;
+    }
+    if (!ownsReview()) return false;
     if (review.state === 'home_creation_review_required') {
       // In build mode the wizard is hidden behind the conversation, so the
       // pane says it, quiet or not, and offers Prepare the group first.
@@ -10394,8 +11804,9 @@ const sessionManager = {
       workspaceBootstrap: this.getWorkspaceBootstrapFromModal(),
       teamPayload: teamView?.payload || {}
     });
-    // The same destination adjustments Create makes before it reviews.
-    if (!payload.parent_id && this.workspaceMapOrigin) {
+    // The same destination adjustments Create makes before it reviews. The
+    // shared review never derives a parent from the map's pending point.
+    if (!payload.parent_id && this.workspaceMapOrigin && !this.usesUnifiedOrdinaryReview()) {
       const pending = window.OriWorkspaceMap?.getPendingBuild?.();
       if (pending?.group?.id) payload.parent_id = pending.group.id;
     }
@@ -10412,6 +11823,11 @@ const sessionManager = {
       !draft ||
       this.isCreatingFolder ||
       this.importModeEnabled ||
+      // The map holds the reviewed receipt; never replace it mid-placement.
+      ['starting', 'placing', 'committing'].includes(this.workspaceMapPlacement?.phase) ||
+      // A loading agent plan has no settled team; its request is not the one
+      // the reviewer sees and must not replace a receipt for it.
+      !this.templateAgentPlan ||
       !this.isFinalWizardStep() ||
       this.isOrdinaryGroupCreator() ||
       window.SetupWorkspaceCreator?.isActive?.() ||
@@ -10424,10 +11840,17 @@ const sessionManager = {
     const key = JSON.stringify({ ...request.payload, group_composition: draft.composition });
     if (draft.review?.payloadKey === key || draft.quietReviewKey === key) return;
     draft.quietReviewKey = key;
+    draft.quietReviewError = null;
     try {
       await this.prepareGroupRequirementCommit(request.endpoint, request.payload, { quiet: true });
-    } catch (_) {
-      // Create asks again and says what is wrong.
+    } catch (error) {
+      // The legacy Create asks again and says what is wrong; the shared review
+      // has no enabled Create until reviewed, so it states the refusal for
+      // this exact request instead of waiting forever.
+      if (this.groupRequirementDraft === draft && draft.quietReviewKey === key) {
+        draft.quietReviewError = { key, message: error?.message || 'Placement review failed.' };
+        void this.syncOrdinaryCreationReview();
+      }
     }
   },
 
@@ -10539,7 +11962,18 @@ const sessionManager = {
   // A blueprint was chosen (or re-emitted by a readiness recheck): apply what
   // it answers to Details without ever clobbering what the user typed, and
   // apply its Agent-behavior default.
-  handleWorkspaceTemplateSelected(template) {
+  handleWorkspaceTemplateSelected(template, { programmatic = false } = {}) {
+    const request = this.workspaceCreatorContext?.blueprintRequest;
+    if (request && ['pending', 'missing', 'ambiguous'].includes(request.state)) {
+      const selected = String(template?.id || '');
+      if (
+        selected === request.id ||
+        (!request.id.includes(':') && selected.endsWith(`:${request.id}`))
+      )
+        request.state = 'selected';
+      else if (!programmatic) request.state = 'cancelled';
+      this.syncBlueprintRequestStatus();
+    }
     this.closeWorkspaceAgentSetup({ restoreFocus: false, silent: true });
     // A different blueprint starts from a new project again; a readiness
     // recheck re-emitting the same blueprint keeps the chosen folder.
@@ -11028,12 +12462,15 @@ const sessionManager = {
   // The values the user chose, in one draft object. The DOM is never read back
   // at submit time: a field hidden by a later choice, or replaced while the
   // blueprint changed, would otherwise still be sent.
-  resetBlueprintInputsDraft(template) {
+  resetBlueprintInputsDraft(template, { preserveTouched = false } = {}) {
     const { inputs } = this.blueprintDetailsProfile(template);
+    const previous = preserveTouched ? this.blueprintInputsDraft : null;
+    const touched = { ...(previous?.touched || {}) };
     const values = {};
+    for (const id of Object.keys(touched)) if (touched[id]) values[id] = previous.values[id];
     for (const field of inputs?.fields || []) {
       const id = String(field?.id || '');
-      if (id) values[id] = this.blueprintInputDefaultText(field);
+      if (id && !touched[id]) values[id] = this.blueprintInputDefaultText(field);
     }
     this.blueprintInputsDraft = {
       declaration: inputs,
@@ -11041,7 +12478,7 @@ const sessionManager = {
       errors: {},
       // Fields the person (or an assistant build) set. The destination Home's
       // own defaults never replace one of these.
-      touched: {},
+      touched,
       // The destination Home's defaults currently shown, by field, and the
       // one-line note that says where they came from.
       homeDefaults: {},
@@ -11146,7 +12583,7 @@ const sessionManager = {
     if (!this.isWorkspaceCreator() || this.importModeEnabled) return false;
     if (this.workspaceCreatorContext?.mode === 'import') return false;
     if (this.usesExistingProject()) return false;
-    return Boolean(this.blueprintDetailsProfile(this.workspaceTemplate).inputs);
+    return Boolean(this.blueprintDetailsProfile(this.currentCreationBlueprint()).inputs);
   },
 
   // Builds the card from the declaration. Number fields carry their unit and a
@@ -11397,9 +12834,9 @@ const sessionManager = {
     return Object.keys(payload).length ? payload : null;
   },
 
-  // Review's statement of the values the project will be created with (FR 44).
-  renderBlueprintInputsReceipt() {
-    if (!this.blueprintInputsAvailable()) return '';
+  // Read-only display uses the same typed-input draft as serialization.
+  blueprintInputReviewLines() {
+    if (!this.blueprintInputsAvailable()) return [];
     const draft = this.blueprintInputsDraft;
     const declaration = draft?.declaration;
     const lines = (declaration?.fields || [])
@@ -11415,7 +12852,14 @@ const sessionManager = {
         return `${String(field?.label || id)}: ${shown}`;
       })
       .filter(Boolean);
+    return lines;
+  },
+
+  // Review's statement of the values the project will be created with (FR 44).
+  renderBlueprintInputsReceipt() {
+    const lines = this.blueprintInputReviewLines();
     if (!lines.length) return '';
+    const declaration = this.blueprintInputsDraft.declaration;
     return `
       <div class="workspace-review-card" data-blueprint-inputs-receipt>
         <div class="workspace-review-card-main">
@@ -11470,6 +12914,11 @@ const sessionManager = {
   // The assistant's build passes { focus: false }: it advances the wizard
   // while the user is typing to it, and must never take the caret away.
   goToWizardStep(step, options = {}) {
+    if (
+      this.workspaceCreatorContext?.groupTemplates?.sharedReview?.accepted &&
+      Number(step) !== this.wizardStepCount
+    )
+      return;
     const moveFocus = options.focus !== false;
     // Contextual edits deliberately reveal the existing wizard, not a second form.
     if (moveFocus && this.workspaceBuildAssisted()) this.collapseWorkspaceBuild({ focus: false });
@@ -11587,7 +13036,11 @@ const sessionManager = {
     // A build remembers the furthest step, to resume there.
     if (this.workspaceBuild) this.scheduleWorkspaceBuildDraft({ user: false });
     if (!moveFocus) return;
-    const heading = document.getElementById(`wizardStep${this.wizardStep}Title`);
+    const heading =
+      this.isFinalWizardStep() && this.usesUnifiedOrdinaryReview()
+        ? document.getElementById('workspaceCreationReviewTitle') ||
+          document.getElementById('workspaceCreationReviewPanel')
+        : document.getElementById(`wizardStep${this.wizardStep}Title`);
     if (heading) heading.focus();
     else if (this.wizardStep === 2) document.getElementById('folderNameInput')?.focus();
   },
@@ -11786,6 +13239,7 @@ const sessionManager = {
           `${base}/${encodeURIComponent(String(id || ''))}${recheck ? '?recheck=1' : ''}`
         ),
       setup: (id, body) => call('POST', sessionURL(id, 'setup'), body),
+      softwareReview: (id, body) => call('POST', sessionURL(id, 'software-review'), body),
       homeProvider: (id, body) => call('POST', sessionURL(id, 'home-provider'), body),
       janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
       janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body),
@@ -11795,6 +13249,14 @@ const sessionManager = {
 
   workspaceCreatorClosed() {
     const context = this.workspaceCreatorContext;
+    context?.ordinaryReview?.panel?.destroy();
+    context?.groupTemplates?.sharedReview?.panel?.destroy();
+    const ordinaryReview = context?.ordinaryReview;
+    if (ordinaryReview?.reference && !ordinaryReview.accepted && !ordinaryReview.result) {
+      void ordinaryReview.api
+        ?.abandonCreationOperation(fetch, ordinaryReview.reference)
+        .catch(error => console.warn('Unaccepted workspace review could not be retired:', error));
+    }
     const placement = this.workspaceBuild?.placement;
     const focused = document.activeElement;
     const restoreFocus =
@@ -12381,36 +13843,55 @@ const sessionManager = {
     const session = context.inboxPlacement.session;
     const build = this.newWorkspaceBuildState(context, null, { folders: true });
     this.workspaceBuild = build;
-    build.placement = {
-      token: this.nextWorkspaceMapPlacementToken(),
-      mode: context.inboxPlacement.mode,
-      candidate: null
-    };
     build.janitorMonitoring = session.placement_monitoring === true;
-    // Both assistant entries start with the full setup review. Map placement
-    // is a separate, explicit step after the current choices have been reviewed.
-    const ui =
-      window.OriAssistedWorkspacePlacement ||
-      (await import('/js/modules/assisted-workspace-placement.js'));
-    if (this.workspaceBuild !== build) return false;
-    const host = document.getElementById('assistedWorkspacePlacementPanel');
-    build.placement.host = host;
-    build.placement.home = host.parentElement;
-    build.placement.cards = ui.createPlacementCards(() => this.nextWorkspaceMapPlacementToken());
-    build.placement.approvedFolders = new Map();
-    build.placement.panel = ui.mountPlacementPanel(host, action => {
-      void this.actOnInboxWorkspacePlacement(action).catch(error => {
-        if (this.workspaceBuild !== build) return;
-        build.placement.message =
-          error.message || 'This draft could not be updated. Your choices are kept.';
-        this.syncWorkspaceBuildPresentation();
-      });
-    });
+    // The source handoff has already happened. Only this placement presentation
+    // is shared with other editable File Janitor build drafts.
+    if (
+      !(await this.mountWorkspacePreparationPlacement(build, {
+        mode: context.inboxPlacement.mode,
+        cards: true
+      }))
+    )
+      return false;
     this.mountWorkspaceBuildPane();
     await this.applyWorkspaceBuildSession(session, { resume: true });
     if (this.workspaceBuild !== build) return false;
     build.placement.ready = true;
     this.syncWorkspaceBuildPresentation();
+    return true;
+  },
+
+  async mountWorkspacePreparationPlacement(build, { mode = 'suggested', cards = false } = {}) {
+    if (this.workspaceBuild !== build) return false;
+    if (build.placement?.panel) return true;
+    const ui =
+      window.OriAssistedWorkspacePlacement ||
+      (await import('/js/modules/assisted-workspace-placement.js'));
+    if (this.workspaceBuild !== build || build.closing || build.closeReady) return false;
+    const host = document.getElementById('assistedWorkspacePlacementPanel');
+    if (!host) return false;
+    const placement = (build.placement = {
+      token: this.nextWorkspaceMapPlacementToken(),
+      mode,
+      candidate: null,
+      host,
+      home: host.parentElement,
+      ready: true
+    });
+    // Held-card attachment remains exclusive to from-inbox's scoped admission.
+    // A generic build uses only its ordinary trusted picker/role setters.
+    if (cards) {
+      placement.cards = ui.createPlacementCards(() => this.nextWorkspaceMapPlacementToken());
+      placement.approvedFolders = new Map();
+    }
+    placement.panel = ui.mountPlacementPanel(host, action => {
+      void this.actOnInboxWorkspacePlacement(action).catch(error => {
+        if (this.workspaceBuild !== build) return;
+        placement.message =
+          error.message || 'This draft could not be updated. Your choices are kept.';
+        this.syncWorkspaceBuildPresentation();
+      });
+    });
     return true;
   },
 
@@ -12592,6 +14073,7 @@ const sessionManager = {
       },
       review,
       monitoring: build.janitorMonitoring,
+      canDefer: Boolean(build.acceptedPreparation && build.janitorReview?.review_revision),
       accepted,
       busy: Boolean(
         build.preparationBusy ||
@@ -12711,7 +14193,13 @@ const sessionManager = {
           (placement.onMap ? !placement.candidate : placement.mode === 'map'))
       )
         return;
+      placement.message = '';
       await this.confirmWorkspaceBuildPreparation();
+    } else if (action === 'defer') {
+      if (!build.acceptedPreparation || !build.janitorReview?.review_revision) return;
+      await this.deferWorkspaceBuildPreparation();
+      if (this.workspaceBuild === build && build.session?.status === 'abandoned')
+        this.closeInboxWorkspacePlacement();
     } else if (action === 'review') {
       placement.message = '';
       build.janitorReviewFailureKey = '';
@@ -12872,6 +14360,16 @@ const sessionManager = {
       const started = window.OriWorkspaceMap?.beginPlacement?.({
         token: placement.token,
         mode: 'reviewed-setup',
+        actionCopy: {
+          confirmLabel: 'Create workspace & scan here',
+          pendingLabel: 'Creating workspace…',
+          instruction:
+            'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.',
+          pendingInstruction:
+            'Creating the reviewed workspace and preparing its filing scan. This position is locked.',
+          announcement:
+            'Setup reviewed. Click open ground or press Enter to create the workspace and scan. Escape returns to editing.'
+        },
         origin: {},
         initialCandidate: placement.candidate,
         preview: {
@@ -13585,7 +15083,13 @@ const sessionManager = {
   workspaceBuildFolderReviewAvailable() {
     const build = this.workspaceBuild;
     const session = build?.session;
-    if (build?.acceptedPreparation || build?.preparationUncertain) return true;
+    if (
+      build?.acceptedPreparation ||
+      build?.preparationUncertain ||
+      build?.setupReviewUI?.accepted ||
+      build?.setupReviewUI?.result
+    )
+      return true;
     if (!session?.folder || build.resumeLine || build.groupSwitchLine || session.setup)
       return false;
     const verdict = session.folder.recognition?.verdict;
@@ -13605,11 +15109,24 @@ const sessionManager = {
 
   async actOnWorkspaceBuildFolderReview() {
     const build = this.workspaceBuild;
+    if (this.workspaceBuildUsesSetupReview()) {
+      if (!this.workspaceBuildSetupNameCurrent())
+        await this.reviewWorkspaceBuildSoftware({ mode: 'adjust' });
+      if (this.workspaceBuild !== build) return;
+      this.workspaceBuild.setupReviewUI ||= { automatic: false };
+      this.workspaceBuild.setupReviewUI.editing = false;
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
     if (this.workspaceBuildPlanReady()) {
       await this.setUpFromWorkspaceBuildPlanReview();
       return;
     }
     if (build?.session?.folder?.recognition?.verdict === 'project') {
+      if (build.session.folder.recognition.shape === 'code' && !build.session.setup) {
+        await this.reviewWorkspaceBuildSoftware();
+        return;
+      }
       this.refineWorkspaceBuildFolder({ focus: false });
       return;
     }
@@ -13638,6 +15155,352 @@ const sessionManager = {
     if (focus) document.getElementById('workspaceBuildComposerInput')?.focus();
   },
 
+  async reviewWorkspaceBuildSoftware({ mode = 'review' } = {}) {
+    const build = this.workspaceBuild;
+    if (!build?.session || build.busy || build.setupBusy || build.readinessBusy || build.closing)
+      return;
+    await this.flushWorkspaceBuildDraft({ force: true });
+    if (
+      this.workspaceBuild !== build ||
+      build.draftError ||
+      build.draftConflict ||
+      build.draftUser !== undefined
+    )
+      return;
+    const { id, version } = build.session;
+    const revision = this.workspaceBuildRevision();
+    build.readinessBusy = true;
+    build.readinessMessage =
+      mode === 'adjust'
+        ? 'Updating the name through the software owner. No project contents are read.'
+        : 'The software owner is reviewing bounded README, instructions and build-file evidence. No model or setup is running.';
+    this.syncWorkspaceBuildPresentation();
+    try {
+      const result = await this.workspaceBuildApi().softwareReview(id, { version, mode });
+      if (
+        this.workspaceBuild !== build ||
+        build.closing ||
+        build.session.version !== version ||
+        this.workspaceBuildRevision() !== revision
+      )
+        return;
+      const fresh = result?.body?.session;
+      if (
+        !result?.ok ||
+        fresh?.id !== id ||
+        fresh.status !== 'open' ||
+        fresh.setup ||
+        fresh.folder?.observation?.id !== build.session.folder?.observation?.id ||
+        fresh.version <= version
+      ) {
+        build.readinessMessage =
+          result?.body?.error ||
+          'Software review could not finish. Nothing was accepted; your draft is kept.';
+        return;
+      }
+      this.adoptWorkspaceBuildSession(fresh);
+      build.readinessStale = false;
+      build.readinessMessage = '';
+      build.refining = false;
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.readinessBusy = false;
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
+  },
+
+  workspaceBuildUsesSetupReview() {
+    const session = this.workspaceBuild?.session;
+    return Boolean(
+      session?.plan?.ready &&
+      session.plan.first_task_deferred === true &&
+      session.plan.software_review === true &&
+      !session.setup &&
+      session.status === 'open'
+    );
+  },
+
+  workspaceBuildSetupNameCurrent() {
+    const requested = document.getElementById('folderNameInput')?.value?.trim();
+    return !requested || requested === this.workspaceBuild?.session?.plan?.visual?.entity?.name;
+  },
+
+  workspaceBuildSetupReviewKey() {
+    const session = this.workspaceBuild?.session;
+    return JSON.stringify([
+      session?.id,
+      session?.version,
+      session?.plan?.digest,
+      document.getElementById('folderNameInput')?.value || '',
+      this.workspaceBuildPane()?.setupBrief?.() ?? session?.plan?.brief_default ?? ''
+    ]);
+  },
+
+  async syncWorkspaceBuildSetupReview() {
+    const build = this.workspaceBuild;
+    const host = document.getElementById('workspaceBuildSetupReview');
+    if (!host || !build) return;
+    const state = (build.setupReviewUI ||= { automatic: false, editing: false });
+    const active =
+      (this.workspaceBuildUsesSetupReview() || state.accepted || state.result) &&
+      this.workspaceBuildFolderReviewActive();
+    const showing = active && !state.editing;
+    host.hidden = !showing;
+    const footer = document.getElementById('workspaceBuildFolderReviewFooter');
+    if (footer) footer.hidden = showing;
+    if (!showing) {
+      if (active && state.editing)
+        for (const id of ['workspaceBuildPlanReviewSetup', 'workspaceBuildFolderConfirm']) {
+          const button = document.getElementById(id);
+          if (button) button.textContent = 'Return to reviewed setup';
+        }
+      return;
+    }
+    const legacy = document.getElementById('workspaceBuildPlanReview');
+    if (legacy) legacy.hidden = true;
+    state.modules ||= Promise.all([
+      import('/js/modules/assisted-workspace-placement.js'),
+      import('/js/modules/workspace-creation-review.js')
+    ]);
+    const [ui, shared] = await state.modules;
+    if (
+      this.workspaceBuild !== build ||
+      build.closing ||
+      (!this.workspaceBuildUsesSetupReview() && !state.accepted && !state.result) ||
+      state.editing
+    )
+      return;
+    state.used = true;
+    state.offerID ||= build.session.folder?.recognition?.offer_id;
+    state.panel ||= ui.mountPlacementPanel(host, action => {
+      void this.actOnWorkspaceBuildSetupReview(build, action);
+    });
+    if (state.accepted || state.result) {
+      state.panel.update({
+        ownerKind: 'setup',
+        idPrefix: 'workspaceSetupReview',
+        accepted: true,
+        result: state.result,
+        resultTitle: state.result && state.existing ? 'Existing workspace prepared' : undefined,
+        busy: state.observing,
+        positionFailed: state.positionFailed,
+        message:
+          state.message ||
+          'The original software setup is being observed. Reading status never starts or continues work.'
+      });
+      return;
+    }
+    const brief =
+      this.workspaceBuildPane()?.setupBrief?.() ?? build.session.plan.brief_default ?? '';
+    const material = shared.setupCreationReviewMaterial(build.session, brief);
+    state.panel.update({
+      ...material,
+      facts: [...material.facts, { label: 'Later', value: material.later }],
+      ownerKind: 'setup',
+      idPrefix: 'workspaceSetupReview',
+      name:
+        document.getElementById('folderNameInput')?.value ||
+        build.session.plan.visual?.entity?.name ||
+        this.workspaceBuildPlanFolder(),
+      nameMaxLength: 80,
+      goalMaxLength: 2000,
+      canChangeBlueprint: false,
+      detailsLabel: 'Review full setup details',
+      automatic: state.automatic,
+      canPlace: this.workspaceBuildSetupMapAvailable(),
+      reviewed: this.workspaceBuildSetupPressable(),
+      canConfirm:
+        this.workspaceBuildSetupPressable() &&
+        !state.dirty &&
+        build.draftUser === undefined &&
+        !build.draftError &&
+        !build.draftConflict &&
+        this.workspaceBuildSetupNameCurrent(),
+      busy: build.setupBusy || build.draftInFlight || build.readinessBusy || build.busy,
+      message:
+        state.message ||
+        build.readinessMessage ||
+        (build.draftError || build.draftConflict
+          ? 'Resolve the saved draft conflict; your edits are kept.'
+          : build.draftUser !== undefined
+            ? 'Wait for the latest draft edits to be saved.'
+            : ''),
+      mapHint: this.workspaceBuildSetupMapAvailable()
+        ? 'The editor closes for positioning. The map click creates and prepares; it does not start the assessment.'
+        : 'Automatic placement completes this setup without moving any reused workspace.',
+      canEditName: build.session.plan.visual?.entity?.operation !== 'reuse',
+      confirmLabel:
+        build.session.plan.visual?.entity?.operation === 'reuse'
+          ? 'Prepare existing workspace'
+          : 'Create & prepare workspace'
+    });
+  },
+
+  async actOnWorkspaceBuildSetupReview(build, { action, field, value }) {
+    if (this.workspaceBuild !== build || build.setupBusy) return;
+    const state = build.setupReviewUI;
+    if (state?.accepted || state?.result) {
+      if (state.observing) return;
+      if (action === 'read-status') {
+        const observed = await this.workspaceBuildApi().read(build.session.id);
+        if (this.workspaceBuild !== build) return;
+        if (observed?.ok && observed.body?.session?.id === build.session.id) {
+          this.adoptWorkspaceBuildSession(observed.body.session);
+          if (observed.body.session.status === 'created')
+            await this.observeWorkspaceBuildSoftwareResult(build, observed.body.session);
+        }
+      } else if (action === 'retry-position' && state.result?.id && state.positionFailed) {
+        state.positionFailed =
+          (await window.OriWorkspaceMap?.retryPlacement?.(
+            state.result.id,
+            state.mapState?.candidate
+          )) !== true;
+        state.message = state.positionFailed
+          ? 'Only layout was retried; the requested position is not saved.'
+          : 'The requested position is saved. Only layout changed.';
+        if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
+      } else if (action === 'open' && state.result?.id) {
+        // Workspace pages are routed by slug; resolve it rather than use the ID.
+        const slug = String(state.result.folder_slug || '').trim();
+        if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+        else await this.openExistingResourceWorkspace(state.result.id);
+      } else if (action === 'back') this.hideWorkspaceCreatorModal();
+      return;
+    }
+    if (!this.workspaceBuildUsesSetupReview()) return;
+    if (action === 'dirty') {
+      state.dirty = true;
+      return;
+    }
+    if (action === 'edit') {
+      state.dirty = false;
+      if (field === 'name') {
+        this.noteWorkspaceBuildPlanEdit({ value }, 'folderNameInput');
+        await this.reviewWorkspaceBuildSoftware({ mode: 'adjust' });
+      } else if (field === 'mission') {
+        const brief = document.getElementById('workspaceBuildPlanReviewBrief');
+        if (brief) {
+          brief.value = value;
+          brief.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        this.noteWorkspaceBuildIntent();
+      }
+    } else if (action === 'suggested') {
+      state.automatic = true;
+      state.mapState = null;
+      this.abandonWorkspaceMapPlacement();
+    } else if (action === 'place' && !state.dirty && this.workspaceBuildSetupMapAvailable())
+      await this.beginWorkspaceBuildSetupPlacement(build);
+    else if (action === 'details') state.editing = true;
+    else if (action === 'back') this.refineWorkspaceBuildFolder();
+    else if (action === 'cancel') this.hideWorkspaceCreatorModal();
+    else if (action === 'confirm' && state.automatic && !state.dirty) {
+      const reviewedKey = this.workspaceBuildSetupReviewKey();
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (
+        this.workspaceBuild !== build ||
+        !this.workspaceBuildSetupNameCurrent() ||
+        !this.workspaceBuildSetupPressable() ||
+        build.draftError ||
+        build.draftConflict ||
+        build.draftUser !== undefined
+      )
+        return;
+      if (this.workspaceBuildSetupReviewKey() !== reviewedKey)
+        state.message = 'The draft terms changed. Review the current plan and confirm again.';
+      else
+        await this.setUpWorkspaceBuild(
+          { brief: this.workspaceBuildPane()?.setupBrief?.() },
+          { reviewedKey }
+        );
+    }
+    if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
+  },
+
+  workspaceBuildSetupMapAvailable() {
+    if (
+      this.workspaceMapPlacement &&
+      !['review', 'created'].includes(this.workspaceMapPlacement.phase)
+    )
+      return false;
+    const plan = this.workspaceBuild?.session?.plan;
+    return Boolean(
+      this.ordinaryCreationMapAvailable() &&
+      plan?.visual?.entity?.kind === 'workspace' &&
+      plan.visual.entity.operation === 'create' &&
+      !plan.home
+    );
+  },
+
+  async beginWorkspaceBuildSetupPlacement(build) {
+    const state = build.setupReviewUI;
+    const key = this.workspaceBuildSetupReviewKey();
+    await this.flushWorkspaceBuildDraft({ force: true });
+    if (
+      this.workspaceBuild !== build ||
+      !this.workspaceBuildSetupPressable() ||
+      !this.workspaceBuildSetupNameCurrent() ||
+      build.draftError ||
+      build.draftConflict ||
+      build.draftUser !== undefined ||
+      key !== this.workspaceBuildSetupReviewKey()
+    )
+      return;
+    state.automatic = false;
+    state.mapState = this.beginWorkspaceMapPlacement({
+      payload: { name: build.session.plan.visual.entity.name },
+      setupOwner: { build, key }
+    });
+  },
+
+  async confirmWorkspaceBuildSetupPlacement(placement, candidate) {
+    const { build, key } = placement.setupOwner;
+    if (
+      this.workspaceBuild !== build ||
+      this.workspaceCreatorContext !== placement.creatorContext ||
+      this.workspaceCreatorContext?.generation !== placement.creatorGeneration ||
+      !this.workspaceBuildSetupPressable() ||
+      !this.workspaceBuildSetupNameCurrent() ||
+      key !== this.workspaceBuildSetupReviewKey()
+    ) {
+      this.returnFromWorkspaceMapPlacement(placement.token, 'changed-review');
+      return false;
+    }
+    placement.candidate = this.cloneWorkspaceMapPlacementValue(candidate || placement.candidate);
+    if (!placement.candidate) return false;
+    placement.phase = 'committing';
+    placement.inFlight = { token: placement.token, revision: placement.revision };
+    window.OriWorkspaceMap?.setDraftPlacementPending?.(placement.token, true);
+    await this.setUpWorkspaceBuild(
+      { brief: this.workspaceBuildPane()?.setupBrief?.() },
+      { reviewedKey: key }
+    );
+    if (this.workspaceBuild !== build) return false;
+    if (!build.setupReviewUI.accepted) {
+      placement.inFlight = null;
+      placement.phase = 'placing';
+      window.OriWorkspaceMap?.setDraftPlacementPending?.(placement.token, false);
+      this.returnFromWorkspaceMapPlacement(placement.token, 'setup-refused');
+      return false;
+    }
+    return true;
+  },
+
+  resumeWorkspaceBuildSetupResult(build) {
+    if (this.workspaceBuild !== build) return;
+    const modal = document.getElementById('addFolderModal');
+    const token = build.setupReviewUI?.mapState?.token;
+    if (modal && token) {
+      delete modal.dataset.suspendedForMapPlacement;
+      modal.dataset.resumingFromMapPlacement = token;
+      window.OriWorkspaceMap?.endPlacement?.(token);
+      const api = typeof bootstrap !== 'undefined' ? bootstrap.Modal : window.bootstrap?.Modal;
+      api?.getOrCreateInstance?.(modal)?.show();
+    }
+    this.syncWorkspaceBuildPresentation();
+  },
+
   // workspaceBuildPlanReady says the build's recognized folder has a host plan
   // Set it up can run: the plan, not the wizard, then decides the workspace.
   workspaceBuildPlanReady() {
@@ -13649,6 +15512,16 @@ const sessionManager = {
   // the wizard, as before.
   reviewOrEditWorkspaceBuild() {
     const build = this.workspaceBuild;
+    if (
+      build?.ordinarySourceEdit &&
+      build.ordinarySourceEdit === this.workspaceCreatorContext &&
+      this.ordinaryBuildReviewEligible()
+    ) {
+      build.ordinarySourceEdit = null;
+      this.collapseWorkspaceBuild({ focus: false });
+      this.goToWizardStep(this.creatorWizardSteps().at(-1));
+      return;
+    }
     if (build?.placement && build.collapsed) return this.expandWorkspaceBuild();
     if (this.workspaceBuildFolderReviewAvailable()) {
       build.refining = false;
@@ -13806,6 +15679,16 @@ const sessionManager = {
   // setUpFromWorkspaceBuildPlanReview is the review's Set it up: the review
   // closes so the pane shows the run, line by line.
   async setUpFromWorkspaceBuildPlanReview() {
+    if (this.workspaceBuildUsesSetupReview()) {
+      const build = this.workspaceBuild;
+      if (!this.workspaceBuildSetupNameCurrent())
+        await this.reviewWorkspaceBuildSoftware({ mode: 'adjust' });
+      if (this.workspaceBuild !== build) return;
+      this.workspaceBuild.setupReviewUI ||= {};
+      this.workspaceBuild.setupReviewUI.editing = false;
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
     const build = this.workspaceBuild;
     if (!build || !this.workspaceBuildSetupPressable()) return;
     build.planReviewOpen = false;
@@ -14023,6 +15906,11 @@ const sessionManager = {
     const link = session.link?.observation;
     hide('workspaceBuildFolderLinkRow', !link);
     setText('workspaceBuildFolderLink', link?.title || link?.repo?.full_name || link?.host || '');
+    const softwareReview =
+      recognized &&
+      session.folder.recognition.shape === 'code' &&
+      !session.setup &&
+      !session.folder.recognition.offer_id;
     const janitor = this.workspaceBuildPreparationEligible();
     const groupNeeded = !recognized && this.workspaceBuildGroupNeeded();
     const frozen = Boolean(build.acceptedPreparation || build.preparationUncertain);
@@ -14068,11 +15956,13 @@ const sessionManager = {
     }
     setText(
       'workspaceBuildFolderEffects',
-      recognized
-        ? `Only ${hire?.confirmLabel || 'Set it up'} runs these host-owned steps. To use another purpose, change the attached folder.`
-        : janitor
-          ? 'Creating makes Filed/ and scans top-level metadata once. Review the folder permissions below. Moves and Trash always need separate approval.'
-          : 'Creating links this folder in place. No files are moved or changed by attaching it.'
+      softwareReview
+        ? 'Review software setup reads bounded README, instructions and build-file evidence through the existing software owner. It calls no model and creates nothing. Final setup remains a separate confirmation.'
+        : recognized
+          ? `Only ${hire?.confirmLabel || 'Set it up'} runs these host-owned steps. To use another purpose, change the attached folder.`
+          : janitor
+            ? 'Creating makes Filed/ and scans top-level metadata once. Review the folder permissions below. Moves and Trash always need separate approval.'
+            : 'Creating links this folder in place. No files are moved or changed by attaching it.'
     );
     hide(
       'workspaceBuildFolderRetry',
@@ -14151,7 +16041,9 @@ const sessionManager = {
               ? hire?.confirmLabel ||
                 (session.plan.hire.mode === 'bind' ? 'Assign & start' : 'Hire & start')
               : 'Set it up'
-            : 'Review prerequisites'
+            : softwareReview
+              ? 'Review software setup'
+              : 'Review prerequisites'
           : janitor
             ? build.preparationBusy
               ? 'Preparing workspace…'
@@ -14166,9 +16058,7 @@ const sessionManager = {
                       : 'Create & scan folder'
             : groupNeeded
               ? 'Review required group'
-              : this.workspaceReviewCreatesAgents()
-                ? 'Hire and create'
-                : 'Create workspace';
+              : 'Review & place workspace';
       if (recognized && planReady)
         action.textContent =
           window.OriFolderSetupVisual?.requirementsActionLabel?.(
@@ -14300,6 +16190,8 @@ const sessionManager = {
         : `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${attached}`;
     }
     this.syncInboxWorkspacePlacement();
+    // A view projects the current owner; it never obtains or confirms setup.
+    void this.syncWorkspaceBuildSetupReview();
   },
 
   // workspaceBuildGroupLine names the group the chosen blueprint lives in, from
@@ -14328,6 +16220,11 @@ const sessionManager = {
     void this.pauseWorkspaceBuildSuggestion();
     if (this.workspaceBuild?.janitorReviewTimer)
       clearTimeout(this.workspaceBuild.janitorReviewTimer);
+    this.workspaceBuild?.setupReviewUI?.panel?.destroy();
+    const setupHost = document.getElementById('workspaceBuildSetupReview');
+    if (setupHost) setupHost.hidden = true;
+    const setupFooter = document.getElementById('workspaceBuildFolderReviewFooter');
+    if (setupFooter) setupFooter.hidden = false;
     const placement = this.workspaceBuild?.placement;
     if (placement?.host) {
       window.OriWorkspaceMap?.endPlacement?.(placement.token);
@@ -14976,6 +16873,8 @@ const sessionManager = {
     });
     if (key === build.lastDraftKey) {
       this.syncWorkspaceBuildPresentation();
+      // Clearing even a redundant pending sync changes review readiness.
+      if (this.usesUnifiedOrdinaryReview()) void this.syncOrdinaryCreationReview();
       return;
     }
     const fail = () => {
@@ -15048,6 +16947,7 @@ const sessionManager = {
       if (this.workspaceBuild === build) {
         build.draftInFlight = null;
         this.syncWorkspaceBuildPresentation();
+        if (this.usesUnifiedOrdinaryReview()) void this.syncOrdinaryCreationReview();
       }
     }
   },
@@ -15163,6 +17063,14 @@ const sessionManager = {
   },
 
   finishWorkspaceBuildFolderChoice(build, { cancelled = false, focus = false } = {}) {
+    if (
+      build?.ordinarySourceEdit &&
+      build.ordinarySourceEdit === this.workspaceCreatorContext &&
+      this.ordinaryBuildReviewEligible()
+    ) {
+      this.reviewOrEditWorkspaceBuild();
+      return true;
+    }
     if (!build?.returnAfterFolderChoice || this.workspaceBuild !== build) return false;
     build.returnAfterFolderChoice = false;
     if (build.closing || build.closeReady || !this.workspaceBuildAssisted()) return false;
@@ -15218,6 +17126,37 @@ const sessionManager = {
       return;
     }
     pane.openFolderChooser(result.body);
+  },
+
+  // A refused observer can still reserve/release a version. Read only that
+  // same build and adopt its version only when every material/source choice is
+  // unchanged. This neither re-picks a folder nor overwrites a newer edit.
+  async recoverWorkspaceBuildAttachmentRefusal(build) {
+    const session = build?.session;
+    if (!session) return;
+    const revision = this.workspaceBuildRevision();
+    const latest = await this.workspaceBuildApi()
+      .read(session.id)
+      .catch(() => null);
+    if (
+      this.workspaceBuild !== build ||
+      build.closing ||
+      build.session !== session ||
+      this.workspaceBuildRevision() !== revision
+    )
+      return;
+    const saved = latest?.body?.session;
+    if (!latest?.ok || saved?.id !== session.id || Number(saved.version) < Number(session.version))
+      return;
+    const sameChoices =
+      JSON.stringify(saved.draft) === JSON.stringify(session.draft) &&
+      JSON.stringify(saved.team_state) === JSON.stringify(session.team_state) &&
+      saved.folder?.observation?.id === session.folder?.observation?.id &&
+      saved.link?.observation?.id === session.link?.observation?.id &&
+      Boolean(saved.placement_monitoring) === Boolean(session.placement_monitoring);
+    if (sameChoices && saved.status === 'open' && !saved.setup && !saved.preparation)
+      this.adoptWorkspaceBuildSession(saved);
+    else this.adoptWorkspaceBuildConflict(saved);
   },
 
   // attachWorkspaceBuildFolder sends one choice to the build: a chip, the
@@ -15308,23 +17247,9 @@ const sessionManager = {
         if (build.placement) {
           note = message;
           build.placement.message = message;
-          // Reserving/releasing a picker advances the attachment version even
-          // when a selection is refused. Recover that version, not a new pick.
-          const latest = await this.workspaceBuildApi()
-            .read(build.session.id)
-            .catch(() => null);
-          if (this.workspaceBuild !== build) return;
-          const saved = latest?.body?.session;
-          if (latest?.ok && saved?.id === build.session.id) {
-            const sameChoices =
-              JSON.stringify(saved.draft) === JSON.stringify(build.session.draft) &&
-              JSON.stringify(saved.team_state) === JSON.stringify(build.session.team_state) &&
-              saved.folder?.observation?.id === build.session.folder?.observation?.id &&
-              Boolean(saved.placement_monitoring) === Boolean(build.session.placement_monitoring);
-            if (sameChoices && saved.status === 'open') this.adoptWorkspaceBuildSession(saved);
-            else this.adoptWorkspaceBuildConflict(saved);
-          }
         }
+        await this.recoverWorkspaceBuildAttachmentRefusal(build);
+        if (this.workspaceBuild !== build) return;
         pane.showLine(message);
         return;
       }
@@ -15480,6 +17405,8 @@ const sessionManager = {
       }
       const session = result?.body?.session || null;
       if (!result?.ok || !session) {
+        await this.recoverWorkspaceBuildAttachmentRefusal(build);
+        if (this.workspaceBuild !== build) return;
         pane.linkFieldStatus(
           String(result?.body?.error || '').trim() ||
             'That link could not be used. Your draft is unchanged.',
@@ -15731,7 +17658,17 @@ const sessionManager = {
   // setUpWorkspaceBuild is Set it up: the plan the user reviewed runs as Home's
   // setup journey on the server. A Retry continues the run that stopped; a
   // project file chosen from the run's own candidates goes with it.
-  async setUpWorkspaceBuild(detail = {}) {
+  async setUpWorkspaceBuild(detail = {}, { reviewedKey } = {}) {
+    if (
+      this.workspaceBuildUsesSetupReview() &&
+      (reviewedKey !== this.workspaceBuildSetupReviewKey() ||
+        !this.workspaceBuildSetupNameCurrent())
+    ) {
+      this.workspaceBuild.setupReviewUI ||= {};
+      this.workspaceBuild.setupReviewUI.editing = false;
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build?.session || !pane || build.busy || build.setupBusy || build.readinessBusy) return;
@@ -15752,6 +17689,17 @@ const sessionManager = {
     try {
       await this.flushWorkspaceBuildDraft();
       if (this.workspaceBuild !== build || !build.session) return;
+      if (
+        reviewedKey &&
+        (reviewedKey !== this.workspaceBuildSetupReviewKey() ||
+          build.draftError ||
+          build.draftConflict ||
+          build.draftUser !== undefined)
+      ) {
+        build.setupReviewUI.message =
+          'The draft terms changed or could not be saved. Review the current plan before confirming.';
+        return;
+      }
       const body = { version: Number(build.session.version) || 0, plan_digest: digest };
       const entry = String(detail.entry_name || '').trim();
       if (entry) body.entry_name = entry;
@@ -15770,6 +17718,20 @@ const sessionManager = {
       }
     }
     if (this.workspaceBuild !== build || !result) return;
+    if (!result.ok && result.status === 0 && build.setupReviewUI?.used) {
+      build.setupReviewUI.accepted = true;
+      build.setupReviewUI.message =
+        'Confirmation delivery is unknown. Read the original build status; do not confirm again. Closing is not undo.';
+      const observed = await this.workspaceBuildApi()
+        .read(build.session.id)
+        .catch(() => null);
+      if (this.workspaceBuild !== build) return;
+      if (observed?.ok && observed.body?.session?.id === build.session.id)
+        this.adoptWorkspaceBuildSession(observed.body.session);
+      this.resumeWorkspaceBuildSetupResult(build);
+      return;
+    }
+    if (result.ok && build.setupReviewUI?.used) build.setupReviewUI.accepted = true;
     if (result.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
     if (result.ok) return;
     if (result.status === 409 && result.body?.code === 'version') {
@@ -15829,8 +17791,75 @@ const sessionManager = {
   // start finished: the workspaces it made are announced and what it made is
   // said. The Map's automatic layout places them; nothing asks where, and the
   // hired agent's report offers Move.
+  async observeWorkspaceBuildSoftwareResult(build, session) {
+    const state = build.setupReviewUI;
+    if (this.workspaceBuild !== build || !state || state.observing) return;
+    state.accepted = true;
+    state.observing = true;
+    try {
+      const receipt = session.setup_result;
+      const outcome = receipt?.outcome;
+      if (
+        !receipt?.id ||
+        (state.offerID && receipt.id !== state.offerID) ||
+        receipt.status !== 'resolved' ||
+        receipt.conversation_id !== `build:${session.id}` ||
+        outcome?.workspace_id !== session.created_workspace_id
+      )
+        throw new Error('Unverified source result');
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(outcome.workspace_id)}`, {
+        cache: 'no-store'
+      });
+      const resource = await response.json();
+      if (this.workspaceBuild !== build) return;
+      if (
+        !response.ok ||
+        resource.id !== outcome.workspace_id ||
+        (!outcome.existing && resource.shared_data?.folder_digest_offer_id !== receipt.id)
+      )
+        throw new Error('Unverified resource');
+      state.offerID = receipt.id;
+      state.result = resource;
+      state.existing = outcome.existing === true;
+      if (state.mapState && !state.existing && !state.positionAttempted) {
+        state.positionAttempted = true;
+        const placement = state.mapState;
+        this.completeWorkspaceMapPlacement(placement.token, resource.id);
+        const saved = await window.OriWorkspaceMap?.commitPlacement?.(resource.id, {
+          token: placement.token,
+          revision: placement.revision,
+          candidate: placement.candidate,
+          select: false
+        });
+        if (this.workspaceBuild !== build) return;
+        state.positionResult = saved;
+        state.positionFailed = saved?.saved !== true;
+      }
+      if (!state.notified) {
+        state.notified = true;
+        this.notifyWorkspacesChanged?.({ workspaceId: resource.id });
+      }
+      state.message = `${session.setup_receipt || 'The canonical software setup result is verified.'} Reading it did not execute or continue work.${state.positionFailed ? ' The workspace exists, but its requested position was not saved. Retry position only; setup will not run again.' : ''}`;
+    } catch {
+      if (this.workspaceBuild === build)
+        state.message =
+          'The original software setup result could not be verified. Read its saved status; do not create again. Closing is not undo.';
+    } finally {
+      if (this.workspaceBuild === build) {
+        state.observing = false;
+        this.resumeWorkspaceBuildSetupResult(build);
+      }
+    }
+  },
+
   finishWorkspaceBuildSetupInDialog(build, session) {
     build.session = session;
+    if (build.setupReviewUI?.used || session.setup_result) {
+      build.setupReviewUI ||= {};
+      build.setupReviewUI.accepted = true;
+      void this.observeWorkspaceBuildSoftwareResult(build, session);
+      return;
+    }
     const workspaceId = String(session.created_workspace_id || '').trim();
     this.notifyWorkspacesChanged?.({ workspaceId });
     const receipt = String(session.setup_receipt || '').trim();
@@ -15961,6 +17990,14 @@ const sessionManager = {
     const steps = this.creatorWizardSteps();
     const review = steps[steps.length - 1];
     if (this.wizardStep !== review) this.goToWizardStep(review, { focus: false });
+    if (this.usesUnifiedOrdinaryReview()) {
+      // A model's create_now is a proposal to review, never final consent.
+      // Collapse through the existing mode owner, invalidating late replies.
+      this.collapseWorkspaceBuild({ focus: false });
+      await this.syncOrdinaryCreationReview();
+      document.getElementById('workspaceCreationReviewTitle')?.focus();
+      return;
+    }
     await this.createFolder();
   },
 
@@ -16141,6 +18178,10 @@ const sessionManager = {
       build.janitorReviewKey = request.key;
       build.janitorReviewFailureKey = '';
       build.acceptedPreparation = review.state === 'accepted';
+      if (!build.placement && !build.session.placement_source) {
+        await this.mountWorkspacePreparationPlacement(build);
+        if (this.workspaceBuild !== build) return;
+      }
       build.preparationMessage = build.acceptedPreparation
         ? 'An earlier confirmation was saved. Resume that exact workspace.'
         : build.placement
@@ -16680,7 +18721,17 @@ const sessionManager = {
       // session and record how the workspace was set up. It changes nothing
       // about what is created.
       const buildSessionID = String(creatorContext?.buildSession?.id || '').trim();
-      if (buildSessionID && !ordinaryGroup) payload.build_session_id = buildSessionID;
+      if (buildSessionID && !ordinaryGroup) {
+        payload.build_session_id = buildSessionID;
+        const build = this.workspaceBuild?.session;
+        if (
+          build?.id === buildSessionID &&
+          (build.folder || build.link) &&
+          this.ordinaryBuildReviewEligible()
+        ) {
+          payload.build_review_version = build.version;
+        }
+      }
     }
     return { payload, endpoint, assistantHireConfig };
   },
@@ -16691,7 +18742,8 @@ const sessionManager = {
       this.isCreatingFolder ||
       this.workspaceBuild?.preparationBusy ||
       this.workspaceBuild?.acceptedPreparation ||
-      this.workspaceBuild?.preparationUncertain
+      this.workspaceBuild?.preparationUncertain ||
+      this.workspaceCreatorContext?.ordinaryReview?.accepted
     )
       return;
     // A folder or link still being attached would be lost by a create that
@@ -16699,6 +18751,32 @@ const sessionManager = {
     // covers any other path that submits.
     if (this.workspaceBuildAttachmentPending()) return;
     const placement = options.placement || null;
+    const unifiedOrdinary = this.usesUnifiedOrdinaryReview();
+    const ordinaryReview = unifiedOrdinary ? this.workspaceCreatorContext.ordinaryReview : null;
+    if (
+      unifiedOrdinary &&
+      (!ordinaryReview?.api || (!placement && !['place', 'confirm'].includes(options.reviewAction)))
+    )
+      return;
+    if (ordinaryReview?.accepted || ordinaryReview?.dirty) return;
+    if (ordinaryReview && this.workspaceBuild) {
+      const build = this.workspaceBuild;
+      const context = this.workspaceCreatorContext;
+      const revision = this.workspaceBuildRevision();
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (
+        this.workspaceCreatorContext !== context ||
+        this.workspaceBuild !== build ||
+        this.workspaceBuildRevision() !== revision
+      )
+        return;
+      const problem = this.ordinaryBuildReviewProblem();
+      if (problem) {
+        ordinaryReview.message = problem;
+        void this.syncOrdinaryCreationReview();
+        return;
+      }
+    }
 
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -16724,6 +18802,16 @@ const sessionManager = {
     const importPath = importPathInput?.value?.trim() || '';
     const name = nameInput?.value.trim() || '';
     const description = descriptionInput?.value.trim() || '';
+    const ordinaryIdentityProblem = ordinaryReview ? this.workspaceIdentityProblem() : '';
+    if (ordinaryIdentityProblem) {
+      ordinaryReview.message = ordinaryIdentityProblem;
+      if (placement) {
+        placement.phase = 'placing';
+        this.returnFromWorkspaceMapPlacement(placement.token, 'identity-changed');
+      }
+      void this.syncOrdinaryCreationReview();
+      return;
+    }
     if (!name && !importEnabled) {
       // Inline error belongs to Details, rather than a transient toast.
       this.setWorkspaceNameError(
@@ -16759,7 +18847,9 @@ const sessionManager = {
     if (!importEnabled && this.usesManagedGroupTemplate()) {
       // A managed Group Template commits only its reviewed Home operation and
       // never falls back to the ordinary Group roster request.
-      await window.GroupTemplateCreator.submit(this);
+      // Legacy buttons/proposals only reveal the common review; only its
+      // explicit final action may invoke the managed Home commit owner.
+      await window.GroupTemplateCreator.syncSharedReview?.(this);
       return;
     }
     if (requiresReviewedRoster && (!confirmedTeamView || !confirmedTeamView.canContinueFromTeam)) {
@@ -16779,6 +18869,12 @@ const sessionManager = {
       // rejection. Rendering the current state here is cheaper than that, and
       // the server still has the final say either way.
       const current = await window.ProjectTemplateCard?.recheckSelection?.();
+      if (
+        ordinaryReview &&
+        (this.workspaceCreatorContext?.ordinaryReview !== ordinaryReview ||
+          this.workspaceCreatorContext.generation !== ordinaryReview.generation)
+      )
+        return;
       if (current && current.state !== 'ready') {
         this.renderReviewReadiness();
         this.showWorkspaceCreateError(current.summary || 'This blueprint is not ready.', current);
@@ -16847,9 +18943,9 @@ const sessionManager = {
 
       const requestsMapPlacement =
         !importEnabled &&
-        !ordinaryGroup &&
+        (!ordinaryGroup || Boolean(ordinaryReview)) &&
         !placement &&
-        this.workspaceMapOrigin &&
+        (ordinaryReview ? options.reviewAction === 'place' : this.workspaceMapOrigin) &&
         !window.SetupWorkspaceCreator?.isActive?.();
       const pendingMapBuild = requestsMapPlacement
         ? window.OriWorkspaceMap?.getPendingBuild?.() || null
@@ -16857,7 +18953,7 @@ const sessionManager = {
       // Preserve the existing district-Build behavior through the ordinary
       // create owner: an explicit parent the reviewer chose still wins, but an
       // otherwise blank form carries its originating district in the one POST.
-      if (!payload.parent_id && pendingMapBuild?.group?.id) {
+      if (!ordinaryReview && !payload.parent_id && pendingMapBuild?.group?.id) {
         payload.parent_id = pendingMapBuild.group.id;
       }
       const lockedParent = this.lockedParentId();
@@ -16872,6 +18968,46 @@ const sessionManager = {
         if (!groupRequirementReady && !requestsMapPlacement) return;
       }
 
+      if (ordinaryReview) {
+        if (
+          this.workspaceCreatorContext !== creatorContext ||
+          creatorContext.generation !== creatorGeneration
+        )
+          return;
+        if (
+          placement &&
+          (JSON.stringify(payload) !== JSON.stringify(placement.payload) ||
+            ordinaryReview.operationKey !==
+              this.ordinaryCreationMaterialKey(payload, openProjectAfterCreate))
+        ) {
+          placement.phase = 'placing';
+          this.returnFromWorkspaceMapPlacement(placement.token, 'review-changed');
+          this.showWorkspaceCreateError(
+            'The reviewed choices changed. Review them again before creating.'
+          );
+          return;
+        }
+        if (ordinaryReview.owner === 'grouped') {
+          // Group intent never enters the ordinary journal; the requirement
+          // receipt for this exact request is the reviewed operation.
+          if (
+            !groupRequirementReady ||
+            !payload.group_review_token ||
+            !this.groupRequirementDraft?.review?.input_digest
+          ) {
+            ordinaryReview.message =
+              ordinaryReview.message ||
+              'Review this exact destination before creating. Nothing was created.';
+            void this.syncOrdinaryCreationReview();
+            return;
+          }
+          ordinaryReview.operationKey = this.ordinaryCreationMaterialKey(
+            payload,
+            openProjectAfterCreate
+          );
+        } else if (!(await this.prepareOrdinaryCreationOperation(creatorContext, payload))) return;
+      }
+
       if (requestsMapPlacement) {
         // A false return can mean an inert receipt was just prepared. It may
         // enter placement only when that exact payload now has a receipt; a
@@ -16882,6 +19018,10 @@ const sessionManager = {
           (review?.review_token && review.payloadKey === JSON.stringify(payload));
         if (!groupRequirementReady && !reviewedCurrentPayload) return;
         const pending = pendingMapBuild;
+        const homeID =
+          ordinaryReview?.owner === 'grouped' && review?.selected_composition === 'grouped'
+            ? String(review.home_workspace_id || '')
+            : '';
         this.beginWorkspaceMapPlacement({
           origin: {
             entryPoint: this.importEntryPoint || 'workspace_map_build',
@@ -16890,7 +19030,23 @@ const sessionManager = {
           },
           candidate: pending?.point || null,
           payload,
-          review: review || null
+          review: review || null,
+          // The reviewed Home is display/collision context, never a parent
+          // chosen by the coordinate; the receipt already binds membership.
+          previewParentID: homeID,
+          actionCopy:
+            ordinaryReview?.owner === 'grouped'
+              ? {
+                  confirmLabel: 'Create project here',
+                  pendingLabel: 'Creating reviewed project…',
+                  instruction: homeID
+                    ? `Click a valid position or press Enter to create this project in “${review.home_name || 'its Home'}”. Position never changes membership or moves the Home. Escape returns to review.`
+                    : 'Click open ground or press Enter to create this standalone project. Position joins no district. Escape returns to review.',
+                  pendingInstruction: 'Creating the reviewed project. This position is locked.',
+                  announcement:
+                    'Destination reviewed. Choose a position; the Home and its members stay unchanged.'
+                }
+              : undefined
         });
         return;
       }
@@ -16898,8 +19054,82 @@ const sessionManager = {
       const requestPayload = { ...payload };
       let response;
       let result = {};
+      // A Home created inside the same operation needs a reviewed composite
+      // layout; a one-building point would misrepresent it.
+      let compositeLayout = false;
 
-      while (true) {
+      if (ordinaryReview) {
+        ordinaryReview.accepted = true;
+        const groupedOwner = ordinaryReview.owner === 'grouped';
+        let outcome;
+        try {
+          outcome = groupedOwner
+            ? await this.dispatchGroupedCreation(
+                creatorContext,
+                endpoint,
+                requestPayload,
+                placement
+              )
+            : await ordinaryReview.api.confirmCreationOperation(
+                fetch,
+                window.localStorage,
+                ordinaryReview.reference
+              );
+        } catch (error) {
+          // Only retention can throw here, before anything is sent (for
+          // example another tab's confirmed operation is still retained).
+          outcome = { state: 'not_sent', message: error?.message || 'Nothing was sent.' };
+        }
+        if (
+          this.workspaceCreatorContext !== creatorContext ||
+          creatorContext.generation !== creatorGeneration
+        )
+          return;
+        ordinaryReview.observedState = outcome.state;
+        ordinaryReview.message = outcome.message;
+        if (outcome.state === 'not_sent') {
+          ordinaryReview.accepted = false;
+          if (placement) {
+            placement.phase = 'placing';
+            this.returnFromWorkspaceMapPlacement(placement.token, 'review-refused');
+          }
+          this.showWorkspaceCreateError(outcome.message);
+          // A retained confirmed operation (from another tab) comes first:
+          // release this tab's unsent review and show that original read-only.
+          if (!groupedOwner && ordinaryReview.reference)
+            void ordinaryReview.api
+              .abandonCreationOperation(fetch, ordinaryReview.reference)
+              .catch(() => {});
+          ordinaryReview.reference = null;
+          ordinaryReview.operationKey = '';
+          ordinaryReview.observedState = '';
+          ordinaryReview.restored = false;
+          return;
+        }
+        if (outcome.state !== 'complete') {
+          if (outcome.state === 'refused' || outcome.state === 'abandoned') {
+            this.releaseCreationReviewReference(ordinaryReview);
+            // A refused requirement receipt is never reused for new terms.
+            if (groupedOwner && this.groupRequirementDraft) this.invalidateGroupRequirementReview();
+            ordinaryReview.accepted = false;
+            ordinaryReview.reference = null;
+            ordinaryReview.operationKey = '';
+            if (placement) {
+              placement.phase = 'placing';
+              this.returnFromWorkspaceMapPlacement(placement.token, 'review-refused');
+            }
+            this.applyOrdinaryCreationRefusal(creatorContext, outcome);
+          } else {
+            await this.showOrdinaryCreationOutcome(creatorContext, null, placement);
+          }
+          return;
+        }
+        response = { ok: true, status: 201 };
+        result = outcome.result;
+        compositeLayout = outcome.compositeLayout === true;
+      }
+
+      while (!ordinaryReview) {
         response = window.SetupWorkspaceCreator?.isActive()
           ? await window.SetupWorkspaceCreator.submit(requestPayload)
           : await fetch(endpoint, {
@@ -17120,7 +19350,7 @@ const sessionManager = {
         throw new Error(result.error || result.message || fallbackMessage);
       }
 
-      if (ordinaryGroup) {
+      if (ordinaryGroup && !ordinaryReview) {
         await this.finishOrdinaryGroupCreate(result, creatorContext, creatorGeneration);
         return;
       }
@@ -17165,9 +19395,11 @@ const sessionManager = {
           'warning'
         );
       }
-      if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
-      if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
-      window.OriTagInput?.clearTagPoolCache?.();
+      if (!ordinaryReview) {
+        if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
+        if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
+        window.OriTagInput?.clearTagPoolCache?.();
+      }
 
       const createdWorkspaceId =
         result && result.folder && result.folder.id ? String(result.folder.id) : '';
@@ -17185,17 +19417,34 @@ const sessionManager = {
       // A page-local session that disappeared after dispatch is a partial
       // success, not evidence the ordinary create can be replayed.
       let placementResult = completedPlacement ? null : { saved: false, reason: 'session_expired' };
-      if (placement && completedPlacement) {
+      if (placement && completedPlacement && compositeLayout) {
+        placementResult = { saved: false, reason: 'composite_unsupported' };
+      } else if (placement && completedPlacement) {
         const commitPlacement = window.OriWorkspaceMap?.commitPlacement;
         if (typeof commitPlacement === 'function') {
           placementResult = await commitPlacement(createdWorkspaceId, {
             token: placement.token,
             revision: placement.revision,
+            ...(ordinaryReview ? { select: false } : {}),
             candidate: this.cloneWorkspaceMapPlacementValue(placement.candidate)
           });
         } else {
           placementResult = { saved: false, reason: 'map_unavailable' };
         }
+      }
+      if (ordinaryReview) {
+        if (openProjectAfterCreate && !ordinaryReview.projectOpenApplied) {
+          ordinaryReview.projectOpenApplied = true;
+          try {
+            await this.openProjectAfterWorkspaceCreate(createdWorkspaceId);
+            ordinaryReview.projectOpenRequested = true;
+          } catch (error) {
+            this.rememberProjectOpenFailure(createdWorkspaceId, error);
+            result.project_warning = `The workspace exists, but its project could not be opened. ${error.message || ''}`;
+          }
+        }
+        await this.showOrdinaryCreationOutcome(creatorContext, result, placement, placementResult);
+        return;
       }
       const createdWorkspaceSlug =
         result && result.folder && result.folder.folder_slug
@@ -17526,6 +19775,10 @@ const sessionManager = {
       // problem and resubmit rather than rebuilding the team from scratch.
       if (!importEnabled) this.showWorkspaceCreateError(message);
       if (!error?.status) this.mirrorWorkspaceBuildError(message);
+      if (ordinaryReview?.accepted) {
+        ordinaryReview.message = message;
+        await this.showOrdinaryCreationOutcome(creatorContext, null, placement);
+      }
     } finally {
       this.isCreatingFolder = false;
       if (this.workspaceBuild) this.syncWorkspaceBuildPresentation();
@@ -17542,6 +19795,8 @@ const sessionManager = {
           ? 'Retry Confirmed Change'
           : this.workspaceCreateCtaLabel() || originalCreateLabel || 'Create';
       }
+      if (ordinaryReview && this.workspaceCreatorContext === creatorContext)
+        void this.syncOrdinaryCreationReview();
     }
   },
 
@@ -18491,28 +20746,73 @@ const sessionManager = {
   // so this re-clicks until the selection actually sticks (verified against
   // ProjectTemplateCard.getSelectedTemplate) or a short budget elapses. Quietly
   // gives up if the card never appears.
+  blueprintRequestProblem() {
+    const state = this.workspaceCreatorContext?.blueprintRequest?.state;
+    if (state === 'pending')
+      return 'Checking the requested blueprint. Nothing can be created until the choice is resolved.';
+    if (state === 'missing' || state === 'ambiguous')
+      return 'The requested blueprint is unavailable or ambiguous. Choose another blueprint explicitly; Ori will not create a Blank substitute.';
+    return '';
+  },
+
+  syncBlueprintRequestStatus() {
+    const host = document.getElementById('workspaceBlueprintRequestStatus');
+    if (!host) return;
+    const message = this.blueprintRequestProblem();
+    host.hidden = !message;
+    if (host.textContent !== message) host.textContent = message;
+  },
+
   preselectBlueprintCard(templateId) {
     const id = String(templateId || '').trim();
-    if (!id) return;
+    const context = this.workspaceCreatorContext;
+    if (!id || !context) return;
+    const generation = context.generation;
+    const request = (context.blueprintRequest = { id, state: 'pending' });
     let attempts = 0;
     const step = () => {
-      const picker = typeof window !== 'undefined' ? window.ProjectTemplateCard : null;
-      const selected = picker && picker.getSelectedTemplate ? picker.getSelectedTemplate() : null;
-      const selectedId = selected ? String(selected.id || '') : '';
-      if (selectedId === id || selectedId.endsWith(`:${id}`)) return; // stuck — done
-      // A blueprint published by a plugin carries a namespaced template ID
-      // ("plugin:<plugin>:<blueprint>"), so a deep link naming the bare
-      // blueprint ID also matches the card whose ID ends with it.
-      const card =
-        document.querySelector(
-          `.workspace-template-card[data-template-id="${id}"], .workspace-template-row[data-template-id="${id}"]`
-        ) ||
-        document.querySelector(
-          `.workspace-template-card[data-template-id$=":${id}"], .workspace-template-row[data-template-id$=":${id}"]`
-        );
-      if (card) card.click();
-      if (attempts++ < 40) setTimeout(step, 75);
+      if (
+        this.workspaceCreatorContext !== context ||
+        context.generation !== generation ||
+        context.blueprintRequest !== request ||
+        request.state !== 'pending'
+      )
+        return;
+      const selectedId = String(window.ProjectTemplateCard?.getSelectedTemplate?.()?.id || '');
+      if (selectedId === id) {
+        request.state = 'selected';
+        this.refreshWizardChrome();
+        return;
+      }
+      // Never interpolate untrusted URL text into a CSS selector. A bare
+      // plugin blueprint ID is supported only when its source is unambiguous.
+      const cards = Array.from(
+        document.querySelectorAll('.workspace-template-card, .workspace-template-row')
+      );
+      const exact = cards.filter(card => card.dataset.templateId === id);
+      const matches = exact.length
+        ? exact
+        : !id.includes(':')
+          ? cards.filter(card => String(card.dataset.templateId || '').endsWith(`:${id}`))
+          : [];
+      const sources = new Set(matches.map(card => card.dataset.templateId));
+      if (sources.size === 1) {
+        matches[0].click();
+        const chosen = String(window.ProjectTemplateCard?.getSelectedTemplate?.()?.id || '');
+        if (chosen === matches[0].dataset.templateId) {
+          request.state = 'selected';
+          this.refreshWizardChrome();
+          return;
+        }
+      } else if (sources.size > 1) request.state = 'ambiguous';
+      if (request.state === 'pending' && attempts++ < 40) {
+        setTimeout(step, 75);
+        return;
+      }
+      if (request.state === 'pending') request.state = 'missing';
+      this.refreshWizardChrome();
     };
+    this.refreshWizardChrome();
     step();
   },
 

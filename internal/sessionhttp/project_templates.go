@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/blueprintreadiness"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -60,6 +61,13 @@ func (h *Handler) resolveProjectTemplate(templateID, templatePath string) (proje
 	default:
 		return projecttemplates.Template{}, fmt.Errorf("no template specified")
 	}
+}
+
+type templateFolderReview struct {
+	Path         string                       `json:"path"`
+	SourceDigest string                       `json:"source_digest"`
+	Template     projecttemplates.Template    `json:"template"`
+	Readiness    blueprintreadiness.Readiness `json:"readiness"`
 }
 
 func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +159,16 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 	plan.GroupRequirement = groupPlan
 	plan = finalizeTemplateAgentPlan(plan)
 	plan.AutoStaffing = h.planRoleAutoFills(sourceTemplate, effectiveTemplate, req.GroupComposition, ownerUserID)
+	if path := strings.TrimSpace(req.TemplatePath); path != "" {
+		digest, digestErr := workspaceCreationSourceDigest(createWorkspaceRequest{TemplatePath: path}, sourceTemplate, true)
+		if digestErr != nil {
+			_ = orihttp.RespondInternalError(w, "Could not read the folder template declaration")
+			return
+		}
+		// Append after finalization: agent review revisions retain their existing
+		// contract, while the ordinary operation independently binds this source.
+		plan.FolderTemplate = &templateFolderReview{Path: path, SourceDigest: digest, Template: sourceTemplate, Readiness: h.revalidateBlueprintReadiness(sourceTemplate)}
+	}
 	_ = orihttp.RespondSuccess(w, plan)
 }
 

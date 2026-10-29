@@ -11,6 +11,8 @@
 // Sets window.OriFolderPlanLines, which the plan line exports below come from.
 import './folder-plan-lines.js';
 import './folder-setup-visual.js';
+import { mountPlacementPanel } from './assisted-workspace-placement.js';
+import { setupCreationReviewMaterial } from './workspace-creation-review.js';
 // Sets window.OriFolderRecognitionLines: the Recognized and Needs lines, in the
 // build pane's words.
 import './folder-recognition-lines.js';
@@ -4140,6 +4142,7 @@ function render() {
   renderScene();
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderHomeSongs();
+  renderSourceCreationReview();
   announceFinishedRun();
   syncSetupPolling();
 }
@@ -4575,8 +4578,337 @@ async function startInboxPlacement(mode) {
   }
 }
 
+// An inert shared surface around this source controller, not a source-to-build
+// transfer. Its key and token are references; brief/name setters and all requests
+// remain with this existing offer owner.
+let sourceCreationReview = null;
+
+export function sourceCreationReviewKey(offer, brief, monitoring = false) {
+  return JSON.stringify([
+    offer?.id,
+    offer?.conversation_id || '',
+    offer?.plan?.digest,
+    offer?.software?.workspace_name || offer?.plan?.visual?.entity?.name || '',
+    brief,
+    monitoring
+  ]);
+}
+
+function sourceReviewCurrent(review) {
+  return (
+    sourceCreationReview === review &&
+    review.generation === state.reviewGeneration &&
+    review.offerID === state.offer?.id
+  );
+}
+
+function sourceReviewKey() {
+  return sourceCreationReviewKey(state.offer, briefFor(state.offer), monitoringChosen(state.offer));
+}
+
+function sourceReviewMapAvailable() {
+  const plan = state.offer?.plan;
+  return Boolean(
+    window.innerWidth >= 768 &&
+    window.OriWorkspaceMap?.beginPlacement &&
+    document.querySelector('[data-ws-map-viewport]') &&
+    plan?.visual?.entity?.kind === 'workspace' &&
+    plan.visual.entity.operation === 'create' &&
+    !plan.destination &&
+    !plan.home
+  );
+}
+
+function sourceReviewRestore(review) {
+  window.OriWorkspaceMap?.endPlacement?.(review.token);
+  if (!sourceReviewCurrent(review)) return;
+  review.onMap = false;
+  if (!state.reviewSlot) enterThread({ byUser: false });
+  window.PersonalAssistantPanel?.open?.(document.getElementById('personalAssistantLauncher'), {
+    focus: false,
+    preserveConversation: true
+  });
+  render();
+  document.getElementById('sourceCreationReviewTitle')?.focus({ preventScroll: true });
+}
+
+function renderSourceCreationReview() {
+  const review = sourceCreationReview,
+    offer = state.offer,
+    parent = elements()?.offer;
+  if (!parent) return;
+  const active = review && sourceReviewCurrent(review) && !review.editing;
+  parent.classList.toggle('pa-folder--shared-review', Boolean(active));
+  let host = parent.querySelector('[data-source-creation-review]');
+  if (!active) {
+    if (host) host.hidden = true;
+    return;
+  }
+  if (!host) {
+    host = document.createElement('section');
+    host.dataset.sourceCreationReview = 'true';
+    host.setAttribute('aria-label', 'Review source workspace setup');
+    parent.append(host);
+  }
+  host.hidden = false;
+  review.panel ||= mountPlacementPanel(host, intent => {
+    void actOnSourceCreationReview(review, intent);
+  });
+  if (
+    review.pending &&
+    offer.status === 'resolved' &&
+    offer.outcome?.workspace_id &&
+    !review.observing &&
+    !review.observeFailed &&
+    !review.result
+  )
+    void observeSourceCreationResult(review);
+  if (review.pending || review.result) {
+    review.panel.update({
+      ownerKind: 'setup',
+      idPrefix: 'sourceCreationReview',
+      accepted: true,
+      result: review.result,
+      resultTitle: review.existing ? 'Existing workspace prepared' : undefined,
+      positionFailed: review.positionFailed,
+      busy: review.observing,
+      message:
+        review.message ||
+        'Observing the original setup. Reading status never starts or continues work.'
+    });
+    return;
+  }
+  const projection = setupCreationReviewMaterial(
+    {
+      plan: {
+        ...offer.plan,
+        first_task_deferred: Boolean(offer.software || offer.plan?.optional_task)
+      }
+    },
+    briefFor(offer) ?? offer.plan?.brief_default ?? ''
+  );
+  const deferred = Boolean(offer.software || offer.plan?.optional_task);
+  review.actionLabel = deferred
+    ? 'Create & prepare workspace'
+    : 'Create workspace & start first task';
+  if (offer.plan?.visual?.entity?.operation === 'reuse')
+    review.actionLabel = 'Prepare existing workspace';
+  review.panel.update({
+    ...projection,
+    ownerKind: 'setup',
+    idPrefix: 'sourceCreationReview',
+    name:
+      state.workspaceName ||
+      offer.software?.workspace_name ||
+      offer.plan?.visual?.entity?.name ||
+      offer.subject?.name,
+    nameMaxLength: 120,
+    goalMaxLength: 2000,
+    canEditName: Boolean(offer.software && offer.plan?.visual?.entity?.operation === 'create'),
+    canEditGoal: Boolean(offer.plan?.brief_default),
+    canChangeBlueprint: false,
+    detailsLabel: 'Edit with the source owner',
+    automatic: review.automatic,
+    canPlace: sourceReviewMapAvailable(),
+    reviewed: Boolean(offer.plan?.digest && !offer.needs_pick),
+    canConfirm: Boolean(
+      offer.plan?.digest && !offer.needs_pick && !review.dirty && !review.nameProblem
+    ),
+    busy: state.busy,
+    message: review.message || '',
+    facts: [...projection.facts, { label: 'Later', value: projection.later }],
+    confirmLabel: review.actionLabel,
+    mapHint: 'Position changes no membership or permissions. Automatic placement needs no map.'
+  });
+}
+
+async function actOnSourceCreationReview(review, { action, field, value }) {
+  if (!sourceReviewCurrent(review) || state.busy || review.observing) return;
+  if (action === 'read-status') {
+    // One explicit re-read; a failure waits for the next explicit request.
+    review.observeFailed = false;
+    await pollSetup();
+    render();
+    return;
+  }
+  if (action === 'retry-position' && review.result?.id && review.positionFailed) {
+    review.positionFailed =
+      (await window.OriWorkspaceMap?.retryPlacement?.(review.result.id, review.candidate)) !== true;
+    review.message = review.positionFailed
+      ? 'Only layout was retried; its position is not saved.'
+      : 'Only layout changed. The requested position is saved.';
+    render();
+    return;
+  }
+  if (action === 'open' && review.result?.id) {
+    // Workspace pages are routed by slug; resolve it rather than use the ID.
+    const slug = String(review.result.folder_slug || '').trim();
+    if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+    else await window.sessionManager?.openExistingResourceWorkspace?.(review.result.id);
+    return;
+  }
+  if (action === 'back' || action === 'cancel' || action === 'details') {
+    review.editing = true;
+    render();
+    if (action === 'details' && state.offer.software) runAction({ softwareAdjust: true });
+    else focusFolderAction('setup', 'adjust');
+    return;
+  }
+  if (review.pending || review.result) return;
+  if (action === 'dirty') {
+    review.dirty = true;
+    return;
+  }
+  if (action === 'edit') {
+    review.dirty = false;
+    if (field === 'mission') state.brief = { offerId: state.offer.id, value, typed: true };
+    if (field === 'name' && state.offer.software) {
+      state.workspaceName = value;
+      state.busy = true;
+      try {
+        const result = await postOffer(state.offer.id, 'adjust', {
+          workspace_name: value,
+          assistant_name: state.offer.software.assistant
+        });
+        if (sourceReviewCurrent(review)) {
+          review.nameProblem = !result.ok;
+          review.message = result.ok
+            ? ''
+            : 'The source owner refused this name. Correct it before confirming.';
+        }
+      } finally {
+        state.busy = false;
+      }
+    }
+  } else if (action === 'suggested') {
+    review.automatic = true;
+    review.candidate = null;
+  } else if (
+    action === 'place' &&
+    !review.dirty &&
+    !review.nameProblem &&
+    sourceReviewMapAvailable()
+  ) {
+    review.key = sourceReviewKey();
+    review.automatic = false;
+    review.onMap = true;
+    window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
+    const started = window.OriWorkspaceMap.beginPlacement({
+      token: review.token,
+      mode: 'reviewed-setup',
+      preview: { name: state.offer.plan.visual.entity.name },
+      actionCopy: {
+        confirmLabel: `${review.actionLabel} here`,
+        instruction: `${review.actionLabel} with a click on open ground or Enter. Escape returns to review.`,
+        announcement: 'Source setup reviewed. Choose a point; nothing runs before confirmation.'
+      },
+      onCandidate: (_token, point) => {
+        if (sourceReviewCurrent(review)) review.candidate = point;
+      },
+      onConfirm: async () => {
+        if (!sourceReviewCurrent(review) || review.key !== sourceReviewKey() || review.pending) {
+          sourceReviewRestore(review);
+          return false;
+        }
+        review.pending = true;
+        await startOneCardSetup({ reviewedSourceKey: review.key });
+        if (sourceReviewCurrent(review) && !review.pending) sourceReviewRestore(review);
+        return review.pending;
+      },
+      onBack: () => sourceReviewRestore(review)
+    });
+    if (started === false) sourceReviewRestore(review);
+    return;
+  } else if (action === 'confirm' && review.automatic && !review.dirty && !review.nameProblem) {
+    review.key = sourceReviewKey();
+    review.pending = true;
+    await startOneCardSetup({ reviewedSourceKey: review.key });
+  }
+  if (sourceReviewCurrent(review)) render();
+}
+
+async function observeSourceCreationResult(review) {
+  if (!sourceReviewCurrent(review) || review.observing) return;
+  const offer = state.offer,
+    outcome = offer?.outcome;
+  review.observing = true;
+  try {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(outcome.workspace_id)}`, {
+      cache: 'no-store'
+    });
+    const resource = await response.json();
+    if (!sourceReviewCurrent(review)) return;
+    // The server-resolved offer outcome names the workspace. Reviewed setup
+    // runs (for example a plugin's) do not stamp the ordinary-create offer
+    // marker, so the marker only proves "new here" for positioning.
+    if (!response.ok || resource.id !== outcome.workspace_id)
+      throw new Error('Unverified source outcome');
+    const createdHere =
+      !outcome.existing && resource.shared_data?.folder_digest_offer_id === offer.id;
+    review.result = resource;
+    review.existing = outcome.existing === true;
+    review.positionUnproven = Boolean(review.candidate && !review.existing && !createdHere);
+    if (review.candidate && createdHere && !review.positionAttempted) {
+      review.positionAttempted = true;
+      const result = await window.OriWorkspaceMap?.commitPlacement?.(resource.id, {
+        token: review.token,
+        candidate: review.candidate,
+        select: false
+      });
+      if (!sourceReviewCurrent(review)) return;
+      review.positionFailed = result?.saved !== true;
+    }
+    review.message = review.positionFailed
+      ? 'Workspace verified; requested position not saved. Retry position only.'
+      : review.positionUnproven
+        ? 'Canonical source outcome verified. This setup does not prove the workspace is new here, so its requested position was not applied; automatic layout keeps it. No work was repeated.'
+        : 'Canonical source outcome and current membership verified. No work was repeated.';
+  } catch {
+    if (sourceReviewCurrent(review)) {
+      // Never re-read automatically: each attempt would re-render and read
+      // again. Read saved status is the explicit retry.
+      review.observeFailed = true;
+      review.message =
+        'The original result could not be verified. Read its saved status; do not start setup again.';
+    }
+  } finally {
+    if (sourceReviewCurrent(review)) {
+      review.observing = false;
+      // Only a return from the Map reopens the drawer; otherwise just redraw.
+      if (review.onMap) sourceReviewRestore(review);
+      else render();
+    }
+  }
+}
+
 // Confirm the displayed plan only; the server rechecks it and runs the setup.
 async function startOneCardSetup(action) {
+  if (
+    state.offer?.status === 'pending' &&
+    state.offer.plan?.digest &&
+    !isInboxFolderOffer(state.offer)
+  ) {
+    if (!action?.reviewedSourceKey) {
+      if (!sourceCreationReview || !sourceReviewCurrent(sourceCreationReview)) {
+        sourceCreationReview?.panel?.destroy();
+        sourceCreationReview = {
+          offerID: state.offer.id,
+          generation: state.reviewGeneration,
+          token: `source:${requestId()}`,
+          automatic: false
+        };
+      }
+      sourceCreationReview.editing = false;
+      render();
+      document.getElementById('sourceCreationReviewTitle')?.focus({ preventScroll: true });
+      return;
+    }
+    if (
+      !sourceReviewCurrent(sourceCreationReview) ||
+      action.reviewedSourceKey !== sourceReviewKey()
+    )
+      return;
+  }
   const offer = state.offer;
   const current = reviewResponseGuard(offer);
   if (!offer?.id || state.busy || conversationReviewLoading() || prerequisites.active()) return;
@@ -4626,6 +4958,13 @@ async function startOneCardSetup(action) {
       revealRunSurface();
       return;
     }
+    if (sourceCreationReview && sourceReviewCurrent(sourceCreationReview)) {
+      sourceCreationReview.pending = false;
+      sourceCreationReview.message = String(
+        payload?.error ||
+          'The source refused these terms. Review the current setup before confirming again.'
+      );
+    }
     if (payload?.plan_changed) {
       // Keep the current review visible even if a failed response has no view.
       state.offer =
@@ -4638,7 +4977,14 @@ async function startOneCardSetup(action) {
     }
     showOfferFailure(payload);
   } catch (_) {
-    if (current()) showError('Set up could not be started. Try again.');
+    if (current()) {
+      if (sourceCreationReview && sourceReviewCurrent(sourceCreationReview))
+        sourceCreationReview.message =
+          'Confirmation delivery is unknown. Read the original source status; do not confirm again. Closing is not undo.';
+      showError(
+        'Confirmation delivery is unknown. Read the original source status before doing anything else.'
+      );
+    }
   } finally {
     state.busy = false;
     render();
