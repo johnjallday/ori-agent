@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -168,6 +169,16 @@ func TestFolderHandoff_TheStoppedSongIsItsHomesSuggestion(t *testing.T) {
 	got, err := f.service.HomeSuggestions(ctx, "local", "home-1")
 	if err != nil || len(got) != 1 || got[0].ID != f.offer.ID || got[0].Setup == nil || got[0].Setup.PlanDigest != f.offer.Plan.Digest {
 		t.Fatalf("Home suggestions = %+v %v", got, err)
+	}
+	before := f.stored(t)
+	for i := 0; i < 3; i++ {
+		view, err := f.service.Current(ctx, "local")
+		if err != nil || view.Offer == nil || view.Offer.Setup == nil || view.Offer.Setup.StopReason != FolderStopHandoffReady {
+			t.Fatalf("Home-ready observation = %+v, %v", view, err)
+		}
+	}
+	if after := f.stored(t); !reflect.DeepEqual(before, after) || f.setup.runCount() != 1 {
+		t.Fatal("reading Home-ready status changed the run or continued setup")
 	}
 	if other, err := f.service.HomeSuggestions(ctx, "local", "someone-elses"); err != nil || len(other) != 0 {
 		t.Fatalf("another Home suggested the song: %+v %v", other, err)

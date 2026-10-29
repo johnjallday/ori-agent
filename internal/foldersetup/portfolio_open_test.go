@@ -86,8 +86,11 @@ func TestPortfolioRunStopsAtTheHandoffUntilOpenIsPressed(t *testing.T) {
 	if result.Status != personalassistant.FolderSetupStopped || result.StopReason != personalassistant.FolderStopHandoffReady || result.Cause != nil {
 		t.Fatalf("set up = %+v", result)
 	}
-	if len(o.opens) != 0 || o.called("open:find:Album-5") {
+	if len(o.opens) != 0 || o.workspaces != 0 || o.called("open:find:Album-5") {
 		t.Fatalf("the song was opened before Open was pressed: %v", w.log)
+	}
+	if progress.last().HomeID != w.homeID || w.homeID == "" || !w.scanned || len(progress.last().Receipt) != 0 {
+		t.Fatalf("Home-ready must identify the listed Home without a final project receipt: %+v", progress.last())
 	}
 	// The shared assistant's standing consent comes with the Open, where it is
 	// disclosed, never with the Home's Set up.
