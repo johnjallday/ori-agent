@@ -357,7 +357,8 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		// A resume carries on with the brief the run was started with, except
 		// a single song's open: its brief is asked in the Home, on that press.
-		if !(input.Open && !offer.Setup.Opening && brief != "" && hasPlanLineKind(offer.Setup.Lines, FolderPlanHandoff)) {
+		homeOpen := input.Open && !offer.Setup.Opening && brief != "" && hasPlanLineKind(offer.Setup.Lines, FolderPlanHandoff)
+		if !homeOpen {
 			brief = offer.Setup.Brief
 		}
 		if plan.Destination != nil {
