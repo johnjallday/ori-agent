@@ -420,6 +420,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			}
 		}
 		runID, homeID, opening := "", "", false
+		var homeOperation *FolderSetupHomeOperation
 		if item.Setup != nil {
 			// A resume keeps the run and the Home an earlier pass built or joined,
 			// so the Home is found again, never mistaken for a stranger's. A
@@ -427,6 +428,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			// answering which file to open) starts the Portfolio Manager's open,
 			// and every later pass keeps going there.
 			runID, homeID = item.Setup.RunID, item.Setup.HomeID
+			homeOperation = item.Setup.HomeOperation
 			opening = item.Setup.Opening || input.Open || input.EntryName != ""
 		} else if input.Open && HomeSuggestionReady(plan) {
 			// A later song into a ready Home: the Home's manager lists and opens
@@ -435,7 +437,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
-			RunID: runID, HomeID: homeID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
+			RunID: runID, HomeID: homeID, HomeOperation: homeOperation, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
 			Visual: CloneFolderSetupVisual(plan.Visual), Monitoring: monitoring, Opening: opening,
 		}
 		if plan.Hire != nil {

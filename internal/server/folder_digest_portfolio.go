@@ -285,7 +285,7 @@ func (h *folderSetupHost) portfolioRun(ctx context.Context, req personalassistan
 	b := h.builder
 	runner := &foldersetup.PortfolioRunner{
 		ValidateDestination: func(ctx context.Context, homeID string) error { return h.ValidateSetupDestination(ctx, req) },
-		Homes:               &portfolioHomes{host: h, userID: req.UserID, provider: target.provider},
+		Homes:               &portfolioHomes{host: h, userID: req.UserID, provider: target.provider, request: req},
 		Staffing:            portfolioHomeStaffing{builder: b, model: req.Plan.Intent.Model},
 		Library:             portfolioLibrary{builder: b, userID: req.UserID, offerID: req.Offer.ID},
 		Receipts:            portfolioReceipts{host: h, folder: strings.TrimSpace(req.Offer.Subject.Name), noun: target.row.Offer.DisplayName, projectLabel: target.row.Blueprint.Label},
@@ -334,6 +334,7 @@ type portfolioHomes struct {
 	userID   string
 	provider reviewedintegration.HomeProvider
 	reviewed map[string]sessionhttp.PortfolioHomeReview
+	request  personalassistant.FolderSetupRequest
 }
 
 func (p *portfolioHomes) Find(context.Context) (foldersetup.HomeFound, bool, error) {
@@ -369,6 +370,18 @@ func (p *portfolioHomes) Commit(ctx context.Context, review foldersetup.HomeRevi
 		return "", errSetupUnavailable
 	}
 	delete(p.reviewed, review.Token)
+	witness := personalassistant.FolderSetupHomeOperation{
+		Version: 1, OfferID: p.request.Offer.ID, RequestID: p.request.Offer.RequestID, PlanDigest: p.request.Plan.Digest,
+		GroupTemplateID: reviewed.GroupTemplateID, Revision: reviewed.Revision, Name: reviewed.Name,
+		ReviewToken: reviewed.Token, IdempotencyKey: key,
+	}
+	service := p.host.builder.personalAssistantFolderDigest
+	if service == nil {
+		return "", errSetupUnavailable
+	}
+	if err := service.RecordSetupHomeOperation(ctx, p.userID, witness); err != nil {
+		return "", err
+	}
 	return p.host.builder.sessionHandler.CommitPortfolioHome(ctx, reviewed, key)
 }
 

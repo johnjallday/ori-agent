@@ -513,6 +513,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			if err := validateFolderSetupRun(*offer.Setup); err != nil {
 				return err
 			}
+			if witness := offer.Setup.HomeOperation; witness != nil && (witness.OfferID != offer.ID || witness.RequestID != offer.RequestID) {
+				return fmt.Errorf("%w: Home operation offer", errFolderDigestInvalid)
+			}
 		}
 		if offer.EntryName != "" {
 			if err := validateFolderName(offer.EntryName); err != nil {

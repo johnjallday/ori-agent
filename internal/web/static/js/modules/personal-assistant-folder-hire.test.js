@@ -354,8 +354,9 @@ test('a later song, with its Home ready, only leads to the Home', () => {
   );
 });
 
-test('a single song’s first press skips the source review; its brief is asked in the Home', () => {
-  assert.match(source, /!handoffLineParts\(state\.offer\.plan\?\.lines\)/);
+test('a single song’s first press reviews Home setup; its project brief stays in the Home', () => {
+  assert.doesNotMatch(source, /!handoffLineParts\(state\.offer\.plan\?\.lines\)/);
+  assert.match(source, /sourceHomeReviewPlan\(state\.offer\.plan\)/);
 });
 
 test('after Adjust… the hire keeps its plan beside Continue setup', () => {

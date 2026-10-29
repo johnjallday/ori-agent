@@ -51,7 +51,7 @@ func (h *folderSetupHost) songRun(ctx context.Context, req personalassistant.Fol
 	library := portfolioLibrary{builder: b, userID: req.UserID, offerID: req.Offer.ID}
 	runner := &foldersetup.PortfolioRunner{
 		ValidateDestination: func(ctx context.Context, homeID string) error { return h.ValidateSetupDestination(ctx, req) },
-		Homes:               &portfolioHomes{host: h, userID: req.UserID, provider: provider},
+		Homes:               &portfolioHomes{host: h, userID: req.UserID, provider: provider, request: req},
 		Staffing:            portfolioHomeStaffing{builder: b, model: req.Plan.Intent.Model},
 		Library:             songLibrary{library},
 		Opener:              opener,

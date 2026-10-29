@@ -769,6 +769,14 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	if len(run.HomeID) > 200 || strings.ContainsAny(run.HomeID, "/\\\x00\r\n") || len(run.Receipt) > folderSetupMaxLines {
 		return fmt.Errorf("%w: setup home", errFolderDigestInvalid)
 	}
+	if run.HomeOperation != nil {
+		if err := run.HomeOperation.Validate(); err != nil {
+			return err
+		}
+		if run.HomeOperation.PlanDigest != run.PlanDigest || !run.Intent.CreatesHome || !run.Intent.Portfolio {
+			return fmt.Errorf("%w: Home operation source", errFolderDigestInvalid)
+		}
+	}
 	if !validFolderHomeLink(run.HomeUpgrade) || !validFolderHomeLink(run.SuggestedIn) {
 		return fmt.Errorf("%w: setup home upgrade", errFolderDigestInvalid)
 	}
@@ -825,8 +833,9 @@ type FolderSetupRun struct {
 	Opening bool `json:"opening,omitempty"`
 	// HomeID and Receipt are a portfolio run's Home and what it read back from
 	// canonical state when it finished; the offer resolves to that Home.
-	HomeID  string             `json:"home_id,omitempty"`
-	Receipt []FolderReceiptRow `json:"receipt,omitempty"`
+	HomeID        string                    `json:"home_id,omitempty"`
+	Receipt       []FolderReceiptRow        `json:"receipt,omitempty"`
+	HomeOperation *FolderSetupHomeOperation `json:"home_operation,omitempty"`
 	// HomeUpgrade is the Home a home_upgrade_required stop waits on.
 	HomeUpgrade *FolderHomeLink `json:"home_upgrade,omitempty"`
 	// SuggestedIn is the Home a handoff_ready stop waits in.

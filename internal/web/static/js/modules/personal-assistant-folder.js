@@ -4713,16 +4713,36 @@ function sourceReviewKey() {
   return sourceCreationReviewKey(state.offer, briefFor(state.offer), monitoringChosen(state.offer));
 }
 
+export function sourceHomeReviewPlan(plan) {
+  return Boolean(plan?.visual?.entity?.kind === 'home' && plan.destination?.kind === 'home');
+}
+
+// Source identity, not a display name, binds the Home phase to this press.
+export function sourceHomePlacementResult(offer, review) {
+  const result = offer?.home_result;
+  if (
+    !review?.home ||
+    !result ||
+    result.offer_id !== review.offerID ||
+    result.plan_digest !== review.planDigest ||
+    result.request_id !== review.acceptedRequestID
+  )
+    return null;
+  return result;
+}
+
 function sourceReviewMapAvailable() {
   const plan = state.offer?.plan;
+  const viewport = document.querySelector('[data-ws-map-viewport]');
+  const standalone = plan?.visual?.entity?.kind === 'workspace' && !plan.destination && !plan.home;
+  const newHome = sourceHomeReviewPlan(plan) && plan.destination.status === 'new';
   return Boolean(
-    window.innerWidth >= 768 &&
+    window.innerWidth >= 980 &&
     window.OriWorkspaceMap?.beginPlacement &&
-    document.querySelector('[data-ws-map-viewport]') &&
-    plan?.visual?.entity?.kind === 'workspace' &&
-    plan.visual.entity.operation === 'create' &&
-    !plan.destination &&
-    !plan.home
+    window.OriWorkspaceMap?.getLayoutState?.().status === 'ready' &&
+    viewport?.getClientRects?.().length &&
+    plan?.visual?.entity?.operation === 'create' &&
+    (standalone || newHome)
   );
 }
 
@@ -4752,9 +4772,16 @@ function renderSourceCreationReview() {
     sourceReviewCurrent(review) &&
     review.pending &&
     !review.result &&
-    offer?.setup?.status === 'stopped'
-  )
-    sourceCreationReview = null;
+    offer?.setup?.status === 'stopped' &&
+    offer.setup.stop_reason !== 'handoff_ready'
+  ) {
+    // Partial setup belongs to the original card's recovery controls. Never
+    // save its point or leave an accepted preview capturing canvas input.
+    window.OriWorkspaceMap?.endPlacement?.(review.token);
+    review.pending = false;
+    review.editing = true;
+    if (review.onMap) sourceReviewRestore(review);
+  }
   const active =
     sourceCreationReview === review && review && sourceReviewCurrent(review) && !review.editing;
   parent.classList.toggle('pa-folder--shared-review', Boolean(active));
@@ -4775,8 +4802,12 @@ function renderSourceCreationReview() {
   });
   if (
     review.pending &&
-    offer.status === 'resolved' &&
-    offer.outcome?.workspace_id &&
+    (review.home
+      ? Boolean(
+          sourceHomePlacementResult(offer, review) &&
+          (offer.setup?.stop_reason === 'handoff_ready' || offer.status === 'resolved')
+        )
+      : offer.status === 'resolved' && offer.outcome?.workspace_id) &&
     !review.observing &&
     !review.observeFailed &&
     !review.result
@@ -4788,7 +4819,17 @@ function renderSourceCreationReview() {
       idPrefix: 'sourceCreationReview',
       accepted: true,
       result: review.result,
-      resultTitle: review.existing ? 'Existing workspace prepared' : undefined,
+      subjectKind: review.home ? 'group' : undefined,
+      resultTitle: review.home
+        ? review.result
+          ? 'Home ready'
+          : 'Checking Home setup'
+        : review.existing
+          ? 'Existing workspace prepared'
+          : undefined,
+      openLabel: review.home
+        ? `Go to ${review.result?.name || 'Music Production Home'}`
+        : undefined,
       positionFailed: review.positionFailed,
       busy: review.observing,
       message:
@@ -4814,6 +4855,21 @@ function renderSourceCreationReview() {
     review.actionLabel = 'Prepare existing workspace';
   const firstPress = handoffFirstPressLabel(offer.plan);
   if (firstPress) review.actionLabel = firstPress;
+  if (review.home) {
+    review.actionLabel = 'Set up Home';
+    projection.destination = `${offer.plan.destination.status === 'new' ? 'New' : 'Existing'} Home: ${offer.plan.destination.name}. Position changes no membership or access.`;
+    const handoffAt = offer.plan.lines.findIndex(line => line.kind === 'handoff');
+    projection.facts = projection.facts.map((fact, index) => ({
+      ...fact,
+      label:
+        handoffAt >= 0 && index >= handoffAt
+          ? `Later · ${fact.label}`
+          : `This press · ${fact.label}`
+    }));
+    projection.later = handoffLineParts(offer.plan.lines)
+      ? 'The Portfolio Manager offers Open later. This press sets up the Home and lists the song; it does not open its workspace or start its task.'
+      : 'Library entries are not opened project workspaces. Open each project separately from the Home when you choose.';
+  }
   review.panel.update({
     ...projection,
     ownerKind: 'setup',
@@ -4826,7 +4882,10 @@ function renderSourceCreationReview() {
     nameMaxLength: 120,
     goalMaxLength: 2000,
     canEditName: Boolean(offer.software && offer.plan?.visual?.entity?.operation === 'create'),
-    canEditGoal: Boolean(offer.plan?.brief_default),
+    canEditGoal: !review.home && Boolean(offer.plan?.brief_default),
+    subjectKind: review.home ? 'group' : undefined,
+    placeLabel: review.home ? 'Place & set up on map' : undefined,
+    title: review.home ? `Review ${offer.plan.destination.name}` : undefined,
     canChangeBlueprint: false,
     detailsLabel: 'Edit with the source owner',
     automatic: review.automatic,
@@ -4862,6 +4921,10 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     return;
   }
   if (action === 'open' && review.result?.id) {
+    if (review.home && review.homeRoute?.startsWith('/workspaces/')) {
+      window.location.href = review.homeRoute;
+      return;
+    }
     // Workspace pages are routed by slug; resolve it rather than use the ID.
     const slug = String(review.result.folder_slug || '').trim();
     if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
@@ -4917,20 +4980,27 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     const started = window.OriWorkspaceMap.beginPlacement({
       token: review.token,
       mode: 'reviewed-setup',
-      preview: { name: state.offer.plan.visual.entity.name },
+      initialCandidate: review.candidate,
+      preview: {
+        name: state.offer.plan.visual.entity.name,
+        kind: review.home ? 'group' : 'workspace'
+      },
       actionCopy: {
         confirmLabel: `${review.actionLabel} here`,
         instruction: `${review.actionLabel} with a click on open ground or Enter. Escape returns to review.`,
         announcement: 'Source setup reviewed. Choose a point; nothing runs before confirmation.'
       },
       onCandidate: (_token, point) => {
-        if (sourceReviewCurrent(review)) review.candidate = point;
+        if (sourceReviewCurrent(review) && !review.pending) review.candidate = { ...point };
       },
-      onConfirm: async () => {
-        if (!sourceReviewCurrent(review) || review.key !== sourceReviewKey() || review.pending) {
+      onConfirm: async (_token, point) => {
+        if (sourceReviewCurrent(review) && review.pending) return true;
+        if (!sourceReviewCurrent(review) || review.key !== sourceReviewKey()) {
           sourceReviewRestore(review);
           return false;
         }
+        review.candidate = point ? { ...point } : review.candidate;
+        if (!review.candidate || !sourceReviewMapAvailable()) return false;
         review.pending = true;
         await startOneCardSetup({ reviewedSourceKey: review.key });
         if (sourceReviewCurrent(review) && !review.pending) sourceReviewRestore(review);
@@ -4951,10 +5021,14 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
 async function observeSourceCreationResult(review) {
   if (!sourceReviewCurrent(review) || review.observing) return;
   const offer = state.offer,
-    outcome = offer?.outcome;
+    outcome = offer?.outcome,
+    home = sourceHomePlacementResult(offer, review);
   review.observing = true;
   try {
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(outcome.workspace_id)}`, {
+    if (review.home && (home?.state !== 'ready' || !home.home_id))
+      throw new Error('Home phase is not verified ready');
+    const id = review.home ? home.home_id : outcome?.workspace_id;
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
       cache: 'no-store'
     });
     const resource = await response.json();
@@ -4962,12 +5036,16 @@ async function observeSourceCreationResult(review) {
     // The server-resolved offer outcome names the workspace. Reviewed setup
     // runs (for example a plugin's) do not stamp the ordinary-create offer
     // marker, so the marker only proves "new here" for positioning.
-    if (!response.ok || resource.id !== outcome.workspace_id)
+    if (!response.ok || resource.id !== id || (review.home && resource.kind !== 'group'))
       throw new Error('Unverified source outcome');
-    const createdHere =
-      !outcome.existing && resource.shared_data?.folder_digest_offer_id === offer.id;
+    const createdHere = review.home
+      ? home.layout_subject_new === true && home.created_by_this_operation === true
+      : !outcome.existing && resource.shared_data?.folder_digest_offer_id === offer.id;
     review.result = resource;
-    review.existing = outcome.existing === true;
+    review.homeRoute = home?.route;
+    review.existing = review.home ? !createdHere : outcome.existing === true;
+    await window.OriHomeCockpit?.refreshQuietly?.();
+    if (!sourceReviewCurrent(review)) return;
     review.positionUnproven = Boolean(review.candidate && !review.existing && !createdHere);
     if (review.candidate && createdHere && !review.positionAttempted) {
       review.positionAttempted = true;
@@ -4980,10 +5058,12 @@ async function observeSourceCreationResult(review) {
       review.positionFailed = result?.saved !== true;
     }
     review.message = review.positionFailed
-      ? 'Workspace verified; requested position not saved. Retry position only.'
+      ? `${review.home ? 'Home' : 'Workspace'} verified; requested position not saved. Automatic layout remains. Retry position only.`
       : review.positionUnproven
         ? 'Canonical source outcome verified. This setup does not prove the workspace is new here, so its requested position was not applied; automatic layout keeps it. No work was repeated.'
-        : 'Canonical source outcome and current membership verified. No work was repeated.';
+        : review.home
+          ? `${review.existing ? 'Existing Home kept in place.' : 'Home setup verified.'} Library entries are not project buildings. Open a project separately from the Home; no project was opened by placement.`
+          : 'Canonical source outcome and current membership verified. No work was repeated.';
   } catch {
     if (sourceReviewCurrent(review)) {
       // Never re-read automatically: each attempt would re-render and read
@@ -5004,13 +5084,12 @@ async function observeSourceCreationResult(review) {
 
 // Confirm the displayed plan only; the server rechecks it and runs the setup.
 async function startOneCardSetup(action) {
-  // A single song's first press sets up its Home, whose place is fixed; the
-  // song's name and goal are asked in the Home, on its manager's suggestion.
+  // The source remains the only setup owner. Single-song and collection Home
+  // phases use this inert review too; the song's later Open stays in the Home.
   if (
     state.offer?.status === 'pending' &&
     state.offer.plan?.digest &&
-    !isInboxFolderOffer(state.offer) &&
-    !handoffLineParts(state.offer.plan?.lines)
+    !isInboxFolderOffer(state.offer)
   ) {
     if (!action?.reviewedSourceKey) {
       if (!sourceCreationReview || !sourceReviewCurrent(sourceCreationReview)) {
@@ -5019,7 +5098,11 @@ async function startOneCardSetup(action) {
           offerID: state.offer.id,
           generation: state.reviewGeneration,
           token: `source:${requestId()}`,
-          automatic: false
+          home: sourceHomeReviewPlan(state.offer.plan),
+          planDigest: state.offer.plan.digest,
+          automatic:
+            sourceHomeReviewPlan(state.offer.plan) &&
+            state.offer.plan.destination.status === 'existing'
         };
       }
       sourceCreationReview.editing = false;
@@ -5060,6 +5143,12 @@ async function startOneCardSetup(action) {
   render();
   try {
     const body = { plan_digest: digest };
+    const review = sourceCreationReview;
+    if (review && sourceReviewCurrent(review) && review.pending) {
+      review.planDigest = digest;
+      review.acceptedRequestID = requestId();
+      body.request_id = review.acceptedRequestID;
+    }
     if (action?.entry) body.entry_name = action.entry;
     // A single song's Open: the Home is ready; its Portfolio Manager opens it.
     if (action?.openSong) body.open = true;
@@ -5104,9 +5193,11 @@ async function startOneCardSetup(action) {
     showOfferFailure(payload);
   } catch (_) {
     if (current()) {
-      if (sourceCreationReview && sourceReviewCurrent(sourceCreationReview))
+      if (sourceCreationReview && sourceReviewCurrent(sourceCreationReview)) {
         sourceCreationReview.message =
           'Confirmation delivery is unknown. Read the original source status; do not confirm again. Closing is not undo.';
+        if (sourceCreationReview.onMap) sourceReviewRestore(sourceCreationReview);
+      }
       showError(
         'Confirmation delivery is unknown. Read the original source status before doing anything else.'
       );
@@ -5880,7 +5971,7 @@ async function postOffer(offerId, action, body) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ ...body, request_id: requestId() })
+      body: JSON.stringify({ ...body, request_id: body?.request_id || requestId() })
     }
   );
   const payload = await readJSON(response);
