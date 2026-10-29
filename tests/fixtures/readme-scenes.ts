@@ -72,6 +72,8 @@ export const README_SCENES = {
         id: 'finding-launch-risks',
         workspace_id: 'ws-product-launch',
         workspace_name: 'Product Launch',
+        // Action Center links a finding to its workspace by folder slug.
+        workspace_slug: 'product-launch',
         title: 'Resolve launch readiness risks',
         summary: 'Two launch tasks need a named owner before the review.',
         priority: 'high',
@@ -83,6 +85,8 @@ export const README_SCENES = {
         id: 'finding-brief-review',
         workspace_id: 'ws-personal-hq',
         workspace_name: 'Northstar Personal HQ',
+        // Action Center links a finding to its workspace by folder slug.
+        workspace_slug: 'northstar-personal-hq',
         title: 'Review your Daily Brief',
         summary: 'One follow-up is due today and ready to resume.',
         priority: 'medium',
@@ -94,6 +98,8 @@ export const README_SCENES = {
         id: 'finding-research-decision',
         workspace_id: 'ws-research-lab',
         workspace_name: 'Research Lab',
+        // Action Center links a finding to its workspace by folder slug.
+        workspace_slug: 'research-lab',
         title: 'Choose the research direction',
         summary: 'The comparison note has a clear next decision.',
         priority: 'low',

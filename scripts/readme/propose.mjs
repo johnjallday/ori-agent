@@ -117,13 +117,18 @@ export function auditCandidate({ root, manifest, current, proposed }) {
     },
     {
       id: 'how_it_works',
-      evidence_paths: ['internal/workspace/mission.go', 'internal/workspace/scheduler.go', 'internal/workspace/opportunities.go'],
-      required_text: ['Compose a workspace', 'Set a mission + autonomy policy', 'It runs on a schedule', 'Triage in the Action Center'],
+      evidence_paths: [
+        'internal/progression/quests.go',
+        'internal/personalassistant/folder_digest_types.go',
+        'internal/workspace/scheduler.go',
+        'internal/workspace/opportunities.go',
+      ],
+      required_text: ['Meet your assistant', 'Build your HQ', 'Show it a folder', 'See what it found', 'Action Center'],
     },
     {
       id: 'feature_list',
-      evidence_paths: ['internal/workspace/mission.go', 'internal/skills/manager.go', 'internal/mcp/registry.go'],
-      required_text: ['Missions & Action Center', 'Workspaces', 'Multiple agents', 'MCP servers & Skills', 'Workspace memory'],
+      evidence_paths: ['internal/personalassistant/today_sections.go', 'internal/workspace/mission.go', 'internal/skills/manager.go', 'internal/mcp/registry.go'],
+      required_text: ['Personal assistant', 'Missions & Action Center', 'Workspaces', 'Multiple agents', 'MCP servers & Skills', 'Workspace memory'],
     },
     {
       id: 'screenshots',

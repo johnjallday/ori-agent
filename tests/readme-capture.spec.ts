@@ -47,8 +47,12 @@ function json(route: Route, payload: unknown, status = 200) {
 }
 
 function workspace(id: string) {
+  // The Workspace Command scene swaps its fixture ID for the seeded real
+  // workspace's UUID (see its test below), so resolve that UUID back to the
+  // Product Launch summary; otherwise the header loses its name.
+  const sceneID = id === README_SCENES.workspace_command.workspace_id ? 'ws-product-launch' : id;
   const summary =
-    README_SCENES.workspaces.find(item => item.id === id) || README_SCENES.workspace_command;
+    README_SCENES.workspaces.find(item => item.id === sceneID) || README_SCENES.workspace_command;
   return {
     ...summary,
     id,
@@ -762,7 +766,6 @@ async function installFixtureRoutes(page: Page) {
         mission: README_SCENES.workspace_command.mission.title,
         cadence: null,
         autonomy_policy: 'watch',
-        notification_policy: 'never',
         mission_enabled: false,
         mission_cadence_heartbeat: false,
         last_mission_run_at: null,

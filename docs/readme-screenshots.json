@@ -2,7 +2,7 @@
   "schema_version": 1,
   "acceptance_state": "accepted",
   "last_accepted_capture_commit": "7c28b392b4e3513436fde4fd69165f7fde24a6c1",
-  "accepted_readme_sha256": "09bcf6dbda181869b377f5ddcf843994e1372a2fecae1c261ca85a32519cc390",
+  "accepted_readme_sha256": "1a9f189f4ac1a3f87a270bdd5eb8dd52dc6d1692d6a8f4b66debc0bdba07ad2a",
   "accepted_environment": {
     "platform": "darwin",
     "architecture": "arm64",
