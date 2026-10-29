@@ -1,8 +1,8 @@
 # Assistant operations ("Operate Ori") — contract v1
 
-Status: implementation contract for `feature/operate-ori`; groups 1–4 of
-`tasks/tasks-operate-ori.md` build against it and 5.4 reconciles it with what
-shipped. Source constants live in `internal/assistantops/types.go`
+Status: Implemented (merged in #640). Groups 1–4 of
+`tasks/tasks-operate-ori.md` were built against this contract and 5.4 reconciled
+it with what shipped. Source constants live in `internal/assistantops/types.go`
 (`ContractVersion = 1`).
 
 ## Purpose and boundaries

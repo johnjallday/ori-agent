@@ -1,6 +1,6 @@
 # Personal Assistant workspace awareness: investigation contract
 
-**Status: host implementation complete on its feature branch; not merged.**
+**Status: host implementation complete (merged in #625).**
 Context-following conversations (group 2), setup continuity/placement (group 3),
 grounded notes/tasks with checked sources (group 4), permitted file reading
 (group 5) and final cross-slice validation (group 6) are implemented. Vendor-model
@@ -13,7 +13,7 @@ in `tasks/findings-assistant-workspace-awareness.md` and its evidence directory.
 
 ## Conversation discovery amendment
 
-Implemented on `feature/assistant-conversation-discovery`; delivery gates and
+Implemented (merged in #635); delivery gates and
 live-model quality are separate. The historical staged notes below are not a
 new permission boundary.
 

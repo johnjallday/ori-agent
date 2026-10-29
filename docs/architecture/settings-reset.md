@@ -1,6 +1,6 @@
 # Settings reset: scope and lifecycle findings
 
-Status: active implementation branch for `settings-reset-ux`. Replay Setup,
+Status: Implemented (`settings-reset-ux`, merged in #460). Replay Setup,
 Reset Getting Started, and Reset Selected Data now use distinct verified paths.
 Selective destructive reset is wired to the production process lease, shared
 admission gate, bounded drain, staged journal, full-process relaunch, pre-store

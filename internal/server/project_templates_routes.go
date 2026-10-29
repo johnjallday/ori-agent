@@ -203,13 +203,6 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// buildBlueprintCatalog assembles the creation catalog: the library, the
-// blueprints installed plugins contribute, and one readiness projection per
-// entry derived from the same authoritative state the create gate uses.
-func (s *Server) buildBlueprintCatalog(root string) ([]blueprintCatalogEntry, error) {
-	return s.buildBlueprintCatalogForOwner(root, "local")
-}
-
 func (s *Server) buildBlueprintCatalogForOwner(root, ownerUserID string) ([]blueprintCatalogEntry, error) {
 	var plugins installedPluginSource
 	if s.Handlers != nil && s.Handlers.Plugin != nil {

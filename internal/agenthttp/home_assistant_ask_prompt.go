@@ -92,12 +92,6 @@ func buildAssistantConversationUserPrompt(prompt string, workContext *PersonalAs
 	return strings.TrimSpace(prompt) + renderPersonalAssistantPromptContext(workContext)
 }
 
-// buildHomeUserPrompt assembles the user turn: the request plus the injected
-// snapshot and navigation catalog.
-func buildHomeUserPrompt(prompt, intent string, snapshot HomeSnapshot) string {
-	return buildHomeUserPromptWithAssistant(prompt, intent, snapshot, nil)
-}
-
 func buildHomeUserPromptWithAssistant(prompt, intent string, snapshot HomeSnapshot, workContext *PersonalAssistantWorkContext) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "User request: %s\n\n", strings.TrimSpace(prompt))

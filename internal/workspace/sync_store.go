@@ -501,7 +501,6 @@ func restoreMissionFromDisk(ws, disk *Workspace) {
 	ws.MissionEnabled = disk.MissionEnabled
 	ws.AutonomyPolicy = disk.AutonomyPolicy
 	ws.Cadence = disk.Cadence
-	ws.NotificationPolicy = disk.NotificationPolicy
 	ws.LastMissionRunAt = disk.LastMissionRunAt
 	ws.NextMissionRunAt = disk.NextMissionRunAt
 	ws.MissionExecutionCount = disk.MissionExecutionCount

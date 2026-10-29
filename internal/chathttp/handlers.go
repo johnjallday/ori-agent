@@ -1061,18 +1061,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	if invokedSkill == nil && routeNeedsWorkspace(routeDecision.Mode) {
 		hadWorkspaceContext := strings.TrimSpace(normalizedRouteContext.WorkspaceID) != ""
-		autoWorkspace, created, wsErr := h.ensureWorkspaceForRoute(ctx, current, originalQuery, routeDecision, normalizedRouteContext)
+		routeWorkspace, wsErr := h.workspaceForRoute(current, routeDecision, normalizedRouteContext)
 		if wsErr != nil {
-			logger.Warn("Failed to ensure workspace for routed chat request", logger.Fields{
+			logger.Warn("Failed to resolve workspace for routed chat request", logger.Fields{
 				"agent":        current,
 				"route_mode":   routeDecision.Mode,
 				"workspace_id": normalizedRouteContext.WorkspaceID,
 				"error":        wsErr,
 			})
-		} else if autoWorkspace != nil {
-			normalizedRouteContext = applyWorkspaceRouteContext(normalizedRouteContext, autoWorkspace)
-			if created || !hadWorkspaceContext {
-				q = enrichPromptWithWorkspaceContext(q, autoWorkspace, routeDecision.Mode, created)
+		} else if routeWorkspace != nil {
+			normalizedRouteContext = applyWorkspaceRouteContext(normalizedRouteContext, routeWorkspace)
+			if !hadWorkspaceContext {
+				q = enrichPromptWithWorkspaceContext(q, routeWorkspace, routeDecision.Mode)
 			}
 		}
 	}

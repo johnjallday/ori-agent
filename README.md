@@ -14,14 +14,14 @@ A **local-first** base of autonomous AI workspaces, guardrailed by the autonomy 
 </p>
 <p align="center"><em>Home brings the command bridge and a focused Personal HQ Daily Brief into one starting point.</em></p>
 
-**Ori Agent** is a local-first **AI headquarters** that runs on your machine. A **Personal HQ** anchors your day — daily brief, email station, follow-ups, and a Watchtower view across everything else — while specialized **workspaces** around it pursue missions on a recurring schedule under an **autonomy policy** you set. Findings flow into one cross-workspace **Action Center** for triage. Compose each workspace from multiple named agents, each with its own model, prompt, skills, and MCP tools. Everything stays local unless you opt into cloud LLMs.
+**Ori Agent** is a local-first **AI headquarters** that runs on your machine. A **Personal HQ** anchors your day — daily brief, email station, follow-ups, and a Watchtower view across everything else — while specialized **workspaces** around it pursue missions on a recurring schedule under an **autonomy policy** you set. Findings flow into one cross-workspace **Action Center** for triage. Your **personal assistant** sets those workspaces up from the folders you show it, each with named agents that have their own model, prompt, skills, and MCP tools. Everything stays local unless you opt into cloud LLMs.
 
 ## ⚙️ How it works
 
-1. **Compose a workspace** — group one or more agents around shared notes, files, and tasks, and bind the MCP servers and Skills they're allowed to use.
-2. **Set a mission + autonomy policy** — describe what the workspace should pursue, and choose how much it's allowed to do on its own.
-3. **It runs on a schedule** — the mission executes on a cron-like cadence without you kicking off each run.
-4. **Triage in the Action Center** — findings collect in one inbox where you **open**, **snooze**, **resolve**, or **dismiss** them. A resolved issue that a later run re-detects re-surfaces automatically, so nothing gets silently buried.
+1. **Meet your assistant** — a short Welcome sets your name, timezone, and workspace folder; then you hire your personal assistant and choose the model it runs on.
+2. **Build your HQ** — your Personal HQ is the assistant's home base, where it prepares your Daily Brief, tracks follow-ups, and keeps what it learns.
+3. **Show it a folder** — a code project, a cluttered Downloads, a pile of research. The assistant works from a local snapshot of names and markers (not file contents) and proposes a setup: a workspace linked to that folder with its agent, goal, and first task, a File Janitor tidy, or a Home for a whole collection. Nothing is created until you review it and press **Set up**.
+4. **See what it found** — the new agent takes one read-only first look and reports back, and anything that needs you lands in the assistant's **Needs you**. From there, workspaces keep working toward their goals on a schedule under the autonomy policy you set, and their findings collect in the **Action Center**, where you **open**, **snooze**, **resolve**, or **dismiss** them. A resolved issue that a later run re-detects re-surfaces automatically, so nothing gets silently buried.
 
 ### Autonomy policies
 
@@ -36,8 +36,9 @@ Each MCP/skill binding is classified by side effect (read / write / external), a
 
 ## ✨ What you can do
 
+- **Personal assistant** — one assistant that owns your ongoing work: show it a folder and it proposes the right workspace, sets it up once you confirm, and keeps **Needs you**, **Working on**, and **Done** in one drawer.
 - **Personal HQ** — a home-base workspace that starts your day: daily brief, Gmail-backed email station with confirm-gated send, follow-up tracking, a journal, and a Watchtower view over every other workspace.
-- **Missions & Action Center** — let a workspace work autonomously on a recurring cadence under an autonomy policy, and triage its findings (“opportunities”) from one cross-workspace inbox.
+- **Missions & Action Center** — give a workspace a goal and let it work on a recurring cadence under an autonomy policy; its runs suggest Backlog tickets and send findings (“opportunities”) to one cross-workspace inbox for triage.
 - **Workspaces** — group agents to collaborate, with shared notes, files, and tasks scoped to the workspace. The same agent can have different tool access in different workspaces.
 - **Tasks & scheduling** — assign tasks to agents and run them on a cron-like schedule, with structured result storage (CSV/JSON output specs).
 - **Multiple agents** — create named agents, each with its own provider/model, system prompt, skills, and MCP servers.

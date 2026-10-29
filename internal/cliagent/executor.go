@@ -65,9 +65,18 @@ func (e *MicroStepExecutor) RunningCount() int {
 	return len(e.running)
 }
 
-// Execute runs a CLI agent task through the micro-step loop.
-// This is a blocking call — run in a goroutine for async execution.
+// Execute runs a CLI agent task through the micro-step loop under a fresh
+// task ID. This is a blocking call — run in a goroutine for async execution.
 func (e *MicroStepExecutor) Execute(ctx context.Context, config TaskConfig) (*TaskResult, error) {
+	return e.ExecuteWithID(ctx, uuid.New().String(), config)
+}
+
+// ExecuteWithID is Execute under a task ID the caller chose, so a caller that
+// runs the task in the background can hand the ID out before it starts.
+func (e *MicroStepExecutor) ExecuteWithID(ctx context.Context, taskID string, config TaskConfig) (*TaskResult, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("task ID is required")
+	}
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -84,8 +93,11 @@ func (e *MicroStepExecutor) Execute(ctx context.Context, config TaskConfig) (*Ta
 		e.mu.Unlock()
 		return nil, fmt.Errorf("max concurrent tasks reached (%d)", e.maxConcurrent)
 	}
+	if _, running := e.running[taskID]; running {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("task %s is already running", taskID)
+	}
 
-	taskID := uuid.New().String()
 	taskCtx, cancel := context.WithCancel(ctx)
 	e.running[taskID] = cancel
 	e.mu.Unlock()

@@ -66,7 +66,7 @@ assert_excluded 'ori-devtools'
 # internal/sessionhttp leaks back in, the leg is re-running the ubuntu suite
 # at 10x the cost, which is the whole thing this scope exists to stop.
 assert_platform_included 'ori-agent/internal/platform$'
-assert_platform_included 'ori-agent/internal/nativemenubar$'
+assert_platform_included 'ori-agent/internal/location$'          # wifi_darwin.go vs wifi_linux.go
 assert_platform_included 'ori-agent/cmd/menubar$'
 assert_platform_included 'ori-agent/cmd/server$'
 assert_platform_included 'ori-agent/internal/backuprecovery$'      # _darwin_arm64 provider and helper

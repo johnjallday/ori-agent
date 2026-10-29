@@ -141,36 +141,6 @@ func authoritativeProjectEntry(source ProjectFileFallbackSource, workspaceID str
 	return filepath.Clean(resolved.AbsolutePath), nil
 }
 
-func inspectFallbackRelativePath(root, portable string, wantDirectory bool) (string, error) {
-	root, err := filepath.Abs(filepath.Clean(root))
-	if err != nil {
-		return "", ErrProjectFileFallbackScope
-	}
-	portable = strings.TrimSpace(portable)
-	if portable == "" || filepath.IsAbs(portable) || strings.ContainsRune(portable, '\x00') || strings.Contains(portable, `\`) {
-		return "", ErrProjectFileFallbackScope
-	}
-	current := root
-	for index, segment := range strings.Split(filepath.ToSlash(portable), "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return "", ErrProjectFileFallbackScope
-		}
-		current = filepath.Join(current, filepath.FromSlash(segment))
-		if !fallbackPathInsideLexically(current, root) || current == root {
-			return "", ErrProjectFileFallbackScope
-		}
-		info, statErr := os.Lstat(current) // #nosec G304 -- trusted segment-checked workspace metadata
-		if statErr != nil || info.Mode()&os.ModeSymlink != 0 {
-			return "", ErrProjectFileFallbackUnavailable
-		}
-		last := index == len(strings.Split(filepath.ToSlash(portable), "/"))-1
-		if !last && !info.IsDir() || last && wantDirectory && !info.IsDir() || last && !wantDirectory && !info.Mode().IsRegular() {
-			return "", ErrProjectFileFallbackScope
-		}
-	}
-	return filepath.Clean(current), nil
-}
-
 func readProjectFallbackFile(path string) ([]byte, os.FileMode, error) {
 	info, err := os.Lstat(path) // #nosec G304 -- canonical authoritative/staging project path
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > maxProjectFileFallbackBytes {
@@ -240,15 +210,6 @@ func withoutRuntimeCapability(capabilities []string, excluded string) []string {
 func fallbackPathInsideLexically(path, root string) bool {
 	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-}
-
-func fallbackPathInside(path, root string) bool {
-	canonicalPath, err := filepath.EvalSymlinks(filepath.Clean(path))
-	if err != nil {
-		return false
-	}
-	canonicalRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
-	return err == nil && fallbackPathInsideLexically(canonicalPath, canonicalRoot)
 }
 
 func samePortableProjectPath(current, expected string) bool {

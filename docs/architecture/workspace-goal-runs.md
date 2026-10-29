@@ -155,6 +155,6 @@ backfill or adoption migration.
 
 ## Notifications
 
-Notifications are a separate feature. The stored `NotificationPolicy` fields are
-kept for compatibility, ignored by goal runs, and no longer shown in Goal
-Settings.
+Notifications are a separate feature. Goal runs have no notification policy:
+the old `notification_policy` field was never read, and has been removed. A
+workspace that still stores it loads normally and drops it on its next save.

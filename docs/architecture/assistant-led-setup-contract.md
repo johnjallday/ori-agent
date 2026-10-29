@@ -1,6 +1,6 @@
 # Assistant-led File Janitor setup contract
 
-**Status:** Implemented on `feature/assistant-led-setup` (#528); final repository gates and foreground native-picker evidence remain pending. The workspace/team presentation (#529: `milestones`, the workspace-step outcomes and failure classification, and the read-only walkthrough) is implemented on `feature/529-show-the-assistant-creating-workspaces-and-agents-step-by-step`; its Playwright specs are written but were NOT RUN by the implementing agent (Chromium could not launch), so they are unverified until run on a desktop. This document records both the findings baseline and the delivered contract. Native selection, cancellation, and nested-focus claims remain explicitly NOT RUN where noted.
+**Status:** Implemented (merged in #528); final repository gates and foreground native-picker evidence remain pending. The workspace/team presentation (Issue #529: `milestones`, the workspace-step outcomes and failure classification, and the read-only walkthrough) is implemented (merged in #539); its Playwright specs are written but were NOT RUN by the implementing agent (Chromium could not launch), so they are unverified until run on a desktop. This document records both the findings baseline and the delivered contract. Native selection, cancellation, and nested-focus claims remain explicitly NOT RUN where noted.
 
 ## Evidence baseline and preflight
 

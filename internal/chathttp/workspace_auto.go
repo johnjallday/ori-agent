@@ -1,12 +1,10 @@
 package chathttp
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -19,61 +17,40 @@ func routeNeedsWorkspace(mode UtilityRouteMode) bool {
 	}
 }
 
-// ensureWorkspaceForRoute returns an active workspace for the agent, creating one when needed.
-func (h *Handler) ensureWorkspaceForRoute(ctx context.Context, agentName, request string, decision UtilityRouteDecision, routeCtx normalizedChatRouteContext) (*workspace.Workspace, bool, error) {
+// workspaceForRoute returns the workspace a routed chat request runs in: the
+// one the route names, else the agent's most recently updated active
+// workspace, else nil. Chat never creates a workspace; that is the job of the
+// assistant's reviewed setup and the workspace creation surfaces.
+func (h *Handler) workspaceForRoute(agentName string, decision UtilityRouteDecision, routeCtx normalizedChatRouteContext) (*workspace.Workspace, error) {
 	if h == nil || h.commandHandler == nil || h.commandHandler.workspaceStore == nil {
-		return nil, false, nil
+		return nil, nil
 	}
 	if strings.TrimSpace(agentName) == "" || !routeNeedsWorkspace(decision.Mode) {
-		return nil, false, nil
+		return nil, nil
 	}
 
 	if workspaceID := strings.TrimSpace(routeCtx.WorkspaceID); workspaceID != "" {
 		ws, err := h.commandHandler.workspaceStore.Get(workspaceID)
 		if err != nil {
-			return nil, false, fmt.Errorf("get route workspace %q: %w", workspaceID, err)
+			return nil, fmt.Errorf("get route workspace %q: %w", workspaceID, err)
 		}
 		if ws == nil {
-			return nil, false, fmt.Errorf("route workspace %q was not found", workspaceID)
+			return nil, fmt.Errorf("route workspace %q was not found", workspaceID)
 		}
-		return ws, false, nil
+		return ws, nil
 	}
 
 	active, err := h.commandHandler.workspaceStore.ListActive()
 	if err != nil {
-		return nil, false, fmt.Errorf("list active workspaces: %w", err)
+		return nil, fmt.Errorf("list active workspaces: %w", err)
 	}
 
 	for _, ws := range newestWorkspacesFirst(active) {
 		if ws != nil && ws.HasAgent(agentName) {
-			return ws, false, nil
+			return ws, nil
 		}
 	}
-
-	name := buildAutoWorkspaceName(agentName, decision.Mode, request)
-	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
-		Name:        name,
-		Description: fmt.Sprintf("Auto-created from chat (%s)", decision.Mode),
-		Agents:      []string{agentName},
-		InitialData: map[string]any{
-			"source":          "chat_auto_workspace",
-			"initial_request": strings.TrimSpace(request),
-			"route_mode":      string(decision.Mode),
-		},
-	})
-
-	if err := workspace.CreateNativeWorkspace(ctx, h.commandHandler.workspaceStore, ws); err != nil {
-		return nil, false, fmt.Errorf("save auto-created workspace: %w", err)
-	}
-
-	logger.Info("Auto-created workspace for chat route", logger.Fields{
-		"workspace_id": ws.ID,
-		"name":         ws.Name,
-		"agent":        agentName,
-		"route_mode":   decision.Mode,
-	})
-
-	return ws, true, nil
+	return nil, nil
 }
 
 func applyWorkspaceRouteContext(routeCtx normalizedChatRouteContext, ws *workspace.Workspace) normalizedChatRouteContext {
@@ -97,7 +74,7 @@ func applyWorkspaceRouteContext(routeCtx normalizedChatRouteContext, ws *workspa
 		updated.Surface = "workspace_chat"
 	}
 	if strings.TrimSpace(updated.Origin) == "" {
-		updated.Origin = "chat_auto_workspace"
+		updated.Origin = "chat_route_workspace"
 	}
 	return updated
 }
@@ -123,35 +100,13 @@ func newestWorkspacesFirst(items []*workspace.Workspace) []*workspace.Workspace 
 	return out
 }
 
-func buildAutoWorkspaceName(agentName string, mode UtilityRouteMode, request string) string {
-	base := strings.TrimSpace(agentName)
-	if base == "" {
-		base = "agent"
-	}
-	snippet := strings.TrimSpace(request)
-	if len(snippet) > 42 {
-		snippet = strings.TrimSpace(snippet[:42])
-	}
-	snippet = strings.ReplaceAll(snippet, "\n", " ")
-	if snippet == "" {
-		snippet = "task"
-	}
-	return fmt.Sprintf("%s-%s-%s", base, mode, snippet)
-}
-
-func enrichPromptWithWorkspaceContext(prompt string, ws *workspace.Workspace, mode UtilityRouteMode, created bool) string {
+func enrichPromptWithWorkspaceContext(prompt string, ws *workspace.Workspace, mode UtilityRouteMode) string {
 	if ws == nil {
 		return prompt
 	}
 
-	action := "Reusing existing workspace context."
-	if created {
-		action = "A workspace was auto-created for this request."
-	}
-
 	return fmt.Sprintf(
-		"%s\nWorkspace context:\n- workspace_id: %s\n- workspace_name: %s\n- route_mode: %s\n\nUser request:\n%s",
-		action,
+		"Reusing existing workspace context.\nWorkspace context:\n- workspace_id: %s\n- workspace_name: %s\n- route_mode: %s\n\nUser request:\n%s",
 		ws.ID,
 		ws.Name,
 		mode,

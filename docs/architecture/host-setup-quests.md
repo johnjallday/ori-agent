@@ -1,7 +1,6 @@
 # Host-owned setup quests
 
-Status: **Implemented** on `feature/455-goal-first-gmail-setup-quest`
-(2026-09-15). This document records the contract for host-owned setup quests.
+Status: **Implemented** (Issue #455, merged in #491 on 2026-09-15). This document records the contract for host-owned setup quests.
 Sections 2–7 were written as the plan in the Group 1 spike. Where the
 implementation differed, the drift register in §1.3 wins: D11–D14 record the
 Group 2–4 refinements and their demo evidence. Line references in §1 point at

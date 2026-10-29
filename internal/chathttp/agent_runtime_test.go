@@ -233,11 +233,15 @@ func TestChatHandler_WorkspaceEntryGeneralAgent_UsesPlanningForm(t *testing.T) {
 	}
 }
 
-func TestChatHandler_AutoWorkspaceContextIsAppliedBeforeRuntimeResolution(t *testing.T) {
+func TestChatHandler_RouteWorkspaceContextIsAppliedBeforeRuntimeResolution(t *testing.T) {
 	st := newPreflightStore("Ori", &agent.Agent{})
 	h := NewHandler(st, nil)
 	wsStore := workspace.NewInMemoryStore()
 	h.SetWorkspaceStore(wsStore)
+	existing := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Repo", Agents: []string{"Ori"}})
+	if err := wsStore.Save(existing); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
 
 	resolver := &stubChatRuntimeResolver{
 		resolved: &workspace.ResolvedAgentRuntime{
@@ -276,8 +280,8 @@ func TestChatHandler_AutoWorkspaceContextIsAppliedBeforeRuntimeResolution(t *tes
 	if parts[0] != "Ori" {
 		t.Fatalf("expected resolver to target agent Ori, got %q", parts[0])
 	}
-	if strings.TrimSpace(parts[1]) == "" {
-		t.Fatalf("expected resolver to receive an auto-selected workspace id, got %q", resolver.calls[0])
+	if parts[1] != existing.ID {
+		t.Fatalf("expected resolver to receive the agent's workspace %q, got %q", existing.ID, resolver.calls[0])
 	}
 
 	allIDs, err := wsStore.List()
@@ -285,9 +289,6 @@ func TestChatHandler_AutoWorkspaceContextIsAppliedBeforeRuntimeResolution(t *tes
 		t.Fatalf("failed to list workspaces: %v", err)
 	}
 	if len(allIDs) != 1 {
-		t.Fatalf("expected one auto-created workspace, got %d", len(allIDs))
-	}
-	if parts[1] != allIDs[0] {
-		t.Fatalf("expected resolver workspace id %q to match created workspace %q", parts[1], allIDs[0])
+		t.Fatalf("chat must not create workspaces, got %d", len(allIDs))
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
@@ -94,31 +95,38 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The ID is chosen here, not inside the executor, so the 202 can name the
+	// task the caller then polls or stops.
+	taskID := uuid.New().String()
+	h.mu.Lock()
+	h.pending[taskID] = &config
+	h.mu.Unlock()
+
 	// Launch task in background. The request context is canceled as soon as
 	// this handler returns, so the background task must not inherit its
 	// cancellation or it dies almost immediately.
 	taskCtx := context.WithoutCancel(r.Context())
 	go func() {
 		defer release()
-		result, err := h.executor.Execute(taskCtx, config)
+		result, err := h.executor.ExecuteWithID(taskCtx, taskID, config)
 		if err != nil {
 			result = &cliagent.TaskResult{
+				TaskID: taskID,
 				Status: cliagent.TaskFailed,
 				Error:  err.Error(),
 			}
 		}
-		if result != nil && result.TaskID != "" {
-			h.mu.Lock()
-			h.results[result.TaskID] = result
-			delete(h.pending, result.TaskID)
-			h.mu.Unlock()
+		if result == nil {
+			result = &cliagent.TaskResult{TaskID: taskID, Status: cliagent.TaskFailed, Error: "task produced no result"}
 		}
+		h.mu.Lock()
+		h.results[taskID] = result
+		delete(h.pending, taskID)
+		h.mu.Unlock()
 	}()
 
-	// Return immediately with accepted status
-	// Note: We don't have the taskID yet since Execute generates it internally.
-	// For now we return a placeholder. A production implementation would use channels.
 	writeJSON(w, http.StatusAccepted, createTaskResponse{
+		TaskID: taskID,
 		Status: "accepted",
 	})
 }
@@ -138,11 +146,11 @@ func (h *Handler) HandleGetTask(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.RLock()
 	result, found := h.results[taskID]
+	_, pending := h.pending[taskID]
 	h.mu.RUnlock()
 
 	if !found {
-		// Check if it's still running
-		if h.executor.RunningCount() > 0 {
+		if pending {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"task_id": taskID,
 				"status":  "running",

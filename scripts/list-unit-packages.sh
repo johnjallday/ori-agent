@@ -70,7 +70,7 @@ fi
 # A package is platform-conditional when the toolchain compiles a different
 # set of files for GOOS=darwin than for GOOS=linux - _darwin/_linux/_unix
 # variants, build-tagged stubs, darwin-only test files (internal/platform,
-# internal/location, internal/nativemenubar, cmd/menubar, ...).
+# internal/location, cmd/menubar, ...).
 # Deriving it means a package that grows a platform variant later is picked up
 # without anyone remembering to edit this list.
 #

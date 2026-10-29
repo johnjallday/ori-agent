@@ -1,6 +1,7 @@
 # Music setup onboarding: state and consent contract
 
-Status: implementation contract for the `music-setup-onboarding` feature. It
+Status: Implemented (merged in #580); the contract for the
+`music-setup-onboarding` feature. It
 freezes what each onboarding state means, who owns its truth, what the user may
 do next, and what cancelling or losing it costs. It adds **no new authority**:
 every consequence stays behind the existing, separately reviewed service

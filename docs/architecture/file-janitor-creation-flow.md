@@ -1,7 +1,7 @@
 # Reviewed File Janitor creation and preparation
 
-Status: implementation contract; acceptance evidence remains in the feature's
-findings log. This document does not claim the complete journey is implemented.
+Status: Implemented (merged in #678); acceptance evidence remains in the
+feature's findings log.
 
 ## Boundary
 
