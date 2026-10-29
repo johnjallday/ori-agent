@@ -48,7 +48,10 @@ func TestHomePlacement_WitnessIsBoundedImmutableAndSurvivesContinuation(t *testi
 	}
 	close(f.setup.hold)
 	waitFor(t, "Home-ready", func() bool { return !f.service.isRunning(f.offer.ID) })
-	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "continue", PlanDigest: f.offer.Plan.Digest}); err != nil {
+	f.setup.finish = func() FolderSetupUpdate {
+		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopNeedsModel, HomeID: "home-1"}
+	}
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "continue", PlanDigest: f.offer.Plan.Digest, Open: true}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "continued", func() bool { return f.setup.runCount() == 2 && !f.service.isRunning(f.offer.ID) })

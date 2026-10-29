@@ -136,15 +136,82 @@ func TestFolderHandoff_OpenIsItsOwnPressAndSticks(t *testing.T) {
 	if first := press("r1", FolderSetupInput{Open: true}, 1); first.Open || f.stored(t).Setup.Opening {
 		t.Fatal("the first Set up opened the song")
 	}
-	if again := press("r2", FolderSetupInput{}, 2); again.Open {
-		t.Fatal("a resume without Open opened the song")
+	before := f.stored(t)
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r2", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	if f.setup.runCount() != 1 || f.service.isRunning(f.offer.ID) || !reflect.DeepEqual(before, f.stored(t)) {
+		t.Fatal("a second tab's stale Set up restarted or rewrote a successful Home phase")
 	}
 	stopWith(FolderStopNeedsModel)
-	if opened := press("r3", FolderSetupInput{Open: true}, 3); !opened.Open || !f.stored(t).Setup.Opening {
+	if opened := press("r3", FolderSetupInput{Open: true}, 2); !opened.Open || !f.stored(t).Setup.Opening {
 		t.Fatal("Open did not open the song")
 	}
-	if retried := press("r4", FolderSetupInput{}, 4); !retried.Open {
+	if retried := press("r4", FolderSetupInput{}, 3); !retried.Open {
 		t.Fatal("Try again after Open forgot to open")
+	}
+}
+
+type delayedHandoffPlanKey struct{}
+
+type delayedHandoffPlan struct {
+	*fakeFolderSetup
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f delayedHandoffPlan) Plan(ctx context.Context, req FolderSetupRequest) (FolderSetupPlan, error) {
+	if ctx.Value(delayedHandoffPlanKey{}) == true && req.Offer.Setup == nil {
+		close(f.entered)
+		<-f.release
+	}
+	return f.fakeFolderSetup.Plan(ctx, req)
+}
+
+func TestFolderHandoff_ACompetingPressCannotRestartAHomeThatFinishedDuringItsPlanCheck(t *testing.T) {
+	f, _ := handoffCardFixture(t)
+	f.setup.finish = func() FolderSetupUpdate {
+		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopHandoffReady, RunID: "new-run", HomeID: "home-1"}
+	}
+	gate := delayedHandoffPlan{fakeFolderSetup: f.setup, entered: make(chan struct{}), release: make(chan struct{})}
+	f.service.deps.Setup = gate
+	t.Cleanup(func() {
+		select {
+		case <-gate.release:
+		default:
+			close(gate.release)
+		}
+	})
+	result := make(chan error, 1)
+	go func() {
+		_, err := f.service.StartSetup(context.WithValue(context.Background(), delayedHandoffPlanKey{}, true), "local", f.offer.ID,
+			FolderSetupInput{RequestID: "slow-tab", PlanDigest: f.offer.Plan.Digest})
+		result <- err
+	}()
+	select {
+	case <-gate.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the delayed plan was not reached")
+	}
+	if _, err := f.service.StartSetup(context.Background(), "local", f.offer.ID,
+		FolderSetupInput{RequestID: "first-tab", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		close(gate.release)
+		t.Fatal(err)
+	}
+	waitFor(t, "the first tab's Home phase", func() bool {
+		return f.stored(t).Setup != nil && f.stored(t).Setup.StopReason == FolderStopHandoffReady && !f.service.isRunning(f.offer.ID)
+	})
+	close(gate.release)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the delayed press did not return")
+	}
+	if f.setup.runCount() != 1 || f.service.isRunning(f.offer.ID) || f.stored(t).RequestID != "first-tab" {
+		t.Fatal("the delayed tab restarted or adopted the original Home operation")
 	}
 }
 

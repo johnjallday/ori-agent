@@ -354,6 +354,30 @@
       });
   }
 
+  // A position-only repair reads the current shared layout before checking
+  // occupancy. Never let an old owner or an older read repaint a newer editor.
+  async function refreshLayout(options) {
+    var current = options && options.current;
+    var seq = ++layoutRequestSeq;
+    try {
+      var response = await fetch(LAYOUT_ENDPOINT, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response || !response.ok) return false;
+      var data = await response.json();
+      if (!data || !data.layout || seq !== layoutRequestSeq || (current && !current()))
+        return false;
+      if (Number(data.layout.revision || 0) < layoutState.revision) return false;
+      applyLayoutPayload(data.layout);
+      layoutState.status = 'ready';
+      settleLayout();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /**
    * Send one partial update and reconcile against what the server committed.
    *
@@ -2190,6 +2214,9 @@
   // layout record and has no fake workspace id; persistence starts only after
   // sessions.js creates the real workspace.
   var placementSession = null;
+  // Retain only the last editor's return/focus owner after its save finishes.
+  // Starting a newer placement or explicit move invalidates an older return.
+  var placementReturnOwner = '';
 
   // measured:false marks the DEFAULT_VIEWPORT fallback. Panning and drawing are
   // happy with a placeholder size, but framing is not: a fit computed against
@@ -10540,6 +10567,7 @@
     var id = String(workspaceId || '').trim();
     if (!container || !id || layoutState.status !== 'ready' || placementSession) return false;
     if (!reveal(id, options)) return false;
+    placementReturnOwner = '';
     var workspaces = (lastMount.state && lastMount.state.workspaces) || [];
     setMoveMode(container, true);
     var canvas = container.querySelector('[data-ws-map-viewport]');
@@ -10561,6 +10589,7 @@
     if (!container || !token || layoutState.status !== 'ready') return false;
     if (placementSession && !placementMatches(placementSession, options)) return false;
     var previousMoveMode = moveModeEnabled;
+    placementReturnOwner = token;
     closeContextMenu({ restoreFocus: false });
     closeHarvestPopover({ restoreFocus: false });
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
@@ -10852,10 +10881,18 @@
     // geometry only, with current collision/readiness checks, never a new site.
     var explicit = reviewedPoint !== undefined;
     var point = explicit ? safePoint(reviewedPoint) : failedPlacements[workspaceId];
+    var viewport = lastMount && lastMount.container.querySelector('[data-ws-map-viewport]');
     if (
       !point ||
       (explicit &&
         (!lastMount ||
+          lastMount.container.isConnected === false ||
+          (viewport && viewport.getClientRects && !viewport.getClientRects().length) ||
+          placementSession ||
+          moveState ||
+          dragState ||
+          clusterDrag ||
+          resizeState ||
           isMapReadOnly() ||
           placementProblem(
             point,
@@ -11495,6 +11532,16 @@
     suspendDraftPlacement: suspendDraftPlacement,
     setDraftPlacementPending: setDraftPlacementPending,
     endPlacement: endPlacement,
+    canReturnFromPlacement: function (token) {
+      return (
+        placementReturnOwner === token &&
+        (!placementSession || placementMatches(placementSession, token)) &&
+        !moveState &&
+        !dragState &&
+        !clusterDrag &&
+        !resizeState
+      );
+    },
     cancelPlacement: cancelPlacement,
     commitPlacement: commitPlacement,
     // Legacy Build seam retained for older callers while the shared wizard now
@@ -11558,6 +11605,7 @@
     // The one reconciled layout state both surfaces read. Exposed so Home and
     // the /workspaces launcher can reflect "positions cannot be saved right
     // now" without each keeping its own copy (FR-4, FR-105).
+    refreshLayout: refreshLayout,
     getLayoutState: function () {
       var groups = Object.create(null);
       Object.keys(layoutState.groups).forEach(function (id) {

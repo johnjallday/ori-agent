@@ -4641,6 +4641,56 @@ test('explicit position repair checks current collision and map availability wit
   assert.equal(patches.length, 1);
 });
 
+test('position repair reads current shared occupancy and never chooses a substitute', async () => {
+  const layout = {
+    schema_version: 1,
+    revision: 1,
+    positions: { occupied: { x: 0, y: 0 }, home: { x: 380, y: 0 } }
+  };
+  const { map, harness, patches } = buildHarness({ layout });
+  mountWithCamera(map, harness, [{ id: 'occupied' }, { id: 'home', kind: 'group' }]);
+  await flush();
+  layout.revision = 2;
+  layout.positions.occupied = { x: 760, y: 456 };
+  assert.equal(await map.refreshLayout({ current: () => true }), true);
+  assert.equal(await map.retryPlacement('home', { x: 760, y: 456 }, { kind: 'group' }), false);
+  assert.equal(patches.length, 0);
+  assert.equal(map.getLayoutState().revision, 2);
+});
+
+test('a stale owner or older layout read cannot roll the map back', async () => {
+  const layout = { schema_version: 1, revision: 1, positions: {} };
+  const { map, harness } = buildHarness({ layout });
+  mountWithCamera(map, harness, [{ id: 'home', kind: 'group' }]);
+  await flush();
+  layout.revision = 2;
+  assert.equal(await map.refreshLayout({ current: () => false }), false);
+  assert.equal(map.getLayoutState().revision, 1);
+  map._setLayoutForTest({ schema_version: 1, revision: 3, positions: {} }, 'ready');
+  assert.equal(await map.refreshLayout({ current: () => true }), false);
+  assert.equal(map.getLayoutState().revision, 3);
+});
+
+test('position repair cannot interrupt a newer map editor', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'home', kind: 'group' }]);
+  await flush();
+  assert.equal(
+    map.beginPlacement({ token: 'newer', mode: 'draft', initialCandidate: { x: 900, y: 900 } }),
+    true
+  );
+  assert.equal(await map.retryPlacement('home', { x: 760, y: 456 }, { kind: 'group' }), false);
+  assert.equal(patches.length, 0);
+  assert.equal(map.canReturnFromPlacement('older'), false);
+  assert.equal(map.canReturnFromPlacement('newer'), true);
+  assert.equal(map.endPlacement('newer'), true, 'repair did not clear the newer editor');
+  assert.equal(
+    map.canReturnFromPlacement('older'),
+    false,
+    'finishing a new editor does not revive an old return'
+  );
+});
+
 test('pending draft confirmation freezes geometry but still permits a non-mutating view change', async () => {
   const { map, harness, patches } = buildHarness();
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);

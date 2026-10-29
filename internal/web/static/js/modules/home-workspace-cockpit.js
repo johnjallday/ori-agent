@@ -4732,11 +4732,13 @@ import {
         state.error = null;
         state.refreshError = false;
         pruneTreeTabs();
+        return true;
       } catch (err) {
         state.refreshError = true;
         // A failed background refresh keeps the last good data on screen rather
         // than blanking a working cockpit.
         console.warn('home-workspace-cockpit: background refresh failed', err);
+        return false;
       } finally {
         state.inFlight = null;
         renderAreaStatus();

@@ -4183,16 +4183,24 @@ function renderOffer(place) {
       firstLook.visible && !separateTask
         ? firstLook.status || firstLook.message || firstLook.hint
         : '';
-    const note =
-      state.progress ||
-      state.restoreMessage ||
-      (receipt.gone ? receipt.gone.message : '') ||
-      lookNote ||
-      (view.setup
-        ? view.setup.statusLine
-        : view.decided && !receipt.visible
-          ? folderOutcomeNote(state.offer)
-          : '');
+    // The accepted shared surface owns uncertainty/result copy. An older
+    // conversation restore note must not still promise “nothing is set up”.
+    const acceptedReview =
+      sourceCreationReview &&
+      sourceReviewCurrent(sourceCreationReview) &&
+      !sourceCreationReview.editing &&
+      (sourceCreationReview.pending || sourceCreationReview.result);
+    const note = acceptedReview
+      ? ''
+      : state.progress ||
+        state.restoreMessage ||
+        (receipt.gone ? receipt.gone.message : '') ||
+        lookNote ||
+        (view.setup
+          ? view.setup.statusLine
+          : view.decided && !receipt.visible
+            ? folderOutcomeNote(state.offer)
+            : '');
     els.offerNote.replaceChildren();
     els.offerNote.hidden = !note;
     if (note) {
@@ -4738,7 +4746,8 @@ export function folderHomeMapTarget(offer) {
 
 async function navigateFolderHomeMap(homeID, action) {
   const offer = state.offer;
-  const current = reviewResponseGuard(offer);
+  const generation = state.reviewGeneration;
+  const current = () => generation === state.reviewGeneration && state.offer?.id === offer?.id;
   if (!homeID || !offer?.id) return;
   try {
     const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(offer.id)}`, {
@@ -4777,6 +4786,25 @@ export function sourceHomePlacementResult(offer, review) {
   return result;
 }
 
+// A duplicate press in a second tab may observe the original successful Home
+// phase. It can reveal that canonical Home, but cannot inherit the first press's
+// new-subject authority or apply the second tab's candidate.
+export function sourceHomeObservationResult(offer, review) {
+  const own = sourceHomePlacementResult(offer, review);
+  if (own) return own;
+  const result = offer?.home_result;
+  if (
+    !review?.home ||
+    !review.acceptedRequestID ||
+    !result?.request_id ||
+    result.offer_id !== review.offerID ||
+    result.plan_digest !== review.planDigest ||
+    result.state !== 'ready'
+  )
+    return null;
+  return { ...result, created_by_this_operation: false, layout_subject_new: false };
+}
+
 function sourceReviewMapAvailable() {
   const plan = state.offer?.plan;
   const viewport = document.querySelector('[data-ws-map-viewport]');
@@ -4793,9 +4821,14 @@ function sourceReviewMapAvailable() {
 }
 
 function sourceReviewRestore(review) {
+  const canReturn = window.OriWorkspaceMap?.canReturnFromPlacement?.(review.token) !== false;
   window.OriWorkspaceMap?.endPlacement?.(review.token);
   if (!sourceReviewCurrent(review)) return;
   review.onMap = false;
+  const dialogOpen = Array.from(
+    document.querySelectorAll?.('[role="dialog"], .modal.show') || []
+  ).some(dialog => dialog.getClientRects?.().length);
+  if (!canReturn || dialogOpen) return;
   if (!state.reviewSlot) enterThread({ byUser: false });
   window.PersonalAssistantPanel?.open?.(document.getElementById('personalAssistantLauncher'), {
     focus: false,
@@ -4828,6 +4861,17 @@ function renderSourceCreationReview() {
     review.editing = true;
     if (review.onMap) sourceReviewRestore(review);
   }
+  // A changed destination or unavailable provider can withdraw the plan
+  // entirely. Hand back to the source owner's fresh-review controls rather
+  // than rendering (or confirming) the old Home terms against a missing plan.
+  if (
+    review &&
+    sourceReviewCurrent(review) &&
+    !review.pending &&
+    !review.result &&
+    (!offer?.plan || (review.home && !sourceHomeReviewPlan(offer.plan)))
+  )
+    review.editing = true;
   const active =
     sourceCreationReview === review && review && sourceReviewCurrent(review) && !review.editing;
   parent.classList.toggle('pa-folder--shared-review', Boolean(active));
@@ -4850,7 +4894,7 @@ function renderSourceCreationReview() {
     review.pending &&
     (review.home
       ? Boolean(
-          sourceHomePlacementResult(offer, review) &&
+          sourceHomeObservationResult(offer, review) &&
           (offer.setup?.stop_reason === 'handoff_ready' || offer.status === 'resolved')
         )
       : offer.status === 'resolved' && offer.outcome?.workspace_id) &&
@@ -4950,6 +4994,79 @@ function renderSourceCreationReview() {
   });
 }
 
+function sameSourcePoint(first, second) {
+  return Boolean(first && second && first.x === second.x && first.y === second.y);
+}
+
+async function readHomePlacementAuthority(review) {
+  const response = await fetch(
+    `${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(review.offerID)}`,
+    { cache: 'no-store' }
+  );
+  if (!response.ok) throw new Error('The Home could not be checked. No position was saved.');
+  const payload = await response.json();
+  const home = sourceHomePlacementResult(payload?.folder_digest?.offer, review);
+  if (
+    !home ||
+    home.state !== 'ready' ||
+    home.home_id !== review.result?.id ||
+    home.created_by_this_operation !== true ||
+    home.layout_subject_new !== true
+  ) {
+    const error = new Error(
+      'The original Home no longer has verified placement authority. Read its saved status; no work was repeated.'
+    );
+    error.authorityLost = true;
+    throw error;
+  }
+  return home;
+}
+
+async function retrySourceHomePosition(review) {
+  if (!review.candidate) return;
+  review.observing = true;
+  render();
+  try {
+    await readHomePlacementAuthority(review);
+    if (!sourceReviewCurrent(review)) return;
+    const refreshed = await window.OriHomeCockpit?.refreshQuietly?.();
+    if (!sourceReviewCurrent(review)) return;
+    const map = window.OriWorkspaceMap;
+    if (
+      refreshed !== true ||
+      !(await map?.refreshLayout?.({ current: () => sourceReviewCurrent(review) }))
+    )
+      throw new Error('Current map data is unavailable. The Home is kept; no position was saved.');
+    if (!sourceReviewCurrent(review)) return;
+    const saved = map.getLayoutState().positions[review.result.id];
+    if (saved && !sameSourcePoint(saved, review.candidate))
+      throw new Error(
+        'The Home already has a different saved position. Use Move group to change it explicitly.'
+      );
+    // A lost layout acknowledgement is observed, not written again.
+    review.positionFailed =
+      !sameSourcePoint(saved, review.candidate) &&
+      (await map.retryPlacement(review.result.id, review.candidate, { kind: 'group' })) !== true;
+    if (!sourceReviewCurrent(review)) return;
+    review.message = review.positionFailed
+      ? 'The requested point is not available. The Home is kept. Use Move group; no setup work was repeated.'
+      : 'The requested position is saved. No setup work was repeated.';
+  } catch (error) {
+    if (!sourceReviewCurrent(review)) return;
+    review.message = error.message;
+    if (error.authorityLost) {
+      review.result = null;
+      review.positionFailed = false;
+      review.observeFailed = true;
+    }
+  } finally {
+    if (sourceReviewCurrent(review)) {
+      review.observing = false;
+      render();
+    }
+  }
+}
+
 async function actOnSourceCreationReview(review, { action, field, value }) {
   if (!sourceReviewCurrent(review) || state.busy || review.observing) return;
   if (action === 'read-status') {
@@ -4964,6 +5081,7 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     return;
   }
   if (action === 'retry-position' && review.result?.id && review.positionFailed) {
+    if (review.home) return retrySourceHomePosition(review);
     review.positionFailed =
       (await window.OriWorkspaceMap?.retryPlacement?.(review.result.id, review.candidate)) !== true;
     review.message = review.positionFailed
@@ -5055,7 +5173,11 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
         if (!review.candidate || !sourceReviewMapAvailable()) return false;
         review.pending = true;
         await startOneCardSetup({ reviewedSourceKey: review.key });
-        if (sourceReviewCurrent(review) && !review.pending) sourceReviewRestore(review);
+        if (!sourceReviewCurrent(review)) {
+          window.OriWorkspaceMap?.endPlacement?.(review.token);
+          return false;
+        }
+        if (!review.pending) sourceReviewRestore(review);
         return review.pending;
       },
       onBack: () => sourceReviewRestore(review)
@@ -5074,7 +5196,7 @@ async function observeSourceCreationResult(review) {
   if (!sourceReviewCurrent(review) || review.observing) return;
   const offer = state.offer,
     outcome = offer?.outcome,
-    home = sourceHomePlacementResult(offer, review);
+    home = sourceHomeObservationResult(offer, review);
   review.observing = true;
   try {
     if (review.home && (home?.state !== 'ready' || !home.home_id))
@@ -5096,18 +5218,48 @@ async function observeSourceCreationResult(review) {
     review.result = resource;
     review.homeRoute = home?.route;
     review.existing = review.home ? !createdHere : outcome.existing === true;
-    await window.OriHomeCockpit?.refreshQuietly?.();
+    if (
+      review.candidate &&
+      window.OriWorkspaceMap?.canReturnFromPlacement?.(review.token) === false
+    ) {
+      review.positionFailed = true;
+      review.message =
+        'Setup is verified. A newer map editor owns this view; its selection and position were not changed.';
+      return;
+    }
+    const refreshed = await window.OriHomeCockpit?.refreshQuietly?.();
     if (!sourceReviewCurrent(review)) return;
-    if (review.home) await window.OriHomeCockpit?.refreshLibraryBadges?.({ force: true });
+    if (review.home)
+      await Promise.resolve(window.OriHomeCockpit?.refreshLibraryBadges?.({ force: true })).catch(
+        () => {}
+      );
     if (!sourceReviewCurrent(review)) return;
+    if (review.home && !createdHere) {
+      await window.OriWorkspaceMap?.refreshLayout?.({ current: () => sourceReviewCurrent(review) });
+      if (!sourceReviewCurrent(review)) return;
+    }
     review.positionUnproven = Boolean(review.candidate && !review.existing && !createdHere);
     if (review.candidate && createdHere && !review.positionAttempted) {
       review.positionAttempted = true;
-      const result = await window.OriWorkspaceMap?.commitPlacement?.(resource.id, {
-        token: review.token,
-        candidate: review.candidate,
-        select: false
-      });
+      const map = window.OriWorkspaceMap;
+      let mapReady = true;
+      if (review.home) {
+        await readHomePlacementAuthority(review);
+        if (!sourceReviewCurrent(review)) return;
+        mapReady =
+          refreshed === true &&
+          (await map?.refreshLayout?.({ current: () => sourceReviewCurrent(review) }));
+        if (!sourceReviewCurrent(review)) return;
+      }
+      const saved = review.home && map?.getLayoutState?.().positions[resource.id];
+      const result =
+        mapReady && !saved
+          ? await map?.commitPlacement?.(resource.id, {
+              token: review.token,
+              candidate: review.candidate,
+              select: false
+            })
+          : { saved: sameSourcePoint(saved, review.candidate) };
       if (!sourceReviewCurrent(review)) return;
       review.positionFailed = result?.saved !== true;
     }
@@ -5118,8 +5270,12 @@ async function observeSourceCreationResult(review) {
         : review.home
           ? `${review.existing ? 'Existing Home kept in place.' : 'Home setup verified.'} Library entries are not project buildings. Open a project separately from the Home; no project was opened by placement.`
           : 'Canonical source outcome and current membership verified. No work was repeated.';
-  } catch {
+  } catch (error) {
     if (sourceReviewCurrent(review)) {
+      if (review.home && review.positionAttempted && review.result) {
+        review.positionFailed = !error.authorityLost;
+        if (error.authorityLost) review.result = null;
+      }
       // Never re-read automatically: each attempt would re-render and read
       // again. Read saved status is the explicit retry.
       review.observeFailed = true;
@@ -5171,7 +5327,10 @@ async function startOneCardSetup(action) {
       return;
   }
   const offer = state.offer;
-  const current = reviewResponseGuard(offer);
+  const owner =
+    sourceCreationReview && sourceReviewCurrent(sourceCreationReview) ? sourceCreationReview : null;
+  const responseCurrent = reviewResponseGuard(offer);
+  const current = () => responseCurrent() && (!owner || sourceReviewCurrent(owner));
   if (!offer?.id || state.busy || conversationReviewLoading() || prerequisites.active()) return;
   if (offer.needs_pick) {
     showOfferFailure({
@@ -5212,6 +5371,10 @@ async function startOneCardSetup(action) {
     if (brief !== null) body.brief = brief;
     // Watching is the user's own tick, sent with the click and not part of the plan.
     if (offer.plan?.monitoring && monitoringChosen(offer)) body.monitoring = true;
+    if (!current()) return;
+    // The old turn's “nothing is set up until you confirm” summary is no
+    // longer current once delivery begins, even if the reply is later lost.
+    window.PersonalAssistantFolderSetup?.applyReviewContext?.(null);
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
@@ -5257,8 +5420,10 @@ async function startOneCardSetup(action) {
       );
     }
   } finally {
-    state.busy = false;
-    render();
+    if (current()) {
+      state.busy = false;
+      render();
+    }
   }
 }
 

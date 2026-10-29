@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
   sourceHomePlacementResult,
+  sourceHomeObservationResult,
   sourceHomeReviewPlan,
   folderHomeMapTarget
 } from './personal-assistant-folder.js';
@@ -13,7 +14,7 @@ const source = readFileSync(new URL('./personal-assistant-folder.js', import.met
 // Execute the real source controller, isolating only browser/owner I/O. Domain
 // creation and proof are covered separately by real-server acceptance.
 function controller() {
-  const effects = { setup: 0, position: 0, returned: 0 };
+  const effects = { setup: 0, position: 0, returned: 0, proofReads: 0, layoutReads: 0, retries: 0 };
   const state = {
     reviewGeneration: 1,
     reviewSlot: true,
@@ -33,6 +34,7 @@ function controller() {
   const context = vm.createContext({
     state,
     effects,
+    DIGEST_ENDPOINT: '/digest',
     console,
     document: {
       querySelector: () => ({ getClientRects: () => [1] }),
@@ -41,7 +43,16 @@ function controller() {
     window: {
       innerWidth: 1200,
       OriWorkspaceMap: {
-        getLayoutState: () => ({ status: 'ready' }),
+        getLayoutState: () => ({ status: 'ready', positions: {} }),
+        refreshLayout: async options => {
+          effects.layoutReads++;
+          return options.current();
+        },
+        retryPlacement: async (_id, _point, options) => {
+          effects.retries++;
+          assert.equal(options.kind, 'group');
+          return true;
+        },
         beginPlacement: spec => {
           placement = spec;
           return true;
@@ -58,7 +69,7 @@ function controller() {
           effects.returned++;
         }
       },
-      OriHomeCockpit: { refreshQuietly: async () => {} }
+      OriHomeCockpit: { refreshQuietly: async () => true }
     },
     OriFolderSetupVisual: { briefError: () => '', setupAcceptedLine: () => '' },
     render() {},
@@ -95,10 +106,16 @@ function controller() {
       };
       return { ok: true, payload: {} };
     },
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({ id: 'home', kind: 'group', name: 'Music Home' })
-    })
+    fetch: async url => {
+      if (url.startsWith('/digest')) effects.proofReads++;
+      return {
+        ok: true,
+        json: async () =>
+          url.startsWith('/digest')
+            ? { folder_digest: { offer: state.offer } }
+            : { id: 'home', kind: 'group', name: 'Music Home' }
+      };
+    }
   });
   const code = source.slice(
     source.indexOf('let sourceCreationReview = null;'),
@@ -106,7 +123,7 @@ function controller() {
   );
   vm.runInContext(
     code.replaceAll('export function ', 'function ') +
-      '\nglobalThis.harness = { startOneCardSetup, actOnSourceCreationReview, observeSourceCreationResult, sourceReviewMapAvailable, review: () => sourceCreationReview };',
+      '\nglobalThis.harness = { startOneCardSetup, actOnSourceCreationReview, observeSourceCreationResult, renderSourceCreationReview, sourceReviewMapAvailable, review: () => sourceCreationReview };',
     context
   );
   return { ...context.harness, context, state, effects, placement: () => placement };
@@ -140,6 +157,63 @@ test('Home proof binds the original accepted offer, plan and press, not the late
     );
   }
   assert.equal(sourceHomePlacementResult({ home_result: home }, {}), null);
+});
+
+test('a second press may observe the original Home but cannot inherit new-placement proof', async () => {
+  const review = {
+    home: true,
+    offerID: 'offer',
+    planDigest: 'digest',
+    acceptedRequestID: 'second'
+  };
+  const home = {
+    offer_id: 'offer',
+    plan_digest: 'digest',
+    request_id: 'first',
+    state: 'ready',
+    home_id: 'home',
+    created_by_this_operation: true,
+    layout_subject_new: true
+  };
+  const observed = sourceHomeObservationResult({ home_result: home }, review);
+  assert.equal(observed.home_id, 'home');
+  assert.equal(observed.layout_subject_new, false);
+  assert.equal(observed.created_by_this_operation, false);
+  assert.equal(home.layout_subject_new, true, 'the canonical original proof is not rewritten');
+  for (const changed of [{ offer_id: 'other' }, { plan_digest: 'other' }, { state: 'partial' }])
+    assert.equal(
+      sourceHomeObservationResult({ home_result: { ...home, ...changed } }, review),
+      null
+    );
+  const c = controller();
+  await c.startOneCardSetup({});
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
+  c.state.offer.home_result.request_id = 'first-tab';
+  await c.observeSourceCreationResult(c.review());
+  assert.equal(c.review().result.id, 'home');
+  assert.equal(c.review().existing, true);
+  assert.equal(c.effects.position, 0);
+});
+
+test('a withdrawn or changed Home plan returns to source review without stale terms or effects', async () => {
+  for (const plan of [
+    undefined,
+    { digest: 'different', visual: { entity: { kind: 'workspace' } } }
+  ]) {
+    const c = controller();
+    await c.startOneCardSetup({});
+    const host = { hidden: false };
+    c.context.elements = () => ({
+      offer: { classList: { toggle() {} }, querySelector: () => host }
+    });
+    c.state.offer.plan = plan;
+    c.renderSourceCreationReview();
+    assert.equal(c.review().editing, true);
+    assert.equal(host.hidden, true);
+    assert.equal(c.effects.setup, 0);
+    assert.equal(c.effects.position, 0);
+  }
 });
 
 test('enter, hover and Back retain review and candidate with no domain effects; final gesture dispatches once', async () => {
@@ -187,6 +261,31 @@ test('automatic mode only clears candidate; hidden/narrow/read-only maps cannot 
   assert.equal(c.effects.position, 0);
 });
 
+test('lost confirmation retires the old nothing-is-set-up summary without claiming success or resending', async () => {
+  const c = controller();
+  let cleared = 0;
+  c.context.window.PersonalAssistantFolderSetup = {
+    applyReviewContext(value) {
+      assert.equal(value, null);
+      cleared++;
+    }
+  };
+  await c.startOneCardSetup({});
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  assert.equal(cleared, 0);
+  c.context.postOffer = async () => {
+    c.effects.setup++;
+    throw new Error('lost delivery');
+  };
+  await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
+  assert.equal(cleared, 1);
+  assert.match(c.review().message, /delivery is unknown/);
+  assert.equal(c.review().result, undefined);
+  await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
+  assert.equal(c.effects.setup, 1);
+  assert.equal(c.effects.position, 0);
+});
+
 test('changed material or replacement editor refuses final gesture without setup', async () => {
   for (const mutate of [
     c => {
@@ -225,6 +324,127 @@ test('reused/history Home navigation requires canonical identity, never the name
     folderHomeMapTarget({ outcome: { workspace_id: 'song', name: 'Music Production Home' } }),
     ''
   );
+});
+
+async function failedPosition() {
+  const c = controller();
+  await c.startOneCardSetup({});
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
+  c.context.window.OriWorkspaceMap.commitPlacement = async () => {
+    c.effects.position++;
+    return { saved: false };
+  };
+  await c.observeSourceCreationResult(c.review());
+  assert.equal(c.review().positionFailed, true);
+  return c;
+}
+
+test('position-only retry rereads exact Home authority and live layout, never setup', async () => {
+  const c = await failedPosition();
+  const reads = c.effects.proofReads;
+  await c.actOnSourceCreationReview(c.review(), { action: 'retry-position' });
+  assert.equal(c.effects.setup, 1);
+  assert.equal(c.effects.position, 1);
+  assert.equal(c.effects.proofReads, reads + 1);
+  assert.equal(c.effects.layoutReads, 2);
+  assert.equal(c.effects.retries, 1);
+  assert.equal(c.review().positionFailed, false);
+});
+
+test('a saved but unacknowledged position is observed without another PATCH', async () => {
+  const c = await failedPosition();
+  c.context.window.OriWorkspaceMap.getLayoutState = () => ({
+    status: 'ready',
+    positions: { home: c.review().candidate }
+  });
+  await c.actOnSourceCreationReview(c.review(), { action: 'retry-position' });
+  assert.equal(c.effects.retries, 0);
+  assert.equal(c.effects.setup, 1);
+  assert.equal(c.review().positionFailed, false);
+});
+
+test('changed Home identity/proof/phase refuses position repair', async () => {
+  for (const change of [
+    { home_id: 'replacement' },
+    { state: 'partial' },
+    { state: 'unavailable' },
+    { created_by_this_operation: false },
+    { layout_subject_new: false },
+    { request_id: 'other' }
+  ]) {
+    const c = await failedPosition();
+    Object.assign(c.state.offer.home_result, change);
+    await c.actOnSourceCreationReview(c.review(), { action: 'retry-position' });
+    assert.equal(c.effects.retries, 0);
+    assert.equal(c.effects.setup, 1);
+    assert.equal(c.review().result, null);
+    assert.equal(c.review().observeFailed, true);
+  }
+});
+
+test('changed position, occupancy, or failed map refresh cannot silently substitute a point', async () => {
+  for (const failure of ['moved', 'occupied', 'tree-unavailable', 'layout-unavailable']) {
+    const c = await failedPosition();
+    const map = c.context.window.OriWorkspaceMap;
+    if (failure === 'moved')
+      map.getLayoutState = () => ({ status: 'ready', positions: { home: { x: 1, y: 2 } } });
+    if (failure === 'occupied') map.retryPlacement = async () => false;
+    if (failure === 'tree-unavailable')
+      c.context.window.OriHomeCockpit.refreshQuietly = async () => false;
+    if (failure === 'layout-unavailable') map.refreshLayout = async () => false;
+    await c.actOnSourceCreationReview(c.review(), { action: 'retry-position' });
+    assert.equal(c.effects.setup, 1);
+    assert.equal(c.effects.retries, 0);
+    assert.equal(c.review().positionFailed, true);
+  }
+});
+
+test('late proof or accepted reply cannot release a newer owner busy state or save geometry', async () => {
+  const c = await failedPosition();
+  let resolve;
+  c.context.fetch = () =>
+    new Promise(done => {
+      resolve = done;
+    });
+  const repair = c.actOnSourceCreationReview(c.review(), { action: 'retry-position' });
+  c.state.reviewGeneration++;
+  c.state.busy = true;
+  resolve({ ok: true, json: async () => ({ folder_digest: { offer: c.state.offer } }) });
+  await repair;
+  assert.equal(c.effects.retries, 0);
+  assert.equal(c.state.busy, true);
+
+  const d = controller();
+  await d.startOneCardSetup({});
+  await d.actOnSourceCreationReview(d.review(), { action: 'place' });
+  d.context.postOffer = () =>
+    new Promise(done => {
+      resolve = done;
+    });
+  const accepted = d.placement().onConfirm(d.review().token, { x: 10, y: 20 });
+  d.state.reviewGeneration++;
+  d.state.busy = true;
+  resolve({ ok: true, payload: {} });
+  await accepted;
+  assert.equal(d.state.busy, true);
+  assert.equal(d.effects.position, 0);
+});
+
+test('a newer map editor prevents old completion refresh, positioning, and focus return', async () => {
+  const c = controller();
+  await c.startOneCardSetup({});
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
+  c.context.window.OriWorkspaceMap.canReturnFromPlacement = () => false;
+  c.context.window.OriHomeCockpit.refreshQuietly = async () => {
+    throw new Error('must not repaint newer editor');
+  };
+  await c.observeSourceCreationResult(c.review());
+  assert.equal(c.review().result.id, 'home');
+  assert.equal(c.effects.position, 0);
+  assert.equal(c.effects.returned, 0);
+  assert.equal(c.effects.layoutReads, 0);
 });
 
 test('shared renderer uses truthful owner labels and escapes Home names', () => {
