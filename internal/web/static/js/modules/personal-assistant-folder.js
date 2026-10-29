@@ -4659,6 +4659,7 @@ function renderSourceCreationReview() {
     offer.status === 'resolved' &&
     offer.outcome?.workspace_id &&
     !review.observing &&
+    !review.observeFailed &&
     !review.result
   )
     void observeSourceCreationResult(review);
@@ -4724,6 +4725,8 @@ function renderSourceCreationReview() {
 async function actOnSourceCreationReview(review, { action, field, value }) {
   if (!sourceReviewCurrent(review) || state.busy || review.observing) return;
   if (action === 'read-status') {
+    // One explicit re-read; a failure waits for the next explicit request.
+    review.observeFailed = false;
     await pollSetup();
     render();
     return;
@@ -4835,15 +4838,17 @@ async function observeSourceCreationResult(review) {
     });
     const resource = await response.json();
     if (!sourceReviewCurrent(review)) return;
-    if (
-      !response.ok ||
-      resource.id !== outcome.workspace_id ||
-      (!outcome.existing && resource.shared_data?.folder_digest_offer_id !== offer.id)
-    )
+    // The server-resolved offer outcome names the workspace. Reviewed setup
+    // runs (for example a plugin's) do not stamp the ordinary-create offer
+    // marker, so the marker only proves "new here" for positioning.
+    if (!response.ok || resource.id !== outcome.workspace_id)
       throw new Error('Unverified source outcome');
+    const createdHere =
+      !outcome.existing && resource.shared_data?.folder_digest_offer_id === offer.id;
     review.result = resource;
     review.existing = outcome.existing === true;
-    if (review.candidate && !review.existing && !review.positionAttempted) {
+    review.positionUnproven = Boolean(review.candidate && !review.existing && !createdHere);
+    if (review.candidate && createdHere && !review.positionAttempted) {
       review.positionAttempted = true;
       const result = await window.OriWorkspaceMap?.commitPlacement?.(resource.id, {
         token: review.token,
@@ -4855,15 +4860,23 @@ async function observeSourceCreationResult(review) {
     }
     review.message = review.positionFailed
       ? 'Workspace verified; requested position not saved. Retry position only.'
-      : 'Canonical source outcome and current membership verified. No work was repeated.';
+      : review.positionUnproven
+        ? 'Canonical source outcome verified. This setup does not prove the workspace is new here, so its requested position was not applied; automatic layout keeps it. No work was repeated.'
+        : 'Canonical source outcome and current membership verified. No work was repeated.';
   } catch {
-    if (sourceReviewCurrent(review))
+    if (sourceReviewCurrent(review)) {
+      // Never re-read automatically: each attempt would re-render and read
+      // again. Read saved status is the explicit retry.
+      review.observeFailed = true;
       review.message =
         'The original result could not be verified. Read its saved status; do not start setup again.';
+    }
   } finally {
     if (sourceReviewCurrent(review)) {
       review.observing = false;
-      sourceReviewRestore(review);
+      // Only a return from the Map reopens the drawer; otherwise just redraw.
+      if (review.onMap) sourceReviewRestore(review);
+      else render();
     }
   }
 }

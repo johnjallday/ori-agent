@@ -625,6 +625,75 @@ test.describe('ordinary attached-source review on a real isolated host', () => {
       expect(model.calls()).toBe(calls);
     });
 
+  test('an unverifiable Home source result is stated once and never re-read in a loop', async ({
+    page,
+    request
+  }) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ori-home-source-loop-')));
+    writeFileSync(join(root, 'go.mod'), 'module example.org/home-loop\n\ngo 1.24\n', {
+      mode: 0o600
+    });
+    const picked = await request.post('/api/folder-picker/select-path', { data: { path: root } });
+    expect(picked.ok()).toBeTruthy();
+    const scanned = await request.post('/api/personal-assistant/folder-digest/scan', {
+      data: { selection_token: (await picked.json()).selection_token }
+    });
+    expect(scanned.ok(), await scanned.text()).toBeTruthy();
+    const offer = (await scanned.json()).offer;
+    const reviewed = await request.post(
+      `/api/personal-assistant/folder-digest/offers/${offer.id}/review`,
+      { data: { request_id: randomUUID() } }
+    );
+    expect(reviewed.ok(), await reviewed.text()).toBeTruthy();
+    await request.post('/api/onboarding/skip');
+    // Only the first canonical result read fails; nothing else is faked.
+    let failNextRead = false;
+    await page.route(/\/api\/workspaces\/[0-9a-f-]{36}$/, async route => {
+      if (route.request().method() === 'GET' && failNextRead) {
+        failNextRead = false;
+        await route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } });
+        return;
+      }
+      await route.continue();
+    });
+    let resultReads = 0,
+      stateReads = 0;
+    page.on('request', sent => {
+      const path = new URL(sent.url()).pathname;
+      if (sent.method() !== 'GET') return;
+      if (/^\/api\/workspaces\/[0-9a-f-]{36}$/.test(path)) resultReads++;
+      if (path === '/api/personal-assistant') stateReads++;
+    });
+    await page.goto('/');
+    await page.waitForFunction(() =>
+      Boolean((window as any).PersonalAssistantFolder?.showHomeReview)
+    );
+    await page.evaluate(async id => {
+      (window as any).PersonalAssistantPanel.open(
+        document.getElementById('personalAssistantLauncher')
+      );
+      await (window as any).PersonalAssistantFolder.showHomeReview(id);
+    }, offer.id);
+    const showNeeds = page.getByRole('button', { name: 'Show', exact: true });
+    if (await showNeeds.isVisible()) await showNeeds.click();
+    await page.locator('[data-folder-action="setup"]').filter({ visible: true }).first().click();
+    const review = page.locator('[data-source-creation-review]');
+    await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    failNextRead = true;
+    await review.getByRole('button', { name: 'Create & prepare workspace', exact: true }).click();
+    await expect(review).toContainText('The original result could not be verified', {
+      timeout: 15000
+    });
+    const settled = { resultReads, stateReads };
+    await page.waitForTimeout(4000);
+    expect(resultReads - settled.resultReads, 'no automatic result re-read').toBe(0);
+    expect(stateReads - settled.stateReads, 'no assistant refresh loop').toBeLessThanOrEqual(1);
+    await review.getByRole('button', { name: 'Read saved status', exact: true }).click();
+    await expect(
+      review.getByRole('heading', { name: 'Workspace created', exact: true })
+    ).toBeVisible({ timeout: 15000 });
+  });
+
   test('a real page link keeps its observed identity, refuses private replacement and creates only after reviewed confirmation', async ({
     page,
     request
