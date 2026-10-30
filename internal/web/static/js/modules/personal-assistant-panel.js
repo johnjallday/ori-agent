@@ -14,6 +14,7 @@ import {
   switchLockMessage
 } from './personal-assistant-recipient.js';
 import { mountFirstLookReports } from './first-look-report.js';
+import { briefModeView, briefSend } from './personal-assistant-brief-mode.js';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
 const PANEL_OPEN_KEY = 'ori.personalAssistant.panelOpen';
@@ -331,19 +332,28 @@ export function assistantMoreLinks(today) {
 /** Where what needs the user is listed: Home, with the drawer open. */
 export const NEEDS_YOU_URL = '/?panel=today';
 
+// A workspace's own page, where the drawer talks to the workspace's entry agent.
+const WORKSPACE_PAGE_PATH = /^\/workspaces\/[^/?#]+(?:\/|$)/;
+
 // A console deep link owns its panel/focus. Restoring this drawer must neither
 // consume the other owner's query nor hide the requested backup console.
-export function assistantPanelOpenIntent(search, hasToday) {
+// `consumes` is the `panel` value this drawer takes from the URL once it opens,
+// so Back and refresh do not ask again.
+export function assistantPanelOpenIntent(search, hasToday, pathname = '') {
   const params = new URLSearchParams(search);
   const panel = params.get('panel');
-  const requestedOpen = Boolean(hasToday) && panel === 'today';
+  const today = Boolean(hasToday) && panel === 'today';
+  // `?panel=assistant` on a workspace page opens the drawer on its entry agent
+  // (a song's hand-off lands on its Home this way).
+  const assistant = panel === 'assistant' && WORKSPACE_PAGE_PATH.test(String(pathname || ''));
   return {
-    requestedOpen,
+    requestedOpen: today || assistant,
     restoreAllowed: panel !== 'backup-recovery',
     // `/?panel=today` is the way to what needs the user (the "N need you"
     // line, the HQ card, a locked mission), so it opens Today's strip too.
     // `&folder=show` is the way to the folder flow in the conversation.
-    revealToday: requestedOpen && !params.has('folder')
+    revealToday: today && !params.has('folder'),
+    consumes: today || assistant ? panel : ''
   };
 }
 
@@ -1041,9 +1051,14 @@ function renderIdentity() {
   else els.title.textContent = title;
   renderPicker(who);
   // An attached folder belongs to the hired assistant's conversation only.
+  const brief = currentBriefMode();
   els.input.placeholder = who.personal
     ? composerPlaceholder(who, state.folderPlaceholder)
-    : who.placeholder;
+    : brief.on
+      ? brief.placeholder
+      : who.placeholder;
+  els.send.textContent = brief.on ? brief.sendLabel : 'Send';
+  els.form?.toggleAttribute?.('data-brief-mode', brief.on);
   els.input.disabled = !who.available;
   els.send.disabled = !who.available || state.pending;
   if (els.modelSetup)
@@ -1585,6 +1600,34 @@ export function entryAgentSendRecipient(recipient, sessionId) {
   };
 }
 
+/** Brief mode for this tab now: the Home manager's one offered song, or off. */
+function currentBriefMode() {
+  return briefModeView({
+    recipient: recipients()?.current?.(),
+    offers: window.PersonalAssistantHomeOffer?.state?.()
+  });
+}
+
+/**
+ * Send in brief mode: the text becomes the card's brief and the user's message
+ * in the thread. Nothing is routed, created or run.
+ */
+function useAsBrief(brief) {
+  if (brief.action === 'none') return false;
+  if (brief.action === 'tooLong') {
+    setStatus(brief.message);
+    return false;
+  }
+  const offer = window.PersonalAssistantHomeOffer;
+  if (!offer?.setBrief) return false;
+  offer.setBrief(brief.offerID, brief.brief);
+  window.OriAskRouting?.appendMessage?.('user', brief.brief);
+  clearComposer();
+  setStatus('');
+  offer.announce?.(`Brief saved: ${brief.brief}`);
+  return true;
+}
+
 /** Empties the composer after it was used for something other than a turn. */
 function clearComposer() {
   state.draft = '';
@@ -1639,6 +1682,10 @@ async function submit(event) {
   const composerDraft = String(state.els?.input?.value || '');
   const typed = composerDraft.trim();
   if (composerCommand(typed) === 'clear') return clearConversation(who);
+  // A reply to a Home's manager offering one song is that song's brief: it is
+  // never routed, so no session is created and no turn runs.
+  const brief = briefSend(currentBriefMode(), composerDraft);
+  if (brief.action !== 'turn') return useAsBrief(brief);
   // An empty Send explores an attached folder or link only in the hired
   // assistant's conversation; neither is attached to a workspace agent's turn.
   const text = assistantSendText({
@@ -1982,10 +2029,17 @@ function init() {
   }
   syncPanelViewport();
   renderHeader();
-  // `/?panel=today` opens the drawer on Home. Wait for the server-owned
-  // identity first; a query string must not make an unhired assistant appear
-  // hired.
-  const intent = assistantPanelOpenIntent(window.location.search, Boolean(state.els.todayBanner));
+  // `/?panel=today` opens the drawer on Home, `?panel=assistant` on a
+  // workspace's page. Wait for the server-owned identity first; a query string
+  // must not make an unhired assistant appear hired.
+  const intent = assistantPanelOpenIntent(
+    window.location.search,
+    Boolean(state.els.todayBanner),
+    window.location.pathname
+  );
+  // Kept after the param leaves the address bar: a module that loads later
+  // (the Home manager's offer) still knows this page was arrived at this way.
+  state.arrival = intent.consumes;
   void refresh().then(() => {
     if (!intent.restoreAllowed || !(intent.requestedOpen || tabValue(PANEL_OPEN_KEY) === '1'))
       return;
@@ -1997,7 +2051,7 @@ function init() {
       return;
     }
     const url = new URL(window.location.href);
-    if (intent.requestedOpen && url.searchParams.get('panel') === 'today') {
+    if (intent.consumes && url.searchParams.get('panel') === intent.consumes) {
       url.searchParams.delete('panel');
       window.history.replaceState(null, '', url.pathname + url.search + url.hash);
     }
@@ -2015,6 +2069,8 @@ const api = {
     return open(trigger, { workActivity: true, focus: options.focus === true });
   },
   isOpen: () => state.open,
+  // The `panel` value this page load arrived with ('today', 'assistant' or '').
+  arrival: () => state.arrival || '',
   // Whether this opening came from a link to what needs the user
   // (`/?panel=today`), so Home's Today opens its strip.
   todayRequested: () => state.open && state.todayRequested === true,
@@ -2032,6 +2088,9 @@ const api = {
   setFolderBusy,
   syncViewport: syncPanelViewport,
   refreshWorkspaceContext,
+  // The Home manager's offer changed (Not now, the press, a new read): brief
+  // mode follows it.
+  syncBriefMode: () => renderIdentity(),
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;
