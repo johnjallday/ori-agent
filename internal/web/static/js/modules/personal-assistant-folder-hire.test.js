@@ -90,19 +90,26 @@ const handoffStop = (extra = {}) => ({
 });
 
 test('a single song whose Home is ready leads to the Home', () => {
+  const landing = '/workspaces/music-home?mode=map&panel=assistant';
   const view = setupRunView(
-    handoffStop({
-      suggested_in: { name: 'Music Production Home', route: '/workspaces/music-home/assistant' }
-    }),
+    handoffStop({ suggested_in: { name: 'Music Production Home', route: landing } }),
     'Album-5'
   );
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label, action.href]),
     [
-      ['go-home', 'Go to Music Production Home', '/workspaces/music-home/assistant'],
+      ['go-home', 'Go to Music Production Home', landing],
       ['remove', 'Remove', undefined]
     ]
   );
+  // An older offer's stored link to the Home's dashboard page still leads there.
+  const older = setupRunView(
+    handoffStop({
+      suggested_in: { name: 'Music Production Home', route: '/workspaces/music-home/assistant' }
+    }),
+    'Album-5'
+  );
+  assert.equal(older.actions[0].href, '/workspaces/music-home/assistant');
   assert.equal(view.ask, 'open it in its Home');
   // The Home's steps are all done, so no "2 of 4" count of the song's steps.
   assert.match(
@@ -113,7 +120,12 @@ test('a single song whose Home is ready leads to the Home', () => {
 });
 
 test('a stopped song whose Home page cannot be named keeps its Open here', () => {
-  for (const suggested of [undefined, { name: 'Home', route: 'https://elsewhere.example/x' }]) {
+  for (const suggested of [
+    undefined,
+    { name: 'Home', route: 'https://elsewhere.example/x' },
+    { name: 'Home', route: '/workspaces/music-home?mode=map&panel=assistant&next=//evil' },
+    { name: 'Home', route: '/workspaces/music-home?panel=today' }
+  ]) {
     const view = setupRunView(handoffStop({ suggested_in: suggested }), 'Album-5');
     assert.deepEqual(
       view.actions.map(action => [action.id, action.label]),
@@ -335,7 +347,10 @@ test('a later song, with its Home ready, only leads to the Home', () => {
         { kind: 'handoff', name: 'Your Portfolio Manager then suggests opening My Song' },
         { kind: 'workspace', name: 'Creates a REAPER Song workspace named My Song' }
       ],
-      suggested_in: { name: 'Music Production Home', route: '/workspaces/music-home/assistant' }
+      suggested_in: {
+        name: 'Music Production Home',
+        route: '/workspaces/music-home?mode=map&panel=assistant'
+      }
     })
   );
   assert.equal(text(view.headline), 'My Song belongs in Music Production Home');
@@ -348,7 +363,7 @@ test('a later song, with its Home ready, only leads to the Home', () => {
   assert.deepEqual(
     view.actions.map(action => [action.id, action.href]),
     [
-      ['go-home', '/workspaces/music-home/assistant'],
+      ['go-home', '/workspaces/music-home?mode=map&panel=assistant'],
       ['no', undefined]
     ]
   );

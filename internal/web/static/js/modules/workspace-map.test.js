@@ -4487,6 +4487,108 @@ test('reviewed action copy is owner-supplied inert text and generic creation nev
   assert.equal(patches.length, 0);
 });
 
+test('a child reviewed on its Home’s map is a candidate only inside the Home’s frame', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { home: { x: 800, y: 900 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'home', kind: 'group', name: 'Music Production Home' }]);
+  await flush();
+  const confirmed = [];
+  const candidates = [];
+  assert.equal(
+    map.beginPlacement({
+      token: 'song-in-home',
+      mode: 'reviewed-setup',
+      initialCandidate: { x: 3000, y: 3000 },
+      preview: { name: 'Album-5', kind: 'workspace', parentID: 'home', withinParent: true },
+      onCandidate: (_token, point, problem) => candidates.push({ point, problem }),
+      onConfirm: (_token, point) => {
+        confirmed.push(point);
+        return true;
+      }
+    }),
+    true
+  );
+  // Outside the Home: not a candidate, said in the live instruction.
+  assert.match(harness.container.innerHTML, /That point is outside Music Production Home\./);
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(confirmed.length, 0, 'a point outside the Home never confirms');
+  // Inside the empty Home's frame (where its first member is drawn) it is.
+  const inside = map.groupMemberPlacement(
+    'home',
+    'album-5',
+    map.computeWorldLayout([{ id: 'home', kind: 'group', name: 'Music Production Home' }], {
+      positions: { home: { x: 800, y: 900 } }
+    })
+  );
+  map.endPlacement('song-in-home');
+  map.beginPlacement({
+    token: 'song-in-home-2',
+    mode: 'reviewed-setup',
+    initialCandidate: inside,
+    preview: { name: 'Album-5', kind: 'workspace', parentID: 'home', withinParent: true },
+    onConfirm: (_token, point) => {
+      confirmed.push(point);
+      return true;
+    }
+  });
+  assert.doesNotMatch(harness.container.innerHTML, /is outside/);
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(confirmed.length, 1);
+  assert.deepEqual({ ...confirmed[0] }, { x: inside.x, y: inside.y });
+  assert.equal(patches.length, 0, 'geometry waits for the verified workspace id');
+  // The same point without the opt-in keeps the ordinary reviewed-parent rules.
+  map.endPlacement('song-in-home-2');
+  map.beginPlacement({
+    token: 'ordinary',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 3000, y: 3000 },
+    preview: { name: 'Album-5', kind: 'workspace', parentID: 'home' }
+  });
+  assert.doesNotMatch(harness.container.innerHTML, /is outside/);
+});
+
+// The camera harness does not route placement buttons; the click itself is
+// driven in tests/music-home-map-placement.spec.ts.
+test('a host’s secondary placement action is drawn only when the host supplies one', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  const secondary = [];
+  const back = [];
+  map.beginPlacement({
+    token: 'auto',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 },
+    actionCopy: {
+      backLabel: 'Back to the conversation',
+      secondaryLabel: 'Use automatic placement'
+    },
+    onSecondary: token => secondary.push(token),
+    onBack: token => back.push(token)
+  });
+  assert.match(harness.container.innerHTML, /Back to the conversation/);
+  assert.match(
+    harness.container.innerHTML,
+    /data-ws-map-placement-secondary[^>]*>Use automatic placement/
+  );
+  // Escape is still Back, never the secondary action.
+  harness.fire('keydown', keyEvent('Escape'));
+  assert.deepEqual(back, ['auto']);
+  assert.deepEqual(secondary, []);
+  assert.equal(patches.length, 0);
+  // Without onSecondary there is no such button, and Back keeps its default.
+  map.beginPlacement({
+    token: 'plain',
+    mode: 'reviewed-setup',
+    initialCandidate: { x: 760, y: 456 }
+  });
+  assert.doesNotMatch(harness.container.innerHTML, /data-ws-map-placement-secondary/);
+  assert.match(harness.container.innerHTML, /Back to review/);
+});
+
 test('hovering placement toolbar preserves the reviewed candidate instead of moving it under the button', async () => {
   const { map, harness } = buildHarness({
     layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }

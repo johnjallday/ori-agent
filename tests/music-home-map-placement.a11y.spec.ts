@@ -76,13 +76,13 @@ async function capture(page: Page, name: string) {
   }
 }
 
-async function usable(control: Locator) {
+async function usable(control: Locator, key: 'Tab' | 'Shift+Tab' = 'Tab') {
   await control.scrollIntoViewIfNeeded();
   // Reach the action through the browser's real tab order, not focus() which
   // could hide a tabindex or focus-trap regression.
   for (let step = 0; step < 60; step++) {
     if (await control.evaluate(element => element === document.activeElement)) break;
-    await control.page().keyboard.press('Tab');
+    await control.page().keyboard.press(key);
   }
   await expect(control).toBeFocused();
   await expect(control).toBeInViewport();
@@ -254,3 +254,86 @@ async function exercise(page: Page) {
   expect((await snapshot(page.request)).positions).toEqual(after.positions);
   expect(setups).toBe(1);
 }
+
+// The Home's manager offers the waiting song in the drawer (home-manager-chat-
+// handoff). Runs on a sandbox whose Home the plain single-song case just set up
+// (scripts/music-home-placement-demo.sh --case chat-a11y).
+test('manager hand-off: keyboard-only offer, brief and placement in both themes', async ({
+  page,
+  request
+}) => {
+  test.skip(!song || variant !== 'chat', 'MUSIC_HOME_PLACEMENT_A11Y=chat after the Home setup');
+  const chatEvidence = 'tasks/evidence-home-manager-chat-handoff/a11y';
+  await fs.mkdir(chatEvidence, { recursive: true });
+  if (!axe) {
+    const asset = await request.get('https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js', {
+      timeout: 20_000
+    });
+    expect(asset.ok()).toBe(true);
+    axe = await asset.text();
+  }
+  const home = (await snapshot(request)).workspaces.find((w: any) => w.kind === 'group');
+  expect(home).toBeTruthy();
+  let setups = 0;
+  page.on('request', r => {
+    if (r.method() === 'POST' && /folder-digest\/offers\/[^/]+\/setup$/.test(r.url())) setups++;
+  });
+  const landing = `/workspaces/${home.folder_slug}?mode=map&panel=assistant`;
+  const offers = page.locator('#personalAssistantHomeOffer');
+  const offer = offers.locator('.pa-home-offer').first();
+  const live = offers.locator('[role="status"][aria-live="polite"]').last();
+  // Dark with reduced motion, then light: focus lands on the manager's message.
+  for (const scheme of ['dark', 'light'] as const) {
+    await page.addInitScript(theme => localStorage.setItem('ori-theme', theme), scheme);
+    await page.emulateMedia({
+      colorScheme: scheme,
+      reducedMotion: scheme === 'dark' ? 'reduce' : 'no-preference'
+    });
+    await page.goto(landing);
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', scheme);
+    await expect(offer).toBeVisible();
+    await expect(offer).toBeFocused();
+    // This feature's surfaces: the manager's offer and the composer it changes.
+    // (The drawer header's Model Settings link has a pre-existing target-size
+    // finding outside this feature.)
+    await accessibility(page, '#personalAssistantHomeOffer');
+    await accessibility(page, '#personalAssistantForm');
+    await noOverflow(page);
+    await page.screenshot({ path: `${chatEvidence}/offer-${scheme}.png` });
+  }
+  // A reply becomes the brief, from the keyboard, and is announced.
+  const input = page.locator('#personalAssistantInput');
+  await usable(input);
+  await page.keyboard.type('bounce stems and print a mix note');
+  const send = page.locator('#personalAssistantSend');
+  await expect(send).toHaveText('Use as brief');
+  await usable(send);
+  await page.keyboard.press('Enter');
+  await expect(offer.locator('textarea')).toHaveValue('bounce stems and print a mix note');
+  await expect(live).toContainText('Brief saved: bounce stems and print a mix note');
+  // Placement from the keyboard: start is announced, a point outside the Home is
+  // refused aloud, Escape returns focus to the offer, Enter inside opens it.
+  const press = offers.getByRole('button', { name: 'Open Ori Music Demo & hire', exact: true });
+  // From Send the card sits just above, back up the drawer's tab order.
+  await usable(press, 'Shift+Tab');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-map-live]').first()).toContainText(
+    'Placing Ori Music Demo inside Music Production Home'
+  );
+  const instruction = page.locator('[data-ws-map-placement-instruction]');
+  await expect(instruction).toHaveAttribute('aria-live', 'polite');
+  for (let step = 0; step < 40; step++) await page.keyboard.press('Shift+ArrowLeft');
+  await expect(instruction).toContainText('That point is outside Music Production Home.');
+  await page.keyboard.press('Escape');
+  await expect(offer).toBeFocused();
+  expect(setups).toBe(0);
+  await usable(press);
+  await page.keyboard.press('Enter');
+  await expect(instruction).not.toContainText('outside');
+  await page.keyboard.press('Enter');
+  await expect(offers).toContainText('Ori Music Demo is open', { timeout: 90_000 });
+  await expect(live).toContainText('Ori Music Demo is open');
+  expect(setups).toBe(1);
+  await accessibility(page, '#personalAssistantHomeOffer');
+  await page.screenshot({ path: `${chatEvidence}/receipt-light.png` });
+});

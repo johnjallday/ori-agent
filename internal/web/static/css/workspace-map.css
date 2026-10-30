@@ -686,8 +686,9 @@
   top: 14px;
   left: 50%;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 10px 14px;
   width: min(620px, calc(100% - 32px));
   transform: translateX(-50%);
   padding: 10px 12px;
@@ -697,7 +698,10 @@
 }
 .ws-map-placement-copy {
   display: grid;
-  min-width: 0;
+  /* With three actions (Back, a host's own, confirm) the buttons wrap below
+     the copy rather than squeezing it into a column. */
+  flex: 1 1 16rem;
+  min-width: min(16rem, 100%);
   gap: 2px;
   color: var(--ws-ink);
   font-size: 12px;
@@ -720,7 +724,7 @@
 }
 .ws-map-placement-buttons {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;

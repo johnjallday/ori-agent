@@ -174,7 +174,7 @@ func TestFolderHandoff_PlanOnTheRealHost(t *testing.T) {
 	if plan.SuggestedIn != nil || existing.SuggestedIn != nil {
 		t.Fatalf("a Home still to set up was offered as the place to open: %+v %+v", plan.SuggestedIn, existing.SuggestedIn)
 	}
-	if route, ok := homeSuggestionsRoute(&workspace.Workspace{FolderSlug: "music-production-home"}); !ok || route != "/workspaces/music-production-home/assistant" {
+	if route, ok := homeSuggestionsRoute(&workspace.Workspace{FolderSlug: "music-production-home"}); !ok || route != "/workspaces/music-production-home?mode=map&panel=assistant" {
 		t.Fatalf("Home route = %q %v", route, ok)
 	}
 	if _, ok := homeSuggestionsRoute(&workspace.Workspace{FolderSlug: "../x"}); ok {

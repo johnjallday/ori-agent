@@ -66,7 +66,7 @@ func TestHandoffReceipts_ReadTheSongsSetupBackInOrder(t *testing.T) {
 	if rows[1].Assigned || !rows[4].Assigned {
 		t.Fatalf("assigned = manager %v, song assistant %v", rows[1].Assigned, rows[4].Assigned)
 	}
-	if rows[3].Route != "/workspaces/album-5" || rows[3].Operation != "create" || !strings.HasSuffix(rows[0].Route, "#projectLibraryPanel") {
+	if rows[3].Route != "/workspaces/album-5" || rows[3].Operation != "create" || !strings.HasSuffix(rows[0].Route, "?mode=map&panel=assistant") {
 		t.Fatalf("routes = %+v", rows)
 	}
 	// A second song into the same Home: reused Home, manager already there,

@@ -2174,7 +2174,7 @@ an additive, read-only `home_result` on setup responses and named digest reads:
   "state": "ready",
   "home_id": "<canonical Home ID>",
   "name": "Music Production Home",
-  "route": "/workspaces/<Home slug>/assistant",
+  "route": "/workspaces/<Home slug>?mode=map&panel=assistant",
   "created_by_this_operation": true,
   "layout_subject_new": true
 }
@@ -2183,7 +2183,13 @@ an additive, read-only `home_result` on setup responses and named digest reads:
 States are `ready` (verified Home plus persisted successful phase), `partial`
 (verified Home, incomplete phase), `unproven` (no sufficient operation proof,
 including legacy records), and `unavailable` (no valid current target).
-`home_id`, `name` and `route` are optional. The accepted request/digest binding and
+`home_id`, `name` and `route` are optional. `route` is the Home's landing: its
+page in Map mode with the assistant drawer requested open on the Home's entry
+agent (`panel=assistant` is consumed once by the drawer). The same landing is
+the `route` of a single song's `suggested_in` (plan and stopped run), of the
+Needs-you row for a song waiting in its Home, and of the hand-off receipt's
+`home` row; offers stored before this change keep `/workspaces/<slug>/assistant`,
+which the browser still accepts. The accepted request/digest binding and
 canonical managed-Home provenance determine creation, never the planned name or
 an HTTP success. Only a ready result created by this exact operation has
 `layout_subject_new: true`; reuse or another tab's confirmation does not gain

@@ -343,6 +343,10 @@
       </section>
       {{if ne .CurrentPage "index"}}
       {{template "assistant-led-setup.tmpl" .}}
+      <!-- A Home's manager offering the songs waiting in the Home: its message
+           and card, first in its conversation. Host-written, never a saved turn
+           (personal-assistant-home-offer.js). Empty and hidden elsewhere. -->
+      <div id="personalAssistantHomeOffer" class="pa-home-offers" hidden></div>
       {{end}}
       <!-- The conversation: routing, planning, confirmations and replies land
            here once a request is sent, and on Home the folder flow runs here

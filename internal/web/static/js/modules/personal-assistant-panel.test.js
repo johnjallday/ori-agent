@@ -423,26 +423,98 @@ test('backup-console navigation owns focus and Today consumes only its own query
   assert.deepEqual(assistantPanelOpenIntent('?panel=backup-recovery&tab=overview', false), {
     requestedOpen: false,
     restoreAllowed: false,
-    revealToday: false
+    revealToday: false,
+    consumes: ''
   });
   // The way to what needs the user opens Today's strip as well.
   assert.deepEqual(assistantPanelOpenIntent('?panel=today', true), {
     requestedOpen: true,
     restoreAllowed: true,
-    revealToday: true
+    revealToday: true,
+    consumes: 'today'
   });
   // The way to the folder flow opens the drawer but leaves Today folded.
   assert.deepEqual(assistantPanelOpenIntent('?panel=today&folder=show', true), {
     requestedOpen: true,
     restoreAllowed: true,
-    revealToday: false
+    revealToday: false,
+    consumes: 'today'
   });
   for (const query of ['', '?panel=calendar', '?panel=file-janitor'])
     assert.deepEqual(assistantPanelOpenIntent(query, false), {
       requestedOpen: false,
       restoreAllowed: true,
-      revealToday: false
+      revealToday: false,
+      consumes: ''
     });
+});
+
+test('?panel=assistant opens the drawer on a workspace page only, consumed once', () => {
+  // A song's hand-off lands on its Home's map with the manager's drawer open.
+  for (const path of [
+    '/workspaces/music-home',
+    '/workspaces/music-home/',
+    '/workspaces/x/assistant'
+  ])
+    assert.deepEqual(
+      assistantPanelOpenIntent('?mode=map&panel=assistant', false, path),
+      { requestedOpen: true, restoreAllowed: true, revealToday: false, consumes: 'assistant' },
+      path
+    );
+  // Anywhere else the request is not this drawer's to take.
+  for (const path of ['/', '', '/workspaces', '/workspaces/', '/agents'])
+    assert.deepEqual(
+      assistantPanelOpenIntent('?panel=assistant', true, path),
+      { requestedOpen: false, restoreAllowed: true, revealToday: false, consumes: '' },
+      path
+    );
+  // Today's request is still Home's own, whatever the path.
+  assert.equal(
+    assistantPanelOpenIntent('?panel=today', false, '/workspaces/x').requestedOpen,
+    false
+  );
+});
+
+test('the drawer strips only the panel value it consumed and keeps the map mode', () => {
+  const panelSource = readFileSync(
+    new URL('./personal-assistant-panel.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(
+    panelSource,
+    /intent\.consumes && url\.searchParams\.get\('panel'\) === intent\.consumes/
+  );
+  assert.match(panelSource, /url\.searchParams\.delete\('panel'\)/);
+  assert.doesNotMatch(panelSource, /url\.searchParams\.delete\('mode'\)/);
+});
+
+test('brief mode takes Send before any routing, session or turn', () => {
+  const panelSource = readFileSync(
+    new URL('./personal-assistant-panel.js', import.meta.url),
+    'utf8'
+  );
+  const submitBody = panelSource.slice(panelSource.indexOf('async function submit(event)'));
+  const intercept = submitBody.indexOf('return useAsBrief(brief)');
+  assert.ok(intercept > 0, 'submit hands a brief to useAsBrief');
+  // Before the work controller, the model check and the routed turn.
+  for (const later of [
+    'window.OriAskRouting.submit(',
+    'PersonalAssistantModel?.beforeSend',
+    'setRecipient?.(entry'
+  ])
+    assert.ok(submitBody.indexOf(later) > intercept, later);
+  const useAsBrief = panelSource.slice(
+    panelSource.indexOf('function useAsBrief(brief)'),
+    panelSource.indexOf('/** Empties the composer after')
+  );
+  // It echoes the reply, sets the card's brief and clears the composer only.
+  assert.match(useAsBrief, /offer\.setBrief\(brief\.offerID, brief\.brief\)/);
+  assert.match(useAsBrief, /appendMessage\?\.\('user', brief\.brief\)/);
+  assert.match(useAsBrief, /clearComposer\(\)/);
+  assert.doesNotMatch(useAsBrief, /submit|fetch|\/api\/|runEntryAgentPanelTurn|sessions/);
+  // Send reads "Use as brief" and the placeholder names the song while it is on.
+  assert.match(panelSource, /els\.send\.textContent = brief\.on \? brief\.sendLabel : 'Send'/);
+  assert.match(panelSource, /brief\.on\s*\?\s*brief\.placeholder/);
 });
 
 test('only a focused control outside the scroll viewport needs reflow recovery', () => {

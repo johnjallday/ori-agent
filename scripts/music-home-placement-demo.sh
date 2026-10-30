@@ -4,14 +4,16 @@
 #   --reaper-source DIR --music-source DIR --music-ref REF
 # CASE: single, pointer, later, collection, collection-map, accept, layout, ack, occupied, partial,
 #       stale, two-tabs, competing-home, disabled-provider, deleted-home, missing-model,
-#       a11y-light, a11y-dark, a11y-touch, a11y-tree, a11y-zoom
+#       a11y-light, a11y-dark, a11y-touch, a11y-tree, a11y-zoom, chat, chat-choice, chat-a11y
+# chat: the Home is set up, then Go to lands on its map where the manager's
+# offer takes a reply as the brief and the song is placed inside the Home.
 # Uses an invented credential and a refused loopback endpoint: no paid inference.
 set -euo pipefail
 root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
 # Each explicit case owns these flags; an old shell export must not add a fault.
 unset MUSIC_HOME_PLACEMENT_FAULT MUSIC_HOME_PLACEMENT_CONFIRM MUSIC_HOME_PLACEMENT_COLLECTION \
-	MUSIC_HOME_PLACEMENT_LIBRARY MUSIC_HOME_PLACEMENT_SECOND_SONG MUSIC_HOME_PLACEMENT_A11Y MUSIC_HOME_PLACEMENT_COLLECTION_MAP
+	MUSIC_HOME_PLACEMENT_LIBRARY MUSIC_HOME_PLACEMENT_SECOND_SONG MUSIC_HOME_PLACEMENT_A11Y MUSIC_HOME_PLACEMENT_COLLECTION_MAP MUSIC_HOME_PLACEMENT_TWO_FILES
 case_name=single
 port=8956
 sources=()
@@ -25,7 +27,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 case "$case_name" in
-single | pointer | later | collection | collection-map | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
+single | chat | chat-choice | chat-a11y | pointer | later | collection | collection-map | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
 *) echo "unknown case: $case_name" >&2; exit 2 ;;
 esac
 [[ "$port" =~ ^[0-9]+$ ]] || { echo 'port must be numeric' >&2; exit 2; }
@@ -77,6 +79,20 @@ a11y-*)
 	args+=(--env "MUSIC_HOME_PLACEMENT_A11Y=${case_name#a11y-}")
 	spec=tests/music-home-map-placement.a11y.spec.ts
 	pattern='source Home' ;;
+chat) pattern='single-song' ;;
+chat-choice)
+	# A song folder with two project files: the manager asks which one to open.
+	song_dir="$sandbox/Documents/Ori Music Demo"
+	cp "$song_dir/Ori Music Demo.rpp" "$song_dir/Ori Music Demo (mix).rpp"
+	args+=(--env MUSIC_HOME_PLACEMENT_TWO_FILES=1)
+	pattern='single-song' ;;
+chat-a11y)
+	# The Home is set up by the plain journey first; the a11y spec then drives
+	# the manager's hand-off on it.
+	"$root/scripts/e2e.sh" "${args[@]}" "$spec" -- --workers=1 -g 'single-song reviewed' --output "$sandbox/evidence/placement-setup"
+	args+=(--env MUSIC_HOME_PLACEMENT_A11Y=chat)
+	spec=tests/music-home-map-placement.a11y.spec.ts
+	pattern='manager hand-off' ;;
 pointer) args+=(--env MUSIC_HOME_PLACEMENT_CONFIRM=pointer) ;;
 later)
 	"$root/scripts/smoke.sh" showfolder "http://localhost:$port" seed-song "$sandbox" Documents 'Second Song'

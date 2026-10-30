@@ -102,13 +102,17 @@ func (h *folderSetupHost) handoffPlan(ctx context.Context, req personalassistant
 	return h.bindHandoffModel(plan)
 }
 
-// homeSuggestionsRoute is a Home's own page, where its manager's suggestions are.
+// homeSuggestionsRoute is a Home's own page in map view with the drawer open on
+// its manager, who offers the waiting song there.
 func homeSuggestionsRoute(home *workspace.Workspace) (string, bool) {
 	if home == nil || !workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) {
 		return "", false
 	}
-	return "/workspaces/" + url.PathEscape(home.FolderSlug) + "/assistant", true
+	return "/workspaces/" + url.PathEscape(home.FolderSlug) + homeLandingQuery, true
 }
+
+// homeLandingQuery asks the Home's page for its map and the manager's drawer.
+const homeLandingQuery = "?mode=map&panel=assistant"
 
 // bindHandoffModel says which model the Home's new agents use, on the Home's
 // agents line only, and binds the Default model the run may create agents

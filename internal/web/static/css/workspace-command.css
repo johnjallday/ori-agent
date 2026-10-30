@@ -805,6 +805,12 @@
   flex-basis: 76px;
 }
 
+/* While a building is being placed on this map, its banner owns the top centre
+   and the toolbar's Build/Add existing do not apply. */
+body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
+  visibility: hidden;
+}
+
 /* The Detachment toolbar, between New Quest and the tool belt. */
 .ws-cmd-map-group-bar {
   position: absolute;

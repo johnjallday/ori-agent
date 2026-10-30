@@ -147,6 +147,24 @@ test('Home, group and batch retain their canonical nouns and distinct destinatio
   });
   assert.equal(home.headline, '✓ Music Home is ready');
   assert.equal(home.href, '/workspaces/music/assistant#projectLibraryPanel');
+  // A song's hand-off receipt leads to the Home's map with the manager's drawer.
+  const landing = '/workspaces/music?mode=map&panel=assistant';
+  const handedOff = view({
+    ...offer,
+    outcome: { kind: 'home', receipt: [{ kind: 'home', name: 'Music Home', route: landing }] }
+  });
+  assert.equal(handedOff.href, landing);
+  for (const route of [
+    '/workspaces/music?mode=map&panel=assistant&x=1',
+    '/workspaces/music?panel=assistant',
+    '//evil?mode=map&panel=assistant'
+  ])
+    assert.equal(
+      view({ ...offer, outcome: { kind: 'home', receipt: [{ kind: 'home', name: 'H', route }] } })
+        .ready,
+      false,
+      route
+    );
   const deletedHome = folderReceiptView({
     ...offer,
     workspace_gone: 'removed',

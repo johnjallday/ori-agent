@@ -269,6 +269,17 @@ not the source song's name. A source-song brief is labeled **Later project goal*
 its REAPER Assistant row is explicitly a later-project assignment, not the Home's
 Portfolio Manager or a hire performed by this press.
 
+A single song's later Open, offered by the Home's manager in the drawer on the
+Home's page, is a **child inside an existing Home** reviewed on that Home's own
+scoped map (`beginPlacement` with `preview.parentID` and `withinParent`): a
+point whose anchor is outside the Home's drawn frame is refused, nothing runs
+before the click or Enter, and the press is the same setup Open the Home page's
+card makes. The point is saved once, through the layout API, only after the
+browser has verified the outcome workspace is not `existing` and its own record
+names this Home as parent (the song open records its offer on the Home, not as
+a workspace `folder_digest_offer_id` marker); otherwise automatic placement
+stands and the receipt says to use Move. It never changes membership.
+
 Manual source placement requires a visible, writable mounted Map at desktop
 width. Tree, narrow/touch layouts and 200% browser zoom retain the explicit
 automatic alternative; a hidden map cannot capture confirmation. Escape before

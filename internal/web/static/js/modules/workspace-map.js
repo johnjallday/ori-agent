@@ -10079,7 +10079,11 @@
         'Click open ground or press Enter to create this reviewed workspace. Drag to pan; Escape returns to review. Position does not change membership.',
       pendingInstruction: 'Creating the reviewed workspace. This position is locked.',
       announcement:
-        'Setup reviewed. Click open ground or press Enter to create the workspace. Escape returns to editing.'
+        'Setup reviewed. Click open ground or press Enter to create the workspace. Escape returns to editing.',
+      backLabel: 'Back to review',
+      // A host's own way out of the click (e.g. "Use automatic placement");
+      // shown only with spec.onSecondary.
+      secondaryLabel: ''
     };
     var copy = {};
     Object.keys(defaults).forEach(function (key) {
@@ -10129,7 +10133,16 @@
       escapeHtml(placementInstructionText(state, problem)) +
       '</small></div>' +
       '<div class="ws-map-placement-buttons">' +
-      '<button type="button" class="ws-map-placement-back" data-ws-map-placement-back>Back to review</button>' +
+      '<button type="button" class="ws-map-placement-back" data-ws-map-placement-back>' +
+      escapeHtml(state.actionCopy.backLabel) +
+      '</button>' +
+      (typeof state.onSecondary === 'function' && state.actionCopy.secondaryLabel
+        ? '<button type="button" class="ws-map-placement-back" data-ws-map-placement-secondary' +
+          (state.submitting ? ' disabled' : '') +
+          '>' +
+          escapeHtml(state.actionCopy.secondaryLabel) +
+          '</button>'
+        : '') +
       '<button type="button" class="ws-map-placement-confirm" data-ws-map-placement-confirm' +
       (problem || state.submitting ? ' disabled' : '') +
       '>' +
@@ -10175,6 +10188,12 @@
         );
     }
     var reviewedParent = parentID || (placementSession && placementSession.payload.parent_id);
+    // A child reviewed on its parent's own map stands inside the parent's
+    // drawn frame; a point outside it is not a candidate (geometry only).
+    if (!group && reviewedParent && placementSession && placementSession.payload.within_parent) {
+      var outside = outsideParentFrame(reviewedParent, point, lastWorldLayout);
+      if (outside) return outside;
+    }
     if (!group && reviewedParent) {
       var destination = groupCandidateConflict(
         reviewedParent,
@@ -10192,6 +10211,26 @@
     return wouldOverlapOccupied(point, excludeId || '', true)
       ? 'That position overlaps an existing workspace. Choose open ground.'
       : '';
+  }
+
+  // '' when a child's tile anchored at `point` starts inside its parent's drawn
+  // frame or within one tile past its right or bottom edge (where an auto-sized
+  // frame grows to hold a new member; an empty Home is a single tile), else why
+  // it is not a candidate. groupCandidateConflict still refuses growth across a
+  // neighbour.
+  function outsideParentFrame(parentID, point, world) {
+    var district = ((world && world.districts) || []).find(function (row) {
+      return row.id === parentID;
+    });
+    var name = String((district && district.ws && district.ws.name) || 'the Home').trim();
+    if (!district) return 'The ' + name + ' frame is not drawn yet. Use automatic placement.';
+    var frame = district.collapsed ? district : district.expandedFrame || district;
+    var inside =
+      point.x >= frame.x &&
+      point.y >= frame.y &&
+      point.x < frame.x + frame.width + CELL_W &&
+      point.y < frame.y + frame.height + CELL_H;
+    return inside ? '' : 'That point is outside ' + name + '. Choose open ground inside it.';
   }
 
   function placementOptions(options, secondary) {
@@ -10220,6 +10259,7 @@
       name: preview.name,
       kind: preview.kind === 'group' ? 'group' : 'workspace',
       parent_id: preview.parentID || '',
+      within_parent: preview.withinParent === true && !!preview.parentID,
       blueprint_id: preview.blueprintID,
       blueprint_builtin: preview.blueprintBuiltin === true,
       group_name: preview.groupName
@@ -10444,6 +10484,16 @@
         confirmPlacement(container);
       });
     }
+    var secondaryButton = container.querySelector('[data-ws-map-placement-secondary]');
+    if (secondaryButton && secondaryButton.addEventListener) {
+      secondaryButton.addEventListener('click', function () {
+        var current = placementSession;
+        if (!current || current.container !== container || current.submitting) return;
+        // The session ends first; the host then runs its own path.
+        finishPlacement(container, false);
+        current.onSecondary(current.token);
+      });
+    }
     if (!canvas || !canvas.addEventListener) return;
     var press = null;
 
@@ -10634,6 +10684,7 @@
       onConfirm: options.onConfirm,
       onBack: options.onBack,
       onCancel: options.onCancel,
+      onSecondary: options.onSecondary,
       container: container,
       previousMoveMode: previousMoveMode,
       submitting: false
