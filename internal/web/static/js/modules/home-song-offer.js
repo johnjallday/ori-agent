@@ -67,9 +67,17 @@ export function songSuggestionView(offer) {
     stopCopy:
       STOP_COPY[stopped] ||
       (stopped && stopped !== 'handoff_ready' ? 'A step did not finish.' : ''),
+    // A song with more than one project file stops for a choice; these are the
+    // files the server offered, and one of them answers it in place.
+    choices:
+      stopped === 'needs_choice' && Array.isArray(setup?.entry_candidates)
+        ? setup.entry_candidates.map(text).filter(Boolean).slice(0, SONG_CHOICE_MAX)
+        : [],
     label: `Open ${song} & hire`
   };
 }
+
+const SONG_CHOICE_MAX = 12;
 
 /** What a card says while the manager is opening the song. */
 export function songOpeningLabel(view) {
@@ -105,14 +113,19 @@ export async function readSongSuggestions(fetchImpl, homeID) {
 
 /**
  * The one press: Set up with open, the plan's digest, the brief when the plan
- * asks for one, and a fresh request id. Returns { ok } or { ok: false, message }.
- * A lost response is never re-sent; the caller follows the offer instead.
+ * asks for one, and a fresh request id; `entryName` answers a stop for the
+ * project file with one of the names the server offered. Returns { ok } or
+ * { ok: false, message }. A lost response is never re-sent; the caller follows
+ * the offer instead.
  */
-export async function pressSongOpen(fetchImpl, view, brief = '') {
+export async function pressSongOpen(fetchImpl, view, brief = '', { entryName = '' } = {}) {
   const typed = text(brief);
   if (typed.length > BRIEF_MAX) return { ok: false, message: '' };
+  const entry = text(entryName);
+  if (entry && !(view.choices || []).includes(entry)) return { ok: false, message: '' };
   const body = { plan_digest: view.digest, open: true, request_id: songRequestID() };
   if (view.asksBrief) body.brief = typed;
+  if (entry) body.entry_name = entry;
   try {
     const response = await fetchImpl(
       `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(view.offerID)}/setup`,

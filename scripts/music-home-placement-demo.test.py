@@ -95,6 +95,17 @@ while true; do sleep 1; done
         self.assertNotIn("MUSIC_HOME_PLACEMENT_FAULT", calls)
         self.assertIn(f"MUSIC_HOME_PLACEMENT_SONG={self.sandbox.resolve()}/Documents/Ori Music Demo", calls)
 
+    def test_chat_choice_gives_the_song_a_second_project_file(self):
+        song = self.sandbox / "Documents" / "Ori Music Demo"
+        song.mkdir(parents=True)
+        (song / "Ori Music Demo.rpp").write_text("<REAPER_PROJECT>\n")
+        result = self.run_case("chat-choice")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((song / "Ori Music Demo (mix).rpp").is_file())
+        calls = self.trace.read_text()
+        self.assertIn("MUSIC_HOME_PLACEMENT_TWO_FILES=1", calls)
+        self.assertIn("-g\nsingle-song\n", calls)
+
     def test_chat_a11y_sets_up_the_home_before_the_a11y_hand_off(self):
         result = self.run_case("chat-a11y")
         self.assertEqual(result.returncode, 0, result.stderr)

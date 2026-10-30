@@ -21,6 +21,13 @@ import { createHomeSongPlacement, homeSongPlacementAvailable } from './home-song
 export const OFFER_LIMIT = 5;
 export const NOT_NOW_KEY_PREFIX = 'ori.personalAssistant.homeOffer.notNow.';
 export const BRIEF_KEY_PREFIX = 'ori.personalAssistant.homeOffer.brief.';
+// After a stop: the press made nothing, so a chosen point placed nothing.
+export const NOTHING_OPENED = 'Nothing was opened or placed yet.';
+
+/** The manager asks which project file a song with several should open. */
+export function chooseFileLine(view) {
+  return `${view.song} has more than one project file. Which one should I open?`;
+}
 
 const WORKSPACE_PATH = /^\/workspaces\/([^/?#]+)(?:\/|$)/;
 
@@ -86,8 +93,10 @@ export function unavailableLine(view) {
  */
 export function homeOfferCardState(view, local = {}) {
   if (local.opened) return 'opened';
-  if (view.waitsElsewhere) return 'elsewhere';
   if (view.running || local.pressing) return 'running';
+  // A song with more than one project file is answered here, by choosing one.
+  if (view.choices?.length) return 'choose';
+  if (view.waitsElsewhere) return 'elsewhere';
   if (local.notNow) return 'notNow';
   return 'offer';
 }
@@ -369,8 +378,22 @@ export function createHomeOffer({
     const actions = element(doc, 'div', 'pa-home-offer__actions');
     const status = element(doc, 'p', 'pa-home-offer__status');
     status.setAttribute('role', 'status');
-    if (state === 'elsewhere') {
-      status.textContent = view.stopCopy;
+    if (state === 'choose') {
+      // The run stopped before anything was made: ask which file, here.
+      section.append(element(doc, 'p', 'pa-home-offer__ask', chooseFileLine(view)));
+      actions.setAttribute('role', 'group');
+      actions.setAttribute('aria-label', `Project files in ${view.song}`);
+      for (const name of view.choices) {
+        const choice = element(doc, 'button', 'modern-btn modern-btn-outline', name);
+        choice.type = 'button';
+        choice.dataset.homeOfferChoice = name;
+        choice.setAttribute('aria-label', `Open ${view.song} with ${name}`);
+        choice.addEventListener('click', () => void open(view, { entryName: name }));
+        actions.append(choice);
+      }
+      status.textContent = item.message || NOTHING_OPENED;
+    } else if (state === 'elsewhere') {
+      status.textContent = [view.stopCopy, item.message].filter(Boolean).join(' ');
       const link = element(doc, 'a', 'modern-btn modern-btn-primary', 'Go to your assistant');
       link.href = '/';
       actions.append(link);
@@ -502,7 +525,7 @@ export function createHomeOffer({
   }
 
   /** The press: the map first when placement takes it, else at once. */
-  async function open(view) {
+  async function open(view, { entryName = '' } = {}) {
     const item = facts(view.offerID);
     if (item.pressing || view.running || item.opened) return;
     const typed = view.asksBrief ? text(brief(view)) : '';
@@ -512,10 +535,12 @@ export function createHomeOffer({
       return;
     }
     if (placement?.wants?.(view)) {
-      await placement.begin(view, { run: (options = {}) => run(view, typed, options) });
+      await placement.begin(view, {
+        run: (options = {}) => run(view, typed, { ...options, entryName })
+      });
       return;
     }
-    await run(view, typed);
+    await run(view, typed, { entryName });
   }
 
   /**
@@ -523,7 +548,7 @@ export function createHomeOffer({
    * placement) may save the chosen point once and return a note for the
    * receipt; a failed point never re-presses.
    */
-  async function run(view, typed, { afterVerified } = {}) {
+  async function run(view, typed, { afterVerified, entryName = '' } = {}) {
     const item = facts(view.offerID);
     if (item.pressing || item.opened) return false;
     item.pressing = true;
@@ -531,12 +556,17 @@ export function createHomeOffer({
     render();
     announce(songOpeningLabel(view));
     try {
-      const pressed = await pressSongOpen(fetchImpl, view, typed);
+      const pressed = await pressSongOpen(fetchImpl, view, typed, { entryName });
       if (!pressed.ok) {
         item.message = pressed.message;
         return false;
       }
       const settled = await followSongOpen(fetchImpl, view, { live: () => mount.isConnected });
+      if (settled.state === 'stopped') {
+        // Say plainly that the click did nothing yet: no workspace, no building.
+        item.message = NOTHING_OPENED;
+        announce(`${view.song} was not opened. ${NOTHING_OPENED}`);
+      }
       if (settled.state !== 'opened') return false;
       const opened = songOpenedView(view, settled.outcome);
       if (typeof afterVerified === 'function') {

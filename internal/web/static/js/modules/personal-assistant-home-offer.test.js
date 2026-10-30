@@ -10,6 +10,7 @@ import {
   homeOfferPresentation,
   homePageRoute,
   NOT_NOW_KEY_PREFIX,
+  NOTHING_OPENED,
   OFFER_LIMIT,
   readNotNow,
   revealOpenedSong,
@@ -522,6 +523,107 @@ test('a song stopped elsewhere links to the assistant’s card with the existing
   const link = article.querySelector('a');
   assert.equal(link.textContent, 'Go to your assistant');
   assert.equal(link.href, '/');
+});
+
+test('a song with several project files is answered in the card, and its press carries the file', async () => {
+  let resolved = false;
+  const posts = [];
+  const stopped = {
+    id: 'offer-5',
+    status: 'awaiting_outcome',
+    subject: { name: 'Album-5' },
+    setup: {
+      plan_digest: 'run-digest',
+      status: 'stopped',
+      stop_reason: 'needs_choice',
+      entry_candidates: ['Album-5.rpp', 'Album-5 (mix).rpp'],
+      brief: 'Mix it.',
+      hire,
+      lines
+    }
+  };
+  const { offer, mount } = harness({
+    fetchImpl: async (url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(init.body));
+        return respond(202, {});
+      }
+      if (url.includes('offer_id=')) {
+        resolved = true;
+        return respond(200, {
+          folder_digest: {
+            offer: { id: 'offer-5', status: 'resolved', outcome: { route: '/workspaces/album-5' } }
+          }
+        });
+      }
+      return respond(200, { suggestions: resolved ? [] : [stopped] });
+    }
+  });
+  await offer.refresh();
+  const article = mount.querySelector('.pa-home-offer');
+  assert.equal(article.dataset.state, 'choose');
+  assert.match(
+    article.querySelector('.pa-home-offer__ask').textContent,
+    /^Album-5 has more than one project file\. Which one should I open\?$/
+  );
+  assert.equal(article.querySelector('.pa-home-offer__status').textContent, NOTHING_OPENED);
+  // No "Go to your assistant": the choice is made here. The run's brief stays.
+  assert.equal(article.querySelector('a'), null);
+  assert.equal(article.querySelector('textarea').disabled, true);
+  // Brief mode is off while a file is being chosen.
+  assert.deepEqual(offer.state().pending, []);
+  const choices = mount.querySelectorAll('[data-home-offer-choice]');
+  assert.deepEqual(
+    choices.map(button => button.textContent),
+    ['Album-5.rpp', 'Album-5 (mix).rpp']
+  );
+  choices[1].click();
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].entry_name, 'Album-5 (mix).rpp');
+  assert.equal(posts[0].plan_digest, 'run-digest');
+  assert.equal(posts[0].open, true);
+});
+
+test('a press that stops says nothing was opened or placed', async () => {
+  let stoppedNow = false;
+  const { offer, mount } = harness({
+    fetchImpl: async (url, init) => {
+      if (init?.method === 'POST') {
+        stoppedNow = true;
+        return respond(202, {});
+      }
+      if (url.includes('offer_id='))
+        return respond(200, {
+          folder_digest: { offer: { id: 'offer-5', setup: { status: 'stopped' } } }
+        });
+      return respond(200, {
+        suggestions: [
+          stoppedNow
+            ? {
+                id: 'offer-5',
+                status: 'awaiting_outcome',
+                subject: { name: 'Album-5' },
+                setup: {
+                  plan_digest: 'd',
+                  status: 'stopped',
+                  stop_reason: 'needs_model',
+                  lines,
+                  hire
+                }
+              }
+            : suggestion('offer-5', 'Album-5')
+        ]
+      });
+    }
+  });
+  await offer.refresh();
+  const view = offer.state().pending[0];
+  assert.equal(await offer.run(view, ''), false);
+  const status = mount.querySelector('.pa-home-offer__status').textContent;
+  assert.match(status, /needs a model first/);
+  assert.match(status, /Nothing was opened or placed yet\.$/);
 });
 
 test('a vacant manager renders only the line to the Home’s page', async () => {

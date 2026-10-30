@@ -104,6 +104,67 @@ test('a song that stopped for anything else is answered on the assistant’s car
   assert.equal(running.running, true);
 });
 
+test('a song stopped for its project file offers the server’s file names as choices', () => {
+  const view = songSuggestionView({
+    id: 'offer-5',
+    status: 'awaiting_outcome',
+    subject: { name: 'Album-5' },
+    setup: {
+      plan_digest: 'run-digest',
+      status: 'stopped',
+      stop_reason: 'needs_choice',
+      entry_candidates: ['Album-5.rpp', ' Album-5 (mix).rpp ', ''],
+      lines
+    }
+  });
+  assert.deepEqual(view.choices, ['Album-5.rpp', 'Album-5 (mix).rpp']);
+  // The Home page's card keeps sending this to the assistant's card.
+  assert.equal(view.waitsElsewhere, true);
+  for (const reason of ['needs_model', 'handoff_ready'])
+    assert.deepEqual(
+      songSuggestionView({
+        id: 'offer-5',
+        setup: {
+          plan_digest: 'd',
+          status: 'stopped',
+          stop_reason: reason,
+          entry_candidates: ['a.rpp'],
+          lines
+        }
+      }).choices,
+      [],
+      reason
+    );
+});
+
+test('answering the choice re-presses the same setup with one offered file name', async () => {
+  const view = {
+    ...songSuggestionView(pending),
+    choices: ['Album-5.rpp', 'Album-5 (mix).rpp']
+  };
+  const bodies = [];
+  const fetchImpl = async (_, init) => {
+    bodies.push(JSON.parse(init.body));
+    return respond(202, {});
+  };
+  assert.deepEqual(
+    await pressSongOpen(fetchImpl, view, 'brief', { entryName: 'Album-5 (mix).rpp' }),
+    {
+      ok: true
+    }
+  );
+  assert.equal(bodies[0].entry_name, 'Album-5 (mix).rpp');
+  assert.equal(bodies[0].open, true);
+  assert.equal(bodies[0].plan_digest, 'abc');
+  // A name the server did not offer is never sent.
+  const refused = await pressSongOpen(fetchImpl, view, '', { entryName: '../other.rpp' });
+  assert.equal(refused.ok, false);
+  assert.equal(bodies.length, 1);
+  // Without a choice, no entry_name.
+  await pressSongOpen(fetchImpl, view, '');
+  assert.equal('entry_name' in bodies[1], false);
+});
+
 test('an offer that is not a song this Home opens is not a suggestion', () => {
   assert.equal(songSuggestionView(null), null);
   assert.equal(

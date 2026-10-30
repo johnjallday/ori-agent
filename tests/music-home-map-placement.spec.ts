@@ -18,6 +18,8 @@ const evidence = fault
   : 'tasks/evidence-music-home-map-placement/group-2';
 const collection = process.env.MUSIC_HOME_PLACEMENT_COLLECTION || '';
 const secondSong = process.env.MUSIC_HOME_PLACEMENT_SECOND_SONG || '';
+// The song folder holds two project files (scripts/music-home-placement-demo.sh --case chat-choice).
+const twoFiles = process.env.MUSIC_HOME_PLACEMENT_TWO_FILES === '1';
 test.describe.configure({ mode: 'serial' });
 let restoreFault: (() => Promise<void>) | null = null;
 test.afterEach(async () => {
@@ -583,12 +585,33 @@ test('single-song chat hand-off: the manager offers the song and it stands where
   await press();
   await expect(preview).toBeVisible();
   await expect(instruction).not.toContainText('outside');
-  const candidate = await preview.evaluate(element => ({
-    x: Number.parseFloat((element as HTMLElement).style.left),
-    y: Number.parseFloat((element as HTMLElement).style.top)
-  }));
+  const point = () =>
+    preview.evaluate(element => ({
+      x: Number.parseFloat((element as HTMLElement).style.left),
+      y: Number.parseFloat((element as HTMLElement).style.top)
+    }));
+  let candidate = await point();
   await page.keyboard.press('Enter');
   await expect.poll(() => setupPosts).toBe(1);
+  if (twoFiles) {
+    // Two project files: the open stops before anything is made, and the
+    // manager asks which file, in the card. Nothing was placed.
+    const choices = offers.locator('[data-home-offer-choice]');
+    await expect(choices).toHaveCount(2, { timeout: 90_000 });
+    await expect(offers).toContainText(
+      'Ori Music Demo has more than one project file. Which one should I open?'
+    );
+    await expect(offers).toContainText('Nothing was opened or placed yet.');
+    expect(
+      (await snapshot(request)).workspaces.filter((w: any) => w.parent_id === home.id)
+    ).toHaveLength(0);
+    await page.screenshot({ path: `${chatEvidence}/choose-project-file.png` });
+    await offers.getByRole('button', { name: /with Ori Music Demo \(mix\)\.rpp$/ }).click();
+    await expect(preview).toBeVisible();
+    candidate = await point();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => setupPosts).toBe(2);
+  }
   // The drawer is back on the running card, then the manager's receipt.
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   await expect(offers).toContainText('Portfolio Manager opened it', { timeout: 90_000 });
@@ -605,7 +628,7 @@ test('single-song chat hand-off: the manager offers the song and it stands where
   expect(resource.parent_id).toBe(home.id);
   expect(JSON.stringify(resource)).toContain(brief);
   await expect(page.locator(`.ws-map-tile[data-ws-id="${child.id}"]`)).toHaveClass(/is-selected/);
-  expect(setupPosts).toBe(1);
+  expect(setupPosts).toBe(twoFiles ? 2 : 1);
   expect(sessionPosts).toBe(0);
   expect(modelPosts).toBe(0);
   // The Home page's card no longer offers the opened song.
