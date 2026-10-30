@@ -95,6 +95,19 @@ including legacy offers). Attached selections can also report `expired`. The
 review context carries the same code. Neither time alone nor a server restart
 invalidates a saved review whose directory is unchanged.
 
+An explicit re-pick can relocate an ordinary review only when both original
+root/candidate witnesses and the canonical owner still match. It updates private
+locations and path-derived keys, retaining the offer, dated observation/revision,
+name, brief, structure choices, selected entry and stopped run. The select response
+returns `resumed_review` with the existing context; the browser redraws that card
+without another Review request, message or model suggestion. A replacement cannot
+inherit the review. Separately fenced arrangements and placement handoffs keep
+their existing recovery workflows, rather than being adopted by this shortcut.
+Home scans recover only Home-owned offers; they cannot adopt or retire a pending
+conversation/build review. Pausing changes confirmable effects (such as remembering),
+not the review's directory identity: the old digest fails, and the reduced effects
+must be confirmed anew.
+
 ### Canonical persistence and concurrency
 
 Use one narrowly typed optional `folder_context_json` column on canonical
@@ -117,8 +130,9 @@ The SQLite transaction is authoritative, not the LRU; the hybrid adapter
 invalidates cached sessions after writes and reads context state from SQLite.
 Deleting a session uses the existing message cascade. Migration 76 additionally
 clears typed context when a session's workspace/profile changes, including
-shallow HQ deletion; ordinary chat remains. Renaming also drops the binding and
-requires re-picking rather than carrying authority to a newly named owner.
+shallow HQ deletion; ordinary chat remains. Renaming that workspace/profile also
+drops the binding and requires re-picking rather than carrying authority to a
+newly named owner.
 Failed first-turn storage discards the newly created session. No new
 transcript/sidecar exists.
 

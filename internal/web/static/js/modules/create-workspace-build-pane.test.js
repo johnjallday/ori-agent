@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./create-workspace-build-pane.js', import.meta.url), 'utf8');
+const pickCopySource = readFileSync(
+  new URL('./folder-pick-copy-shared.js', import.meta.url),
+  'utf8'
+);
 const visualSource = readFileSync(new URL('./folder-setup-visual.js', import.meta.url), 'utf8');
 const planLinesSource = readFileSync(new URL('./folder-plan-lines.js', import.meta.url), 'utf8');
 const recognitionLinesSource = readFileSync(
@@ -207,6 +211,7 @@ function loadPane(extras = {}) {
   class CustomEvent extends FakeEvent {}
   // Loaded before the pane, as in base.tmpl.
   const context = vm.createContext({ window, document, CustomEvent, ...extras });
+  vm.runInContext(pickCopySource, context, { filename: 'folder-pick-copy-shared.js' });
   vm.runInContext(planLinesSource, context, { filename: 'folder-plan-lines.js' });
   vm.runInContext(visualSource, context, { filename: 'folder-setup-visual.js' });
   vm.runInContext(recognitionLinesSource, context, { filename: 'folder-recognition-lines.js' });
@@ -1529,11 +1534,36 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
     draft: { name: 'Ori Music Demo' },
     folder_expires_at: new Date(Date.now() - 60000).toISOString()
   });
-  assert.equal(expiry().textContent, 'The folder pick expired. Add the folder again to set it up.');
+  assert.match(expiry().textContent, /no longer has.*open/);
+  assert.doesNotMatch(expiry().textContent, /restarted|expired/);
   assert.equal(control('setup').disabled, true);
   assert.equal(control('folder-again').hidden, false);
   control('folder-again').click();
   same(events.at(-1), { type: 'workspace-build-folder-open', detail: {} });
+
+  for (const [reason, phrase] of [
+    ['moved', /has moved or been renamed/],
+    ['changed', /was replaced/],
+    ['lost', /no longer has/]
+  ]) {
+    pane.applySession({
+      ...session,
+      folder_expires_at: new Date(0).toISOString(),
+      folder_needs_pick_reason: reason
+    });
+    assert.match(expiry().textContent, phrase);
+    assert.doesNotMatch(expiry().textContent, /restarted|expired/);
+    assert.equal(control('folder-again').hidden, false);
+  }
+
+  // The server omits observation expiry for a valid retained review. Its
+  // canonical setup controls must stay usable without another folder pick.
+  const retained = { ...session, draft: { name: 'Ori Music Demo' } };
+  delete retained.folder_expires_at;
+  pane.applySession(retained);
+  assert.equal(expiry().hidden, true);
+  assert.equal(control('folder-again').hidden, true);
+  assert.equal(control('setup').disabled, false);
 });
 
 // PRD user story 2: a plan waiting on its Home's plugin offers the install,

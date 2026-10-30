@@ -440,6 +440,11 @@ func TestInterviewFolderSnapshot_DeclinedProjectStaysDeclined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Re-picking an open review now resumes it. Set this one aside explicitly
+	// so the next scan can test a genuinely newer review's decline.
+	if _, err := f.service.Decide(ctx, "local", first.ID, FolderDecisionInput{Decision: FolderDecisionLater, RequestID: "req-later"}); err != nil {
+		t.Fatal(err)
+	}
 	second, err := f.service.ScanChip(ctx, "local", "documents")
 	if err != nil {
 		t.Fatal(err)

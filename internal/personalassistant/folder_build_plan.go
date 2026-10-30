@@ -68,6 +68,11 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	if err != nil {
 		return nil, err
 	}
+	// Restoration may have found the exact build review behind this draft.
+	// Its canonical owner, not a new synthetic draft, supplies setup authority.
+	if IsBuildReview(held.target) {
+		target = held.target
+	}
 	// Named as Set it up's review will name it, so the digests are the same.
 	ctx = WithFolderReviewWorkspaceName(ctx, workspaceName)
 	offer, err := s.prepareReviewOffer(ctx, held, target, candidateID)

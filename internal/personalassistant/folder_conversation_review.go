@@ -159,6 +159,45 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 	target := source
 	target.ConversationID, target.DraftID = conversationID, ""
 	d := s.digest
+	if held.reheld == nil {
+		doc, readErr := d.store.Read(ctx, source.UserID)
+		if readErr != nil {
+			return FolderOfferView{}, readErr
+		}
+		placement := folderReviewPlacement(ctx)
+		var recoverable *FolderOffer
+		for _, prior := range doc.Offers {
+			review := prior.ConversationReview
+			if !openFolderReview(prior) || review == nil || prior.Structure.Arranged() || prior.PlacementHandoff != nil || review.Target != target || review.ObservationID == observationID ||
+				review.Operation != placement.Operation || review.DestinationID != placement.DestinationID {
+				continue
+			}
+			guard, _ := s.reviewAuthority(target)
+			if guard == nil || guard(ctx, prior) != nil {
+				continue // retired provenance cannot donate choices to a new review
+			}
+			_, matched, matchErr := s.matchReviewPick(held, prior, candidateID)
+			if matchErr != nil {
+				return FolderOfferView{}, matchErr
+			}
+			if matched {
+				if recoverable != nil {
+					return FolderOfferView{}, ErrFolderReviewPending
+				}
+				copy := prior
+				recoverable = &copy
+			}
+		}
+		if recoverable != nil {
+			view, resumeErr := s.resumeReviewPick(ctx, held, target, *recoverable, candidateID)
+			if resumeErr != nil {
+				return FolderOfferView{}, resumeErr
+			}
+			if view != nil {
+				return *view, nil
+			}
+		}
+	}
 	// A review opened again without new Adjust choices keeps the ones its
 	// pending review already has. Changed facts cannot silently discard an
 	// explicit choice or a deliberately cleared name.

@@ -152,7 +152,7 @@ func (s *FolderDigestService) resolveInbox(ctx context.Context, userID, offerID 
 		offer.Setup.Intent.Inbox == nil || !isInboxOffer(*offer) {
 		return ErrFolderOfferDecided
 	}
-	path, identity, err := s.softwareSubject(*offer)
+	path, identity, err := s.softwareSubject(userID, *offer)
 	if err != nil {
 		return err
 	}
@@ -213,7 +213,7 @@ func (s *FolderDigestService) planRequest(ctx context.Context, userID string, of
 	}
 	if path, _ := ctx.Value(folderSubjectPathKey{}).(string); strings.TrimSpace(path) != "" {
 		req.Path = path
-	} else if path, err := s.subjectPathOf(offer); err == nil {
+	} else if path, err := s.subjectPathOf(userID, offer); err == nil {
 		req.Path = path
 	}
 	return req

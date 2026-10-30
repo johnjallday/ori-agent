@@ -99,7 +99,7 @@ func (s *FolderDigestService) PortfolioContinuations(ctx context.Context, userID
 	result := make([]FolderContinuation, 0, len(offers))
 	for _, offer := range offers {
 		item := FolderContinuation{OfferID: offer.ID, Folder: offer.FolderName, State: FolderContinuationReady}
-		if _, _, loss := s.portfolioSource(offer); loss != "" {
+		if _, _, loss := s.portfolioSource(userID, offer); loss != "" {
 			item.State, item.Reason = FolderContinuationNeedsPick, loss
 		}
 		result = append(result, item)

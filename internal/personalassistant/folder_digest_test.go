@@ -464,16 +464,16 @@ func TestFolderDigest_ReviewedJourneyResolvesOnlyCanonicalProject(t *testing.T) 
 		t.Fatalf("verifier called %d times", verifier.calls)
 	}
 	// A confirmed offer must remain visible after reload/restart, even when
-	// there is no longer a pending card and the picker path was forgotten.
+	// there is no longer a pending card. Its private path restores authority.
 	restarted := f.newService()
 	restarted.deps.Journey = verifier
 	current, err := restarted.Current(ctx, "local")
 	if err != nil || current.Offer == nil || current.Offer.ID != offer.ID ||
-		current.Offer.Status != FolderOfferAwaitingOutcome || !current.Offer.NeedsPick {
+		current.Offer.Status != FolderOfferAwaitingOutcome || current.Offer.NeedsPick {
 		t.Fatalf("confirmed picker offer after restart = %+v, %v", current.Offer, err)
 	}
-	if _, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "too-soon"}); !errors.Is(err, ErrFolderPathLost) {
-		t.Fatalf("lost picker path must not be guessed after restart: %v", err)
+	if path, err := restarted.SubjectPath(ctx, "local", offer.ID); err != nil || path != folder {
+		t.Fatalf("saved picker path did not restore after restart: %v", err)
 	}
 	resumed, err := restarted.scanRoot(ctx, "local", folder, "")
 	if err != nil || resumed.ID != offer.ID || resumed.Status != FolderOfferAwaitingOutcome {
@@ -886,7 +886,7 @@ func TestFolderDigest_NextQueuedCandidateAfterTheSitting(t *testing.T) {
 	}
 }
 
-func TestFolderDigest_RestartKeepsChipOffersAndLosesPickedOnes(t *testing.T) {
+func TestFolderDigest_RestartKeepsChipAndPickedOffersButRefusesMovedFolders(t *testing.T) {
 	f := newFolderDigestFixture(t)
 	ctx := context.Background()
 	chipOffer, err := f.service.ScanChip(ctx, "local", "downloads")
@@ -910,8 +910,14 @@ func TestFolderDigest_RestartKeepsChipOffersAndLosesPickedOnes(t *testing.T) {
 	}
 	restarted = f.newService()
 	view, err = restarted.Current(ctx, "local")
-	if err != nil || view.Offer == nil || !view.Offer.NeedsPick {
+	if err != nil || view.Offer == nil || view.Offer.NeedsPick {
 		t.Fatalf("picked offer after restart=%+v err=%v", view.Offer, err)
+	}
+	if path, err := restarted.SubjectPath(ctx, "local", offer.ID); err != nil || path != picked {
+		t.Fatal("picked path not restored", err)
+	}
+	if err := os.Rename(picked, picked+"-moved"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := restarted.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "r2"}); !errors.Is(err, ErrFolderPathLost) {
 		t.Fatalf("picked yes after restart err=%v", err)

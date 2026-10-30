@@ -84,7 +84,7 @@
     setupRunning: 'Setting it up… Ori is running the plan, line by line.',
     setupEntry: name => `Use ${name}`,
     folderExpiresIn: minutes => `Folder pick expires in ${minutes} min`,
-    folderExpired: 'The folder pick expired. Add the folder again to set it up.',
+    folderExpired: 'Ori no longer has this folder open. Pick it again to carry on.',
     folderAgain: 'Add the folder again',
     // Why a recognized folder has no plan, by the server's reason code.
     planUnavailable: (reason, subject) => {
@@ -895,7 +895,10 @@
       !open || !session.folder
         ? ''
         : expired
-          ? COPY.folderExpired
+          ? globalThis.OriFolderPickCopy?.(
+              session.folder.observation?.folder,
+              session.folder_needs_pick_reason || 'lost'
+            ) || COPY.folderExpired
           : minutes < 5
             ? COPY.folderExpiresIn(minutes)
             : '';

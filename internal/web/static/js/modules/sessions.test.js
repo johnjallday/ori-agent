@@ -9470,6 +9470,23 @@ test('build model recheck updates only readiness and preserves its separate exac
   assert.equal(reads.length, 1, 'accepted work cannot recheck into a new plan');
 });
 
+test('a retained build review clears an obsolete folder deadline without changing the draft', async () => {
+  const { manager, build, applied } = readinessBuild();
+  build.session.folder_expires_at = new Date(Date.now() + 60000).toISOString();
+  const draft = JSON.stringify(build.session.draft);
+  const fresh = { ...build.session };
+  delete fresh.folder_expires_at;
+  delete fresh.folder_needs_pick_reason;
+  manager.workspaceBuildTransport = { read: async () => ({ ok: true, body: { session: fresh } }) };
+  assert.equal(manager.workspaceBuildFolderSelectionExpired(build), false);
+  await manager.recheckWorkspaceBuild();
+  assert.equal(applied.length, 1);
+  assert.equal(manager.workspaceBuildFolderSelectionExpired(build), false);
+  assert.equal(build.session.folder_expires_at, undefined);
+  assert.equal(build.session.folder_needs_pick_reason, undefined);
+  assert.equal(JSON.stringify(build.session.draft), draft);
+});
+
 test('late and failed build readiness reads cannot overwrite newer drafts or enable stale setup', async () => {
   const { manager, build, applied } = readinessBuild();
   let finish;
@@ -9865,6 +9882,31 @@ test('attachment suggests once; cancelled picking restores its trigger without s
     assert.equal(suggestions, cancelled ? 0 : 1);
     assert.equal(restored, cancelled && !movedFocus ? 1 : 0);
   }
+});
+
+test('a build re-pick redraws the same review without another model suggestion', async () => {
+  const { manager, nameInput } = prepareProposalWizard();
+  const build = manager.workspaceBuild;
+  build.session.proposal = null;
+  const draft = JSON.stringify(build.session.draft);
+  const folder = JSON.stringify(build.session.folder);
+  const name = nameInput.value;
+  manager.workspaceBuildApi = () => ({
+    folder: async () => ({
+      ok: true,
+      body: {
+        session: { ...build.session, version: build.session.version + 2 },
+        resumed_review: 'same-review'
+      }
+    })
+  });
+  manager.suggestWorkspaceBuildFolder = () =>
+    assert.fail('recovery must not admit another suggestion');
+  await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+  assert.equal(JSON.stringify(build.session.draft), draft);
+  assert.equal(JSON.stringify(build.session.folder), folder);
+  assert.equal(nameInput.value, name);
+  assert.equal(build.folderPending, false);
 });
 
 test('attachment delivery during the hide transition cannot admit inference or revive the review', async () => {

@@ -15631,7 +15631,10 @@ const sessionManager = {
       build.session = {
         ...build.session,
         plan: fresh.plan || null,
-        folder_expires_at: fresh.folder_expires_at ?? build.session.folder_expires_at
+        // A retained review has no observation TTL. Do not keep an old
+        // deadline when the canonical response intentionally omits it.
+        folder_expires_at: fresh.folder_expires_at,
+        folder_needs_pick_reason: fresh.folder_needs_pick_reason
       };
       build.readinessStale = false;
       pane.applySession(build.session);
@@ -17191,6 +17194,7 @@ const sessionManager = {
     }
     build.attachmentRequestID = globalThis.crypto?.randomUUID?.();
     let attached = false;
+    let resumedReview = false;
     let attaching = false;
     let cancelled = false;
     let note = '';
@@ -17242,6 +17246,11 @@ const sessionManager = {
       const session = result?.body?.session || null;
       if (!result?.ok || !session) {
         const message =
+          (result?.body?.needs_pick_reason &&
+            globalThis.OriFolderPickCopy?.(
+              build.session.folder?.observation?.folder,
+              result.body.needs_pick_reason
+            )) ||
           String(result?.body?.error || '').trim() ||
           'That folder could not be used. Try Add folder again; your draft is unchanged.';
         if (build.placement) {
@@ -17254,6 +17263,11 @@ const sessionManager = {
         return;
       }
       if (Number(session.version) < Number(build.session?.version)) return;
+      resumedReview = Boolean(
+        result.body.resumed_review &&
+        session.id === build.session.id &&
+        session.folder?.observation?.id === build.session.folder?.observation?.id
+      );
       this.adoptWorkspaceBuildSession(session);
       if (result.body.cancelled) {
         cancelled = true;
@@ -17277,7 +17291,8 @@ const sessionManager = {
           this.finishWorkspaceBuildFolderChoice(build, { cancelled, focus });
         if (cancelled && !returned && focus && this.workspaceBuildAssisted())
           pane.closeFolderChooser?.({ focus: true });
-        if (attached && !build.session.placement_source) await this.suggestWorkspaceBuildFolder();
+        if (attached && !resumedReview && !build.session.placement_source)
+          await this.suggestWorkspaceBuildFolder();
         else if (attached) this.syncWorkspaceBuildPresentation();
       }
     }

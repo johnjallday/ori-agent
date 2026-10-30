@@ -1762,6 +1762,8 @@ What the pane's Add folder sheet can offer: the composer's known-folder chips, w
 
 `mode` is `chip` (with `chip`), `picker` (the server opens its folder dialog), or `selection` (with `selection_token`, the receipt `POST /api/folder-picker/select-path` issued for a typed path it checked). **No path is accepted** (`400`). The server looks at the folder the way the assistant's composer does — names, kinds, counts, project markers, last-changed dates, coverage; it never reads a file — and stores the path-free observation on the session as `folder.observation`, with a `form` transcript entry ("You attached the folder “X”. It will be linked to the workspace when you create it.") the assistant hears on its next turn. The model then sees the observation and may not ask its own folder question. `version` is checked before the dialog opens; the pick itself then stands. A cancelled dialog returns `200` with `{ "session": …, "cancelled": true }` and changes nothing. A refused folder (too broad, unreadable, the dialog off, a pick still running) is `409` with `code: folder` and a sentence to show; `code: version`, `closed`, and `not_found` as elsewhere. Returns `{ "session": … }`.
 
+Ordinary attachment also opens the build's local review. Its server-private folder authority survives pauses/restarts while that exact review and build owner remain valid; plan reads create no review and renew no scan evidence. Valid retained reviews omit `folder_expires_at`; loss exposes `folder_needs_pick_reason` (`moved`, `changed`, or `lost`). Ordinary views omit `folder_path`. Explicit re-pick of the verified original, including after a move/rename, returns `resumed_review` (the existing offer ID) without replacing the observation, draft or transcript. The browser does not automatically ask the model for another suggestion. Inbox-placement handoffs retain their separately fenced contract.
+
 ### Remove the Folder
 
 **Endpoint:** `POST /api/workspaces/build-sessions/{id}/folder/detach`
@@ -1770,7 +1772,7 @@ What the pane's Add folder sheet can offer: the composer's known-folder chips, w
 { "version": 4 }
 ```
 
-Clears the attached folder and says so in the transcript. Removing twice is harmless. Returns `{ "session": … }`.
+Clears the attached folder and says so in the transcript. Removing twice is harmless. Retires the detached observation's undecided review and private paths; accepted work is never rolled back. Returns `{ "session": … }`.
 
 ### Attach a Link
 
@@ -2031,9 +2033,11 @@ No body (any request data is `400`). Same as a scan with `{ "picker": true }`.
 { "decision": "yes", "choice": "project", "create": true, "request_id": "…" }
 ```
 
-Open conversation reviews retain their server-private folder authority across pauses and restarts while `pending` or `awaiting_outcome`; the resolver checks the saved canonical path, directory identity, folder key and subject key without a new scan. Discussion snapshots stay dated and path-free, and an attached folder with no review keeps its 30-minute hold. Legacy reviews have no backfill and need a new pick when their hold is lost.
+Open conversation, Home and workspace-build reviews retain their server-private folder authority across pauses and restarts while `pending` or `awaiting_outcome`; the resolver checks the saved canonical path, directory identity, folder key and subject key without a new scan. Discussion snapshots stay dated and path-free, and an attached folder with no review keeps its 30-minute hold. Legacy reviews have no backfill and need a new pick when their hold is lost.
 
 A `needs_pick: true` offer or `409` response also carries `needs_pick_reason`: `moved` (saved path disappeared or resolves elsewhere), `changed` (directory replaced), `lost` (no saved path/hold), or `expired` (attached selection past its TTL). Reasons disclose no filesystem path. The review context's `reselection_needed` carries the same reason. Cards say “Pick it again” without guessing a restart.
+
+`POST /api/home-assistant/folder-context/select` can resume an ordinary review on an explicit re-pick of the original witnessed root/candidate, even after a move or rename. It returns the existing `observation`, `revision`, `folder_context` and a `resumed_review` offer, without another conversation turn or Review request. Names, brief, structure choices, selected entry and stopped run remain; only validated private locations and path-derived keys change. Replaced directories and foreign/retired owners cannot inherit the review. Arrangements/placement handoffs retain their separate recovery fences. A Home scan can resume only a unique open Home-owned offer and cannot replace a conversation/build-owned pending review.
 
 A recognized software project adds two refusals to a `yes` with `project`: `400` while the offer's `software.needs_candidate` is true (choose a candidate first, below), and `409` with `"project_exists": true` and the offer when a workspace of the user's already has this exact folder as its primary linked folder (the offer's `software.existing` lists it; no second workspace is made). `409` with `"needs_pick": true` also covers a folder that was deleted and made again at the same path since it was shown.
 

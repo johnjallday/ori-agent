@@ -138,14 +138,27 @@ Create links the folder and that `ask_folder` is never to be set (validation ref
 `a folder is already attached; it is linked at Create`). `POST …/{id}/folder/detach` clears it.
 
 Create (`POST /api/workspaces` with `build_session_id`) resolves the folder's root through
-the service's own hold on the selection (`ResolveRoot`, the same 30-minute window the
-composer has) before anything is created; a lost pick is a `409` with
+the service's own authority (`ResolveRoot`) before anything is created. Ordinary
+explicit attachment opens the build's local review and retains private paths with
+the same witnessed, owner-bound store as conversation/Home reviews. Reads do not
+open reviews or reconstruct fresh scan facts. Draft resolution bridges only to its
+exact open review and original observation under the canonical build guard. A lost
+pick is a `409` with
 `conflict.type: build_folder`, and nothing is left behind. Once the workspace folder exists,
 the attached folder is linked in place as a directory reference (`AttachLinkedDirectory`) and
 becomes the primary directory unless the create already set one outside the workspace folder
 (an attached project keeps it; a scaffold inside the workspace folder is superseded). The link
 runs after the scaffold or attached project and before the template's tool step, which reads
 and saves the workspace itself. The `BuildSummary` records it as a `folder` decision.
+
+A valid retained review omits `folder_expires_at`; an unavailable one supplies
+`folder_needs_pick_reason` and an expired sentinel for the existing controls.
+Ordinary build views never return a privately restored root as `folder_path`.
+Explicit re-pick of the witnessed original preserves draft, transcript, observation
+and choices; `resumed_review` suppresses automatic model suggestions only for the
+same build and observation. Detach, abandon and successful ordinary Create retire
+undecided source reviews; accepted work is never rolled back. Inbox-placement
+handoffs keep their separate authority and path contract.
 
 ### A recognized folder (narrated setup)
 

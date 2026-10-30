@@ -102,7 +102,7 @@ func (s *FolderDigestService) Prerequisite(ctx context.Context, userID, offerID 
 	if current == nil || current.Status != FolderOfferPending || current.Setup != nil {
 		return FolderPrerequisiteReview{}, ErrFolderOfferDecided
 	}
-	if _, err := s.subjectPathOf(*current); err != nil {
+	if _, err := s.subjectPathOf(userID, *current); err != nil {
 		return FolderPrerequisiteReview{}, err
 	}
 	return host.Prerequisite(ctx, s.setupRequest(ctx, userID, *current), input)

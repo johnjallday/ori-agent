@@ -240,6 +240,16 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		writeFolderReviewError(w, personalassistant.ErrFolderOfferDecided)
 		return
 	}
+	if !created && state.OfferID == offer.ID && state.Observation != nil && state.Observation.ID != req.SelectionID &&
+		(offer.Status == personalassistant.FolderOfferPending || offer.Status == personalassistant.FolderOfferAwaitingOutcome) {
+		state.Historical = true
+		state.Authority = h.FolderObservations.Status(r.Context(), target, *state.Observation)
+		orihttp.WriteJSON(w, map[string]any{
+			"conversation": HomeAssistantConversationState{ID: id, Stored: true}, "folder_context": state,
+			"folder_reviews": map[string]personalassistant.FolderOfferView{offer.ID: offer},
+		})
+		return
+	}
 	if (req.Recheck || restoredReview || offer.PlacementHandoff != nil) && !created && state.OfferID == offer.ID && state.Observation != nil && state.Observation.ID == req.SelectionID {
 		// Refresh this existing canonical review in place. A readiness check is
 		// not another folder turn, a new conversation or a setup confirmation.

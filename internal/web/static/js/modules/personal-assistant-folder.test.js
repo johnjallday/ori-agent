@@ -1336,6 +1336,19 @@ test('every stop reason says in one plain sentence what finished and what is nee
   }
 });
 
+test('a restored Home review offers Continue rather than another folder pick', () => {
+  // The server projects an old needs_pick stop as interrupted once its
+  // canonical folder is usable again. The stored run and progress remain.
+  const view = folderOfferView({ ...stoppedOffer('interrupted'), needs_pick: false });
+  assert.equal(view.actions.find(action => action.id === 'resume')?.label, 'Continue setup');
+  assert.equal(
+    view.actions.some(action => action.id === 'pick'),
+    false
+  );
+  assert.doesNotMatch(view.question, /Pick it again|restarted|expired/);
+  assert.equal(view.resume, true);
+});
+
 test('a stopped collection says what is true for a collection', () => {
   const view = folderOfferView({
     ...stoppedOffer('needs_model'),

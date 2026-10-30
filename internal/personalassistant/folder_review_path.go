@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 )
@@ -39,7 +40,26 @@ type heldReviewPath struct {
 }
 
 func (s *FolderObservationService) resolve(ctx context.Context, target foldercontext.Target, id string) (heldFolderObservation, FolderContinuationReason, error) {
-	return s.resolveForReview(ctx, target, id, "")
+	held, reason, err := s.resolveForReview(ctx, target, id, "")
+	if err != nil && target.ConversationID == "" && strings.HasPrefix(target.DraftID, BuildReviewPrefix) {
+		// A build's Create/plan still names its draft target after its explicit
+		// review moved the hold. Only that exact build's guard may restore it.
+		review := BuildReviewTarget(target, strings.TrimPrefix(target.DraftID, BuildReviewPrefix))
+		if s != nil && s.digest != nil {
+			if doc, readErr := s.digest.store.Read(ctx, target.UserID); readErr == nil {
+				for _, offer := range doc.Offers {
+					if !openFolderReview(offer) || offer.ConversationReview == nil || offer.ConversationReview.Target != review || offer.ConversationReview.ObservationID != id {
+						continue
+					}
+					if _, loss := s.reviewSourceReason(offer); loss != "" {
+						return heldFolderObservation{}, loss, folderPickError{reason: loss, cause: ErrFolderSelection}
+					}
+					return s.resolveForReview(ctx, review, id, offer.ID)
+				}
+			}
+		}
+	}
+	return held, reason, err
 }
 
 func (s *FolderObservationService) resolveForReview(ctx context.Context, target foldercontext.Target, id, offerID string) (heldFolderObservation, FolderContinuationReason, error) {

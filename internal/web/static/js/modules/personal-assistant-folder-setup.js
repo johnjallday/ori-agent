@@ -921,6 +921,16 @@ function reviewFrom(trigger, candidateId, placement = {}) {
   void review(candidateId, false, undefined, placement);
 }
 
+// A verified re-pick redraws its existing card without another review request,
+// replacing the conversation, or resetting the user's local name/brief fields.
+export function resumeReview(offer) {
+  if (!currentReview(current, offer)) return false;
+  reviews = { ...reviews, [offer.id]: offer };
+  window.PersonalAssistantFolder?.updateConversationReview?.(offer);
+  applyReviewContext(null);
+  return true;
+}
+
 // reviewCandidate opens the review of the one project an attached folder is,
 // as Review setup would: the attach named it (hire_candidate), so the hire card
 // answers the attach. false when there is nothing current to review.
@@ -1366,6 +1376,7 @@ if (typeof window !== 'undefined')
     structure: currentStructure,
     reviewStructure,
     reviewCandidate,
+    resumeReview,
     recheckReview,
     refreshReviewLink: syncReviewLink,
     adjustStructure,

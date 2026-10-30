@@ -294,7 +294,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 	}
 	// The project's own folder: the scan root, or the subfolder the offer is about.
-	path, err := s.subjectPathOf(*offer)
+	path, err := s.subjectPathOf(userID, *offer)
 	if err != nil {
 		return FolderOfferView{}, err
 	}
@@ -306,7 +306,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			return FolderOfferView{}, ErrFolderOutcomeUnavailable
 		}
 		// The directory must still be the one the offer was made about.
-		if path, _, err = s.softwareSubject(*offer); err != nil {
+		if path, _, err = s.softwareSubject(userID, *offer); err != nil {
 			return FolderOfferView{}, err
 		}
 		if offer.Setup == nil {

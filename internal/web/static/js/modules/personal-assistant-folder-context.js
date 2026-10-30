@@ -31,6 +31,7 @@ export const FOLDER_DISCLOSURE =
 export function createFolderContextController({
   post,
   changed = () => {},
+  reviewResumed = () => {},
   uuid,
   currentId,
   isBusy = () => false,
@@ -123,6 +124,17 @@ export function createFolderContextController({
       if (result.cancelled || !result.observation) {
         notify('Selection cancelled. Your draft and previous folder are unchanged.');
         return false;
+      }
+      if (
+        result.resumed_review?.id &&
+        result.folder_context?.offer_id === state.offerId &&
+        result.resumed_review.id === state.offerId &&
+        owner
+      ) {
+        reset(owner, result.folder_context);
+        reviewResumed(result.resumed_review);
+        notify('Your existing review is ready. Nothing has been set up.');
+        return true;
       }
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
@@ -1079,6 +1091,7 @@ async function open() {
       if (
         selected &&
         !reviewed &&
+        !controller.state.offerId &&
         !controller.state.structure &&
         !controller.state.hireUnavailable &&
         folderTreeView(controller.state.observation)
@@ -1191,6 +1204,7 @@ function init() {
   controller = createFolderContextController({
     post: jsonRequest,
     changed: render,
+    reviewResumed: offer => window.PersonalAssistantFolderSetup?.resumeReview?.(offer),
     uuid: () => crypto.randomUUID(),
     currentId: () => window.PersonalAssistantConversation?.currentId?.() || '',
     isConsumed: state => consumedSetup(state),

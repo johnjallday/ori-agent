@@ -245,7 +245,11 @@ func respondBuildFolderError(w http.ResponseWriter, err error) {
 	case errors.As(err, &rootErr):
 		message = rootErr.Message
 	}
-	_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": message, "code": "folder"})
+	body := map[string]any{"error": message, "code": "folder"}
+	if reason := personalassistant.FolderPickReason(err); reason != "" {
+		body["needs_pick_reason"] = reason
+	}
+	_ = orihttp.RespondJSON(w, http.StatusConflict, body)
 }
 
 // postWorkspaceBuildFolder attaches a folder to an open build. The build must
@@ -363,6 +367,26 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		h.respondBuildSession(r.Context(), w, http.StatusOK, current, map[string]any{"cancelled": true})
 		return
 	}
+	if current.PlacementSource == nil && current.Folder != nil {
+		if resumes, ok := deps.Folders.(interface {
+			ResumeBuildFolderPick(context.Context, foldercontext.Target, string, string, string) (*personalassistant.FolderOfferView, error)
+		}); ok {
+			resumed, resumeErr := resumes.ResumeBuildFolderPick(ctx, target, id, current.Folder.Observation.ID, observation.ID)
+			if resumeErr != nil {
+				respondBuildFolderError(w, resumeErr)
+				return
+			}
+			if resumed != nil {
+				h.releaseBuildAttachment(ctx, userID, id, claimID, true)
+				if latest, readErr := deps.Store.Read(ctx, userID); readErr == nil {
+					h.respondBuildSession(ctx, w, http.StatusOK, latest.Session(id), map[string]any{"resumed_review": resumed.ID})
+				} else {
+					respondBuildUnavailable(w, buildReasonAssistantNotReady)
+				}
+				return
+			}
+		}
+	}
 	// What the folder digest recognized in the same scan. A folder that cannot
 	// be recognized right now is still attached; the pane then says nothing
 	// about its kind rather than guess.
@@ -384,6 +408,31 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 	probe := *current
 	probe.Folder = &personalassistant.BuildFolder{Observation: *observation, Recognition: recognition}
 	plan := h.workspaceBuildPlan(ctx, userID, readiness.projection, &probe)
+	keptReview := ""
+	if current.PlacementSource == nil {
+		if keeper, ok := deps.Folders.(interface {
+			KeepBuildFolder(context.Context, foldercontext.Target, string, string, string, string) (personalassistant.FolderOfferView, error)
+		}); ok {
+			candidate := ""
+			if recognition != nil {
+				candidate = recognition.CandidateID
+			}
+			if candidate == "" {
+				for _, project := range observation.Projects {
+					if project.Root {
+						candidate = project.ID
+						break
+					}
+				}
+			}
+			kept, keepErr := keeper.KeepBuildFolder(ctx, target, id, observation.ID, candidate, current.Draft.Name)
+			if keepErr != nil {
+				respondBuildFolderError(w, keepErr)
+				return
+			}
+			keptReview = kept.ID
+		}
+	}
 	var result personalassistant.WorkspaceBuildSession
 	_, err = deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		build := doc.Session(id)
@@ -414,6 +463,13 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		return nil
 	})
 	if err != nil {
+		if closer, ok := deps.Folders.(interface {
+			CloseBuildFolderReview(context.Context, foldercontext.Target, string, string) error
+		}); ok && keptReview != "" {
+			if closeErr := closer.CloseBuildFolderReview(ctx, target, id, keptReview); closeErr != nil {
+				logger.Warn("Unbound build folder review could not be closed", logger.Fields{"session_id": id, "error": closeErr})
+			}
+		}
 		var turnErr errBuildTurn
 		if errors.As(err, &turnErr) {
 			_ = orihttp.RespondJSON(w, turnErr.status, map[string]any{"error": buildErrorText(turnErr.code), "code": turnErr.code})
@@ -441,6 +497,7 @@ func (h *Handler) postWorkspaceBuildFolderDetach(w http.ResponseWriter, r *http.
 		return
 	}
 	var result personalassistant.WorkspaceBuildSession
+	retiredObservation := ""
 	_, err := deps.Store.Mutate(ctx, h.workspaceBuildUserID(ctx), func(doc *personalassistant.WorkspaceBuildDocument) error {
 		build := doc.Session(id)
 		if build == nil {
@@ -453,6 +510,9 @@ func (h *Handler) postWorkspaceBuildFolderDetach(w http.ResponseWriter, r *http.
 			return errBuildTurn{http.StatusConflict, "version"}
 		}
 		if build.Folder != nil || build.FolderRequestID != "" {
+			if build.Folder != nil {
+				retiredObservation = build.Folder.Observation.ID
+			}
 			now := deps.Store.Now()
 			build.InvalidateBuildInference(false)
 			build.FolderRequestID = ""
@@ -474,6 +534,9 @@ func (h *Handler) postWorkspaceBuildFolderDetach(w http.ResponseWriter, r *http.
 		logger.Warn("Workspace build folder could not be removed", logger.Fields{"session_id": id, "error": err})
 		respondBuildUnavailable(w, buildReasonAssistantNotReady)
 		return
+	}
+	if retiredObservation != "" {
+		h.closeBuildFolderReviews(ctx, id, retiredObservation)
 	}
 	logger.Info("Workspace build folder removed", logger.Fields{"session_id": id})
 	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, nil)

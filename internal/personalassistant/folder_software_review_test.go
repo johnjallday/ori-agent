@@ -538,14 +538,21 @@ func TestFolderSoftwareSetup_AResumeIsForTheSameDirectoryOnly(t *testing.T) {
 	}
 	runs := s.setup.runCount()
 
-	// After a restart the server holds no folder for the offer.
+	// Losing the memory hold restores only the same witnessed directory.
 	s.service.mu.Lock()
 	delete(s.service.paths, view.ID)
 	s.service.mu.Unlock()
-	if err := resume("lost"); !errors.Is(err, ErrFolderPathLost) {
-		t.Fatalf("resuming with no folder held: %v", err)
+	if err := resume("restored"); err != nil {
+		t.Fatalf("resuming the retained directory: %v", err)
 	}
-	// Picking the same folder again gives the paused offer its folder back.
+	waitFor(t, "the restored run to stop", func() bool {
+		return s.stored(t, view.ID).Setup.Status == FolderSetupStopped && !s.service.isRunning(view.ID)
+	})
+	if s.setup.runCount() != runs+1 {
+		t.Fatal("restoration did not resume exactly once")
+	}
+	runs++
+	// An explicit re-pick also preserves the paused offer and its run.
 	again := s.pick(t, s.set.Clone)
 	if again.ID != view.ID || again.Setup == nil || again.Setup.StopReason != FolderStopNeedsModel {
 		t.Fatalf("picking the folder again: offer %s setup %+v", again.ID, again.Setup)

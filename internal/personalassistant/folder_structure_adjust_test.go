@@ -3,6 +3,8 @@ package personalassistant
 import (
 	"context"
 	"errors"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -218,6 +220,20 @@ func TestFolderStructureAdjustment_APendingReviewKeepsItsChoicesWhenOpenedAgain(
 	doc, err := f.store.Read(ctx, target.UserID)
 	if err != nil || len(doc.Offers) != 1 || doc.Offers[0].Structure.Group.Name != "Records" || doc.Offers[0].Structure.Members[0].RelPath == "" {
 		t.Fatalf("stored offer: %+v, %v", doc.Offers, err)
+	}
+	root := service.selections[observation.ID].root
+	if err := os.Rename(root, root+"-renamed"); err != nil {
+		t.Fatal(err)
+	}
+	picked := observeSelected(t, f, service, saved, root+"-renamed")
+	resumed, err := service.ResumeReviewPick(ctx, saved, first.ID, picked.ID)
+	if err != nil || resumed == nil || resumed.ID != first.ID || resumed.NeedsPick {
+		t.Fatalf("re-picked structure: %+v %v", resumed, err)
+	}
+	after, err := f.store.Read(ctx, target.UserID)
+	if err != nil || !reflect.DeepEqual(doc.Offer(first.ID).Structure, after.Offer(first.ID).Structure) ||
+		!reflect.DeepEqual(doc.Offer(first.ID).ConversationReview.Structure, after.Offer(first.ID).ConversationReview.Structure) {
+		t.Fatal("re-pick reset adjusted member/group choices", err)
 	}
 }
 
