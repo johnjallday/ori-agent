@@ -3,76 +3,22 @@
 // The card reads the same offer the assistant's card does and presses the same
 // Set up (with open), so the server rechecks the plan it was shown; it never
 // opens a song itself and carries no path.
-import './folder-plan-lines.js';
+import {
+  BRIEF_MAX,
+  followSongOpen,
+  folderDigestOffer,
+  pressSongOpen,
+  readSongSuggestions,
+  songOpenedView,
+  songOpeningLabel,
+  songSuggestionView
+} from './home-song-offer.js';
 
-const DIGEST_ENDPOINT = '/api/personal-assistant/folder-digest';
-const POLL_MS = 1500;
-const POLL_LIMIT = 200;
-const BRIEF_MAX = 2000;
-
-const STOP_COPY = {
-  needs_model: 'Its assistant needs a model first. Your assistant kept what finished.',
-  needs_choice: 'It has more than one project file. Your assistant asks which one to open.',
-  needs_pick: 'Ori no longer has its folder open. Your assistant asks you to pick it again.',
-  consent_stale: 'Its shared agent needs your review first.',
-  assistant_missing: 'The shared agent this Home used is gone. Choose its agent first.'
-};
+// The view and the offer read are shared with the manager's offer in the drawer.
+export { folderDigestOffer, songSuggestionView };
 
 function text(value) {
   return String(value ?? '').trim();
-}
-
-// songSuggestionView is one suggestion as the card shows it, or null for an
-// offer that is not a song this Home's manager can open.
-export function songSuggestionView(offer) {
-  const planLines = globalThis.OriFolderPlanLines;
-  if (!offer || typeof offer.id !== 'string' || !offer.id || !planLines) return null;
-  const setup = offer.setup || null;
-  const source = setup || offer.plan;
-  const lines = Array.isArray(source?.lines) ? source.lines : [];
-  const parts = planLines.handoffLineParts(lines);
-  if (!parts) return null;
-  const digest = text(setup?.plan_digest || offer.plan?.digest);
-  if (!digest) return null;
-  const song = parts.song || text(offer.subject?.name) || text(offer.folder);
-  const manager = parts.manager.replace(/^Your /, '');
-  const hire = source?.hire || null;
-  const agent = hire?.mode === 'pending' ? '' : text(hire?.agent_name);
-  const role = text(hire?.role_label);
-  const model = text(hire?.model);
-  const status = text(setup?.status);
-  const stopped = status === 'stopped' ? text(setup?.stop_reason) : '';
-  return {
-    offerID: offer.id,
-    digest,
-    song,
-    manager,
-    sections: planLines.handoffNames(source),
-    lines,
-    hire: agent
-      ? {
-          name: agent,
-          detail: [role && role !== agent ? `${role} role` : '', model ? `uses ${model}` : '']
-            .filter(Boolean)
-            .join(' · ')
-        }
-      : null,
-    brief: text(setup?.brief || offer.plan?.brief_default),
-    asksBrief: Boolean(offer.plan?.brief_default || setup?.brief),
-    running: status === 'running',
-    // Stopped anywhere but the hand-off, the assistant's card has the answer.
-    waitsElsewhere: Boolean(stopped && stopped !== 'handoff_ready'),
-    stopCopy:
-      STOP_COPY[stopped] ||
-      (stopped && stopped !== 'handoff_ready' ? 'A step did not finish.' : ''),
-    label: `Open ${song} & hire`
-  };
-}
-
-// folderDigestOffer is the one offer a GET ?offer_id= read returns.
-export function folderDigestOffer(body) {
-  const offer = body?.folder_digest?.offer;
-  return offer && typeof offer === 'object' ? offer : null;
 }
 
 function element(tag, className, content) {
@@ -102,20 +48,8 @@ export class HomeSongSuggestions {
   }
 
   async load() {
-    let suggestions = [];
-    try {
-      const response = await this.fetchImpl(
-        `${DIGEST_ENDPOINT}/home-suggestions?home_id=${encodeURIComponent(this.workspaceId)}`,
-        { headers: { Accept: 'application/json' } }
-      );
-      if (response.ok) {
-        const body = await response.json();
-        suggestions = Array.isArray(body?.suggestions) ? body.suggestions : [];
-      }
-    } catch (_) {
-      // Advisory: without it the Home shows no suggestion.
-    }
-    this.render(suggestions.map(songSuggestionView).filter(Boolean));
+    // Advisory: without the read the Home shows no suggestion.
+    this.render((await readSongSuggestions(this.fetchImpl, this.workspaceId)) || []);
   }
 
   render(views) {
@@ -181,7 +115,7 @@ export class HomeSongSuggestions {
       const button = element('button', 'modern-btn modern-btn-primary', view.label);
       button.type = 'button';
       button.disabled = view.running || this.busy.has(view.offerID);
-      if (view.running) button.textContent = `${view.manager} is opening ${view.song}…`;
+      if (view.running) button.textContent = songOpeningLabel(view);
       button.addEventListener('click', () => void this.open(view, brief));
       actions.append(button);
       status.textContent = message;
@@ -195,86 +129,37 @@ export class HomeSongSuggestions {
     const typed = brief ? brief.value.trim() : '';
     if (typed.length > BRIEF_MAX) return;
     this.busy.add(view.offerID);
-    this.messages.set(view.offerID, `${view.manager} is opening ${view.song}…`);
+    this.messages.set(view.offerID, songOpeningLabel(view));
     await this.load();
     try {
-      const body = { plan_digest: view.digest, open: true, request_id: requestId() };
-      if (view.asksBrief) body.brief = typed;
-      const response = await this.fetchImpl(
-        `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(view.offerID)}/setup`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(body)
-        }
-      );
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        this.messages.set(
-          view.offerID,
-          result?.plan_changed
-            ? 'What opening does has changed. Review it again below.'
-            : text(result?.error) || `${view.song} could not be opened.`
-        );
+      const pressed = await pressSongOpen(this.fetchImpl, view, typed);
+      if (!pressed.ok) {
+        this.messages.set(view.offerID, pressed.message);
         return;
       }
-      await this.follow(view);
-    } catch (_) {
-      this.messages.set(
-        view.offerID,
-        'Ori could not be reached. Nothing was opened twice; try again.'
-      );
+      const settled = await followSongOpen(this.fetchImpl, view);
+      if (settled.state === 'opened') this.opened(view, settled.outcome);
     } finally {
       this.busy.delete(view.offerID);
       await this.load();
     }
   }
 
-  // follow reads the offer until its run settles: opened, or stopped with
-  // something to answer on the assistant's card.
-  async follow(view) {
-    for (let i = 0; i < POLL_LIMIT; i += 1) {
-      await new Promise(resolve => setTimeout(resolve, POLL_MS));
-      let offer = null;
-      try {
-        const response = await this.fetchImpl(
-          `${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(view.offerID)}`,
-          { headers: { Accept: 'application/json' } }
-        );
-        if (response.ok) offer = folderDigestOffer(await response.json());
-      } catch (_) {
-        continue;
-      }
-      if (!offer) continue;
-      if (offer.status === 'resolved') {
-        this.opened(view, offer.outcome);
-        return;
-      }
-      if (offer.setup?.status === 'stopped') return;
-    }
-  }
-
   // opened replaces the card with the song it opened, until the page reloads.
   opened(view, outcome) {
     this.messages.delete(view.offerID);
-    const route = text(outcome?.route);
+    const opened = songOpenedView(view, outcome);
     const note = element('section', 'assistant-program-suggestion is-opened');
     note.append(
-      element('span', 'assistant-program-kicker', `${view.manager} opened it`),
-      element('h2', '', `${view.song} is open`),
-      element('p', '', 'It has its own workspace and assistant, and stays in this Home’s library.')
+      element('span', 'assistant-program-kicker', opened.kicker),
+      element('h2', '', opened.heading),
+      element('p', '', opened.body)
     );
-    if (/^\/workspaces\/[A-Za-z0-9._~%-]+$/.test(route)) {
-      const link = element('a', 'modern-btn modern-btn-primary', `Open ${view.song}`);
-      link.href = route;
+    if (opened.route) {
+      const link = element('a', 'modern-btn modern-btn-primary', opened.openLabel);
+      link.href = opened.route;
       note.append(link);
     }
     this.root?.after?.(note);
   }
-}
-
-function requestId() {
-  return (
-    globalThis.crypto?.randomUUID?.() || `home-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  );
 }

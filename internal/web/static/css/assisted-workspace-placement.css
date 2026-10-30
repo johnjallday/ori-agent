@@ -1,3 +1,114 @@
+/* A Home's manager offering a waiting song, first in its drawer conversation
+   (personal-assistant-home-offer.js). Theme tokens only, so both themes hold. */
+.pa-home-offers[hidden] {
+  display: none;
+}
+.pa-home-offers {
+  --pho-ink: var(--ori-ink, var(--text-primary, #20342d));
+  --pho-paper: var(--ori-paper, var(--bg-primary, #fff));
+  --pho-muted: color-mix(in srgb, var(--pho-ink) 72%, var(--pho-paper));
+  --pho-line: var(--ori-border, var(--border-color, #c9d0c6));
+  --pho-accent: var(--accent-color, #376c54);
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--pho-ink);
+}
+.pa-home-offer {
+  max-width: 92%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--pho-line);
+  border-radius: 10px;
+  background: var(--pho-paper);
+  overflow-wrap: anywhere;
+}
+.pa-home-offer:focus-visible {
+  outline: 2px solid var(--pho-accent);
+  outline-offset: 2px;
+}
+.pa-home-offer p,
+.pa-home-offer h3 {
+  margin: 0;
+}
+.pa-home-offer__text {
+  margin-block: 0.25rem 0.6rem !important;
+}
+.pa-home-offer__card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--pho-line);
+  border-left: 3px solid var(--pho-accent);
+  border-radius: 3px 8px 8px 3px;
+}
+.pa-home-offer__hire strong {
+  font-weight: 600;
+}
+.pa-home-offer__lines {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pa-home-offer__lines li {
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+}
+.pa-home-offer__lines small,
+.pa-home-offer__brief small,
+.pa-home-offer__waits,
+.pa-home-offer__note {
+  color: var(--pho-muted);
+}
+.pa-home-offer__brief {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+.pa-home-offer__brief small {
+  font-weight: 400;
+}
+.pa-home-offer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.pa-home-offer__status:empty {
+  display: none;
+}
+.pa-home-offer__kicker {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--pho-muted);
+}
+.pa-home-offer__receipt h3 {
+  font-size: 1rem;
+}
+.pa-home-offer__rows {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.pa-home-offer__unavailable {
+  margin: 0;
+}
+.pa-home-offer a:not(.modern-btn) {
+  color: var(--pho-accent);
+}
+.pa-home-offer a.modern-btn {
+  justify-self: start;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pa-home-offer {
+    scroll-behavior: auto;
+  }
+}
+
 /* Only the existing source owner's review replaces its old editor while
    active; its underlying field setters and completion mounts stay intact. */
 .pa-folder--shared-review > :not([data-source-creation-review]) {
