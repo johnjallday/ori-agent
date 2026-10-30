@@ -25,6 +25,10 @@ type ToolCallResult struct {
 	Result     string `json:"result"`
 	DurationMs int64  `json:"durationMs,omitempty"` // Execution time in milliseconds
 	Success    bool   `json:"success"`              // Whether the tool executed successfully
+
+	// Host-created attribution from the actual native reader, never from a
+	// model message or a same-named plugin. Included in the persisted reply.
+	sourceNote string
 }
 
 // ExecuteToolCallsResult holds the results of executing multiple tool calls
@@ -298,10 +302,7 @@ func (h *Handler) runProviderToolLoop(w http.ResponseWriter, ctx, baseCtx contex
 		},
 	)
 
-	finalText := getResponseText(loopResult.FinalContent)
-	if loopResult.HasStructuredResult {
-		finalText = loopResult.FinalContent
-	}
+	finalText := toolLoopResponseText(loopResult)
 
 	logger.Debug("Provider tool loop completed", logger.Fields{
 		"provider": run.ProviderLabel,
@@ -317,6 +318,22 @@ func (h *Handler) runProviderToolLoop(w http.ResponseWriter, ctx, baseCtx contex
 		Mode:      routeModeAssistantChat,
 		ToolCount: len(loopResult.ToolCalls),
 	}), loopResult.Receipts), run.PlannerDecision))
+}
+
+// Both the SDK and generic-provider paths persist exactly the attributed text
+// they return. A structured result keeps its existing rendering contract.
+func toolLoopResponseText(result boundedToolLoopResult) string {
+	if result.HasStructuredResult {
+		return result.FinalContent
+	}
+	text := getResponseText(result.FinalContent)
+	for i := len(result.ToolCalls) - 1; i >= 0; i-- {
+		call := result.ToolCalls[i]
+		if call.Success && call.sourceNote != "" {
+			return text + "\n\n" + call.sourceNote
+		}
+	}
+	return text
 }
 
 func tryToolLoopFinalSynthesis(request func() (string, error)) (string, bool) {
@@ -478,6 +495,7 @@ func (h *Handler) executeToolCallsCommonWithSession(
 			Result:     result,
 			DurationMs: duration.Milliseconds(),
 			Success:    err == nil,
+			sourceNote: workspaceAssessmentSourceNote(tool, result, err == nil),
 		})
 	}
 

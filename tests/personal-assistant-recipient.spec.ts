@@ -131,6 +131,14 @@ async function sessionsIn(request: APIRequestContext, workspaceId: string) {
   return (list.sessions || []) as { id: string; agent_name: string }[];
 }
 
+// Arrival delivery has its own real-host journey in workspace-lead-welcome.
+// These routing tests deliberately exercise an otherwise empty conversation.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/lead-conversation/open', route =>
+    route.fulfill({ json: { changed: false } })
+  );
+});
+
 test('a workspace with a Commander opens as its entry agent and sends to it', async ({
   page,
   request

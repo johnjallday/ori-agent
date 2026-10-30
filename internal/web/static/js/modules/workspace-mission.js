@@ -1156,6 +1156,11 @@
   // it is opened (FR25); a run already executing — started on the first goal
   // save, by the cadence or in another tab — is followed until it ends (FR27).
   function afterStateLoaded(state) {
+    try {
+      document.dispatchEvent(new CustomEvent('ori:workspace-goal-state'));
+    } catch (_) {
+      /* Optional conversation listener; never affects admission. */
+    }
     if (runInProgress || !state) return;
     if (state.run_in_flight) {
       const detail = state.run_in_flight_detail || {};

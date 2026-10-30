@@ -81,6 +81,7 @@ type Handler struct {
 	calendarOpsPreference  chatCalendarOpsPreference
 	backupAdvisorReader    backupAdvisorReader
 	workspaceProtection    workspaceProtectionReader
+	fileCuratorWelcome     fileCuratorWelcomeReader
 	// planOpener starts a durable Plan for chat requests that need one. It is
 	// deliberately one method wide: chat may open a plan and link to it, never
 	// edit, review, or approve one (FR-19, FR-149).
@@ -1245,6 +1246,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	toolRuntimeSystemPrompt := ""
 	if !basePromptHasVars {
 		toolRuntimeSystemPrompt = h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
+	}
+	// Assessment discussion is a lead-agent capability, not a generic
+	// snapshot. Authored prompt variables must not suppress its guidance.
+	if assessmentPrompt := workspaceAssessmentPrompt(ag); assessmentPrompt != "" {
+		toolRuntimeSystemPrompt = strings.TrimSpace(toolRuntimeSystemPrompt + "\n\n" + assessmentPrompt)
 	}
 	providerName, providerErr := resolveChatProviderName(current, ag, h.llmFactory)
 	if providerErr != nil {

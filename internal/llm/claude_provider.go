@@ -384,7 +384,7 @@ func claudeSystemText(req ChatRequest) string {
 func (p *ClaudeProvider) convertMessages(messages []Message) []anthropic.MessageParam {
 	var claudeMessages []anthropic.MessageParam
 
-	for _, msg := range messages {
+	for _, msg := range claudeOpeningContext(messages) {
 		switch msg.Role {
 		case RoleUser:
 			// Build content blocks for the user message

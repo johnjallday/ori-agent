@@ -368,6 +368,8 @@ export function createRecipientController({
   // The title of the entry agent's current session, for the session strip.
   let session = { workspaceId: '', id: '', title: '' };
   const sessionListeners = new Set();
+  let sessionRevision = 0;
+  let loadSequence = 0;
 
   function sessionId() {
     const stored = readEntrySession(page.workspaceId, storage);
@@ -375,6 +377,7 @@ export function createRecipientController({
   }
 
   function setSession(workspaceId, id, title) {
+    sessionRevision += 1;
     writeEntrySession(workspaceId, id, storage);
     const real = text(id) && text(id) !== NEW_CONVERSATION_MARK ? text(id) : '';
     session = { workspaceId: text(workspaceId), id: real, title: real ? text(title) : '' };
@@ -473,6 +476,8 @@ export function createRecipientController({
       if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || !current.available || !fetchImpl) {
         return { session: null, error: false };
       }
+      const revision = sessionRevision;
+      const ticket = ++loadSequence;
       const loaded = await loadEntrySession({
         fetchImpl,
         workspaceId,
@@ -480,7 +485,14 @@ export function createRecipientController({
         storedId: readEntrySession(workspaceId, storage)
       });
       // The tab moved on while the server answered; that answer is not ours.
-      if (page.workspaceId !== workspaceId) return { session: null, error: false, stale: true };
+      if (
+        page.workspaceId !== workspaceId ||
+        sessionRevision !== revision ||
+        ticket !== loadSequence ||
+        resolution.current?.name !== current.name ||
+        resolution.current?.kind !== current.kind
+      )
+        return { session: null, error: false, stale: true };
       if (loaded.session) setSession(workspaceId, loaded.session.id, loaded.session.title);
       else if (!loaded.error && !loaded.fresh) setSession(workspaceId, '', '');
       return loaded;

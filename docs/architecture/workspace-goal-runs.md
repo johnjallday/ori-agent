@@ -97,6 +97,114 @@ with the note that it has no parts yet.
   normalized title to `Workspace.DismissedSuggestions`, which later runs are told
   never to suggest again.
 
+## Discussing an assessment with the lead agent
+
+In the workspace's existing chat/drawer, ask the lead agent **“What should I
+focus on in this workspace?”** The runtime offers `workspace_goal_assessment`
+only to the exact resolved local entry-agent instance and rechecks that identity
+on each call. Specialists, a global namesake and ambiguous/replaced instances do
+not receive it. It uses the existing conversation surface.
+
+The read returns the current full goal, the newest successful saved assessment,
+its start/finish times and goal match (`current`, `changed`, or `unknown`), the
+latest recorded attempt's success, and a bounded snapshot of current open and
+recently finished top-level work. It reuses `MissionWorkSnapshot`: at most five
+open items with their total and five recently finished items, with bounded
+previews. Current task states must take precedence over an older assessment's
+claims. If more evidence is needed, the agent uses the existing authorized
+workspace readers; this does not expand folder access.
+
+The conversational guidance asks for findings → one recommendation with a reason
+→ a concrete offer to discuss/review. It discourages unnecessary hiring/setup,
+repeating finished work, and assessment pitches on greetings or unrelated
+requests. An existing relevant goal suggestion may link to the canonical
+Backlog; there is no new execution button or approval route. The guidance also
+applies when an authored agent prompt uses workspace variables rather than the
+generic runtime snapshot.
+
+These are stored observations, not a fresh review: `read_at` dates the read, not
+the assessment. A newer failed attempt never replaces a successful assessment;
+a missing assessment is stated, not invented. A matching goal is not proof that
+the workspace is unchanged. New assessments retain their goal digest even when
+no charter is proposed; older undigested records remain `unknown`, with no
+migration or inferred freshness. Suggested charters and raw failure output are
+not returned by this reader.
+
+On successful reads, the host appends a short source line to the conversational
+reply, before persisting it in the existing session. It uses the exact returned
+metadata: assessment completion/start time (or explicitly unavailable), goal
+match, task-snapshot read time and any latest failed review. This line is not
+model-authored and does not substitute today's read time for an older review.
+Only the actual native reader can supply it; same-named tools, failed reads and
+model-authored JSON cannot mint one. One line covers the last successful read in
+a turn. Unrelated/no-tool replies and structured tool rendering are unchanged.
+The model still owns the recommendation and must distinguish historical claims
+from current facts; the source line does not verify the prose's correctness.
+
+The reader has no mutation or run-start dependency and is classified read-only.
+Asking for advice starts only the normal chat turn, not a goal run, task, hire,
+install, note save or standing permission. Advisory guidance explicitly overrides
+the generic suggestion to save useful generated content automatically. Existing
+chat tools and their authorization boundaries are otherwise unchanged; this is
+not a new sandbox or a general autonomous execution policy. Actions still use
+their existing review/start controls. No new background review, notification
+policy or automatic charter adoption is introduced.
+
+### The lead speaks first
+
+On the first eligible workspace open, the drawer delivers a host-written
+introduction in an ordinary lead-agent session. It brings in the saved review's
+findings, one highest-priority unfinished suggestion from that same review, its
+reason/first step and source dates. Completed, active, cancelled, dismissed and
+older-review suggestions are not presented as new starts. Changed or unknown
+goal matches are qualified instead of recommending obsolete work. This initial
+message uses the saved model assessment, not a second automatic model call.
+Subsequent questions use normal lead chat and the evidence reader above. The
+stored introduction stays assistant-authored. For Claude's user-first wire
+contract, its adapter quotes an assistant-only opening as historical context
+inside the first actual user turn; it never inserts a dummy user request or
+promotes that prose to system instructions.
+
+A capability-associated File Curator lead instead uses File Janitor's saved
+filing state, not the presence of a goal assessment. Its welcome offers two or
+three numbered discussion choices: review the pending batch, discuss uncertain
+items only when some are still pending, and understand the filing rules. It
+recommends starting with the proposed filing. With no batch it offers the
+existing **Scan now** control; missing setup or unavailable evidence gets an
+honest setup/status choice, never invented findings or a Goal settings detour.
+The reader checks the current owner, Curator association and saved read grant,
+returns counts/dates only, and never probes the managed folder, scans, or changes
+filing state. Batch completion and record-read times stay distinct. Choosing a
+topic is not consent for a scan or file action. These choices complete the
+one-time welcome rather than waiting for a separate goal review. An unanswered
+older generic welcome may receive them once; user-led chats remain untouched.
+
+`POST /api/workspaces/{workspaceID}/lead-conversation/open` is authenticated to
+the workspace owner and exact local lead, fenced against workspace version
+changes. It has no model/run/task dependency. Migration 87 adds a local delivery
+receipt, with workspace-delete cascade and factory-reset inventory. The receipt
+survives session deletion; imports do not carry permission or delivery state.
+Transactions deduplicate concurrent tabs and combine a ready assessment with
+the introduction, or append it at most once later. A failed review (or a
+completed review with no assessment) gets an explicit non-retrying fallback.
+With no review yet, the lead says so and asks about the goal rather than
+inventing findings or silently starting a review. Existing first-open admission,
+manual-only consent and setup gates are unchanged.
+
+The drawer waits for workspace/setup readiness and a resolved workspace lead.
+It does not replace a draft, an active turn, a new-conversation choice or another
+recipient. Existing lead sessions suppress the introduction. Once a user has
+spoken, the delayed unsolicited assessment is suppressed too. Reloads, another
+tab, moved/deleted sessions and replacement leads do not recreate the greeting.
+Closing the drawer keeps later delivery quiet. A bounded poll and the existing
+goal-state/setup events observe readiness; no persistent background worker is
+added. HQ/groups and assistant-home programs retain their own entry flows.
+
+`./scripts/e2e-goal-suggestions.sh --lead-welcome` checks the real browser,
+creation, first-open review, persisted conversation and follow-up using only the
+isolated fixture model. Node tests cover UI deferral and stale-response guards;
+Go tests cover identity, version/owner fences and transactional delivery.
+
 ## Preconditions
 
 A precondition is a host-observed fact that an unmet step must come before
