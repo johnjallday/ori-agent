@@ -1256,7 +1256,7 @@ func TestFolderDigestErrors_MapWithoutLeaking(t *testing.T) {
 	}{
 		{&personalassistant.FolderRootError{Message: "That is your whole home folder. Choose one folder inside it, such as Downloads or Desktop."}, http.StatusBadRequest, "choose_folder"},
 		{personalassistant.ErrFolderScanBusy, http.StatusConflict, "still looking"},
-		{personalassistant.ErrFolderPathLost, http.StatusConflict, `"needs_pick":true`},
+		{personalassistant.ErrFolderPathLost, http.StatusConflict, `"needs_pick_reason":"lost"`},
 		{personalassistant.ErrFolderOfferNotFound, http.StatusNotFound, "no longer here"},
 		{personalassistant.ErrFolderPickerUnavailable, http.StatusConflict, "unavailable here"},
 		{personalassistant.ErrNeedsHQ, http.StatusConflict, "Personal HQ"},

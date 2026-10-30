@@ -20,6 +20,7 @@ const (
 	FolderDigestSchemaVersion = 2
 	folderDigestFileName      = "folder-digest-v1.json"
 	folderDigestLockName      = "folder-digest-v1.lock"
+	folderPathsFileName       = "folder-paths-v1.json"
 	folderDigestMaxBytes      = 256 * 1024
 	// folderDigestMaxOffers bounds the offer history; settled offers past
 	// the cap are pruned oldest first.

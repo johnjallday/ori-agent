@@ -14,9 +14,12 @@ func (s *FolderObservationService) copyInboxPlacementHold(ctx context.Context, s
 	if source.ConversationID == "" || source.DraftID != "" || IsBuildReview(source) || !placementReference(buildID) {
 		return nil, ErrFolderSelection
 	}
-	held, _, err := s.resolve(ctx, source, observationID)
+	held, _, err := s.resolveHeld(ctx, source, observationID)
 	if err != nil {
 		return nil, err
+	}
+	if held.reheld != nil {
+		return nil, ErrFolderSelection
 	}
 	target := source
 	target.ConversationID, target.DraftID = "", "build:"+buildID

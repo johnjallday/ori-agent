@@ -298,7 +298,10 @@ export function createFolderContextController({
     if (
       isBusy() ||
       state.pending ||
-      (close ? !state.conversationId || !offerId : !state.observation || state.authority)
+      (close
+        ? !state.conversationId || !offerId
+        : !state.observation ||
+          (state.authority && !(state.conversationId && state.offerId && !state.preview)))
     )
       return null;
     const generation = ++state.generation;
@@ -992,7 +995,7 @@ function renderAttachment(state) {
   elements.history.hidden = !attached || !view.authority;
   elements.history.textContent =
     attached && view.authority
-      ? `Discussing saved observations only (${view.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
+      ? `Discussing saved observations only (${view.authority}). Pick again for fresh inspection. File contents have not been read.`
       : '';
   if (needsFocus) document.getElementById('personalAssistantInput')?.focus({ preventScroll: true });
 }

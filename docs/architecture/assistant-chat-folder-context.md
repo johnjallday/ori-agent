@@ -12,10 +12,11 @@
   even when the entry/time budget did not trip. Candidate names are root and
   immediate subfolders. Explicit attachments additionally capture a bounded
   metadata tree during the same walk; neither projection is a complete inventory.
-- Picked paths in the existing digest are process-local; chip paths can be
-  reconstructed by the old offer path. Conversation selections must **not**
-  reconstruct either kind after restart. The existing portfolio continuation's
-  canonical-path plus directory-identity witness supplies the relevant pattern.
+- At this original inspection, picked paths were process-local and conversation
+  selections could not reconstruct after restart. The review-only continuity
+  exception below now uses the portfolio continuation's canonical-path plus
+  directory-identity pattern; attached discussion snapshots still cannot restore
+  filesystem authority.
 - Conversations are Sessions under Personal HQ, owned by the relationship's
   hired profile; Messages are the transcript. Ask creates a session only when
   storing an answered first turn. Session deletion cascades to Messages; shallow
@@ -64,9 +65,35 @@ untrusted data, not instructions; Send discloses metadata sharing with the
 configured model.
 
 A saved snapshot is discussable, not a filesystem grant. Current authority is
-checked independently. Lost (restart), expired and changed selections retain
-their dated snapshot; no automatic rescan occurs. A new explicit pick is needed
-for inspection or setup. Provider transmission occurs only on Send.
+checked independently. Lost, expired and changed selections retain their dated
+snapshot; no automatic rescan occurs. An attached folder with no opened review
+still needs an explicit pick after the 30-minute TTL or a restart. Provider
+transmission occurs only on Send.
+
+An explicitly opened conversation review (including an arranged review) keeps
+setup authority separately while its offer is `pending` or `awaiting_outcome`.
+The server-private `folder-paths-v1.json` beside the HQ's digest stores canonical
+root/candidate paths, identity witnesses and `saved_at`, keyed by offer ID. It
+uses the digest lock and the knowledge store's atomic 0600 writer, has its own
+version and owner, and never adds a path to the digest, browser, transcript or
+model input. Final transitions, removal and pruning delete its entry; deleting
+the managed HQ directory removes the sidecar. The cap is 64 entries: a full
+store logs a path-free warning and keeps a new review's in-memory hold without
+evicting another entry.
+
+When a review's hold expires or disappears, the resolver checks the canonical
+owner, saved path canonicalisation, directory identity and folder/subject keys.
+It re-holds only the existing review's root and candidate under its observation
+ID, without scanning or rebuilding a tree. Other candidates and fresh structure
+proposals still need a pick. Discussion Resolve/Status retain the old snapshot's
+age; reconstructed setup authority is not fresh discussion evidence. The review
+lease and canonical owner guard still apply to actions.
+
+A failed reconstruction exposes only `needs_pick_reason`: `moved` (missing or
+redirected path), `changed` (replaced directory), or `lost` (no saved path/hold,
+including legacy offers). Attached selections can also report `expired`. The
+review context carries the same code. Neither time alone nor a server restart
+invalidates a saved review whose directory is unchanged.
 
 ### Canonical persistence and concurrency
 

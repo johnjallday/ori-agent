@@ -1541,10 +1541,10 @@ test('a project without a marker or a blueprint is still a plan, and a missing b
 test('an offer whose folder the server no longer holds asks for it again before any yes', () => {
   const view = folderOfferView({ ...thesisOffer, needs_pick: true });
   assert.equal(headlineText(view), 'Thesis looks like a LaTeX manuscript.');
-  assert.match(view.question, /Pick the folder again/);
+  assert.match(view.question, /Pick it again/);
   assert.deepEqual(
     view.actions.map(a => a.id),
-    ['repick', 'no', 'later']
+    ['repick']
   );
   assert.equal(view.actions[0].repick, true);
   assert.equal(view.confirming, false);

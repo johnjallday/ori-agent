@@ -10,6 +10,7 @@
 
 // Sets window.OriFolderPlanLines, which the plan line exports below come from.
 import './folder-plan-lines.js';
+import { folderPickCopy } from './folder-pick-copy.js';
 import './folder-setup-visual.js';
 import { mountPlacementPanel } from './assisted-workspace-placement.js';
 import { setupCreationReviewMaterial } from './workspace-creation-review.js';
@@ -258,7 +259,7 @@ export const { setupLinesView, renderSetupLines, hireView, handoffNames, handoff
 const SETUP_STOP_COPY = {
   plan_changed:
     'What Set up would do now differs from the plan you approved, so I stopped before going further. Review the changed setup before continuing.',
-  needs_pick: subject => `Ori no longer has ${subject} open. Pick the folder again to carry on.`,
+  needs_pick: (subject, setup) => folderPickCopy(subject, setup?.needs_pick_reason),
   needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
   needs_model:
     'The agent needs a model before setup can continue. Completed work is kept; see the saved progress below.',
@@ -321,8 +322,7 @@ function goToHomeAction(home) {
 const PORTFOLIO_STOP_COPY = {
   needs_model:
     'What finished is kept. The Home needs a model before its agents can be added; nothing was listed yet.',
-  needs_pick: subject =>
-    `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to list it.`
+  needs_pick: (subject, setup) => folderPickCopy(subject, setup?.needs_pick_reason)
 };
 
 // A software project's setup is the host's own: there is no step-by-step
@@ -331,8 +331,7 @@ const PORTFOLIO_STOP_COPY = {
 const SOFTWARE_STOP_COPY = {
   plan_changed:
     'What is saved no longer matches what you reviewed, so I stopped before going further. Anything that finished is kept. Review the setup again to carry on.',
-  needs_pick: subject =>
-    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  needs_pick: (subject, setup) => folderPickCopy(subject, setup?.needs_pick_reason),
   needs_model:
     'The assistant has no model yet, so setup paused. Choose a model, then continue; nothing is lost.',
   interrupted:
@@ -347,8 +346,7 @@ const SOFTWARE_STOP_COPY = {
 const INBOX_STOP_COPY = {
   plan_changed:
     'What is saved no longer matches what you reviewed, or File Janitor will not take this folder, so I stopped before going further. Anything that finished is kept and no file was moved. Pick the folder again to review it afresh.',
-  needs_pick: subject =>
-    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  needs_pick: (subject, setup) => folderPickCopy(subject, setup?.needs_pick_reason),
   interrupted:
     'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
   failed:
@@ -368,8 +366,7 @@ const STRUCTURE_STOP_COPY = {
     'One workspace could not be created, so I stopped there. What finished is kept and nothing in your folder was changed; Continue carries on from that workspace.',
   plan_changed:
     'What is saved no longer matches what you reviewed, so I stopped before going further. Anything that finished is kept.',
-  needs_pick: subject =>
-    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  needs_pick: (subject, setup) => folderPickCopy(subject, setup?.needs_pick_reason),
   interrupted:
     'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
   failed:
@@ -1387,7 +1384,8 @@ function folderOfferViewWithoutLead(offer, options = {}) {
     reason,
     decided,
     confirming: false,
-    needsPick: offer.needs_pick === true
+    needsPick: offer.needs_pick === true,
+    needsPickReason: offer.needs_pick_reason || 'lost'
   };
   const structured = Boolean(offerStructure(offer)) && verdict === 'project';
   const view = structured
@@ -1421,9 +1419,8 @@ function folderOfferViewWithoutLead(offer, options = {}) {
     view.reason = '';
     view.capabilityDetail = ''; // the pre-setup install promise is no longer true
   }
-  // A yes needs the folder's path, and a dialog-chosen folder is held in
-  // memory only: after a server restart the card asks for the folder again
-  // before offering anything a yes would need.
+  // Only the server decides whether a review's folder can still be used.
+  // Time passing or a restart alone does not invalidate a saved review.
   if (
     view.visible &&
     status === 'pending' &&
@@ -1522,17 +1519,9 @@ function folderOfferViewWithoutLead(offer, options = {}) {
   if (view.visible && view.needsPick && status === 'awaiting_outcome') {
     return {
       ...lostFolderSetupView(view, subject),
-      // A confirmed setup whose folder was lost (a restart drops a held folder)
+      // A confirmed setup whose folder was moved, replaced or no longer held
       // must still draw its way back; a decided card shows actions only then.
       resume: true
-    };
-  }
-  if (view.visible && view.needsPick && !view.decided && offer.software) {
-    // A software project's folder can also be lost by being replaced: a folder
-    // deleted and made again at the same place is not the one that was shown.
-    return {
-      ...repickView(view, subject),
-      question: `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`
     };
   }
   if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
@@ -2113,12 +2102,8 @@ function repickView(view, subject) {
   return {
     ...view,
     confirming: false,
-    question: `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
-    actions: [
-      { id: 'repick', label: 'Pick it again', style: 'primary', repick: true },
-      { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
-      { id: 'later', label: 'Later', style: 'link', decision: 'later' }
-    ]
+    question: folderPickCopy(subject, view.needsPickReason),
+    actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
   };
 }
 
@@ -5349,6 +5334,7 @@ async function startOneCardSetup(action) {
   if (offer.needs_pick) {
     showOfferFailure({
       needs_pick: true,
+      needs_pick_reason: offer.needs_pick_reason,
       error: 'Ori no longer has that folder open. Pick it again.'
     });
     render();
@@ -6227,7 +6213,12 @@ function showOfferFailure(payload) {
     // in the chooser as well when that is open.
     const message = String(payload?.error || 'Pick the folder again.');
     showError(message);
-    if (state.offer) state.offer = { ...state.offer, needs_pick: true };
+    if (state.offer)
+      state.offer = {
+        ...state.offer,
+        needs_pick: true,
+        needs_pick_reason: payload.needs_pick_reason || 'lost'
+      };
     if (state.chooserOpen) showStatus(message);
     return;
   }
@@ -6567,6 +6558,7 @@ function startProjectOutcome(action) {
   if (offer.needs_pick) {
     showOfferFailure({
       needs_pick: true,
+      needs_pick_reason: offer.needs_pick_reason,
       error: 'Ori no longer has that folder open. Pick it again.'
     });
     render();

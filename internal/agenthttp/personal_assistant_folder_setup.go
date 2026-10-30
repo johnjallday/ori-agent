@@ -179,6 +179,19 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 	}
 	placementContext = personalassistant.WithFolderStructureAdjustment(placementContext, req.Structure)
 	observation, err := h.resolveFolderObservation(r.Context(), target, req.SelectionID)
+	restoredReview := false
+	if err != nil && state.OfferID != "" && state.Observation != nil && state.Observation.ID == req.SelectionID && req.ConversationID != "" {
+		// A dated snapshot can name an already-open canonical review. It does
+		// not authorize new candidates: the review resolver independently
+		// validates the saved folder and its exact candidate before reuse.
+		prior, readErr := h.FolderSetups.ReadReview(r.Context(), target, state.OfferID)
+		if readErr == nil && prior != nil && !prior.NeedsPick && prior.CandidateID == req.CandidateID &&
+			(prior.Status == personalassistant.FolderOfferPending || prior.Status == personalassistant.FolderOfferAwaitingOutcome) {
+			observation, err, restoredReview = state.Observation, nil, true
+			state.Historical = true
+			state.Authority = h.FolderObservations.Status(r.Context(), target, *state.Observation)
+		}
+	}
 	if err != nil {
 		writeFolderError(w, err)
 		return
@@ -227,7 +240,7 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		writeFolderReviewError(w, personalassistant.ErrFolderOfferDecided)
 		return
 	}
-	if (req.Recheck || offer.PlacementHandoff != nil) && !created && state.OfferID == offer.ID && state.Observation != nil && state.Observation.ID == req.SelectionID {
+	if (req.Recheck || restoredReview || offer.PlacementHandoff != nil) && !created && state.OfferID == offer.ID && state.Observation != nil && state.Observation.ID == req.SelectionID {
 		// Refresh this existing canonical review in place. A readiness check is
 		// not another folder turn, a new conversation or a setup confirmation.
 		orihttp.WriteJSON(w, map[string]any{

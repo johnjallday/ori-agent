@@ -317,7 +317,7 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, personalassistant.ErrSecondBrainUnknownVault):
 		orihttp.NotFound(w, "That vault is no longer in Obsidian's list. Choose it again")
 	case errors.Is(err, personalassistant.ErrSecondBrainSelection):
-		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true})
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true, "needs_pick_reason": personalassistant.FolderPickReason(err)})
 	case errors.Is(err, personalassistant.ErrSecondBrainNotConnected):
 		orihttp.Conflict(w, "No notes folder is connected")
 	case errors.Is(err, personalassistant.ErrSecondBrainLookNotFound):

@@ -577,7 +577,7 @@ type FolderDigestService struct {
 
 	// Conversation offers never reconstruct a chip path or outlive their
 	// canonical review authority. Wired once alongside the observation service.
-	conversationSource func(FolderOffer) (string, bool)
+	conversationSource func(FolderOffer) (string, FolderContinuationReason)
 	conversationLease  func(context.Context, FolderOffer) (func(), error)
 
 	mu       sync.Mutex
@@ -696,10 +696,11 @@ type FolderOfferView struct {
 	// NeedsPick is set when the offer's folder path is no longer known
 	// (a restart after a picker-chosen folder) and a yes needs the user to
 	// pick it again.
-	NeedsPick bool           `json:"needs_pick,omitempty"`
-	Decision  string         `json:"decision,omitempty"`
-	Choice    string         `json:"choice,omitempty"`
-	Outcome   *FolderOutcome `json:"outcome,omitempty"`
+	NeedsPick       bool                     `json:"needs_pick,omitempty"`
+	NeedsPickReason FolderContinuationReason `json:"needs_pick_reason,omitempty"`
+	Decision        string                   `json:"decision,omitempty"`
+	Choice          string                   `json:"choice,omitempty"`
+	Outcome         *FolderOutcome           `json:"outcome,omitempty"`
 	// Blueprint is the id the Create Workspace modal should preselect for a
 	// project outcome; empty means the blank workspace. BlueprintNote is the
 	// one-line fallback explanation when the preferred blueprint is not
@@ -1860,9 +1861,9 @@ func (s *FolderDigestService) SubjectPath(ctx context.Context, userID, offerID s
 }
 
 func (s *FolderDigestService) subjectPathOf(offer FolderOffer) (string, error) {
-	root, ok := s.rootPath(offer)
-	if !ok {
-		return "", ErrFolderPathLost
+	root, reason := s.rootPathReason(offer)
+	if reason != "" {
+		return "", folderPickError{reason: reason, cause: ErrFolderPathLost}
 	}
 	if offer.Subject.IsRoot || offer.Subject.RelPath == "" {
 		return root, nil
@@ -2659,8 +2660,13 @@ func isProjectCapabilityOffer(offer FolderOffer) bool {
 func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, paused bool) FolderOfferView {
 	v := s.describeOffer(ctx, offer, paused)
 	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
-		_, ok := s.rootPath(offer)
-		v.NeedsPick = !ok
+		_, reason := s.rootPathReason(offer)
+		v.NeedsPick, v.NeedsPickReason = reason != "", reason
+		if reason == "" && v.Setup != nil && v.Setup.Status == FolderSetupStopped && v.Setup.StopReason == FolderStopNeedsPick {
+			// The old stop is history, not a new request to pick an intact
+			// review again. Continue/Retry revalidates the ordinary saved run.
+			v.Setup.StopReason = FolderStopInterrupted
+		}
 	}
 	if first, ok := s.firstTaskView(ctx, offer); ok {
 		v.FirstTask = &first
@@ -2868,9 +2874,14 @@ func (s *FolderDigestService) rememberPath(offerID, root string) {
 // chip it came from after a restart. A picker-chosen folder is known only to
 // the process that scanned it.
 func (s *FolderDigestService) rootPath(offer FolderOffer) (string, bool) {
+	root, reason := s.rootPathReason(offer)
+	return root, reason == ""
+}
+
+func (s *FolderDigestService) rootPathReason(offer FolderOffer) (string, FolderContinuationReason) {
 	if offer.ConversationReview != nil {
 		if s.conversationSource == nil {
-			return "", false
+			return "", FolderContinuationLost
 		}
 		return s.conversationSource(offer)
 	}
@@ -2878,23 +2889,23 @@ func (s *FolderDigestService) rootPath(offer FolderOffer) (string, bool) {
 	root, ok := s.paths[offer.ID]
 	s.mu.Unlock()
 	if ok {
-		return root, true
+		return root, ""
 	}
 	if offer.Chip == "" {
-		return "", false
+		return "", FolderContinuationLost
 	}
 	path, err := s.chipPath(offer.Chip)
 	if err != nil {
-		return "", false
+		return "", FolderContinuationLost
 	}
 	// The stored key was taken from the canonical path, so the chip's folder
 	// is canonicalised the same way before the two are compared.
 	canonical, err := s.deps.ValidateRoot(path)
 	if err != nil || FolderKey(canonical) != offer.FolderKey {
-		return "", false
+		return "", FolderContinuationMoved
 	}
 	s.rememberPath(offer.ID, canonical)
-	return canonical, true
+	return canonical, ""
 }
 
 // buildPortfolioOffer makes the root the subject even when the scan would

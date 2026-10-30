@@ -98,6 +98,9 @@ func (s *FolderObservationService) ReviewArrangementGroup(ctx context.Context, t
 	if err != nil {
 		return FolderOfferView{}, false, err
 	}
+	if err := s.saveReviewPath(ctx, held, result); err != nil {
+		return FolderOfferView{}, false, err
+	}
 	return d.viewFor(ctx, target.UserID, result, held.binding.Paused), created, nil
 }
 

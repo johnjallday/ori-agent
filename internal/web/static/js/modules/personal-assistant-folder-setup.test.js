@@ -6,6 +6,7 @@ import {
   reviewLinkHidden,
   choiceIsCurrent,
   currentReview,
+  canReviewCandidate,
   currentSuggestion,
   subjectPlacement,
   existingProjectView,
@@ -151,6 +152,30 @@ test('only the current conversation and exact canonical offer get live controls'
   assert.equal(currentReview({ conversationId: 'chat-b', offerId: 'offer-a' }, offer), false);
   assert.equal(currentReview({ conversationId: 'chat-a', offerId: 'old' }, offer), false);
   assert.equal(currentReview({}, null), false);
+  const saved = {
+    conversationId: 'chat-a',
+    offerId: 'offer-a',
+    observation: { id: 'snapshot' },
+    authority: 'lost'
+  };
+  const restored = { ...offer, status: 'pending', candidate_id: 'candidate-0', needs_pick: false };
+  assert.equal(canReviewCandidate(saved, restored, 'candidate-0'), true);
+  const binding = { conversationId: 'chat-a', observationId: 'snapshot', revision: 'r' };
+  assert.equal(
+    choiceIsCurrent(binding, { ...saved, revision: 'r' }, restored, 'candidate-0'),
+    true
+  );
+  assert.equal(
+    choiceIsCurrent(binding, { ...saved, revision: 'newer' }, restored, 'candidate-0'),
+    false
+  );
+  assert.equal(
+    choiceIsCurrent(binding, { ...saved, revision: 'r' }, restored, 'candidate-1'),
+    false
+  );
+  assert.equal(canReviewCandidate(saved, restored, 'candidate-1'), false);
+  assert.equal(canReviewCandidate(saved, { ...restored, needs_pick: true }, 'candidate-0'), false);
+  assert.equal(canReviewCandidate({ ...saved, offerId: 'other' }, restored, 'candidate-0'), false);
 });
 
 test('focus handoff requires the exact live canonical card and never reconstructs a control', () => {

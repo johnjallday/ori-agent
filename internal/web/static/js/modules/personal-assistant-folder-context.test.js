@@ -96,6 +96,25 @@ test('completed folder retires both the setup placeholder and implicit empty req
   assert.equal(emptySendView('', false, true), null);
 });
 
+test('a dated snapshot can recheck its canonical review but cannot open a new one', async () => {
+  const { controller, calls, setId } = fixture(async () => ({ folder_reviews: {} }));
+  setId('chat');
+  const saved = {
+    observation: observation('a'),
+    revision: 'r',
+    historical: true,
+    authority: 'lost'
+  };
+  controller.reset('chat', { ...saved, offer_id: 'offer' });
+  assert.ok(await controller.review('root', false, 'offer', { recheck: true }));
+  assert.equal(calls[0].body.selection_id, 'a');
+  assert.equal(calls[0].body.recheck, true);
+  assert.equal(controller.request().historical, true);
+  controller.reset('chat', saved);
+  assert.equal(await controller.review('root'), null);
+  assert.equal(calls.length, 1);
+});
+
 test('select is local, request is references only, and disclosure names provider boundary', async () => {
   const { controller, calls } = fixture(async () => ({
     observation: observation('a'),

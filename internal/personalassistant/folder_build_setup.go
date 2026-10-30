@@ -41,7 +41,7 @@ func (s *FolderObservationService) ConfigureBuildReviews(
 	lease func(foldercontext.Target) (func(), bool),
 ) {
 	s.buildGuard, s.buildLease = guard, lease
-	s.digest.conversationSource = s.reviewSource
+	s.digest.conversationSource = s.reviewSourceReason
 	s.digest.conversationLease = s.acquireReview
 }
 

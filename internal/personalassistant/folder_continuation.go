@@ -35,6 +35,8 @@ const (
 	// FolderContinuationChanged: the folder is missing, no longer the same
 	// directory, or otherwise fails the original identity check.
 	FolderContinuationChanged FolderContinuationReason = "changed"
+	// FolderContinuationMoved: a saved review path disappeared or now resolves elsewhere.
+	FolderContinuationMoved FolderContinuationReason = "moved"
 )
 
 const (

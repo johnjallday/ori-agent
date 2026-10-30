@@ -164,9 +164,17 @@ func (s *reviewContextReader) ReadReview(_ context.Context, _ foldercontext.Targ
 	return s.view, s.err
 }
 
+type datedReviewObservation struct {
+	PersonalAssistantFolderObservations
+}
+
+func (datedReviewObservation) Status(context.Context, foldercontext.Target, foldercontext.Observation) personalassistant.FolderContinuationReason {
+	return personalassistant.FolderContinuationLost
+}
+
 func TestReviewContext_CanonicalReferenceNotImportedTextOrBrowserClaim(t *testing.T) {
 	reader := &reviewContextReader{view: &personalassistant.FolderOfferView{ID: "canonical-review", ConversationID: "conversation", Status: personalassistant.FolderOfferPending, Subject: personalassistant.FolderSubjectView{Name: "Album-5"}, CreateAvailable: true}}
-	h := &HomeAssistantAskHandler{UserID: "local", FolderSetups: reader}
+	h := &HomeAssistantAskHandler{UserID: "local", FolderSetups: reader, FolderObservations: datedReviewObservation{}}
 	conversation := &openConversation{id: "conversation", scope: personalAssistantConversationScope{workspaceID: "hq", agentName: "atlas"}}
 	projection := h.prepareReviewContext(context.Background(), conversation, nil)
 	if projection.Status != "no_proposal" || reader.reads != 0 {
@@ -184,6 +192,10 @@ func TestReviewContext_CanonicalReferenceNotImportedTextOrBrowserClaim(t *testin
 	if got := h.prepareReviewContext(context.Background(), conversation, nil); got.Status != "awaiting_confirmation" || reader.reads != 1 {
 		t.Fatal(got)
 	}
+	turn := &preparedFolderTurn{offerID: "canonical-review", ref: HomeAssistantFolderRef{Historical: true}}
+	if got := h.prepareReviewContext(context.Background(), conversation, turn); got.Status != "awaiting_confirmation" || got.Historical {
+		t.Fatal("dated discussion snapshot expired an intact review", got)
+	}
 	conversation.messages = append(conversation.messages, PersonalAssistantConversationMessage{ID: "canonical-detach", Role: "system", FolderContext: &foldercontext.Event{Version: 1}})
 	if got := h.prepareReviewContext(context.Background(), conversation, nil); !got.Historical || len(got.Controls) != 0 {
 		t.Fatal("detach revived review", got)
@@ -195,6 +207,16 @@ func TestReviewContext_CanonicalReferenceNotImportedTextOrBrowserClaim(t *testin
 	reader.err = errors.New("private source failure /private/secret")
 	if got := h.prepareReviewContext(context.Background(), conversation, nil); got.Status != "state_unavailable" || got.Blocker != "" {
 		t.Fatal(got)
+	}
+}
+
+func TestReviewContext_NeedsPickReason(t *testing.T) {
+	for _, reason := range []personalassistant.FolderContinuationReason{"moved", "changed", "lost", "expired"} {
+		view := &personalassistant.FolderOfferView{Status: personalassistant.FolderOfferPending, NeedsPick: true, NeedsPickReason: reason}
+		got := projectReviewContext(view, true)
+		if got.Status != "reselection_needed" || got.NeedsPickReason != reason {
+			t.Fatalf("reason: %+v", got)
+		}
 	}
 }
 

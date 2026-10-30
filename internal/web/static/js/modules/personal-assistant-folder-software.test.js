@@ -324,11 +324,8 @@ test('a folder inside a larger repository is explained and the user is asked for
 
 test('a software folder the server no longer holds, or that was replaced, asks for a fresh pick', () => {
   const view = folderOfferView(softwareOffer({ needs_pick: true, create_available: false }));
-  assert.equal(
-    view.question,
-    'Ori can no longer use widget: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.'
-  );
-  assert.deepEqual(actionIds(view), ['repick', 'no', 'later']);
+  assert.equal(view.question, 'Ori no longer has widget open. Pick it again to carry on.');
+  assert.deepEqual(actionIds(view), ['repick']);
   assert.equal(view.actions.some(setsUp), false);
 });
 
@@ -597,7 +594,7 @@ test('a setup that stopped says what is kept and offers the repair for that stop
   assert.equal(changed.actions.some(setsUp), false);
 
   const lost = stopped('needs_pick');
-  assert.match(lost.question, /not the one you showed me/);
+  assert.match(lost.question, /Ori no longer has widget open/);
   assert.deepEqual(actionIds(lost), ['repick', 'remove']);
 
   for (const reason of ['failed', 'interrupted', 'some_new_reason']) {

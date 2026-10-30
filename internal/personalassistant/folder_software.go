@@ -153,18 +153,22 @@ func (s *FolderDigestService) enclosingHint(repository, path string) *FolderEncl
 func (s *FolderDigestService) softwareSubject(offer FolderOffer) (path, identity string, err error) {
 	path, err = s.subjectPathOf(offer)
 	if err != nil {
-		return "", "", ErrFolderPathLost
+		return "", "", err
+	}
+	canonical, canonicalErr := s.deps.ValidateRoot(path)
+	if canonicalErr != nil || canonical != path {
+		return "", "", folderPickError{reason: FolderContinuationMoved, cause: ErrFolderPathLost}
 	}
 	identity, err = portfolioDirectoryIdentity(path)
 	if err != nil {
-		return "", "", ErrFolderPathLost
+		return "", "", folderPickError{reason: FolderContinuationChanged, cause: ErrFolderPathLost}
 	}
 	expected := offer.SubjectIdentity
 	if review := offer.ConversationReview; review != nil {
 		expected = review.CandidateIdentity
 	}
 	if expected != "" && expected != identity {
-		return "", "", ErrFolderPathLost
+		return "", "", folderPickError{reason: FolderContinuationChanged, cause: ErrFolderPathLost}
 	}
 	return path, identity, nil
 }
@@ -235,7 +239,7 @@ func (s *FolderDigestService) attachSoftware(ctx context.Context, userID string,
 		case errors.Is(err, ErrFolderPathLost):
 			// The folder is gone, replaced, or no longer held: only a fresh pick
 			// can continue, and the card says so instead of offering setup.
-			v.NeedsPick = true
+			v.NeedsPick, v.NeedsPickReason = true, FolderPickReason(err)
 			v.CreateAvailable = false
 		case err != nil:
 			view.ExistingUnavailable = true
