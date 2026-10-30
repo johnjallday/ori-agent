@@ -101,6 +101,7 @@ type MissionRun = {
   tasks_created: number;
   findings_created: number;
   duplicates_skipped: number;
+  assessment?: string;
 };
 type MissionState = {
   mission: string;
@@ -297,6 +298,10 @@ test('saving the first goal starts a run whose suggestions reach the Backlog dra
   const run = await waitForRuns(request, workspaceId, 1);
   expect(run).toMatchObject({ origin: 'first_goal', succeeded: true, tasks_created: 3 });
   expect(run.findings_created).toBe(2);
+  // goal-charter FR24: an answer in the older shape, with no assessment,
+  // still parses cleanly and stores its items.
+  expect(run.parse_status).toBe('ok');
+  expect(run.assessment).toBeUndefined();
   expect(goalRunPrompts().at(-1)).toContain(GOAL);
 });
 
@@ -386,6 +391,57 @@ test('Action Center shows the suggestion summary and each finding with its evide
   const drift = finding.filter({ hasText: 'Newsletter is formal' });
   await drift.locator('summary').click();
   await expect(drift).toContainText('Review the last three posts against one agreed tone.');
+});
+
+// goal-charter FR9–FR16: a run reads the goal as a "## Goal" section, writes an
+// assessment before its items, and the Goal card shows it; a run that assessed
+// and found nothing new says so.
+test('a goal run assesses the workspace and the Goal card shows the latest assessment', async ({
+  page,
+  request
+}) => {
+  answerGoalRunsWith(
+    JSON.stringify({
+      assessment:
+        'Voice: the newsletter reads formal and the posts casual.\n\nThe guide was dismissed; one agreed tone is still missing.',
+      items: [
+        {
+          kind: 'task',
+          title: 'Agree one tone for the newsletter and posts',
+          why: 'The assessment found two tones.',
+          evidence: 'Newsletter is formal, social posts are casual.',
+          priority: 'high',
+          effort: 'small'
+        }
+      ]
+    })
+  );
+  await page.goto(`/workspaces/${workspaceSlug}`);
+  await page.locator('#workspace-command-mission-run').click();
+  const status = page.locator('#workspace-command-mission-action-status');
+  await expect(status).toHaveText('Run complete — 1 task suggested · 0 findings.', {
+    timeout: 60_000
+  });
+  const assessment = page.locator('.ws-cmd-goal-assessment');
+  await expect(assessment).toContainText('Latest assessment');
+  await expect(assessment).toContainText('one agreed tone is still missing');
+  const run = await waitForRuns(request, workspaceId, 4);
+  expect(run).toMatchObject({ origin: 'manual', succeeded: true, parse_status: 'ok' });
+  expect(run.assessment).toContain('Voice: the newsletter reads formal');
+  const prompt = goalRunPrompts().at(-1) || '';
+  expect(prompt).toContain(
+    `## Goal\n${GOAL}\nThis goal is one plain statement; it has no parts yet.`
+  );
+  expect(prompt).toContain('{"assessment": string, "items": [ ... ]}');
+
+  answerGoalRunsWith(JSON.stringify({ assessment: 'Nothing new since the last run.', items: [] }));
+  await page.locator('#workspace-command-mission-run').click();
+  await expect(status).toHaveText('Assessed the workspace; nothing to suggest right now.', {
+    timeout: 60_000
+  });
+  await expect(assessment).toContainText('Nothing new since the last run.');
+  const quiet = await waitForRuns(request, workspaceId, 5);
+  expect(quiet).toMatchObject({ succeeded: true, parse_status: 'ok', tasks_created: 0 });
 });
 
 test('stock suggestions: a shipped goal reaches the model and starter tasks are not suggested twice', async ({
