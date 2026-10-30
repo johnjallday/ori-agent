@@ -217,6 +217,12 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		p.readDirectoriesTool(),
 	}
 
+	// The current lead can discuss a saved assessment without starting a
+	// goal run. The reader rechecks the exact local instance on every call.
+	if _, err := p.assessmentWorkspace(); err == nil {
+		tools = append(tools, p.goalAssessmentTool())
+	}
+
 	// Read-only parsed access to linked directories, only when the workspace
 	// has one (FR58). No write, move, rename, or delete counterpart exists.
 	if p.linkedDirectoriesEnabled() {

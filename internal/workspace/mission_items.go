@@ -279,7 +279,9 @@ type MissionRunRecord struct {
 	// Goal card offers it with Use and Edit while the goal is still the one
 	// the run read (GoalDigest, compared with the mission GET's goal_digest).
 	SuggestedCharter string `json:"suggested_charter,omitempty"`
-	GoalDigest       string `json:"goal_digest,omitempty"`
+	// GoalDigest also binds an assessment to the goal its run read. Older
+	// assessments without a digest have unknown goal freshness.
+	GoalDigest string `json:"goal_digest,omitempty"`
 }
 
 // RecordMissionRun prepends a run record and keeps the newest

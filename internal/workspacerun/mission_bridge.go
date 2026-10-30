@@ -369,7 +369,9 @@ func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runI
 	if record.Assessment != "" {
 		record.AssessmentParts = goal.parts
 	}
-	if record.SuggestedCharter != "" {
+	if record.Assessment != "" || record.SuggestedCharter != "" {
+		// A later conversation must be able to tell that the assessment was
+		// written against an older goal, even without a suggested charter.
 		record.GoalDigest = goal.digest
 	}
 	if !stored {

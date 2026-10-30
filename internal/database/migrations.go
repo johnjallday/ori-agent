@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 86
+const schemaVersion = 87
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -239,6 +239,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration085AssistantHireProposals(ctx)
 	case 86:
 		return db.migration086WorkspaceCreationOperations(ctx)
+	case 87:
+		return db.migration087WorkspaceLeadConversation(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}

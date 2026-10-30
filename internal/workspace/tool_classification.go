@@ -136,6 +136,7 @@ const (
 var nativeToolSideEffects = map[string]SideEffect{
 	"workspace_notes":                     SideEffectRead,
 	"workspace_tasks":                     SideEffectRead,
+	"workspace_goal_assessment":           SideEffectRead,
 	"workspace_sessions":                  SideEffectRead,
 	"workspace_session_detail":            SideEffectRead,
 	"workspace_files":                     SideEffectRead,

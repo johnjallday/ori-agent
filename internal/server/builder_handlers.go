@@ -919,6 +919,9 @@ func (b *ServerBuilder) wireFileJanitor() {
 	service := filejanitor.NewService(filejanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
 	b.fileJanitorService = service
 	b.fileJanitorHandler = filejanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+	if b.chatHandler != nil {
+		b.chatHandler.SetFileCuratorWelcomeReader(service)
+	}
 }
 
 // wireWorkspaceCapabilities constructs the built-in Workspace Capability
