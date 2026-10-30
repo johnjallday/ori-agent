@@ -401,7 +401,7 @@ func (h *Handler) planHire(req hireRequest) (hirePlan, int, string, string) {
 
 	brief, err := personalassistant.NormalizeFolderBrief(req.Brief)
 	if err != nil {
-		return refuse(fmt.Sprintf("What it should do is capped at %d characters, in plain words.", personalassistant.WorkspaceGoalMaxRunes))
+		return refuse(fmt.Sprintf("What it should do is capped at %d characters, in plain words.", personalassistant.BriefMaxRunes))
 	}
 	if brief == "" {
 		brief = personalassistant.HireDefaultBrief(entry.Slug, plan.domain)

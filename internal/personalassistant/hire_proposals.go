@@ -144,7 +144,7 @@ func (p *HireProposal) validate() error {
 			return fmt.Errorf("%w: hire proposal %s", ErrValidation, field.label)
 		}
 	}
-	if _, err := validateText("brief", p.Brief, WorkspaceGoalMaxRunes, true); err != nil {
+	if _, err := validateText("brief", p.Brief, BriefMaxRunes, true); err != nil {
 		return fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if p.OpenRoles < 0 || p.OpenRoles > hireProposalOpenRolesMax {

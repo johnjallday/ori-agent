@@ -2,6 +2,7 @@ package workspacerun
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -67,5 +68,71 @@ func TestMissionBridge_HireFirstLookReadsOnlyAndReportsItsNext(t *testing.T) {
 	if record.Summary != "You want one note app. The workspace is new, so I worked from the brief.\nNext: List the three apps and the criteria that matter" ||
 		record.NextWhy != "Every comparison needs the criteria first." {
 		t.Fatalf("summary %q why %q", record.Summary, record.NextWhy)
+	}
+}
+
+// goal-charter FR11/FR12: every origin stores its assessment and the goal's
+// parts at run time; a first look's Summary still ends in its Next: line.
+func TestMissionBridge_StoresTheAssessmentForEveryOrigin(t *testing.T) {
+	const charterGoal = "## Outcome\nA monthly newsletter.\n## Boundaries\nNever send anything."
+	const assessed = `{"summary": "A newsletter brief. Nothing written yet.",
+		"assessment": "Outcome: nothing written yet.\n\nBoundaries: understood, no sending.",
+		"suggested_charter": "## Outcome\nA monthly newsletter.\n## Boundaries\nNever send anything.",
+		"next": "Draft the issue template",
+		"items": [{"kind": "task", "title": "Draft the issue template", "why": "w", "evidence": "the brief", "priority": "high", "effort": "small"}]}`
+	for name, tc := range map[string]struct {
+		origin  string
+		ordinal int
+		goal    string
+		parts   []string
+	}{
+		"first look": {workspace.MissionOriginHireFirstLook, 1, "help me write a newsletter", nil},
+		"baseline":   {workspace.MissionOriginFirstGoal, 1, charterGoal, []string{"Outcome", "Boundaries"}},
+		"cadence":    {workspace.MissionOriginCadence, 3, charterGoal, []string{"Outcome", "Boundaries"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wsStore := workspace.NewInMemoryStore()
+			ws := makeMissionWorkspace(t, wsStore)
+			if err := wsStore.Update(ws.ID, func(w *workspace.Workspace) error {
+				w.Mission = tc.goal
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := bridgeAnswering(t, wsStore, assessed).TriggerMissionRunOpts(context.Background(), ws.ID, tc.ordinal,
+				workspace.MissionRunOptions{Origin: tc.origin}); err != nil {
+				t.Fatal(err)
+			}
+			fresh, _ := wsStore.Get(ws.ID)
+			record := fresh.MissionRuns[0]
+			if !record.Succeeded || record.Assessment != "Outcome: nothing written yet.\n\nBoundaries: understood, no sending." {
+				t.Fatalf("record %+v", record)
+			}
+			if !reflect.DeepEqual(record.AssessmentParts, tc.parts) {
+				t.Fatalf("assessment parts = %#v, want %#v", record.AssessmentParts, tc.parts)
+			}
+			// FR18: the bridge copies the suggested charter for every origin.
+			if record.SuggestedCharter != "## Outcome\nA monthly newsletter.\n## Boundaries\nNever send anything." {
+				t.Fatalf("suggested charter = %q", record.SuggestedCharter)
+			}
+			// ...stamped with the goal it was written for.
+			if record.GoalDigest == "" || record.GoalDigest != workspace.GoalDigest(tc.goal) {
+				t.Fatalf("goal digest = %q, want %q", record.GoalDigest, workspace.GoalDigest(tc.goal))
+			}
+			if !strings.HasSuffix(record.Summary, "\nNext: Draft the issue template") {
+				t.Fatalf("the summary keeps its Next: line: %q", record.Summary)
+			}
+		})
+	}
+
+	// An answer without an assessment stores none and no parts.
+	wsStore := workspace.NewInMemoryStore()
+	ws := makeMissionWorkspace(t, wsStore)
+	if _, err := bridgeAnswering(t, wsStore, threeTasksTwoFindings).TriggerMissionRun(context.Background(), ws.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := wsStore.Get(ws.ID)
+	if record := fresh.MissionRuns[0]; record.Assessment != "" || record.AssessmentParts != nil || record.ParseStatus != workspace.MissionParseOK || record.TasksCreated != 3 {
+		t.Fatalf("old-shape record %+v", record)
 	}
 }

@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -111,6 +112,38 @@ func TestHireTodayItems_TheFinishedLookIsAReportUnderNeedsYou(t *testing.T) {
 	f.now = f.now.Add(8 * 24 * time.Hour)
 	if needs, _, _ := f.items(t, nil); len(needs) != 0 {
 		t.Fatalf("a report from last week is still under Needs you: %+v", needs)
+	}
+}
+
+// goal-charter FR20: a first look's assessment and suggested charter belong to
+// the workspace's Goal card; the hire report, its suggestion and Needs you
+// stay exactly what they were.
+func TestHireTodayItems_IgnoreTheAssessmentAndSuggestedCharter(t *testing.T) {
+	f := newHireLookFixture(t)
+	before, _ := f.store.Get(f.ws.ID)
+	run := before.MissionRuns[0]
+	summary, suggestion := HireLookSummary(&run), HireLookSuggestionOf(before, &run)
+	needsBefore, workingBefore, doneBefore := f.items(t, nil)
+
+	if err := f.store.Update(f.ws.ID, func(w *workspace.Workspace) error {
+		w.MissionRuns[0].Assessment = "Outcome: nothing written yet.\n\nNext: not a next line, an assessment paragraph."
+		w.MissionRuns[0].AssessmentParts = []string{"Outcome"}
+		w.MissionRuns[0].SuggestedCharter = "## Outcome\nOne note app chosen.\n## Boundaries\nNo purchases."
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := f.store.Get(f.ws.ID)
+	run = after.MissionRuns[0]
+	if got := HireLookSummary(&run); got != summary {
+		t.Fatalf("HireLookSummary changed: %q, was %q", got, summary)
+	}
+	if got := HireLookSuggestionOf(after, &run); !reflect.DeepEqual(got, suggestion) {
+		t.Fatalf("HireLookSuggestionOf changed: %+v, was %+v", got, suggestion)
+	}
+	needs, working, done := f.items(t, nil)
+	if !reflect.DeepEqual(needs, needsBefore) || !reflect.DeepEqual(working, workingBefore) || !reflect.DeepEqual(done, doneBefore) {
+		t.Fatalf("Today items changed:\n%+v\nwas\n%+v", needs, needsBefore)
 	}
 }
 

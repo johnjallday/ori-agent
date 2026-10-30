@@ -991,8 +991,15 @@
                   <form id="workspace-detail-mission-form" class="workspace-detail-settings-form">
                     <div class="row g-3">
                       <div class="col-12">
-                        <label for="workspace-detail-mission-text" class="form-label">Goal</label>
-                        <textarea id="workspace-detail-mission-text" class="form-control" rows="3" placeholder="e.g. Keep brand voice and visuals consistent across all channels."></textarea>
+                        <div class="workspace-goal-editor-head">
+                          <label for="workspace-detail-mission-text" class="form-label">Goal</label>
+                          <span id="workspace-detail-mission-count" class="workspace-goal-count" aria-live="polite">0 / 4000</span>
+                        </div>
+                        <textarea id="workspace-detail-mission-text" class="form-control" rows="8" placeholder="What this workspace exists to produce or keep true."></textarea>
+                        <div class="workspace-goal-charter-tools">
+                          <button type="button" id="workspace-detail-mission-charter-fill" class="btn btn-sm btn-outline-secondary">Use the charter shape</button>
+                          <span>A plain sentence works too.</span>
+                        </div>
                         <div class="workspace-detail-settings-field-hint">
                           Ask Ori rereads this goal each cycle. Be specific about what to watch and what counts as a finding.
                         </div>
@@ -1322,8 +1329,15 @@
           </div>
 
           <div class="workspace-detail-goal-modal-field">
-            <label for="workspace-detail-goal-modal-text" class="form-label">Goal</label>
-            <textarea id="workspace-detail-goal-modal-text" class="form-control" rows="4" placeholder="e.g. Keep brand voice and visuals consistent across all channels."></textarea>
+            <div class="workspace-goal-editor-head">
+              <label for="workspace-detail-goal-modal-text" class="form-label">Goal</label>
+              <span id="workspace-detail-goal-modal-count" class="workspace-goal-count" aria-live="polite">0 / 4000</span>
+            </div>
+            <textarea id="workspace-detail-goal-modal-text" class="form-control" rows="8" placeholder="What this workspace exists to produce or keep true."></textarea>
+            <div class="workspace-goal-charter-tools">
+              <button type="button" id="workspace-detail-goal-modal-charter-fill" class="btn btn-sm btn-outline-secondary">Use the charter shape</button>
+              <span>A plain sentence works too.</span>
+            </div>
           </div>
 
           <div class="workspace-detail-goal-modal-grid">
@@ -3105,6 +3119,36 @@
       color: var(--text-secondary);
     }
 
+    /* Goal editors (Goal Settings and the quick-edit modal): count and the
+       "Use the charter shape" fill (workspace-mission.js wireGoalEditor). */
+    .workspace-goal-editor-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .workspace-goal-count {
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .workspace-goal-count.is-over {
+      color: var(--danger-color, #dc3545);
+      font-weight: 600;
+    }
+
+    .workspace-goal-charter-tools {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem 0.75rem;
+      margin-top: 0.5rem;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
     /* Goal Settings run history (workspace-mission.js runHistoryHTML). */
     .workspace-mission-history {
       margin-top: 0.75rem;
@@ -3153,10 +3197,17 @@
       overflow-wrap: anywhere;
     }
 
-    .workspace-mission-run-output summary {
+    .workspace-mission-run-output summary,
+    .workspace-mission-run-assessment summary {
       cursor: pointer;
       width: fit-content;
       margin-top: 0.25rem;
+    }
+
+    .workspace-mission-run-assessment p {
+      margin: 0.3rem 0 0;
+      max-width: 82ch;
+      overflow-wrap: anywhere;
     }
 
     .workspace-mission-run-output pre {

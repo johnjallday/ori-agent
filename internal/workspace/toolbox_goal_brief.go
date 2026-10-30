@@ -209,7 +209,7 @@ func (p *GoalToolboxPolicy) Pinned() bool {
 func ProposeGoalBrief(goalText string, autonomy AutonomyPolicy) GoalBrief {
 	text := strings.ToLower(strings.TrimSpace(goalText))
 	brief := GoalBrief{
-		Summary:   strings.TrimSpace(goalText),
+		Summary:   GoalOutcomeLine(goalText),
 		Source:    GoalBriefSourceFallback,
 		UpdatedAt: time.Now(),
 	}

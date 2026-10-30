@@ -3,6 +3,7 @@ package chathttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -180,6 +181,44 @@ func TestBuildWorkspaceSnapshotPrompt_IncludesTheWorkspaceGoal(t *testing.T) {
 	}
 	if prompt := buildWorkspaceSnapshotPrompt(context.Background(), route, wsStore, &mockWorkspaceSnapshotSessionStore{}); strings.Contains(prompt, "- Goal:") {
 		t.Fatalf("a workspace without a goal must not carry a goal line: %q", prompt)
+	}
+}
+
+// FR22: a plain goal of up to 500 runes gives the same snapshot goal line it
+// gave before charters existed; a charter gives its Outcome line only.
+func TestBuildWorkspaceSnapshotPrompt_GoalLineIsTheOutcomeLine(t *testing.T) {
+	route := func(id string) normalizedChatRouteContext {
+		return normalizedChatRouteContext{Surface: "workspace_detail", PagePath: "/workspaces/" + id, WorkspaceID: id}
+	}
+	words := strings.Repeat("Keep the brand voice consistent, é ü. ", 20)
+	for _, goal := range []string{
+		"a",
+		strings.Repeat("Ship\n it. ", 12)[:120],
+		string([]rune(words)[:500]),
+	} {
+		wsStore := workspace.NewInMemoryStore()
+		ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Brand Desk"})
+		ws.Mission = goal
+		if err := wsStore.Save(ws); err != nil {
+			t.Fatal(err)
+		}
+		// The line the snapshot wrote before charters existed.
+		want := fmt.Sprintf("- Goal: %q", sanitizeWorkspaceSnapshotText(goal, workspace.WorkspaceGoalPromptLimit))
+		prompt := buildWorkspaceSnapshotPrompt(context.Background(), route(ws.ID), wsStore, &mockWorkspaceSnapshotSessionStore{})
+		if !strings.Contains(prompt, want+"\n") {
+			t.Fatalf("goal of %d runes: want %q in %q", len([]rune(goal)), want, prompt)
+		}
+	}
+
+	wsStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Newsletter"})
+	ws.Mission = "## Outcome\nA monthly newsletter.\n## Boundaries\nNever send anything."
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	prompt := buildWorkspaceSnapshotPrompt(context.Background(), route(ws.ID), wsStore, &mockWorkspaceSnapshotSessionStore{})
+	if !strings.Contains(prompt, `- Goal: "A monthly newsletter."`+"\n") || strings.Contains(prompt, "Never send") || strings.Contains(prompt, "## Outcome") {
+		t.Fatalf("a charter contributes its Outcome line only: %q", prompt)
 	}
 }
 

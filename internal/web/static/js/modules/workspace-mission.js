@@ -32,6 +32,8 @@
     enabled: '#workspace-detail-mission-enabled',
     heartbeat: '#workspace-detail-mission-heartbeat',
     text: '#workspace-detail-mission-text',
+    textCount: '#workspace-detail-mission-count',
+    textFill: '#workspace-detail-mission-charter-fill',
     autonomyRadios: 'input[name="workspace-detail-mission-autonomy"]',
     cadenceType: '#workspace-detail-mission-cadence-type',
     cadenceTime: '#workspace-detail-mission-cadence-time',
@@ -58,6 +60,8 @@
     goalModalForm: '#workspace-detail-goal-modal-form',
     goalModalTitle: '#workspace-detail-goal-modal-title',
     goalModalText: '#workspace-detail-goal-modal-text',
+    goalModalCount: '#workspace-detail-goal-modal-count',
+    goalModalFill: '#workspace-detail-goal-modal-charter-fill',
     goalModalEnabled: '#workspace-detail-goal-modal-enabled',
     goalModalStatus: '#workspace-detail-goal-modal-status',
     goalModalSaveBtn: '#workspace-detail-goal-modal-save',
@@ -80,6 +84,7 @@
     commandStatus: '#workspace-command-mission-status',
     commandTitle: '#workspace-command-mission-title',
     commandText: '#workspace-command-mission-text',
+    commandExtras: '#workspace-command-mission-extras',
     commandCadence: '#workspace-command-mission-cadence',
     commandNextRun: '#workspace-command-mission-next-run',
     commandLastRun: '#workspace-command-mission-last-run',
@@ -110,9 +115,270 @@
   const EMPTY_GOAL_TITLE = 'No goal yet';
   const EMPTY_GOAL_PROMPT = 'Set a goal so your agents can suggest work';
 
-  function goalCardCopy(mission) {
-    const goal = String(mission || '').trim();
-    return goal ? { title: goal, text: '' } : { title: EMPTY_GOAL_TITLE, text: EMPTY_GOAL_PROMPT };
+  // The card's heading is the goal's Outcome line (`goal_outcome`, computed by
+  // the server), so a charter never puts its headings on the card (FR7).
+  function goalCardCopy(state) {
+    const current = state || {};
+    const goal = String(current.mission || '').trim();
+    if (!goal) return { title: EMPTY_GOAL_TITLE, text: EMPTY_GOAL_PROMPT };
+    const outcome = String(current.goal_outcome || '').trim();
+    return { title: outcome || goal, text: '' };
+  }
+
+  // The goal editor allows a five-part charter; the server enforces the same
+  // bound (workspace.WorkspaceGoalMaxRunes).
+  const GOAL_MAX_CHARS = 4000;
+
+  // The charter's part names and hints come from the mission GET
+  // (`goal_charter_shape`), never from copy in this file.
+  function charterShape(state) {
+    const shape = state && state.goal_charter_shape;
+    return Array.isArray(shape) ? shape.filter(part => part && part.name) : [];
+  }
+
+  // `Charter · Outcome, Build, Boundaries` when the goal is a charter (FR7).
+  function charterLine(state) {
+    const parts = Array.isArray(state && state.goal_parts) ? state.goal_parts : [];
+    return parts.length ? `Charter · ${parts.join(', ')}` : '';
+  }
+
+  // The lines under the goal heading: the charter line, then (when a run wrote
+  // them) the Latest assessment and the Suggested charter. Model text is
+  // escaped, never rendered as HTML.
+  function goalCardExtrasHTML(state) {
+    const line = charterLine(state);
+    return (
+      (line ? `<p class="ws-cmd-mission-charter">${escapeHtml(line)}</p>` : '') +
+      suggestedCharterHTML(state) +
+      latestAssessmentHTML(state)
+    );
+  }
+
+  // The run whose suggested charter the card offers (FR19): the newest
+  // successful run, when it proposed one, the goal is still plain and still
+  // the goal that run read (goal_digest). Using it, or any later edit of the
+  // goal, retires the offer: the suggestion belongs to the run.
+  function suggestedCharterRun(state) {
+    const parts = Array.isArray(state && state.goal_parts) ? state.goal_parts : [];
+    if (parts.length) return null;
+    const runs = Array.isArray(state && state.mission_runs) ? state.mission_runs : [];
+    const newest = runs.find(run => run && run.succeeded);
+    if (!newest || !String(newest.suggested_charter || '').trim()) return null;
+    if (newest.goal_digest && newest.goal_digest !== state.goal_digest) return null;
+    return newest;
+  }
+
+  // A charter as one paragraph per part: the part name bold, its text after.
+  // Text before the first heading belongs to Outcome. Everything is escaped.
+  function charterSectionsHTML(text, state) {
+    const names = new Map(charterShape(state).map(part => [part.name.toLowerCase(), part.name]));
+    const sections = [];
+    let current = { name: names.get('outcome') || 'Outcome', lines: [] };
+    for (const line of String(text || '').split('\n')) {
+      const label = charterHeadingLabel(line);
+      if (names.has(label)) {
+        sections.push(current);
+        current = { name: names.get(label), lines: [] };
+      } else if (line.trim()) {
+        current.lines.push(line.trim());
+      }
+    }
+    sections.push(current);
+    return sections
+      .filter(section => section.lines.length)
+      .map(
+        section =>
+          `<p><strong>${escapeHtml(section.name)}</strong> ${section.lines.map(escapeHtml).join('<br>')}</p>`
+      )
+      .join('');
+  }
+
+  // The Suggested charter block with Use and Edit (FR19).
+  function suggestedCharterHTML(state) {
+    const run = suggestedCharterRun(state);
+    if (!run) return '';
+    const when = run.finished_at || run.started_at;
+    const origin = RUN_ORIGIN_LABELS[run.origin] || 'Run';
+    return (
+      '<section class="ws-cmd-goal-block ws-cmd-goal-suggested" aria-label="Suggested charter">' +
+      '<div class="ws-cmd-goal-block-head"><strong>Suggested charter</strong>' +
+      `<span>${escapeHtml(origin)}</span>` +
+      (when
+        ? `<span title="${escapeHtml(fmtTime(when))}">${escapeHtml(fmtRelative(when))}</span>`
+        : '') +
+      '</div>' +
+      `<div class="ws-cmd-goal-block-body">${charterSectionsHTML(run.suggested_charter, state)}</div>` +
+      '<div class="ws-cmd-goal-block-actions">' +
+      '<button type="button" class="ws-cmd-mission-btn" data-cmd-mission-action="use-suggested-charter">Use</button>' +
+      '<button type="button" class="ws-cmd-mission-btn" data-cmd-mission-action="edit-suggested-charter">Edit</button>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  // Use: the suggested charter becomes the goal, then the card re-renders.
+  async function useSuggestedCharter() {
+    const run = suggestedCharterRun(latestState);
+    if (!run) return;
+    reportToCards('Saving…');
+    try {
+      await saveMission({ mission: run.suggested_charter });
+      lastRunOutcome = null;
+      await reload();
+      if (!runInProgress) reportToCards('Goal saved.');
+    } catch (e) {
+      reportToCards(
+        e.status === 400 && e.message ? e.message : `Save failed: ${e.message}`,
+        'error'
+      );
+    }
+  }
+
+  // Edit: the Goal modal opens with the suggested charter in its textarea.
+  function editSuggestedCharter() {
+    const run = suggestedCharterRun(latestState);
+    if (!run) return;
+    openGoalModal();
+    const text = $(SELECTORS.goalModalText);
+    if (!text) return;
+    text.value = run.suggested_charter;
+    renderGoalCount(text, $(SELECTORS.goalModalCount));
+  }
+
+  // The newest successful run that wrote an assessment. Runs come newest
+  // first, and a run in flight has no record yet, so the previous assessment
+  // stays on the card until the new one arrives (FR16).
+  function latestAssessedRun(state) {
+    const runs = Array.isArray(state && state.mission_runs) ? state.mission_runs : [];
+    return runs.find(run => run && run.succeeded && String(run.assessment || '').trim()) || null;
+  }
+
+  // The part names an assessment may lead a paragraph with: the charter's
+  // five, plus whatever the run's goal had.
+  function assessmentPartNames(state, run) {
+    const names = charterShape(state).map(part => String(part.name));
+    for (const name of (run && run.assessment_parts) || []) names.push(String(name));
+    return new Set(names.map(name => name.toLowerCase()));
+  }
+
+  // An assessment as paragraphs of text. A paragraph the model opened with
+  // `**Label**`, a `#` heading line or `Part:` shows that label as a bold
+  // lead-in. Everything is escaped; line breaks inside a paragraph are kept.
+  function assessmentParagraphsHTML(text, partNames) {
+    return String(text || '')
+      .split(/\n\s*\n/)
+      .map(paragraph => paragraph.trim())
+      .filter(Boolean)
+      .map(paragraph => {
+        let lead = '';
+        let rest = paragraph;
+        let match = /^\*\*([^*\n]{1,40})\*\*[:.]?\s*/.exec(paragraph);
+        if (!match) match = /^#{1,3}\s*([^\n]{1,40})\n/.exec(paragraph);
+        if (!match) {
+          const named = /^([A-Za-z][A-Za-z ]{0,30}):\s+/.exec(paragraph);
+          if (named && partNames.has(named[1].trim().toLowerCase())) match = named;
+        }
+        if (match) {
+          lead = match[1].trim().replace(/:$/, '');
+          rest = paragraph.slice(match[0].length);
+        }
+        const body = escapeHtml(rest).replace(/\n/g, '<br>');
+        return `<p>${lead ? `<strong>${escapeHtml(lead)}</strong> ` : ''}${body}</p>`;
+      })
+      .join('');
+  }
+
+  // The Latest assessment block (FR14): hidden when no run wrote one.
+  function latestAssessmentHTML(state) {
+    const run = latestAssessedRun(state);
+    if (!run) return '';
+    const when = run.finished_at || run.started_at;
+    const origin = RUN_ORIGIN_LABELS[run.origin] || 'Run';
+    return (
+      '<section class="ws-cmd-goal-block ws-cmd-goal-assessment" aria-label="Latest assessment">' +
+      '<div class="ws-cmd-goal-block-head"><strong>Latest assessment</strong>' +
+      `<span>${escapeHtml(origin)}</span>` +
+      (when
+        ? `<span title="${escapeHtml(fmtTime(when))}">${escapeHtml(fmtRelative(when))}</span>`
+        : '') +
+      '</div>' +
+      `<div class="ws-cmd-goal-block-body">${assessmentParagraphsHTML(run.assessment, assessmentPartNames(state, run))}</div>` +
+      '<button type="button" class="ws-cmd-goal-link" data-cmd-mission-action="show-run-history">Show earlier</button>' +
+      '</section>'
+    );
+  }
+
+  // Actions of the Goal card's own blocks (workspace-command.js routes every
+  // data-cmd-mission-action it does not handle itself here).
+  function cardAction(action) {
+    if (action === 'show-run-history') return openGoalSettings();
+    if (action === 'use-suggested-charter') return useSuggestedCharter();
+    if (action === 'edit-suggested-charter') return editSuggestedCharter();
+    return undefined;
+  }
+
+  // The label a charter heading line names, lower-cased, or '' for any other
+  // line: `#`–`###` + name, or a whole-line `**Name**`, with an optional colon.
+  // Mirrors the server's reader (workspace.ParseGoalCharter) closely enough to
+  // keep the fill button from touching a goal that is already a charter.
+  function charterHeadingLabel(line) {
+    let label = String(line || '').trim();
+    const hashes = /^#+/.exec(label);
+    if (hashes) {
+      if (hashes[0].length > 3) return '';
+      label = label.slice(hashes[0].length).trim();
+    }
+    label = label.replace(/:$/, '').trim();
+    if (label.length > 4 && label.startsWith('**') && label.endsWith('**')) {
+      label = label.slice(2, -2).trim();
+    } else if (!hashes) {
+      return '';
+    }
+    return label.replace(/:$/, '').trim().toLowerCase();
+  }
+
+  function isCharterText(text, shape) {
+    const names = new Set(shape.map(part => String(part.name).toLowerCase()));
+    return String(text || '')
+      .split('\n')
+      .some(line => names.has(charterHeadingLabel(line)));
+  }
+
+  // "Use the charter shape" (FR5): an empty goal gets the five headings with a
+  // hint line under each; a plain sentence moves under Outcome and the other
+  // four follow; a charter is left exactly as it is. The save path drops hint
+  // lines left untouched.
+  function charterFill(text, shape) {
+    const value = String(text || '');
+    if (!shape.length || isCharterText(value, shape)) return value;
+    const sentence = value.trim();
+    return (
+      shape
+        .map((part, i) => `## ${part.name}\n${i === 0 && sentence ? sentence : `_${part.hint}_`}`)
+        .join('\n\n') + '\n'
+    );
+  }
+
+  // The empty textarea shows the charter's shape as its placeholder (FR6).
+  function charterPlaceholder(shape) {
+    return shape.map(part => `## ${part.name}\n${part.hint}`).join('\n');
+  }
+
+  function goalCount(value) {
+    const count = Array.from(String(value || '')).length;
+    return { text: `${count} / ${GOAL_MAX_CHARS}`, over: count > GOAL_MAX_CHARS };
+  }
+
+  function renderGoalCount(textarea, counter) {
+    if (!textarea || !counter) return;
+    const count = goalCount(textarea.value);
+    counter.textContent = count.text;
+    if (counter.classList) counter.classList.toggle('is-over', count.over);
+  }
+
+  function applyCharterPlaceholder(textarea, state) {
+    const shape = charterShape(state);
+    if (textarea && shape.length) textarea.placeholder = charterPlaceholder(shape);
   }
 
   let latestState = null;
@@ -132,6 +398,7 @@
   // A goal run is bounded server-side at 15 minutes; follow it a little longer.
   const RUN_POLL_TIMEOUT_MS = 16 * 60 * 1000;
   const RUN_IN_FLIGHT_COPY = 'Looking for things to work on…';
+  const ASSESSED_NOTHING_TO_SUGGEST = 'Assessed the workspace; nothing to suggest right now.';
 
   // Cadence intervals come back from the API as Go durations in nanoseconds.
   const NS_PER_HOUR = 3.6e12;
@@ -348,6 +615,8 @@
 
     if (title) title.textContent = mission.trim() ? 'Edit goal' : 'Set goal';
     if (text) text.value = mission;
+    applyCharterPlaceholder(text, current);
+    renderGoalCount(text, $(SELECTORS.goalModalCount));
     if (enabled) enabled.checked = !!current.mission_enabled;
     populateCadenceFields(CADENCE_SURFACES.modal, current.cadence);
     renderGoalModalAutonomy(current);
@@ -458,13 +727,15 @@
     const findings = buildFindingsMeta(current);
     const statusLine = goalStatusLine(current, mission);
     const actionStatus = statusLine.text;
-    const copy = goalCardCopy(mission);
+    const copy = goalCardCopy(current);
     return {
       mission,
       label: status.label,
       className: status.className,
       title: copy.title,
       text: copy.text,
+      charterLine: mission ? charterLine(current) : '',
+      extrasHTML: mission ? goalCardExtrasHTML(current) : '',
       cadenceLabel: `Cadence: ${cadenceLabel(current.cadence)}`,
       nextLabel: `Next: ${fmtNextRun(current.next_mission_run_at)}`,
       lastLabel: `Last: ${fmtLastRun(current.last_mission_run_at)}`,
@@ -525,6 +796,11 @@
       textEl.hidden = !summary.text;
       textEl.classList.toggle('is-empty', !summary.mission);
     }
+    const extrasEl = $(SELECTORS.commandExtras);
+    if (extrasEl) {
+      extrasEl.innerHTML = summary.extrasHTML;
+      extrasEl.hidden = !summary.extrasHTML;
+    }
     if (cadenceEl) cadenceEl.textContent = summary.cadenceLabel;
     if (nextEl) {
       nextEl.textContent = summary.nextLabel;
@@ -565,7 +841,7 @@
       statusEl.textContent = status.label;
       statusEl.className = `workspace-detail-goal-status ${status.className}`;
     }
-    const copy = goalCardCopy(mission);
+    const copy = goalCardCopy(state);
     if (titleEl) titleEl.textContent = copy.title;
     if (textEl) {
       textEl.textContent = copy.text;
@@ -671,7 +947,8 @@
     cadence: 'Scheduled',
     manual: 'Run now',
     first_goal: 'First goal',
-    event: 'Event trigger'
+    event: 'Event trigger',
+    hire_first_look: 'First look'
   };
 
   function plural(count, one, many) {
@@ -696,6 +973,10 @@
         const output = run.output_tail
           ? `<details class="workspace-mission-run-output"><summary>Show output</summary><pre>${escapeHtml(run.output_tail)}</pre></details>`
           : '';
+        // FR15: the run's assessment, collapsed so ten runs stay short.
+        const assessment = String(run.assessment || '').trim()
+          ? `<details class="workspace-mission-run-assessment"><summary>Assessment</summary>${assessmentParagraphsHTML(run.assessment, assessmentPartNames(latestState, run))}</details>`
+          : '';
         return `
           <li class="workspace-mission-run ${run.succeeded ? 'is-succeeded' : 'is-failed'}">
             <div class="workspace-mission-run-head">
@@ -704,7 +985,7 @@
               <span title="${escapeHtml(when ? fmtTime(when) : '')}">${escapeHtml(when ? fmtRelative(when) : '')}</span>
             </div>
             <div class="workspace-mission-run-counts">${escapeHtml(runCountsText(run))}</div>
-            ${error}${output}
+            ${assessment}${error}${output}
           </li>`;
       })
       .join('');
@@ -792,29 +1073,8 @@
 
     populateCadenceFields(CADENCE_SURFACES.form, state.cadence);
 
-    // Starter hint placeholder based on workspace name in the page header.
-    applyStarterHint();
-  }
-
-  function applyStarterHint() {
-    const textarea = $(SELECTORS.text);
-    if (!textarea || textarea.value || textarea.placeholder) return; // Don't override user input or existing placeholder.
-    const titleEl = document.querySelector('.workspace-detail-title, h1');
-    if (!titleEl) return;
-    const name = titleEl.textContent.toLowerCase();
-    const hints = {
-      brand: 'Keep brand voice, visuals, and messaging consistent across channels.',
-      home: 'Watch over home devices, maintenance, and recurring household needs.',
-      finance: 'Monitor finance for risks, opportunities, and reconciliation issues.',
-      health: 'Track health routines, appointments, and check-ins.',
-      travel: 'Maintain trip plans, bookings, and travel-readiness checklists.'
-    };
-    for (const [key, hint] of Object.entries(hints)) {
-      if (name.includes(key)) {
-        textarea.placeholder = hint;
-        return;
-      }
-    }
+    applyCharterPlaceholder($(SELECTORS.text), state);
+    renderGoalCount($(SELECTORS.text), $(SELECTORS.textCount));
   }
 
   function readFormState() {
@@ -1093,6 +1353,16 @@
       return rememberRunReport(`Run failed${why} See Goal Settings for details.`, 'error');
     }
     lastRunOutcome = { label: 'Completed', className: 'is-completed' };
+    // FR13: a run that assessed the workspace and found nothing new to
+    // suggest succeeded; say so rather than listing zero counts.
+    if (
+      record &&
+      String(record.assessment || '').trim() &&
+      !record.tasks_created &&
+      !record.findings_created
+    ) {
+      return rememberRunReport(ASSESSED_NOTHING_TO_SUGGEST, null);
+    }
     return rememberRunReport(
       record ? `Run complete — ${runCountsText(record)}.` : 'Run complete.',
       null
@@ -1191,7 +1461,28 @@
     report(message, kind);
   }
 
+  // The goal textarea's live count and its "Use the charter shape" button, on
+  // both editors (Goal Settings and the quick-edit modal).
+  function wireGoalEditor(textSelector, countSelector, fillSelector) {
+    const textarea = $(textSelector);
+    if (!textarea) return;
+    const counter = $(countSelector);
+    textarea.addEventListener('input', () => renderGoalCount(textarea, counter));
+    const fill = $(fillSelector);
+    if (fill) {
+      fill.addEventListener('click', () => {
+        const next = charterFill(textarea.value, charterShape(latestState));
+        if (next !== textarea.value) textarea.value = next;
+        renderGoalCount(textarea, counter);
+        textarea.focus();
+      });
+    }
+  }
+
   function wireForm() {
+    wireGoalEditor(SELECTORS.text, SELECTORS.textCount, SELECTORS.textFill);
+    wireGoalEditor(SELECTORS.goalModalText, SELECTORS.goalModalCount, SELECTORS.goalModalFill);
+
     const cadenceType = $(SELECTORS.cadenceType);
     if (cadenceType) {
       cadenceType.addEventListener('change', () =>
@@ -1233,6 +1524,9 @@
         } catch (e) {
           if (e.status === 412) {
             setGoalModalStatus('Classify workspace bindings before enabling automation.', 'error');
+          } else if (e.status === 400 && e.message) {
+            // The server's own sentence, e.g. the goal's length bound.
+            setGoalModalStatus(e.message, 'error');
           } else {
             setGoalModalStatus(`Save failed: ${e.message}`, 'error');
           }
@@ -1275,6 +1569,8 @@
               'error'
             );
             setGoalActionStatus('Classify workspace bindings before enabling this goal.', 'error');
+          } else if (e.status === 400 && e.message) {
+            setStatusText(e.message, 'error');
           } else {
             setStatusText(`Save failed: ${e.message}`, 'error');
             setGoalActionStatus(`Save failed: ${e.message}`, 'error');
@@ -1331,6 +1627,10 @@
       // Pure renderers of a given state, for module tests.
       summarize: state => commandSummary(state || {}),
       runHistoryHTML,
+      goalCardExtrasHTML,
+      charterFill,
+      charterPlaceholder,
+      goalCount,
       effectiveAutonomy,
       runCountsText,
       settleRun,
@@ -1340,6 +1640,7 @@
         if (latestState) renderCommandPanel(latestState);
       },
       openGoalModal,
+      cardAction,
       runNow: runNowFromCommand,
       reload
     });

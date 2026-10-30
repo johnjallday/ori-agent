@@ -1,10 +1,50 @@
 # Workspace goal runs
 
-A workspace's goal (`Workspace.Mission`) is the one sentence its agents work
-toward. It is set at create (explicit goal → template `goal` → legacy bootstrap
-goal) or in Goal Settings, and it is injected into every workspace prompt: the
-chat snapshot, the protected task header (`GoalPromptLine`), Plans and the Home
-summary.
+A workspace's goal (`Workspace.Mission`) is what its agents work toward: one
+sentence, or a short **charter** (below). It is set at create (explicit goal →
+template `goal` → legacy bootstrap goal) or in Goal Settings, and it is injected
+into every workspace prompt: the chat snapshot, the protected task header
+(`GoalPromptLine`), Plans and the Home summary.
+
+## The goal charter
+
+A goal is a charter when its text has at least one of five part headings, as a
+`#`/`##`/`###` line or a whole-line `**Part**`, case-insensitive, in any order
+and any subset (`workspace.ParseGoalCharter`). Text before the first heading
+belongs to Outcome; an unknown heading stays text of the part above it. The
+parts and their meanings live in `internal/workspace/goal_charter.go` only
+(`GoalCharterParts`):
+
+| Part       | Meaning                                                             |
+| ---------- | ------------------------------------------------------------------- |
+| Outcome    | What this workspace exists to produce or keep true.                 |
+| Maintain   | What the agent keeps in good order on its own initiative.           |
+| Build      | What the agent should work towards that does not exist yet.         |
+| Watch      | What the agent looks for and reports when it changes.               |
+| Boundaries | What the agent must not do or touch, and what needs the user's say. |
+
+- The charter is text: no workspace field, no SQLite column, no migration. A
+  blueprint whose goal is written with the headings gets the shape for free.
+  The starter blueprints' goals are still single sentences; rewriting them as
+  charters is a separate content change.
+- **One-line readers show the Outcome line** (`GoalOutcomeLine`): the first line
+  of a charter's Outcome (or, without one, its first line of text), flattened
+  and bounded at 500 bytes. A plain goal's line is exactly what it was before
+  charters. Task prompts, builder plans, the assistant's workspace and Home
+  snapshots, the folder summary, the software assessment intent and the toolbox
+  goal brief summary read it; the mission GET returns it as `goal_outcome`.
+- The goal save (`PUT`/`PATCH /api/workspaces/{id}/mission`) drops untouched
+  hint lines (`_<meaning>_`, written by the editor's **Use the charter shape**)
+  and refuses a goal over `WorkspaceGoalMaxRunes` (4,000) with 400 "Keep the
+  goal within 4,000 characters."
+- The mission GET also returns `goal_parts` (present parts, `[]` for a plain
+  goal) and `goal_charter_shape` (the five names with their hints), so the page
+  never duplicates the copy.
+- **Brief vs. charter:** the hire card's brief, the build-session goal and the
+  folder brief stay one line of at most 300 runes
+  (`personalassistant.BriefMaxRunes`). The brief becomes the goal at hire; it
+  grows into a charter through the suggested charter (below), not by typing one
+  into the hire card.
 
 A folder setup presented as a hire (**Hire and start**, on Home's card, the
 assistant's folder card and the Create Workspace build) asks one question,
@@ -16,8 +56,31 @@ goal run; the hired agent's first look is told it as the user's intent.
 
 ## What a goal run does
 
-A goal run reads the workspace and answers with one JSON object whose `items`
-array holds `task` suggestions and `finding`s (`ParseMissionRunOutput`).
+A goal run reads the workspace and answers with one JSON object: first an
+`assessment`, then an `items` array of `task` suggestions and `finding`s
+(`ParseMissionRunOutput`). Its prompt carries the goal as a `## Goal` section:
+a charter's present parts, each under `### <Part> — <meaning>`, or a plain goal
+with the note that it has no parts yet.
+
+- **Assessment.** Every run (baseline, cadence, manual, event, first look) is
+  asked to write it first: short plain text, at most about 1,500 characters, one
+  paragraph per part the goal has (`Part: …`), or one paragraph against a plain
+  goal, saying where the workspace stands today with evidence. Items follow from
+  it; `items` may be empty. The record keeps `assessment` (paragraphs kept,
+  bounded at `MissionAssessmentMax` = 1,500 runes) and `assessment_parts` (the
+  goal's parts when the run started). An answer without one (the older
+  `{"items": [...]}` shape) still parses `ok`. The Goal card shows the newest
+  successful run's assessment (**Latest assessment**) and run history keeps each
+  one under a collapsed **Assessment**; a run that assessed and stored nothing
+  reports "Assessed the workspace; nothing to suggest right now."
+- **Suggested charter.** When the goal is plain, a hire's first look and any run
+  with `CycleOrdinal` ≤ 1 may also return `suggested_charter`: the five parts
+  written from the brief and what the run found. It is bounded at 4,000 runes on
+  whole lines and kept only when it parses as a charter with Outcome
+  (`suggested_charter` on the record). The Goal card shows it with **Use** (saves
+  it as the goal) and **Edit** (opens the Goal modal with it) while the goal is
+  still plain. Later runs never ask; the hire report, Needs you and the Backlog
+  ignore it. The first look's `summary` and `Next:` line are unchanged.
 
 - Suggestions become **Backlog tickets** with `source_type` `goal_suggestion`
   and their why, evidence, first step, agent, effort and confidence under the

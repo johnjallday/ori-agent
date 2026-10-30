@@ -51,7 +51,7 @@ func hireCatalog() map[string]any {
 	return map[string]any{
 		"roles":              roles,
 		"domain_brief":       personalassistant.HireDomainBrief(),
-		"brief_max":          personalassistant.WorkspaceGoalMaxRunes,
+		"brief_max":          personalassistant.BriefMaxRunes,
 		"workspace_name_max": personalassistant.HireWorkspaceNameMaxRunes,
 	}
 }

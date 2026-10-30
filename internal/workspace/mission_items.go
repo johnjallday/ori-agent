@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 )
@@ -38,6 +40,9 @@ const (
 	// task and the reason it comes first.
 	missionSummaryMax = 600
 	missionNextMax    = 200
+	// MissionAssessmentMax bounds a run's assessment of the workspace against
+	// its goal; ten kept runs hold at most 15,000 runes of it.
+	MissionAssessmentMax = 1500
 	// MissionRunHistoryLimit is how many run records a workspace keeps.
 	MissionRunHistoryLimit = 10
 	// MissionOutputTailLimit bounds the raw output kept for a failed run.
@@ -79,14 +84,19 @@ type MissionTaskSuggestion struct {
 // MissionRunOutput is a parsed goal-run answer. Rejected counts items that
 // were present but unusable (unknown kind, no title, an invalid enum value).
 // Summary, Next and NextWhy are what a hired agent's first look says about
-// itself; other runs leave them empty.
+// itself; other runs leave them empty. Assessment is where the run found the
+// workspace standing against its goal; an older-shaped answer leaves it empty.
 type MissionRunOutput struct {
-	Tasks    []MissionTaskSuggestion
-	Findings []Opportunity
-	Rejected int
-	Summary  string
-	Next     string
-	NextWhy  string
+	Tasks      []MissionTaskSuggestion
+	Findings   []Opportunity
+	Rejected   int
+	Summary    string
+	Next       string
+	NextWhy    string
+	Assessment string
+	// SuggestedCharter is a charter the run proposes for a plain goal, kept
+	// only when it reads as a charter with an Outcome.
+	SuggestedCharter string
 }
 
 // MissionSuggestionLimits is how many tasks and findings a run of this
@@ -126,6 +136,109 @@ func missionOneLine(value string, max int) string {
 	return value
 }
 
+// missionParagraphs keeps model text's paragraph breaks — trailing spaces
+// trimmed, runs of blank lines collapsed to one — bounded on a rune boundary.
+func missionParagraphs(value string, max int) string {
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	kept := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		line = strings.TrimRight(line, " \t")
+		if strings.TrimSpace(line) == "" {
+			blank = true
+			continue
+		}
+		if blank && len(kept) > 0 {
+			kept = append(kept, "")
+		}
+		blank = false
+		kept = append(kept, line)
+	}
+	value = strings.Join(kept, "\n")
+	if runes := []rune(value); len(runes) > max {
+		value = strings.TrimSpace(string(runes[:max]))
+	}
+	return value
+}
+
+// missionAssessmentText reads the assessment field: a string, or — from a
+// model that structured it anyway — an object of part names to text, which
+// becomes "Part: text" paragraphs in canonical order. Anything else, or a
+// missing field, is no assessment; it never fails the run.
+func missionAssessmentText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return missionParagraphs(text, MissionAssessmentMax)
+	}
+	var parts map[string]string
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var paragraphs []string
+	used := map[string]bool{}
+	for _, part := range GoalCharterParts {
+		for key, body := range parts {
+			if strings.EqualFold(strings.TrimSpace(key), part.Name) && strings.TrimSpace(body) != "" {
+				paragraphs = append(paragraphs, part.Name+": "+strings.TrimSpace(body))
+				used[key] = true
+			}
+		}
+	}
+	others := make([]string, 0, len(parts))
+	for key := range parts {
+		if !used[key] && strings.TrimSpace(parts[key]) != "" {
+			others = append(others, key)
+		}
+	}
+	sort.Strings(others)
+	for _, key := range others {
+		paragraphs = append(paragraphs, strings.TrimSpace(key)+": "+strings.TrimSpace(parts[key]))
+	}
+	return missionParagraphs(strings.Join(paragraphs, "\n\n"), MissionAssessmentMax)
+}
+
+// missionSuggestedCharter reads the suggested_charter field (goal-charter
+// FR18): a string, with untouched hint lines dropped, bounded at
+// WorkspaceGoalMaxRunes on whole lines so no heading is cut or left without
+// its text, and kept only when it parses as a charter with an Outcome.
+func missionSuggestedCharter(raw json.RawMessage) string {
+	var text string
+	if len(raw) == 0 || json.Unmarshal(raw, &text) != nil {
+		return ""
+	}
+	text = strings.TrimSpace(StripGoalHints(strings.ReplaceAll(text, "\r\n", "\n")))
+	if utf8.RuneCountInString(text) > WorkspaceGoalMaxRunes {
+		var kept []string
+		size := 0
+		for _, line := range strings.Split(text, "\n") {
+			next := size + utf8.RuneCountInString(line)
+			if len(kept) > 0 {
+				next++
+			}
+			if next > WorkspaceGoalMaxRunes {
+				break
+			}
+			kept, size = append(kept, line), next
+		}
+		for len(kept) > 0 {
+			last := kept[len(kept)-1]
+			if _, heading := goalPartHeading(last); !heading && strings.TrimSpace(last) != "" {
+				break
+			}
+			kept = kept[:len(kept)-1]
+		}
+		text = strings.TrimSpace(strings.Join(kept, "\n"))
+	}
+	charter := ParseGoalCharter(text)
+	if !charter.IsCharter || charter.Parts[GoalPartOutcome] == "" {
+		return ""
+	}
+	return text
+}
+
 // ParseStatus summarizes how cleanly the answer parsed.
 func (o MissionRunOutput) ParseStatus() string {
 	if o.Rejected > 0 {
@@ -156,6 +269,17 @@ type MissionRunRecord struct {
 	// comes first. Other runs leave both empty.
 	Summary string `json:"summary,omitempty"`
 	NextWhy string `json:"next_why,omitempty"`
+	// Assessment is where the run found the workspace standing against its
+	// goal (paragraphs, bounded at MissionAssessmentMax), for every origin.
+	// AssessmentParts names the charter parts the goal had when the run
+	// started, so the card can tell an assessment of an older goal.
+	Assessment      string   `json:"assessment,omitempty"`
+	AssessmentParts []string `json:"assessment_parts,omitempty"`
+	// SuggestedCharter is a charter the run proposed for a plain goal; the
+	// Goal card offers it with Use and Edit while the goal is still the one
+	// the run read (GoalDigest, compared with the mission GET's goal_digest).
+	SuggestedCharter string `json:"suggested_charter,omitempty"`
+	GoalDigest       string `json:"goal_digest,omitempty"`
 }
 
 // RecordMissionRun prepends a run record and keeps the newest
@@ -245,11 +369,13 @@ func ParseMissionRunOutput(workspaceID, sourceRunID, raw string) (MissionRunOutp
 		legacyKind = MissionItemFinding
 	} else {
 		var envelope struct {
-			Items    *[]missionItem `json:"items"`
-			Findings *[]missionItem `json:"findings"`
-			Summary  string         `json:"summary"`
-			Next     string         `json:"next"`
-			NextWhy  string         `json:"next_why"`
+			Items      *[]missionItem  `json:"items"`
+			Findings   *[]missionItem  `json:"findings"`
+			Summary    string          `json:"summary"`
+			Next       string          `json:"next"`
+			NextWhy    string          `json:"next_why"`
+			Assessment json.RawMessage `json:"assessment"`
+			Charter    json.RawMessage `json:"suggested_charter"`
 		}
 		if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
 			return out, fmt.Errorf("goal run output: %w", err)
@@ -257,6 +383,8 @@ func ParseMissionRunOutput(workspaceID, sourceRunID, raw string) (MissionRunOutp
 		out.Summary = missionOneLine(envelope.Summary, missionSummaryMax)
 		out.Next = missionOneLine(envelope.Next, missionNextMax)
 		out.NextWhy = missionOneLine(envelope.NextWhy, missionSummaryMax)
+		out.Assessment = missionAssessmentText(envelope.Assessment)
+		out.SuggestedCharter = missionSuggestedCharter(envelope.Charter)
 		switch {
 		case envelope.Items != nil:
 			items = *envelope.Items

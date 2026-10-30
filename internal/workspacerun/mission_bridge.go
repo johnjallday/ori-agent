@@ -322,15 +322,24 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 		return "", nil, fmt.Errorf("create mission run: %w", err)
 	}
 
+	// The goal as this run's prompt saw it, for the record.
+	goal := missionGoalSeen{parts: workspace.ParseGoalCharter(ws.Mission).Present, digest: workspace.GoalDigest(ws.Mission)}
 	execute := func() error {
-		return b.executeMissionRun(ctx, workspaceID, run.ID, opts, preconditions)
+		return b.executeMissionRun(ctx, workspaceID, run.ID, opts, preconditions, goal)
 	}
 	return run.ID, execute, nil
 }
 
 // executeMissionRun runs a created goal run to completion and records it.
-// preconditions are those its prompt carried.
-func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runID string, opts workspace.MissionRunOptions, preconditions []workspace.MissionPrecondition) error {
+// missionGoalSeen is the goal a run's prompt read: its charter parts and its
+// digest.
+type missionGoalSeen struct {
+	parts  []string
+	digest string
+}
+
+// preconditions are those its prompt carried; goal is the goal it read.
+func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runID string, opts workspace.MissionRunOptions, preconditions []workspace.MissionPrecondition, goal missionGoalSeen) error {
 	runCtx, cancel := context.WithTimeout(ctx, b.executionTimeout)
 	defer cancel()
 
@@ -356,6 +365,12 @@ func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runI
 	if execErr == nil || strings.TrimSpace(result) != "" {
 		parseErr = b.storeMissionOutput(workspaceID, runID, result, &record, preconditions)
 		stored = parseErr == nil
+	}
+	if record.Assessment != "" {
+		record.AssessmentParts = goal.parts
+	}
+	if record.SuggestedCharter != "" {
+		record.GoalDigest = goal.digest
 	}
 	if !stored {
 		b.storeUnansweredPreconditions(workspaceID, runID, &record, preconditions)
@@ -417,6 +432,9 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 	}
 	record.ParseStatus = output.ParseStatus()
 	record.ItemsRejected = output.Rejected
+	// Every origin keeps its assessment; Summary and NextWhy below are unchanged.
+	record.Assessment = output.Assessment
+	record.SuggestedCharter = output.SuggestedCharter
 	taskLimit, findingLimit := workspace.MissionSuggestionLimits(record.Origin)
 
 	findings := output.Findings

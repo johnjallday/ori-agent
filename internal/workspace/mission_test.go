@@ -92,7 +92,7 @@ func TestBuildMissionSystemPrompt_BaselineFraming(t *testing.T) {
 	if strings.Contains(got, "goal run #") {
 		t.Error("baseline must not use the recurring framing")
 	}
-	if !strings.Contains(got, `{"items": [ ... ]}`) || !strings.Contains(got, `"kind": "task"`) || !strings.Contains(got, `"kind": "finding"`) {
+	if !strings.Contains(got, `{"assessment": string, "items": [ ... ]`) || !strings.Contains(got, `"kind": "task"`) || !strings.Contains(got, `"kind": "finding"`) {
 		t.Error("structured-output contract missing")
 	}
 }
@@ -102,7 +102,7 @@ func TestBuildMissionSystemPrompt_BaselineFraming(t *testing.T) {
 func TestBuildMissionSystemPrompt_ItemsContract(t *testing.T) {
 	got := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "Keep brand voice consistent.", CycleOrdinal: 1})
 	for _, want := range []string{
-		"Goal: Keep brand voice consistent.",
+		"## Goal\nKeep brand voice consistent.\n",
 		"Answer with ONE JSON object and nothing else",
 		`- "task": work that moves the goal forward and that an agent in this workspace could do.`,
 		`- "finding": something the user should know that is not itself a task`,
@@ -111,7 +111,7 @@ func TestBuildMissionSystemPrompt_ItemsContract(t *testing.T) {
 		`"first_step": string`,
 		`"recommended_action": string`,
 		"Suggest at most 5 tasks and 5 findings.",
-		`If nothing is worth suggesting, answer {"items": []}.`,
+		"Always write the assessment; `items` may be empty when the assessment finds nothing to do.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt lacks %q", want)
@@ -119,6 +119,129 @@ func TestBuildMissionSystemPrompt_ItemsContract(t *testing.T) {
 	}
 	if strings.Contains(got, `{"findings": [`) {
 		t.Error("the findings-only contract must be gone")
+	}
+	if strings.Contains(got, `If nothing is worth suggesting`) {
+		t.Error("the empty-answer sentence must ask for the assessment instead")
+	}
+}
+
+// goal-charter FR8: the goal is a "## Goal" section. A charter lists only the
+// parts it has, in canonical order, each with what it means; a plain goal is
+// written as it is and said to have no parts yet.
+func TestBuildMissionSystemPrompt_GoalSection(t *testing.T) {
+	charter := BuildMissionSystemPrompt(MissionPromptInputs{
+		Mission:      "## Boundaries\nNever send anything.\n\n## Outcome\nA monthly newsletter.\n## Build\nA reusable issue template.",
+		CycleOrdinal: 2,
+	})
+	section := "## Goal\n" +
+		"The user wrote this goal as a charter. Each part below says what the part means, then what the user wrote for it.\n\n" +
+		"### Outcome — What this workspace exists to produce or keep true.\nA monthly newsletter.\n\n" +
+		"### Build — What the agent should work towards that does not exist yet.\nA reusable issue template.\n\n" +
+		"### Boundaries — What the agent must not do or touch, and what needs the user's say.\nNever send anything.\n\n"
+	if !strings.Contains(charter, "--- MISSION CONTEXT ---\n\n"+section+"This is goal run #2.") {
+		t.Fatalf("charter goal section:\n%s", charter)
+	}
+	for _, absent := range []string{"### Maintain", "### Watch", "Goal: ", "no parts yet"} {
+		if strings.Contains(charter, absent) {
+			t.Errorf("charter prompt has %q", absent)
+		}
+	}
+
+	plain := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "  Keep brand voice consistent.  ", CycleOrdinal: 2})
+	if !strings.Contains(plain, "## Goal\nKeep brand voice consistent.\nThis goal is one plain statement; it has no parts yet.\n\nThis is goal run #2.") {
+		t.Fatalf("plain goal section:\n%s", plain)
+	}
+	if none := BuildMissionSystemPrompt(MissionPromptInputs{CycleOrdinal: 2}); strings.Contains(none, "## Goal") {
+		t.Fatalf("no goal, no section:\n%s", none)
+	}
+}
+
+// goal-charter FR17: a plain goal's first look and any run with CycleOrdinal
+// ≤ 1 ask for an optional suggested charter with the five parts; a charter
+// goal and run #2 onwards never do.
+func TestBuildMissionSystemPrompt_AsksForACharterOnlyForAPlainGoalsFirstRuns(t *testing.T) {
+	const plain = "help me write a newsletter"
+	const charter = "## Outcome\nA newsletter."
+	for name, tc := range map[string]struct {
+		in   MissionPromptInputs
+		want bool
+	}{
+		"first look, plain":        {MissionPromptInputs{Mission: plain, CycleOrdinal: 1, Origin: MissionOriginHireFirstLook}, true},
+		"first look run #2, plain": {MissionPromptInputs{Mission: plain, CycleOrdinal: 2, Origin: MissionOriginHireFirstLook}, false},
+		"baseline, plain":          {MissionPromptInputs{Mission: plain, CycleOrdinal: 1, Origin: MissionOriginFirstGoal}, true},
+		"manual run #1, plain":     {MissionPromptInputs{Mission: plain, CycleOrdinal: 1, Origin: MissionOriginManual}, true},
+		"first look, charter":      {MissionPromptInputs{Mission: charter, CycleOrdinal: 1, Origin: MissionOriginHireFirstLook}, false},
+		"baseline, charter":        {MissionPromptInputs{Mission: charter, CycleOrdinal: 1, Origin: MissionOriginFirstGoal}, false},
+		"manual run #2, plain":     {MissionPromptInputs{Mission: plain, CycleOrdinal: 2, Origin: MissionOriginManual}, false},
+		"cadence run #3, plain":    {MissionPromptInputs{Mission: plain, CycleOrdinal: 3, Origin: MissionOriginCadence}, false},
+		"event run #2, plain":      {MissionPromptInputs{Mission: plain, CycleOrdinal: 2, Origin: MissionOriginEvent}, false},
+	} {
+		got := BuildMissionSystemPrompt(tc.in)
+		if asked := strings.Contains(got, `"suggested_charter"`); asked != tc.want {
+			t.Errorf("%s: asks for a charter = %v, want %v", name, asked, tc.want)
+			continue
+		}
+		if !tc.want {
+			continue
+		}
+		for _, want := range []string{
+			`"items": [ ... ], "suggested_charter": string}`,
+			`- "suggested_charter" (optional): Also propose a charter for this workspace from the brief and what you found, as the five parts below, each one or two sentences; write it so the user could adopt it as the goal unchanged.`,
+			"Leave it out when the goal is already a charter.",
+			"    - Outcome: What this workspace exists to produce or keep true.\n    - Maintain: ",
+			"    - Boundaries: What the agent must not do or touch, and what needs the user's say.\n",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: lacks %q", name, want)
+			}
+		}
+	}
+}
+
+// goal-charter FR9/FR10: both output shapes name the assessment first and ask
+// for it against the parts the goal has, or one paragraph for a plain goal.
+func TestBuildMissionSystemPrompt_AssessmentContract(t *testing.T) {
+	const charterGoal = "## Outcome\nA newsletter.\n## Watch\nStalled drafts."
+	for name, in := range map[string]MissionPromptInputs{
+		"baseline":   {Mission: charterGoal, CycleOrdinal: 1, Origin: MissionOriginFirstGoal},
+		"cadence":    {Mission: charterGoal, CycleOrdinal: 4, Origin: MissionOriginCadence},
+		"first look": {Mission: charterGoal, CycleOrdinal: 1, Origin: MissionOriginHireFirstLook},
+	} {
+		got := BuildMissionSystemPrompt(in)
+		contract := got[strings.Index(got, "--- OUTPUT ---"):]
+		for _, want := range []string{
+			`- "assessment": write it first, as a string inside the JSON object. Short plain text, at most about 1,500 characters.`,
+			"Organise it under the goal's parts (Outcome, Watch): one short paragraph per part, starting with the part's name and a colon, saying where this workspace stands on that part today, with evidence from this workspace.",
+			`- "items": they come from the assessment; what the assessment finds in good order yields no item.`,
+			"Always write the assessment; `items` may be empty when the assessment finds nothing to do.",
+		} {
+			if !strings.Contains(contract, want) {
+				t.Errorf("%s: contract lacks %q:\n%s", name, want, contract)
+			}
+		}
+		if strings.Index(contract, `"assessment"`) > strings.Index(contract, `"items"`) {
+			t.Errorf("%s: assessment must come before items:\n%s", name, contract)
+		}
+	}
+
+	look := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "help me write a newsletter", CycleOrdinal: 1, Origin: MissionOriginHireFirstLook})
+	for _, want := range []string{
+		`{"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]`,
+		"Open it with the two sentences of your summary. Write one short paragraph saying where this workspace stands against the goal today",
+		`"next": the exact title of the one task to start first`,
+		`"next_why": one sentence on why that task comes first`,
+	} {
+		if !strings.Contains(look, want) {
+			t.Errorf("first look lacks %q:\n%s", want, look)
+		}
+	}
+	if strings.Contains(look, `{"summary": string, "items": []}`) {
+		t.Error("the first look's empty answer must ask for the assessment instead")
+	}
+	plain := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "Ship it", CycleOrdinal: 3})
+	if !strings.Contains(plain, `{"assessment": string, "items": [ ... ]}`) || strings.Contains(plain, "Organise it under") ||
+		!strings.Contains(plain, "Write one short paragraph saying where this workspace stands against the goal today") {
+		t.Fatalf("plain contract:\n%s", plain)
 	}
 }
 

@@ -272,6 +272,273 @@ test('cleared or already attempted goals do not POST and consent wording disting
   }
 });
 
+// The five parts as the mission GET sends them (goal_charter_shape).
+const SHAPE = [
+  { name: 'Outcome', hint: 'What this workspace exists to produce or keep true.' },
+  { name: 'Maintain', hint: 'What the agent keeps in good order on its own initiative.' },
+  { name: 'Build', hint: 'What the agent should work towards that does not exist yet.' },
+  { name: 'Watch', hint: 'What the agent looks for and reports when it changes.' },
+  {
+    name: 'Boundaries',
+    hint: "What the agent must not do or touch, and what needs the user's say."
+  }
+];
+
+// FR5: the fill button's three cases.
+test('Use the charter shape fills an empty goal, wraps a sentence and never touches a charter', () => {
+  const mission = loadWorkspaceMission();
+  const empty = mission.charterFill('  ', SHAPE);
+  assert.equal(
+    empty,
+    '## Outcome\n_What this workspace exists to produce or keep true._\n\n' +
+      '## Maintain\n_What the agent keeps in good order on its own initiative._\n\n' +
+      '## Build\n_What the agent should work towards that does not exist yet._\n\n' +
+      '## Watch\n_What the agent looks for and reports when it changes._\n\n' +
+      "## Boundaries\n_What the agent must not do or touch, and what needs the user's say._\n"
+  );
+
+  const wrapped = mission.charterFill('  help me write a newsletter \n', SHAPE);
+  assert.match(
+    wrapped,
+    /^## Outcome\nhelp me write a newsletter\n\n## Maintain\n_What the agent keeps/
+  );
+  assert.equal((wrapped.match(/^## /gm) || []).length, 5);
+  assert.doesNotMatch(wrapped, /_What this workspace exists/);
+
+  for (const charter of [
+    '## Build\nA release pipeline.',
+    'Ship v2.\n**Boundaries**\nNever push to main.',
+    '### watch:\nCI'
+  ]) {
+    assert.equal(mission.charterFill(charter, SHAPE), charter);
+  }
+  // A heading that names no part, or four hashes, is not a charter.
+  assert.match(mission.charterFill('#### Outcome', SHAPE), /^## Outcome\n#### Outcome\n/);
+  // Without the shape (state not loaded yet) the button changes nothing.
+  assert.equal(mission.charterFill('a sentence', []), 'a sentence');
+});
+
+test('the goal count runs against 4,000 and the placeholder is the charter shape', () => {
+  const mission = loadWorkspaceMission();
+  assert.deepEqual({ ...mission.goalCount('héllo') }, { text: '5 / 4000', over: false });
+  assert.deepEqual(
+    { ...mission.goalCount('é'.repeat(4000)) },
+    { text: '4000 / 4000', over: false }
+  );
+  assert.equal(mission.goalCount('a'.repeat(4001)).over, true);
+  assert.equal(
+    mission.charterPlaceholder(SHAPE.slice(0, 2)),
+    '## Outcome\nWhat this workspace exists to produce or keep true.\n## Maintain\nWhat the agent keeps in good order on its own initiative.'
+  );
+});
+
+// FR7: the card shows the Outcome line and, for a charter, the parts it has.
+test('the Goal card shows the Outcome line and a Charter line only for a charter', () => {
+  const mission = loadWorkspaceMission();
+  const charter = mission.summarize({
+    mission: '## Outcome\nA monthly newsletter.\n## Build\nA template.\n## Boundaries\nNever send.',
+    goal_outcome: 'A monthly newsletter.',
+    goal_parts: ['Outcome', 'Build', 'Boundaries']
+  });
+  assert.equal(charter.title, 'A monthly newsletter.');
+  assert.equal(charter.charterLine, 'Charter · Outcome, Build, Boundaries');
+  assert.match(
+    charter.extrasHTML,
+    /<p class="ws-cmd-mission-charter">Charter · Outcome, Build, Boundaries<\/p>/
+  );
+
+  const plain = mission.summarize({
+    mission: 'Keep the brand voice consistent',
+    goal_outcome: 'Keep the brand voice consistent',
+    goal_parts: []
+  });
+  assert.equal(plain.title, 'Keep the brand voice consistent');
+  assert.equal(plain.charterLine, '');
+  assert.equal(plain.extrasHTML, '');
+
+  // A state without goal_outcome (an older server) still shows the goal.
+  assert.equal(mission.summarize({ mission: ' Ship it ' }).title, 'Ship it');
+});
+
+// FR14/FR16: the card shows the newest successful run's assessment as escaped
+// paragraphs with bold part lead-ins, its origin and time, and Show earlier.
+test('the Goal card shows the latest assessment from the newest successful run', () => {
+  const mission = loadWorkspaceMission();
+  const finished = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+  const state = {
+    mission: '## Outcome\nA newsletter.\n## Boundaries\nNever send.',
+    goal_outcome: 'A newsletter.',
+    goal_parts: ['Outcome', 'Boundaries'],
+    goal_charter_shape: SHAPE,
+    mission_runs: [
+      { origin: 'manual', succeeded: false, error: 'timed out', assessment: 'stale failed text' },
+      {
+        origin: 'hire_first_look',
+        succeeded: true,
+        finished_at: finished,
+        assessment:
+          'Outcome: nothing <b>written</b> yet.\nNo notes.\n\n**Build** A template first.\n\n## Watch\nNothing to watch.\n\nAside: not a part.'
+      },
+      { origin: 'cadence', succeeded: true, assessment: 'older run' }
+    ]
+  };
+  const html = mission.summarize(state).extrasHTML;
+  assert.match(html, /<strong>Latest assessment<\/strong><span>First look<\/span>/);
+  assert.match(html, /<span title="[^"]+">3m ago<\/span>/);
+  assert.match(
+    html,
+    /<p><strong>Outcome<\/strong> nothing &lt;b&gt;written&lt;\/b&gt; yet\.<br>No notes\.<\/p>/
+  );
+  assert.match(html, /<p><strong>Build<\/strong> A template first\.<\/p>/);
+  assert.match(html, /<p><strong>Watch<\/strong> Nothing to watch\.<\/p>/);
+  assert.match(html, /<p>Aside: not a part\.<\/p>/, 'only part names lead with a colon');
+  assert.doesNotMatch(html, /stale failed text|older run/);
+  assert.match(html, /data-cmd-mission-action="show-run-history">Show earlier<\/button>/);
+  assert.ok(html.indexOf('Charter · Outcome, Boundaries') < html.indexOf('Latest assessment'));
+
+  // No run with an assessment: no block. A run in flight keeps the previous one.
+  assert.doesNotMatch(
+    mission.summarize({ mission: 'Ship', mission_runs: [{ succeeded: true }] }).extrasHTML,
+    /Latest assessment/
+  );
+  assert.match(
+    mission.summarize({ ...state, run_in_flight: true }).extrasHTML,
+    /nothing &lt;b&gt;written/
+  );
+});
+
+// FR15: run history keeps each run's assessment behind a collapsed details.
+test('run history shows a run assessment collapsed under Assessment', () => {
+  const mission = loadWorkspaceMission();
+  const html = mission.runHistoryHTML([
+    { origin: 'manual', succeeded: true, tasks_created: 0, assessment: 'All <i>fine</i>.' },
+    { origin: 'cadence', succeeded: true, tasks_created: 1 }
+  ]);
+  assert.match(
+    html,
+    /<details class="workspace-mission-run-assessment"><summary>Assessment<\/summary><p>All &lt;i&gt;fine&lt;\/i&gt;\.<\/p><\/details>/
+  );
+  assert.equal((html.match(/<summary>Assessment<\/summary>/g) || []).length, 1);
+});
+
+// FR13: an assessed run with nothing new to suggest is a success, said plainly.
+test('a run that assessed and suggested nothing says so', () => {
+  const mission = loadWorkspaceMission();
+  const quiet = mission.settleRun({
+    done: true,
+    failed: false,
+    record: {
+      succeeded: true,
+      tasks_created: 0,
+      findings_created: 0,
+      duplicates_skipped: 2,
+      assessment: 'Everything is in order.'
+    }
+  });
+  assert.equal(quiet.message, 'Assessed the workspace; nothing to suggest right now.');
+  assert.equal(quiet.kind, null);
+  const old = mission.settleRun({
+    done: true,
+    failed: false,
+    record: { succeeded: true, tasks_created: 0, findings_created: 0 }
+  });
+  assert.equal(old.message, 'Run complete — 0 tasks suggested · 0 findings.');
+});
+
+// FR19: a plain goal whose newest run proposed a charter gets the Suggested
+// charter block with Use and Edit; it goes once the goal changes.
+const SUGGESTED = '## Outcome\nA monthly <newsletter>.\n## Boundaries\nNever send anything.';
+
+function charterFixture() {
+  let state = {
+    mission: 'help me write a newsletter',
+    goal_outcome: 'help me write a newsletter',
+    goal_parts: [],
+    goal_digest: 'plain-1',
+    goal_charter_shape: SHAPE,
+    mission_runs: [
+      {
+        origin: 'hire_first_look',
+        succeeded: true,
+        finished_at: new Date().toISOString(),
+        assessment: 'Outcome: nothing yet.',
+        suggested_charter: SUGGESTED,
+        goal_digest: 'plain-1'
+      }
+    ]
+  };
+  const puts = [];
+  const modalText = { value: '', placeholder: '', focus() {} };
+  const mission = loadWorkspaceMission({
+    elements: {
+      '#workspace-detail-mission-text': {},
+      '#workspace-detail-mission-enabled': {},
+      '#workspace-detail-goal-modal-text': modalText
+    },
+    setTimeout: fn => {
+      queueMicrotask(fn);
+      return 1;
+    },
+    fetch: async (url, options) => {
+      if (options?.method === 'PUT') {
+        const body = JSON.parse(options.body);
+        puts.push(body);
+        state = {
+          ...state,
+          mission: body.mission,
+          goal_outcome: 'A monthly <newsletter>.',
+          goal_parts: ['Outcome', 'Boundaries'],
+          goal_digest: 'charter-1'
+        };
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => state };
+    }
+  });
+  return { mission, puts, modalText, state: () => state };
+}
+
+test('a suggested charter shows with Use and Edit while the goal is the plain one it was written for', async () => {
+  const f = charterFixture();
+  await f.mission.reload();
+  const html = f.mission.getSummary().extrasHTML;
+  assert.match(html, /<strong>Suggested charter<\/strong><span>First look<\/span>/);
+  assert.match(html, /<p><strong>Outcome<\/strong> A monthly &lt;newsletter&gt;\.<\/p>/);
+  assert.match(html, /<p><strong>Boundaries<\/strong> Never send anything\.<\/p>/);
+  assert.match(html, /data-cmd-mission-action="use-suggested-charter">Use<\/button>/);
+  assert.match(html, /data-cmd-mission-action="edit-suggested-charter">Edit<\/button>/);
+  assert.ok(html.indexOf('Suggested charter') < html.indexOf('Latest assessment'));
+
+  // Absent when the goal changed since the run, is a charter, or the newest
+  // successful run proposed none.
+  const base = f.state();
+  for (const state of [
+    { ...base, goal_digest: 'plain-2' },
+    { ...base, goal_parts: ['Outcome'] },
+    {
+      ...base,
+      mission_runs: [{ origin: 'manual', succeeded: true }, ...base.mission_runs]
+    }
+  ]) {
+    assert.doesNotMatch(f.mission.summarize(state).extrasHTML, /Suggested charter/);
+  }
+});
+
+test('Edit opens the Goal modal with the suggested charter; Use saves it and the block goes', async () => {
+  const f = charterFixture();
+  await f.mission.reload();
+  f.mission.cardAction('edit-suggested-charter');
+  assert.equal(f.modalText.value, SUGGESTED);
+  assert.equal(f.puts.length, 0, 'Edit saves nothing');
+
+  await f.mission.cardAction('use-suggested-charter');
+  assert.deepEqual(f.puts, [{ mission: SUGGESTED }]);
+  const after = f.mission.getSummary();
+  assert.equal(after.title, 'A monthly <newsletter>.');
+  assert.equal(after.charterLine, 'Charter · Outcome, Boundaries');
+  assert.doesNotMatch(after.extrasHTML, /Suggested charter/);
+});
+
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {
   const mission = loadWorkspaceMission();
   const summary = mission.summarize({ mission: '' });

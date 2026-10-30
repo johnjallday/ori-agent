@@ -118,7 +118,7 @@ func TestHireRecords_RefuseUnboundedOrPathLikeText(t *testing.T) {
 		"path agent name":  func(r *HireRecord) { r.AgentName = "/Users/me/Agents/Rita" },
 		"empty workspace":  func(r *HireRecord) { r.WorkspaceID = "" },
 		"long request id":  func(r *HireRecord) { r.RequestID = strings.Repeat("r", 129) },
-		"long brief":       func(r *HireRecord) { r.Brief = strings.Repeat("b", WorkspaceGoalMaxRunes+1) },
+		"long brief":       func(r *HireRecord) { r.Brief = strings.Repeat("b", BriefMaxRunes+1) },
 		"control in brief": func(r *HireRecord) { r.Brief = "check\x00" },
 		"unknown state":    func(r *HireRecord) { r.State = "hired" },
 	} {

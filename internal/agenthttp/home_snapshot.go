@@ -324,7 +324,7 @@ func BuildHomeSnapshot(ctx context.Context, sources HomeSnapshotSources, window 
 						AgentCount: workspaceAgentCount(ws),
 						OpenTasks:  stats["pending"] + stats["assigned"] + stats["in_progress"] + stats["waiting_for_choice"],
 						UpdatedAt:  ws.UpdatedAt,
-						Goal:       strings.TrimSpace(ws.Mission),
+						Goal:       workspace.GoalOutcomeLine(ws.Mission),
 					})
 				}
 				for _, t := range ws.Tasks {

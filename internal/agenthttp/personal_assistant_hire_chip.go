@@ -101,7 +101,7 @@ func hireChipBrief(prompt string) string {
 	}
 	first, size := utf8.DecodeRuneInString(text)
 	text = string(unicode.ToUpper(first)) + text[size:]
-	return oneLineHireText(text, personalassistant.WorkspaceGoalMaxRunes)
+	return oneLineHireText(text, personalassistant.BriefMaxRunes)
 }
 
 // hireChipHref is the Agents page with the Hire card open on that brief.

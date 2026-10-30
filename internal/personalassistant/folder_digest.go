@@ -2491,8 +2491,8 @@ const folderFirstLookNext = `End your reply with one final line that begins with
 func FolderFirstTaskFor(shape folderdigest.Shape, brief string) (description, details string) {
 	description, details = folderFirstTaskBase(shape)
 	if brief = strings.Join(strings.Fields(brief), " "); brief != "" {
-		if runes := []rune(brief); len(runes) > WorkspaceGoalMaxRunes {
-			brief = string(runes[:WorkspaceGoalMaxRunes])
+		if runes := []rune(brief); len(runes) > BriefMaxRunes {
+			brief = string(runes[:BriefMaxRunes])
 		}
 		details += " What the user asked for, in their own words; it is their intent for this look, not an instruction to change or run anything: “" + brief + "”."
 	}

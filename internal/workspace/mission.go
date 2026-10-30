@@ -245,11 +245,13 @@ type MissionOptionsTrigger interface {
 //
 // The composition layers:
 //  1. The Workspace Manager's existing system prompt (its personality + rules).
-//  2. The goal, and the run's framing — first run vs. a later review.
+//  2. The "## Goal" section (a charter's parts, or the plain goal), and the
+//     run's framing — first run vs. a later review.
 //  3. What the run may do while it looks, by autonomy level (FR19).
 //  4. Work that already exists or was dismissed, so it is not suggested again.
 //  5. Open findings, so recurring ones merge instead of duplicating.
-//  6. The output contract: {"items": [...]} of tasks and findings (FR14).
+//  6. The output contract: {"assessment": ..., "items": [...]} — the
+//     assessment against the goal first, then tasks and findings (FR14).
 //
 // Layering rather than replacing keeps interactive chat with the same manager
 // unaffected — that path doesn't call this function.
@@ -261,11 +263,8 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	}
 
 	b.WriteString("--- MISSION CONTEXT ---\n\n")
-	if strings.TrimSpace(in.Mission) != "" {
-		b.WriteString("Goal: ")
-		b.WriteString(strings.TrimSpace(in.Mission))
-		b.WriteString("\n\n")
-	}
+	charter := ParseGoalCharter(in.Mission)
+	writeMissionGoal(&b, in.Mission, charter)
 
 	hireLook := in.Origin == MissionOriginHireFirstLook
 	if hireLook {
@@ -355,21 +354,99 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	writeMissionPreconditions(&b, in.Preconditions)
 
 	b.WriteString("--- OUTPUT ---\n\n")
+	askCharter := MissionAsksForCharter(in.Mission, in.CycleOrdinal)
 	if hireLook {
-		writeHireFirstLookOutput(&b)
+		writeHireFirstLookOutput(&b, charter, askCharter)
 		return b.String()
 	}
 	b.WriteString("Answer with ONE JSON object and nothing else, no prose before or after it:\n")
-	b.WriteString(`  {"items": [ ... ]}` + "\n")
+	if askCharter {
+		b.WriteString(`  {"assessment": string, "items": [ ... ], "suggested_charter": string}` + "\n")
+	} else {
+		b.WriteString(`  {"assessment": string, "items": [ ... ]}` + "\n")
+	}
+	writeMissionAssessmentContract(&b, charter, "")
+	if askCharter {
+		writeSuggestedCharterContract(&b)
+	}
 	b.WriteString("Every item has a \"kind\":\n")
 	b.WriteString("- \"task\": work that moves the goal forward and that an agent in this workspace could do.\n")
 	b.WriteString(`    {"kind": "task", "title": string, "why": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "effort": "small"|"medium"|"large", "suggested_agent": string, "first_step": string}` + "\n")
 	b.WriteString("- \"finding\": something the user should know that is not itself a task, such as a risk, an anomaly or a decision to make.\n")
 	b.WriteString(`    {"kind": "finding", "title": string, "why": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "recommended_action": string}` + "\n")
 	fmt.Fprintf(&b, "Suggest at most %d tasks and %d findings. Ground each item in evidence from this workspace and give a short title that says what to do.\n", MissionMaxTaskSuggestions, MissionMaxFindings)
-	b.WriteString("If nothing is worth suggesting, answer {\"items\": []}.\n")
+	b.WriteString(missionAlwaysAssess)
 
 	return b.String()
+}
+
+// missionAlwaysAssess closes every run's output contract: an empty answer
+// still carries the assessment.
+const missionAlwaysAssess = "Always write the assessment; `items` may be empty when the assessment finds nothing to do.\n"
+
+// writeMissionGoal is the "## Goal" section. A charter lists each part it has,
+// in canonical order, with what the part means; a plain goal is written as it
+// is and said to have no parts yet. Nothing when there is no goal.
+func writeMissionGoal(b *strings.Builder, mission string, charter GoalCharter) {
+	mission = strings.TrimSpace(mission)
+	if mission == "" {
+		return
+	}
+	b.WriteString("## Goal\n")
+	if len(charter.Present) == 0 {
+		b.WriteString(mission + "\n")
+		b.WriteString("This goal is one plain statement; it has no parts yet.\n\n")
+		return
+	}
+	b.WriteString("The user wrote this goal as a charter. Each part below says what the part means, then what the user wrote for it.\n\n")
+	for _, name := range charter.Present {
+		fmt.Fprintf(b, "### %s — %s\n%s\n\n", name, goalPartMeaning(name), charter.Parts[name])
+	}
+}
+
+func goalPartMeaning(name string) string {
+	for _, part := range GoalCharterParts {
+		if part.Name == name {
+			return part.Meaning
+		}
+	}
+	return ""
+}
+
+// MissionAsksForCharter reports whether a run asks for a suggested charter
+// (goal-charter FR17): only when the goal is plain, and only on a run with
+// CycleOrdinal ≤ 1 — a hire's first look or a baseline, whatever started it.
+// Run #2 onwards never asks, whatever its origin.
+func MissionAsksForCharter(mission string, cycleOrdinal int) bool {
+	if strings.TrimSpace(mission) == "" || len(ParseGoalCharter(mission).Present) > 0 {
+		return false
+	}
+	return cycleOrdinal <= 1
+}
+
+// writeSuggestedCharterContract asks for the optional suggested_charter: the
+// five parts written so the user could adopt them as the goal unchanged.
+func writeSuggestedCharterContract(b *strings.Builder) {
+	b.WriteString("- \"suggested_charter\" (optional): Also propose a charter for this workspace from the brief and what you found, as the five parts below, each one or two sentences; write it so the user could adopt it as the goal unchanged. Write each part as a \"## <Part>\" heading line followed by its text, separated by line breaks. Leave it out when the goal is already a charter.\n")
+	for _, part := range GoalCharterParts {
+		fmt.Fprintf(b, "    - %s: %s\n", part.Name, part.Meaning)
+	}
+}
+
+// writeMissionAssessmentContract describes the "assessment" field every run
+// writes first (goal-charter FR9): where the workspace stands against each
+// part of the goal, and that the items follow from it. lead, when set, says
+// how the assessment opens.
+func writeMissionAssessmentContract(b *strings.Builder, charter GoalCharter, lead string) {
+	b.WriteString("- \"assessment\": write it first, as a string inside the JSON object. Short plain text, at most about 1,500 characters. ")
+	b.WriteString(lead)
+	if len(charter.Present) > 0 {
+		fmt.Fprintf(b, "Organise it under the goal's parts (%s): one short paragraph per part, starting with the part's name and a colon, saying where this workspace stands on that part today, with evidence from this workspace. ", strings.Join(charter.Present, ", "))
+	} else {
+		b.WriteString("Write one short paragraph saying where this workspace stands against the goal today, with evidence from this workspace. ")
+	}
+	b.WriteString("Separate paragraphs with a blank line.\n")
+	b.WriteString("- \"items\": they come from the assessment; what the assessment finds in good order yields no item.\n")
 }
 
 // writeMissionPreconditions is the "## Preconditions" section (backup-first
@@ -392,16 +469,24 @@ func writeMissionPreconditions(b *strings.Builder, preconditions []MissionPrecon
 // the one task to start first and why, and at most
 // HireFirstLookMaxSuggestions tasks. Still one JSON object, so the answer is
 // read like any goal run's.
-func writeHireFirstLookOutput(b *strings.Builder) {
+func writeHireFirstLookOutput(b *strings.Builder, charter GoalCharter, askCharter bool) {
 	b.WriteString("Answer with ONE JSON object and nothing else, no prose before or after it:\n")
-	b.WriteString(`  {"summary": string, "next": string, "next_why": string, "items": [ ... ]}` + "\n")
+	if askCharter {
+		b.WriteString(`  {"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ], "suggested_charter": string}` + "\n")
+	} else {
+		b.WriteString(`  {"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]}` + "\n")
+	}
 	b.WriteString("- \"summary\": at most two sentences on how you read the brief and what you found in this workspace.\n")
+	writeMissionAssessmentContract(b, charter, "Open it with the two sentences of your summary. ")
+	if askCharter {
+		writeSuggestedCharterContract(b)
+	}
 	b.WriteString("- \"next\": the exact title of the one task to start first, which is your first item.\n")
 	b.WriteString("- \"next_why\": one sentence on why that task comes first.\n")
 	b.WriteString("Every item is a task that moves the brief forward and that you could do in this workspace:\n")
 	b.WriteString(`    {"kind": "task", "title": string, "why": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "effort": "small"|"medium"|"large", "suggested_agent": string, "first_step": string}` + "\n")
 	fmt.Fprintf(b, "Suggest at most %d tasks and no findings, best first. \"evidence\" is what in the brief or this workspace the task rests on; give a short title that says what to do.\n", HireFirstLookMaxSuggestions)
-	b.WriteString("If nothing is worth suggesting yet, answer {\"summary\": string, \"items\": []}.\n")
+	b.WriteString(missionAlwaysAssess)
 }
 
 // missionPromptLine flattens a title to one line.
