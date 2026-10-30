@@ -121,8 +121,8 @@ func TestFolderFirstTaskFor_AddsTheBriefAndEndsWithNext(t *testing.T) {
 			t.Errorf("%s: details = %q", shape, details)
 		}
 	}
-	_, long := FolderFirstTaskFor(folderdigest.ShapeCode, strings.Repeat("a", WorkspaceGoalMaxRunes+50))
-	if strings.Contains(long, strings.Repeat("a", WorkspaceGoalMaxRunes+1)) {
+	_, long := FolderFirstTaskFor(folderdigest.ShapeCode, strings.Repeat("a", BriefMaxRunes+50))
+	if strings.Contains(long, strings.Repeat("a", BriefMaxRunes+1)) {
 		t.Fatal("the brief in the details is not bounded")
 	}
 }

@@ -32,6 +32,8 @@
     enabled: '#workspace-detail-mission-enabled',
     heartbeat: '#workspace-detail-mission-heartbeat',
     text: '#workspace-detail-mission-text',
+    textCount: '#workspace-detail-mission-count',
+    textFill: '#workspace-detail-mission-charter-fill',
     autonomyRadios: 'input[name="workspace-detail-mission-autonomy"]',
     cadenceType: '#workspace-detail-mission-cadence-type',
     cadenceTime: '#workspace-detail-mission-cadence-time',
@@ -58,6 +60,8 @@
     goalModalForm: '#workspace-detail-goal-modal-form',
     goalModalTitle: '#workspace-detail-goal-modal-title',
     goalModalText: '#workspace-detail-goal-modal-text',
+    goalModalCount: '#workspace-detail-goal-modal-count',
+    goalModalFill: '#workspace-detail-goal-modal-charter-fill',
     goalModalEnabled: '#workspace-detail-goal-modal-enabled',
     goalModalStatus: '#workspace-detail-goal-modal-status',
     goalModalSaveBtn: '#workspace-detail-goal-modal-save',
@@ -80,6 +84,7 @@
     commandStatus: '#workspace-command-mission-status',
     commandTitle: '#workspace-command-mission-title',
     commandText: '#workspace-command-mission-text',
+    commandExtras: '#workspace-command-mission-extras',
     commandCadence: '#workspace-command-mission-cadence',
     commandNextRun: '#workspace-command-mission-next-run',
     commandLastRun: '#workspace-command-mission-last-run',
@@ -110,9 +115,103 @@
   const EMPTY_GOAL_TITLE = 'No goal yet';
   const EMPTY_GOAL_PROMPT = 'Set a goal so your agents can suggest work';
 
-  function goalCardCopy(mission) {
-    const goal = String(mission || '').trim();
-    return goal ? { title: goal, text: '' } : { title: EMPTY_GOAL_TITLE, text: EMPTY_GOAL_PROMPT };
+  // The card's heading is the goal's Outcome line (`goal_outcome`, computed by
+  // the server), so a charter never puts its headings on the card (FR7).
+  function goalCardCopy(state) {
+    const current = state || {};
+    const goal = String(current.mission || '').trim();
+    if (!goal) return { title: EMPTY_GOAL_TITLE, text: EMPTY_GOAL_PROMPT };
+    const outcome = String(current.goal_outcome || '').trim();
+    return { title: outcome || goal, text: '' };
+  }
+
+  // The goal editor allows a five-part charter; the server enforces the same
+  // bound (workspace.WorkspaceGoalMaxRunes).
+  const GOAL_MAX_CHARS = 4000;
+
+  // The charter's part names and hints come from the mission GET
+  // (`goal_charter_shape`), never from copy in this file.
+  function charterShape(state) {
+    const shape = state && state.goal_charter_shape;
+    return Array.isArray(shape) ? shape.filter(part => part && part.name) : [];
+  }
+
+  // `Charter · Outcome, Build, Boundaries` when the goal is a charter (FR7).
+  function charterLine(state) {
+    const parts = Array.isArray(state && state.goal_parts) ? state.goal_parts : [];
+    return parts.length ? `Charter · ${parts.join(', ')}` : '';
+  }
+
+  // The lines under the goal heading: the charter line, then (when a run wrote
+  // them) the Latest assessment and the Suggested charter. Model text is
+  // escaped, never rendered as HTML.
+  function goalCardExtrasHTML(state) {
+    const line = charterLine(state);
+    return line ? `<p class="ws-cmd-mission-charter">${escapeHtml(line)}</p>` : '';
+  }
+
+  // The label a charter heading line names, lower-cased, or '' for any other
+  // line: `#`–`###` + name, or a whole-line `**Name**`, with an optional colon.
+  // Mirrors the server's reader (workspace.ParseGoalCharter) closely enough to
+  // keep the fill button from touching a goal that is already a charter.
+  function charterHeadingLabel(line) {
+    let label = String(line || '').trim();
+    const hashes = /^#+/.exec(label);
+    if (hashes) {
+      if (hashes[0].length > 3) return '';
+      label = label.slice(hashes[0].length).trim();
+    }
+    label = label.replace(/:$/, '').trim();
+    if (label.length > 4 && label.startsWith('**') && label.endsWith('**')) {
+      label = label.slice(2, -2).trim();
+    } else if (!hashes) {
+      return '';
+    }
+    return label.replace(/:$/, '').trim().toLowerCase();
+  }
+
+  function isCharterText(text, shape) {
+    const names = new Set(shape.map(part => String(part.name).toLowerCase()));
+    return String(text || '')
+      .split('\n')
+      .some(line => names.has(charterHeadingLabel(line)));
+  }
+
+  // "Use the charter shape" (FR5): an empty goal gets the five headings with a
+  // hint line under each; a plain sentence moves under Outcome and the other
+  // four follow; a charter is left exactly as it is. The save path drops hint
+  // lines left untouched.
+  function charterFill(text, shape) {
+    const value = String(text || '');
+    if (!shape.length || isCharterText(value, shape)) return value;
+    const sentence = value.trim();
+    return (
+      shape
+        .map((part, i) => `## ${part.name}\n${i === 0 && sentence ? sentence : `_${part.hint}_`}`)
+        .join('\n\n') + '\n'
+    );
+  }
+
+  // The empty textarea shows the charter's shape as its placeholder (FR6).
+  function charterPlaceholder(shape) {
+    return shape.map(part => `## ${part.name}\n${part.hint}`).join('\n');
+  }
+
+  function goalCount(value) {
+    const count = Array.from(String(value || '')).length;
+    return { text: `${count} / ${GOAL_MAX_CHARS}`, over: count > GOAL_MAX_CHARS };
+  }
+
+  function renderGoalCount(textarea, counter) {
+    if (!textarea || !counter) return;
+    const count = goalCount(textarea.value);
+    counter.textContent = count.text;
+    if (counter.classList) counter.classList.toggle('is-over', count.over);
+  }
+
+  function applyCharterPlaceholder(textarea, state) {
+    const shape = charterShape(state);
+    if (textarea && shape.length) textarea.placeholder = charterPlaceholder(shape);
   }
 
   let latestState = null;
@@ -348,6 +447,8 @@
 
     if (title) title.textContent = mission.trim() ? 'Edit goal' : 'Set goal';
     if (text) text.value = mission;
+    applyCharterPlaceholder(text, current);
+    renderGoalCount(text, $(SELECTORS.goalModalCount));
     if (enabled) enabled.checked = !!current.mission_enabled;
     populateCadenceFields(CADENCE_SURFACES.modal, current.cadence);
     renderGoalModalAutonomy(current);
@@ -458,13 +559,15 @@
     const findings = buildFindingsMeta(current);
     const statusLine = goalStatusLine(current, mission);
     const actionStatus = statusLine.text;
-    const copy = goalCardCopy(mission);
+    const copy = goalCardCopy(current);
     return {
       mission,
       label: status.label,
       className: status.className,
       title: copy.title,
       text: copy.text,
+      charterLine: mission ? charterLine(current) : '',
+      extrasHTML: mission ? goalCardExtrasHTML(current) : '',
       cadenceLabel: `Cadence: ${cadenceLabel(current.cadence)}`,
       nextLabel: `Next: ${fmtNextRun(current.next_mission_run_at)}`,
       lastLabel: `Last: ${fmtLastRun(current.last_mission_run_at)}`,
@@ -525,6 +628,11 @@
       textEl.hidden = !summary.text;
       textEl.classList.toggle('is-empty', !summary.mission);
     }
+    const extrasEl = $(SELECTORS.commandExtras);
+    if (extrasEl) {
+      extrasEl.innerHTML = summary.extrasHTML;
+      extrasEl.hidden = !summary.extrasHTML;
+    }
     if (cadenceEl) cadenceEl.textContent = summary.cadenceLabel;
     if (nextEl) {
       nextEl.textContent = summary.nextLabel;
@@ -565,7 +673,7 @@
       statusEl.textContent = status.label;
       statusEl.className = `workspace-detail-goal-status ${status.className}`;
     }
-    const copy = goalCardCopy(mission);
+    const copy = goalCardCopy(state);
     if (titleEl) titleEl.textContent = copy.title;
     if (textEl) {
       textEl.textContent = copy.text;
@@ -792,29 +900,8 @@
 
     populateCadenceFields(CADENCE_SURFACES.form, state.cadence);
 
-    // Starter hint placeholder based on workspace name in the page header.
-    applyStarterHint();
-  }
-
-  function applyStarterHint() {
-    const textarea = $(SELECTORS.text);
-    if (!textarea || textarea.value || textarea.placeholder) return; // Don't override user input or existing placeholder.
-    const titleEl = document.querySelector('.workspace-detail-title, h1');
-    if (!titleEl) return;
-    const name = titleEl.textContent.toLowerCase();
-    const hints = {
-      brand: 'Keep brand voice, visuals, and messaging consistent across channels.',
-      home: 'Watch over home devices, maintenance, and recurring household needs.',
-      finance: 'Monitor finance for risks, opportunities, and reconciliation issues.',
-      health: 'Track health routines, appointments, and check-ins.',
-      travel: 'Maintain trip plans, bookings, and travel-readiness checklists.'
-    };
-    for (const [key, hint] of Object.entries(hints)) {
-      if (name.includes(key)) {
-        textarea.placeholder = hint;
-        return;
-      }
-    }
+    applyCharterPlaceholder($(SELECTORS.text), state);
+    renderGoalCount($(SELECTORS.text), $(SELECTORS.textCount));
   }
 
   function readFormState() {
@@ -1191,7 +1278,28 @@
     report(message, kind);
   }
 
+  // The goal textarea's live count and its "Use the charter shape" button, on
+  // both editors (Goal Settings and the quick-edit modal).
+  function wireGoalEditor(textSelector, countSelector, fillSelector) {
+    const textarea = $(textSelector);
+    if (!textarea) return;
+    const counter = $(countSelector);
+    textarea.addEventListener('input', () => renderGoalCount(textarea, counter));
+    const fill = $(fillSelector);
+    if (fill) {
+      fill.addEventListener('click', () => {
+        const next = charterFill(textarea.value, charterShape(latestState));
+        if (next !== textarea.value) textarea.value = next;
+        renderGoalCount(textarea, counter);
+        textarea.focus();
+      });
+    }
+  }
+
   function wireForm() {
+    wireGoalEditor(SELECTORS.text, SELECTORS.textCount, SELECTORS.textFill);
+    wireGoalEditor(SELECTORS.goalModalText, SELECTORS.goalModalCount, SELECTORS.goalModalFill);
+
     const cadenceType = $(SELECTORS.cadenceType);
     if (cadenceType) {
       cadenceType.addEventListener('change', () =>
@@ -1233,6 +1341,9 @@
         } catch (e) {
           if (e.status === 412) {
             setGoalModalStatus('Classify workspace bindings before enabling automation.', 'error');
+          } else if (e.status === 400 && e.message) {
+            // The server's own sentence, e.g. the goal's length bound.
+            setGoalModalStatus(e.message, 'error');
           } else {
             setGoalModalStatus(`Save failed: ${e.message}`, 'error');
           }
@@ -1275,6 +1386,8 @@
               'error'
             );
             setGoalActionStatus('Classify workspace bindings before enabling this goal.', 'error');
+          } else if (e.status === 400 && e.message) {
+            setStatusText(e.message, 'error');
           } else {
             setStatusText(`Save failed: ${e.message}`, 'error');
             setGoalActionStatus(`Save failed: ${e.message}`, 'error');
@@ -1331,6 +1444,10 @@
       // Pure renderers of a given state, for module tests.
       summarize: state => commandSummary(state || {}),
       runHistoryHTML,
+      goalCardExtrasHTML,
+      charterFill,
+      charterPlaceholder,
+      goalCount,
       effectiveAutonomy,
       runCountsText,
       settleRun,

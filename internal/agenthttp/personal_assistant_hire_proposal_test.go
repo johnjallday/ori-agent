@@ -301,7 +301,7 @@ func TestHireProposalValidatesLikeTheHire(t *testing.T) {
 			if tc.brief != "" && plan.brief != tc.brief {
 				t.Fatalf("brief %q, want %q", plan.brief, tc.brief)
 			}
-			if tc.briefPrefix != "" && (!strings.HasPrefix(plan.brief, tc.briefPrefix) || len([]rune(plan.brief)) > personalassistant.WorkspaceGoalMaxRunes) {
+			if tc.briefPrefix != "" && (!strings.HasPrefix(plan.brief, tc.briefPrefix) || len([]rune(plan.brief)) > personalassistant.BriefMaxRunes) {
 				t.Fatalf("brief not bounded: %q", plan.brief)
 			}
 			if tc.workspace != "" && plan.workspaceName != tc.workspace {

@@ -166,6 +166,18 @@ func TestBuildHomeSnapshot_WorkspaceLineCarriesTheGoal(t *testing.T) {
 			t.Fatalf("a workspace without a goal must not render one: %q", line)
 		}
 	}
+
+	// A charter goal contributes its Outcome line, never a heading.
+	if err := store.Update("ws-1", func(ws *workspace.Workspace) error {
+		ws.Mission = "## Outcome\nA consistent brand voice.\n## Boundaries\nNever post."
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	txt = BuildHomeSnapshot(context.Background(), HomeSnapshotSources{Workspaces: store, Now: fixedNow}, HomeWindowThisWeek).PromptText()
+	if !strings.Contains(txt, `Goal: "A consistent brand voice."`) || strings.Contains(txt, "## Outcome") || strings.Contains(txt, "Never post") {
+		t.Fatalf("a charter goal must show its Outcome line: %q", txt)
+	}
 }
 
 func TestBuildHomeSnapshot_DegradedUsage(t *testing.T) {

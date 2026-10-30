@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -56,6 +57,9 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		"first_run_state":           ws.GoalFirstRunState,
 		"read_consent_required":     consentRequired,
 		"mission":                   ws.Mission,
+		"goal_outcome":              GoalOutcomeLine(ws.Mission),
+		"goal_parts":                goalPartsOrEmpty(ws.Mission),
+		"goal_charter_shape":        GoalCharterParts,
 		"cadence":                   ws.Cadence,
 		"autonomy_policy":           ws.AutonomyPolicy,
 		"mission_enabled":           ws.MissionEnabled,
@@ -74,6 +78,15 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.Error("encode mission response", logger.Fields{"error": err})
 	}
+}
+
+// goalPartsOrEmpty names the charter parts the goal has, in canonical order;
+// an empty JSON array for a plain goal.
+func goalPartsOrEmpty(mission string) []string {
+	if present := ParseGoalCharter(mission).Present; present != nil {
+		return present
+	}
+	return []string{}
 }
 
 // missionRunsOrEmpty keeps the run history a JSON array even before any run.
@@ -147,6 +160,16 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 			orihttp.BadRequest(w, fmt.Sprintf("unsupported autonomy_policy: %q (v1 supports watch, propose)", *req.AutonomyPolicy))
 			return
 		}
+	}
+
+	if req.Mission != nil {
+		// Untouched hint lines from the charter fill never reach the goal.
+		goal := StripGoalHints(*req.Mission)
+		if utf8.RuneCountInString(strings.TrimSpace(goal)) > WorkspaceGoalMaxRunes {
+			orihttp.BadRequest(w, "Keep the goal within 4,000 characters.")
+			return
+		}
+		req.Mission = &goal
 	}
 
 	enablingNow := req.MissionEnabled != nil && *req.MissionEnabled

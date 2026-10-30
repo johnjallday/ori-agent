@@ -2885,6 +2885,22 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-faint);
   font-style: italic;
 }
+/* The charter line and the run's assessment blocks under the goal. */
+.ws-cmd-mission-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 88ch;
+}
+.ws-cmd-mission-extras[hidden] {
+  display: none;
+}
+.ws-cmd-mission-charter {
+  margin: 0;
+  color: var(--ws-ink-faint);
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
+}
 .ws-cmd-mission-meta {
   display: flex;
   align-items: center;

@@ -83,7 +83,7 @@ func (r softwareAssessmentRunner) Brief(ctx context.Context, task workspace.Task
 
 	// What the owner asked the hired assistant to do is the workspace's goal:
 	// the brief from its hire card, or whatever they changed it to since.
-	intent := strings.TrimSpace(ws.Mission)
+	intent := workspace.GoalOutcomeLine(ws.Mission)
 	brief := softwareassessment.BuildWithIntent(assessmentProjectName(ws), intent, evidence, softwareassessment.TierFull)
 	if !brief.Fits(contextWindow) {
 		brief = softwareassessment.BuildWithIntent(assessmentProjectName(ws), intent, evidence, softwareassessment.TierCompact)

@@ -19,6 +19,29 @@ func TestGoalPromptLine(t *testing.T) {
 	}
 }
 
+// FR22: a plain goal of up to 500 runes gives the byte-identical goal line it
+// gave before charters existed (task prompts and builder plans both read
+// GoalPromptLine); a charter gives its Outcome line only.
+func TestGoalPromptLine_PlainGoalIsUnchangedAndACharterGivesItsOutcome(t *testing.T) {
+	words := strings.Repeat("Keep the brand voice consistent, é ü. Reply\n within a day. ", 10)
+	for _, goal := range []string{
+		"a",
+		string([]rune(words)[:120]),
+		string([]rune(words)[:500]),
+		"  Draft   posts\n\nweekly  ",
+	} {
+		before := "Goal: " + sanitizeTaskPromptText(goal, WorkspaceGoalPromptLimit)
+		if got := GoalPromptLine(goal); got != before {
+			t.Fatalf("goal of %d runes changed:\n got %q\nwant %q", len([]rune(goal)), got, before)
+		}
+	}
+
+	charter := "## Outcome\nA monthly newsletter.\n## Maintain\nTidy ideas.\n## Boundaries\nNever send anything."
+	if got := GoalPromptLine(charter); got != "Goal: A monthly newsletter." {
+		t.Fatalf("charter line = %q", got)
+	}
+}
+
 // SM1: every task the workspace runs — an ordinary task, a delegated subtask,
 // a mission run — carries the goal in the protected header of its user turn,
 // which the context budget never trims.

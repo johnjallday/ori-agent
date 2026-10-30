@@ -10,9 +10,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// WorkspaceGoalMaxRunes bounds a workspace goal a person types: the build
-// session's goal and a folder setup's brief share it.
-const WorkspaceGoalMaxRunes = 300
+// BriefMaxRunes bounds the one-line brief a person types or speaks: the hire
+// card's brief, the build session's goal and a folder setup's brief share it.
+// The brief becomes the new workspace's goal; the goal itself, edited in Goal
+// Settings, has a much larger bound (workspace.WorkspaceGoalMaxRunes).
+const BriefMaxRunes = 300
 
 // How a folder setup staffs the folder's project, as its card says it.
 const (
@@ -104,7 +106,7 @@ const hireDomainBrief = "Act as the {domain} expert for this workspace."
 // catalog does not have.
 func HireDefaultBrief(role types.AgentRole, domain string) string {
 	if domain = strings.Join(strings.Fields(domain), " "); role == types.RoleSpecialist && domain != "" {
-		return truncateRunes(strings.Replace(hireDomainBrief, "{domain}", domain, 1), WorkspaceGoalMaxRunes)
+		return truncateRunes(strings.Replace(hireDomainBrief, "{domain}", domain, 1), BriefMaxRunes)
 	}
 	return roleDefaultBriefs[role]
 }
@@ -169,7 +171,7 @@ func HireWorkspaceName(brief string) string {
 // goal, with no control characters and nothing that looks like a secret.
 // Empty stays empty; the caller falls back to the plan's default.
 func NormalizeFolderBrief(text string) (string, error) {
-	brief, err := validateText("brief", strings.Join(strings.Fields(text), " "), WorkspaceGoalMaxRunes, false)
+	brief, err := validateText("brief", strings.Join(strings.Fields(text), " "), BriefMaxRunes, false)
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}

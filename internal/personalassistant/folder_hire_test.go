@@ -31,17 +31,22 @@ func TestFolderDefaultBrief_EveryShapeHasOneAndTheBlueprintGoalWins(t *testing.T
 }
 
 func TestNormalizeFolderBrief_KeepsOneBoundedLineOfPlainText(t *testing.T) {
+	// FR21: the one-line brief keeps its 300-rune rule; the goal's own,
+	// larger bound lives in workspace.WorkspaceGoalMaxRunes.
+	if BriefMaxRunes != 300 {
+		t.Fatalf("BriefMaxRunes = %d, want 300", BriefMaxRunes)
+	}
 	if got, err := NormalizeFolderBrief("  Fix the\n\tflaky tests  first "); err != nil || got != "Fix the flaky tests first" {
 		t.Fatalf("brief = %q, %v", got, err)
 	}
 	if got, err := NormalizeFolderBrief("   "); err != nil || got != "" {
 		t.Fatalf("an empty brief stays empty for the default: %q, %v", got, err)
 	}
-	if _, err := NormalizeFolderBrief(strings.Repeat("é", WorkspaceGoalMaxRunes)); err != nil {
+	if _, err := NormalizeFolderBrief(strings.Repeat("é", BriefMaxRunes)); err != nil {
 		t.Fatalf("a brief at the limit is accepted: %v", err)
 	}
 	for name, text := range map[string]string{
-		"too long":          strings.Repeat("a", WorkspaceGoalMaxRunes+1),
+		"too long":          strings.Repeat("a", BriefMaxRunes+1),
 		"control character": "Fix it\x07 now",
 		"nul":               "Fix\x00it",
 	} {
@@ -140,7 +145,7 @@ func TestFolderSetup_APlanWithoutAQuestionTakesNoBrief(t *testing.T) {
 
 func TestFolderSetup_AnInvalidBriefIsRefusedAndChangesNothing(t *testing.T) {
 	f := folderHireFixture(t)
-	for i, brief := range []string{strings.Repeat("a", WorkspaceGoalMaxRunes+1), "Fix\x00it"} {
+	for i, brief := range []string{strings.Repeat("a", BriefMaxRunes+1), "Fix\x00it"} {
 		_, err := f.service.StartSetup(context.Background(), "local", f.offer.ID,
 			FolderSetupInput{RequestID: "r" + string(rune('1'+i)), PlanDigest: f.offer.Plan.Digest, Brief: brief})
 		if !errors.Is(err, ErrValidation) {
@@ -188,7 +193,7 @@ func TestFolderSetup_AStoredRunKeepsItsHireBoundedAndPathFree(t *testing.T) {
 	for name, change := range map[string]func(*FolderSetupRun){
 		"unknown mode":     func(r *FolderSetupRun) { r.Hire.Mode = "promote" },
 		"path-like name":   func(r *FolderSetupRun) { r.Hire.AgentName = "/Users/me/agent" },
-		"unbounded brief":  func(r *FolderSetupRun) { r.Brief = strings.Repeat("a", WorkspaceGoalMaxRunes+1) },
+		"unbounded brief":  func(r *FolderSetupRun) { r.Brief = strings.Repeat("a", BriefMaxRunes+1) },
 		"multi-line brief": func(r *FolderSetupRun) { r.Brief = "one\ntwo" },
 	} {
 		bad := run

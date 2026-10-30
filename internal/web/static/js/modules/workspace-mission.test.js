@@ -272,6 +272,94 @@ test('cleared or already attempted goals do not POST and consent wording disting
   }
 });
 
+// The five parts as the mission GET sends them (goal_charter_shape).
+const SHAPE = [
+  { name: 'Outcome', hint: 'What this workspace exists to produce or keep true.' },
+  { name: 'Maintain', hint: 'What the agent keeps in good order on its own initiative.' },
+  { name: 'Build', hint: 'What the agent should work towards that does not exist yet.' },
+  { name: 'Watch', hint: 'What the agent looks for and reports when it changes.' },
+  {
+    name: 'Boundaries',
+    hint: "What the agent must not do or touch, and what needs the user's say."
+  }
+];
+
+// FR5: the fill button's three cases.
+test('Use the charter shape fills an empty goal, wraps a sentence and never touches a charter', () => {
+  const mission = loadWorkspaceMission();
+  const empty = mission.charterFill('  ', SHAPE);
+  assert.equal(
+    empty,
+    '## Outcome\n_What this workspace exists to produce or keep true._\n\n' +
+      '## Maintain\n_What the agent keeps in good order on its own initiative._\n\n' +
+      '## Build\n_What the agent should work towards that does not exist yet._\n\n' +
+      '## Watch\n_What the agent looks for and reports when it changes._\n\n' +
+      "## Boundaries\n_What the agent must not do or touch, and what needs the user's say._\n"
+  );
+
+  const wrapped = mission.charterFill('  help me write a newsletter \n', SHAPE);
+  assert.match(
+    wrapped,
+    /^## Outcome\nhelp me write a newsletter\n\n## Maintain\n_What the agent keeps/
+  );
+  assert.equal((wrapped.match(/^## /gm) || []).length, 5);
+  assert.doesNotMatch(wrapped, /_What this workspace exists/);
+
+  for (const charter of [
+    '## Build\nA release pipeline.',
+    'Ship v2.\n**Boundaries**\nNever push to main.',
+    '### watch:\nCI'
+  ]) {
+    assert.equal(mission.charterFill(charter, SHAPE), charter);
+  }
+  // A heading that names no part, or four hashes, is not a charter.
+  assert.match(mission.charterFill('#### Outcome', SHAPE), /^## Outcome\n#### Outcome\n/);
+  // Without the shape (state not loaded yet) the button changes nothing.
+  assert.equal(mission.charterFill('a sentence', []), 'a sentence');
+});
+
+test('the goal count runs against 4,000 and the placeholder is the charter shape', () => {
+  const mission = loadWorkspaceMission();
+  assert.deepEqual({ ...mission.goalCount('héllo') }, { text: '5 / 4000', over: false });
+  assert.deepEqual(
+    { ...mission.goalCount('é'.repeat(4000)) },
+    { text: '4000 / 4000', over: false }
+  );
+  assert.equal(mission.goalCount('a'.repeat(4001)).over, true);
+  assert.equal(
+    mission.charterPlaceholder(SHAPE.slice(0, 2)),
+    '## Outcome\nWhat this workspace exists to produce or keep true.\n## Maintain\nWhat the agent keeps in good order on its own initiative.'
+  );
+});
+
+// FR7: the card shows the Outcome line and, for a charter, the parts it has.
+test('the Goal card shows the Outcome line and a Charter line only for a charter', () => {
+  const mission = loadWorkspaceMission();
+  const charter = mission.summarize({
+    mission: '## Outcome\nA monthly newsletter.\n## Build\nA template.\n## Boundaries\nNever send.',
+    goal_outcome: 'A monthly newsletter.',
+    goal_parts: ['Outcome', 'Build', 'Boundaries']
+  });
+  assert.equal(charter.title, 'A monthly newsletter.');
+  assert.equal(charter.charterLine, 'Charter · Outcome, Build, Boundaries');
+  assert.match(
+    charter.extrasHTML,
+    /<p class="ws-cmd-mission-charter">Charter · Outcome, Build, Boundaries<\/p>/
+  );
+
+  const plain = mission.summarize({
+    mission: 'Keep the brand voice consistent',
+    goal_outcome: 'Keep the brand voice consistent',
+    goal_parts: []
+  });
+  assert.equal(plain.title, 'Keep the brand voice consistent');
+  assert.equal(plain.charterLine, '');
+  assert.equal(plain.extrasHTML, '');
+
+  // A state without goal_outcome (an older server) still shows the goal.
+  assert.equal(mission.summarize({ mission: ' Ship it ' }).title, 'Ship it');
+});
+
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {
   const mission = loadWorkspaceMission();
   const summary = mission.summarize({ mission: '' });

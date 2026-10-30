@@ -129,7 +129,7 @@ func (r *HireRecord) validate() error {
 			return fmt.Errorf("%w: hire %s", ErrValidation, field.label)
 		}
 	}
-	if _, err := validateText("brief", r.Brief, WorkspaceGoalMaxRunes, true); err != nil {
+	if _, err := validateText("brief", r.Brief, BriefMaxRunes, true); err != nil {
 		return fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if utf8.RuneCountInString(r.Failure) > hireFailureMax || strings.ContainsRune(r.Failure, 0) {

@@ -2055,6 +2055,7 @@ export class WorkspaceCommandView {
     const runDisabled = summary.canRun === true ? '' : ' disabled';
     const runTitle = summary.runTitle || 'Set a goal before running';
     const actionStatus = summary.actionStatus || '';
+    const extrasHTML = loaded ? String(summary.extrasHTML || '') : '';
 
     const editLabel = missionText ? 'Edit Goal' : 'Set Goal';
     const missionClass = 'ws-cmd-mission' + (missionText ? '' : ' is-empty');
@@ -2084,6 +2085,13 @@ export class WorkspaceCommandView {
       '>' +
       escapeHtml(text) +
       '</p>' +
+      // The charter line and the run's assessment blocks: HTML the mission
+      // module builds with every model-written string escaped.
+      '<div id="workspace-command-mission-extras" class="ws-cmd-mission-extras"' +
+      (extrasHTML ? '' : ' hidden') +
+      '>' +
+      extrasHTML +
+      '</div>' +
       '<div class="ws-cmd-mission-meta" aria-label="Mission automation timing">' +
       '<span id="workspace-command-mission-cadence">' +
       escapeHtml(cadence) +
@@ -2806,6 +2814,9 @@ export class WorkspaceCommandView {
         mission.openGoalModal();
       } else if (action === 'run' && mission && typeof mission.runNow === 'function') {
         mission.runNow(btn);
+      } else if (mission && typeof mission.cardAction === 'function') {
+        // The Goal card's own blocks (assessment, suggested charter).
+        mission.cardAction(action, btn);
       }
     });
   }

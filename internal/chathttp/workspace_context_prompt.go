@@ -394,8 +394,9 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 	}
 
 	// The goal is what the user wants this workspace to achieve; suggestions
-	// and "what should I work on?" answers start from it.
-	if goal := sanitizeWorkspaceSnapshotText(ws.Mission, workspace.WorkspaceGoalPromptLimit); goal != "" {
+	// and "what should I work on?" answers start from it. A charter goal
+	// contributes its Outcome line.
+	if goal := workspace.GoalOutcomeLine(ws.Mission); goal != "" {
 		lines = append(lines, fmt.Sprintf("- Goal: %q", goal))
 	}
 	if description := sanitizeWorkspaceSnapshotText(ws.Description, workspaceSnapshotPreviewLimit); description != "" {

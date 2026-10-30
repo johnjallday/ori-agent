@@ -93,7 +93,7 @@ func TestHireProposals_UpdateChangesStateAndOutcomeNotIdentity(t *testing.T) {
 func TestHireProposals_RefusesUnboundedPathLikeOrSecretText(t *testing.T) {
 	proposals := newHireProposalsForTest(t)
 	for name, mutate := range map[string]func(*HireProposal){
-		"long brief":     func(p *HireProposal) { p.Brief = strings.Repeat("x", WorkspaceGoalMaxRunes+1) },
+		"long brief":     func(p *HireProposal) { p.Brief = strings.Repeat("x", BriefMaxRunes+1) },
 		"empty brief":    func(p *HireProposal) { p.Brief = " " },
 		"secret brief":   func(p *HireProposal) { p.Brief = "api_key=sk-1234567890abcdef1234567890abcdef" },
 		"path name":      func(p *HireProposal) { p.Name = "/Users/someone/Agents" },

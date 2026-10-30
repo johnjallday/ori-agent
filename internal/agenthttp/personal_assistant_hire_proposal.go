@@ -153,7 +153,7 @@ func decodeHireProposal(text string, taken func(name string) bool) (*hireProposa
 		plan.domain = oneLineHireText(args.Domain, hireDomainMax)
 	}
 
-	brief, err := personalassistant.NormalizeFolderBrief(oneLineHireText(args.Brief, personalassistant.WorkspaceGoalMaxRunes))
+	brief, err := personalassistant.NormalizeFolderBrief(oneLineHireText(args.Brief, personalassistant.BriefMaxRunes))
 	if err != nil {
 		return nil, false
 	}

@@ -152,7 +152,7 @@ func (r folderSummaryRunner) Brief(ctx context.Context, task workspace.Task, win
 		Goal   string     `json:"goal"`
 		Files  []document `json:"files"`
 	}{
-		Folder: foldercontext.DisplayName(ref.Name), Goal: ws.Mission, Files: documents,
+		Folder: foldercontext.DisplayName(ref.Name), Goal: workspace.GoalOutcomeLine(ws.Mission), Files: documents,
 	})
 	if err != nil {
 		return workspace.RecipeBrief{}, err
