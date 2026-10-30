@@ -493,6 +493,126 @@ test('single-song reviewed empty Home is positioned before any project Open', as
   expect(positionWrites).toBe(writesBeforeReload);
 });
 
+test('single-song chat hand-off: the manager offers the song and it stands where clicked inside the Home', async ({
+  page,
+  request
+}) => {
+  test.skip(
+    !song || !!secondSong || !!fault,
+    'runs after the plain single-song case; the later case opens this song itself'
+  );
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const chatEvidence = 'tasks/evidence-home-manager-chat-handoff/e2e';
+  const before = await snapshot(request);
+  const home = before.workspaces.find((w: any) => w.kind === 'group');
+  expect(home).toBeTruthy();
+  let setupPosts = 0;
+  let modelPosts = 0;
+  let sessionPosts = 0;
+  page.on('request', r => {
+    if (r.method() !== 'POST') return;
+    if (/folder-digest\/offers\/[^/]+\/setup$/.test(r.url())) setupPosts++;
+    if (/\/(turns|chat|completions)$/.test(r.url())) modelPosts++;
+    if (/\/api\/sessions$/.test(r.url())) sessionPosts++;
+  });
+  await page.goto(`/workspaces/${home.folder_slug}?mode=map&panel=assistant`);
+  const offers = page.locator('#personalAssistantHomeOffer');
+  const offer = offers.locator('.pa-home-offer').first();
+  await expect(offer).toBeVisible();
+  await expect(offer).toContainText(
+    'I listed Ori Music Demo in Music Production Home. Want me to open it and hire the REAPER Assistant?'
+  );
+  await expect(offer.locator('.personal-assistant-message__author')).toContainText(
+    'Portfolio Manager'
+  );
+  // The drawer's request is consumed once; Map mode stays.
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${home.folder_slug}\\?mode=map$`));
+  const input = page.locator('#personalAssistantInput');
+  const send = page.locator('#personalAssistantSend');
+  await expect(send).toHaveText('Use as brief');
+  await expect(input).toHaveAttribute(
+    'placeholder',
+    /what the REAPER Assistant should do with Ori Music Demo/
+  );
+  const brief = 'clean up the drums and bounce stems';
+  await input.fill(brief);
+  await send.click();
+  await expect(offer.locator('textarea')).toHaveValue(brief);
+  await expect(page.locator('[data-message-role="user"]').last()).toContainText(brief);
+  await expect(input).toHaveValue('');
+  await page.screenshot({ path: `${chatEvidence}/offer-with-brief.png` });
+  expect({ setupPosts, sessionPosts, modelPosts }).toEqual({
+    setupPosts: 0,
+    sessionPosts: 0,
+    modelPosts: 0
+  });
+
+  const press = () =>
+    offers.getByRole('button', { name: 'Open Ori Music Demo & hire', exact: true }).click();
+  const preview = page.locator('.ws-map-placement-preview');
+  const instruction = page.locator('[data-ws-map-placement-instruction]');
+  // Escape is back to the conversation: the card and its brief stay; nothing ran.
+  await press();
+  await expect(preview).toBeVisible();
+  await expect(instruction).toContainText(
+    'Open Ori Music Demo here with a click on open ground inside Music Production Home'
+  );
+  // The banner's copy keeps a readable width beside its three actions.
+  const copy = page.locator('.ws-map-placement-copy');
+  expect((await copy.boundingBox())?.width ?? 0).toBeGreaterThan(200);
+  // The Home's Detachment toolbar steps aside while the banner is up.
+  await expect(page.locator('.ws-cmd-map-group-bar')).toBeHidden();
+  await page.screenshot({ path: `${chatEvidence}/placement-banner.png` });
+  await page.keyboard.press('Escape');
+  await expect(offer.locator('textarea')).toHaveValue(brief);
+  expect(setupPosts).toBe(0);
+  // A point outside the Home is not a candidate.
+  await press();
+  await expect(preview).toBeVisible();
+  const canvas = page.locator('[data-ws-map-viewport]:visible').first();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('the Home map is not drawn');
+  await page.mouse.move(box.x + 12, box.y + box.height - 12);
+  await expect(instruction).toContainText('That point is outside Music Production Home.');
+  await page.keyboard.press('Enter');
+  expect(setupPosts).toBe(0);
+  await page.screenshot({ path: `${chatEvidence}/outside-refused.png` });
+  await page.keyboard.press('Escape');
+  // The suggested point inside the Home, confirmed by keyboard.
+  await press();
+  await expect(preview).toBeVisible();
+  await expect(instruction).not.toContainText('outside');
+  const candidate = await preview.evaluate(element => ({
+    x: Number.parseFloat((element as HTMLElement).style.left),
+    y: Number.parseFloat((element as HTMLElement).style.top)
+  }));
+  await page.keyboard.press('Enter');
+  await expect.poll(() => setupPosts).toBe(1);
+  // The drawer is back on the running card, then the manager's receipt.
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  await expect(offers).toContainText('Portfolio Manager opened it', { timeout: 90_000 });
+  await expect(offers).toContainText('Ori Music Demo is open');
+  await page.screenshot({ path: `${chatEvidence}/receipt.png` });
+  const after = await snapshot(request);
+  const child = after.workspaces.find((w: any) => w.parent_id === home.id);
+  expect(child).toBeTruthy();
+  await expect(
+    offers.getByRole('link', { name: 'Open Ori Music Demo', exact: true })
+  ).toHaveAttribute('href', `/workspaces/${child.folder_slug}`);
+  await expect.poll(async () => (await snapshot(request)).positions[child.id]).toEqual(candidate);
+  const resource = await (await request.get(`/api/workspaces/${child.id}`)).json();
+  expect(resource.parent_id).toBe(home.id);
+  expect(JSON.stringify(resource)).toContain(brief);
+  await expect(page.locator(`.ws-map-tile[data-ws-id="${child.id}"]`)).toHaveClass(/is-selected/);
+  expect(setupPosts).toBe(1);
+  expect(sessionPosts).toBe(0);
+  expect(modelPosts).toBe(0);
+  // The Home page's card no longer offers the opened song.
+  await page.goto(`/workspaces/${home.folder_slug}/assistant`);
+  await expect(page.locator('#homeSongSuggestions [data-offer-id]')).toHaveCount(0);
+});
+
 test('existing Home Show and Move preserve later project anchors and canonical membership', async ({
   page,
   request
@@ -588,13 +708,17 @@ test('existing Home Show and Move preserve later project anchors and canonical m
     .getByRole('button', { name: /Go to Music Production Home/ })
     .first()
     .click();
-  const secondSuggestion = page.locator('#homeSongSuggestions [data-offer-id]').first();
+  // Go to lands on the Home's map with its manager offering the song in the
+  // drawer; this case keeps automatic placement from the banner.
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${home.folder_slug}\\?mode=map$`));
+  const secondSuggestion = page.locator('#personalAssistantHomeOffer [data-offer-id]').first();
   await expect(secondSuggestion).toBeVisible();
   const secondOfferID = await secondSuggestion.getAttribute('data-offer-id');
   await page
-    .locator('#homeSongSuggestions')
+    .locator('#personalAssistantHomeOffer')
     .getByRole('button', { name: 'Open Second Song & hire', exact: true })
     .click();
+  await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const readSecond = async () =>
     (
       await (

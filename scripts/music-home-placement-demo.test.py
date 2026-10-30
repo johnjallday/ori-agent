@@ -85,6 +85,29 @@ while true; do sleep 1; done
         self.assertIn("MUSIC_HOME_PLACEMENT_A11Y=touch", calls)
         self.assertIn("tests/music-home-map-placement.a11y.spec.ts", calls)
 
+    def test_chat_runs_home_setup_then_the_manager_hand_off(self):
+        result = self.run_case("chat")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertEqual(calls.count("e2e.sh\n"), 1)
+        self.assertIn("tests/music-home-map-placement.spec.ts", calls)
+        self.assertIn("-g\nsingle-song\n", calls)
+        self.assertNotIn("MUSIC_HOME_PLACEMENT_FAULT", calls)
+        self.assertIn(f"MUSIC_HOME_PLACEMENT_SONG={self.sandbox.resolve()}/Documents/Ori Music Demo", calls)
+
+    def test_chat_a11y_sets_up_the_home_before_the_a11y_hand_off(self):
+        result = self.run_case("chat-a11y")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertEqual(calls.count("e2e.sh\n"), 2)
+        setup, a11y = calls.split("e2e.sh\n")[1:3]
+        self.assertIn("tests/music-home-map-placement.spec.ts", setup)
+        self.assertIn("single-song reviewed", setup)
+        self.assertNotIn("MUSIC_HOME_PLACEMENT_A11Y", setup)
+        self.assertIn("MUSIC_HOME_PLACEMENT_A11Y=chat", a11y)
+        self.assertIn("tests/music-home-map-placement.a11y.spec.ts", a11y)
+        self.assertIn("manager hand-off", a11y)
+
     def test_bad_case_launches_nothing(self):
         result = self.run_case("not-a-case")
         self.assertEqual(result.returncode, 2)
