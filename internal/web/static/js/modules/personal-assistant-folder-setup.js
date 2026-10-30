@@ -3,6 +3,7 @@
 import { folderReceiptView, renderReceiptRows, renderMapRow } from './personal-assistant-folder.js';
 import { renderFolderFindings } from './personal-assistant-folder-presentation.js';
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
+import { folderPickCopy } from './folder-pick-copy.js';
 import {
   setupCompletionView,
   setupAttachmentConsumed,
@@ -118,11 +119,17 @@ export function subjectPlacement(subjectId, option = {}) {
   return subjectId ? { ...option, subject_workspace_id: String(subjectId) } : option;
 }
 
-export function choiceIsCurrent(binding, state) {
+export function choiceIsCurrent(
+  binding,
+  state,
+  offer = null,
+  candidateId = binding?.candidateId || ''
+) {
   return Boolean(
     binding &&
     state &&
-    !state.authority &&
+    (!state.authority || reviewedCandidateIsCurrent(state, offer, candidateId)) &&
+    (!binding.offerId || binding.offerId === state.offerId) &&
     binding.conversationId === state.conversationId &&
     binding.observationId === state.observation?.id &&
     binding.revision === state.revision
@@ -200,10 +207,13 @@ export function reviewStatusView(context, elsewhere = null) {
       text = `Setting up ${subject}${place}…`;
       break;
     case 'setup_stopped':
-      text = `Setup for ${subject}${place} stopped because ${STOPPED_BECAUSE[context.blocker] || 'a step did not finish'}. Use its card to continue.`;
+      text =
+        context.blocker === 'handoff_ready'
+          ? `${known ? name : 'Your Home'} is ready and lists ${subject}. Open it separately with the Home’s manager.`
+          : `Setup for ${subject}${place} stopped because ${STOPPED_BECAUSE[context.blocker] || 'a step did not finish'}. Use its card to continue.`;
       break;
     case 'reselection_needed':
-      text = `The setup review for ${subject} needs the folder again. Pick the folder again for a current review.`;
+      text = folderPickCopy(subject, context.needs_pick_reason);
       break;
     case 'setup_unavailable':
       text =
@@ -252,7 +262,8 @@ export function reviewStateKey(offer) {
     offer?.setup?.status,
     offer?.setup?.stop_reason,
     offer?.destination_status,
-    offer?.needs_pick === true
+    offer?.needs_pick === true,
+    offer?.needs_pick_reason
   ].join('|');
 }
 
@@ -585,7 +596,12 @@ function showPlacement(focus, shouldFocus) {
 }
 
 async function review(candidateId, close = false, offerId, placement) {
-  if (!close && choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current)) return;
+  if (
+    !close &&
+    choiceOrigin &&
+    !choiceIsCurrent(choiceOrigin.binding, current, reviews[current?.offerId], candidateId)
+  )
+    return;
   const ticket = ++uiEpoch;
   const actionHadFocus =
     choiceOrigin?.parent?.contains(document.activeElement) ||
@@ -882,8 +898,26 @@ function closeAdjust(returnFocus = true) {
 
 // One explicit review of one candidate, started from a control rather than the
 // scope chooser. placement may carry what the user changed in Adjust.
+// Restored setup authority permits only the exact existing review, never a
+// fresh candidate from the dated discussion snapshot.
+function reviewedCandidateIsCurrent(state, offer, candidateId) {
+  return Boolean(
+    candidateId &&
+    state?.observation &&
+    currentReview(state, offer) &&
+    !offer.needs_pick &&
+    offer.status === 'pending' &&
+    offer.candidate_id === candidateId
+  );
+}
+
+export function canReviewCandidate(state, offer, candidateId) {
+  if (!candidateId || !state?.observation || state.pending) return false;
+  return !state.authority || reviewedCandidateIsCurrent(state, offer, candidateId);
+}
+
 function reviewFrom(trigger, candidateId, placement = {}) {
-  if (!candidateId || !current?.observation || current.pending || current.authority) return;
+  if (!canReviewCandidate(current, reviews[current?.offerId], candidateId)) return;
   closeChoices(false);
   closeAdjust(false);
   choiceTrigger = trigger;
@@ -893,10 +927,22 @@ function reviewFrom(trigger, candidateId, placement = {}) {
     binding: {
       conversationId: current.conversationId,
       observationId: current.observation.id,
-      revision: current.revision
+      revision: current.revision,
+      offerId: current.offerId,
+      candidateId
     }
   };
   void review(candidateId, false, undefined, placement);
+}
+
+// A verified re-pick redraws its existing card without another review request,
+// replacing the conversation, or resetting the user's local name/brief fields.
+export function resumeReview(offer) {
+  if (!currentReview(current, offer)) return false;
+  reviews = { ...reviews, [offer.id]: offer };
+  window.PersonalAssistantFolder?.updateConversationReview?.(offer);
+  applyReviewContext(null);
+  return true;
 }
 
 // reviewCandidate opens the review of the one project an attached folder is,
@@ -922,7 +968,7 @@ export function recheckReview(offer, trigger) {
     !current.observation ||
     !offer.candidate_id ||
     current.pending ||
-    current.authority
+    offer.needs_pick
   )
     return false;
   reviewFrom(trigger, offer.candidate_id, { recheck: true });
@@ -1231,7 +1277,9 @@ function contextChanged(state) {
     window.PersonalAssistantFolder?.parkConversation?.();
   current = { ...state };
   if (adjusting && !choiceIsCurrent(adjusting.binding, current)) closeAdjust(false);
-  if (choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current)) {
+  // Our own in-flight refresh must not retire its origin merely because the
+  // discussion snapshot is historical. Keep the exact offer/candidate fence.
+  if (choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current, reviews[current.offerId])) {
     if (flowHasFocus()) retireSuggestion(choiceOrigin.parent);
     else closeChoices(false);
   }
@@ -1344,6 +1392,7 @@ if (typeof window !== 'undefined')
     structure: currentStructure,
     reviewStructure,
     reviewCandidate,
+    resumeReview,
     recheckReview,
     refreshReviewLink: syncReviewLink,
     adjustStructure,

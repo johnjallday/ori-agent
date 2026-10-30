@@ -29,12 +29,14 @@ type FolderContinuationReason string
 const (
 	// FolderContinuationExpired: the 30-minute hand-off window has elapsed.
 	FolderContinuationExpired FolderContinuationReason = "expired"
-	// FolderContinuationLost: the server no longer holds the picked path (it
-	// restarted; a dialog-picked folder is process memory only).
+	// FolderContinuationLost: neither a live hold nor valid retained review
+	// authority is available. Resolved legacy handoffs remain process-local.
 	FolderContinuationLost FolderContinuationReason = "lost"
 	// FolderContinuationChanged: the folder is missing, no longer the same
 	// directory, or otherwise fails the original identity check.
 	FolderContinuationChanged FolderContinuationReason = "changed"
+	// FolderContinuationMoved: a saved review path disappeared or now resolves elsewhere.
+	FolderContinuationMoved FolderContinuationReason = "moved"
 )
 
 const (
@@ -97,7 +99,7 @@ func (s *FolderDigestService) PortfolioContinuations(ctx context.Context, userID
 	result := make([]FolderContinuation, 0, len(offers))
 	for _, offer := range offers {
 		item := FolderContinuation{OfferID: offer.ID, Folder: offer.FolderName, State: FolderContinuationReady}
-		if _, _, loss := s.portfolioSource(offer); loss != "" {
+		if _, _, loss := s.portfolioSource(userID, offer); loss != "" {
 			item.State, item.Reason = FolderContinuationNeedsPick, loss
 		}
 		result = append(result, item)

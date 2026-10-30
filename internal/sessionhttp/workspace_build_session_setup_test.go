@@ -265,7 +265,7 @@ func TestWorkspaceBuildSetup_AStoppedRunReopensTheBuildAndRetryContinuesIt(t *te
 		{personalassistant.FolderStopConsentStale, "The Home's shared assistant needs approval for the current blueprint. Completed work is kept."},
 		{personalassistant.FolderStopAssistantMissing, "The Home's shared assistant is unavailable. Completed work is kept."},
 		{personalassistant.FolderStopNeedsPick, "Ori no longer holds the attached folder. Add the folder again, then Retry."},
-		{personalassistant.FolderStopNeedsChoice, "The folder has more than one project file. Choose the one to set up."},
+		{personalassistant.FolderStopNeedsChoice, "Choose the project file to use. The available files may have changed."},
 		{personalassistant.FolderStopPlanChanged, "What Set it up would do has changed, so it stopped before going further. Review the plan, then Retry."},
 	} {
 		t.Run(tc.reason, func(t *testing.T) {

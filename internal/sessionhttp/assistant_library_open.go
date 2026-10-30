@@ -60,6 +60,16 @@ var (
 	ErrLibraryOpenReadBack = errors.New("the opened song could not be read back")
 )
 
+// LibraryFileNotOfferedError retains the current read-only candidates for a
+// canonical handoff to ask again. Public library callers keep the existing
+// ErrLibraryFileNotOffered refusal; no unselected open is attempted.
+type LibraryFileNotOfferedError struct {
+	ProjectFiles []string
+}
+
+func (*LibraryFileNotOfferedError) Error() string { return ErrLibraryFileNotOffered.Error() }
+func (*LibraryFileNotOfferedError) Unwrap() error { return ErrLibraryFileNotOffered }
+
 // LibraryOpenStop is an open that asks the owner something first, or that the
 // row's own state refuses. Nothing was made.
 type LibraryOpenStop struct {
@@ -98,9 +108,11 @@ type LibraryOpenResult struct {
 	EntryID     string `json:"entry_id"`
 	WorkspaceID string `json:"workspace_id"`
 	// LinkID is the song's reciprocal link to the Home; the Open row omits it.
-	LinkID  string `json:"-"`
-	Route   string `json:"route"`
-	Created bool   `json:"created"`
+	LinkID string `json:"-"`
+	// SelectedFile is read back from the canonical project locator, not input.
+	SelectedFile string `json:"-"`
+	Route        string `json:"route"`
+	Created      bool   `json:"created"`
 	// Staffing is how the project role was filled (or why not): added, joined,
 	// already, none, off, not_shared, consent_stale, assistant_missing.
 	Staffing  string `json:"staffing"`
@@ -279,7 +291,7 @@ func (h *Handler) openLibraryProject(ctx context.Context, scope projectlibrary.S
 				Message: "Choose which project file to open", ProjectFiles: eligible.ProjectFiles}
 		}
 		if in.SelectedFile != "" && !containsName(eligible.ProjectFiles, in.SelectedFile) {
-			return LibraryOpenResult{}, ErrLibraryFileNotOffered
+			return LibraryOpenResult{}, &LibraryFileNotOfferedError{ProjectFiles: append([]string(nil), eligible.ProjectFiles...)}
 		}
 		// A song whose assistant would be created now needs a model first; the
 		// workspace is not made half-staffed (needs_model).
@@ -301,6 +313,17 @@ func (h *Handler) openLibraryProject(ctx context.Context, scope projectlibrary.S
 	song, err := h.workspaceTaskStore.Get(result.WorkspaceID)
 	if err != nil || song == nil || song.OwnerUserID != scope.OwnerUserID || !workspace.IsCanonicalWorkspaceSlug(song.FolderSlug) {
 		return LibraryOpenResult{}, ErrLibraryOpenReadBack
+	}
+	locator, locatorErr := workspace.GetProjectEntryLocator(song.SharedData)
+	if locatorErr != nil {
+		return LibraryOpenResult{}, ErrLibraryOpenReadBack
+	}
+	if locator != nil && personalassistant.ValidFolderEntryName(locator.RelativePath) {
+		result.SelectedFile = locator.RelativePath
+	}
+	if in.SelectedFile != "" && result.SelectedFile != in.SelectedFile {
+		return LibraryOpenResult{}, &LibraryOpenStop{Reason: personalassistant.FolderStopPlanChanged,
+			Message: "The workspace is not linked to the reviewed project file."}
 	}
 	result.Route = "/workspaces/" + url.PathEscape(song.FolderSlug)
 	if link := song.GetAssistantProjectLink(); link != nil && link.StationWorkspaceID == scope.HomeID {

@@ -96,6 +96,66 @@ test('completed folder retires both the setup placeholder and implicit empty req
   assert.equal(emptySendView('', false, true), null);
 });
 
+test('a verified re-pick redraws the existing review without retiring its saved snapshot', async () => {
+  const saved = {
+    observation: observation('original'),
+    revision: 'r',
+    offer_id: 'offer',
+    historical: true,
+    authority: 'lost'
+  };
+  const resumed = [];
+  const calls = [];
+  const controller = createFolderContextController({
+    uuid: () => 'draft',
+    currentId: () => 'chat',
+    reviewResumed: offer => resumed.push(offer),
+    post: async (url, body) => {
+      calls.push({ url, body });
+      return {
+        observation: saved.observation,
+        revision: 'r',
+        folder_context: saved,
+        resumed_review: { id: 'offer', needs_pick: false }
+      };
+    }
+  });
+  controller.reset('chat', saved);
+  assert.equal(await controller.select('selection', '', 'receipt'), true);
+  assert.equal(controller.state.offerId, 'offer');
+  assert.equal(controller.state.preview, false);
+  assert.equal(controller.state.pending, false);
+  assert.equal(controller.state.hireCandidate, '');
+  assert.equal(controller.request().selection_id, 'original');
+  assert.equal(controller.request().historical, true);
+  assert.equal(resumed[0].id, 'offer');
+  assert.equal(
+    controller.state.notice,
+    'Your existing review is ready. This pick did not start setup.'
+  );
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/select$/);
+});
+
+test('a dated snapshot can recheck its canonical review but cannot open a new one', async () => {
+  const { controller, calls, setId } = fixture(async () => ({ folder_reviews: {} }));
+  setId('chat');
+  const saved = {
+    observation: observation('a'),
+    revision: 'r',
+    historical: true,
+    authority: 'lost'
+  };
+  controller.reset('chat', { ...saved, offer_id: 'offer' });
+  assert.ok(await controller.review('root', false, 'offer', { recheck: true }));
+  assert.equal(calls[0].body.selection_id, 'a');
+  assert.equal(calls[0].body.recheck, true);
+  assert.equal(controller.request().historical, true);
+  controller.reset('chat', saved);
+  assert.equal(await controller.review('root'), null);
+  assert.equal(calls.length, 1);
+});
+
 test('select is local, request is references only, and disclosure names provider boundary', async () => {
   const { controller, calls } = fixture(async () => ({
     observation: observation('a'),
@@ -225,7 +285,10 @@ test('one project Ori can hire for is reviewed on attach; a group or any other f
     'utf8'
   );
   assert.match(source, /window\.PersonalAssistantFolderSetup\?\.reviewCandidate\?\.\(hire\)/);
-  assert.match(source, /!reviewed &&\s+!controller\.state\.structure &&/);
+  assert.match(
+    source,
+    /!reviewed &&\s+!controller\.state\.offerId &&\s+!controller\.state\.structure &&/
+  );
   const setup = readFileSync(
     new URL('./personal-assistant-folder-setup.js', import.meta.url),
     'utf8'

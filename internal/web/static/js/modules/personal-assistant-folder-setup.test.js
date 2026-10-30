@@ -6,6 +6,7 @@ import {
   reviewLinkHidden,
   choiceIsCurrent,
   currentReview,
+  canReviewCandidate,
   currentSuggestion,
   subjectPlacement,
   existingProjectView,
@@ -151,6 +152,62 @@ test('only the current conversation and exact canonical offer get live controls'
   assert.equal(currentReview({ conversationId: 'chat-b', offerId: 'offer-a' }, offer), false);
   assert.equal(currentReview({ conversationId: 'chat-a', offerId: 'old' }, offer), false);
   assert.equal(currentReview({}, null), false);
+  const saved = {
+    conversationId: 'chat-a',
+    offerId: 'offer-a',
+    observation: { id: 'snapshot' },
+    authority: 'lost'
+  };
+  const restored = { ...offer, status: 'pending', candidate_id: 'candidate-0', needs_pick: false };
+  assert.equal(canReviewCandidate(saved, restored, 'candidate-0'), true);
+  const binding = { conversationId: 'chat-a', observationId: 'snapshot', revision: 'r' };
+  assert.equal(
+    choiceIsCurrent(binding, { ...saved, revision: 'r' }, restored, 'candidate-0'),
+    true
+  );
+  assert.equal(
+    choiceIsCurrent(binding, { ...saved, revision: 'newer' }, restored, 'candidate-0'),
+    false
+  );
+  assert.equal(
+    choiceIsCurrent(binding, { ...saved, revision: 'r' }, restored, 'candidate-1'),
+    false
+  );
+  assert.equal(canReviewCandidate(saved, restored, 'candidate-1'), false);
+  assert.equal(canReviewCandidate(saved, { ...restored, needs_pick: true }, 'candidate-0'), false);
+  assert.equal(canReviewCandidate({ ...saved, offerId: 'other' }, restored, 'candidate-0'), false);
+});
+
+test('a restored review keeps its exact refresh origin while pending and on completion', () => {
+  const restored = { ...offer, candidate_id: 'candidate-0' };
+  const binding = {
+    conversationId: 'chat-a',
+    offerId: 'offer-a',
+    observationId: 'snapshot',
+    revision: 'r',
+    candidateId: 'candidate-0'
+  };
+  const state = {
+    conversationId: 'chat-a',
+    offerId: 'offer-a',
+    observation: { id: 'snapshot' },
+    revision: 'r',
+    authority: 'lost',
+    pending: true
+  };
+  assert.equal(choiceIsCurrent(binding, state, restored), true);
+  assert.equal(canReviewCandidate(state, restored, 'candidate-0'), false);
+  assert.equal(choiceIsCurrent(binding, { ...state, pending: false }, restored), true);
+  for (const change of [
+    { revision: 'new' },
+    { offerId: 'other' },
+    { conversationId: 'other' },
+    { observation: { id: 'other' } }
+  ])
+    assert.equal(choiceIsCurrent(binding, { ...state, ...change }, restored), false);
+  for (const change of [{ needs_pick: true }, { status: 'closed' }, { candidate_id: 'other' }])
+    assert.equal(choiceIsCurrent(binding, state, { ...restored, ...change }), false);
+  assert.equal(choiceIsCurrent({ ...binding, candidateId: undefined }, state, restored), false);
 });
 
 test('focus handoff requires the exact live canonical card and never reconstructs a control', () => {
@@ -296,6 +353,14 @@ test('the status sentence names the reviewed destination and why a control is bl
     }).text,
     /Music Home/
   );
+  const handoff = reviewStatusView({
+    ...base,
+    status: 'setup_stopped',
+    destination_status: 'existing',
+    blocker: 'handoff_ready'
+  }).text;
+  assert.match(handoff, /Music Home is ready and lists Album-5/);
+  assert.doesNotMatch(handoff, /stopped|did not finish|failed/);
   assert.match(
     reviewStatusView({ ...base, status: 'setup_stopped', blocker: 'needs_choice' }).text,
     /stopped because it needs you to choose the project file/

@@ -12,10 +12,11 @@
   even when the entry/time budget did not trip. Candidate names are root and
   immediate subfolders. Explicit attachments additionally capture a bounded
   metadata tree during the same walk; neither projection is a complete inventory.
-- Picked paths in the existing digest are process-local; chip paths can be
-  reconstructed by the old offer path. Conversation selections must **not**
-  reconstruct either kind after restart. The existing portfolio continuation's
-  canonical-path plus directory-identity witness supplies the relevant pattern.
+- At this original inspection, picked paths were process-local and conversation
+  selections could not reconstruct after restart. The review-only continuity
+  exception below now uses the portfolio continuation's canonical-path plus
+  directory-identity pattern; attached discussion snapshots still cannot restore
+  filesystem authority.
 - Conversations are Sessions under Personal HQ, owned by the relationship's
   hired profile; Messages are the transcript. Ask creates a session only when
   storing an answered first turn. Session deletion cascades to Messages; shallow
@@ -64,9 +65,48 @@ untrusted data, not instructions; Send discloses metadata sharing with the
 configured model.
 
 A saved snapshot is discussable, not a filesystem grant. Current authority is
-checked independently. Lost (restart), expired and changed selections retain
-their dated snapshot; no automatic rescan occurs. A new explicit pick is needed
-for inspection or setup. Provider transmission occurs only on Send.
+checked independently. Lost, expired and changed selections retain their dated
+snapshot; no automatic rescan occurs. An attached folder with no opened review
+still needs an explicit pick after the 30-minute TTL or a restart. Provider
+transmission occurs only on Send.
+
+An explicitly opened conversation review (including an arranged review) keeps
+setup authority separately while its offer is `pending` or `awaiting_outcome`.
+The server-private `folder-paths-v1.json` beside the HQ's digest stores canonical
+root/candidate paths, identity witnesses and `saved_at`, keyed by offer ID. It
+uses the digest lock and the knowledge store's atomic 0600 writer, has its own
+version and owner, and never adds a path to the digest, browser, transcript or
+model input. Final transitions, removal and pruning delete its entry; deleting
+the managed HQ directory removes the sidecar. The cap is 64 entries: a full
+store logs a path-free warning and keeps a new review's in-memory hold without
+evicting another entry.
+
+When a review's hold expires or disappears, the resolver checks the canonical
+owner, saved path canonicalisation, directory identity and folder/subject keys.
+It re-holds only the existing review's root and candidate under its observation
+ID, without scanning or rebuilding a tree. Other candidates and fresh structure
+proposals still need a pick. Discussion Resolve/Status retain the old snapshot's
+age; reconstructed setup authority is not fresh discussion evidence. The review
+lease and canonical owner guard still apply to actions.
+
+A failed reconstruction exposes only `needs_pick_reason`: `moved` (missing or
+redirected path), `changed` (replaced directory), or `lost` (no saved path/hold,
+including legacy offers). Attached selections can also report `expired`. The
+review context carries the same code. Neither time alone nor a server restart
+invalidates a saved review whose directory is unchanged.
+
+An explicit re-pick can relocate an ordinary review only when both original
+root/candidate witnesses and the canonical owner still match. It updates private
+locations and path-derived keys, retaining the offer, dated observation/revision,
+name, brief, structure choices, selected entry and stopped run. The select response
+returns `resumed_review` with the existing context; the browser redraws that card
+without another Review request, message or model suggestion. A replacement cannot
+inherit the review. Separately fenced arrangements and placement handoffs keep
+their existing recovery workflows, rather than being adopted by this shortcut.
+Home scans recover only Home-owned offers; they cannot adopt or retire a pending
+conversation/build review. Pausing changes confirmable effects (such as remembering),
+not the review's directory identity: the old digest fails, and the reduced effects
+must be confirmed anew.
 
 ### Canonical persistence and concurrency
 
@@ -90,8 +130,9 @@ The SQLite transaction is authoritative, not the LRU; the hybrid adapter
 invalidates cached sessions after writes and reads context state from SQLite.
 Deleting a session uses the existing message cascade. Migration 76 additionally
 clears typed context when a session's workspace/profile changes, including
-shallow HQ deletion; ordinary chat remains. Renaming also drops the binding and
-requires re-picking rather than carrying authority to a newly named owner.
+shallow HQ deletion; ordinary chat remains. Renaming that workspace/profile also
+drops the binding and requires re-picking rather than carrying authority to a
+newly named owner.
 Failed first-turn storage discards the newly created session. No new
 transcript/sidecar exists.
 
@@ -294,6 +335,39 @@ The existing creator, reviewed plan digest,
 receipt and provider-specific gates remain the sole execution path. Canonical
 outcome references are read back in the owning conversation; hydration executes
 nothing.
+
+### Project-file choice before confirmation
+
+A verified project review passes its subject path privately to planning
+(`FolderSetupRequest.Path` is never JSON). The installed active blueprint's
+attach-existing declaration supplies the extensions. Bounded, no-follow
+metadata reads list direct regular files, newest modification first with name
+as the tie-breaker. This does not renew discussion/tree evidence or read file
+contents. A still-listed saved selection is kept; one file needs no chooser,
+multiple files expose at most 64 bare names, and no match leaves the runtime
+question available. Unready declarations are not guessed.
+
+`POST …/folder-digest/offers/{id}/entry {plan_digest, entry_name}` is an inert
+canonical review edit. It rechecks owner, directory authority, current digest and
+membership, then compares the complete saved offer before changing only its
+entry name. No setup, journey, model turn or resource creation begins. Native
+labelled radios retain node identity and keyboard focus through the save; a
+refusal restores the canonical selection. The selected name is independently
+bound into the new digest and appears as `Opens <file>`.
+
+Set up accepts that reviewed selection, not an arbitrary alternative from the
+list. Omission uses the plan/run's name. Runtime discovery of a missing selected
+file may read one unselected disclosure to ask again, but never commits that
+fallback; an explicit late answer rebinds consent. A filename does not imply
+Open: the Home phase and the manager's later `open: true` remain separate.
+Completed file receipts require the finished run and verified workspace.
+The Home's manager and static suggestion both disclose the saved filename and
+carry it into the separate Open. Library Open reads the actual bare name back
+from the canonical project locator: a connected workspace bound to a different
+file cannot silently satisfy that choice. A legacy single-file default can
+therefore be recorded accurately too. Missing-file questions use read-only
+candidate disclosures, never an unselected fallback Open. Completed manager
+receipts and first-look handoff sentences name only the verified receipt's file.
 
 ### Setup requirements and configuration return
 

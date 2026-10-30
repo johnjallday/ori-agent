@@ -466,7 +466,7 @@ func (h *folderSetupHost) plan(ctx context.Context, req personalassistant.Folder
 		}
 		plan.Intent.Model = model
 	}
-	return plan.Stamped(), nil
+	return h.projectEntryPlan(ctx, req, target, plan)
 }
 
 // Run brings the plugins the plan promised into place, then drives the plugin's

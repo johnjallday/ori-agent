@@ -74,9 +74,9 @@ func TestReviewContext_RealHostCompletedSetupIsReportedFromItsReceipt(t *testing
 }
 
 // Pausing the assistant withdraws the "remember this project" effect and changes
-// the relationship the folder was picked under. Neither the confirmation
-// prepared before the pause nor the refreshed one can set anything up until the
-// folder is picked again; the card says so instead of going quiet.
+// the current confirmation terms. The old confirmation must fail, but an
+// explicit confirmation of the reduced effects can use the retained folder.
+// A pause changes effects; it does not replace this review's canonical owner.
 func TestFolderPlacement_PausingChangesTheReviewedEffectsBeforeConfirmation(t *testing.T) {
 	f := newDraftServerFixture(t)
 	id, _, offer := reviewFolder(t, f, stageReviewFolder(t, f))
@@ -101,18 +101,18 @@ func TestFolderPlacement_PausingChangesTheReviewedEffectsBeforeConfirmation(t *t
 		t.Fatalf("a review that promised remembering was confirmed while paused: %d %v", status, result)
 	}
 	current := read()
-	if current["remember"] != false || current["review_digest"] == reviewed["review_digest"] || current["status"] != "pending" {
+	if current["remember"] != false || current["review_digest"] == reviewed["review_digest"] || current["status"] != "pending" || current["needs_pick"] == true {
 		t.Fatalf("the card still promises remembering while paused: %v", current)
 	}
 	status, result := confirm(current["review_digest"], "after-pause")
-	if status != http.StatusConflict || result["needs_pick"] != true || len(f.builder.workspaceFileStore.CachedWorkspaces()) != before {
-		t.Fatalf("folder access picked under the earlier relationship was reused: %d %v", status, result)
+	if status != http.StatusOK || len(f.builder.workspaceFileStore.CachedWorkspaces()) != before+1 {
+		t.Fatalf("the newly confirmed reduced effects could not use the retained folder: %d %v", status, result)
 	}
 	if facts := f.approvedFacts(t); len(facts) != 0 {
 		t.Fatalf("a fact was remembered while paused: %v", facts)
 	}
 	_, saved := f.call(t, http.MethodGet, "/api/home-assistant/conversations/"+id, nil)
-	if review := saved["folder_review_context"].(map[string]any); review["status"] != "reselection_needed" || review["control_labels"] != nil {
-		t.Fatalf("the drawer does not ask for the folder again: %v", review)
+	if review := saved["folder_review_context"].(map[string]any); review["status"] != "completed" {
+		t.Fatalf("the drawer lost the newly confirmed receipt: %v", review)
 	}
 }

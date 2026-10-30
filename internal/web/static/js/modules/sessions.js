@@ -13239,6 +13239,7 @@ const sessionManager = {
           `${base}/${encodeURIComponent(String(id || ''))}${recheck ? '?recheck=1' : ''}`
         ),
       setup: (id, body) => call('POST', sessionURL(id, 'setup'), body),
+      entry: (id, body) => call('POST', sessionURL(id, 'entry'), body),
       softwareReview: (id, body) => call('POST', sessionURL(id, 'software-review'), body),
       homeProvider: (id, body) => call('POST', sessionURL(id, 'home-provider'), body),
       janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
@@ -13563,6 +13564,9 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-defer', () => {
       void this.deferWorkspaceBuildPreparation();
+    });
+    modal.addEventListener('workspace-build-entry-choice', event => {
+      void this.chooseWorkspaceBuildEntry(event?.detail?.entry_name);
     });
     modal.addEventListener('workspace-build-setup', event => {
       void this.setUpWorkspaceBuild(event?.detail || {});
@@ -15631,7 +15635,10 @@ const sessionManager = {
       build.session = {
         ...build.session,
         plan: fresh.plan || null,
-        folder_expires_at: fresh.folder_expires_at ?? build.session.folder_expires_at
+        // A retained review has no observation TTL. Do not keep an old
+        // deadline when the canonical response intentionally omits it.
+        folder_expires_at: fresh.folder_expires_at,
+        folder_needs_pick_reason: fresh.folder_needs_pick_reason
       };
       build.readinessStale = false;
       pane.applySession(build.session);
@@ -15769,6 +15776,19 @@ const sessionManager = {
       document.getElementById('workspaceBuildPlanReviewRequirements')
     );
     const shared = window.OriFolderPlanLines;
+    shared?.renderEntryChoice?.(
+      document.getElementById('workspaceBuildPlanReviewEntryChoice'),
+      this.workspaceBuild.session.setup_run || plan,
+      {
+        readOnly: Boolean(this.workspaceBuild.session.setup),
+        disabled: Boolean(
+          this.workspaceBuild.busy ||
+          this.workspaceBuild.setupBusy ||
+          this.workspaceBuild.readinessBusy
+        ),
+        onChange: name => void this.chooseWorkspaceBuildEntry(name)
+      }
+    );
     const list = document.getElementById('workspaceBuildPlanReviewLines');
     if (list) list.hidden = !planReady;
     if (planReady && shared && list) {
@@ -17191,6 +17211,7 @@ const sessionManager = {
     }
     build.attachmentRequestID = globalThis.crypto?.randomUUID?.();
     let attached = false;
+    let resumedReview = false;
     let attaching = false;
     let cancelled = false;
     let note = '';
@@ -17242,6 +17263,11 @@ const sessionManager = {
       const session = result?.body?.session || null;
       if (!result?.ok || !session) {
         const message =
+          (result?.body?.needs_pick_reason &&
+            globalThis.OriFolderPickCopy?.(
+              build.session.folder?.observation?.folder,
+              result.body.needs_pick_reason
+            )) ||
           String(result?.body?.error || '').trim() ||
           'That folder could not be used. Try Add folder again; your draft is unchanged.';
         if (build.placement) {
@@ -17254,6 +17280,11 @@ const sessionManager = {
         return;
       }
       if (Number(session.version) < Number(build.session?.version)) return;
+      resumedReview = Boolean(
+        result.body.resumed_review &&
+        session.id === build.session.id &&
+        session.folder?.observation?.id === build.session.folder?.observation?.id
+      );
       this.adoptWorkspaceBuildSession(session);
       if (result.body.cancelled) {
         cancelled = true;
@@ -17277,7 +17308,8 @@ const sessionManager = {
           this.finishWorkspaceBuildFolderChoice(build, { cancelled, focus });
         if (cancelled && !returned && focus && this.workspaceBuildAssisted())
           pane.closeFolderChooser?.({ focus: true });
-        if (attached && !build.session.placement_source) await this.suggestWorkspaceBuildFolder();
+        if (attached && !resumedReview && !build.session.placement_source)
+          await this.suggestWorkspaceBuildFolder();
         else if (attached) this.syncWorkspaceBuildPresentation();
       }
     }
@@ -17655,6 +17687,61 @@ const sessionManager = {
     this.workspaceBuildPane()?.setProviderInstall?.({ note: 'Nothing was installed.' });
   },
 
+  // A file choice edits the existing review, without a turn or setup claim.
+  async chooseWorkspaceBuildEntry(name) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (
+      !build?.session ||
+      !pane ||
+      build.busy ||
+      build.setupBusy ||
+      build.readinessBusy ||
+      build.session.setup
+    )
+      return;
+    if (
+      !build.session.plan?.entry_candidates?.includes(name) ||
+      build.session.plan.entry_name === name
+    )
+      return;
+    build.setupBusy = true;
+    pane.setBusy?.(true);
+    this.syncWorkspaceBuildPresentation();
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      if (build.draftError || build.draftConflict || build.draftUser !== undefined) {
+        pane.showLine('Save the draft changes before choosing the project file.');
+        return;
+      }
+      const result = await this.workspaceBuildApi().entry(build.session.id, {
+        version: Number(build.session.version) || 0,
+        plan_digest: build.session.plan?.digest || '',
+        entry_name: name
+      });
+      if (this.workspaceBuild !== build) return;
+      if (result.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+      if (!result.ok) {
+        if (result.status === 409 && result.body?.code === 'version')
+          await this.reloadWorkspaceBuildSession();
+        if (this.workspaceBuild === build)
+          pane.showLine(result.body?.error || 'Review the current file choice before Set up.');
+      }
+    } catch (_) {
+      if (this.workspaceBuild === build)
+        pane.showLine(
+          'The file choice could not be read back. Review the current plan before Set up.'
+        );
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.setupBusy = false;
+        pane.setBusy?.(false, { focus: false });
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
+  },
+
   // setUpWorkspaceBuild is Set it up: the plan the user reviewed runs as Home's
   // setup journey on the server. A Retry continues the run that stopped; a
   // project file chosen from the run's own candidates goes with it.
@@ -17674,7 +17761,10 @@ const sessionManager = {
     if (!build?.session || !pane || build.busy || build.setupBusy || build.readinessBusy) return;
     if (!build.session.setup && !this.workspaceBuildSetupPressable()) return;
     const digest = String(
-      build.session.setup?.plan_digest || build.session.plan?.digest || ''
+      build.session.setup_run?.plan_digest ||
+        build.session.setup?.plan_digest ||
+        build.session.plan?.digest ||
+        ''
     ).trim();
     if (!digest) return;
     const brief = typeof detail.brief === 'string' ? detail.brief : (pane.setupBrief?.() ?? null);
@@ -17701,7 +17791,12 @@ const sessionManager = {
         return;
       }
       const body = { version: Number(build.session.version) || 0, plan_digest: digest };
-      const entry = String(detail.entry_name || '').trim();
+      const entry = String(
+        detail.entry_name ||
+          build.session.setup_run?.entry_name ||
+          build.session.plan?.entry_name ||
+          ''
+      ).trim();
       if (entry) body.entry_name = entry;
       // Hire and start sends the brief the pane shows, from either button; a
       // Retry sends none and continues with the one the run was given.

@@ -31,11 +31,13 @@ type heldFolderObservation struct {
 	identity          string
 	result            folderdigest.Result
 	observation       foldercontext.Observation
-	saved             bool // once consumed, this ID can never masquerade as fresh staging
+	saved             bool            // once consumed, this ID can never masquerade as fresh staging
+	reheld            *heldReviewPath // authority for one review only; no scan or discussion evidence
 }
 
 // FolderObservationService borrows the trusted picker/scan dependencies, never
-// the digest's mutating ScanChip/ScanPicked APIs. Paths remain process-local.
+// the digest's mutating ScanChip/ScanPicked APIs. Discussion holds remain
+// process-local; only explicitly opened reviews have private durable authority.
 type FolderObservationService struct {
 	digest            *FolderDigestService
 	mu                sync.Mutex
@@ -203,9 +205,12 @@ func (s *FolderObservationService) pruneLocked() {
 // Resolve accepts only a live, exactly scoped selection. Historical fallback
 // belongs to the conversation handler, using its canonical saved snapshot.
 func (s *FolderObservationService) Resolve(ctx context.Context, target foldercontext.Target, id string) (*foldercontext.Observation, error) {
-	selection, _, err := s.resolve(ctx, target, id)
+	selection, _, err := s.resolveHeld(ctx, target, id)
 	if err != nil {
 		return nil, err
+	}
+	if selection.reheld != nil {
+		return nil, ErrFolderSelection // setup authority is not a fresh observation
 	}
 	observation := selection.observation
 	// Copy the slices: consumers cannot mutate the server's held evidence.
@@ -215,7 +220,7 @@ func (s *FolderObservationService) Resolve(ctx context.Context, target foldercon
 	return &observation, nil
 }
 
-func (s *FolderObservationService) resolve(ctx context.Context, target foldercontext.Target, id string) (heldFolderObservation, FolderContinuationReason, error) {
+func (s *FolderObservationService) resolveHeld(ctx context.Context, target foldercontext.Target, id string) (heldFolderObservation, FolderContinuationReason, error) {
 	if s == nil || s.digest == nil || !target.Valid() {
 		return heldFolderObservation{}, FolderContinuationLost, ErrFolderSelection
 	}
@@ -227,7 +232,7 @@ func (s *FolderObservationService) resolve(ctx context.Context, target foldercon
 	}
 	now := s.digest.now()
 	if now.Before(selection.observation.ScannedAt) || now.Sub(selection.observation.ScannedAt) >= foldercontext.SelectionTTL {
-		return heldFolderObservation{}, FolderContinuationExpired, ErrFolderSelection
+		return heldFolderObservation{}, FolderContinuationExpired, folderPickError{reason: FolderContinuationExpired, cause: ErrFolderSelection}
 	}
 	binding, err := s.digest.store.Binding(ctx, target.UserID)
 	if err != nil || binding != selection.binding {
@@ -245,8 +250,9 @@ func (s *FolderObservationService) resolve(ctx context.Context, target foldercon
 // for a host that links the folder to a workspace the user is creating from
 // it (the workspace build's Create). The root is the server's own: it is never
 // serialized to a browser, and a selection that was lost, expired, or whose
-// directory changed is refused exactly as Resolve refuses it. The snapshot a
-// build keeps cannot revive a selection; only a new pick can.
+// directory changed is refused. Unlike discussion Resolve, an explicitly opened
+// review can reconstruct this authority from its private saved path and witness;
+// the snapshot a build keeps cannot itself revive a selection.
 func (s *FolderObservationService) ResolveRoot(ctx context.Context, target foldercontext.Target, id string) (string, error) {
 	selection, _, err := s.resolve(ctx, target, id)
 	if err != nil {
@@ -265,7 +271,10 @@ func (s *FolderObservationService) Status(ctx context.Context, target foldercont
 	if now.Before(observation.ScannedAt) || now.Sub(observation.ScannedAt) >= foldercontext.SelectionTTL {
 		return FolderContinuationExpired
 	}
-	_, reason, _ := s.resolve(ctx, target, observation.ID)
+	held, reason, _ := s.resolveHeld(ctx, target, observation.ID)
+	if held.reheld != nil {
+		return FolderContinuationLost
+	}
 	return reason
 }
 

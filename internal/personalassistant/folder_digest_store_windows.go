@@ -2,13 +2,17 @@
 
 package personalassistant
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // FolderDigestStore is the Windows counterpart of the Unix store: same
 // document, same lock-then-replace discipline, over the knowledge store's
 // checked .ori path.
 type FolderDigestStore struct {
-	knowledge *KnowledgeStore
+	knowledge    *KnowledgeStore
+	pathWarnings sync.Map // one capacity warning per HQ owner, never a path
 }
 
 func NewFolderDigestStore(knowledge *KnowledgeStore) *FolderDigestStore {
@@ -90,6 +94,9 @@ func (s *FolderDigestStore) Update(ctx context.Context, userID string, expectedV
 	if err != nil {
 		return FolderDigestDocument{}, err
 	}
+	if err := s.pruneFolderPaths(dir, doc); err != nil {
+		return FolderDigestDocument{}, err
+	}
 	if err := s.knowledge.writeNamed(dir, folderDigestFileName, ".folder-digest-", encoded); err != nil {
 		return FolderDigestDocument{}, err
 	}
@@ -97,6 +104,77 @@ func (s *FolderDigestStore) Update(ctx context.Context, userID string, expectedV
 		return FolderDigestDocument{}, err
 	}
 	return doc, nil
+}
+
+// withFolderPaths mirrors the Unix store using the checked Windows directory.
+func (s *FolderDigestStore) withFolderPaths(ctx context.Context, userID string, change func(FolderDigestDocument, *folderPathDocument) (bool, error)) error {
+	binding, err := s.resolve(ctx, userID)
+	if err != nil {
+		return err
+	}
+	dir, err := s.knowledge.path(binding, true)
+	if err != nil {
+		return err
+	}
+	release, err := lockSidecar(dir, folderDigestLockName, true)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.knowledge.checkBinding(ctx, binding); err != nil {
+		return err
+	}
+	offers, err := readFolderDigest(dir, binding.owner())
+	if err != nil {
+		return err
+	}
+	paths, err := readFolderPaths(dir, binding.owner())
+	if err != nil {
+		return err
+	}
+	changed, err := change(offers, &paths)
+	if err != nil {
+		return err
+	}
+	if err := s.knowledge.checkBinding(ctx, binding); err != nil {
+		return err
+	}
+	if changed {
+		data, err := encodeFolderPaths(paths)
+		if err != nil {
+			return err
+		}
+		if err := s.knowledge.writeNamed(dir, folderPathsFileName, ".folder-paths-", data); err != nil {
+			return err
+		}
+	}
+	return s.knowledge.checkBinding(ctx, binding)
+}
+
+func readFolderPaths(dir string, owner KnowledgeOwner) (folderPathDocument, error) {
+	data, present, err := readSidecarBytes(dir, folderPathsFileName, folderPathsMaxBytes)
+	if present && len(data) == 0 {
+		return folderPathDocument{}, ErrKnowledgeCorrupt
+	}
+	if err != nil {
+		return folderPathDocument{}, err
+	}
+	return decodeFolderPaths(data, owner)
+}
+
+func (s *FolderDigestStore) pruneFolderPaths(dir string, offers FolderDigestDocument) error {
+	paths, err := readFolderPaths(dir, offers.Owner)
+	if err != nil {
+		return err
+	}
+	if !paths.prune(offers) {
+		return nil
+	}
+	data, err := encodeFolderPaths(paths)
+	if err != nil {
+		return err
+	}
+	return s.knowledge.writeNamed(dir, folderPathsFileName, ".folder-paths-", data)
 }
 
 func readFolderDigest(dir string, owner KnowledgeOwner) (FolderDigestDocument, error) {

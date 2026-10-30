@@ -288,10 +288,9 @@ func TestFolderStructure_SelectedVersionHasItsOwnRules(t *testing.T) {
 	}
 }
 
-// An open arranged review authorizes Set up only while its held folder is
-// live in this process: an expired selection or a restarted service refuses
-// before anything runs, and the offer stays an unconfirmed review.
-func TestReviewArrangementGroup_SetUpNeedsTheLiveHeldFolder(t *testing.T) {
+// An opened arrangement retains authority for its reviewed members after a
+// pause or restart, without reconstructing a scan or confirming the review.
+func TestReviewArrangementGroup_SetUpRestoresTheReviewedFolder(t *testing.T) {
 	f, service, target, observationID, ids := arrangedFixture(t)
 	permissive := func(context.Context, FolderOffer) error { return nil }
 	lease := func(foldercontext.Target) (func(), bool) { return func() {}, true }
@@ -309,23 +308,20 @@ func TestReviewArrangementGroup_SetUpNeedsTheLiveHeldFolder(t *testing.T) {
 		}
 	}
 	input := FolderSetupInput{RequestID: "arranged-set-up", PlanDigest: view.Plan.Digest}
-	// Expired: the held selection is gone even though the review is stored.
-	start := f.now
-	f.now = start.Add(foldercontext.SelectionTTL)
-	if _, err := f.service.StartSetup(t.Context(), target.UserID, view.ID, input); err == nil {
-		t.Fatal("an expired held folder authorized Set up")
+	// Expiry restores only this saved review, without starting it.
+	f.now = f.now.Add(foldercontext.SelectionTTL)
+	if current, err := service.ReadReview(t.Context(), target, view.ID); err != nil || current.NeedsPick {
+		t.Fatalf("expired review not restored: %+v %v", current, err)
 	}
 	pending()
 	// Restarted: a new observation service holds no selection.
-	f.now = start
 	restarted := NewFolderObservationService(f.service)
 	restarted.ConfigureConversationReviews(permissive, lease)
-	if _, err := f.service.StartSetup(t.Context(), target.UserID, view.ID, input); err == nil {
-		t.Fatal("a restarted process confirmed a review it no longer holds")
+	if current, err := restarted.ReadReview(t.Context(), target, view.ID); err != nil || current.NeedsPick {
+		t.Fatalf("restarted review not restored: %+v %v", current, err)
 	}
 	pending()
-	// The same review in the live process still confirms exactly once.
-	service.ConfigureConversationReviews(permissive, lease)
+	// Set up after restart confirms exactly once.
 	if _, err := f.service.StartSetup(t.Context(), target.UserID, view.ID, input); err != nil {
 		t.Fatalf("live Set up: %v", err)
 	}

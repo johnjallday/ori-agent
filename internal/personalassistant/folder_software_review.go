@@ -245,7 +245,7 @@ func (s *FolderDigestService) recheckSoftwareEvidence(ctx context.Context, userI
 	if err != nil || validateSoftwareReview(&found.Review) != nil || found.Review.EvidenceRevision == "" {
 		return offer, false, ErrFolderOutcomeUnavailable
 	}
-	if _, _, err := s.softwareSubject(offer); err != nil {
+	if _, _, err := s.softwareSubject(userID, offer); err != nil {
 		return offer, false, err
 	}
 	s.holdEvidence(offer.ID, found.Evidence)
@@ -288,7 +288,7 @@ func (s *FolderDigestService) resolveSoftware(ctx context.Context, userID, offer
 		offer.Setup.Intent.Recipe == "" || offer.Setup.Intent.Software == nil {
 		return ErrFolderOfferDecided
 	}
-	path, identity, err := s.softwareSubject(*offer)
+	path, identity, err := s.softwareSubject(userID, *offer)
 	if err != nil {
 		return err
 	}
@@ -327,7 +327,7 @@ func (s *FolderDigestService) resolveSoftware(ctx context.Context, userID, offer
 // the workspaces that already cover it, and the review so far. It reads the
 // host's saved bindings; it never opens a file in the folder.
 func (s *FolderDigestService) softwareRequest(ctx context.Context, userID string, offer FolderOffer) (*FolderSoftwareRequest, error) {
-	_, identity, err := s.softwareSubject(offer)
+	_, identity, err := s.softwareSubject(userID, offer)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +462,7 @@ func (s *FolderDigestService) changeSoftwareReview(ctx context.Context, userID, 
 		if s.deps.InspectSoftware == nil {
 			return FolderOfferView{}, ErrFolderReviewUnavailable
 		}
-		path, _, subjectErr := s.softwareSubject(*offer)
+		path, _, subjectErr := s.softwareSubject(userID, *offer)
 		if subjectErr != nil {
 			return FolderOfferView{}, subjectErr
 		}
@@ -472,7 +472,7 @@ func (s *FolderDigestService) changeSoftwareReview(ctx context.Context, userID, 
 		}
 		// The folder is checked again after the read: a directory swapped in
 		// while it was being read is not the one the review is about.
-		if _, _, subjectErr := s.softwareSubject(*offer); subjectErr != nil {
+		if _, _, subjectErr := s.softwareSubject(userID, *offer); subjectErr != nil {
 			return FolderOfferView{}, subjectErr
 		}
 		if validateSoftwareReview(&found.Review) != nil || found.Review.EvidenceRevision == "" {

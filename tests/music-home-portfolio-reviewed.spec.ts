@@ -33,6 +33,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   request,
   browser
 }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
   const documents = join(sandbox, 'Documents');
   const songs: string[] = [];
   for (let i = 0; i < 5; i++) {
@@ -82,14 +83,14 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   const offerID = scanned.offer.id;
   await page.goto('/?panel=today&folder=show');
   const offerCard = page.locator('#personalAssistantFolderOffer');
-  // With the provider not installed yet the folder is first proposed as a plain
-  // group; listing it in the Home is the Adjust choice this suite takes.
-  await expect(offerCard).toContainText('Set up Documents as a group?');
-  await offerCard.getByRole('button', { name: 'Adjust…', exact: true }).click();
-  const sheet = offerCard.locator('[data-folder-adjust]').first();
-  await sheet.locator('input[type=radio][value=library]').check();
-  await sheet.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(offerCard).toContainText('5 music projects');
+  const today = page.locator('#personalAssistantTodayStripToggle');
+  if ((await today.getAttribute('aria-expanded')) === 'false') await today.click();
+  await expect(offerCard).toBeVisible();
+  // The collection already proposes its shape's Home, even before the
+  // provider is installed. Missing packages retain the reviewed, step-by-step
+  // path below; choosing a plain group would be a different operation.
+  await expect(offerCard).toContainText('Observed 5 REAPER session folders.');
+  await expect(offerCard).toContainText('Set up one Music Production Home for these projects?');
   await shot(page, '16-reviewed-release-offer');
   const disclosures: string[] = [];
   page.on('dialog', async dialog => {
@@ -159,6 +160,13 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await shot(page, '19-reviewed-home-before-library-consent');
   // The card's button announced that it starts the library for this collection,
   // so the exact folder's own review follows directly.
+  // Closing the automatically opened manager intentionally moves focus away
+  // from the continuation heading; assert its initial focus above first.
+  if (await page.locator('#personalAssistantPanel').isVisible()) {
+    await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  }
+  await setupCard.evaluate(node => node.scrollIntoView({ block: 'center' }));
   await setupCard.locator('#projectSetupNextAction').click();
   const grant = page.getByRole('dialog', { name: 'Connect this discovery folder?' });
   await expect(grant).toContainText(documents);

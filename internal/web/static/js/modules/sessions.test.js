@@ -9364,9 +9364,62 @@ test('a refused Set it up says why and does not follow anything', async () => {
   };
   build.session.setup = { plan_digest: 'run-digest' };
   await manager.setUpWorkspaceBuild({ entry_name: 'Take Two.rpp' });
+  build.session.setup_run = { plan_digest: 'chosen-digest', entry_name: 'Take Two.rpp' };
+  await manager.setUpWorkspaceBuild({});
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
-    { version: 4, plan_digest: 'run-digest', entry_name: 'Take Two.rpp' }
+    { version: 4, plan_digest: 'run-digest', entry_name: 'Take Two.rpp' },
+    { version: 4, plan_digest: 'chosen-digest', entry_name: 'Take Two.rpp' }
   ]);
+});
+
+test('a build file choice saves a fresh plan without setup or another model turn', async () => {
+  const manager = loadSessionManager();
+  const lines = [];
+  manager.workspaceBuildPane = () => ({ setBusy() {}, showLine: line => lines.push(line) });
+  manager.syncWorkspaceBuildPresentation = () => {};
+  const build = plannedBuild();
+  build.session.id = 'build-entry';
+  build.session.version = 4;
+  build.session.plan = {
+    ...build.session.plan,
+    digest: 'before',
+    entry_name: 'Song.rpp',
+    entry_candidates: ['Song.rpp', 'Alternate.rpp']
+  };
+  manager.workspaceBuild = build;
+  let flushed = false;
+  manager.flushWorkspaceBuildDraft = async () => {
+    flushed = true;
+  };
+  manager.adoptWorkspaceBuildSession = session => {
+    build.session = session;
+  };
+  const sent = [];
+  manager.workspaceBuildTransport = {
+    entry: async (id, body) => {
+      assert.equal(flushed, true);
+      sent.push({ id, ...body });
+      return {
+        ok: true,
+        body: {
+          session: {
+            ...build.session,
+            version: 5,
+            plan: { ...build.session.plan, digest: 'after', entry_name: 'Alternate.rpp' }
+          }
+        }
+      };
+    },
+    setup: () => assert.fail('choosing started setup'),
+    turn: () => assert.fail('choosing added a model turn')
+  };
+  await manager.chooseWorkspaceBuildEntry('Alternate.rpp');
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    { id: 'build-entry', version: 4, plan_digest: 'before', entry_name: 'Alternate.rpp' }
+  ]);
+  assert.equal(build.session.plan.entry_name, 'Alternate.rpp');
+  assert.equal(build.session.setup, undefined);
+  assert.deepEqual(lines, []);
 });
 
 test('Hire and start sends the brief the pane shows, from either button', async () => {
@@ -9468,6 +9521,23 @@ test('build model recheck updates only readiness and preserves its separate exac
   build.session.setup = { plan_digest: 'accepted' };
   await manager.recheckWorkspaceBuild();
   assert.equal(reads.length, 1, 'accepted work cannot recheck into a new plan');
+});
+
+test('a retained build review clears an obsolete folder deadline without changing the draft', async () => {
+  const { manager, build, applied } = readinessBuild();
+  build.session.folder_expires_at = new Date(Date.now() + 60000).toISOString();
+  const draft = JSON.stringify(build.session.draft);
+  const fresh = { ...build.session };
+  delete fresh.folder_expires_at;
+  delete fresh.folder_needs_pick_reason;
+  manager.workspaceBuildTransport = { read: async () => ({ ok: true, body: { session: fresh } }) };
+  assert.equal(manager.workspaceBuildFolderSelectionExpired(build), false);
+  await manager.recheckWorkspaceBuild();
+  assert.equal(applied.length, 1);
+  assert.equal(manager.workspaceBuildFolderSelectionExpired(build), false);
+  assert.equal(build.session.folder_expires_at, undefined);
+  assert.equal(build.session.folder_needs_pick_reason, undefined);
+  assert.equal(JSON.stringify(build.session.draft), draft);
 });
 
 test('late and failed build readiness reads cannot overwrite newer drafts or enable stale setup', async () => {
@@ -9865,6 +9935,31 @@ test('attachment suggests once; cancelled picking restores its trigger without s
     assert.equal(suggestions, cancelled ? 0 : 1);
     assert.equal(restored, cancelled && !movedFocus ? 1 : 0);
   }
+});
+
+test('a build re-pick redraws the same review without another model suggestion', async () => {
+  const { manager, nameInput } = prepareProposalWizard();
+  const build = manager.workspaceBuild;
+  build.session.proposal = null;
+  const draft = JSON.stringify(build.session.draft);
+  const folder = JSON.stringify(build.session.folder);
+  const name = nameInput.value;
+  manager.workspaceBuildApi = () => ({
+    folder: async () => ({
+      ok: true,
+      body: {
+        session: { ...build.session, version: build.session.version + 2 },
+        resumed_review: 'same-review'
+      }
+    })
+  });
+  manager.suggestWorkspaceBuildFolder = () =>
+    assert.fail('recovery must not admit another suggestion');
+  await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+  assert.equal(JSON.stringify(build.session.draft), draft);
+  assert.equal(JSON.stringify(build.session.folder), folder);
+  assert.equal(nameInput.value, name);
+  assert.equal(build.folderPending, false);
 });
 
 test('attachment delivery during the hide transition cannot admit inference or revive the review', async () => {

@@ -326,7 +326,105 @@
     };
   }
 
+  const entryChoices = new WeakMap();
+  let entryChoiceID = 0;
+
+  function entryChoiceView(plan) {
+    const name = typeof plan?.entry_name === 'string' ? plan.entry_name : '';
+    const candidates = [
+      ...new Set(
+        (Array.isArray(plan?.entry_candidates) ? plan.entry_candidates : [])
+          .filter(value => typeof value === 'string' && value)
+          .slice(0, 64)
+      )
+    ];
+    return {
+      visible: Boolean(name && (!candidates.length || candidates.includes(name))),
+      name,
+      candidates: candidates.length > 1 ? candidates : []
+    };
+  }
+
+  // Native radios keep their identity across saves/renders, so arrow keys and
+  // focus keep working. Filenames are text and values, never markup or links.
+  function renderEntryChoice(container, plan, options = {}, doc = document) {
+    if (!container) return;
+    const view = entryChoiceView(options.readOnly ? { ...plan, entry_candidates: [] } : plan);
+    container.hidden = !view.visible;
+    if (!view.visible) return;
+    const candidates = options.readOnly ? [] : view.candidates;
+    const key = JSON.stringify(candidates);
+    let state = entryChoices.get(container);
+    if (!state || state.key !== key) {
+      container.replaceChildren();
+      state = { key, inputs: [], focused: null };
+      if (candidates.length) {
+        state.fieldset = doc.createElement('fieldset');
+        state.fieldset.className = 'folder-entry-choice';
+        const legend = doc.createElement('legend');
+        legend.textContent = 'Which file is the song?';
+        state.fieldset.append(legend);
+        const group = `folder-entry-${++entryChoiceID}`;
+        for (const name of candidates) {
+          const label = doc.createElement('label');
+          label.className = 'folder-entry-choice__option';
+          const input = doc.createElement('input');
+          input.type = 'radio';
+          input.name = group;
+          input.value = name;
+          const text = doc.createElement('span');
+          text.textContent = name;
+          label.append(input, text);
+          state.fieldset.append(label);
+          state.inputs.push(input);
+        }
+        container.append(state.fieldset);
+      } else {
+        state.caption = doc.createElement('p');
+        state.caption.className = 'folder-entry-choice__caption';
+        container.append(state.caption);
+      }
+      entryChoices.set(container, state);
+    }
+    if (state.caption) {
+      const missing =
+        options.readOnly &&
+        plan?.stop_reason === 'needs_choice' &&
+        !plan?.entry_candidates?.includes(view.name);
+      state.caption.textContent = `${missing ? 'Previously chose' : 'Opens'} ${view.name}`;
+    }
+    if (state.fieldset) {
+      if (options.disabled && state.inputs.includes(doc.activeElement))
+        state.focused = doc.activeElement;
+      state.fieldset.disabled = Boolean(options.disabled);
+      // Keep the native click/arrow selection visible while its save is busy.
+      // The canonical reply wins when editing resumes, including on refusal.
+      const selected = options.disabled && state.pending ? state.pending : view.name;
+      if (!options.disabled) state.pending = '';
+      for (const input of state.inputs) {
+        input.checked = input.value === selected;
+        input.onchange = () => {
+          if (!options.disabled && input.checked && input.value !== view.name) {
+            state.pending = input.value;
+            options.onChange?.(input.value);
+          }
+        };
+      }
+      if (!options.disabled && state.focused) {
+        if (
+          !doc.activeElement ||
+          doc.activeElement === doc.body ||
+          state.inputs.includes(doc.activeElement)
+        )
+          state.focused.focus?.({ preventScroll: true });
+        state.focused = null;
+      }
+    }
+  }
+
   globalThis.OriFolderPlanLines = {
+    entryChoiceView,
+    renderEntryChoice,
     setupLinesView,
     satisfiedLinesView,
     handoffSections,

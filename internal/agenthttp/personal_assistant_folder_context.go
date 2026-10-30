@@ -214,6 +214,13 @@ func strictFolderBodyWithin(w http.ResponseWriter, r *http.Request, out any, lim
 }
 
 func writeFolderError(w http.ResponseWriter, err error) {
+	if errors.Is(err, personalassistant.ErrFolderPathLost) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": PersonalAssistantFolderUnavailable, "message": "That folder is not the one this review expects. Pick the original folder again.",
+			"needs_pick": true, "needs_pick_reason": personalassistant.FolderPickReason(err),
+		})
+		return
+	}
 	code, message := PersonalAssistantFolderUnavailable, "That folder selection is unavailable. Pick again; your message and previous folder have not been replaced."
 	if errors.Is(err, ErrPersonalAssistantFolderConflict) {
 		code, message = PersonalAssistantFolderConflict, "This conversation changed in another request. Reopen it before changing or sending folder context. Your draft is still here."
@@ -327,6 +334,29 @@ func (h *HomeAssistantAskHandler) SelectFolderContextHandler(w http.ResponseWrit
 	if err != nil {
 		writeFolderError(w, err)
 		return
+	}
+	// An explicit pick of the original directory resumes the canonical review
+	// before any retirement. Keep its dated observation and event revision;
+	// recovery is neither another conversation turn nor setup consent.
+	if observation != nil && current.OfferID != "" && current.Observation != nil {
+		if resumes, ok := h.FolderSetups.(interface {
+			ResumeReviewPick(context.Context, foldercontext.Target, string, string) (*personalassistant.FolderOfferView, error)
+		}); ok {
+			offer, resumeErr := resumes.ResumeReviewPick(r.Context(), target, current.OfferID, observation.ID)
+			if resumeErr != nil {
+				writeFolderReviewError(w, resumeErr)
+				return
+			}
+			if offer != nil {
+				current.Historical = true
+				current.Authority = h.FolderObservations.Status(r.Context(), target, *current.Observation)
+				orihttp.WriteJSON(w, map[string]any{
+					"observation": current.Observation, "revision": current.Revision,
+					"folder_context": current, "resumed_review": offer,
+				})
+				return
+			}
+		}
 	}
 	// A valid replacement immediately retires the previous active binding and
 	// its unconfirmed setup reviews. The new metadata remains a local preview

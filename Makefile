@@ -313,7 +313,7 @@ lint-fix: ## Auto-fix lint issues where possible (gofmt rewrites + golangci-lint
 
 test-js: ## Run JS unit tests (Node 18+ built-in test runner; no npm install needed)
 	@echo "$(BLUE)Running JS unit tests...$(NC)"
-	$(TEST_RUNNER) node --test internal/web/static/js/modules/*.test.js
+	$(TEST_RUNNER) node --test internal/web/static/js/modules/*.test.js scripts/e2e-fresh.test.mjs
 	@echo "$(GREEN)✓ JS tests passed$(NC)"
 
 test-clean-test-artifacts: ## Test the temp artifact cleanup script in an isolated directory

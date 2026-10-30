@@ -28,7 +28,8 @@ import {
   finishedRunWorkspace,
   arrangedStructure,
   conversationFolderOfferView,
-  sourceCreationReviewKey
+  sourceCreationReviewKey,
+  setupEntryName
 } from './personal-assistant-folder.js';
 
 // A finished Explore run is drawn where the Map's automatic layout puts it:
@@ -1336,6 +1337,19 @@ test('every stop reason says in one plain sentence what finished and what is nee
   }
 });
 
+test('a restored Home review offers Continue rather than another folder pick', () => {
+  // The server projects an old needs_pick stop as interrupted once its
+  // canonical folder is usable again. The stored run and progress remain.
+  const view = folderOfferView({ ...stoppedOffer('interrupted'), needs_pick: false });
+  assert.equal(view.actions.find(action => action.id === 'resume')?.label, 'Continue setup');
+  assert.equal(
+    view.actions.some(action => action.id === 'pick'),
+    false
+  );
+  assert.doesNotMatch(view.question, /Pick it again|restarted|expired/);
+  assert.equal(view.resume, true);
+});
+
 test('a stopped collection says what is true for a collection', () => {
   const view = folderOfferView({
     ...stoppedOffer('needs_model'),
@@ -1541,10 +1555,10 @@ test('a project without a marker or a blueprint is still a plan, and a missing b
 test('an offer whose folder the server no longer holds asks for it again before any yes', () => {
   const view = folderOfferView({ ...thesisOffer, needs_pick: true });
   assert.equal(headlineText(view), 'Thesis looks like a LaTeX manuscript.');
-  assert.match(view.question, /Pick the folder again/);
+  assert.match(view.question, /Pick it again/);
   assert.deepEqual(
     view.actions.map(a => a.id),
-    ['repick', 'no', 'later']
+    ['repick']
   );
   assert.equal(view.actions[0].repick, true);
   assert.equal(view.confirming, false);
@@ -1894,7 +1908,14 @@ test('Set up sends only the plan digest and a chosen file name, and polls while 
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
   assert.match(source, /postOffer\(offer\.id, 'setup', body\)/);
   assert.match(source, /const body = \{ plan_digest: digest \}/);
-  assert.match(source, /body\.entry_name = action\.entry/);
+  assert.match(source, /body\.entry_name = entryName/);
+  assert.equal(setupEntryName({ plan: { entry_name: 'Song.rpp' } }), 'Song.rpp');
+  assert.equal(setupEntryName({ setup: { entry_name: 'Kept.rpp' } }), 'Kept.rpp');
+  assert.equal(
+    setupEntryName({ setup: { entry_name: 'Kept.rpp' } }, { entry: 'Other.rpp' }),
+    'Other.rpp'
+  );
+  assert.equal(setupEntryName({}), '');
   assert.match(source, /offer\.plan\?\.digest \|\| offer\.setup\?\.plan_digest/);
   // Polling uses the tested run/awaiting-receipt predicate, never idle offers.
   assert.match(source, /if \(folderSetupPolling\(state\.offer\)\) return pollSetup\(\)/);

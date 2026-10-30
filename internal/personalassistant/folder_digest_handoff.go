@@ -45,7 +45,7 @@ func (s *FolderDigestService) ResolveHandoff(ctx context.Context, userID, offerI
 		if receipt.OfferID != offerID || receipt.Action != "handoff" {
 			return FolderOfferView{}, ErrFolderOfferDecided
 		}
-		return s.view(ctx, *offer, binding.Paused), nil
+		return s.view(ctx, userID, *offer, binding.Paused), nil
 	}
 	if offer.Status != FolderOfferAwaitingOutcome || offer.Choice != FolderChoiceProject || offer.DecidedAt == nil ||
 		offer.CapabilitySuppressed || !isHandoffSetup(*offer) || strings.TrimSpace(offer.Setup.HomeID) == "" {
@@ -55,7 +55,7 @@ func (s *FolderDigestService) ResolveHandoff(ctx context.Context, userID, offerI
 	if !ok || row.Offer == nil {
 		return FolderOfferView{}, ErrFolderOfferDecided
 	}
-	path, err := s.subjectPathOf(*offer)
+	path, err := s.subjectPathOf(userID, *offer)
 	if err != nil {
 		return FolderOfferView{}, err
 	}
@@ -90,5 +90,5 @@ func (s *FolderDigestService) ResolveHandoff(ctx context.Context, userID, offerI
 		return FolderOfferView{}, err
 	}
 	resolved = s.afterOutcome(ctx, userID, resolved)
-	return s.view(ctx, resolved, binding.Paused), nil
+	return s.view(ctx, userID, resolved, binding.Paused), nil
 }

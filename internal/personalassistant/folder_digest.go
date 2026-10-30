@@ -577,7 +577,7 @@ type FolderDigestService struct {
 
 	// Conversation offers never reconstruct a chip path or outlive their
 	// canonical review authority. Wired once alongside the observation service.
-	conversationSource func(FolderOffer) (string, bool)
+	conversationSource func(FolderOffer) (string, FolderContinuationReason)
 	conversationLease  func(context.Context, FolderOffer) (func(), error)
 
 	mu       sync.Mutex
@@ -693,13 +693,14 @@ type FolderOfferView struct {
 	// Remember says whether the card may promise "I will also remember"
 	// (FR22, FR39, FR52).
 	Remember bool `json:"remember"`
-	// NeedsPick is set when the offer's folder path is no longer known
-	// (a restart after a picker-chosen folder) and a yes needs the user to
-	// pick it again.
-	NeedsPick bool           `json:"needs_pick,omitempty"`
-	Decision  string         `json:"decision,omitempty"`
-	Choice    string         `json:"choice,omitempty"`
-	Outcome   *FolderOutcome `json:"outcome,omitempty"`
+	// NeedsPick is set when the server cannot verify this offer's folder.
+	// An intact, privately retained review survives expiry and restart;
+	// genuine loss requires another explicit pick.
+	NeedsPick       bool                     `json:"needs_pick,omitempty"`
+	NeedsPickReason FolderContinuationReason `json:"needs_pick_reason,omitempty"`
+	Decision        string                   `json:"decision,omitempty"`
+	Choice          string                   `json:"choice,omitempty"`
+	Outcome         *FolderOutcome           `json:"outcome,omitempty"`
 	// Blueprint is the id the Create Workspace modal should preselect for a
 	// project outcome; empty means the blank workspace. BlueprintNote is the
 	// one-line fallback explanation when the preferred blueprint is not
@@ -1152,22 +1153,6 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	// Native picker paths intentionally are not persisted. After a restart the
-	// user can re-pick the same canonical root to resume a confirmed journey;
-	// do not replace that pending offer or silently adopt a different folder.
-	if chip == "" {
-		doc, readErr := s.store.Read(ctx, userID)
-		if readErr != nil {
-			return FolderOfferView{}, readErr
-		}
-		for _, prior := range doc.Offers {
-			if prior.FolderKey == FolderKey(root) && prior.Status == FolderOfferAwaitingOutcome {
-				s.rememberPath(prior.ID, root)
-				view := s.viewFor(ctx, userID, prior, binding.Paused)
-				return view, nil
-			}
-		}
-	}
 
 	s.mu.Lock()
 	if s.scanning[userID] {
@@ -1182,8 +1167,8 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		s.mu.Unlock()
 	}()
 
-	// A portfolio offer may later hand off this server-held source to the
-	// library. Record its directory identity before and after the scan so a
+	// Every open Home offer may recover its saved source. Record directory
+	// identity before and after the scan so a
 	// replacement at the same path cannot inherit the original selection.
 	beforeIdentity, _ := portfolioDirectoryIdentity(root)
 	result, err := s.deps.Scan(root)
@@ -1197,11 +1182,21 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 			return FolderOfferView{}, &FolderRootError{Message: "Ori could not open that folder. Choose a different folder."}
 		}
 	}
+	afterIdentity, identityErr := portfolioDirectoryIdentity(root)
+	if (identityErr != nil && !errors.Is(identityErr, projectlibrary.ErrUnavailable)) ||
+		(beforeIdentity != "" && beforeIdentity != afterIdentity) {
+		return FolderOfferView{}, folderPickError{reason: FolderContinuationChanged, cause: ErrFolderPathLost}
+	}
 	// The scan itself never writes into the folder; the only write below is
 	// the decision record under the HQ (FR50).
 	doc, err := s.store.Read(ctx, userID)
 	if err != nil {
 		return FolderOfferView{}, err
+	}
+	if resumed, resumeErr := s.resumeHomePick(ctx, userID, doc, result, root, afterIdentity, binding.Paused); resumeErr != nil {
+		return FolderOfferView{}, resumeErr
+	} else if resumed != nil {
+		return *resumed, nil
 	}
 	now := s.now()
 	verdict := folderdigest.Exclude(result, now, func(c folderdigest.Candidate) bool {
@@ -1212,6 +1207,7 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		verdict, fileShape = fileVerdict(verdict, pickedFile, now)
 	}
 	offer := buildFolderOffer(verdict, result, chip, now, s.deps.NewID())
+	offer.RootIdentity = afterIdentity
 	// A whole collection is one Home question, not the first of seven
 	// per-project questions. An unreadable Home suppresses it. An existing Home
 	// turns it into "add this collection to your Home", never a second Home.
@@ -1324,6 +1320,7 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		}
 	}
 
+	s.witnessSoftwareSubject(&offer, homePathEntry(offer, root).CandidatePath)
 	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
 		if legacyDeclined && d.DeclineFor(domain) == nil {
 			d.DomainDeclines = append(d.DomainDeclines, FolderDomainDecline{
@@ -1341,6 +1338,9 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		// Showing a second folder replaces the pending offer; the earlier
 		// one becomes "later" (FR8).
 		if pending := d.Pending(); pending != nil && offer.Status == FolderOfferPending {
+			if pending.ConversationReview != nil {
+				return ErrFolderReviewPending
+			}
 			until := now.Add(FolderLaterDelay)
 			pending.Status = FolderOfferLater
 			pending.LaterUntil = &until
@@ -1352,10 +1352,12 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	s.rememberPath(offer.ID, root)
 	stored := updated.Offer(offer.ID)
 	if stored == nil {
 		stored = &offer
+	}
+	if err := s.rememberHomePath(ctx, userID, *stored, root); err != nil {
+		return FolderOfferView{}, err
 	}
 	return s.viewFor(ctx, userID, *stored, binding.Paused), nil
 }
@@ -1412,6 +1414,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	// and a retried click can try again (FR33).
 	var tidy *FolderTidyResult
 	var created *FolderCreateResult
+	var confirmedRoot string
 	doc, err := s.store.Read(ctx, userID)
 	if err != nil {
 		return FolderOfferView{}, err
@@ -1463,8 +1466,10 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 			return FolderOfferView{}, ErrFolderOutcomeUnavailable
 		}
 		if receipt := doc.Receipt(input.RequestID); receipt == nil && offer.Status == FolderOfferPending {
-			if _, ok := s.rootPath(*offer); !ok {
-				return FolderOfferView{}, ErrFolderPathLost
+			var loss FolderContinuationReason
+			confirmedRoot, loss = s.rootPathReason(userID, *offer)
+			if loss != "" {
+				return FolderOfferView{}, folderPickError{reason: loss, cause: ErrFolderPathLost}
 			}
 			choice, err := folderOfferChoice(*offer, input.Choice)
 			if err != nil {
@@ -1563,6 +1568,9 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 			if err := applyFolderChoice(offer, choice); err != nil {
 				return err
 			}
+			if offer.ConversationReview == nil {
+				s.witnessSoftwareSubject(offer, homePathEntry(*offer, confirmedRoot).CandidatePath)
+			}
 			if tidy != nil {
 				// The tidy already ran: the offer is resolved in the same
 				// request, with the File Janitor route to open.
@@ -1601,6 +1609,11 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	}
 	if err == nil && resolvedNow {
 		result = s.afterOutcome(ctx, userID, result)
+	}
+	if confirmedRoot != "" {
+		if err := s.rememberHomePath(ctx, userID, result, confirmedRoot); err != nil {
+			return FolderOfferView{}, err
+		}
 	}
 	return s.viewFor(ctx, userID, result, binding.Paused), nil
 }
@@ -1750,7 +1763,7 @@ func (s *FolderDigestService) runCreate(ctx context.Context, userID string, offe
 	if s.deps.Creator == nil {
 		return FolderCreateResult{}, ErrFolderOutcomeUnavailable
 	}
-	path, err := s.subjectPathOf(offer)
+	path, err := s.subjectPathOf(userID, offer)
 	if err != nil {
 		return FolderCreateResult{}, err
 	}
@@ -1782,7 +1795,7 @@ func (s *FolderDigestService) runTidy(ctx context.Context, userID string, offer 
 	if s.deps.Tidier == nil {
 		return FolderTidyResult{}, ErrFolderOutcomeUnavailable
 	}
-	root, ok := s.rootPath(offer)
+	root, ok := s.rootPath(userID, offer)
 	if !ok {
 		return FolderTidyResult{}, ErrFolderPathLost
 	}
@@ -1856,13 +1869,13 @@ func (s *FolderDigestService) SubjectPath(ctx context.Context, userID, offerID s
 	if offer == nil {
 		return "", ErrFolderOfferNotFound
 	}
-	return s.subjectPathOf(*offer)
+	return s.subjectPathOf(userID, *offer)
 }
 
-func (s *FolderDigestService) subjectPathOf(offer FolderOffer) (string, error) {
-	root, ok := s.rootPath(offer)
-	if !ok {
-		return "", ErrFolderPathLost
+func (s *FolderDigestService) subjectPathOf(userID string, offer FolderOffer) (string, error) {
+	root, reason := s.rootPathReason(userID, offer)
+	if reason != "" {
+		return "", folderPickError{reason: reason, cause: ErrFolderPathLost}
 	}
 	if offer.Subject.IsRoot || offer.Subject.RelPath == "" {
 		return root, nil
@@ -1891,7 +1904,7 @@ func (s *FolderDigestService) ProjectSelectionPath(ctx context.Context, userID, 
 	if !ok || row.Offer == nil {
 		return "", ErrFolderOfferDecided
 	}
-	return s.subjectPathOf(*offer)
+	return s.subjectPathOf(userID, *offer)
 }
 
 // Resolve completes a project outcome: the modal reported that a workspace
@@ -1931,11 +1944,11 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 		if receipt.OfferID != offerID {
 			return FolderOfferView{}, ErrFolderOfferDecided
 		}
-		return s.view(ctx, *offer, binding.Paused), nil
+		return s.view(ctx, userID, *offer, binding.Paused), nil
 	}
 	if offer.Status == FolderOfferResolved {
 		if offer.Outcome != nil && offer.Outcome.WorkspaceID == input.WorkspaceID {
-			return s.view(ctx, *offer, binding.Paused), nil
+			return s.view(ctx, userID, *offer, binding.Paused), nil
 		}
 		return FolderOfferView{}, ErrFolderOfferDecided
 	}
@@ -1953,7 +1966,7 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 	if s.deps.Linker == nil {
 		return FolderOfferView{}, ErrFolderOutcomeUnavailable
 	}
-	path, err := s.subjectPathOf(*offer)
+	path, err := s.subjectPathOf(userID, *offer)
 	if err != nil {
 		return FolderOfferView{}, err
 	}
@@ -1996,7 +2009,7 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 			resolved = s.afterOutcome(ctx, userID, *stored)
 		}
 	}
-	return s.view(ctx, resolved, binding.Paused), nil
+	return s.view(ctx, userID, resolved, binding.Paused), nil
 }
 
 // ResolvePortfolio verifies a just-created independent Home against its
@@ -2028,7 +2041,7 @@ func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offe
 		if receipt.OfferID != offerID || receipt.Action != "portfolio" {
 			return FolderOfferView{}, ErrFolderOfferDecided
 		}
-		return s.view(ctx, *offer, binding.Paused), nil
+		return s.view(ctx, userID, *offer, binding.Paused), nil
 	}
 	// An add-to-my-Home offer resolves only through ResolveExistingHome, which
 	// re-reads the Home itself; a browser-supplied Home ID never applies to it.
@@ -2060,7 +2073,7 @@ func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offe
 	}
 	// A portfolio Home is not a project workspace and must not enter the
 	// dossier's folder→project fact or first-project mission observers.
-	return s.view(ctx, resolved, binding.Paused), nil
+	return s.view(ctx, userID, resolved, binding.Paused), nil
 }
 
 // existingHomeReadable reports whether the owner's existing Home can be read
@@ -2099,7 +2112,7 @@ func (s *FolderDigestService) ResolveExistingHome(ctx context.Context, userID, o
 		if receipt.OfferID != offerID || receipt.Action != "existing_home" {
 			return FolderOfferView{}, ErrFolderOfferDecided
 		}
-		return s.view(ctx, *offer, binding.Paused), nil
+		return s.view(ctx, userID, *offer, binding.Paused), nil
 	}
 	if offer.Status != FolderOfferAwaitingOutcome || offer.Portfolio == nil || !offer.Portfolio.ExistingHome ||
 		offer.CapabilitySuppressed || offer.DecidedAt == nil {
@@ -2127,7 +2140,7 @@ func (s *FolderDigestService) ResolveExistingHome(ctx context.Context, userID, o
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	return s.view(ctx, resolved, binding.Paused), nil
+	return s.view(ctx, userID, resolved, binding.Paused), nil
 }
 
 // finishedSetupReceipt is the receipt a finished one-card collection run read
@@ -2136,7 +2149,7 @@ func finishedSetupReceipt(offer *FolderOffer) []FolderReceiptRow {
 	if offer == nil || offer.Setup == nil || offer.Setup.Status != FolderSetupDone {
 		return nil
 	}
-	return append([]FolderReceiptRow(nil), offer.Setup.Receipt...)
+	return folderSetupEntryReceipt(offer, append([]FolderReceiptRow(nil), offer.Setup.Receipt...))
 }
 
 const portfolioRootHandoffTTL = 30 * time.Minute
@@ -2162,7 +2175,7 @@ func (s *FolderDigestService) PortfolioRoot(ctx context.Context, userID, offerID
 		offer.Outcome.WorkspaceID != homeID || !offer.Subject.IsRoot {
 		return "", "", ErrFolderWorkspaceRefused
 	}
-	canonical, identity, loss := s.portfolioSource(*offer)
+	canonical, identity, loss := s.portfolioSource(userID, *offer)
 	if loss != "" {
 		return "", "", ErrFolderPathLost
 	}
@@ -2193,12 +2206,12 @@ func (s *FolderDigestService) PortfolioSetupRoot(ctx context.Context, userID, of
 	if offer.Portfolio == nil {
 		// A single song its Home's manager opens: the root is the song's own
 		// folder (3A), never the folder it was found in.
-		return s.heldSongFolder(*offer)
+		return s.heldSongFolder(userID, *offer)
 	}
 	if !offer.Subject.IsRoot {
 		return "", "", ErrFolderWorkspaceRefused
 	}
-	canonical, identity, loss := s.heldPortfolioFolder(*offer)
+	canonical, identity, loss := s.heldPortfolioFolder(userID, *offer)
 	if loss != "" {
 		return "", "", ErrFolderPathLost
 	}
@@ -2208,20 +2221,20 @@ func (s *FolderDigestService) PortfolioSetupRoot(ctx context.Context, userID, of
 // portfolioSource decides whether a resolved collection offer's server-held
 // folder is still the one the user chose, and if not, why. PortfolioRoot and the
 // read-only continuation projection share it so they cannot disagree.
-func (s *FolderDigestService) portfolioSource(offer FolderOffer) (root, identity string, loss FolderContinuationReason) {
+func (s *FolderDigestService) portfolioSource(userID string, offer FolderOffer) (root, identity string, loss FolderContinuationReason) {
 	if offer.ResolvedAt == nil || s.now().Before(*offer.ResolvedAt) ||
 		s.now().Sub(*offer.ResolvedAt) > portfolioRootHandoffTTL {
 		return "", "", FolderContinuationExpired
 	}
-	return s.heldPortfolioFolder(offer)
+	return s.heldPortfolioFolder(userID, offer)
 }
 
 // heldPortfolioFolder is the server-held collection folder when it is still the
 // exact directory the scan saw (canonical path and directory identity).
-func (s *FolderDigestService) heldPortfolioFolder(offer FolderOffer) (root, identity string, loss FolderContinuationReason) {
-	held, ok := s.rootPath(offer)
-	if !ok {
-		return "", "", FolderContinuationLost
+func (s *FolderDigestService) heldPortfolioFolder(userID string, offer FolderOffer) (root, identity string, loss FolderContinuationReason) {
+	held, reason := s.rootPathReason(userID, offer)
+	if reason != "" {
+		return "", "", reason
 	}
 	canonical, err := s.deps.ValidateRoot(held)
 	if err != nil || canonical != held || FolderKey(canonical) != offer.FolderKey || offer.RootIdentity == "" {
@@ -2238,13 +2251,13 @@ func (s *FolderDigestService) heldPortfolioFolder(offer FolderOffer) (root, iden
 // run's plan opens exactly that song and the server-held folder is still the
 // one the scan named (its canonical path's key). Its directory identity is read
 // now and pins the folder from here on.
-func (s *FolderDigestService) heldSongFolder(offer FolderOffer) (string, string, error) {
+func (s *FolderDigestService) heldSongFolder(userID string, offer FolderOffer) (string, string, error) {
 	opens := offer.Setup.Intent.OpensProjects
 	if !offer.Setup.Intent.Portfolio || len(opens) != 1 || opens[0] != offer.Subject.Name ||
 		offer.Subject.Kind != FolderChoiceProject || offer.Choice != FolderChoiceProject {
 		return "", "", ErrFolderWorkspaceRefused
 	}
-	path, err := s.subjectPathOf(offer)
+	path, err := s.subjectPathOf(userID, offer)
 	if err != nil {
 		return "", "", ErrFolderPathLost
 	}
@@ -2283,7 +2296,7 @@ func (s *FolderDigestService) PortfolioProvider(ctx context.Context, userID, off
 		return "", ErrFolderOfferDecided
 	}
 	if offer.ConversationReview != nil {
-		if _, ok := s.rootPath(*offer); !ok {
+		if _, ok := s.rootPath(userID, *offer); !ok {
 			return "", ErrFolderSelection
 		}
 	}
@@ -2348,7 +2361,7 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 		if receipt.OfferID != offerID || receipt.Action != "journey" {
 			return FolderOfferView{}, ErrFolderOfferDecided
 		}
-		return s.view(ctx, *offer, binding.Paused), nil
+		return s.view(ctx, userID, *offer, binding.Paused), nil
 	}
 	if offer.Status != FolderOfferAwaitingOutcome || offer.Choice != FolderChoiceProject || offer.DecidedAt == nil || offer.Portfolio != nil {
 		return FolderOfferView{}, ErrFolderOfferDecided
@@ -2357,7 +2370,7 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 	if !ok {
 		return FolderOfferView{}, ErrFolderOfferDecided
 	}
-	path, err := s.subjectPathOf(*offer)
+	path, err := s.subjectPathOf(userID, *offer)
 	if err != nil {
 		return FolderOfferView{}, err
 	}
@@ -2373,7 +2386,7 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 	if offer.Setup != nil {
 		brief = offer.Setup.Brief
 	}
-	verified.Receipt = s.withFirstTask(ctx, userID, offer.Subject.Shape, brief, verified)
+	verified.Receipt = folderSetupEntryReceipt(offer, s.withFirstTask(ctx, userID, offer.Subject.Shape, brief, verified))
 	now := s.now()
 	var resolved FolderOffer
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
@@ -2395,7 +2408,7 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 		return FolderOfferView{}, err
 	}
 	resolved = s.afterOutcome(ctx, userID, resolved)
-	return s.view(ctx, resolved, binding.Paused), nil
+	return s.view(ctx, userID, resolved, binding.Paused), nil
 }
 
 // afterOutcome runs the best-effort observers of a completed outcome: the
@@ -2573,7 +2586,7 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 	if parent == nil {
 		return nil, nil
 	}
-	parentRoot, ok := s.rootPath(*parent)
+	parentRoot, ok := s.rootPath(userID, *parent)
 	if !ok {
 		return nil, nil
 	}
@@ -2605,7 +2618,7 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 		}
 		offer := FolderOffer{
 			ID: nextID, Status: FolderOfferPending, Chip: p.Chip,
-			FolderKey: p.FolderKey, FolderName: p.FolderName,
+			FolderKey: p.FolderKey, FolderName: p.FolderName, RootIdentity: p.RootIdentity,
 			Reason: next.Reason, Partial: p.Partial, ScannedAt: p.ScannedAt,
 			Subject: *next, Queue: rest, CreatedAt: now,
 		}
@@ -2626,6 +2639,7 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 			offer.Enclosing = s.enclosingHint(next.Repository, subjectPath)
 			s.witnessSoftwareSubject(&offer, subjectPath)
 		}
+		s.witnessSoftwareSubject(&offer, homePathEntry(offer, parentRoot).CandidatePath)
 		d.Offers = append(d.Offers, offer)
 		pruneFolderDigest(d)
 		return nil
@@ -2636,8 +2650,8 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 		}
 		return nil, err
 	}
-	if root, ok := s.rootPath(*parent); ok {
-		s.rememberPath(nextID, root)
+	if err := s.rememberHomePath(ctx, userID, *updated.Offer(nextID), parentRoot); err != nil {
+		return nil, err
 	}
 	return updated.Offer(nextID), nil
 }
@@ -2656,11 +2670,16 @@ func isProjectCapabilityOffer(offer FolderOffer) bool {
 	return ok
 }
 
-func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, paused bool) FolderOfferView {
+func (s *FolderDigestService) view(ctx context.Context, userID string, offer FolderOffer, paused bool) FolderOfferView {
 	v := s.describeOffer(ctx, offer, paused)
 	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
-		_, ok := s.rootPath(offer)
-		v.NeedsPick = !ok
+		_, reason := s.rootPathReason(userID, offer)
+		v.NeedsPick, v.NeedsPickReason = reason != "", reason
+		if reason == "" && v.Setup != nil && v.Setup.Status == FolderSetupStopped && v.Setup.StopReason == FolderStopNeedsPick {
+			// The old stop is history, not a new request to pick an intact
+			// review again. Continue/Retry revalidates the ordinary saved run.
+			v.Setup.StopReason = FolderStopInterrupted
+		}
 	}
 	if first, ok := s.firstTaskView(ctx, offer); ok {
 		v.FirstTask = &first
@@ -2782,7 +2801,7 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 // viewFor is view for a caller that knows the user: it also attaches the plan a
 // pending project offer's Set up would carry out, which can depend on the user.
 func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer FolderOffer, paused bool) FolderOfferView {
-	v := s.view(ctx, offer, paused)
+	v := s.view(ctx, userID, offer, paused)
 	s.attachHomeResult(ctx, userID, offer, &v)
 	if review := offer.ConversationReview; review != nil {
 		v.Operation = review.Operation
@@ -2864,37 +2883,21 @@ func (s *FolderDigestService) rememberPath(offerID, root string) {
 	s.paths[offerID] = root
 }
 
-// rootPath recovers an offer's folder: from memory, or by re-resolving the
-// chip it came from after a restart. A picker-chosen folder is known only to
-// the process that scanned it.
-func (s *FolderDigestService) rootPath(offer FolderOffer) (string, bool) {
+// rootPath recovers an offer's folder from its live hold, approved chip or
+// owner-bound private path record, always checking the original witnesses.
+func (s *FolderDigestService) rootPath(userID string, offer FolderOffer) (string, bool) {
+	root, reason := s.rootPathReason(userID, offer)
+	return root, reason == ""
+}
+
+func (s *FolderDigestService) rootPathReason(userID string, offer FolderOffer) (string, FolderContinuationReason) {
 	if offer.ConversationReview != nil {
 		if s.conversationSource == nil {
-			return "", false
+			return "", FolderContinuationLost
 		}
 		return s.conversationSource(offer)
 	}
-	s.mu.Lock()
-	root, ok := s.paths[offer.ID]
-	s.mu.Unlock()
-	if ok {
-		return root, true
-	}
-	if offer.Chip == "" {
-		return "", false
-	}
-	path, err := s.chipPath(offer.Chip)
-	if err != nil {
-		return "", false
-	}
-	// The stored key was taken from the canonical path, so the chip's folder
-	// is canonicalised the same way before the two are compared.
-	canonical, err := s.deps.ValidateRoot(path)
-	if err != nil || FolderKey(canonical) != offer.FolderKey {
-		return "", false
-	}
-	s.rememberPath(offer.ID, canonical)
-	return canonical, true
+	return s.homeRootPath(userID, offer)
 }
 
 // buildPortfolioOffer makes the root the subject even when the scan would

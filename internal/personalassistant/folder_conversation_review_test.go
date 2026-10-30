@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 )
@@ -137,8 +136,8 @@ func TestFolderConversationReview_ReadCancelAndRetryDoNotCreateOrLearn(t *testin
 	}
 }
 
-func TestFolderConversationReview_StaleExpiredChangedAndRestartedSourceRefuseCreator(t *testing.T) {
-	for _, mode := range []string{"detached", "expired", "changed-child", "restart"} {
+func TestFolderConversationReview_DetachedAndChangedSourceRefuseCreator(t *testing.T) {
+	for _, mode := range []string{"detached", "changed-child"} {
 		t.Run(mode, func(t *testing.T) {
 			f, service, target, id, creator, active := reviewedObservation(t, "documents", "Scans")
 			live, err := service.ReadReview(context.Background(), target, id)
@@ -148,8 +147,6 @@ func TestFolderConversationReview_StaleExpiredChangedAndRestartedSourceRefuseCre
 			switch mode {
 			case "detached":
 				*active = ""
-			case "expired":
-				f.now = f.now.Add(foldercontext.SelectionTTL + time.Second)
 			case "changed-child":
 				child := filepath.Join(f.home, "Documents", "Scans")
 				if err := os.Rename(child, child+"-original"); err != nil {
@@ -158,10 +155,6 @@ func TestFolderConversationReview_StaleExpiredChangedAndRestartedSourceRefuseCre
 				if err := os.Mkdir(child, 0750); err != nil {
 					t.Fatal(err)
 				}
-			case "restart":
-				restarted := NewFolderObservationService(f.service)
-				restarted.ConfigureConversationReviews(func(context.Context, FolderOffer) error { return nil }, func(foldercontext.Target) (func(), bool) { return func() {}, true })
-				service = restarted
 			}
 			if _, err := f.service.Decide(context.Background(), "local", id, FolderDecisionInput{Decision: FolderDecisionYes, Create: true, RequestID: "old-confirm", ReviewDigest: live.ReviewDigest}); err == nil || len(creator.requests) != 0 {
 				t.Fatalf("%s created: %v", mode, err)

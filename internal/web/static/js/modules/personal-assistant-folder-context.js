@@ -31,6 +31,7 @@ export const FOLDER_DISCLOSURE =
 export function createFolderContextController({
   post,
   changed = () => {},
+  reviewResumed = () => {},
   uuid,
   currentId,
   isBusy = () => false,
@@ -123,6 +124,17 @@ export function createFolderContextController({
       if (result.cancelled || !result.observation) {
         notify('Selection cancelled. Your draft and previous folder are unchanged.');
         return false;
+      }
+      if (
+        result.resumed_review?.id &&
+        result.folder_context?.offer_id === state.offerId &&
+        result.resumed_review.id === state.offerId &&
+        owner
+      ) {
+        reset(owner, result.folder_context);
+        reviewResumed(result.resumed_review);
+        notify('Your existing review is ready. This pick did not start setup.');
+        return true;
       }
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
@@ -298,7 +310,10 @@ export function createFolderContextController({
     if (
       isBusy() ||
       state.pending ||
-      (close ? !state.conversationId || !offerId : !state.observation || state.authority)
+      (close
+        ? !state.conversationId || !offerId
+        : !state.observation ||
+          (state.authority && !(state.conversationId && state.offerId && !state.preview)))
     )
       return null;
     const generation = ++state.generation;
@@ -992,7 +1007,7 @@ function renderAttachment(state) {
   elements.history.hidden = !attached || !view.authority;
   elements.history.textContent =
     attached && view.authority
-      ? `Discussing saved observations only (${view.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
+      ? `Discussing saved observations only (${view.authority}). Pick again for fresh inspection. File contents have not been read.`
       : '';
   if (needsFocus) document.getElementById('personalAssistantInput')?.focus({ preventScroll: true });
 }
@@ -1076,6 +1091,7 @@ async function open() {
       if (
         selected &&
         !reviewed &&
+        !controller.state.offerId &&
         !controller.state.structure &&
         !controller.state.hireUnavailable &&
         folderTreeView(controller.state.observation)
@@ -1188,6 +1204,7 @@ function init() {
   controller = createFolderContextController({
     post: jsonRequest,
     changed: render,
+    reviewResumed: offer => window.PersonalAssistantFolderSetup?.resumeReview?.(offer),
     uuid: () => crypto.randomUUID(),
     currentId: () => window.PersonalAssistantConversation?.currentId?.() || '',
     isConsumed: state => consumedSetup(state),

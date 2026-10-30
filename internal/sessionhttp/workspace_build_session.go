@@ -235,11 +235,13 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			mutate(h.postWorkspaceBuildLink)
 		case action == "software-review" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildSoftwareReview(w, r, id)
+		case action == "entry" && r.Method == http.MethodPost:
+			mutate(h.postWorkspaceBuildEntry)
 		case action == "setup" && r.Method == http.MethodPost:
 			mutate(h.postWorkspaceBuildSetup)
 		case action == "home-provider" && r.Method == http.MethodPost:
 			mutate(h.postWorkspaceBuildHomeProvider)
-		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "software-review" || action == "home-provider":
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "entry" || action == "software-review" || action == "home-provider":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")
@@ -325,11 +327,12 @@ type buildSessionView struct {
 	SetupRun *buildSetupRunView `json:"setup_run,omitempty"`
 	// SetupResult is read from the canonical source journal, never resumed.
 	SetupResult *personalassistant.FolderOfferView `json:"setup_result,omitempty"`
-	// FolderExpiresAt is when the server stops holding the attached folder's
-	// pick (foldercontext.SelectionTTL after it was observed).
-	FolderExpiresAt *time.Time `json:"folder_expires_at,omitempty"`
-	// FolderPath identifies the owner's current held root in the local UI only.
-	// It is never part of the stored session or the model's folder observation.
+	// FolderExpiresAt bounds an ephemeral selection, not an intact retained
+	// review. A lost review uses an expired sentinel and the safe reason below.
+	FolderExpiresAt       *time.Time `json:"folder_expires_at,omitempty"`
+	FolderNeedsPickReason string     `json:"folder_needs_pick_reason,omitempty"`
+	// FolderPath is the legacy/inbox-placement local UI hold. Ordinary review
+	// paths are omitted; no path enters the session or model observation.
 	FolderPath string `json:"folder_path,omitempty"`
 	// GroupPrerequisite is the group the drafted blueprint must be created
 	// inside (workspaceBuildGroupPrerequisite).
@@ -379,9 +382,29 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 					} else {
 						built.FolderPath = root
 					}
+					if reviews, ok := deps.Folders.(interface {
+						BuildFolderReviewState(context.Context, foldercontext.Target, string) (bool, string)
+					}); ok {
+						// This adapter may resolve from private persistence even if
+						// a second metadata read fails. Never serialize that root.
+						if session.PlacementSource == nil {
+							built.FolderPath = ""
+						}
+						if retained, reason := reviews.BuildFolderReviewState(ctx, target, session.Folder.Observation.ID); retained {
+							built.FolderPath = "" // saved review paths are server-only
+							built.FolderNeedsPickReason = reason
+							if reason == "" {
+								expires = time.Time{} // no observation TTL on review authority
+							} else {
+								expires = time.Unix(0, 0).UTC()
+							}
+						}
+					}
 				}
 			}
-			built.FolderExpiresAt = &expires
+			if !expires.IsZero() {
+				built.FolderExpiresAt = &expires
+			}
 		}
 		if h.workspaceBuild != nil && h.workspaceBuild.HomeProvider != nil && session.Status == personalassistant.WorkspaceBuildOpen &&
 			buildWaitsOnProvider(built.Plan) && session.Folder != nil && session.Folder.Recognition.Recognized() &&
@@ -1339,6 +1362,7 @@ func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspace
 		logger.Info("Workspace build not recorded for a create", logger.Fields{"session_id": sessionID, "workspace_id": workspaceID, "reason": err.Error()})
 		return
 	}
+	h.closeBuildFolderReviews(ctx, sessionID)
 	if recorded {
 		return
 	}

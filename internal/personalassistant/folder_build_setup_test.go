@@ -116,9 +116,10 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 		stored.ConversationReview.WorkspaceName != "Summer Demos" || stored.Status != FolderOfferPending || BuildSessionOf(stored) != "session-1" {
 		t.Fatalf("stored offer %+v %v", stored.ConversationReview, err)
 	}
-	// The pick moved from the build's draft to its review, exactly once.
-	if _, err := fx.service.ResolveRoot(ctx, fx.draft, fx.observation.ID); !errors.Is(err, ErrFolderSelection) {
-		t.Fatalf("the draft still holds the pick: %v", err)
+	// The pick moved to its review. The draft's Create/plan may resolve that
+	// exact canonical build owner, but no discussion snapshot is reconstructed.
+	if root, err := fx.service.ResolveRoot(ctx, fx.draft, fx.observation.ID); err != nil || root != fx.song {
+		t.Fatalf("the draft could not resolve its canonical review: %v", err)
 	}
 	if root, err := fx.service.ResolveRoot(ctx, fx.review, fx.observation.ID); err != nil || root != fx.song {
 		t.Fatalf("the review holds the pick: %q %v", root, err)
@@ -162,7 +163,7 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 		t.Fatalf("retry review %+v %v", retried, err)
 	}
 	rebound, _ := fx.service.digest.StoredOffer(ctx, "local", view.ID)
-	if rebound.ConversationReview.ObservationID != fresh.ID || rebound.ConversationReview.WorkspaceName != "Summer Demos" {
+	if rebound.ConversationReview.ObservationID != fx.observation.ID || rebound.ConversationReview.WorkspaceName != "Summer Demos" {
 		t.Fatalf("rebound review %+v", rebound.ConversationReview)
 	}
 	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-2", "", ""); err != nil {

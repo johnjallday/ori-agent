@@ -138,14 +138,27 @@ Create links the folder and that `ask_folder` is never to be set (validation ref
 `a folder is already attached; it is linked at Create`). `POST …/{id}/folder/detach` clears it.
 
 Create (`POST /api/workspaces` with `build_session_id`) resolves the folder's root through
-the service's own hold on the selection (`ResolveRoot`, the same 30-minute window the
-composer has) before anything is created; a lost pick is a `409` with
+the service's own authority (`ResolveRoot`) before anything is created. Ordinary
+explicit attachment opens the build's local review and retains private paths with
+the same witnessed, owner-bound store as conversation/Home reviews. Reads do not
+open reviews or reconstruct fresh scan facts. Draft resolution bridges only to its
+exact open review and original observation under the canonical build guard. A lost
+pick is a `409` with
 `conflict.type: build_folder`, and nothing is left behind. Once the workspace folder exists,
 the attached folder is linked in place as a directory reference (`AttachLinkedDirectory`) and
 becomes the primary directory unless the create already set one outside the workspace folder
 (an attached project keeps it; a scaffold inside the workspace folder is superseded). The link
 runs after the scaffold or attached project and before the template's tool step, which reads
 and saves the workspace itself. The `BuildSummary` records it as a `folder` decision.
+
+A valid retained review omits `folder_expires_at`; an unavailable one supplies
+`folder_needs_pick_reason` and an expired sentinel for the existing controls.
+Ordinary build views never return a privately restored root as `folder_path`.
+Explicit re-pick of the witnessed original preserves draft, transcript, observation
+and choices; `resumed_review` suppresses automatic model suggestions only for the
+same build and observation. Detach, abandon and successful ordinary Create retire
+undecided source reviews; accepted work is never rolled back. Inbox-placement
+handoffs keep their separate authority and path contract.
 
 ### A recognized folder (narrated setup)
 
@@ -217,12 +230,23 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   (**Set it up** for a plan that names no hire). The model is told the plan column answers the
   setup request: it never names the hired agent, counts the plan's steps or describes its
   controls, and its `<setup_plan>` carries no hire or brief.
+- **Project file**: ready plans expose `entry_name` and, for multiple files,
+  `entry_candidates` (bounded bare names, newest modification first, ties by
+  name). Both build review layouts use the same native labelled radio group as
+  the assistant card. `POST …/{id}/entry {version, plan_digest, entry_name}`
+  acquires the build edit lease and canonical folder-review owner, then saves
+  only the file choice. The browser flushes draft edits first; the request does
+  not change the draft/transcript, claim setup, run inference or create resources.
+  The choice changes the plan digest and survives live/restored plan reads.
 - **Hire and start**: `POST …/{id}/setup {version, plan_digest, entry_name?, brief?}` writes the build's
   `setup` claim (offer, digest, request id) and runs **Home's own setup journey** on the build's
   held folder: the build's review target is `build:<session id>`, and Home's setup reads that
   folder only while this build stands behind it (`ConfigureBuildReviews`). The session is
   `preparing`; `GET …/{id}` returns `setup_run` (the run's lines with their states, a stop reason,
-  project-file candidates). Refusals: `plan_changed` (the plan the user confirmed is no longer
+  project-file candidates, `entry_name` and the canonical `plan_digest`). Setup
+  echoes the reviewed name; omission keeps it. A late explicit file answer
+  rebinds the run's digest, and retries read that digest rather than a stale build
+  claim, including recovery after an interrupted claim update. Refusals: `plan_changed` (the plan the user confirmed is no longer
   the host's), `no_plan`, `review_pending` (another folder setup waits on Home),
   `declined`, and `build_folder` (the pick is lost). An unnamed draft is named after its folder,
   as the plan says (the model never has to name it first). A stopped run leaves the build open with
@@ -231,12 +255,14 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   Linked folder “<folder>”."), applies the draft's description and extra teammate (and its goal
   only when the run had no brief: the brief is the workspace's goal), and writes "How this was set
   up" from the plan lines and the receipt. The brief goes to the run as on Home's card
-  (`FolderSetupInput.Brief`), and the hired agent's first look starts when the run finishes, under
-  the same consent. The journey links the folder as a directory reference, as on Home (it does
+  (`FolderSetupInput.Brief`); first-task execution follows the same Home policy.
+  An optional folder summary stays seeded until explicitly started. The journey links the folder as a directory reference, as on Home (it does
   not mark it primary).
-- **Pick lifetime**: `folder_expires_at` is when the server stops holding the pick (30
-  minutes after the look). Under 5 minutes the pane counts down; once expired, Hire and start is
-  disabled and **Add the folder again** is offered.
+- **Pick lifetime**: valid retained ordinary reviews omit `folder_expires_at`;
+  restart/elapsed time alone does not demand another pick. Private path and
+  directory-identity checks restore only the canonical open review. A real loss
+  exposes `folder_needs_pick_reason` and disables setup until a verified re-pick.
+  Legacy unreviewed/independently owned picks retain their separate deadline.
 - **Map**: when the run finishes the dialog closes with the receipt as a toast, and the Map's
   automatic layout places the result (a new Home as a new district with the workspace inside, a
   workspace joining an existing Home inside it); nothing is asked and nothing is written to the
@@ -307,8 +333,13 @@ Personal Assistant knowledge store (locked, atomic replace, a Windows variant). 
 - every host-written line is cut to the store's 2,000-character bound, and the lists a
   model can grow (refusals, saved teammates) are capped;
 - an attached folder is kept only as its path-free observation (at most 8 KiB, validated
-  on every write) and dropped when the build settles; the server's hold on the folder
-  itself lasts 30 minutes and is never written anywhere;
+  on every write) and dropped when the build settles. Unreviewed attachments
+  retain the 30-minute in-memory hold. An explicitly opened ordinary build review
+  additionally keeps its verified private location in the HQ's bounded 0600
+  `folder-paths-v1.json`, outside the build/session document. Restart restoration
+  checks its exact owner, observation, keys and directory witnesses; it adds no
+  new scan facts. Detach, abandon and successful ordinary Create retire that
+  source authority without undoing accepted resources;
 - every mutation is versioned; a stale `version` is a `409` the client reloads from.
 
 On create, `build_session_id` marks the session `created` and stores a `BuildSummary` in

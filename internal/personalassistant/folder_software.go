@@ -150,21 +150,25 @@ func (s *FolderDigestService) enclosingHint(repository, path string) *FolderEncl
 // or when the directory there is not the one the offer was made about: a
 // folder deleted and made again at the same path is a different folder, and
 // only a fresh pick can make an offer about it.
-func (s *FolderDigestService) softwareSubject(offer FolderOffer) (path, identity string, err error) {
-	path, err = s.subjectPathOf(offer)
+func (s *FolderDigestService) softwareSubject(userID string, offer FolderOffer) (path, identity string, err error) {
+	path, err = s.subjectPathOf(userID, offer)
 	if err != nil {
-		return "", "", ErrFolderPathLost
+		return "", "", err
+	}
+	canonical, canonicalErr := s.deps.ValidateRoot(path)
+	if canonicalErr != nil || canonical != path {
+		return "", "", folderPickError{reason: FolderContinuationMoved, cause: ErrFolderPathLost}
 	}
 	identity, err = portfolioDirectoryIdentity(path)
 	if err != nil {
-		return "", "", ErrFolderPathLost
+		return "", "", folderPickError{reason: FolderContinuationChanged, cause: ErrFolderPathLost}
 	}
 	expected := offer.SubjectIdentity
 	if review := offer.ConversationReview; review != nil {
 		expected = review.CandidateIdentity
 	}
 	if expected != "" && expected != identity {
-		return "", "", ErrFolderPathLost
+		return "", "", folderPickError{reason: FolderContinuationChanged, cause: ErrFolderPathLost}
 	}
 	return path, identity, nil
 }
@@ -177,7 +181,7 @@ func (s *FolderDigestService) softwareExisting(ctx context.Context, userID strin
 	if s.deps.ExistingProjects == nil {
 		return nil, nil // a host with no lookup has nothing to reuse
 	}
-	path, identity, err := s.softwareSubject(offer)
+	path, identity, err := s.softwareSubject(userID, offer)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +239,7 @@ func (s *FolderDigestService) attachSoftware(ctx context.Context, userID string,
 		case errors.Is(err, ErrFolderPathLost):
 			// The folder is gone, replaced, or no longer held: only a fresh pick
 			// can continue, and the card says so instead of offering setup.
-			v.NeedsPick = true
+			v.NeedsPick, v.NeedsPickReason = true, FolderPickReason(err)
 			v.CreateAvailable = false
 		case err != nil:
 			view.ExistingUnavailable = true
@@ -274,11 +278,11 @@ func (s *FolderDigestService) guardSoftwareYes(ctx context.Context, userID strin
 	return nil
 }
 
-// witnessSoftwareSubject records the directory a software offer is about, so a
+// witnessSoftwareSubject records the directory any Home offer is about, so a
 // later yes can tell that folder from another one made at the same path.
 func (s *FolderDigestService) witnessSoftwareSubject(offer *FolderOffer, subjectPath string) {
 	offer.SubjectIdentity = ""
-	if offer.ConversationReview != nil || !isSoftwareOffer(*offer) {
+	if offer.ConversationReview != nil {
 		return
 	}
 	if identity, err := portfolioDirectoryIdentity(subjectPath); err == nil {
@@ -309,6 +313,29 @@ func (s *FolderDigestService) ChooseCandidate(ctx context.Context, userID, offer
 	binding, err := s.store.Binding(ctx, userID)
 	if err != nil {
 		return FolderOfferView{}, err
+	}
+	// Resolve before the digest mutation: private recovery takes the same
+	// sidecar lock, and must never be entered from inside that lock.
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	prior := doc.Offer(offerID)
+	if prior == nil {
+		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	if receipt := doc.Receipt(input.RequestID); receipt != nil {
+		if receipt.OfferID != offerID || receipt.Action != "candidate" {
+			return FolderOfferView{}, ErrFolderOfferDecided
+		}
+		return s.viewFor(ctx, userID, *prior, binding.Paused), nil
+	}
+	if prior.Status != FolderOfferPending || prior.ConversationReview != nil || !prior.NeedsCandidate {
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	root, loss := s.rootPathReason(userID, *prior)
+	if loss != "" {
+		return FolderOfferView{}, folderPickError{reason: loss, cause: ErrFolderPathLost}
 	}
 	now := s.now()
 	var result FolderOffer
@@ -348,8 +375,10 @@ func (s *FolderDigestService) ChooseCandidate(ctx context.Context, userID, offer
 		offer.NeedsCandidate = false
 		// The witness and the enclosing check belong to the folder now chosen,
 		// which the server still holds; the browser named a candidate, not a path.
-		root, held := s.rootPath(*offer)
-		if !held {
+		canonical, rootErr := s.deps.ValidateRoot(root)
+		identity, identityErr := portfolioDirectoryIdentity(root)
+		if rootErr != nil || canonical != root || FolderKey(root) != offer.FolderKey ||
+			(offer.RootIdentity != "" && (identityErr != nil || identity != offer.RootIdentity)) {
 			return ErrFolderPathLost
 		}
 		subjectPath := root
@@ -364,6 +393,9 @@ func (s *FolderDigestService) ChooseCandidate(ctx context.Context, userID, offer
 		return nil
 	})
 	if err != nil && !errors.Is(err, errFolderReplay) {
+		return FolderOfferView{}, err
+	}
+	if err := s.rememberHomePath(ctx, userID, result, root); err != nil {
 		return FolderOfferView{}, err
 	}
 	return s.viewFor(ctx, userID, result, binding.Paused), nil

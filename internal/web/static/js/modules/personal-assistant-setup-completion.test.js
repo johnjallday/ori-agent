@@ -27,6 +27,22 @@ const offer = {
 };
 const view = value => setupCompletionView(value, folderReceiptView(value));
 
+test('the compact completed card names the file only from its verified receipt', () => {
+  const completed = {
+    ...offer,
+    outcome: {
+      ...offer.outcome,
+      receipt: [...offer.outcome.receipt, { kind: 'folder', name: 'Opens Song.rpp' }]
+    }
+  };
+  assert.equal(view(completed).facts, 'Folder linked · Opens Song.rpp · Ari assigned');
+  assert.equal(
+    view({ ...offer, plan: { entry_name: 'Unconfirmed.rpp' } }).facts,
+    'Folder linked · Ari assigned'
+  );
+  assert.equal(view({ ...completed, status: 'awaiting_outcome' }).ready, false);
+});
+
 test('runner done keeps observational polling until its separate verified receipt arrives', () => {
   assert.equal(folderSetupPolling({ status: 'awaiting_outcome', setup: { status: 'done' } }), true);
   assert.equal(

@@ -41,7 +41,7 @@ func (s *FolderObservationService) ConfigureBuildReviews(
 	lease func(foldercontext.Target) (func(), bool),
 ) {
 	s.buildGuard, s.buildLease = guard, lease
-	s.digest.conversationSource = s.reviewSource
+	s.digest.conversationSource = s.reviewSourceReason
 	s.digest.conversationLease = s.acquireReview
 }
 
@@ -86,6 +86,86 @@ func (s *FolderObservationService) ReviewBuild(ctx context.Context, draft folder
 		s.BindSaved(draft, observationID, review.ConversationID)
 	}
 	return view, nil
+}
+
+// ResumeBuildFolderPick keeps a build's original folder snapshot on a verified
+// re-pick. The caller holds the build attachment lease and has not replaced its
+// canonical folder yet. Nil means a different folder, not recovery authority.
+func (s *FolderObservationService) ResumeBuildFolderPick(ctx context.Context, draft foldercontext.Target, sessionID, originalID, pickedID string) (*FolderOfferView, error) {
+	held, _, err := s.resolveHeld(ctx, draft, pickedID)
+	if err != nil {
+		return nil, err
+	}
+	target := BuildReviewTarget(draft, sessionID)
+	doc, err := s.digest.store.Read(ctx, draft.UserID)
+	if err != nil {
+		return nil, err
+	}
+	var found *FolderOffer
+	for _, offer := range doc.Offers {
+		review := offer.ConversationReview
+		if openFolderReview(offer) && review != nil && review.Target == target && review.ObservationID == originalID {
+			if found != nil {
+				return nil, ErrFolderReviewPending
+			}
+			copy := offer
+			found = &copy
+		}
+	}
+	if found == nil {
+		return nil, nil
+	}
+	return s.resumeReviewPick(ctx, held, target, *found, "")
+}
+
+// BuildFolderReviewState exposes only whether this draft has a canonical open
+// review and a safe loss reason. Its private paths never enter the pane's view.
+func (s *FolderObservationService) BuildFolderReviewState(ctx context.Context, target foldercontext.Target, observationID string) (bool, string) {
+	if !IsBuildReview(target) {
+		if !strings.HasPrefix(target.DraftID, BuildReviewPrefix) {
+			return false, ""
+		}
+		target = BuildReviewTarget(target, strings.TrimPrefix(target.DraftID, BuildReviewPrefix))
+	}
+	doc, err := s.digest.store.Read(ctx, target.UserID)
+	if err != nil {
+		return false, ""
+	}
+	for _, offer := range doc.Offers {
+		if openFolderReview(offer) && offer.ConversationReview != nil && offer.ConversationReview.Target == target && offer.ConversationReview.ObservationID == observationID {
+			_, reason := s.reviewSourceReason(offer)
+			return true, string(reason)
+		}
+	}
+	return false, ""
+}
+
+// CloseBuildFolderReviews retires undecided reviews after the draft owner has
+// detached, discarded or created its workspace. Accepted work is never undone.
+func (s *FolderObservationService) CloseBuildFolderReviews(ctx context.Context, userID, sessionID, observationID string) error {
+	doc, err := s.digest.store.Read(ctx, userID)
+	if err != nil {
+		return err
+	}
+	for _, offer := range doc.Offers {
+		if BuildSessionOf(offer) == sessionID && offer.Status == FolderOfferPending && offer.DecidedAt == nil &&
+			(observationID == "" || offer.ConversationReview.ObservationID == observationID) {
+			if err := s.CloseReview(ctx, offer.ConversationReview.Target, offer.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ChooseBuildSetupEntry refreshes this build's review with its saved draft
+// name, then edits only its project-file choice. It never claims or starts setup.
+func (s *FolderObservationService) ChooseBuildSetupEntry(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string, input FolderSetupEntryInput) (FolderOfferView, error) {
+	view, err := s.ReviewBuild(ctx, draft, sessionID, observationID, candidateID, workspaceName)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	return s.digest.ChooseSetupEntry(ctx, draft.UserID, view.ID, input)
 }
 
 // StartBuildSetup is Set it up: Home's own StartSetup on the build's offer,

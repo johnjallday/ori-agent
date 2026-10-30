@@ -202,6 +202,13 @@ func (s *FolderObservationService) HandoffInbox(ctx context.Context, userID stri
 			return &InboxPlacementError{Code: "build_conflict", BuildID: open.ID}
 		}
 		if draft == nil {
+			// A new build copies the original observation, not just this
+			// review's directory authority. A reconstructed hold has no scan
+			// evidence to transfer and must fail before preparing the seed.
+			held, _, holdErr := s.resolveHeld(ctx, review.Target, review.ObservationID)
+			if holdErr != nil || held.reheld != nil {
+				return placementError("selection_expired")
+			}
 			path, available := s.reviewSource(offer)
 			if !available {
 				return placementError("selection_expired")

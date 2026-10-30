@@ -152,7 +152,7 @@ func (s *FolderDigestService) resolveInbox(ctx context.Context, userID, offerID 
 		offer.Setup.Intent.Inbox == nil || !isInboxOffer(*offer) {
 		return ErrFolderOfferDecided
 	}
-	path, identity, err := s.softwareSubject(*offer)
+	path, identity, err := s.softwareSubject(userID, *offer)
 	if err != nil {
 		return err
 	}
@@ -203,17 +203,16 @@ func withFolderSubjectPath(ctx context.Context, path string) context.Context {
 	return context.WithValue(ctx, folderSubjectPathKey{}, path)
 }
 
-// planRequest is setupRequest for a plan read. An inbox folder's plan checks the
-// folder against File Janitor's other workspaces and its root rules, so the
-// request carries the folder's path (never sent to the browser).
+// planRequest carries the private subject path for inbox root checks and a
+// project's bounded entry-file metadata review. It never reaches the browser.
 func (s *FolderDigestService) planRequest(ctx context.Context, userID string, offer FolderOffer) FolderSetupRequest {
 	req := s.setupRequest(ctx, userID, offer)
-	if !isInboxOffer(offer) {
+	if !isInboxOffer(offer) && !isProjectCapabilityOffer(offer) {
 		return req
 	}
 	if path, _ := ctx.Value(folderSubjectPathKey{}).(string); strings.TrimSpace(path) != "" {
 		req.Path = path
-	} else if path, err := s.subjectPathOf(offer); err == nil {
+	} else if path, err := s.subjectPathOf(userID, offer); err == nil {
 		req.Path = path
 	}
 	return req

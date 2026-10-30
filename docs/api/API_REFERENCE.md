@@ -1762,6 +1762,8 @@ What the pane's Add folder sheet can offer: the composer's known-folder chips, w
 
 `mode` is `chip` (with `chip`), `picker` (the server opens its folder dialog), or `selection` (with `selection_token`, the receipt `POST /api/folder-picker/select-path` issued for a typed path it checked). **No path is accepted** (`400`). The server looks at the folder the way the assistant's composer does — names, kinds, counts, project markers, last-changed dates, coverage; it never reads a file — and stores the path-free observation on the session as `folder.observation`, with a `form` transcript entry ("You attached the folder “X”. It will be linked to the workspace when you create it.") the assistant hears on its next turn. The model then sees the observation and may not ask its own folder question. `version` is checked before the dialog opens; the pick itself then stands. A cancelled dialog returns `200` with `{ "session": …, "cancelled": true }` and changes nothing. A refused folder (too broad, unreadable, the dialog off, a pick still running) is `409` with `code: folder` and a sentence to show; `code: version`, `closed`, and `not_found` as elsewhere. Returns `{ "session": … }`.
 
+Ordinary attachment also opens the build's local review. Its server-private folder authority survives pauses/restarts while that exact review and build owner remain valid; plan reads create no review and renew no scan evidence. Valid retained reviews omit `folder_expires_at`; loss exposes `folder_needs_pick_reason` (`moved`, `changed`, or `lost`). Ordinary views omit `folder_path`. Explicit re-pick of the verified original, including after a move/rename, returns `resumed_review` (the existing offer ID) without replacing the observation, draft or transcript. The browser does not automatically ask the model for another suggestion. Inbox-placement handoffs retain their separately fenced contract.
+
 ### Remove the Folder
 
 **Endpoint:** `POST /api/workspaces/build-sessions/{id}/folder/detach`
@@ -1770,7 +1772,7 @@ What the pane's Add folder sheet can offer: the composer's known-folder chips, w
 { "version": 4 }
 ```
 
-Clears the attached folder and says so in the transcript. Removing twice is harmless. Returns `{ "session": … }`.
+Clears the attached folder and says so in the transcript. Removing twice is harmless. Retires the detached observation's undecided review and private paths; accepted work is never rolled back. Returns `{ "session": … }`.
 
 ### Attach a Link
 
@@ -1826,7 +1828,7 @@ Ends an open build without creating anything (Start over, or Discard from Today)
 
 `POST /api/workspaces` accepts `build_session_id`. After the workspace is created the session is marked `created` and a short summary is stored in the workspace's `template_provenance.build_summary`: `assistant_name`, `session_id`, `created_at`, `turn_count`, `user_request` (the first thing the user asked for), and `decisions` (one `{section, text}` per section — blueprint, details, team, placement). The team line describes the team in the create request, not the model's claim, and the assistant's reason for a section the user later changed on the form is left out. The build is named in the create request only once its draft is on the form: while "Resume building …?" is unanswered, a workspace made by hand is not tied to the paused build. `GET /api/orchestration/workspace?id=…` and the sessionhttp workspace detail return it as `build_summary`, and the workspace page shows it under "How this was set up". An unknown or ordinary closed `build_session_id` does not block ordinary create. A retained accepted File Janitor preparation claim does: use its exact confirmation/recovery endpoint; ordinary create cannot bypass it.
 
-When the named build has an attached folder, Create links that folder to the new workspace in place — as a linked directory reference, and as its primary directory unless the create already set one outside the workspace folder — and the summary gains a `folder` decision. The folder is resolved through the server's own hold on the pick (the same 30-minute window the assistant's composer has) before anything is created: a pick the server no longer holds is `409` with `conflict.type: "build_folder"` and an `error` to show, and nothing is created. Nothing is copied, moved, or read in the linked folder.
+When the named build has an attached folder, Create links that folder to the new workspace in place — as a linked directory reference, and as its primary directory unless the create already set one outside the workspace folder — and the summary gains a `folder` decision. The folder is resolved through the build's canonical open review before anything is created, including private path-and-identity restoration after a restart. An unavailable or replaced source is `409` with `conflict.type: "build_folder"` and an `error` to show, and nothing is created. Unreviewed selections still have their separate 30-minute lifetime. Nothing is copied, moved, or read in the linked folder.
 
 ### What Every Session Response Also Carries
 
@@ -1834,8 +1836,9 @@ Besides the stored session, each response reads a few things fresh; none is stor
 
 - `folder.recognition` (stored with the folder): `verdict` `project`, `collection` or `none`; for a project its `label` ("<integration> project"), `marker_noun`/`marker_count` (the session files that say so), the suggested `blueprint_id`/`blueprint_label`, the integration and Home provider (`integration_name`, `home_provider_name`, `home_name`) and `home_exists`; for a collection `project_count`. Read from the attach's own scan; nothing is rescanned.
 - `plan` — a recognized single project's setup plan, exactly as Home's folder card plans the same folder: `lines` (`kind`, `name`, `detail`), `digest`, `needs` (`kind`, `name`, `state` = `ready` | `install` | `enable` | `update`), `home` (`name`, `status` `new` | `existing`), `placement`, `evidence`, `ready`; or `ready: false` with `unavailable` (a reason code such as `provider_not_installed`) and `unavailable_subject` (the plugin it waits on).
-- `folder_expires_at` — when the server stops holding the attached folder's pick.
-- `setup_run` — while Set it up runs or after it stopped: the run's `lines` with their `state`, `status`, `stop_reason`, and `entry_candidates` (project files to choose from).
+- `plan.entry_name` / `plan.entry_candidates` — the reviewed bare project filename and, for multiple files, up to 64 candidates in newest-modification order (ties by name). One file needs no chooser. The chosen name participates in the plan digest.
+- `folder_expires_at` — omitted for a valid retained ordinary review; legacy unreviewed picks keep their deadline. `folder_needs_pick_reason` reports a lost retained source without exposing its path.
+- `setup_run` — while Set it up runs or after it stopped: the run's `lines` with their `state`, `status`, `stop_reason`, `entry_name`, `entry_candidates` (a late file question), and canonical `plan_digest` for retries.
 - `group_prerequisite` — when the drafted blueprint must be created inside a group and no ready plan sets it up (and no `install_provider` is offered: once installed, the plan sets the group up): the form's own group-requirement projection (`state` `home_creation_review_required` with `home.proposed_name`, or `ready_grouped` with `home.workspace_id`/`home.name`, plus `summary` and `actions`).
 - `install_provider` — `{ "name": "<Home provider name>" }` while the build is open and its plan waits on that plugin (`unavailable` `provider_not_installed` or `provider_unverified`) and the server can install it; the pane then offers Install (see below).
 
@@ -1847,6 +1850,22 @@ A settled Set it up also stores `home_workspace_id` and `setup_receipt` on the s
 
 Returns `{ "session": … }` for one of this user's builds, read-only; the client follows a running Set it up with it. `404` for any other id.
 
+### Choose a Build's Project File
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/entry`
+
+```json
+{ "version": 6, "plan_digest": "9b1c…", "entry_name": "Take Two.rpp" }
+```
+
+Edits only the current open ordinary build's reviewed file choice and returns
+`{ "session": … }` with the new plan/digest. Requires the current version,
+canonical folder-review owner, and a filename offered by that plan. The browser
+flushes draft edits first. It does not change the draft or transcript, claim
+setup, run a model, or create resources. Paths, `open`, and extra authority are
+not accepted. Stale versions or plans return `409` (`version` or `plan_changed`);
+read the returned/current session before confirming again.
+
 ### Set It Up (a Recognized Folder)
 
 **Endpoint:** `POST /api/workspaces/build-sessions/{id}/setup`
@@ -1855,7 +1874,7 @@ Returns `{ "session": … }` for one of this user's builds, read-only; the clien
 { "version": 6, "plan_digest": "9b1c…", "entry_name": "Take Two.rpp", "brief": "Mix the chorus first." }
 ```
 
-Runs the build's ready `plan` as Home's own setup journey on the build's held folder; the build does not post the wizard's create request. `plan_digest` must be the plan the user saw (a different current plan is `409` `plan_changed` with the fresh plan in the session); `entry_name` (optional) answers a stopped run's project-file question; a retry sends the run's own digest. A ready `plan` carries `hire` (`mode` `create`, `bind` or `pending`, `agent_name`, `role_label`, `model`) and `brief_default`, outside its digest: the pane presents it as a hire (**Hire and start**) with the one question "What should it do with it?". `brief` (optional, at most 300 characters, line breaks folded) is that answer and becomes the new workspace's goal; an empty one takes `brief_default`, a plan with no question ignores it, and a retry keeps the brief the run started with. The session becomes `preparing` with a `setup` claim and the response returns it; nothing is installed or created before this call. A draft with no name is set up under the recognized project's own name, as the plan says and as Home's card does. Refusals are `409` with `code` and an `error` to show: `no_plan`, `review_pending` (another folder setup is waiting for an answer on Home), `declined`, `build_folder` (the pick is lost), `version`, `closed`. When the run finishes the build is `created` with `created_workspace_id`, `home_workspace_id` and `setup_receipt` ("Created <Home> and <workspace> inside it. Linked folder “<folder>”."), the draft's description and extra teammate are applied to the workspace (and its goal, only when the run had no brief: the brief is the goal), the hired agent's first look starts as on Home's card, and its `build_summary` is written from the plan lines and the receipt. A stopped run leaves the build open with its `setup_run.stop_reason`, ready for a retry.
+Runs the build's ready `plan` as Home's own setup journey on the build's held folder; the build does not post the wizard's create request. `plan_digest` must be the plan the user saw (a different current plan is `409` `plan_changed` with the fresh plan in the session); `entry_name` (optional) echoes the reviewed selection or answers a stopped run's explicit file question. Omitting it keeps the plan/run's selected file. A different listed selection requires a new review rather than silently retargeting setup; an unlisted/unsafe name is invalid. A retry sends `setup_run.plan_digest`, including the rebound digest after a late file answer. A ready `plan` carries `hire` (`mode` `create`, `bind` or `pending`, `agent_name`, `role_label`, `model`) and `brief_default`, outside its digest: the pane presents it as a hire (**Hire and start**) with the one question "What should it do with it?". `brief` (optional, at most 300 characters, line breaks folded) is that answer and becomes the new workspace's goal; an empty one takes `brief_default`, a plan with no question ignores it, and a retry keeps the brief the run started with. The session becomes `preparing` with a `setup` claim and the response returns it; nothing is installed or created before this call. A draft with no name is set up under the recognized project's own name, as the plan says and as Home's card does. Refusals are `409` with `code` and an `error` to show: `no_plan`, `review_pending` (another folder setup is waiting for an answer on Home), `declined`, `build_folder` (the pick is lost), `version`, `closed`. When the run finishes the build is `created` with `created_workspace_id`, `home_workspace_id` and `setup_receipt` ("Created <Home> and <workspace> inside it. Linked folder “<folder>”."), the draft's description and extra teammate are applied to the workspace (and its goal, only when the run had no brief: the brief is the goal), first-task execution follows Home's policy (an optional folder summary stays seeded until explicitly started), and its `build_summary` is written from the plan lines and the receipt. A stopped run leaves the build open with its `setup_run.stop_reason`, ready for a retry.
 
 ### Install the Folder's Home Plugin
 
@@ -2031,6 +2050,12 @@ No body (any request data is `400`). Same as a scan with `{ "picker": true }`.
 { "decision": "yes", "choice": "project", "create": true, "request_id": "…" }
 ```
 
+Open conversation, Home and workspace-build reviews retain their server-private folder authority across pauses and restarts while `pending` or `awaiting_outcome`; the resolver checks the saved canonical path, directory identity, folder key and subject key without a new scan. Discussion snapshots stay dated and path-free, and an attached folder with no review keeps its 30-minute hold. Legacy reviews have no backfill and need a new pick when their hold is lost.
+
+A `needs_pick: true` offer or `409` response also carries `needs_pick_reason`: `moved` (saved path disappeared or resolves elsewhere), `changed` (directory replaced), `lost` (no saved path/hold), or `expired` (attached selection past its TTL). Reasons disclose no filesystem path. The review context's `reselection_needed` carries the same reason. Cards say “Pick it again” without guessing a restart.
+
+`POST /api/home-assistant/folder-context/select` can resume an ordinary review on an explicit re-pick of the original witnessed root/candidate, even after a move or rename. It returns the existing `observation`, `revision`, `folder_context` and a `resumed_review` offer, without another conversation turn or Review request. Names, brief, structure choices, selected entry and stopped run remain; only validated private locations and path-derived keys change. Replaced directories and foreign/retired owners cannot inherit the review. Arrangements/placement handoffs retain their separate recovery fences. A Home scan can resume only a unique open Home-owned offer and cannot replace a conversation/build-owned pending review.
+
 A recognized software project adds two refusals to a `yes` with `project`: `400` while the offer's `software.needs_candidate` is true (choose a candidate first, below), and `409` with `"project_exists": true` and the offer when a workspace of the user's already has this exact folder as its primary linked folder (the offer's `software.existing` lists it; no second workspace is made). `409` with `"needs_pick": true` also covers a folder that was deleted and made again at the same path since it was shown.
 
 `decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the File Janitor setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` and `create: true` — the card's confirmed plan ("Set up Thesis as a Writing project workspace?") — has the server set the workspace up itself (the folder's name, the shape's installed blueprint or blank, the folder linked as the primary directory, the first task seeded) and the returned offer is `resolved` with `outcome.workspace_id`, `outcome.route` and `outcome.blueprint`; a retried click reuses the workspace already made for the offer. It is offered only while the offer's `create_available` is true. A `yes` with `project` and no `create` (the card's Adjust…) leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered; `503` when the workspace could not be created (the offer stays pending).
@@ -2134,6 +2159,31 @@ Stops the workspace's running first look (the card's **Stop**): the run is cance
 
 After the Create Workspace modal (opened pre-filled, sent with `entry_point: "folder_digest"` and `folder_offer_id`) reports the workspace it made. The server links the offer's folder as the workspace's primary project directory, superseding a blueprint scaffold inside the workspace, seeds one first task naming the read-only tools below, and returns the `resolved` offer. `409` when the workspace was not created for this offer or already has an outside linked folder; `409` with `"needs_pick": true` when the server no longer holds the picked folder (pick it again); `503` when the folder store is unavailable.
 
+### Choose the Reviewed Project File
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/entry`
+
+```json
+{ "plan_digest": "<64 hex>", "entry_name": "Song.rpp" }
+```
+
+An inert edit of a pending ordinary review, before setup. Accepts exactly these
+two string fields in a bounded 4 KiB object; duplicate/unknown keys, paths,
+`request_id`, `open`, and malformed names are `400`. The server rechecks the
+canonical owner, held directory and current plan, then saves only the chosen
+filename and returns `{ "offer": … }` with its new digest. No setup, model turn,
+journey, resource creation or file operation begins. A stale plan is `409` with
+`plan_changed: true` and the fresh `offer`; other owners/running or stopped
+setups cannot be edited through this endpoint.
+
+Installed active blueprint declarations supply the allowed extensions. Planning
+reads bounded direct-child regular-file metadata, never file contents or symlink
+targets. The plan carries `entry_name`; `entry_candidates` appears only for two
+or more files (maximum 64), newest modification first, then name. A still-listed
+saved choice wins over a newer file; otherwise the newest is offered for fresh
+confirmation. An unready integration retains its runtime question rather than
+guessing extensions. Only bare filenames leave the server.
+
 ### Set Up a Recognized Project (one card)
 
 **Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/setup`
@@ -2142,7 +2192,7 @@ After the Create Workspace modal (opened pre-filled, sent with `entry_point: "fo
 { "request_id": "…", "plan_digest": "<64 hex>", "entry_name": "optional picked project file", "brief": "optional answer to the plan's question" }
 ```
 
-A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are exactly the four above; there is no path field, and the intent behind the plan is pinned on the server.
+A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state and binds `entry_name` independently of prose. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are the four above plus the separate `open` and inbox `monitoring` controls; there is no path field, and the intent behind the plan is pinned on the server. `entry_name` must match the reviewed choice (or an explicitly offered late `needs_choice` answer); omission keeps the plan/run's choice. A filename never implies `open: true`. If it disappears during execution, the run asks with current safe candidates, never commits an unselected replacement. A late answer rebinds the run's digest; other stopped runs cannot silently retarget. Completed receipts name the selected file only after workspace proof.
 
 A plan for one project also names its **hire**, outside the digest: `plan.hire` (`mode` `create` for a new assistant, `bind` for a saved or the Home's existing one, `pending` while the integration that names it is not installed; `agent_name`, `role_label`, `model`) and `plan.brief_default`, the goal the card's one question "What should it do with it?" starts with (the blueprint's goal, else one per folder shape). The card presents the plan as **Hire and start**. `brief` is the user's answer: at most 300 characters, line breaks folded to spaces, no control characters (`400` otherwise); it becomes the new workspace's goal (`mission`, with its first goal run pending, never started by the setup) and the first look's stated intent. An empty `brief` takes `brief_default`; a plan with no question (a reused workspace) ignores it; a continued run keeps the brief it started with. The run records `setup.hire` and `setup.brief`.
 

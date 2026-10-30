@@ -31,6 +31,11 @@ func TestAlbumsFixture_ExactAndUnmarkedVariants(t *testing.T) {
 			wantFiles, wantEntries, wantProjects := 15, 26, 5
 			if exact {
 				wantFiles, wantEntries, wantProjects = 8, 15, 6
+				song, songErr := os.Stat(filepath.Join(sandbox, "Albums", "Album-5", "Song.rpp"))
+				alternate, alternateErr := os.Stat(filepath.Join(sandbox, "Albums", "Album-5", "Alternate.rpp"))
+				if songErr != nil || alternateErr != nil || !song.ModTime().After(alternate.ModTime()) {
+					t.Fatal("the exact file-choice fixture must have a newer Song.rpp", songErr, alternateErr)
+				}
 			}
 			v := Decide(result, now)
 			if result.RootCandidate().FileCount != wantFiles || result.Entries != wantEntries || result.Partial ||

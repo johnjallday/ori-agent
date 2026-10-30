@@ -651,7 +651,7 @@ func (s *FolderDigestService) resolveStructure(ctx context.Context, userID, offe
 		offer.Status != FolderOfferAwaitingOutcome || offer.Setup.Intent.Structure == nil {
 		return ErrFolderOfferDecided
 	}
-	root, err := s.subjectPathOf(*offer)
+	root, err := s.subjectPathOf(userID, *offer)
 	if err != nil {
 		return err
 	}

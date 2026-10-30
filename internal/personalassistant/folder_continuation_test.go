@@ -149,6 +149,19 @@ func TestPortfolioContinuations_ExplainsWhyAPickIsNeeded(t *testing.T) {
 		}
 	})
 
+	t.Run("moved directory", func(t *testing.T) {
+		f := newFolderDigestFixture(t)
+		offerID, root := seedPickedAlbums(t, f)
+		resolveAlbumsHome(t, f, offerID)
+		if err := os.Rename(root, root+"-moved"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := f.service.PortfolioContinuations(ctx, "local", "new-home")
+		if err != nil || len(got) != 1 || got[0].State != FolderContinuationNeedsPick || got[0].Reason != FolderContinuationMoved {
+			t.Fatalf("moved directory: %+v, %v", got, err)
+		}
+	})
+
 	t.Run("replaced directory", func(t *testing.T) {
 		f := newFolderDigestFixture(t)
 		offerID, root := seedPickedAlbums(t, f)

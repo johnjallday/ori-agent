@@ -2011,23 +2011,27 @@ test('each way a folder choice can be unusable gets its own honest message', () 
   const kept = /Your Home is ready and anything already connected is kept/;
   const expired = selectionRecovery({ continuation: { reason: 'expired' } });
   assert.equal(expired.repick, true);
-  assert.match(expired.message, /30 minutes/);
+  assert.match(expired.message, /no longer has/);
   assert.match(expired.message, kept);
 
   const lost = selectionRecovery({ continuation: { reason: 'lost' } });
-  assert.match(lost.message, /restarted/);
-  assert.doesNotMatch(lost.message, /30 minutes|moved, replaced/);
+  assert.match(lost.message, /no longer has/);
+  assert.doesNotMatch(lost.message, /restarted|30 minutes|moved|replaced/);
+
+  const moved = selectionRecovery({ continuation: { reason: 'moved', folder: 'Album-5' } });
+  assert.match(moved.message, /Album-5 has moved or been renamed/);
 
   const changed = selectionRecovery({ continuation: { reason: 'changed' } });
-  assert.match(changed.message, /changed after you chose it/);
+  assert.match(changed.message, /is not the folder you showed me: it was replaced/);
   assert.doesNotMatch(changed.message, /restarted|30 minutes/);
 
   const unknown = selectionRecovery({});
   assert.equal(unknown.repick, true);
   assert.match(unknown.message, /no longer has the folder you chose/);
-  assert.equal(new Set([expired, lost, changed, unknown].map(item => item.message)).size, 4);
-  for (const item of [expired, lost, changed, unknown]) {
-    assert.match(item.message, /Choose the folder again/);
+  for (const item of [expired, lost, moved, changed, unknown]) {
+    assert.match(item.message, /Pick it again to carry on/);
+    assert.match(item.message, kept);
+    assert.doesNotMatch(item.message, /restarted|30 minutes/);
     assert.doesNotMatch(item.message, /\/(Users|home|var)\//, 'no path is ever shown');
   }
 });
@@ -2078,9 +2082,10 @@ const failure = (status, reason = '') => Object.assign(new Error('nope'), { stat
 
 test('a lost offer asks the server why and only then offers one new pick', async () => {
   for (const [why, pattern] of [
-    ['expired', /30 minutes/],
-    ['lost', /restarted/],
-    ['changed', /changed after you chose it/]
+    ['expired', /no longer has/],
+    ['lost', /no longer has/],
+    ['moved', /has moved or been renamed/],
+    ['changed', /was replaced/]
   ]) {
     const { panel, log } = addFolderPanel({
       pickOffer: () => {

@@ -787,7 +787,13 @@ assistant makes one explained offer.
   answers, for a Home reopened without its original query string, which
   collection the owner chose for that exact Home: opaque `offer_id`, folder
   name, `state` (`ready` or `needs_pick`) and, when a pick is needed, a
-  `reason` (`expired`, `lost` after a restart, or `changed` directory). It is a
+  `reason` (`moved`, `changed`, `lost`, or `expired` for the resolved
+  collection's existing handoff window). An open review restores only its owner's
+  saved canonical path, keys and directory witnesses from the private 0600
+  `folder-paths-v1.json`;
+  elapsed time or restart alone is not folder loss. The bounded sidecar is
+  pruned with offers and deleted on final decisions/removal or HQ deletion.
+  Restored authority never refreshes dated discussion/scan evidence. It is a
   pure read of the owner's own offers (newest first, at most five, within a day
   of the Home's creation), accepts only `home_id`, returns no path, and grants
   nothing: the library's `roots/pick-offer`, root review and commit re-verify the

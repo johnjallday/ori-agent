@@ -35,6 +35,7 @@ type fakeFolderSetup struct {
 	briefDefault string
 	visual       *FolderSetupVisual
 	monitoring   *FolderMonitoringOffer
+	planEntries  []string
 }
 
 func (f *fakeFolderSetup) entryNames() []string {
@@ -53,6 +54,21 @@ func (f *fakeFolderSetup) Plan(_ context.Context, req FolderSetupRequest) (Folde
 	plan.Hire, plan.BriefDefault = f.hire, f.briefDefault
 	plan.Visual = f.visual
 	plan.Monitoring = f.monitoring
+	if len(f.planEntries) > 0 {
+		chosen := f.planEntries[0]
+		for _, name := range f.planEntries {
+			if name == req.Offer.EntryName {
+				chosen = name
+			}
+		}
+		var candidates []string
+		if len(f.planEntries) > 1 {
+			candidates = f.planEntries
+		}
+		plan = WithFolderSetupEntry(plan, chosen, candidates)
+	} else if req.Offer.EntryName != "" {
+		plan = WithFolderSetupEntry(plan, req.Offer.EntryName, nil)
+	}
 	return plan.Stamped(), f.planErr
 }
 
@@ -303,15 +319,25 @@ func TestFolderSetup_TwoClicksStartOneRun(t *testing.T) {
 
 func TestFolderSetup_ARunLostToARestartIsReportedInterruptedAndResumes(t *testing.T) {
 	f := newOneCardFixture(t)
-	f.setup.hold = make(chan struct{})
+	f.setup.finish = func() FolderSetupUpdate {
+		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopNeedsModel, RunID: "new-run"}
+	}
 	ctx := context.Background()
 	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the run to start", func() bool { return f.setup.runCount() == 1 })
-
-	// A restarted server has the stored "running" but no live run, and has
-	// forgotten the picked folder.
+	waitFor(t, "the first runner to leave", func() bool {
+		return f.stored(t).Setup.Status == FolderSetupStopped && !f.service.isRunning(f.offer.ID)
+	})
+	// Simulate the running journal left by a dead process, not a second live
+	// runner. The private path remains available across that process loss.
+	if _, err := f.store.Mutate(ctx, "local", func(doc *FolderDigestDocument) error {
+		run := doc.Offer(f.offer.ID).Setup
+		run.Status, run.StopReason = FolderSetupRunning, ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	restarted := f.newService()
 	restarted.deps.Setup = f.setup
 	restarted.deps.Journey = &fakeJourneyVerifier{folder: f.folder}
@@ -322,22 +348,28 @@ func TestFolderSetup_ARunLostToARestartIsReportedInterruptedAndResumes(t *testin
 	if got := current.Offer.Setup; got.Status != FolderSetupStopped || got.StopReason != FolderStopInterrupted {
 		t.Fatalf("setup = %+v", got)
 	}
-	if _, err := restarted.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r2", PlanDigest: f.stored(t).Setup.PlanDigest}); !errors.Is(err, ErrFolderPathLost) {
-		t.Fatalf("a lost path must ask for the folder again: %v", err)
+	if current.Offer.NeedsPick {
+		t.Fatal("restart lost the retained folder")
 	}
-	close(f.setup.hold)
+	f.setup.finish = nil
+	if _, err := restarted.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r2", PlanDigest: f.stored(t).Setup.PlanDigest}); err != nil {
+		t.Fatalf("retained review must resume without another pick: %v", err)
+	}
+	waitFor(t, "the resumed run to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
+	if f.setup.runCount() != 2 {
+		t.Fatal("resume did not start exactly one new runner")
+	}
 }
 
-// A folder chosen in the native dialog is held in memory only. After a restart,
-// choosing the same folder again returns the same offer and its run, which then
-// resumes; nothing is created twice.
-func TestFolderSetup_PickingTheSameFolderAgainResumesTheSameRun(t *testing.T) {
+// A moved original needs an explicit re-pick, even with private persistence.
+// Its identity recovers the same offer/run; nothing is created twice.
+func TestFolderSetup_PickingMovedOriginalFolderResumesTheSameRun(t *testing.T) {
 	f := newOneCardFixture(t)
 	ctx := context.Background()
 	f.setup.finish = func() FolderSetupUpdate {
 		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopNeedsModel, RunID: "new-run"}
 	}
-	// The card was made by the dialog, not a chip, so its path is memory only.
+	// The card was made by the dialog, not a chip.
 	picked, err := f.service.scanSelectedRoot(ctx, "local", f.folder, "", "")
 	if err != nil || picked.Plan == nil {
 		t.Fatalf("picked offer = %+v, %v", picked, err)
@@ -351,18 +383,22 @@ func TestFolderSetup_PickingTheSameFolderAgainResumesTheSameRun(t *testing.T) {
 		return o != nil && o.Setup != nil && o.Setup.Status == FolderSetupStopped && !f.service.isRunning(picked.ID)
 	})
 
+	moved := f.folder + "-moved"
+	if err := os.Rename(f.folder, moved); err != nil {
+		t.Fatal(err)
+	}
 	restarted := f.newService()
 	restarted.deps.Setup = f.setup
-	restarted.deps.Journey = &fakeJourneyVerifier{folder: f.folder}
+	restarted.deps.Journey = &fakeJourneyVerifier{folder: moved}
 	current, err := restarted.Current(ctx, "local")
-	if err != nil || current.Offer == nil || !current.Offer.NeedsPick || current.Offer.Setup == nil {
-		t.Fatalf("after a restart the card must ask for the folder: %+v, %v", current.Offer, err)
+	if err != nil || current.Offer == nil || !current.Offer.NeedsPick || current.Offer.NeedsPickReason != FolderContinuationMoved || current.Offer.Setup == nil {
+		t.Fatalf("the moved folder must need an explicit pick: %+v, %v", current.Offer, err)
 	}
 	digest := current.Offer.Setup.PlanDigest
 	if _, err := restarted.StartSetup(ctx, "local", picked.ID, FolderSetupInput{RequestID: "r2", PlanDigest: digest}); !errors.Is(err, ErrFolderPathLost) {
 		t.Fatalf("a lost path must not be guessed: %v", err)
 	}
-	again, err := restarted.scanSelectedRoot(ctx, "local", f.folder, "", "")
+	again, err := restarted.scanSelectedRoot(ctx, "local", moved, "", "")
 	if err != nil || again.ID != picked.ID || again.Setup == nil || again.NeedsPick {
 		t.Fatalf("picking the same folder must resume the same offer: %+v, %v", again, err)
 	}
@@ -693,7 +729,10 @@ func TestFolderSetup_RefusesWhatItCannotRun(t *testing.T) {
 	if _, err := f.service.StartSetup(ctx, "local", "no-such-offer", FolderSetupInput{RequestID: "x", PlanDigest: "d"}); !errors.Is(err, ErrFolderOfferNotFound) {
 		t.Errorf("unknown offer: %v", err)
 	}
-	// A restart forgets a picked folder; the click then asks for it again.
+	// An unavailable saved location cannot be used or guessed after restart.
+	if err := os.Rename(f.folder, f.folder+"-away"); err != nil {
+		t.Fatal(err)
+	}
 	restarted := f.newService()
 	restarted.deps.Setup = f.setup
 	if _, err := restarted.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r-lost", PlanDigest: f.offer.Plan.Digest}); !errors.Is(err, ErrFolderPathLost) {

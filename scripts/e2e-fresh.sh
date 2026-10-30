@@ -4,7 +4,7 @@
 # isolated demo server.
 #
 # Usage:
-#   ./scripts/e2e-fresh.sh [--port PORT] [--tail N] [--rev REV] [--env KEY=VAL] spec [spec ...] [-- playwright args]
+#   ./scripts/e2e-fresh.sh [--port PORT] [--tail N] [--rev REV] [--sandbox DIR] [--env KEY=VAL] spec [spec ...] [-- playwright args]
 #
 # --rev REV serves a build of another commit (for example origin/dev) instead
 # of the working tree, so the same specs give the baseline to compare with.
@@ -12,6 +12,11 @@
 # --env KEY=VAL sets a variable for the Playwright run of every spec, for specs
 # that read one (FAKE_CALENDAR_MCP_BIN, …). Repeatable. It is passed on to
 # scripts/e2e.sh, so the command needs no `KEY=VAL` shell prefix.
+#
+# --sandbox DIR explicitly reuses one owned ori-e2e.* sandbox for one spec.
+# The server is still freshly built/started/stopped, so several invocations
+# exercise real restarts without editing stored application state. It refuses
+# unmarked, foreign-worktree or non-temporary directories.
 #
 # --sandbox-env NAME hands each spec its own sandbox path as NAME, for specs
 # that seed folders into the sandbox (ORI_SONG_FACTS_SANDBOX,
@@ -43,6 +48,7 @@ port=8947
 tail_lines=40
 rev=""
 sandbox_env=""
+sandbox_arg=""
 extra_env=()
 specs=()
 pw_args=()
@@ -58,6 +64,11 @@ while [[ $# -gt 0 ]]; do
 			exit 2
 		}
 		extra_env+=(--env "$2")
+		shift 2
+		;;
+	--sandbox)
+		sandbox_arg="${2:-}"
+		[[ -n "$sandbox_arg" ]] || { echo "--sandbox requires a directory" >&2; exit 2; }
 		shift 2
 		;;
 	--sandbox-env)
@@ -89,7 +100,7 @@ done
 	exit 2
 }
 [[ ${#specs[@]} -gt 0 ]] || {
-	echo "usage: $0 [--port PORT] [--tail N] [--rev REV] [--sandbox-env NAME] [--env KEY=VAL] spec [spec ...] [-- playwright args]" >&2
+	echo "usage: $0 [--port PORT] [--tail N] [--rev REV] [--sandbox DIR] [--sandbox-env NAME] [--env KEY=VAL] spec [spec ...] [-- playwright args]" >&2
 	exit 2
 }
 [[ -z "$sandbox_env" || "$sandbox_env" =~ ^[A-Z][A-Z0-9_]*$ ]] || {
@@ -99,6 +110,7 @@ done
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
+repo_root="$(pwd -P)"
 
 if lsof -nP -t -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
 	echo "port $port is already in use; pick another with --port" >&2
@@ -106,7 +118,24 @@ if lsof -nP -t -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 tmp_root="${TMPDIR:-/tmp}"
-tmp_root="${tmp_root%/}"
+tmp_root="$(cd "${tmp_root%/}" && pwd -P)"
+if [[ -n "$sandbox_arg" ]]; then
+	[[ ${#specs[@]} -eq 1 && -z "$rev" ]] || {
+		echo "--sandbox requires one working-tree spec, without --rev" >&2
+		exit 2
+	}
+	sandbox_arg="$(cd "$sandbox_arg" 2>/dev/null && pwd -P)" || exit 2
+	case "$sandbox_arg" in
+	"$tmp_root"/ori-e2e.*) ;;
+	*) echo "--sandbox must be an owned ori-e2e.* directory directly under TMPDIR" >&2; exit 2 ;;
+	esac
+	[[ "$(dirname "$sandbox_arg")" == "$tmp_root" && -f "$sandbox_arg/.ori-demo-owner" && ! -L "$sandbox_arg/.ori-demo-owner" ]] || {
+		echo "--sandbox requires a regular ownership marker" >&2
+		exit 2
+	}
+	owner="$(<"$sandbox_arg/.ori-demo-owner")"
+	[[ "$owner" == "worktree=$repo_root" ]] || { echo "--sandbox belongs to another worktree" >&2; exit 2; }
+fi
 if [[ -n "$rev" ]]; then
 	# The same cached build scripts/demo-server.sh --rev uses; the specs still
 	# come from the working tree, so a branch's specs run against its baseline.
@@ -144,7 +173,12 @@ trap stop_server EXIT
 summary=()
 overall=0
 for spec in "${specs[@]}"; do
-	sandbox="$(mktemp -d "$tmp_root/ori-e2e.XXXXXX")"
+	sandbox="$sandbox_arg"
+	if [[ -z "$sandbox" ]]; then
+		sandbox="$(mktemp -d "$tmp_root/ori-e2e.XXXXXX")"
+		printf 'worktree=%s\n' "$repo_root" >"$sandbox/.ori-demo-owner"
+		chmod 600 "$sandbox/.ori-demo-owner"
+	fi
 	# An empty path would point HOME and the data dir at the working tree.
 	[[ -n "$sandbox" && -d "$sandbox" ]] || {
 		echo "could not create a sandbox under $tmp_root" >&2
@@ -153,7 +187,7 @@ for spec in "${specs[@]}"; do
 	echo "== $spec"
 	echo "   sandbox $sandbox"
 	(cd "$sandbox" && exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$binary") \
-		>"$sandbox/server.log" 2>&1 &
+		>>"$sandbox/server.log" 2>&1 &
 	server_pid=$!
 
 	log="$sandbox/playwright.log"

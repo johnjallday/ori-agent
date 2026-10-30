@@ -84,7 +84,7 @@
     setupRunning: 'Setting it up… Ori is running the plan, line by line.',
     setupEntry: name => `Use ${name}`,
     folderExpiresIn: minutes => `Folder pick expires in ${minutes} min`,
-    folderExpired: 'The folder pick expired. Add the folder again to set it up.',
+    folderExpired: 'Ori no longer has this folder open. Pick it again to carry on.',
     folderAgain: 'Add the folder again',
     // Why a recognized folder has no plan, by the server's reason code.
     planUnavailable: (reason, subject) => {
@@ -623,6 +623,11 @@
     const run =
       session.setup_run && typeof session.setup_run === 'object' ? session.setup_run : null;
     const shared = globalThis.OriFolderPlanLines;
+    shared?.renderEntryChoice?.(els.entryChoice, run || plan, {
+      readOnly: Boolean(session.setup || run),
+      disabled: state.busy || state.folderBusy,
+      onChange: name => emit('workspace-build-entry-choice', { entry_name: name })
+    });
     // Once Set it up ran, its own lines (with their states) stand in for the plan's.
     const source =
       run && Array.isArray(run.lines) && run.lines.length
@@ -895,7 +900,10 @@
       !open || !session.folder
         ? ''
         : expired
-          ? COPY.folderExpired
+          ? globalThis.OriFolderPickCopy?.(
+              session.folder.observation?.folder,
+              session.folder_needs_pick_reason || 'lost'
+            ) || COPY.folderExpired
           : minutes < 5
             ? COPY.folderExpiresIn(minutes)
             : '';
@@ -982,6 +990,9 @@
     const requirements = createElement('div');
     requirements.id = 'workspaceBuildRequirements';
     requirements.hidden = true;
+    const entryChoice = createElement('div');
+    entryChoice.id = 'workspaceBuildEntryChoice';
+    entryChoice.hidden = true;
     const consequences = createElement('div', 'folder-setup-consequences');
     const progress = createElement('div');
     const details = createElement('details', 'folder-setup-details');
@@ -994,6 +1005,7 @@
     body.append(
       requirements,
       hireBlock.hire,
+      entryChoice,
       consequences,
       progress,
       sketch,
@@ -1013,6 +1025,7 @@
       hireBlock,
       sketch,
       sketchBody,
+      entryChoice,
       consequences,
       progress,
       linesKicker,

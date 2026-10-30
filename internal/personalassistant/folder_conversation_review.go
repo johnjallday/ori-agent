@@ -16,7 +16,8 @@ import (
 var ErrFolderReviewPending = errors.New("another folder setup review is pending; finish or close that review first")
 
 // FolderConversationReview is provenance, not authority. Only the owning
-// canonical conversation and a still-live selection can authorize a new setup.
+// canonical conversation and a validated live or privately restored folder can
+// authorize setup.
 // No source path is persisted here or exposed by FolderOfferView.
 type FolderConversationReview struct {
 	Target                 foldercontext.Target    `json:"target"`
@@ -49,7 +50,7 @@ func (s *FolderObservationService) ConfigureConversationReviews(
 	lease func(foldercontext.Target) (func(), bool),
 ) {
 	s.reviewGuard, s.reviewLease = guard, lease
-	s.digest.conversationSource = s.reviewSource
+	s.digest.conversationSource = s.reviewSourceReason
 	s.digest.conversationLease = s.acquireReview
 }
 
@@ -79,43 +80,57 @@ func (s *FolderObservationService) acquireReview(ctx context.Context, offer Fold
 		release()
 		return nil, ErrFolderSelection
 	}
-	if _, ok := s.reviewSource(offer); !ok {
+	if _, reason := s.reviewSourceReason(offer); reason != "" {
 		release()
-		return nil, ErrFolderSelection
+		return nil, folderPickError{reason: reason, cause: ErrFolderSelection}
 	}
 	return release, nil
 }
 
 func (s *FolderObservationService) reviewSource(offer FolderOffer) (string, bool) {
+	root, reason := s.reviewSourceReason(offer)
+	return root, reason == ""
+}
+
+func (s *FolderObservationService) reviewSourceReason(offer FolderOffer) (string, FolderContinuationReason) {
 	review := offer.ConversationReview
 	if review == nil {
-		return "", false
+		return "", FolderContinuationLost
 	}
 	guard, _ := s.reviewAuthority(review.Target)
-	if guard == nil {
-		return "", false
-	}
 	ctx := context.Background()
-	if err := guard(ctx, offer); err != nil {
-		return "", false
+	if guard == nil || guard(ctx, offer) != nil {
+		return "", FolderContinuationLost
 	}
-	held, _, err := s.resolve(ctx, review.Target, review.ObservationID)
-	if err != nil || FolderKey(held.root) != offer.FolderKey || held.identity != offer.RootIdentity {
-		return "", false
+	held, reason, err := s.resolveForReview(ctx, review.Target, review.ObservationID, offer.ID)
+	if err != nil {
+		return "", reason
+	}
+	if FolderKey(held.root) != offer.FolderKey || held.identity != offer.RootIdentity {
+		return "", FolderContinuationChanged
 	}
 	candidate, ok := observedReviewCandidate(held, review.CandidateID)
 	if !ok || FolderKey(candidate.Path) != offer.Subject.Key {
-		return "", false
+		return "", FolderContinuationLost
 	}
 	canonical, err := s.digest.deps.ValidateRoot(candidate.Path)
-	identity, identityErr := portfolioDirectoryIdentity(candidate.Path)
-	if err != nil || canonical != candidate.Path || identityErr != nil || identity != review.CandidateIdentity {
-		return "", false
+	if err != nil || canonical != candidate.Path {
+		return "", FolderContinuationMoved
 	}
-	return held.root, true
+	identity, identityErr := portfolioDirectoryIdentity(candidate.Path)
+	if identityErr != nil || identity != review.CandidateIdentity {
+		return "", FolderContinuationChanged
+	}
+	return held.root, ""
 }
 
 func observedReviewCandidate(held heldFolderObservation, id string) (folderdigest.Candidate, bool) {
+	if held.reheld != nil {
+		if held.reheld.candidateID != id {
+			return folderdigest.Candidate{}, false
+		}
+		return folderdigest.Candidate{Path: held.reheld.candidatePath, IsRoot: held.reheld.candidatePath == held.root}, true
+	}
 	// Only candidates actually disclosed in the bounded preview are selectable.
 	for _, shown := range held.observation.Projects {
 		if shown.ID != id {
@@ -144,6 +159,45 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 	target := source
 	target.ConversationID, target.DraftID = conversationID, ""
 	d := s.digest
+	if held.reheld == nil {
+		doc, readErr := d.store.Read(ctx, source.UserID)
+		if readErr != nil {
+			return FolderOfferView{}, readErr
+		}
+		placement := folderReviewPlacement(ctx)
+		var recoverable *FolderOffer
+		for _, prior := range doc.Offers {
+			review := prior.ConversationReview
+			if !openFolderReview(prior) || review == nil || prior.Structure.Arranged() || prior.PlacementHandoff != nil || review.Target != target || review.ObservationID == observationID ||
+				review.Operation != placement.Operation || review.DestinationID != placement.DestinationID {
+				continue
+			}
+			guard, _ := s.reviewAuthority(target)
+			if guard == nil || guard(ctx, prior) != nil {
+				continue // retired provenance cannot donate choices to a new review
+			}
+			_, matched, matchErr := s.matchReviewPick(held, prior, candidateID)
+			if matchErr != nil {
+				return FolderOfferView{}, matchErr
+			}
+			if matched {
+				if recoverable != nil {
+					return FolderOfferView{}, ErrFolderReviewPending
+				}
+				copy := prior
+				recoverable = &copy
+			}
+		}
+		if recoverable != nil {
+			view, resumeErr := s.resumeReviewPick(ctx, held, target, *recoverable, candidateID)
+			if resumeErr != nil {
+				return FolderOfferView{}, resumeErr
+			}
+			if view != nil {
+				return *view, nil
+			}
+		}
+	}
 	// A review opened again without new Adjust choices keeps the ones its
 	// pending review already has. Changed facts cannot silently discard an
 	// explicit choice or a deliberately cleared name.
@@ -227,12 +281,33 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 	if err != nil {
 		return FolderOfferView{}, err
 	}
+	if err := s.saveReviewPath(ctx, held, result); err != nil {
+		return FolderOfferView{}, err
+	}
 	return d.viewFor(ctx, source.UserID, result, held.binding.Paused), nil
+}
+
+func (s *FolderObservationService) saveReviewPath(ctx context.Context, held heldFolderObservation, offer FolderOffer) error {
+	if !openFolderReview(offer) {
+		return nil
+	}
+	candidate, ok := observedReviewCandidate(held, offer.ConversationReview.CandidateID)
+	if !ok {
+		return ErrFolderSelection
+	}
+	return s.digest.store.saveFolderPath(ctx, held.target.UserID, offer.ID, folderPathEntry{
+		RootPath: held.root, RootIdentity: offer.RootIdentity,
+		CandidatePath: candidate.Path, CandidateIdentity: offer.ConversationReview.CandidateIdentity,
+		SavedAt: s.digest.now(),
+	})
 }
 
 // prepareReviewOffer is shared by explicit Review and read-only suggestions.
 // It validates the observed candidate but neither allocates nor stores an offer.
 func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held heldFolderObservation, target foldercontext.Target, candidateID string) (FolderOffer, error) {
+	if held.reheld != nil {
+		return s.prepareReheldReview(ctx, held, target, candidateID)
+	}
 	candidate, ok := observedReviewCandidate(held, candidateID)
 	if !ok {
 		return FolderOffer{}, ErrFolderSelection
@@ -311,20 +386,7 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 	if collection {
 		offer.ConversationReview.DestinationID = ""
 	}
-	if reader, ok := d.deps.Setup.(FolderSetupDestinationReader); ok {
-		destination, err := reader.ReadSetupDestination(ctx, d.setupRequest(ctx, target.UserID, offer))
-		if err != nil {
-			offer.ConversationReview.DestinationUnavailable = true
-			offer.ConversationReview.DestinationBlocker = folderDestinationBlocker(err)
-		} else if destination != nil {
-			if destination.Validate() != nil {
-				offer.ConversationReview.DestinationUnavailable = true
-			} else {
-				copy := *destination
-				offer.ConversationReview.Destination = &copy
-			}
-		}
-	}
+	s.refreshReviewDestination(ctx, target.UserID, &offer)
 	// What the user changed in Adjust applies only to a collection's own
 	// proposal. It is kept on the review so a refresh proposes the same thing.
 	adjustment := folderStructureAdjustment(ctx)
@@ -352,6 +414,27 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 		review.Destination, review.DestinationUnavailable, review.DestinationBlocker = nil, false, nil
 	}
 	return offer, nil
+}
+
+func (s *FolderObservationService) refreshReviewDestination(ctx context.Context, userID string, offer *FolderOffer) {
+	reader, ok := s.digest.deps.Setup.(FolderSetupDestinationReader)
+	if !ok {
+		return
+	}
+	review := offer.ConversationReview
+	review.Destination, review.DestinationBlocker, review.DestinationUnavailable = nil, nil, false
+	destination, err := reader.ReadSetupDestination(ctx, s.digest.setupRequest(ctx, userID, *offer))
+	if err != nil {
+		review.DestinationUnavailable = true
+		review.DestinationBlocker = folderDestinationBlocker(err)
+	} else if destination != nil {
+		if destination.Validate() != nil {
+			review.DestinationUnavailable = true
+		} else {
+			copy := *destination
+			review.Destination = &copy
+		}
+	}
 }
 
 // declinedDomains reports the capability domains the owner said no to: in the

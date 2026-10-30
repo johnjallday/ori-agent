@@ -24,6 +24,9 @@ func (s *FolderObservationService) Recognize(ctx context.Context, target folderc
 	if err != nil {
 		return nil, err
 	}
+	if held.reheld != nil {
+		return nil, ErrFolderSelection
+	} // no fabricated scan facts
 	d := s.digest
 	doc, err := d.store.Read(ctx, target.UserID)
 	if err != nil {

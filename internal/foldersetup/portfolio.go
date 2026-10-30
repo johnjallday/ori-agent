@@ -159,11 +159,13 @@ type OpenInput struct {
 // service reports it. Created is false when an earlier pass already made the
 // workspace (connected): this pass only finished what was missing.
 type OpenOutcome struct {
-	EntryID     string
-	WorkspaceID string
-	LinkID      string
-	Route       string
-	Created     bool
+	// SelectedFile is the file proved by the opened workspace, when available.
+	SelectedFile string
+	EntryID      string
+	WorkspaceID  string
+	LinkID       string
+	Route        string
+	Created      bool
 	// Staffing is how the project role was filled: added, joined, already, or
 	// why not (none, off, not_shared, consent_stale, assistant_missing).
 	Staffing  string
@@ -736,6 +738,13 @@ func (s *portfolioRun) open(ctx context.Context) error {
 		return failed("the song could not be opened: " + err.Error())
 	case outcome.WorkspaceID == "" || outcome.EntryID != entryID:
 		return failed("the open did not name the song's workspace")
+	}
+	if outcome.SelectedFile != "" {
+		if !personalassistant.ValidFolderEntryName(outcome.SelectedFile) || (s.entryName != "" && s.entryName != outcome.SelectedFile) {
+			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the opened workspace names a different project file"}
+		}
+		s.entryName = outcome.SelectedFile
+		s.lines = personalassistant.WithFolderSetupEntry(personalassistant.FolderSetupPlan{Lines: s.lines, EntryName: s.cfg.Plan.EntryName}, s.entryName, nil).Lines
 	}
 	for _, kind := range []string{personalassistant.FolderPlanWorkspace, personalassistant.FolderPlanFolder, personalassistant.FolderPlanMode} {
 		s.setOpen(kind, personalassistant.FolderLineDone)

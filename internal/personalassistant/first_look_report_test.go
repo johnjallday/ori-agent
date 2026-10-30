@@ -135,6 +135,20 @@ func TestFirstLookReport_NamesThePortfolioManagerWhoOpenedTheSong(t *testing.T) 
 		strings.Join(needs[0].Actions, ",") != "start_this,not_now" {
 		t.Fatalf("handoff report = %+v", needs)
 	}
+	outcome.Receipt = []FolderReceiptRow{{Kind: FolderPlanFolder, Name: "Opens Song.rpp"}}
+	if got := handoffSentence(offer, ws); got != "Your Portfolio Manager opened My Song with Song.rpp in Music Production Home." {
+		t.Fatal("opened file missing", got)
+	}
+	outcome.Receipt[0].Name = "Opens /private/Song.rpp"
+	if got := handoffSentence(offer, ws); strings.Contains(got, "/private/") {
+		t.Fatal("unsafe receipt file", got)
+	}
+	outcome.Receipt = nil
+	// A pending choice without the completed receipt is not a report fact.
+	offer.EntryName = "Unconfirmed.rpp"
+	if got := handoffSentence(offer, ws); strings.Contains(got, "Unconfirmed") {
+		t.Fatal("unconfirmed choice became an opened file", got)
+	}
 	// Without the manager, or without the Home, nothing is added.
 	outcome.OpenedBy = ""
 	offer.Outcome = &outcome

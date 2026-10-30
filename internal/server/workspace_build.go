@@ -166,12 +166,58 @@ func (o buildFolderObservations) Plan(ctx context.Context, target foldercontext.
 	return service.BuildPlan(ctx, target, observationID, candidateID, workspaceName)
 }
 
+func (o buildFolderObservations) ChooseSetupEntry(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string, input personalassistant.FolderSetupEntryInput) (personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderSelection
+	}
+	return service.ChooseBuildSetupEntry(ctx, draft, sessionID, observationID, candidateID, workspaceName, input)
+}
+
 func (o buildFolderObservations) ReviewSetup(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
 	service := o.service()
 	if service == nil {
 		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderSelection
 	}
 	return service.ReviewBuild(ctx, draft, sessionID, observationID, candidateID, workspaceName)
+}
+
+// KeepBuildFolder opens the pane's local review at explicit attachment, not
+// during a plan read. The canonical build guard remains its authority.
+func (o buildFolderObservations) KeepBuildFolder(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
+	return o.ReviewSetup(ctx, draft, sessionID, observationID, candidateID, workspaceName)
+}
+
+func (o buildFolderObservations) ResumeBuildFolderPick(ctx context.Context, draft foldercontext.Target, sessionID, originalID, pickedID string) (*personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.ResumeBuildFolderPick(ctx, draft, sessionID, originalID, pickedID)
+}
+
+func (o buildFolderObservations) BuildFolderReviewState(ctx context.Context, target foldercontext.Target, observationID string) (bool, string) {
+	service := o.service()
+	if service == nil {
+		return false, ""
+	}
+	return service.BuildFolderReviewState(ctx, target, observationID)
+}
+
+func (o buildFolderObservations) CloseBuildFolderReview(ctx context.Context, draft foldercontext.Target, sessionID, offerID string) error {
+	service := o.service()
+	if service == nil {
+		return personalassistant.ErrFolderSelection
+	}
+	return service.CloseReview(ctx, personalassistant.BuildReviewTarget(draft, sessionID), offerID)
+}
+
+func (o buildFolderObservations) CloseBuildFolderReviews(ctx context.Context, userID, sessionID, observationID string) error {
+	service := o.service()
+	if service == nil {
+		return personalassistant.ErrFolderSelection
+	}
+	return service.CloseBuildFolderReviews(ctx, userID, sessionID, observationID)
 }
 
 func (o buildFolderObservations) ReadSoftwareResult(ctx context.Context, userID, sessionID, workspaceID string) (*personalassistant.FolderOfferView, error) {

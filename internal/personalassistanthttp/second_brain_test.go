@@ -228,7 +228,7 @@ func TestSecondBrainErrors_SayOneSentenceEach(t *testing.T) {
 		{&personalassistant.SecondBrainFolderError{Message: "No Markdown notes found in Brain.", NoNotes: true}, http.StatusBadRequest, `"no_notes":true`},
 		{&personalassistant.SecondBrainTooSoonError{RetryAfter: 90 * time.Second}, http.StatusTooManyRequests, `"retry_after_seconds":90`},
 		{secondbrain.ErrReplaceNeedsConfirm, http.StatusConflict, `"needs_confirm":true`},
-		{personalassistant.ErrSecondBrainSelection, http.StatusConflict, `"needs_pick":true`},
+		{personalassistant.ErrSecondBrainSelection, http.StatusConflict, `"needs_pick_reason":"lost"`},
 		{personalassistant.ErrSecondBrainUnknownVault, http.StatusNotFound, "Obsidian's list"},
 		{personalassistant.ErrSecondBrainNotConnected, http.StatusConflict, "No notes folder"},
 		{personalassistant.ErrNeedsHQ, http.StatusConflict, "Personal HQ"},

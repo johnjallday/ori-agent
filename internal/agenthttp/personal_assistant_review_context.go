@@ -16,18 +16,19 @@ import (
 // Destination disclosure/binding is supplied by the plan in the next slice;
 // until then a generic "your Home" is explicitly not an exact destination.
 type personalAssistantReviewContext struct {
-	Version           int                   `json:"version"`
-	Status            string                `json:"status"`
-	Subject           string                `json:"subject,omitempty"`
-	Operation         string                `json:"operation,omitempty"`
-	DestinationStatus string                `json:"destination_status,omitempty"`
-	DestinationName   string                `json:"destination_name,omitempty"`
-	DestinationKind   string                `json:"destination_kind,omitempty"`
-	Effects           []reviewContextEffect `json:"effects,omitempty"`
-	Blocker           string                `json:"blocker,omitempty"`
-	Controls          []string              `json:"control_labels,omitempty"`
-	Historical        bool                  `json:"historical,omitempty"`
-	Partial           bool                  `json:"partial,omitempty"`
+	Version           int                                        `json:"version"`
+	Status            string                                     `json:"status"`
+	Subject           string                                     `json:"subject,omitempty"`
+	Operation         string                                     `json:"operation,omitempty"`
+	DestinationStatus string                                     `json:"destination_status,omitempty"`
+	DestinationName   string                                     `json:"destination_name,omitempty"`
+	DestinationKind   string                                     `json:"destination_kind,omitempty"`
+	Effects           []reviewContextEffect                      `json:"effects,omitempty"`
+	Blocker           string                                     `json:"blocker,omitempty"`
+	NeedsPickReason   personalassistant.FolderContinuationReason `json:"needs_pick_reason,omitempty"`
+	Controls          []string                                   `json:"control_labels,omitempty"`
+	Historical        bool                                       `json:"historical,omitempty"`
+	Partial           bool                                       `json:"partial,omitempty"`
 	// elsewhere is the owning conversation of a review pending elsewhere. It is
 	// for the drawer's "Open existing conversation" only, never for the model.
 	elsewhere string
@@ -81,7 +82,9 @@ func (h *HomeAssistantAskHandler) prepareReviewContext(ctx context.Context, conv
 	active := id != "" && state.Observation != nil
 	if turn != nil {
 		id = turn.offerID
-		active = id != "" && !turn.ref.Historical
+		// A dated discussion snapshot is independent of the canonical review's
+		// folder authority, which may have been restored without a fresh scan.
+		active = id != ""
 	}
 	// After detach/close, the most recent local reference may still be explained,
 	// but it is never current. Imported records cannot select a local review.
@@ -140,10 +143,8 @@ func (h *HomeAssistantAskHandler) prepareReviewContext(ctx context.Context, conv
 	if err != nil || view == nil || view.ID != id || view.ConversationID != conversation.id {
 		return result
 	}
-	if active && h.FolderObservations != nil && state.Observation != nil &&
-		h.FolderObservations.Status(ctx, target, *state.Observation) != "" {
-		active = false
-	}
+	// ReadReview checks setup authority itself. The discussion snapshot's
+	// Status may remain lost/expired even when that authority was restored.
 	return projectReviewContext(view, active)
 }
 
@@ -257,6 +258,10 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 	default:
 		if !active || view.NeedsPick {
 			result.Status, result.Blocker = "reselection_needed", "current_folder_access_unavailable"
+			result.NeedsPickReason = view.NeedsPickReason
+			if result.NeedsPickReason == "" {
+				result.NeedsPickReason = personalassistant.FolderContinuationLost
+			}
 			break
 		}
 		if view.Setup != nil {

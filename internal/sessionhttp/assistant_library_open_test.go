@@ -65,6 +65,12 @@ func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, activat
 		ProjectRoles: []agentworkspace.AssistantProgramRoleSpec{{ID: "reaper-assistant", Label: "REAPER Assistant",
 			Scope: agentworkspace.AssistantRoleScopeProject, Required: true, Primary: true}},
 	})
+	if selectedFile == "" && len(f.rows[entryID].ProjectFiles) == 1 {
+		selectedFile = f.rows[entryID].ProjectFiles[0]
+	}
+	if selectedFile != "" {
+		song.SharedData = map[string]any{agentworkspace.ProjectEntryPathKey: selectedFile}
+	}
 	if err := f.store.Save(song); err != nil {
 		return "", err
 	}
@@ -453,6 +459,26 @@ func TestOpenLibrarySong_RowPassesNoGoalAndShowsNoLink(t *testing.T) {
 	}
 }
 
+func TestOpenPortfolioProject_ReportsTheLinkedFileAndRefusesRetargetingAConnectedSong(t *testing.T) {
+	f := newOpenFixture(t)
+	f.grant(t)
+	input := LibraryOpenInput{EntryID: "one", SelectedFile: "Song 001 alt.rpp", Key: "chosen-file"}
+	result, err := f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, input)
+	if err != nil || result.SelectedFile != input.SelectedFile || len(f.opener.activations) != 1 {
+		t.Fatalf("selected file: %+v / %v", result, err)
+	}
+	input.SelectedFile = "Song 001.rpp"
+	_, err = f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, input)
+	var stop *LibraryOpenStop
+	if !errors.As(err, &stop) || stop.Reason != "plan_changed" || len(f.opener.activations) != 1 {
+		t.Fatalf("connected song silently retargeted: %v", err)
+	}
+	result, err = f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, LibraryOpenInput{EntryID: "two", Key: "single-default"})
+	if err != nil || result.SelectedFile == "" {
+		t.Fatalf("single-file default lost its read-back name: %+v / %v", result, err)
+	}
+}
+
 // Every stop comes back typed, and none makes a song.
 func TestOpenPortfolioProject_StopsAreTypedAndMakeNothing(t *testing.T) {
 	f := newOpenFixture(t)
@@ -470,7 +496,9 @@ func TestOpenPortfolioProject_StopsAreTypedAndMakeNothing(t *testing.T) {
 		strings.Join(stop.ProjectFiles, ",") != "Song 001.rpp,Song 001 alt.rpp" {
 		t.Fatalf("needs choice = %v", err)
 	}
-	if err := open(LibraryOpenInput{EntryID: "one", SelectedFile: "Other.rpp"}); !errors.Is(err, ErrLibraryFileNotOffered) {
+	var missing *LibraryFileNotOfferedError
+	if err := open(LibraryOpenInput{EntryID: "one", SelectedFile: "Other.rpp"}); !errors.Is(err, ErrLibraryFileNotOffered) ||
+		!errors.As(err, &missing) || strings.Join(missing.ProjectFiles, ",") != "Song 001.rpp,Song 001 alt.rpp" {
 		t.Fatalf("unoffered file = %v", err)
 	}
 	if err := open(LibraryOpenInput{EntryID: "ableton"}); !errors.As(err, &stop) || stop.Reason != "project_provider_unavailable" ||

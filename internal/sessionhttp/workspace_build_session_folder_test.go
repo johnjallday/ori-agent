@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,40 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+func TestBuildFolderRefusals_DoNotCallAnotherReviewOrPickerFailureFolderLoss(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		err          error
+		code, reason string
+	}{
+		{"pending owner", personalassistant.ErrFolderReviewPending, "review_pending", ""},
+		{"declined", personalassistant.ErrFolderOfferDecided, "declined", ""},
+		{"busy", personalassistant.ErrFolderScanBusy, "folder", ""},
+		{"picker unavailable", personalassistant.ErrFolderPickerUnavailable, "folder", ""},
+		{"selection unavailable", personalassistant.ErrFolderSelection, "folder", "lost"},
+		{"path unavailable", personalassistant.ErrFolderPathLost, "folder", "lost"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			respondBuildFolderError(w, tc.err)
+			var body map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != http.StatusConflict || body["code"] != tc.code {
+				t.Fatal(w.Code, body)
+			}
+			if tc.reason == "" {
+				if _, exists := body["needs_pick_reason"]; exists {
+					t.Fatal("unrelated refusal claimed folder loss", body)
+				}
+			} else if body["needs_pick_reason"] != tc.reason {
+				t.Fatal(body)
+			}
+		})
+	}
+}
 
 // fakeBuildFolders stands in for the composer's observation service: it
 // answers the chooser, hands back one scripted observation, and remembers

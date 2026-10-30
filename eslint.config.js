@@ -175,6 +175,8 @@ export default defineConfig([
       'internal/web/static/js/modules/show-folder-quest.js',
       'internal/web/static/js/modules/personal-assistant-folder-chooser.js',
       'internal/web/static/js/modules/folder-path-entry.js',
+      'internal/web/static/js/modules/folder-pick-copy.js',
+      'internal/web/static/js/modules/folder-pick-copy-shared.js',
       'internal/web/static/js/modules/folder-prerequisites.js',
       'internal/web/static/js/modules/folder-task-disclosure.js',
       'internal/web/static/js/modules/personal-assistant-hire.js',

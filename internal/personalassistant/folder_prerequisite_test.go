@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -29,7 +30,7 @@ func (s *prerequisiteSetup) Prerequisite(_ context.Context, req FolderSetupReque
 }
 
 func TestFolderPrerequisiteRequiresCurrentCanonicalUnacceptedCreation(t *testing.T) {
-	for _, scenario := range []string{"preview", "confirm", "accepted", "support", "other_owner", "lost_selection", "changed_destination", "missing_home", "unnamed_blocker", "unknown_kind", "build_owner"} {
+	for _, scenario := range []string{"preview", "confirm", "accepted", "support", "other_owner", "expired_selection", "lost_selection", "changed_destination", "missing_home", "unnamed_blocker", "unknown_kind", "build_owner"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := t.Context()
 			f, observations, source := observationFixture(t)
@@ -55,8 +56,12 @@ func TestFolderPrerequisiteRequiresCurrentCanonicalUnacceptedCreation(t *testing
 			switch scenario {
 			case "other_owner":
 				active = "another-review"
-			case "lost_selection":
+			case "expired_selection":
 				f.now = f.now.Add(31 * time.Minute)
+			case "lost_selection":
+				if err := os.Rename(song, song+"-moved"); err != nil {
+					t.Fatal(err)
+				}
 			case "changed_destination":
 				setup.destination = &FolderSetupDestination{Status: "new", ProgramID: "changed"}
 			case "unknown_kind":
@@ -88,7 +93,7 @@ func TestFolderPrerequisiteRequiresCurrentCanonicalUnacceptedCreation(t *testing
 				t.Fatal(err)
 			}
 			_, err = f.service.Prerequisite(ctx, "local", view.ID, input)
-			allowed := scenario == "preview" || scenario == "confirm" || scenario == "missing_home"
+			allowed := scenario == "preview" || scenario == "confirm" || scenario == "missing_home" || scenario == "expired_selection"
 			if (err == nil) != allowed || (setup.calls == 1) != allowed {
 				t.Fatalf("allowed=%t calls=%d error=%v", allowed, setup.calls, err)
 			}

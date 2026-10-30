@@ -401,11 +401,15 @@ func (i FolderSoftwareIntent) Validate() error {
 // Digest back with the click and the server recomputes the plan: a mismatch
 // means the card on screen is stale and the click is refused.
 type FolderSetupPlan struct {
-	OptionalTask bool                    `json:"optional_task,omitempty"`
-	Visual       *FolderSetupVisual      `json:"visual,omitempty"`
-	Lines        []FolderPlanLine        `json:"lines"`
-	Digest       string                  `json:"digest"`
-	Destination  *FolderSetupDestination `json:"destination,omitempty"`
+	// EntryName is the selected direct-child project file. Multiple candidates
+	// are offered before confirmation; neither field contains a path.
+	EntryName       string                  `json:"entry_name,omitempty"`
+	EntryCandidates []string                `json:"entry_candidates,omitempty"`
+	OptionalTask    bool                    `json:"optional_task,omitempty"`
+	Visual          *FolderSetupVisual      `json:"visual,omitempty"`
+	Lines           []FolderPlanLine        `json:"lines"`
+	Digest          string                  `json:"digest"`
+	Destination     *FolderSetupDestination `json:"destination,omitempty"`
 	// Prerequisites say what the setup needs and what it can use, as it stands
 	// now. They are read fresh for each plan and are not part of the digest: a
 	// prerequisite that changes the setup itself (the assistant's model) is in
@@ -490,6 +494,8 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
+	stamped.EntryName = p.EntryName
+	stamped.EntryCandidates = append([]string(nil), p.EntryCandidates...)
 	stamped.OptionalTask = p.Intent.OptionalTaskPolicy == FolderOptionalSummaryPolicy
 	if p.Intent.Model != nil {
 		model := *p.Intent.Model
@@ -542,7 +548,35 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 			stamped.Digest = hex.EncodeToString(sum[:])
 		}
 	}
+	if !validSetupPlanEntries(stamped.EntryName, stamped.EntryCandidates) {
+		stamped.Digest = ""
+	} else if stamped.EntryName != "" && stamped.Digest != "" {
+		sum := sha256.Sum256([]byte(stamped.Digest + "\x00entry\x00" + stamped.EntryName))
+		stamped.Digest = hex.EncodeToString(sum[:])
+	}
 	return stamped
+}
+
+// ValidFolderEntryName admits only a bounded, bare filename, as setup accepts.
+func ValidFolderEntryName(name string) bool {
+	return name != "" && strings.TrimSpace(name) == name && len(name) <= folderDigestMaxName &&
+		!strings.ContainsAny(name, "/\\\x00\r\n") && validateFolderName(name) == nil
+}
+
+func validSetupPlanEntries(name string, candidates []string) bool {
+	if len(candidates) > folderSetupMaxEntries || (name != "" && !ValidFolderEntryName(name)) {
+		return false
+	}
+	found := len(candidates) == 0
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if !ValidFolderEntryName(candidate) || seen[candidate] {
+			return false
+		}
+		seen[candidate] = true
+		found = found || candidate == name
+	}
+	return found
 }
 
 // validOpensProjects accepts plain, distinct folder names only.
@@ -595,15 +629,15 @@ type FolderSetupUpdate struct {
 }
 
 // FolderSetupRequest is what the host needs to plan or run a setup. Path is the
-// folder's canonical path from the offer the server holds; it is set only for
-// Run and never reaches the browser.
+// folder's canonical path from the offer the server holds; plans may use it for
+// bounded metadata checks. It never reaches the browser or model.
 type FolderSetupRequest struct {
 	UserID string
 	Offer  FolderOffer
 	// AppInstalled says whether the application itself is on this computer, which
 	// the plan states honestly; setup never depends on it.
 	AppInstalled bool
-	Path         string
+	Path         string `json:"-"`
 	EntryName    string
 	// WorkspaceName names the new workspace when the review gave it a name of
 	// its own; empty names it after the folder.
@@ -671,6 +705,7 @@ type FolderSetupView struct {
 	Status          string                  `json:"status"`
 	StopReason      string                  `json:"stop_reason,omitempty"`
 	Lines           []FolderPlanLine        `json:"lines"`
+	EntryName       string                  `json:"entry_name,omitempty"`
 	EntryCandidates []string                `json:"entry_candidates,omitempty"`
 	Destination     *FolderSetupDestination `json:"destination,omitempty"`
 	// HomeUpgrade is the Home a home_upgrade_required stop waits on.

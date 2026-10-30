@@ -998,7 +998,7 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 	case errors.Is(err, personalassistant.ErrFolderOfferDecided):
 		orihttp.Conflict(w, "That offer was already answered")
 	case errors.Is(err, personalassistant.ErrFolderPathLost), errors.Is(err, personalassistant.ErrFolderSelection):
-		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true})
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true, "needs_pick_reason": personalassistant.FolderPickReason(err)})
 	case errors.Is(err, personalassistant.ErrNeedsHQ):
 		orihttp.Conflict(w, "Build Personal HQ before showing a folder")
 	case errors.Is(err, personalassistant.ErrRepairNeeded), errors.Is(err, personalassistant.ErrConflict), errors.Is(err, personalassistant.ErrNotFound):

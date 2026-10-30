@@ -13,6 +13,7 @@ import {
   songLineText
 } from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
+import { folderPickCopy } from './folder-pick-copy.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
 import { mountHomeArrangementPlanner } from './home-arrangement.js';
 import { mountCollectionReview } from './home-collection-review.js';
@@ -47,8 +48,7 @@ function node(tag, className, value) {
 // What to tell the user when the folder they chose for this Home cannot be used
 // to continue, and whether choosing it again could help. `reason` is the
 // library's own answer (picker/Home/package unavailable); `continuation` is the
-// server's account of the carried collection (expired, lost after a restart, or
-// changed). Every message says the Home is ready and that nothing was connected,
+// server's account of the carried collection (moved, changed or unavailable). Every message says the Home is ready and that nothing was connected,
 // because no committed result is ever lost by a lost selection, and none of these
 // is a reason to distrust a completed grant after an ordinary reload.
 export function selectionRecovery({ reason = '', continuation = null } = {}) {
@@ -73,28 +73,10 @@ export function selectionRecovery({ reason = '', continuation = null } = {}) {
     default:
   }
   const kept = 'Your Home is ready and anything already connected is kept.';
-  switch (continuation?.reason) {
-    case 'expired':
-      return {
-        repick: true,
-        message: `The folder you chose was held for 30 minutes and that time has passed. ${kept} Choose the folder again to continue.`
-      };
-    case 'lost':
-      return {
-        repick: true,
-        message: `Ori was restarted, which clears a folder choice that has not been connected yet. ${kept} Choose the folder again to continue.`
-      };
-    case 'changed':
-      return {
-        repick: true,
-        message: `The folder at that location changed after you chose it (it was moved, replaced, or is gone). ${kept} Choose the folder again to continue.`
-      };
-    default:
-      return {
-        repick: true,
-        message: `Ori no longer has the folder you chose earlier. ${kept} Choose the folder again to continue.`
-      };
-  }
+  return {
+    repick: true,
+    message: `${folderPickCopy(continuation?.folder || 'the folder you chose earlier', continuation?.reason)} ${kept}`
+  };
 }
 
 // A short, honest label for where one saved song stands, from the library's own

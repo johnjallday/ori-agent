@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./create-workspace-build-pane.js', import.meta.url), 'utf8');
+const pickCopySource = readFileSync(
+  new URL('./folder-pick-copy-shared.js', import.meta.url),
+  'utf8'
+);
 const visualSource = readFileSync(new URL('./folder-setup-visual.js', import.meta.url), 'utf8');
 const planLinesSource = readFileSync(new URL('./folder-plan-lines.js', import.meta.url), 'utf8');
 const recognitionLinesSource = readFileSync(
@@ -207,6 +211,7 @@ function loadPane(extras = {}) {
   class CustomEvent extends FakeEvent {}
   // Loaded before the pane, as in base.tmpl.
   const context = vm.createContext({ window, document, CustomEvent, ...extras });
+  vm.runInContext(pickCopySource, context, { filename: 'folder-pick-copy-shared.js' });
   vm.runInContext(planLinesSource, context, { filename: 'folder-plan-lines.js' });
   vm.runInContext(visualSource, context, { filename: 'folder-setup-visual.js' });
   vm.runInContext(recognitionLinesSource, context, { filename: 'folder-recognition-lines.js' });
@@ -227,6 +232,7 @@ function loadPane(extras = {}) {
     'workspace-build-prepare',
     'workspace-build-defer',
     'workspace-build-setup',
+    'workspace-build-entry-choice',
     'workspace-build-configure-model',
     'workspace-build-recheck',
     'workspace-build-prepare-group',
@@ -1246,6 +1252,58 @@ test('build and review adapters share recorded visual facts and saved run milest
   assert.doesNotMatch(milestones.textContent, /First look/);
 });
 
+test('the build file chooser precedes consequences and keeps the typed brief when its digest changes', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const plan = {
+    ready: true,
+    digest: 'before',
+    entry_name: 'Song.rpp',
+    entry_candidates: ['Song.rpp', 'Alternate.rpp'],
+    lines: [{ kind: 'folder', name: 'Opens Song.rpp' }],
+    hire: { mode: 'create', agent_name: 'Producer', role_label: 'Song' },
+    brief_default: 'Understand this song.'
+  };
+  const session = {
+    id: 'build-entry',
+    status: 'open',
+    transcript: [],
+    folder: { observation },
+    plan,
+    draft: {}
+  };
+  pane.applySession(session);
+  const chooser = root
+    .querySelectorAll('div')
+    .find(node => node.id === 'workspaceBuildEntryChoice');
+  assert.equal(chooser.hidden, false);
+  const radios = chooser.querySelectorAll('input');
+  assert.equal(radios[0].checked, true);
+  assert.equal(radios[1].checked, false);
+  const body = chooser.parentNode;
+  assert.ok(
+    body.children.indexOf(chooser) <
+      body.children.findIndex(node => node.classList.contains('folder-setup-consequences'))
+  );
+  const brief = root.querySelectorAll('textarea').find(node => node.id === 'workspaceBuildBrief');
+  brief.value = 'Keep my arrangement.';
+  brief.dispatchEvent(new FakeEvent('input'));
+  radios[1].checked = true;
+  radios[1].onchange();
+  same(events.at(-1), {
+    type: 'workspace-build-entry-choice',
+    detail: { entry_name: 'Alternate.rpp' }
+  });
+  assert.equal(events.filter(event => event.type === 'workspace-build-setup').length, 0);
+  pane.applySession({
+    ...session,
+    plan: { ...plan, digest: 'after', entry_name: 'Alternate.rpp' }
+  });
+  assert.equal(chooser.querySelectorAll('input')[1], radios[1]);
+  assert.equal(radios[1].checked, true);
+  assert.equal(pane.setupBrief(), 'Keep my arrangement.');
+});
+
 test('a plan that names a hire shows it above the sketch and Hire and start sends the brief', () => {
   const { pane, root, events, document } = loadPane();
   pane.mount({ assistant, folders: true });
@@ -1529,11 +1587,36 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
     draft: { name: 'Ori Music Demo' },
     folder_expires_at: new Date(Date.now() - 60000).toISOString()
   });
-  assert.equal(expiry().textContent, 'The folder pick expired. Add the folder again to set it up.');
+  assert.match(expiry().textContent, /no longer has.*open/);
+  assert.doesNotMatch(expiry().textContent, /restarted|expired/);
   assert.equal(control('setup').disabled, true);
   assert.equal(control('folder-again').hidden, false);
   control('folder-again').click();
   same(events.at(-1), { type: 'workspace-build-folder-open', detail: {} });
+
+  for (const [reason, phrase] of [
+    ['moved', /has moved or been renamed/],
+    ['changed', /was replaced/],
+    ['lost', /no longer has/]
+  ]) {
+    pane.applySession({
+      ...session,
+      folder_expires_at: new Date(0).toISOString(),
+      folder_needs_pick_reason: reason
+    });
+    assert.match(expiry().textContent, phrase);
+    assert.doesNotMatch(expiry().textContent, /restarted|expired/);
+    assert.equal(control('folder-again').hidden, false);
+  }
+
+  // The server omits observation expiry for a valid retained review. Its
+  // canonical setup controls must stay usable without another folder pick.
+  const retained = { ...session, draft: { name: 'Ori Music Demo' } };
+  delete retained.folder_expires_at;
+  pane.applySession(retained);
+  assert.equal(expiry().hidden, true);
+  assert.equal(control('folder-again').hidden, true);
+  assert.equal(control('setup').disabled, false);
 });
 
 // PRD user story 2: a plan waiting on its Home's plugin offers the install,
