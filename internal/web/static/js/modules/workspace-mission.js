@@ -147,7 +147,79 @@
   // escaped, never rendered as HTML.
   function goalCardExtrasHTML(state) {
     const line = charterLine(state);
-    return line ? `<p class="ws-cmd-mission-charter">${escapeHtml(line)}</p>` : '';
+    return (
+      (line ? `<p class="ws-cmd-mission-charter">${escapeHtml(line)}</p>` : '') +
+      latestAssessmentHTML(state)
+    );
+  }
+
+  // The newest successful run that wrote an assessment. Runs come newest
+  // first, and a run in flight has no record yet, so the previous assessment
+  // stays on the card until the new one arrives (FR16).
+  function latestAssessedRun(state) {
+    const runs = Array.isArray(state && state.mission_runs) ? state.mission_runs : [];
+    return runs.find(run => run && run.succeeded && String(run.assessment || '').trim()) || null;
+  }
+
+  // The part names an assessment may lead a paragraph with: the charter's
+  // five, plus whatever the run's goal had.
+  function assessmentPartNames(state, run) {
+    const names = charterShape(state).map(part => String(part.name));
+    for (const name of (run && run.assessment_parts) || []) names.push(String(name));
+    return new Set(names.map(name => name.toLowerCase()));
+  }
+
+  // An assessment as paragraphs of text. A paragraph the model opened with
+  // `**Label**`, a `#` heading line or `Part:` shows that label as a bold
+  // lead-in. Everything is escaped; line breaks inside a paragraph are kept.
+  function assessmentParagraphsHTML(text, partNames) {
+    return String(text || '')
+      .split(/\n\s*\n/)
+      .map(paragraph => paragraph.trim())
+      .filter(Boolean)
+      .map(paragraph => {
+        let lead = '';
+        let rest = paragraph;
+        let match = /^\*\*([^*\n]{1,40})\*\*[:.]?\s*/.exec(paragraph);
+        if (!match) match = /^#{1,3}\s*([^\n]{1,40})\n/.exec(paragraph);
+        if (!match) {
+          const named = /^([A-Za-z][A-Za-z ]{0,30}):\s+/.exec(paragraph);
+          if (named && partNames.has(named[1].trim().toLowerCase())) match = named;
+        }
+        if (match) {
+          lead = match[1].trim().replace(/:$/, '');
+          rest = paragraph.slice(match[0].length);
+        }
+        const body = escapeHtml(rest).replace(/\n/g, '<br>');
+        return `<p>${lead ? `<strong>${escapeHtml(lead)}</strong> ` : ''}${body}</p>`;
+      })
+      .join('');
+  }
+
+  // The Latest assessment block (FR14): hidden when no run wrote one.
+  function latestAssessmentHTML(state) {
+    const run = latestAssessedRun(state);
+    if (!run) return '';
+    const when = run.finished_at || run.started_at;
+    const origin = RUN_ORIGIN_LABELS[run.origin] || 'Run';
+    return (
+      '<section class="ws-cmd-goal-block ws-cmd-goal-assessment" aria-label="Latest assessment">' +
+      '<div class="ws-cmd-goal-block-head"><strong>Latest assessment</strong>' +
+      `<span>${escapeHtml(origin)}</span>` +
+      (when
+        ? `<span title="${escapeHtml(fmtTime(when))}">${escapeHtml(fmtRelative(when))}</span>`
+        : '') +
+      '</div>' +
+      `<div class="ws-cmd-goal-block-body">${assessmentParagraphsHTML(run.assessment, assessmentPartNames(state, run))}</div>` +
+      '<button type="button" class="ws-cmd-goal-link" data-cmd-mission-action="show-run-history">Show earlier</button>' +
+      '</section>'
+    );
+  }
+
+  // Actions of the Goal card's own blocks (workspace-command.js routes every
+  // data-cmd-mission-action it does not handle itself here).
+  function cardAction(action) {
+    if (action === 'show-run-history') openGoalSettings();
   }
 
   // The label a charter heading line names, lower-cased, or '' for any other
@@ -231,6 +303,7 @@
   // A goal run is bounded server-side at 15 minutes; follow it a little longer.
   const RUN_POLL_TIMEOUT_MS = 16 * 60 * 1000;
   const RUN_IN_FLIGHT_COPY = 'Looking for things to work on…';
+  const ASSESSED_NOTHING_TO_SUGGEST = 'Assessed the workspace; nothing to suggest right now.';
 
   // Cadence intervals come back from the API as Go durations in nanoseconds.
   const NS_PER_HOUR = 3.6e12;
@@ -779,7 +852,8 @@
     cadence: 'Scheduled',
     manual: 'Run now',
     first_goal: 'First goal',
-    event: 'Event trigger'
+    event: 'Event trigger',
+    hire_first_look: 'First look'
   };
 
   function plural(count, one, many) {
@@ -804,6 +878,10 @@
         const output = run.output_tail
           ? `<details class="workspace-mission-run-output"><summary>Show output</summary><pre>${escapeHtml(run.output_tail)}</pre></details>`
           : '';
+        // FR15: the run's assessment, collapsed so ten runs stay short.
+        const assessment = String(run.assessment || '').trim()
+          ? `<details class="workspace-mission-run-assessment"><summary>Assessment</summary>${assessmentParagraphsHTML(run.assessment, assessmentPartNames(latestState, run))}</details>`
+          : '';
         return `
           <li class="workspace-mission-run ${run.succeeded ? 'is-succeeded' : 'is-failed'}">
             <div class="workspace-mission-run-head">
@@ -812,7 +890,7 @@
               <span title="${escapeHtml(when ? fmtTime(when) : '')}">${escapeHtml(when ? fmtRelative(when) : '')}</span>
             </div>
             <div class="workspace-mission-run-counts">${escapeHtml(runCountsText(run))}</div>
-            ${error}${output}
+            ${assessment}${error}${output}
           </li>`;
       })
       .join('');
@@ -1180,6 +1258,16 @@
       return rememberRunReport(`Run failed${why} See Goal Settings for details.`, 'error');
     }
     lastRunOutcome = { label: 'Completed', className: 'is-completed' };
+    // FR13: a run that assessed the workspace and found nothing new to
+    // suggest succeeded; say so rather than listing zero counts.
+    if (
+      record &&
+      String(record.assessment || '').trim() &&
+      !record.tasks_created &&
+      !record.findings_created
+    ) {
+      return rememberRunReport(ASSESSED_NOTHING_TO_SUGGEST, null);
+    }
     return rememberRunReport(
       record ? `Run complete — ${runCountsText(record)}.` : 'Run complete.',
       null
@@ -1457,6 +1545,7 @@
         if (latestState) renderCommandPanel(latestState);
       },
       openGoalModal,
+      cardAction,
       runNow: runNowFromCommand,
       reload
     });

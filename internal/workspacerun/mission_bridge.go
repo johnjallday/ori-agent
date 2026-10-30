@@ -322,15 +322,18 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 		return "", nil, fmt.Errorf("create mission run: %w", err)
 	}
 
+	// The goal's charter parts as this run's prompt saw them, for the record.
+	goalParts := workspace.ParseGoalCharter(ws.Mission).Present
 	execute := func() error {
-		return b.executeMissionRun(ctx, workspaceID, run.ID, opts, preconditions)
+		return b.executeMissionRun(ctx, workspaceID, run.ID, opts, preconditions, goalParts)
 	}
 	return run.ID, execute, nil
 }
 
 // executeMissionRun runs a created goal run to completion and records it.
-// preconditions are those its prompt carried.
-func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runID string, opts workspace.MissionRunOptions, preconditions []workspace.MissionPrecondition) error {
+// preconditions are those its prompt carried; goalParts the charter parts its
+// goal had.
+func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runID string, opts workspace.MissionRunOptions, preconditions []workspace.MissionPrecondition, goalParts []string) error {
 	runCtx, cancel := context.WithTimeout(ctx, b.executionTimeout)
 	defer cancel()
 
@@ -356,6 +359,9 @@ func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runI
 	if execErr == nil || strings.TrimSpace(result) != "" {
 		parseErr = b.storeMissionOutput(workspaceID, runID, result, &record, preconditions)
 		stored = parseErr == nil
+	}
+	if record.Assessment != "" {
+		record.AssessmentParts = goalParts
 	}
 	if !stored {
 		b.storeUnansweredPreconditions(workspaceID, runID, &record, preconditions)
@@ -417,6 +423,8 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 	}
 	record.ParseStatus = output.ParseStatus()
 	record.ItemsRejected = output.Rejected
+	// Every origin keeps its assessment; Summary and NextWhy below are unchanged.
+	record.Assessment = output.Assessment
 	taskLimit, findingLimit := workspace.MissionSuggestionLimits(record.Origin)
 
 	findings := output.Findings

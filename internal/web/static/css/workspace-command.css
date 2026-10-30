@@ -2901,6 +2901,50 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 12.5px;
   letter-spacing: 0.2px;
 }
+.ws-cmd-goal-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-line);
+  border-radius: 8px;
+}
+.ws-cmd-goal-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  color: var(--ws-ink-faint);
+  font-size: 12px;
+}
+.ws-cmd-goal-block-head strong {
+  color: var(--ws-ink);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.ws-cmd-goal-block-body p {
+  margin: 0 0 6px;
+  color: var(--ws-ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ws-cmd-goal-block-body p:last-child {
+  margin-bottom: 0;
+}
+.ws-cmd-goal-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ws-ink-faint);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ws-cmd-goal-link:hover,
+.ws-cmd-goal-link:focus-visible {
+  color: var(--ws-ink);
+}
 .ws-cmd-mission-meta {
   display: flex;
   align-items: center;

@@ -14,12 +14,12 @@ func TestBuildMissionSystemPrompt_HireFirstLookFramingAndContract(t *testing.T) 
 		Origin:         MissionOriginHireFirstLook,
 	})
 	for _, want := range []string{
-		"Goal: Compare the three note-taking apps I'm considering and recommend one",
+		"## Goal\nCompare the three note-taking apps I'm considering and recommend one\n",
 		"You were just hired for this workspace, and this is your FIRST LOOK",
 		"There is no folder or project to read",
 		"Do not read anything outside this workspace",
 		"change nothing",
-		`{"summary": string, "next": string, "next_why": string, "items": [ ... ]}`,
+		`{"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]}`,
 		`"next": the exact title of the one task to start first`,
 		`"next_why": one sentence on why that task comes first`,
 		"Suggest at most 3 tasks and no findings",

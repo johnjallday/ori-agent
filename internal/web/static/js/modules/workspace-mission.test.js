@@ -360,6 +360,91 @@ test('the Goal card shows the Outcome line and a Charter line only for a charter
   assert.equal(mission.summarize({ mission: ' Ship it ' }).title, 'Ship it');
 });
 
+// FR14/FR16: the card shows the newest successful run's assessment as escaped
+// paragraphs with bold part lead-ins, its origin and time, and Show earlier.
+test('the Goal card shows the latest assessment from the newest successful run', () => {
+  const mission = loadWorkspaceMission();
+  const finished = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+  const state = {
+    mission: '## Outcome\nA newsletter.\n## Boundaries\nNever send.',
+    goal_outcome: 'A newsletter.',
+    goal_parts: ['Outcome', 'Boundaries'],
+    goal_charter_shape: SHAPE,
+    mission_runs: [
+      { origin: 'manual', succeeded: false, error: 'timed out', assessment: 'stale failed text' },
+      {
+        origin: 'hire_first_look',
+        succeeded: true,
+        finished_at: finished,
+        assessment:
+          'Outcome: nothing <b>written</b> yet.\nNo notes.\n\n**Build** A template first.\n\n## Watch\nNothing to watch.\n\nAside: not a part.'
+      },
+      { origin: 'cadence', succeeded: true, assessment: 'older run' }
+    ]
+  };
+  const html = mission.summarize(state).extrasHTML;
+  assert.match(html, /<strong>Latest assessment<\/strong><span>First look<\/span>/);
+  assert.match(html, /<span title="[^"]+">3m ago<\/span>/);
+  assert.match(
+    html,
+    /<p><strong>Outcome<\/strong> nothing &lt;b&gt;written&lt;\/b&gt; yet\.<br>No notes\.<\/p>/
+  );
+  assert.match(html, /<p><strong>Build<\/strong> A template first\.<\/p>/);
+  assert.match(html, /<p><strong>Watch<\/strong> Nothing to watch\.<\/p>/);
+  assert.match(html, /<p>Aside: not a part\.<\/p>/, 'only part names lead with a colon');
+  assert.doesNotMatch(html, /stale failed text|older run/);
+  assert.match(html, /data-cmd-mission-action="show-run-history">Show earlier<\/button>/);
+  assert.ok(html.indexOf('Charter · Outcome, Boundaries') < html.indexOf('Latest assessment'));
+
+  // No run with an assessment: no block. A run in flight keeps the previous one.
+  assert.doesNotMatch(
+    mission.summarize({ mission: 'Ship', mission_runs: [{ succeeded: true }] }).extrasHTML,
+    /Latest assessment/
+  );
+  assert.match(
+    mission.summarize({ ...state, run_in_flight: true }).extrasHTML,
+    /nothing &lt;b&gt;written/
+  );
+});
+
+// FR15: run history keeps each run's assessment behind a collapsed details.
+test('run history shows a run assessment collapsed under Assessment', () => {
+  const mission = loadWorkspaceMission();
+  const html = mission.runHistoryHTML([
+    { origin: 'manual', succeeded: true, tasks_created: 0, assessment: 'All <i>fine</i>.' },
+    { origin: 'cadence', succeeded: true, tasks_created: 1 }
+  ]);
+  assert.match(
+    html,
+    /<details class="workspace-mission-run-assessment"><summary>Assessment<\/summary><p>All &lt;i&gt;fine&lt;\/i&gt;\.<\/p><\/details>/
+  );
+  assert.equal((html.match(/<summary>Assessment<\/summary>/g) || []).length, 1);
+});
+
+// FR13: an assessed run with nothing new to suggest is a success, said plainly.
+test('a run that assessed and suggested nothing says so', () => {
+  const mission = loadWorkspaceMission();
+  const quiet = mission.settleRun({
+    done: true,
+    failed: false,
+    record: {
+      succeeded: true,
+      tasks_created: 0,
+      findings_created: 0,
+      duplicates_skipped: 2,
+      assessment: 'Everything is in order.'
+    }
+  });
+  assert.equal(quiet.message, 'Assessed the workspace; nothing to suggest right now.');
+  assert.equal(quiet.kind, null);
+  const old = mission.settleRun({
+    done: true,
+    failed: false,
+    record: { succeeded: true, tasks_created: 0, findings_created: 0 }
+  });
+  assert.equal(old.message, 'Run complete — 0 tasks suggested · 0 findings.');
+});
+
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {
   const mission = loadWorkspaceMission();
   const summary = mission.summarize({ mission: '' });
