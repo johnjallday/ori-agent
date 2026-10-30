@@ -628,6 +628,8 @@ func TestAPIKeyHandler_SavesTheAnthropicWorkspaceIDAndSendsItWithClaudeRequests(
 	defer server.Close()
 	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
 	t.Setenv("ANTHROPIC_WORKSPACE_ID", "")
+	// The developer's own Anthropic SDK profile would add its workspace_id too.
+	t.Setenv("ANTHROPIC_CONFIG_DIR", t.TempDir())
 
 	tmpFile := filepath.Join(t.TempDir(), "settings.json")
 	configManager := config.NewManagerWithSecretStore(tmpFile, vault.NewMemorySecretStore())

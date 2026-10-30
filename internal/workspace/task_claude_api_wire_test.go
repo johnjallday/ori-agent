@@ -29,8 +29,10 @@ func TestExecuteTask_ClaudeAPIModelReceivesTheTaskSystemPromptOnTheWire(t *testi
 	}))
 	defer server.Close()
 	// The SDK takes its endpoint from the environment, so the provider under
-	// test is the one production builds.
+	// test is the one production builds. An empty ANTHROPIC_CONFIG_DIR keeps
+	// the developer's own Anthropic SDK profile out of the request.
 	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+	t.Setenv("ANTHROPIC_CONFIG_DIR", t.TempDir())
 
 	factory := llm.NewFactory()
 	factory.Register("claude", llm.NewClaudeProvider(llm.ProviderConfig{APIKey: "test-key"}))

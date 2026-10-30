@@ -30,8 +30,11 @@ func TestClaudeProvider_SendsTheWorkspaceIDOnEveryRequest(t *testing.T) {
 			}))
 			defer server.Close()
 			// The SDK takes its endpoint from the environment, so the provider under
-			// test is the one production builds.
+			// test is the one production builds. It also reads the developer's own
+			// Anthropic SDK profile (workspace_id, base_url) from ANTHROPIC_CONFIG_DIR;
+			// an empty directory keeps that machine state out of the assertion.
 			t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+			t.Setenv("ANTHROPIC_CONFIG_DIR", t.TempDir())
 
 			provider := NewClaudeProvider(ClaudeProviderConfig("test-key", tc.workspaceID))
 			request := ChatRequest{Model: "claude-fixture", Messages: []Message{NewUserMessage("Hello")}}
