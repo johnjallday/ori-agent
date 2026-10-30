@@ -232,6 +232,7 @@ function loadPane(extras = {}) {
     'workspace-build-prepare',
     'workspace-build-defer',
     'workspace-build-setup',
+    'workspace-build-entry-choice',
     'workspace-build-configure-model',
     'workspace-build-recheck',
     'workspace-build-prepare-group',
@@ -1249,6 +1250,58 @@ test('build and review adapters share recorded visual facts and saved run milest
     .find(node => node.classList.contains('folder-setup-milestones'));
   assert.match(milestones.textContent, /Workspace · In progress/);
   assert.doesNotMatch(milestones.textContent, /First look/);
+});
+
+test('the build file chooser precedes consequences and keeps the typed brief when its digest changes', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const plan = {
+    ready: true,
+    digest: 'before',
+    entry_name: 'Song.rpp',
+    entry_candidates: ['Song.rpp', 'Alternate.rpp'],
+    lines: [{ kind: 'folder', name: 'Opens Song.rpp' }],
+    hire: { mode: 'create', agent_name: 'Producer', role_label: 'Song' },
+    brief_default: 'Understand this song.'
+  };
+  const session = {
+    id: 'build-entry',
+    status: 'open',
+    transcript: [],
+    folder: { observation },
+    plan,
+    draft: {}
+  };
+  pane.applySession(session);
+  const chooser = root
+    .querySelectorAll('div')
+    .find(node => node.id === 'workspaceBuildEntryChoice');
+  assert.equal(chooser.hidden, false);
+  const radios = chooser.querySelectorAll('input');
+  assert.equal(radios[0].checked, true);
+  assert.equal(radios[1].checked, false);
+  const body = chooser.parentNode;
+  assert.ok(
+    body.children.indexOf(chooser) <
+      body.children.findIndex(node => node.classList.contains('folder-setup-consequences'))
+  );
+  const brief = root.querySelectorAll('textarea').find(node => node.id === 'workspaceBuildBrief');
+  brief.value = 'Keep my arrangement.';
+  brief.dispatchEvent(new FakeEvent('input'));
+  radios[1].checked = true;
+  radios[1].onchange();
+  same(events.at(-1), {
+    type: 'workspace-build-entry-choice',
+    detail: { entry_name: 'Alternate.rpp' }
+  });
+  assert.equal(events.filter(event => event.type === 'workspace-build-setup').length, 0);
+  pane.applySession({
+    ...session,
+    plan: { ...plan, digest: 'after', entry_name: 'Alternate.rpp' }
+  });
+  assert.equal(chooser.querySelectorAll('input')[1], radios[1]);
+  assert.equal(radios[1].checked, true);
+  assert.equal(pane.setupBrief(), 'Keep my arrangement.');
 });
 
 test('a plan that names a hire shows it above the sketch and Hire and start sends the brief', () => {

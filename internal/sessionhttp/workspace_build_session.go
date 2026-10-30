@@ -235,11 +235,13 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			mutate(h.postWorkspaceBuildLink)
 		case action == "software-review" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildSoftwareReview(w, r, id)
+		case action == "entry" && r.Method == http.MethodPost:
+			mutate(h.postWorkspaceBuildEntry)
 		case action == "setup" && r.Method == http.MethodPost:
 			mutate(h.postWorkspaceBuildSetup)
 		case action == "home-provider" && r.Method == http.MethodPost:
 			mutate(h.postWorkspaceBuildHomeProvider)
-		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "software-review" || action == "home-provider":
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "entry" || action == "software-review" || action == "home-provider":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")

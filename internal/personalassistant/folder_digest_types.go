@@ -223,8 +223,8 @@ type FolderOffer struct {
 	Decision           string         `json:"decision,omitempty"`
 	Choice             string         `json:"choice,omitempty"`
 	Outcome            *FolderOutcome `json:"outcome,omitempty"`
-	// EntryName is the base name of the file the user picked, when the offer came
-	// from a picked file rather than a folder. Never a path.
+	// EntryName is the reviewed project file: an explicit file pick or a choice
+	// saved on the setup card. It is always a bare name, never a path.
 	EntryName string `json:"entry_name,omitempty"`
 	// Setup is the one-card setup run, kept so the card survives a reload.
 	Setup      *FolderSetupRun `json:"setup,omitempty"`

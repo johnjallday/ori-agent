@@ -128,6 +128,11 @@ fi
 
 # Files first, then the folders that hold them, deepest first.
 find "$root" -type f -exec touch -t "$stamp" {} +
+if ((exact_albums == 1)); then
+	# The file-choice demo has a deterministic newest song, not an alphabetic
+	# tie with Alternate.rpp. Both still have the fixture's observed date.
+	touch -t 202610010901 "$root/Album-5/Song.rpp"
+fi
 find "$root" -depth -type d -exec touch -t "$stamp" {} +
 
 echo "FOLDER=$root"

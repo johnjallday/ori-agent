@@ -35,6 +35,7 @@ type fakeFolderSetup struct {
 	briefDefault string
 	visual       *FolderSetupVisual
 	monitoring   *FolderMonitoringOffer
+	planEntries  []string
 }
 
 func (f *fakeFolderSetup) entryNames() []string {
@@ -53,6 +54,21 @@ func (f *fakeFolderSetup) Plan(_ context.Context, req FolderSetupRequest) (Folde
 	plan.Hire, plan.BriefDefault = f.hire, f.briefDefault
 	plan.Visual = f.visual
 	plan.Monitoring = f.monitoring
+	if len(f.planEntries) > 0 {
+		chosen := f.planEntries[0]
+		for _, name := range f.planEntries {
+			if name == req.Offer.EntryName {
+				chosen = name
+			}
+		}
+		var candidates []string
+		if len(f.planEntries) > 1 {
+			candidates = f.planEntries
+		}
+		plan = WithFolderSetupEntry(plan, chosen, candidates)
+	} else if req.Offer.EntryName != "" {
+		plan = WithFolderSetupEntry(plan, req.Offer.EntryName, nil)
+	}
 	return plan.Stamped(), f.planErr
 }
 

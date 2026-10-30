@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -40,7 +40,7 @@ func (s *FolderDigestService) attachSetupRun(offer FolderOffer, v *FolderOfferVi
 	}
 	run := *offer.Setup
 	view := &FolderSetupView{
-		PlanDigest: run.PlanDigest, Status: run.Status, StopReason: run.StopReason, EntryCandidates: append([]string(nil), run.EntryCandidates...),
+		PlanDigest: run.PlanDigest, Status: run.Status, StopReason: run.StopReason, EntryName: run.EntryName, EntryCandidates: append([]string(nil), run.EntryCandidates...),
 		Lines: append([]FolderPlanLine(nil), run.Lines...), Brief: run.Brief,
 		Visual: CloneFolderSetupVisual(run.Visual), HomeUpgrade: cloneFolderHomeLink(run.HomeUpgrade),
 		SuggestedIn: cloneFolderHomeLink(run.SuggestedIn),
@@ -229,8 +229,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	if input.RequestID == "" || len(input.RequestID) > folderRequestIDMax || input.PlanDigest == "" || len(input.PlanDigest) > 64 {
 		return FolderOfferView{}, fmt.Errorf("%w: setup request", ErrValidation)
 	}
-	if input.EntryName != "" && (len(input.EntryName) > folderDigestMaxName || filepath.Base(input.EntryName) != input.EntryName ||
-		validateFolderName(input.EntryName) != nil) {
+	if input.EntryName != "" && !ValidFolderEntryName(input.EntryName) {
 		return FolderOfferView{}, fmt.Errorf("%w: project file", ErrValidation)
 	}
 	brief, err := NormalizeFolderBrief(input.Brief)
@@ -281,18 +280,6 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		return FolderOfferView{}, guardErr
 	}
 	defer release()
-	// A project file the user chooses must be one the server offered. The journey
-	// checks the name against the folder again; this keeps a made-up name from
-	// ever reaching it.
-	if input.EntryName != "" && offer.Setup != nil && len(offer.Setup.EntryCandidates) > 0 {
-		offered := false
-		for _, candidate := range offer.Setup.EntryCandidates {
-			offered = offered || candidate == input.EntryName
-		}
-		if !offered {
-			return FolderOfferView{}, fmt.Errorf("%w: project file", ErrValidation)
-		}
-	}
 	// The project's own folder: the scan root, or the subfolder the offer is about.
 	path, err := s.subjectPathOf(userID, *offer)
 	if err != nil {
@@ -328,12 +315,20 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	// plan legitimately shrinks as steps finish, against the plan it was
 	// confirmed on.
 	var plan FolderSetupPlan
+	entryName := ""
 	if offer.Setup == nil {
 		fresh, planErr := s.deps.Setup.Plan(ctx, s.planRequest(withFolderSubjectPath(ctx, path), userID, *offer))
 		if planErr != nil {
 			return FolderOfferView{}, planErr
 		}
 		plan = fresh.Stamped()
+		if input.EntryName != "" && !setupEntryOffered(plan, input.EntryName) {
+			return FolderOfferView{}, fmt.Errorf("%w: project file", ErrValidation)
+		}
+		if input.EntryName != "" && input.EntryName != plan.EntryName {
+			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
+		}
+		entryName = plan.EntryName
 		if plan.Digest == "" || plan.Digest != input.PlanDigest {
 			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
 		}
@@ -353,7 +348,11 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		plan = FolderSetupPlan{
 			Lines: append([]FolderPlanLine(nil), offer.Setup.Lines...), Digest: offer.Setup.PlanDigest,
 			Intent: offer.Setup.Intent, Destination: offer.Setup.Intent.Destination, Hire: offer.Setup.Hire,
-			Visual: CloneFolderSetupVisual(offer.Setup.Visual),
+			Visual: CloneFolderSetupVisual(offer.Setup.Visual), EntryName: offer.Setup.EntryName,
+		}
+		plan, entryName, err = resumedSetupEntry(plan, *offer.Setup, input.EntryName)
+		if err != nil {
+			return FolderOfferView{}, err
 		}
 		// A resume carries on with the brief the run was started with, except
 		// a single song's open: its brief is asked in the Home, on that press.
@@ -372,7 +371,6 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	}
 
 	now := s.now()
-	entryName := input.EntryName
 	var started FolderOffer
 	observeOnly := false
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
@@ -388,6 +386,13 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		if completedHomePhase(*item, input) {
 			started, observeOnly = *item, true
 			return nil
+		}
+		// Planning is outside the mutation lock. A concurrent choice, source
+		// re-pick, decision or run must not be overwritten by this old click.
+		if item.Status != offer.Status || item.FolderKey != offer.FolderKey || item.RootIdentity != offer.RootIdentity ||
+			item.SubjectIdentity != offer.SubjectIdentity || !reflect.DeepEqual(item.Subject, offer.Subject) ||
+			item.EntryName != offer.EntryName || !reflect.DeepEqual(item.Setup, offer.Setup) {
+			return ErrConflict
 		}
 		if item.Status == FolderOfferPending {
 			decided := now
@@ -405,8 +410,9 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			entryName = item.Setup.EntryName
 		}
 		if entryName == "" {
-			entryName = item.EntryName
+			entryName = item.EntryName // legacy explicit file-picker choice
 		}
+		item.EntryName = entryName
 		lines := append([]FolderPlanLine(nil), plan.Lines...)
 		// A ticked watching checkbox is the user's own choice, outside the
 		// digest: the run carries it as a fifth line, and a resume keeps it.
@@ -436,7 +442,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			// and every later pass keeps going there.
 			runID, homeID = item.Setup.RunID, item.Setup.HomeID
 			homeOperation = item.Setup.HomeOperation
-			opening = item.Setup.Opening || input.Open || input.EntryName != ""
+			opening = item.Setup.Opening || input.Open
 		} else if input.Open && HomeSuggestionReady(plan) {
 			// A later song into a ready Home: the Home's manager lists and opens
 			// it on its own suggestion, in one press made in the Home.
@@ -478,7 +484,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 func completedHomePhase(offer FolderOffer, input FolderSetupInput) bool {
 	return offer.Setup != nil && isHandoffSetup(offer) && !offer.Setup.Opening &&
 		offer.Setup.Status == FolderSetupStopped && offer.Setup.StopReason == FolderStopHandoffReady &&
-		!input.Open && input.EntryName == ""
+		!input.Open
 }
 
 func hasPlanLineKind(lines []FolderPlanLine, kind string) bool {
@@ -634,7 +640,7 @@ func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID s
 			run.RunID = u.RunID
 		}
 		if u.EntryName != "" {
-			run.EntryName = u.EntryName
+			run.EntryName, offer.EntryName = u.EntryName, u.EntryName
 		}
 		if u.HomeID != "" {
 			run.HomeID = u.HomeID

@@ -37,6 +37,8 @@ type BuildFolderPlan struct {
 	Readiness         *FolderSetupVisual `json:"readiness,omitempty"`
 	Lines             []FolderPlanLine   `json:"lines"`
 	Digest            string             `json:"digest,omitempty"`
+	EntryName         string             `json:"entry_name,omitempty"`
+	EntryCandidates   []string           `json:"entry_candidates,omitempty"`
 	Needs             []BuildFolderNeed  `json:"needs,omitempty"`
 	Home              *BuildFolderHome   `json:"home,omitempty"`
 	Placement         string             `json:"placement,omitempty"`
@@ -79,6 +81,22 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	if err != nil {
 		return nil, err
 	}
+	// A live hold prepares a read-only offer rather than returning the stored
+	// review. Carry its exact owner's choice too, as restored holds already do.
+	doc, err := s.digest.store.Read(ctx, target.UserID)
+	if err != nil {
+		return nil, err
+	}
+	for _, prior := range doc.Offers {
+		review := prior.ConversationReview
+		if openFolderReview(prior) && review != nil && review.Target == target &&
+			review.ObservationID == observationID && review.CandidateID == candidateID &&
+			prior.FolderKey == offer.FolderKey && prior.RootIdentity == offer.RootIdentity &&
+			prior.Subject.Key == offer.Subject.Key && review.CandidateIdentity == offer.ConversationReview.CandidateIdentity {
+			offer.EntryName = prior.EntryName
+			break
+		}
+	}
 	unavailable := func(reason string) *BuildFolderPlan {
 		if reason == "" {
 			reason = FolderAvailabilityPlanUnavailable
@@ -88,6 +106,14 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	if offer.Structure != nil || offer.Portfolio != nil || (!isProjectCapabilityOffer(offer) && !isSoftwareOffer(offer)) {
 		return unavailable(""), nil
 	}
+	// The preview may still be a draft, not a canonical review. Its candidate
+	// was just verified by prepareReviewOffer; metadata planning must not ask a
+	// conversation guard to authorize this synthetic offer.
+	candidate, ok := observedReviewCandidate(held, candidateID)
+	if !ok {
+		return nil, ErrFolderSelection
+	}
+	ctx = withFolderSubjectPath(ctx, candidate.Path)
 	s.recheckSetupFacts(ctx, target, offer)
 	view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
 	s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
@@ -122,6 +148,7 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 		FirstTaskDeferred: view.Plan.OptionalTask || view.Plan.Intent.Software != nil,
 		Lines:             append([]FolderPlanLine(nil), view.Plan.Lines...), Digest: view.Plan.Digest,
 		Placement: view.Plan.Intent.Placement, Evidence: view.Reason, Ready: true,
+		EntryName: view.Plan.EntryName, EntryCandidates: append([]string(nil), view.Plan.EntryCandidates...),
 		Needs:  folderPlanNeeds(offer.Subject, view.Plan.Intent),
 		Visual: CloneFolderSetupVisual(view.Plan.Visual),
 	}

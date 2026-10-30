@@ -166,6 +166,14 @@ func (o buildFolderObservations) Plan(ctx context.Context, target foldercontext.
 	return service.BuildPlan(ctx, target, observationID, candidateID, workspaceName)
 }
 
+func (o buildFolderObservations) ChooseSetupEntry(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string, input personalassistant.FolderSetupEntryInput) (personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderSelection
+	}
+	return service.ChooseBuildSetupEntry(ctx, draft, sessionID, observationID, candidateID, workspaceName, input)
+}
+
 func (o buildFolderObservations) ReviewSetup(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
 	service := o.service()
 	if service == nil {

@@ -158,6 +158,16 @@ func (s *FolderObservationService) CloseBuildFolderReviews(ctx context.Context, 
 	return nil
 }
 
+// ChooseBuildSetupEntry refreshes this build's review with its saved draft
+// name, then edits only its project-file choice. It never claims or starts setup.
+func (s *FolderObservationService) ChooseBuildSetupEntry(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string, input FolderSetupEntryInput) (FolderOfferView, error) {
+	view, err := s.ReviewBuild(ctx, draft, sessionID, observationID, candidateID, workspaceName)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	return s.digest.ChooseSetupEntry(ctx, draft.UserID, view.ID, input)
+}
+
 // StartBuildSetup is Set it up: Home's own StartSetup on the build's offer,
 // held to the plan digest the user confirmed.
 func (s *FolderObservationService) StartBuildSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName, brief string) (FolderOfferView, error) {

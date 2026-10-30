@@ -336,6 +336,32 @@ receipt and provider-specific gates remain the sole execution path. Canonical
 outcome references are read back in the owning conversation; hydration executes
 nothing.
 
+### Project-file choice before confirmation
+
+A verified project review passes its subject path privately to planning
+(`FolderSetupRequest.Path` is never JSON). The installed active blueprint's
+attach-existing declaration supplies the extensions. Bounded, no-follow
+metadata reads list direct regular files, newest modification first with name
+as the tie-breaker. This does not renew discussion/tree evidence or read file
+contents. A still-listed saved selection is kept; one file needs no chooser,
+multiple files expose at most 64 bare names, and no match leaves the runtime
+question available. Unready declarations are not guessed.
+
+`POST …/folder-digest/offers/{id}/entry {plan_digest, entry_name}` is an inert
+canonical review edit. It rechecks owner, directory authority, current digest and
+membership, then compares the complete saved offer before changing only its
+entry name. No setup, journey, model turn or resource creation begins. Native
+labelled radios retain node identity and keyboard focus through the save; a
+refusal restores the canonical selection. The selected name is independently
+bound into the new digest and appears as `Opens <file>`.
+
+Set up accepts that reviewed selection, not an arbitrary alternative from the
+list. Omission uses the plan/run's name. Runtime discovery of a missing selected
+file may read one unselected disclosure to ask again, but never commits that
+fallback; an explicit late answer rebinds consent. A filename does not imply
+Open: the Home phase and the manager's later `open: true` remain separate.
+Completed file receipts require the finished run and verified workspace.
+
 ### Setup requirements and configuration return
 
 A single recognized project now opens its canonical requirements review on

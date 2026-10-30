@@ -9364,9 +9364,62 @@ test('a refused Set it up says why and does not follow anything', async () => {
   };
   build.session.setup = { plan_digest: 'run-digest' };
   await manager.setUpWorkspaceBuild({ entry_name: 'Take Two.rpp' });
+  build.session.setup_run = { plan_digest: 'chosen-digest', entry_name: 'Take Two.rpp' };
+  await manager.setUpWorkspaceBuild({});
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
-    { version: 4, plan_digest: 'run-digest', entry_name: 'Take Two.rpp' }
+    { version: 4, plan_digest: 'run-digest', entry_name: 'Take Two.rpp' },
+    { version: 4, plan_digest: 'chosen-digest', entry_name: 'Take Two.rpp' }
   ]);
+});
+
+test('a build file choice saves a fresh plan without setup or another model turn', async () => {
+  const manager = loadSessionManager();
+  const lines = [];
+  manager.workspaceBuildPane = () => ({ setBusy() {}, showLine: line => lines.push(line) });
+  manager.syncWorkspaceBuildPresentation = () => {};
+  const build = plannedBuild();
+  build.session.id = 'build-entry';
+  build.session.version = 4;
+  build.session.plan = {
+    ...build.session.plan,
+    digest: 'before',
+    entry_name: 'Song.rpp',
+    entry_candidates: ['Song.rpp', 'Alternate.rpp']
+  };
+  manager.workspaceBuild = build;
+  let flushed = false;
+  manager.flushWorkspaceBuildDraft = async () => {
+    flushed = true;
+  };
+  manager.adoptWorkspaceBuildSession = session => {
+    build.session = session;
+  };
+  const sent = [];
+  manager.workspaceBuildTransport = {
+    entry: async (id, body) => {
+      assert.equal(flushed, true);
+      sent.push({ id, ...body });
+      return {
+        ok: true,
+        body: {
+          session: {
+            ...build.session,
+            version: 5,
+            plan: { ...build.session.plan, digest: 'after', entry_name: 'Alternate.rpp' }
+          }
+        }
+      };
+    },
+    setup: () => assert.fail('choosing started setup'),
+    turn: () => assert.fail('choosing added a model turn')
+  };
+  await manager.chooseWorkspaceBuildEntry('Alternate.rpp');
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    { id: 'build-entry', version: 4, plan_digest: 'before', entry_name: 'Alternate.rpp' }
+  ]);
+  assert.equal(build.session.plan.entry_name, 'Alternate.rpp');
+  assert.equal(build.session.setup, undefined);
+  assert.deepEqual(lines, []);
 });
 
 test('Hire and start sends the brief the pane shows, from either button', async () => {

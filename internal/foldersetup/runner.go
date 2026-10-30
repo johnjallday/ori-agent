@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -735,14 +736,30 @@ func (s *run) connectProject(ctx context.Context, journey *setupjourney.JourneyP
 	if err != nil {
 		return err
 	}
-	input, err := json.Marshal(projectconnection.Request{
+	request := projectconnection.Request{
 		ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: token,
 		EntryName: s.entryName, WorkspaceName: s.cfg.WorkspaceName, GroupComposition: composition, Goal: s.cfg.Brief,
-	})
+	}
+	input, err := json.Marshal(request)
 	if err != nil {
 		return err
 	}
 	review, err := s.review(ctx, journey, setupjourney.ActionReviewExistingProject, input)
+	// The host rejects a missing selected entry before producing a projection.
+	// Read the unselected disclosure once to recover its current candidates;
+	// this fallback is never committed, even if it defaults to another file.
+	choiceFailure := err
+	var inputFailure *setupjourney.Failure
+	invalidInput := errors.Is(err, setupjourney.ErrInvalid) || (errors.As(err, &inputFailure) && inputFailure.ReasonCode == setupjourney.ReasonInputInvalid)
+	choiceFallback := s.entryName != "" && invalidInput
+	if choiceFallback {
+		request.EntryName = ""
+		question, marshalErr := json.Marshal(request)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		review, err = s.review(ctx, journey, setupjourney.ActionReviewExistingProject, question)
+	}
 	if err != nil {
 		return err
 	}
@@ -757,19 +774,35 @@ func (s *run) connectProject(ctx context.Context, journey *setupjourney.JourneyP
 	if destination := s.cfg.Plan.Destination; destination != nil && (destination.Status == "existing" || destination.Status == "new") && shown.ParentWorkspaceName != destination.Name {
 		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the project review names a different Home"}
 	}
-	if shown.EntryName == "" {
-		candidates := make([]string, 0, len(shown.EntryCandidates))
-		for _, name := range shown.EntryCandidates {
-			if name != "" && filepath.Base(name) == name {
-				candidates = append(candidates, name)
-			}
-		}
-		return &stop{reason: personalassistant.FolderStopNeedsChoice, candidates: candidates}
-	}
-	if s.entryName != "" && shown.EntryName != s.entryName {
+	if len(shown.EntryCandidates) > 64 {
 		return &stop{reason: personalassistant.FolderStopPlanChanged}
 	}
-	return s.commit(ctx, journey, review, input)
+	candidates := make([]string, 0, len(shown.EntryCandidates))
+	for _, name := range shown.EntryCandidates {
+		if personalassistant.ValidFolderEntryName(name) && !slices.Contains(candidates, name) {
+			candidates = append(candidates, name)
+		}
+	}
+	if s.entryName != "" && len(candidates) > 0 && !slices.Contains(candidates, s.entryName) {
+		return &stop{reason: personalassistant.FolderStopNeedsChoice, candidates: candidates}
+	}
+	if choiceFallback {
+		return choiceFailure
+	} // Not a missing file: keep the refusal.
+	if shown.EntryName == "" {
+		return &stop{reason: personalassistant.FolderStopNeedsChoice, candidates: candidates}
+	}
+	if !personalassistant.ValidFolderEntryName(shown.EntryName) || (s.entryName != "" && shown.EntryName != s.entryName) {
+		return &stop{reason: personalassistant.FolderStopPlanChanged}
+	}
+	if err := s.commit(ctx, journey, review, input); err != nil {
+		return err
+	}
+	// Legacy plans may have left a single-file default to the runtime review.
+	// Record the actual committed file, not just an early requested name.
+	s.entryName = shown.EntryName
+	s.lines = personalassistant.WithFolderSetupEntry(personalassistant.FolderSetupPlan{Lines: s.lines, EntryName: s.cfg.Plan.EntryName}, s.entryName, nil).Lines
+	return nil
 }
 
 func (s *run) selectFileOnly(ctx context.Context, journey *setupjourney.JourneyProjection, step *setupjourney.StepProjection) error {

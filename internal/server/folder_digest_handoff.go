@@ -99,7 +99,11 @@ func (h *folderSetupHost) handoffPlan(ctx context.Context, req personalassistant
 			plan.SuggestedIn = &personalassistant.FolderHomeLink{Name: home.Name, Route: route}
 		}
 	}
-	return h.bindHandoffModel(plan)
+	plan, err = h.bindHandoffModel(plan)
+	if err != nil {
+		return personalassistant.FolderSetupPlan{}, err
+	}
+	return h.projectEntryPlan(ctx, req, target, plan)
 }
 
 // homeSuggestionsRoute is a Home's own page in map view with the drawer open on

@@ -260,7 +260,8 @@ const SETUP_STOP_COPY = {
   plan_changed:
     'What Set up would do now differs from the plan you approved, so I stopped before going further. Review the changed setup before continuing.',
   needs_pick: (subject, setup) => folderPickCopy(subject, setup?.needs_pick_reason),
-  needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
+  needs_choice: subject =>
+    `Choose the project file to use for ${subject}. The available files may have changed.`,
   needs_model:
     'The agent needs a model before setup can continue. Completed work is kept; see the saved progress below.',
   install_failed:
@@ -3885,6 +3886,20 @@ function renderOffer(place) {
       els.headline.hidden = true;
     else if (els.headline) els.headline.hidden = false;
   }
+  globalThis.OriFolderPlanLines.renderEntryChoice(
+    document.getElementById('personalAssistantFolderEntryChoice'),
+    receipt.visible ? null : state.offer?.setup || state.offer?.plan,
+    {
+      readOnly: Boolean(state.offer?.setup),
+      disabled:
+        state.busy ||
+        conversationReviewLoading() ||
+        prerequisites.active() ||
+        Boolean(sourceCreationReview) ||
+        Boolean(state.offer?.needs_pick),
+      onChange: name => void chooseProjectEntry(name)
+    }
+  );
   globalThis.OriFolderSetupVisual.renderConsequences(
     document.getElementById('personalAssistantFolderConsequences'),
     !state.offer?.setup && !receipt.visible ? planWithWatching(state.offer) : null
@@ -5292,6 +5307,45 @@ async function observeSourceCreationResult(review) {
 }
 
 // Confirm the displayed plan only; the server rechecks it and runs the setup.
+async function chooseProjectEntry(name) {
+  const offer = state.offer;
+  if (
+    !offer?.id ||
+    !offer.plan ||
+    offer.setup ||
+    offer.needs_pick ||
+    state.busy ||
+    conversationReviewLoading() ||
+    prerequisites.active() ||
+    sourceCreationReview
+  )
+    return;
+  if (!offer.plan.entry_candidates?.includes(name) || name === offer.plan.entry_name) return;
+  const current = reviewResponseGuard(offer);
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    const result = await postOffer(offer.id, 'entry', {
+      plan_digest: offer.plan.digest,
+      entry_name: name
+    });
+    if (current() && !result.ok) showOfferFailure(result.payload);
+  } catch (_) {
+    if (current())
+      showError('The file choice could not be read back. Review the current plan before Set up.');
+  } finally {
+    if (current()) {
+      state.busy = false;
+      render();
+    }
+  }
+}
+
+export function setupEntryName(offer, action) {
+  return String(action?.entry || offer?.setup?.entry_name || offer?.plan?.entry_name || '');
+}
+
 async function startOneCardSetup(action) {
   // The source remains the only setup owner. Single-song and collection Home
   // phases use this inert review too; the song's later Open stays in the Home.
@@ -5362,7 +5416,8 @@ async function startOneCardSetup(action) {
       review.acceptedRequestID = requestId();
       body.request_id = review.acceptedRequestID;
     }
-    if (action?.entry) body.entry_name = action.entry;
+    const entryName = setupEntryName(offer, action);
+    if (entryName) body.entry_name = entryName;
     // A single song's Open: the Home is ready; its Portfolio Manager opens it.
     if (action?.openSong) body.open = true;
     // The brief the user typed; untouched, the server applies the plan's own
@@ -6190,7 +6245,10 @@ async function postOffer(offerId, action, body) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ ...body, request_id: body?.request_id || requestId() })
+      // Choosing is a plan-fenced edit, not a recorded setup decision.
+      body: JSON.stringify(
+        action === 'entry' ? body : { ...body, request_id: body?.request_id || requestId() }
+      )
     }
   );
   const payload = await readJSON(response);

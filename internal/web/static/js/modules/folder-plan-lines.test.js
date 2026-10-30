@@ -50,6 +50,71 @@ function load() {
   return { shared: context.OriFolderPlanLines, document };
 }
 
+test('entry choice uses native labelled radios in plan order and preserves focusable nodes', () => {
+  const { shared, document } = load();
+  const container = document.createElement('div');
+  const chosen = [];
+  const plan = { entry_name: 'Song.rpp', entry_candidates: ['Song.rpp', 'Alternate <img>.rpp'] };
+  const options = { onChange: name => chosen.push(name) };
+  shared.renderEntryChoice(container, plan, options, document);
+  const fieldset = container.children[0];
+  assert.equal(fieldset.tagName, 'FIELDSET');
+  assert.equal(fieldset.children[0].tagName, 'LEGEND');
+  assert.equal(fieldset.children[0].textContent, 'Which file is the song?');
+  const first = fieldset.children[1].children[0];
+  const second = fieldset.children[2].children[0];
+  assert.equal(first.type, 'radio');
+  assert.equal(first.name, second.name);
+  assert.equal(first.checked, true);
+  assert.equal(second.checked, false);
+  assert.equal(fieldset.children[2].children[1].textContent, 'Alternate <img>.rpp');
+  second.checked = true;
+  second.onchange();
+  assert.deepEqual(chosen, ['Alternate <img>.rpp']);
+  shared.renderEntryChoice(container, plan, { ...options, disabled: true }, document);
+  assert.equal(first.checked, false);
+  assert.equal(second.checked, true, 'the busy render must not undo the native click');
+  shared.renderEntryChoice(
+    container,
+    { ...plan, entry_name: 'Alternate <img>.rpp' },
+    options,
+    document
+  );
+  assert.equal(container.children[0], fieldset);
+  assert.equal(first.checked, false);
+  assert.equal(second.checked, true);
+  shared.renderEntryChoice(container, plan, { ...options, disabled: true }, document);
+  assert.equal(fieldset.disabled, true);
+  assert.equal(first.checked, true, 'an old pending choice must not override a canonical reply');
+  second.checked = true;
+  second.onchange();
+  assert.equal(chosen.length, 1);
+});
+
+test('single-file and saved-run disclosures name the file without another chooser', () => {
+  const { shared, document } = load();
+  const container = document.createElement('div');
+  shared.renderEntryChoice(container, { entry_name: 'Song.rpp' }, {}, document);
+  assert.equal(container.children[0].tagName, 'P');
+  assert.equal(container.textContent, 'Opens Song.rpp');
+  shared.renderEntryChoice(
+    container,
+    { entry_name: 'Song.rpp', entry_candidates: ['Song.rpp', 'Alt.rpp'] },
+    { readOnly: true },
+    document
+  );
+  assert.equal(container.children[0].tagName, 'P');
+  shared.renderEntryChoice(
+    container,
+    { entry_name: 'Gone.rpp', entry_candidates: ['Remaining.rpp'], stop_reason: 'needs_choice' },
+    { readOnly: true },
+    document
+  );
+  assert.equal(container.textContent, 'Previously chose Gone.rpp');
+  shared.renderEntryChoice(container, {}, {}, document);
+  assert.equal(container.hidden, true);
+});
+
 test('setupLinesView keeps named lines as text and trusts only the known states', () => {
   const { shared } = load();
   // The view's objects come from the script's own realm: compared by value.

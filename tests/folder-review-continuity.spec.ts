@@ -29,15 +29,238 @@ async function checkedSandbox(request: APIRequestContext) {
   return root;
 }
 
+test('the project file is chosen before setup and kept through the separate manager Open', async ({
+  page,
+  request
+}) => {
+  test.skip(
+    !sandbox || !['entry-choice', 'entry-run'].includes(phase || ''),
+    'requires explicit isolated entry phases'
+  );
+  expect(process.env.ORI_FOLDER_REVIEW_CONTINUITY_OFFLINE_MODEL).toBe('1');
+  test.setTimeout(240_000);
+  page.setDefaultTimeout(25_000);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const root = await checkedSandbox(request);
+  const stateFile = join(root, '.folder-review-continuity-state.json');
+  const state = JSON.parse(await readFile(stateFile, 'utf8'));
+  let modelTurns = 0;
+  await page.route('**/api/**', async route => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'POST' && /\/(?:chat|turns)$/.test(url.pathname)) {
+      modelTurns++;
+      await route.abort();
+    } else await route.continue();
+  });
+  const readOffer = async () => {
+    const response = await request.get(
+      `/api/personal-assistant/folder-digest?offer_id=${encodeURIComponent(state.offer)}`
+    );
+    expect(response.ok(), await response.text()).toBe(true);
+    return (await response.json()).folder_digest.offer;
+  };
+  if (phase === 'entry-choice') {
+    await page.goto('/settings#system-model');
+    await page.locator('#systemModelProvider').selectOption('openai');
+    await page.locator('#systemModelModel').selectOption('gpt-5-mini');
+    await page.locator('#saveSystemModelBtn').click();
+    await expect(page.locator('#systemModelStatusText')).toHaveText('Default model configured');
+  }
+  await page.goto('/');
+  await page.waitForFunction(() => (window as any).PersonalAssistantPanel?._state.view.available);
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
+  await chooseConversation(page, '#personalAssistantConversationContinue');
+  await page.locator(`button[data-conversation-id="${state.conversation}"]`).click();
+  const card = page.locator('#personalAssistantFolderOffer');
+  await expect(card).toBeVisible();
+  if (phase === 'entry-choice') {
+    const enable = card.getByRole('button', { name: 'Enable REAPER', exact: true });
+    if (await enable.count()) {
+      await enable.click();
+      await card.getByRole('button', { name: 'Confirm enablement', exact: true }).click();
+      await expect(enable).toHaveCount(0, { timeout: 60_000 });
+    }
+    const check = card.getByRole('button', { name: 'Check again', exact: true });
+    if (await check.count()) await check.click();
+    const choice = card.locator('#personalAssistantFolderEntryChoice');
+    await expect(choice.getByRole('group', { name: 'Which file is the song?' })).toBeVisible();
+    let before = await readOffer();
+    await expect(
+      choice.getByRole('radio', { name: before.plan.entry_name, exact: true })
+    ).toBeChecked();
+    expect(before.plan.entry_candidates).toEqual(['Song.rpp', 'Alternate.rpp']);
+    if (!state.entryDemoChoiceAttempted) expect(before.plan.entry_name).toBe('Song.rpp');
+    await writeFile(stateFile, JSON.stringify({ ...state, entryDemoChoiceAttempted: true }), {
+      mode: 0o600
+    });
+    let setups = 0;
+    page.on('request', req => {
+      if (req.method() === 'POST' && req.url().endsWith('/setup')) setups++;
+    });
+    const brief = card.locator('#personalAssistantFolderBrief');
+    if (await brief.isVisible()) await brief.fill('Keep this file choice and my arrangement.');
+    const choose = async (name: string, keyboard = false) => {
+      const saved = page.waitForResponse(
+        response =>
+          response.url().endsWith(`/offers/${state.offer}/entry`) &&
+          response.request().method() === 'POST'
+      );
+      if (keyboard) await choice.getByRole('radio', { checked: true }).press('ArrowUp');
+      else await choice.getByRole('radio', { name, exact: true }).check();
+      const response = await saved;
+      expect(response.ok(), await response.text()).toBe(true);
+      expect(response.request().postDataJSON().request_id).toBeUndefined();
+      await expect(choice.getByRole('radio', { name, exact: true })).toBeEnabled();
+      return (await response.json()).offer;
+    };
+    // A failed/interrupted demo may have saved its last click. Reset only via
+    // the same inert editor, never by rewriting the review or its sidecar.
+    if (before.plan.entry_name !== 'Song.rpp') {
+      await choose('Song.rpp');
+      before = await readOffer();
+    }
+    const alternate = await choose('Alternate.rpp');
+    expect(alternate.id).toBe(before.id);
+    expect(alternate.plan.digest).not.toBe(before.plan.digest);
+    expect(alternate.plan.entry_name).toBe('Alternate.rpp');
+    if (await brief.isVisible())
+      await expect(brief).toHaveValue('Keep this file choice and my arrangement.');
+    await choose('Song.rpp', true);
+    await expect(choice.getByRole('radio', { name: 'Song.rpp', exact: true })).toBeFocused();
+    await choice.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, 'entry-choice-light.png') });
+    const dark = page.getByRole('button', { name: 'Switch to dark mode', exact: true });
+    if (await dark.count()) await dark.click();
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
+          .map(animation => animation.finished.catch(() => {}))
+      )
+    );
+    await choice.getByRole('radio', { name: 'Song.rpp', exact: true }).focus();
+    await page.screenshot({ path: join(evidence, 'entry-choice-dark.png') });
+    expect(setups).toBe(0);
+    const kept = await readOffer();
+    expect(kept.setup).toBeUndefined();
+    expect(kept.scanned_at).toBe(before.scanned_at);
+    await writeFile(
+      stateFile,
+      JSON.stringify({ ...state, entryDemoChoiceAttempted: true, entryName: 'Song.rpp' }),
+      {
+        mode: 0o600
+      }
+    );
+  } else {
+    expect(state.entryName).toBe('Song.rpp');
+    await expect(card.getByRole('button', { name: 'Pick it again', exact: true })).toHaveCount(0);
+    let offer = await readOffer();
+    if (!offer.setup) {
+      await expect(card.getByRole('radio', { name: 'Song.rpp', exact: true })).toBeChecked();
+      await card.getByRole('button', { name: /^Set up Music Production Home$/ }).click();
+      await card.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+      const started = page.waitForResponse(
+        response => response.url().endsWith('/setup') && response.request().method() === 'POST'
+      );
+      await card.locator('[data-placement-action="confirm"]').click();
+      const response = await started;
+      expect(response.ok(), await response.text()).toBe(true);
+      expect(response.request().postDataJSON().entry_name).toBe('Song.rpp');
+      expect(response.request().postDataJSON().open).not.toBe(true);
+    }
+    await expect
+      .poll(async () => (await readOffer()).setup?.stop_reason, { timeout: 120_000 })
+      .toBe('handoff_ready');
+    offer = await readOffer();
+    expect(offer.setup.entry_name).toBe('Song.rpp');
+    await page.screenshot({ path: join(evidence, 'entry-home-ready.png') });
+    const home = offer.setup.suggested_in?.route || offer.home_result?.route;
+    expect(home).toMatch(/^\/workspaces\//);
+    await page.goto(home);
+    const open = page.getByRole('button', { name: 'Open Album-5 & hire', exact: true }).first();
+    await expect(open).toBeVisible();
+    const opened = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/offers/${state.offer}/setup`) &&
+        response.request().method() === 'POST'
+    );
+    await open.click();
+    await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    // Automatic placement is the map's explicit Open confirmation.
+    const response = await opened;
+    expect(response.ok(), await response.text()).toBe(true);
+    expect(response.request().postDataJSON().open).toBe(true);
+    await expect
+      .poll(
+        async () => {
+          const current = await readOffer();
+          return current.status === 'resolved' ? 'resolved' : current.setup?.stop_reason;
+        },
+        { timeout: 120_000 }
+      )
+      .toBe('resolved');
+    const finished = await readOffer();
+    expect(finished.outcome.receipt.some((row: any) => row.name === 'Opens Song.rpp')).toBe(true);
+    await page.screenshot({ path: join(evidence, 'entry-project-opened.png') });
+  }
+  expect(modelTurns).toBe(0);
+});
+
+test('the completed project receipt names the file without starting its optional summary', async ({
+  page,
+  request
+}) => {
+  test.skip(!sandbox || phase !== 'entry-receipt', 'requires the completed isolated entry demo');
+  const root = await checkedSandbox(request);
+  const state = JSON.parse(
+    await readFile(join(root, '.folder-review-continuity-state.json'), 'utf8')
+  );
+  const response = await request.get(
+    `/api/personal-assistant/folder-digest?offer_id=${encodeURIComponent(state.offer)}`
+  );
+  expect(response.ok()).toBe(true);
+  const offer = (await response.json()).folder_digest.offer;
+  expect(offer.status).toBe('resolved');
+  expect(offer.outcome.receipt.filter((row: any) => row.name === 'Opens Song.rpp')).toHaveLength(1);
+  expect(offer.first_task.state).toBe('seeded');
+  expect(offer.first_task.input_scope).toContain('Song.rpp');
+  let modelTurns = 0;
+  await page.route('**/api/**', async route => {
+    if (
+      route.request().method() === 'POST' &&
+      /\/(?:chat|turns)$/.test(new URL(route.request().url()).pathname)
+    ) {
+      modelTurns++;
+      await route.abort();
+    } else await route.continue();
+  });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto('/');
+  await page.waitForFunction(() => (window as any).PersonalAssistantPanel?._state.view.available);
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
+  await chooseConversation(page, '#personalAssistantConversationContinue');
+  await page.locator(`button[data-conversation-id="${state.conversation}"]`).click();
+  const card = page.locator(`[data-folder-review-id="${state.offer}"]`);
+  const facts = card.locator('.folder-completion__facts');
+  await expect(facts).toContainText('Opens Song.rpp');
+  await facts.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(evidence, 'entry-project-opened.png') });
+  expect(modelTurns).toBe(0);
+});
+
 test('an opened folder review survives a server restart without a new pick', async ({
   page,
   request
 }) => {
   test.skip(
-    !sandbox || !['seed', 'reopen'].includes(phase || ''),
+    !sandbox || !['seed', 'entry-seed', 'reopen'].includes(phase || ''),
     'requires an isolated demo and explicit phase'
   );
   test.setTimeout(300_000);
+  const seeding = phase === 'seed' || phase === 'entry-seed';
   page.setDefaultTimeout(20_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   const temporaryRoot = await realpath(tmpdir());
@@ -62,7 +285,7 @@ test('an opened folder review survives a server restart without a new pick', asy
     ),
     'server must belong to the supplied sandbox'
   ).toBe(true);
-  if (phase === 'seed' && !carried) {
+  if (seeding && !carried) {
     await api('POST', '/api/onboarding/skip');
     await api('POST', '/api/settings/workspace-root', { workspace_root: '' });
     let assistant = (await api('GET', '/api/personal-assistant')).personal_assistant;
@@ -90,7 +313,7 @@ test('an opened folder review survives a server restart without a new pick', asy
     await page.locator('#personalAssistantLauncher').click();
   }
   let state: { conversation: string; offer: string };
-  if (phase === 'seed' && !carried) {
+  if (seeding && !carried) {
     await chooseAttach(page, '#personalAssistantFolderChip');
     const chooser = page.locator('#personalAssistantFolderChoices');
     await chooser.getByLabel('or paste a folder path').fill(join(sandbox!, 'Albums', 'Album-5'));
@@ -115,7 +338,7 @@ test('an opened folder review survives a server restart without a new pick', asy
   await expect(card).toBeVisible();
   await expect(card).toContainText('Album-5');
   await expect(card.getByRole('button', { name: 'Pick it again', exact: true })).toHaveCount(0);
-  if (phase === 'seed') {
+  if (seeding) {
     // These reviewed packages install only inside the disposable server's
     // plugin store. Each download uses its real disclosure/confirmation UI.
     for (const name of ['REAPER', 'Music Project Management']) {
@@ -150,6 +373,13 @@ test('an opened folder review survives a server restart without a new pick', asy
   const offer = stored.folder_reviews[state.offer];
   expect(offer.id).toBe(state.offer);
   expect(offer.needs_pick).not.toBe(true);
+  if (phase === 'entry-seed') {
+    // The entry-choice phase configures the offline model and enables the
+    // installed integration before expecting declared file metadata.
+    expect(offer.status).toBe('pending');
+    expect(offer.setup).toBeUndefined();
+    return;
+  }
   expect(stored.folder_review_context.status).toBe('awaiting_confirmation');
   expect(stored.folder_review_context.historical).not.toBe(true);
   const setupButton = card

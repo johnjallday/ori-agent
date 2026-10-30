@@ -230,12 +230,23 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   (**Set it up** for a plan that names no hire). The model is told the plan column answers the
   setup request: it never names the hired agent, counts the plan's steps or describes its
   controls, and its `<setup_plan>` carries no hire or brief.
+- **Project file**: ready plans expose `entry_name` and, for multiple files,
+  `entry_candidates` (bounded bare names, newest modification first, ties by
+  name). Both build review layouts use the same native labelled radio group as
+  the assistant card. `POST …/{id}/entry {version, plan_digest, entry_name}`
+  acquires the build edit lease and canonical folder-review owner, then saves
+  only the file choice. The browser flushes draft edits first; the request does
+  not change the draft/transcript, claim setup, run inference or create resources.
+  The choice changes the plan digest and survives live/restored plan reads.
 - **Hire and start**: `POST …/{id}/setup {version, plan_digest, entry_name?, brief?}` writes the build's
   `setup` claim (offer, digest, request id) and runs **Home's own setup journey** on the build's
   held folder: the build's review target is `build:<session id>`, and Home's setup reads that
   folder only while this build stands behind it (`ConfigureBuildReviews`). The session is
   `preparing`; `GET …/{id}` returns `setup_run` (the run's lines with their states, a stop reason,
-  project-file candidates). Refusals: `plan_changed` (the plan the user confirmed is no longer
+  project-file candidates, `entry_name` and the canonical `plan_digest`). Setup
+  echoes the reviewed name; omission keeps it. A late explicit file answer
+  rebinds the run's digest, and retries read that digest rather than a stale build
+  claim, including recovery after an interrupted claim update. Refusals: `plan_changed` (the plan the user confirmed is no longer
   the host's), `no_plan`, `review_pending` (another folder setup waits on Home),
   `declined`, and `build_folder` (the pick is lost). An unnamed draft is named after its folder,
   as the plan says (the model never has to name it first). A stopped run leaves the build open with
@@ -244,12 +255,14 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   Linked folder “<folder>”."), applies the draft's description and extra teammate (and its goal
   only when the run had no brief: the brief is the workspace's goal), and writes "How this was set
   up" from the plan lines and the receipt. The brief goes to the run as on Home's card
-  (`FolderSetupInput.Brief`), and the hired agent's first look starts when the run finishes, under
-  the same consent. The journey links the folder as a directory reference, as on Home (it does
+  (`FolderSetupInput.Brief`); first-task execution follows the same Home policy.
+  An optional folder summary stays seeded until explicitly started. The journey links the folder as a directory reference, as on Home (it does
   not mark it primary).
-- **Pick lifetime**: `folder_expires_at` is when the server stops holding the pick (30
-  minutes after the look). Under 5 minutes the pane counts down; once expired, Hire and start is
-  disabled and **Add the folder again** is offered.
+- **Pick lifetime**: valid retained ordinary reviews omit `folder_expires_at`;
+  restart/elapsed time alone does not demand another pick. Private path and
+  directory-identity checks restore only the canonical open review. A real loss
+  exposes `folder_needs_pick_reason` and disables setup until a verified re-pick.
+  Legacy unreviewed/independently owned picks retain their separate deadline.
 - **Map**: when the run finishes the dialog closes with the receipt as a toast, and the Map's
   automatic layout places the result (a new Home as a new district with the workspace inside, a
   workspace joining an existing Home inside it); nothing is asked and nothing is written to the

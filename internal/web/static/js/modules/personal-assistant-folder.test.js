@@ -28,7 +28,8 @@ import {
   finishedRunWorkspace,
   arrangedStructure,
   conversationFolderOfferView,
-  sourceCreationReviewKey
+  sourceCreationReviewKey,
+  setupEntryName
 } from './personal-assistant-folder.js';
 
 // A finished Explore run is drawn where the Map's automatic layout puts it:
@@ -1907,7 +1908,14 @@ test('Set up sends only the plan digest and a chosen file name, and polls while 
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
   assert.match(source, /postOffer\(offer\.id, 'setup', body\)/);
   assert.match(source, /const body = \{ plan_digest: digest \}/);
-  assert.match(source, /body\.entry_name = action\.entry/);
+  assert.match(source, /body\.entry_name = entryName/);
+  assert.equal(setupEntryName({ plan: { entry_name: 'Song.rpp' } }), 'Song.rpp');
+  assert.equal(setupEntryName({ setup: { entry_name: 'Kept.rpp' } }), 'Kept.rpp');
+  assert.equal(
+    setupEntryName({ setup: { entry_name: 'Kept.rpp' } }, { entry: 'Other.rpp' }),
+    'Other.rpp'
+  );
+  assert.equal(setupEntryName({}), '');
   assert.match(source, /offer\.plan\?\.digest \|\| offer\.setup\?\.plan_digest/);
   // Polling uses the tested run/awaiting-receipt predicate, never idle offers.
   assert.match(source, /if \(folderSetupPolling\(state\.offer\)\) return pollSetup\(\)/);

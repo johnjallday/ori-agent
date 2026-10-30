@@ -59,7 +59,7 @@ const (
 var buildSetupStopCopy = map[string]string{
 	personalassistant.FolderStopPlanChanged:      "What Set it up would do has changed, so it stopped before going further. Review the plan, then Retry.",
 	personalassistant.FolderStopNeedsPick:        "Ori no longer holds the attached folder. Add the folder again, then Retry.",
-	personalassistant.FolderStopNeedsChoice:      "The folder has more than one project file. Choose the one to set up.",
+	personalassistant.FolderStopNeedsChoice:      "Choose the project file to use. The available files may have changed.",
 	personalassistant.FolderStopNeedsModel:       "The project agent needs a model before setup can continue. Completed work is kept.",
 	personalassistant.FolderStopInstallFailed:    "A required plugin could not be installed, updated or enabled. Completed work is kept; Retry continues from the saved run.",
 	personalassistant.FolderStopHomeUpgrade:      "Your Home still uses the installed release of a plugin this setup updates. Upgrade it from that Home first, then review this setup again. Completed work is kept.",
@@ -78,12 +78,14 @@ func buildSetupStopText(reason string) string {
 // buildSetupRunView is a setup run as the pane draws it: the plan's lines
 // with their states, and why it stopped.
 type buildSetupRunView struct {
+	PlanDigest      string                                    `json:"plan_digest,omitempty"`
 	Visual          *personalassistant.FolderSetupVisual      `json:"visual,omitempty"`
 	Hire            *personalassistant.FolderHire             `json:"hire,omitempty"`
 	Destination     *personalassistant.FolderSetupDestination `json:"destination,omitempty"`
 	Status          string                                    `json:"status"`
 	StopReason      string                                    `json:"stop_reason,omitempty"`
 	Lines           []personalassistant.FolderPlanLine        `json:"lines"`
+	EntryName       string                                    `json:"entry_name,omitempty"`
 	EntryCandidates []string                                  `json:"entry_candidates,omitempty"`
 }
 
@@ -181,8 +183,9 @@ func (h *Handler) readBuildSetupRun(ctx context.Context, userID string, projecti
 	}
 	view := &buildSetupRunView{
 		Visual: personalassistant.CloneFolderSetupVisual(offer.Setup.Visual),
-		Status: offer.Setup.Status, StopReason: offer.Setup.StopReason,
+		Status: offer.Setup.Status, StopReason: offer.Setup.StopReason, PlanDigest: offer.Setup.PlanDigest,
 		Lines:           append([]personalassistant.FolderPlanLine(nil), offer.Setup.Lines...),
+		EntryName:       offer.Setup.EntryName,
 		EntryCandidates: append([]string(nil), offer.Setup.EntryCandidates...),
 	}
 	if offer.Setup.Hire != nil {
@@ -256,6 +259,9 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 	if retry {
 		// A Retry continues the run the user confirmed, on its own digest.
 		digest = current.Setup.PlanDigest
+		if run != nil && run.PlanDigest != "" {
+			digest = run.PlanDigest
+		}
 	} else {
 		plan, planErr := h.readBuildPlan(ctx, userID, readiness.projection, current)
 		switch {
@@ -326,7 +332,7 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 			reason = personalassistant.FolderStopNeedsPick
 		}
 		logger.Info("Workspace build setup did not start", logger.Fields{"session_id": id, "reason": reason, "error": err})
-		reopened := h.reopenWorkspaceBuildSetup(ctx, userID, id, offer.ID, reason)
+		reopened := h.reopenWorkspaceBuildSetup(ctx, userID, id, offer.ID, reason, "")
 		if reopened == nil {
 			reopened = claimed.Session(id)
 		}
@@ -345,7 +351,7 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 // reopenWorkspaceBuildSetup returns a build whose run stopped (or never
 // started) to open, says why as a host line, and keeps its claim so Retry
 // continues the same run. It returns the reopened session, or nil.
-func (h *Handler) reopenWorkspaceBuildSetup(ctx context.Context, userID, sessionID, offerID, reason string) *personalassistant.WorkspaceBuildSession {
+func (h *Handler) reopenWorkspaceBuildSetup(ctx context.Context, userID, sessionID, offerID, reason, planDigest string) *personalassistant.WorkspaceBuildSession {
 	deps := h.workspaceBuild
 	var result *personalassistant.WorkspaceBuildSession
 	_, err := deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
@@ -356,6 +362,9 @@ func (h *Handler) reopenWorkspaceBuildSetup(ctx context.Context, userID, session
 		now := deps.Store.Now()
 		session.Status = personalassistant.WorkspaceBuildOpen
 		session.Setup.StopReason = reason
+		if planDigest != "" {
+			session.Setup.PlanDigest = planDigest
+		}
 		session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleForm, Text: buildSetupStopText(reason), Host: true, At: now})
 		session.Touch(now)
 		copied := cloneBuildSession(*session)
@@ -382,7 +391,7 @@ func (h *Handler) WorkspaceBuildSetupSettled(ctx context.Context, userID string,
 	case offer.Status == personalassistant.FolderOfferResolved && offer.Outcome != nil && strings.TrimSpace(offer.Outcome.WorkspaceID) != "":
 		h.finishWorkspaceBuildSetup(ctx, userID, sessionID, offer)
 	case offer.Setup != nil && offer.Setup.Status == personalassistant.FolderSetupStopped:
-		h.reopenWorkspaceBuildSetup(ctx, userID, sessionID, offer.ID, offer.Setup.StopReason)
+		h.reopenWorkspaceBuildSetup(ctx, userID, sessionID, offer.ID, offer.Setup.StopReason, offer.Setup.PlanDigest)
 	}
 }
 
@@ -444,6 +453,9 @@ func (h *Handler) finishWorkspaceBuildSetup(ctx context.Context, userID, session
 		session.CreatedWorkspaceID = workspaceID
 		session.HomeWorkspaceID = homeID
 		session.SetupReceipt = receipt
+		if offer.Setup != nil && offer.Setup.PlanDigest != "" {
+			session.Setup.PlanDigest = offer.Setup.PlanDigest
+		}
 		session.PendingQuestion = nil
 		session.CreateNow = false
 		session.Touch(now)

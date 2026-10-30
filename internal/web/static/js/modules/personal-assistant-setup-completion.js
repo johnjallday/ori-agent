@@ -37,6 +37,10 @@ export function setupCompletionView(offer, receipt) {
     const members = rows.filter(row => row.kind === 'workspace').length;
     if (members) facts.push(`${members} workspaces`);
   } else if (rows.some(row => row.kind === 'folder')) facts.push('Folder linked');
+  const entry = rows.find(
+    row => row.kind === 'folder' && typeof row.name === 'string' && row.name.startsWith('Opens ')
+  );
+  if (entry) facts.push(entry.name);
   const assigned = rows.filter(row => row.kind === 'agent' && row.assigned === true && row.name);
   if (assigned.length === 1) facts.push(`${assigned[0].name} assigned`);
   else if (assigned.length > 1) facts.push(`${assigned.length} agents assigned`);

@@ -2149,7 +2149,7 @@ func finishedSetupReceipt(offer *FolderOffer) []FolderReceiptRow {
 	if offer == nil || offer.Setup == nil || offer.Setup.Status != FolderSetupDone {
 		return nil
 	}
-	return append([]FolderReceiptRow(nil), offer.Setup.Receipt...)
+	return folderSetupEntryReceipt(offer, append([]FolderReceiptRow(nil), offer.Setup.Receipt...))
 }
 
 const portfolioRootHandoffTTL = 30 * time.Minute
@@ -2386,7 +2386,7 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 	if offer.Setup != nil {
 		brief = offer.Setup.Brief
 	}
-	verified.Receipt = s.withFirstTask(ctx, userID, offer.Subject.Shape, brief, verified)
+	verified.Receipt = folderSetupEntryReceipt(offer, s.withFirstTask(ctx, userID, offer.Subject.Shape, brief, verified))
 	now := s.now()
 	var resolved FolderOffer
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
