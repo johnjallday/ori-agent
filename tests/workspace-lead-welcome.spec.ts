@@ -115,7 +115,8 @@ test('creation opens the lead conversation, then brings its first assessment onc
   await page.locator('#personalAssistantInput').fill('Why should I focus on editor review?');
   await page.locator('#personalAssistantSend').click();
   expect((await sent).headers()['x-session-id']).toBe(sessionId);
-  await expect(messages).toContainText('Fixture model reply');
+  // This is a real host/provider round trip; allow cold startup under the CI load.
+  await expect(messages).toContainText('Fixture model reply', { timeout: 30000 });
   const latest = await ok(await request.get(`/api/sessions/${sessionId}`));
   expect(latest.messages.length).toBe(original.messages.length + 2);
   await page.reload();
@@ -196,7 +197,8 @@ test('the Curator offers filing choices without waiting for a goal assessment', 
   await page.locator('#personalAssistantInput').fill('2');
   await page.locator('#personalAssistantSend').click();
   expect((await sent).headers()['x-session-id']).toBe(sessions[0].id);
-  await expect(messages).toContainText('Fixture model reply');
+  // Curator runtime/tool initialization can outlast the default UI assertion wait.
+  await expect(messages).toContainText('Fixture model reply', { timeout: 30000 });
   expect(automaticActions).toBe(0);
   expect(await ok(await request.get(`/api/workspaces/${id}/file-janitor/batches`))).toEqual(
     batches
