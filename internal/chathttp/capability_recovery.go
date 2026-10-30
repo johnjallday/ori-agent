@@ -25,7 +25,58 @@ var (
 	capabilityRecoveryANSIPattern         = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 	capabilityRecoveryPackagePattern      = regexp.MustCompile(`^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[A-Za-z0-9._-]+)\b`)
 	capabilityRecoveryMarketplaceSearchFn = searchCapabilityRecoveryMarketplaceSkills
+
+	// A delivery request leads with the act, after any polite lead-in, and
+	// may sit in a later clause ("summarize this and send it to Lani"). It is
+	// never recognised from a word buried mid-sentence: "what does this error
+	// message say" and "summarize this text" are questions for the model.
+	communicationClausePattern = regexp.MustCompile(`[.!?;\n]+|,?\s+(?:and|then)\s+`)
+	communicationLeadInPattern = regexp.MustCompile(`^(?:(?:hey|hi|ok|okay|ori|please|pls|plz|now|then|also|just|quickly|go ahead and|can you|could you|would you|will you|i need you to|i want you to|i'd like you to)[\s,]+)+`)
+	communicationVerbPattern   = regexp.MustCompile(`^(send|e-?mail|mail|message|msg|text|sms|dm|forward|reply)\b\s*(\S*)`)
+	// "reply to Lani" / "reply to that email" deliver something. "reply with
+	// the number" tells the assistant how to answer in this chat.
+	replyDeliveryPattern = regexp.MustCompile(`^reply\s+(?:back\s+)?to\b`)
 )
+
+// communicationNounFollowers are words after which a clause-leading verb
+// reads as a noun instead: "text below is wrong", "message says error 42".
+var communicationNounFollowers = map[string]bool{
+	"above": true, "app": true, "are": true, "below": true, "body": true, "box": true,
+	"color": true, "colour": true, "content": true, "contents": true, "editor": true,
+	"field": true, "file": true, "files": true, "format": true, "formatting": true,
+	"from": true, "had": true, "has": true, "have": true, "here": true, "in": true,
+	"is": true, "looks": true, "needs": true, "of": true, "on": true, "reads": true,
+	"said": true, "says": true, "seems": true, "should": true, "size": true,
+	"there": true, "was": true, "were": true,
+}
+
+// isSendCommunicationRequest reports whether the lower-cased query asks for
+// something to be delivered to someone, as opposed to mentioning mail, text
+// or a reply while asking the model a question.
+func isSendCommunicationRequest(lower string) bool {
+	for _, clause := range communicationClausePattern.Split(lower, -1) {
+		clause = strings.TrimSpace(communicationLeadInPattern.ReplaceAllString(strings.TrimSpace(clause), ""))
+		if clause == "" {
+			continue
+		}
+		match := communicationVerbPattern.FindStringSubmatch(clause)
+		if match == nil {
+			continue
+		}
+		verb, follower := match[1], strings.Trim(match[2], `"',.:;!?`)
+		if verb == "reply" {
+			if replyDeliveryPattern.MatchString(clause) {
+				return true
+			}
+			continue
+		}
+		if verb != "send" && verb != "forward" && communicationNounFollowers[follower] {
+			continue
+		}
+		return true
+	}
+	return false
+}
 
 type capabilityRecoveryIntent struct {
 	Kind         string
@@ -174,16 +225,12 @@ func detectCapabilityRecoveryIntent(query string) (capabilityRecoveryIntent, boo
 		}, true
 	}
 
-	if containsAnyPhrase(lower, []string{"send", "email", "mail", "message", "text", "sms", "reply"}) {
-		if containsAnyPhrase(lower, []string{"send ", "email ", "mail ", "message ", "text ", "sms ", "reply "}) ||
-			containsAnyPhrase(lower, []string{"send this", "send that", "send this note", "email this", "message this", "reply to"}) {
-			intent := capabilityRecoveryIntent{
-				Kind:         "send_communication",
-				Recipient:    extractCommunicationRecipient(trimmed),
-				MarketplaceQ: "email messaging gmail outlook smtp imap",
-			}
-			return intent, true
-		}
+	if isSendCommunicationRequest(lower) {
+		return capabilityRecoveryIntent{
+			Kind:         "send_communication",
+			Recipient:    extractCommunicationRecipient(trimmed),
+			MarketplaceQ: "email messaging gmail outlook smtp imap",
+		}, true
 	}
 
 	return capabilityRecoveryIntent{}, false
