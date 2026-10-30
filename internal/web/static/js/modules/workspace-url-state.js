@@ -43,7 +43,9 @@ const VALID_PANELS = new Set(['tasks', 'backlog', 'settings']);
 // Brief (`&event=<id>&calendar=<id>`): those params are not parsed here, so
 // they are never reported as stale either. Serialization preserves their
 // parameters while updating only Command-owned view state.
-const CONSOLE_PANELS = new Set(['file-janitor', 'calendar', 'backup-recovery']);
+// `?panel=assistant` is the assistant drawer's: it opens on the workspace's
+// entry agent and removes the param itself once it has opened.
+const CONSOLE_PANELS = new Set(['file-janitor', 'calendar', 'backup-recovery', 'assistant']);
 
 /** Parse a query string (with or without a leading `?`) into raw URL state. */
 export function parseWorkspaceURLState(search) {

@@ -55,6 +55,7 @@ import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
 import { renderFolderFindings } from './personal-assistant-folder-presentation.js';
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
 import {
+  HOME_RECEIPT_ROUTE,
   setupCompletionView,
   setupTaskVisible,
   completedTaskView,
@@ -296,8 +297,10 @@ function handoffManager(setup) {
   return handoffLineParts(setup?.lines)?.manager || 'Your Portfolio Manager';
 }
 
-// A Home's own page, where its manager's suggestions are.
-const HOME_SUGGESTION_ROUTE = /^\/workspaces\/[A-Za-z0-9._~%-]+\/assistant$/;
+// A Home's own page, where its manager's suggestions are: its map with the
+// drawer open on the manager, or (an older offer's) its dashboard page.
+const HOME_SUGGESTION_ROUTE =
+  /^\/workspaces\/[A-Za-z0-9._~%-]+(?:\?mode=map&panel=assistant|\/assistant)$/;
 
 // homeSuggestionLink is the ready Home a single song waits in ({ name, route }):
 // the plan's, before anything is pressed, or the stopped run's. null when the
@@ -2838,8 +2841,7 @@ function homeReceiptView(offer) {
   const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
   const home = rows.find(row => row?.kind === 'home');
   const route = String(home?.route || '').trim();
-  if (!home || !/^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(route))
-    return { visible: false };
+  if (!home || !HOME_RECEIPT_ROUTE.test(route)) return { visible: false };
   const homeName = String(home.name || '').trim() || 'your Home';
   // The Home's workspace ID, read from the server's outcome, never from the route.
   const homeID = String(offer?.outcome?.workspace_id || '').trim();

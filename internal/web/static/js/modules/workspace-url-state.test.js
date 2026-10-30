@@ -140,7 +140,8 @@ test('sanitizeWorkspaceURLState accepts panel=settings (the Plans page deep link
 // panel belongs to the capability console, which reads it itself; the page must
 // neither open a drawer for it nor toast that the link was out of date.
 test('sanitizeWorkspaceURLState leaves capability console panels alone without a stale notice', () => {
-  for (const panel of ['file-janitor', 'calendar', 'backup-recovery']) {
+  // `assistant` is the assistant drawer's open request (a Home's hand-off link).
+  for (const panel of ['file-janitor', 'calendar', 'backup-recovery', 'assistant']) {
     const { state, dropped } = sanitizeWorkspaceURLState({ panel }, {});
     assert.equal(state.panel, '', `${panel} opened a workspace drawer`);
     assert.deepEqual(dropped, [], `${panel} was reported as out of date`);
@@ -272,6 +273,11 @@ test('view changes preserve console ownership, unrelated parameters and fragment
       'https://ori.invalid'
     ).searchParams.get('panel'),
     'tasks'
+  );
+  // The Home's hand-off link keeps the drawer's request while Map mode settles.
+  assert.equal(
+    buildWorkspaceURL('/workspaces/music-home', { mode: MODE.MAP }, '?mode=map&panel=assistant'),
+    '/workspaces/music-home?panel=assistant&mode=map'
   );
 });
 

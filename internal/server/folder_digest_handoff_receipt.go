@@ -35,7 +35,7 @@ func (r handoffReceipts) Receipt(_ context.Context, homeID string, facts folders
 	}
 	rows := []personalassistant.FolderReceiptRow{{
 		Kind: "home", Name: home.Name, Detail: detail, Operation: operation,
-		Route: "/workspaces/" + url.PathEscape(home.FolderSlug) + "/assistant#projectLibraryPanel",
+		Route: "/workspaces/" + url.PathEscape(home.FolderSlug) + homeLandingQuery,
 	}}
 	manager := managerName(home)
 	if name := homeManagerAgent(home); name != "" {

@@ -1,7 +1,10 @@
 // Inert presentation of a canonical receipt. The caller supplies the existing
 // receipt reader's view; this module owns no reads, mutations or persistence.
 const WORKSPACE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/?$/;
-const LIBRARY = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/;
+// A Home receipt leads to the Home: its map with the manager's drawer open, or
+// (an older receipt's) the library on its dashboard page.
+export const HOME_RECEIPT_ROUTE =
+  /^\/workspaces\/[a-z0-9][a-z0-9-]*(?:\?mode=map&panel=assistant|\/assistant#projectLibraryPanel)$/;
 
 function settledReceipt(offer, receipt) {
   return Boolean(
@@ -21,7 +24,7 @@ export function setupCompletionView(offer, receipt) {
     return { ready: false };
   const route = String(offer.outcome.route || '');
   const href = receipt.batch ? route : String(receipt.route || '');
-  if (!(receipt.home ? LIBRARY : WORKSPACE).test(href)) return { ready: false };
+  if (!(receipt.home ? HOME_RECEIPT_ROUTE : WORKSPACE).test(href)) return { ready: false };
   const rows = Array.isArray(offer.outcome.receipt) ? offer.outcome.receipt : [];
   const name = String(
     receipt.homeName ||
