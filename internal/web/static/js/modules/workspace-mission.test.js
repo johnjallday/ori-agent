@@ -445,6 +445,100 @@ test('a run that assessed and suggested nothing says so', () => {
   assert.equal(old.message, 'Run complete — 0 tasks suggested · 0 findings.');
 });
 
+// FR19: a plain goal whose newest run proposed a charter gets the Suggested
+// charter block with Use and Edit; it goes once the goal changes.
+const SUGGESTED = '## Outcome\nA monthly <newsletter>.\n## Boundaries\nNever send anything.';
+
+function charterFixture() {
+  let state = {
+    mission: 'help me write a newsletter',
+    goal_outcome: 'help me write a newsletter',
+    goal_parts: [],
+    goal_digest: 'plain-1',
+    goal_charter_shape: SHAPE,
+    mission_runs: [
+      {
+        origin: 'hire_first_look',
+        succeeded: true,
+        finished_at: new Date().toISOString(),
+        assessment: 'Outcome: nothing yet.',
+        suggested_charter: SUGGESTED,
+        goal_digest: 'plain-1'
+      }
+    ]
+  };
+  const puts = [];
+  const modalText = { value: '', placeholder: '', focus() {} };
+  const mission = loadWorkspaceMission({
+    elements: {
+      '#workspace-detail-mission-text': {},
+      '#workspace-detail-mission-enabled': {},
+      '#workspace-detail-goal-modal-text': modalText
+    },
+    setTimeout: fn => {
+      queueMicrotask(fn);
+      return 1;
+    },
+    fetch: async (url, options) => {
+      if (options?.method === 'PUT') {
+        const body = JSON.parse(options.body);
+        puts.push(body);
+        state = {
+          ...state,
+          mission: body.mission,
+          goal_outcome: 'A monthly <newsletter>.',
+          goal_parts: ['Outcome', 'Boundaries'],
+          goal_digest: 'charter-1'
+        };
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => state };
+    }
+  });
+  return { mission, puts, modalText, state: () => state };
+}
+
+test('a suggested charter shows with Use and Edit while the goal is the plain one it was written for', async () => {
+  const f = charterFixture();
+  await f.mission.reload();
+  const html = f.mission.getSummary().extrasHTML;
+  assert.match(html, /<strong>Suggested charter<\/strong><span>First look<\/span>/);
+  assert.match(html, /<p><strong>Outcome<\/strong> A monthly &lt;newsletter&gt;\.<\/p>/);
+  assert.match(html, /<p><strong>Boundaries<\/strong> Never send anything\.<\/p>/);
+  assert.match(html, /data-cmd-mission-action="use-suggested-charter">Use<\/button>/);
+  assert.match(html, /data-cmd-mission-action="edit-suggested-charter">Edit<\/button>/);
+  assert.ok(html.indexOf('Suggested charter') < html.indexOf('Latest assessment'));
+
+  // Absent when the goal changed since the run, is a charter, or the newest
+  // successful run proposed none.
+  const base = f.state();
+  for (const state of [
+    { ...base, goal_digest: 'plain-2' },
+    { ...base, goal_parts: ['Outcome'] },
+    {
+      ...base,
+      mission_runs: [{ origin: 'manual', succeeded: true }, ...base.mission_runs]
+    }
+  ]) {
+    assert.doesNotMatch(f.mission.summarize(state).extrasHTML, /Suggested charter/);
+  }
+});
+
+test('Edit opens the Goal modal with the suggested charter; Use saves it and the block goes', async () => {
+  const f = charterFixture();
+  await f.mission.reload();
+  f.mission.cardAction('edit-suggested-charter');
+  assert.equal(f.modalText.value, SUGGESTED);
+  assert.equal(f.puts.length, 0, 'Edit saves nothing');
+
+  await f.mission.cardAction('use-suggested-charter');
+  assert.deepEqual(f.puts, [{ mission: SUGGESTED }]);
+  const after = f.mission.getSummary();
+  assert.equal(after.title, 'A monthly <newsletter>.');
+  assert.equal(after.charterLine, 'Charter · Outcome, Boundaries');
+  assert.doesNotMatch(after.extrasHTML, /Suggested charter/);
+});
+
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {
   const mission = loadWorkspaceMission();
   const summary = mission.summarize({ mission: '' });

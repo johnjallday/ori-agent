@@ -142,6 +142,9 @@ func TestGetMission_CarriesTheGoalOutcomeAndCharterShape(t *testing.T) {
 	if string(plain["goal_outcome"]) != `"Already has a goal"` || string(plain["goal_parts"]) != `[]` {
 		t.Fatalf("plain goal: outcome %s parts %s", plain["goal_outcome"], plain["goal_parts"])
 	}
+	if string(plain["goal_digest"]) != `"`+GoalDigest("Already has a goal")+`"` {
+		t.Fatalf("goal_digest = %s", plain["goal_digest"])
+	}
 	var shape []GoalCharterPart
 	if err := json.Unmarshal(plain["goal_charter_shape"], &shape); err != nil || len(shape) != 5 {
 		t.Fatalf("goal_charter_shape = %s (err %v)", plain["goal_charter_shape"], err)

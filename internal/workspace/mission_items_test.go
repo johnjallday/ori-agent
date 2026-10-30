@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +70,51 @@ func TestMissionPrecondition_MatchAndTag(t *testing.T) {
 }
 
 const assessmentTestItem = `{"kind": "task", "title": "Draft the issue template", "why": "w", "evidence": "e", "priority": "high", "effort": "small"}`
+
+// goal-charter FR18: a suggested charter is kept only when it reads as a
+// charter with an Outcome, bounded at the goal cap on whole lines.
+func TestParseMissionRunOutput_ReadsASuggestedCharter(t *testing.T) {
+	parse := func(t *testing.T, value string) MissionRunOutput {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"assessment": "a", "items": []any{}, "suggested_charter": value})
+		out, err := ParseMissionRunOutput("ws-1", "run-1", string(body))
+		if err != nil || out.ParseStatus() != MissionParseOK {
+			t.Fatalf("parse: %v %s", err, out.ParseStatus())
+		}
+		return out
+	}
+
+	valid := "## Outcome\r\nA monthly newsletter.\r\n## Maintain\r\n_What the agent keeps in good order on its own initiative._\r\n## Boundaries\r\nNever send."
+	if got := parse(t, "  "+valid+"\n").SuggestedCharter; got != "## Outcome\nA monthly newsletter.\n## Maintain\n## Boundaries\nNever send." {
+		t.Fatalf("valid charter = %q", got)
+	}
+	for name, value := range map[string]string{
+		"plain text":         "A monthly newsletter that goes out on Tuesdays.",
+		"no Outcome":         "## Build\nA template.\n## Watch\nStalled drafts.",
+		"empty Outcome only": "## Outcome\n\n## Build\nA template.",
+	} {
+		if got := parse(t, value).SuggestedCharter; got != "" {
+			t.Errorf("%s kept: %q", name, got)
+		}
+	}
+	// A non-string value is ignored and does not fail the run.
+	if out, err := ParseMissionRunOutput("ws-1", "run-1", `{"items": [], "suggested_charter": {"Outcome": "x"}}`); err != nil || out.SuggestedCharter != "" {
+		t.Fatalf("object charter: %+v %v", out, err)
+	}
+
+	// Over the cap: trimmed to whole lines, and a heading left without its
+	// text at the cut goes too.
+	head := "## Outcome\n" + strings.Repeat("é", 100) + "\n## Build\n"
+	filler := strings.Repeat("b", WorkspaceGoalMaxRunes-len([]rune(head))-5)
+	long := head + filler + "\n## Watch\n" + strings.Repeat("w", 50)
+	got := parse(t, long).SuggestedCharter
+	if want := head + filler; got != want {
+		t.Fatalf("over-cap charter: %d runes, ends %q", len([]rune(got)), got[len(got)-20:])
+	}
+	if len([]rune(got)) > WorkspaceGoalMaxRunes {
+		t.Fatalf("over the cap: %d", len([]rune(got)))
+	}
+}
 
 // goal-charter FR11/FR24: the assessment is read when present, its paragraph
 // breaks kept and its length bounded; an older-shaped answer still parses ok.

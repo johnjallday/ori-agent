@@ -354,13 +354,21 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	writeMissionPreconditions(&b, in.Preconditions)
 
 	b.WriteString("--- OUTPUT ---\n\n")
+	askCharter := MissionAsksForCharter(in.Mission, in.CycleOrdinal)
 	if hireLook {
-		writeHireFirstLookOutput(&b, charter)
+		writeHireFirstLookOutput(&b, charter, askCharter)
 		return b.String()
 	}
 	b.WriteString("Answer with ONE JSON object and nothing else, no prose before or after it:\n")
-	b.WriteString(`  {"assessment": string, "items": [ ... ]}` + "\n")
+	if askCharter {
+		b.WriteString(`  {"assessment": string, "items": [ ... ], "suggested_charter": string}` + "\n")
+	} else {
+		b.WriteString(`  {"assessment": string, "items": [ ... ]}` + "\n")
+	}
 	writeMissionAssessmentContract(&b, charter, "")
+	if askCharter {
+		writeSuggestedCharterContract(&b)
+	}
 	b.WriteString("Every item has a \"kind\":\n")
 	b.WriteString("- \"task\": work that moves the goal forward and that an agent in this workspace could do.\n")
 	b.WriteString(`    {"kind": "task", "title": string, "why": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "effort": "small"|"medium"|"large", "suggested_agent": string, "first_step": string}` + "\n")
@@ -405,6 +413,26 @@ func goalPartMeaning(name string) string {
 	return ""
 }
 
+// MissionAsksForCharter reports whether a run asks for a suggested charter
+// (goal-charter FR17): only when the goal is plain, and only on a run with
+// CycleOrdinal ≤ 1 — a hire's first look or a baseline, whatever started it.
+// Run #2 onwards never asks, whatever its origin.
+func MissionAsksForCharter(mission string, cycleOrdinal int) bool {
+	if strings.TrimSpace(mission) == "" || len(ParseGoalCharter(mission).Present) > 0 {
+		return false
+	}
+	return cycleOrdinal <= 1
+}
+
+// writeSuggestedCharterContract asks for the optional suggested_charter: the
+// five parts written so the user could adopt them as the goal unchanged.
+func writeSuggestedCharterContract(b *strings.Builder) {
+	b.WriteString("- \"suggested_charter\" (optional): Also propose a charter for this workspace from the brief and what you found, as the five parts below, each one or two sentences; write it so the user could adopt it as the goal unchanged. Write each part as a \"## <Part>\" heading line followed by its text, separated by line breaks. Leave it out when the goal is already a charter.\n")
+	for _, part := range GoalCharterParts {
+		fmt.Fprintf(b, "    - %s: %s\n", part.Name, part.Meaning)
+	}
+}
+
 // writeMissionAssessmentContract describes the "assessment" field every run
 // writes first (goal-charter FR9): where the workspace stands against each
 // part of the goal, and that the items follow from it. lead, when set, says
@@ -441,11 +469,18 @@ func writeMissionPreconditions(b *strings.Builder, preconditions []MissionPrecon
 // the one task to start first and why, and at most
 // HireFirstLookMaxSuggestions tasks. Still one JSON object, so the answer is
 // read like any goal run's.
-func writeHireFirstLookOutput(b *strings.Builder, charter GoalCharter) {
+func writeHireFirstLookOutput(b *strings.Builder, charter GoalCharter, askCharter bool) {
 	b.WriteString("Answer with ONE JSON object and nothing else, no prose before or after it:\n")
-	b.WriteString(`  {"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]}` + "\n")
+	if askCharter {
+		b.WriteString(`  {"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ], "suggested_charter": string}` + "\n")
+	} else {
+		b.WriteString(`  {"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]}` + "\n")
+	}
 	b.WriteString("- \"summary\": at most two sentences on how you read the brief and what you found in this workspace.\n")
 	writeMissionAssessmentContract(b, charter, "Open it with the two sentences of your summary. ")
+	if askCharter {
+		writeSuggestedCharterContract(b)
+	}
 	b.WriteString("- \"next\": the exact title of the one task to start first, which is your first item.\n")
 	b.WriteString("- \"next_why\": one sentence on why that task comes first.\n")
 	b.WriteString("Every item is a task that moves the brief forward and that you could do in this workspace:\n")

@@ -160,6 +160,19 @@ func TestStripGoalHints(t *testing.T) {
 	}
 }
 
+func TestGoalDigest(t *testing.T) {
+	if GoalDigest("  \n") != "" {
+		t.Fatal("no goal, no digest")
+	}
+	a := GoalDigest("help me write a newsletter")
+	if len(a) != 16 || a != GoalDigest("  help me write a newsletter\n") {
+		t.Fatalf("digest %q must ignore surrounding space", a)
+	}
+	if a == GoalDigest("help me write a weekly newsletter") || GoalDigest("a\r\nb") != GoalDigest("a\nb") {
+		t.Fatal("digest must change with the text and ignore line-ending style")
+	}
+}
+
 // The toolbox goal brief's summary is a one-line field: a charter fills it
 // with its Outcome line, while the keyword inference still reads every part.
 func TestProposeGoalBrief_SummarizesACharterByItsOutcome(t *testing.T) {

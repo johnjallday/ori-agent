@@ -2931,6 +2931,10 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-goal-block-body p:last-child {
   margin-bottom: 0;
 }
+.ws-cmd-goal-block-actions {
+  display: flex;
+  gap: 8px;
+}
 .ws-cmd-goal-link {
   align-self: flex-start;
   padding: 0;

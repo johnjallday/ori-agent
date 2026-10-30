@@ -60,6 +60,7 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		"goal_outcome":              GoalOutcomeLine(ws.Mission),
 		"goal_parts":                goalPartsOrEmpty(ws.Mission),
 		"goal_charter_shape":        GoalCharterParts,
+		"goal_digest":               GoalDigest(ws.Mission),
 		"cadence":                   ws.Cadence,
 		"autonomy_policy":           ws.AutonomyPolicy,
 		"mission_enabled":           ws.MissionEnabled,

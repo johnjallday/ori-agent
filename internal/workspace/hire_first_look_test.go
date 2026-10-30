@@ -19,7 +19,7 @@ func TestBuildMissionSystemPrompt_HireFirstLookFramingAndContract(t *testing.T) 
 		"There is no folder or project to read",
 		"Do not read anything outside this workspace",
 		"change nothing",
-		`{"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]}`,
+		`{"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]`,
 		`"next": the exact title of the one task to start first`,
 		`"next_why": one sentence on why that task comes first`,
 		"Suggest at most 3 tasks and no findings",

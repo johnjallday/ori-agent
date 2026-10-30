@@ -1,6 +1,10 @@
 package workspace
 
-import "strings"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+)
 
 // WorkspaceGoalMaxRunes bounds the goal a person saves from Goal Settings or
 // the quick-edit Goal modal: room for a five-part charter. The hire card's
@@ -138,6 +142,18 @@ func firstGoalTextLine(body string) string {
 		}
 	}
 	return ""
+}
+
+// GoalDigest is a short fingerprint of the goal text, so a run's suggested
+// charter is offered only while the goal is still the one the run read.
+// Empty when there is no goal.
+func GoalDigest(mission string) string {
+	mission = strings.TrimSpace(strings.ReplaceAll(mission, "\r\n", "\n"))
+	if mission == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(mission))
+	return hex.EncodeToString(sum[:8])
 }
 
 // StripGoalHints drops every line that is exactly one of the five untouched

@@ -92,7 +92,7 @@ func TestBuildMissionSystemPrompt_BaselineFraming(t *testing.T) {
 	if strings.Contains(got, "goal run #") {
 		t.Error("baseline must not use the recurring framing")
 	}
-	if !strings.Contains(got, `{"assessment": string, "items": [ ... ]}`) || !strings.Contains(got, `"kind": "task"`) || !strings.Contains(got, `"kind": "finding"`) {
+	if !strings.Contains(got, `{"assessment": string, "items": [ ... ]`) || !strings.Contains(got, `"kind": "task"`) || !strings.Contains(got, `"kind": "finding"`) {
 		t.Error("structured-output contract missing")
 	}
 }
@@ -156,6 +156,48 @@ func TestBuildMissionSystemPrompt_GoalSection(t *testing.T) {
 	}
 }
 
+// goal-charter FR17: a plain goal's first look and any run with CycleOrdinal
+// ≤ 1 ask for an optional suggested charter with the five parts; a charter
+// goal and run #2 onwards never do.
+func TestBuildMissionSystemPrompt_AsksForACharterOnlyForAPlainGoalsFirstRuns(t *testing.T) {
+	const plain = "help me write a newsletter"
+	const charter = "## Outcome\nA newsletter."
+	for name, tc := range map[string]struct {
+		in   MissionPromptInputs
+		want bool
+	}{
+		"first look, plain":        {MissionPromptInputs{Mission: plain, CycleOrdinal: 1, Origin: MissionOriginHireFirstLook}, true},
+		"first look run #2, plain": {MissionPromptInputs{Mission: plain, CycleOrdinal: 2, Origin: MissionOriginHireFirstLook}, false},
+		"baseline, plain":          {MissionPromptInputs{Mission: plain, CycleOrdinal: 1, Origin: MissionOriginFirstGoal}, true},
+		"manual run #1, plain":     {MissionPromptInputs{Mission: plain, CycleOrdinal: 1, Origin: MissionOriginManual}, true},
+		"first look, charter":      {MissionPromptInputs{Mission: charter, CycleOrdinal: 1, Origin: MissionOriginHireFirstLook}, false},
+		"baseline, charter":        {MissionPromptInputs{Mission: charter, CycleOrdinal: 1, Origin: MissionOriginFirstGoal}, false},
+		"manual run #2, plain":     {MissionPromptInputs{Mission: plain, CycleOrdinal: 2, Origin: MissionOriginManual}, false},
+		"cadence run #3, plain":    {MissionPromptInputs{Mission: plain, CycleOrdinal: 3, Origin: MissionOriginCadence}, false},
+		"event run #2, plain":      {MissionPromptInputs{Mission: plain, CycleOrdinal: 2, Origin: MissionOriginEvent}, false},
+	} {
+		got := BuildMissionSystemPrompt(tc.in)
+		if asked := strings.Contains(got, `"suggested_charter"`); asked != tc.want {
+			t.Errorf("%s: asks for a charter = %v, want %v", name, asked, tc.want)
+			continue
+		}
+		if !tc.want {
+			continue
+		}
+		for _, want := range []string{
+			`"items": [ ... ], "suggested_charter": string}`,
+			`- "suggested_charter" (optional): Also propose a charter for this workspace from the brief and what you found, as the five parts below, each one or two sentences; write it so the user could adopt it as the goal unchanged.`,
+			"Leave it out when the goal is already a charter.",
+			"    - Outcome: What this workspace exists to produce or keep true.\n    - Maintain: ",
+			"    - Boundaries: What the agent must not do or touch, and what needs the user's say.\n",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: lacks %q", name, want)
+			}
+		}
+	}
+}
+
 // goal-charter FR9/FR10: both output shapes name the assessment first and ask
 // for it against the parts the goal has, or one paragraph for a plain goal.
 func TestBuildMissionSystemPrompt_AssessmentContract(t *testing.T) {
@@ -184,7 +226,7 @@ func TestBuildMissionSystemPrompt_AssessmentContract(t *testing.T) {
 
 	look := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "help me write a newsletter", CycleOrdinal: 1, Origin: MissionOriginHireFirstLook})
 	for _, want := range []string{
-		`{"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]}`,
+		`{"summary": string, "assessment": string, "next": string, "next_why": string, "items": [ ... ]`,
 		"Open it with the two sentences of your summary. Write one short paragraph saying where this workspace stands against the goal today",
 		`"next": the exact title of the one task to start first`,
 		`"next_why": one sentence on why that task comes first`,

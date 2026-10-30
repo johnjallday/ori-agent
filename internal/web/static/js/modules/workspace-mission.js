@@ -149,8 +149,100 @@
     const line = charterLine(state);
     return (
       (line ? `<p class="ws-cmd-mission-charter">${escapeHtml(line)}</p>` : '') +
+      suggestedCharterHTML(state) +
       latestAssessmentHTML(state)
     );
+  }
+
+  // The run whose suggested charter the card offers (FR19): the newest
+  // successful run, when it proposed one, the goal is still plain and still
+  // the goal that run read (goal_digest). Using it, or any later edit of the
+  // goal, retires the offer: the suggestion belongs to the run.
+  function suggestedCharterRun(state) {
+    const parts = Array.isArray(state && state.goal_parts) ? state.goal_parts : [];
+    if (parts.length) return null;
+    const runs = Array.isArray(state && state.mission_runs) ? state.mission_runs : [];
+    const newest = runs.find(run => run && run.succeeded);
+    if (!newest || !String(newest.suggested_charter || '').trim()) return null;
+    if (newest.goal_digest && newest.goal_digest !== state.goal_digest) return null;
+    return newest;
+  }
+
+  // A charter as one paragraph per part: the part name bold, its text after.
+  // Text before the first heading belongs to Outcome. Everything is escaped.
+  function charterSectionsHTML(text, state) {
+    const names = new Map(charterShape(state).map(part => [part.name.toLowerCase(), part.name]));
+    const sections = [];
+    let current = { name: names.get('outcome') || 'Outcome', lines: [] };
+    for (const line of String(text || '').split('\n')) {
+      const label = charterHeadingLabel(line);
+      if (names.has(label)) {
+        sections.push(current);
+        current = { name: names.get(label), lines: [] };
+      } else if (line.trim()) {
+        current.lines.push(line.trim());
+      }
+    }
+    sections.push(current);
+    return sections
+      .filter(section => section.lines.length)
+      .map(
+        section =>
+          `<p><strong>${escapeHtml(section.name)}</strong> ${section.lines.map(escapeHtml).join('<br>')}</p>`
+      )
+      .join('');
+  }
+
+  // The Suggested charter block with Use and Edit (FR19).
+  function suggestedCharterHTML(state) {
+    const run = suggestedCharterRun(state);
+    if (!run) return '';
+    const when = run.finished_at || run.started_at;
+    const origin = RUN_ORIGIN_LABELS[run.origin] || 'Run';
+    return (
+      '<section class="ws-cmd-goal-block ws-cmd-goal-suggested" aria-label="Suggested charter">' +
+      '<div class="ws-cmd-goal-block-head"><strong>Suggested charter</strong>' +
+      `<span>${escapeHtml(origin)}</span>` +
+      (when
+        ? `<span title="${escapeHtml(fmtTime(when))}">${escapeHtml(fmtRelative(when))}</span>`
+        : '') +
+      '</div>' +
+      `<div class="ws-cmd-goal-block-body">${charterSectionsHTML(run.suggested_charter, state)}</div>` +
+      '<div class="ws-cmd-goal-block-actions">' +
+      '<button type="button" class="ws-cmd-mission-btn" data-cmd-mission-action="use-suggested-charter">Use</button>' +
+      '<button type="button" class="ws-cmd-mission-btn" data-cmd-mission-action="edit-suggested-charter">Edit</button>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  // Use: the suggested charter becomes the goal, then the card re-renders.
+  async function useSuggestedCharter() {
+    const run = suggestedCharterRun(latestState);
+    if (!run) return;
+    reportToCards('Saving…');
+    try {
+      await saveMission({ mission: run.suggested_charter });
+      lastRunOutcome = null;
+      await reload();
+      if (!runInProgress) reportToCards('Goal saved.');
+    } catch (e) {
+      reportToCards(
+        e.status === 400 && e.message ? e.message : `Save failed: ${e.message}`,
+        'error'
+      );
+    }
+  }
+
+  // Edit: the Goal modal opens with the suggested charter in its textarea.
+  function editSuggestedCharter() {
+    const run = suggestedCharterRun(latestState);
+    if (!run) return;
+    openGoalModal();
+    const text = $(SELECTORS.goalModalText);
+    if (!text) return;
+    text.value = run.suggested_charter;
+    renderGoalCount(text, $(SELECTORS.goalModalCount));
   }
 
   // The newest successful run that wrote an assessment. Runs come newest
@@ -219,7 +311,10 @@
   // Actions of the Goal card's own blocks (workspace-command.js routes every
   // data-cmd-mission-action it does not handle itself here).
   function cardAction(action) {
-    if (action === 'show-run-history') openGoalSettings();
+    if (action === 'show-run-history') return openGoalSettings();
+    if (action === 'use-suggested-charter') return useSuggestedCharter();
+    if (action === 'edit-suggested-charter') return editSuggestedCharter();
+    return undefined;
   }
 
   // The label a charter heading line names, lower-cased, or '' for any other

@@ -77,6 +77,7 @@ func TestMissionBridge_StoresTheAssessmentForEveryOrigin(t *testing.T) {
 	const charterGoal = "## Outcome\nA monthly newsletter.\n## Boundaries\nNever send anything."
 	const assessed = `{"summary": "A newsletter brief. Nothing written yet.",
 		"assessment": "Outcome: nothing written yet.\n\nBoundaries: understood, no sending.",
+		"suggested_charter": "## Outcome\nA monthly newsletter.\n## Boundaries\nNever send anything.",
 		"next": "Draft the issue template",
 		"items": [{"kind": "task", "title": "Draft the issue template", "why": "w", "evidence": "the brief", "priority": "high", "effort": "small"}]}`
 	for name, tc := range map[string]struct {
@@ -109,6 +110,14 @@ func TestMissionBridge_StoresTheAssessmentForEveryOrigin(t *testing.T) {
 			}
 			if !reflect.DeepEqual(record.AssessmentParts, tc.parts) {
 				t.Fatalf("assessment parts = %#v, want %#v", record.AssessmentParts, tc.parts)
+			}
+			// FR18: the bridge copies the suggested charter for every origin.
+			if record.SuggestedCharter != "## Outcome\nA monthly newsletter.\n## Boundaries\nNever send anything." {
+				t.Fatalf("suggested charter = %q", record.SuggestedCharter)
+			}
+			// ...stamped with the goal it was written for.
+			if record.GoalDigest == "" || record.GoalDigest != workspace.GoalDigest(tc.goal) {
+				t.Fatalf("goal digest = %q, want %q", record.GoalDigest, workspace.GoalDigest(tc.goal))
 			}
 			if !strings.HasSuffix(record.Summary, "\nNext: Draft the issue template") {
 				t.Fatalf("the summary keeps its Next: line: %q", record.Summary)
