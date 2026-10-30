@@ -26,8 +26,10 @@ func TestConversation_ClaudeAPIModelReceivesTheTurnsRulesOnTheWire(t *testing.T)
 	}))
 	defer server.Close()
 	// The SDK takes its endpoint from the environment, so the provider under
-	// test is the one production builds.
+	// test is the one production builds. An empty ANTHROPIC_CONFIG_DIR keeps
+	// the developer's own Anthropic SDK profile out of the request.
 	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+	t.Setenv("ANTHROPIC_CONFIG_DIR", t.TempDir())
 
 	f := newConversationFixture(t)
 	factory := llm.NewFactory()

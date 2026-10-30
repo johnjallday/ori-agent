@@ -16,11 +16,63 @@ import (
 // have an API key in its environment.
 const providerIntegrationOptIn = "ORI_RUN_PROVIDER_INTEGRATION"
 
-// requireOpenAIDecision reports why a provider-integration test should skip
-// given the current guard state, or "" if it should proceed. It takes its
-// inputs as parameters (rather than reading the environment/dialing itself)
-// so the decision logic is testable without an API key or network access.
-func requireOpenAIDecision(short bool, optIn string, apiKey string, dial func() error) string {
+// Overrides shared with tests/helpers: which vendor the live tests talk to
+// and which of its models they use.
+const (
+	providerIntegrationProviderEnv = "ORI_TEST_PROVIDER"
+	providerIntegrationModelEnv    = "ORI_TEST_MODEL"
+)
+
+// integrationProvider describes one vendor the live tests can run against.
+type integrationProvider struct {
+	name     string
+	keyEnv   string
+	endpoint string // host:port probed for reachability before any billed call
+	model    string // the vendor's cheapest tool-capable model
+	build    func(apiKey string) Provider
+}
+
+var integrationProviders = map[string]integrationProvider{
+	"openai": {
+		name:     "openai",
+		keyEnv:   "OPENAI_API_KEY",
+		endpoint: "api.openai.com:443",
+		model:    "gpt-5-mini",
+		build: func(apiKey string) Provider {
+			return NewOpenAIProvider(ProviderConfig{APIKey: apiKey})
+		},
+	},
+	"claude": {
+		name:     "claude",
+		keyEnv:   "ANTHROPIC_API_KEY",
+		endpoint: "api.anthropic.com:443",
+		model:    "claude-haiku-5-5",
+		build: func(apiKey string) Provider {
+			// An organization-wide key needs the workspace header on every request.
+			return NewClaudeProvider(ClaudeProviderConfig(apiKey, os.Getenv("ANTHROPIC_WORKSPACE_ID")))
+		},
+	},
+}
+
+// selectIntegrationProvider mirrors tests/helpers.GetTestProvider for this
+// package, which cannot import it: an explicit ORI_TEST_PROVIDER wins, else
+// claude when an Anthropic key is present, else openai.
+func selectIntegrationProvider(explicit, anthropicKey string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if anthropicKey != "" {
+		return "claude"
+	}
+	return "openai"
+}
+
+// requireProviderDecision reports why a provider-integration test should
+// skip given the current guard state, or "" if it should proceed. It takes
+// its inputs as parameters (rather than reading the environment/dialing
+// itself) so the decision logic is testable without an API key or network
+// access.
+func requireProviderDecision(short bool, optIn string, keyEnv string, apiKey string, endpoint string, dial func() error) string {
 	if short {
 		return "skipping provider integration test in short mode"
 	}
@@ -28,45 +80,56 @@ func requireOpenAIDecision(short bool, optIn string, apiKey string, dial func() 
 		return providerIntegrationOptIn + "=1 not set - skipping provider integration test"
 	}
 	if apiKey == "" {
-		return "OPENAI_API_KEY not set - skipping integration test"
+		return keyEnv + " not set - skipping integration test"
 	}
 	if err := dial(); err != nil {
-		return fmt.Sprintf("OpenAI endpoint unreachable - skipping integration test: %v", err)
+		return fmt.Sprintf("%s unreachable - skipping integration test: %v", endpoint, err)
 	}
 	return ""
 }
 
-func requireOpenAI(t *testing.T) string {
+// requireIntegrationProvider picks the vendor for this run, applies the
+// guard, and returns its description plus a ready provider.
+func requireIntegrationProvider(t *testing.T) (integrationProvider, Provider) {
 	t.Helper()
 
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	name := selectIntegrationProvider(os.Getenv(providerIntegrationProviderEnv), os.Getenv("ANTHROPIC_API_KEY"))
+	spec, ok := integrationProviders[name]
+	if !ok {
+		t.Skipf("%s=%q is not a provider this test knows (openai, claude) - skipping", providerIntegrationProviderEnv, name)
+	}
+
+	apiKey := os.Getenv(spec.keyEnv)
 	dial := func() error {
-		conn, err := net.DialTimeout("tcp", "api.openai.com:443", 2*time.Second)
+		conn, err := net.DialTimeout("tcp", spec.endpoint, 2*time.Second)
 		if err != nil {
 			return err
 		}
 		return conn.Close()
 	}
 
-	if reason := requireOpenAIDecision(testing.Short(), os.Getenv(providerIntegrationOptIn), apiKey, dial); reason != "" {
+	if reason := requireProviderDecision(testing.Short(), os.Getenv(providerIntegrationOptIn), spec.keyEnv, apiKey, spec.endpoint, dial); reason != "" {
 		t.Skip(reason)
 	}
 
-	return apiKey
+	if model := os.Getenv(providerIntegrationModelEnv); model != "" {
+		spec.model = model
+	}
+	t.Logf("Live provider: %s (%s)", spec.name, spec.model)
+	return spec, spec.build(apiKey)
 }
 
-// TestProviderIntegration tests the full provider flow with OpenAI
-// This test requires a valid OPENAI_API_KEY environment variable
+// TestProviderIntegration tests the full provider flow against a real vendor.
+// It requires ORI_RUN_PROVIDER_INTEGRATION=1 plus the selected provider's key.
 func TestProviderIntegration(t *testing.T) {
-	apiKey := requireOpenAI(t)
+	spec, provider := requireIntegrationProvider(t)
 
 	// Create factory and register provider
 	factory := NewFactory()
-	provider := NewOpenAIProvider(ProviderConfig{APIKey: apiKey})
-	factory.Register("openai", provider)
+	factory.Register(spec.name, provider)
 
 	// Get provider
-	retrievedProvider, err := factory.GetProvider("openai")
+	retrievedProvider, err := factory.GetProvider(spec.name)
 	if err != nil {
 		t.Fatalf("Failed to get provider: %v", err)
 	}
@@ -77,7 +140,7 @@ func TestProviderIntegration(t *testing.T) {
 		defer cancel()
 
 		req := ChatRequest{
-			Model: "gpt-4o",
+			Model: spec.model,
 			Messages: []Message{
 				NewUserMessage("Say 'Hello World' and nothing else"),
 			},
@@ -99,8 +162,8 @@ func TestProviderIntegration(t *testing.T) {
 			t.Error("Response content is empty")
 		}
 
-		if resp.Provider != "openai" {
-			t.Errorf("Expected provider 'openai', got '%s'", resp.Provider)
+		if resp.Provider != spec.name {
+			t.Errorf("Expected provider '%s', got '%s'", spec.name, resp.Provider)
 		}
 
 		if resp.Usage.TotalTokens == 0 {
@@ -117,7 +180,7 @@ func TestProviderIntegration(t *testing.T) {
 		defer cancel()
 
 		req := ChatRequest{
-			Model:        "gpt-4o",
+			Model:        spec.model,
 			SystemPrompt: "You are a helpful assistant that responds in exactly 3 words.",
 			Messages: []Message{
 				NewUserMessage("What is the capital of France?"),
@@ -164,7 +227,7 @@ func TestProviderIntegration(t *testing.T) {
 		}
 
 		req := ChatRequest{
-			Model: "gpt-4o",
+			Model: spec.model,
 			Messages: []Message{
 				NewUserMessage("What is 15 multiplied by 7? Use the calculator tool."),
 			},
@@ -223,7 +286,7 @@ func TestProviderIntegration(t *testing.T) {
 		}
 
 		resp1, err := retrievedProvider.Chat(ctx, ChatRequest{
-			Model:       "gpt-4o",
+			Model:       spec.model,
 			Messages:    messages,
 			Temperature: 0.0,
 		})
@@ -240,7 +303,7 @@ func TestProviderIntegration(t *testing.T) {
 		messages = append(messages, NewUserMessage("What is my name?"))
 
 		resp2, err := retrievedProvider.Chat(ctx, ChatRequest{
-			Model:       "gpt-4o",
+			Model:       spec.model,
 			Messages:    messages,
 			Temperature: 0.0,
 		})
@@ -258,13 +321,12 @@ func TestProviderIntegration(t *testing.T) {
 
 // TestProviderFactoryIntegration tests that the factory works correctly in a real scenario
 func TestProviderFactoryIntegration(t *testing.T) {
-	apiKey := requireOpenAI(t)
+	spec, provider := requireIntegrationProvider(t)
 
 	factory := NewFactory()
 
 	// Register provider
-	provider := NewOpenAIProvider(ProviderConfig{APIKey: apiKey})
-	factory.Register("openai", provider)
+	factory.Register(spec.name, provider)
 
 	// List providers
 	providers := factory.ListProviders()
@@ -272,13 +334,13 @@ func TestProviderFactoryIntegration(t *testing.T) {
 		t.Errorf("Expected 1 provider, got %d", len(providers))
 	}
 
-	if providers[0].Name != "openai" {
-		t.Errorf("Expected provider name 'openai', got '%s'", providers[0].Name)
+	if providers[0].Name != spec.name {
+		t.Errorf("Expected provider name '%s', got '%s'", spec.name, providers[0].Name)
 	}
 
 	// Check capabilities
 	if !providers[0].Capabilities.SupportsTools {
-		t.Error("Expected OpenAI to support tools")
+		t.Errorf("Expected %s to support tools", spec.name)
 	}
 
 	t.Logf("Provider: %s", providers[0].Name)
