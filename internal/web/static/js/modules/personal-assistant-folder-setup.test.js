@@ -321,6 +321,14 @@ test('the status sentence names the reviewed destination and why a control is bl
     }).text,
     /Music Home/
   );
+  const handoff = reviewStatusView({
+    ...base,
+    status: 'setup_stopped',
+    destination_status: 'existing',
+    blocker: 'handoff_ready'
+  }).text;
+  assert.match(handoff, /Music Home is ready and lists Album-5/);
+  assert.doesNotMatch(handoff, /stopped|did not finish|failed/);
   assert.match(
     reviewStatusView({ ...base, status: 'setup_stopped', blocker: 'needs_choice' }).text,
     /stopped because it needs you to choose the project file/

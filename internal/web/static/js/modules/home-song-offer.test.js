@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { folderPickCopy } from './folder-pick-copy.js';
 
 import {
   BRIEF_MAX,
@@ -80,6 +81,49 @@ test('a song stopped at the hand-off resumes on its run’s digest and brief', (
   assert.equal(view.stopCopy, '');
 });
 
+test('the reviewed file is disclosed and carried into the separate Open without another question', async () => {
+  const view = songSuggestionView({
+    ...pending,
+    setup: {
+      plan_digest: 'saved',
+      status: 'stopped',
+      stop_reason: 'handoff_ready',
+      entry_name: 'Song <img>.rpp',
+      lines
+    }
+  });
+  assert.equal(view.fileCaption, 'Opens Song <img>.rpp');
+  assert.equal(view.entryName, 'Song <img>.rpp');
+  assert.deepEqual(view.choices, []);
+  let body;
+  await pressSongOpen(async (_, init) => {
+    body = JSON.parse(init.body);
+    return respond(200, {});
+  }, view);
+  assert.equal(body.entry_name, 'Song <img>.rpp');
+  assert.equal(body.open, true);
+  assert.equal(body.plan_digest, 'saved');
+  assert.equal(songSuggestionView(pending).fileCaption, '');
+  const changed = songSuggestionView({
+    ...pending,
+    setup: {
+      plan_digest: 'saved',
+      status: 'stopped',
+      stop_reason: 'needs_choice',
+      entry_name: 'Gone.rpp',
+      entry_candidates: ['Remaining.rpp'],
+      lines: [...lines, { kind: 'folder', name: 'Opens Gone.rpp' }]
+    }
+  });
+  assert.equal(changed.entryName, '');
+  assert.equal(changed.fileCaption, 'Previously chose Gone.rpp');
+  assert.deepEqual(changed.choices, ['Remaining.rpp']);
+  assert.equal(
+    changed.lines.some(line => line.name === 'Opens Gone.rpp'),
+    false
+  );
+});
+
 test('a song that stopped for anything else is answered on the assistant’s card', () => {
   for (const [reason, copy] of Object.entries(STOP_COPY)) {
     const view = songSuggestionView({
@@ -88,7 +132,7 @@ test('a song that stopped for anything else is answered on the assistant’s car
       setup: { plan_digest: 'd', status: 'stopped', stop_reason: reason, lines }
     });
     assert.equal(view.waitsElsewhere, true, reason);
-    assert.equal(view.stopCopy, copy, reason);
+    assert.equal(view.stopCopy, reason === 'needs_pick' ? folderPickCopy('Album-5') : copy, reason);
   }
   assert.match(STOP_COPY.needs_model, /needs a model/);
   const unknown = songSuggestionView({
@@ -102,6 +146,17 @@ test('a song that stopped for anything else is answered on the assistant’s car
     setup: { plan_digest: 'd', status: 'running', lines }
   });
   assert.equal(running.running, true);
+});
+
+test('manager loss wording uses the shared moved/replaced/unavailable table', () => {
+  for (const reason of ['moved', 'changed', 'lost']) {
+    const view = songSuggestionView({
+      ...pending,
+      needs_pick_reason: reason,
+      setup: { plan_digest: 'd', status: 'stopped', stop_reason: 'needs_pick', lines }
+    });
+    assert.equal(view.stopCopy, folderPickCopy('Album-5', reason));
+  }
 });
 
 test('a song stopped for its project file offers the server’s file names as choices', () => {
@@ -348,7 +403,8 @@ test('the opened receipt names the manager, the song link and the hire and first
       { kind: 'agent', name: 'Portfolio Manager', detail: 'already here' },
       { kind: 'workspace', name: 'Album-5', detail: 'opened' },
       { kind: 'agent', name: 'Song Assistant', detail: 'added', assigned: true },
-      { kind: 'task', name: 'Summarize Album-5', detail: 'ready to start' }
+      { kind: 'task', name: 'Summarize Album-5', detail: 'ready to start' },
+      { kind: 'folder', name: 'Opens Song.rpp' }
     ]
   });
   assert.equal(opened.kicker, 'Portfolio Manager opened it');
@@ -358,7 +414,8 @@ test('the opened receipt names the manager, the song link and the hire and first
   assert.equal(opened.workspaceID, 'song-1');
   assert.deepEqual(opened.rows, [
     { kind: 'agent', text: 'Song Assistant — added' },
-    { kind: 'task', text: 'Summarize Album-5 — ready to start' }
+    { kind: 'task', text: 'Summarize Album-5 — ready to start' },
+    { kind: 'folder', text: 'Opens Song.rpp' }
   ]);
   for (const route of ['//evil', 'https://x/workspaces/a', '/workspaces/a/b', '/workspaces/a?x=1'])
     assert.equal(songOpenedView(view, { route }).route, '', route);

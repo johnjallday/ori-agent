@@ -304,7 +304,10 @@ test('card states follow the shared view, with this tab’s press and Not now', 
 
 test('the drawer draws the manager’s message and card, escaped, and saves nothing', async () => {
   const name = 'Song <img src=x onerror=alert(1)>';
-  const { offer, mount, calls } = harness({ suggestions: [suggestion('offer-5', name)] });
+  const song = suggestion('offer-5', name);
+  song.plan.entry_name = 'Song <img>.rpp';
+  song.plan.entry_candidates = ['Song <img>.rpp', 'Alternate.rpp'];
+  const { offer, mount, calls } = harness({ suggestions: [song] });
   await offer.refresh();
   assert.equal(mount.hidden, false);
   const article = mount.querySelector('.pa-home-offer');
@@ -326,6 +329,9 @@ test('the drawer draws the manager’s message and card, escaped, and saves noth
     article.querySelector('.pa-home-offer__hire').textContent,
     /Hires REAPER Assistant · uses gpt-5-mini/
   );
+  const file = article.querySelector('.folder-entry-choice__caption');
+  assert.equal(file.textContent, 'Opens Song <img>.rpp');
+  assert.equal(file.innerHTML, '', 'a filename must remain text, not markup');
   assert.equal(article.querySelector('textarea').value, 'Suggest the next step.');
   const buttons = article.querySelectorAll('button').map(button => button.textContent);
   assert.deepEqual(buttons, [`Open ${name} & hire`, 'Not now']);
@@ -564,7 +570,7 @@ test('a song with several project files is answered in the card, and its press c
   assert.equal(article.dataset.state, 'choose');
   assert.match(
     article.querySelector('.pa-home-offer__ask').textContent,
-    /^Album-5 has more than one project file\. Which one should I open\?$/
+    /^Which project file should I open for Album-5\?$/
   );
   assert.equal(article.querySelector('.pa-home-offer__status').textContent, NOTHING_OPENED);
   // No "Go to your assistant": the choice is made here. The run's brief stays.

@@ -168,7 +168,18 @@ func (o *handoffOpener) Open(ctx context.Context, in foldersetup.OpenInput) (fol
 			return true
 		},
 	})
+	if err != nil {
+		return foldersetup.OpenOutcome{}, handoffOpenError(err)
+	}
+	return foldersetup.OpenOutcome{
+		EntryID: result.EntryID, WorkspaceID: result.WorkspaceID, LinkID: result.LinkID, Route: result.Route, SelectedFile: result.SelectedFile,
+		Created: result.Created, Staffing: result.Staffing, AgentName: result.AgentName, FirstTask: result.FirstTask,
+	}, nil
+}
+
+func handoffOpenError(err error) error {
 	var asked *sessionhttp.LibraryOpenStop
+	var missing *sessionhttp.LibraryFileNotOfferedError
 	switch {
 	case errors.As(err, &asked):
 		reason := asked.Reason
@@ -180,15 +191,21 @@ func (o *handoffOpener) Open(ctx context.Context, in foldersetup.OpenInput) (fol
 		case sessionhttp.LibraryOpenConsentStale:
 			reason = personalassistant.FolderStopConsentStale
 		}
-		return foldersetup.OpenOutcome{}, &foldersetup.OpenStop{Reason: reason, Candidates: asked.ProjectFiles, Detail: asked.Message}
+		return &foldersetup.OpenStop{Reason: reason, Candidates: asked.ProjectFiles, Detail: asked.Message}
+	case errors.As(err, &missing):
+		if len(missing.ProjectFiles) > 0 && len(missing.ProjectFiles) <= 64 {
+			for _, name := range missing.ProjectFiles {
+				if !personalassistant.ValidFolderEntryName(name) {
+					return &foldersetup.OpenStop{Reason: personalassistant.FolderStopPlanChanged}
+				}
+			}
+			return &foldersetup.OpenStop{Reason: personalassistant.FolderStopNeedsChoice,
+				Candidates: append([]string(nil), missing.ProjectFiles...), Detail: "the chosen project file is no longer offered"}
+		}
+		return &foldersetup.OpenStop{Reason: personalassistant.FolderStopPlanChanged}
 	case errors.Is(err, sessionhttp.ErrLibraryFileNotOffered):
-		// The file chosen on the card is no longer one the song offers.
-		return foldersetup.OpenOutcome{}, &foldersetup.OpenStop{Reason: personalassistant.FolderStopPlanChanged, Detail: "the chosen project file is gone"}
-	case err != nil:
-		return foldersetup.OpenOutcome{}, err
+		return &foldersetup.OpenStop{Reason: personalassistant.FolderStopPlanChanged, Detail: "the chosen project file is gone"}
+	default:
+		return err
 	}
-	return foldersetup.OpenOutcome{
-		EntryID: result.EntryID, WorkspaceID: result.WorkspaceID, LinkID: result.LinkID, Route: result.Route,
-		Created: result.Created, Staffing: result.Staffing, AgentName: result.AgentName, FirstTask: result.FirstTask,
-	}, nil
 }

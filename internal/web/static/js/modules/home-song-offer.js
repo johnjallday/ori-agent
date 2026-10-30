@@ -3,6 +3,7 @@
 // Both press the same Set up (with open), so the server rechecks the plan it
 // was shown; neither opens a song itself, and neither carries a path.
 import './folder-plan-lines.js';
+import { folderPickCopy } from './folder-pick-copy.js';
 
 export const DIGEST_ENDPOINT = '/api/personal-assistant/folder-digest';
 export const BRIEF_MAX = 2000;
@@ -11,8 +12,8 @@ const POLL_LIMIT = 200;
 
 export const STOP_COPY = {
   needs_model: 'Its assistant needs a model first. Your assistant kept what finished.',
-  needs_choice: 'It has more than one project file. Your assistant asks which one to open.',
-  needs_pick: 'Ori no longer has its folder open. Your assistant asks you to pick it again.',
+  needs_choice: 'Choose which project file to open.',
+  needs_pick: folderPickCopy('this song'),
   consent_stale: 'Its shared agent needs your review first.',
   assistant_missing: 'The shared agent this Home used is gone. Choose its agent first.'
 };
@@ -44,13 +45,21 @@ export function songSuggestionView(offer) {
   const model = text(hire?.model);
   const status = text(setup?.status);
   const stopped = status === 'stopped' ? text(setup?.stop_reason) : '';
+  const savedEntry = text(source?.entry_name);
+  const entryName = stopped === 'needs_choice' ? '' : savedEntry;
   return {
+    entryName,
+    fileCaption: savedEntry ? `${entryName ? 'Opens' : 'Previously chose'} ${savedEntry}` : '',
     offerID: offer.id,
     digest,
     song,
     manager,
     sections: planLines.handoffNames(source),
-    lines,
+    // A late question is not a promise to open the no-longer-confirmed file.
+    lines:
+      stopped === 'needs_choice' && savedEntry
+        ? lines.filter(line => line.kind !== 'folder' || line.name !== `Opens ${savedEntry}`)
+        : lines,
     hire: agent
       ? {
           name: agent,
@@ -65,8 +74,10 @@ export function songSuggestionView(offer) {
     // Stopped anywhere but the hand-off, the assistant's card has the answer.
     waitsElsewhere: Boolean(stopped && stopped !== 'handoff_ready'),
     stopCopy:
-      STOP_COPY[stopped] ||
-      (stopped && stopped !== 'handoff_ready' ? 'A step did not finish.' : ''),
+      stopped === 'needs_pick'
+        ? folderPickCopy(song, offer.needs_pick_reason)
+        : STOP_COPY[stopped] ||
+          (stopped && stopped !== 'handoff_ready' ? 'A step did not finish.' : ''),
     // A song with more than one project file stops for a choice; these are the
     // files the server offered, and one of them answers it in place.
     choices:
@@ -77,7 +88,7 @@ export function songSuggestionView(offer) {
   };
 }
 
-const SONG_CHOICE_MAX = 12;
+const SONG_CHOICE_MAX = 64;
 
 /** What a card says while the manager is opening the song. */
 export function songOpeningLabel(view) {
@@ -115,7 +126,8 @@ export async function readSongSuggestions(fetchImpl, homeID) {
  * The one press: Set up with open, the plan's digest, the brief when the plan
  * asks for one, and a fresh request id; `entryName` answers a stop for the
  * project file with one of the names the server offered. Returns { ok } or
- * { ok: false, message }. A lost response is never re-sent; the caller follows
+ * { ok: false, message }. Otherwise the saved reviewed filename is carried
+ * without asking again. A lost response is never re-sent; the caller follows
  * the offer instead.
  */
 export async function pressSongOpen(fetchImpl, view, brief = '', { entryName = '' } = {}) {
@@ -125,7 +137,7 @@ export async function pressSongOpen(fetchImpl, view, brief = '', { entryName = '
   if (entry && !(view.choices || []).includes(entry)) return { ok: false, message: '' };
   const body = { plan_digest: view.digest, open: true, request_id: songRequestID() };
   if (view.asksBrief) body.brief = typed;
-  if (entry) body.entry_name = entry;
+  if (entry || view.entryName) body.entry_name = entry || view.entryName;
   try {
     const response = await fetchImpl(
       `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(view.offerID)}/setup`,
@@ -187,7 +199,12 @@ export async function followSongOpen(
 export function songOpenedView(view, outcome) {
   const route = text(outcome?.route);
   const rows = (Array.isArray(outcome?.receipt) ? outcome.receipt : [])
-    .filter(row => (row?.kind === 'agent' && row.assigned === true) || row?.kind === 'task')
+    .filter(
+      row =>
+        (row?.kind === 'agent' && row.assigned === true) ||
+        row?.kind === 'task' ||
+        (row?.kind === 'folder' && text(row.name).startsWith('Opens '))
+    )
     .map(row => ({
       kind: String(row.kind),
       text: [text(row.name), text(row.detail)].filter(Boolean).join(' — ')

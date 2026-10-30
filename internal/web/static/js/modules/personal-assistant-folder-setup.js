@@ -201,7 +201,10 @@ export function reviewStatusView(context, elsewhere = null) {
       text = `Setting up ${subject}${place}…`;
       break;
     case 'setup_stopped':
-      text = `Setup for ${subject}${place} stopped because ${STOPPED_BECAUSE[context.blocker] || 'a step did not finish'}. Use its card to continue.`;
+      text =
+        context.blocker === 'handoff_ready'
+          ? `${known ? name : 'Your Home'} is ready and lists ${subject}. Open it separately with the Home’s manager.`
+          : `Setup for ${subject}${place} stopped because ${STOPPED_BECAUSE[context.blocker] || 'a step did not finish'}. Use its card to continue.`;
       break;
     case 'reselection_needed':
       text = folderPickCopy(subject, context.needs_pick_reason);

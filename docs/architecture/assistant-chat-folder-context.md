@@ -361,6 +361,13 @@ file may read one unselected disclosure to ask again, but never commits that
 fallback; an explicit late answer rebinds consent. A filename does not imply
 Open: the Home phase and the manager's later `open: true` remain separate.
 Completed file receipts require the finished run and verified workspace.
+The Home's manager and static suggestion both disclose the saved filename and
+carry it into the separate Open. Library Open reads the actual bare name back
+from the canonical project locator: a connected workspace bound to a different
+file cannot silently satisfy that choice. A legacy single-file default can
+therefore be recorded accurately too. Missing-file questions use read-only
+candidate disclosures, never an unselected fallback Open. Completed manager
+receipts and first-look handoff sentences name only the verified receipt's file.
 
 ### Setup requirements and configuration return
 

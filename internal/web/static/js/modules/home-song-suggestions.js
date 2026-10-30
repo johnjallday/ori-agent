@@ -72,6 +72,8 @@ export class HomeSongSuggestions {
       `${view.song} is listed in this Home. Opening it makes its own workspace and hires its assistant to work on it.`
     );
     card.append(kicker, title, body);
+    if (view.fileCaption)
+      card.append(element('p', 'folder-entry-choice__caption', view.fileCaption));
     if (view.hire) {
       const hire = element('p', 'assistant-program-suggestion-hire');
       hire.append('Hires ', element('strong', '', view.hire.name));
@@ -155,6 +157,11 @@ export class HomeSongSuggestions {
       element('h2', '', opened.heading),
       element('p', '', opened.body)
     );
+    if (opened.rows.length) {
+      const rows = element('ul', 'pa-folder__receipt');
+      for (const row of opened.rows) rows.append(element('li', '', row.text));
+      note.append(rows);
+    }
     if (opened.route) {
       const link = element('a', 'modern-btn modern-btn-primary', opened.openLabel);
       link.href = opened.route;

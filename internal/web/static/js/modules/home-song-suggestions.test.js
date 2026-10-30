@@ -22,6 +22,13 @@ test('the Home page’s card reads the shared view and makes the shared press', 
   assert.doesNotMatch(source, /\b(folder_path|path):/);
 });
 
+test('the static suggestion and opened receipt disclose filenames as text', () => {
+  assert.match(source, /element\('p', 'folder-entry-choice__caption', view.fileCaption\)/);
+  assert.match(source, /element\('li', '', row.text\)/);
+  assert.match(source, /node.textContent = content/);
+  assert.doesNotMatch(source, /innerHTML\s*=/);
+});
+
 test('a redraw while opening keeps the typed brief', () => {
   assert.match(source, /this\.briefs\.get\(view\.offerID\) \?\? view\.brief/);
 });

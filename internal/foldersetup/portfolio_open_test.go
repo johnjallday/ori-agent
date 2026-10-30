@@ -13,15 +13,16 @@ import (
 // its project files, and whether an earlier pass already made its workspace.
 type worldOpener struct {
 	*portfolioWorld
-	entries    map[string]string // folder name -> entry ID
-	files      []string          // the song folder's project files
-	staleTeam  bool
-	noModel    bool
-	connected  bool
-	staffing   string
-	firstTask  bool
-	opens      []OpenInput
-	workspaces int
+	entries      map[string]string // folder name -> entry ID
+	files        []string          // the song folder's project files
+	staleTeam    bool
+	noModel      bool
+	connected    bool
+	staffing     string
+	firstTask    bool
+	opens        []OpenInput
+	workspaces   int
+	selectedFile string // canonical file reported by the opened workspace
 }
 
 func newWorldOpener(w *portfolioWorld) *worldOpener {
@@ -50,7 +51,7 @@ func (o *worldOpener) Open(_ context.Context, in OpenInput) (OpenOutcome, error)
 			return OpenOutcome{}, &OpenStop{Reason: personalassistant.FolderStopNeedsModel}
 		}
 		o.connected, o.workspaces = true, o.workspaces+1
-		return OpenOutcome{EntryID: in.EntryID, WorkspaceID: "song-5", LinkID: "link-5", Route: "/workspaces/album-5", Created: true,
+		return OpenOutcome{EntryID: in.EntryID, WorkspaceID: "song-5", LinkID: "link-5", Route: "/workspaces/album-5", Created: true, SelectedFile: o.selectedFile,
 			Staffing: o.staffing, AgentName: "REAPER Assistant", FirstTask: o.firstTask}, nil
 	}
 	return OpenOutcome{EntryID: in.EntryID, WorkspaceID: "song-5", LinkID: "link-5", Route: "/workspaces/album-5",
@@ -160,6 +161,42 @@ func TestPortfolioRunStaffingTheHomeLeavesTheSongsAgentsWaiting(t *testing.T) {
 	}
 	if len(o.opens) != 0 {
 		t.Fatal("the song was opened before the Home was staffed")
+	}
+}
+
+func TestPortfolioRunUsesTheOpenedFileProofWithoutSilentlyRetargeting(t *testing.T) {
+	for _, selected := range []string{"", "Another.rpp"} {
+		t.Run(selected, func(t *testing.T) {
+			w := newPortfolioWorld()
+			o := newWorldOpener(w)
+			o.selectedFile = "Actual.rpp"
+			result, progress := runSong(t, w, o, songPlan(false), selected)
+			if selected == "" {
+				if result.Status != personalassistant.FolderSetupDone || progress.last().EntryName != "Actual.rpp" {
+					t.Fatalf("actual file not recorded: %+v / %+v", result, progress.last())
+				}
+			} else if result.StopReason != personalassistant.FolderStopPlanChanged || len(progress.last().Receipt) != 0 {
+				t.Fatalf("different actual file earned a receipt: %+v / %+v", result, progress.last())
+			}
+		})
+	}
+}
+
+func TestPortfolioRunKeepsTheReviewedFileUntilTheSeparateOpen(t *testing.T) {
+	w := newPortfolioWorld()
+	o := newWorldOpener(w)
+	o.files = []string{"Album-5.rpp", "Album-5 alt.rpp"}
+	plan := personalassistant.WithFolderSetupEntry(songPlan(false), o.files[1], o.files)
+	result, progress := runPortfolio(t, w, plan, func(r *PortfolioRunner, cfg *PortfolioConfig) {
+		r.Opener, cfg.EntryName = o, plan.EntryName
+	})
+	if result.StopReason != personalassistant.FolderStopHandoffReady || len(o.opens) != 0 || progress.last().EntryName != plan.EntryName {
+		t.Fatalf("file choice implied Open: %+v / %+v", result, progress.last())
+	}
+	result, progress = runSong(t, w, o, plan, progress.last().EntryName)
+	if result.Status != personalassistant.FolderSetupDone || len(o.opens) != 1 || o.opens[0].SelectedFile != plan.EntryName ||
+		o.workspaces != 1 || progress.last().EntryName != plan.EntryName {
+		t.Fatalf("the manager asked again or retargeted: %+v / %+v", result, o.opens)
 	}
 }
 

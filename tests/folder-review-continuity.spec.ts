@@ -179,6 +179,20 @@ test('the project file is chosen before setup and kept through the separate mana
     const home = offer.setup.suggested_in?.route || offer.home_result?.route;
     expect(home).toMatch(/^\/workspaces\//);
     await page.goto(home);
+    const managerCard = page.locator('.pa-home-offer').filter({ hasText: 'Album-5' }).first();
+    await expect(managerCard.locator('.folder-entry-choice__caption')).toHaveText('Opens Song.rpp');
+    await expect(managerCard.locator('[data-home-offer-choice]')).toHaveCount(0);
+    await page.screenshot({ path: join(evidence, 'entry-manager-card.png') });
+    const homePath = new URL(home, 'http://localhost').pathname;
+    await page.goto(`${homePath}/assistant`);
+    if (await page.locator('#personalAssistantPanel').isVisible()) {
+      await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+    }
+    const staticCard = page.locator(`#homeSongSuggestions [data-offer-id="${state.offer}"]`);
+    await expect(staticCard.locator('.folder-entry-choice__caption')).toHaveText('Opens Song.rpp');
+    await staticCard.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, 'entry-home-static-card.png') });
+    await page.goto(home);
     const open = page.getByRole('button', { name: 'Open Album-5 & hire', exact: true }).first();
     await expect(open).toBeVisible();
     const opened = page.waitForResponse(
@@ -192,6 +206,7 @@ test('the project file is chosen before setup and kept through the separate mana
     const response = await opened;
     expect(response.ok(), await response.text()).toBe(true);
     expect(response.request().postDataJSON().open).toBe(true);
+    expect(response.request().postDataJSON().entry_name).toBe('Song.rpp');
     await expect
       .poll(
         async () => {
@@ -203,7 +218,8 @@ test('the project file is chosen before setup and kept through the separate mana
       .toBe('resolved');
     const finished = await readOffer();
     expect(finished.outcome.receipt.some((row: any) => row.name === 'Opens Song.rpp')).toBe(true);
-    await page.screenshot({ path: join(evidence, 'entry-project-opened.png') });
+    await expect(page.locator('.pa-home-offer__receipt')).toContainText('Opens Song.rpp');
+    await page.screenshot({ path: join(evidence, 'entry-manager-receipt.png') });
   }
   expect(modelTurns).toBe(0);
 });

@@ -211,7 +211,15 @@ func handoffSentence(offer FolderOffer, ws *workspace.Workspace) string {
 	if manager == "" || offer.Outcome.Parent == nil || strings.TrimSpace(offer.Outcome.Parent.Name) == "" {
 		return ""
 	}
-	return "Your " + manager + " opened " + strings.TrimSpace(ws.Name) + " in " + strings.TrimSpace(offer.Outcome.Parent.Name) + "."
+	file := ""
+	for _, row := range offer.Outcome.Receipt {
+		name, named := strings.CutPrefix(row.Name, "Opens ")
+		if row.Kind == FolderPlanFolder && named && ValidFolderEntryName(name) {
+			file = " with " + name
+			break
+		}
+	}
+	return "Your " + manager + " opened " + strings.TrimSpace(ws.Name) + file + " in " + strings.TrimSpace(offer.Outcome.Parent.Name) + "."
 }
 
 func findTask(ws *workspace.Workspace, id string) *workspace.Task {

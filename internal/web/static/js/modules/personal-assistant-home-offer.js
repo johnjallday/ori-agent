@@ -26,7 +26,7 @@ export const NOTHING_OPENED = 'Nothing was opened or placed yet.';
 
 /** The manager asks which project file a song with several should open. */
 export function chooseFileLine(view) {
-  return `${view.song} has more than one project file. Which one should I open?`;
+  return `Which project file should I open for ${view.song}?`;
 }
 
 const WORKSPACE_PATH = /^\/workspaces\/([^/?#]+)(?:\/|$)/;
@@ -342,6 +342,8 @@ export function createHomeOffer({
   function card(view, item, state) {
     const section = element(doc, 'section', 'pa-home-offer__card');
     section.setAttribute('aria-label', `Open ${view.song}`);
+    if (view.fileCaption)
+      section.append(element(doc, 'p', 'folder-entry-choice__caption', view.fileCaption));
     if (view.hire) {
       const hire = element(doc, 'p', 'pa-home-offer__hire');
       hire.append('Hires ', element(doc, 'strong', '', view.hire.name));
