@@ -208,19 +208,19 @@ test-herdr-devflow-cross: ## Explicitly cross-build the selected external toolbo
 test-herdr-devflow: test-devtools test-herdr-devflow-cross ## Explicit companion tests plus Ori adapter contracts
 	@bash scripts/devtools-make.sh test
 
-test-integration: ## Run integration tests (needs OPENAI_API_KEY; sets the provider opt-in)
+test-integration: ## Run integration tests (needs ANTHROPIC_API_KEY or OPENAI_API_KEY; sets the provider opt-in)
 	@echo "$(BLUE)Running integration tests...$(NC)"
-	@if [ -z "$$OPENAI_API_KEY" ]; then \
-		echo "$(YELLOW)Skipping integration tests (OPENAI_API_KEY not set)$(NC)"; \
+	@if [ -z "$$OPENAI_API_KEY" ] && [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "$(YELLOW)Skipping integration tests (neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set)$(NC)"; \
 	else \
 		ORI_RUN_PROVIDER_INTEGRATION=1 $(TEST_RUNNER) $(GOTEST) -v -run Integration ./...; \
 		echo "$(GREEN)✓ Integration tests passed$(NC)"; \
 	fi
 
-test-e2e: build ## Run end-to-end tests (needs OPENAI_API_KEY; sets the provider opt-in)
+test-e2e: build ## Run end-to-end tests (needs ANTHROPIC_API_KEY or OPENAI_API_KEY; sets the provider opt-in)
 	@echo "$(BLUE)Running E2E tests...$(NC)"
-	@if [ -z "$$OPENAI_API_KEY" ]; then \
-		echo "$(YELLOW)Skipping E2E tests (OPENAI_API_KEY not set)$(NC)"; \
+	@if [ -z "$$OPENAI_API_KEY" ] && [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "$(YELLOW)Skipping E2E tests (neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set)$(NC)"; \
 	else \
 		ORI_RUN_PROVIDER_INTEGRATION=1 $(TEST_RUNNER) $(GOTEST) -v ./tests/e2e/...; \
 		echo "$(GREEN)✓ E2E tests passed$(NC)"; \

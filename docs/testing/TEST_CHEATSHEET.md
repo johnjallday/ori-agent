@@ -11,13 +11,21 @@ make test
 # Run only fast unit tests
 make test-unit
 
-# Run integration tests (needs API key; make test-integration sets the
+# Run integration tests (needs an API key; make test-integration sets the
 # required ORI_RUN_PROVIDER_INTEGRATION=1 opt-in for you when a key is
 # present - a bare `go test -run Integration ./...` will skip without it)
+ANTHROPIC_API_KEY=sk-ant-... ANTHROPIC_WORKSPACE_ID=wrkspc_... make test-integration
 OPENAI_API_KEY=sk-... make test-integration
 
 # Run E2E tests (needs build + API key)
+ANTHROPIC_API_KEY=sk-ant-... ANTHROPIC_WORKSPACE_ID=wrkspc_... make test-e2e
 OPENAI_API_KEY=sk-... make test-e2e
+
+# Which vendor the live suites use: ORI_TEST_PROVIDER if set, else claude
+# when ANTHROPIC_API_KEY is set, else openai. The model follows the provider
+# (claude-haiku-5-5 / gpt-5-mini) unless ORI_TEST_MODEL or --model overrides it.
+ORI_TEST_PROVIDER=openai make test-e2e        # both keys set, force OpenAI
+ORI_TEST_MODEL=claude-sonnet-5-5 make test-e2e
 
 # Generate coverage report
 make test-coverage
@@ -248,9 +256,9 @@ make test-coverage
 # 5. Run all checks
 make check
 
-# 6. Build and test E2E
+# 6. Build and test E2E (either vendor key works; see the top of this file)
 make build
-OPENAI_API_KEY=sk-... make test-e2e
+ANTHROPIC_API_KEY=sk-ant-... ANTHROPIC_WORKSPACE_ID=wrkspc_... make test-e2e
 
 # 7. Commit
 git add .

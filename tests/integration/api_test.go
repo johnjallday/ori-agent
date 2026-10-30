@@ -87,7 +87,7 @@ func TestCreateAgentEndpoint(t *testing.T) {
 		"name":        "test-agent",
 		"description": "Test agent for integration testing",
 		"model":       model,
-		"provider":    "openai",
+		"provider":    helpers.GetTestProvider(),
 	}
 
 	jsonData, _ := json.Marshal(agentData)

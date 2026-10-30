@@ -332,6 +332,8 @@ func startServerWithDataDir(t *testing.T, ctx context.Context, dataDir string) *
 		"WORKSPACE_DIR=",
 		fmt.Sprintf("OPENAI_API_KEY=%s", os.Getenv("OPENAI_API_KEY")),
 		fmt.Sprintf("ANTHROPIC_API_KEY=%s", os.Getenv("ANTHROPIC_API_KEY")),
+		// An organization-wide Anthropic key is rejected without its workspace.
+		fmt.Sprintf("ANTHROPIC_WORKSPACE_ID=%s", os.Getenv("ANTHROPIC_WORKSPACE_ID")),
 	)
 
 	// Capture output for debugging
@@ -353,7 +355,7 @@ func createServerAgent(t *testing.T, client *http.Client, name, description stri
 		"name":         name,
 		"description":  description,
 		"model":        helpers.GetTestModel(),
-		"llm_provider": "openai",
+		"llm_provider": helpers.GetTestProvider(),
 	}
 	agentJSON, err := json.Marshal(agentData)
 	if err != nil {
@@ -455,7 +457,7 @@ func configureSystemModel(t *testing.T, client *http.Client) {
 	t.Helper()
 
 	payload, err := json.Marshal(map[string]string{
-		"provider": "openai",
+		"provider": helpers.GetTestProvider(),
 		"model":    helpers.GetTestModel(),
 	})
 	if err != nil {
