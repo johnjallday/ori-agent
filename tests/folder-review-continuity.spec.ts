@@ -15,7 +15,10 @@ const evidence = resolve('tasks/evidence-folder-review-continuity');
 
 async function checkedSandbox(request: APIRequestContext) {
   const root = await realpath(sandbox!);
-  expect(root.startsWith(`${await realpath(tmpdir())}/ori-demo.`)).toBe(true);
+  const temporaryRoot = await realpath(tmpdir());
+  expect(
+    ['ori-demo.', 'ori-e2e.'].some(prefix => root.startsWith(`${temporaryRoot}/${prefix}`))
+  ).toBe(true);
   expect(await readFile(join(root, '.ori-demo-owner'), 'utf8')).toBe(
     `worktree=${await realpath('.')}\n`
   );
@@ -34,7 +37,7 @@ test('the project file is chosen before setup and kept through the separate mana
   request
 }) => {
   test.skip(
-    !sandbox || !['entry-choice', 'entry-run'].includes(phase || ''),
+    !sandbox || !['entry-choice', 'entry-run', 'entry-handoff'].includes(phase || ''),
     'requires explicit isolated entry phases'
   );
   expect(process.env.ORI_FOLDER_REVIEW_CONTINUITY_OFFLINE_MODEL).toBe('1');
@@ -175,6 +178,10 @@ test('the project file is chosen before setup and kept through the separate mana
       .toBe('handoff_ready');
     offer = await readOffer();
     expect(offer.setup.entry_name).toBe('Song.rpp');
+    if (phase === 'entry-handoff') {
+      expect(modelTurns).toBe(0);
+      return; // Leave the confirmed run open for the independent rename scenario.
+    }
     await page.screenshot({ path: join(evidence, 'entry-home-ready.png') });
     const home = offer.setup.suggested_in?.route || offer.home_result?.route;
     expect(home).toMatch(/^\/workspaces\//);
@@ -280,7 +287,12 @@ test('an opened folder review survives a server restart without a new pick', asy
   page.setDefaultTimeout(20_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   const temporaryRoot = await realpath(tmpdir());
-  expect((await realpath(sandbox!)).startsWith(`${temporaryRoot}/ori-demo.`)).toBe(true);
+  const canonicalSandbox = await realpath(sandbox!);
+  expect(
+    ['ori-demo.', 'ori-e2e.'].some(prefix =>
+      canonicalSandbox.startsWith(`${temporaryRoot}/${prefix}`)
+    )
+  ).toBe(true);
   expect(await readFile(join(sandbox!, '.ori-demo-owner'), 'utf8')).toBe(
     `worktree=${await realpath('.')}\n`
   );
@@ -366,6 +378,14 @@ test('an opened folder review survives a server restart without a new pick', asy
         await confirm.click();
         await expect(install).toHaveCount(0, { timeout: 120_000 });
       }
+    }
+  }
+  if (phase === 'seed') {
+    const enable = card.getByRole('button', { name: 'Enable REAPER', exact: true });
+    if (await enable.count()) {
+      await enable.click();
+      await card.getByRole('button', { name: 'Confirm enablement', exact: true }).click();
+      await expect(enable).toHaveCount(0, { timeout: 60_000 });
     }
   }
   // Explicit Review again must also work using the restored authority, while
@@ -485,6 +505,14 @@ test('re-picking the renamed original keeps its review, name, brief and stopped 
   const card = page.locator('#personalAssistantFolderOffer');
   await expect(card).toContainText('has moved or been renamed');
   await page.screenshot({ path: join(evidence, 'conversation-moved.png') });
+  const dark = page.getByRole('button', { name: 'Switch to dark mode', exact: true });
+  if (await dark.count()) await dark.click();
+  await page.screenshot({
+    path: join(evidence, 'conversation-moved-dark.png'),
+    animations: 'disabled'
+  });
+  const light = page.getByRole('button', { name: 'Switch to light mode', exact: true });
+  if (await light.count()) await light.click();
   let reviewCalls = 0;
   page.on('request', req => {
     if (req.method() === 'POST' && req.url().endsWith('/folder-context/review')) reviewCalls++;
@@ -501,7 +529,10 @@ test('re-picking the renamed original keeps its review, name, brief and stopped 
   expect(response.ok(), await response.text()).toBe(true);
   expect((await response.json()).resumed_review).toBeTruthy();
   await expect(card.getByRole('button', { name: 'Pick it again', exact: true })).toHaveCount(0);
-  await expect(card.getByRole('button', { name: 'Continue setup', exact: true })).toBeVisible();
+  if (original.setup.stop_reason === 'handoff_ready')
+    await expect(card.getByRole('button', { name: /Go to .*Home/ })).toBeVisible();
+  else
+    await expect(card.getByRole('button', { name: 'Continue setup', exact: true })).toBeVisible();
   const after = await get(conversationURL);
   const recovered = after.folder_reviews[state.offer];
   expect(after.folder_context.offer_id).toBe(state.offer);
@@ -510,6 +541,7 @@ test('re-picking the renamed original keeps its review, name, brief and stopped 
   expect(recovered.scanned_at).toBe(original.scanned_at);
   expect(recovered.setup.brief).toBe(original.setup.brief);
   expect(recovered.setup.lines).toEqual(original.setup.lines);
+  expect(recovered.setup.entry_name).toBe(original.setup.entry_name);
   expect(after.messages.length).toBe(before.messages.length);
   expect(reviewCalls).toBe(0);
   const digest = await get('/api/personal-assistant/folder-digest');
@@ -568,8 +600,9 @@ test('a Home-owned review keeps its folder after restart', async ({ page, reques
   await expect(card).toContainText('Album-1');
   await expect(card.getByRole('button', { name: 'Pick it again', exact: true })).toHaveCount(0);
   await revealFolderSetupDetails(card);
-  if (phase === 'home-seed') {
-    await card.getByRole('button', { name: /^Adjust(?:…)?$/ }).click();
+  const adjust = card.getByRole('button', { name: /^Adjust(?:…)?$/ });
+  if (phase === 'home-seed' && (await adjust.count())) {
+    await adjust.click();
     const modal = page.locator('#specialistSetupJourneyModal');
     await expect(modal).toBeVisible();
     await page.locator('#specialistSetupJourneyClose').click();
@@ -582,7 +615,17 @@ test('a Home-owned review keeps its folder after restart', async ({ page, reques
   expect(digest.folder_digest.offer.id).toBe(state.homeOffer);
   expect(digest.folder_digest.offer.conversation_id).toBeFalsy();
   expect(digest.folder_digest.offer.needs_pick).not.toBe(true);
-  await expect(card.getByRole('button', { name: 'Continue setup', exact: true })).toBeVisible();
+  const home = digest.folder_digest.offer.plan?.suggested_in;
+  if (home?.route) {
+    // An already-ready Home owns the next confirmation. The pending Home
+    // review retains that exact navigation instead of inventing an Adjust run.
+    expect(home.route).toMatch(/^\/workspaces\//);
+    await expect(
+      card.getByRole('button', { name: `Go to ${home.name}`, exact: true })
+    ).toBeVisible();
+  } else {
+    await expect(card.getByRole('button', { name: 'Continue setup', exact: true })).toBeVisible();
+  }
   await card.scrollIntoViewIfNeeded();
   await page.setViewportSize({ width: 1440, height: 1200 });
   const details = card.locator('#personalAssistantFolderDetails');
@@ -590,6 +633,20 @@ test('a Home-owned review keeps its folder after restart', async ({ page, reques
     await details.locator('summary').first().click();
   await card.scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(evidence, `${phase}.png`) });
+  if (phase === 'home-reopen' && home?.route) {
+    // The next scenario belongs to a different owner. Close this pending
+    // Home review through its real action; a build must not retire it for us.
+    await card.getByRole('button', { name: 'Not now', exact: true }).click();
+    await expect
+      .poll(async () => {
+        const current = await api(
+          'GET',
+          `/api/personal-assistant/folder-digest?offer_id=${encodeURIComponent(state.homeOffer)}`
+        );
+        return current.folder_digest.offer.status;
+      })
+      .toBe('declined');
+  }
 });
 
 test('the build pane reopens its own folder and name after restart', async ({ page, request }) => {

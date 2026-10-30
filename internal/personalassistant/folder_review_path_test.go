@@ -122,7 +122,7 @@ func TestFolderReviewPath_RejectsMovedReplacedAndLegacyPaths(t *testing.T) {
 }
 
 func TestFolderReviewPath_SetupAndRetryAfterRestart(t *testing.T) {
-	f, observations, target, id, _, _ := reviewedObservation(t, "documents", "Album")
+	f, _, target, id, _, _ := reviewedObservation(t, "documents", "Album")
 	setup := &fakeFolderSetup{lines: oneCardLines(), finish: func() FolderSetupUpdate {
 		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopNeedsPick}
 	}}
@@ -132,7 +132,7 @@ func TestFolderReviewPath_SetupAndRetryAfterRestart(t *testing.T) {
 		restarted.deps.Setup = setup
 		return restarted
 	}()
-	observations = NewFolderObservationService(f.service)
+	observations := NewFolderObservationService(f.service)
 	observations.ConfigureConversationReviews(func(context.Context, FolderOffer) error { return nil }, func(foldercontext.Target) (func(), bool) { return func() {}, true })
 	view, err := observations.ReadReview(t.Context(), target, id)
 	if err != nil || view.Plan == nil || view.NeedsPick {

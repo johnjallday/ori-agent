@@ -333,8 +333,13 @@ Personal Assistant knowledge store (locked, atomic replace, a Windows variant). 
 - every host-written line is cut to the store's 2,000-character bound, and the lists a
   model can grow (refusals, saved teammates) are capped;
 - an attached folder is kept only as its path-free observation (at most 8 KiB, validated
-  on every write) and dropped when the build settles; the server's hold on the folder
-  itself lasts 30 minutes and is never written anywhere;
+  on every write) and dropped when the build settles. Unreviewed attachments
+  retain the 30-minute in-memory hold. An explicitly opened ordinary build review
+  additionally keeps its verified private location in the HQ's bounded 0600
+  `folder-paths-v1.json`, outside the build/session document. Restart restoration
+  checks its exact owner, observation, keys and directory witnesses; it adds no
+  new scan facts. Detach, abandon and successful ordinary Create retire that
+  source authority without undoing accepted resources;
 - every mutation is versioned; a stale `version` is a `409` the client reloads from.
 
 On create, `build_session_id` marks the session `created` and stores a `BuildSummary` in

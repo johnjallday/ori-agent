@@ -3,11 +3,15 @@ package foldersetup
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 )
@@ -128,6 +132,40 @@ func TestRunProjectEntry_RealJourneyReturnsFreshChoiceAfterItsTypedInputFailure(
 	}
 	if owner.project || len(owner.commits) != 0 || !reflect.DeepEqual(progress.last().EntryCandidates, []string{"Remaining.rpp"}) {
 		t.Fatal("fallback committed or lost the fresh choice", owner, progress.last())
+	}
+}
+
+// With no entry in the confirmed plan, new files arriving before the project
+// step require a question. Adding a file beside a still-listed chosen file is
+// deliberately different: the selection remains valid (covered above).
+func TestRunProjectEntry_FilesAddedAfterTheCardWasDrawnAskWithoutCommitting(t *testing.T) {
+	root := t.TempDir()
+	declaration := &projecttemplates.AttachExistingDeclaration{EntryExtensions: []string{".rpp"}}
+	if _, err := projectconnection.ScanExistingProject(root, declaration); !errors.Is(err, projectconnection.ErrNoProjectEntry) {
+		t.Fatal("expected the original card to have no file choice", err)
+	}
+	cfg := testConfig()
+	for _, name := range []string{"Song.rpp", "Alternate.rpp"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("metadata fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan, err := projectconnection.ScanExistingProject(root, declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journey := newFake()
+	journey.shownEntry, journey.candidates = "", scan.Candidates
+	progress := &recorder{}
+	runner := &Runner{Journey: journey, Selections: fakeSelections{}, Progress: progress}
+	result, err := runner.Run(t.Context(), cfg)
+	if err != nil || result.StopReason != personalassistant.FolderStopNeedsChoice || !reflect.DeepEqual(progress.last().EntryCandidates, scan.Candidates) {
+		t.Fatal(result, err, progress.last())
+	}
+	for _, call := range journey.calls {
+		if call == "connect_existing_project" {
+			t.Fatal("committed a file that was never confirmed")
+		}
 	}
 }
 

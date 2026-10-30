@@ -34,9 +34,10 @@ import (
 // The browser never sends a path. It names a folder by a known-folder chip,
 // by the picker (a dialog the server opens), or by the selection token the
 // folder-picker endpoint issued for a typed path it checked. The server holds
-// the folder's root for the observation it returns, for as long as the
-// composer holds one (foldercontext.SelectionTTL); the session keeps only the
-// observation, which can never revive that root.
+// the folder's root for the observation it returns. Unreviewed picks retain the
+// composer's SelectionTTL; an opened ordinary review additionally keeps its
+// privately witnessed location until retirement. The session stores only the
+// observation, which cannot revive a root without that canonical authority.
 
 // WorkspaceBuildFolders observes a folder for a build, says what the folder
 // digest recognized in it, and resolves it again at Create
@@ -234,6 +235,12 @@ func respondBuildFolderError(w http.ResponseWriter, err error) {
 	message := "That folder could not be used. Pick again; your draft and any folder already attached are unchanged."
 	var rootErr *personalassistant.FolderRootError
 	switch {
+	case errors.Is(err, personalassistant.ErrFolderReviewPending):
+		respondBuildSetupRefusal(w, http.StatusConflict, "review_pending", "Another folder setup review is pending. Finish or close it before attaching this folder. Your draft is unchanged.")
+		return
+	case errors.Is(err, personalassistant.ErrFolderOfferDecided):
+		respondBuildSetupRefusal(w, http.StatusConflict, "declined", buildCopySetupDeclined)
+		return
 	case errors.Is(err, errBuildFoldersOff):
 		message = "Folders can’t be added to this build right now."
 	case errors.Is(err, personalassistant.ErrFolderScanBusy):
@@ -246,8 +253,8 @@ func respondBuildFolderError(w http.ResponseWriter, err error) {
 		message = rootErr.Message
 	}
 	body := map[string]any{"error": message, "code": "folder"}
-	if reason := personalassistant.FolderPickReason(err); reason != "" {
-		body["needs_pick_reason"] = reason
+	if errors.Is(err, personalassistant.ErrFolderSelection) || errors.Is(err, personalassistant.ErrFolderPathLost) {
+		body["needs_pick_reason"] = personalassistant.FolderPickReason(err)
 	}
 	_ = orihttp.RespondJSON(w, http.StatusConflict, body)
 }

@@ -11,6 +11,54 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
+func TestWorkspaceBuildContinuity_PendingHomeReviewIsNotReportedAsFolderLoss(t *testing.T) {
+	f := newDraftServerFixture(t)
+	provider := &capturingChatProvider{}
+	f.builder.llmFactory.Register("claude_code", provider)
+	if status, body := f.call(t, http.MethodPost, "/api/settings/system-model", map[string]string{"provider": "claude_code", "model": "sonnet"}); status != http.StatusOK {
+		t.Fatal(body)
+	}
+	pick := func(name string) map[string]any {
+		t.Helper()
+		root := filepath.Join(os.Getenv("HOME"), name)
+		if err := os.MkdirAll(root, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "Song.rpp"), []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		status, body := f.call(t, http.MethodPost, "http://localhost/api/folder-picker/select-path", map[string]any{"path": root})
+		if status != http.StatusOK {
+			t.Fatal(status, body)
+		}
+		return body
+	}
+	selected := pick("Home pending")
+	status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/scan", map[string]any{"selection_token": selected["selection_token"]})
+	if status != http.StatusOK {
+		t.Fatal(status, body)
+	}
+	offerID := body["offer"].(map[string]any)["id"].(string)
+	status, body = f.call(t, http.MethodPost, "/api/workspaces/build-sessions", map[string]any{"entry_point": "home_cockpit_create"})
+	if status != http.StatusCreated {
+		t.Fatal(status, body)
+	}
+	build := body["session"].(map[string]any)
+	selected = pick("Build candidate")
+	status, body = f.call(t, http.MethodPost, "/api/workspaces/build-sessions/"+build["id"].(string)+"/folder", map[string]any{"version": build["version"], "mode": "selection", "selection_token": selected["selection_token"]})
+	if status != http.StatusConflict || body["code"] != "review_pending" || body["needs_pick_reason"] != nil {
+		t.Fatal("pending owner became folder loss", status, body)
+	}
+	stored, err := f.builder.personalAssistantFolderDigest.StoredOffer(t.Context(), "local", offerID)
+	if err != nil || stored.Status != personalassistant.FolderOfferPending || stored.ConversationReview != nil {
+		t.Fatal("build retired or adopted the Home review", stored, err)
+	}
+	status, body = f.call(t, http.MethodGet, "/api/workspaces/build-sessions/"+build["id"].(string), nil)
+	if status != http.StatusOK || body["session"].(map[string]any)["folder"] != nil || len(provider.requests) != 0 {
+		t.Fatal("failed attachment changed the build or inferred", status, body)
+	}
+}
+
 func TestWorkspaceBuildContinuity_AttachRestartRepickAndDetachUseOneReview(t *testing.T) {
 	for _, marker := range []string{"Song.rpp", "notes.txt"} {
 		t.Run(marker, func(t *testing.T) {

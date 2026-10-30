@@ -28,13 +28,14 @@ func TestFolderReviewRepick_PreservesReviewAcrossRootAndChildRename(t *testing.T
 				before := *doc.Offer(id)
 				root := filepath.Join(f.home, "Documents")
 				child := filepath.Join(root, "Scans")
-				if move == "root" {
+				switch move {
+				case "root":
 					if err := os.Rename(root, root+"-renamed"); err != nil {
 						t.Fatal(err)
 					}
 					root += "-renamed"
 					child = filepath.Join(root, "Scans")
-				} else if move == "child" {
+				case "child":
 					if err := os.Rename(child, child+"-renamed"); err != nil {
 						t.Fatal(err)
 					}

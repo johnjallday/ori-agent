@@ -133,7 +133,7 @@ export function createFolderContextController({
       ) {
         reset(owner, result.folder_context);
         reviewResumed(result.resumed_review);
-        notify('Your existing review is ready. Nothing has been set up.');
+        notify('Your existing review is ready. This pick did not start setup.');
         return true;
       }
       state.observation = result.observation;

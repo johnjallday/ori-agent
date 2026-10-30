@@ -129,6 +129,10 @@ test('a verified re-pick redraws the existing review without retiring its saved 
   assert.equal(controller.request().selection_id, 'original');
   assert.equal(controller.request().historical, true);
   assert.equal(resumed[0].id, 'offer');
+  assert.equal(
+    controller.state.notice,
+    'Your existing review is ready. This pick did not start setup.'
+  );
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /\/select$/);
 });

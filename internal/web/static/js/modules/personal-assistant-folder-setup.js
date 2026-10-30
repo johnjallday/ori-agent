@@ -119,11 +119,17 @@ export function subjectPlacement(subjectId, option = {}) {
   return subjectId ? { ...option, subject_workspace_id: String(subjectId) } : option;
 }
 
-export function choiceIsCurrent(binding, state, offer = null, candidateId = '') {
+export function choiceIsCurrent(
+  binding,
+  state,
+  offer = null,
+  candidateId = binding?.candidateId || ''
+) {
   return Boolean(
     binding &&
     state &&
-    (!state.authority || canReviewCandidate(state, offer, candidateId)) &&
+    (!state.authority || reviewedCandidateIsCurrent(state, offer, candidateId)) &&
+    (!binding.offerId || binding.offerId === state.offerId) &&
     binding.conversationId === state.conversationId &&
     binding.observationId === state.observation?.id &&
     binding.revision === state.revision
@@ -894,17 +900,20 @@ function closeAdjust(returnFocus = true) {
 // scope chooser. placement may carry what the user changed in Adjust.
 // Restored setup authority permits only the exact existing review, never a
 // fresh candidate from the dated discussion snapshot.
+function reviewedCandidateIsCurrent(state, offer, candidateId) {
+  return Boolean(
+    candidateId &&
+    state?.observation &&
+    currentReview(state, offer) &&
+    !offer.needs_pick &&
+    offer.status === 'pending' &&
+    offer.candidate_id === candidateId
+  );
+}
+
 export function canReviewCandidate(state, offer, candidateId) {
   if (!candidateId || !state?.observation || state.pending) return false;
-  return (
-    !state.authority ||
-    Boolean(
-      currentReview(state, offer) &&
-      !offer.needs_pick &&
-      offer.status === 'pending' &&
-      offer.candidate_id === candidateId
-    )
-  );
+  return !state.authority || reviewedCandidateIsCurrent(state, offer, candidateId);
 }
 
 function reviewFrom(trigger, candidateId, placement = {}) {
@@ -918,7 +927,9 @@ function reviewFrom(trigger, candidateId, placement = {}) {
     binding: {
       conversationId: current.conversationId,
       observationId: current.observation.id,
-      revision: current.revision
+      revision: current.revision,
+      offerId: current.offerId,
+      candidateId
     }
   };
   void review(candidateId, false, undefined, placement);
@@ -1266,7 +1277,9 @@ function contextChanged(state) {
     window.PersonalAssistantFolder?.parkConversation?.();
   current = { ...state };
   if (adjusting && !choiceIsCurrent(adjusting.binding, current)) closeAdjust(false);
-  if (choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current)) {
+  // Our own in-flight refresh must not retire its origin merely because the
+  // discussion snapshot is historical. Keep the exact offer/candidate fence.
+  if (choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current, reviews[current.offerId])) {
     if (flowHasFocus()) retireSuggestion(choiceOrigin.parent);
     else closeChoices(false);
   }

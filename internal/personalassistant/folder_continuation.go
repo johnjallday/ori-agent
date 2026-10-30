@@ -29,8 +29,8 @@ type FolderContinuationReason string
 const (
 	// FolderContinuationExpired: the 30-minute hand-off window has elapsed.
 	FolderContinuationExpired FolderContinuationReason = "expired"
-	// FolderContinuationLost: the server no longer holds the picked path (it
-	// restarted; a dialog-picked folder is process memory only).
+	// FolderContinuationLost: neither a live hold nor valid retained review
+	// authority is available. Resolved legacy handoffs remain process-local.
 	FolderContinuationLost FolderContinuationReason = "lost"
 	// FolderContinuationChanged: the folder is missing, no longer the same
 	// directory, or otherwise fails the original identity check.

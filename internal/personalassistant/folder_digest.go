@@ -693,9 +693,9 @@ type FolderOfferView struct {
 	// Remember says whether the card may promise "I will also remember"
 	// (FR22, FR39, FR52).
 	Remember bool `json:"remember"`
-	// NeedsPick is set when the offer's folder path is no longer known
-	// (a restart after a picker-chosen folder) and a yes needs the user to
-	// pick it again.
+	// NeedsPick is set when the server cannot verify this offer's folder.
+	// An intact, privately retained review survives expiry and restart;
+	// genuine loss requires another explicit pick.
 	NeedsPick       bool                     `json:"needs_pick,omitempty"`
 	NeedsPickReason FolderContinuationReason `json:"needs_pick_reason,omitempty"`
 	Decision        string                   `json:"decision,omitempty"`
@@ -2232,9 +2232,9 @@ func (s *FolderDigestService) portfolioSource(userID string, offer FolderOffer) 
 // heldPortfolioFolder is the server-held collection folder when it is still the
 // exact directory the scan saw (canonical path and directory identity).
 func (s *FolderDigestService) heldPortfolioFolder(userID string, offer FolderOffer) (root, identity string, loss FolderContinuationReason) {
-	held, ok := s.rootPath(userID, offer)
-	if !ok {
-		return "", "", FolderContinuationLost
+	held, reason := s.rootPathReason(userID, offer)
+	if reason != "" {
+		return "", "", reason
 	}
 	canonical, err := s.deps.ValidateRoot(held)
 	if err != nil || canonical != held || FolderKey(canonical) != offer.FolderKey || offer.RootIdentity == "" {
