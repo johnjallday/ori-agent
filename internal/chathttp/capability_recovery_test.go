@@ -42,6 +42,83 @@ func TestDetectCapabilityRecoveryIntent_SendNoteToRecipient(t *testing.T) {
 	}
 }
 
+// TestDetectCapabilityRecoveryIntent_DeliveryVersusMention pins the line
+// between asking Ori to deliver something and merely mentioning mail, text
+// or a reply while asking the model a question. The second group used to be
+// intercepted and answered with "no messaging tool is configured" instead of
+// reaching the model.
+func TestDetectCapabilityRecoveryIntent_DeliveryVersusMention(t *testing.T) {
+	deliveries := []string{
+		"send this note to Lani.",
+		"email this to Sam",
+		"Please text Sam that dinner is at 7",
+		"Message Sam about the invoice",
+		"Can you reply to Lani and say I'm running late?",
+		"Summarize the notes and send them to Lani",
+		"ok ori, forward the invoice to accounting",
+		"Hey, DM Sam the link",
+		"reply back to that email with a thank you",
+	}
+	for _, query := range deliveries {
+		intent, ok := detectCapabilityRecoveryIntent(query)
+		if !ok || intent.Kind != "send_communication" {
+			t.Errorf("%q: expected send_communication, got ok=%v kind=%q", query, ok, intent.Kind)
+		}
+	}
+
+	mentions := []string{
+		"Reply with exactly the word PONG and nothing else.",
+		"Reply in two sentences.",
+		"reply using JSON only",
+		"What does this error message say?",
+		"Summarize this text in two lines",
+		"The text below needs editing: hello wrold",
+		"My email address is on the contact page, is that safe?",
+		"Which message in the log is the first failure?",
+		"Is the Mail app open right now?",
+		"What is 7 times 6? Answer with just the number.",
+		"how do I send a POST request with curl in bash",
+	}
+	for _, query := range mentions {
+		if intent, ok := detectCapabilityRecoveryIntent(query); ok {
+			t.Errorf("%q: expected no recovery intent, got %#v", query, intent)
+		}
+	}
+}
+
+func TestMaybeHandleCapabilityRecovery_LetsAnswerFormatInstructionsReachTheModel(t *testing.T) {
+	h := NewHandler(newPreflightStore("Ori", &agent.Agent{}), nil)
+	factory := llm.NewFactory()
+	factory.Register("codex", &scriptedChatProvider{name: "codex", supportsTools: false})
+	h.SetLLMFactory(factory)
+	ag := &resolvedChatAgent{
+		Agent: &agent.Agent{
+			Settings: types.Settings{
+				Provider: "codex",
+				Model:    "gpt-5.3-codex",
+			},
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	handled := h.maybeHandleCapabilityRecovery(
+		rec,
+		context.Background(),
+		ag,
+		"Ori",
+		"Reply with exactly the word PONG and nothing else.",
+		"",
+		nil,
+		nil,
+	)
+	if handled {
+		t.Fatalf("an answer-format instruction must not be intercepted as a delivery request; got %q", rec.Body.String())
+	}
+	if len(ag.Messages) != 0 {
+		t.Fatalf("expected no messages appended when not intercepting, got %d", len(ag.Messages))
+	}
+}
+
 func TestDetectCapabilityRecoveryIntent_OpenInbox(t *testing.T) {
 	intent, ok := detectCapabilityRecoveryIntent("open my inbox")
 	if !ok {
