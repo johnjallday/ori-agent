@@ -14,9 +14,51 @@ import (
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// workspaceFilesMCPAlias is the alias of the filesystem MCP binding that every
-// workspace (groups included) gets provisioned with.
+// workspaceFilesMCPAlias is the filesystem binding for managed workspaces
+// (groups included), never for an anchored workspace's sidecar.
 const workspaceFilesMCPAlias = "workspace-files"
+const anchorFolderMCPAlias = agentworkspace.AnchorFolderMCPAlias
+
+// anchorFolderReadTools is deliberately explicit. New filesystem server tools
+// do not acquire access to the user's folder without a reviewed code change.
+var anchorFolderReadTools = [...]string{
+	"list_directory", "list_directory_with_sizes", "directory_tree", "search_files",
+	"get_file_info", "list_allowed_directories", "read_file", "read_text_file",
+	"read_media_file", "read_multiple_files",
+}
+
+// provisionAnchoredScaffolding prepares the complete portable shape before the
+// first record write. FileStore sees the anchor on its first Save and therefore
+// creates only the sidecar, not managed files/ or notes/ directories.
+func provisionAnchoredScaffolding(ws *session.Workspace, path string) error {
+	// The hybrid store normally allocates this during CreateWorkspace, but the
+	// complete anchor reference must already name its owner at that first write.
+	if ws.ID == "" {
+		ws.ID = uuid.NewString()
+	}
+	now := time.Now()
+	ref := newWorkspaceDirectoryReference(ws, path, now)
+	ref.Name = filepath.Base(path)
+	refs, err := json.Marshal([]workspaceDirectoryReference{ref})
+	if err != nil {
+		return err
+	}
+	binding := agentworkspace.MCPBinding{
+		ID: uuid.NewString(), ServerName: "filesystem", Alias: anchorFolderMCPAlias,
+		Enabled: true, Config: map[string]any{"roots": []string{path}},
+		DefaultSideEffect: agentworkspace.SideEffectRead,
+		AllowedTools:      append([]string(nil), anchorFolderReadTools[:]...),
+		CreatedAt:         now, UpdatedAt: now,
+	}
+	bindings, err := json.Marshal([]agentworkspace.MCPBinding{binding})
+	if err != nil {
+		return err
+	}
+	setWorkspaceAnchorDirectoryID(ws, ref.ID)
+	ws.DirectoryReferencesJSON = refs
+	ws.MCPBindingsJSON = bindings
+	return nil
+}
 
 // groupContentDirs holds the group-owned content directories that scaffolding
 // exposes. sub-workspaces/ (member folders) is deliberately absent: group

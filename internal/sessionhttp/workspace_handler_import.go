@@ -745,6 +745,7 @@ func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPa
 		folderSlug:  ws.FolderSlug,
 		name:        ws.Name,
 		isGroup:     session.NormalizeWorkspaceKind(ws.Kind) == session.WorkspaceKindGroup,
+		isAnchored:  ws.IsAnchored(),
 	}
 	refs, bindings, _ := rebaseWorkspaceFolderReferences(id, ws.DirectoryReferences, ws.MCPBindings, oldPath, newPath, time.Now())
 	ws.DirectoryReferences = refs

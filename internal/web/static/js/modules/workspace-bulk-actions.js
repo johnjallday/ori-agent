@@ -25,6 +25,7 @@
 
 import { workspacePageURL } from './workspace-routes.js';
 import { openDeleteDialog } from './workspace-delete-dialog.js';
+import { anchorFolder, anchoredDeletionCopy } from './workspace-folder-shape.js';
 
 const REVIEW_REQUIRED = 'assistant_program_review_required';
 const GROUP_REQUIREMENT_REVIEW_REQUIRED = 'group_requirement_review_required';
@@ -749,6 +750,17 @@ async function performDelete(ctx, session, row, mode, round = 0) {
   return false;
 }
 
+async function folderDeletionCopy(row, ctx) {
+  if (!anchorFolder(row)) return '';
+  try {
+    const response = await ctxFetch(ctx)(`/api/workspaces/${encodeURIComponent(row.id)}`);
+    if (response.ok) return anchoredDeletionCopy(await response.json());
+  } catch (_) {
+    /* The known anchor still must not be described as deleted. */
+  }
+  return anchoredDeletionCopy(row);
+}
+
 /** Delete a single workspace or group, with its own confirmation. */
 export async function deleteWorkspace(id, ctx) {
   const row = findRow(ctx, id);
@@ -757,6 +769,7 @@ export async function deleteWorkspace(id, ctx) {
   const session = openSession(ctx, `Delete "${row.name}"?`);
   if (!session) return false;
   const choice = await session.chooseDelete({
+    folderNote: await folderDeletionCopy(row, ctx),
     name: row.name,
     group,
     memberCount: group ? descendantCount(ctxRows(ctx), id) : 0
@@ -780,7 +793,10 @@ export async function deleteWorkspaces(ids, ctx) {
   if (selected.length === 1) return (await deleteWorkspace(selected[0], ctx)) ? 1 : 0;
   const session = openSession(ctx, `Delete ${selected.length} selected items?`);
   if (!session) return 0;
-  if (!(await session.confirmCount({ count: selected.length }))) {
+  const folderNote = selected.some(id => anchorFolder(findRow(ctx, id)))
+    ? "Anchored folders are not touched. Only Ori's notes, settings and agents move with their workspace folders."
+    : '';
+  if (!(await session.confirmCount({ count: selected.length, folderNote }))) {
     session.close();
     return 0;
   }

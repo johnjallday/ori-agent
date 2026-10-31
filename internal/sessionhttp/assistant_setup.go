@@ -57,6 +57,9 @@ type AssistantSetupCreationDescriptor struct {
 }
 
 type ReviewedTemplateCreationRequest struct {
+	// AnchorPath is a server-held, reviewed inbox folder, never a guessed root.
+	// Empty preserves setup flows that have not selected a folder yet.
+	AnchorPath string
 	Name       string
 	Plan       ReviewedTemplateCreationPlan
 	Descriptor AssistantSetupCreationDescriptor
@@ -224,7 +227,7 @@ func (h *Handler) CreateReviewedFileJanitor(ctx context.Context, request Reviewe
 		return ReviewedTemplateCreationResult{}, err
 	}
 	create := createWorkspaceRequest{
-		Name: request.Name, TemplateID: fresh.BlueprintID, TeamIntent: intent,
+		Name: request.Name, AnchorPath: request.AnchorPath, TemplateID: fresh.BlueprintID, TeamIntent: intent,
 		teamIntentPresent: true, roleStaffingPresent: true,
 		RoleStaffing: []roleStaffingInput{{RoleID: role.RoleID, Mode: mode, Name: role.Name}},
 	}

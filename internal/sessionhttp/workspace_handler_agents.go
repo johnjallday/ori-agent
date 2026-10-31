@@ -260,6 +260,7 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 		logger.Warn("Failed to encode workspace payload for response", logger.Fields{"workspace_id": workspace.ID, "error": err})
 	}
 
+	h.addWorkspaceFolderPresentation(payload, workspace)
 	analyticsWorkspace := buildWorkspaceAnalyticsView(workspace)
 	settings := workspacesettings.Extract(workspace.SharedData)
 	payload["attachments"] = h.buildWorkspaceResponseAttachments(workspace)

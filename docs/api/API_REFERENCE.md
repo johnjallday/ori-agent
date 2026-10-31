@@ -21,6 +21,7 @@ http://localhost:8765/api
 - [Chat API](#chat-api)
 - [Updates API](#updates-api)
 - [Tags API](#tags-api)
+- [Anchored Workspaces](#anchored-workspaces)
 - [Workspace Groups](#workspace-groups)
 - [Workspace Build Sessions API](#workspace-build-sessions-api)
 - [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
@@ -1564,6 +1565,85 @@ POST /api/tags/delete
 ```
 
 Both mutations return per-source affected counts; an unknown tag is a no-op `200` with zero counts. `400` for missing fields, an over-long `to`, or `from == to`.
+
+## Anchored Workspaces
+
+`POST /api/workspaces` accepts `anchor_path` for an explicitly selected existing
+folder. Omitting it retains ordinary managed creation. Advanced Import Folder is
+a separate operation; it is not an anchor. Normal staffing/review requirements
+still apply.
+
+```json
+{ "name": "Client", "anchor_path": "/Users/example/Documents/Client" }
+```
+
+Creation returns the ordinary `folder` response with derived `shape: "anchored"`.
+All workspace list/detail responses expose `shape` as `managed`, `anchored` or
+`imported`. The portable identity is
+`shared_data.anchor_directory_reference_id`, also recorded as
+`shared_data.primary_directory_id`; the path belongs to that directory reference.
+No existing workspace is converted automatically.
+
+`GET /api/workspaces/anchor/check?path=<URL-encoded path>` is observational. On
+success it returns `success`, `normalized_path`, and optionally a
+`related_workspace` (`workspace_id`, `name`, `slug`) for the closest parent
+anchor. Nested anchors are allowed; this hint offers an alternative, not a grant
+or a refusal. `~` is expanded server-side. Symlink paths are refused.
+
+Specific anchor errors have an `error` sentence and `code`; ownership conflicts
+also carry `duplicate: { workspace_id, name, slug? }` for Open it.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `anchor_invalid_path` | 400 | Empty or unresolvable path |
+| `anchor_not_directory` | 400 | Missing, inaccessible or non-directory path |
+| `anchor_symlink` | 400 | The selected path differs from its resolved real path |
+| `anchor_inside_workspace_root` | 400 | Inside the Workspace Directory |
+| `anchor_incompatible_options` | 400 | Group, custom sidecar location or project-connection combination |
+| `anchor_contains_workspace` | 409 | Contains `workspace.json`; use Import Folder |
+| `anchor_already_owned` | 409 | Exact folder is already owned by another workspace |
+| `anchor_changed` | 409 | Relink's expected reference/path is stale |
+| `anchor_sidecar_failed` | 409 | Sidecar creation failed; creation is rolled back |
+| `anchor_unavailable` | 503 (500 for a failed sidecar lookup) | Required storage/ownership checks are unavailable |
+
+`GET /api/workspaces/{id}` adds local, non-persisted presentation:
+
+```json
+{
+  "shape": "anchored",
+  "anchor": {
+    "directory_reference_id": "folder-id",
+    "path": "/Users/example/Documents/Client",
+    "missing": false
+  },
+  "sidecar_path": "/Users/example/Ori Workspaces/client",
+  "home_directory": "/Users/example"
+}
+```
+
+The anchor entry in `directory_references` also has `missing`. Lightweight lists
+have `shape`, not existence probes. Display shortening must never change paths
+submitted to the server.
+
+`PUT /api/workspaces/{id}/anchor` relinks an already anchored workspace:
+
+```json
+{
+  "directory_reference_id": "folder-id",
+  "expected_path": "/Users/example/Documents/Client",
+  "path": "/Users/example/Projects/Client"
+}
+```
+
+It reuses creation's path/ownership validation, rejects stale state, and returns
+the updated workspace detail. Default access retains its ID, tools and disabled
+or removed state; unrelated user grants are unchanged. File Janitor-owned
+anchors use the capability's lifecycle to invalidate old pending approvals and
+monitoring consent. Capability availability or lifecycle conflicts return 409
+with an error sentence. Generic directory PUT cannot change an anchor path.
+
+See [Anchored folder architecture](../architecture/anchored-folder-workspace.md)
+for the single-binding rule, sidecar-only deletion/backup and no-migration policy.
 
 ## Workspace Groups
 

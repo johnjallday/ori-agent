@@ -123,7 +123,7 @@ func (h *folderSetupHost) inboxRun(ctx context.Context, req personalassistant.Fo
 		return err
 	}
 	_, err := deps.team.CreateReviewedFileJanitor(ctx, sessionhttp.ReviewedTemplateCreationRequest{
-		Name: intent.WorkspaceName, Mission: req.Brief, Plan: inboxTeamPlan(*intent),
+		Name: intent.WorkspaceName, AnchorPath: req.Path, Mission: req.Brief, Plan: inboxTeamPlan(*intent),
 		Descriptor: sessionhttp.AssistantSetupCreationDescriptor{
 			OwnerUserID: req.UserID, RunID: runID, OperationID: ids.create, ReviewDigest: req.Plan.Digest,
 			WorkspaceID: ids.workspace, ProfileProvenanceID: ids.profile, ConfigDigest: intent.Agent.ConfigDigest,

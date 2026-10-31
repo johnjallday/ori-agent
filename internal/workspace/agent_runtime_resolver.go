@@ -333,7 +333,7 @@ func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance 
 }
 
 func synthesizeFilesystemBinding(bindings []MCPBinding, ws *Workspace) *MCPBinding {
-	if ws == nil {
+	if ws == nil || ws.IsAnchored() {
 		return nil
 	}
 

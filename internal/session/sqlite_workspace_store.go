@@ -659,7 +659,9 @@ func (s *SQLiteStore) UnlinkSessionsFromWorkspace(ctx context.Context, workspace
 func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, folder_slug, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
-			agent_instances, tags, status, installed_capabilities_json, ticket_migration_version, ticket_sequence, version
+			agent_instances, tags, status, installed_capabilities_json, ticket_migration_version, ticket_sequence, version,
+			json_object('anchor_directory_reference_id', json_extract(shared_data, '$.anchor_directory_reference_id'),
+				'folder_import', json_extract(shared_data, '$.folder_import'))
 		FROM workspaces
 		ORDER BY COALESCE(parent_id, ''), order_index ASC, name ASC
 	`)
@@ -673,18 +675,26 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		var workspace Workspace
 		var parentID, color, description, ownerUserID, kind sql.NullString
 		var agentInstancesJSON, tagsJSON, status, installedCapabilitiesJSON sql.NullString
+		var shapeJSON string
 		var createdAtRaw any
 		var updatedAtRaw any
 
 		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.FolderSlug, &kind, &description, &ownerUserID, &parentID, &workspace.OrderIndex, &color,
 			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
-			&agentInstancesJSON, &tagsJSON, &status, &installedCapabilitiesJSON, &workspace.TicketMigrationVersion, &workspace.TicketSequence, &workspace.Version); err != nil {
+			&agentInstancesJSON, &tagsJSON, &status, &installedCapabilitiesJSON, &workspace.TicketMigrationVersion, &workspace.TicketSequence, &workspace.Version, &shapeJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan workspace: %w", err)
 		}
 		if err := assignWorkspaceTimes(&workspace, createdAtRaw, updatedAtRaw); err != nil {
 			return nil, fmt.Errorf("failed to parse workspace timestamps: %w", err)
 		}
 
+		// Project only the two small shape markers, never the potentially heavy
+		// shared_data payload. The result is observational, not writable state.
+		var shapeRecord Workspace
+		if err := json.Unmarshal([]byte(shapeJSON), &shapeRecord.SharedData); err != nil {
+			return nil, fmt.Errorf("failed to read workspace shape: %w", err)
+		}
+		workspace.SummaryShape = shapeRecord.Shape()
 		workspace.Kind = NormalizeWorkspaceKind(kind.String)
 		workspace.Description = description.String
 		workspace.OwnerUserID = normalizeOwnerUserID(ownerUserID.String)

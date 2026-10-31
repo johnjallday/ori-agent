@@ -56,6 +56,44 @@ func TestSourceService_AddFileCopiesParsesHashesAndPersists(t *testing.T) {
 	}
 }
 
+func TestSourceService_AnchoredUploadCreatesFilesLazily(t *testing.T) {
+	service, store, ws := newSourceTestService(t, []string{".txt"})
+	ws.SharedData = map[string]any{workspace.AnchorDirectoryReferenceIDKey: "anchor", workspace.PrimaryDirectoryIDKey: "anchor"}
+	ws.DirectoryReferences = []workspace.DirectoryReference{{ID: "anchor", Path: t.TempDir()}}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	root, err := store.GetFolderPath(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The reusable fixture starts managed. Remove its empty scaffold to model
+	// an anchored sidecar; the upload, not a Save, must recreate files/.
+	if err := os.Remove(filepath.Join(root, workspace.FilesDir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, workspace.FilesDir)); !os.IsNotExist(err) {
+		t.Fatalf("Save scaffolded files/: %v", err)
+	}
+	result, err := service.AddFile(t.Context(), ws.ID, "materials", "notes.txt", bytes.NewBufferString("Private intake notes"))
+	if err != nil || result.Status != SourceStatusParsed {
+		t.Fatalf("upload: %+v / %v", result, err)
+	}
+	if info, err := os.Stat(filepath.Join(root, workspace.FilesDir, UploadedFilesDir)); err != nil || !info.IsDir() {
+		t.Fatalf("no lazy files directory: %v", err)
+	}
+	loaded, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.DirectoryReferences) != 1 || loaded.DirectoryReferences[0].ID != "anchor" || len(loaded.MCPBindings) != 0 {
+		t.Fatalf("upload exposed sidecar as a work folder")
+	}
+}
+
 func TestSourceService_AddFileRecordsIndependentStatuses(t *testing.T) {
 	service, _, ws := newSourceTestService(t, []string{".txt", ".pdf"})
 	tests := []struct {

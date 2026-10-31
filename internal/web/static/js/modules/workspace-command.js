@@ -21,6 +21,11 @@ import {
   taskShortId,
   FILTER
 } from './task-presentation.js';
+import {
+  anchorFolder,
+  shortenWorkspacePath,
+  filesystemBindingSubtitle
+} from './workspace-folder-shape.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
 import {
@@ -1628,6 +1633,28 @@ export class WorkspaceCommandView {
     );
   }
 
+  anchorDetailsHTML() {
+    const ws = this.page?.workspace || {};
+    const anchor = anchorFolder(ws);
+    if (!anchor) return '';
+    return (
+      '<div class="ws-cmd-anchor-details">' +
+      '<div>Anchored to ' +
+      escapeHtml(shortenWorkspacePath(anchor.path, ws)) +
+      '</div>' +
+      '<small>Ori’s notes and settings: ' +
+      escapeHtml(shortenWorkspacePath(ws.sidecar_path, ws)) +
+      '</small>' +
+      (anchor.missing
+        ? '<div class="workspace-anchor-missing" role="status">Folder not found · Ori can’t find this folder on this machine. ' +
+          '<button type="button" class="ws-cmd-mini-btn" data-cmd-relink-anchor="' +
+          escapeHtml(anchor.id) +
+          '">Relink</button></div>'
+        : '') +
+      '</div>'
+    );
+  }
+
   projectOpenActionHTML() {
     const page = this.page || {};
     if (typeof page.hasProjectEntry !== 'function' || !page.hasProjectEntry()) return '';
@@ -1836,6 +1863,7 @@ export class WorkspaceCommandView {
         : '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>') +
       '</div>' +
       this.groupTemplateStatusHTML() +
+      this.anchorDetailsHTML() +
       '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
       escapeHtml(workflowLabel) +
       '"' +
@@ -2627,6 +2655,16 @@ export class WorkspaceCommandView {
     if (!root) return;
 
     root.addEventListener('click', event => {
+      const relinkAnchor = event.target.closest('[data-cmd-relink-anchor]');
+      if (relinkAnchor) {
+        event.preventDefault();
+        void this.page?.promptRelinkDirectory(
+          relinkAnchor.getAttribute('data-cmd-relink-anchor'),
+          'reference',
+          relinkAnchor
+        );
+        return;
+      }
       const openProjectBtn = event.target.closest('[data-cmd-open-project]');
       if (openProjectBtn) {
         const page = this.page || {};
@@ -9567,6 +9605,11 @@ export class WorkspaceCommandView {
             const busy = this.loadoutBusyKey === kind + ':' + bindingId;
             const selected = this.capabilityInspectorMatches(kind, bindingId, encodedAgent);
             const inspectLabel = `Inspect ${capabilityType} ${name}`;
+            const subtitle =
+              kind === 'mcp'
+                ? filesystemBindingSubtitle(item, this.page?.workspace) ||
+                  (list.filter(other => other.name === name).length > 1 ? item.alias : '')
+                : '';
             const assignment = item.locked
               ? '<span class="ws-cmd-loadout-lock" title="Always available in this workspace"><i class="bi bi-lock-fill" aria-hidden="true"></i> Locked</span>'
               : '<button type="button" class="ws-cmd-loadout-remove' +
@@ -9613,7 +9656,11 @@ export class WorkspaceCommandView {
               (kind === 'mcp' ? 'bi-hdd-network' : 'bi-stars') +
               '" aria-hidden="true"></i></span><span class="ws-cmd-loadout-row-copy"><strong>' +
               escapeHtml(name) +
-              '</strong><small>' +
+              '</strong>' +
+              (subtitle
+                ? '<span class="ws-cmd-binding-scope">' + escapeHtml(subtitle) + '</span>'
+                : '') +
+              '<small>' +
               escapeHtml(capabilityType) +
               ' · View details</small></span></button>' +
               assignment +
@@ -12286,6 +12333,8 @@ export class WorkspaceCommandView {
 
   folderRole(dir) {
     const page = this.page || {};
+    if (dir?.id && dir.id === anchorFolder(page.workspace)?.id)
+      return { label: 'Anchored folder', className: 'is-project' };
     if (dir && dir.isProjectPathOnly) return { label: 'Project Folder', className: 'is-project' };
     let primaryDirectoryId = '';
     try {
@@ -12395,6 +12444,13 @@ export class WorkspaceCommandView {
         escapeHtml(role.label) +
         '</span></span>' +
         (path ? '<span class="ws-cmd-rail-m">' + escapeHtml(path) + '</span>' : '');
+      const missingAnchor = dir.missing && dir.id === anchorFolder(this.page?.workspace)?.id;
+      const relink = missingAnchor
+        ? '<div class="workspace-anchor-missing" role="status">Folder not found ' +
+          '<button type="button" class="ws-cmd-mini-btn" data-cmd-relink-anchor="' +
+          escapeHtml(id) +
+          '">Relink</button></div>'
+        : '';
       const isProject = role.className === 'is-project';
       const projectActions = isProject ? this.projectEntryActionsHTML() : '';
       const protection = isProject ? this.protectionFactHTML() : '';
@@ -12411,6 +12467,7 @@ export class WorkspaceCommandView {
           inner +
           '</button>';
       }
+      folderRow += relink;
       return projectActions || protection
         ? '<div class="ws-cmd-project-entry-row">' +
             folderRow +

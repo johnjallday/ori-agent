@@ -87,6 +87,8 @@ This directory contains detailed documentation for Ori Agent.
   reports (first run: 2026-07-18)
 
 ### Architecture & Contracts
+- [Anchored Folder Workspaces](./architecture/anchored-folder-workspace.md) - Managed,
+  anchored and imported shapes; explicit folder access and the sidecar lifecycle
 
 #### Assistant
 - [Personal Assistant Foundation Contract](./architecture/personal-assistant-foundation-contract.md) -

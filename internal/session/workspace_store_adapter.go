@@ -231,6 +231,7 @@ func (a *WorkspaceStoreAdapter) ListActiveSummaries() ([]workspace.WorkspaceSumm
 		summaries = append(summaries, workspace.WorkspaceSummary{
 			ID: ws.ID, Name: ws.Name, Kind: string(NormalizeWorkspaceKind(string(ws.Kind))),
 			Description: ws.Description, FolderSlug: ws.FolderSlug,
+			Shape:       ws.Shape(),
 			OwnerUserID: normalizeOwnerUserID(ws.OwnerUserID), ParentID: ws.ParentID, OrderIndex: ws.OrderIndex,
 			Status: workspace.StatusActive, Version: ws.Version, CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
 		})

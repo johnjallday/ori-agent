@@ -18,6 +18,7 @@ type folderRebaseIdentity struct {
 	folderSlug  string
 	name        string
 	isGroup     bool
+	isAnchored  bool
 }
 
 // rebaseWorkspaceFolderReferences rewrites directory references and MCP binding
@@ -40,6 +41,12 @@ func rebaseWorkspaceFolderReferences(
 	normalizedNew := cleanWorkspaceSyncPath(newPath)
 	if normalizedNew == "" {
 		return refs, bindings, false
+	}
+
+	// The moved folder is only Ori's sidecar. In particular, do not use the
+	// name-keyed fallback: an anchor often has the same basename as its sidecar.
+	if id.isAnchored {
+		return refs, bindings, true
 	}
 
 	normalizedOld := cleanWorkspaceSyncPath(oldPath)

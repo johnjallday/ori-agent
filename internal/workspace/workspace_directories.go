@@ -92,6 +92,10 @@ func (w *Workspace) DeleteDirectoryReference(id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if anchorID := AnchorIDFromSharedData(w.SharedData); anchorID != "" && id == anchorID {
+		return fmt.Errorf("the anchored folder cannot be removed; relink it instead")
+	}
+
 	for i := range w.DirectoryReferences {
 		if w.DirectoryReferences[i].ID == id {
 			if w.DirectoryReferences[i].Purpose == "sample_library" {

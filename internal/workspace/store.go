@@ -327,13 +327,8 @@ func (s *FileStore) saveFenced(ws *Workspace, fence *folderFence) error {
 		}
 	}
 
-	// The name was canonicalized by Slugify above; parents and any explicit
-	// absolute destination come only from this store's local path registry.
-	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0750); err != nil { // #nosec G703 -- canonical slug and locally registered parent/destination, not a portable path
-		return fmt.Errorf("failed to create workspace folder: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0750); err != nil { // #nosec G703 -- same canonical local destination as the files directory
-		return fmt.Errorf("failed to create workspace notes folder: %w", err)
+	if err := ensureWorkspaceContentDirs(folderPath, ws.IsAnchored()); err != nil {
+		return err
 	}
 
 	// Persist through the canonical private/portable boundary. A fenced
@@ -441,12 +436,8 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 		}
 	}
 
-	// Create workspace folder with files and notes subdirectories
-	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0750); err != nil {
-		return fmt.Errorf("failed to create workspace folder: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0750); err != nil {
-		return fmt.Errorf("failed to create workspace notes folder: %w", err)
+	if err := ensureWorkspaceContentDirs(folderPath, ws.IsAnchored()); err != nil {
+		return err
 	}
 
 	// Serialize and write workspace.json through its local configuration owner.

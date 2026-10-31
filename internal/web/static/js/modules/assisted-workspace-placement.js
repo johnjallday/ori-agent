@@ -147,7 +147,7 @@ export function placementPanelHTML(view = {}) {
             actionLabel: 'Choose agent'
           },
           {
-            label: 'Linked folder',
+            label: 'Anchored folder',
             value: folder.name || 'Choose a folder',
             detail: folder.path,
             slot: 'folder',
@@ -172,7 +172,8 @@ export function placementPanelHTML(view = {}) {
           <dt>Workspace</dt><dd>${escape(workspace.name)} · standalone</dd>
           <dt>Goal</dt><dd class="assisted-placement__goal">${escape(workspace.mission)}</dd>
           <dt>Team</dt><dd>${escape(teamText)}</dd>
-          <dt>Source</dt><dd>${escape(folder.path || folder.name)} — linked, not moved</dd>
+          <dt>Work folder</dt><dd>${escape(folder.path || folder.name)} — used where it is, not moved</dd>
+          <dt>Ori’s notes and settings</dt><dd>${escape(review.sidecar_path || 'A separate workspace folder in Ori Workspaces')} — your work folder is not used for Ori’s state.</dd>
           <dt>Access</dt><dd>Top-level names, types, sizes and dates only. No file contents.</dd>
           <dt>Destination</dt><dd>Create or reuse Filed/ inside this folder.</dd>
           <dt>Next</dt><dd>Prepare the first filing review. No model call. Nothing is moved or deleted.</dd>

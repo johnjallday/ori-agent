@@ -163,6 +163,11 @@ func FindFolderOwner(store FolderOwnerStore, selected, ignoreWorkspaceID string)
 			continue
 		}
 		owner := &FolderOwner{WorkspaceID: candidate.ID, Name: candidate.Name, Slug: candidate.FolderSlug}
+		if anchorID := candidate.AnchorDirectoryReferenceID(); anchorID != "" {
+			if reference, referenceErr := candidate.GetDirectoryReference(anchorID); referenceErr == nil && reference != nil && sameFolder(reference.Path) {
+				return owner, nil
+			}
+		}
 		if locator, locatorErr := workspace.GetProjectEntryLocator(candidate.SharedData); locatorErr == nil &&
 			locator != nil && locator.Kind == workspace.ProjectEntryDirectoryReference {
 			if reference, referenceErr := candidate.GetDirectoryReference(locator.DirectoryReferenceID); referenceErr == nil &&

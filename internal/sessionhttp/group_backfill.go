@@ -87,6 +87,9 @@ func workspaceTreeDepth(parents map[string]string, id string) int {
 // backfillGroupScaffolding provisions a single group, reporting whether
 // anything changed.
 func (h *Handler) backfillGroupScaffolding(ctx context.Context, ws *session.Workspace) (bool, error) {
+	if ws == nil || !ws.IsGroup() || workspaceAnchorDirectoryID(ws) != "" {
+		return false, nil
+	}
 	folderPath, err := h.workspaceStore.GetFolderPath(ws.ID)
 	if err != nil {
 		// Legacy DB-only group: create its folder via the standard save path.

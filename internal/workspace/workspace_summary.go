@@ -13,6 +13,7 @@ type WorkspaceSummary struct {
 	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	Kind        string          `json:"kind,omitempty"`
+	Shape       string          `json:"shape"`
 	Description string          `json:"description,omitempty"`
 	FolderSlug  string          `json:"folder_slug,omitempty"`
 	OwnerUserID string          `json:"owner_user_id,omitempty"`
@@ -66,6 +67,7 @@ func summarizeWorkspace(ws *Workspace) WorkspaceSummary {
 	defer ws.mu.RUnlock()
 	return WorkspaceSummary{
 		ID: ws.ID, Name: ws.Name, Kind: ws.Kind, Description: ws.Description,
+		Shape:      ShapeFromSharedData(ws.SharedData),
 		FolderSlug: ws.FolderSlug, OwnerUserID: ws.OwnerUserID, ParentID: ws.ParentID,
 		OrderIndex: ws.OrderIndex, Status: ws.Status, Version: ws.Version,
 		CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,

@@ -11,6 +11,16 @@ application (Time Machine or restic) performs backups and restores. Completing s
 connecting metadata is **not proof that your files are protected**. Core guidance
 and status do not require a model.
 
+## Anchored workspaces: two separate backup boundaries
+
+An [anchored workspace](architecture/anchored-folder-workspace.md) keeps Ori's
+notes, settings and agent state in its ordinary workspace folder, while the work
+files stay in the external folder you selected. Backing up or syncing the Ori
+sidecar covers **that state only**, not the anchor's files. Protect the external
+folder independently with your backup application. A copied sidecar may require
+Relink on the destination machine; it does not restore a missing anchor.
+File Janitor filing is not a backup.
+
 ## Supported integrations
 
 Two observe-only providers, chosen in the console's **Settings**: **Time
