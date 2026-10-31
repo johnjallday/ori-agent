@@ -286,10 +286,7 @@ func (h *Handler) handleOpenAIToolCalls(
 		},
 	)
 
-	finalText := getResponseText(loopResult.FinalContent)
-	if loopResult.HasStructuredResult {
-		finalText = loopResult.FinalContent
-	}
+	finalText := toolLoopResponseText(loopResult)
 
 	logger.Debug("Chat with tool completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.persistAgent(agentName, ag)

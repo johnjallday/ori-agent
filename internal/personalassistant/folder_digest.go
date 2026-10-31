@@ -589,11 +589,25 @@ type FolderDigestService struct {
 	// setupObservers hear when a one-card setup run stops, finishes or is
 	// resolved: the workspace build follows the run it started this way.
 	setupObservers []func(ctx context.Context, userID string, offer FolderOffer)
+	// settled holds, per offer id, the latest settlement heard while that
+	// offer's run still held its claim. It is told once the claim is released.
+	settled map[string]settledSetup
+	// runs counts the setup goroutines this service started that have not
+	// returned yet.
+	runs sync.WaitGroup
+}
+
+type settledSetup struct {
+	ctx    context.Context
+	userID string
+	offer  FolderOffer
 }
 
 // AddSetupObserver adds fn to what hears each settled setup run: a run that
 // stopped, one that finished, and the offer it resolved. fn gets the offer as
-// stored, runs on the run's own goroutine, and must not block.
+// stored, runs on the run's own goroutine, and must not block. A run is heard
+// only after it has released its claim, so an observer that offers a Retry
+// offers one the service accepts.
 func (s *FolderDigestService) AddSetupObserver(fn func(ctx context.Context, userID string, offer FolderOffer)) {
 	if s == nil || fn == nil {
 		return
@@ -605,12 +619,24 @@ func (s *FolderDigestService) AddSetupObserver(fn func(ctx context.Context, user
 
 func (s *FolderDigestService) notifySetup(ctx context.Context, userID string, offer FolderOffer) {
 	s.mu.Lock()
-	observers := make([]func(context.Context, string, FolderOffer), len(s.setupObservers))
-	copy(observers, s.setupObservers)
+	if s.running[offer.ID] {
+		// The run that settled is still claimed: telling the observers now
+		// would let them retry into a busy offer. releaseRun tells them.
+		s.settled[offer.ID] = settledSetup{ctx: ctx, userID: userID, offer: offer}
+		s.mu.Unlock()
+		return
+	}
+	observers := s.setupObserversLocked()
 	s.mu.Unlock()
 	for _, observe := range observers {
 		observe(ctx, userID, offer)
 	}
+}
+
+func (s *FolderDigestService) setupObserversLocked() []func(context.Context, string, FolderOffer) {
+	observers := make([]func(context.Context, string, FolderOffer), len(s.setupObservers))
+	copy(observers, s.setupObservers)
+	return observers
 }
 
 // NewFolderDigestService builds the service.
@@ -647,6 +673,7 @@ func NewFolderDigestService(store *FolderDigestStore, deps FolderDigestDeps) *Fo
 	return &FolderDigestService{
 		store: store, deps: deps,
 		paths: map[string]string{}, scanning: map[string]bool{}, running: map[string]bool{},
+		settled: map[string]settledSetup{},
 	}
 }
 

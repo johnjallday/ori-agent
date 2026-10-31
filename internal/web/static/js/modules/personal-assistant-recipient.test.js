@@ -583,6 +583,33 @@ test('after New the latest session is not offered again until a message creates 
   );
 });
 
+test('a late session lookup cannot overwrite a welcome delivery or New', async () => {
+  for (const fresh of [false, true]) {
+    const base = fakeFetch(reaperRoutes);
+    let finish;
+    const pending = new Promise(resolve => {
+      finish = resolve;
+    });
+    const storage = memoryStorage();
+    const controller = createRecipientController({
+      fetchImpl: (url, ...args) => (url === latestRoute ? pending : base(url, ...args)),
+      storage,
+      pageContext: () => ({ surface: 'workspace_detail', workspace_id: 'ws-1' })
+    });
+    await controller.refresh();
+    const loading = controller.loadSession();
+    if (fresh) controller.forgetSession();
+    else controller.rememberSession('ws-1', { id: 'welcome', title: 'Getting started' });
+    finish({ ok: true, json: async () => ({ sessions: [] }) });
+    assert.equal((await loading).stale, true);
+    assert.equal(controller.sessionId(), fresh ? '' : 'welcome');
+    assert.equal(
+      storage.getItem(SESSION_KEY_PREFIX + 'ws-1'),
+      fresh ? NEW_CONVERSATION_MARK : 'welcome'
+    );
+  }
+});
+
 test('loading a session is a no-op unless the entry agent is the ready recipient', async () => {
   const { controller, fetchImpl } = controllerFor({ surface: 'home', workspace_id: '' }, {});
   await controller.refresh();

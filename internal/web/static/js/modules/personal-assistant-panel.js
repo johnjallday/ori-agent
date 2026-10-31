@@ -4,6 +4,8 @@ import {
 } from './personal-assistant-workspace-context.js';
 import {
   RECIPIENT_WORKSPACE_ENTRY,
+  NEW_CONVERSATION_MARK,
+  readEntrySession,
   createRecipientMenu,
   entryAgentPlaceholder,
   entrySessionRows,
@@ -13,6 +15,7 @@ import {
   recipientMenuRows,
   switchLockMessage
 } from './personal-assistant-recipient.js';
+import { createLeadWelcome } from './personal-assistant-lead-welcome.js';
 import { mountFirstLookReports } from './first-look-report.js';
 import { briefModeView, briefSend } from './personal-assistant-brief-mode.js';
 
@@ -1562,6 +1565,13 @@ async function refreshWorkspaceContext() {
     state.els.workspaceContext.textContent = text;
     state.els.workspaceContext.title = text;
   };
+  const recipient = recipients()?.current?.();
+  if (recipient?.kind === RECIPIENT_WORKSPACE_ENTRY && recipient.available) {
+    // Lead chat is scoped by its workspace/session, not by whether a personal
+    // assistant has been hired. Do not show that other recipient's context error.
+    say('Context · ' + (recipient.workspaceName || 'This workspace'));
+    return;
+  }
   say('Checking workspace context…');
   try {
     const response = await fetch('/api/home-assistant/context', {
@@ -1909,11 +1919,62 @@ function init() {
   window.addEventListener('popstate', () => void refreshWorkspaceContext());
   // The recipient follows the page: the workspace's entry agent on a workspace
   // page, the hired assistant elsewhere.
+  state.leadWelcome = createLeadWelcome({
+    target: () => {
+      const recipient = recipients()?.current?.();
+      if (recipient?.kind !== RECIPIENT_WORKSPACE_ENTRY || !recipient.available) return null;
+      const context = routeContext();
+      if (!['workspace_detail', 'workspace_canvas'].includes(context.surface)) return null;
+      return {
+        workspaceId: recipient.workspaceId,
+        name: recipient.name,
+        sessionId: recipients()?.sessionId?.() || '',
+        fresh: readEntrySession(recipient.workspaceId) === NEW_CONVERSATION_MARK
+      };
+    },
+    ready: () => {
+      const setup = window.SetupWizard?.getStatus?.();
+      return (
+        window.workspaceDetail?.initialListsLoaded === true &&
+        (!window.SetupWizard || (setup && (!setup.applicable || setup.state === 'ready'))) &&
+        !document.querySelector('.modal.show, dialog[open]')
+      );
+    },
+    busy: () =>
+      Boolean(
+        switchLock() ||
+        state.draft ||
+        state.els?.input?.value ||
+        document.activeElement?.matches?.('input, textarea, select, [contenteditable="true"]')
+      ),
+    deliver: async (sessionId, { reveal }) => {
+      const current = recipients()?.current?.();
+      if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY) return;
+      recipients().rememberSession(current.workspaceId, {
+        id: sessionId,
+        title: 'Getting started'
+      });
+      // Reveal while this recipient is still current. A close or navigation
+      // during asynchronous hydration must not reopen a different conversation.
+      if (reveal) open(null, { focus: false, preserveConversation: true });
+      await hydrateEntryConversation({ force: true });
+    }
+  });
+  document.addEventListener('ori:setup-status', () => void state.leadWelcome.refresh());
+  document.addEventListener('ori:workspace-goal-state', () => void state.leadWelcome.refresh());
+  document.addEventListener('personal-assistant:closed', () => state.leadWelcome.quiet());
+  window.addEventListener('pagehide', event => {
+    if (!event.persisted) state.leadWelcome.destroy();
+  });
+  window.addEventListener('pageshow', event => {
+    if (event.persisted) void state.leadWelcome.refresh();
+  });
   document.addEventListener('personal-assistant:recipient', event => {
     const recipient = event.detail?.recipient;
     window.OriAskRouting?.setRecipient?.(recipient);
     renderIdentity();
-    void hydrateEntryConversation();
+    void refreshWorkspaceContext();
+    void hydrateEntryConversation().then(() => state.leadWelcome.refresh());
   });
   document.addEventListener('personal-assistant:entry-session', renderEntrySessionBar);
   document.addEventListener('personal-assistant:conversation', event => {

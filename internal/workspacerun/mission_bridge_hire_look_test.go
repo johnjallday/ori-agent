@@ -125,6 +125,21 @@ func TestMissionBridge_StoresTheAssessmentForEveryOrigin(t *testing.T) {
 		})
 	}
 
+	// An assessment with no charter offer still remembers the goal it read.
+	// The lead's later conversation must detect edits to that goal.
+	t.Run("assessment without charter", func(t *testing.T) {
+		store := workspace.NewInMemoryStore()
+		ws := makeMissionWorkspace(t, store)
+		if _, err := bridgeAnswering(t, store, `{"assessment":"The release has no checklist yet.","items":[]}`).TriggerMissionRun(context.Background(), ws.ID, 2); err != nil {
+			t.Fatal(err)
+		}
+		fresh, _ := store.Get(ws.ID)
+		record := fresh.MissionRuns[0]
+		if record.Assessment == "" || record.SuggestedCharter != "" || record.GoalDigest != workspace.GoalDigest(ws.Mission) || record.GoalDigest == "" {
+			t.Fatalf("assessment lost its goal identity: %+v", record)
+		}
+	})
+
 	// An answer without an assessment stores none and no parts.
 	wsStore := workspace.NewInMemoryStore()
 	ws := makeMissionWorkspace(t, wsStore)

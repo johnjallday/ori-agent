@@ -4,7 +4,9 @@
 # real browser against an isolated demo server backed by the fixture model.
 #
 # Usage:
-#   ./scripts/e2e-goal-suggestions.sh [--upgrade] [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]
+#   ./scripts/e2e-goal-suggestions.sh [--upgrade|--lead-welcome] [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]
+# --lead-welcome runs the proactive lead conversation journey using the same
+# isolated host and fixture review; it never calls a live provider.
 # --upgrade runs the stock-template upgrade journey before/after a real server
 # restart in the same disposable sandbox instead of the ordinary goal suite.
 #
@@ -32,9 +34,14 @@ port=8967
 fixture_port=11530
 tail_lines=40
 upgrade=0
+lead_welcome=0
 pw_args=()
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+	--lead-welcome)
+		lead_welcome=1
+		shift
+		;;
 	--upgrade)
 		upgrade=1
 		shift
@@ -57,7 +64,7 @@ while [[ $# -gt 0 ]]; do
 		break
 		;;
 	-h | --help)
-		echo "usage: $0 [--upgrade] [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]"
+		echo "usage: $0 [--upgrade|--lead-welcome] [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]"
 		echo "Runs tests/workspace-goal-suggestions.spec.ts against an isolated demo"
 		echo "server and the fixture model. See the header of this script."
 		exit 0
@@ -68,6 +75,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	esac
 done
+if [[ "$upgrade" == "1" && "$lead_welcome" == "1" ]]; then
+	echo "choose either --upgrade or --lead-welcome" >&2
+	exit 2
+fi
 for value in "$port" "$fixture_port" "$tail_lines"; do
 	[[ "$value" =~ ^[0-9]+$ ]] || {
 		echo "--port, --fixture-port and --tail must be numbers, got '$value'" >&2
@@ -136,7 +147,9 @@ run_phase() {
 }
 
 status=0
-if [[ "$upgrade" == "1" ]]; then
+if [[ "$lead_welcome" == "1" ]]; then
+	run_phase welcome tests/workspace-lead-welcome.spec.ts || status=$?
+elif [[ "$upgrade" == "1" ]]; then
 	if run_phase before tests/stock-template-upgrade.spec.ts; then
 		run_phase after tests/stock-template-upgrade.spec.ts || status=$?
 	else

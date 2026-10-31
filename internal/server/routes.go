@@ -488,6 +488,7 @@ func registerChatRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/api/chat", s.Handlers.Chat.ChatHandler)
 	mux.HandleFunc("/api/chat/model", s.Handlers.Chat.ModelHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/lead-conversation/open", s.Handlers.Chat.LeadConversationOpen)
 }
 
 // registerUpdateRoutes registers update-check endpoints.
