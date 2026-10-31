@@ -89,6 +89,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "import":
 		h.handleWorkspaceImport(w, r)
 		return
+	case "anchor/check":
+		h.handleWorkspaceAnchorCheck(w, r)
+		return
 	case "import/check":
 		h.handleWorkspaceImportCheck(w, r)
 		return
@@ -1688,6 +1691,10 @@ func (h *Handler) installTemplateDashboard(workspaceID, folderPath string, tc cr
 // scaffolding and is the exception: its failure is returned as attachErr.
 func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, folderPath string, tc createTemplateContext) (projectWarning string, attachErr error) {
 	switch {
+	case folderWS.IsAnchored():
+		// The existing work folder replaces project scaffolding. Blueprint
+		// agents, capabilities and declared tools still apply below, but a
+		// generated sidecar project must not become a second primary folder.
 	case tc.attach != nil:
 		// The user's folder is referenced in place; nothing is copied into it.
 		if err := h.recordCreateWorkspaceAttachedProject(ctx, ws, folderWS, tc.attach); err != nil {

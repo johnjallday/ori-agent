@@ -36,6 +36,8 @@ const sessionManager = {
   editAgentModelOptionsLoaded: false,
   isCreatingFolder: false,
   importModeEnabled: false,
+  anchorChoice: null,
+  anchorCheckSequence: 0,
   importAllowDuplicate: false,
   importContinuityStatus: '',
   importContinuityPath: '',
@@ -661,6 +663,34 @@ const sessionManager = {
       // the path; the picker clears the input silently before selecting.
       this.templateFolderOverridePath = String(event?.currentTarget?.value || '');
       this.scheduleTemplateAgentPlanRefresh();
+    });
+
+    document.getElementById('workspaceFolderChoice')?.addEventListener('change', event => {
+      if (event.target.name === 'workspace-folder-mode') {
+        this.setAnchorMode(event.target.value === 'anchored');
+      }
+    });
+    document.getElementById('workspaceAnchorPath')?.addEventListener('input', event => {
+      if (!this.anchorChoice?.enabled) return;
+      Object.assign(this.anchorChoice, {
+        path: event.target.value.trim(),
+        checkedPath: '',
+        message: '',
+        duplicate: null,
+        pending: false
+      });
+      this.anchorCheckSequence++;
+      this.refreshWizardChrome();
+    });
+    document
+      .getElementById('workspaceAnchorPath')
+      ?.addEventListener('blur', () => void this.checkAnchorPath());
+    document
+      .getElementById('workspaceAnchorChoose')
+      ?.addEventListener('click', () => void this.browseAnchorFolder());
+    document.getElementById('workspaceAnchorOpenExisting')?.addEventListener('click', () => {
+      const owner = this.anchorChoice?.duplicate;
+      if (owner?.workspace_id) this.openImportedWorkspace(owner.slug || owner.workspace_id);
     });
 
     const importToggle = document.getElementById('folderImportToggle');
@@ -3822,7 +3852,148 @@ const sessionManager = {
     return this.importModeEnabled && this.workspacePostCreateAction === 'designate_personal_hq';
   },
 
+  resetAnchorChoice() {
+    this.anchorCheckSequence++;
+    this.anchorChoice = {
+      enabled: false,
+      path: '',
+      checkedPath: '',
+      message: '',
+      duplicate: null,
+      pending: false
+    };
+    const input = document.getElementById('workspaceAnchorPath');
+    if (input) input.value = '';
+  },
+
+  setAnchorMode(enabled) {
+    if (this.workspaceCreatorContext?.ordinaryReview?.accepted || this.isCreatingFolder) return;
+    if (enabled && this.isGroupCreator()) return;
+    if (enabled && this.importModeEnabled) this.setImportModeEnabled(false);
+    this.resetAnchorChoice();
+    this.anchorChoice.enabled = Boolean(enabled);
+    if (enabled && this.usesExistingProject()) this.setExistingProjectMode('new_project');
+    this.refreshWizardChrome();
+  },
+
+  anchorFolderProblem() {
+    if (!this.anchorChoice?.enabled || this.importModeEnabled || this.isGroupCreator()) return '';
+    const choice = this.anchorChoice;
+    if (!choice.path) return 'Choose an existing folder for this workspace.';
+    if (choice.pending) return 'Checking folder ownership…';
+    if (choice.message) return choice.message;
+    if (choice.checkedPath !== choice.path)
+      return 'Check this folder before creating the workspace.';
+    return '';
+  },
+
+  syncAnchorChoice() {
+    const hidden = this.importModeEnabled || this.isGroupCreator();
+    if (hidden && this.anchorChoice?.enabled) this.resetAnchorChoice();
+    const choice = this.anchorChoice;
+    const enabled = !hidden && Boolean(choice?.enabled);
+    const card = document.getElementById('workspaceFolderChoice');
+    if (card) card.hidden = hidden;
+    const fields = document.getElementById('workspaceAnchorFields');
+    if (fields) fields.hidden = !enabled;
+    const managed = document.getElementById('workspaceFolderModeManaged');
+    const anchored = document.getElementById('workspaceFolderModeAnchored');
+    if (managed) managed.checked = !enabled;
+    if (anchored) anchored.checked = enabled;
+    const importToggle = document.getElementById('folderImportToggle');
+    if (importToggle) importToggle.disabled = enabled;
+    const help = document.getElementById('workspaceFolderChoiceHelp');
+    if (help) {
+      const name =
+        this.slugifyWorkspaceName(document.getElementById('folderNameInput')?.value || '') ||
+        '<name>';
+      help.textContent = `Ori reads this folder as the workspace. Its own notes and settings stay in ~/Ori Workspaces/${name}, so nothing is written into your folder.`;
+    }
+    const status = document.getElementById('workspaceAnchorStatus');
+    if (status) {
+      status.textContent = enabled ? this.anchorFolderProblem() : '';
+      status.hidden = !status.textContent;
+      status.classList.toggle('is-error', Boolean(choice?.message));
+    }
+    const open = document.getElementById('workspaceAnchorOpenExisting');
+    if (open) open.hidden = !enabled || !choice?.duplicate?.workspace_id;
+    const browse = document.getElementById('workspaceAnchorChoose');
+    if (browse) browse.disabled = Boolean(choice?.pending);
+    // Existing-project attachment and a folder anchor are distinct contracts.
+    const projectChoice = document.getElementById('workspaceProjectChoice');
+    if (enabled && projectChoice) projectChoice.hidden = true;
+  },
+
+  async checkAnchorPath() {
+    const choice = this.anchorChoice;
+    const input = document.getElementById('workspaceAnchorPath');
+    if (!choice?.enabled || !input) return;
+    const path = input.value.trim();
+    const sequence = ++this.anchorCheckSequence;
+    Object.assign(choice, {
+      path,
+      checkedPath: '',
+      message: '',
+      duplicate: null,
+      pending: Boolean(path)
+    });
+    this.refreshWizardChrome();
+    if (!path) return;
+    try {
+      const response = await fetch(`/api/workspaces/anchor/check?path=${encodeURIComponent(path)}`);
+      const result = await response.json().catch(() => ({}));
+      if (
+        this.anchorChoice !== choice ||
+        sequence !== this.anchorCheckSequence ||
+        input.value.trim() !== path
+      )
+        return;
+      if (response.ok && result.success && result.normalized_path) {
+        choice.path = choice.checkedPath = result.normalized_path;
+        input.value = result.normalized_path;
+      } else {
+        choice.message = result.error || 'Folder ownership could not be checked. Try again.';
+        choice.duplicate = result.duplicate || null;
+      }
+    } catch {
+      if (this.anchorChoice !== choice || sequence !== this.anchorCheckSequence) return;
+      choice.message = 'Folder ownership could not be checked. Try again.';
+    } finally {
+      if (this.anchorChoice === choice && sequence === this.anchorCheckSequence) {
+        choice.pending = false;
+        this.refreshWizardChrome();
+      }
+    }
+  },
+
+  async browseAnchorFolder() {
+    const choice = this.anchorChoice;
+    if (!choice?.enabled || choice.pending) return;
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Choose the workspace’s existing folder' })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (this.anchorChoice !== choice) return;
+      if (response.ok && result.success && result.selected && result.path) {
+        const input = document.getElementById('workspaceAnchorPath');
+        if (input) input.value = result.path;
+        await this.checkAnchorPath();
+      } else if (result.reason === 'dialog_off' || !response.ok) {
+        choice.message = result.note || result.error || 'Type the folder path below.';
+        this.refreshWizardChrome();
+      }
+    } catch {
+      if (this.anchorChoice !== choice) return;
+      choice.message = 'The folder picker is unavailable. Type the folder path instead.';
+      this.refreshWizardChrome();
+    }
+  },
+
   setImportModeEnabled(enabled) {
+    if (enabled) this.resetAnchorChoice();
     this.importModeEnabled = Boolean(enabled);
     const personalHQImport = this.isPersonalHQImport();
     const modal = document.getElementById('addFolderModal');
@@ -4479,6 +4650,7 @@ const sessionManager = {
     this.workspacePostCreateAction = '';
     this.importAllowDuplicate = false;
     this.setImportBrowseLoading(false);
+    this.resetAnchorChoice();
     this.setImportModeEnabled(false);
     this.clearImportDuplicateWarning();
     if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
@@ -11076,6 +11248,7 @@ const sessionManager = {
     const finalStep = visibleSteps[visibleSteps.length - 1];
 
     this.syncWorkspaceCreatorPresentation();
+    this.syncAnchorChoice();
     const sections = [1, 2, 3, 4].map(index => document.getElementById(`wizardStep${index}`));
     const stepper = document.getElementById('wizardStepper');
     const backBtn = document.getElementById('wizardBackBtn');
@@ -11146,6 +11319,7 @@ const sessionManager = {
         // Groups have no blueprint/team/project readiness dependency. Workspace
         // blockers remain exactly as before.
         createBtn.disabled =
+          Boolean(this.anchorFolderProblem()) ||
           Boolean(this.workspaceBuild?.busy) ||
           this.workspaceBuildAttachmentPending() ||
           (importMode &&
@@ -12375,6 +12549,8 @@ const sessionManager = {
 
   // An actionable message when Details cannot continue in existing mode, or ''.
   existingProjectProblem() {
+    const anchorProblem = this.anchorFolderProblem();
+    if (anchorProblem) return anchorProblem;
     if (!this.usesExistingProject()) return '';
     const choice = this.existingProjectChoice;
     if (!choice.selectionToken) return 'Choose the project folder to use an existing project.';
@@ -12418,6 +12594,15 @@ const sessionManager = {
   // Refuses leaving Details (or creating) in existing mode: the message goes
   // where the fix is, and focus moves to the control that fixes it.
   signalExistingProjectProblem(problem) {
+    if (this.anchorChoice?.enabled) {
+      this.syncAnchorChoice();
+      document
+        .getElementById(
+          this.anchorChoice.duplicate ? 'workspaceAnchorOpenExisting' : 'workspaceAnchorPath'
+        )
+        ?.focus();
+      return;
+    }
     const review = this.existingProjectChoice?.review;
     if (review?.state === 'duplicate') {
       document.getElementById('workspaceExistingProjectOpenExisting')?.focus();
@@ -18736,6 +18921,8 @@ const sessionManager = {
       payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
       if (this.importLegacyAdopt) payload.adopt_assistant = true;
     } else if (requiresReviewedRoster || !ordinaryGroup) {
+      if (this.anchorChoice?.enabled && !ordinaryGroup)
+        payload.anchor_path = this.anchorChoice.path;
       // A create opened for a "show me a folder" offer names the offer so
       // the server can attach that folder afterwards (FR28). The folder's
       // path is never part of this request.
@@ -19250,6 +19437,17 @@ const sessionManager = {
           return;
         }
 
+        if (!importEnabled && String(result.code || '').startsWith('anchor_')) {
+          if (this.anchorChoice?.enabled) {
+            this.anchorChoice.message = result.error || 'This folder cannot be used as an anchor.';
+            this.anchorChoice.checkedPath = '';
+            this.anchorChoice.duplicate = result.duplicate || null;
+          }
+          this.goToWizardStep(2);
+          this.syncAnchorChoice();
+          document.getElementById('workspaceAnchorPath')?.focus();
+          return;
+        }
         if (response.status === 409 && importEnabled && result.duplicate) {
           this.showImportDuplicateWarning(result.duplicate);
           this.showToast(

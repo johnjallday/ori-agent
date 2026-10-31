@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -143,6 +145,57 @@ func TestCreateAnchoredWorkspace(t *testing.T) {
 	rows, err := h.store.ListWorkspaces(context.Background())
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("duplicate left records: %d / %v", len(rows), err)
+	}
+}
+
+func TestAnchoredTemplateDoesNotScaffoldASecondWorkFolder(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	path := canonicalAnchorTestDir(t)
+	body, err := json.Marshal(map[string]any{"name": "Existing client", "anchor_path": path, "template_id": "demo-template"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, payload := postCreateWorkspace(t, h, string(body))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", response.Code, response.Body.String())
+	}
+	id := payload["folder"].(map[string]any)["id"].(string)
+	ws, err := h.workspaceStore.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ws.DirectoryReferences) != 1 || ws.DirectoryReferences[0].Path != path || ws.ProjectPath != "" || ws.SharedData[agentworkspace.PrimaryDirectoryIDKey] != ws.AnchorDirectoryReferenceID() {
+		t.Fatalf("template replaced the anchor: %+v / %+v", ws.DirectoryReferences, ws.SharedData)
+	}
+}
+
+func TestAnchorChooserCheckIsReadOnly(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	path := canonicalAnchorTestDir(t)
+	response := httptest.NewRecorder()
+	h.HandleWorkspaces(response, httptest.NewRequest(http.MethodGet, "/api/workspaces/anchor/check?path="+url.QueryEscape(path), nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("check: %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Success bool   `json:"success"`
+		Path    string `json:"normalized_path"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.Success || payload.Path != path {
+		t.Fatalf("check result: %+v", payload)
+	}
+	rows, err := h.store.ListWorkspaces(t.Context())
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("check created a workspace: %+v / %v", rows, err)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("check wrote to folder: %v / %v", entries, err)
 	}
 }
 

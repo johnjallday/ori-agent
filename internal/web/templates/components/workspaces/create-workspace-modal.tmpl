@@ -324,6 +324,30 @@
                 <div id="workspaceCreateFolderNote" class="workspace-create-name-hint" role="status" hidden></div>
               </div>
 
+              <fieldset id="workspaceFolderChoice" class="workspace-setup-card mb-3" aria-describedby="workspaceFolderChoiceHelp">
+                <legend class="workspace-create-section-title">Folder</legend>
+                <div class="workspace-project-choice-options mb-2">
+                  <label>
+                    <input type="radio" name="workspace-folder-mode" id="workspaceFolderModeManaged" value="managed" checked>
+                    <span>New folder in Ori Workspaces<span class="workspace-setup-help d-block">Ori creates a folder for your files and notes.</span></span>
+                  </label>
+                  <label>
+                    <input type="radio" name="workspace-folder-mode" id="workspaceFolderModeAnchored" value="anchored">
+                    <span>Use an existing folder</span>
+                  </label>
+                </div>
+                <div id="workspaceAnchorFields" hidden>
+                  <label for="workspaceAnchorPath" class="workspace-setup-title">Work folder</label>
+                  <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
+                    <input type="text" id="workspaceAnchorPath" class="modern-input w-100" placeholder="~/Documents/Clients/Acme" autocomplete="off" aria-describedby="workspaceFolderChoiceHelp workspaceAnchorStatus">
+                    <button type="button" id="workspaceAnchorChoose" class="modern-btn modern-btn-secondary text-nowrap flex-shrink-0">Choose folder…</button>
+                  </div>
+                  <p id="workspaceFolderChoiceHelp" class="workspace-setup-help">Ori reads this folder as the workspace. Its own notes and settings stay in ~/Ori Workspaces/&lt;name&gt;, so nothing is written into your folder.</p>
+                  <p id="workspaceAnchorStatus" class="workspace-create-name-hint" role="status" aria-live="polite" hidden></p>
+                  <button type="button" id="workspaceAnchorOpenExisting" class="modern-btn modern-btn-secondary" hidden>Open it</button>
+                </div>
+              </fieldset>
+
               <!-- Shown only for a blueprint that declares existing projects.
                    The browser keeps the picker's selection token, never a path
                    it could send as authority. -->

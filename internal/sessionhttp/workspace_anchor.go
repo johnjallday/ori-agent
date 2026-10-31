@@ -33,8 +33,29 @@ func respondAnchorError(w http.ResponseWriter, err *anchorPathError) {
 	_ = orihttp.RespondJSON(w, err.status, err)
 }
 
+func (h *Handler) handleWorkspaceAnchorCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	path, err := h.validateAnchorPath(r.URL.Query().Get("path"), "")
+	if err != nil {
+		respondAnchorError(w, err)
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true, "normalized_path": path})
+}
+
 func (h *Handler) validateAnchorPath(input, ignoreID string) (string, *anchorPathError) {
-	abs, err := filepath.Abs(strings.TrimSpace(input))
+	input = strings.TrimSpace(input)
+	if input == "~" || strings.HasPrefix(input, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", anchorError("anchor_invalid_path", "The home folder could not be resolved.", http.StatusBadRequest)
+		}
+		input = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(input, "~"), "/"))
+	}
+	abs, err := filepath.Abs(input)
 	if err != nil || strings.TrimSpace(input) == "" {
 		return "", anchorError("anchor_invalid_path", "Choose an existing directory for the anchor.", http.StatusBadRequest)
 	}

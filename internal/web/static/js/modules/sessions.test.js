@@ -8568,6 +8568,116 @@ test('collectCreatePayload returns exactly what Create posts, without a request'
   assert.deepEqual(JSON.parse(JSON.stringify(collected.payload)), expectedFixturePayload);
 });
 
+function anchorChoiceFixture(fetchImpl) {
+  const elements = new Map([
+    ['workspaceAnchorPath', { value: '' }],
+    ['workspaceFolderChoice', { hidden: false }],
+    ['workspaceAnchorFields', { hidden: true }],
+    ['workspaceFolderModeManaged', { checked: true }],
+    ['workspaceFolderModeAnchored', { checked: false }],
+    ['workspaceAnchorStatus', { hidden: true, textContent: '', classList: { toggle() {} } }],
+    ['workspaceAnchorOpenExisting', { hidden: true }],
+    ['workspaceAnchorChoose', { disabled: false }],
+    ['folderImportToggle', { checked: false, disabled: false }]
+  ]);
+  const manager = loadSessionManager(fetchImpl, {}, { getElementById: id => elements.get(id) });
+  manager.refreshWizardChrome = () => manager.syncAnchorChoice();
+  manager.isGroupCreator = () => false;
+  manager.usesExistingProject = () => false;
+  manager.scheduleTemplateAgentPlanRefresh = () => {};
+  manager.resetTemplateAgentReview = () => {};
+  manager.resetExistingAgentTeam = () => {};
+  manager.resetAnchorChoice();
+  return { manager, elements };
+}
+
+test('anchor chooser defaults managed and excludes Import Folder and groups', () => {
+  const { manager, elements } = anchorChoiceFixture();
+  assert.equal(manager.anchorChoice.enabled, false);
+  manager.setAnchorMode(true);
+  assert.equal(elements.get('workspaceAnchorFields').hidden, false);
+  assert.equal(elements.get('folderImportToggle').disabled, true);
+  assert.match(manager.anchorFolderProblem(), /Choose an existing folder/);
+  manager.setImportModeEnabled(true);
+  assert.equal(manager.anchorChoice.enabled, false);
+  assert.equal(elements.get('workspaceFolderChoice').hidden, true);
+  manager.setAnchorMode(true);
+  assert.equal(manager.importModeEnabled, false);
+  assert.equal(manager.anchorChoice.enabled, true);
+  manager.isGroupCreator = () => true;
+  manager.syncAnchorChoice();
+  assert.equal(manager.anchorChoice.enabled, false);
+  assert.equal(elements.get('workspaceFolderChoice').hidden, true);
+});
+
+test('anchor folder check enables only the verified path and displays duplicate ownership inline', async () => {
+  let duplicate = false;
+  const { manager, elements } = anchorChoiceFixture(async url => {
+    assert.match(url, /^\/api\/workspaces\/anchor\/check\?path=/);
+    return {
+      ok: !duplicate,
+      json: async () =>
+        duplicate
+          ? {
+              code: 'anchor_already_owned',
+              error: 'This folder already belongs to the workspace "Acme".',
+              duplicate: { workspace_id: 'owner', name: 'Acme' }
+            }
+          : { success: true, normalized_path: '/external/Acme' }
+    };
+  });
+  manager.setAnchorMode(true);
+  elements.get('workspaceAnchorPath').value = '/external/Acme';
+  await manager.checkAnchorPath();
+  assert.equal(manager.anchorFolderProblem(), '');
+  assert.equal(manager.anchorChoice.checkedPath, '/external/Acme');
+  duplicate = true;
+  await manager.checkAnchorPath();
+  assert.match(elements.get('workspaceAnchorStatus').textContent, /already belongs.*Acme/);
+  assert.equal(elements.get('workspaceAnchorOpenExisting').hidden, false);
+  assert.equal(manager.anchorChoice.checkedPath, '');
+});
+
+test('stale anchor checks cannot validate a newer folder or a closed chooser', async () => {
+  let resolve;
+  const { manager, elements } = anchorChoiceFixture(
+    () =>
+      new Promise(done => {
+        resolve = done;
+      })
+  );
+  manager.setAnchorMode(true);
+  elements.get('workspaceAnchorPath').value = '/old';
+  const pending = manager.checkAnchorPath();
+  manager.setAnchorMode(false);
+  resolve({ ok: true, json: async () => ({ success: true, normalized_path: '/old' }) });
+  await pending;
+  assert.equal(manager.anchorChoice.enabled, false);
+  assert.equal(manager.anchorChoice.checkedPath, '');
+});
+
+test('anchor chooser fails closed when the folder check is unavailable', async () => {
+  const { manager, elements } = anchorChoiceFixture(async () => {
+    throw new Error('offline');
+  });
+  manager.setAnchorMode(true);
+  elements.get('workspaceAnchorPath').value = '/external';
+  await manager.checkAnchorPath();
+  assert.match(manager.anchorFolderProblem(), /could not be checked/);
+  assert.equal(manager.anchorChoice.checkedPath, '');
+});
+
+test('create payload carries an anchor only for the explicit non-import choice', () => {
+  const manager = loadPayloadFixtureManager([]);
+  assert.equal(manager.collectCreatePayload().payload.anchor_path, undefined);
+  manager.anchorChoice = { enabled: true, path: '/external/Acme', checkedPath: '/external/Acme' };
+  assert.equal(manager.collectCreatePayload().payload.anchor_path, '/external/Acme');
+  const imported = manager.collectCreatePayload({ importEnabled: true, importPath: '/imported' });
+  assert.equal(imported.endpoint, '/api/workspaces/import');
+  assert.equal(imported.payload.path, '/imported');
+  assert.equal(imported.payload.anchor_path, undefined);
+});
+
 function prepareModeWizard() {
   const fixture = loadBuildWizard();
   const { manager } = fixture;
