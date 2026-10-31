@@ -9,6 +9,7 @@ import {
   followUpView,
   followUpCategoryLabel,
   journalPromptView,
+  journalSavedMessage,
   hqWorkspaceRootView,
   hqBuildTarget,
   hqBuildAssistantCopy,
@@ -311,6 +312,21 @@ test('journalPromptView: carries the editable draft and degraded flag', () => {
   assert.equal(view.draft, '# End of day');
   assert.equal(view.degraded, true);
   assert.deepEqual(view.gaps, ['x']);
+});
+
+test('journalSavedMessage: says what became of the Daily copy, if there was one', () => {
+  assert.equal(journalSavedMessage({ note_id: 'n' }), 'Your journal was saved.');
+  assert.equal(journalSavedMessage(null), 'Your journal was saved.');
+  assert.equal(
+    journalSavedMessage({ daily_note: 'mirrored' }),
+    'Your journal was saved, and copied to Daily in your notes.'
+  );
+  assert.equal(
+    journalSavedMessage({ daily_note: 'user_owned' }),
+    'Saved; your Daily note is yours, left as is.'
+  );
+  assert.equal(journalSavedMessage({ daily_note: 'failed' }), "Saved; couldn't mirror to Daily.");
+  assert.equal(journalSavedMessage({ daily_note: 'something else' }), 'Your journal was saved.');
 });
 
 test('journalPromptView: degrades safely with no proposal', () => {

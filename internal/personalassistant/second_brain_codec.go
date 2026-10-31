@@ -43,6 +43,7 @@ func decodeSecondBrain(data []byte, owner KnowledgeOwner) (SecondBrainDocument, 
 	if err := doc.Validate(); err != nil {
 		return SecondBrainDocument{}, ErrKnowledgeCorrupt
 	}
+	doc.DefaultOrigins()
 	doc.Present = true
 	return doc, nil
 }

@@ -7,14 +7,13 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
-	"github.com/johnjallday/ori-agent/internal/session"
 )
 
 // JournalAPI is the end-of-day journal surface, implemented by
 // *personalhq.JournalService.
 type JournalAPI interface {
 	Propose(ctx context.Context, userID, localDate string) (*personalhq.JournalProposal, error)
-	Save(ctx context.Context, userID, localDate, content string) (*session.WorkspaceNote, error)
+	SaveMirrored(ctx context.Context, userID, localDate, content string) (personalhq.JournalSaved, error)
 }
 
 // SetJournal wires the end-of-day journal service.
@@ -70,12 +69,18 @@ func (h *Handler) SaveJournal(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	note, err := h.journal.Save(r.Context(), userID, req.LocalDate, req.Content)
+	saved, err := h.journal.SaveMirrored(r.Context(), userID, req.LocalDate, req.Content)
 	if err != nil {
 		orihttp.Conflict(w, err.Error())
 		return
 	}
-	orihttp.Success(w, map[string]any{"note_id": note.ID, "workspace_id": note.WorkspaceID})
+	response := map[string]any{"note_id": saved.Note.ID, "workspace_id": saved.Note.WorkspaceID}
+	// daily_note is present only when the user has a second brain Ori set up:
+	// "mirrored", "user_owned" (their own Daily note was left alone) or "failed".
+	if saved.DailyNote != "" {
+		response["daily_note"] = string(saved.DailyNote)
+	}
+	orihttp.Success(w, response)
 }
 
 // DismissJournal handles POST /api/personal-hq/journal/dismiss. Dismissing is a

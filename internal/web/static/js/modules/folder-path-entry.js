@@ -80,6 +80,7 @@ export function createFolderPathEntry({
   workspaceId = '',
   title = '',
   note = '',
+  placeholder = FOLDER_PATH_PLACEHOLDER,
   label = FOLDER_PATH_LABEL,
   buttonLabel = FOLDER_PATH_BUTTON,
   busyLabel = 'Checking…',
@@ -95,7 +96,7 @@ export function createFolderPathEntry({
   const input = node(doc, 'input', 'modern-input folder-path-entry__input');
   input.id = id;
   input.type = 'text';
-  input.placeholder = FOLDER_PATH_PLACEHOLDER;
+  input.placeholder = placeholder;
   input.setAttribute('autocomplete', 'off');
   input.setAttribute('autocapitalize', 'off');
   input.setAttribute('spellcheck', 'false');

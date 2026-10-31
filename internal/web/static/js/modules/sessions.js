@@ -52,6 +52,7 @@ const sessionManager = {
   workspaceCreatorContext: null,
   workspaceCreatorGeneration: 0,
   pendingWorkspaceCreatorOptions: null,
+  pendingAnchorPrefill: '',
   // True while the open Create Workspace modal was launched from the Workspace
   // Map's Build mode, which changes only where the flow returns to (#292 FR-53).
   workspaceMapOrigin: false,
@@ -830,6 +831,7 @@ const sessionManager = {
       this.pendingWorkspaceCreatorOptions = null;
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.applyCreatorPrefill(this.workspaceCreatorContext);
+      this.applyAnchorPrefill();
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
@@ -20979,6 +20981,9 @@ const sessionManager = {
       invoker: options.invoker || document.activeElement
     };
     this.pendingWorkspaceCreatorOptions = contextOptions;
+    // A folder the opener already chose (a project of the user's second brain)
+    // fills the anchored work folder once the form has been reset.
+    this.pendingAnchorPrefill = String(options.anchorPath || '').trim();
     this.beginWorkspaceCreatorContext(contextOptions);
     modalElement.dataset.pendingImportMode = options.importMode ? 'true' : 'false';
     modalElement.dataset.pendingEntryPoint = String(contextOptions.entryPoint);
@@ -21014,6 +21019,39 @@ const sessionManager = {
       ? bootstrap.Modal.getOrCreateInstance(modalElement)
       : new bootstrap.Modal(modalElement);
     modal.show();
+  },
+
+  // applyAnchorPrefill turns on "Use an existing folder" and checks the folder
+  // an opener named, through the same read-only chooser check a typed path
+  // gets. Nothing is created: the person still reviews and presses Create.
+  applyAnchorPrefill() {
+    const path = String(this.pendingAnchorPrefill || '').trim();
+    this.pendingAnchorPrefill = '';
+    if (!path) return;
+    this.setAnchorMode(true);
+    if (!this.anchorChoice?.enabled) return;
+    const input = document.getElementById('workspaceAnchorPath');
+    if (input) input.value = path;
+    void this.checkAnchorPath();
+  },
+
+  // openSecondBrainProjectWorkspace opens Create Workspace on a folder under
+  // Projects in the user's second brain, by the project's name. The folder is
+  // looked up in the second-brain status, so a link carries a name and never a
+  // path. A name that is no longer listed opens the plain form with the name.
+  async openSecondBrainProjectWorkspace(name) {
+    const wanted = String(name || '').trim();
+    if (!wanted || /[\\/]/.test(wanted)) return;
+    let anchorPath = '';
+    try {
+      const response = await fetch('/api/personal-assistant/second-brain');
+      const payload = response.ok ? await response.json() : null;
+      const project = (payload?.second_brain?.projects || []).find(item => item?.name === wanted);
+      anchorPath = String(project?.path || '');
+    } catch (_) {
+      // The form opens without the folder; the person can choose it.
+    }
+    this.showAddWorkspaceModal({ entryPoint: 'second_brain_project', name: wanted, anchorPath });
   },
 
   // applyCreatorPrefill fills the Details step from what the opener already
@@ -25186,6 +25224,12 @@ document.addEventListener('DOMContentLoaded', () => {
       // blueprint it opens. The server still decides whether that Home may
       // hold it; the parameter only preselects.
       const parent = String(params.get('parent') || '').trim();
+      // A link from the assistant or the Notes card names a project of the
+      // user's second brain; the form opens on that folder.
+      const secondBrainProject = openCreate
+        ? String(params.get('second_brain_project') || '').trim()
+        : '';
+      params.delete('second_brain_project');
       const lockedParent =
         openCreate && blueprint && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(parent) ? parent : '';
       params.delete('create');
@@ -25196,6 +25240,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       // Defer a frame so init()'s show.bs.modal handler is bound first.
+      if (secondBrainProject) {
+        requestAnimationFrame(
+          () => void sessionManager.openSecondBrainProjectWorkspace(secondBrainProject)
+        );
+        return;
+      }
       requestAnimationFrame(() =>
         sessionManager.showAddWorkspaceModal({
           entryPoint: openImport

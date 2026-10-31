@@ -7913,13 +7913,24 @@ export class WorkspaceCommandView {
     }
     if (secondBrain.status === 'connected' && name) {
       const since = this.formatRelativeTime(secondBrain.last_look?.at);
+      // A folder Ori set up says so, and what Ori has written in it (FR16).
+      if (secondBrain.source?.origin === 'created_by_ori' && secondBrain.written_by_ori) {
+        const written = Number(secondBrain.written_by_ori.count) || 0;
+        const lastWrite = this.formatRelativeTime(secondBrain.written_by_ori.last_at);
+        let line = 'set up by Ori · ' + written + ' written by Ori';
+        if (written > 0 && lastWrite) line += ' · last write ' + lastWrite;
+        return { value: name, description: line, tone: 'clear' };
+      }
+      const lead = secondBrain.source?.origin === 'created_by_ori' ? 'set up by Ori' : 'connected';
       return {
         value: name,
-        description: since ? 'connected · last look ' + since : 'connected',
+        description: since ? lead + ' · last look ' + since : lead,
         tone: 'clear'
       };
     }
-    return { value: 'Not set up', description: 'connect your notes' };
+    // The station is one target; the card it opens offers both Choose folder
+    // and Set one up for me.
+    return { value: 'Not set up', description: 'connect or set one up' };
   }
 
   // Fetch the notes connection once for the active HQ; a stale response after

@@ -28,7 +28,14 @@ const (
 	Research = "research"
 )
 
-// Flavours lists every flavour in build order.
+// Created is a second brain Ori set up for the user (Issue #750), a few days
+// after setup: the Creator's layout, seeded follow-ups and a person, a note
+// Ori wrote for a Journal, and notes of the user's own. It is built on request
+// and is not in Flavours, so a fixture list of the vaults a user already had
+// (and the vault list Obsidian keeps) never includes it.
+const Created = "created"
+
+// Flavours lists every flavour in build order: the folders a user already had.
 var Flavours = []string{Music, Software, Research}
 
 // Kinds, as the second-brain record names them.
@@ -46,6 +53,9 @@ type Vault struct {
 	Path string `json:"path"`
 	// LastOpened is the "ts" the vault list gives it.
 	LastOpened time.Time `json:"last_opened"`
+	// Origin is "created_by_ori" for the Created flavour; empty for a folder
+	// the user connects.
+	Origin string `json:"origin,omitempty"`
 
 	// What a reader that follows the second-brain rules finds.
 	Notes         int    `json:"notes"`
@@ -92,6 +102,8 @@ func Build(dir, flavour string, now time.Time) (Vault, error) {
 		vault, notes = software(now)
 	case Research:
 		vault, notes = research(now)
+	case Created:
+		vault, notes = created(now)
 	default:
 		return Vault{}, fmt.Errorf("vaultfixture: unknown flavour %q", flavour)
 	}
@@ -162,6 +174,42 @@ func iso(t time.Time) string { return t.Format("2006-01-02") }
 
 // spoken is "Oct 25", the way people write a date in a sentence.
 func spoken(t time.Time) string { return t.Format("Jan 2") }
+
+// oriNote is a note as Ori writes it: frontmatter naming the kind and the
+// sha256 of the body, then the body. The marker format is secondbrain's
+// (ReadMark); the fixture cannot import that package, so a test in secondbrain
+// reads every note here back through it.
+func oriNote(kind, body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return "---\nori: " + kind + "\nori_hash: " + hex.EncodeToString(sum[:]) + "\n---\n" + body
+}
+
+// createdFolders are the Creator's top-level folders; each holds a README.
+var createdFolders = []string{"Inbox", "Daily", "Projects", "Areas", "Resources", "Archive", "People"}
+
+func created(now time.Time) (Vault, []note) {
+	vault := Vault{
+		Kind: KindObsidian, Name: "My Second Brain", Origin: "created_by_ori",
+		// 8 READMEs, 3 Inbox notes, a person, a Journal day, one project note.
+		Notes: 14, OpenItems: 4, NotesWithOpen: 4, Dated: 1, Done: 0, DailyNotes: 1,
+	}
+	notes := []note{
+		{rel: ".obsidian/app.json", age: 3 * day, text: "{\n  \"alwaysUpdateLinks\": false,\n  \"promptDelete\": true\n}\n"},
+		{rel: "README.md", age: 3 * day, text: "I'll keep Inbox and Daily up to date; everything else is yours.\n\nThis is your second brain.\n"},
+	}
+	for _, folder := range createdFolders {
+		notes = append(notes, note{rel: folder + "/README.md", age: 3 * day, text: "# " + folder + "\n"})
+	}
+	return vault, append(notes,
+		note{rel: "Inbox/call-the-distributor.md", age: 3 * day, text: oriNote("seed",
+			"# Call the distributor\n\n- [ ] Call the distributor 📅 "+iso(now.Add(2*day))+"\n\nFrom: Email · Dana\n")},
+		note{rel: "Inbox/renew-the-lease.md", age: 3 * day, text: oriNote("seed", "# Renew the lease\n\n- [ ] Renew the lease\n\nFrom: Added by you\n")},
+		note{rel: "Inbox/buy-strings.md", age: day, text: "- [ ] Buy strings\n"},
+		note{rel: "People/Dana Lee.md", age: 3 * day, text: oriNote("seed", "# Dana Lee\n\nDana Lee is your distributor.\n")},
+		note{rel: "Daily/" + iso(now.Add(-day)) + ".md", age: day, text: oriNote("journal", "Shipped the mix and talked to Dana.\n")},
+		note{rel: "Projects/Launch/Plan.md", age: 2 * day, text: "# Launch plan\n\n- [ ] Book the venue\n"},
+	)
+}
 
 func music(now time.Time) (Vault, []note) {
 	vault := Vault{

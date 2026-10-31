@@ -110,6 +110,79 @@ func TestJournalSaveCreatesDatedNoteNoMemory(t *testing.T) {
 	_ = note
 }
 
+type fakeDailyMirror struct {
+	result  DailyResult
+	calls   []string
+	content string
+}
+
+func (f *fakeDailyMirror) MirrorDaily(_ context.Context, userID, localDate, content string) DailyResult {
+	f.calls = append(f.calls, userID+" "+localDate)
+	f.content = content
+	return f.result
+}
+
+// journalHQ gives the harness a valid Personal HQ to save into.
+func journalHQ(t *testing.T) *Service {
+	t.Helper()
+	svc, profiles, workspaces := newTestHarness(t)
+	ctx := context.Background()
+	if err := profiles.Upsert(ctx, &userprofile.UserProfile{ID: "local"}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	ws := &session.Workspace{ID: "hq-1", Name: "HQ", Kind: session.WorkspaceKindWorkspace, OwnerUserID: "local", Status: session.WorkspaceStatusActive}
+	if err := workspaces.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := svc.Designate(ctx, "local", "hq-1"); err != nil {
+		t.Fatalf("designate: %v", err)
+	}
+	return svc
+}
+
+func TestJournalSaveMirroredReportsWhatBecameOfTheDailyCopy(t *testing.T) {
+	for _, result := range []DailyResult{"", DailyMirrored, DailyUserOwned, DailyFailed} {
+		t.Run("result "+string(result), func(t *testing.T) {
+			notes := &fakeNoteWriter{}
+			mirror := &fakeDailyMirror{result: result}
+			j := NewJournalService(journalHQ(t), nil, notes)
+			j.SetDailyMirror(mirror)
+			saved, err := j.SaveMirrored(context.Background(), "local", "2026-07-15", "  Today I shipped the thing. ")
+			if err != nil {
+				t.Fatalf("SaveMirrored: %v", err)
+			}
+			// The workspace note is the canonical save whatever the copy did.
+			if len(notes.notes) != 1 || saved.Note == nil || saved.Note.ID != notes.notes[0].ID {
+				t.Fatalf("notes = %d, saved = %+v", len(notes.notes), saved)
+			}
+			if saved.DailyNote != result || len(mirror.calls) != 1 || mirror.calls[0] != "local 2026-07-15" || mirror.content != "Today I shipped the thing." {
+				t.Fatalf("daily = %q, calls = %v, content = %q", saved.DailyNote, mirror.calls, mirror.content)
+			}
+		})
+	}
+}
+
+func TestJournalSaveWithoutAMirrorOrAfterAFailedSaveCopiesNothing(t *testing.T) {
+	j := NewJournalService(journalHQ(t), nil, &fakeNoteWriter{})
+	saved, err := j.SaveMirrored(context.Background(), "local", "2026-07-15", "Today.")
+	if err != nil || saved.DailyNote != "" {
+		t.Fatalf("no mirror: %+v, %v", saved, err)
+	}
+
+	mirror := &fakeDailyMirror{result: DailyMirrored}
+	j.SetDailyMirror(mirror)
+	if _, err := j.SaveMirrored(context.Background(), "local", "2026-07-15", "   "); err == nil {
+		t.Fatal("empty content must be rejected")
+	}
+	if len(mirror.calls) != 0 {
+		t.Fatalf("a rejected journal was copied: %v", mirror.calls)
+	}
+	// Save keeps its old shape and also copies.
+	if _, err := j.Save(context.Background(), "local", "2026-07-15", "Today."); err != nil || len(mirror.calls) != 1 {
+		t.Fatalf("Save: %v, calls = %v", err, mirror.calls)
+	}
+}
+
 func TestJournalSaveRejectsEmptyContentAndNoHQ(t *testing.T) {
 	svc, _, _ := newTestHarness(t)
 	j := NewJournalService(svc, nil, &fakeNoteWriter{})

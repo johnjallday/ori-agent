@@ -6,9 +6,26 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
+
+// seededNotes are the notes in Inbox that Ori seeded from the user's own
+// follow-ups, for a folder Ori created. A connected folder has none: a note
+// there that happens to carry the same frontmatter is the user's.
+func seededNotes(source Source, reading Reading) map[string]bool {
+	if !source.CreatedByOri() {
+		return nil
+	}
+	seeded := map[string]bool{}
+	for _, note := range reading.Notes {
+		if strings.HasPrefix(note.RelPath, FolderInbox+"/") && ReadMark(note.Content).Kind == NoteKindSeed {
+			seeded[note.RelPath] = true
+		}
+	}
+	return seeded
+}
 
 // maxStoredItemBytes caps the encoded open items one look keeps, so the
 // record stays well inside RecordMaxBytes whatever the items say.
@@ -53,6 +70,38 @@ func (l Looker) now() time.Time {
 // Run looks at source. previous is the last finished look, for the new and
 // done counts (FR36); lookID and requestID name this look.
 func (l Looker) Run(ctx context.Context, source Source, previous *Look, lookID, requestID string) LookRun {
+	return l.run(ctx, source, previous, lookID, requestID, nil)
+}
+
+// RunSetup is the first look at a folder Ori has just set up: the same read,
+// with a rules-only headline that reports what the setup seeded (FR10).
+func (l Looker) RunSetup(ctx context.Context, source Source, lookID, requestID string, setup SetupCounts) LookRun {
+	return l.run(ctx, source, nil, lookID, requestID, &setup)
+}
+
+// SetupCounts is what one setup seeded.
+type SetupCounts struct {
+	FollowUps int
+	People    int
+}
+
+// SetupHeadline reports a fresh second brain honestly (FR10): what was seeded,
+// or that the folder is ready when nothing was.
+func SetupHeadline(counts SetupCounts) string {
+	var parts []string
+	if counts.FollowUps > 0 {
+		parts = append(parts, plural(counts.FollowUps, "follow-up", "follow-ups")+" in Inbox")
+	}
+	if counts.People > 0 {
+		parts = append(parts, plural(counts.People, "person", "people"))
+	}
+	if len(parts) == 0 {
+		return "Your second brain is ready. Ask me to note something and it lands in Inbox."
+	}
+	return "Your second brain is set up: " + strings.Join(parts, ", ") + "."
+}
+
+func (l Looker) run(ctx context.Context, source Source, previous *Look, lookID, requestID string, setup *SetupCounts) LookRun {
 	started := l.now().UTC()
 	look := Look{ID: lookID, RequestID: requestID, StartedAt: started}
 	read := l.read
@@ -75,11 +124,17 @@ func (l Looker) Run(ctx context.Context, source Source, previous *Look, lookID, 
 		Notes: signals.Notes, OpenItems: len(signals.OpenLoops), NotesWithOpen: signals.NotesWithOpen,
 		Dated: signals.Dated, Done: signals.Done, Partial: reading.Partial,
 	}
-	look.Items = lookItems(source, signals.OpenLoops)
+	look.Items = lookItems(source, signals.OpenLoops, seededNotes(source, reading))
 	look.Headline, look.HeadlineBy = RulesHeadline(source.Name, look.Counts), HeadlineByRules
-	headline, note := modelHeadline(ctx, l.Model, source.Name, look.Counts, signals, look.Items, now)
-	if note == "" {
-		look.Headline, look.HeadlineBy = headline, HeadlineByModel
+	var note string
+	if setup != nil {
+		look.Headline, note = SetupHeadline(*setup), "setup"
+	} else {
+		var headline string
+		headline, note = modelHeadline(ctx, l.Model, source.Name, look.Counts, signals, look.Items, now)
+		if note == "" {
+			look.Headline, look.HeadlineBy = headline, HeadlineByModel
+		}
 	}
 	look.AlsoNoticed = AlsoNoticed(signals, now)
 	finished := l.now().UTC()
@@ -96,8 +151,20 @@ func (l Looker) Run(ctx context.Context, source Source, previous *Look, lookID, 
 // lookItems turns open loops into the items a look keeps, marking the
 // suggested set, within MaxLookItems and the stored-bytes budget. Two
 // identical lines in one note are one item.
-func lookItems(source Source, loops []OpenLoop) []LookItem {
-	suggested := Suggest(loops)
+func lookItems(source Source, loops []OpenLoop, seeded map[string]bool) []LookItem {
+	// Items in seeded notes are never suggested: the user already has them as
+	// follow-ups (FR10).
+	eligible := make([]OpenLoop, 0, len(loops))
+	eligibleAt := make([]int, 0, len(loops))
+	for index, loop := range loops {
+		if !seeded[loop.Note] {
+			eligible, eligibleAt = append(eligible, loop), append(eligibleAt, index)
+		}
+	}
+	suggested := make(map[int]bool, MaxSuggested)
+	for chosen := range Suggest(eligible) {
+		suggested[eligibleAt[chosen]] = true
+	}
 	items := make([]LookItem, 0, min(len(loops), MaxLookItems))
 	seen := make(map[string]bool, len(loops))
 	budget := maxStoredItemBytes
@@ -107,7 +174,7 @@ func lookItems(source Source, loops []OpenLoop) []LookItem {
 		}
 		item := LookItem{
 			ID: ItemID(source.ID, loop.Note, loop.Text), Text: loop.Text, Note: loop.Note, Line: loop.Line,
-			Due: loop.Due, Suggested: suggested[index], InDecision: loop.InDecision,
+			Due: loop.Due, Suggested: suggested[index], InDecision: loop.InDecision, Seeded: seeded[loop.Note],
 		}
 		if source.Kind == KindObsidian {
 			item.Link = ObsidianLink(source.Name, loop.Note)

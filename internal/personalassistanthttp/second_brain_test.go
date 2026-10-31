@@ -20,6 +20,8 @@ import (
 type fakeSecondBrain struct {
 	calls   []string
 	connect personalassistant.SecondBrainConnectInput
+	create  personalassistant.SecondBrainCreateInput
+	capture [2]string // text, request id
 	accept  personalassistant.SecondBrainAcceptInput
 	lookID  string
 	version int64
@@ -46,6 +48,16 @@ func (f *fakeSecondBrain) DecideAsk(context.Context, string, string, string) (pe
 func (f *fakeSecondBrain) Connect(_ context.Context, _ string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error) {
 	f.connect = input
 	return personalassistant.SecondBrainView{LookID: "look-1"}, f.record("connect")
+}
+
+func (f *fakeSecondBrain) Create(_ context.Context, _ string, input personalassistant.SecondBrainCreateInput) (personalassistant.SecondBrainView, error) {
+	f.create = input
+	return personalassistant.SecondBrainView{LookID: "look-1"}, f.record("create")
+}
+
+func (f *fakeSecondBrain) Capture(_ context.Context, _ string, text, requestID string) (personalassistant.SecondBrainCaptureView, error) {
+	f.capture = [2]string{text, requestID}
+	return personalassistant.SecondBrainCaptureView{Note: "Inbox/20261031-1407-note.md", Name: "20261031-1407-note"}, f.record("capture")
 }
 
 func (f *fakeSecondBrain) Look(context.Context, string) (personalassistant.SecondBrainLookView, error) {
@@ -79,6 +91,8 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("POST "+base+"/prompted", h.PromptedSecondBrain)
 	mux.HandleFunc("POST "+base+"/ask", h.AskSecondBrain)
 	mux.HandleFunc("POST "+base+"/connect", h.ConnectSecondBrain)
+	mux.HandleFunc("POST "+base+"/create", h.CreateSecondBrain)
+	mux.HandleFunc("POST "+base+"/capture", h.CaptureSecondBrain)
 	mux.HandleFunc("GET "+base+"/look", h.GetSecondBrainLook)
 	mux.HandleFunc("POST "+base+"/look", h.LookSecondBrainAgain)
 	mux.HandleFunc("POST "+base+"/look/{lookID}/follow-ups", h.AcceptSecondBrainFollowUps)
@@ -106,6 +120,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 		{http.MethodPost, "/prompted", `{"request_id":"p-1"}`},
 		{http.MethodPost, "/ask", `{"decision":"later","request_id":"a-1"}`},
 		{http.MethodPost, "/connect", `{"detected_id":"v_1","request_id":"c-1"}`},
+		{http.MethodPost, "/create", `{"selection_token":"t-1","name":"Second Brain","request_id":"s-1"}`},
+		{http.MethodPost, "/capture", `{"text":"Call Dana","request_id":"n-1"}`},
 		{http.MethodGet, "/look", ""},
 		{http.MethodPost, "/look", `{"request_id":"l-1"}`},
 		{http.MethodPost, "/look/look-1/follow-ups", `{"items":"suggested","request_id":"f-1"}`},
@@ -119,8 +135,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 			t.Errorf("%s %s from Ori's page = %d, want 200", route.method, route.path, got)
 		}
 	}
-	if len(fake.calls) != 9 {
-		t.Fatalf("calls = %v, want only the nine local requests", fake.calls)
+	if len(fake.calls) != 11 {
+		t.Fatalf("calls = %v, want only the eleven local requests", fake.calls)
 	}
 
 	rebound := httptest.NewRequest(http.MethodGet, "http://attacker.example/api/personal-assistant/second-brain", nil)
@@ -142,6 +158,9 @@ func TestSecondBrainRoutes_RefuseUnknownFieldsAndAnyPath(t *testing.T) {
 		{"/look", `{"request_id":"l-1","path":"/"}`},
 		{"/look/look-1/follow-ups", `{"items":"suggested","request_id":"f-1","note_path":"Inbox.md"}`},
 		{"/disconnect", `{"request_id":"d-1","if_version":1,"force":true}`},
+		{"/create", `{"selection_token":"t-1","name":"Brain","request_id":"s-1","path":"/Users/sam/Documents"}`},
+		{"/create", `{"selection_token":"t-1","name":"Brain","request_id":"s-1","parent_folder":"/Users/sam"}`},
+		{"/create", `{"selection_token":"t-1","name":"Brain","request_id":"s-1","origin":"connected"}`},
 		{"/connect", `{"detected_id":"v_1","request_id":"c-1"}{"detected_id":"v_2"}`},
 		{"/connect", `["detected_id"]`},
 	} {
@@ -170,6 +189,58 @@ func TestSecondBrainConnect_TakesExactlyOneWayToNameTheFolder(t *testing.T) {
 		if want == http.StatusOK && strings.Contains(body, "token-1") && (!fake.connect.Replace || fake.connect.SelectionToken != "token-1") {
 			t.Errorf("connect input = %+v", fake.connect)
 		}
+	}
+}
+
+func TestSecondBrainCreate_TakesATokenAndANameNeverAPath(t *testing.T) {
+	for body, want := range map[string]int{
+		`{"selection_token":"token-1","name":"My Brain","request_id":"s-1"}`:                http.StatusOK,
+		`{"selection_token":" token-1 ","name":" My Brain ","request_id":"s-1"}`:            http.StatusOK,
+		`{"name":"My Brain","request_id":"s-1"}`:                                            http.StatusBadRequest,
+		`{"selection_token":"  ","name":"My Brain","request_id":"s-1"}`:                     http.StatusBadRequest,
+		`{"selection_token":"token-1","name":"My Brain","request_id":"s-1","replace":true}`: http.StatusBadRequest,
+	} {
+		fake := &fakeSecondBrain{}
+		response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/create", body, "")
+		if response.Code != want {
+			t.Errorf("create %s = %d, want %d", body, response.Code, want)
+			continue
+		}
+		if want == http.StatusOK {
+			if fake.create.SelectionToken != "token-1" || fake.create.Name != "My Brain" || fake.create.RequestID != "s-1" {
+				t.Errorf("create input = %+v", fake.create)
+			}
+			if !strings.Contains(response.Body.String(), `"look_id":"look-1"`) {
+				t.Errorf("create body = %s", response.Body.String())
+			}
+		} else if len(fake.calls) != 0 {
+			t.Errorf("create %s reached the service", body)
+		}
+	}
+}
+
+func TestSecondBrainCapture_TakesTextAndARequestIDNeverAPath(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	handler := newSecondBrainHandler(fake)
+	response := secondBrainRequest(handler, http.MethodPost, "/capture", `{"text":" Call Dana ","request_id":" n-1 "}`, "")
+	if response.Code != http.StatusOK || fake.capture != [2]string{" Call Dana ", "n-1"} ||
+		!strings.Contains(response.Body.String(), `"note":"Inbox/20261031-1407-note.md"`) {
+		t.Fatalf("capture = %d %s, reached the service as %q", response.Code, response.Body.String(), fake.capture)
+	}
+	for _, body := range []string{
+		`{"text":"Call Dana","request_id":"n-1","path":"Inbox/x.md"}`,
+		`{"text":"Call Dana","request_id":"n-1","folder":"Projects"}`,
+		`{"text":"Call Dana","request_id":"n-1","kind":"journal"}`,
+		`{"text":["Call Dana"],"request_id":"n-1"}`,
+	} {
+		fake := &fakeSecondBrain{}
+		if got := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/capture", body, "").Code; got != http.StatusBadRequest || len(fake.calls) != 0 {
+			t.Errorf("capture %s = %d (calls %v), want 400 before the service", body, got, fake.calls)
+		}
+	}
+	big := `{"text":"` + strings.Repeat("a", 30*1024) + `","request_id":"n-1"}`
+	if got := secondBrainRequest(newSecondBrainHandler(&fakeSecondBrain{}), http.MethodPost, "/capture", big, "").Code; got != http.StatusBadRequest {
+		t.Errorf("a body over the cap = %d, want 400", got)
 	}
 }
 
@@ -231,6 +302,12 @@ func TestSecondBrainErrors_SayOneSentenceEach(t *testing.T) {
 		{personalassistant.ErrSecondBrainSelection, http.StatusConflict, `"needs_pick_reason":"lost"`},
 		{personalassistant.ErrSecondBrainUnknownVault, http.StatusNotFound, "Obsidian's list"},
 		{personalassistant.ErrSecondBrainNotConnected, http.StatusConflict, "No notes folder"},
+		{personalassistant.ErrSecondBrainAlreadyConnected, http.StatusConflict, "Disconnect it before"},
+		{secondbrain.ErrNotOwned, http.StatusConflict, "only writes notes to a second brain it set up"},
+		{secondbrain.ErrCaptureSecretLike, http.StatusBadRequest, "looks like a secret"},
+		{secondbrain.ErrCaptureInvalid, http.StatusBadRequest, "1 to 4,000 characters"},
+		{secondbrain.ErrUserModified, http.StatusConflict, "could not write that note"},
+		{&personalassistant.SecondBrainFolderError{Message: "Brain already has something in it. Choose another name or location."}, http.StatusBadRequest, `"repair":"choose_folder"`},
 		{personalassistant.ErrNeedsHQ, http.StatusConflict, "Personal HQ"},
 		{secondbrain.ErrRequestReused, http.StatusConflict, "request id"},
 		{errors.New("disk on fire"), http.StatusServiceUnavailable, "temporarily unavailable"},

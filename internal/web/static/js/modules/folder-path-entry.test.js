@@ -4,6 +4,7 @@ import {
   FOLDER_PATH_BUTTON,
   FOLDER_PATH_ENDPOINT,
   FOLDER_PATH_LABEL,
+  FOLDER_PATH_PLACEHOLDER,
   createFolderPathEntry,
   folderDialogOffNote,
   openFolderPathDialog,
@@ -209,6 +210,11 @@ test('the control is a labelled field, a button, and two quiet lines', () => {
   assert.equal(note.hidden, true);
   assert.equal(status.hidden, true);
   assert.equal(status.attributes.role, 'status');
+});
+
+test("the example in the field is the default, or the surface's own", () => {
+  assert.equal(entryFixture().input.placeholder, FOLDER_PATH_PLACEHOLDER);
+  assert.equal(entryFixture({ placeholder: '~/Documents' }).input.placeholder, '~/Documents');
 });
 
 test('Use this path hands the accepted selection on and clears the field', async () => {

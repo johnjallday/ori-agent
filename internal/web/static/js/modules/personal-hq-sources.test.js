@@ -31,6 +31,15 @@ test('the Notes row names the connected folder, a missing one, or none', () => {
   assert.deepEqual(missing.action, { label: 'Choose again', route: '/?quest=second-brain' });
   assert.equal(missing.disconnect, true);
 
+  const created = notesSourceView({
+    status: 'connected',
+    source: { name: 'My Brain', kind: 'obsidian', origin: 'created_by_ori' }
+  });
+  assert.match(created.summary, /^Second brain: My Brain \(set up by Ori\)\./);
+  assert.doesNotMatch(created.summary, /Read-only/);
+  assert.match(created.summary, /Disconnecting leaves the folder/);
+  assert.equal(created.disconnect, true);
+
   const none = notesSourceView({ status: 'not_connected' });
   assert.equal(none.disconnect, false);
   assert.equal(none.action.label, 'Connect your notes');

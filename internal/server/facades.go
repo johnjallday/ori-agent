@@ -103,7 +103,10 @@ type StorageSystemFacade struct {
 	PersonalAssistant       *personalassistant.Service
 	PersonalAssistantMemory *personalassistant.MemoryService
 	// PersonalAssistantKnowledge is the current, server-bound reviewed HQ context reader.
-	PersonalAssistantKnowledge          *personalassistant.KnowledgeContextReader
+	PersonalAssistantKnowledge *personalassistant.KnowledgeContextReader
+	// PersonalAssistantSecondBrain is the notes service the assistant's chat
+	// uses to save a note to a second brain Ori set up.
+	PersonalAssistantSecondBrain        *personalassistant.SecondBrainService
 	PersonalAssistantFolderObservations *personalassistant.FolderObservationService
 	// AssistantOperations stores what the hired assistant asked Ori to do in
 	// the app ("Operate Ori"). Nil leaves operations unavailable.

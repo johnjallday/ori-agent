@@ -246,11 +246,15 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.personalHQHandler.SetFollowUps(b.followUpService)
 		// End-of-day journal (Group 7): grounded on the day's closed follow-ups,
 		// saved as a dated Personal HQ note (never MEMORY.md by default).
-		b.personalHQHandler.SetJournal(personalhq.NewJournalService(
+		journal := personalhq.NewJournalService(
 			b.personalHQService,
 			&journalSnapshotBuilder{followups: b.followUpService},
 			sessionStore,
-		))
+		)
+		// A saved journal is also copied to that day's note in a second brain
+		// Ori set up; the service is read when a journal is saved.
+		journal.SetDailyMirror(journalDailyMirror{builder: b})
+		b.personalHQHandler.SetJournal(journal)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

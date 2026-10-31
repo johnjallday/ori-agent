@@ -30,6 +30,38 @@ func secondBrainSource(path string) secondbrain.Source {
 	}
 }
 
+func TestSecondBrainCodec_OriginDecodesAndDefaults(t *testing.T) {
+	owner := KnowledgeOwner{UserID: "local", HQWorkspaceID: "hq"}
+	record := func(originField string) []byte {
+		return fmt.Appendf(nil, `{"schema_version":1,"version":1,"owner":{"user_id":"local","hq_workspace_id":"hq"},"ask":{},
+			"sources":[{"id":%q,"kind":"obsidian","name":"Brain","path":"/Users/sam/Brain","connected_at":"2026-10-21T09:00:00Z","request_id":"connect-1"%s}]}`,
+			secondbrain.SourceID("/Users/sam/Brain"), originField)
+	}
+	for name, tc := range map[string]struct {
+		field, want string
+	}{
+		"a record from before the field": {"", secondbrain.OriginConnected},
+		"connected":                      {`,"origin":"connected"`, secondbrain.OriginConnected},
+		"created by Ori":                 {`,"origin":"created_by_ori"`, secondbrain.OriginCreatedByOri},
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc, err := decodeSecondBrain(record(tc.field), owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := doc.Connected().Origin; got != tc.want {
+				t.Fatalf("origin = %q, want %q", got, tc.want)
+			}
+			if _, err := encodeSecondBrain(doc); err != nil {
+				t.Fatalf("re-encode: %v", err)
+			}
+		})
+	}
+	if _, err := decodeSecondBrain(record(`,"origin":"imported"`), owner); !errors.Is(err, ErrKnowledgeCorrupt) {
+		t.Fatalf("an unknown origin: err = %v, want ErrKnowledgeCorrupt", err)
+	}
+}
+
 func TestSecondBrainStore_RoundTripsTheRecordUnderTheHQ(t *testing.T) {
 	ctx := context.Background()
 	store, kf := newSecondBrainStoreFixture(t)
