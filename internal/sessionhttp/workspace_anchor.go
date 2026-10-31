@@ -117,7 +117,7 @@ func (h *Handler) validateAnchorPath(input, ignoreID string) (string, *anchorPat
 		}
 	}
 	configPath := filepath.Join(path, agentworkspace.WorkspaceConfigFile)
-	if _, statErr := os.Lstat(configPath); statErr == nil {
+	if _, statErr := os.Lstat(configPath); statErr == nil { // #nosec G703 -- normalized user-selected directory plus a fixed filename; inspect identity only, no writes.
 		var existing struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
