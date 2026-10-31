@@ -526,8 +526,11 @@ const HOME_ROWS = [
   ...ROWS
 ];
 
+// `workspace` is the protected workspace the server named: the Home itself for
+// a removal, the linked project for a disconnect.
 function reviewRequired({
   station = 'home',
+  workspace = station,
   action = 'Review Home removal',
   slug = 'music-home',
   message = 'Use Review Home removal in Music Home before deleting.'
@@ -540,7 +543,7 @@ function reviewRequired({
         code: 'assistant_program_review_required',
         message,
         details: {
-          workspace_id: station,
+          workspace_id: workspace,
           station_workspace_id: station,
           review_action: action,
           ...(slug ? { review_home_slug: slug } : {})
@@ -548,6 +551,54 @@ function reviewRequired({
       })
   };
 }
+
+function disconnectRequired(workspace = 'song') {
+  return reviewRequired({
+    station: 'home',
+    workspace,
+    action: 'Review disconnect',
+    message: 'Use Review disconnect in Music Home before deleting.'
+  });
+}
+
+function disconnectResponses({
+  revision = 7,
+  projects = [{ id: 'song', name: 'Song', folder_slug: 'song' }],
+  impact = ['Home rollup stops.', 'The project is preserved.']
+} = {}) {
+  return {
+    'GET /api/workspaces/home/assistant-program': json({
+      available: true,
+      is_station: true,
+      state_revision: revision,
+      declaration: { station_name: 'Music Home' },
+      projects
+    }),
+    'POST /api/workspaces/home/assistant-program/disconnect/review': json({
+      token: 'disc-1',
+      impact
+    }),
+    'POST /api/workspaces/home/assistant-program/disconnect/commit': json({
+      station_workspace_id: 'home',
+      project_workspace_id: 'song'
+    })
+  };
+}
+
+function contractReview(id = 'song') {
+  return {
+    [`POST /api/workspaces/${id}/group-requirement/delete/review`]: json({
+      group_requirement_review: {
+        review_token: 'review-token',
+        summary: 'Review deletion.',
+        impact: [],
+        trashes: true
+      }
+    })
+  };
+}
+
+const requestLine = call => `${call.method} ${String(call.url).split('?')[0]}`;
 
 const json = data => ({ ok: true, status: 200, json: async () => data });
 
@@ -769,28 +820,285 @@ test('the review-and-retry loop is bounded', async () => {
   assert.equal(h.stepsOf('close').length, 1);
 });
 
-test('a disconnect review is offered as a link, never performed automatically', async () => {
+// ---------------------------------------------------------------------------
+// Linked project: disconnected and deleted inside the dialog
+// ---------------------------------------------------------------------------
+
+test('a linked project is disconnected and deleted inside the same dialog', async () => {
+  let deletes = 0;
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: '' }, true],
+    responses: {
+      'DELETE /api/workspaces/song': (_url, init) => {
+        deletes += 1;
+        if (deletes === 1) return disconnectRequired();
+        if (deletes === 2) return groupRequirementReviewRequired();
+        assert.equal(init.headers['X-Ori-Group-Requirement-Review'], 'review-token');
+        return { ok: true, status: 200, json: async () => ({ trashed: true }) };
+      },
+      ...disconnectResponses(),
+      ...contractReview()
+    }
+  });
+
+  assert.equal(await deleteWorkspace('song', h.ctx), true);
+
+  const [shown] = h.stepsOf('review');
+  assert.equal(shown.heading, 'Delete "Song"?');
+  assert.equal(shown.confirmLabel, 'Disconnect and delete');
+  assert.match(shown.summary, /"Song" is linked to the Assistant Home "Music Home"/);
+  assert.match(shown.summary, /disconnected from the Home first, then moved to the Trash/);
+  assert.ok(shown.impact.includes('"Music Home" itself is not removed.'));
+  assert.equal(h.stepsOf('notice').length, 0, 'no detour through another page');
+
+  // Preview the impact, then at confirm: a fresh review bound to the live
+  // revision, its commit, and the delete with its own contract review.
+  assert.deepEqual(h.calls.map(requestLine), [
+    'DELETE /api/workspaces/song',
+    'GET /api/workspaces/home/assistant-program',
+    'POST /api/workspaces/home/assistant-program/disconnect/review',
+    'GET /api/workspaces/home/assistant-program',
+    'POST /api/workspaces/home/assistant-program/disconnect/review',
+    'POST /api/workspaces/home/assistant-program/disconnect/commit',
+    'DELETE /api/workspaces/song',
+    'POST /api/workspaces/song/group-requirement/delete/review',
+    'DELETE /api/workspaces/song'
+  ]);
+  const review = h.calls.find(c => c.url.endsWith('/disconnect/review'));
+  assert.deepEqual(review.body, { project_workspace_id: 'song', state_revision: 7 });
+  const commit = h.calls.find(c => c.url.endsWith('/disconnect/commit'));
+  assert.equal(commit.body.token, 'disc-1');
+  assert.match(commit.body.idempotency_key, /^disconnect-/);
+
+  assert.deepEqual(h.trashed, [{ id: 'song', name: 'Song' }]);
+  assert.ok(h.announced.includes('Song deleted.'));
+  assert.equal(h.changedCount(), 1);
+  assert.equal(h.stepsOf('close').length, 1);
+});
+
+test('declining the disconnect review leaves the project linked', async () => {
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    answers: [{ mode: '' }, false],
+    responses: { 'DELETE /api/workspaces/song': disconnectRequired(), ...disconnectResponses() }
+  });
+
+  assert.equal(await deleteWorkspace('song', h.ctx), false);
+  assert.equal(
+    h.calls.some(c => c.url.endsWith('/disconnect/commit')),
+    false
+  );
+  assert.equal(h.calls.filter(c => c.method === 'DELETE').length, 1);
+  assert.equal(h.changedCount(), 0);
+  assert.deepEqual(h.trashed, []);
+});
+
+test('a delete that fails after the disconnect is retried without disconnecting twice', async () => {
+  let deletes = 0;
+  const h = ctxFor({
+    rows: HOME_ROWS,
+    // Choose, confirm, retry after the error, confirm the re-shown review.
+    answers: [{ mode: '' }, true, true, true],
+    responses: {
+      'DELETE /api/workspaces/song': () => {
+        deletes += 1;
+        if (deletes === 1) return disconnectRequired();
+        if (deletes === 2) {
+          return {
+            ok: false,
+            status: 500,
+            text: async () => JSON.stringify({ error: 'disk busy' })
+          };
+        }
+        return { ok: true, status: 204 };
+      },
+      ...disconnectResponses()
+    }
+  });
+
+  assert.equal(await deleteWorkspace('song', h.ctx), true);
+  assert.deepEqual(
+    h.stepsOf('review-error').map(entry => entry.message),
+    ['disk busy']
+  );
+  assert.equal(h.calls.filter(c => c.url.endsWith('/disconnect/commit')).length, 1);
+  assert.equal(deletes, 3);
+  assert.ok(h.announced.includes('Song deleted.'));
+});
+
+test('a trashed or missing Home still gets the recovery notice, not a disconnect', async () => {
   const h = ctxFor({
     rows: HOME_ROWS,
     answers: [{ mode: '' }],
     responses: {
       'DELETE /api/workspaces/song': reviewRequired({
-        station: 'home',
+        workspace: 'song',
         action: 'Review disconnect',
-        message: 'Use Review disconnect in Music Home before deleting.'
+        slug: '',
+        message: 'Restore Music Home from Trash first.'
       })
     }
   });
 
   assert.equal(await deleteWorkspace('song', h.ctx), false);
   const [notice] = h.stepsOf('notice');
-  assert.match(notice.message, /Review disconnect/);
-  assert.deepEqual(notice.action, {
-    label: 'Open Assistant Home',
-    href: '/workspaces/music-home/assistant'
+  assert.match(notice.message, /Restore Music Home/);
+  assert.equal(notice.action, null);
+  assert.equal(h.calls.length, 1);
+});
+
+test('un-nesting a group only disconnects its linked member, then the group delete continues', async () => {
+  const rows = [
+    { id: 'g1', name: 'Marketing', kind: 'group' },
+    { id: 'home', name: 'Music Home', kind: 'group' },
+    { id: 'song', name: 'Song', parent_id: 'g1' }
+  ];
+  let attempts = 0;
+  const h = ctxFor({
+    rows,
+    answers: [{ mode: 'group_only' }, true],
+    responses: {
+      'DELETE /api/workspaces/g1': () =>
+        ++attempts === 1 ? disconnectRequired('song') : { ok: true, status: 204 },
+      ...disconnectResponses()
+    }
   });
-  assert.equal(h.calls.length, 1, 'no disconnect, no delete retry');
-  assert.equal(h.changedCount(), 0);
+
+  assert.equal(await deleteWorkspace('g1', h.ctx), true);
+  const [shown] = h.stepsOf('review');
+  assert.equal(shown.heading, 'Disconnect the linked project in "Marketing"?');
+  assert.equal(shown.confirmLabel, 'Disconnect');
+  assert.match(shown.summary, /kept as a standalone workspace/);
+  assert.match(shown.summary, /Deleting "Marketing" then continues/);
+  assert.deepEqual(shown.impact, ['Home rollup stops.', 'The project is preserved.']);
+  assert.equal(h.calls.filter(c => c.url.endsWith('/disconnect/commit')).length, 1);
+  assert.equal(
+    h.calls.some(c => c.method === 'DELETE' && c.url.includes('/workspaces/song')),
+    false,
+    'the member is kept'
+  );
+  assert.equal(attempts, 2, 'the group delete is retried');
+  assert.ok(h.announced.includes('Song disconnected from Music Home.'));
+});
+
+// ---------------------------------------------------------------------------
+// Home with everything inside it
+// ---------------------------------------------------------------------------
+
+test('deleting a Home with everything inside it removes the members first and the Home last', async () => {
+  const rows = [
+    { id: 'home', name: 'Music Home', kind: 'group' },
+    { id: 'song', name: 'Song', parent_id: 'home' },
+    { id: 'demo', name: 'Demo', parent_id: 'home' },
+    { id: 'w3', name: 'Gamma' }
+  ];
+  let songDeletes = 0;
+  const h = ctxFor({
+    rows,
+    answers: [{ mode: 'contents' }, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses({ linked: 2 }),
+      ...disconnectResponses(),
+      ...contractReview('song'),
+      'DELETE /api/workspaces/song': (_url, init) => {
+        songDeletes += 1;
+        if (songDeletes === 1) return groupRequirementReviewRequired();
+        assert.equal(init.headers['X-Ori-Group-Requirement-Review'], 'review-token');
+        return { ok: true, status: 200, json: async () => ({ trashed: true }) };
+      },
+      'DELETE /api/workspaces/demo': {
+        ok: true,
+        status: 200,
+        json: async () => ({ trashed: true })
+      }
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), true);
+
+  const [shown] = h.stepsOf('review');
+  assert.equal(shown.heading, 'Delete "Music Home" and everything inside it?');
+  assert.equal(shown.confirmLabel, 'Delete everything');
+  assert.match(shown.summary, /1 linked project will be disconnected and moved to the Trash/);
+  assert.match(shown.summary, /1 other workspace will move to the Trash, then the Home is removed/);
+  assert.match(shown.summary, /1 linked project outside this group is kept/);
+  assert.match(shown.summary, /restoring the Home does not reconnect its projects/);
+  assert.deepEqual(shown.impact, ['Linked projects: "Song".', 'Other workspaces inside: "Demo".']);
+
+  assert.deepEqual(h.calls.map(requestLine), [
+    'DELETE /api/workspaces/home',
+    'GET /api/workspaces/home/assistant-program',
+    'POST /api/workspaces/home/assistant-program/remove-home/review',
+    'GET /api/workspaces/home/assistant-program',
+    'POST /api/workspaces/home/assistant-program/disconnect/review',
+    'POST /api/workspaces/home/assistant-program/disconnect/commit',
+    'DELETE /api/workspaces/song',
+    'POST /api/workspaces/song/group-requirement/delete/review',
+    'DELETE /api/workspaces/song',
+    'DELETE /api/workspaces/demo',
+    'GET /api/workspaces/home/assistant-program',
+    'POST /api/workspaces/home/assistant-program/remove-home/review',
+    'POST /api/workspaces/home/assistant-program/remove-home/commit'
+  ]);
+  assert.deepEqual(h.trashed, [
+    { id: 'song', name: 'Song' },
+    { id: 'demo', name: 'Demo' },
+    { id: 'home', name: 'Music Home' }
+  ]);
+  assert.ok(h.announced.includes('Music Home and 2 workspaces inside it deleted.'));
+  assert.equal(h.changedCount(), 1);
+  assert.equal(h.stepsOf('close').length, 1);
+});
+
+test('a member that fails to delete keeps the Home, and a retry skips the members already gone', async () => {
+  const rows = [
+    { id: 'home', name: 'Music Home', kind: 'group' },
+    { id: 'song', name: 'Song', parent_id: 'home' },
+    { id: 'demo', name: 'Demo', parent_id: 'home' }
+  ];
+  let demoDeletes = 0;
+  const h = ctxFor({
+    rows,
+    // Choose, confirm, retry after the error, confirm the re-shown review.
+    answers: [{ mode: 'contents' }, true, true, true],
+    responses: {
+      'DELETE /api/workspaces/home': reviewRequired(),
+      ...homeResponses({ linked: 1 }),
+      ...disconnectResponses(),
+      'DELETE /api/workspaces/song': { ok: true, status: 204 },
+      'DELETE /api/workspaces/demo': () =>
+        ++demoDeletes === 1
+          ? {
+              ok: false,
+              status: 409,
+              text: async () => JSON.stringify({ error: 'Stop the running task first.' })
+            }
+          : { ok: true, status: 204 }
+    }
+  });
+
+  assert.equal(await deleteWorkspace('home', h.ctx), true);
+  assert.deepEqual(
+    h.stepsOf('review-error').map(entry => entry.message),
+    ['Stop the running task first.']
+  );
+  assert.equal(
+    h.calls.filter(c => c.url.endsWith('/disconnect/commit')).length,
+    1,
+    'Song went once'
+  );
+  assert.equal(
+    h.calls.filter(c => c.method === 'DELETE' && c.url.includes('/workspaces/song')).length,
+    1
+  );
+  assert.equal(demoDeletes, 2);
+  assert.equal(
+    h.calls.filter(c => c.url.endsWith('/remove-home/commit')).length,
+    1,
+    'the Home goes last, once'
+  );
 });
 
 test('a trashed Home gives recovery instructions rather than a broken review', async () => {
@@ -830,24 +1138,35 @@ test('a Home the assistant API cannot read is reported, not guessed at', async (
   );
 });
 
-test('bulk deletion keeps the review reason and reviews a shared Home once', async () => {
+test('bulk deletion reviews a shared Home once, then retries what it protected', async () => {
+  // The Home blocks both until it is removed; the retry then goes through.
+  const attempts = {};
+  const untilHomeRemoved = id => () => {
+    attempts[id] = (attempts[id] || 0) + 1;
+    return attempts[id] === 1 ? reviewRequired() : { ok: true, status: 204 };
+  };
   const h = ctxFor({
     rows: HOME_ROWS,
     answers: [true, true],
     responses: {
-      'DELETE /api/workspaces/w1': reviewRequired(),
-      'DELETE /api/workspaces/w2': reviewRequired(),
+      'DELETE /api/workspaces/w1': untilHomeRemoved('w1'),
+      'DELETE /api/workspaces/w2': untilHomeRemoved('w2'),
       ...homeResponses(),
       default: { ok: true, status: 204 }
     }
   });
 
-  assert.equal(await deleteWorkspaces(['w1', 'w2', 'w3'], h.ctx), 1);
-  assert.match(h.announced[0], /Deleted 1 of 3/);
-  assert.match(h.announced[0], /Review Home removal/);
+  assert.equal(await deleteWorkspaces(['w1', 'w2', 'w3'], h.ctx), 3);
+  assert.ok(
+    h.announced.some(message => /Review Home removal/.test(message)),
+    'the reason is kept'
+  );
+  assert.equal(h.announced.at(-1), '3 items deleted.');
   assert.equal(h.stepsOf('review').length, 1, 'one review for the one Home');
   assert.equal(h.calls.filter(c => c.url.endsWith('/remove-home/commit')).length, 1);
+  assert.equal(h.calls.filter(c => c.method === 'DELETE').length, 5, 'w1 and w2 are retried');
   assert.equal(h.stepsOf('close').length, 1);
+  assert.equal(h.toasted.length, 0);
 });
 
 test('bulk deletion counts a removed Home that was itself selected', async () => {
@@ -863,10 +1182,43 @@ test('bulk deletion counts a removed Home that was itself selected', async () =>
   assert.equal(await deleteWorkspaces(['home', 'w3'], h.ctx), 2);
 });
 
-test('bulk deletion does not choose arbitrarily between multiple Assistant Homes', async () => {
+test('bulk deletion disconnects and deletes each linked project in turn', async () => {
+  const rows = [
+    { id: 'home', name: 'Music Home', kind: 'group' },
+    { id: 'song', name: 'Song', parent_id: 'home' },
+    { id: 'song2', name: 'Song Two', parent_id: 'home' },
+    { id: 'w3', name: 'Gamma' }
+  ];
+  const deletes = {};
+  const blockedOnce = id => () => {
+    deletes[id] = (deletes[id] || 0) + 1;
+    return deletes[id] === 1 ? disconnectRequired(id) : { ok: true, status: 204 };
+  };
+  const h = ctxFor({
+    rows,
+    answers: [true, true, true],
+    responses: {
+      'DELETE /api/workspaces/song': blockedOnce('song'),
+      'DELETE /api/workspaces/song2': blockedOnce('song2'),
+      ...disconnectResponses(),
+      default: { ok: true, status: 204 }
+    }
+  });
+
+  assert.equal(await deleteWorkspaces(['song', 'song2', 'w3'], h.ctx), 3);
+  assert.deepEqual(
+    h.stepsOf('review').map(step => step.heading),
+    ['Delete "Song"?', 'Delete "Song Two"?']
+  );
+  assert.equal(h.calls.filter(c => c.url.endsWith('/disconnect/commit')).length, 2);
+  assert.equal(h.announced.at(-1), '3 items deleted.');
+  assert.equal(h.stepsOf('close').length, 1);
+});
+
+test('bulk deletion reports a Home it cannot read instead of guessing', async () => {
   const h = ctxFor({
     rows: HOME_ROWS,
-    answers: [true, true],
+    answers: [true, true, true],
     responses: {
       'DELETE /api/workspaces/w1': reviewRequired({ station: 'home', slug: 'music-home' }),
       'DELETE /api/workspaces/w2': reviewRequired({ station: 'other', slug: 'another-home' })
@@ -874,7 +1226,7 @@ test('bulk deletion does not choose arbitrarily between multiple Assistant Homes
   });
   assert.equal(await deleteWorkspaces(['w1', 'w2'], h.ctx), 0);
   assert.equal(h.stepsOf('review').length, 0);
-  assert.equal(h.stepsOf('notice').length, 0);
-  assert.equal(h.calls.length, 2);
+  assert.equal(h.stepsOf('notice').length, 2, 'each blocked item is reported in turn');
+  assert.match(h.toasted.at(-1).message, /Deleted 0 of 2/);
   assert.equal(h.stepsOf('close').length, 1);
 });

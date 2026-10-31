@@ -19,7 +19,9 @@
 // the dialog for each decision and talks to the API; the dialog only renders.
 // A deletion the server refuses because an Assistant Home is involved is
 // resolved in that same dialog — review, impact, commit — instead of bouncing
-// the user to another page through a native confirm.
+// the user to another page through a native confirm. That covers a linked
+// project (disconnected from its Home, then deleted), a Home with everything
+// inside it (members first, the Home last), and a Home nested in a group.
 
 import { workspacePageURL } from './workspace-routes.js';
 import { openDeleteDialog } from './workspace-delete-dialog.js';
@@ -28,6 +30,8 @@ const REVIEW_REQUIRED = 'assistant_program_review_required';
 const GROUP_REQUIREMENT_REVIEW_REQUIRED = 'group_requirement_review_required';
 const GROUP_REQUIREMENT_REVIEW_HEADER = 'X-Ori-Group-Requirement-Review';
 const REVIEW_HOME_REMOVAL = 'Review Home removal';
+const REVIEW_DISCONNECT = 'Review disconnect';
+const DELETE_CONTENTS = 'contents';
 // A group can hold more than one protected Home. Each reviewed removal is a
 // separate consent, so the retry loop is bounded rather than open-ended.
 const MAX_REVIEW_ROUNDS = 3;
@@ -234,6 +238,111 @@ export function descendantCount(rows, id) {
 // Assistant Home review
 // ---------------------------------------------------------------------------
 
+function plural(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function idempotencyKey(prefix) {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid
+    ? `${prefix}-${uuid}`
+    : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+/** The Home's live program, so a review can be bound to its current revision. */
+async function readStation(ctx, stationId) {
+  const program = await requestJSON(ctx, assistantProgramURL(stationId));
+  if (!program || !program.available || !program.is_station) {
+    throw new Error('The Assistant Home could not be read. Nothing was deleted.');
+  }
+  return program;
+}
+
+function stationName(ctx, stationId, program) {
+  return (
+    findRow(ctx, stationId)?.name ||
+    String(program?.declaration?.station_name || '').trim() ||
+    'its Assistant Home'
+  );
+}
+
+async function readDeleteResult(response) {
+  if (response.status === 204) return { trashed: false };
+  const data = await response.json().catch(() => ({}));
+  return { trashed: Boolean(data && data.trashed) };
+}
+
+/**
+ * DELETE one workspace that no Home protects any more.
+ *
+ * A Required template contract still asks for its own lifecycle review. It is
+ * obtained and consumed right here, so the one confirmation the user already
+ * gave covers the whole deletion; the server still verifies every step.
+ * Resolves `{ trashed }` and throws with the server's reason otherwise.
+ */
+async function deleteDetached(ctx, row, mode) {
+  const first = await ctxFetch(ctx)(deleteURL(row.id, mode), { method: 'DELETE' });
+  if (first.ok) return readDeleteResult(first);
+  const error = await requestError(first, 'Failed to delete');
+  const requested = error.groupRequirementReview;
+  if (!requested || requested.workspaceId !== row.id) throw error;
+  const payload = await requestJSON(
+    ctx,
+    `/api/workspaces/${encodeURIComponent(row.id)}/group-requirement/delete/review`,
+    { method: 'POST', body: { delete_sessions: requested.deleteSessions } }
+  );
+  const token = String(payload?.group_requirement_review?.review_token || '').trim();
+  if (!token) throw new Error('The Required template contract review was incomplete.');
+  const second = await ctxFetch(ctx)(deleteURL(row.id, mode), {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', [GROUP_REQUIREMENT_REVIEW_HEADER]: token }
+  });
+  if (!second.ok) throw await requestError(second, 'Reviewed deletion failed');
+  return readDeleteResult(second);
+}
+
+/**
+ * Disconnect `row` from the Home `stationId`. The review is taken fresh, bound
+ * to the Home's live revision, and committed at once. `state` remembers a
+ * finished disconnect so a retry after a later failure never repeats it.
+ */
+async function disconnect(ctx, session, row, stationId, state) {
+  if (state.disconnected) return;
+  session.busy(`Disconnecting ${row.name}…`);
+  const program = await readStation(ctx, stationId);
+  const review = await requestJSON(ctx, assistantProgramURL(stationId, '/disconnect/review'), {
+    method: 'POST',
+    body: { project_workspace_id: row.id, state_revision: Number(program.state_revision || 0) }
+  });
+  await requestJSON(ctx, assistantProgramURL(stationId, '/disconnect/commit'), {
+    method: 'POST',
+    body: { token: review.token, idempotency_key: idempotencyKey('disconnect') }
+  });
+  state.disconnected = true;
+}
+
+async function disconnectAndDelete(ctx, session, row, stationId, mode, state) {
+  await disconnect(ctx, session, row, stationId, state);
+  session.busy(`Deleting ${row.name}…`);
+  const result = await deleteDetached(ctx, row, mode);
+  if (result.trashed) trashed(ctx, row.id, row.name);
+}
+
+/** Remove a Home whose revision moved since it was previewed: fresh review, then commit. */
+async function removeHome(ctx, session, stationId, homeName) {
+  session.busy(`Removing ${homeName}…`);
+  const program = await readStation(ctx, stationId);
+  const impact = await requestJSON(ctx, assistantProgramURL(stationId, '/remove-home/review'), {
+    method: 'POST',
+    body: { state_revision: Number(program.state_revision || 0) }
+  });
+  const receipt = await requestJSON(ctx, assistantProgramURL(stationId, '/remove-home/commit'), {
+    method: 'POST',
+    body: { token: impact.token }
+  });
+  if (receipt && receipt.trashed) trashed(ctx, stationId, homeName);
+}
+
 /**
  * Resolve a delete the server refused because an Assistant Home is involved,
  * without leaving the dialog.
@@ -244,33 +353,123 @@ export function descendantCount(rows, id) {
  * here, in the dialog the user already has open, instead of on the Home's own
  * page after a native confirm and a navigation.
  *
- * Only "Review Home removal" is resolved in place. "Review disconnect" (a
- * linked project being deleted on its own) still belongs to the Home page, and
- * the dialog offers that page as a link rather than a redirect.
+ * "Review Home removal" removes the Home; with the "everything inside it"
+ * mode its members go first. "Review disconnect" disconnects the linked
+ * project and, unless it is only being un-nested, deletes it too.
  *
- * Resolves true once the Home was removed; false when nothing changed. The
- * caller owns closing the session either way.
+ * Resolves 'done' when the row itself is gone, 'retry' when a blocker inside
+ * the row was cleared and the original delete should run again, and false
+ * when nothing changed. The caller owns closing the session either way.
  */
-async function resolveRemovalReview(ctx, session, row, error) {
+async function resolveRemovalReview(ctx, session, row, error, mode = '') {
   const review = error.review || {};
   const homeHref = review.homeSlug ? workspacePageURL(review.homeSlug, ['assistant']) : '';
   announce(ctx, error.message);
-  if (review.action !== REVIEW_HOME_REMOVAL || !review.stationId || !homeHref) {
+  // A Home without a page is trashed or missing: there is nothing live to
+  // review against, so the server's recovery instructions are the answer.
+  const resolvable =
+    Boolean(review.stationId && homeHref) &&
+    (review.action === REVIEW_HOME_REMOVAL || review.action === REVIEW_DISCONNECT);
+  if (!resolvable) {
     await session.notice({
       message: error.message,
       action: homeHref ? { label: 'Open Assistant Home', href: homeHref } : null
     });
     return false;
   }
+  if (review.action === REVIEW_DISCONNECT) {
+    return resolveDisconnectReview(ctx, session, row, review, mode, homeHref);
+  }
+  return resolveHomeRemovalReview(ctx, session, row, review, mode);
+}
 
+async function resolveDisconnectReview(ctx, session, row, review, mode, homeHref) {
+  const nested = Boolean(review.workspaceId) && review.workspaceId !== row.id;
+  const target = nested ? findRow(ctx, review.workspaceId) : row;
+  if (!target) {
+    await session.notice({
+      message: 'The linked project could not be found on this page. Refresh and try again.',
+      action: { label: 'Open Assistant Home', href: homeHref }
+    });
+    return false;
+  }
+  // Un-nesting a group keeps its members, so a linked member is only
+  // disconnected; deleting the project itself, or a group with its contents,
+  // deletes the member as well.
+  const deleteTarget = !nested || mode === DELETE_CONTENTS;
+
+  session.busy('Checking what this deletion affects…');
+  let program;
+  let preview;
+  try {
+    program = await readStation(ctx, review.stationId);
+    preview = await requestJSON(ctx, assistantProgramURL(review.stationId, '/disconnect/review'), {
+      method: 'POST',
+      body: { project_workspace_id: target.id, state_revision: Number(program.state_revision || 0) }
+    });
+  } catch (err) {
+    announce(ctx, err.message);
+    await session.notice({ message: err.message || 'The disconnect could not be reviewed.' });
+    return false;
+  }
+  const homeName = stationName(ctx, review.stationId, program);
+
+  const sentences = [];
+  sentences.push(
+    nested
+      ? `"${row.name}" contains "${target.name}", which is linked to the Assistant Home "${homeName}".`
+      : `"${target.name}" is linked to the Assistant Home "${homeName}".`
+  );
+  sentences.push(
+    deleteTarget
+      ? 'It will be disconnected from the Home first, then moved to the Trash. Restoring it with Undo does not reconnect it.'
+      : 'It will be disconnected from the Home and kept as a standalone workspace.'
+  );
+  if (nested) sentences.push(`Deleting "${row.name}" then continues.`);
+  // The server's disconnect notes promise the project is preserved, which is
+  // true of the disconnect alone; when the deletion follows, say what the
+  // whole step does instead.
+  const impact = deleteTarget
+    ? [
+        `It stops appearing in the portfolio of "${homeName}", and Home handoffs to it stop.`,
+        'The workspace, its team, tasks and files move to the Trash together and can be restored with Undo.',
+        `"${homeName}" itself is not removed.`
+      ]
+    : Array.isArray(preview.impact)
+      ? preview.impact
+      : [];
+
+  const state = {};
+  const done = await session.review({
+    heading: nested
+      ? `Disconnect the linked project in "${row.name}"?`
+      : `Delete "${target.name}"?`,
+    summary: sentences.join(' '),
+    impact,
+    confirmLabel: deleteTarget ? 'Disconnect and delete' : 'Disconnect',
+    progress: 'Disconnecting…',
+    confirm: async () => {
+      if (deleteTarget) {
+        await disconnectAndDelete(ctx, session, target, review.stationId, '', state);
+      } else {
+        await disconnect(ctx, session, target, review.stationId, state);
+      }
+    }
+  });
+  if (!done) return false;
+  announce(
+    ctx,
+    deleteTarget ? `${target.name} deleted.` : `${target.name} disconnected from ${homeName}.`
+  );
+  return nested ? 'retry' : 'done';
+}
+
+async function resolveHomeRemovalReview(ctx, session, row, review, mode) {
   session.busy('Checking what this removal affects…');
   let program;
   let impact;
   try {
-    program = await requestJSON(ctx, assistantProgramURL(review.stationId));
-    if (!program || !program.available || !program.is_station) {
-      throw new Error('The Assistant Home could not be read. Nothing was deleted.');
-    }
+    program = await readStation(ctx, review.stationId);
     impact = await requestJSON(ctx, assistantProgramURL(review.stationId, '/remove-home/review'), {
       method: 'POST',
       body: { state_revision: Number(program.state_revision || 0) }
@@ -282,12 +481,16 @@ async function resolveRemovalReview(ctx, session, row, error) {
   }
 
   const isSelf = review.stationId === row.id;
-  const homeName =
-    (isSelf ? row.name : findRow(ctx, review.stationId)?.name) ||
-    String(program.declaration?.station_name || '').trim() ||
-    'this Assistant Home';
+  const homeName = isSelf ? row.name : stationName(ctx, review.stationId, program);
   const linked = Math.max(0, Number(impact.linked_project_count) || 0);
   const roles = Math.max(0, Number(impact.home_role_count) || 0);
+
+  // "Delete the group and everything inside it" on a Home: the members go
+  // first (linked ones disconnected, each through its own server review) and
+  // the Home last, all under this one confirmation.
+  if (isSelf && mode === DELETE_CONTENTS) {
+    return cascadeHomeDeletion(ctx, session, row, program, homeName, linked);
+  }
 
   // The server says whether the commit will move the Home to the Trash (the
   // normal case) or delete it outright (a platform with no trash). The dialog
@@ -306,12 +509,12 @@ async function resolveRemovalReview(ctx, session, row, error) {
   if (linked === 0) {
     sentences.push(
       roles > 0
-        ? `It has no linked projects, so removing it affects only the group and its ${roles} Home role${roles === 1 ? '' : 's'}.`
+        ? `It has no linked projects, so removing it affects only the group and its ${plural(roles, 'Home role')}.`
         : 'It has no linked projects, so removing it affects only the group.'
     );
   } else {
     sentences.push(
-      `Its ${linked} linked project${linked === 1 ? '' : 's'} will be kept as standalone workspace${linked === 1 ? '' : 's'}.`
+      `Its ${plural(linked, 'linked project')} will be kept as standalone workspace${linked === 1 ? '' : 's'}.`
     );
   }
   sentences.push(
@@ -347,7 +550,94 @@ async function resolveRemovalReview(ctx, session, row, error) {
   // authoritative, because only the commit knows what the store actually did.
   if (receipt && receipt.trashed) trashed(ctx, review.stationId, homeName);
   announce(ctx, `${homeName} removed.`);
-  return true;
+  return isSelf ? 'done' : 'retry';
+}
+
+/**
+ * Delete a Home and everything inside it under one confirmation.
+ *
+ * Members are deleted one at a time, linked projects disconnected first, each
+ * through the server's own review-then-commit; the Home is removed last with a
+ * review taken after its membership changed. Progress survives a failure: a
+ * second click skips what already went.
+ */
+async function cascadeHomeDeletion(ctx, session, row, program, homeName, linked) {
+  const members = ctxRows(ctx).filter(member => member && member.parent_id === row.id);
+  const linkedIds = new Set(
+    (Array.isArray(program.projects) ? program.projects : []).map(project => project && project.id)
+  );
+  const linkedMembers = members.filter(member => linkedIds.has(member.id));
+  const otherMembers = members.filter(member => !linkedIds.has(member.id));
+  const outside = Math.max(0, linked - linkedMembers.length);
+  const names = list => list.map(member => `"${member.name}"`).join(', ');
+
+  const sentences = [`"${homeName}" is an Assistant Home.`];
+  if (members.length === 0) {
+    sentences.push('Nothing is inside it, so only the Home itself is removed.');
+  } else {
+    const parts = [];
+    if (linkedMembers.length) {
+      parts.push(
+        `${plural(linkedMembers.length, 'linked project')} will be disconnected and moved to the Trash`
+      );
+    }
+    if (otherMembers.length) {
+      parts.push(`${plural(otherMembers.length, 'other workspace')} will move to the Trash`);
+    }
+    sentences.push(`${parts.join(', and ')}, then the Home is removed.`);
+  }
+  if (outside > 0) {
+    sentences.push(
+      `${plural(outside, 'linked project')} outside this group ${outside === 1 ? 'is' : 'are'} kept as standalone workspace${outside === 1 ? '' : 's'}.`
+    );
+  }
+  sentences.push(
+    'Each item is restored separately with Undo; restoring the Home does not reconnect its projects.'
+  );
+
+  const impact = [];
+  if (linkedMembers.length) impact.push(`Linked projects: ${names(linkedMembers)}.`);
+  if (otherMembers.length) impact.push(`Other workspaces inside: ${names(otherMembers)}.`);
+
+  const done = new Set();
+  const states = new Map();
+  const stateFor = id => {
+    if (!states.has(id)) states.set(id, {});
+    return states.get(id);
+  };
+  const memberMode = member => (isGroupRow(member) ? DELETE_CONTENTS : '');
+  const removed = await session.review({
+    heading: `Delete "${homeName}" and everything inside it?`,
+    summary: sentences.join(' '),
+    impact,
+    confirmLabel: 'Delete everything',
+    progress: 'Deleting…',
+    confirm: async () => {
+      for (const member of linkedMembers) {
+        if (done.has(member.id)) continue;
+        await disconnectAndDelete(
+          ctx,
+          session,
+          member,
+          row.id,
+          memberMode(member),
+          stateFor(member.id)
+        );
+        done.add(member.id);
+      }
+      for (const member of otherMembers) {
+        if (done.has(member.id)) continue;
+        session.busy(`Deleting ${member.name}…`);
+        const result = await deleteDetached(ctx, member, memberMode(member));
+        if (result.trashed) trashed(ctx, member.id, member.name);
+        done.add(member.id);
+      }
+      await removeHome(ctx, session, row.id, homeName);
+    }
+  });
+  if (!removed) return false;
+  announce(ctx, `${homeName} and ${plural(members.length, 'workspace')} inside it deleted.`);
+  return 'done';
 }
 
 // ---------------------------------------------------------------------------
@@ -433,12 +723,12 @@ async function performDelete(ctx, session, row, mode, round = 0) {
   }
 
   if (error && error.review && round < MAX_REVIEW_ROUNDS) {
-    const removed = await resolveRemovalReview(ctx, session, row, error);
-    if (!removed) {
+    const outcome = await resolveRemovalReview(ctx, session, row, error, mode);
+    if (!outcome) {
       session.close();
       return false;
     }
-    if (error.review.stationId === row.id) {
+    if (outcome === 'done') {
       session.close();
       await changed(ctx);
       return true;
@@ -498,8 +788,7 @@ export async function deleteWorkspaces(ids, ctx) {
 
   let deleted = 0;
   const failures = [];
-  const reviews = [];
-  const groupRequirementReviews = [];
+  const blocked = [];
   for (const id of selected) {
     const row = findRow(ctx, id);
     if (!row) continue;
@@ -509,9 +798,8 @@ export async function deleteWorkspaces(ids, ctx) {
       const res = await ctxFetch(ctx)(deleteURL(id, ''), { method: 'DELETE' });
       if (!res.ok) {
         const error = await requestError(res, 'Failed to delete');
-        failures.push(`${row.name}: ${error.message}`);
-        if (error.review) reviews.push({ row, error });
-        if (error.groupRequirementReview) groupRequirementReviews.push({ row, error });
+        if (error.review || error.groupRequirementReview) blocked.push({ row, error });
+        else failures.push(`${row.name}: ${error.message}`);
         continue;
       }
       if (res.status !== 204) {
@@ -523,6 +811,46 @@ export async function deleteWorkspaces(ids, ctx) {
       failures.push(row.name);
     }
   }
+  if (deleted > 0) await changed(ctx);
+
+  // Every refusal that a review can resolve is reviewed here, one after the
+  // other, in the order the items were selected. A Home removed for one entry
+  // also unblocks the others it protected, so those are simply retried.
+  const removedStations = new Set();
+  for (const { row, error } of blocked) {
+    let gone = false;
+    try {
+      if (error.review) {
+        const stationId = error.review.stationId;
+        let outcome = 'retry';
+        if (!removedStations.has(stationId)) {
+          outcome = await resolveRemovalReview(ctx, session, row, error, '');
+          if (outcome && error.review.action === REVIEW_HOME_REMOVAL)
+            removedStations.add(stationId);
+        }
+        if (outcome === 'done') {
+          gone = true;
+        } else if (outcome === 'retry') {
+          session.busy(`Deleting ${row.name}…`);
+          const result = await deleteDetached(ctx, row, '');
+          if (result.trashed) trashed(ctx, row.id, row.name);
+          gone = true;
+        }
+      } else {
+        gone = await resolveGroupRequirementDeletionReview(ctx, session, row, error, '');
+      }
+    } catch (err) {
+      failures.push(`${row.name}: ${err && err.message ? err.message : 'Failed to delete'}`);
+      continue;
+    }
+    if (gone) {
+      deleted += 1;
+      await changed(ctx);
+    } else {
+      failures.push(`${row.name}: not deleted`);
+    }
+  }
+  session.close();
 
   // Report what actually happened. The previous Tree implementation always
   // claimed the full count, so a server-side failure looked like a success and
@@ -534,38 +862,6 @@ export async function deleteWorkspaces(ids, ctx) {
     announce(ctx, message);
     toast(ctx, message, 'error');
   }
-  await changed(ctx);
-
-  // One Home blocked the batch: review it right here. Several: the toast has
-  // already named each, and choosing one to review would be guessing.
-  const stations = [...new Set(reviews.map(entry => entry.error.review.stationId).filter(Boolean))];
-  if (stations.length === 1) {
-    const first = reviews.find(entry => entry.error.review.stationId === stations[0]);
-    const removed = await resolveRemovalReview(ctx, session, first.row, first.error);
-    session.close();
-    if (removed) {
-      if (first.error.review.stationId === first.row.id) deleted += 1;
-      await changed(ctx);
-    }
-    return deleted;
-  }
-  if (stations.length === 0 && groupRequirementReviews.length === 1) {
-    const [first] = groupRequirementReviews;
-    const removed = await resolveGroupRequirementDeletionReview(
-      ctx,
-      session,
-      first.row,
-      first.error,
-      ''
-    );
-    session.close();
-    if (removed) {
-      deleted += 1;
-      await changed(ctx);
-    }
-    return deleted;
-  }
-  session.close();
   return deleted;
 }
 

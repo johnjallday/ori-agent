@@ -555,7 +555,9 @@ func respondRequiredGroupRequirementDeletionError(w http.ResponseWriter, err err
 	case errors.Is(err, grouprequirements.ErrLifecycleNotRequired):
 		_ = orihttp.RespondConflict(w, "This workspace has no Required template contract to review.")
 	case errors.Is(err, grouprequirements.ErrLifecycleConflict):
-		_ = orihttp.RespondConflict(w, "Assistant Program membership changed. Review disconnect or Home removal before deleting this workspace.")
+		_ = orihttp.RespondConflict(w, "This workspace is still connected to an Assistant Program Home. Disconnect it from the Home, or remove the Home, and then delete it.")
+	case errors.Is(err, grouprequirements.ErrLifecycleUnbindable):
+		_ = orihttp.RespondConflict(w, "The recorded template contract of this workspace has no operation record, so a deletion review cannot be bound to it. Recreate the workspace from its template, or remove its folder by hand.")
 	case errors.Is(err, grouprequirements.ErrReviewRequired), errors.Is(err, grouprequirements.ErrReviewStale):
 		_ = orihttp.RespondConflict(w, "The deletion review changed or expired. Review the Required template contract again.")
 	default:

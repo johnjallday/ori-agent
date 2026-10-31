@@ -130,8 +130,12 @@ func reviewedGroupRequirementOperationOwned(candidate *Workspace, operationDiges
 	if candidate == nil || strings.TrimSpace(operationDigest) == "" || candidate.GetAssistantProjectLink() != nil || candidate.GetAssistantProgramState() != nil {
 		return false
 	}
+	// The snapshot is bound by its operation digest, not by its validity. A
+	// creation that failed before the record was complete is exactly the case
+	// this rollback exists for; refusing a malformed record here left the
+	// half-made workspace behind as an undeletable orphan.
 	provenance := candidate.GetTemplateProvenance()
-	return provenance != nil && provenance.GroupRequirement != nil && provenance.GroupRequirement.StructurallyValid() &&
+	return provenance != nil && provenance.GroupRequirement != nil &&
 		provenance.GroupRequirement.OperationDigest == strings.TrimSpace(operationDigest)
 }
 
