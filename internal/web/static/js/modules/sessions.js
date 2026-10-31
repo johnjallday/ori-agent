@@ -677,6 +677,7 @@ const sessionManager = {
         checkedPath: '',
         message: '',
         duplicate: null,
+        related: null,
         pending: false
       });
       this.anchorCheckSequence++;
@@ -689,7 +690,7 @@ const sessionManager = {
       .getElementById('workspaceAnchorChoose')
       ?.addEventListener('click', () => void this.browseAnchorFolder());
     document.getElementById('workspaceAnchorOpenExisting')?.addEventListener('click', () => {
-      const owner = this.anchorChoice?.duplicate;
+      const owner = this.anchorChoice?.duplicate || this.anchorChoice?.related;
       if (owner?.workspace_id) this.openImportedWorkspace(owner.slug || owner.workspace_id);
     });
 
@@ -3860,6 +3861,7 @@ const sessionManager = {
       checkedPath: '',
       message: '',
       duplicate: null,
+      related: null,
       pending: false
     };
     const input = document.getElementById('workspaceAnchorPath');
@@ -3911,12 +3913,17 @@ const sessionManager = {
     }
     const status = document.getElementById('workspaceAnchorStatus');
     if (status) {
-      status.textContent = enabled ? this.anchorFolderProblem() : '';
+      status.textContent = enabled
+        ? this.anchorFolderProblem() ||
+          (choice?.related
+            ? `This folder is inside the anchor for workspace "${choice.related.name}". You can still use it, or open that workspace.`
+            : '')
+        : '';
       status.hidden = !status.textContent;
       status.classList.toggle('is-error', Boolean(choice?.message));
     }
     const open = document.getElementById('workspaceAnchorOpenExisting');
-    if (open) open.hidden = !enabled || !choice?.duplicate?.workspace_id;
+    if (open) open.hidden = !enabled || !(choice?.duplicate || choice?.related)?.workspace_id;
     const browse = document.getElementById('workspaceAnchorChoose');
     if (browse) browse.disabled = Boolean(choice?.pending);
     // Existing-project attachment and a folder anchor are distinct contracts.
@@ -3935,6 +3942,7 @@ const sessionManager = {
       checkedPath: '',
       message: '',
       duplicate: null,
+      related: null,
       pending: Boolean(path)
     });
     this.refreshWizardChrome();
@@ -3950,6 +3958,7 @@ const sessionManager = {
         return;
       if (response.ok && result.success && result.normalized_path) {
         choice.path = choice.checkedPath = result.normalized_path;
+        choice.related = result.related_workspace || null;
         input.value = result.normalized_path;
       } else {
         choice.message = result.error || 'Folder ownership could not be checked. Try again.';

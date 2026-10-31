@@ -217,8 +217,8 @@ test('wt demo: linked files and attachments are read with coverage; an attached 
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
-  await expect(page.locator('#personalAssistantFolderExplorer')).toBeVisible();
-  await page.locator('#personalAssistantExplorerBack').click();
+  // Add folder now opens the local preview directly; Tree + Chat is a
+  // separate user action. Do not depend on the former automatic explorer.
   await expect(page.locator('#personalAssistantFolderPreview')).toBeVisible();
   const attached = await send(
     'Summarize the lyrics file in Album-1 assets and the artwork attachment'

@@ -43,7 +43,33 @@ func (h *Handler) handleWorkspaceAnchorCheck(w http.ResponseWriter, r *http.Requ
 		respondAnchorError(w, err)
 		return
 	}
-	orihttp.WriteJSON(w, map[string]any{"success": true, "normalized_path": path})
+	orihttp.WriteJSON(w, map[string]any{"success": true, "normalized_path": path, "related_workspace": h.parentAnchorOwner(path)})
+}
+
+// Nested anchors are allowed. The chooser offers the closest parent workspace
+// as a non-blocking alternative, never treats its grant as inherited authority.
+func (h *Handler) parentAnchorOwner(path string) *projectconnection.FolderOwner {
+	ids, err := h.workspaceStore.List()
+	if err != nil {
+		return nil
+	}
+	var owner *projectconnection.FolderOwner
+	closest := 0
+	for _, id := range ids {
+		ws, err := h.workspaceStore.Get(id)
+		if err != nil || !ws.IsAnchored() {
+			continue
+		}
+		ref, err := ws.GetDirectoryReference(ws.AnchorDirectoryReferenceID())
+		if err != nil || ref.Path == path || len(ref.Path) <= closest {
+			continue
+		}
+		if _, inside := rewriteWorkspaceContentPath(path, ref.Path, ref.Path); inside {
+			closest = len(ref.Path)
+			owner = &projectconnection.FolderOwner{WorkspaceID: ws.ID, Name: ws.Name, Slug: ws.FolderSlug}
+		}
+	}
+	return owner
 }
 
 func (h *Handler) validateAnchorPath(input, ignoreID string) (string, *anchorPathError) {

@@ -150,6 +150,7 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - See `internal/llm/README.md` for detailed usage patterns
 
 **4. Agent Isolation & Workspaces**
+- **Workspace shapes**: [Anchored folder workspaces](docs/architecture/anchored-folder-workspace.md) separates external work folders from Ori's sidecar state; existing workspaces are never migrated.
 - **The user's agents live in the Workspace Directory**: `<root>/Agents/<Name>/agent_settings.json`, one folder per agent, next to the workspaces. The folder also holds the agent's uploaded image, `skills/`, `skills_state.json`, and `mcp_servers.json`, so copying or syncing the root carries the agents with it. There is no index file there.
 - `agent_settings.json` holds only the **definition** (role, capabilities, settings, metadata, appearance, paused). Runtime state — status, statistics, evolution — goes to `<data dir>/agent_state/<root key>/<Name>.json`, so ordinary use never rewrites a synced file. Writes are per agent, change-only, and atomic; an edit made on disk since Ori loaded the agent is a 409 (`agent_changed_on_disk`), never silently overwritten.
 - The data dir keeps a **system store** (`agents.json` + `agents/<Name>/`) for the built-in assistant. `store.CompositeStore` presents both as one `store.Store`, plus a read-only view of trusted workspaces' own agent copies (`<workspace>/agents/<slug>/`); editing one of those is a 409 (`workspace_owned_agent`) until it is added to your agents.

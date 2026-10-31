@@ -8638,6 +8638,23 @@ test('anchor folder check enables only the verified path and displays duplicate 
   assert.equal(manager.anchorChoice.checkedPath, '');
 });
 
+test('a parent-anchor hint offers Open it without blocking a nested anchor', async () => {
+  const { manager, elements } = anchorChoiceFixture(async () => ({
+    ok: true,
+    json: async () => ({
+      success: true,
+      normalized_path: '/external/Client/Invoices',
+      related_workspace: { workspace_id: 'parent', name: 'Client' }
+    })
+  }));
+  manager.setAnchorMode(true);
+  elements.get('workspaceAnchorPath').value = '/external/Client/Invoices';
+  await manager.checkAnchorPath();
+  assert.equal(manager.anchorFolderProblem(), '');
+  assert.equal(elements.get('workspaceAnchorOpenExisting').hidden, false);
+  assert.match(elements.get('workspaceAnchorStatus').textContent, /inside the anchor.*Client/);
+});
+
 test('stale anchor checks cannot validate a newer folder or a closed chooser', async () => {
   let resolve;
   const { manager, elements } = anchorChoiceFixture(
