@@ -186,6 +186,55 @@ func (f *oneCardFixture) stored(t *testing.T) FolderOffer {
 	return *offer
 }
 
+// An observer that hears a run settle (the workspace build reopening its Set it
+// up) is told only once the run has let go of the offer, so the Retry it offers
+// is one the service accepts instead of "a folder scan is already running".
+func TestFolderSetup_ObserversHearARunOnlyAfterItReleasesTheOffer(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		finish func() FolderSetupUpdate
+		want   func(FolderOffer) bool
+	}{
+		{"stopped", func() FolderSetupUpdate {
+			return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopInstallFailed, RunID: "new-run"}
+		}, func(o FolderOffer) bool { return o.Setup != nil && o.Setup.Status == FolderSetupStopped }},
+		{"finished", nil, func(o FolderOffer) bool { return o.Status == FolderOfferResolved }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOneCardFixture(t)
+			f.setup.finish = tc.finish
+			type heard struct {
+				offer   FolderOffer
+				running bool
+			}
+			settled := make(chan heard, 4)
+			f.service.AddSetupObserver(func(ctx context.Context, _ string, offer FolderOffer) {
+				if ctx.Err() != nil {
+					t.Errorf("the observer got a cancelled context: %v", ctx.Err())
+				}
+				settled <- heard{offer: offer, running: f.service.isRunning(offer.ID)}
+			})
+			if _, err := f.service.StartSetup(context.Background(), "local", f.offer.ID,
+				FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
+				t.Fatal(err)
+			}
+			var got heard
+			select {
+			case got = <-settled:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the run never settled")
+			}
+			if got.running || !tc.want(got.offer) {
+				t.Fatalf("observer heard running=%v status=%s setup=%+v", got.running, got.offer.Status, got.offer.Setup)
+			}
+			f.service.waitRuns()
+			if extra := len(settled); extra != 0 {
+				t.Fatalf("the run was heard %d more times", extra)
+			}
+		})
+	}
+}
+
 func TestFolderSetup_PendingCapabilityOfferCarriesItsPlan(t *testing.T) {
 	f := newOneCardFixture(t)
 	if f.offer.Plan == nil || f.offer.Plan.Digest != FolderPlanDigest(oneCardLines()) || len(f.offer.Plan.Lines) != 3 {
