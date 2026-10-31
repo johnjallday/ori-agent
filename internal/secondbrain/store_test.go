@@ -71,6 +71,48 @@ func TestRecord_ConnectRefusesAMalformedSource(t *testing.T) {
 	}
 }
 
+func TestSource_OriginDefaultsToConnectedAndOnlyCreatedByOriCounts(t *testing.T) {
+	var record Record
+	connected, err := record.Connect(testSource("/Users/sam/Brain"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connected.Origin != OriginConnected || connected.CreatedByOri() {
+		t.Fatalf("a source with no origin connected as %+v", connected)
+	}
+
+	created := testSource("/Users/sam/Set Up")
+	created.Origin = OriginCreatedByOri
+	got, err := record.Connect(created, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Origin != OriginCreatedByOri || !got.CreatedByOri() {
+		t.Fatalf("a created source connected as %+v", got)
+	}
+	if err := record.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := Record{Sources: []Source{testSource("/Users/sam/Old")}}
+	if err := legacy.Validate(); err != nil {
+		t.Fatalf("a record from before the field: %v", err)
+	}
+	legacy.DefaultOrigins()
+	if legacy.Sources[0].Origin != OriginConnected {
+		t.Fatalf("legacy origin = %q", legacy.Sources[0].Origin)
+	}
+
+	unknown := testSource("/Users/sam/Other")
+	unknown.Origin = "imported"
+	if _, err := (&Record{}).Connect(unknown, false); !errors.Is(err, ErrInvalidRecord) {
+		t.Fatalf("connect with an unknown origin: err = %v", err)
+	}
+	if err := (Record{Sources: []Source{unknown}}).Validate(); !errors.Is(err, ErrInvalidRecord) {
+		t.Fatalf("validate with an unknown origin: err = %v", err)
+	}
+}
+
 func TestRecord_AskStates(t *testing.T) {
 	var record Record
 	if got := record.Ask.State(); got != AskPending {

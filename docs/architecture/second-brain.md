@@ -171,12 +171,92 @@ write idempotent.
 | `POST /look/{lookID}/dismiss` | `{request_id}` | takes a result off Needs you |
 | `POST /disconnect` | `{request_id, if_version}` | status |
 
+## A second brain Ori set up
+
+Amendment for Issue #750. A user with no notes can answer the ask with **Set
+one up for me**: Ori creates a Markdown folder the user owns, connects it, and
+keeps two of its subfolders up to date. Everything above still holds for it;
+this section adds what differs.
+
+### Origin
+
+Each source records `origin`: `connected` (the user's own folder, never written
+to) or `created_by_ori`. A record from before the field reads as `connected`, so
+a missing value can never grant a write. A connected vault cannot become
+`created_by_ori`; granting that later would be a separate, consented change.
+
+### The created layout
+
+| Folder | Purpose | Ori writes? |
+|---|---|---|
+| `Inbox/` | Captures from chat, seeded follow-ups, unsorted notes | Yes |
+| `Daily/` | One note per day, from the HQ Journal | Yes |
+| `Projects/` | Things with an end date | No |
+| `Areas/` | Ongoing responsibilities | No |
+| `Resources/` | Reference material | No |
+| `Archive/` | Finished projects and areas | No |
+| `People/` | One note per person | Seeded once, then no |
+| `README.md` | How this second brain works with Ori | Written once |
+| `.obsidian/` | Minimal vault config so Obsidian opens it | Written once |
+
+### The note marker
+
+Every note Ori writes to `Inbox/` or `Daily/` opens with exactly this frontmatter:
+
+```yaml
+---
+ori: journal   # or capture, seed
+ori_hash: <sha256 of everything after the closing fence>
+---
+```
+
+`secondbrain.ReadMark` reports a note as `owned_by_ori` only when that block is
+the whole frontmatter and the hash matches the body. Anything else is
+`user_modified`: no marker, an edited body, or an added frontmatter key (an
+Obsidian tag, say). Whatever Ori cannot prove it wrote counts as the user's.
+"Written by Ori" counts every note still carrying the marker, edited or not.
+
+### The two write rules
+
+`secondbrain.Writer` is the only way anything reaches the folder after creation.
+
+1. **Only a `created_by_ori` source, and only directly in `Inbox/` or `Daily/`.**
+   A path must be `<Inbox|Daily>/<visible name>.md`. Any other source is
+   `ErrNotOwned`; any other path is `ErrOutsideOwnedFolders`, with no filesystem
+   call made.
+2. **Only a new note, or one still exactly as Ori wrote it.** Anything else is
+   `ErrUserModified` and the file is left alone. A symbolic link is never
+   followed or replaced, including an `Inbox` or `Daily` that is itself a link
+   (`os.Root` alone would allow one that stays inside the folder). An evicted
+   iCloud placeholder counts as the user's, because opening it would start a
+   download.
+
+Writes pin the folder and the subfolder as `os.Root` handles, recreate a deleted
+`Inbox/` or `Daily/`, and go through a temp file with fsync, mode 0644. A new
+note is hard-linked into place so it cannot clobber one saved a moment earlier;
+a filesystem without hard links re-checks and renames. A replacement re-checks
+just before the rename, which leaves only a very small window on a re-saved
+Journal note. Ori never deletes or renames a note; the only file it removes is
+its own temp file. `TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes`
+proves all this against a tree of user notes and links, comparing a byte, mode
+and mtime snapshot before and after.
+
+Disconnecting removes the record exactly as for any source, and with it the
+permission to write. The folder and everything in it stay on disk.
+
 ## What is never done
 
-- Writing anything under the notes folder, following a link, or opening a file
-  outside it.
+Never, for any source:
+
+- Following a link, or opening or writing a file outside the folder.
+- Editing, deleting or renaming a note the user wrote or changed.
 - Storing note contents, or sending more than the extracted signals to a model.
-- Giving the assistant's chat, a project agent, the Journal agent or the Daily
-  Brief a way to read the notes.
-- Running a look on a timer, or opening Obsidian itself (links are only links;
-  `ORI_NO_DESKTOP_OPEN` stays honoured).
+- Giving a project agent, the Journal agent, the Daily Brief or an MCP server a
+  way to read the notes.
+- Giving the assistant's chat a tool that reads the notes.
+- Writing on a timer, running a look on a timer, or opening Obsidian itself
+  (links are only links; `ORI_NO_DESKTOP_OPEN` stays honoured).
+
+Never, for a connected source:
+
+- Writing anything under the notes folder.

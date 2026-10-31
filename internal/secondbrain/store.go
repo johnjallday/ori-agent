@@ -46,6 +46,15 @@ const (
 	KindMarkdown = "markdown"
 )
 
+// Source origins. A connected folder is the user's own and is never written
+// to. A folder Ori created is the user's too, but Ori may keep writing to the
+// subfolders it announced (see Writer). A record from before the field means
+// connected, so missing can never grant a write.
+const (
+	OriginConnected    = "connected"
+	OriginCreatedByOri = "created_by_ori"
+)
+
 // Ask states, as the API reports them.
 const (
 	AskPending  = "pending"
@@ -97,6 +106,9 @@ type Source struct {
 	Path        string    `json:"path"`
 	ConnectedAt time.Time `json:"connected_at"`
 	RequestID   string    `json:"request_id"`
+	// Origin says how the folder came to be here: OriginConnected or
+	// OriginCreatedByOri. Only the second lets Ori write (FR12).
+	Origin string `json:"origin,omitempty"`
 	// LastLook is the latest finished look. Current is a look that is running,
 	// or one that failed after LastLook; a failure never erases LastLook.
 	LastLook *Look `json:"last_look,omitempty"`
@@ -186,6 +198,26 @@ func (r *Record) Connected() *Source {
 	return &r.Sources[0]
 }
 
+// origin is the source's origin with a missing one read as connected.
+func (s Source) origin() string {
+	if s.Origin == "" {
+		return OriginConnected
+	}
+	return s.Origin
+}
+
+// CreatedByOri reports whether Ori created this folder, which is the only
+// thing that lets it write there.
+func (s Source) CreatedByOri() bool { return s.Origin == OriginCreatedByOri }
+
+// DefaultOrigins fills in the origin a record from before the field left out,
+// for the codec to call as it reads the record.
+func (r *Record) DefaultOrigins() {
+	for index := range r.Sources {
+		r.Sources[index].Origin = r.Sources[index].origin()
+	}
+}
+
 // Connect makes source the connected folder (FR15). Connecting the folder
 // that is already connected changes nothing. Another folder replaces the
 // connected one only when replace says the user confirmed it.
@@ -193,6 +225,7 @@ func (r *Record) Connect(source Source, replace bool) (*Source, error) {
 	if err := validateSource(source); err != nil {
 		return nil, err
 	}
+	source.Origin = source.origin()
 	if current := r.Connected(); current != nil {
 		if current.ID == source.ID {
 			return current, nil
@@ -371,7 +404,8 @@ func validateSource(source Source) error {
 		!filepath.IsAbs(source.Path) || filepath.Clean(source.Path) != source.Path || strings.ContainsRune(source.Path, 0),
 		source.ID != SourceID(source.Path),
 		source.ConnectedAt.IsZero(),
-		!ValidRequestID(source.RequestID):
+		!ValidRequestID(source.RequestID),
+		source.origin() != OriginConnected && source.origin() != OriginCreatedByOri:
 		return ErrInvalidRecord
 	}
 	return nil

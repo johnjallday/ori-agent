@@ -1,0 +1,330 @@
+package secondbrain
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func createdSource(path string) Source {
+	source := testSource(path)
+	source.Origin = OriginCreatedByOri
+	return source
+}
+
+func newWriterFor(t *testing.T, root string) *Writer {
+	t.Helper()
+	source := createdSource(root)
+	writer, err := NewWriter(&source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writer
+}
+
+// writerTree is a folder Ori created, holding the user's notes, an Ori note
+// the user has edited, an intact Ori note, and links pointing out of the folder
+// and across it, beside a folder that is not part of it.
+type writerTree struct {
+	base, vault, outside string
+}
+
+func newWriterTree(t *testing.T) writerTree {
+	t.Helper()
+	base := canonicalTemp(t)
+	tree := writerTree{base: base, vault: filepath.Join(base, "Second Brain"), outside: filepath.Join(base, "outside")}
+	writeNote(t, tree.outside, "secret.md", outsideSentinel)
+	writeNote(t, tree.vault, ".obsidian/app.json", "{}")
+	writeNote(t, tree.vault, "README.md", "how this works\n")
+	writeNote(t, tree.vault, "Projects/Album.md", "# Album\n")
+	writeNote(t, tree.vault, "Inbox/mine.md", "# Written by the user\n")
+	writeNote(t, tree.vault, "Inbox/ori-note.md", string(RenderNote(NoteKindCapture, []byte("a capture\n"))))
+	writeNote(t, tree.vault, "Daily/2026-10-30.md", string(RenderNote(NoteKindJournal, []byte("the journal\n")))+"and a line the user added\n")
+	if err := os.Symlink(filepath.Join(tree.outside, "secret.md"), filepath.Join(tree.vault, "Inbox", "linked-note.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(tree.vault, "README.md"), filepath.Join(tree.vault, "Inbox", "linked-inside.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tree.outside, filepath.Join(tree.vault, "Inbox", "linked-folder")); err != nil {
+		t.Fatal(err)
+	}
+	return tree
+}
+
+// TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes is
+// the write-side twin of TestRead_NeverLeavesTheFolderNeverFollowsALinkNeverWrites
+// (FR21). Each refusal leaves a byte, mode and mtime snapshot of the whole tree
+// unchanged, and each allowed write changes only its own path.
+func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *testing.T) {
+	tree := newWriterTree(t)
+	writer := newWriterFor(t, tree.vault)
+	body := []byte("new text\n")
+
+	refusals := map[string]struct {
+		rel  string
+		want error
+	}{
+		"a user's note":                 {"Inbox/mine.md", ErrUserModified},
+		"an Ori note the user edited":   {"Daily/2026-10-30.md", ErrUserModified},
+		"a link pointing out":           {"Inbox/linked-note.md", ErrOutsideOwnedFolders},
+		"a link pointing inside":        {"Inbox/linked-inside.md", ErrOutsideOwnedFolders},
+		"through a linked folder":       {"Inbox/linked-folder/new.md", ErrOutsideOwnedFolders},
+		"the root README":               {"README.md", ErrOutsideOwnedFolders},
+		"another folder":                {"Projects/new.md", ErrOutsideOwnedFolders},
+		"Obsidian's settings":           {".obsidian/new.md", ErrOutsideOwnedFolders},
+		"climbing out":                  {"Inbox/../../outside/new.md", ErrOutsideOwnedFolders},
+		"climbing across":               {"Inbox/../Projects/new.md", ErrOutsideOwnedFolders},
+		"an absolute path":              {filepath.Join(tree.outside, "new.md"), ErrOutsideOwnedFolders},
+		"the folder itself":             {"Inbox", ErrOutsideOwnedFolders},
+		"a nested path":                 {"Inbox/sub/new.md", ErrOutsideOwnedFolders},
+		"a hidden note":                 {"Inbox/.hidden.md", ErrOutsideOwnedFolders},
+		"not Markdown":                  {"Inbox/script.sh", ErrOutsideOwnedFolders},
+		"a backslash":                   {`Inbox\new.md`, ErrOutsideOwnedFolders},
+		"a different case of the owned": {"inbox/new.md", ErrOutsideOwnedFolders},
+		"a control character":           {"Inbox/a\nb.md", ErrOutsideOwnedFolders},
+		"nothing":                       {"", ErrOutsideOwnedFolders},
+	}
+	for name, tc := range refusals {
+		t.Run(name, func(t *testing.T) {
+			before := snapshot(t, tree.base)
+			if _, err := writer.Write(tc.rel, NoteKindCapture, body); !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if after := snapshot(t, tree.base); after != before {
+				t.Fatalf("a refused write changed the tree.\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
+	}
+
+	allowed := func(t *testing.T, rel string, wantReplaced bool) {
+		t.Helper()
+		protected := withoutPath(snapshot(t, tree.base), filepath.Join(filepath.Base(tree.vault), filepath.FromSlash(rel)), filepath.Join(filepath.Base(tree.vault), filepath.Dir(filepath.FromSlash(rel))))
+		result, err := writer.Write(rel, NoteKindCapture, body)
+		if err != nil {
+			t.Fatalf("Write(%s): %v", rel, err)
+		}
+		if result.Rel != rel || result.Replaced != wantReplaced {
+			t.Fatalf("result = %+v", result)
+		}
+		after := withoutPath(snapshot(t, tree.base), filepath.Join(filepath.Base(tree.vault), filepath.FromSlash(rel)), filepath.Join(filepath.Base(tree.vault), filepath.Dir(filepath.FromSlash(rel))))
+		if after != protected {
+			t.Fatalf("writing %s changed something else.\nbefore:\n%s\nafter:\n%s", rel, protected, after)
+		}
+		content, err := os.ReadFile(filepath.Join(tree.vault, filepath.FromSlash(rel))) // #nosec G304 -- the test's own temp tree
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mark := ReadMark(content); !mark.OwnedByOri || mark.Kind != NoteKindCapture {
+			t.Fatalf("written note mark = %+v", mark)
+		}
+		info, err := os.Lstat(filepath.Join(tree.vault, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
+			t.Fatalf("mode = %v, want 0644", info.Mode().Perm())
+		}
+	}
+	allowed(t, "Inbox/new.md", false)
+	allowed(t, "Daily/2026-10-31.md", false)
+	allowed(t, "Inbox/ori-note.md", true)
+
+	assertNoTempFiles(t, tree.vault)
+}
+
+func TestWrite_AConnectedSourceIsNeverWritten(t *testing.T) {
+	tree := newWriterTree(t)
+	before := snapshot(t, tree.base)
+	for name, origin := range map[string]string{"connected": OriginConnected, "missing": "", "unknown": "somebody_else"} {
+		t.Run(name, func(t *testing.T) {
+			source := testSource(tree.vault)
+			source.Origin = origin
+			if _, err := NewWriter(&source); !errors.Is(err, ErrNotOwned) {
+				t.Fatalf("err = %v, want ErrNotOwned", err)
+			}
+		})
+	}
+	if _, err := NewWriter(nil); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("nil source: err = %v", err)
+	}
+	if after := snapshot(t, tree.base); after != before {
+		t.Fatalf("the tree changed.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestWrite_RefusesAnOwnedFolderThatIsALink(t *testing.T) {
+	for name, target := range map[string]func(tree writerTree) string{
+		"to a folder outside": func(tree writerTree) string { return tree.outside },
+		"to Projects, inside": func(tree writerTree) string { return filepath.Join(tree.vault, "Projects") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := newWriterTree(t)
+			if err := os.RemoveAll(filepath.Join(tree.vault, "Daily")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target(tree), filepath.Join(tree.vault, "Daily")); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshot(t, tree.base)
+			if _, err := newWriterFor(t, tree.vault).Write("Daily/2026-10-31.md", NoteKindJournal, []byte("x")); !errors.Is(err, ErrOutsideOwnedFolders) {
+				t.Fatalf("err = %v, want ErrOutsideOwnedFolders", err)
+			}
+			if after := snapshot(t, tree.base); after != before {
+				t.Fatalf("the tree changed.\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
+	}
+}
+
+func TestWrite_RefusesARootThatIsALink(t *testing.T) {
+	tree := newWriterTree(t)
+	link := filepath.Join(tree.base, "Linked Brain")
+	if err := os.Symlink(tree.vault, link); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, tree.base)
+	if _, err := newWriterFor(t, link).Write("Inbox/new.md", NoteKindCapture, []byte("x")); !errors.Is(err, ErrNotDirectory) {
+		t.Fatalf("err = %v, want ErrNotDirectory", err)
+	}
+	if after := snapshot(t, tree.base); after != before {
+		t.Fatalf("the tree changed.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestWrite_RecreatesAnOwnedFolderTheUserDeleted(t *testing.T) {
+	tree := newWriterTree(t)
+	for _, folder := range []string{FolderInbox, FolderDaily} {
+		if err := os.RemoveAll(filepath.Join(tree.vault, folder)); err != nil {
+			t.Fatal(err)
+		}
+		rel := folder + "/note.md"
+		if _, err := newWriterFor(t, tree.vault).Write(rel, NoteKindCapture, []byte("x\n")); err != nil {
+			t.Fatalf("Write(%s): %v", rel, err)
+		}
+		if _, err := os.Lstat(filepath.Join(tree.vault, folder, "note.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestWrite_AReplacementIsRefusedOnceTheUserEditsTheNote(t *testing.T) {
+	tree := newWriterTree(t)
+	writer := newWriterFor(t, tree.vault)
+	rel := "Daily/2026-10-31.md"
+	full := filepath.Join(tree.vault, "Daily", "2026-10-31.md")
+
+	if _, err := writer.Write(rel, NoteKindJournal, []byte("first\n")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := writer.Write(rel, NoteKindJournal, []byte("re-saved\n"))
+	if err != nil || !result.Replaced {
+		t.Fatalf("a re-save of an intact note = %+v, %v", result, err)
+	}
+	content, err := os.ReadFile(full) // #nosec G304 -- the test's own temp tree
+	if err != nil || !strings.HasSuffix(string(content), "re-saved\n") {
+		t.Fatalf("content = %q, %v", content, err)
+	}
+
+	edited := string(content) + "the user's line\n"
+	if err := os.WriteFile(full, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(rel, NoteKindJournal, []byte("again\n")); !errors.Is(err, ErrUserModified) {
+		t.Fatalf("err = %v, want ErrUserModified", err)
+	}
+	content, err = os.ReadFile(full) // #nosec G304 -- the test's own temp tree
+	if err != nil || string(content) != edited {
+		t.Fatalf("the user's edit was lost: %q, %v", content, err)
+	}
+}
+
+func TestWrite_RefusesAnOverSizeNoteAndAnOverSizeExistingOne(t *testing.T) {
+	tree := newWriterTree(t)
+	writer := newWriterFor(t, tree.vault)
+	before := snapshot(t, tree.base)
+	if _, err := writer.Write("Inbox/huge.md", NoteKindCapture, make([]byte, MaxNoteBytes)); !errors.Is(err, ErrNoteTooLarge) {
+		t.Fatalf("err = %v, want ErrNoteTooLarge", err)
+	}
+	if after := snapshot(t, tree.base); after != before {
+		t.Fatalf("the tree changed.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	writeNote(t, tree.vault, "Inbox/big.md", strings.Repeat("x", MaxNoteBytes+1))
+	if _, err := writer.Write("Inbox/big.md", NoteKindCapture, []byte("x")); !errors.Is(err, ErrUserModified) {
+		t.Fatalf("err = %v, want ErrUserModified", err)
+	}
+}
+
+func TestWrite_RefusesAnUnknownKind(t *testing.T) {
+	tree := newWriterTree(t)
+	if _, err := newWriterFor(t, tree.vault).Write("Inbox/new.md", "other", []byte("x")); !errors.Is(err, ErrInvalidNote) {
+		t.Fatalf("err = %v, want ErrInvalidNote", err)
+	}
+}
+
+func TestPublish_NeverClobbersANoteSavedDuringTheWrite(t *testing.T) {
+	tree := newWriterTree(t)
+	root, err := pinFolder(tree.vault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	dir, err := pinOwnedFolder(root, FolderInbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = dir.Close() }()
+	temp, err := writeTemp(dir, RenderNote(NoteKindCapture, []byte("Ori's\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = dir.Remove(temp) }()
+
+	// The checks said the name was free; the user saves a note there before
+	// the write is published.
+	full := writeNote(t, tree.vault, "Inbox/raced.md", "the user's note\n")
+	if err := publish(dir, temp, "raced.md", false); !errors.Is(err, ErrUserModified) {
+		t.Fatalf("err = %v, want ErrUserModified", err)
+	}
+	content, err := os.ReadFile(full) // #nosec G304 -- the test's own temp tree
+	if err != nil || string(content) != "the user's note\n" {
+		t.Fatalf("the note was clobbered: %q, %v", content, err)
+	}
+}
+
+// withoutPath drops the lines for one note and its folder (whose size and
+// mtime a new entry changes) from a snapshot.
+func withoutPath(snapshot string, paths ...string) string {
+	var kept []string
+	for _, line := range strings.Split(snapshot, "\n") {
+		skip := false
+		for _, p := range paths {
+			if strings.HasPrefix(line, p+" ") {
+				skip = true
+			}
+		}
+		if !skip {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+func assertNoTempFiles(t *testing.T, root string) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(entry.Name(), writeTempPrefix) {
+			t.Errorf("temp file left behind: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
