@@ -26,6 +26,9 @@ type folderDigestFixture struct {
 	ids     int
 	service *FolderDigestService
 	store   *FolderDigestStore
+	// services is every service newService built, so teardown can wait for
+	// the setup runs they started.
+	services []*FolderDigestService
 }
 
 func newFolderDigestFixture(t *testing.T) *folderDigestFixture {
@@ -41,12 +44,38 @@ func newFolderDigestFixture(t *testing.T) *folderDigestFixture {
 	f := &folderDigestFixture{knowledgeFixture: kf, home: home, now: time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)}
 	f.store = NewFolderDigestStore(NewKnowledgeStore(kf.resolver(), kf.folder))
 	f.service = f.newService()
+	// Registered after the store and the temp dirs, so it runs before they are
+	// closed and removed: a setup run a test started but did not wait for
+	// still finishes against them.
+	t.Cleanup(func() { f.waitSetupRuns(t) })
 	return f
+}
+
+func (f *folderDigestFixture) waitSetupRuns(t *testing.T) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		for _, service := range f.services {
+			service.waitRuns()
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Error("a setup run was still going when the test ended")
+	}
 }
 
 // newService builds a service over the same store, as a restarted server
 // would: the in-memory offer paths are gone.
 func (f *folderDigestFixture) newService() *FolderDigestService {
+	service := f.buildService()
+	f.services = append(f.services, service)
+	return service
+}
+
+func (f *folderDigestFixture) buildService() *FolderDigestService {
 	return NewFolderDigestService(f.store, FolderDigestDeps{
 		ValidateRoot: func(raw string) (string, error) {
 			resolved, err := filepath.EvalSymlinks(raw)

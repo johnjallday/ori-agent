@@ -209,10 +209,30 @@ func (s *FolderDigestService) claimRun(offerID string) bool {
 	return true
 }
 
+// releaseRun ends an offer's claim, then tells the setup observers the
+// settlement the run reached while it held it, if any.
 func (s *FolderDigestService) releaseRun(offerID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.running, offerID)
+	parked, ok := s.settled[offerID]
+	delete(s.settled, offerID)
+	observers := s.setupObserversLocked()
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	// The run's own context is cancelled by now; the observers still act on
+	// its behalf.
+	ctx := context.WithoutCancel(parked.ctx)
+	for _, observe := range observers {
+		observe(ctx, parked.userID, parked.offer)
+	}
+}
+
+// waitRuns blocks until every setup run this service started has returned and
+// its settlement has been told.
+func (s *FolderDigestService) waitRuns() {
+	s.runs.Wait()
 }
 
 // StartSetup is the click on Set up. It records the yes while the offer is
@@ -474,6 +494,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		return s.viewFor(ctx, userID, started, binding.Paused), nil
 	}
 	// The run outlives the request: keep its values, drop its cancellation.
+	s.runs.Add(1)
 	go s.runSetup(context.WithoutCancel(ctx), userID, started, path, plan, entryName)
 	return s.viewFor(ctx, userID, started, binding.Paused), nil
 }
@@ -500,6 +521,7 @@ func hasPlanLineKind(lines []FolderPlanLine, kind string) bool {
 // existing journey verification settle the offer. A run that cannot be proved
 // to have made a workspace for this exact folder never resolves the offer.
 func (s *FolderDigestService) runSetup(parent context.Context, userID string, offer FolderOffer, path string, plan FolderSetupPlan, entryName string) {
+	defer s.runs.Done()
 	defer s.releaseRun(offer.ID)
 	ctx, cancel := context.WithTimeout(parent, folderSetupTimeout)
 	defer cancel()
