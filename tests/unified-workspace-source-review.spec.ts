@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 import {
   prepareFolderCreationRuntime,
@@ -443,6 +444,7 @@ test.describe('ordinary attached-source review on a real isolated host', () => {
             : route.continue()
         );
       await place.click();
+      await openMapReceiptDetails(page, 'Workspace ready');
       await expect(
         review.getByRole('heading', { name: 'Workspace created', exact: true })
       ).toBeVisible({ timeout: 15000 });
@@ -607,6 +609,7 @@ test.describe('ordinary attached-source review on a real isolated host', () => {
         await expect(place).toBeEnabled();
         expect(await snapshot(request)).toEqual(before);
         await place.click();
+        await openMapReceiptDetails(page, 'Workspace ready');
       } else {
         await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
         await review

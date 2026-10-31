@@ -7,6 +7,7 @@ import {
   musicHomeResourceCounts as resourceCounts,
   openMusicHomeReview
 } from './helpers/music-home-placement';
+import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 import { withOwnedBrowserZoom } from './helpers/owned-browser-zoom';
 const expect = baseExpect.configure({ timeout: 60_000 });
 
@@ -198,6 +199,7 @@ async function exercise(page: Page) {
     expect(setups).toBe(0);
     expect(writes).toBe(0);
     await canvas.press('Enter');
+    await openMapReceiptDetails(page, /Home (ready|kept)/);
   } else {
     await expect(place).toBeDisabled();
     if (variant === 'tree')

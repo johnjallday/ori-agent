@@ -134,6 +134,7 @@ export default defineConfig([
       'internal/web/static/js/modules/home-song-suggestions.js',
       'internal/web/static/js/modules/home-song-offer.js',
       'internal/web/static/js/modules/home-song-placement.js',
+      'internal/web/static/js/modules/workspace-creation-transition.js',
       'internal/web/static/js/modules/resource-catalog.js',
       'internal/web/static/js/modules/chat-auto-scroll.js',
       'internal/web/static/js/modules/chat-state-ui.js',

@@ -267,6 +267,10 @@ separate expiry spec waits for the real server-issued 30-minute hold deadline;
 its seed/review passes neither change the clock nor fabricate a selection.
 
 Use isolated HOME/data, synthetic directories and explicit no-provider launch.
+The assistant conversation stays open behind this review and is only suspended
+once the user chooses the Map; see the map-first handoff in
+[unified workspace placement](unified-workspace-placement.md).
+
 Desktop native picker and actual 200% zoom checks remain required observations,
 not claims inferred from scripted picker responses. Before confirming, a
 reviewer must identify the workspace, agent, folder, first action and monitoring

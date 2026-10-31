@@ -228,7 +228,9 @@ export async function confirmManagedHomeReview(manager, creator, reviewedKey, pl
         'Confirmation delivery is unknown or incomplete. Read the original saved status; do not confirm again. Closing is not undo.';
     }
     if (placement && manager.workspaceCreatorContext === context) {
-      manager.resumeManagedHomeReview?.(context, placement);
+      manager.resumeManagedHomeReview?.(context, placement, intent =>
+        act(manager, creator, context, intent)
+      );
     }
     if (manager.workspaceCreatorContext === context) void syncManagedHomeReview(manager, creator);
   }

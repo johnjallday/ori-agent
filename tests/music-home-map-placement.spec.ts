@@ -4,6 +4,7 @@ import {
   musicHomeResourceCounts as resourceCounts,
   openMusicHomeReview
 } from './helpers/music-home-placement';
+import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -322,6 +323,8 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     expect(partial.agents.length).toBeGreaterThanOrEqual(before.agents.length);
     expect(partial.agents.length).toBeLessThanOrEqual(before.agents.length + 1);
     expect(partial.positions).toEqual(before.positions);
+    // Partial setup says so on the Map; Continue is the way to its recovery.
+    await openMapReceiptDetails(page, 'Setup stopped');
     await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Retry position only', exact: true })
@@ -340,11 +343,15 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     return;
   }
   if (fault === 'accept') {
+    await openMapReceiptDetails(page, 'not confirmed');
     await expect(review).toContainText('Confirmation delivery is unknown');
     await expect(page.locator('#personalAssistantFolderOfferNote')).toBeHidden();
     await expect(page.locator('#personalAssistantFolderReviewStatus')).toBeHidden();
     await page.screenshot({ path: `${evidence}/unknown-confirmation.png` });
     await review.getByRole('button', { name: 'Read saved status', exact: true }).click();
+  } else {
+    // The verified result reports on the Map; Details is the full receipt.
+    await openMapReceiptDetails(page, /Home (ready|kept)/);
   }
   await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible({
     timeout: 60_000
@@ -356,6 +363,7 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     const original = (await (await request.get('/api/personal-assistant/folder-digest')).json())
       .folder_digest.offer;
     await secondTab.keyboard.press('Enter');
+    await openMapReceiptDetails(secondTab, /Home (ready|kept)/);
     await expect(
       secondReview.getByRole('heading', { name: 'Home ready', exact: true })
     ).toBeVisible();
@@ -595,7 +603,9 @@ test('single-song chat hand-off: the manager offers the song and it stands where
   await expect.poll(() => setupPosts).toBe(1);
   if (twoFiles) {
     // Two project files: the open stops before anything is made, and the
-    // manager asks which file, in the card. Nothing was placed.
+    // manager asks which file, in the card. Nothing was placed. The Map says so
+    // first, and Continue brings back the card that asks.
+    await openMapReceiptDetails(page, 'was not opened');
     const choices = offers.locator('[data-home-offer-choice]');
     await expect(choices).toHaveCount(2, { timeout: 90_000 });
     await expect(offers).toContainText(
@@ -612,7 +622,9 @@ test('single-song chat hand-off: the manager offers the song and it stands where
     await page.keyboard.press('Enter');
     await expect.poll(() => setupPosts).toBe(2);
   }
-  // The drawer is back on the running card, then the manager's receipt.
+  // The Map stays clear while it runs; the receipt is one explicit click away.
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await openMapReceiptDetails(page, 'opened');
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   await expect(offers).toContainText('Portfolio Manager opened it', { timeout: 90_000 });
   await expect(offers).toContainText('Ori Music Demo is open');
@@ -932,6 +944,7 @@ test(`collection ${collectionOnMap ? 'map' : 'automatic'} setup finishes a Home 
   if (collectionOnMap) await page.locator('[data-ws-map-viewport]').press('Enter');
   else await review.getByRole('button', { name: 'Set up Home', exact: true }).click();
   const accepted = await (await acceptedResponse).json();
+  if (collectionOnMap) await openMapReceiptDetails(page, /Home (ready|kept)/);
   await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible({
     timeout: 60_000
   });

@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 import { prepareFolderCreationRuntime, abandonOpenBuild } from './helpers/folder-first-runtime';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
@@ -652,6 +653,7 @@ test('Blank full review closes for placement and one canvas Enter creates the re
   )
     await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
+  await openMapReceiptDetails(page, 'Workspace created');
   await expect(
     review.getByRole('heading', { name: 'Workspace created', exact: true })
   ).toBeVisible();
