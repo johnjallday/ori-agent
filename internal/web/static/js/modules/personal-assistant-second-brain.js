@@ -37,27 +37,97 @@ export function secondBrainAskView(secondBrain, available) {
     secondBrain?.status === 'not_connected' &&
     secondBrain?.ask?.state === 'pending';
   const vault = Array.isArray(secondBrain?.detected) ? secondBrain.detected[0] : null;
+  // "I don't keep notes" is no longer offered: Set one up for me takes its
+  // place. A decline already on record (decision "none") is unaffected.
+  const setUp = { id: 'setup', label: 'Set one up for me', style: 'outline' };
   if (vault?.id && vault?.name) {
     return {
       show,
-      line: `Do you keep a second brain? I found your Obsidian vault "${vault.name}". If you let me read it, I'll tell you what's open.`,
+      line: `Do you keep a second brain? I found your Obsidian vault "${vault.name}". Let me read it, or I can set one up for you.`,
       actions: [
         { id: 'read', label: `Read ${vault.name}`, style: 'primary', vaultId: vault.id },
         { id: 'choose', label: 'Another folder…', style: 'outline' },
-        { id: 'later', label: 'Not now', style: 'link' },
-        { id: 'none', label: "I don't keep notes", style: 'link' }
+        setUp,
+        { id: 'later', label: 'Not now', style: 'link' }
       ]
     };
   }
   return {
     show,
-    line: "Do you keep a second brain, notes in Obsidian or a folder of Markdown? Point me at it and I'll tell you what's open.",
+    line: 'Do you keep a second brain? Point me at it, or I can set one up for you.',
     actions: [
       { id: 'choose', label: 'Choose folder…', style: 'primary' },
-      { id: 'later', label: 'Not now', style: 'link' },
-      { id: 'none', label: "I don't keep notes", style: 'link' }
+      setUp,
+      { id: 'later', label: 'Not now', style: 'link' }
     ]
   };
+}
+
+export const DEFAULT_SECOND_BRAIN_NAME = 'Second Brain';
+
+// secondBrainFolderNameProblem is the one sentence for a name that is not one
+// plain folder name, or '' when it is fine. The server checks it again.
+export function secondBrainFolderNameProblem(name) {
+  const text = String(name ?? '').trim();
+  if (!text) return 'Give the folder a name.';
+  if (
+    text.length > 255 ||
+    text === '.' ||
+    text === '..' ||
+    text.startsWith('.') ||
+    text.endsWith('.') ||
+    /[/\\:]/.test(text) ||
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f]/.test(text)
+  ) {
+    return 'Choose a simple folder name, without slashes.';
+  }
+  return '';
+}
+
+// secondBrainSetupWhereView is the first step of setting one up: where. Only
+// a parent is picked here, through the same folder dialog or typed path as
+// connecting a folder (FR4).
+export function secondBrainSetupWhereView({ pickerOff = '', message = '' } = {}) {
+  return {
+    title: 'Where should I set up your second brain?',
+    note: 'Pick the folder it goes in. Documents is a good place.',
+    pickLabel: 'Choose where…',
+    pickerOff: String(pickerOff || ''),
+    message: String(message || '')
+  };
+}
+
+// secondBrainSetupConfirmView is the second step: the name, and one sentence
+// saying what Ori will write, before it writes anything (FR4, design).
+export function secondBrainSetupConfirmView(parent, name, { message = '' } = {}) {
+  const folder = String(parent?.name || 'that folder');
+  const named = String(name ?? DEFAULT_SECOND_BRAIN_NAME).trim() || DEFAULT_SECOND_BRAIN_NAME;
+  return {
+    title: `Set up "${named}" in ${folder}?`,
+    path: String(parent?.path || ''),
+    nameLabel: 'Folder name',
+    name: String(name ?? DEFAULT_SECOND_BRAIN_NAME),
+    lines: [
+      "I'll keep Inbox and Daily up to date; everything else is yours.",
+      'It starts with your open follow-ups and the people I already know. Plain Markdown that opens in Obsidian or any editor, and stays yours if you stop using Ori.'
+    ],
+    message: String(message || ''),
+    actions: [
+      { id: 'create', label: 'Set it up', style: 'primary' },
+      { id: 'back', label: 'Back', style: 'outline' },
+      { id: 'later', label: 'Not now', style: 'link' }
+    ]
+  };
+}
+
+// secondBrainOpenLink is the link that opens a folder Ori set up as a vault in
+// Obsidian; '' for any other connection. It is a link only: Ori never opens
+// the app itself.
+export function secondBrainOpenLink(secondBrain) {
+  const source = secondBrain?.source;
+  const link = String(source?.open_link || '');
+  return source?.origin === 'created_by_ori' && link.startsWith('obsidian://open?') ? link : '';
 }
 
 // secondBrainAnsweredLine is the assistant's short reply to a decline. It is
@@ -84,6 +154,7 @@ export function secondBrainChooserView(secondBrain, { pickerOff = '', message = 
     title: vaults.length ? 'Which notes should I read?' : 'Where do you keep your notes?',
     vaults,
     pickLabel: 'Pick another folder…',
+    setUp: { id: 'setup', label: 'Set one up for me', style: 'outline' },
     pickerOff: String(pickerOff || ''),
     message: String(message || '')
   };
@@ -144,7 +215,9 @@ export function secondBrainItemGroups(items) {
       id: item.id,
       text: item.text,
       due: String(item.due || ''),
-      checked: item.suggested === true
+      checked: item.suggested === true,
+      // Copied from a follow-up the user already has: shown, never added again.
+      seeded: item.seeded === true
     });
   }
   return groups;
@@ -227,11 +300,19 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
       state: 'not_connected',
       title: 'Your notes are not connected.',
       detail:
-        'Point Ori at an Obsidian vault or a folder of Markdown and it tells you what is open.',
-      actions: [{ id: 'choose', label: 'Choose folder…', style: 'primary' }]
+        'Point Ori at an Obsidian vault or a folder of Markdown and it tells you what is open, or let it set one up for you.',
+      actions: [
+        { id: 'choose', label: 'Choose folder…', style: 'primary' },
+        { id: 'setup', label: 'Set one up for me', style: 'outline' }
+      ]
     };
   }
-  const kind = source.kind === 'obsidian' ? 'Obsidian' : 'Markdown folder';
+  const kind =
+    source.origin === 'created_by_ori'
+      ? 'Set up by Ori'
+      : source.kind === 'obsidian'
+        ? 'Obsidian'
+        : 'Markdown folder';
   const disconnect = { id: 'disconnect', label: 'Disconnect', style: 'link' };
   if (secondBrain.status === 'missing') {
     return {
@@ -243,12 +324,68 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
   }
   const last = secondBrain.last_look;
   const since = last?.at ? sinceLabel(last.at, now) : '';
+  const created = source.origin === 'created_by_ori';
   return {
     state: 'connected',
     title: `Connected · ${source.name}`,
     detail: since ? `${kind} · last look ${since}` : `${kind} · not looked at yet`,
+    // A folder Ori set up says what Ori wrote in it and takes a quick note.
+    written: created ? secondBrainWrittenLine(secondBrain.written_by_ori, now) : '',
+    capture: created,
     actions: [{ id: 'again', label: 'Look again', style: 'primary' }, disconnect]
   };
+}
+
+// secondBrainWrittenLine says what Ori has put in Inbox and Daily (FR16).
+export function secondBrainWrittenLine(written, now = Date.now()) {
+  const count = Number(written?.count) || 0;
+  if (count === 0) return 'Ori has not written to your notes yet.';
+  const notes = count === 1 ? '1 note' : `${count} notes`;
+  const when = written?.last_at ? sinceLabel(written.last_at, now) : '';
+  return when ? `Written by Ori: ${notes} · last write ${when}` : `Written by Ori: ${notes}`;
+}
+
+// secondBrainProjectsView lists the folders under Projects in a second brain
+// Ori set up, each with Make a workspace (FR18). Nothing is made until the
+// person presses it and then Creates in the form it opens.
+export function secondBrainProjectsView(secondBrain) {
+  if (secondBrain?.source?.origin !== 'created_by_ori') return [];
+  return (Array.isArray(secondBrain.projects) ? secondBrain.projects : [])
+    .filter(project => project?.name && !/[\\/]/.test(project.name))
+    .map(project => ({
+      name: String(project.name),
+      action: {
+        id: 'workspace',
+        label: 'Make a workspace',
+        style: 'outline',
+        ariaLabel: `Make ${project.name} a workspace`
+      }
+    }));
+}
+
+// secondBrainProjectLink opens Create Workspace on a project, by its name: the
+// page looks the folder up itself, so a link never carries a path.
+export function secondBrainProjectLink(name) {
+  return `/?create=1&second_brain_project=${encodeURIComponent(String(name || ''))}`;
+}
+
+export const CAPTURE_MAX_CHARACTERS = 4000;
+
+// secondBrainCaptureProblem is the one sentence for a note that cannot be
+// saved, or '' when it can. The server checks it again.
+export function secondBrainCaptureProblem(text) {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return 'Write the note first.';
+  if (Array.from(trimmed).length > CAPTURE_MAX_CHARACTERS) {
+    return `A note is at most ${CAPTURE_MAX_CHARACTERS.toLocaleString('en-US')} characters.`;
+  }
+  return '';
+}
+
+// secondBrainCaptureReceipt says where a captured note went.
+export function secondBrainCaptureReceipt(capture) {
+  const name = String(capture?.name || '').trim();
+  return name ? `Saved to Inbox as ${name}.` : 'Saved to Inbox.';
 }
 
 // secondBrainQuestRequested says the mission card sent the user here.
@@ -287,9 +424,14 @@ export function newRequestID(prefix = 'sb') {
 const state = {
   available: false,
   secondBrain: null,
-  phase: 'idle', // ask | answered | chooser | consent | reading | result | failed
+  phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed
   pinned: false,
   chosen: null, // { detectedId | selectionToken, name, path }
+  // Setting one up: the parent the user picked ({ selectionToken, name, path})
+  // once there is one, the folder name typed for it, and a refusal to show.
+  setup: { parent: null, name: DEFAULT_SECOND_BRAIN_NAME, message: '', requestId: '' },
+  // The capture box on a second brain Ori set up.
+  capture: { text: '', requestId: '', message: '', link: '' },
   look: null,
   model: null,
   busy: false,
@@ -313,6 +455,7 @@ const state = {
 };
 
 let pathEntry = null;
+let setupPathEntry = null;
 
 function elements() {
   const root = document.getElementById('personalAssistantSecondBrain');
@@ -413,14 +556,226 @@ function renderManage(body) {
   if (state.secondBrain?.source?.path) {
     body.append(node('p', 'pa-second-brain__path', state.secondBrain.source.path));
   }
+  if (view.written) body.append(node('p', 'pa-folder__note', view.written));
+  const openLink = secondBrainOpenLink(state.secondBrain);
+  if (openLink) {
+    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
+    open.href = openLink;
+    open.title = 'Open this folder as a vault in Obsidian';
+    const line = node('p', 'pa-folder__note');
+    line.append(open);
+    body.append(line);
+  }
+  if (view.capture) renderCapture(body);
+  renderProjects(body);
   body.append(
     actionRow(view.actions, action => {
       if (action.id === 'again') void lookAgain();
       else if (action.id === 'disconnect') void disconnect();
+      else if (action.id === 'setup') startSetup();
       else {
         state.message = '';
         go('chooser');
       }
+    })
+  );
+}
+
+// renderProjects lists the project folders with Make a workspace, which opens
+// Create Workspace on that folder (FR18). It creates nothing itself.
+function renderProjects(body) {
+  const projects = secondBrainProjectsView(state.secondBrain);
+  if (!projects.length) return;
+  body.append(node('p', 'pa-folder__note', 'Projects'));
+  const list = node('ul', 'pa-second-brain__vaults');
+  list.setAttribute('aria-label', 'Projects');
+  projects.forEach(project => {
+    const item = node('li', 'pa-second-brain__vault');
+    item.append(node('span', 'pa-second-brain__vault-detail', project.name));
+    const make = button(project.action, () => makeWorkspace(project.name));
+    make.setAttribute('aria-label', project.action.ariaLabel);
+    item.append(make);
+    list.append(item);
+  });
+  body.append(list);
+}
+
+// makeWorkspace opens Create Workspace with the project's folder chosen, by
+// name; the page that owns the form looks the folder up.
+function makeWorkspace(name) {
+  const manager = window.sessionManager;
+  if (typeof manager?.openSecondBrainProjectWorkspace === 'function') {
+    void manager.openSecondBrainProjectWorkspace(name);
+    return;
+  }
+  window.location.assign(secondBrainProjectLink(name));
+}
+
+// renderCapture is the small box on the card of a folder Ori set up: a note
+// goes to Inbox as its own file, the same place "note this" in chat writes.
+function renderCapture(body) {
+  const box = node('div', 'pa-second-brain__capture');
+  // A block label, so the box can fill the card instead of the label's width.
+  const label = node('label', 'pa-folder__note d-block', 'Note something for your Inbox ');
+  const field = node('textarea', 'modern-input w-100');
+  field.rows = 2;
+  field.maxLength = CAPTURE_MAX_CHARACTERS;
+  field.value = state.capture.text;
+  field.disabled = state.busy;
+  field.dataset.secondBrainCapture = '';
+  field.addEventListener('input', () => {
+    state.capture.text = field.value;
+  });
+  label.append(field);
+  box.append(label);
+  if (state.capture.message) {
+    const line = node('p', 'pa-folder__note', state.capture.message);
+    line.setAttribute('role', 'status');
+    if (state.capture.link) {
+      const open = node('a', 'pa-second-brain__open', ' Open in Obsidian');
+      open.href = state.capture.link;
+      line.append(open);
+    }
+    box.append(line);
+  }
+  box.append(
+    actionRow([{ id: 'capture', label: 'Save to Inbox', style: 'outline' }], () => void capture())
+  );
+  body.append(box);
+}
+
+// capture saves the note in the box. One request id per note, kept until it
+// is saved, so a retry after a lost answer replays instead of writing twice.
+async function capture() {
+  if (state.busy) return;
+  const problem = secondBrainCaptureProblem(state.capture.text);
+  if (problem) {
+    state.capture.message = problem;
+    state.capture.link = '';
+    render();
+    return;
+  }
+  state.busy = true;
+  state.capture.message = '';
+  state.capture.link = '';
+  if (!state.capture.requestId) state.capture.requestId = newRequestID('capture');
+  render();
+  const { ok, payload } = await request('/capture', {
+    method: 'POST',
+    body: { text: state.capture.text, request_id: state.capture.requestId }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    state.capture.message = secondBrainError(payload, 'That note was not saved. Try again.');
+    render();
+    return;
+  }
+  state.capture = {
+    text: '',
+    requestId: '',
+    message: secondBrainCaptureReceipt(payload.capture),
+    link: String(payload.capture?.link || '').startsWith('obsidian://open?')
+      ? payload.capture.link
+      : ''
+  };
+  await refresh();
+  render();
+  announce();
+}
+
+// startSetup opens Set one up for me at its first step, from the ask, the
+// chooser, or the Notes station's card.
+function startSetup() {
+  // One request id for the whole attempt: a retry after a lost answer replays
+  // the first call on the server instead of making a second folder.
+  state.setup = {
+    parent: null,
+    name: DEFAULT_SECOND_BRAIN_NAME,
+    message: '',
+    requestId: newRequestID('create')
+  };
+  showError('');
+  go('setup');
+}
+
+function renderSetup(body) {
+  if (state.setup.parent) {
+    renderSetupConfirm(body);
+    return;
+  }
+  const view = secondBrainSetupWhereView({
+    pickerOff: state.pickerOff,
+    message: state.setup.message
+  });
+  body.append(node('p', 'pa-specialist-offer__headline', view.title));
+  body.append(node('p', 'pa-folder__note', view.note));
+  if (view.message) body.append(node('p', 'pa-folder__note', view.message));
+  if (!view.pickerOff) {
+    body.append(
+      actionRow(
+        [{ id: 'pick', label: view.pickLabel, style: 'primary' }],
+        () => void pickFolder('setup')
+      )
+    );
+  }
+  if (!setupPathEntry) {
+    setupPathEntry = createFolderPathEntry({
+      title: 'Choose where to set up your second brain',
+      placeholder: '~/Documents',
+      onSelect: selection =>
+        chooseParent({
+          selectionToken: selection.selectionToken,
+          name: baseName(selection.path),
+          path: selection.path
+        })
+    });
+  }
+  setupPathEntry.setNote(view.pickerOff);
+  setupPathEntry.setDisabled(state.busy);
+  body.append(setupPathEntry.element);
+  body.append(actionRow([{ id: 'back', label: 'Back', style: 'link' }], back));
+}
+
+function renderSetupConfirm(body) {
+  const view = secondBrainSetupConfirmView(state.setup.parent, state.setup.name, {
+    message: state.setup.message
+  });
+  body.append(node('p', 'pa-specialist-offer__headline', view.title));
+  if (view.path) body.append(node('p', 'pa-second-brain__path', view.path));
+  const field = node('label', 'pa-folder__note');
+  field.append(node('span', '', `${view.nameLabel} `));
+  const input = node('input', 'modern-input');
+  input.type = 'text';
+  input.value = view.name;
+  input.maxLength = 255;
+  input.disabled = state.busy;
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('spellcheck', 'false');
+  input.dataset.secondBrainName = '';
+  input.addEventListener('input', () => {
+    state.setup.name = input.value;
+  });
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void createSecondBrain();
+    }
+  });
+  field.append(input);
+  body.append(field);
+  if (view.message) body.append(node('p', 'pa-folder__note is-error', view.message));
+  const list = node('ul', 'pa-folder__receipt pa-second-brain__consent');
+  list.dataset.layout = 'list';
+  view.lines.forEach(line => list.append(node('li', '', line)));
+  body.append(list);
+  body.append(
+    actionRow(view.actions, action => {
+      if (action.id === 'create') void createSecondBrain();
+      else if (action.id === 'back') {
+        state.setup.parent = null;
+        state.setup.message = '';
+        render();
+      } else void decide('later');
     })
   );
 }
@@ -452,9 +807,13 @@ function renderChooser(body) {
   }
   if (!view.pickerOff) {
     body.append(
-      actionRow([{ id: 'pick', label: view.pickLabel, style: 'outline' }], () => void pickFolder())
+      actionRow(
+        [{ id: 'pick', label: view.pickLabel, style: 'outline' }],
+        () => void pickFolder('connect')
+      )
     );
   }
+  body.append(actionRow([view.setUp], startSetup));
   if (!pathEntry) {
     pathEntry = createFolderPathEntry({
       title: 'Choose your notes folder',
@@ -520,6 +879,15 @@ function renderLook(body) {
   if (view.alsoNoticed)
     body.append(node('p', 'pa-folder__note pa-second-brain__noticed', view.alsoNoticed));
   if (state.receipt) body.append(node('p', 'pa-folder__first-look', state.receipt));
+  const openLink = secondBrainOpenLink(state.secondBrain);
+  if (openLink) {
+    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
+    open.href = openLink;
+    open.title = 'Open this folder as a vault in Obsidian';
+    const line = node('p', 'pa-folder__note');
+    line.append(open);
+    body.append(line);
+  }
   const actions = [];
   if (view.primary) actions.push(view.primary);
   if (state.pinned && !state.receipt)
@@ -559,15 +927,19 @@ function renderEverything(view) {
       box.type = 'checkbox';
       box.value = item.id;
       box.checked = item.checked;
-      box.disabled = state.busy || view.acted;
+      box.disabled = state.busy || view.acted || item.seeded;
       label.append(box, document.createTextNode(` ${item.text}`));
       if (item.due) label.append(node('span', 'pa-second-brain__due', ` · ${item.due}`));
+      if (item.seeded)
+        label.append(node('span', 'pa-second-brain__due', ' · already in your follow-ups'));
       fieldset.append(label);
     });
     form.append(fieldset);
   });
   details.append(form);
-  if (!view.acted) {
+  // Nothing to add when every item is one Ori copied from a follow-up.
+  const addable = view.groups.some(group => group.items.some(item => !item.seeded));
+  if (!view.acted && addable) {
     details.append(
       actionRow([{ id: 'add-selected', label: 'Add selected', style: 'outline' }], () => {
         const ids = Array.from(form.querySelectorAll('input[type="checkbox"]:checked')).map(
@@ -616,6 +988,7 @@ function render() {
     if (state.phase === 'ask') renderAsk(els.body);
     else if (state.phase === 'answered') renderAnswered(els.body);
     else if (state.phase === 'chooser') renderChooser(els.body);
+    else if (state.phase === 'setup') renderSetup(els.body);
     else if (state.phase === 'consent') renderConsent(els.body);
     else if (state.phase === 'manage') renderManage(els.body);
     else renderLook(els.body);
@@ -676,15 +1049,28 @@ async function chooseFolder(chosen) {
   go('consent');
 }
 
-async function pickFolder() {
+// chooseParent keeps the folder the user picked to set a second brain up in.
+function chooseParent(parent) {
+  state.setup.parent = parent;
+  state.setup.message = '';
+  showError('');
+  setPhase('setup');
+}
+
+// pickFolder opens the native dialog for connecting a folder ('connect') or
+// for the parent of a second brain Ori sets up ('setup').
+async function pickFolder(purpose = 'connect') {
   if (state.busy) return;
+  const setup = purpose === 'setup';
   state.busy = true;
   render();
   try {
     const response = await fetch(FOLDER_PATH_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ title: 'Choose your notes folder' })
+      body: JSON.stringify({
+        title: setup ? 'Choose where to set up your second brain' : 'Choose your notes folder'
+      })
     });
     const result = (await readJSON(response)) || {};
     const off = folderDialogOffNote(result);
@@ -692,11 +1078,13 @@ async function pickFolder() {
       state.pickerOff = off;
     } else if (response.ok && result.selected && result.selection_token) {
       state.busy = false;
-      await chooseFolder({
+      const picked = {
         selectionToken: result.selection_token,
         name: baseName(result.path),
         path: String(result.path || '')
-      });
+      };
+      if (setup) chooseParent(picked);
+      else await chooseFolder(picked);
       return;
     } else if (!response.ok) {
       showError(
@@ -708,7 +1096,50 @@ async function pickFolder() {
   } finally {
     state.busy = false;
   }
-  setPhase('chooser');
+  setPhase(setup ? 'setup' : 'chooser');
+}
+
+// createSecondBrain asks the server to make the folder inside the picked
+// parent, seed it, connect it, and start the first look. The request carries
+// the parent's selection token and the name, never a path.
+async function createSecondBrain() {
+  const parent = state.setup.parent;
+  if (state.busy || !parent) return;
+  const problem = secondBrainFolderNameProblem(state.setup.name);
+  if (problem) {
+    state.setup.message = problem;
+    render();
+    return;
+  }
+  const name = String(state.setup.name).trim();
+  state.busy = true;
+  state.setup.message = '';
+  showError('');
+  render();
+  const { ok, payload } = await request('/create', {
+    method: 'POST',
+    body: { selection_token: parent.selectionToken, name, request_id: state.setup.requestId }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    if (payload.needs_pick) state.setup.parent = null;
+    if (payload.needs_pick || payload.repair === 'choose_folder') {
+      state.setup.message = secondBrainError(payload);
+      render();
+      return;
+    }
+    showError(secondBrainError(payload));
+    render();
+    return;
+  }
+  state.secondBrain = payload.second_brain || state.secondBrain;
+  state.chosen = { name, path: parent.path };
+  state.receipt = '';
+  state.look = { state: 'running', look_id: payload.look_id };
+  state.polls = 0;
+  setPhase('reading', { focus: false });
+  announce();
+  schedulePoll();
 }
 
 async function decide(decision) {
@@ -741,6 +1172,8 @@ function onAskAction(action) {
   } else if (action.id === 'choose') {
     state.message = '';
     go('chooser');
+  } else if (action.id === 'setup') {
+    startSetup();
   } else {
     void decide(action.id);
   }
@@ -1032,6 +1465,15 @@ function init() {
       state.message = '';
       state.history = [];
       setPhase('chooser');
+    },
+    // Set one up for me, straight to its first step, as the conversation's
+    // latest reply.
+    openSetup: async () => {
+      if (!state.secondBrain) await load();
+      state.pinned = false;
+      state.latest = true;
+      state.history = [];
+      startSetup();
     },
     // A folder card in the conversation named an Obsidian vault: show what
     // connecting it means, as the conversation's latest reply (FR10).

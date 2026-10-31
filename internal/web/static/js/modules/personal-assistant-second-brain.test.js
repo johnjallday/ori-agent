@@ -3,19 +3,30 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  CAPTURE_MAX_CHARACTERS,
+  DEFAULT_SECOND_BRAIN_NAME,
   followUpReceiptLine,
   newRequestID,
   secondBrainAnsweredLine,
   secondBrainAskView,
   secondBrainAvailable,
+  secondBrainCaptureProblem,
+  secondBrainCaptureReceipt,
   secondBrainChooserView,
   secondBrainConsentView,
   secondBrainError,
+  secondBrainFolderNameProblem,
   secondBrainItemGroups,
   secondBrainLookView,
   secondBrainManageView,
+  secondBrainOpenLink,
   secondBrainPlacement,
+  secondBrainProjectLink,
+  secondBrainProjectsView,
   secondBrainQuestRequested,
+  secondBrainSetupConfirmView,
+  secondBrainSetupWhereView,
+  secondBrainWrittenLine,
   sinceLabel,
   suggestedLabel
 } from './personal-assistant-second-brain.js';
@@ -49,12 +60,17 @@ test('the connection card says connected, missing, or not set up', () => {
     now
   );
   assert.match(folder.detail, /^Markdown folder · /);
+  const setUp = secondBrainManageView(
+    { ...connected, source: { name: 'My Brain', kind: 'obsidian', origin: 'created_by_ori' } },
+    now
+  );
+  assert.match(setUp.detail, /^Set up by Ori · /);
 
   const none = secondBrainManageView({ status: 'not_connected' }, now);
   assert.equal(none.state, 'not_connected');
   assert.deepEqual(
     none.actions.map(action => action.label),
-    ['Choose folder…']
+    ['Choose folder…', 'Set one up for me']
   );
 });
 
@@ -95,29 +111,201 @@ test('the ask belongs to an active relationship only', () => {
   assert.equal(secondBrainAvailable(null), false);
 });
 
-test('with a detected vault the ask names it and offers four answers', () => {
+test('with a detected vault the ask names it and offers read, set up, or not now', () => {
   const view = secondBrainAskView(detected, true);
   assert.equal(view.show, true);
   assert.equal(
     view.line,
-    'Do you keep a second brain? I found your Obsidian vault "Second Brain". If you let me read it, I\'ll tell you what\'s open.'
+    'Do you keep a second brain? I found your Obsidian vault "Second Brain". Let me read it, or I can set one up for you.'
   );
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Read Second Brain', 'Another folder…', 'Not now', "I don't keep notes"]
+    ['Read Second Brain', 'Another folder…', 'Set one up for me', 'Not now']
   );
   assert.equal(view.actions[0].vaultId, 'v_1');
 });
 
-test('with nothing detected the ask points at a folder', () => {
+test('with nothing detected the ask points at a folder or offers to set one up', () => {
   const view = secondBrainAskView({ ...detected, detected: [] }, true);
   assert.equal(
     view.line,
-    "Do you keep a second brain, notes in Obsidian or a folder of Markdown? Point me at it and I'll tell you what's open."
+    'Do you keep a second brain? Point me at it, or I can set one up for you.'
   );
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Choose folder…', 'Not now', "I don't keep notes"]
+    ['Choose folder…', 'Set one up for me', 'Not now']
+  );
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['choose', 'setup', 'later']
+  );
+});
+
+test('the ask no longer offers "I don\'t keep notes", but a decline on record still reads', () => {
+  for (const secondBrain of [detected, { ...detected, detected: [] }]) {
+    const ids = secondBrainAskView(secondBrain, true).actions.map(action => action.id);
+    assert.ok(!ids.includes('none'), ids.join());
+  }
+  assert.equal(secondBrainAskView({ ...detected, ask: { state: 'declined' } }, true).show, false);
+  assert.equal(secondBrainAnsweredLine('none'), "Got it. I won't ask about notes again.");
+});
+
+test('setting one up asks where first, then names the folder and what Ori will write', () => {
+  const where = secondBrainSetupWhereView({
+    pickerOff: 'The dialog is off.',
+    message: 'Pick again.'
+  });
+  assert.equal(where.title, 'Where should I set up your second brain?');
+  assert.equal(where.pickLabel, 'Choose where…');
+  assert.equal(where.pickerOff, 'The dialog is off.');
+  assert.equal(where.message, 'Pick again.');
+
+  const confirm = secondBrainSetupConfirmView(
+    { name: 'Documents', path: '/Users/sam/Documents' },
+    ''
+  );
+  assert.equal(confirm.title, 'Set up "Second Brain" in Documents?');
+  assert.equal(confirm.path, '/Users/sam/Documents');
+  assert.equal(confirm.lines[0], "I'll keep Inbox and Daily up to date; everything else is yours.");
+  assert.deepEqual(
+    confirm.actions.map(action => action.label),
+    ['Set it up', 'Back', 'Not now']
+  );
+  assert.equal(
+    secondBrainSetupConfirmView({ name: 'Documents' }, 'My Brain').title,
+    'Set up "My Brain" in Documents?'
+  );
+  assert.equal(DEFAULT_SECOND_BRAIN_NAME, 'Second Brain');
+});
+
+test('the card of a folder Ori set up says what Ori wrote and takes a note', () => {
+  const now = Date.parse('2026-10-31T12:00:00Z');
+  const created = {
+    status: 'connected',
+    source: { name: 'My Brain', kind: 'obsidian', origin: 'created_by_ori' },
+    last_look: { at: '2026-10-31T11:00:00Z' },
+    written_by_ori: { count: 5, last_at: '2026-10-31T09:00:00Z' }
+  };
+  const view = secondBrainManageView(created, now);
+  assert.equal(view.written, 'Written by Ori: 5 notes · last write 3 hours ago');
+  assert.equal(view.capture, true);
+
+  const connected = secondBrainManageView(
+    { ...created, source: { name: 'Vault', kind: 'obsidian', origin: 'connected' } },
+    now
+  );
+  assert.equal(connected.written, '');
+  assert.equal(connected.capture, false);
+  assert.equal(secondBrainManageView({ ...created, status: 'missing' }, now).capture, undefined);
+});
+
+test('projects get Make a workspace only on a folder Ori set up, by name', () => {
+  const created = {
+    source: { origin: 'created_by_ori' },
+    projects: [
+      { name: 'Launch', rel: 'Projects/Launch', path: '/Users/sam/Second Brain/Projects/Launch' },
+      { name: 'a/b', rel: 'Projects/a/b', path: '/x' },
+      { rel: 'Projects/' }
+    ]
+  };
+  const views = secondBrainProjectsView(created);
+  assert.deepEqual(
+    views.map(view => [view.name, view.action.label, view.action.ariaLabel]),
+    [['Launch', 'Make a workspace', 'Make Launch a workspace']]
+  );
+  assert.deepEqual(secondBrainProjectsView({ ...created, source: { origin: 'connected' } }), []);
+  assert.deepEqual(secondBrainProjectsView({ source: { origin: 'created_by_ori' } }), []);
+  assert.deepEqual(secondBrainProjectsView(null), []);
+  // The link names the project, never a place on disk.
+  assert.equal(
+    secondBrainProjectLink('Album 2: the remix'),
+    '/?create=1&second_brain_project=Album%202%3A%20the%20remix'
+  );
+  assert.doesNotMatch(secondBrainProjectLink('Launch'), /Users|path=|%2F/);
+});
+
+test('the written line is honest about none, one, and many', () => {
+  const now = Date.parse('2026-10-31T12:00:00Z');
+  assert.equal(secondBrainWrittenLine(undefined, now), 'Ori has not written to your notes yet.');
+  assert.equal(secondBrainWrittenLine({ count: 0 }, now), 'Ori has not written to your notes yet.');
+  assert.equal(
+    secondBrainWrittenLine({ count: 1, last_at: '2026-10-31T11:59:50Z' }, now),
+    'Written by Ori: 1 note · last write just now'
+  );
+  assert.equal(secondBrainWrittenLine({ count: 3 }, now), 'Written by Ori: 3 notes');
+});
+
+test('a note must be there and fit before it is sent', () => {
+  assert.equal(secondBrainCaptureProblem(''), 'Write the note first.');
+  assert.equal(secondBrainCaptureProblem('  \n '), 'Write the note first.');
+  assert.equal(secondBrainCaptureProblem('Call Dana'), '');
+  assert.equal(secondBrainCaptureProblem('a'.repeat(CAPTURE_MAX_CHARACTERS)), '');
+  assert.equal(
+    secondBrainCaptureProblem('a'.repeat(CAPTURE_MAX_CHARACTERS + 1)),
+    'A note is at most 4,000 characters.'
+  );
+  assert.equal(
+    secondBrainCaptureReceipt({ name: '20261031-1407-call-dana' }),
+    'Saved to Inbox as 20261031-1407-call-dana.'
+  );
+  assert.equal(secondBrainCaptureReceipt({}), 'Saved to Inbox.');
+});
+
+test('a folder name is one plain name', () => {
+  for (const good of ['Second Brain', 'My Notes 2026', 'Notes & Ideas', ' padded ']) {
+    assert.equal(secondBrainFolderNameProblem(good), '', good);
+  }
+  assert.equal(secondBrainFolderNameProblem(''), 'Give the folder a name.');
+  assert.equal(secondBrainFolderNameProblem('   '), 'Give the folder a name.');
+  for (const bad of [
+    'a/b',
+    'a\\b',
+    '..',
+    '.',
+    '.hidden',
+    'ends.',
+    'a:b',
+    'a\nb',
+    'x'.repeat(256)
+  ]) {
+    assert.equal(
+      secondBrainFolderNameProblem(bad),
+      'Choose a simple folder name, without slashes.',
+      JSON.stringify(bad)
+    );
+  }
+});
+
+test('Open in Obsidian only for a folder Ori set up, and only as an obsidian:// link', () => {
+  const created = {
+    source: {
+      origin: 'created_by_ori',
+      open_link: 'obsidian://open?path=%2FUsers%2Fsam%2FSecond%20Brain'
+    }
+  };
+  assert.equal(secondBrainOpenLink(created), created.source.open_link);
+  assert.equal(secondBrainOpenLink({ source: { ...created.source, origin: 'connected' } }), '');
+  assert.equal(
+    secondBrainOpenLink({
+      source: { origin: 'created_by_ori', open_link: 'https://evil.example' }
+    }),
+    ''
+  );
+  assert.equal(secondBrainOpenLink({ source: { origin: 'created_by_ori' } }), '');
+  assert.equal(secondBrainOpenLink(null), '');
+});
+
+test('seeded items are shown but never checked', () => {
+  const groups = secondBrainItemGroups([
+    { id: 'a', text: 'Call Dana', note: 'Inbox/call-dana.md', seeded: true },
+    { id: 'b', text: 'Buy strings', note: 'Inbox/mine.md', suggested: true }
+  ]);
+  assert.deepEqual(
+    groups.flatMap(group => group.items.map(item => [item.id, item.checked, item.seeded])),
+    [
+      ['a', false, true],
+      ['b', true, false]
+    ]
   );
 });
 
@@ -147,6 +335,7 @@ test('the chooser names vaults by name and folder, the path only as detail', () 
     }
   ]);
   assert.equal(view.pickLabel, 'Pick another folder…');
+  assert.equal(view.setUp.label, 'Set one up for me');
   const empty = secondBrainChooserView(
     { detected: [] },
     { pickerOff: 'The folder dialog is off.', message: 'No Markdown notes found in Empty.' }
@@ -255,15 +444,15 @@ test('show everything groups the items by note, suggested ones checked', () => {
       label: 'Projects/Album Release',
       link: '',
       items: [
-        { id: 'a', text: 'Master track 7', due: '2026-10-24', checked: true },
-        { id: 'b', text: 'Upload stems', due: '', checked: true }
+        { id: 'a', text: 'Master track 7', due: '2026-10-24', checked: true, seeded: false },
+        { id: 'b', text: 'Upload stems', due: '', checked: true, seeded: false }
       ]
     },
     {
       note: 'Reading List.md',
       label: 'Reading List',
       link: '',
-      items: [{ id: 'c', text: 'Read Making Music', due: '', checked: false }]
+      items: [{ id: 'c', text: 'Read Making Music', due: '', checked: false, seeded: false }]
     }
   ]);
 });
@@ -339,6 +528,16 @@ test('the module sends no path to its own endpoint', () => {
   assert.doesNotMatch(source, /body\.path\s*=/);
   assert.match(source, /body\.detected_id = state\.chosen\.detectedId/);
   assert.match(source, /body\.selection_token = state\.chosen\.selectionToken/);
+  // A capture sends the note's text and a request id, nothing that names a place.
+  assert.match(
+    source,
+    /body: \{ text: state\.capture\.text, request_id: state\.capture\.requestId \}/
+  );
+  // Setting one up sends the parent's token and the folder's name, no path.
+  assert.match(
+    source,
+    /body: \{ selection_token: parent\.selectionToken, name, request_id: state\.setup\.requestId \}/
+  );
   // Server text is only ever set as text.
   assert.doesNotMatch(source, /innerHTML/);
 });

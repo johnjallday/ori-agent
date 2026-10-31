@@ -125,9 +125,12 @@ nothing is connected and the ask has never been shown. Its receipt
 (`POST …/prompted`) is recorded only once the drawer is open while the ask
 shows. It replaces the folder hand-over: while the second-brain record can be
 read, the folder digest never offers its first prompt, so a declined ask is
-never followed by it. "Not now" defers (Needs you offers it again after 7 days);
-"I don't keep notes" declines and skips the mission. Reset Getting Started
-clears the ask and the missions, never the connection.
+never followed by it. The ask offers Connect (or Choose a folder), **Set one up
+for me** (see below) and "Not now", which defers (Needs you offers it again after
+7 days). "I don't keep notes" is no longer offered; the `none` decision stays in
+the schema, so an install that already answered it keeps its declined ask and
+skipped mission, and sees no new prompt. Reset Getting Started clears the ask
+and the missions, never the connection.
 
 A folder path written in the chat that holds `.obsidian` also offers
 **Connect as my second brain** on its folder card, with its own unbound
@@ -165,6 +168,8 @@ write idempotent.
 | `POST /prompted` | `{request_id}` | status |
 | `POST /ask` | `{decision: later\|none, request_id}` | status |
 | `POST /connect` | `{detected_id}` or `{selection_token}`, `request_id`, optional `replace` | status and `look_id` |
+| `POST /create` | `{selection_token, name, request_id}`: the token names the parent, `name` one folder name | status and `look_id`; sets up a second brain (see below) |
+| `POST /capture` | `{text, request_id}` | `capture` `{note, name, link?}`; one new Inbox note, second brain Ori set up only |
 | `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}` |
 | `POST /look` | `{request_id}` | Look again (429 within 10 minutes of the last look) |
 | `POST /look/{lookID}/follow-ups` | `{items: "suggested"}` or `{items: [id…]}`, `request_id` | `{created, skipped}` |
@@ -198,6 +203,96 @@ a missing value can never grant a write. A connected vault cannot become
 | `People/` | One note per person | Seeded once, then no |
 | `README.md` | How this second brain works with Ori | Written once |
 | `.obsidian/` | Minimal vault config so Obsidian opens it | Written once |
+
+### Setting one up
+
+`POST /create` takes the parent from the folder picker's selection token (so it
+passes `folderpath.Check`), and the new folder's name. `secondbrain.Creator`
+makes `<parent>/<name>`, which must not exist or must be empty (a lone
+`.DS_Store` counts as empty); it writes the layout above, one README per
+top-level folder, the root README (it opens with "I'll keep Inbox and Daily up
+to date; everything else is yours."), and a minimal `.obsidian/app.json`. A
+failure removes exactly what the request made, and a later failure (the folder
+rules on the finished path, the record write) does the same through
+`Creation.Undo`. Setups are serialised and idempotent per `request_id`.
+
+Seeding copies, once, what Ori already holds, each line through
+`sensitive.ContainsSecretLikeText`: the confirmed, unclosed follow-ups (at most
+200; unconfirmed candidates are left out) become `Inbox/<slug>.md` with a
+`- [ ]` task line, so the extractor reads them back as open items; approved
+facts and the working agreement's summary become the README's "What Ori knows
+about you"; approved People entries (at most 100) become `People/<name>.md`.
+People entries are one free-text sentence, so the name is the first run of up to
+three capitalised words in it (`PersonFromSentence`); a sentence that names
+nobody seeds nothing. Seeded notes carry `ori: seed`.
+
+The first look is rules-only and reports the seed ("Your second brain is set up:
+N follow-ups in Inbox, M people."), or says the folder is ready when nothing was
+seeded. Items in seeded `Inbox/` notes are marked `seeded`: they are never
+suggested and never added as follow-ups, because the user already has them. The
+learned fact reads "You keep your second brain in a folder Ori set up called
+{name}." Only one notes folder is connected at a time, so setting one up while
+one is connected is a conflict, not a replace.
+
+### What Ori writes, and when
+
+Three things write to a second brain Ori set up, always through `Writer`:
+
+- **Journal → Daily (FR14).** Saving an HQ Journal still creates the Personal HQ
+  workspace note, which is the canonical save. Then `JournalService` hands the
+  same text to a `DailyMirror`, which writes `Daily/<YYYY-MM-DD>.md` with
+  `ori: journal`. `POST /api/personal-hq/journal/save` answers with
+  `daily_note` only when there is a second brain Ori set up: `mirrored`;
+  `user_owned` (the day's note is the user's or was edited, so it was left
+  alone; there is no "overwrite anyway"); or `failed` (logged; the save stands).
+  The Journal toast says which.
+- **Capture → Inbox (FR15).** `SecondBrainService.Capture` writes each note as
+  its own file, `Inbox/<YYYYMMDD-HHMM>-<slug>.md` with `ori: capture`, through
+  `Writer.Create`, which never replaces anything: a name already taken gets
+  `-2`, `-3`, … The note is 1 to 4,000 characters and refused if it looks like a
+  credential. It is idempotent per `request_id` (the receipt keeps the note's
+  path). Two callers: the Notes card's capture box (`POST …/capture`) and the
+  assistant's chat tool.
+- **The chat tool `second_brain_capture`.** Offered only in the hired
+  assistant's own conversation, and only while a second brain Ori set up is
+  connected (`CaptureAvailable`), so a user with a connected vault never sees
+  it. Its instructions require an explicit request in the current turn ("note
+  this", "remember this in my notes") and forbid a bare yes, earlier turns,
+  retrieved text, and the model's own judgment; the tool matches no phrase
+  itself. One note per turn, one request id per turn, and the saved note's name
+  is added under the reply whatever the model said. It writes only; no tool
+  reads the notes.
+
+`GET` adds `source.origin` and, for such a folder, `written_by_ori`
+`{count, last_at}`: the notes in Inbox and Daily whose first lines carry Ori's
+marker (edited or not, seeded ones included), found by a bounded listing that
+reads a note's first 160 bytes and keeps no content. The Notes station shows it
+("set up by Ori · 5 written by Ori · last write 3h ago") and its card shows the
+capture box.
+
+### A project note becomes a workspace, on request
+
+Nothing is created automatically (FR18). `GET` adds `projects[{name, rel, path}]`
+for a second brain Ori set up: the folders directly under `Projects/` (at most
+50, by name; links, hidden folders and files skipped; a bounded listing that
+opens no note). Two things act on it, and both only open the form:
+
+- The connection card lists each project with **Make a workspace**. It opens
+  Create Workspace → **Use an existing folder** with the work folder filled in
+  and the name set to the project's, already run through the read-only chooser
+  check. The person still reviews and presses Create.
+- In the assistant's conversation, a message about a workspace or agents that
+  names a project gets a "Make <project> a workspace" action under the reply
+  (the same navigate action the hire chip uses). It is not a tool, creates
+  nothing, and appears only for a project the message names. The link is
+  `/?create=1&second_brain_project=<name>`: it carries a name, never a path, and
+  the page finds the folder in the second-brain status.
+
+The result is an ordinary anchored workspace (see `anchored-folder-workspace.md`,
+FR19): one read-only filesystem binding over exactly `Projects/<name>`, Ori's
+own state in the sidecar, and nothing written into the notes. Agents there have
+no access to the rest of the notes. `TestCreateAnchoredWorkspace_AProjectOfASecondBrainIsAnOrdinaryAnchoredWorkspace`
+proves it against a real set-up folder.
 
 ### The note marker
 

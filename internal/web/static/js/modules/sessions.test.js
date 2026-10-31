@@ -8638,6 +8638,83 @@ test('anchor folder check enables only the verified path and displays duplicate 
   assert.equal(manager.anchorChoice.checkedPath, '');
 });
 
+test('a folder an opener names fills the anchored work folder and is checked, not created', async () => {
+  const checked = [];
+  const { manager, elements } = anchorChoiceFixture(async url => {
+    checked.push(url);
+    return {
+      ok: true,
+      json: async () => ({
+        success: true,
+        normalized_path: '/Users/sam/Second Brain/Projects/Launch'
+      })
+    };
+  });
+  manager.pendingAnchorPrefill = '/Users/sam/Second Brain/Projects/Launch';
+  manager.applyAnchorPrefill();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(manager.pendingAnchorPrefill, '', 'the prefill is used once');
+  assert.equal(manager.anchorChoice.enabled, true);
+  assert.equal(elements.get('workspaceAnchorFields').hidden, false);
+  assert.equal(
+    elements.get('workspaceAnchorPath').value,
+    '/Users/sam/Second Brain/Projects/Launch'
+  );
+  assert.equal(checked.length, 1);
+  assert.match(checked[0], /^\/api\/workspaces\/anchor\/check\?path=/);
+  assert.equal(manager.anchorChoice.checkedPath, '/Users/sam/Second Brain/Projects/Launch');
+  assert.equal(manager.anchorFolderProblem(), '');
+
+  // Nothing named: nothing changes. A group creator cannot take an anchor.
+  const quiet = anchorChoiceFixture(async () => {
+    throw new Error('unexpected request');
+  });
+  quiet.manager.applyAnchorPrefill();
+  assert.equal(quiet.manager.anchorChoice.enabled, false);
+  const group = anchorChoiceFixture(async () => {
+    throw new Error('unexpected request');
+  });
+  group.manager.isGroupCreator = () => true;
+  group.manager.pendingAnchorPrefill = '/Users/sam/Second Brain/Projects/Launch';
+  group.manager.applyAnchorPrefill();
+  assert.equal(group.manager.anchorChoice.enabled, false);
+  assert.equal(group.elements.get('workspaceAnchorPath').value, '');
+});
+
+test('a project named in a link opens the form on that project, found by name in the status', async () => {
+  const opened = [];
+  const { manager } = anchorChoiceFixture(async url => {
+    assert.equal(url, '/api/personal-assistant/second-brain');
+    return {
+      ok: true,
+      json: async () => ({
+        second_brain: {
+          projects: [
+            {
+              name: 'Launch',
+              rel: 'Projects/Launch',
+              path: '/Users/sam/Second Brain/Projects/Launch'
+            }
+          ]
+        }
+      })
+    };
+  });
+  manager.showAddWorkspaceModal = options => opened.push(options);
+  await manager.openSecondBrainProjectWorkspace('Launch');
+  await manager.openSecondBrainProjectWorkspace('Gone');
+  await manager.openSecondBrainProjectWorkspace('../escape');
+  await manager.openSecondBrainProjectWorkspace('');
+  assert.deepEqual(JSON.parse(JSON.stringify(opened)), [
+    {
+      entryPoint: 'second_brain_project',
+      name: 'Launch',
+      anchorPath: '/Users/sam/Second Brain/Projects/Launch'
+    },
+    { entryPoint: 'second_brain_project', name: 'Gone', anchorPath: '' }
+  ]);
+});
+
 test('a parent-anchor hint offers Open it without blocking a nested anchor', async () => {
   const { manager, elements } = anchorChoiceFixture(async () => ({
     ok: true,

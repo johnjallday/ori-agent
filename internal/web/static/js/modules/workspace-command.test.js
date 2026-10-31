@@ -4808,8 +4808,35 @@ test('the Notes station says whether notes are set up, connected, or missing', (
     };
     assert.deepEqual(notes({ status: 'not_connected' }), {
       value: 'Not set up',
-      description: 'connect your notes'
+      description: 'connect or set one up'
     });
+    const setUp = notes({
+      status: 'connected',
+      source: { name: 'My Brain', origin: 'created_by_ori' },
+      last_look: { at: new Date(Date.now() - 2 * 3600000).toISOString() }
+    });
+    assert.deepEqual(setUp, {
+      value: 'My Brain',
+      description: 'set up by Ori · last look 2h ago',
+      tone: 'clear'
+    });
+    const written = notes({
+      status: 'connected',
+      source: { name: 'My Brain', origin: 'created_by_ori' },
+      last_look: { at: new Date(Date.now() - 2 * 3600000).toISOString() },
+      written_by_ori: { count: 5, last_at: new Date(Date.now() - 3 * 3600000).toISOString() }
+    });
+    assert.deepEqual(written, {
+      value: 'My Brain',
+      description: 'set up by Ori · 5 written by Ori · last write 3h ago',
+      tone: 'clear'
+    });
+    const none = notes({
+      status: 'connected',
+      source: { name: 'My Brain', origin: 'created_by_ori' },
+      written_by_ori: { count: 0 }
+    });
+    assert.equal(none.description, 'set up by Ori · 0 written by Ori');
     const connected = notes({
       status: 'connected',
       source: { name: 'Second Brain' },

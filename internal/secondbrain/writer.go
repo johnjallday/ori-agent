@@ -38,6 +38,8 @@ var (
 	ErrNoteTooLarge = errors.New("secondbrain: note is too large")
 	// ErrInvalidNote refuses an unknown marker kind.
 	ErrInvalidNote = errors.New("secondbrain: invalid note")
+	// ErrNoteExists refuses Create over a name that is taken.
+	ErrNoteExists = errors.New("secondbrain: a note with that name already exists")
 )
 
 // Writer is the one way anything is written to a notes folder after it was
@@ -66,6 +68,17 @@ type WriteResult struct {
 // when it is still exactly what Ori wrote. Nothing is ever deleted or renamed
 // except this call's own temp file, which becomes the note.
 func (w *Writer) Write(rel, kind string, body []byte) (WriteResult, error) {
+	return w.write(rel, kind, body, false)
+}
+
+// Create puts one new marked note at rel and never replaces anything: a name
+// already taken, by the user or by Ori, is ErrNoteExists and the tree is left
+// alone. Captures use it, since each one is its own note.
+func (w *Writer) Create(rel, kind string, body []byte) (WriteResult, error) {
+	return w.write(rel, kind, body, true)
+}
+
+func (w *Writer) write(rel, kind string, body []byte, create bool) (WriteResult, error) {
 	if !validNoteKind(kind) {
 		return WriteResult{}, ErrInvalidNote
 	}
@@ -88,15 +101,23 @@ func (w *Writer) Write(rel, kind string, body []byte) (WriteResult, error) {
 	}
 	defer func() { _ = dir.Close() }()
 
-	exists, err := checkReplaceable(dir, name)
-	if err != nil {
+	var exists bool
+	if create {
+		// Any entry at the name, a link included, is taken.
+		switch _, statErr := dir.Lstat(name); {
+		case statErr == nil:
+			return WriteResult{}, ErrNoteExists
+		case !errors.Is(statErr, fs.ErrNotExist):
+			return WriteResult{}, statErr
+		}
+	} else if exists, err = checkReplaceable(dir, name); err != nil {
 		return WriteResult{}, err
 	}
 	temp, err := writeTemp(dir, content)
 	if err != nil {
 		return WriteResult{}, err
 	}
-	if err := publish(dir, temp, name, exists); err != nil {
+	if err := publish(dir, temp, name, exists, create); err != nil {
 		_ = dir.Remove(temp)
 		return WriteResult{}, err
 	}
@@ -244,17 +265,26 @@ func writeAndSync(file *os.File, content []byte) error {
 // renamed, so one the user saved a moment ago is never clobbered; a filesystem
 // without hard links falls back to a re-check and a rename. A replacement
 // re-checks the note right before the rename.
-func publish(dir *os.Root, temp, name string, exists bool) error {
+//
+// With create set, an existing name is never replaced, whoever wrote it:
+// ErrNoteExists, so the caller can pick another name.
+func publish(dir *os.Root, temp, name string, exists, create bool) error {
 	if !exists {
 		err := dir.Link(temp, name)
 		switch {
 		case err == nil:
 			return dir.Remove(temp)
 		case errors.Is(err, fs.ErrExist):
+			if create {
+				return ErrNoteExists
+			}
 			return ErrUserModified
 		}
 	}
 	nowExists, err := checkReplaceable(dir, name)
+	if create && (nowExists || errors.Is(err, ErrUserModified)) {
+		return ErrNoteExists
+	}
 	if err != nil {
 		return err
 	}

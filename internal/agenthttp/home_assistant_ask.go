@@ -283,7 +283,10 @@ type HomeAssistantAskHandler struct {
 	// ExternalMemory searches the mirror of other agents' memory for the hired
 	// assistant's memory_recall tool; nil offers no such tool.
 	ExternalMemory ExternalMemoryRecaller
-	now            func() time.Time
+	// SecondBrainCapture offers second_brain_capture in the hired assistant's
+	// conversation while the user has a second brain Ori set up.
+	SecondBrainCapture SecondBrainCapturer
+	now                func() time.Time
 }
 
 // NewHomeAssistantAskHandler builds the handler from its data sources.
@@ -673,6 +676,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			sources:        promptSources,
 			temperature:    0.6,
 			externalRecall: workContext.MayRecallExternalMemory(),
+			// Only the assistant's own conversation can add to the notes, not
+			// Home's other answers.
+			secondBrainCapture: workContext.MayRecallExternalMemory(),
 		})
 		if err != nil {
 			resp := h.conversationModelUnavailable(ctx, prompt, intent, workContext, conversation, err)
@@ -690,6 +696,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		if chip := h.hireChipForRequest(prompt); chip != nil {
 			reply.Actions = append(reply.Actions, *chip)
 		}
+		// A project of the user's second brain named in a workspace request gets
+		// a button to the pre-filled form; nothing is created by the reply.
+		reply.Actions = append(reply.Actions, h.secondBrainWorkspaceActions(ctx, prompt)...)
 		return reply
 	}
 
@@ -851,6 +860,9 @@ type modelTurn struct {
 	// externalRecall offers memory_recall: set only for the hired, active
 	// assistant's own turns.
 	externalRecall bool
+	// secondBrainCapture offers second_brain_capture: set only for the hired,
+	// active assistant's own conversation.
+	secondBrainCapture bool
 }
 
 // runModel sends one turn to the configured system model with the read-only
@@ -885,6 +897,10 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	recallOffered := turn.externalRecall && h.ExternalMemory != nil && provider.Capabilities().SupportsTools
 	if recallOffered {
 		registry = &externalMemoryRegistry{base: registry, recall: h.ExternalMemory}
+	}
+	capture := h.secondBrainCaptureTurn(ctx, turn.secondBrainCapture && provider.Capabilities().SupportsTools)
+	if capture != nil {
+		registry = &secondBrainCaptureRegistry{base: registry, turn: capture}
 	}
 	// A reader is offered only on a path that can run it; the prompt then says
 	// exactly which readers exist, so no path claims a read it cannot make.
@@ -922,6 +938,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		proposalPrompt = hireProposalInstructions
 	}
 	systemText := turn.system + plainTextReplies + researchSystemPrompt(research, provider.Capabilities().SupportsTools) + proposalPrompt
+	if capture != nil {
+		systemText += secondBrainCaptureInstructions
+	}
 	conversation := make([]llm.Message, 0, len(turn.history)+1)
 	conversation = append(conversation, turn.history...)
 	researchEvidence := ""
@@ -982,9 +1001,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		}
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Content) == "" {
-				return "I couldn't find anything to report for that.", nil
+				return capture.appendSaved("I couldn't find anything to report for that."), nil
 			}
-			return scope.finishAnswer(resp.Content), nil
+			return capture.appendSaved(scope.finishAnswer(resp.Content)), nil
 		}
 
 		if len(tools) == 0 {

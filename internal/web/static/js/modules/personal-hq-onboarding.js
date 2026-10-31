@@ -213,6 +213,23 @@ export function journalPromptView(proposal) {
   };
 }
 
+// journalSavedMessage is what the Saved toast says, given the save's response.
+// When the user has a second brain Ori set up the response also says what
+// became of the Daily copy; a copy that was left alone or failed is said, the
+// journal itself is saved either way (FR14).
+export function journalSavedMessage(result) {
+  switch (result && result.daily_note) {
+    case 'mirrored':
+      return 'Your journal was saved, and copied to Daily in your notes.';
+    case 'user_owned':
+      return 'Saved; your Daily note is yours, left as is.';
+    case 'failed':
+      return "Saved; couldn't mirror to Daily.";
+    default:
+      return 'Your journal was saved.';
+  }
+}
+
 // hqBuildTarget decides WHICH server consequence a Build My HQ submission is.
 //
 // There are two, and they are not interchangeable:
@@ -1391,11 +1408,15 @@ export function followUpView(f) {
     saveBtn.addEventListener('click', async () => {
       saveBtn.disabled = true;
       try {
-        await postJSON('/api/personal-hq/journal/save', {
+        const saved = await postJSON('/api/personal-hq/journal/save', {
           local_date: view.localDate,
           content: editor.value
         });
-        toast('Your journal was saved.', 'Saved', 'success');
+        toast(
+          journalSavedMessage(saved),
+          'Saved',
+          saved && saved.daily_note === 'failed' ? 'warning' : 'success'
+        );
         mount.innerHTML = '';
         mount.appendChild(journalLauncher(mount));
       } catch (e) {

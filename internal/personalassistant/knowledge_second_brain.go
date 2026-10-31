@@ -22,14 +22,23 @@ func SecondBrainFactText(kind, name string) string {
 	return "You keep your notes in a Markdown folder called " + name + "."
 }
 
+// SecondBrainSetUpFactText is the fact for a folder Ori set up (FR9).
+func SecondBrainSetUpFactText(name string) string {
+	return "You keep your second brain in a folder Ori set up called " + name + "."
+}
+
 // SecondBrainKnowledgeProposal is the one proposal a connected source makes.
 // Its meaning is the source itself, so connecting the same folder again is the
 // same fact and another folder is a new one.
 func SecondBrainKnowledgeProposal(source secondbrain.Source) KnowledgeProposal {
+	text := SecondBrainFactText(source.Kind, source.Name)
+	if source.CreatedByOri() {
+		text = SecondBrainSetUpFactText(source.Name)
+	}
 	return KnowledgeProposal{
 		SourceKind: SecondBrainSourceKind, ScopeID: source.ID, SubjectID: "notes",
 		Predicate: "keeps notes in", Value: source.Kind, Category: "how_you_work",
-		Text: SecondBrainFactText(source.Kind, source.Name),
+		Text: text,
 		Evidence: []KnowledgeEvidence{{
 			SourceKind: SecondBrainSourceKind, SourceID: source.ID,
 			ObservedAt: source.ConnectedAt.UTC(), Summary: "Notes folder connected to Personal HQ",

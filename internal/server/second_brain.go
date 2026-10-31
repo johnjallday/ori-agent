@@ -9,8 +9,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderpath"
 	"github.com/johnjallday/ori-agent/internal/followup"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 )
 
@@ -40,8 +42,35 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 		// later is used without a restart (FR23).
 		Looker: secondbrain.Looker{Model: systemHeadlineModel{builder: b}},
 	})
+	// Setting one up copies what Ori already holds into the new folder; the
+	// learning services it reads are built later, so they are looked up then.
+	service.SetSeeds(secondBrainSeeds{builder: b}.Seeds)
 	b.personalAssistantSecondBrain = service
 	b.personalAssistantHandler.SetSecondBrain(service, connectionshttp.NewOriginGuard().Check)
+}
+
+// journalDailyMirror copies a saved Journal to Daily/<date>.md in a second
+// brain Ori set up (FR14). The second-brain service is built after the Journal
+// service, so it is read at call time.
+type journalDailyMirror struct{ builder *ServerBuilder }
+
+func (m journalDailyMirror) MirrorDaily(ctx context.Context, userID, localDate, content string) personalhq.DailyResult {
+	if m.builder == nil || m.builder.personalAssistantSecondBrain == nil {
+		return ""
+	}
+	mirrored, err := m.builder.personalAssistantSecondBrain.WriteDaily(ctx, userID, localDate, content)
+	switch {
+	case err == nil && mirrored:
+		return personalhq.DailyMirrored
+	case err == nil:
+		// Nothing connected, or a folder the user connected: nothing to copy to.
+		return ""
+	case errors.Is(err, secondbrain.ErrUserModified):
+		return personalhq.DailyUserOwned
+	default:
+		logger.Warn("A saved journal could not be copied to Daily", logger.Fields{"error": err.Error()})
+		return personalhq.DailyFailed
+	}
 }
 
 // lateFollowUps reads the follow-up service at call time, since it may be

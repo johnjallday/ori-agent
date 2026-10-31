@@ -22,6 +22,8 @@ type SecondBrainService interface {
 	MarkPrompted(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DecideAsk(ctx context.Context, userID, decision, requestID string) (personalassistant.SecondBrainView, error)
 	Connect(ctx context.Context, userID string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error)
+	Create(ctx context.Context, userID string, input personalassistant.SecondBrainCreateInput) (personalassistant.SecondBrainView, error)
+	Capture(ctx context.Context, userID, text, requestID string) (personalassistant.SecondBrainCaptureView, error)
 	Look(ctx context.Context, userID string) (personalassistant.SecondBrainLookView, error)
 	LookAgain(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainLookView, error)
 	AcceptFollowUps(ctx context.Context, userID, lookID string, input personalassistant.SecondBrainAcceptInput) (personalassistant.SecondBrainAcceptView, error)
@@ -43,6 +45,9 @@ const (
 	maxSecondBrainBodyBytes = 4 * 1024
 	// maxSecondBrainItemsBodyBytes fits every item id a look keeps.
 	maxSecondBrainItemsBodyBytes = 64 * 1024
+	// maxSecondBrainCaptureBodyBytes fits 4,000 characters of any script, with
+	// the JSON around them.
+	maxSecondBrainCaptureBodyBytes = 24 * 1024
 )
 
 // secondBrainReady answers for an unavailable service or a foreign origin.
@@ -160,6 +165,71 @@ func (h *Handler) ConnectSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Success(w, map[string]any{"second_brain": view, "look_id": view.LookID})
+}
+
+type secondBrainCreateRequest struct {
+	// SelectionToken names the parent the folder picker returned; Name is the
+	// new folder's own name, one path segment the service validates.
+	SelectionToken string `json:"selection_token"`
+	Name           string `json:"name"`
+	RequestID      string `json:"request_id"`
+}
+
+// CreateSecondBrain sets up a second brain inside the picked parent, connects
+// it as created by Ori, and starts the first look.
+func (h *Handler) CreateSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainCreateRequest
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "selection_token", "name", "request_id") {
+		return
+	}
+	req.SelectionToken = strings.TrimSpace(req.SelectionToken)
+	if req.SelectionToken == "" {
+		orihttp.BadRequest(w, "Choose where to set up your second brain")
+		return
+	}
+	view, err := h.secondBrain.Create(r.Context(), userID, personalassistant.SecondBrainCreateInput{
+		SelectionToken: req.SelectionToken, Name: strings.TrimSpace(req.Name), RequestID: strings.TrimSpace(req.RequestID),
+	})
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"second_brain": view, "look_id": view.LookID})
+}
+
+type secondBrainCaptureRequest struct {
+	Text      string `json:"text"`
+	RequestID string `json:"request_id"`
+}
+
+// CaptureSecondBrain writes one note to Inbox in a second brain Ori set up,
+// for the Notes station's capture box. The chat tool calls the service
+// directly.
+func (h *Handler) CaptureSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainCaptureRequest
+	if !decodeClosedBody(w, r, maxSecondBrainCaptureBodyBytes, &req, "text", "request_id") {
+		return
+	}
+	view, err := h.secondBrain.Capture(r.Context(), userID, req.Text, strings.TrimSpace(req.RequestID))
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"capture": view})
 }
 
 // GetSecondBrainLook reports the current look.
@@ -320,6 +390,17 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true, "needs_pick_reason": personalassistant.FolderPickReason(err)})
 	case errors.Is(err, personalassistant.ErrSecondBrainNotConnected):
 		orihttp.Conflict(w, "No notes folder is connected")
+	case errors.Is(err, secondbrain.ErrNotOwned):
+		orihttp.Conflict(w, "Ori only writes notes to a second brain it set up")
+	case errors.Is(err, secondbrain.ErrCaptureSecretLike):
+		orihttp.BadRequest(w, "That looks like a secret, so Ori did not save it")
+	case errors.Is(err, secondbrain.ErrCaptureInvalid):
+		orihttp.BadRequest(w, "A note is 1 to 4,000 characters")
+	case errors.Is(err, secondbrain.ErrOutsideOwnedFolders), errors.Is(err, secondbrain.ErrUserModified),
+		errors.Is(err, secondbrain.ErrNoteTooLarge), errors.Is(err, secondbrain.ErrNoteExists):
+		orihttp.Conflict(w, "Ori could not write that note in your notes folder")
+	case errors.Is(err, personalassistant.ErrSecondBrainAlreadyConnected):
+		orihttp.Conflict(w, "A notes folder is already connected. Disconnect it before setting one up")
 	case errors.Is(err, personalassistant.ErrSecondBrainLookNotFound):
 		orihttp.NotFound(w, "That look is no longer here")
 	case errors.Is(err, personalassistant.ErrValidation):

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,10 @@ var (
 	ErrSecondBrainSelection    = errors.New("personal assistant: the chosen folder is no longer available")
 	ErrSecondBrainLookNotFound = errors.New("personal assistant: that look is no longer here")
 	ErrSecondBrainUnavailable  = errors.New("personal assistant: notes are unavailable")
+	// ErrSecondBrainAlreadyConnected refuses setting one up while a notes
+	// folder is connected; Create has no replace, since neither entry point
+	// offers it with a folder connected.
+	ErrSecondBrainAlreadyConnected = errors.New("personal assistant: a notes folder is already connected")
 
 	errSecondBrainLookSuperseded = errors.New("personal assistant: look superseded")
 )
@@ -57,6 +62,11 @@ const (
 	secondBrainActionFollowUps  = "follow_ups"
 	secondBrainActionAsk        = "ask"
 	secondBrainActionDisconnect = "disconnect"
+	secondBrainActionCreate     = "create"
+	secondBrainActionCapture    = "capture"
+
+	// maxCaptureAttempts bounds the numbering of a capture whose name is taken.
+	maxCaptureAttempts = 50
 )
 
 // Connection states for the API.
@@ -98,10 +108,30 @@ type SecondBrainService struct {
 	mu      sync.Mutex
 	running map[string]string // user id → the look this process is running
 
+	// createMu serialises setups, so two requests with the same id cannot
+	// both try to make the folder.
+	createMu sync.Mutex
+	seeds    SecondBrainSeeds
+	// captureMu serialises captures, so two in one minute number their names
+	// instead of racing for one.
+	captureMu sync.Mutex
+
 	// Hooks for the mission and the learned fact, bound at startup.
 	onConnected    []func(ctx context.Context, userID string, source secondbrain.Source)
 	onDisconnected []func(ctx context.Context, userID string, source secondbrain.Source)
 	onDeclined     []func(ctx context.Context, userID string)
+}
+
+// SecondBrainSeeds gathers what Ori already holds about the user, for the one
+// setup that copies it into a new folder (FR8). It reads; it never writes.
+type SecondBrainSeeds func(ctx context.Context, userID string) (secondbrain.Seeds, error)
+
+// SetSeeds binds the seed source. The learning services it reads are built
+// after this service, so this is startup wiring.
+func (s *SecondBrainService) SetSeeds(seeds SecondBrainSeeds) {
+	if s != nil {
+		s.seeds = seeds
+	}
 }
 
 // OnConnected runs fn after every connect that was not a replay, the same
@@ -161,9 +191,30 @@ type SecondBrainView struct {
 	Source   *SecondBrainSourceView  `json:"source,omitempty"`
 	LastLook *SecondBrainLookSummary `json:"last_look,omitempty"`
 	Ask      SecondBrainAskView      `json:"ask"`
-	Version  int64                   `json:"version"`
+	// WrittenByOri counts what Ori has put in Inbox and Daily; only a status
+	// read of a second brain Ori set up carries it (FR16).
+	WrittenByOri *SecondBrainWrittenView `json:"written_by_ori,omitempty"`
+	// Projects lists the folders under Projects, so one can be offered as a
+	// workspace when the user asks (FR18); a second brain Ori set up only.
+	Projects []SecondBrainProjectView `json:"projects,omitempty"`
+	Version  int64                    `json:"version"`
 	// LookID names the look a connect started (or the replayed one).
 	LookID string `json:"look_id,omitempty"`
+}
+
+// SecondBrainProjectView is one folder under Projects. Path is the folder the
+// Create Workspace form takes as its work folder; it is built from the
+// connected folder, never read from a note.
+type SecondBrainProjectView struct {
+	Name string `json:"name"`
+	Rel  string `json:"rel"`
+	Path string `json:"path"`
+}
+
+// SecondBrainWrittenView is the "Written by Ori" count.
+type SecondBrainWrittenView struct {
+	Count  int       `json:"count"`
+	LastAt time.Time `json:"last_at,omitempty"`
 }
 
 // SecondBrainDetected is one vault Obsidian lists. Path is shown only in the
@@ -182,6 +233,11 @@ type SecondBrainSourceView struct {
 	Name        string    `json:"name"`
 	Path        string    `json:"path"`
 	ConnectedAt time.Time `json:"connected_at"`
+	// Origin is "connected" or "created_by_ori" (FR9).
+	Origin string `json:"origin"`
+	// OpenLink opens a folder Ori set up as a vault in Obsidian. It is a link
+	// only; nothing is launched.
+	OpenLink string `json:"open_link,omitempty"`
 }
 
 // SecondBrainLookSummary is the last finished look, for the slot and Home.
@@ -237,7 +293,41 @@ func (s *SecondBrainService) Status(ctx context.Context, userID string) (SecondB
 	if err != nil {
 		return SecondBrainView{}, err
 	}
-	return s.view(doc), nil
+	view := s.view(doc)
+	if connected := doc.Connected(); connected != nil && connected.CreatedByOri() && view.Status == SecondBrainConnected {
+		if written, err := secondbrain.CountWritten(connected.Path); err == nil {
+			view.WrittenByOri = &SecondBrainWrittenView{Count: written.Count, LastAt: written.LastAt}
+		}
+		view.Projects = projectViews(connected.Path)
+	}
+	return view, nil
+}
+
+// projectViews lists the folders under Projects in a folder Ori set up.
+func projectViews(root string) []SecondBrainProjectView {
+	projects, err := secondbrain.ListProjects(root)
+	if err != nil {
+		return nil
+	}
+	views := make([]SecondBrainProjectView, 0, len(projects))
+	for _, project := range projects {
+		views = append(views, SecondBrainProjectView{Name: project.Name, Rel: project.Rel, Path: project.Path})
+	}
+	return views
+}
+
+// Projects lists the folders under Projects in a second brain Ori set up, for
+// the assistant's reply to link when the user asks to make one a workspace.
+func (s *SecondBrainService) Projects(ctx context.Context, userID string) []SecondBrainProjectView {
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return nil
+	}
+	source := doc.Connected()
+	if source == nil || !source.CreatedByOri() {
+		return nil
+	}
+	return projectViews(source.Path)
 }
 
 // MarkPrompted records that the ask was shown, once per relationship (FR5).
@@ -330,7 +420,7 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 		return SecondBrainView{}, err
 	}
 	if started != nil {
-		s.startLook(userID, *doc.Connected(), nil, started.ID, input.RequestID)
+		s.startLook(userID, *doc.Connected(), nil, started.ID, input.RequestID, nil)
 	}
 	if connected := doc.Connected(); connected != nil {
 		for _, fn := range s.onConnected {
@@ -340,6 +430,283 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 	view := s.view(doc)
 	view.LookID = lookID
 	return view, nil
+}
+
+// SecondBrainCreateInput names the parent by a selection token and the new
+// folder by a name, never by path (FR4).
+type SecondBrainCreateInput struct {
+	SelectionToken string
+	Name           string
+	RequestID      string
+}
+
+// Create sets up a second brain (FR4–FR11): it makes the folder inside the
+// parent the user picked, seeds it, connects it as created by Ori, and starts
+// the first look. A replayed request returns what the first call did. A
+// failure after the folder was made removes what this call made.
+func (s *SecondBrainService) Create(ctx context.Context, userID string, input SecondBrainCreateInput) (SecondBrainView, error) {
+	name := strings.TrimSpace(input.Name)
+	if !secondbrain.ValidRequestID(input.RequestID) || input.SelectionToken == "" {
+		return SecondBrainView{}, ErrValidation
+	}
+	if !secondbrain.ValidFolderName(name) {
+		return SecondBrainView{}, &SecondBrainFolderError{Message: "Choose a simple folder name, without slashes."}
+	}
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+
+	current, err := s.read(ctx, userID)
+	if err != nil {
+		return SecondBrainView{}, err
+	}
+	if receipt, replayed, err := current.Replay(input.RequestID, secondBrainActionCreate); err != nil || replayed {
+		if err != nil {
+			return SecondBrainView{}, err
+		}
+		view := s.view(current)
+		view.LookID = receipt.LookID
+		return view, nil
+	}
+	if current.Connected() != nil {
+		return SecondBrainView{}, ErrSecondBrainAlreadyConnected
+	}
+	parent, err := s.checkedFolder(input.SelectionToken)
+	if err != nil {
+		return SecondBrainView{}, err
+	}
+
+	creation, err := s.createFolder(ctx, userID, parent.Path, name)
+	if err != nil {
+		return SecondBrainView{}, err
+	}
+	target, err := s.deps.CheckFolder(creation.Path)
+	if err != nil {
+		creation.Undo()
+		return SecondBrainView{}, &SecondBrainFolderError{Message: folderpath.Message(err)}
+	}
+	kind := secondbrain.KindMarkdown
+	if secondbrain.IsObsidianVault(target.Path) {
+		kind = secondbrain.KindObsidian
+	}
+	source := secondbrain.Source{
+		ID: secondbrain.SourceID(target.Path), Kind: kind, Name: target.Name, Path: target.Path,
+		ConnectedAt: s.deps.Now().UTC(), RequestID: input.RequestID, Origin: secondbrain.OriginCreatedByOri,
+	}
+
+	var started *secondbrain.Look
+	var lookID string
+	doc, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
+		started, lookID = nil, ""
+		if doc.Connected() != nil {
+			return ErrSecondBrainAlreadyConnected
+		}
+		connected, err := doc.Connect(source, false)
+		if err != nil {
+			return err
+		}
+		look := s.runningLook(input.RequestID)
+		connected.Current, lookID, started = &look, look.ID, &look
+		doc.Remember(secondbrain.Receipt{
+			RequestID: input.RequestID, Action: secondBrainActionCreate, At: s.deps.Now(), LookID: lookID,
+			Created: creation.FollowUps, Skipped: creation.People,
+		})
+		return nil
+	})
+	if err != nil {
+		creation.Undo()
+		return SecondBrainView{}, err
+	}
+	setup := secondbrain.SetupCounts{FollowUps: creation.FollowUps, People: creation.People}
+	s.startLook(userID, *doc.Connected(), nil, started.ID, input.RequestID, &setup)
+	for _, fn := range s.onConnected {
+		fn(ctx, userID, *doc.Connected())
+	}
+	view := s.view(doc)
+	view.LookID = lookID
+	return view, nil
+}
+
+// SecondBrainCaptureView is the note a capture wrote.
+type SecondBrainCaptureView struct {
+	// Note is the path below the notes folder, "Inbox/<stamp>-<slug>.md".
+	Note string `json:"note"`
+	// Name is the note's file name without its extension.
+	Name string `json:"name"`
+	// Link opens the note in Obsidian; a link only.
+	Link string `json:"link,omitempty"`
+}
+
+// ErrSecondBrainNotOwned refuses a write to a notes folder the user connected:
+// Ori only writes to one it set up (FR12).
+var ErrSecondBrainNotOwned = secondbrain.ErrNotOwned
+
+// Capture writes one note to Inbox in a second brain Ori set up (FR15). It is
+// refused for any other connection. A replayed request returns the note the
+// first call wrote; a name already taken gets a number, never an overwrite.
+func (s *SecondBrainService) Capture(ctx context.Context, userID, text, requestID string) (SecondBrainCaptureView, error) {
+	if !secondbrain.ValidRequestID(requestID) {
+		return SecondBrainCaptureView{}, ErrValidation
+	}
+	now := s.deps.Now()
+	capture, err := secondbrain.NewCapture(text, now)
+	if err != nil {
+		return SecondBrainCaptureView{}, err
+	}
+	s.captureMu.Lock()
+	defer s.captureMu.Unlock()
+
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return SecondBrainCaptureView{}, err
+	}
+	source := doc.Connected()
+	if source == nil {
+		return SecondBrainCaptureView{}, ErrSecondBrainNotConnected
+	}
+	if receipt, replayed, err := doc.Replay(requestID, secondBrainActionCapture); err != nil || replayed {
+		return captureView(*source, receipt.Note), err
+	}
+	writer, err := secondbrain.NewWriter(source)
+	if err != nil {
+		return SecondBrainCaptureView{}, err
+	}
+	var rel string
+	for attempt := 1; ; attempt++ {
+		if attempt > maxCaptureAttempts {
+			return SecondBrainCaptureView{}, ErrSecondBrainUnavailable
+		}
+		rel = capture.Rel(attempt)
+		_, err = writer.Create(rel, secondbrain.NoteKindCapture, capture.Body)
+		if !errors.Is(err, secondbrain.ErrNoteExists) {
+			break
+		}
+	}
+	if err != nil {
+		logger.Warn("A capture could not be written", logger.Fields{"error": err.Error()})
+		return SecondBrainCaptureView{}, err
+	}
+	if _, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
+		if _, replayed, err := doc.Replay(requestID, secondBrainActionCapture); err != nil || replayed {
+			return err
+		}
+		doc.Remember(secondbrain.Receipt{RequestID: requestID, Action: secondBrainActionCapture, At: now, Note: rel})
+		return nil
+	}); err != nil {
+		// The note is on disk; a retry with this id writes a second one, so say
+		// so rather than hide the failure.
+		logger.Warn("A capture's receipt could not be saved", logger.Fields{"error": err.Error()})
+	}
+	return captureView(*source, rel), nil
+}
+
+// CaptureAvailable reports whether Capture can work: a second brain Ori set up
+// is connected and its folder is still there. The chat tool is offered only
+// then, so a user with a connected vault never sees it.
+func (s *SecondBrainService) CaptureAvailable(ctx context.Context, userID string) bool {
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return false
+	}
+	source := doc.Connected()
+	if source == nil || !source.CreatedByOri() {
+		return false
+	}
+	info, err := os.Stat(source.Path)
+	return err == nil && info.IsDir()
+}
+
+func captureView(source secondbrain.Source, rel string) SecondBrainCaptureView {
+	name := strings.TrimSuffix(strings.TrimPrefix(rel, secondbrain.FolderInbox+"/"), ".md")
+	view := SecondBrainCaptureView{Note: rel, Name: name}
+	if source.CreatedByOri() {
+		view.Link = secondbrain.ObsidianPathLink(filepath.Join(source.Path, filepath.FromSlash(rel)))
+	}
+	return view
+}
+
+// WriteDaily mirrors a Journal day to Daily/<date>.md in a second brain Ori
+// set up (FR14). ok is false, with no error, when there is nothing to mirror to
+// (nothing connected, or a folder the user connected). ErrUserModified says the
+// day's note is the user's and was left alone.
+func (s *SecondBrainService) WriteDaily(ctx context.Context, userID, localDate, content string) (mirrored bool, err error) {
+	if !isoDay(localDate) {
+		return false, ErrValidation
+	}
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	source := doc.Connected()
+	if source == nil || !source.CreatedByOri() {
+		return false, nil
+	}
+	writer, err := secondbrain.NewWriter(source)
+	if err != nil {
+		return false, err
+	}
+	body := strings.TrimSpace(content)
+	if body == "" {
+		return false, ErrValidation
+	}
+	if _, err := writer.Write(secondbrain.FolderDaily+"/"+localDate+".md", secondbrain.NoteKindJournal, []byte(body+"\n")); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func isoDay(text string) bool {
+	if len(text) != 10 {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", text)
+	return err == nil
+}
+
+// createFolder gathers the seeds and makes the folder, turning each refusal
+// into one sentence the user can act on (FR5, FR11).
+func (s *SecondBrainService) createFolder(ctx context.Context, userID, parent, name string) (secondbrain.Creation, error) {
+	var seeds secondbrain.Seeds
+	if s.seeds != nil {
+		var err error
+		if seeds, err = s.seeds(ctx, userID); err != nil {
+			// An unreadable follow-up list must not stop the user's folder;
+			// the first look then reports the seed honestly as empty.
+			logger.Warn("Second-brain seeds could not be read", logger.Fields{"error": err.Error()})
+			seeds = secondbrain.Seeds{}
+		}
+	}
+	creation, err := secondbrain.Creator{}.Create(parent, name, seeds)
+	switch {
+	case err == nil:
+		return creation, nil
+	case errors.Is(err, secondbrain.ErrTargetNotEmpty):
+		return secondbrain.Creation{}, &SecondBrainFolderError{Message: fmt.Sprintf("%s already has something in it. Choose another name or location.", name)}
+	case errors.Is(err, secondbrain.ErrInvalidFolderName):
+		return secondbrain.Creation{}, &SecondBrainFolderError{Message: "Choose a simple folder name, without slashes."}
+	default:
+		logger.Warn("A second brain could not be set up", logger.Fields{"error": err.Error()})
+		return secondbrain.Creation{}, &SecondBrainFolderError{Message: "Ori couldn't set up the folder there. Check that you can write to that location, then try again."}
+	}
+}
+
+// checkedFolder resolves a folder-picker selection token and applies the
+// typed-path rules (FR4).
+func (s *SecondBrainService) checkedFolder(token string) (folderpath.Checked, error) {
+	if s.deps.ResolveSelection == nil {
+		return folderpath.Checked{}, ErrSecondBrainSelection
+	}
+	path, err := s.deps.ResolveSelection(token)
+	if err != nil {
+		return folderpath.Checked{}, ErrSecondBrainSelection
+	}
+	if s.deps.CheckFolder == nil {
+		return folderpath.Checked{}, ErrSecondBrainUnavailable
+	}
+	checked, err := s.deps.CheckFolder(path)
+	if err != nil {
+		return folderpath.Checked{}, &SecondBrainFolderError{Message: folderpath.Message(err)}
+	}
+	return checked, nil
 }
 
 // chosenSource resolves the folder a connect names and applies the folder
@@ -438,7 +805,7 @@ func (s *SecondBrainService) LookAgain(ctx context.Context, userID, requestID st
 	}
 	connected := doc.Connected()
 	if started != nil {
-		s.startLook(userID, *connected, previous, started.ID, requestID)
+		s.startLook(userID, *connected, previous, started.ID, requestID, nil)
 	}
 	return s.lookView(userID, connected), nil
 }
@@ -636,7 +1003,7 @@ func (s *SecondBrainService) isRunning(userID, lookID string) bool {
 
 // startLook runs the look in the background and writes its result, unless
 // the folder was disconnected or replaced, or a newer look took its place.
-func (s *SecondBrainService) startLook(userID string, source secondbrain.Source, previous *secondbrain.Look, lookID, requestID string) {
+func (s *SecondBrainService) startLook(userID string, source secondbrain.Source, previous *secondbrain.Look, lookID, requestID string, setup *secondbrain.SetupCounts) {
 	s.mu.Lock()
 	s.running[userID] = lookID
 	s.mu.Unlock()
@@ -652,8 +1019,13 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), secondBrainLookTimeout)
 		defer cancel()
-		run := s.deps.Looker.Run(ctx, source, previous, lookID, requestID)
-		if note := run.HeadlineNote; note != "" && note != "no model" && note != "no open items" {
+		var run secondbrain.LookRun
+		if setup != nil {
+			run = s.deps.Looker.RunSetup(ctx, source, lookID, requestID, *setup)
+		} else {
+			run = s.deps.Looker.Run(ctx, source, previous, lookID, requestID)
+		}
+		if note := run.HeadlineNote; note != "" && note != "no model" && note != "no open items" && note != "setup" {
 			logger.Info("A look kept the rules-only headline", logger.Fields{"look_id": lookID, "reason": note})
 		}
 		_, err := s.store.Mutate(ctx, userID, func(doc *SecondBrainDocument) error {
@@ -736,6 +1108,13 @@ func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
 	}
 	view.Source = &SecondBrainSourceView{
 		ID: connected.ID, Kind: connected.Kind, Name: connected.Name, Path: connected.Path, ConnectedAt: connected.ConnectedAt,
+		Origin: connected.Origin,
+	}
+	if view.Source.Origin == "" {
+		view.Source.Origin = secondbrain.OriginConnected
+	}
+	if connected.CreatedByOri() {
+		view.Source.OpenLink = secondbrain.ObsidianPathLink(connected.Path)
 	}
 	if last := connected.LastLook; last != nil {
 		summary := &SecondBrainLookSummary{

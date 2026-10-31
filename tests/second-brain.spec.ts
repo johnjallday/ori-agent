@@ -108,11 +108,25 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
   await expect(card(page)).toBeHidden();
 });
 
-test("I don't keep notes declines the ask and skips the mission", async ({ page, request }) => {
+test("the ask offers Set one up for me instead of I don't keep notes", async ({
+  page,
+  request
+}) => {
   await resetGettingStarted(request);
   await openDrawer(page);
-  await action(page, 'none').click();
-  await expect(card(page)).toContainText("Got it. I won't ask about notes again.");
+  await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
+    'Read Second Brain',
+    'Another folder…',
+    'Set one up for me',
+    'Not now'
+  ]);
+  await expect(action(page, 'none')).toHaveCount(0);
+  await expect(card(page)).toContainText('I can set one up for you.');
+  // A decline already on record still declines the ask and skips the mission.
+  const response = await request.post(`${ENDPOINT}/ask`, {
+    data: { decision: 'none', request_id: `spec-decline-${Date.now()}` }
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
   expect((await secondBrain(request)).ask.state).toBe('declined');
   const progression = await (await request.get('/api/progression')).json();
   const mission = progression.missions.find(
@@ -137,12 +151,12 @@ test('with nothing detected the ask points at a folder, and the chooser takes a 
   });
   await openDrawer(page);
   await expect(card(page)).toContainText(
-    "Do you keep a second brain, notes in Obsidian or a folder of Markdown? Point me at it and I'll tell you what's open."
+    'Do you keep a second brain? Point me at it, or I can set one up for you.'
   );
   await expect(card(page).locator('button')).toHaveText([
     'Choose folder…',
-    'Not now',
-    "I don't keep notes"
+    'Set one up for me',
+    'Not now'
   ]);
 
   await action(page, 'choose').click();
@@ -174,7 +188,14 @@ test('read the vault: consent, one headline, add the open items once, and Look a
   // A rules-only headline on the fixture vault, or the model's when one is set.
   await expect(action(page, 'add')).toHaveText('Add 8 as follow-ups', { timeout: 75_000 });
   await expect(card(page).locator('.pa-specialist-offer__headline')).toHaveText(/^12 open items/);
-  await expect(card(page)).toContainText('Studio Website has 3 open items untouched since June');
+  // The fixture's stalest project was last touched 120 days ago, so the month
+  // moves with the date the suite runs.
+  const staleMonth = new Date(Date.now() - 120 * 86_400_000).toLocaleString('en-US', {
+    month: 'long'
+  });
+  await expect(card(page)).toContainText(
+    `Studio Website has 3 open items untouched since ${staleMonth}`
+  );
   await card(page).getByText('Show everything (12)').click();
   const heading = card(page).locator('.pa-second-brain__open', {
     hasText: 'Projects/Album Release'

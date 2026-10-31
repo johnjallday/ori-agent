@@ -4,7 +4,7 @@
 # with a fixture notes vault, ready for the "Connect your second brain" ask.
 #
 # Usage:
-#   ./scripts/second-brain-demo.sh [--flavour music|software|research] [--no-vault-list] [--codex] [port]
+#   ./scripts/second-brain-demo.sh [--flavour music|software|research] [--no-vault-list] [--create] [--codex] [port]
 #
 # It refuses a port that is already in use (default 8947, not wt demo's 8931),
 # writes a fixture vault under <sandbox>/Documents and, unless --no-vault-list,
@@ -15,6 +15,12 @@
 #
 #   READY SANDBOX=<dir> ORI_URL=http://localhost:<port> VAULT=<path>
 #
+# --create is for "Set one up for me": <sandbox>/Documents is left empty, there
+# is no vault list (so the ask offers no vault), and the sandbox gets three
+# open follow-ups and two approved People entries for the setup to seed. The
+# line then reads VAULT= (empty) DOCUMENTS=<sandbox>/Documents FOLLOW_UPS=3
+# PEOPLE=2.
+#
 # The server stays in the foreground; stop it with
 # ./scripts/stop-demo-server.sh <port>. --codex passes your Codex home through
 # (as wt demo does) and sets the system model to codex/gpt-5.6-luna, so the
@@ -24,6 +30,7 @@ set -euo pipefail
 
 flavour="music"
 vault_list=1
+create=0
 codex=0
 port="8947"
 while (($#)); do
@@ -36,12 +43,16 @@ while (($#)); do
 		vault_list=0
 		shift
 		;;
+	--create)
+		create=1
+		shift
+		;;
 	--codex)
 		codex=1
 		shift
 		;;
 	-h | --help)
-		sed -n '3,22p' "$0"
+		sed -n '3,28p' "$0"
 		exit 0
 		;;
 	*)
@@ -51,7 +62,7 @@ while (($#)); do
 	esac
 done
 if ! [[ "$port" =~ ^[0-9]+$ ]]; then
-	echo "usage: $0 [--flavour music|software|research] [--no-vault-list] [--codex] [port]" >&2
+	echo "usage: $0 [--flavour music|software|research] [--no-vault-list] [--create] [--codex] [port]" >&2
 	exit 2
 fi
 if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -68,10 +79,16 @@ if [[ ! -d "$sandbox" ]]; then
 	exit 1
 fi
 
-fixture_args=(-flavours "$flavour")
-if ((vault_list)); then fixture_args+=(-home "$sandbox"); fi
-(cd "$repo" && go run ./internal/testutil/vaultfixture/cmd/vaultfixture "${fixture_args[@]}" "$sandbox/Documents") >"$sandbox/fixture.json"
-vault="$(sed -n 's/^ *"path": "\(.*\)",$/\1/p' "$sandbox/fixture.json" | head -1)"
+vault=""
+if ((create)); then
+	# Nothing to read yet: an empty Documents, and no vault list for the ask to find.
+	mkdir -p "$sandbox/Documents"
+else
+	fixture_args=(-flavours "$flavour")
+	if ((vault_list)); then fixture_args+=(-home "$sandbox"); fi
+	(cd "$repo" && go run ./internal/testutil/vaultfixture/cmd/vaultfixture "${fixture_args[@]}" "$sandbox/Documents") >"$sandbox/fixture.json"
+	vault="$(sed -n 's/^ *"path": "\(.*\)",$/\1/p' "$sandbox/fixture.json" | head -1)"
+fi
 
 if ((codex)); then
 	export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
@@ -95,5 +112,20 @@ post /api/personal-assistant/hire '{"request_id":"demo-hire","if_version":0,"dis
 version="$(curl -fsS "$url/api/personal-assistant" | sed -n 's/.*"state_version":\([0-9]*\).*/\1/p' | head -1)"
 post /api/personal-assistant/hq "{\"request_id\":\"demo-hq\",\"if_version\":${version:-2},\"name\":\"Personal HQ\",\"timezone\":\"Asia/Seoul\",\"schedule_days\":[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\"],\"schedule_time\":\"08:00\",\"scope\":\"all\",\"include_future_workspaces\":true,\"notify_on_ready\":false}" >/dev/null
 
-echo "READY SANDBOX=$sandbox ORI_URL=$url VAULT=$vault"
+if ((create)); then
+	# What the setup seeds: open follow-ups the user confirmed (manual ones are
+	# active, not candidates) and approved People entries.
+	for title in "Call the distributor" "Renew the studio lease" "Send the invoice to Sam"; do
+		post /api/personal-hq/followups "{\"category\":\"i_owe\",\"direction\":\"outbound\",\"title\":\"$title\"}" >/dev/null
+	done
+	version="$(curl -fsS "$url/api/personal-assistant" | sed -n 's/.*"state_version":\([0-9]*\).*/\1/p' | head -1)"
+	n=0
+	for text in "Dana Lee is my distributor." "Sam Ortiz mixes my records."; do
+		n=$((n + 1))
+		post /api/personal-assistant/knowledge/explicit "{\"request_id\":\"demo-person-$n\",\"state_version\":${version:-3},\"category\":\"people\",\"text\":\"$text\"}" >/dev/null
+	done
+	echo "READY SANDBOX=$sandbox ORI_URL=$url VAULT= DOCUMENTS=$sandbox/Documents FOLLOW_UPS=3 PEOPLE=2"
+else
+	echo "READY SANDBOX=$sandbox ORI_URL=$url VAULT=$vault"
+fi
 wait "$server"

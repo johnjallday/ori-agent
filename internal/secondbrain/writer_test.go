@@ -258,6 +258,37 @@ func TestWrite_RefusesAnOverSizeNoteAndAnOverSizeExistingOne(t *testing.T) {
 	}
 }
 
+func TestCreate_NeverReplacesWhateverIsAtTheName(t *testing.T) {
+	tree := newWriterTree(t)
+	writer := newWriterFor(t, tree.vault)
+	// The user's note, Ori's intact note, an edited one, and links.
+	for _, rel := range []string{"Inbox/mine.md", "Inbox/ori-note.md", "Daily/2026-10-30.md", "Inbox/linked-note.md", "Inbox/linked-inside.md"} {
+		before := snapshot(t, tree.base)
+		if _, err := writer.Create(rel, NoteKindCapture, []byte("new\n")); !errors.Is(err, ErrNoteExists) {
+			t.Errorf("Create(%s): err = %v, want ErrNoteExists", rel, err)
+		}
+		if after := snapshot(t, tree.base); after != before {
+			t.Fatalf("a refused Create(%s) changed the tree.\nbefore:\n%s\nafter:\n%s", rel, before, after)
+		}
+	}
+	// A free name is written, and only that path changes; the boundary still holds.
+	result, err := writer.Create("Inbox/fresh.md", NoteKindCapture, []byte("new\n"))
+	if err != nil || result.Replaced || result.Rel != "Inbox/fresh.md" {
+		t.Fatalf("Create = %+v, %v", result, err)
+	}
+	for _, rel := range []string{"Projects/new.md", "Inbox/sub/new.md", "README.md"} {
+		if _, err := writer.Create(rel, NoteKindCapture, []byte("x")); !errors.Is(err, ErrOutsideOwnedFolders) {
+			t.Errorf("Create(%s): err = %v", rel, err)
+		}
+	}
+	source := testSource(tree.vault)
+	connected, err := NewWriter(&source)
+	if err == nil || connected != nil {
+		t.Fatalf("a connected source got a writer: %v", err)
+	}
+	assertNoTempFiles(t, tree.vault)
+}
+
 func TestWrite_RefusesAnUnknownKind(t *testing.T) {
 	tree := newWriterTree(t)
 	if _, err := newWriterFor(t, tree.vault).Write("Inbox/new.md", "other", []byte("x")); !errors.Is(err, ErrInvalidNote) {
@@ -286,8 +317,11 @@ func TestPublish_NeverClobbersANoteSavedDuringTheWrite(t *testing.T) {
 	// The checks said the name was free; the user saves a note there before
 	// the write is published.
 	full := writeNote(t, tree.vault, "Inbox/raced.md", "the user's note\n")
-	if err := publish(dir, temp, "raced.md", false); !errors.Is(err, ErrUserModified) {
+	if err := publish(dir, temp, "raced.md", false, false); !errors.Is(err, ErrUserModified) {
 		t.Fatalf("err = %v, want ErrUserModified", err)
+	}
+	if err := publish(dir, temp, "raced.md", false, true); !errors.Is(err, ErrNoteExists) {
+		t.Fatalf("create: err = %v, want ErrNoteExists", err)
 	}
 	content, err := os.ReadFile(full) // #nosec G304 -- the test's own temp tree
 	if err != nil || string(content) != "the user's note\n" {

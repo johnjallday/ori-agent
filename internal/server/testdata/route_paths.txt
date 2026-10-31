@@ -131,7 +131,9 @@
 /api/personal-assistant/folder-digest/scan
 /api/personal-assistant/second-brain
 /api/personal-assistant/second-brain/ask
+/api/personal-assistant/second-brain/capture
 /api/personal-assistant/second-brain/connect
+/api/personal-assistant/second-brain/create
 /api/personal-assistant/second-brain/disconnect
 /api/personal-assistant/second-brain/look
 /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/follow-ups

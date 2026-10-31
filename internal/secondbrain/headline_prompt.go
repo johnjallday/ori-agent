@@ -241,6 +241,13 @@ func ObsidianLink(vault, rel string) string {
 	return "obsidian://open?vault=" + escapeQuery(vault) + "&file=" + escapeQuery(file)
 }
 
+// ObsidianPathLink opens a folder as a vault, or a note inside one, by its
+// absolute path, even for a vault Obsidian has not seen yet, which the
+// vault-name link of ObsidianLink cannot. It is only a link.
+func ObsidianPathLink(path string) string {
+	return "obsidian://open?path=" + escapeQuery(path)
+}
+
 func escapeQuery(value string) string {
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }

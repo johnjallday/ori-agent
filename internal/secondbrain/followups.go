@@ -99,6 +99,12 @@ func Accept(ctx context.Context, followUps FollowUps, in Acceptance) (created, s
 		location = time.Local
 	}
 	for _, item := range in.Items {
+		if item.Seeded {
+			// Seeded from a follow-up the user already has; its own source is
+			// not this note, so the dedup below could not see it.
+			skipped++
+			continue
+		}
 		_, err := followUps.FindBySource(ctx, in.UserID, FollowUpSourceType, item.ID)
 		switch {
 		case err == nil:

@@ -441,6 +441,11 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		if s.Storage.PersonalAssistantFolderObservations != nil {
 			handler.SetFolderSetups(s.Storage.PersonalAssistantFolderObservations)
 		}
+		// "Note this" in the assistant's conversation adds to a second brain
+		// Ori set up; the tool is offered only while one is connected.
+		if s.Storage.PersonalAssistantSecondBrain != nil {
+			handler.SetSecondBrainCapture(s.Storage.PersonalAssistantSecondBrain)
+		}
 		// Operations belong to a hired assistant's conversations; without the
 		// relationship above there is nothing to bind them to.
 		s.wireAssistantOperations(handler)

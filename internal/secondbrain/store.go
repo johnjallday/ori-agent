@@ -174,6 +174,9 @@ type LookItem struct {
 	// InDecision says the item's note marks an open decision, so it becomes
 	// a needs-decision follow-up.
 	InDecision bool `json:"in_decision,omitempty"`
+	// Seeded says the item sits in a note Ori seeded from a follow-up the user
+	// already has. It is never suggested and never added again (FR10).
+	Seeded bool `json:"seeded,omitempty"`
 	// Link opens the note in Obsidian (FR26); "" for a plain Markdown folder.
 	// It is built from the vault's name and the note's path, never read.
 	Link string `json:"link,omitempty"`
@@ -188,6 +191,8 @@ type Receipt struct {
 	LookID    string    `json:"look_id,omitempty"`
 	Created   int       `json:"created,omitempty"`
 	Skipped   int       `json:"skipped,omitempty"`
+	// Note is the Inbox path a capture wrote, so a replay links the same note.
+	Note string `json:"note,omitempty"`
 }
 
 // Connected returns the connected source, or nil.
@@ -390,7 +395,8 @@ func (r Record) Validate() error {
 		return err
 	}
 	for _, receipt := range r.Receipts {
-		if !ValidRequestID(receipt.RequestID) || receipt.Action == "" || len(receipt.Action) > 32 || receipt.Created < 0 || receipt.Skipped < 0 {
+		if !ValidRequestID(receipt.RequestID) || receipt.Action == "" || len(receipt.Action) > 32 || receipt.Created < 0 || receipt.Skipped < 0 ||
+			(receipt.Note != "" && (len(receipt.Note) > 300 || !strings.HasPrefix(receipt.Note, FolderInbox+"/") || strings.Contains(receipt.Note, ".."))) {
 			return ErrInvalidRecord
 		}
 	}
