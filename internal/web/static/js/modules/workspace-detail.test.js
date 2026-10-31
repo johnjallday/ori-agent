@@ -41,6 +41,27 @@ function withDocumentElements(elements, fn) {
   }
 }
 
+test('anchored directory rendering labels the anchor and offers relink, never unlink or promote', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    shape: 'anchored',
+    primary_directory_id: 'a',
+    shared_data: { anchor_directory_reference_id: 'a' }
+  };
+  page.directories = [
+    { id: 'a', name: 'Client', path: '/missing', missing: true, source: 'reference' },
+    { id: 'extra', name: 'Other', path: '/other', source: 'reference' }
+  ];
+  page.elements = { directoriesList: { innerHTML: '' } };
+  page.renderDirectories();
+  const html = page.elements.directoriesList.innerHTML;
+  assert.match(html, /Anchored folder/);
+  assert.match(html, /Folder not found/);
+  assert.match(html, /Relink Client/);
+  assert.doesNotMatch(html, /Remove directory Client|Make Project/);
+  assert.match(html, /Reference/);
+});
+
 function makeTabButton() {
   return {
     clickCount: 0,

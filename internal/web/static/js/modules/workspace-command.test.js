@@ -14,6 +14,48 @@ globalThis.localStorage = {
 };
 const view = new WorkspaceCommandView(null);
 
+test('anchored header and folder rows show the real root, sidecar and relink state', () => {
+  const workspace = {
+    shape: 'anchored',
+    home_directory: '/Users/test',
+    sidecar_path: '/Users/test/Ori Workspaces/client',
+    anchor: { directory_reference_id: 'a', path: '/Users/test/Client', missing: true }
+  };
+  const command = new WorkspaceCommandView({ workspace });
+  assert.match(command.anchorDetailsHTML(), /Anchored to ~\/Client/);
+  assert.match(command.anchorDetailsHTML(), /Ori’s notes and settings: ~\/Ori Workspaces\/client/);
+  assert.match(command.anchorDetailsHTML(), /Folder not found/);
+  assert.match(command.anchorDetailsHTML(), /data-cmd-relink-anchor="a"/);
+  assert.equal(command.folderRole({ id: 'a' }).label, 'Anchored folder');
+  assert.equal(command.folderRole({ id: 'other' }).label, 'Reference');
+});
+
+test('filesystem loadout rows expose alias, escaped root and exact read-only policy', () => {
+  const command = new WorkspaceCommandView(null);
+  command.page = { workspace: { home_directory: '/Users/test' } };
+  const row = {
+    bindingId: 'a',
+    name: 'filesystem',
+    alias: 'anchor-folder',
+    roots: ['/Users/test/<Client>'],
+    allowedTools: ['read_file'],
+    enabled: true
+  };
+  const html = command.loadoutSectionHTML('mcp', 'MCP Tools', [row], 'Reader');
+  assert.match(html, /anchor-folder · ~\/&lt;Client&gt; · read-only/);
+  assert.match(html, /Remove MCP server filesystem/);
+  assert.doesNotMatch(html, / Locked/);
+  const managed = command.loadoutSectionHTML(
+    'mcp',
+    'MCP Tools',
+    [{ ...row, alias: 'workspace-files', allowedTools: null, locked: true }],
+    'Reader'
+  );
+  assert.match(managed, /workspace-files/);
+  assert.match(managed, / Locked/);
+  assert.doesNotMatch(managed, /read-only/);
+});
+
 function makeToggleButton() {
   return {
     attrs: {},

@@ -180,6 +180,9 @@ func (s *Service) Privacy(settings JanitorSettings) PrivacyState {
 type RelinkRequest struct {
 	WorkspaceID string
 	Path        string
+	// Server-only, after the workspace anchor validator accepts the new root.
+	// Ordinary capability relinks may tidy another folder without moving the anchor.
+	AnchorDirectoryReferenceID string
 }
 
 // Relink moves the workspace to a new folder, in an order chosen so nothing
@@ -193,6 +196,10 @@ func (s *Service) Relink(automation WatcherLifecycle, req RelinkRequest) (Status
 	current, err := s.store.LoadSettings(workspaceID)
 	if err != nil {
 		return Status{}, err
+	}
+
+	if req.AnchorDirectoryReferenceID != "" && req.AnchorDirectoryReferenceID != current.DirectoryReferenceID {
+		return Status{}, setupErr(CodeFolderChanged, "File Janitor no longer manages this anchor. Review its folder settings first.", RepairChooseFolder, nil)
 	}
 
 	// 0. Validate and reserve the new folder BEFORE anything is torn down. A
@@ -249,7 +256,8 @@ func (s *Service) Relink(automation WatcherLifecycle, req RelinkRequest) (Status
 
 	// 3. Point at the new folder, which revalidates it and rebuilds the
 	//    directory reference and read-only binding.
-	status, err := s.ConfirmSetup(SetupRequest{WorkspaceID: workspaceID, Path: req.Path})
+	status, err := s.ConfirmSetup(SetupRequest{WorkspaceID: workspaceID, Path: req.Path,
+		DirectoryReferenceID: req.AnchorDirectoryReferenceID, relinkAnchor: req.AnchorDirectoryReferenceID != ""})
 	if err != nil {
 		return Status{}, err
 	}

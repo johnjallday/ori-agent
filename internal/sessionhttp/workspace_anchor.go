@@ -164,6 +164,39 @@ func (h *Handler) saveAnchoredWorkspaceFolder(path string, ws *agentworkspace.Wo
 	return nil
 }
 
+// Folder presentation is a local read-only projection, never portable state.
+// Only the anchor is probed; a missing external folder is never recreated.
+func (h *Handler) addWorkspaceFolderPresentation(payload map[string]any, ws *session.Workspace) {
+	if home, err := os.UserHomeDir(); err == nil {
+		payload["home_directory"] = home
+	}
+	if h.workspaceStore != nil {
+		if path, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+			payload["sidecar_path"] = path
+		}
+	}
+	id := workspaceAnchorDirectoryID(ws)
+	if id == "" {
+		return
+	}
+	var refs []map[string]any
+	if json.Unmarshal(ws.DirectoryReferencesJSON, &refs) != nil {
+		return
+	}
+	for _, ref := range refs {
+		if ref["id"] != id {
+			continue
+		}
+		path, _ := ref["path"].(string)
+		info, err := os.Stat(path) // #nosec G703 -- persisted user-selected anchor, existence-only presentation; no writes.
+		missing := err != nil || !info.IsDir()
+		ref["missing"] = missing
+		payload["anchor"] = map[string]any{"directory_reference_id": id, "path": path, "missing": missing}
+		break
+	}
+	payload["directory_references"] = refs
+}
+
 func workspaceAnchorDirectoryID(ws *session.Workspace) string {
 	if ws == nil {
 		return ""

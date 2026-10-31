@@ -70,6 +70,11 @@ export class WorkspaceMCPManager {
       enabled: binding?.enabled !== false,
       scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {},
       config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {},
+      allowedTools: Array.isArray(binding?.allowed_tools)
+        ? [...binding.allowed_tools]
+        : Array.isArray(binding?.allowedTools)
+          ? [...binding.allowedTools]
+          : null,
       emailAccount,
       emailAccountMissing:
         binding?.email_account_missing === true || binding?.emailAccountMissing === true,

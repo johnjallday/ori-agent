@@ -3751,9 +3751,23 @@
     }
 
     const label = getWorkspaceLabel(workspaceId) || 'Workspace';
+    let anchorNote = '';
+    const listed = window.WorkspaceHubState.getState().workspaceMap.get(workspaceId);
+    if (listed?.shape === 'anchored' || listed?.shared_data?.anchor_directory_reference_id) {
+      const { anchoredDeletionCopy } = await import('./workspace-folder-shape.js');
+      let detail = listed;
+      try {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
+        if (response.ok) detail = await response.json();
+      } catch (_) {
+        /* Preserve the anchor disclosure even when detail is unavailable. */
+      }
+      anchorNote = anchoredDeletionCopy(detail) + ' ';
+    }
     const confirmed = await showWorkspaceDeleteConfirm({
       title: `Move "${label}" to Trash?`,
       message:
+        anchorNote +
         'This will move the workspace folder to the system Trash and hide it from Ori. You can restore it from Undo while this app session is open, or from Trash until it is emptied.',
       variant: 'trash',
       confirmLabel: 'Move to Trash'
@@ -3796,6 +3810,13 @@
         `${selectedGroups} group${selectedGroups === 1 ? '' : 's'} and ${selectedGroups === 1 ? 'its' : 'their'} contents will be moved to the system Trash.`
       );
     }
+    const selectedAnchors = selected.some(
+      id => window.WorkspaceHubState.getState().workspaceMap.get(id)?.shape === 'anchored'
+    );
+    if (selectedAnchors)
+      details.push(
+        "Anchored folders are not touched; only Ori's notes, settings and agents move with their workspace folders."
+      );
     details.push('You can Undo to restore. Continue?');
 
     const confirmed = await showWorkspaceDeleteConfirm({

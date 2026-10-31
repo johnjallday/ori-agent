@@ -25,6 +25,17 @@ test('anchored workspace never displays synthesized filesystem access after bind
   }
 });
 
+test('MCP normalization preserves explicit empty and narrow allowlists, distinct from all tools', () => {
+  const manager = new WorkspaceMCPManager({});
+  for (const allowed of [[], ['read_file'], null, undefined]) {
+    const normalized = manager.normalizeWorkspaceMCPBinding({
+      server_name: 'filesystem',
+      allowed_tools: allowed
+    });
+    assert.deepEqual(normalized.allowedTools, allowed ?? null);
+  }
+});
+
 test('legacy managed workspace retains synthesized filesystem display', () => {
   const manager = new WorkspaceMCPManager({
     workspace: { directory_references: [{ path: '/managed' }] }

@@ -4747,6 +4747,28 @@ button.ws-cmd-rpg-class-card:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ws-cmd-binding-scope {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-anchor-details {
+  margin: 6px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-anchor-details small {
+  display: block;
+  color: var(--ws-ink-faint);
+  margin-top: 3px;
+}
+.workspace-anchor-missing {
+  color: var(--ws-ink);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 4px;
+}
 .ws-cmd-loadout-row-copy strong {
   color: var(--ws-ink);
   font-size: 10.5px;
@@ -5081,6 +5103,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 .ws-cmd-loadout-card.is-editor {
   display: block;
+  grid-column: 1 / -1;
 }
 .ws-cmd-loadout-prompt {
   display: flex;
@@ -6228,20 +6251,20 @@ button.ws-cmd-rpg-class-card:focus-visible {
   background-color: rgba(255, 255, 255, 0.78);
 }
 [data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-status-strip,
-[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-add-btn,
+[data-bs-theme="light"] .ws-cmd-loadout-add-btn,
 [data-bs-theme="light"]
   .ws-cmd-map-window-inspector
   .ws-cmd-rpg-command:not(.is-primary):not(.is-alert):not(.is-needs-input),
-[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-row,
-[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-remove {
+[data-bs-theme="light"] .ws-cmd-loadout-row,
+[data-bs-theme="light"] .ws-cmd-loadout-remove {
   background-color: rgba(255, 255, 255, 0.78);
 }
-[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-remove:hover:not([disabled]) {
+[data-bs-theme="light"] .ws-cmd-loadout-remove:hover:not([disabled]) {
   background-color: rgba(185, 75, 63, 0.1);
 }
 [data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-command:not(.is-primary):hover,
-[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-row:hover,
-[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-row.is-selected {
+[data-bs-theme="light"] .ws-cmd-loadout-row:hover,
+[data-bs-theme="light"] .ws-cmd-loadout-row.is-selected {
   background-color: rgba(31, 107, 78, 0.07);
 }
 [data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-class-card,

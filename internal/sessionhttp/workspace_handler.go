@@ -130,6 +130,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		subPath := parts[1]
 
 		switch subPath {
+		case "anchor":
+			h.handleWorkspaceAnchorRelink(w, r, id)
+			return
 		case "settings":
 			h.handleWorkspaceSettings(w, r, id)
 			return

@@ -19,6 +19,29 @@ func createDirectory(t *testing.T, handler *HTTPHandler, workspaceID, body strin
 	return recorder
 }
 
+func TestGenericDirectoryUpdateCannotRelinkAnAnchor(t *testing.T) {
+	store := NewInMemoryStore()
+	ws := &Workspace{ID: "anchored", Name: "Anchored", Status: StatusActive,
+		SharedData:          map[string]any{AnchorDirectoryReferenceIDKey: "root", PrimaryDirectoryIDKey: "root"},
+		DirectoryReferences: []DirectoryReference{{ID: "root", Path: t.TempDir()}}}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"path": t.TempDir()})
+	req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(string(body)))
+	req.SetPathValue("workspaceID", ws.ID)
+	req.SetPathValue("dirId", "root")
+	res := httptest.NewRecorder()
+	NewHTTPHandler(store, nil, nil).UpdateDirectory(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("unguarded anchor update: %d %s", res.Code, res.Body.String())
+	}
+	after, _ := store.Get(ws.ID)
+	if after.DirectoryReferences[0].Path != ws.DirectoryReferences[0].Path {
+		t.Fatal("refusal changed anchor")
+	}
+}
+
 // A typed path is linked by its selection token: the folder-picker endpoint
 // checked the path and bound the token to this workspace, so the link call
 // carries no path at all.

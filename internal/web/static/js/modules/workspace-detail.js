@@ -6,6 +6,7 @@
  */
 /* global escapeHtml */
 
+import { anchorFolder } from './workspace-folder-shape.js';
 import { createWorkspaceDetailDataLoader } from './workspace-detail-data-loader.js';
 import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explorer.js';
 import { folderDialogOffNote, openFolderPathDialog } from './folder-path-entry.js';
@@ -12801,6 +12802,12 @@ export class WorkspaceDetailPage {
           bindingId,
           name: String(binding?.serverName || '').trim(),
           alias: String(binding?.alias || '').trim(),
+          allowedTools: binding?.allowedTools ?? null,
+          roots: Array.isArray(binding?.config?.roots)
+            ? [...binding.config.roots]
+            : Array.isArray(binding?.scope?.roots)
+              ? [...binding.scope.roots]
+              : [],
           enabled: effective.has(bindingId.toLowerCase()),
           locked: binding?.source === 'synthesized',
           source: String(binding?.source || 'workspace').trim(),
@@ -16246,6 +16253,9 @@ export class WorkspaceDetailPage {
 
     if (workspace && typeof workspace === 'object') {
       if (!this.workspace || typeof this.workspace !== 'object') this.workspace = {};
+      for (const key of ['anchor', 'shape', 'sidecar_path', 'home_directory']) {
+        if (Object.hasOwn(workspace, key)) this.workspace[key] = workspace[key];
+      }
       this.workspace.directory_references = Array.isArray(workspace.directory_references)
         ? workspace.directory_references
         : [];
@@ -16276,6 +16286,7 @@ export class WorkspaceDetailPage {
           id: ref.id,
           name: ref.name || '',
           path: ref.path || '',
+          missing: ref.missing === true,
           source: 'reference'
         }))
       : [];
@@ -16342,14 +16353,22 @@ export class WorkspaceDetailPage {
             : 'Legacy attachment';
         const source = dir.source === 'attachment' ? 'attachment' : 'reference';
         const isPrimary = dir.id === primaryDirectoryId;
-        const roleLabel = isTemplateProject || isPrimary ? 'Project Folder' : 'Reference';
+        const anchor = anchorFolder(this.workspace);
+        const isAnchor = dir.id === anchor?.id;
+        const missingAnchor = isAnchor && dir.missing;
+        const roleLabel = isAnchor
+          ? 'Anchored folder'
+          : isTemplateProject || isPrimary
+            ? 'Project Folder'
+            : 'Reference';
         const roleClass = isTemplateProject || isPrimary ? 'is-primary' : 'is-reference';
         return `
         <div class="workspace-detail-item${isTemplateProject ? ' workspace-detail-project-directory' : ''}" data-directory-id="${dir.id}">
           ${
             !isTemplateProject
               ? `
-          <button type="button" class="workspace-detail-item-change" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkDirectory('${dir.id}', '${source}', this)" title="Change linked folder" aria-label="Change linked folder for ${this.escapeHtml(name)}">
+          <button type="button" class="workspace-detail-item-change" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkDirectory('${dir.id}', '${source}', this)" title="${missingAnchor ? 'Relink' : 'Change linked folder'}" aria-label="${missingAnchor ? 'Relink' : 'Change linked folder for'} ${this.escapeHtml(name)}">
+            ${missingAnchor ? 'Relink' : ''}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M4,7H18.17L15.59,4.41L17,3L22,8L17,13L15.59,11.59L18.17,9H4V7M20,17H5.83L8.41,19.59L7,21L2,16L7,11L8.41,12.41L5.83,15H20V17Z"/>
             </svg>
@@ -16363,7 +16382,7 @@ export class WorkspaceDetailPage {
             </svg>
           </button>
           ${
-            !isTemplateProject
+            !isTemplateProject && !isAnchor
               ? `
           <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteDirectory('${dir.id}', '${source}')" title="Remove directory" aria-label="Remove directory ${this.escapeHtml(name)}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -16387,10 +16406,11 @@ export class WorkspaceDetailPage {
               <span class="workspace-detail-directory-role ${roleClass}">${roleLabel}</span>
             </div>
             <div class="workspace-detail-item-meta">${this.escapeHtml(path)}</div>
+            ${missingAnchor ? '<div class="workspace-anchor-missing" role="status">Folder not found</div>' : ''}
             <div class="workspace-detail-item-submeta">
               <span class="workspace-detail-directory-source">${this.escapeHtml(sourceLabel)}</span>
               ${
-                !isPrimary && !isTemplateProject
+                !anchor && !isPrimary && !isTemplateProject
                   ? `
                 <button
                   type="button"
@@ -16544,6 +16564,9 @@ export class WorkspaceDetailPage {
       return;
     }
 
+    if (directoryId === anchorFolder(this.workspace)?.id) {
+      return this.promptAnchorRelink(directory);
+    }
     const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
     const isPrimaryDirectory = this.getPrimaryDirectoryId() === directoryId;
     const button = triggerButton instanceof HTMLElement ? triggerButton : null;
@@ -16602,6 +16625,46 @@ export class WorkspaceDetailPage {
         button.innerHTML = originalButtonHTML;
       }
     }
+  }
+
+  promptAnchorRelink(directory) {
+    const workspaceId = this.workspaceId;
+    const select = async selection => {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/anchor`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: selection.path,
+          directory_reference_id: directory.id,
+          expected_path: directory.path
+        })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'The anchor could not be relinked.');
+      if (this.workspaceId === workspaceId) {
+        await this.loadDirectories();
+        window.Toast?.success('Anchored folder updated');
+      }
+      return true;
+    };
+    return openFolderPathDialog({
+      heading: 'Relink anchored folder',
+      workspaceId,
+      title: 'Relink anchored folder',
+      copy: 'Choose the folder at its new location. Ori’s notes and settings stay in their separate folder. Access is not widened. If File Janitor manages this folder, old pending approvals are cleared and monitoring needs a fresh decision.',
+      onSelect: select,
+      onChoose: async () => {
+        const response = await fetch('/api/folder-picker/select-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspace_id: workspaceId, title: 'Relink anchored folder' })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Folder picker unavailable');
+        if (result.selected && result.path) await select(result);
+        return result;
+      }
+    });
   }
 
   async updateDirectoryReference(directoryId, nextPath) {

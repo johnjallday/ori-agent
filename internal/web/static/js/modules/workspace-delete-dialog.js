@@ -135,9 +135,9 @@ export function openDeleteDialog({ title = '', doc = globalThis.document } = {})
   }
 
   const session = {
-    chooseDelete({ name = '', group = false, memberCount = 0 } = {}) {
+    chooseDelete({ name = '', group = false, memberCount = 0, folderNote = '' } = {}) {
       const count = Math.max(0, Number(memberCount) || 0);
-      const content = [];
+      const content = folderNote ? [node(doc, 'p', 'ws-delete-dialog__copy', folderNote)] : [];
       let readMode = () => '';
       if (group && count > 0) {
         const members = plural(count, 'workspace');
@@ -187,7 +187,9 @@ export function openDeleteDialog({ title = '', doc = globalThis.document } = {})
             doc,
             'p',
             'ws-delete-dialog__copy',
-            'It moves to the Trash and can be restored with Undo.'
+            folderNote
+              ? "Only Ori's separate workspace folder moves to the Trash and can be restored with Undo."
+              : 'It moves to the Trash and can be restored with Undo.'
           )
         );
       }
@@ -202,7 +204,7 @@ export function openDeleteDialog({ title = '', doc = globalThis.document } = {})
       return step(null);
     },
 
-    confirmCount({ count = 0 } = {}) {
+    confirmCount({ count = 0, folderNote = '' } = {}) {
       const total = Math.max(0, Number(count) || 0);
       const cancel = button('Cancel', 'modern-btn-secondary', close);
       const confirm = button('Delete', 'modern-btn-danger', () => settle(true));
@@ -213,7 +215,9 @@ export function openDeleteDialog({ title = '', doc = globalThis.document } = {})
             doc,
             'p',
             'ws-delete-dialog__copy',
-            'They move to the Trash and can be restored with Undo.'
+            [folderNote, 'They move to the Trash and can be restored with Undo.']
+              .filter(Boolean)
+              .join(' ')
           )
         ],
         controls: [cancel, confirm],

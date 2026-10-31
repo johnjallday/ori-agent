@@ -478,6 +478,9 @@ type SetupRequest struct {
 	// Internal reviewed-link bindings; never accepted as arbitrary HTTP paths.
 	ExpectedRootIdentity string
 	DirectoryReferenceID string
+	// Only Relink may replace a capability-owned anchor's path. Normal setup
+	// of another folder must not silently move the workspace's anchor.
+	relinkAnchor bool
 }
 
 type FolderGrantOperation struct {
@@ -629,7 +632,7 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 	if operation != nil && operation.PreparationID != "" {
 		preparation = current.SetupPreparation
 	}
-	referenceID, err := s.ensureWorkspaceAccess(workspaceID, root, req.DirectoryReferenceID, preparation)
+	referenceID, err := s.ensureWorkspaceAccess(workspaceID, root, req.DirectoryReferenceID, preparation, req.relinkAnchor)
 	if err != nil {
 		return Status{}, err
 	}
@@ -819,7 +822,7 @@ func verifyFilingRootWritable(path string) error {
 // reference and grants exactly one read-only filesystem binding for it,
 // returning the reference ID. Both are idempotent, so repeating setup with the
 // same folder updates rather than duplicates (FR-24).
-func (s *Service) ensureWorkspaceAccess(workspaceID, root, selectedReference string, preparation *SetupPreparation) (string, error) {
+func (s *Service) ensureWorkspaceAccess(workspaceID, root, selectedReference string, preparation *SetupPreparation, relinkAnchor bool) (string, error) {
 	if s.workspaces == nil {
 		return "", setupErr(CodeWorkspaceMissing, "This workspace is unavailable.", "", nil)
 	}
@@ -843,6 +846,15 @@ func (s *Service) ensureWorkspaceAccess(workspaceID, root, selectedReference str
 			ref, err := ws.GetDirectoryReference(selectedReference)
 			if err != nil || ref.Purpose != "" {
 				return setupErr(CodeFolderChanged, "The attached folder changed. Review access again.", RepairChooseFolder, nil)
+			}
+			if relinkAnchor {
+				if ws.AnchorDirectoryReferenceID() != selectedReference {
+					return setupErr(CodeFolderChanged, "The workspace anchor changed. Choose it again.", RepairChooseFolder, nil)
+				}
+				ref.Path, ref.Name = root, filepath.Base(root)
+				if err := ws.UpdateDirectoryReference(*ref); err != nil {
+					return err
+				}
 			}
 			resolved, err := resolveSetupRoot(ref.Path)
 			if err != nil || resolved != root {

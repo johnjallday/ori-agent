@@ -206,6 +206,11 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Path != nil && dirID == workspace.AnchorDirectoryReferenceID() && *req.Path != dir.Path {
+		orihttp.Conflict(w, "Use the workspace anchor relink action so folder ownership and access are checked together")
+		return
+	}
+
 	// Apply updates
 	if req.Name != nil {
 		dir.Name = *req.Name
