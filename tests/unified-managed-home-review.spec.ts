@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 
 // Real exact-candidate owner/journal/role/layout acceptance. The Music wrapper
 // must stage its immutable candidate in disposable HOME/data first. No model,
@@ -179,6 +180,8 @@ test(`managed Home ${map ? 'map frame' : 'automatic'}${lost ? ' with lost real d
       }));
     }
     await canvas.press('Enter');
+    // The accepted Home reports on the Map; Details is its full receipt.
+    await openMapReceiptDetails(page, 'Home');
   } else {
     await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
     await review.locator('[data-placement-action="confirm"]').click();

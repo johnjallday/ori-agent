@@ -383,6 +383,33 @@ after one final gesture, after duplicate/lost-reply/reload recovery and after
 layout-only repair. Check exact receipts, unchanged global profiles/source bytes,
 no render/place model calls, actual membership and actual immediate/later work.
 
+## Map-first handoff
+
+`workspace-creation-transition.js` holds one transient presentation lifetime per
+owner + generation + token. It decides what is on screen and nothing else: it has
+no draft, permission, request id or result, and nothing in it survives a reload.
+`personal-assistant-panel.js` creates it and publishes `window.OriCreationTransition`
+(the drawer and the coordinator are always present together). Each owner keeps its
+own canonical confirm, status and retry callbacks.
+
+| Moment | What the user sees | What cannot happen |
+| --- | --- | --- |
+| Attach and review | Conversation and the full review stay; chat stays behind a creator modal | No collapse before the user chooses the Map |
+| Enter placement | The drawer is suspended (`suspend`, not `close`), the modal closes, then Map input starts | The initiating click cannot confirm; a held Enter (`event.repeat`) is ignored |
+| Back, Escape, view change | The same review returns with unsent text, width and scroll | No resource, grant, scan or position write; the open preference is untouched |
+| Final gesture | Map stays clear and locked with owner pending copy | Escape and Back are inert after the gesture; no second dispatch |
+| Verified, partial or uncertain | One compact status on the Map (`[data-creation-map-status]`) with the owner's Open, Retry position, Read saved status, Details/Continue and Dismiss | Status never moves focus, never reopens a surface, and is not timed away |
+| User asks for chat | Before acceptance: the owner's own Back, then chat. After: chat beside the running work | Accepted work never returns as an editable review |
+| Unsolicited reveal | Lead welcome and activity wait until the lifetime ends (`blocksReveal`, `open({ unsolicited })`) | Nothing opens over a placement or its receipt |
+
+Details is the existing full receipt: the creator modal for ordinary, Group,
+managed Home and build-setup owners, the drawer for source-owned reviews and Home
+projects. File Janitor keeps its own map-hosted accepted panel
+(`assisted-placement-host--map`), which already satisfies this contract, and uses
+the coordinator only for the drawer and lifetime. Automatic placement, Tree, narrow
+widths and unavailable maps never enter a lifetime and behave as before. Without a
+coordinator every owner falls back to its earlier modal or drawer reopen.
+
 Music/REAPER source compatibility, sandbox staging and published rollout are
 separate evidence. No version/floor bump, installation or companion write is
 implied by this host presentation contract.

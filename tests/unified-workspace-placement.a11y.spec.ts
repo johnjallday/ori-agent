@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 
 // Shared review accessibility on a real isolated branch server. Only the
@@ -183,6 +184,7 @@ test('keyboard-only map placement returns with Escape and creates once with Ente
   for (let n = 0; n < 60 && /is-invalid/.test((await preview.getAttribute('class')) || ''); n++)
     await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
+  await openMapReceiptDetails(page, 'Workspace created');
   await expect(
     review.getByRole('heading', { name: 'Workspace created', exact: true })
   ).toBeVisible();
