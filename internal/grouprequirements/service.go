@@ -227,6 +227,7 @@ var (
 	ErrReviewStale          = errors.New("group requirement review is stale")
 	ErrOperationConflict    = errors.New("group requirement operation conflicts with an earlier request")
 	ErrLifecycleConflict    = errors.New("group requirement lifecycle state conflicts with this operation")
+	ErrLifecycleUnbindable  = errors.New("group requirement contract record cannot be bound to a deletion review")
 	ErrLifecycleNotRequired = errors.New("workspace has no Required group requirement to review")
 	ErrUnavailable          = errors.New("group requirement owner is unavailable")
 	ErrNotFound             = errors.New("group requirement receipt was not found")
@@ -591,6 +592,10 @@ func (s *Service) ReviewDeletion(ctx context.Context, input DeletionInput) (Dele
 	if input.DeleteSessions {
 		impact = append(impact, "Sessions belonging to this workspace will also be deleted.")
 	}
+	if !snapshot.StructurallyValid() {
+		summary = fmt.Sprintf("Review deletion of %q. Its recorded template contract is invalid and nothing is connected to it.", candidate.Name)
+		impact = append(impact, "The invalid contract record cannot be repaired or reconnected; deleting the workspace is the way to clear it.")
+	}
 	return DeletionReview{
 		Token: receipt.Token, ExpiresAt: receipt.ExpiresAt, WorkspaceID: candidate.ID,
 		State: "deletion_review_ready", Summary: summary, Impact: impact,
@@ -669,9 +674,9 @@ func (s *Service) requiredDeletionCandidate(input DeletionInput) (*workspace.Wor
 		return nil, nil, ErrLifecycleNotRequired
 	}
 	snapshot := provenance.GroupRequirement
-	if !snapshot.StructurallyValid() {
-		return nil, nil, ErrLifecycleConflict
-	}
+	// Membership is the fact that protects data: a project that is still linked
+	// to a live Home (from either side) must be disconnected, or the Home
+	// removed, before it can go.
 	if candidate.GetAssistantProjectLink() != nil || candidate.GetAssistantProgramState() != nil {
 		return nil, nil, ErrLifecycleConflict
 	}
@@ -683,6 +688,14 @@ func (s *Service) requiredDeletionCandidate(input DeletionInput) (*workspace.Wor
 				}
 			}
 		}
+	}
+	// A malformed snapshot still declares Required, so ordinary deletion keeps
+	// failing closed. A reviewed deletion of a fully detached workspace is the
+	// one way out of that state, and it stays bound to the recorded operation
+	// digest exactly like a valid contract. Without a digest nothing can bind
+	// the review, so such a record remains protected.
+	if !snapshot.StructurallyValid() && strings.TrimSpace(snapshot.OperationDigest) == "" {
+		return nil, nil, ErrLifecycleUnbindable
 	}
 	return candidate, snapshot, nil
 }

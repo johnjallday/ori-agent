@@ -1109,6 +1109,13 @@ func (s *FileStore) DeleteReviewedGroupRequirementOperation(id, operationDigest,
 // user reviewed deletion. It authorizes only the exact Required contract at the
 // subtree root; another Required descendant or any live/reciprocal Assistant
 // Program state still fails closed.
+//
+// The snapshot does not have to be structurally valid here. A malformed record
+// is still protected from ordinary deletion (HasRequiredGroupRequirement reads
+// only the policy), but the host's reviewed deletion is bound to the recorded
+// operation digest and to proof of detachment, which is exactly the evidence a
+// valid contract needs. Refusing it would leave the workspace undeletable with
+// nothing to preserve.
 func reviewedGroupRequirementRemovalOwned(workspaces map[string]*Workspace, rootID, operationDigest string) bool {
 	candidate := workspaces[rootID]
 	if candidate == nil || strings.TrimSpace(operationDigest) == "" ||
@@ -1118,7 +1125,6 @@ func reviewedGroupRequirementRemovalOwned(workspaces map[string]*Workspace, root
 	}
 	provenance := candidate.GetTemplateProvenance()
 	if provenance == nil || provenance.GroupRequirement == nil ||
-		!provenance.GroupRequirement.StructurallyValid() ||
 		!strings.EqualFold(strings.TrimSpace(provenance.GroupRequirement.Policy), "required") ||
 		provenance.GroupRequirement.OperationDigest != strings.TrimSpace(operationDigest) {
 		return false
