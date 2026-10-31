@@ -63,8 +63,24 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # -v output runs to hundreds of thousands of lines, which buries a
+      # failure far above the log tail. Keep the full log, then repeat each
+      # failing test and package at the end where it can be found.
       - name: Run tests
-        run: go test -v -short ./...
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          go test -v -short ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log" || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Failure summary"
+            grep -nE -A20 -- '^\s*--- FAIL|^panic:|^FAIL\s|\[build failed\]|\[setup failed\]' "$RUNNER_TEMP/go-test.log" | grep -vE 'ℹ️|\[DEBUG\]' | head -400 || true
+            echo "::endgroup::"
+            grep -E -- '^\s*--- FAIL|^FAIL\s|^panic:' "$RUNNER_TEMP/go-test.log" | while IFS= read -r line; do
+              echo "::error title=go test::$line"
+            done
+          fi
+          exit "$status"
 
       - name: Install folder picker build deps
         run: |
