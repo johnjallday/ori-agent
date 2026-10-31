@@ -61,6 +61,7 @@ type DirectorySyncManager struct {
 	workspaceAccessed map[string]time.Time
 
 	started bool
+	stopped bool
 	startMu sync.Mutex
 }
 
@@ -113,7 +114,7 @@ func (m *DirectorySyncManager) Start() {
 	}
 	defer release()
 	m.startMu.Lock()
-	if m.started {
+	if m.started || m.stopped {
 		m.startMu.Unlock()
 		return
 	}
@@ -128,12 +129,17 @@ func (m *DirectorySyncManager) Start() {
 }
 
 // Stop gracefully stops filesystem watching.
+//
+// The watcher is opened by NewDirectorySyncManager, so Stop closes it even when
+// Start never ran; otherwise every unstarted manager keeps an inotify instance
+// until the process exits. A stopped manager cannot be started again.
 func (m *DirectorySyncManager) Stop() {
 	m.startMu.Lock()
-	if !m.started {
+	if m.stopped {
 		m.startMu.Unlock()
 		return
 	}
+	m.stopped = true
 	m.started = false
 	m.startMu.Unlock()
 

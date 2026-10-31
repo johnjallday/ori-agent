@@ -1,11 +1,13 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/johnjallday/ori-agent/internal/agent"
 )
 
@@ -180,6 +182,28 @@ func TestDirectorySyncManagerSkipsTrashedWorkspace(t *testing.T) {
 
 	if len(manager.watched) != 0 {
 		t.Fatalf("expected no watched directories for trashed workspace, got %d", len(manager.watched))
+	}
+}
+
+// A manager that was built but never started still owns an OS watcher. Stop
+// must release it, or every unstarted server leaks an inotify instance.
+func TestDirectorySyncManagerStopReleasesWatcherWithoutStart(t *testing.T) {
+	store := &directorySyncTestStore{workspaces: map[string]*Workspace{}}
+	manager, err := NewDirectorySyncManager(store, DefaultEventBus(), DefaultDirectorySyncConfig())
+	if err != nil {
+		t.Fatalf("failed to create directory sync manager: %v", err)
+	}
+
+	manager.Stop()
+	manager.Stop()
+
+	if err := manager.watcher.Watch("probe", t.TempDir()); !errors.Is(err, fsnotify.ErrClosed) {
+		t.Fatalf("expected the watcher to be closed after Stop, got %v", err)
+	}
+
+	manager.Start()
+	if manager.started {
+		t.Fatal("a stopped manager restarted on a closed watcher")
 	}
 }
 
