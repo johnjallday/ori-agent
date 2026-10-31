@@ -331,6 +331,7 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 			"monitoring": p.request.Monitoring, "disclosure_version": filejanitor.SetupDisclosureVersion, "placement_label": placementLabel,
 			"workspace": buildPreparationSummary{Name: req.Name, Description: req.Description, Mission: createWorkspaceGoal(req, session.WorkspaceKindWorkspace, tpl, true), ParentID: req.ParentID, Color: req.Color, Tags: req.Tags},
 			"team":      members, "folder": map[string]string{"name": folder.name, "path": root.Path}, "terms": root.Terms,
+			"sidecar_path": h.plannedAnchorSidecarPath(req),
 		}})
 		return descriptor, false
 	}

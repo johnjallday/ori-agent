@@ -518,6 +518,12 @@ test.describe('attached creation with a scripted local model', () => {
       const workspaces = (await (await request.get('/api/workspaces')).json()).folders;
       const created = workspaces.filter((ws: { name: string }) => ws.name === editedName);
       expect(created).toHaveLength(1);
+      expect(created[0].shape).toBe('anchored');
+      expect(created[0].directory_references).toHaveLength(1);
+      expect(created[0].directory_references[0].path).toBe(root);
+      expect(created[0].mcp_bindings).toHaveLength(1);
+      expect(created[0].mcp_bindings[0].alias).toBe('downloads_janitor_root');
+      expect(created[0].mcp_bindings[0].allowed_tools).not.toContain('read_file');
       if (!monitoring) expect(created[0].agents).toContain(editedAgent);
       const status = (
         await (await request.get(`/api/workspaces/${created[0].id}/file-janitor`)).json()

@@ -155,13 +155,17 @@ test('review then one map click creates one actual workspace and first result; p
   const readiness = await json(page, `/api/workspaces/${created.id}/file-janitor/readiness`);
   expect(readiness.readiness.paused).toBe(true);
   expect(created.agents).toEqual(['File Curator']);
-  expect(
-    created.directory_references.filter((reference: any) => reference.path === source)
-  ).toHaveLength(1);
-  expect(
-    created.mcp_bindings.find((binding: any) => binding.alias === 'downloads_janitor_root')
-      .allowed_tools
-  ).not.toContain('read_file');
+  expect(created.shape).toBe('anchored');
+  expect(created.directory_references).toHaveLength(1);
+  expect(created.directory_references[0].path).toBe(source);
+  expect(created.mcp_bindings).toHaveLength(1);
+  expect(created.mcp_bindings[0].alias).toBe('downloads_janitor_root');
+  expect(created.mcp_bindings[0].allowed_tools).toEqual([
+    'list_directory',
+    'list_directory_with_sizes',
+    'search_files',
+    'get_file_info'
+  ]);
   const layout = await json(page, '/api/workspace-map/layout');
   expect(layout.layout.positions[created.id]).toMatchObject(candidate);
   expect(existsSync(join(source, 'Filed'))).toBe(true);
@@ -281,7 +285,7 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   // chooser separately; this is not a native dialog observation.
   await sheet.getByRole('button', { name: 'Choose folder', exact: true }).click();
   await chooser.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(sheet.getByRole('region', { name: 'Linked folder', exact: true })).toContainText(
+  await expect(sheet.getByRole('region', { name: 'Anchored folder', exact: true })).toContainText(
     folder
   );
   await expect(sheet.getByLabel('Workspace name')).toHaveValue('Filing desk');
@@ -291,8 +295,8 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   const desktop = cards.getByRole('button', { name: /^Desktop / });
   await expect(desktop).toBeEnabled();
   await desktop.evaluate(element => element.scrollIntoView({ block: 'center' }));
-  await desktop.dragTo(sheet.getByRole('region', { name: 'Linked folder', exact: true }));
-  await expect(sheet.getByRole('region', { name: 'Linked folder', exact: true })).toContainText(
+  await desktop.dragTo(sheet.getByRole('region', { name: 'Anchored folder', exact: true }));
+  await expect(sheet.getByRole('region', { name: 'Anchored folder', exact: true })).toContainText(
     join(sandbox, 'Desktop')
   );
   await cards.getByRole('button', { name: /^placement-replacement / }).click();
@@ -300,7 +304,7 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
     sheet.getByRole('button', { name: 'Use selected folder', exact: true })
   ).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(sheet.getByRole('region', { name: 'Linked folder', exact: true })).toContainText(
+  await expect(sheet.getByRole('region', { name: 'Anchored folder', exact: true })).toContainText(
     folder
   );
   await sheet.getByRole('button', { name: 'Hide setup cards', exact: true }).click();

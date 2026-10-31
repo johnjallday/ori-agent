@@ -993,7 +993,11 @@ func ensureJanitorBinding(ws *workspace.Workspace, root string) string {
 	root = filepath.Clean(root)
 	allowed := append([]string(nil), JanitorReadTools...)
 	for i := range ws.MCPBindings {
-		if strings.EqualFold(strings.TrimSpace(ws.MCPBindings[i].Alias), LegacyBindingAlias) {
+		if strings.EqualFold(strings.TrimSpace(ws.MCPBindings[i].Alias), LegacyBindingAlias) || defaultAnchorBinding(ws, ws.MCPBindings[i], root) {
+			// Retain the stable ID so explicit agent/Toolbox references keep
+			// pointing at the now narrower grant. This happens in the same
+			// store.Update that records the capability's resource ownership.
+			ws.MCPBindings[i].Alias = LegacyBindingAlias
 			ws.MCPBindings[i].ServerName = filesystemServerName
 			ws.MCPBindings[i].Enabled = true
 			ws.MCPBindings[i].Config = map[string]any{"roots": []string{root}}

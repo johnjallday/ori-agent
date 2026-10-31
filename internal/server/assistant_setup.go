@@ -61,7 +61,9 @@ func (a assistantSetupSessionAdapter) PrepareFileJanitor(ctx context.Context, re
 	if request.Mode == assistantsetup.TargetAdopt {
 		return a.observeAdoptedFileJanitor(request)
 	}
-	result, err := a.sessions.CreateReviewedFileJanitor(ctx, reviewedCreationRequest(request))
+	creation := reviewedCreationRequest(request)
+	creation.AnchorPath, _ = ctx.Value(tidyAnchorContextKey{}).(string)
+	result, err := a.sessions.CreateReviewedFileJanitor(ctx, creation)
 	if err != nil {
 		return assistantsetup.WorkspaceResult{}, mapAssistantSetupSessionError(err)
 	}

@@ -69,6 +69,10 @@ func (b *ServerBuilder) newFolderTidyRunner() folderTidyRunner {
 	}
 }
 
+// The legacy tidy coordinator creates before its grant step. Carry only the
+// server-held selection through that call; no browser can supply this context.
+type tidyAnchorContextKey struct{}
+
 // TidyFolder creates (or adopts) the File Janitor workspace through the
 // coordinator, grants it the shown folder, and runs the first review — the
 // journey the setup screen used to walk, minus the screen. A folder another
@@ -122,6 +126,7 @@ func (r folderTidyRunner) TidyFolder(ctx context.Context, req personalassistant.
 		return personalassistant.FolderTidyResult{}, personalassistant.ErrFolderOutcomeUnavailable
 	}
 
+	ctx = context.WithValue(ctx, tidyAnchorContextKey{}, root)
 	accepted, _, err := coordinator.Accept(ctx, req.UserID, projection.Proposal.Revision, projection.Proposal.SelectedWorkspaceID)
 	if err != nil {
 		return personalassistant.FolderTidyResult{}, err

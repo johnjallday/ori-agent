@@ -348,7 +348,7 @@ func TestInboxRun_CreatesTheWorkspaceGrantsTheFolderAndPreparesTheFirstBatch(t *
 		t.Fatalf("writes = %v, want the card's order", f.world.writes)
 	}
 	created := f.team.created[0]
-	if created.Name != "Downloads" || created.Mission != "Keep my downloads tidy." || created.Descriptor.RunID != f.offer.Setup.RunID ||
+	if created.AnchorPath != f.path || created.Name != "Downloads" || created.Mission != "Keep my downloads tidy." || created.Descriptor.RunID != f.offer.Setup.RunID ||
 		created.Descriptor.ReviewDigest != plan.Digest || created.Plan.Roles[0].Action != "create" {
 		t.Fatalf("create request = %+v", created)
 	}

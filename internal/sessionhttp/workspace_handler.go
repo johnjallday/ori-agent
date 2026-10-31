@@ -610,18 +610,6 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
-	if strings.TrimSpace(req.AnchorPath) != "" {
-		if kind == session.WorkspaceKindGroup || req.ProjectConnection != nil || strings.TrimSpace(req.Location) != "" {
-			respondAnchorError(w, anchorError("anchor_incompatible_options", "Anchors require a non-group workspace with no custom sidecar location or project connection.", http.StatusBadRequest))
-			return
-		}
-		path, anchorErr := h.validateAnchorPath(req.AnchorPath, "")
-		if anchorErr != nil {
-			respondAnchorError(w, anchorErr)
-			return
-		}
-		req.AnchorPath = path
-	}
 	if req.GroupRoster && kind != session.WorkspaceKindGroup {
 		_ = orihttp.RespondBadRequest(w, "group_roster is available only when kind is group")
 		return
@@ -732,6 +720,23 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if buildFolderErr != nil {
 		respondCreateWorkspaceAttachError(w, buildFolderErr)
 		return
+	}
+	// A reviewed inbox build uses the server-held folder, never a browser path
+	// or an inferred binding. Other folder-setup profiles keep their shape.
+	if buildFolderPlan != nil && templateResolved && resolvedTemplate.Builtin && isReviewedJanitorBlueprint(resolvedTemplate.ID) {
+		req.AnchorPath = buildFolderPlan.root
+	}
+	if strings.TrimSpace(req.AnchorPath) != "" {
+		if kind == session.WorkspaceKindGroup || req.ProjectConnection != nil || strings.TrimSpace(req.Location) != "" {
+			respondAnchorError(w, anchorError("anchor_incompatible_options", "Anchors require a non-group workspace with no custom sidecar location or project connection.", http.StatusBadRequest))
+			return
+		}
+		path, anchorErr := h.validateAnchorPath(req.AnchorPath, "")
+		if anchorErr != nil {
+			respondAnchorError(w, anchorErr)
+			return
+		}
+		req.AnchorPath = path
 	}
 
 	// The client's values are never trusted: they are re-validated against the

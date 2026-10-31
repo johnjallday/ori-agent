@@ -120,14 +120,19 @@ func (r *AgentRuntimeResolver) resolveRuntimeFromToolbox(
 		allowed, narrowed := toolSelection[key]
 		switch {
 		case narrowed:
-			// The Toolbox names an exact operation subset. It was validated
-			// against the binding's policy on save and can only narrow it
-			// (FR-12), so it is applied as-is — including an empty list, which
-			// legitimately exposes no operations from this binding.
+			// A binding can become narrower after this version was pinned
+			// (e.g. File Janitor replaces the default anchor grant). Recheck
+			// current authority, not only the policy at Toolbox-save time.
 			if toolAllowlist == nil {
 				toolAllowlist = make(map[string][]string, len(selected))
 			}
-			toolAllowlist[runtimeName] = allowed
+			current := make([]string, 0, len(allowed))
+			for _, tool := range allowed {
+				if binding.ToolAllowed(tool) {
+					current = append(current, tool)
+				}
+			}
+			toolAllowlist[runtimeName] = current
 		case deferToBinding[key] && !binding.AllowsAllTools():
 			if toolAllowlist == nil {
 				toolAllowlist = make(map[string][]string, len(selected))

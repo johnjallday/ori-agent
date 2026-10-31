@@ -128,6 +128,24 @@ func TestToolboxRuntime_AppliesExactOperationSubset(t *testing.T) {
 	assertStringsEqual(t, "runtime allowlist", resolved.MCPToolAllowlist[runtimeName], []string{"read_note"})
 }
 
+func TestToolboxRuntime_AnchorGrantNarrowedAfterPinCannotReadContents(t *testing.T) {
+	ws := newToolboxRuntimeWorkspace()
+	ws.SharedData = map[string]any{AnchorDirectoryReferenceIDKey: "anchor"}
+	ws.DirectoryReferences = []DirectoryReference{{ID: "anchor", Path: "/external"}}
+	ws.MCPBindings = []MCPBinding{{ID: "anchor-binding", ServerName: "filesystem", Alias: AnchorFolderMCPAlias, Enabled: true,
+		Config: map[string]any{"roots": []string{"/external"}}, AllowedTools: []string{"list_directory", "read_text_file"}}}
+	assignToolbox(t, ws, "inst-1", "Initial anchor", nil, []ToolboxMCPRef{{BindingID: "anchor-binding", AllowedTools: []string{"list_directory", "read_text_file"}}})
+	// The capability replaces the default binding after the recipe was pinned.
+	ws.MCPBindings[0].Alias = "downloads_janitor_root"
+	ws.MCPBindings[0].AllowedTools = []string{"list_directory", "list_directory_with_sizes", "search_files", "get_file_info"}
+	resolved, err := newToolboxRuntimeResolver(t, ws).ResolveAgentForWorkspace("Coder", ws.ID, "coder-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := RuntimeMCPServerName(ws.ID, "filesystem", "anchor-binding")
+	assertStringsEqual(t, "current binding authority", resolved.MCPToolAllowlist[name], []string{"list_directory"})
+}
+
 // An explicit EMPTY tool list is a real selection: the binding is present but
 // exposes no operations.
 func TestToolboxRuntime_EmptyToolListExposesNoOperations(t *testing.T) {

@@ -124,6 +124,26 @@ func (h *Handler) validateAnchorPath(input, ignoreID string) (string, *anchorPat
 	return path, nil
 }
 
+// plannedAnchorSidecarPath is disclosure only; creation still resolves and
+// validates the real destination through FileStore before any folder write.
+func (h *Handler) plannedAnchorSidecarPath(req createWorkspaceRequest) string {
+	if h.workspaceStore == nil {
+		return ""
+	}
+	root := h.workspaceStore.BasePath()
+	if h.workspaceRootResolver != nil && strings.TrimSpace(h.workspaceRootResolver()) != "" {
+		root = h.workspaceRootResolver()
+	}
+	if req.ParentID != "" {
+		parent, err := h.workspaceStore.GetFolderPath(req.ParentID)
+		if err != nil {
+			return ""
+		}
+		root = filepath.Join(parent, agentworkspace.SubWorkspacesDir)
+	}
+	return filepath.Join(root, agentworkspace.Slugify(firstNonEmptyString(req.FolderSlug, req.Name)))
+}
+
 // Serialize the final owner check and durable anchor write with all existing
 // project attaches. A second concurrent create must see the first one's anchor.
 func (h *Handler) saveAnchoredWorkspaceFolder(path string, ws *agentworkspace.Workspace, location string) *anchorPathError {

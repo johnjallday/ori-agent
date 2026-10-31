@@ -52,7 +52,7 @@ func BuildInboxPlan(facts InboxFacts) personalassistant.FolderSetupPlan {
 		agents,
 		{
 			Kind: personalassistant.FolderPlanWorkspace, Name: "A " + facts.BlueprintLabel + " workspace named " + intent.WorkspaceName,
-			Detail: "It lives in Ori as a separate workspace, in no Home.",
+			Detail: "Your reviewed folder stays where it is as the work folder. Ori keeps its notes, settings and agents in a separate workspace folder, in no Home.",
 		},
 		{Kind: personalassistant.FolderPlanFolder, Name: InboxFolderLine, Detail: InboxFolderDetail},
 		{Kind: personalassistant.FolderPlanTask, Name: InboxFirstLookLine, Detail: InboxFirstLookDetail},

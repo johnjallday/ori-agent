@@ -177,6 +177,12 @@ func TestWorkspaceBuildPreparation_ExactEditedDraftAndOneInitialResult(t *testin
 	if err != nil || ws.Name != f.build.Draft.Name || ws.Description != f.build.Draft.Description || ws.Mission != f.build.Draft.Mission || ws.ParentID != parentID {
 		t.Fatalf("edited draft changed: %+v, %v", ws, err)
 	}
+	assertAnchoredJanitorWorkspace(t, ws, f.root)
+	for _, dir := range []string{workspace.FilesDir, workspace.NotesDir} {
+		if _, err := os.Stat(filepath.Join(folder, dir)); !os.IsNotExist(err) {
+			t.Fatalf("anchored hire scaffolded %s: %v", dir, err)
+		}
+	}
 	row, err := f.h.store.GetWorkspace(context.Background(), body.WorkspaceID)
 	if err != nil || row.Color != f.build.Draft.Color || !strings.Contains(strings.Join(ws.Tags, ","), "reviewed") {
 		t.Fatalf("color/tags changed: %+v, %v", row, err)

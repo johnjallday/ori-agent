@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -52,6 +54,47 @@ func reviewedFileJanitorHandler(t *testing.T) (*Handler, *agentstore.CompositeSt
 	templates := filepath.Join("..", "projecttemplates", "starter")
 	handler.SetTemplatesRootResolver(func() string { return templates })
 	return handler, agents, workspaces, cleanup
+}
+
+func assertAnchoredJanitorWorkspace(t *testing.T, ws *agentworkspace.Workspace, root string) {
+	t.Helper()
+	if !ws.IsAnchored() || len(ws.DirectoryReferences) != 1 || ws.DirectoryReferences[0].Path != root || ws.DirectoryReferences[0].ID != ws.AnchorDirectoryReferenceID() || ws.SharedData[agentworkspace.PrimaryDirectoryIDKey] != ws.AnchorDirectoryReferenceID() {
+		t.Fatalf("wrong anchor: %+v / %+v", ws.DirectoryReferences, ws.SharedData)
+	}
+	if len(ws.MCPBindings) != 1 || ws.MCPBindings[0].Alias != filejanitor.LegacyBindingAlias || !reflect.DeepEqual(ws.MCPBindings[0].AllowedTools, filejanitor.JanitorReadTools) {
+		t.Fatalf("wrong Janitor grant: %+v", ws.MCPBindings)
+	}
+	installed, _ := ws.GetInstalledCapability(agentworkspace.CapabilityFileJanitor)
+	if exclusive, recorded := installed.Owns(agentworkspace.ResourceDirectoryReference, ws.AnchorDirectoryReferenceID()); exclusive || !recorded {
+		t.Fatal("anchor ownership is not shared")
+	}
+}
+
+func TestReviewedFileJanitorAnchorsTheServerHeldFolder(t *testing.T) {
+	h, _, workspaces, cleanup := reviewedFileJanitorHandler(t)
+	defer cleanup()
+	request := reviewedCreationFixture(t, h)
+	request.AnchorPath = canonicalAnchorTestDir(t)
+	result, err := h.CreateReviewedFileJanitor(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := workspaces.Get(result.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !before.IsAnchored() || len(before.MCPBindings) != 1 || before.MCPBindings[0].Alias != anchorFolderMCPAlias {
+		t.Fatalf("incomplete initial grant: %+v", before.MCPBindings)
+	}
+	janitor := filejanitor.NewService(filejanitor.NewStore(h.workspaceStore), workspaces)
+	if _, err := janitor.ConfirmSetup(filejanitor.SetupRequest{WorkspaceID: result.WorkspaceID, Path: request.AnchorPath}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := workspaces.Get(result.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAnchoredJanitorWorkspace(t, after, request.AnchorPath)
 }
 
 func TestReviewedFileJanitorCreationStampsExactOperationAndReplays(t *testing.T) {
