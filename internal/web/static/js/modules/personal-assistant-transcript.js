@@ -331,6 +331,8 @@ function init() {
     resize.observe(transcript);
     owner.opened();
   };
+  // A drawer returning from a temporary suspension: no real opening happened.
+  owner.resumed = reopen;
   document.addEventListener('personal-assistant:opened', reopen);
   window.addEventListener('pageshow', event => {
     if (event.persisted) reopen();

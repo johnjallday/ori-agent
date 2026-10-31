@@ -35,6 +35,20 @@ export async function confirmCreatorFinalAction(page: Page, { open = false } = {
   if (open) await review.locator('[data-placement-action="open"]').click();
 }
 
+/**
+ * A Map placement reports on the Map, with nothing reopened over it. Details is
+ * the explicit way to the owner's full receipt, which the caller then asserts.
+ */
+export async function openMapReceiptDetails(page: Page, title: string | RegExp) {
+  const status = page.locator('[data-creation-map-status]');
+  await expect(status).toBeVisible({ timeout: 30_000 });
+  await expect(status).toContainText(title);
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await status.getByRole('button', { name: /^(Details|Continue)$/ }).click();
+  await expect(status).toBeHidden();
+}
+
 /** Follows the verified result's own Open action (after reading its reply). */
 export async function openCreatorResult(page: Page) {
   const review = page.locator('#workspaceCreationReviewPanel');

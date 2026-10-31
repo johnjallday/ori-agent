@@ -4828,17 +4828,31 @@ function sourceReviewMapAvailable() {
 function sourceReviewRestore(review) {
   const canReturn = window.OriWorkspaceMap?.canReturnFromPlacement?.(review.token) !== false;
   window.OriWorkspaceMap?.endPlacement?.(review.token);
-  if (!sourceReviewCurrent(review)) return;
+  const transition = window.OriCreationTransition;
+  const handle = review.transition;
+  review.transition = null;
+  if (!sourceReviewCurrent(review)) {
+    transition?.release?.(handle);
+    return;
+  }
   review.onMap = false;
   const dialogOpen = Array.from(
     document.querySelectorAll?.('[role="dialog"], .modal.show') || []
   ).some(dialog => dialog.getClientRects?.().length);
-  if (!canReturn || dialogOpen) return;
+  if (!canReturn || dialogOpen) {
+    transition?.release?.(handle);
+    return;
+  }
   if (!state.reviewSlot) enterThread({ byUser: false });
-  window.PersonalAssistantPanel?.open?.(document.getElementById('personalAssistantLauncher'), {
-    focus: false,
-    preserveConversation: true
-  });
+  // Accepted work is no longer returnable; ending its lifetime reveals the same
+  // drawer and lets the owner's receipt show in it.
+  if (!transition?.returnToReview?.(handle)) transition?.release?.(handle, { reveal: true });
+  // The drawer was not open when placement began, or there is no coordinator.
+  if (!window.PersonalAssistantPanel?.isOpen?.())
+    window.PersonalAssistantPanel?.open?.(document.getElementById('personalAssistantLauncher'), {
+      focus: false,
+      preserveConversation: true
+    });
   render();
   document.getElementById('sourceCreationReviewTitle')?.focus({ preventScroll: true });
 }
@@ -4864,7 +4878,8 @@ function renderSourceCreationReview() {
     window.OriWorkspaceMap?.endPlacement?.(review.token);
     review.pending = false;
     review.editing = true;
-    if (review.onMap) sourceReviewRestore(review);
+    if (review.onMap && !presentSourceOutcome(review, { stopped: true }))
+      sourceReviewRestore(review);
   }
   // A changed destination or unavailable provider can withdraw the plan
   // entirely. Hand back to the source owner's fresh-review controls rather
@@ -5160,7 +5175,15 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     review.key = sourceReviewKey();
     review.automatic = false;
     review.onMap = true;
-    window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
+    // The drawer steps aside; this conversation and its live review stay intact.
+    if (window.OriCreationTransition) {
+      review.transition = window.OriCreationTransition.enter({
+        owner: 'source-review',
+        generation: review.generation,
+        token: review.token,
+        onExplicitReopen: () => sourceReviewRestore(review)
+      });
+    } else window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
     const started = window.OriWorkspaceMap.beginPlacement({
       token: review.token,
       mode: 'reviewed-setup',
@@ -5186,12 +5209,16 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
         review.candidate = point ? { ...point } : review.candidate;
         if (!review.candidate || !sourceReviewMapAvailable()) return false;
         review.pending = true;
+        window.OriCreationTransition?.dispatch?.(review.transition);
         await startOneCardSetup({ reviewedSourceKey: review.key });
         if (!sourceReviewCurrent(review)) {
           window.OriWorkspaceMap?.endPlacement?.(review.token);
+          window.OriCreationTransition?.release?.(review.transition);
+          review.transition = null;
           return false;
         }
         if (!review.pending) sourceReviewRestore(review);
+        else window.OriCreationTransition?.accept?.(review.transition);
         return review.pending;
       },
       onBack: () => sourceReviewRestore(review)
@@ -5299,11 +5326,58 @@ async function observeSourceCreationResult(review) {
   } finally {
     if (sourceReviewCurrent(review)) {
       review.observing = false;
-      // Only a return from the Map reopens the drawer; otherwise just redraw.
-      if (review.onMap) sourceReviewRestore(review);
+      // The outcome stays on the Map when the user placed from there. The drawer
+      // comes back only if there is no such lifetime, or when they ask for it.
+      const placed =
+        review.onMap || window.OriCreationTransition?.isCurrent?.(review.transition) === true;
+      if (placed && !presentSourceOutcome(review)) sourceReviewRestore(review);
       else render();
     }
   }
+}
+
+// The compact outcome of a Map placement. Every action is this owner's own, and
+// Details/Continue bring back the same conversation with the full receipt.
+function presentSourceOutcome(review, { stopped = false } = {}) {
+  const transition = window.OriCreationTransition;
+  const handle = review.transition;
+  if (!transition?.isCurrent?.(handle)) return false;
+  window.OriWorkspaceMap?.endPlacement?.(review.token);
+  transition.accept(handle);
+  transition.settle(handle);
+  review.onMap = false;
+  const kind = review.home ? 'Home' : 'Workspace';
+  const act = intent => async () => {
+    await actOnSourceCreationReview(review, intent);
+    if (sourceReviewCurrent(review) && transition.isCurrent(handle))
+      presentSourceOutcome(review, { stopped });
+  };
+  const verified = Boolean(review.result?.id);
+  const actions = [];
+  if (verified) actions.push({ label: 'Open', primary: true, run: act({ action: 'open' }) });
+  if (verified && review.positionFailed)
+    actions.push({ label: 'Retry position', run: act({ action: 'retry-position' }) });
+  if (!verified && !stopped)
+    actions.push({ label: 'Read saved status', run: act({ action: 'read-status' }) });
+  actions.push({
+    label: stopped ? 'Continue' : 'Details',
+    primary: stopped,
+    run: () => sourceReviewRestore(review)
+  });
+  actions.push({ label: 'Dismiss', run: () => transition.release(handle) });
+  transition.showStatus(handle, {
+    tone: verified && !review.positionFailed ? 'success' : 'warning',
+    title: stopped
+      ? 'Setup stopped and needs you'
+      : verified
+        ? `${kind} ${review.existing ? 'kept' : 'ready'} · ${review.result.name || ''}`.trim()
+        : `${kind} result is not confirmed`,
+    detail: stopped
+      ? 'What finished is kept. Continue shows what it needs; nothing runs again by itself.'
+      : review.message,
+    actions
+  });
+  return true;
 }
 
 // Confirm the displayed plan only; the server rechecks it and runs the setup.
@@ -5468,7 +5542,10 @@ async function startOneCardSetup(action) {
       if (sourceCreationReview && sourceReviewCurrent(sourceCreationReview)) {
         sourceCreationReview.message =
           'Confirmation delivery is unknown. Read the original source status; do not confirm again. Closing is not undo.';
-        if (sourceCreationReview.onMap) sourceReviewRestore(sourceCreationReview);
+        // Accepted-or-unknown work stays on the Map with its status read; the
+        // editable review never returns as if nothing had been sent.
+        if (sourceCreationReview.onMap && !presentSourceOutcome(sourceCreationReview))
+          sourceReviewRestore(sourceCreationReview);
       }
       showError(
         'Confirmation delivery is unknown. Read the original source status before doing anything else.'

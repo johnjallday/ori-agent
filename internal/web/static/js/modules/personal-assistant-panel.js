@@ -16,6 +16,10 @@ import {
   switchLockMessage
 } from './personal-assistant-recipient.js';
 import { createLeadWelcome } from './personal-assistant-lead-welcome.js';
+import {
+  createCreationStatusSurface,
+  createCreationTransition
+} from './workspace-creation-transition.js';
 import { mountFirstLookReports } from './first-look-report.js';
 import { briefModeView, briefSend } from './personal-assistant-brief-mode.js';
 
@@ -1319,7 +1323,92 @@ function closeMoreMenu() {
   if (state.els?.more?.open) state.els.more.open = false;
 }
 
+// The drawer steps aside for one Map placement and comes back as it was. This is
+// not close(): the open preference, recipient, conversation and live review stay,
+// and nothing that listens for a real close (or a real open) is told.
+function suspend() {
+  if (!state.open || !state.els || state.suspended) return false;
+  const scroll = document.getElementById('personalAssistantScroll');
+  state.suspended = {
+    scrollTop: scroll?.scrollTop || 0,
+    focus: state.els.panel.contains(document.activeElement) ? document.activeElement : null
+  };
+  state.open = false;
+  state.draft = state.els.input.value;
+  saveTabValue(PANEL_DRAFT_KEY, state.draft);
+  closeMoreMenu();
+  state.recipientMenu?.close?.();
+  state.conversationMenu?.close?.();
+  state.attachMenu?.close?.();
+  window.PersonalAssistantFolderContext?.close?.();
+  window.PersonalAssistantTranscript?.closed?.();
+  state.els.panel.hidden = true;
+  state.els.launcher.setAttribute('aria-expanded', 'false');
+  return true;
+}
+
+/**
+ * Ends a suspension. `reveal` shows the same drawer again; otherwise it becomes
+ * an ordinary closed drawer, for work that finished while the user was on the Map.
+ */
+function resume({ reveal = true, restoreFocus = false } = {}) {
+  const held = state.suspended;
+  if (!held || !state.els) return false;
+  state.suspended = null;
+  if (!reveal) {
+    state.lastTrigger = null;
+    try {
+      document.dispatchEvent(new CustomEvent('personal-assistant:closed'));
+    } catch (_) {
+      // Listeners only act on what the drawer no longer covers; none is required.
+    }
+    return true;
+  }
+  state.open = true;
+  renderIdentity();
+  syncPanelViewport();
+  state.els.panel.hidden = false;
+  state.els.launcher.setAttribute('aria-expanded', 'true');
+  state.els.input.value = state.draft;
+  syncComposerHeight();
+  window.PersonalAssistantTranscript?.resumed?.();
+  const scroll = document.getElementById('personalAssistantScroll');
+  if (scroll) scroll.scrollTop = held.scrollTop;
+  if (restoreFocus) {
+    if (held.focus?.isConnected && held.focus.getClientRects().length > 0)
+      held.focus.focus({ preventScroll: true });
+    else focusOnOpen();
+  }
+  return true;
+}
+
+let creationStatus = null;
+export const creationTransition = createCreationTransition({
+  panel: () => ({ suspend, resume }),
+  status: () => {
+    if (!creationStatus && typeof document !== 'undefined')
+      creationStatus = createCreationStatusSurface(document);
+    return creationStatus;
+  }
+});
+if (typeof window !== 'undefined') window.OriCreationTransition = creationTransition;
+
 function close(options = {}) {
+  if (state.suspended && state.els) {
+    // Someone is leaving for good while the drawer is stepped aside (a
+    // navigation that asked for it closed). Honour that as a real close.
+    state.suspended = null;
+    state.draft = state.els.input.value;
+    state.lastTrigger = null;
+    saveTabValue(PANEL_OPEN_KEY, '');
+    saveTabValue(PANEL_DRAFT_KEY, state.draft);
+    try {
+      document.dispatchEvent(new CustomEvent('personal-assistant:closed'));
+    } catch (_) {
+      // Listeners only act on what the drawer no longer covers; none is required.
+    }
+    return;
+  }
   if (!state.open || !state.els) return;
   state.open = false;
   state.todayRequested = false;
@@ -1361,6 +1450,16 @@ function focusOnOpen() {
  */
 function open(trigger, options = {}) {
   if (!state.els || (!identity().openable && options.workActivity !== true)) return false;
+  // Nothing opens itself over a placement or its result. A person asking for the
+  // conversation is honoured, and leaves placement through its owner first.
+  if (options.unsolicited === true && creationTransition.blocksReveal()) return false;
+  if (!creationTransition.isReopening() && (state.suspended || creationTransition.blocksReveal())) {
+    creationTransition.requestOpen();
+    if (state.open) {
+      if (options.focus !== false) focusOnOpen();
+      return true;
+    }
+  }
   state.workActivityOnly = options.workActivity === true;
   if (window.OriGuide?.close) window.OriGuide.close({ restoreFocus: false });
   renderIdentity();
@@ -1937,7 +2036,8 @@ function init() {
       return (
         window.workspaceDetail?.initialListsLoaded === true &&
         (!window.SetupWizard || (setup && (!setup.applicable || setup.state === 'ready'))) &&
-        !document.querySelector('.modal.show, dialog[open]')
+        !document.querySelector('.modal.show, dialog[open]') &&
+        !creationTransition.blocksReveal()
       );
     },
     busy: () =>
@@ -1956,7 +2056,7 @@ function init() {
       });
       // Reveal while this recipient is still current. A close or navigation
       // during asynchronous hydration must not reopen a different conversation.
-      if (reveal) open(null, { focus: false, preserveConversation: true });
+      if (reveal) open(null, { focus: false, preserveConversation: true, unsolicited: true });
       await hydrateEntryConversation({ force: true });
     }
   });
@@ -2021,7 +2121,7 @@ function init() {
   void recipients()?.refresh?.();
   window.addEventListener('beforeunload', () => {
     saveTabValue(PANEL_DRAFT_KEY, state.els.input.value);
-    saveTabValue(PANEL_OPEN_KEY, state.open ? '1' : '');
+    saveTabValue(PANEL_OPEN_KEY, state.open || state.suspended ? '1' : '');
   });
   state.els.folderChip?.addEventListener('click', exploreFolder);
 
@@ -2127,9 +2227,15 @@ const api = {
       if (options.focus === true) focusOnOpen();
       return true;
     }
-    return open(trigger, { workActivity: true, focus: options.focus === true });
+    return open(trigger, {
+      workActivity: true,
+      focus: options.focus === true,
+      // Only a request that also takes focus is someone asking to see it.
+      unsolicited: options.focus !== true
+    });
   },
   isOpen: () => state.open,
+  isSuspended: () => Boolean(state.suspended),
   // The `panel` value this page load arrived with ('today', 'assistant' or '').
   arrival: () => state.arrival || '',
   // Whether this opening came from a link to what needs the user

@@ -70,7 +70,8 @@ export function createHomeSongPlacement({
   home,
   available,
   fetchImpl = (...args) => globalThis.fetch(...args),
-  focusCard = () => {}
+  focusCard = () => {},
+  transition: transitionSource = () => null
 } = {}) {
   let session = 0;
   // The page's map, or a getter for it: its script may load after this one.
@@ -78,9 +79,36 @@ export function createHomeSongPlacement({
 
   // The conversation is kept as it was (the echoed brief included); focus goes
   // to the song's card.
-  function reopen(view) {
-    panel?.open?.(null, { focus: false, preserveConversation: true });
+  function reopen(view, handle) {
+    const transition = transitionSource();
+    if (handle && transition) {
+      if (!transition.returnToReview(handle)) transition.release(handle, { reveal: true });
+      if (panel?.isOpen?.() !== true)
+        panel?.open?.(null, { focus: false, preserveConversation: true });
+    } else panel?.open?.(null, { focus: false, preserveConversation: true });
     focusCard(view);
+  }
+
+  // A press from the Map reports there; its card and receipt stay one click away.
+  function report(view, handle, opened) {
+    const transition = transitionSource();
+    if (!transition?.isCurrent?.(handle)) return;
+    transition.settle(handle);
+    transition.showStatus(handle, {
+      tone: opened ? 'success' : 'warning',
+      title: opened ? `${view.song} opened` : `${view.song} was not opened`,
+      detail: opened
+        ? `${view.manager} opened it inside ${text(home().name) || 'the Home'}.`
+        : 'Nothing was placed. Its card says what to do next.',
+      actions: [
+        {
+          label: opened ? 'Details' : 'Continue',
+          primary: !opened,
+          run: () => reopen(view, handle)
+        },
+        { label: 'Dismiss', run: () => transition.release(handle) }
+      ]
+    });
   }
 
   async function verifyAndSave(view, token, candidate, outcome) {
@@ -124,7 +152,19 @@ export function createHomeSongPlacement({
           map.endPlacement?.(token);
         }
       };
-      panel?.close?.({ restoreFocus: false });
+      // The drawer steps aside; with no coordinator it closes as it always did.
+      const transition = transitionSource();
+      const handle =
+        transition?.enter?.({
+          owner: 'home-song',
+          generation: session,
+          token,
+          onExplicitReopen: () => {
+            map.endPlacement?.(token);
+            transition.returnToReview(handle);
+          }
+        }) || null;
+      if (!handle) panel?.close?.({ restoreFocus: false });
       const started = map.beginPlacement({
         token,
         mode: 'reviewed-setup',
@@ -136,24 +176,30 @@ export function createHomeSongPlacement({
         onConfirm: (_token, point) => {
           candidate = point ? { ...point } : candidate;
           if (!candidate) return false;
-          // Nothing ran before this click or Enter. The drawer comes back on
-          // the running card while the run proceeds (FR13).
+          const afterVerified = outcome => verifyAndSave(view, token, candidate, outcome);
+          // Nothing ran before this click or Enter. The Map stays clear and locked
+          // while the run proceeds, and the result is reported on it.
+          if (handle) {
+            transition.dispatch(handle);
+            transition.accept(handle);
+            void finish({ afterVerified }).then(opened => report(view, handle, opened === true));
+            return true;
+          }
+          // No coordinator: the drawer comes back on the running card (FR13).
           reopen(view);
-          void finish({
-            afterVerified: outcome => verifyAndSave(view, token, candidate, outcome)
-          });
+          void finish({ afterVerified });
           return true;
         },
         // Escape is "back to the conversation": the card and its brief stay.
-        onBack: () => reopen(view),
+        onBack: () => reopen(view, handle),
         onSecondary: () => {
-          reopen(view);
+          reopen(view, handle);
           void finish({});
         }
       });
       if (started === false) {
         // The map could not take the session after all: the automatic path.
-        reopen(view);
+        reopen(view, handle);
         await finish({});
       }
     }

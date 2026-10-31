@@ -9,6 +9,7 @@ import {
   PLACEMENT_MIN_WIDTH,
   POSITION_NOT_SAVED
 } from './home-song-placement.js';
+import { createCreationTransition } from './workspace-creation-transition.js';
 
 const view = { offerID: 'offer-5', song: 'Album-5', manager: 'Music Portfolio Manager' };
 const shown = { getClientRects: () => [{}] };
@@ -226,4 +227,88 @@ test('a map that refuses the session takes the automatic path', async () => {
   const runs = [];
   await placement.begin(view, { run: async options => (runs.push(options), true) });
   assert.deepEqual(runs, [{}]);
+});
+
+function withTransition({ map = fakeMap(), run } = {}) {
+  const panel = fakePanel();
+  panel.isOpen = () => panel.opened === true;
+  const drawer = {
+    suspend: () => (panel.calls.push(['suspend']), true),
+    resume: options => {
+      panel.calls.push(['resume', options.reveal]);
+      if (options.reveal) panel.opened = true;
+      return true;
+    }
+  };
+  const statuses = [];
+  const transition = createCreationTransition({
+    panel: drawer,
+    status: { show: next => statuses.push(next), hide: () => statuses.push(null) }
+  });
+  const focused = [];
+  const placement = createHomeSongPlacement({
+    map: () => map,
+    panel,
+    home: () => ({ id: 'home-1', name: 'Music Production Home' }),
+    available: () => true,
+    focusCard: next => focused.push(next.offerID),
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ id: 'song-1', parent_id: 'home-1' })
+    }),
+    transition: () => transition
+  });
+  return { map, panel, placement, statuses, transition, focused, run };
+}
+
+test('the drawer steps aside for placement rather than closing', async () => {
+  const { map, panel, placement, focused } = withTransition();
+  await placement.begin(view, { run: async () => true });
+  assert.deepEqual(panel.calls, [['suspend']]);
+  map.spec().onBack('token', 'back');
+  assert.deepEqual(panel.calls, [['suspend'], ['resume', true]]);
+  assert.deepEqual(focused, ['offer-5']);
+});
+
+test('a confirmed press stays on the Map and reports there, without reopening chat', async () => {
+  const { map, panel, placement, statuses, transition } = withTransition();
+  let release;
+  const running = new Promise(resolve => (release = resolve));
+  let runs = 0;
+  await placement.begin(view, {
+    run: async () => {
+      runs += 1;
+      await running;
+      return true;
+    }
+  });
+  assert.equal(map.spec().onConfirm('token', { x: 900, y: 1000 }), true);
+  map.spec().onConfirm('token', { x: 900, y: 1000 });
+  assert.equal(runs, 1);
+  assert.equal(transition.phase(), 'accepted');
+  assert.deepEqual(panel.calls, [['suspend']], 'nothing reopens while the press runs');
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  const status = statuses.at(-1);
+  assert.equal(status.tone, 'success');
+  assert.equal(status.title, 'Album-5 opened');
+  assert.deepEqual(panel.calls, [['suspend']], 'the result does not reopen the drawer either');
+  // Details is the explicit way back to the same conversation.
+  status.actions.find(action => action.label === 'Details').run();
+  assert.deepEqual(panel.calls, [['suspend'], ['resume', true]]);
+  assert.equal(transition.blocksReveal(), false);
+});
+
+test('a press that opened nothing says so and offers its card', async () => {
+  const { map, placement, statuses } = withTransition();
+  await placement.begin(view, { run: async () => false });
+  map.spec().onConfirm('token', { x: 900, y: 1000 });
+  await new Promise(resolve => setImmediate(resolve));
+  const status = statuses.at(-1);
+  assert.equal(status.tone, 'warning');
+  assert.equal(status.title, 'Album-5 was not opened');
+  assert.deepEqual(
+    status.actions.map(action => action.label),
+    ['Continue', 'Dismiss']
+  );
 });

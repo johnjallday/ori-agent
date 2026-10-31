@@ -10434,11 +10434,15 @@
       return false;
     }
     if (event.key === 'Escape') {
-      finishPlacement(container, true);
+      // Once the final gesture ran there is nothing to go back to; the owner
+      // reports the outcome and leaving must not read as cancelling it.
+      if (!state.submitting) finishPlacement(container, true);
       return true;
     }
     if (event.key === 'Enter') {
-      confirmPlacement(container);
+      // Holding the Enter that activated Place on map repeats onto this canvas.
+      // Only a fresh press is the final reviewed gesture.
+      if (!event.repeat) confirmPlacement(container);
       return true;
     }
     var step = layoutState.snapToGrid
@@ -10476,6 +10480,7 @@
     var confirm = container.querySelector('[data-ws-map-placement-confirm]');
     if (back && back.addEventListener) {
       back.addEventListener('click', function () {
+        if (placementSession && placementSession.submitting) return;
         finishPlacement(container, true);
       });
     }

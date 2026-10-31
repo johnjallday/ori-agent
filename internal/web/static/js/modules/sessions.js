@@ -5723,6 +5723,32 @@ const sessionManager = {
     };
   },
 
+  presentOrdinaryMapOutcome(context, placement, statusFocus) {
+    const review = context.ordinaryReview;
+    const kind = review.result?.kind === 'group' ? 'Group' : 'Workspace';
+    return this.presentMapOutcome(placement, {
+      tone: !review.result ? 'warning' : review.positionFailed ? 'warning' : 'success',
+      title: review.result
+        ? `${kind} created · ${review.result.name || ''}`.trim()
+        : 'Creation delivery is uncertain',
+      detail: review.message,
+      canOpen: Boolean(review.result?.id),
+      canRetry: Boolean(review.result?.id && review.positionFailed),
+      canRead: !review.result,
+      act: async intent => {
+        await this.actOnOrdinaryCreationReview(context, intent);
+        // The read or retry updated the owner's own record; show what it now says.
+        if (this.workspaceCreatorContext === context && review.message)
+          this.presentOrdinaryMapOutcome(context, placement, statusFocus);
+      },
+      showDetails: () => this.showWorkspaceCreatorResult(placement.token, statusFocus),
+      dismiss: () => {
+        if (review.result) this.releaseCreationReviewReference(review);
+        this.closeHiddenWorkspaceCreator(context);
+      }
+    });
+  },
+
   async showOrdinaryCreationOutcome(context, result, placement = null, placementResult = null) {
     const review = context.ordinaryReview;
     if (this.workspaceCreatorContext !== context || context.generation !== review.generation)
@@ -5767,18 +5793,18 @@ const sessionManager = {
     if (placement) {
       if (!review.result) placement.phase = 'accepted';
       window.OriWorkspaceMap?.endPlacement?.(placement.token);
-      if (modal?.dataset) {
-        delete modal.dataset.suspendedForMapPlacement;
-        modal.dataset.resumingFromMapPlacement = placement.token;
-      }
-      if (modal) {
+      const statusFocus = '#workspaceCreationReviewPanel [data-placement-focus="status"]';
+      const kept = this.presentOrdinaryMapOutcome(context, placement, statusFocus);
+      if (!kept && modal) {
+        if (modal.dataset) {
+          delete modal.dataset.suspendedForMapPlacement;
+          modal.dataset.resumingFromMapPlacement = placement.token;
+        }
         modal.addEventListener(
           'shown.bs.modal',
           () => {
             if (this.workspaceCreatorContext === context)
-              document
-                .querySelector('#workspaceCreationReviewPanel [data-placement-focus="status"]')
-                ?.focus();
+              document.querySelector(statusFocus)?.focus();
           },
           { once: true }
         );
@@ -5884,13 +5910,35 @@ const sessionManager = {
     this.notifyWorkspacesChanged({ workspaceId: ui.result.id });
   },
 
-  resumeManagedHomeReview(context, placement) {
+  resumeManagedHomeReview(context, placement, act) {
     if (this.workspaceCreatorContext !== context || this.workspaceMapPlacement !== placement)
       return;
     window.OriWorkspaceMap?.endPlacement?.(placement.token);
     const ui = context.groupTemplates?.sharedReview;
     placement.inFlight = null;
     if (!ui?.result) placement.phase = ui?.accepted ? 'accepted' : 'review';
+    // Accepted work reports on the Map. Only a refusal goes back to the review.
+    if (ui?.accepted || ui?.result) {
+      const statusFocus = '#workspaceCreationReviewPanel [data-placement-focus="status"]';
+      const present = () =>
+        this.presentMapOutcome(placement, {
+          tone: ui.result && !ui.positionFailed ? 'success' : 'warning',
+          title: ui.result
+            ? `Home ready · ${ui.result.name || ''}`.trim()
+            : 'Home setup is not confirmed',
+          detail: ui.message,
+          canOpen: Boolean(ui.result),
+          canRetry: Boolean(ui.result && ui.layoutSubjectNew && ui.positionFailed),
+          canRead: !ui.result,
+          act: async intent => {
+            await act?.(intent);
+            if (this.workspaceCreatorContext === context) present();
+          },
+          showDetails: () => this.showWorkspaceCreatorResult(placement.token, statusFocus),
+          dismiss: () => this.closeHiddenWorkspaceCreator(context)
+        });
+      if (present()) return;
+    } else window.OriCreationTransition?.returnToReview?.(placement.transition);
     const modal = document.getElementById('addFolderModal');
     if (!modal) return;
     delete modal.dataset.suspendedForMapPlacement;
@@ -5977,6 +6025,19 @@ const sessionManager = {
     state.previewParentID = String(options.previewParentID || '');
     state.inFlight = null;
     this.workspaceMapPlacement = state;
+    // Chat may be open behind the creator. It steps aside with the modal, and
+    // comes back exactly as it was on every return below.
+    state.transition =
+      window.OriCreationTransition?.enter?.({
+        owner: state.setupOwner
+          ? 'build-setup'
+          : state.groupHomeOwner
+            ? 'managed-home'
+            : 'ordinary',
+        generation: state.creatorGeneration,
+        token: state.token,
+        onExplicitReopen: () => this.returnFromWorkspaceMapPlacement(state.token, 'back')
+      }) || null;
 
     const activate = () => {
       if (this.workspaceMapPlacement !== state || state.phase !== 'starting') return;
@@ -5987,6 +6048,16 @@ const sessionManager = {
       )
         return;
       state.phase = 'placing';
+      // The user reopened chat while the modal was still closing: this lifetime
+      // already ended, so the review comes back rather than the Map starting.
+      if (
+        state.transition &&
+        window.OriCreationTransition &&
+        !window.OriCreationTransition.isCurrent(state.transition)
+      ) {
+        this.returnFromWorkspaceMapPlacement(state.token, 'back');
+        return;
+      }
       if (state.creatorContext?.ordinaryReview && !this.ordinaryCreationMapAvailable()) {
         this.returnFromWorkspaceMapPlacement(state.token, 'map-unavailable');
         return;
@@ -6093,6 +6164,7 @@ const sessionManager = {
     const mapUnavailable = reason === 'map-unavailable';
     state.phase = 'resuming';
     window.OriWorkspaceMap?.endPlacement?.(token, { reason });
+    window.OriCreationTransition?.returnToReview?.(state.transition);
 
     const modalElement = document.getElementById('addFolderModal');
     const modalAPI = typeof bootstrap !== 'undefined' ? bootstrap.Modal : window.bootstrap?.Modal;
@@ -6157,6 +6229,7 @@ const sessionManager = {
     state.createdWorkspaceID = id;
     state.inFlight = null;
     state.phase = 'created';
+    window.OriCreationTransition?.accept?.(state.transition);
     const modalElement = document.getElementById('addFolderModal');
     if (modalElement?.dataset.suspendedForMapPlacement === state.token) {
       delete modalElement.dataset.suspendedForMapPlacement;
@@ -6172,8 +6245,72 @@ const sessionManager = {
     if (modalElement?.dataset.suspendedForMapPlacement === state.token) {
       delete modalElement.dataset.suspendedForMapPlacement;
     }
+    window.OriCreationTransition?.release?.(state.transition, { reveal: true });
     this.workspaceMapPlacement = null;
     return true;
+  },
+
+  // The result of a Map placement stays on the Map. The creator's context lives
+  // on, hidden, so Details shows its full receipt and every action below is the
+  // owner's own; none of them repeats creation.
+  presentMapOutcome(
+    placement,
+    { tone, title, detail, act, showDetails, dismiss, canOpen, canRetry, canRead }
+  ) {
+    const transition = window.OriCreationTransition;
+    const handle = placement?.transition;
+    if (!transition || !handle || !transition.isCurrent(handle)) return false;
+    transition.accept(handle);
+    transition.settle(handle);
+    const run = action => () => void Promise.resolve(act(action));
+    const end = () => {
+      transition.release(handle);
+      if (this.creationMapOutcome?.handle === handle) this.creationMapOutcome = null;
+      dismiss?.();
+    };
+    this.creationMapOutcome = { handle, end };
+    const actions = [];
+    if (canOpen) actions.push({ label: 'Open', primary: true, run: run({ action: 'open' }) });
+    if (canRetry) actions.push({ label: 'Retry position', run: run({ action: 'retry-position' }) });
+    if (canRead) actions.push({ label: 'Read saved status', run: run({ action: 'read-status' }) });
+    actions.push({
+      label: 'Details',
+      run: () => {
+        transition.clearStatus(handle);
+        showDetails?.();
+      }
+    });
+    actions.push({ label: 'Dismiss', run: end });
+    transition.showStatus(handle, { tone, title, detail, actions });
+    return true;
+  },
+
+  // A new creator supersedes a receipt still showing on the Map.
+  dismissCreationMapOutcome() {
+    this.creationMapOutcome?.end?.();
+  },
+
+  // The creator's own close cleanup, for a modal that is already hidden.
+  closeHiddenWorkspaceCreator(context) {
+    if (this.workspaceCreatorContext !== context) return;
+    const modal = document.getElementById('addFolderModal');
+    if (modal?.dataset) {
+      delete modal.dataset.suspendedForMapPlacement;
+      delete modal.dataset.resumingFromMapPlacement;
+    }
+    this.workspaceCreatorClosed();
+  },
+
+  // Details on a Map receipt: the same creator modal, with its full read-only result.
+  showWorkspaceCreatorResult(token, focusSelector) {
+    const modal = document.getElementById('addFolderModal');
+    if (!modal) return;
+    delete modal.dataset.suspendedForMapPlacement;
+    modal.dataset.resumingFromMapPlacement = token;
+    modal.addEventListener('shown.bs.modal', () => document.querySelector(focusSelector)?.focus(), {
+      once: true
+    });
+    bootstrap.Modal.getOrCreateInstance(modal).show();
   },
 
   async confirmWorkspaceMapPlacement(token, candidate) {
@@ -6192,6 +6329,7 @@ const sessionManager = {
     if (!state.candidate) return false;
     state.inFlight = { token, revision: state.revision };
     state.phase = 'committing';
+    window.OriCreationTransition?.dispatch?.(state.transition);
     try {
       await this.createFolder({ placement: state });
       return true;
@@ -13446,6 +13584,17 @@ const sessionManager = {
 
   workspaceCreatorClosed() {
     const context = this.workspaceCreatorContext;
+    // Closing is not cancellation: accepted work carries on. Only this lifetime's
+    // presentation ends, whichever surface it was closed from.
+    const outcome = this.creationMapOutcome;
+    this.creationMapOutcome = null;
+    if (outcome) window.OriCreationTransition?.release?.(outcome.handle);
+    // A creator closing with an unfinished placement gives the drawer back.
+    const unfinished = this.workspaceMapPlacement?.transition;
+    if (unfinished)
+      window.OriCreationTransition?.release?.(unfinished, {
+        reveal: window.OriCreationTransition?.phase?.() === 'placing'
+      });
     context?.ordinaryReview?.panel?.destroy();
     context?.groupTemplates?.sharedReview?.panel?.destroy();
     const ordinaryReview = context?.ordinaryReview;
@@ -13493,6 +13642,7 @@ const sessionManager = {
       // The modal was already hidden for map navigation. Use the normal close
       // cleanup without showing it again (or waiting for a second hidden event).
       if (modal?.dataset) delete modal.dataset.suspendedForMapPlacement;
+      window.OriCreationTransition?.release?.(this.workspaceBuild?.placement?.transition);
       this.workspaceCreatorClosed();
     } else this.hideWorkspaceCreatorModal();
   },
@@ -14027,7 +14177,8 @@ const sessionManager = {
       );
     if (session.status === 'abandoned')
       throw new Error('This draft was cancelled. Pick the folder again to request a new setup.');
-    window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
+    // The conversation stays where it is behind the review; it only steps aside
+    // once the user chooses to place on the Map.
     this.showAddWorkspaceModal({
       entryPoint: 'folder_digest',
       blueprint: 'file-janitor',
@@ -14530,9 +14681,31 @@ const sessionManager = {
     }
     const modal = document.getElementById('addFolderModal');
     modal.dataset.suspendedForMapPlacement = placement.token;
+    placement.transition =
+      window.OriCreationTransition?.enter?.({
+        owner: 'inbox',
+        generation: this.workspaceCreatorContext?.generation,
+        token: placement.token,
+        onExplicitReopen: () => this.returnInboxWorkspaceToReview()
+      }) || null;
     const activate = () => {
-      if (this.workspaceBuild !== build || build.session.status === 'abandoned' || build.closeReady)
+      if (
+        this.workspaceBuild !== build ||
+        build.session.status === 'abandoned' ||
+        build.closeReady
+      ) {
+        window.OriCreationTransition?.release?.(placement.transition, { reveal: true });
         return;
+      }
+      // The user reopened chat while the modal was closing: back to the review.
+      if (
+        placement.transition &&
+        window.OriCreationTransition &&
+        !window.OriCreationTransition.isCurrent(placement.transition)
+      ) {
+        this.returnInboxWorkspaceToReview();
+        return;
+      }
       if (
         build.session.status !== 'open' ||
         build.acceptedPreparation ||
@@ -14597,6 +14770,7 @@ const sessionManager = {
             return false;
           }
           placement.candidate = { x: point.x, y: point.y };
+          window.OriCreationTransition?.dispatch?.(placement.transition);
           await this.confirmWorkspaceBuildPreparation();
           if (this.workspaceBuild !== build) return true;
           if (!build.acceptedPreparation && !build.preparationUncertain && !placement.result) {
@@ -14606,6 +14780,7 @@ const sessionManager = {
             this.returnInboxWorkspaceToReview();
             return false;
           }
+          window.OriCreationTransition?.accept?.(placement.transition);
           const active = document.activeElement;
           if (
             placement.onMap &&
@@ -14642,6 +14817,7 @@ const sessionManager = {
     const placement = build?.placement;
     if (!placement) return;
     window.OriWorkspaceMap?.endPlacement?.(placement.token);
+    window.OriCreationTransition?.returnToReview?.(placement.transition);
     placement.onMap = false;
     placement.host.classList.remove('assisted-placement-host--map');
     placement.home.insertBefore(placement.host, document.getElementById('workspaceBuildPane'));
@@ -15690,7 +15866,36 @@ const sessionManager = {
   resumeWorkspaceBuildSetupResult(build) {
     if (this.workspaceBuild !== build) return;
     const modal = document.getElementById('addFolderModal');
-    const token = build.setupReviewUI?.mapState?.token;
+    const state = build.setupReviewUI;
+    const token = state?.mapState?.token;
+    if (token) window.OriWorkspaceMap?.endPlacement?.(token);
+    // Accepted setup reports on the Map; its full result stays one click away.
+    if (token && (state.accepted || state.result)) {
+      const placement = state.mapState;
+      const presented = this.presentMapOutcome(placement, {
+        tone: state.result && !state.positionFailed ? 'success' : 'warning',
+        title: state.result
+          ? `Workspace ready · ${state.result.name || ''}`.trim()
+          : 'Setup result is not confirmed',
+        detail: state.message,
+        canOpen: Boolean(state.result?.id),
+        canRetry: Boolean(state.result?.id && state.positionFailed),
+        canRead: !state.result,
+        act: async intent => {
+          await this.actOnWorkspaceBuildSetupReview(build, intent);
+          if (this.workspaceBuild === build) this.resumeWorkspaceBuildSetupResult(build);
+        },
+        showDetails: () => {
+          this.showWorkspaceCreatorResult(token, '#workspaceSetupReviewTitle');
+          this.syncWorkspaceBuildPresentation();
+        },
+        dismiss: () => this.closeHiddenWorkspaceCreator(placement.creatorContext)
+      });
+      if (presented) {
+        this.syncWorkspaceBuildPresentation();
+        return;
+      }
+    }
     if (modal && token) {
       delete modal.dataset.suspendedForMapPlacement;
       modal.dataset.resumingFromMapPlacement = token;
@@ -19736,6 +19941,9 @@ const sessionManager = {
           placementResult = { saved: false, reason: 'map_unavailable' };
         }
       }
+      // A creator without a shared review reports through its own flow below.
+      if (placement && !ordinaryReview)
+        window.OriCreationTransition?.release?.(placement.transition);
       if (ordinaryReview) {
         if (openProjectAfterCreate && !ordinaryReview.projectOpenApplied) {
           ordinaryReview.projectOpenApplied = true;
@@ -20972,6 +21180,7 @@ const sessionManager = {
   showAddWorkspaceModal(options = {}) {
     const modalElement = document.getElementById('addFolderModal');
     if (!modalElement) return;
+    this.dismissCreationMapOutcome();
 
     const contextOptions = {
       ...options,

@@ -690,7 +690,8 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             innerWidth: window.innerWidth,
             viewport: document.querySelector('[data-ws-map-viewport]')
           }),
-        focusCard: view => controller.focus(view.offerID)
+        focusCard: view => controller.focus(view.offerID),
+        transition: () => window.OriCreationTransition
       })
     );
     const refreshIfOpen = () => {
