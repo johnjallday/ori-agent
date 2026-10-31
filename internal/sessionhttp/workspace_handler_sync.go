@@ -1044,34 +1044,7 @@ func workspaceFolderExists(path string) (bool, error) {
 }
 
 func isFolderImportedWorkspace(ws session.Workspace) bool {
-	if ws.SharedData == nil {
-		return false
-	}
-
-	raw, ok := ws.SharedData["folder_import"]
-	if !ok || raw == nil {
-		return false
-	}
-
-	meta, ok := raw.(map[string]any)
-	if !ok {
-		return false
-	}
-
-	if enabled, exists := meta["enabled"]; exists {
-		switch value := enabled.(type) {
-		case bool:
-			if value {
-				return true
-			}
-		case string:
-			if strings.EqualFold(strings.TrimSpace(value), "true") {
-				return true
-			}
-		}
-	}
-
-	return folderImportedWorkspacePath(ws) != ""
+	return agentworkspace.ShapeFromSharedData(ws.SharedData) == agentworkspace.ShapeImported
 }
 
 func folderImportedWorkspacePath(ws session.Workspace) string {
@@ -1161,6 +1134,7 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 		folderSlug:  workspace.FolderSlug,
 		name:        workspace.Name,
 		isGroup:     workspace.IsGroup(),
+		isAnchored:  workspaceAnchorDirectoryID(workspace) != "",
 	}
 	refs, bindings, ok := rebaseWorkspaceFolderReferences(id, refs, bindings, oldPath, newPath, time.Now())
 	if !ok {

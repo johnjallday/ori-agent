@@ -418,6 +418,10 @@ type Workspace struct {
 	// SharedData is a key-value store for inter-agent data sharing.
 	SharedData map[string]any `json:"shared_data,omitempty"`
 
+	// SummaryShape is a read-only listing projection, never a database column
+	// or writable JSON field. Full records derive Shape from SharedData.
+	SummaryShape string `json:"-"`
+
 	// Status is the current state of the workspace.
 	Status WorkspaceStatus `json:"status,omitempty"`
 

@@ -896,6 +896,9 @@ func (s *Service) ensureWorkspaceAccess(workspaceID, root, selectedReference str
 // widen that synthesized binding to include the approved root with its full
 // tool set.
 func pinExistingFilesystemAccess(ws *workspace.Workspace) {
+	if ws == nil || ws.IsAnchored() {
+		return
+	}
 	for _, binding := range ws.MCPBindings {
 		if strings.EqualFold(strings.TrimSpace(binding.ServerName), filesystemServerName) {
 			return

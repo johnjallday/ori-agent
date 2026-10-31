@@ -289,6 +289,7 @@ type createWorkspaceRequest struct {
 	OrderIndex      *int   `json:"order_index,omitempty"`
 	Color           string `json:"color,omitempty"`
 	ProjectPath     string `json:"project_path,omitempty"`
+	AnchorPath      string `json:"anchor_path,omitempty"`
 	FolderSlug      string `json:"folder_slug,omitempty"`
 	Location        string `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
 	EntryAgentName  string `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
@@ -606,6 +607,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
+	if strings.TrimSpace(req.AnchorPath) != "" {
+		if kind == session.WorkspaceKindGroup || req.ProjectConnection != nil || strings.TrimSpace(req.Location) != "" {
+			respondAnchorError(w, anchorError("anchor_incompatible_options", "Anchors require a non-group workspace with no custom sidecar location or project connection.", http.StatusBadRequest))
+			return
+		}
+		path, anchorErr := h.validateAnchorPath(req.AnchorPath, "")
+		if anchorErr != nil {
+			respondAnchorError(w, anchorErr)
+			return
+		}
+		req.AnchorPath = path
+	}
 	if req.GroupRoster && kind != session.WorkspaceKindGroup {
 		_ = orihttp.RespondBadRequest(w, "group_roster is available only when kind is group")
 		return
@@ -898,6 +911,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.AnchorPath != "" {
+		if err := provisionAnchoredScaffolding(ws, req.AnchorPath); err != nil {
+			_ = orihttp.RespondInternalError(w, "Failed to prepare the anchored workspace")
+			return
+		}
+	}
 	if !h.acceptWorkspaceCreationOperation(w, r, ws, resolvedTemplate, templateResolved) {
 		return
 	}
@@ -943,6 +962,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		inputs:       blueprintInputs,
 	}, seed)
 	if responded {
+		return
+	}
+	if prov.anchorErr != nil {
+		h.rollbackFailedAttachCreate(r.Context(), ws.ID, seed)
+		respondAnchorError(w, prov.anchorErr)
 		return
 	}
 	if prov.attachErr != nil {
@@ -1480,6 +1504,7 @@ type createProvisionOutcome struct {
 	// attachErr is set when a requested existing project was not attached.
 	// Unlike projectWarning it is fatal: the caller rolls the create back.
 	attachErr error
+	anchorErr *anchorPathError
 }
 
 // provisionCreateWorkspaceFolder creates the on-disk workspace folder,
@@ -1524,6 +1549,16 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 		UpdatedAt:      ws.UpdatedAt,
 	}
 
+	if workspaceAnchorDirectoryID(ws) != "" {
+		var err error
+		folderWS, err = buildFileStoreWorkspace(ws)
+		if err != nil {
+			out.anchorErr = anchorError("anchor_unavailable", "The anchored workspace could not be prepared.", http.StatusInternalServerError)
+			return out, false
+		}
+		folderWS.OwnerUserID = ws.OwnerUserID
+	}
+
 	targetLocation := strings.TrimSpace(req.Location)
 	if targetLocation == "" && h.workspaceRootResolver != nil {
 		targetLocation = strings.TrimSpace(h.workspaceRootResolver())
@@ -1531,6 +1566,11 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 
 	var folderErr error
 	switch {
+	case folderWS.IsAnchored():
+		out.anchorErr = h.saveAnchoredWorkspaceFolder(req.AnchorPath, folderWS, targetLocation)
+		if out.anchorErr != nil {
+			return out, false
+		}
 	case targetLocation != "" && !workspacePathsEqual(targetLocation, h.workspaceStore.BasePath()):
 		// Custom location or updated default root outside the original file store base.
 		folderErr = h.workspaceStore.SaveAt(folderWS, targetLocation)
@@ -1569,6 +1609,9 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 
 	folderPath, err := h.workspaceStore.GetFolderPath(ws.ID)
 	if err != nil {
+		if folderWS.IsAnchored() {
+			out.anchorErr = anchorError("anchor_unavailable", "The sidecar folder could not be located.", http.StatusInternalServerError)
+		}
 		return out, false
 	}
 
@@ -1592,7 +1635,11 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 		return out, false
 	}
 
-	h.provisionWorkspaceScaffolding(ctx, ws, folderWS, folderPath, []string{folderPath})
+	if !folderWS.IsAnchored() {
+		h.provisionWorkspaceScaffolding(ctx, ws, folderWS, folderPath, []string{folderPath})
+	} else if _, err := agentworkspace.NewFileBacklogSynchronizer(h.workspaceStore).EnsureBacklogMarkdownFile(ws.ID); err != nil {
+		logger.Warn("Failed to create BACKLOG.md during anchored scaffolding", logger.Fields{"id": ws.ID, "error": err})
+	}
 	logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 
 	out.attachErr = nil
@@ -2058,6 +2105,10 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		workspace.Tags = tags
 	}
 	if req.PrimaryDirectoryID != nil {
+		if anchorID := workspaceAnchorDirectoryID(workspace); anchorID != "" && strings.TrimSpace(*req.PrimaryDirectoryID) != anchorID {
+			_ = orihttp.RespondBadRequest(w, "An anchored workspace's primary folder is its anchor. Relink that folder instead.")
+			return
+		}
 		setWorkspacePrimaryDirectoryID(workspace, *req.PrimaryDirectoryID)
 	}
 	if req.ParentID != nil {
@@ -2554,11 +2605,17 @@ func setWorkspacePrimaryDirectoryID(workspace *session.Workspace, directoryID st
 	}
 
 	if trimmed == "" {
+		if workspaceAnchorDirectoryID(workspace) != "" {
+			return
+		}
 		delete(workspace.SharedData, workspaceSharedDataPrimaryDirectoryIDKey)
 		return
 	}
 
 	workspace.SharedData[workspaceSharedDataPrimaryDirectoryIDKey] = trimmed
+	if workspaceAnchorDirectoryID(workspace) != "" {
+		workspace.SharedData[agentworkspace.AnchorDirectoryReferenceIDKey] = trimmed
+	}
 }
 
 // renameWorkspace is the shared rename mechanism behind both POST

@@ -106,7 +106,10 @@ export class WorkspaceMCPManager {
           .filter(Boolean)
       : [];
 
-    if (explicitFilesystemExists || directoryRoots.length === 0) {
+    const anchored =
+      this.host.workspace.shape === 'anchored' ||
+      Boolean(String(this.host.workspace.shared_data?.anchor_directory_reference_id || '').trim());
+    if (anchored || explicitFilesystemExists || directoryRoots.length === 0) {
       return visibleExplicitBindings;
     }
 
