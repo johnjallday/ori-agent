@@ -2,11 +2,14 @@ package secondbrain
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/followup"
@@ -50,6 +53,77 @@ func TestLooker_RulesOnlyLookFinishesWithOneHeadlineAndASuggestedSet(t *testing.
 	record.Sources[0].LastLook = &look
 	if err := record.Validate(); err != nil {
 		t.Fatalf("the look does not fit the record: %v", err)
+	}
+}
+
+func TestLooker_KeepsBoundedSignalsAndNoLineText(t *testing.T) {
+	source, vault := musicSource(t)
+	look := fixedLooker().Run(context.Background(), source, nil, "look-1", "connect-1").Look
+	if len(look.People) != 2 || look.People[0].Name != vault.TopPerson || look.People[0].Mentions != vault.TopMentions ||
+		look.People[0].Note != "People/Marco.md" || !strings.HasPrefix(look.People[0].Link, "obsidian://") {
+		t.Fatalf("people = %+v", look.People)
+	}
+	if len(look.Stale) != 1 || look.Stale[0].Note != vault.Stale || look.Stale[0].Title != "Studio Website" || look.Stale[0].Open != 3 || look.Stale[0].Modified.IsZero() {
+		t.Fatalf("stale = %+v", look.Stale)
+	}
+	if len(look.Decisions) != 1 || look.Decisions[0].Note != vault.Decision || look.Decisions[0].Title != "Distribution Decision" || look.Decisions[0].Open != 2 {
+		t.Fatalf("decisions = %+v", look.Decisions)
+	}
+	encoded, err := json.Marshal(struct {
+		P []LookPerson
+		S []LookStaleNote
+		D []LookDecision
+	}{look.People, look.Stale, look.Decisions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"Decide by", "Label manager", "Last touched", "Designer for"} {
+		if strings.Contains(string(encoded), line) {
+			t.Fatalf("the signals kept a note's words %q: %s", line, encoded)
+		}
+	}
+}
+
+func TestLookSignals_CapsFoldsAndSkipsWhatCannotBeKept(t *testing.T) {
+	var signals Signals
+	for i := range MaxLookSignals + 5 {
+		name := fmt.Sprintf("n%d", i)
+		signals.People = append(signals.People, Person{Name: name, Note: "People/" + name + ".md", Mentions: 1})
+		signals.Stale = append(signals.Stale, StaleNote{Note: name + ".md", Title: name, Open: 1, Modified: fixtureNow})
+		signals.Decisions = append(signals.Decisions, DecisionNote{Note: name + ".md", Title: name, Text: "the decision line", Open: 1})
+	}
+	people, stale, decisions := lookSignals(Source{Kind: KindMarkdown, Name: "Brain"}, signals)
+	if len(people) != MaxLookSignals || len(stale) != MaxLookSignals || len(decisions) != MaxLookSignals || people[0].Link != "" {
+		t.Fatalf("kept %d/%d/%d, first person %+v", len(people), len(stale), len(decisions), people[0])
+	}
+
+	// Notes whose links run long hit the byte budget before the count cap.
+	var heavy Signals
+	for i := range MaxLookSignals {
+		name := fmt.Sprintf("%02d %s.md", i, strings.Repeat("語", 90))
+		heavy.Stale = append(heavy.Stale, StaleNote{Note: name, Title: strings.Repeat("語", MaxSignalTitleRunes), Open: 1, Modified: fixtureNow})
+		heavy.Decisions = append(heavy.Decisions, DecisionNote{Note: name, Title: strings.Repeat("語", MaxSignalTitleRunes), Open: 1})
+		heavy.People = append(heavy.People, Person{Name: name, Note: name, Mentions: 1})
+	}
+	heavyPeople, heavyStale, heavyDecisions := lookSignals(Source{Kind: KindObsidian, Name: "Brain"}, heavy)
+	encoded, err := json.Marshal([]any{heavyPeople, heavyStale, heavyDecisions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxStoredSignalBytes+64 || len(heavyPeople)+len(heavyStale)+len(heavyDecisions) == 3*MaxLookSignals {
+		t.Fatalf("kept %d bytes in %d/%d/%d signals, want the budget to stop them", len(encoded), len(heavyPeople), len(heavyStale), len(heavyDecisions))
+	}
+
+	long := strings.Repeat("é", MaxSignalTitleRunes+40)
+	_, stale, decisions = lookSignals(Source{Kind: KindMarkdown, Name: "Brain"}, Signals{
+		Stale:     []StaleNote{{Note: `odd\name.md`, Title: "skipped", Modified: fixtureNow}, {Note: "kept.md", Title: "  two\n lines ", Modified: fixtureNow}},
+		Decisions: []DecisionNote{{Note: "a.md", Title: long}, {Note: strings.Repeat("x", maxSignalNoteBytes+1), Title: "skipped"}},
+	})
+	if len(stale) != 1 || stale[0].Title != "two lines" {
+		t.Fatalf("stale = %+v", stale)
+	}
+	if len(decisions) != 1 || utf8.RuneCountInString(decisions[0].Title) > MaxSignalTitleRunes {
+		t.Fatalf("decisions = %+v", decisions)
 	}
 }
 

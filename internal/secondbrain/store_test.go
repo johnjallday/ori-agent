@@ -274,6 +274,34 @@ func TestRecord_ValidateBoundsWhatALookKeeps(t *testing.T) {
 				look.Items = append(look.Items, testItem(source, "Inbox.md", fmt.Sprintf("item %d", i), i+1))
 			}
 		},
+		"too many people": func(r *Record) {
+			r.Sources[0].LastLook.People = make([]LookPerson, MaxLookSignals+1)
+			for i := range r.Sources[0].LastLook.People {
+				r.Sources[0].LastLook.People[i] = LookPerson{Name: "Dana", Note: "People/Dana.md", Mentions: 1}
+			}
+		},
+		"person without a name": func(r *Record) { r.Sources[0].LastLook.People = []LookPerson{{Note: "People/Dana.md"}} },
+		"person outside the folder": func(r *Record) {
+			r.Sources[0].LastLook.People = []LookPerson{{Name: "Dana", Note: "../People/Dana.md"}}
+		},
+		"stale without a note": func(r *Record) {
+			r.Sources[0].LastLook.Stale = []LookStaleNote{{Title: "Old", Modified: storeNow}}
+		},
+		"stale without a date": func(r *Record) {
+			r.Sources[0].LastLook.Stale = []LookStaleNote{{Note: "Old.md", Title: "Old"}}
+		},
+		"stale title on two lines": func(r *Record) {
+			r.Sources[0].LastLook.Stale = []LookStaleNote{{Note: "Old.md", Title: "Old\nnote", Modified: storeNow}}
+		},
+		"decision title too long": func(r *Record) {
+			r.Sources[0].LastLook.Decisions = []LookDecision{{Note: "D.md", Title: strings.Repeat("x", MaxSignalTitleRunes+1)}}
+		},
+		"decision outside the folder": func(r *Record) {
+			r.Sources[0].LastLook.Decisions = []LookDecision{{Note: "/etc/passwd", Title: "D"}}
+		},
+		"signal link to elsewhere": func(r *Record) {
+			r.Sources[0].LastLook.Decisions = []LookDecision{{Note: "D.md", Title: "D", Link: "javascript:alert(1)"}}
+		},
 		"decision without time": func(r *Record) { r.Ask.Decision = DecisionLater },
 		"bad receipt":           func(r *Record) { r.Receipts = []Receipt{{RequestID: "", Action: "look"}} },
 	} {

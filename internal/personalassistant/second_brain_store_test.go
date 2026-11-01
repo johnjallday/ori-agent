@@ -62,6 +62,81 @@ func TestSecondBrainCodec_OriginDecodesAndDefaults(t *testing.T) {
 	}
 }
 
+// fullSecondBrainLook is the largest look the record can be asked to hold: 500
+// items filling the stored-items budget, every signal list at its cap with its
+// fields at their longest, every item triaged.
+func fullSecondBrainLook(source secondbrain.Source) *secondbrain.Look {
+	finished := secondBrainNow.Add(time.Minute)
+	title := strings.Repeat("語", secondbrain.MaxSignalTitleRunes)
+	note := strings.Repeat("n", 297) + ".md"
+	link := "obsidian://open?vault=Brain&file=" + strings.Repeat("l", 340)
+	look := &secondbrain.Look{
+		ID: "look-1", State: secondbrain.LookFinished, RequestID: "connect-1", StartedAt: secondBrainNow, FinishedAt: &finished,
+		Headline: strings.Repeat("h", secondbrain.MaxHeadlineRunes), AlsoNoticed: strings.Repeat("a", secondbrain.MaxHeadlineRunes*2),
+	}
+	// 600 compact bytes an item is the 300 KB budget across 500 items.
+	text := strings.Repeat("t", secondbrain.MaxTaskTextRunes)
+	itemNote := strings.Repeat("i", 180) + ".md"
+	itemLink := "obsidian://open?vault=Brain&file=" + strings.Repeat("k", 80)
+	for i := range secondbrain.MaxLookItems {
+		itemText := fmt.Sprintf("%d %s", i, text)[:secondbrain.MaxTaskTextRunes]
+		look.Items = append(look.Items, secondbrain.LookItem{
+			ID: secondbrain.ItemID(source.ID, itemNote, itemText), Text: itemText, Note: itemNote, Line: 100000 + i, Due: "2026-10-25",
+			Suggested: true, InDecision: true, Link: itemLink,
+		})
+	}
+	for range secondbrain.MaxLookSignals {
+		look.People = append(look.People, secondbrain.LookPerson{Name: strings.Repeat("p", 255), Note: note, Mentions: 99999, Link: link})
+		look.Stale = append(look.Stale, secondbrain.LookStaleNote{Note: note, Title: title, Open: 99999, Modified: secondBrainNow, Link: link})
+		look.Decisions = append(look.Decisions, secondbrain.LookDecision{Note: note, Title: title, Open: 99999, Link: link})
+	}
+	return look
+}
+
+func TestSecondBrainCodec_ALookWithEveryCapFullFitsTheRecord(t *testing.T) {
+	source := secondBrainSource("/Users/sam/Second Brain")
+	source.LastLook = fullSecondBrainLook(source)
+	doc := SecondBrainDocument{SchemaVersion: secondbrain.RecordSchemaVersion, Version: 1}
+	doc.Sources = []secondbrain.Source{source}
+	for i := range secondbrain.MaxReceipts {
+		doc.Remember(secondbrain.Receipt{
+			RequestID: fmt.Sprintf("%0128d", i), Action: "capture", At: secondBrainNow, LookID: "look-1",
+			Note: "Inbox/" + strings.Repeat("c", 280) + ".md",
+		})
+	}
+	encoded, err := encodeSecondBrain(doc)
+	if err != nil {
+		t.Fatalf("a full look does not fit: %v", err)
+	}
+	if len(encoded) > secondbrain.RecordMaxBytes {
+		t.Fatalf("encoded = %d bytes", len(encoded))
+	}
+	decoded, err := decodeSecondBrain(encoded, doc.Owner)
+	if err != nil {
+		t.Fatalf("it does not read back: %v", err)
+	}
+	if last := decoded.Connected().LastLook; len(last.Items) != secondbrain.MaxLookItems || len(last.People) != secondbrain.MaxLookSignals {
+		t.Fatalf("read back %d items, %d people", len(last.Items), len(last.People))
+	}
+	t.Logf("a full record is %d bytes of %d", len(encoded), secondbrain.RecordMaxBytes)
+}
+
+func TestSecondBrainCodec_ARecordFromBeforeTheSignalsStillReads(t *testing.T) {
+	owner := KnowledgeOwner{UserID: "local", HQWorkspaceID: "hq"}
+	id := secondbrain.SourceID("/Users/sam/Brain")
+	record := fmt.Appendf(nil, `{"schema_version":1,"version":1,"owner":{"user_id":"local","hq_workspace_id":"hq"},"ask":{},
+		"sources":[{"id":%q,"kind":"obsidian","name":"Brain","path":"/Users/sam/Brain","connected_at":"2026-10-21T09:00:00Z","request_id":"connect-1",
+		"last_look":{"id":"look-1","state":"finished","started_at":"2026-10-21T09:00:00Z","finished_at":"2026-10-21T09:00:01Z","counts":{"notes":1,"open_items":1,"notes_with_open":1,"dated":0,"done":0},
+		"items":[{"id":%q,"text":"call Dana","note":"a.md","line":1}]}}]}`, id, secondbrain.ItemID(id, "a.md", "call Dana"))
+	doc, err := decodeSecondBrain(record, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := doc.Connected().LastLook; len(last.Items) != 1 || last.People != nil || last.Stale != nil || last.Decisions != nil {
+		t.Fatalf("last look = %+v", last)
+	}
+}
+
 func TestSecondBrainStore_RoundTripsTheRecordUnderTheHQ(t *testing.T) {
 	ctx := context.Background()
 	store, kf := newSecondBrainStoreFixture(t)

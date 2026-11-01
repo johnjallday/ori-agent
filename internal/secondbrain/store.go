@@ -31,6 +31,14 @@ const (
 	MaxReceipts = 32
 	// MaxHeadlineRunes caps a look's headline (FR23) and its Also noticed line.
 	MaxHeadlineRunes = 160
+	// MaxLookSignals caps each list of signals a look keeps beside its items:
+	// people, stale notes and decisions.
+	MaxLookSignals = 20
+	// MaxSignalTitleRunes caps the note title a kept signal carries.
+	MaxSignalTitleRunes = 160
+	// maxSignalNoteBytes caps a kept signal's note path. A longer one is left
+	// out rather than kept, so the signals can never crowd the record.
+	maxSignalNoteBytes = 300
 	// AskAgainAfter is how long "Not now" waits before Needs you offers the
 	// ask again (FR8).
 	AskAgainAfter = 7 * 24 * time.Hour
@@ -142,6 +150,11 @@ type Look struct {
 	AlsoNoticed string     `json:"also_noticed,omitempty"`
 	Counts      LookCounts `json:"counts"`
 	Items       []LookItem `json:"items,omitempty"`
+	// People, Stale and Decisions are bounded signals for the Notes panel: names,
+	// paths, counts and dates, never a note's words.
+	People    []LookPerson    `json:"people,omitempty"`
+	Stale     []LookStaleNote `json:"stale,omitempty"`
+	Decisions []LookDecision  `json:"decisions,omitempty"`
 	// NewSince and DoneSince compare this look with the one before (FR36).
 	NewSince  int `json:"new_since,omitempty"`
 	DoneSince int `json:"done_since,omitempty"`
@@ -180,6 +193,32 @@ type LookItem struct {
 	// Link opens the note in Obsidian (FR26); "" for a plain Markdown folder.
 	// It is built from the vault's name and the note's path, never read.
 	Link string `json:"link,omitempty"`
+}
+
+// LookPerson is a person note and how many other notes mention it.
+type LookPerson struct {
+	Name     string `json:"name"`
+	Note     string `json:"note"`
+	Mentions int    `json:"mentions"`
+	Link     string `json:"link,omitempty"`
+}
+
+// LookStaleNote is a note with open items that has sat untouched for StaleAfter.
+type LookStaleNote struct {
+	Note     string    `json:"note"`
+	Title    string    `json:"title"`
+	Open     int       `json:"open"`
+	Modified time.Time `json:"modified"`
+	Link     string    `json:"link,omitempty"`
+}
+
+// LookDecision is a note that marks an open decision. The decision's own line
+// is not kept.
+type LookDecision struct {
+	Note  string `json:"note"`
+	Title string `json:"title"`
+	Open  int    `json:"open"`
+	Link  string `json:"link,omitempty"`
 }
 
 // Receipt remembers a write by its request_id, so a replay returns what the
@@ -440,6 +479,7 @@ func validateLook(look Look) error {
 		utf8.RuneCountInString(look.AlsoNoticed) > MaxHeadlineRunes*2,
 		utf8.RuneCountInString(look.Failure) > maxFailureRunes,
 		len(look.Items) > MaxLookItems,
+		len(look.People) > MaxLookSignals || len(look.Stale) > MaxLookSignals || len(look.Decisions) > MaxLookSignals,
 		look.Counts.Notes < 0 || look.Counts.OpenItems < 0 || look.Counts.NotesWithOpen < 0 || look.Counts.Dated < 0 || look.Counts.Done < 0,
 		look.NewSince < 0 || look.DoneSince < 0:
 		return ErrInvalidRecord
@@ -449,20 +489,52 @@ func validateLook(look Look) error {
 			return err
 		}
 	}
+	for _, person := range look.People {
+		if person.Name == "" || len(person.Name) > maxNameLength || strings.ContainsAny(person.Name, "\r\n") || person.Mentions < 0 ||
+			!validSignalNote(person.Note) || !validLink(person.Link) {
+			return ErrInvalidRecord
+		}
+	}
+	for _, note := range look.Stale {
+		if !validSignalTitle(note.Title) || note.Open < 0 || note.Modified.IsZero() || !validSignalNote(note.Note) || !validLink(note.Link) {
+			return ErrInvalidRecord
+		}
+	}
+	for _, note := range look.Decisions {
+		if !validSignalTitle(note.Title) || note.Open < 0 || !validSignalNote(note.Note) || !validLink(note.Link) {
+			return ErrInvalidRecord
+		}
+	}
 	return nil
 }
 
 func validateItem(item LookItem) error {
-	note := item.Note
 	switch {
 	case !itemIDPattern.MatchString(item.ID),
 		item.Text == "" || utf8.RuneCountInString(item.Text) > MaxTaskTextRunes || strings.ContainsAny(item.Text, "\r\n"),
-		note == "" || path.IsAbs(note) || path.Clean(note) != note || note == ".." || strings.HasPrefix(note, "../") || strings.Contains(note, "\\"),
+		!validNotePath(item.Note),
 		item.Line < 1,
 		item.Due != "" && (!isoDayPattern.MatchString(item.Due) || !validDate(item.Due)),
-		item.Link != "" && (!strings.HasPrefix(item.Link, "obsidian://open?vault=") || len(item.Link) > 2048 ||
-			strings.ContainsAny(item.Link, " \r\n\"<>")):
+		!validLink(item.Link):
 		return ErrInvalidRecord
 	}
 	return nil
+}
+
+// validNotePath says note is a clean path inside the folder.
+func validNotePath(note string) bool {
+	return note != "" && !path.IsAbs(note) && path.Clean(note) == note && note != ".." && !strings.HasPrefix(note, "../") && !strings.Contains(note, "\\")
+}
+
+func validSignalNote(note string) bool {
+	return validNotePath(note) && len(note) <= maxSignalNoteBytes
+}
+
+func validSignalTitle(title string) bool {
+	return utf8.RuneCountInString(title) <= MaxSignalTitleRunes && !strings.ContainsAny(title, "\r\n")
+}
+
+// validLink says link is absent or an Obsidian link safe to put in an href.
+func validLink(link string) bool {
+	return link == "" || (strings.HasPrefix(link, "obsidian://open?vault=") && len(link) <= 2048 && !strings.ContainsAny(link, " \r\n\"<>"))
 }

@@ -264,6 +264,11 @@ type SecondBrainLookSummary struct {
 	OpenItems int       `json:"open_items"`
 	Headline  string    `json:"headline"`
 	Acted     bool      `json:"acted"`
+	// People, Stale and Decisions count the signals the look kept; GET …/look
+	// holds the lists.
+	People    int `json:"people"`
+	Stale     int `json:"stale"`
+	Decisions int `json:"decisions"`
 }
 
 // SecondBrainAskView is the ask's state.
@@ -1165,6 +1170,7 @@ func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
 	if last := connected.LastLook; last != nil {
 		summary := &SecondBrainLookSummary{
 			ID: last.ID, OpenItems: last.Counts.OpenItems, Headline: last.Headline, Acted: last.ActedAt != nil,
+			People: len(last.People), Stale: len(last.Stale), Decisions: len(last.Decisions),
 		}
 		if last.FinishedAt != nil {
 			summary.At = *last.FinishedAt

@@ -31,6 +31,11 @@ func seededNotes(source Source, reading Reading) map[string]bool {
 // record stays well inside RecordMaxBytes whatever the items say.
 const maxStoredItemBytes = 300 * 1024
 
+// maxStoredSignalBytes does the same for the people, stale notes and decisions
+// together. With the items at their budget and every item triaged, the record
+// still fits RecordMaxBytes (TestSecondBrainCodec_ALookWithEveryCapFullFitsTheRecord).
+const maxStoredSignalBytes = 80 * 1024
+
 // Looker runs one look: read the folder within bounds, extract, choose the
 // suggested items, and write the headline. It never waits on the user and
 // never asks a question (FR27): every run ends finished or failed.
@@ -125,6 +130,7 @@ func (l Looker) run(ctx context.Context, source Source, previous *Look, lookID, 
 		Dated: signals.Dated, Done: signals.Done, Partial: reading.Partial,
 	}
 	look.Items = lookItems(source, signals.OpenLoops, seededNotes(source, reading))
+	look.People, look.Stale, look.Decisions = lookSignals(source, signals)
 	look.Headline, look.HeadlineBy = RulesHeadline(source.Name, look.Counts), HeadlineByRules
 	var note string
 	if setup != nil {
@@ -191,6 +197,76 @@ func lookItems(source Source, loops []OpenLoop, seeded map[string]bool) []LookIt
 		items = append(items, item)
 	}
 	return items
+}
+
+// lookSignals keeps the first MaxLookSignals of each signal the Notes panel
+// shows, in the extractor's order. They hold names, paths, counts and dates and
+// nothing else: a decision's own line is left behind. A signal whose note could
+// not be kept is skipped, so one odd file name never costs the whole look.
+func lookSignals(source Source, signals Signals) (people []LookPerson, stale []LookStaleNote, decisions []LookDecision) {
+	link := func(note string) string {
+		if source.Kind != KindObsidian {
+			return ""
+		}
+		if built := ObsidianLink(source.Name, note); validLink(built) {
+			return built
+		}
+		return ""
+	}
+	budget := maxStoredSignalBytes
+	fits := func(signal any) bool {
+		encoded, err := json.Marshal(signal)
+		if err != nil || len(encoded) > budget {
+			return false
+		}
+		budget -= len(encoded)
+		return true
+	}
+	for _, person := range signals.People {
+		if len(people) == MaxLookSignals {
+			break
+		}
+		name := foldTitle(person.Name, maxNameLength)
+		if name == "" || len(name) > maxNameLength || !validSignalNote(person.Note) {
+			continue
+		}
+		kept := LookPerson{Name: name, Note: person.Note, Mentions: person.Mentions, Link: link(person.Note)}
+		if fits(kept) {
+			people = append(people, kept)
+		}
+	}
+	for _, note := range signals.Stale {
+		if len(stale) == MaxLookSignals {
+			break
+		}
+		if !validSignalNote(note.Note) || note.Modified.IsZero() {
+			continue
+		}
+		kept := LookStaleNote{
+			Note: note.Note, Title: foldTitle(note.Title, MaxSignalTitleRunes), Open: note.Open, Modified: note.Modified.UTC(), Link: link(note.Note),
+		}
+		if fits(kept) {
+			stale = append(stale, kept)
+		}
+	}
+	for _, note := range signals.Decisions {
+		if len(decisions) == MaxLookSignals {
+			break
+		}
+		if !validSignalNote(note.Note) {
+			continue
+		}
+		kept := LookDecision{Note: note.Note, Title: foldTitle(note.Title, MaxSignalTitleRunes), Open: note.Open, Link: link(note.Note)}
+		if fits(kept) {
+			decisions = append(decisions, kept)
+		}
+	}
+	return people, stale, decisions
+}
+
+// foldTitle puts text on one line within limit runes.
+func foldTitle(text string, limit int) string {
+	return truncateRunes(strings.Join(strings.Fields(strings.ToValidUTF8(text, "")), " "), limit)
 }
 
 // compareLooks counts the items new since the previous look and lists the
