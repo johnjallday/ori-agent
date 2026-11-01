@@ -75,8 +75,9 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(raw.Missions) != 6 {
-		t.Fatalf("missions = %d, want 6 (body=%s)", len(raw.Missions), rec.Body.String())
+	// Six to start, then the three optional missions of the second brain's first week.
+	if len(raw.Missions) != 9 {
+		t.Fatalf("missions = %d, want 9 (body=%s)", len(raw.Missions), rec.Body.String())
 	}
 	for i, mission := range raw.Missions {
 		if order, _ := mission["order"].(float64); int(order) != i+1 {
@@ -102,6 +103,8 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 			}
 		case progression.FolderFirstLookQuestID:
 			wantReason = "Show your assistant a folder first"
+		case progression.CaptureFirstNoteQuestID, progression.SaveFirstJournalQuestID, progression.GiveProjectQuestID:
+			wantReason = "Connect your second brain first"
 		}
 		if i > 0 && mission["locked_reason"] != wantReason {
 			t.Fatalf("missions[%d].locked_reason = %v, want %q", i, mission["locked_reason"], wantReason)
@@ -113,6 +116,12 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[1]["id"] != progression.SecondBrainQuestID ||
 		raw.Missions[2]["id"] != progression.ShowFolderQuestID {
 		t.Fatalf("missions[0..2] = %v, %v, %v", raw.Missions[0]["id"], raw.Missions[1]["id"], raw.Missions[2]["id"])
+	}
+	// The first-week missions come last, in the order the week goes.
+	for offset, id := range progression.SecondBrainFirstWeekQuestIDs() {
+		if raw.Missions[6+offset]["id"] != id {
+			t.Fatalf("missions[%d] = %v, want %s", 6+offset, raw.Missions[6+offset]["id"], id)
+		}
 	}
 	if _, present := raw.Missions[0]["locked_reason"]; present {
 		t.Fatalf("an unlocked mission sent a lock reason: %v", raw.Missions[0])
