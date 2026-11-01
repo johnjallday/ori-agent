@@ -4813,38 +4813,22 @@ test('the Notes station says whether notes are set up, connected, or missing', (
     const setUp = notes({
       status: 'connected',
       source: { name: 'My Brain', origin: 'created_by_ori' },
+      inbox_count: 12,
       last_look: { at: new Date(Date.now() - 2 * 3600000).toISOString() }
     });
     assert.deepEqual(setUp, {
-      value: 'My Brain',
-      description: 'set up by Ori · last look 2h ago',
+      value: '12 in Inbox',
+      description: 'set up by Ori · last look 2h',
       tone: 'clear'
     });
-    const written = notes({
-      status: 'connected',
-      source: { name: 'My Brain', origin: 'created_by_ori' },
-      last_look: { at: new Date(Date.now() - 2 * 3600000).toISOString() },
-      written_by_ori: { count: 5, last_at: new Date(Date.now() - 3 * 3600000).toISOString() }
-    });
-    assert.deepEqual(written, {
-      value: 'My Brain',
-      description: 'set up by Ori · 5 written by Ori · last write 3h ago',
-      tone: 'clear'
-    });
-    const none = notes({
-      status: 'connected',
-      source: { name: 'My Brain', origin: 'created_by_ori' },
-      written_by_ori: { count: 0 }
-    });
-    assert.equal(none.description, 'set up by Ori · 0 written by Ori');
     const connected = notes({
       status: 'connected',
       source: { name: 'Second Brain' },
-      last_look: { at: new Date(Date.now() - 2 * 3600000).toISOString() }
+      last_look: { at: new Date(Date.now() - 2 * 3600000).toISOString(), open_items: 14 }
     });
     assert.deepEqual(connected, {
-      value: 'Second Brain',
-      description: 'connected · last look 2h ago',
+      value: '14 open',
+      description: 'connected · last look 2h',
       tone: 'clear'
     });
     assert.deepEqual(notes({ status: 'missing', source: { name: 'Second Brain' } }), {
@@ -4861,7 +4845,96 @@ test('the Notes station says whether notes are set up, connected, or missing', (
   }
 });
 
-test('the Notes station opens the connection card in the drawer, or Home without one', () => {
+test('a connected Notes station opens its panel; closing it re-reads the badge', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const calls = [];
+    hq._notes = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      secondBrain: { status: 'connected', source: { name: 'Second Brain' } }
+    };
+    hq.openStatModal = key => calls.push('panel ' + key);
+    hq.loadNotesPanel = () => calls.push('load');
+    hq.requestNotesData = force => calls.push('reread ' + force);
+    hq.runHQStationAction('second-brain');
+    assert.deepEqual(calls, ['panel second-brain', 'load']);
+
+    calls.length = 0;
+    hq.notesStation().onPanelClosed();
+    assert.deepEqual(calls, ['reread true']);
+    assert.equal(hq.statSectionMeta('second-brain').title, 'Notes');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Notes panel triages an item and shows what the server returned', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  try {
+    const changed = [];
+    globalThis.window = { PersonalAssistantSecondBrain: { changed: async () => changed.push(1) } };
+    const requests = [];
+    globalThis.fetch = async (url, options) => {
+      requests.push([url, JSON.parse(options.body)]);
+      return {
+        ok: true,
+        json: async () => ({
+          look: { state: 'finished', look_id: 'look-1', result: { id: 'after' } }
+        })
+      };
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq._notesPanel = {
+      status: 'ready',
+      look: { state: 'finished', look_id: 'look-1', result: {} }
+    };
+    await hq.triageFromNotesPanel('done', 'item-1');
+    assert.equal(requests[0][0], '/api/personal-assistant/second-brain/look/look-1/items/item-1');
+    assert.equal(requests[0][1].action, 'done');
+    assert.ok(requests[0][1].request_id.startsWith('notes-'));
+    assert.equal(hq._notesPanel.look.result.id, 'after');
+    assert.equal(changed.length, 1);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Look again inside the rate limit says so, and a refused capture keeps the draft', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.window = {};
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: 'Ori looked a moment ago.' })
+    });
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq._notesPanel = { status: 'ready', look: { state: 'finished' } };
+    await hq.lookAgainFromNotesPanel();
+    assert.equal(hq._notesPanel.lookMessage, 'Looked less than 10 minutes ago');
+
+    hq._notesPanel.captureDraft = '   ';
+    await hq.captureFromNotesPanel();
+    assert.equal(hq._notesPanel.captureProblem, 'Write the note first.');
+
+    hq._notesPanel.captureDraft = 'looks like a key';
+    await hq.captureFromNotesPanel();
+    assert.equal(hq._notesPanel.captureProblem, 'Ori looked a moment ago.');
+    assert.equal(hq._notesPanel.captureDraft, 'looks like a key');
+    assert.equal(hq._notesPanel.captureBusy, false);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('with nothing connected the Notes station opens the card in the drawer, or Home without one', () => {
   const originalWindow = globalThis.window;
   try {
     const calls = [];
@@ -4873,6 +4946,11 @@ test('the Notes station opens the connection card in the drawer, or Home without
       PersonalAssistantSecondBrain: { openManage: async () => calls.push('manage') }
     };
     const hq = makeHQCommandView({ id: 'hq-1' });
+    hq._notes = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      secondBrain: { status: 'not_connected' }
+    };
     hq.runHQStationAction('second-brain');
     assert.deepEqual(calls, ['open false', 'manage']);
 

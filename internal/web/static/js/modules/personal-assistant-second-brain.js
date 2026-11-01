@@ -445,6 +445,7 @@ const state = {
   secondBrain: null,
   phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed
   pinned: false,
+  panelRoute: '',
   chosen: null, // { detectedId | selectionToken, name, path }
   // Setting one up: the parent the user picked ({ selectionToken, name, path})
   // once there is one, the folder name typed for it, and a refusal to show.
@@ -938,6 +939,14 @@ function renderLook(body) {
     open.title = 'Open this folder as a vault in Obsidian';
     const line = node('p', 'pa-folder__note');
     line.append(open);
+    body.append(line);
+  }
+  // A result waiting under Needs you leads to the HQ's Notes panel.
+  if (state.pinned && state.panelRoute) {
+    const panel = node('a', 'pa-second-brain__open', 'See it all in Notes');
+    panel.href = state.panelRoute;
+    const line = node('p', 'pa-folder__note');
+    line.append(panel);
     body.append(line);
   }
   const actions = [];
@@ -1572,7 +1581,13 @@ function init() {
       }
       announce();
     },
-    current: () => state.secondBrain
+    current: () => state.secondBrain,
+    // Today says where a waiting result's card leads: the HQ's Notes panel.
+    setPanelRoute: route => {
+      if (state.panelRoute === route) return;
+      state.panelRoute = route;
+      if (state.pinned) setPhase(state.phase, { focus: false });
+    }
   };
   if (secondBrainQuestRequested(window.location.search)) startQuestArrival();
 }

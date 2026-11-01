@@ -1160,6 +1160,12 @@ function renderToday(today) {
     els.workingContent?.append(els.setup);
   } else if (els.setup) els.needsQueueCards?.append(els.setup);
   renderCompactRows(els.workingItems, sections.working);
+  // The notes result's row is its card, which carries the row's way into the
+  // Notes panel.
+  const notesResult = sections.needs.find(row => row.kind === 'second_brain_result');
+  window.PersonalAssistantSecondBrain?.setPanelRoute?.(
+    safeTodayRoute(notesResult?.route) ? notesResult.route : ''
+  );
   renderUnfinishedBuild(els, sections.needs);
   renderFirstLookReports(els, today?.needs_you?.items);
   renderCompactRows(

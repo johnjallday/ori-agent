@@ -147,6 +147,7 @@ export default defineConfig([
       'internal/web/static/js/modules/economy-harvest.js',
       'internal/web/static/js/modules/parcel-open.js',
       'internal/web/static/js/modules/operations-map-activity.js',
+      'internal/web/static/js/modules/notes-station.js',
       'internal/web/static/js/modules/quick-task.js',
       'internal/web/static/js/modules/note-ai-assist.js',
       'internal/web/static/js/modules/note-backlinks.js',
