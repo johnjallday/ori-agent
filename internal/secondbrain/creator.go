@@ -22,13 +22,12 @@ const (
 	MaxSeedFollowUps = 200
 	MaxSeedPeople    = 100
 
-	maxSeedFacts     = 100
 	maxSeedLineRunes = 500
 	maxSeedSlugRunes = 80
 
 	// OwnedFoldersSentence opens the root README and the confirmation step, so
 	// the user reads what Ori will write before it writes.
-	OwnedFoldersSentence = "I'll keep Inbox and Daily up to date; everything else is yours."
+	OwnedFoldersSentence = "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
 
 	obsidianAppJSON = "{\n  \"alwaysUpdateLinks\": false,\n  \"promptDelete\": true\n}\n"
 )
@@ -45,11 +44,11 @@ var (
 var createdLayout = []struct{ folder, readme string }{
 	{FolderInbox, "# Inbox\n\nCaptures from chat, your open follow-ups, and anything not sorted yet.\n\nOri writes here: one new note per capture. It never changes a note you edited.\n"},
 	{FolderDaily, "# Daily\n\nOne note per day, from your HQ Journal.\n\nOri writes here: it updates a day's note when you save that Journal again, unless you edited the note.\n"},
-	{"Projects", "# Projects\n\nThings with an end date.\n\nOri does not write here.\n"},
+	{"Projects", "# Projects\n\nThings with an end date.\n\nOri writes here: a README for each of your workspaces, in a folder of its own. It never changes a note you edited.\n"},
 	{"Areas", "# Areas\n\nOngoing responsibilities.\n\nOri does not write here.\n"},
 	{"Resources", "# Resources\n\nReference material.\n\nOri does not write here.\n"},
 	{"Archive", "# Archive\n\nFinished projects and areas.\n\nOri does not write here.\n"},
-	{"People", "# People\n\nOne note per person.\n\nOri added the people it already knew when it set this up, and does not write here again.\n"},
+	{"People", "# People\n\nOne note per person.\n\nOri writes here: a note for each person you tell it about, including the people it already knew when it set this up. It never changes a note you edited.\n"},
 }
 
 // SeedFollowUp is one open follow-up to copy into Inbox.
@@ -68,10 +67,12 @@ type SeedPerson struct {
 	How string
 }
 
-// Seeds is what Ori already holds and copies in, once, at creation (FR8).
+// Seeds is what Ori already holds and copies in, once, at creation (FR8). The
+// facts become the facts note, rendered as the fill-in renders it, so the first
+// sync finds it as it would have written it and says nothing.
 type Seeds struct {
 	FollowUps        []SeedFollowUp
-	Facts            []string
+	Facts            []HeldFact
 	WorkingAgreement string
 	People           []SeedPerson
 }
@@ -84,6 +85,8 @@ type Creation struct {
 	// and the caps.
 	FollowUps int
 	People    int
+	// Facts says the facts note was written.
+	Facts bool
 
 	parent     string
 	name       string
@@ -230,8 +233,15 @@ func (r *creatorRun) populate(seeds Seeds) (Creation, error) {
 			return Creation{}, err
 		}
 	}
-	if err := r.write("README.md", rootReadme(seeds)); err != nil {
+	facts := factsNote(Holdings{Facts: seeds.Facts, WorkingAgreement: seeds.WorkingAgreement})
+	hasFacts := !facts.OnlyIfTracked
+	if err := r.write("README.md", rootReadme(hasFacts)); err != nil {
 		return Creation{}, err
+	}
+	if hasFacts {
+		if err := r.write(FactsNoteRel, RenderNote(NoteKindFacts, facts.Body)); err != nil {
+			return Creation{}, err
+		}
 	}
 	followUps, err := r.seedFollowUps(seeds.FollowUps)
 	if err != nil {
@@ -241,7 +251,7 @@ func (r *creatorRun) populate(seeds Seeds) (Creation, error) {
 	if err != nil {
 		return Creation{}, err
 	}
-	return Creation{FollowUps: followUps, People: people}, nil
+	return Creation{FollowUps: followUps, People: people, Facts: hasFacts}, nil
 }
 
 func (r *creatorRun) seedFollowUps(seeds []SeedFollowUp) (int, error) {
@@ -348,43 +358,22 @@ func (r *creatorRun) rollback() {
 	}
 }
 
-func rootReadme(seeds Seeds) []byte {
+// rootReadme says what Ori keeps in the folder, and links the facts note when
+// there is one rather than carrying the facts itself (FR11).
+func rootReadme(hasFacts bool) []byte {
 	var out strings.Builder
 	out.WriteString(OwnedFoldersSentence + "\n\n")
-	out.WriteString("This is your second brain: plain Markdown files you own. They open in Obsidian or any editor, and stay useful without Ori. Ori only ever writes to `Inbox/` and `Daily/`, and never changes a note you edited there.\n\n")
+	out.WriteString("This is your second brain: plain Markdown files you own. They open in Obsidian or any editor, and stay useful without Ori. Ori only writes to `Inbox/`, `Daily/`, `People/`, one `README.md` in each folder under `Projects/`, and `What Ori knows about you.md`, and never changes a note you edited there.\n\n")
 	out.WriteString("## Folders\n\n")
 	out.WriteString("- `Inbox/`: captures from chat, your open follow-ups, unsorted notes\n")
 	out.WriteString("- `Daily/`: one note per day, from your HQ Journal\n")
-	out.WriteString("- `Projects/`: things with an end date\n")
+	out.WriteString("- `Projects/`: things with an end date, a note for each workspace\n")
 	out.WriteString("- `Areas/`: ongoing responsibilities\n")
 	out.WriteString("- `Resources/`: reference material\n")
 	out.WriteString("- `Archive/`: finished projects and areas\n")
 	out.WriteString("- `People/`: one note per person\n")
-
-	var known []string
-	for _, fact := range seeds.Facts {
-		if len(known) == maxSeedFacts {
-			break
-		}
-		if line := cleanSeedLine(fact); line != "" && !sensitive.ContainsSecretLikeText(line) {
-			known = append(known, "- "+line)
-		}
-	}
-	agreement := cleanSeedLine(seeds.WorkingAgreement)
-	if sensitive.ContainsSecretLikeText(agreement) {
-		agreement = ""
-	}
-	if len(known) > 0 || agreement != "" {
-		out.WriteString("\n## What Ori knows about you\n\n")
-		if len(known) > 0 {
-			out.WriteString(strings.Join(known, "\n") + "\n")
-		}
-		if agreement != "" {
-			if len(known) > 0 {
-				out.WriteString("\n")
-			}
-			out.WriteString("How you work with Ori: " + agreement + "\n")
-		}
+	if hasFacts {
+		out.WriteString("\n## What Ori knows about you\n\nSee [[What Ori knows about you]].\n")
 	}
 	return []byte(out.String())
 }

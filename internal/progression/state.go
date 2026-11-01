@@ -73,6 +73,12 @@ type Snapshot struct {
 	// SecondBrainConnected is true when a notes folder is connected to the
 	// HQ, which grandfathers the second-brain mission.
 	SecondBrainConnected bool
+	// SecondBrainCaptured, SecondBrainJournaled and SecondBrainProject are true
+	// when a second brain Ori set up already holds a capture, a journal or a
+	// project note. They ground the first-week missions in what is on disk.
+	SecondBrainCaptured  bool
+	SecondBrainJournaled bool
+	SecondBrainProject   bool
 	// LegacyFirstDayCompleted is true when the retired Plan my first day quest
 	// was completed before the starter missions replaced it.
 	LegacyFirstDayCompleted bool

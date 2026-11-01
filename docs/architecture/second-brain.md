@@ -22,7 +22,7 @@ no tool over them in the assistant's chat. The look service is the only reader.
 | The drawer turn | `internal/web/static/js/modules/personal-assistant-second-brain.js`, `templates/components/personal-assistant-second-brain.tmpl` |
 | HQ map Notes station | `workspace-command.js` (`notesStation`) |
 | Profile Sources row | `personal-hq-sources.js` (`notesSourceView`) |
-| Fixtures and demo | `internal/testutil/vaultfixture/`, `scripts/second-brain-demo.sh` |
+| Fixtures and demo | `internal/testutil/vaultfixture/`, `scripts/second-brain-demo.sh` (`--create`, `--empty`), `scripts/second-brain-legacy.sh` (an older setup), `scripts/second-brain-age.sh` (a setup made days ago), `scripts/demo-inbox-folder.sh --recurring-names`; `scripts/second-brain-e2e.sh` runs the Playwright specs on their own sandboxes |
 
 ## Detection
 
@@ -170,6 +170,10 @@ write idempotent.
 | `POST /connect` | `{detected_id}` or `{selection_token}`, `request_id`, optional `replace` | status and `look_id` |
 | `POST /create` | `{selection_token, name, request_id}`: the token names the parent, `name` one folder name; `{request_id}` alone uses the default place | status and `look_id`; sets up a second brain (see below) |
 | `POST /capture` | `{text, request_id}` | `capture` `{note, name, link?}`; one new Inbox note, second brain Ori set up only |
+| `POST /fill-in` | `{decision: allow\|later, request_id}` | status; the consent card's answer, second brain Ori set up only (see "Filling in after setup") |
+| `POST /project` | `{name, answer, request_id}`: `name` one folder name (no slash, not hidden), `answer` the user's own words, folded to one line and refused if empty or secret-like | `{project: {name, rel, link?}}`; writes `Projects/<name>/README.md` and records the question as answered ("The first week") |
+| `POST /project/skip` | `{request_id}` | status; records the project question as skipped, once |
+| `POST /week/dismiss` | `{request_id}` | status; records that the first-week recap row was put away |
 | `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}` |
 | `POST /look` | `{request_id}` | Look again (429 within 10 minutes of the last look) |
 | `POST /look/{lookID}/follow-ups` | `{items: "suggested"}` or `{items: [id…]}`, `request_id` | `{created, skipped}` |
@@ -194,15 +198,21 @@ a missing value can never grant a write. A connected vault cannot become
 
 | Folder | Purpose | Ori writes? |
 |---|---|---|
-| `Inbox/` | Captures from chat, seeded follow-ups, unsorted notes | Yes |
+| `Inbox/` | Captures from chat, follow-ups, unsorted notes | Yes: a new note per capture or follow-up, and a tick |
 | `Daily/` | One note per day, from the HQ Journal | Yes |
-| `Projects/` | Things with an end date | No |
+| `Projects/` | Things with an end date | Only `Projects/<name>/README.md`, one per workspace |
 | `Areas/` | Ongoing responsibilities | No |
 | `Resources/` | Reference material | No |
 | `Archive/` | Finished projects and areas | No |
-| `People/` | One note per person | Seeded once, then no |
+| `People/` | One note per person | Yes: `People/<name>.md` |
+| `What Ori knows about you.md` | The approved facts and the working agreement | Yes |
 | `README.md` | How this second brain works with Ori | Written once |
 | `.obsidian/` | Minimal vault config so Obsidian opens it | Written once |
+
+"Yes" always means the third write rule below: a new note, a note still exactly as
+Ori wrote it, or a tick in such a note. The folder READMEs of `Projects/` and
+`People/` are the user's from the moment they are written, and so is every other
+README.
 
 ### Setting one up
 
@@ -220,8 +230,10 @@ With a token it takes the parent from the folder picker (so it passes
 `folderpath.Check`) and the new folder's name. `secondbrain.Creator`
 makes `<parent>/<name>`, which must not exist or must be empty (a lone
 `.DS_Store` counts as empty); it writes the layout above, one README per
-top-level folder, the root README (it opens with "I'll keep Inbox and Daily up
-to date; everything else is yours."), and a minimal `.obsidian/app.json`. A
+top-level folder, the root README (it opens with "I'll keep Inbox, Daily,
+People, a note per project and what I know about you up to date; everything
+else is yours."), the facts note when there is a fact to write, and a minimal
+`.obsidian/app.json`. A
 failure removes exactly what the request made, and a later failure (the folder
 rules on the finished path, the record write) does the same through
 `Creation.Undo`. Setups are serialised and idempotent per `request_id`.
@@ -230,16 +242,24 @@ Seeding copies, once, what Ori already holds, each line through
 `sensitive.ContainsSecretLikeText`: the confirmed, unclosed follow-ups (at most
 200; unconfirmed candidates are left out) become `Inbox/<slug>.md` with a
 `- [ ]` task line, so the extractor reads them back as open items; approved
-facts and the working agreement's summary become the README's "What Ori knows
-about you"; approved People entries (at most 100) become `People/<name>.md`.
+facts (`how_you_work`, `routines`, `sources`) and the working agreement's summary
+become `What Ori knows about you.md`, which the root README links instead of
+carrying them; approved People entries (at most 100) become `People/<name>.md`.
 People entries are one free-text sentence, so the name is the first run of up to
 three capitalised words in it (`PersonFromSentence`); a sentence that names
-nobody seeds nothing. Seeded notes carry `ori: seed`.
+nobody seeds nothing. Seeded follow-ups and people carry `ori: seed`; the facts
+note carries `ori: facts` and is rendered exactly as the fill-in would render it,
+so the first sync adopts it and says nothing.
 
 The first look is rules-only and reports the seed ("Your second brain is set up:
-N follow-ups in Inbox, M people."), or says the folder is ready when nothing was
-seeded. Items in seeded `Inbox/` notes are marked `seeded`: they are never
-suggested and never added as follow-ups, because the user already has them. The
+N follow-ups in Inbox, M people."), or, when nothing was seeded, says it is empty
+because Ori does not know the user yet and offers to be shown a folder. Under
+either headline the card offers Downloads, Music, Documents and Desktop and
+**Choose a folder…**; a chip attaches that folder to the assistant composer
+exactly as the Add folder chooser does, and nothing is read until the user sends.
+Items in seeded `Inbox/` notes, and in `follow_up` notes (below), are marked
+`seeded`: they are never suggested and never added as follow-ups, because the
+user already has them. The
 learned fact reads "You keep your second brain in a folder Ori set up called
 {name}." Only one notes folder is connected at a time, so setting one up while
 one is connected is a conflict, not a replace.
@@ -274,11 +294,93 @@ Three things write to a second brain Ori set up, always through `Writer`:
   reads the notes.
 
 `GET` adds `source.origin` and, for such a folder, `written_by_ori`
-`{count, last_at}`: the notes in Inbox and Daily whose first lines carry Ori's
-marker (edited or not, seeded ones included), found by a bounded listing that
-reads a note's first 160 bytes and keeps no content. The Notes station shows it
-("set up by Ori · 5 written by Ori · last write 3h ago") and its card shows the
-capture box.
+`{count, by_kind, last_at}`: the notes in Inbox, Daily, People, each project's
+README and the facts note whose first lines carry Ori's marker (edited or not,
+seeded ones included), found by a bounded listing that reads a note's first 160
+bytes and keeps no content. The Notes station shows it ("set up by Ori · 5
+written by Ori · last write 3h ago", or "· 2 are yours now" once the user has
+taken notes over) and its card shows the capture box.
+
+### Filling in after setup
+
+Amendment for Issue #759. Setup copies what Ori holds once. After that, whenever
+the user approves a fact or a person, confirms a follow-up, completes one,
+creates a workspace or changes its goal, Ori copies the result into the folder as
+a note it marks as its own. It never edits a note the user wrote or changed.
+
+`secondbrain.Writer` accepts exactly these paths for a `created_by_ori` source
+(`splitOwnedPath` is the one place the rule lives): `Inbox/<name>.md`,
+`Daily/<name>.md`, `People/<name>.md`, `Projects/<name>/README.md` and
+`What Ori knows about you.md`. Anything else is `ErrOutsideOwnedFolders` with no
+filesystem call. The marker's kinds are `journal`, `capture`, `seed`, `facts`,
+`person`, `project` and `follow_up`, defined once and read by every pattern.
+
+| When this happens in HQ | Ori writes | Kind |
+|---|---|---|
+| A fact is approved, edited or forgotten (any route: Profile, Remember, the interview, a reviewed suggestion) | `What Ori knows about you.md`: a heading, a bullet per approved fact in `how_you_work`, `routines` and `sources`, the working agreement | `facts` |
+| A `people` fact is approved | `People/<Name>.md`: the name, the sentence, "How Ori knows this" with the date; one note per person however many sentences name them | `person` |
+| A follow-up is confirmed or added by hand | `Inbox/<slug>.md` with the same `- [ ]` line, date and "From:" line the seeds use; a title already taken at the next name gets a number | `follow_up` |
+| A follow-up is completed | The `- [ ]` line becomes `- [x]`, only in a `follow_up` or `seed` note Ori wrote and the user never edited (`Writer.Tick`) | unchanged |
+| A workspace is created, or its goal changes (`workspace.created`, `workspace.goal_charter_changed`) | `Projects/<Name>/README.md`: the heading, the goal, the anchored folder, the agents, and a link `/?workspace=<id>` | `project` |
+| A Journal is saved | `Daily/<date>.md` (above) | `journal` |
+
+Personal HQ is never a project (the knowledge binding names it, since a
+workspace's own designation is only a projection), nor is a group. A follow-up
+made from a line in the notes (`SourceRef{note_item}`) is never written back, or
+the next look would find it again.
+
+**One entry point.** `SecondBrainService.Sync(ctx, userID, reason)` compares what
+HQ holds with a ledger and writes only what is new or changed, at most 40 notes a
+run; a run that stops at the bound records `more_pending` and the next continues.
+It runs, in the background and never blocking the change that triggered it, after
+each trigger above, when the Notes panel opens and after Look again. Triggers that
+land during a run share one more run. It never runs on a timer, and a second run
+in a row writes nothing. If HQ's holdings cannot be read the sync stops: unknown
+is not empty, so a passing failure cannot mark every note stale.
+
+**The ledger** is `fill_in.mirrors[]` on the source: `[kind, id, rel, hash,
+written_at, state]` with `state` `current`, `stale` or `user_owned`, at most 400
+entries (1 facts note, 100 people, 200 follow-ups, 50 projects, plus headroom).
+Each entry is an array rather than an object, with the source id and the body hash
+shortened to 16 hex characters and the path held to 96 bytes: with named fields
+400 entries do not fit beside a full look in the 512 KiB record, and
+`TestSecondBrainCodec_EveryCapFullFitsTheRecord` proves the compact form does
+(521,734 bytes with every cap full). Before it trusts an entry, a sync checks the
+note on disk:
+
+- A note the user **edited, moved or deleted** is `user_owned`, and Ori stops
+  updating it and never retries. It is counted ("set up by Ori · 14 written by
+  Ori · 2 are yours now"), not repaired.
+- A note already at the name that is a `seed`, or exactly what the sync would
+  write, is **adopted** with no write, so setup's notes are not rewritten or
+  announced.
+- A name taken by the user's own note is theirs (`user_owned`, no write); a
+  follow-up note instead takes the next number.
+- **Forgetting** deletes nothing. A person's note stays and goes `stale`; the
+  facts note drops the line on its next refresh if it is still Ori's. A completed
+  follow-up's note is ticked and its entry goes `stale`; a reopened one is opened
+  again. When 200 follow-up entries are held, a closed one's entry is released for
+  a new one (its note stays on disk).
+
+**Consent.** A setup made after #759 is `allowed` from the start and its setup
+sentence says so. A setup from before has no answer (`fill_in.state: pending`).
+Until it is allowed the sync writes only `Inbox/` and `Daily/`; what it holds back
+is remembered (`withheld`), and only then Needs you shows one card: "I can also
+keep People, a note per project and what I know about you up to date in your
+second brain. Yours are never touched." with **Let Ori write there** and **Not
+now** (offered again after 7 days, as the ask is). `POST …/fill-in {decision:
+allow|later, request_id}` is closed-body, origin-guarded and idempotent; allowing
+starts a sync. An existing setup's own READMEs are never rewritten, since Ori
+cannot prove they are unedited; the answer is the record of the change.
+
+**What the user sees.** `GET` adds `fill_in {state, offer, project_ask, written,
+user_owned, stale, last_at}` and `written_by_ori.by_kind`, and counts every place Ori keeps
+notes. A sync that wrote something adds one Today Done row, "Ori added 2 people
+and a project to your notes", collapsing every write since it was last seen,
+linking to the Notes station and leaving after a day. A tick, or a refresh of a
+person note that already existed, does not make a row. Three Tier 2 missions complete from what Ori
+wrote, observed on the server: **Capture your first note**, **Save your first
+Journal** and **Give Ori a project**.
 
 ### A project note becomes a workspace, on request
 
@@ -304,13 +406,85 @@ own state in the sidecar, and nothing written into the notes. Agents there have
 no access to the rest of the notes. `TestCreateAnchoredWorkspace_AProjectOfASecondBrainIsAnOrdinaryAnchoredWorkspace`
 proves it against a real set-up folder.
 
+### The first week
+
+Amendment for Issue #759. The fill-in is the engine; the first week is four short
+beats that feed it, each optional and each ending in a note the user can open.
+The assistant drawer shows one second-brain card at a time: the consent card (for
+a setup from before), then the project question.
+
+1. **A folder to learn from.** A setup that seeded nothing says so, once ("Your
+   second brain is empty because I don't know you yet. Show me a folder and I'll
+   start filling it.") and offers the folders the server's own `/choices` list
+   names, so a folder this machine does not have is never offered. The offer
+   stays until a first look succeeds, through a reload or a failed attempt. Three
+   Tier 2 missions follow from what Ori writes (**Capture your first note**,
+   **Save your first Journal**, **Give Ori a project**); they are optional, locked
+   behind **Connect your second brain**, and skipped, never failed, for a user who
+   declined the ask or connected a vault Ori does not write to.
+2. **Downloads teaches Ori.** After the user approves files for filing, the
+   `approved_files` producer reads the File Janitor action journal's file *names*
+   (the base name without its extension, for moves that are approved, applied and
+   not undone, through the same gate as the filing-preference suggestions). A
+   company or person whose name recurs in at least two of those names becomes one
+   reviewable learning: "You deal with Acme (seen in 2 files you filed)." A name is
+   a run of capitalised words joined by exactly one space, underscore or hyphen;
+   digits never reach a learning, every line passes
+   `sensitive.ContainsSecretLikeText`, and no file is opened. Learnings live in
+   the `setup_batch` pool of reviewed knowledge (12 pending, no daily limit), so
+   they neither use up nor wait behind the shared suggestions' 6 pending and 3 a
+   day. Their evidence is `<workspaceId>:<actionId>`, the count follows the
+   journal as more files are filed, and a rejected one is not proposed again. The
+   first-batch report gains "I learned N things from this folder; approve them
+   and they go into your second brain." with **Review what Ori learned**, which
+   opens a card listing these and the Janitor's filing preferences
+   (`GET /api/personal-assistant/setup-learning`; `POST …/setup-learning/dismiss
+   {request_id}` turns the rest away for good). Approving or rejecting is the
+   Profile page's own `POST /api/personal-assistant/knowledge/{id}/approve|reject
+   {version, request_id}`: nothing is a fact until the user says so. An approved
+   person then reaches the notes the ordinary way, as `People/<Name>.md`, through
+   the sync.
+3. **The current project.** Once the card slot is free (nothing else is waiting
+   for an answer) in a second brain Ori set up and may write project notes, with no
+   project under `Projects/` yet and the question neither answered nor skipped,
+   the drawer asks "What's the main thing you're working on right now?" (the
+   interview's `priority` question, at most 500 characters), offering a suggestion
+   from the folder Ori was shown (`GET /api/personal-assistant/knowledge/interview`'s
+   `suggestion {text, folder}`) as one button, and a typed answer otherwise. The answer is saved as
+   an explicit fact (`POST /api/personal-assistant/knowledge/explicit`, not the
+   interview's `save`, which would complete the Profile interview) and then
+   written by `POST …/project` to `Projects/<name>/README.md`: the name as the
+   heading, the user's words as the first paragraph, and "How Ori knows this". The
+   name is the suggestion's folder name, or one Ori proposes from the answer and
+   the user confirms; a name that is not one plain folder name is refused before
+   anything is written. **Make it a workspace** opens the ordinary Create Workspace
+   flow with the name filled in (`/?create=1&second_brain_project=<name>`), creates
+   nothing until the user presses Create, and the workspace's README then replaces
+   this one in place, a single file under `Projects/`. **Skip** is recorded once
+   (`fill_in.project_ask: skipped`); the question never returns to the drawer and
+   stays on the Profile page. Answering writes only where the setup allows project
+   notes, and never over a README the user already has.
+4. **The week.** Seven local days after `connected_at`, Today's Done section shows
+   one row, kind `second_brain_week`: "This week your second brain gained 4 facts,
+   2 people, 1 project and 5 captures.", linking to the Notes station, with
+   **Dismiss**. The counts are the ledger's notes by kind (people, projects,
+   follow-ups), the written-by-Ori listing's captures and journal entries, and the
+   facts the facts note lists once Ori has written it; no note is opened. A quiet
+   week says so plainly. The row is shown once: it appears in the seven days after
+   it is due (a setup older than two weeks never gets a recap of its "first week"),
+   stays for seven days after it was first shown, and is gone for good once
+   dismissed (`fill_in.week_shown_at`, `fill_in.week_dismissed_at`,
+   `POST …/week/dismiss {request_id}`). If the fact count cannot be read the row
+   waits for the next load instead of showing a wrong number. It is only for a
+   second brain Ori set up.
+
 ### The note marker
 
-Every note Ori writes to `Inbox/` or `Daily/` opens with exactly this frontmatter:
+Every note Ori writes opens with exactly this frontmatter:
 
 ```yaml
 ---
-ori: journal   # or capture, seed
+ori: journal   # or capture, seed, facts, person, project, follow_up
 ori_hash: <sha256 of everything after the closing fence>
 ---
 ```
@@ -321,23 +495,31 @@ the whole frontmatter and the hash matches the body. Anything else is
 Obsidian tag, say). Whatever Ori cannot prove it wrote counts as the user's.
 "Written by Ori" counts every note still carrying the marker, edited or not.
 
-### The two write rules
+### The write rules
 
 `secondbrain.Writer` is the only way anything reaches the folder after creation.
 
-1. **Only a `created_by_ori` source, and only directly in `Inbox/` or `Daily/`.**
-   A path must be `<Inbox|Daily>/<visible name>.md`. Any other source is
-   `ErrNotOwned`; any other path is `ErrOutsideOwnedFolders`, with no filesystem
-   call made.
+1. **Only a `created_by_ori` source, and only the five paths in "Filling in after
+   setup".** A path must be `<Inbox|Daily|People>/<visible name>.md`,
+   `Projects/<valid folder name>/README.md` or `What Ori knows about you.md`; a
+   folder's own `README.md` is never one. Any other source is `ErrNotOwned`; any
+   other path is `ErrOutsideOwnedFolders`, with no filesystem call made.
 2. **Only a new note, or one still exactly as Ori wrote it.** Anything else is
    `ErrUserModified` and the file is left alone. A symbolic link is never
-   followed or replaced, including an `Inbox` or `Daily` that is itself a link
-   (`os.Root` alone would allow one that stays inside the folder). An evicted
-   iCloud placeholder counts as the user's, because opening it would start a
-   download.
+   followed or replaced, including an owned folder, or a level of
+   `Projects/<name>`, that is itself a link (`os.Root` alone would allow one that
+   stays inside the folder). An evicted iCloud placeholder counts as the user's,
+   because opening it would start a download.
+3. **A tick is a replacement.** The one change to an existing note that is not a
+   whole new version is one `- [ ]` line made `- [x]`, in a `follow_up` or `seed`
+   note that passes rule 2. It goes through the same replace path, so the marker's
+   hash is rewritten and the note stays Ori's; an edited note gets no write.
+
+`Writer.Inspect` reads what is at a path without changing anything, recreating no
+folder; the sync uses it to adopt a note and to see that one became the user's.
 
 Writes pin the folder and the subfolder as `os.Root` handles, recreate a deleted
-`Inbox/` or `Daily/`, and go through a temp file with fsync, mode 0644. A new
+owned folder, and go through a temp file with fsync, mode 0644. A new
 note is hard-linked into place so it cannot clobber one saved a moment earlier;
 a filesystem without hard links re-checks and renames. A replacement re-checks
 just before the rename, which leaves only a very small window on a re-saved
@@ -414,6 +596,10 @@ Never, for any source:
 - Giving the assistant's chat a tool that reads the notes.
 - Writing on a timer, running a look on a timer, or opening Obsidian itself
   (links are only links; `ORI_NO_DESKTOP_OPEN` stays honoured).
+- Writing to a note the user wrote or changed, on any trigger: People, project
+  READMEs, the facts note and ticks are all under the same rule as Inbox and
+  Daily. Moving, renaming or deleting any note, Ori's own included.
+- Reading the notes into chat, an agent, memory or the Daily Brief.
 
 Never, for a connected source:
 

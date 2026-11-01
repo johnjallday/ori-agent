@@ -419,6 +419,76 @@ test('a Check protection that cannot open says so on the card and re-enables it'
   assert.equal(done, 0);
 });
 
+test('a batch report that learned something offers Review what Ori learned, as navigation that posts nothing', async () => {
+  const learned =
+    'I learned 2 things from this folder; approve them and they go into your second brain.';
+  const item = batchReport({
+    detail: learned,
+    actions: ['review_batch', 'review_learned', 'not_now']
+  });
+  const view = firstLookReportView(item, now);
+  assert.equal(view.summary, learned);
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label, action.primary, Boolean(action.href)]),
+    [
+      ['review_batch', 'Review batch', true, true],
+      ['review_learned', 'Review what Ori learned', false, false],
+      ['not_now', 'Not now', false, false]
+    ]
+  );
+  // Nothing learned, or a scan that failed: no such action, even if offered.
+  assert.equal(
+    firstLookReportView(batchReport(), now).actions.some(a => a.id === 'review_learned'),
+    false
+  );
+  const failed = firstLookReportView(
+    batchReport({ state: 'failed', actions: ['retry', 'review_learned'] }),
+    now
+  );
+  assert.equal(
+    failed.actions.some(a => a.id === 'review_learned'),
+    false
+  );
+
+  const doc = stubDocument();
+  const host = doc.createElement('div');
+  let opened = 0;
+  let done = 0;
+  globalThis.window = { PersonalAssistantSecondBrain: { openLearned: async () => void opened++ } };
+  const posted = [];
+  try {
+    mountFirstLookReports(host, [item], {
+      doc,
+      now,
+      fetchImpl: async (...args) => {
+        posted.push(args);
+        return { ok: true, json: async () => ({}) };
+      },
+      onDone: () => done++
+    });
+    const card = host.children[0];
+    const review = card
+      .querySelectorAll('button')
+      .find(b => b.dataset.firstLookAction === 'review_learned');
+    await review.listeners.click();
+    assert.equal(opened, 1);
+    assert.equal(posted.length, 0, 'opening the card posts nothing');
+    assert.equal(done, 0, 'and does not reload Today');
+    assert.equal(review.disabled, false);
+    assert.equal(card.querySelector('.first-look-report__error'), null);
+
+    // Without the drawer's card the report says so rather than doing nothing.
+    globalThis.window = {};
+    await review.listeners.click();
+    assert.equal(
+      card.querySelector('.first-look-report__error').textContent,
+      'What Ori learned is not available here.'
+    );
+  } finally {
+    delete globalThis.window;
+  }
+});
+
 test('Home reads Today before Personal HQ exists, so a hire reports there without a second Build link', () => {
   const home = read('personal-assistant-home.js');
   assert.match(

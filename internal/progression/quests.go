@@ -54,7 +54,20 @@ const (
 	// between Build My HQ and Show your assistant a folder. It completes when
 	// a notes folder is connected to the HQ, observed on the server.
 	SecondBrainQuestID = "pa-second-brain"
+	// CaptureFirstNoteQuestID, SaveFirstJournalQuestID and GiveProjectQuestID are
+	// the second brain's first-week missions, in the Daily loop. Each completes
+	// from what Ori wrote into a second brain it set up, observed on the server,
+	// never from a browser claim: a capture note, a journal note, a project note.
+	CaptureFirstNoteQuestID = "pa-capture-first-note"
+	SaveFirstJournalQuestID = "pa-save-first-journal"
+	GiveProjectQuestID      = "pa-give-project"
 )
+
+// SecondBrainFirstWeekQuestIDs are the first-week missions, for the code that
+// completes, reconciles or skips them together.
+func SecondBrainFirstWeekQuestIDs() []string {
+	return []string{CaptureFirstNoteQuestID, SaveFirstJournalQuestID, GiveProjectQuestID}
+}
 
 // SecondBrainActionURL opens Home with the assistant's second-brain chooser.
 const SecondBrainActionURL = "/?quest=second-brain"
@@ -457,6 +470,40 @@ func PersonalAssistantGraph() Graph {
 			// the startup rule: an install that already has a brief is done.
 			Satisfied: func(s Snapshot) bool { return s.HasBriefRevision },
 			Resolve:   resolveFirstBrief,
+		},
+		{
+			// The second brain's first week. All three are optional and wait for the
+			// notes folder; one that cannot be reached (a declined ask, or a vault
+			// the user connected, which Ori never writes to) is skipped by the
+			// server, so it never keeps the tier open.
+			ID: CaptureFirstNoteQuestID, Tier: 2, Featured: true, Order: 7, Optional: true,
+			LockedUntil:  SecondBrainQuestID,
+			LockedReason: "Connect your second brain first",
+			Title:        "Capture your first note",
+			Why:          "Tell your assistant something to remember and it lands in your Inbox, a note you can open in Obsidian.",
+			ActionURL:    SecondBrainActionURL,
+			ActionLabel:  "Capture a note",
+			Satisfied:    func(s Snapshot) bool { return s.SecondBrainCaptured },
+		},
+		{
+			ID: SaveFirstJournalQuestID, Tier: 2, Featured: true, Order: 8, Optional: true,
+			LockedUntil:  SecondBrainQuestID,
+			LockedReason: "Connect your second brain first",
+			Title:        "Save your first Journal",
+			Why:          "A saved Journal is copied to today's note in your second brain.",
+			ActionURL:    FirstBriefFallbackURL,
+			ActionLabel:  "Open Today",
+			Satisfied:    func(s Snapshot) bool { return s.SecondBrainJournaled },
+		},
+		{
+			ID: GiveProjectQuestID, Tier: 2, Featured: true, Order: 9, Optional: true,
+			LockedUntil:  SecondBrainQuestID,
+			LockedReason: "Connect your second brain first",
+			Title:        "Give Ori a project",
+			Why:          "A workspace, or the project you tell Ori about, becomes a note in Projects that you can turn into a workspace.",
+			ActionURL:    SecondBrainActionURL,
+			ActionLabel:  "Open my notes",
+			Satisfied:    func(s Snapshot) bool { return s.SecondBrainProject },
 		},
 		// Retired objectives sit on tier 3 or later, so they never affect which
 		// of the two visible tiers is current.

@@ -13,8 +13,11 @@ import {
   folderDialogOffNote,
   FOLDER_PATH_ENDPOINT
 } from './folder-path-entry.js';
+import { folderChooserView } from './personal-assistant-folder-chooser.js';
 
 export const SECOND_BRAIN_ENDPOINT = '/api/personal-assistant/second-brain';
+// The usual folders the Add folder sheet offers, and so the offer under a first look.
+const FOLDER_CHOICES_ENDPOINT = '/api/home-assistant/folder-context/choices';
 const SYSTEM_MODEL_ENDPOINT = '/api/settings/system-model';
 const LOOK_POLL_MS = 1000;
 // A look reads within five seconds and its headline model has 45 more; the
@@ -63,6 +66,163 @@ export function secondBrainAskView(secondBrain, available) {
   };
 }
 
+// What the consent card says to a second brain Ori set up before it kept People,
+// projects and the facts note up to date (FR10). It belongs under Needs you only
+// while there is something to write that the answer would let through.
+export const FILL_IN_LINE =
+  'I can also keep People, a note per project and what I know about you up to date in your second brain. Yours are never touched.';
+
+export function secondBrainFillInView(secondBrain) {
+  const show =
+    secondBrain?.status === 'connected' &&
+    secondBrain?.source?.origin === 'created_by_ori' &&
+    secondBrain?.fill_in?.offer === true;
+  return {
+    show,
+    line: FILL_IN_LINE,
+    actions: [
+      { id: 'allow', label: 'Let Ori write there', style: 'primary' },
+      { id: 'later', label: 'Not now', style: 'link' }
+    ]
+  };
+}
+
+// secondBrainFillInAnsweredLine is the one line the card leaves behind.
+export function secondBrainFillInAnsweredLine(decision) {
+  return decision === 'allow'
+    ? "Done. I'll keep People, a note per project and what I know about you up to date."
+    : "OK. I'll leave those alone for now.";
+}
+
+// The first look at a new second brain offers the first thing to show Ori
+// (FR13, FR14). The server's headline carries the sentence when the brain is
+// empty; under a headline that counts seeded notes the offer says it itself.
+export const FOLDER_OFFER_LINE = "Show me a folder and I'll start filling it.";
+// The usual folders, Downloads first. Which of them the offer shows is the
+// server's list (the one the Add folder sheet uses), so it never offers a folder
+// that is not there; this order only sorts it.
+export const FOLDER_OFFER_ORDER = ['downloads', 'music', 'documents', 'desktop'];
+
+// secondBrainFolderOffer builds the offer from the folders the server approved.
+// available is that list ({id, label}); null means it is not known yet, and then
+// only Choose a folder… is offered rather than a folder that may not exist.
+export function secondBrainFolderOffer(headline, available = null) {
+  const rank = id => {
+    const at = FOLDER_OFFER_ORDER.indexOf(id);
+    return at < 0 ? FOLDER_OFFER_ORDER.length : at;
+  };
+  const chips = (Array.isArray(available) ? available : [])
+    .filter(chip => chip && typeof chip.id === 'string' && chip.id)
+    .map(chip => ({ id: chip.id, label: String(chip.label || chip.id) }))
+    .sort((a, b) => rank(a.id) - rank(b.id));
+  return {
+    line: String(headline || '').includes(FOLDER_OFFER_LINE) ? '' : FOLDER_OFFER_LINE,
+    chips,
+    choose: { id: 'choose', label: 'Choose a folder…' }
+  };
+}
+
+// secondBrainFolderOfferShows: the offer follows the first look of a second brain
+// Ori just set up, and also any result whose own headline asks to be shown a
+// folder, so a reload does not take it away. Choosing a folder ends it.
+export function secondBrainFolderOfferShows({ justSetUp, headline, dismissed } = {}) {
+  if (dismissed === true) return false;
+  return justSetUp === true || String(headline || '').includes(FOLDER_OFFER_LINE);
+}
+
+// The drawer's one project question (first-week FR20 to FR23): the interview's
+// first question, asked once, with the folder suggestion when there is one. The
+// answer is saved as the reviewed fact the user typed, word for word, and becomes
+// a project note they can turn into a workspace. The Profile page's interview is
+// a separate surface and is not touched.
+export const PROJECT_QUESTION_ID = 'priority';
+export const PROJECT_ANSWER_MAX = 500;
+const INTERVIEW_ENDPOINT = '/api/personal-assistant/knowledge/interview';
+const EXPLICIT_ENDPOINT = '/api/personal-assistant/knowledge/explicit';
+const KNOWLEDGE_ENDPOINT = '/api/personal-assistant/knowledge';
+
+// secondBrainProjectAskView: the question belongs to a second brain Ori set up
+// whose owner has let it keep project notes, that has no project yet, and where
+// the question has not been answered or skipped.
+export function secondBrainProjectAskView(secondBrain) {
+  const fillIn = secondBrain?.fill_in;
+  const projects = Array.isArray(secondBrain?.projects) ? secondBrain.projects : [];
+  const show =
+    secondBrain?.status === 'connected' &&
+    secondBrain?.source?.origin === 'created_by_ori' &&
+    fillIn?.state === 'allowed' &&
+    !fillIn?.project_ask &&
+    projects.length === 0;
+  return { show };
+}
+
+const NAME_FILLER = new Set(
+  (
+    'the my our a an on at for of to with working work im i am just currently mainly main thing ' +
+    'is are finishing building writing planning launching preparing starting making doing'
+  ).split(' ')
+);
+
+// projectNameFromAnswer proposes a short name for the project an answer describes:
+// the first clause with its leading filler words dropped, at most three words.
+// It is only a proposal; the user confirms or changes it ("I'll call it Launch.
+// OK?"), and the server checks it again.
+export function projectNameFromAnswer(answer) {
+  const clause = String(answer || '')
+    .split(/[,.;:!?\n—–]|\s-\s/)[0]
+    .replace(/[^\p{L}\p{N}' -]/gu, ' ');
+  const words = clause.split(/\s+/).filter(Boolean);
+  while (words.length && NAME_FILLER.has(words[0].toLowerCase().replace(/'/g, ''))) words.shift();
+  const name = words
+    .slice(0, 3)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+    .trim();
+  return name && !secondBrainFolderNameProblem(name) ? name : 'Project';
+}
+
+// What a folder taught Ori, answered on one card (first-week FR16 to FR19). The
+// items are the review queue's candidates from the user's approved filing; each
+// is approved or turned away with the Profile page's own actions, so the wording
+// the user approves is the wording shown here, word for word.
+export const SETUP_LEARNING_ENDPOINT = '/api/personal-assistant/setup-learning';
+export const SETUP_LEARNING_HEADING =
+  'Here is what I learned from your folder. Approve what is right and it goes into your second brain.';
+
+export function setupLearningView(payload) {
+  const raw = Array.isArray(payload?.learning?.items) ? payload.learning.items : [];
+  const items = raw
+    .filter(item => item && typeof item.id === 'string' && item.id && Number(item.version) >= 1)
+    .map(item => ({
+      id: item.id,
+      version: Number(item.version),
+      text: String(item.text || '').trim(),
+      evidence: (Array.isArray(item.evidence) ? item.evidence : [])
+        .map(line => String(line || '').trim())
+        .filter(Boolean)
+        .slice(0, 3),
+      source: item.source === 'filing' ? 'filing' : 'files'
+    }))
+    .filter(item => item.text);
+  return {
+    items,
+    total: items.length,
+    heading: items.length
+      ? SETUP_LEARNING_HEADING
+      : 'Nothing from this folder is waiting for an answer right now.'
+  };
+}
+
+// setupLearningClosing is the card's last line: how many notes were written, and
+// where to see them. Every number is the folder's own count, never a promise.
+export function setupLearningClosing(written) {
+  const count = Math.max(0, Number(written) || 0);
+  if (count === 0) return 'Nothing new was written to your notes.';
+  return count === 1
+    ? '1 note was written in your second brain.'
+    : `${count} notes were written in your second brain.`;
+}
+
 export const DEFAULT_SECOND_BRAIN_NAME = 'Second Brain';
 
 // secondBrainFolderNameProblem is the one sentence for a name that is not one
@@ -87,7 +247,7 @@ export function secondBrainFolderNameProblem(name) {
 
 // What Ori says it will write, before it writes anything.
 const SECOND_BRAIN_SETUP_LINES = [
-  "I'll keep Inbox and Daily up to date; everything else is yours.",
+  "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours.",
   'It starts with your open follow-ups and the people I already know. Plain Markdown that opens in Obsidian or any editor, and stays yours if you stop using Ori.'
 ];
 
@@ -355,7 +515,7 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
   };
 }
 
-// secondBrainWrittenLine says what Ori has put in Inbox and Daily (FR16).
+// secondBrainWrittenLine says what Ori has put in the notes it keeps (FR16).
 export function secondBrainWrittenLine(written, now = Date.now()) {
   const count = Number(written?.count) || 0;
   if (count === 0) return 'Ori has not written to your notes yet.';
@@ -443,8 +603,34 @@ export function newRequestID(prefix = 'sb') {
 const state = {
   available: false,
   secondBrain: null,
-  phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed
+  phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed | fillin | learned
   pinned: false,
+  // The folder offer under the first look of a second brain Ori just set up;
+  // offerDismissed ends it once a folder is attached. folderChips are the usual
+  // folders the server approved, null until it has answered.
+  offerFolder: false,
+  offerDismissed: false,
+  folderChips: null,
+  folderChipsLoading: false,
+  // The card of what a folder taught Ori: its items, what the user answered
+  // (id → 'approve' | 'reject'), one retry key per answer, the notes counted when
+  // it opened, and its closing line once everything is answered.
+  learned: { status: 'idle', items: [], answered: {}, keys: {}, baseline: 0, closing: '' },
+  // The project question: where it stands (loading | ask | name | done | error),
+  // the interview's wording and state version, the folder suggestion, the answer
+  // and name being typed, one retry key per write, and the note it wrote.
+  project: {
+    status: 'idle',
+    prompt: '',
+    hint: '',
+    stateVersion: 0,
+    suggestion: null,
+    answer: '',
+    name: '',
+    keys: {},
+    note: null,
+    message: ''
+  },
   panelRoute: '',
   chosen: null, // { detectedId | selectionToken, name, path }
   // Setting one up: the parent the user picked ({ selectionToken, name, path})
@@ -553,6 +739,7 @@ function back() {
 
 function setPhase(phase, { focus = true } = {}) {
   if (phase === 'idle' || phase === 'reading') state.history = [];
+  if (phase === 'idle') state.offerFolder = false;
   state.phase = phase;
   state.focusNext = focus;
   render();
@@ -562,6 +749,644 @@ function renderAsk(body) {
   const view = secondBrainAskView(state.secondBrain, true);
   body.append(node('p', 'pa-specialist-offer__headline', view.line));
   body.append(actionRow(view.actions, onAskAction));
+}
+
+function renderFillIn(body) {
+  const view = secondBrainFillInView(state.secondBrain);
+  body.append(node('p', 'pa-specialist-offer__headline', view.line));
+  body.append(actionRow(view.actions, action => void answerFillIn(action.id)));
+}
+
+// answerFillIn sends the answer, then leaves one line behind. Allowing writes
+// what was held back before the user leaves the card.
+async function answerFillIn(decision) {
+  if (state.busy) return;
+  state.busy = true;
+  showError('');
+  render();
+  const { ok, payload } = await request('/fill-in', {
+    method: 'POST',
+    body: { decision, request_id: newRequestID('fillin') }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload));
+    render();
+    return;
+  }
+  state.secondBrain = payload.second_brain || state.secondBrain;
+  state.answer = secondBrainFillInAnsweredLine(decision);
+  state.pinned = false;
+  setPhase('answered', { focus: false });
+  announce();
+}
+
+// renderFolderOffer is the first thing to show Ori: the usual folders that exist
+// and Choose a folder…, both starting the Show a folder turn in this conversation.
+function renderFolderOffer(body, headline) {
+  const offer = secondBrainFolderOffer(headline, state.folderChips);
+  if (offer.line) body.append(node('p', 'pa-folder__note', offer.line));
+  const row = node('div', 'pa-specialist-offer__actions');
+  row.dataset.secondBrainFolderOffer = '';
+  offer.chips.forEach(chip =>
+    row.append(
+      button({ ...chip, label: chip.label, style: 'outline' }, () => void showFolder(chip.id))
+    )
+  );
+  row.append(button({ ...offer.choose, style: 'link' }, () => void showFolder('')));
+  body.append(row);
+  if (state.folderChips === null) void loadFolderChips();
+}
+
+// loadFolderChips asks the server which usual folders exist, the way the Add
+// folder sheet does. Until it answers only Choose a folder… is shown. A failure
+// leaves that, which still works.
+async function loadFolderChips() {
+  if (state.folderChips !== null || state.folderChipsLoading) return;
+  state.folderChipsLoading = true;
+  try {
+    const response = await fetch(FOLDER_CHOICES_ENDPOINT, {
+      headers: { Accept: 'application/json' }
+    });
+    const payload = response.ok ? await response.json() : {};
+    state.folderChips = folderChooserView(payload).chips;
+  } catch (_) {
+    state.folderChips = [];
+  } finally {
+    state.folderChipsLoading = false;
+  }
+  render();
+}
+
+// showFolder hands the folder to the Show a folder flow, which holds it for the
+// next message exactly as Add folder does. Nothing is read until the user sends.
+// The offer stays until a folder is actually attached, so a chip that could not
+// be chosen leaves the others to try.
+async function showFolder(chip) {
+  const context = window.PersonalAssistantFolderContext;
+  if (chip && typeof context?.selectChip === 'function') {
+    if ((await context.selectChip(chip)) === true) {
+      state.offerDismissed = true;
+      render();
+    }
+    return;
+  }
+  // Choose a folder… opens the Add folder chooser, where the choice is made.
+  state.offerDismissed = true;
+  render();
+  window.PersonalAssistantFolder?.openChooser?.();
+}
+
+// openLearned opens the card of what the user's approved filing taught Ori. It is
+// what the first-batch report's Review what Ori learned does: it opens the
+// drawer, reads the queue, and counts the notes already there so the closing line
+// can say how many this card wrote.
+async function openLearned() {
+  try {
+    const panel = window.PersonalAssistantPanel;
+    panel?.open?.(document.getElementById('personalAssistantLauncher'), { focus: false });
+  } catch (_) {
+    // The card still draws if the drawer was already open.
+  }
+  if (!state.secondBrain) await load();
+  state.pinned = false;
+  state.latest = true;
+  state.history = [];
+  state.learned = {
+    status: 'loading',
+    items: [],
+    answered: {},
+    keys: {},
+    baseline: 0,
+    closing: ''
+  };
+  setPhase('learned', { focus: false });
+  const [{ ok, payload }, status] = await Promise.all([
+    fetch(SETUP_LEARNING_ENDPOINT, { headers: { Accept: 'application/json' } })
+      .then(async response => ({
+        ok: response.ok,
+        payload: await response.json().catch(() => ({}))
+      }))
+      .catch(() => ({ ok: false, payload: {} })),
+    refresh()
+  ]);
+  state.learned.baseline = Number(status?.written_by_ori?.count) || 0;
+  if (!ok) {
+    state.learned.status = 'error';
+  } else {
+    state.learned.items = setupLearningView(payload).items;
+    state.learned.status = 'ready';
+  }
+  render();
+}
+
+function learnedRemaining() {
+  return state.learned.items.filter(item => !state.learned.answered[item.id]);
+}
+
+// answerLearning approves or turns away one learning with the Profile page's own
+// action. The retry key is made once per learning and answer, so pressing again
+// after a failure repeats the same request instead of starting another.
+async function answerLearning(item, action) {
+  if (state.busy || state.learned.answered[item.id]) return;
+  state.busy = true;
+  showError('');
+  render();
+  const keyName = `${item.id}:${action}`;
+  if (!state.learned.keys[keyName]) state.learned.keys[keyName] = newRequestID('learn');
+  const { ok, payload } = await fetch(
+    `/api/personal-assistant/knowledge/${encodeURIComponent(item.id)}/${action}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ version: item.version, request_id: state.learned.keys[keyName] })
+    }
+  )
+    .then(async response => ({ ok: response.ok, payload: await response.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload, 'That did not save. Try again.'));
+    render();
+    return;
+  }
+  state.learned.answered[item.id] = action;
+  tellKnowledgeChanged();
+  if (learnedRemaining().length === 0) {
+    await settleLearned();
+    return;
+  }
+  render();
+}
+
+// settleLearned waits for the sync that each approval started, so the closing line
+// counts notes that are on disk, then says how many were written. The sync is a
+// background run, so it polls briefly and then reports what it found.
+async function settleLearned() {
+  state.busy = true;
+  render();
+  const wanted = state.learned.items.filter(
+    item => state.learned.answered[item.id] === 'approve' && item.source === 'files'
+  ).length;
+  let written = 0;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const status = await refresh();
+    written = Math.max(0, (Number(status?.written_by_ori?.count) || 0) - state.learned.baseline);
+    if (written >= wanted) break;
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  state.busy = false;
+  state.learned.closing = setupLearningClosing(written);
+  render();
+  announce();
+}
+
+// dismissLearned turns away what is left so it does not stay in the queue.
+async function dismissLearned() {
+  if (state.busy) return;
+  state.busy = true;
+  showError('');
+  render();
+  const { ok, payload } = await fetch(`${SETUP_LEARNING_ENDPOINT}/dismiss`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ request_id: newRequestID('learn-dismiss') })
+  })
+    .then(async response => ({ ok: response.ok, payload: await response.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload));
+    render();
+    return;
+  }
+  tellKnowledgeChanged();
+  state.pinned = false;
+  setPhase('idle', { focus: false });
+  await showNextCard();
+}
+
+// tellKnowledgeChanged lets Home read Today again, so the first-batch report stops
+// saying it learned what has just been answered.
+function tellKnowledgeChanged() {
+  try {
+    document.dispatchEvent(new CustomEvent('personal-assistant-knowledge-changed'));
+  } catch (_) {
+    // Today reloads on its own the next time it is opened.
+  }
+}
+
+function renderLearned(body) {
+  const learned = state.learned;
+  if (learned.status === 'loading') {
+    const line = node('p', 'pa-specialist-offer__headline', 'Reading what I learned…');
+    line.setAttribute('role', 'status');
+    body.append(line);
+    return;
+  }
+  if (learned.status === 'error') {
+    body.append(
+      node('p', 'pa-specialist-offer__headline', 'I could not read what I learned. Try again.')
+    );
+    body.append(
+      actionRow([{ id: 'retry', label: 'Try again', style: 'primary' }], () => void openLearned())
+    );
+    return;
+  }
+  const view = setupLearningView({ learning: { items: learned.items } });
+  body.append(node('p', 'pa-specialist-offer__headline', view.heading));
+  const list = node('ul', 'pa-second-brain__learned');
+  view.items.forEach(item => {
+    const row = node('li', 'pa-second-brain__learned-item');
+    row.dataset.learnedItem = item.id;
+    row.append(node('p', 'pa-second-brain__learned-text', item.text));
+    item.evidence.forEach(line => row.append(node('p', 'pa-folder__note', line)));
+    const answered = learned.answered[item.id];
+    if (answered) {
+      row.append(
+        node('p', 'pa-folder__note', answered === 'approve' ? 'Approved' : 'Not this one')
+      );
+    } else {
+      row.append(
+        actionRow(
+          [
+            { id: 'approve', label: 'Approve', style: 'primary' },
+            { id: 'reject', label: 'Not this', style: 'link' }
+          ],
+          action => void answerLearning(item, action.id)
+        )
+      );
+    }
+    list.append(row);
+  });
+  if (view.items.length) body.append(list);
+  if (learned.closing) {
+    body.append(node('p', 'pa-folder__first-look', learned.closing));
+    const links = node('p', 'pa-folder__note');
+    if (state.panelRoute) {
+      const notes = node('a', 'pa-second-brain__open', 'See them in Notes');
+      notes.href = state.panelRoute;
+      links.append(notes);
+    }
+    const open = secondBrainOpenLink(state.secondBrain);
+    if (open) {
+      const obsidian = node('a', 'pa-second-brain__open', 'Open in Obsidian');
+      obsidian.href = open;
+      if (links.childNodes.length) links.append(' · ');
+      links.append(obsidian);
+    }
+    if (links.childNodes.length) body.append(links);
+    body.append(
+      actionRow([{ id: 'done', label: 'Done', style: 'outline' }], () => {
+        state.pinned = false;
+        setPhase('idle', { focus: false });
+        void showNextCard();
+      })
+    );
+    return;
+  }
+  const actions = [];
+  if (!view.items.length) actions.push({ id: 'done', label: 'Done', style: 'outline' });
+  else actions.push({ id: 'later', label: 'Not now', style: 'link' });
+  body.append(
+    actionRow(actions, action => {
+      if (action.id === 'later') void dismissLearned();
+      else setPhase('idle', { focus: false });
+    })
+  );
+}
+
+// fetchJSON reads or posts JSON and never throws: {ok, status, payload}.
+function fetchJSON(url, body, fetchImpl = fetch) {
+  return fetchImpl(url, {
+    method: body ? 'POST' : 'GET',
+    headers: {
+      Accept: 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  })
+    .then(async response => ({
+      ok: response.ok,
+      status: response.status,
+      payload: await response.json().catch(() => ({}))
+    }))
+    .catch(() => ({ ok: false, status: 0, payload: {} }));
+}
+
+// saveProjectFact saves the answer as the reviewed fact the user typed. The
+// version it names is the assistant record's, and that moves whenever anything in
+// the record does (a mission completing, a learning arriving), which can happen
+// while the user is still typing. A refusal because it changed is answered by
+// reading the version again and saving once more; the retry key is the same, so
+// the fact can only ever be saved once.
+//
+// A refusal that is not about the version can mean the user already said exactly
+// this (on the Profile page, or in an earlier answer here): saving a fact twice is
+// refused, but the fact is held, and what is left to do is the project's note.
+export async function saveProjectFact(project, fetchImpl = fetch) {
+  const send = () =>
+    fetchJSON(
+      EXPLICIT_ENDPOINT,
+      {
+        request_id: project.keys.fact,
+        state_version: project.stateVersion,
+        category: 'projects',
+        text: project.answer.trim()
+      },
+      fetchImpl
+    );
+  let result = await send();
+  if (!result.ok && result.status === 409) {
+    const fresh = await fetchJSON(INTERVIEW_ENDPOINT, null, fetchImpl);
+    const version = Number(fresh.payload?.state_version);
+    if (fresh.ok && version >= 1 && version !== project.stateVersion) {
+      project.stateVersion = version;
+      result = await send();
+    }
+  }
+  if (!result.ok && result.status === 409) {
+    const held = await fetchJSON(KNOWLEDGE_ENDPOINT, null, fetchImpl);
+    const answer = project.answer.trim();
+    const already =
+      held.ok &&
+      (Array.isArray(held.payload?.items) ? held.payload.items : []).some(
+        item => item?.state === 'approved' && item?.category === 'projects' && item?.text === answer
+      );
+    if (already) return { ok: true, status: 200, payload: { already_held: true } };
+  }
+  return result;
+}
+
+// openProjectAsk reads the interview's first question and the folder suggestion,
+// then asks it. A failed read asks nothing: the question can wait.
+async function openProjectAsk() {
+  state.project = {
+    status: 'loading',
+    prompt: '',
+    hint: '',
+    stateVersion: 0,
+    suggestion: null,
+    answer: '',
+    name: '',
+    keys: {},
+    note: null,
+    message: ''
+  };
+  const { ok, payload } = await fetchJSON(INTERVIEW_ENDPOINT);
+  const question = ok && (payload.questions || []).find(item => item.id === PROJECT_QUESTION_ID);
+  if (!question || !(Number(payload.state_version) >= 1)) {
+    state.project.status = 'idle';
+    return false;
+  }
+  const suggestion = payload.suggestion?.text
+    ? { text: String(payload.suggestion.text), folder: String(payload.suggestion.folder || '') }
+    : null;
+  state.project = {
+    ...state.project,
+    status: 'ask',
+    prompt: String(question.prompt || ''),
+    hint: String(question.hint || ''),
+    stateVersion: Number(payload.state_version),
+    suggestion
+  };
+  state.pinned = true;
+  setPhase('project', { focus: false });
+  return true;
+}
+
+// showProjectAskIfDue asks the question once the card slot is free and the second
+// brain is ready for a project note.
+async function showProjectAskIfDue() {
+  if (state.phase !== 'idle' || !secondBrainProjectAskView(state.secondBrain).show) return;
+  await openProjectAsk();
+}
+
+// showNextCard is whatever the one card slot owes next, in order: the consent
+// question, then the project question.
+async function showNextCard() {
+  await showFillInIfOffered();
+  await showProjectAskIfDue();
+}
+
+function projectFromUsingSuggestion() {
+  const project = state.project;
+  return project.suggestion && project.answer.trim() === project.suggestion.text.trim();
+}
+
+// continueProject moves from the answer to the name, or straight to saving when
+// the suggestion already named the project (its folder's own name).
+function continueProject() {
+  const project = state.project;
+  const answer = project.answer.trim();
+  if (!answer) {
+    project.message = 'Write your answer first, or skip.';
+    render();
+    return;
+  }
+  if (Array.from(answer).length > PROJECT_ANSWER_MAX) {
+    project.message = `An answer is at most ${PROJECT_ANSWER_MAX} characters.`;
+    render();
+    return;
+  }
+  project.message = '';
+  if (projectFromUsingSuggestion() && !secondBrainFolderNameProblem(project.suggestion.folder)) {
+    project.name = project.suggestion.folder;
+    void saveProject();
+    return;
+  }
+  project.name = project.name || projectNameFromAnswer(answer);
+  project.status = 'name';
+  render();
+}
+
+// saveProject saves the answer as the reviewed fact the user typed (the same
+// canonical write the interview's rows end in, one retry key for it), then writes
+// the project's note. Each step repeats safely, so a retry after a failure picks
+// up where it stopped.
+async function saveProject() {
+  const project = state.project;
+  const name = String(project.name).trim();
+  const problem = secondBrainFolderNameProblem(name);
+  if (problem) {
+    project.message = problem;
+    render();
+    return;
+  }
+  if (state.busy) return;
+  state.busy = true;
+  project.message = '';
+  showError('');
+  render();
+  project.keys.fact = project.keys.fact || newRequestID('projfact');
+  project.keys.note = project.keys.note || newRequestID('projnote');
+  const fact = await saveProjectFact(project);
+  if (!fact.ok) {
+    state.busy = false;
+    project.message = secondBrainError(fact.payload, 'That did not save. Try again.');
+    render();
+    return;
+  }
+  const written = await request('/project', {
+    method: 'POST',
+    body: { name, answer: project.answer.trim(), request_id: project.keys.note }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!written.ok) {
+    // The fact is saved either way; only the note is left to do.
+    project.status = project.status === 'ask' && projectFromUsingSuggestion() ? 'ask' : 'name';
+    project.message = secondBrainError(written.payload, 'The note did not save. Try again.');
+    render();
+    return;
+  }
+  project.note = written.payload.project || { name, rel: `Projects/${name}/README.md` };
+  project.status = 'done';
+  await refresh();
+  tellKnowledgeChanged();
+  render();
+  announce();
+}
+
+// skipProject ends the question for good in the drawer. The Profile page keeps it.
+async function skipProject() {
+  if (state.busy) return;
+  state.busy = true;
+  showError('');
+  render();
+  const { ok, payload } = await request('/project/skip', {
+    method: 'POST',
+    body: { request_id: newRequestID('projskip') }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload));
+    render();
+    return;
+  }
+  state.secondBrain = payload.second_brain || state.secondBrain;
+  state.pinned = false;
+  state.answer = 'OK. I won’t ask again here; you can still answer on your Profile page.';
+  setPhase('answered', { focus: false });
+}
+
+function renderProject(body) {
+  const project = state.project;
+  if (project.status === 'loading') {
+    const line = node('p', 'pa-specialist-offer__headline', 'One quick question…');
+    line.setAttribute('role', 'status');
+    body.append(line);
+    return;
+  }
+  if (project.status === 'done') {
+    const name = project.note?.name || project.name;
+    body.append(node('p', 'pa-specialist-offer__headline', `Added ${name} to your notes.`));
+    body.append(
+      node('p', 'pa-folder__note', 'It is in Projects as a note you can turn into a workspace.')
+    );
+    if (project.note?.link) {
+      const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
+      open.href = project.note.link;
+      const line = node('p', 'pa-folder__note');
+      line.append(open);
+      body.append(line);
+    }
+    body.append(
+      actionRow(
+        [
+          { id: 'workspace', label: 'Make it a workspace', style: 'primary' },
+          { id: 'done', label: 'Done', style: 'outline' }
+        ],
+        action => {
+          if (action.id === 'workspace') {
+            makeWorkspace(name);
+            return;
+          }
+          state.pinned = false;
+          setPhase('idle', { focus: false });
+        }
+      )
+    );
+    return;
+  }
+  if (project.status === 'name') {
+    body.append(node('p', 'pa-specialist-offer__headline', `I'll call it ${project.name}. OK?`));
+    const input = node('input', 'form-control form-control-sm');
+    input.type = 'text';
+    input.value = project.name;
+    input.maxLength = 120;
+    input.dataset.projectName = '';
+    input.setAttribute('aria-label', 'Project name');
+    input.disabled = state.busy;
+    input.addEventListener('input', () => {
+      project.name = input.value;
+    });
+    body.append(input);
+    if (project.message) body.append(node('p', 'pa-folder__note', project.message));
+    body.append(
+      actionRow(
+        [
+          { id: 'confirm', label: 'Save', style: 'primary' },
+          { id: 'back', label: 'Back', style: 'link' }
+        ],
+        action => {
+          if (action.id === 'confirm') void saveProject();
+          else {
+            project.status = 'ask';
+            project.message = '';
+            render();
+          }
+        }
+      )
+    );
+    return;
+  }
+  body.append(node('p', 'pa-specialist-offer__headline', project.prompt));
+  if (project.hint) body.append(node('p', 'pa-folder__note', project.hint));
+  const area = node('textarea', 'form-control form-control-sm');
+  area.rows = 3;
+  area.maxLength = PROJECT_ANSWER_MAX;
+  area.value = project.answer;
+  area.dataset.projectAnswer = '';
+  area.setAttribute('aria-label', project.prompt);
+  area.disabled = state.busy;
+  area.addEventListener('input', () => {
+    project.answer = area.value;
+  });
+  body.append(area);
+  if (project.suggestion) {
+    body.append(
+      actionRow(
+        [{ id: 'suggestion', label: `Use “${project.suggestion.text}”`, style: 'outline' }],
+        () => {
+          project.answer = project.suggestion.text;
+          area.value = project.answer;
+        }
+      )
+    );
+  }
+  if (project.message) body.append(node('p', 'pa-folder__note', project.message));
+  body.append(
+    actionRow(
+      [
+        { id: 'save', label: 'Save', style: 'primary' },
+        { id: 'skip', label: 'Skip', style: 'link' }
+      ],
+      action => {
+        if (action.id === 'save') continueProject();
+        else void skipProject();
+      }
+    )
+  );
+}
+
+// showFillInIfOffered is the consent card's turn once a result that was waiting
+// has been dealt with: the one card slot is free, so the question follows at once.
+async function showFillInIfOffered() {
+  await refresh();
+  if (state.phase === 'idle' && secondBrainFillInView(state.secondBrain).show) {
+    state.pinned = true;
+    setPhase('fillin', { focus: false });
+  }
 }
 
 function renderAnswered(body) {
@@ -941,6 +1766,14 @@ function renderLook(body) {
     line.append(open);
     body.append(line);
   }
+  if (
+    secondBrainFolderOfferShows({
+      justSetUp: state.offerFolder,
+      headline: view.headline,
+      dismissed: state.offerDismissed
+    })
+  )
+    renderFolderOffer(body, view.headline);
   // A result waiting under Needs you leads to the HQ's Notes panel.
   if (state.pinned && state.panelRoute) {
     const panel = node('a', 'pa-second-brain__open', 'See it all in Notes');
@@ -1052,6 +1885,9 @@ function render() {
     else if (state.phase === 'setup') renderSetup(els.body);
     else if (state.phase === 'consent') renderConsent(els.body);
     else if (state.phase === 'manage') renderManage(els.body);
+    else if (state.phase === 'fillin') renderFillIn(els.body);
+    else if (state.phase === 'learned') renderLearned(els.body);
+    else if (state.phase === 'project') renderProject(els.body);
     else renderLook(els.body);
   }
   if (els.status) {
@@ -1202,6 +2038,10 @@ async function createSecondBrain() {
   state.secondBrain = payload.second_brain || state.secondBrain;
   state.chosen = { name, path: parent ? parent.path : place.path };
   state.receipt = '';
+  // The first look ends with the first thing to show Ori (FR13, FR14).
+  state.offerFolder = true;
+  state.offerDismissed = false;
+  void loadFolderChips();
   state.look = { state: 'running', look_id: payload.look_id };
   state.polls = 0;
   setPhase('reading', { focus: false });
@@ -1407,6 +2247,7 @@ async function dismiss() {
   }
   state.pinned = false;
   setPhase('idle', { focus: false });
+  await showNextCard();
 }
 
 // announce tells Home's Today and the mission card that the turn moved.
@@ -1444,6 +2285,14 @@ async function load() {
     }
     if (state.phase === 'idle' && state.secondBrain?.status !== 'not_connected') {
       await placeWaitingResult();
+    }
+    // One card at a time: a result still waiting goes first, then the consent
+    // question (FR10), then the project question (FR20).
+    if (state.phase === 'idle' && secondBrainFillInView(state.secondBrain).show) {
+      state.pinned = true;
+      setPhase('fillin', { focus: false });
+    } else {
+      await showProjectAskIfDue();
     }
   } catch (_) {
     // The ask can wait for the next status change; nothing else depends on it.
@@ -1552,6 +2401,11 @@ function init() {
       state.history = [];
       await chooseFolder({ selectionToken, name: name || baseName(path), path: path || '' });
     },
+    // The first-batch report's Review what Ori learned: the card of what the
+    // user's approved filing taught Ori, answered in place.
+    openLearned,
+    // The project question, on request (the drawer asks it by itself in order).
+    openProject: showProjectAskIfDue,
     // The Notes station and the Profile open the connection's own card:
     // connected, missing, or not set up (which is the chooser).
     openManage: async () => {
@@ -1573,7 +2427,9 @@ function init() {
       await refresh();
       if (
         state.secondBrain?.status === 'not_connected' &&
-        ['result', 'reading', 'failed', 'manage'].includes(state.phase)
+        ['result', 'reading', 'failed', 'manage', 'fillin', 'learned', 'project'].includes(
+          state.phase
+        )
       ) {
         clearTimeout(state.pollTimer);
         state.pinned = false;

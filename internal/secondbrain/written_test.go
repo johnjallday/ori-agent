@@ -1,6 +1,7 @@
 package secondbrain
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,6 +35,28 @@ func TestCountWritten_CountsMarkedNotesInTheOwnedFoldersOnly(t *testing.T) {
 	}
 	if after := snapshot(t, tree.base); after != before {
 		t.Fatalf("counting changed the tree.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestCountWritten_CountsEveryPlaceOriKeepsNotesByKind(t *testing.T) {
+	tree := newWriterTree(t)
+	addFillInTargets(t, tree)
+	writeNote(t, tree.vault, "People/Dana Lee.md", string(RenderNote(NoteKindPerson, []byte("x\n"))))
+	writeNote(t, tree.vault, "People/Sam Ortiz.md", string(RenderNote(NoteKindSeed, []byte("x\n"))))
+	writeNote(t, tree.vault, "Projects/Launch/README.md", string(RenderNote(NoteKindProject, []byte("x\n"))))
+	writeNote(t, tree.vault, "Projects/Launch/other.md", string(RenderNote(NoteKindProject, []byte("not the one note\n"))))
+	writeNote(t, tree.vault, "Inbox/follow.md", string(RenderNote(NoteKindFollowUp, []byte("x\n"))))
+	writeNote(t, tree.vault, FactsNoteRel, string(RenderNote(NoteKindFacts, []byte("x\n"))))
+	writeNote(t, tree.outside, "Linked/README.md", string(RenderNote(NoteKindProject, []byte("outside\n"))))
+
+	written, err := CountWritten(tree.vault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Plus the tree's capture and its edited journal, which still carry the marker.
+	want := map[string]int{NoteKindPerson: 1, NoteKindSeed: 1, NoteKindProject: 1, NoteKindFollowUp: 1, NoteKindFacts: 1, NoteKindCapture: 1, NoteKindJournal: 1}
+	if written.Count != 7 || fmt.Sprint(written.ByKind) != fmt.Sprint(want) {
+		t.Fatalf("written = %+v", written)
 	}
 }
 

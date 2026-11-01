@@ -6,10 +6,20 @@ import (
 )
 
 func TestReadMark_RendersAndReadsBackEachKind(t *testing.T) {
-	for _, kind := range []string{NoteKindJournal, NoteKindCapture, NoteKindSeed} {
+	for _, kind := range []string{
+		NoteKindJournal, NoteKindCapture, NoteKindSeed, NoteKindFacts, NoteKindPerson, NoteKindProject, NoteKindFollowUp,
+	} {
+		if !validNoteKind(kind) {
+			t.Fatalf("%s is not a valid kind", kind)
+		}
 		mark := ReadMark(RenderNote(kind, []byte("# A note\n\n- [ ] a line\n")))
 		if mark.Kind != kind || !mark.OwnedByOri || mark.UserModified || !mark.Marked() {
 			t.Fatalf("%s: %+v", kind, mark)
+		}
+		// A kind the marker cannot read back would make Ori's own note the user's.
+		edited := ReadMark(append(RenderNote(kind, []byte("x\n")), "edited\n"...))
+		if edited.Kind != kind || edited.OwnedByOri {
+			t.Fatalf("%s edited: %+v", kind, edited)
 		}
 	}
 	if mark := ReadMark(RenderNote(NoteKindCapture, nil)); !mark.OwnedByOri {

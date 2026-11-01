@@ -43,7 +43,31 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 		done = append(done, TodayItem{ID: "second-brain-" + last.ID, Kind: "second_brain_done",
 			Title: fmt.Sprintf("Looked at %s · %d %s", name, last.OpenItems, items), SourceAt: last.At})
 	}
+	if reporter, ok := s.secondBrain.(secondBrainWrittenReporter); ok {
+		if report, found := reporter.WrittenReport(ctx, userID); found {
+			done = append(done, TodayItem{ID: "second-brain-written-" + report.At.UTC().Format("20060102T150405"), Kind: "second_brain_written",
+				Title: report.Sentence, SourceAt: report.At, Route: notesPanelRoute(hqSlug)})
+		}
+	}
+	if reporter, ok := s.secondBrain.(secondBrainWeekReporter); ok {
+		if report, found := reporter.WeekReport(ctx, userID); found {
+			done = append(done, TodayItem{ID: report.ID, Kind: "second_brain_week",
+				Title: report.Sentence, SourceAt: report.At, Route: notesPanelRoute(hqSlug), Actions: []string{"dismiss"}})
+		}
+	}
 	return working, needs, done
+}
+
+// secondBrainWrittenReporter is the part of the service that says what the fill-in
+// wrote since the row was last seen (FR9).
+type secondBrainWrittenReporter interface {
+	WrittenReport(ctx context.Context, userID string) (SecondBrainWrittenReport, bool)
+}
+
+// secondBrainWeekReporter is the part that says what the first week gained
+// (first-week FR25).
+type secondBrainWeekReporter interface {
+	WeekReport(ctx context.Context, userID string) (SecondBrainWeekReport, bool)
 }
 
 // notesPanelRoute opens the Notes station's panel on the HQ map, or "" when the

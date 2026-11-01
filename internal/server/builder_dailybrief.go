@@ -355,6 +355,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			notes := personalassistant.NewSecondBrainKnowledge(learning)
 			b.personalAssistantSecondBrain.OnConnected(notes.Learn)
 			b.personalAssistantSecondBrain.OnDisconnected(notes.Unlearn)
+			// Every approval reaches the notes, after its own write has succeeded.
+			learning.OnChanged(func(userID string) { b.personalAssistantSecondBrain.SyncSoon(userID, "knowledge") })
+			b.wireSecondBrainTriggers()
 		}
 		b.personalAssistantMemory.SetReviewedHQWriter(learning)
 		rememberedReader = learning
@@ -362,6 +365,10 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			learning.SetProfileCAS(cas)
 		}
 		b.personalAssistantHandler.SetKnowledgeReview(learning)
+		// What the user's approved filing taught Ori: the card that answers it,
+		// and the count the first-batch report says (first-week FR16 to FR19).
+		b.personalAssistantSetupLearning = personalassistant.NewSetupLearningService(learning)
+		b.personalAssistantHandler.SetSetupLearning(b.personalAssistantSetupLearning)
 		b.personalAssistantHandler.SetGlobalMemoryWorkspaces(builderWorkspaces{b: b})
 		b.personalAssistantHandler.SetKnowledgeSources(personalKnowledgeSources{
 			bindings: resolver, apps: b.onboardingMgr, janitor: janitorEvidence,
@@ -377,8 +384,10 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		b.personalAssistantHandler.SetSavedAppSuggestions(appProducer)
 		if janitorEvidence != nil {
 			recovery := &janitorKnowledgeRecovery{reader: janitorEvidence, store: knowledge, learning: learning}
-			producer := janitorKnowledgeProducer{reader: janitorEvidence, learning: learning, recovery: recovery}
+			setupBatch := setupBatchProducer{reader: janitorEvidence, learning: learning}
+			producer := janitorKnowledgeProducer{reader: janitorEvidence, learning: learning, recovery: recovery, setupBatch: setupBatch}
 			recovery.producer = producer
+			recovery.setupBatch = setupBatch
 			b.personalAssistantHandler.SetJanitorSuggestions(producer)
 			b.fileJanitorService.SetReviewedKnowledgeObserver(recovery)
 		}
@@ -451,6 +460,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		}
 		// An inbox hire's first-batch report leads with backup from the same fact.
 		todayService.SetFileCuratorProtectionReader(protection)
+		if b.personalAssistantSetupLearning != nil {
+			todayService.SetSetupLearning(b.personalAssistantSetupLearning)
+		}
 		// So do a File Janitor workspace's goal runs. The bridge is built in
 		// Phase 22.5, before the Today scope this reader needs.
 		if b.missionBridge != nil {

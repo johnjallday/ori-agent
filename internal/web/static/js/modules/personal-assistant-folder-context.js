@@ -1308,6 +1308,10 @@ const api = {
   // server checked): the same local preview the chooser makes.
   selectHeld: selectionToken =>
     controller ? controller.select('selection', '', selectionToken) : Promise.resolve(false),
+  // Attaches one of the usual folders (downloads, music, documents, desktop) as
+  // the chooser's chip does, for a card that offers them without the sheet.
+  selectChip: chip =>
+    controller && chip ? controller.select('chip', String(chip)) : Promise.resolve(false),
   accepted: (id, saved) => controller?.accepted(id, saved),
   adopt: id => controller?.adopt(id) === true,
   isPending: () => controller?.state.pending === true,

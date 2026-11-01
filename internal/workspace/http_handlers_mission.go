@@ -175,13 +175,14 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 
 	enablingNow := req.MissionEnabled != nil && *req.MissionEnabled
 
-	firstGoal := false
+	firstGoal, charterChanged := false, false
 	updateErr := h.store.Update(workspaceID, func(ws *Workspace) error {
 		if enablingNow && !MissionBindingsReady(ws) {
 			return ErrMissionBindingsUnclassified
 		}
 		if req.Mission != nil {
 			wasEmpty := strings.TrimSpace(ws.Mission) == ""
+			charterChanged = ws.Mission != *req.Mission
 			ws.Mission = *req.Mission
 			if strings.TrimSpace(ws.Mission) == "" {
 				cancelDeferredGoalRun(ws)
@@ -220,6 +221,9 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 	if updateErr != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to update mission: %v", updateErr))
 		return
+	}
+	if charterChanged && h.eventBus != nil {
+		h.eventBus.Publish(Event{Type: EventGoalCharterChanged, WorkspaceID: workspaceID, Source: "api"})
 	}
 
 	// The first goal starts one run once the save has succeeded, whatever

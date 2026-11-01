@@ -123,6 +123,7 @@ type Handler struct {
 	folderDigest               FolderDigestService
 	secondBrain                SecondBrainService
 	secondBrainOrigin          func(*http.Request) error
+	setupLearning              SetupLearningService
 	folderHomeProvider         FolderHomeProviderSetup
 	folderProjectSelections    FolderProjectSelectionIssuer
 	provider                   userprofile.UserProvider

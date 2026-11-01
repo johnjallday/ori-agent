@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // FR9: the server refuses a manual goal run when the workspace has no goal,
@@ -118,6 +119,45 @@ func TestUpdateMission_DropsUntouchedHintLines(t *testing.T) {
 	got, _ := store.Get(ws.ID)
 	if want := "## Outcome\nA monthly newsletter.\n## Maintain\n## Boundaries\nNever send anything."; got.Mission != want {
 		t.Fatalf("saved goal = %q, want %q", got.Mission, want)
+	}
+}
+
+// The fill-in refreshes a project's note from this event, so saving the same goal
+// again, or changing something else, says nothing.
+func TestUpdateMission_PublishesOnlyWhenTheGoalChanged(t *testing.T) {
+	ts, store, _ := newSchedulerWithStub(t)
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Charter", Agents: []string{"Writer"}})
+	ws.Mission = "Already has a goal"
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	bus := NewEventBus(8, 8)
+	t.Cleanup(bus.Shutdown)
+	seen := make(chan Event, 8)
+	bus.SubscribeToEventType(EventGoalCharterChanged, func(event Event) { seen <- event })
+	handler := NewHTTPHandler(store, nil, bus)
+	handler.SetScheduler(ts)
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/mission", handler.UpdateMission)
+
+	if rec := patchGoal(mux, ws.ID, "## Outcome\nA monthly newsletter."); rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case event := <-seen:
+		if event.WorkspaceID != ws.ID {
+			t.Fatalf("event = %+v", event)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a changed goal published nothing")
+	}
+	if rec := patchGoal(mux, ws.ID, "## Outcome\nA monthly newsletter."); rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case event := <-seen:
+		t.Fatalf("the same goal published %+v", event)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

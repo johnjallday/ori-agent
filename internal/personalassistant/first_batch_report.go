@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +30,49 @@ const (
 	FirstBatchActionOpen       = "open_janitor"
 	FirstBatchActionRetry      = "retry"
 	FirstBatchActionProtection = "check_protection"
+	// FirstBatchActionLearned opens the card of what Ori learned from the files
+	// the user approved. It is navigation inside the drawer, never a POST.
+	FirstBatchActionLearned = "review_learned"
 )
+
+// firstBatchLearnedSentence is the line a report gains once the approved files
+// taught Ori something: how many things, and where they go if approved.
+func firstBatchLearnedSentence(learned int) string {
+	if learned <= 0 {
+		return ""
+	}
+	if learned == 1 {
+		return "I learned 1 thing from this folder; approve it and it goes into your second brain."
+	}
+	return fmt.Sprintf("I learned %d things from this folder; approve them and they go into your second brain.", learned)
+}
+
+// withLearnedSentence gives a Ready first-batch report the line above and the
+// action that opens the card where the user answers it (first-week FR16). Only a
+// report with a batch to review changes: a failed or empty scan has nothing the
+// files could have taught, and the action goes before Not now.
+func withLearnedSentence(items []TodayItem, learned int) []TodayItem {
+	sentence := firstBatchLearnedSentence(learned)
+	if sentence == "" {
+		return items
+	}
+	out := make([]TodayItem, len(items))
+	copy(out, items)
+	for index, item := range out {
+		if item.Kind != TodayKindFirstBatchReport || item.State != "finished" || !slices.Contains(item.Actions, FirstBatchActionReview) {
+			continue
+		}
+		actions := make([]string, 0, len(item.Actions)+1)
+		for _, action := range item.Actions {
+			if action == FirstLookActionNotNow {
+				actions = append(actions, FirstBatchActionLearned)
+			}
+			actions = append(actions, action)
+		}
+		out[index].Detail, out[index].Actions = sentence, actions
+	}
+	return out
+}
 
 // firstBatchProtectionSentences is the evidence line for each protection
 // state that earns a backup suggestion. It must equal the review console's

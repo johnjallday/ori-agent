@@ -72,6 +72,7 @@ const (
 	secondBrainActionDisconnect = "disconnect"
 	secondBrainActionCreate     = "create"
 	secondBrainActionCapture    = "capture"
+	secondBrainActionFillIn     = "fill_in"
 
 	// SecondBrainItemFollowUp, SecondBrainItemDone and SecondBrainItemDismiss
 	// are what the Notes panel can do with one open item.
@@ -143,10 +144,52 @@ type SecondBrainService struct {
 	inboxMu    sync.Mutex
 	inboxCache *secondBrainInboxEntry
 
+	// holdings reads what HQ holds for the fill-in sync; syncMu keeps it to one
+	// run at a time, and the rest coalesce repeat triggers.
+	holdings  SecondBrainHoldings
+	syncMu    sync.Mutex
+	syncs     sync.WaitGroup
+	syncState map[string]*secondBrainSyncTrigger
+
 	// Hooks for the mission and the learned fact, bound at startup.
 	onConnected    []func(ctx context.Context, userID string, source secondbrain.Source)
 	onDisconnected []func(ctx context.Context, userID string, source secondbrain.Source)
 	onDeclined     []func(ctx context.Context, userID string)
+	onWritten      []func(ctx context.Context, userID string, kinds map[string]int)
+}
+
+// OnWritten runs fn with the kinds of note Ori just wrote in a second brain it
+// set up: a capture, a Journal copy, a sync. The first-week missions observe it.
+// It must not block. Startup wiring only.
+func (s *SecondBrainService) OnWritten(fn func(ctx context.Context, userID string, kinds map[string]int)) {
+	if s != nil && fn != nil {
+		s.onWritten = append(s.onWritten, fn)
+	}
+}
+
+func (s *SecondBrainService) wrote(ctx context.Context, userID string, kinds map[string]int) {
+	for _, fn := range s.onWritten {
+		fn(ctx, userID, kinds)
+	}
+}
+
+// WrittenKinds counts the notes Ori holds in a second brain it set up, by kind,
+// read from the folder. ok is false for nothing connected or a folder the user
+// connected.
+func (s *SecondBrainService) WrittenKinds(ctx context.Context, userID string) (map[string]int, bool) {
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return nil, false
+	}
+	source := doc.Connected()
+	if source == nil || !source.CreatedByOri() {
+		return nil, false
+	}
+	written, err := secondbrain.CountWritten(source.Path)
+	if err != nil {
+		return nil, false
+	}
+	return written.ByKind, true
 }
 
 // SecondBrainSeeds gathers what Ori already holds about the user, for the one
@@ -205,11 +248,14 @@ func NewSecondBrainService(store *SecondBrainStore, deps SecondBrainDeps) *Secon
 	if deps.NewID == nil {
 		deps.NewID = func() string { return "look-" + uuid.NewString() }
 	}
-	return &SecondBrainService{store: store, deps: deps, running: map[string]string{}}
+	return &SecondBrainService{store: store, deps: deps, running: map[string]string{}, syncState: map[string]*secondBrainSyncTrigger{}}
 }
 
-// Wait blocks until every look this service started has been written.
-func (s *SecondBrainService) Wait() { s.looks.Wait() }
+// Wait blocks until every look and sync this service started has finished.
+func (s *SecondBrainService) Wait() {
+	s.looks.Wait()
+	s.syncs.Wait()
+}
 
 // SecondBrainView is GET /api/personal-assistant/second-brain.
 type SecondBrainView struct {
@@ -221,6 +267,8 @@ type SecondBrainView struct {
 	// WrittenByOri counts what Ori has put in Inbox and Daily; only a status
 	// read of a second brain Ori set up carries it (FR16).
 	WrittenByOri *SecondBrainWrittenView `json:"written_by_ori,omitempty"`
+	// FillIn says how keeping the notes filled in stands (FR8), for the same reads.
+	FillIn *SecondBrainFillInView `json:"fill_in,omitempty"`
 	// SetupDefault is where Set one up for me puts the folder without asking;
 	// absent while a folder is connected or no default is available.
 	SetupDefault *SecondBrainSetupDefault `json:"setup_default,omitempty"`
@@ -287,8 +335,25 @@ type SecondBrainProjectView struct {
 
 // SecondBrainWrittenView is the "Written by Ori" count.
 type SecondBrainWrittenView struct {
-	Count  int       `json:"count"`
-	LastAt time.Time `json:"last_at,omitempty"`
+	Count  int            `json:"count"`
+	ByKind map[string]int `json:"by_kind,omitempty"`
+	LastAt time.Time      `json:"last_at,omitempty"`
+}
+
+// SecondBrainFillInView counts the notes Ori keeps by how they stand. UserOwned
+// are the ones the user took over, which Ori stopped updating.
+type SecondBrainFillInView struct {
+	// State is "allowed", "pending" (a setup from before the fill-in, not yet
+	// asked) or "later". Offer says the consent card belongs under Needs you.
+	State string `json:"state"`
+	Offer bool   `json:"offer"`
+	// ProjectAsk is how the drawer's project question ended: "answered" or
+	// "skipped", or "" while it is still to be asked.
+	ProjectAsk string     `json:"project_ask,omitempty"`
+	Written    int        `json:"written"`
+	UserOwned  int        `json:"user_owned"`
+	Stale      int        `json:"stale"`
+	LastAt     *time.Time `json:"last_at,omitempty"`
 }
 
 // SecondBrainDetected is one vault Obsidian lists. Path is shown only in the
@@ -378,9 +443,10 @@ func (s *SecondBrainService) Status(ctx context.Context, userID string) (SecondB
 	view := s.view(doc)
 	if connected := doc.Connected(); connected != nil && connected.CreatedByOri() && view.Status == SecondBrainConnected {
 		if written, err := secondbrain.CountWritten(connected.Path); err == nil {
-			view.WrittenByOri = &SecondBrainWrittenView{Count: written.Count, LastAt: written.LastAt}
+			view.WrittenByOri = &SecondBrainWrittenView{Count: written.Count, ByKind: written.ByKind, LastAt: written.LastAt}
 		}
-		view.Projects = projectViews(connected.Path)
+		view.FillIn = fillInView(connected.FillIn, s.deps.Now())
+		view.Projects = offerableProjects(connected)
 		if inbox, err := s.inboxListing(*connected); err == nil {
 			count := inbox.Total
 			view.InboxCount = &count
@@ -403,6 +469,8 @@ func (s *SecondBrainService) Inbox(ctx context.Context, userID string) (SecondBr
 	if !connected.CreatedByOri() {
 		return SecondBrainInboxView{}, ErrSecondBrainNoInbox
 	}
+	// Only the Notes panel reads this, so this is the panel opening (FR6).
+	s.SyncSoon(userID, "notes opened")
 	return s.inboxListing(*connected)
 }
 
@@ -476,7 +544,29 @@ func (s *SecondBrainService) Projects(ctx context.Context, userID string) []Seco
 	if source == nil || !source.CreatedByOri() {
 		return nil
 	}
-	return projectViews(source.Path)
+	return offerableProjects(source)
+}
+
+// offerableProjects leaves out a project note Ori keeps for a workspace: offering
+// to make it a workspace would make a second one.
+func offerableProjects(source *secondbrain.Source) []SecondBrainProjectView {
+	views := projectViews(source.Path)
+	if source.FillIn == nil {
+		return views
+	}
+	kept := make(map[string]bool, len(source.FillIn.Mirrors))
+	for _, mirror := range source.FillIn.Mirrors {
+		if mirror.Ref.Kind == secondbrain.NoteKindProject && mirror.State == secondbrain.MirrorCurrent {
+			kept[mirror.Rel] = true
+		}
+	}
+	offered := make([]SecondBrainProjectView, 0, len(views))
+	for _, view := range views {
+		if !kept[view.Rel+"/README.md"] {
+			offered = append(offered, view)
+		}
+	}
+	return offered
 }
 
 // MarkPrompted records that the ask was shown, once per relationship (FR5).
@@ -670,6 +760,10 @@ func (s *SecondBrainService) Create(ctx context.Context, userID string, input Se
 		}
 		look := s.runningLook(input.RequestID)
 		connected.Current, lookID, started = &look, look.ID, &look
+		// The setup says what Ori will keep up to date before it writes, so a new
+		// one needs no card (FR10).
+		consented := s.deps.Now().UTC()
+		connected.FillIn = &secondbrain.FillIn{Consent: secondbrain.ConsentAllowed, ConsentAt: &consented, ConsentRequestID: input.RequestID}
 		doc.Remember(secondbrain.Receipt{
 			RequestID: input.RequestID, Action: secondBrainActionCreate, At: s.deps.Now(), LookID: lookID,
 			Created: creation.FollowUps, Skipped: creation.People,
@@ -750,6 +844,7 @@ func (s *SecondBrainService) Capture(ctx context.Context, userID, text, requestI
 		return SecondBrainCaptureView{}, err
 	}
 	s.dropInboxCache()
+	s.wrote(ctx, userID, map[string]int{secondbrain.NoteKindCapture: 1})
 	if _, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 		if _, replayed, err := doc.Replay(requestID, secondBrainActionCapture); err != nil || replayed {
 			return err
@@ -816,6 +911,7 @@ func (s *SecondBrainService) WriteDaily(ctx context.Context, userID, localDate, 
 	if _, err := writer.Write(secondbrain.FolderDaily+"/"+localDate+".md", secondbrain.NoteKindJournal, []byte(body+"\n")); err != nil {
 		return false, err
 	}
+	s.wrote(ctx, userID, map[string]int{secondbrain.NoteKindJournal: 1})
 	return true, nil
 }
 
@@ -981,6 +1077,7 @@ func (s *SecondBrainService) LookAgain(ctx context.Context, userID, requestID st
 	if started != nil {
 		s.startLook(userID, *connected, previous, started.ID, requestID, nil)
 	}
+	s.SyncSoon(userID, "look again")
 	return s.lookView(userID, connected), nil
 }
 

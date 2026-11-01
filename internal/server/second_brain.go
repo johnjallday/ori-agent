@@ -15,6 +15,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // wireSecondBrain builds "connect your second brain" over the resolved HQ
@@ -56,8 +58,30 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 	// Setting one up copies what Ori already holds into the new folder; the
 	// learning services it reads are built later, so they are looked up then.
 	service.SetSeeds(secondBrainSeeds{builder: b}.Seeds)
+	service.SetHoldings(secondBrainSeeds{builder: b}.Holdings)
 	b.personalAssistantSecondBrain = service
 	b.personalAssistantHandler.SetSecondBrain(service, connectionshttp.NewOriginGuard().Check)
+}
+
+// wireSecondBrainTriggers sends the other changes the fill-in mirrors to its one
+// entry point, after each one's own write has succeeded (FR6): a follow-up, a new
+// workspace, and a changed goal. Workspace events carry no user, and this is a
+// one-user server. A workspace made another way reaches the notes at the next
+// trigger, since each sync compares everything Ori holds.
+func (b *ServerBuilder) wireSecondBrainTriggers() {
+	service := b.personalAssistantSecondBrain
+	if service == nil {
+		return
+	}
+	if b.followUpService != nil {
+		b.followUpService.OnChanged(func(userID string) { service.SyncSoon(userID, "follow-up") })
+	}
+	if b.eventBus != nil {
+		b.eventBus.SubscribeToEventTypes(
+			[]workspace.EventType{workspace.EventWorkspaceCreated, workspace.EventGoalCharterChanged},
+			func(event workspace.Event) { service.SyncSoon(userprofile.LocalUserID, string(event.Type)) },
+		)
+	}
 }
 
 // journalDailyMirror copies a saved Journal to Daily/<date>.md in a second

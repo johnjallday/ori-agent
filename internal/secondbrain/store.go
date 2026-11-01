@@ -129,6 +129,9 @@ type Source struct {
 	// or one that failed after LastLook; a failure never erases LastLook.
 	LastLook *Look `json:"last_look,omitempty"`
 	Current  *Look `json:"current,omitempty"`
+	// FillIn is the ledger of notes Ori keeps here after setup. It belongs to the
+	// source, so disconnecting or replacing the folder ends it with the record.
+	FillIn *FillIn `json:"fill_in,omitempty"`
 }
 
 // Ask is the state of the assistant's second-brain ask (FR5, FR8, FR37).
@@ -480,6 +483,11 @@ func (r Record) Validate() error {
 		}
 		if source.Current != nil && source.Current.State == LookFinished {
 			return ErrInvalidRecord
+		}
+		if source.FillIn != nil {
+			if err := validateFillIn(*source.FillIn); err != nil {
+				return err
+			}
 		}
 	}
 	if err := validateAsk(r.Ask); err != nil {

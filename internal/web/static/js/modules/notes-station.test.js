@@ -64,6 +64,21 @@ test('the badge says what the panel will show', () => {
     description: 'set up by Ori · last look 2h',
     tone: 'clear'
   });
+  assert.equal(
+    notesBadge(created({ written_by_ori: { count: 14 }, fill_in: { user_owned: 2 } }), NOW)
+      .description,
+    'set up by Ori · 14 written by Ori · 2 are yours now'
+  );
+  assert.equal(
+    notesBadge(created({ written_by_ori: { count: 3 }, fill_in: { user_owned: 1 } }), NOW)
+      .description,
+    'set up by Ori · 3 written by Ori · 1 is yours now'
+  );
+  assert.equal(
+    notesBadge(created({ written_by_ori: { count: 3 }, fill_in: { user_owned: 0 } }), NOW)
+      .description,
+    'set up by Ori · last look 2h'
+  );
   assert.deepEqual(notesBadge(vault({ status: 'missing' }), NOW), {
     value: "Can't find Second Brain",
     description: 'needs attention',
@@ -411,15 +426,17 @@ test('Inbox rows say whose they are, and a bound says it was hit', () => {
             modified: hoursAgo(1),
             link: 'obsidian://open?path=a'
           },
-          { name: 'b.md', kind: 'user', title: '', modified: hoursAgo(3) }
+          { name: 'b.md', kind: 'user', title: '', modified: hoursAgo(3) },
+          { name: 'c.md', kind: 'follow_up', title: 'Renew the lease', modified: hoursAgo(4) }
         ]
       }
     }
   });
   assert.ok(html.includes('Call Dana'));
   assert.ok(html.includes('Captured'));
+  assert.ok(html.includes('Follow-up'), 'a follow-up Ori copied is not labelled as the user’s');
   assert.ok(html.includes('Yours'));
   assert.ok(html.includes('b.md'));
-  assert.ok(html.includes('Showing the newest 2 of 140.'));
+  assert.ok(html.includes('Showing the newest 3 of 140.'));
   assert.ok(html.includes('Saved to Inbox as call-dana.'));
 });

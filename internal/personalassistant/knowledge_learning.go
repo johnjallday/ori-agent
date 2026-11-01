@@ -53,6 +53,24 @@ type KnowledgeLearningService struct {
 	profiles  ProfileCASStore
 	authority KnowledgeSourceAuthority
 	now       func() time.Time
+	onChanged []func(userID string)
+}
+
+// OnChanged runs fn after the set of approved facts changed. It must not block:
+// the approval it follows has already succeeded. Startup wiring only.
+func (s *KnowledgeLearningService) OnChanged(fn func(userID string)) {
+	if s != nil && fn != nil {
+		s.onChanged = append(s.onChanged, fn)
+	}
+}
+
+func (s *KnowledgeLearningService) notifyChanged(userID string) {
+	if s == nil {
+		return
+	}
+	for _, fn := range s.onChanged {
+		fn(userID)
+	}
 }
 
 // ProfileCASStore changes a single reviewed profile field atomically; an
@@ -148,15 +166,18 @@ func (s *KnowledgeLearningService) Propose(ctx context.Context, userID string, p
 				// A pool of its own counts its items' creation times: items are
 				// never removed, and a new sidecar field would make an older Ori
 				// (strict decoding) read this file as corrupt. A future time
-				// still counts, so a skewed clock cannot erase the quota.
-				admitted := 0
-				for _, existing := range latest.Items {
-					if existing.SourceKind == quota.sourceKind && existing.CreatedAt.After(cutoff) {
-						admitted++
+				// still counts, so a skewed clock cannot erase the quota. A pool
+				// with no daily limit (daily 0) is held by its pending cap alone.
+				if quota.daily > 0 {
+					admitted := 0
+					for _, existing := range latest.Items {
+						if existing.SourceKind == quota.sourceKind && existing.CreatedAt.After(cutoff) {
+							admitted++
+						}
 					}
-				}
-				if admitted >= quota.daily {
-					return ErrKnowledgeQuota
+					if admitted >= quota.daily {
+						return ErrKnowledgeQuota
+					}
 				}
 				latest.Items = append(latest.Items, item)
 				return nil
@@ -378,6 +399,12 @@ func validateKnowledgeProposal(input KnowledgeProposal) (KnowledgeProposal, erro
 		if input.Category != "how_you_work" {
 			return KnowledgeProposal{}, fmt.Errorf("%w: unsupported category for source", ErrValidation)
 		}
+	case SetupBatchSourceKind:
+		// The files the user approved for filing name people and companies they
+		// deal with, and nothing else.
+		if input.Category != "people" {
+			return KnowledgeProposal{}, fmt.Errorf("%w: unsupported category for source", ErrValidation)
+		}
 	case WorkspaceAgentSourceKind:
 		// Any of the five dossier categories; ProposeWorkspaceFact is the only
 		// constructor and fills everything but Category and Text itself.
@@ -456,8 +483,14 @@ type knowledgeQuota struct {
 }
 
 func knowledgeQuotaFor(sourceKind string) knowledgeQuota {
-	if sourceKind == WorkspaceAgentSourceKind {
+	switch sourceKind {
+	case WorkspaceAgentSourceKind:
 		return knowledgeQuota{sourceKind: WorkspaceAgentSourceKind, pending: workspaceProposalPendingLimit, daily: workspaceProposalDailyLimit}
+	case SetupBatchSourceKind:
+		// A setup beat raises its learnings in one sitting and the user answers
+		// them on one card, so it has a pending cap and no rolling daily limit
+		// (daily 0). The shared pool's 6 and 3, and every other pool, are untouched.
+		return knowledgeQuota{sourceKind: SetupBatchSourceKind, pending: setupBatchPendingLimit}
 	}
 	return knowledgeQuota{pending: knowledgePendingLimit, daily: knowledgeDailyLimit}
 }

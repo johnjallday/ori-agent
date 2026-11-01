@@ -98,7 +98,9 @@ func TestFixtureCreated_ReadsAsDocumentedAndSeededItemsAreNeverSuggested(t *test
 			suggested[item.Text] = true
 		}
 	}
-	if len(seeded) != 2 || !seeded["Inbox/call-the-distributor.md"] || !seeded["Inbox/renew-the-lease.md"] {
+	// Two seeds from setup and a follow-up Ori copied later: the user has all
+	// three as follow-ups already, so none is suggested back (FR3).
+	if len(seeded) != 3 || !seeded["Inbox/call-the-distributor.md"] || !seeded["Inbox/renew-the-lease.md"] || !seeded["Inbox/mail-the-masters.md"] {
 		t.Fatalf("seeded = %v", seeded)
 	}
 	if len(suggested) != 2 || !suggested["Buy strings"] || !suggested["Book the venue"] {

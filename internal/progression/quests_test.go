@@ -63,6 +63,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		MeetAssistantQuestID: 1,
 		BuildHQQuestID:       1, SecondBrainQuestID: 1, ShowFolderQuestID: 1, FolderFirstLookQuestID: 1,
 		ConnectSourceQuestID: 2, FirstBriefQuestID: 2,
+		CaptureFirstNoteQuestID: 2, SaveFirstJournalQuestID: 2, GiveProjectQuestID: 2,
 		"t1-first-message": 3, "t1-personalize": 3, "t2-create-note": 3, "t2-run-task": 3,
 		"t3-second-agent": 3, "t3-delegate": 3, "t3-agent-task-done": 3,
 		"t4-enable-skill": 4, "t4-connect-mcp": 4, "t4-tool-task": 4,
@@ -201,7 +202,7 @@ func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards
 			visible = append(visible, q.ID)
 		}
 	}
-	want := []string{MeetAssistantQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID}
+	want := []string{MeetAssistantQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID, CaptureFirstNoteQuestID, SaveFirstJournalQuestID, GiveProjectQuestID}
 	if strings.Join(visible, ",") != strings.Join(want, ",") {
 		t.Fatalf("visible quests = %v, want %v", visible, want)
 	}
@@ -212,13 +213,13 @@ func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards
 	if !e.HasCompleted("t1-first-message") {
 		t.Fatal("a retired quest stopped recording real events")
 	}
-	if after := e.Status(); after.CompletedCount != before.CompletedCount || after.TotalCount != 6 || after.TotalTiers != 2 || after.NextQuest.ID != MeetAssistantQuestID {
+	if after := e.Status(); after.CompletedCount != before.CompletedCount || after.TotalCount != 9 || after.TotalTiers != 2 || after.NextQuest.ID != MeetAssistantQuestID {
 		t.Fatalf("retired completion changed the mission board: %+v", after)
 	}
 	if err := e.Reset(); err != nil {
 		t.Fatal(err)
 	}
-	if e.HasCompleted("t1-first-message") || e.Status().TotalCount != 6 {
+	if e.HasCompleted("t1-first-message") || e.Status().TotalCount != 9 {
 		t.Fatal("reset did not clear retired history while preserving the visible graph")
 	}
 }
@@ -242,7 +243,7 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 	if got := names(st.Tiers[0]); got != strings.Join([]string{MeetAssistantQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID}, ",") {
 		t.Fatalf("Starter holds %s", got)
 	}
-	if got := names(st.Tiers[1]); got != ConnectSourceQuestID+","+FirstBriefQuestID {
+	if got := names(st.Tiers[1]); got != strings.Join([]string{ConnectSourceQuestID, FirstBriefQuestID, CaptureFirstNoteQuestID, SaveFirstJournalQuestID, GiveProjectQuestID}, ",") {
 		t.Fatalf("Daily loop holds %s", got)
 	}
 
@@ -268,8 +269,19 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 	if err := e.Skip(FirstBriefQuestID); err != nil {
 		t.Fatal(err)
 	}
-	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 6 {
-		t.Fatalf("status after six missions = %+v", st)
+	// The first-week missions are part of the Daily loop: until they are done or
+	// skipped (the server skips them when Ori will not write to the notes), the
+	// board is not complete.
+	if st := e.Status(); st.AllComplete {
+		t.Fatalf("the board completed with the first-week missions open: %+v", st)
+	}
+	for _, id := range SecondBrainFirstWeekQuestIDs() {
+		if err := e.Skip(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 9 {
+		t.Fatalf("status after nine missions = %+v", st)
 	}
 }
 
@@ -926,8 +938,8 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
 
 	st := e.Status()
-	if len(st.Missions) != 6 || st.Missions[0].ID != MeetAssistantQuestID {
-		t.Fatalf("missions = %v, want six with Meet your assistant first", missionLocks(e))
+	if len(st.Missions) != 9 || st.Missions[0].ID != MeetAssistantQuestID {
+		t.Fatalf("missions = %v, want nine with Meet your assistant first", missionLocks(e))
 	}
 	wantLocked := []string{
 		MeetAssistantQuestID + ":false:",
@@ -936,6 +948,9 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 		FolderFirstLookQuestID + ":true:Show your assistant a folder first",
 		ConnectSourceQuestID + ":true:Starter first",
 		FirstBriefQuestID + ":true:Starter first",
+		CaptureFirstNoteQuestID + ":true:Connect your second brain first",
+		SaveFirstJournalQuestID + ":true:Connect your second brain first",
+		GiveProjectQuestID + ":true:Connect your second brain first",
 	}
 	if got := missionLocks(e); strings.Join(got, " ") != strings.Join(wantLocked, " ") {
 		t.Fatalf("before the hire = %v, want %v", got, wantLocked)
@@ -1229,7 +1244,7 @@ func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
 	if err := e.Skip(MeetAssistantQuestID); !errors.Is(err, ErrQuestNotOptional) {
 		t.Fatalf("Skip(Meet your assistant) = %v, want ErrQuestNotOptional", err)
 	}
-	for _, id := range []string{BuildHQQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID} {
+	for _, id := range append([]string{BuildHQQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID}, SecondBrainFirstWeekQuestIDs()...) {
 		if err := e.Skip(id); err != nil {
 			t.Fatal(err)
 		}
@@ -1240,7 +1255,7 @@ func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
 	e.Complete(MeetAssistantQuestID)
 	// Everything else was skipped, so the hire resolves Starter, opens the Daily
 	// loop (also skipped), and completes the board.
-	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 6 {
+	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 9 {
 		t.Fatalf("status after the hire = %+v", st)
 	}
 }

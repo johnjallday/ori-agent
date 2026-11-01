@@ -93,7 +93,7 @@ export function notesSourceView(secondBrain) {
   }
   if (source.origin === 'created_by_ori') {
     return {
-      summary: `Second brain: ${source.name} (set up by Ori). Ori keeps Inbox and Daily up to date and never changes a note you edited. Disconnecting leaves the folder and everything in it.`,
+      summary: `Second brain: ${source.name} (set up by Ori). Ori keeps Inbox, Daily, People, a note per project and what it knows about you up to date, and never changes a note you edited. Disconnecting leaves the folder and everything in it.`,
       action: null,
       disconnect: true
     };

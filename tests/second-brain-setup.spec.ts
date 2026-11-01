@@ -109,7 +109,7 @@ async function startSetup(page: Page, request: APIRequestContext) {
   await card(page).getByRole('button', { name: 'Use this path' }).click();
   await expect(card(page)).toContainText('Set up "Second Brain" in Documents?');
   await expect(card(page)).toContainText(
-    "I'll keep Inbox and Daily up to date; everything else is yours."
+    "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
   );
 }
 
@@ -206,7 +206,7 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
   expect(current.source).toMatchObject({ name, path: brain, origin: 'created_by_ori' });
   expect(existsSync(join(brain, '.obsidian', 'app.json'))).toBe(true);
   expect(readFileSync(join(brain, 'README.md'), 'utf8')).toMatch(
-    /^I'll keep Inbox and Daily up to date; everything else is yours\./
+    /^I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours\./
   );
   for (const folder of ['Inbox', 'Daily', 'Projects', 'Areas', 'Resources', 'Archive', 'People']) {
     expect(existsSync(join(brain, folder, 'README.md')), folder).toBe(true);

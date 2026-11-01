@@ -118,7 +118,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		// you. A hired agent reports its finished first look back under Needs
 		// you, then follows the task the user started from it.
 		if reports, handled := firstBatchReportItems(ctx, offer, ws, now, s.curatorProtection); handled {
-			needs = append(needs, reports...)
+			needs = append(needs, withLearnedSentence(reports, s.setupLearned(ctx, userID))...)
 		} else if reports, started, finished, handled := firstLookReportItems(offer, ws, route, now); handled {
 			needs = append(needs, reports...)
 			working = append(working, started...)

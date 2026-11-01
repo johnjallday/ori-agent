@@ -22,8 +22,9 @@ const (
 	maxInboxTitleRunes = 160
 )
 
-// The kinds an Inbox note can be. NoteKindCapture and NoteKindSeed mean the note
-// is exactly as Ori wrote it; anything else is the user's.
+// The kinds an Inbox note can be. NoteKindCapture, NoteKindSeed and
+// NoteKindFollowUp mean the note is exactly as Ori wrote it; anything else is the
+// user's.
 const NoteKindUser = "user"
 
 // InboxNote is one note directly under Inbox. Title is read for this listing
@@ -137,7 +138,7 @@ func peekInboxNote(dir *os.Root, name string) (InboxNote, bool) {
 	}
 	note := InboxNote{Name: name, Kind: NoteKindUser, Modified: info.ModTime()}
 	mark := ReadMark(head)
-	if mark.OwnedByOri && (mark.Kind == NoteKindCapture || mark.Kind == NoteKindSeed) {
+	if mark.OwnedByOri && (mark.Kind == NoteKindCapture || mark.Kind == NoteKindSeed || mark.Kind == NoteKindFollowUp) {
 		note.Kind, note.OwnedByOri = mark.Kind, true
 	}
 	note.Title = inboxTitle(head, name)

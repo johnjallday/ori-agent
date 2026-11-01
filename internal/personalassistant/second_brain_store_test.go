@@ -121,6 +121,111 @@ func TestSecondBrainCodec_ALookWithEveryCapFullFitsTheRecord(t *testing.T) {
 	t.Logf("a full record is %d bytes of %d", len(encoded), secondbrain.RecordMaxBytes)
 }
 
+// fullMirrors is the largest ledger: 400 entries in their longest form, each the
+// user's, with the longest path a ledger entry may hold.
+func fullMirrors() []secondbrain.Mirror {
+	mirrors := make([]secondbrain.Mirror, 0, secondbrain.MaxMirrors)
+	for i := range secondbrain.MaxMirrors {
+		name := fmt.Sprintf("%05d-%s", i, strings.Repeat("n", 96-len("Inbox/.md")-6))
+		mirrors = append(mirrors, secondbrain.Mirror{
+			Ref: secondbrain.MirrorRef{Kind: secondbrain.NoteKindFollowUp, ID: secondbrain.MirrorID(name)},
+			Rel: "Inbox/" + name + ".md", Hash: strings.Repeat("a", 16), WrittenAt: secondBrainNow, State: secondbrain.MirrorUserOwned,
+		})
+	}
+	return mirrors
+}
+
+// The early risk check (FR7): the ledger's shape is what lets this pass. As an
+// object with named fields, 400 entries do not fit beside a full look.
+func TestSecondBrainCodec_EveryCapFullFitsTheRecord(t *testing.T) {
+	source := secondBrainSource("/Users/sam/Second Brain")
+	source.Origin = secondbrain.OriginCreatedByOri
+	source.LastLook = fullSecondBrainLook(source)
+	source.Current = &secondbrain.Look{ID: "look-2", State: secondbrain.LookRunning, RequestID: "connect-2", StartedAt: secondBrainNow}
+	last := secondBrainNow
+	source.FillIn = &secondbrain.FillIn{Mirrors: fullMirrors(), MorePending: true, LastAt: &last}
+	doc := SecondBrainDocument{SchemaVersion: secondbrain.RecordSchemaVersion, Version: 1}
+	doc.Sources = []secondbrain.Source{source}
+	for i := range secondbrain.MaxReceipts {
+		doc.Remember(secondbrain.Receipt{
+			RequestID: fmt.Sprintf("%0128d", i), Action: "capture", At: secondBrainNow, LookID: "look-1",
+			Note: "Inbox/" + strings.Repeat("c", 280) + ".md",
+		})
+	}
+	encoded, err := encodeSecondBrain(doc)
+	if err != nil {
+		t.Fatalf("a full record does not fit: %v", err)
+	}
+	decoded, err := decodeSecondBrain(encoded, doc.Owner)
+	if err != nil {
+		t.Fatalf("it does not read back: %v", err)
+	}
+	mirrors := decoded.Connected().FillIn.Mirrors
+	if len(mirrors) != secondbrain.MaxMirrors || !mirrors[7].WrittenAt.Equal(secondBrainNow) || mirrors[7].Rel != source.FillIn.Mirrors[7].Rel {
+		t.Fatalf("read back %d mirrors, the eighth %+v", len(mirrors), mirrors[7])
+	}
+	t.Logf("a full record is %d bytes of %d", len(encoded), secondbrain.RecordMaxBytes)
+}
+
+func TestSecondBrainCodec_ALedgerRefusesWhatItCouldNotHaveWritten(t *testing.T) {
+	good := func() secondbrain.Mirror {
+		return secondbrain.Mirror{
+			Ref: secondbrain.MirrorRef{Kind: secondbrain.NoteKindPerson, ID: secondbrain.MirrorID("dana lee")},
+			Rel: "People/Dana Lee.md", Hash: strings.Repeat("a", 16), WrittenAt: secondBrainNow, State: secondbrain.MirrorCurrent,
+		}
+	}
+	valid := func(mirrors ...secondbrain.Mirror) error {
+		source := secondBrainSource("/Users/sam/Second Brain")
+		source.FillIn = &secondbrain.FillIn{Mirrors: mirrors}
+		doc := SecondBrainDocument{SchemaVersion: secondbrain.RecordSchemaVersion, Version: 1}
+		doc.Sources = []secondbrain.Source{source}
+		return doc.Validate()
+	}
+	if err := valid(good()); err != nil {
+		t.Fatalf("a good entry: %v", err)
+	}
+	for name, change := range map[string]func(*secondbrain.Mirror){
+		"a path Ori never writes": func(m *secondbrain.Mirror) { m.Rel = "Areas/x.md" },
+		"a path too long":         func(m *secondbrain.Mirror) { m.Rel = "People/" + strings.Repeat("n", 90) + ".md" },
+		"an unknown kind":         func(m *secondbrain.Mirror) { m.Ref.Kind = "capture" },
+		"an unhashed id":          func(m *secondbrain.Mirror) { m.Ref.ID = "dana lee" },
+		"a full-length hash":      func(m *secondbrain.Mirror) { m.Hash = strings.Repeat("a", 64) },
+		"an unknown state":        func(m *secondbrain.Mirror) { m.State = "gone" },
+		"no date":                 func(m *secondbrain.Mirror) { m.WrittenAt = time.Time{} },
+	} {
+		mirror := good()
+		change(&mirror)
+		if err := valid(mirror); !errors.Is(err, secondbrain.ErrInvalidRecord) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	if err := valid(good(), good()); !errors.Is(err, secondbrain.ErrInvalidRecord) {
+		t.Errorf("the same source twice: err = %v", err)
+	}
+}
+
+func TestSecondBrainCodec_ALedgerEntryWithAnotherShapeIsCorrupt(t *testing.T) {
+	owner := KnowledgeOwner{UserID: "local", HQWorkspaceID: "hq"}
+	id := secondbrain.SourceID("/Users/sam/Brain")
+	record := func(fillIn string) []byte {
+		return fmt.Appendf(nil, `{"schema_version":1,"version":1,"owner":{"user_id":"local","hq_workspace_id":"hq"},"ask":{},
+			"sources":[{"id":%q,"kind":"obsidian","name":"Brain","path":"/Users/sam/Brain","connected_at":"2026-10-21T09:00:00Z","request_id":"connect-1","origin":"created_by_ori"%s}]}`, id, fillIn)
+	}
+	old, err := decodeSecondBrain(record(""), owner)
+	if err != nil {
+		t.Fatalf("a record from before the ledger: %v", err)
+	}
+	if old.Connected().FillIn != nil {
+		t.Fatalf("an old record's ledger = %+v", old.Connected().FillIn)
+	}
+	if _, err := decodeSecondBrain(record(`,"fill_in":{"mirrors":[["person","a","b"]]}`), owner); !errors.Is(err, ErrKnowledgeCorrupt) {
+		t.Errorf("a short entry: err = %v", err)
+	}
+	if _, err := decodeSecondBrain(record(`,"fill_in":{"unknown":1}`), owner); !errors.Is(err, ErrKnowledgeCorrupt) {
+		t.Errorf("an unknown field: err = %v", err)
+	}
+}
+
 func TestSecondBrainCodec_ARecordFromBeforeTheSignalsStillReads(t *testing.T) {
 	owner := KnowledgeOwner{UserID: "local", HQWorkspaceID: "hq"}
 	id := secondbrain.SourceID("/Users/sam/Brain")

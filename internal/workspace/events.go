@@ -20,6 +20,8 @@ const (
 	EventWorkspaceUpdated   EventType = "workspace.updated"
 	EventWorkspaceCompleted EventType = "workspace.completed"
 	EventWorkspaceDeleted   EventType = "workspace.deleted"
+	// EventGoalCharterChanged says the user saved a different goal.
+	EventGoalCharterChanged EventType = "workspace.goal_charter_changed"
 
 	// Task events
 	EventTaskCreated    EventType = "task.created"

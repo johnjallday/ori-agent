@@ -22,6 +22,16 @@ func (f fakeTodayNotes) Look(context.Context, string) (SecondBrainLookView, erro
 	return f.look, f.err
 }
 
+type fakeTodayNotesWithReport struct {
+	fakeTodayNotes
+	report SecondBrainWrittenReport
+	found  bool
+}
+
+func (f fakeTodayNotesWithReport) WrittenReport(context.Context, string) (SecondBrainWrittenReport, bool) {
+	return f.report, f.found
+}
+
 func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 	connected := SecondBrainView{Status: SecondBrainConnected, Source: &SecondBrainSourceView{Name: "Second Brain"}}
@@ -57,6 +67,25 @@ func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 		}
 		if _, _, done := s.secondBrainItems(context.Background(), "local", "my-hq", now.Add(8*24*time.Hour)); len(done) != 0 {
 			t.Fatalf("a week-old look is still Done: %+v", done)
+		}
+	})
+
+	t.Run("what the fill-in wrote is one Done row that leads to the Notes panel", func(t *testing.T) {
+		wrote := fakeTodayNotesWithReport{
+			fakeTodayNotes: fakeTodayNotes{view: connected},
+			report:         SecondBrainWrittenReport{Sentence: "Ori added 2 people and a project to your notes", At: now.Add(-time.Minute)},
+			found:          true,
+		}
+		s := &TodayService{secondBrain: wrote}
+		_, _, done := s.secondBrainItems(context.Background(), "local", "my-hq", now)
+		if len(done) != 1 || done[0].Kind != "second_brain_written" || done[0].Title != wrote.report.Sentence ||
+			done[0].Route != "/workspaces/my-hq?station=second-brain" || done[0].ID == "" {
+			t.Fatalf("done = %+v", done)
+		}
+		wrote.found = false
+		s = &TodayService{secondBrain: wrote}
+		if _, _, done := s.secondBrainItems(context.Background(), "local", "my-hq", now); len(done) != 0 {
+			t.Fatalf("a row with nothing written: %+v", done)
 		}
 	})
 
