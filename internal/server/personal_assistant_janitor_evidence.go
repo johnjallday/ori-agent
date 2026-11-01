@@ -178,25 +178,33 @@ func (r *janitorKnowledgeReader) visitJournals(ctx context.Context, userID strin
 	return nil
 }
 
+// janitorSupportAction says one journal record is a move the user approved in
+// this workspace's current root, that was applied and not undone, with its
+// destination exactly where the Janitor would put it. Every knowledge reader
+// shares it, so none of them can see an action the others would not.
+func janitorSupportAction(action filejanitor.FileAction, workspaceID, userID string, settings filejanitor.JanitorSettings, now time.Time) bool {
+	cutoff := now.Add(-90 * 24 * time.Hour)
+	if action.WorkspaceID != workspaceID || action.RootID != settings.RootID ||
+		action.ApprovedBy != userID || action.ApprovedAt.IsZero() || action.CompletedAt.IsZero() ||
+		action.CompletedAt.Before(cutoff) || action.CompletedAt.After(now) ||
+		action.Operation != filejanitor.OperationMove || action.Result != filejanitor.ResultApplied ||
+		action.Undo == filejanitor.UndoDone || !filejanitor.ValidCategory(action.DestinationCategory) ||
+		action.AfterFingerprint.Zero() || action.Validate() != nil {
+		return false
+	}
+	canonicalDestination, err := filejanitor.DestinationRelativeFor(
+		settings.FilingRootName, action.DestinationCategory, path.Base(action.DestinationRelative))
+	return err == nil && canonicalDestination == action.DestinationRelative
+}
+
 // projectJanitorKnowledgeSupports is pure and returns no file name/path or
 // raw action record. Failed undo records (which may have UndoneAt set) still
 // count as applied support; only a durable UndoDone removes that support.
 func projectJanitorKnowledgeSupports(workspaceID, userID string, settings filejanitor.JanitorSettings, actions []filejanitor.FileAction, now time.Time) []janitorKnowledgeEvidence {
-	cutoff := now.Add(-90 * 24 * time.Hour)
 	byCategory := make(map[filejanitor.Category][]filejanitor.FileAction)
 	seen := make(map[string]bool)
 	for _, action := range actions {
-		if action.WorkspaceID != workspaceID || action.RootID != settings.RootID ||
-			action.ApprovedBy != userID || action.ApprovedAt.IsZero() || action.CompletedAt.IsZero() ||
-			action.CompletedAt.Before(cutoff) || action.CompletedAt.After(now) ||
-			action.Operation != filejanitor.OperationMove || action.Result != filejanitor.ResultApplied ||
-			action.Undo == filejanitor.UndoDone || !filejanitor.ValidCategory(action.DestinationCategory) ||
-			action.AfterFingerprint.Zero() || action.Validate() != nil || seen[action.ID] {
-			continue
-		}
-		canonicalDestination, err := filejanitor.DestinationRelativeFor(
-			settings.FilingRootName, action.DestinationCategory, path.Base(action.DestinationRelative))
-		if err != nil || canonicalDestination != action.DestinationRelative {
+		if !janitorSupportAction(action, workspaceID, userID, settings, now) || seen[action.ID] {
 			continue
 		}
 		seen[action.ID] = true

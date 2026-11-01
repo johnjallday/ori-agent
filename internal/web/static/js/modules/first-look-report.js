@@ -23,7 +23,10 @@ const REPORT_ACTIONS = [
   'retry',
   'review_batch',
   'open_janitor',
-  'check_protection'
+  'check_protection',
+  // Opens the card where what the approved files taught Ori is answered; it is
+  // navigation inside the drawer and posts nothing.
+  'review_learned'
 ];
 // A task's own page in a workspace, and nothing else.
 const REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
@@ -190,6 +193,8 @@ function firstBatchReportView(item, now) {
     else if (offered.includes('open_janitor'))
       actions.push({ id: 'open_janitor', label: 'Open File Janitor', primary: true, href: route });
   }
+  if (!failed && offered.includes('review_learned'))
+    actions.push({ id: 'review_learned', label: 'Review what Ori learned', primary: false });
   if (failed && offered.includes('retry'))
     actions.push({ id: 'retry', label: 'Retry', primary: true });
   if (!failed && offered.includes('not_now'))
@@ -418,6 +423,22 @@ export function mountFirstLookReports(
           if (action === 'check_protection') {
             const card = button?.closest?.('.first-look-report');
             showReportError(card, doc, await checkReportProtection(view, protection));
+            buttons.forEach(control => {
+              control.disabled = false;
+            });
+            return;
+          }
+          if (action === 'review_learned') {
+            // The card of what Ori learned lives in the drawer; opening it posts
+            // nothing, so the report stays as it is.
+            const card = button?.closest?.('.first-look-report');
+            const opener = globalThis.window?.PersonalAssistantSecondBrain?.openLearned;
+            showReportError(
+              card,
+              doc,
+              typeof opener === 'function' ? '' : 'What Ori learned is not available here.'
+            );
+            if (typeof opener === 'function') await opener();
             buttons.forEach(control => {
               control.disabled = false;
             });

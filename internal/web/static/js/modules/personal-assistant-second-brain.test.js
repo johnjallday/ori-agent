@@ -13,6 +13,9 @@ import {
   secondBrainFillInView,
   secondBrainFolderOffer,
   secondBrainFolderOfferShows,
+  setupLearningClosing,
+  setupLearningView,
+  SETUP_LEARNING_HEADING,
   secondBrainAnsweredLine,
   secondBrainAskView,
   secondBrainAvailable,
@@ -687,4 +690,77 @@ test('the card posts the answer with a fresh request id and leaves one line behi
   assert.match(source, /folder-context\/choices/);
   // A result dealt with frees the one card slot for the consent question.
   assert.match(source, /await showFillInIfOffered\(\)/);
+});
+
+test('what a folder taught Ori is listed word for word, with the version and id the approve action takes', () => {
+  const view = setupLearningView({
+    learning: {
+      items: [
+        {
+          id: 'item-1',
+          version: 3,
+          text: 'You deal with Chase (seen in 2 files you filed).',
+          evidence: [
+            'User-approved filing of a file whose name includes Chase',
+            ' ',
+            'User-approved filing of a file whose name includes Chase',
+            'c',
+            'd'
+          ],
+          source: 'files'
+        },
+        { id: 'item-2', version: 1, text: 'You may prefer filing documents.', source: 'filing' },
+        { id: 'item-3', version: 0, text: 'No version, so no action can take it.' },
+        { id: '', version: 1, text: 'No id.' },
+        { id: 'item-5', version: 1, text: '   ' },
+        null
+      ]
+    }
+  });
+  assert.equal(view.total, 2);
+  assert.equal(view.heading, SETUP_LEARNING_HEADING);
+  assert.deepEqual(view.items[0], {
+    id: 'item-1',
+    version: 3,
+    text: 'You deal with Chase (seen in 2 files you filed).',
+    evidence: [
+      'User-approved filing of a file whose name includes Chase',
+      'User-approved filing of a file whose name includes Chase',
+      'c'
+    ],
+    source: 'files'
+  });
+  assert.equal(view.items[1].source, 'filing');
+  for (const nothing of [null, {}, { learning: {} }, { learning: { items: 'x' } }]) {
+    const empty = setupLearningView(nothing);
+    assert.equal(empty.total, 0);
+    assert.equal(empty.heading, 'Nothing from this folder is waiting for an answer right now.');
+  }
+});
+
+test('the card closes by counting the notes that were written', () => {
+  assert.equal(setupLearningClosing(0), 'Nothing new was written to your notes.');
+  assert.equal(setupLearningClosing(-3), 'Nothing new was written to your notes.');
+  assert.equal(setupLearningClosing('x'), 'Nothing new was written to your notes.');
+  assert.equal(setupLearningClosing(1), '1 note was written in your second brain.');
+  assert.equal(setupLearningClosing(4), '4 notes were written in your second brain.');
+});
+
+test('each answer carries one retry key and the Profile page action, and dismissing posts only an id', () => {
+  const source = readFileSync(
+    new URL('./personal-assistant-second-brain.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(
+    source,
+    /api\/personal-assistant\/knowledge\/\$\{encodeURIComponent\(item\.id\)\}\/\$\{action\}/
+  );
+  assert.match(source, /version: item\.version, request_id: state\.learned\.keys\[keyName\]/);
+  // The key is made once per learning and answer, so a retry repeats the request.
+  assert.match(
+    source,
+    /if \(!state\.learned\.keys\[keyName\]\) state\.learned\.keys\[keyName\] = newRequestID\('learn'\)/
+  );
+  assert.match(source, /SETUP_LEARNING_ENDPOINT\}\/dismiss/);
+  assert.match(source, /openLearned,/);
 });

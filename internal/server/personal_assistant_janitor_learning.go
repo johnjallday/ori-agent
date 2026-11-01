@@ -22,6 +22,9 @@ type janitorKnowledgeProducer struct {
 	reader   *janitorKnowledgeReader
 	learning *personalassistant.KnowledgeLearningService
 	recovery *janitorKnowledgeRecovery
+	// setupBatch also reads the journal on an explicit check, so moves filed
+	// before the scope allowed it are learned without waiting for the next move.
+	setupBatch setupBatchProducer
 }
 
 func (p janitorKnowledgeProducer) Check(ctx context.Context, userID string) ([]personalassistant.KnowledgeItem, error) {
@@ -51,6 +54,13 @@ func (p janitorKnowledgeProducer) Check(ctx context.Context, userID string) ([]p
 			return items, err
 		}
 		items = append(items, item)
+	}
+	// What the approved files teach is its own pool and not this check's result:
+	// it is raised here so an explicit check catches up, and answered on its card.
+	if p.setupBatch.reader != nil {
+		if _, err := p.setupBatch.Check(ctx, userID); err != nil && !errors.Is(err, personalassistant.ErrKnowledgePaused) {
+			logger.Warn("Setup learnings from approved files deferred", logger.Fields{"reason": "source_unavailable"})
+		}
 	}
 	return items, nil
 }
@@ -101,6 +111,11 @@ func (a scopedKnowledgeAuthority) Revalidate(ctx context.Context, binding person
 		return a.folderScan.Revalidate(ctx, binding, item)
 	case personalassistant.SecondBrainSourceKind:
 		return a.secondBrain.Revalidate(ctx, binding, item)
+	case personalassistant.SetupBatchSourceKind:
+		if a.janitor == nil {
+			return errJanitorKnowledgeSourceUnavailable
+		}
+		return a.janitor.revalidateSetupBatch(ctx, binding, item)
 	case "file_janitor":
 		if a.janitor == nil {
 			return errJanitorKnowledgeSourceUnavailable
@@ -158,6 +173,8 @@ type janitorKnowledgeRecovery struct {
 	store    *personalassistant.KnowledgeStore
 	learning *personalassistant.KnowledgeLearningService
 	producer janitorKnowledgeProducer
+	// setupBatch raises what the approved files teach (first-week FR17).
+	setupBatch setupBatchProducer
 }
 
 func (s *janitorKnowledgeRecovery) Reconcile(ctx context.Context, userID string) error {
@@ -218,6 +235,11 @@ func (s *janitorKnowledgeRecovery) MoveApplied(_, _ string) {
 	defer cancel()
 	if _, err := s.producer.Check(ctx, userprofile.LocalUserID); err != nil {
 		logger.Warn("File Janitor knowledge update deferred", logger.Fields{"reason": "source_unavailable"})
+	}
+	// What the approved files teach is its own pool, so a full queue of filing
+	// preferences does not stop it. A missing source defers it the same way.
+	if _, err := s.setupBatch.Check(ctx, userprofile.LocalUserID); err != nil && !errors.Is(err, personalassistant.ErrKnowledgePaused) {
+		logger.Warn("Setup learnings from approved files deferred", logger.Fields{"reason": "source_unavailable"})
 	}
 }
 

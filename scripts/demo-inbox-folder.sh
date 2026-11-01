@@ -5,7 +5,11 @@
 # sandboxed folder chips reach them.
 #
 # Usage:
-#   ./scripts/demo-inbox-folder.sh [--port PORT] [--sandbox DIR] [--desktop-project-leads] [--native-picker]
+#   ./scripts/demo-inbox-folder.sh [--port PORT] [--sandbox DIR] [--desktop-project-leads] [--recurring-names] [--native-picker]
+#
+# --recurring-names adds six files to Downloads whose names recur (Chase_Statement_*,
+# Dana_Lee_*) beside one that does not (Acme_Invoice_*), for the second brain's
+# first-week "what Ori learned from the files you filed" card.
 #
 # --desktop-project-leads seeds Desktop with a Go module beside five loose files
 # instead of leaving it empty, so the project hire leads there (the mixed-folder
@@ -33,6 +37,7 @@ set -euo pipefail
 port=8952
 sandbox=""
 desktop=empty
+recurring_names=0
 native_picker=0
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -44,6 +49,10 @@ while [[ $# -gt 0 ]]; do
 		desktop=project-leads
 		shift
 		;;
+	--recurring-names)
+		recurring_names=1
+		shift
+		;;
 	--port)
 		port="${2:-}"
 		shift 2
@@ -53,7 +62,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	-h | --help)
-		echo "usage: $0 [--port PORT] [--sandbox DIR] [--desktop-project-leads] [--native-picker]"
+		echo "usage: $0 [--port PORT] [--sandbox DIR] [--desktop-project-leads] [--recurring-names] [--native-picker]"
 		echo "Serves this worktree on an isolated sandbox with no model and seeded inbox folders."
 		exit 0
 		;;
@@ -117,6 +126,16 @@ seed_loose() {
 }
 
 seed_loose "$sandbox/Downloads" 25 download pdf png zip dmg csv mov
+if [[ "$recurring_names" == 1 ]]; then
+	# Files whose names recur, for what the approved files teach Ori (first-week
+	# FR17): Chase and Dana Lee each appear in more than one file name, Acme in
+	# only one, and a statement carries an amount that must never be kept.
+	for name in Chase_Statement_Jan.pdf Chase_Statement_Feb.pdf Chase_Statement_balance-4521.88_Mar.pdf \
+		Dana_Lee_Contract.pdf Dana_Lee_Proposal.docx Acme_Invoice_0412.pdf; do
+		printf 'fixture\n' >"$sandbox/Downloads/$name"
+	done
+	echo "RECURRING_NAMES=Chase,Dana Lee (Acme appears once and must not be learned)"
+fi
 echo "DOWNLOADS=$sandbox/Downloads"
 
 seed_loose "$sandbox/Documents" 22 note docx pdf txt xlsx png
@@ -174,7 +193,10 @@ if [[ "$state" != "active" && "$state" != "paused" && "$state" != "needs_hq" ]];
 		node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).personal_assistant.state_version))')"
 fi
 if [[ "$state" != "active" && "$state" != "paused" ]]; then
-	api POST /api/personal-assistant/hq "{\"request_id\":\"inbox-demo-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\"}" >/dev/null
+	# include_future_workspaces is what the HQ card sends: the assistant's reading
+	# scope then takes in the File Curator workspace hired later, and what it
+	# learns from the files the user approves reaches the review queue.
+	api POST /api/personal-assistant/hq "{\"request_id\":\"inbox-demo-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\",\"scope\":\"all\",\"include_future_workspaces\":true}" >/dev/null
 fi
 echo "URL=$base"
 echo "READY: Home's Hire an agent and the composer's Add folder can attach Downloads, Documents or Desktop."

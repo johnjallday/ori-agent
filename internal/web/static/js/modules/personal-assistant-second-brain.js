@@ -130,6 +130,48 @@ export function secondBrainFolderOfferShows({ justSetUp, headline, dismissed } =
   return justSetUp === true || String(headline || '').includes(FOLDER_OFFER_LINE);
 }
 
+// What a folder taught Ori, answered on one card (first-week FR16 to FR19). The
+// items are the review queue's candidates from the user's approved filing; each
+// is approved or turned away with the Profile page's own actions, so the wording
+// the user approves is the wording shown here, word for word.
+export const SETUP_LEARNING_ENDPOINT = '/api/personal-assistant/setup-learning';
+export const SETUP_LEARNING_HEADING =
+  'Here is what I learned from your folder. Approve what is right and it goes into your second brain.';
+
+export function setupLearningView(payload) {
+  const raw = Array.isArray(payload?.learning?.items) ? payload.learning.items : [];
+  const items = raw
+    .filter(item => item && typeof item.id === 'string' && item.id && Number(item.version) >= 1)
+    .map(item => ({
+      id: item.id,
+      version: Number(item.version),
+      text: String(item.text || '').trim(),
+      evidence: (Array.isArray(item.evidence) ? item.evidence : [])
+        .map(line => String(line || '').trim())
+        .filter(Boolean)
+        .slice(0, 3),
+      source: item.source === 'filing' ? 'filing' : 'files'
+    }))
+    .filter(item => item.text);
+  return {
+    items,
+    total: items.length,
+    heading: items.length
+      ? SETUP_LEARNING_HEADING
+      : 'Nothing from this folder is waiting for an answer right now.'
+  };
+}
+
+// setupLearningClosing is the card's last line: how many notes were written, and
+// where to see them. Every number is the folder's own count, never a promise.
+export function setupLearningClosing(written) {
+  const count = Math.max(0, Number(written) || 0);
+  if (count === 0) return 'Nothing new was written to your notes.';
+  return count === 1
+    ? '1 note was written in your second brain.'
+    : `${count} notes were written in your second brain.`;
+}
+
 export const DEFAULT_SECOND_BRAIN_NAME = 'Second Brain';
 
 // secondBrainFolderNameProblem is the one sentence for a name that is not one
@@ -510,7 +552,7 @@ export function newRequestID(prefix = 'sb') {
 const state = {
   available: false,
   secondBrain: null,
-  phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed | fillin
+  phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed | fillin | learned
   pinned: false,
   // The folder offer under the first look of a second brain Ori just set up;
   // offerDismissed ends it once a folder is attached. folderChips are the usual
@@ -519,6 +561,10 @@ const state = {
   offerDismissed: false,
   folderChips: null,
   folderChipsLoading: false,
+  // The card of what a folder taught Ori: its items, what the user answered
+  // (id → 'approve' | 'reject'), one retry key per answer, the notes counted when
+  // it opened, and its closing line once everything is answered.
+  learned: { status: 'idle', items: [], answered: {}, keys: {}, baseline: 0, closing: '' },
   panelRoute: '',
   chosen: null, // { detectedId | selectionToken, name, path }
   // Setting one up: the parent the user picked ({ selectionToken, name, path})
@@ -723,6 +769,223 @@ async function showFolder(chip) {
   state.offerDismissed = true;
   render();
   window.PersonalAssistantFolder?.openChooser?.();
+}
+
+// openLearned opens the card of what the user's approved filing taught Ori. It is
+// what the first-batch report's Review what Ori learned does: it opens the
+// drawer, reads the queue, and counts the notes already there so the closing line
+// can say how many this card wrote.
+async function openLearned() {
+  try {
+    const panel = window.PersonalAssistantPanel;
+    panel?.open?.(document.getElementById('personalAssistantLauncher'), { focus: false });
+  } catch (_) {
+    // The card still draws if the drawer was already open.
+  }
+  if (!state.secondBrain) await load();
+  state.pinned = false;
+  state.latest = true;
+  state.history = [];
+  state.learned = {
+    status: 'loading',
+    items: [],
+    answered: {},
+    keys: {},
+    baseline: 0,
+    closing: ''
+  };
+  setPhase('learned', { focus: false });
+  const [{ ok, payload }, status] = await Promise.all([
+    fetch(SETUP_LEARNING_ENDPOINT, { headers: { Accept: 'application/json' } })
+      .then(async response => ({
+        ok: response.ok,
+        payload: await response.json().catch(() => ({}))
+      }))
+      .catch(() => ({ ok: false, payload: {} })),
+    refresh()
+  ]);
+  state.learned.baseline = Number(status?.written_by_ori?.count) || 0;
+  if (!ok) {
+    state.learned.status = 'error';
+  } else {
+    state.learned.items = setupLearningView(payload).items;
+    state.learned.status = 'ready';
+  }
+  render();
+}
+
+function learnedRemaining() {
+  return state.learned.items.filter(item => !state.learned.answered[item.id]);
+}
+
+// answerLearning approves or turns away one learning with the Profile page's own
+// action. The retry key is made once per learning and answer, so pressing again
+// after a failure repeats the same request instead of starting another.
+async function answerLearning(item, action) {
+  if (state.busy || state.learned.answered[item.id]) return;
+  state.busy = true;
+  showError('');
+  render();
+  const keyName = `${item.id}:${action}`;
+  if (!state.learned.keys[keyName]) state.learned.keys[keyName] = newRequestID('learn');
+  const { ok, payload } = await fetch(
+    `/api/personal-assistant/knowledge/${encodeURIComponent(item.id)}/${action}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ version: item.version, request_id: state.learned.keys[keyName] })
+    }
+  )
+    .then(async response => ({ ok: response.ok, payload: await response.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload, 'That did not save. Try again.'));
+    render();
+    return;
+  }
+  state.learned.answered[item.id] = action;
+  tellKnowledgeChanged();
+  if (learnedRemaining().length === 0) {
+    await settleLearned();
+    return;
+  }
+  render();
+}
+
+// settleLearned waits for the sync that each approval started, so the closing line
+// counts notes that are on disk, then says how many were written. The sync is a
+// background run, so it polls briefly and then reports what it found.
+async function settleLearned() {
+  state.busy = true;
+  render();
+  const wanted = state.learned.items.filter(
+    item => state.learned.answered[item.id] === 'approve' && item.source === 'files'
+  ).length;
+  let written = 0;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const status = await refresh();
+    written = Math.max(0, (Number(status?.written_by_ori?.count) || 0) - state.learned.baseline);
+    if (written >= wanted) break;
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  state.busy = false;
+  state.learned.closing = setupLearningClosing(written);
+  render();
+  announce();
+}
+
+// dismissLearned turns away what is left so it does not stay in the queue.
+async function dismissLearned() {
+  if (state.busy) return;
+  state.busy = true;
+  showError('');
+  render();
+  const { ok, payload } = await fetch(`${SETUP_LEARNING_ENDPOINT}/dismiss`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ request_id: newRequestID('learn-dismiss') })
+  })
+    .then(async response => ({ ok: response.ok, payload: await response.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload));
+    render();
+    return;
+  }
+  tellKnowledgeChanged();
+  state.pinned = false;
+  setPhase('idle', { focus: false });
+}
+
+// tellKnowledgeChanged lets Home read Today again, so the first-batch report stops
+// saying it learned what has just been answered.
+function tellKnowledgeChanged() {
+  try {
+    document.dispatchEvent(new CustomEvent('personal-assistant-knowledge-changed'));
+  } catch (_) {
+    // Today reloads on its own the next time it is opened.
+  }
+}
+
+function renderLearned(body) {
+  const learned = state.learned;
+  if (learned.status === 'loading') {
+    const line = node('p', 'pa-specialist-offer__headline', 'Reading what I learned…');
+    line.setAttribute('role', 'status');
+    body.append(line);
+    return;
+  }
+  if (learned.status === 'error') {
+    body.append(
+      node('p', 'pa-specialist-offer__headline', 'I could not read what I learned. Try again.')
+    );
+    body.append(
+      actionRow([{ id: 'retry', label: 'Try again', style: 'primary' }], () => void openLearned())
+    );
+    return;
+  }
+  const view = setupLearningView({ learning: { items: learned.items } });
+  body.append(node('p', 'pa-specialist-offer__headline', view.heading));
+  const list = node('ul', 'pa-second-brain__learned');
+  view.items.forEach(item => {
+    const row = node('li', 'pa-second-brain__learned-item');
+    row.dataset.learnedItem = item.id;
+    row.append(node('p', 'pa-second-brain__learned-text', item.text));
+    item.evidence.forEach(line => row.append(node('p', 'pa-folder__note', line)));
+    const answered = learned.answered[item.id];
+    if (answered) {
+      row.append(
+        node('p', 'pa-folder__note', answered === 'approve' ? 'Approved' : 'Not this one')
+      );
+    } else {
+      row.append(
+        actionRow(
+          [
+            { id: 'approve', label: 'Approve', style: 'primary' },
+            { id: 'reject', label: 'Not this', style: 'link' }
+          ],
+          action => void answerLearning(item, action.id)
+        )
+      );
+    }
+    list.append(row);
+  });
+  if (view.items.length) body.append(list);
+  if (learned.closing) {
+    body.append(node('p', 'pa-folder__first-look', learned.closing));
+    const links = node('p', 'pa-folder__note');
+    if (state.panelRoute) {
+      const notes = node('a', 'pa-second-brain__open', 'See them in Notes');
+      notes.href = state.panelRoute;
+      links.append(notes);
+    }
+    const open = secondBrainOpenLink(state.secondBrain);
+    if (open) {
+      const obsidian = node('a', 'pa-second-brain__open', 'Open in Obsidian');
+      obsidian.href = open;
+      if (links.childNodes.length) links.append(' · ');
+      links.append(obsidian);
+    }
+    if (links.childNodes.length) body.append(links);
+    body.append(
+      actionRow([{ id: 'done', label: 'Done', style: 'outline' }], () => {
+        state.pinned = false;
+        setPhase('idle', { focus: false });
+      })
+    );
+    return;
+  }
+  const actions = [];
+  if (!view.items.length) actions.push({ id: 'done', label: 'Done', style: 'outline' });
+  else actions.push({ id: 'later', label: 'Not now', style: 'link' });
+  body.append(
+    actionRow(actions, action => {
+      if (action.id === 'later') void dismissLearned();
+      else setPhase('idle', { focus: false });
+    })
+  );
 }
 
 // showFillInIfOffered is the consent card's turn once a result that was waiting
@@ -1232,6 +1495,7 @@ function render() {
     else if (state.phase === 'consent') renderConsent(els.body);
     else if (state.phase === 'manage') renderManage(els.body);
     else if (state.phase === 'fillin') renderFillIn(els.body);
+    else if (state.phase === 'learned') renderLearned(els.body);
     else renderLook(els.body);
   }
   if (els.status) {
@@ -1743,6 +2007,9 @@ function init() {
       state.history = [];
       await chooseFolder({ selectionToken, name: name || baseName(path), path: path || '' });
     },
+    // The first-batch report's Review what Ori learned: the card of what the
+    // user's approved filing taught Ori, answered in place.
+    openLearned,
     // The Notes station and the Profile open the connection's own card:
     // connected, missing, or not set up (which is the chooser).
     openManage: async () => {
@@ -1764,7 +2031,7 @@ function init() {
       await refresh();
       if (
         state.secondBrain?.status === 'not_connected' &&
-        ['result', 'reading', 'failed', 'manage', 'fillin'].includes(state.phase)
+        ['result', 'reading', 'failed', 'manage', 'fillin', 'learned'].includes(state.phase)
       ) {
         clearTimeout(state.pollTimer);
         state.pinned = false;

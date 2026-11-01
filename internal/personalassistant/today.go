@@ -289,6 +289,7 @@ type TodayService struct {
 	setup              todaySpecialistSetupReader
 	janitorResults     JanitorResultReader
 	curatorProtection  filecuratorguidance.ProtectionReader
+	setupLearning      SetupLearnedCounter
 	folderReceipts     FolderReceiptReader
 	folderDigest       FolderDigestReader
 	secondBrain        SecondBrainTodayReader
@@ -351,6 +352,27 @@ func (s *TodayService) SetFileCuratorProtectionReader(reader filecuratorguidance
 	if s != nil {
 		s.curatorProtection = reader
 	}
+}
+
+// SetupLearnedCounter counts what the approved files taught Ori and the user has
+// not yet answered, for the first-batch report's sentence (first-week FR16).
+type SetupLearnedCounter interface {
+	Count(ctx context.Context, userID string) int
+}
+
+// SetSetupLearning lets an inbox hire's report say what its files taught Ori.
+// Unset, the report is exactly what it was without it. Startup wiring only.
+func (s *TodayService) SetSetupLearning(counter SetupLearnedCounter) {
+	if s != nil {
+		s.setupLearning = counter
+	}
+}
+
+func (s *TodayService) setupLearned(ctx context.Context, userID string) int {
+	if s == nil || s.setupLearning == nil {
+		return 0
+	}
+	return s.setupLearning.Count(ctx, userID)
 }
 
 // SetFolderReceiptReader enables seven-day setup receipts in Today's Results.

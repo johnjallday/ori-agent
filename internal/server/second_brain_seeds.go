@@ -254,6 +254,10 @@ func knowledgeHowPhrase(item personalassistant.KnowledgeReviewItem) string {
 		return "You told Ori this when it asked about you"
 	case "explicit":
 		return "You told Ori this"
+	case personalassistant.SetupBatchSourceKind:
+		return "You approved this after Ori saw it in the files you filed"
+	case "file_janitor":
+		return "You approved this after Ori noticed how you file"
 	default:
 		return "You approved this on the Profile page"
 	}

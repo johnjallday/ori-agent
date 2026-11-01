@@ -377,6 +377,8 @@ type ServerBuilder struct {
 	// offers, and decisions over the HQ sidecar.
 	personalAssistantFolderDigest *personalassistant.FolderDigestService
 	personalAssistantSecondBrain  *personalassistant.SecondBrainService
+	// personalAssistantSetupLearning lists and dismisses what a folder taught Ori.
+	personalAssistantSetupLearning *personalassistant.SetupLearningService
 	// folderSetupHost plans and runs the digest's one-card setups; its short
 	// plan cache is dropped when a build installs a plugin a plan depends on.
 	folderSetupHost *folderSetupHost
