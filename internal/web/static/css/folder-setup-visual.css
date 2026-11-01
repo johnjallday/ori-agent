@@ -512,24 +512,10 @@
   white-space: normal;
 }
 
-.folder-requirements__row--actionable > .folder-requirements__actions:has(section, p) {
+.folder-requirements__row--actionable > .folder-requirements__actions:has(p) {
   grid-area: 6 / 1 / auto / -1;
   justify-content: start;
   max-width: none;
-}
-
-.folder-requirements__review {
-  width: 100%;
-  min-width: 0;
-  border-top: 1px solid var(--ori-line);
-  padding-top: 12px;
-  overflow-wrap: anywhere;
-}
-
-.folder-requirements__review pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-width: 100%;
 }
 
 .folder-requirements__error {

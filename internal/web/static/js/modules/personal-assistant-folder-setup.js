@@ -932,7 +932,7 @@ function reviewFrom(trigger, candidateId, placement = {}) {
       candidateId
     }
   };
-  void review(candidateId, false, undefined, placement);
+  return review(candidateId, false, undefined, placement);
 }
 
 // A verified re-pick redraws its existing card without another review request,
@@ -971,8 +971,9 @@ export function recheckReview(offer, trigger) {
     offer.needs_pick
   )
     return false;
-  reviewFrom(trigger, offer.candidate_id, { recheck: true });
-  return true;
+  // Truthy for a started re-read, and awaitable so the plugin wizard can read
+  // the refreshed requirements rather than guess at them.
+  return reviewFrom(trigger, offer.candidate_id, { recheck: true }) || true;
 }
 
 function reviewStructure(trigger) {

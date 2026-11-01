@@ -1,0 +1,97 @@
+/* The plugin setup wizard: a fixed header, the decision, a fixed footer and one
+   scrolling region. The footer follows the decision in the DOM so keyboard and
+   screen-reader users reach the choice before the long trust report; `order`
+   keeps it at the bottom of the screen. */
+.plugin-setup-wizard {
+  --psw-ink: var(--pa-ink, var(--text-primary));
+  --psw-muted: var(--pa-ink-dim, var(--text-secondary));
+  --psw-line: var(--ori-border, var(--border-color));
+  --psw-paper: var(--ori-paper, var(--bg-primary));
+  width: min(560px, calc(100vw - 24px));
+  max-width: none;
+  max-height: min(720px, calc(100dvh - 24px));
+  padding: 0;
+  color: var(--psw-ink);
+  background: var(--psw-paper);
+  border: 1px solid var(--psw-line);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.plugin-setup-wizard[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-setup-wizard::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.plugin-setup-wizard__header {
+  flex: none;
+  order: 0;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--psw-line);
+}
+
+.plugin-setup-wizard__title {
+  margin: 0;
+  font:
+    700 0.95rem "Chakra Petch",
+    sans-serif;
+}
+
+.plugin-setup-wizard__title:focus {
+  outline: none;
+}
+
+.plugin-setup-wizard__title:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+
+.plugin-setup-wizard__body {
+  flex: 1 1 auto;
+  order: 2;
+  min-height: 0;
+  padding: 0.75rem 1rem;
+  overflow: auto;
+}
+
+.plugin-setup-wizard__body h3 {
+  margin: 0 0 0.25rem;
+  font:
+    700 1.05rem "Chakra Petch",
+    sans-serif;
+}
+
+.plugin-setup-wizard__footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  order: 3;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--psw-line);
+}
+
+.plugin-setup-wizard__footer > button {
+  min-height: 44px;
+}
+
+@media (max-height: 520px) {
+  .plugin-setup-wizard {
+    max-height: calc(100dvh - 8px);
+  }
+
+  .plugin-setup-wizard__header,
+  .plugin-setup-wizard__footer {
+    padding-block: 0.35rem;
+  }
+
+  .plugin-setup-wizard__body {
+    padding-block: 0.35rem;
+  }
+}

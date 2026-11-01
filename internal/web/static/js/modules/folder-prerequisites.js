@@ -133,7 +133,7 @@ export function renderFolderPrerequisites(
   container,
   offer,
   controller,
-  { blocked = false, trust } = {}
+  { blocked = false, openWizard } = {}
 ) {
   const eligible = Boolean(
     offer?.prerequisites_available &&
@@ -163,9 +163,6 @@ export function renderFolderPrerequisites(
       state: selected
         ? {
             busy: state.busy,
-            review: state.review
-              ? { ...state.review, review_token: undefined, run_id: undefined }
-              : null,
             pending: Boolean(state.pending),
             error: state.error
           }
@@ -175,107 +172,27 @@ export function renderFolderPrerequisites(
     if (mount.dataset.signature === signature) continue;
     mount.dataset.signature = signature;
     mount.replaceChildren();
-    mount.onkeydown = null;
     if (!eligible || !['install', 'update', 'enable'].includes(operation)) continue;
-    const make = (tag, text, className = '') => {
-      const node = doc.createElement(tag);
-      node.textContent = text;
-      node.className = className;
-      return node;
-    };
-    const button = (label, action, disabled = false) => {
-      const node = make('button', label, 'personal-assistant-panel__chip');
-      node.type = 'button';
-      node.disabled = disabled;
-      node.addEventListener('click', action);
-      mount.append(node);
-      return node;
-    };
     const verb = { install: 'Install', update: 'Update', enable: 'Enable' }[operation];
-    if (!selected || (!state.review && !state.pending && !state.busy))
-      button(
-        `${verb} ${name}`,
-        () => void controller.review(row.dataset.requirementKind),
-        blocked || state.busy
-      );
-    if (selected && state.review) {
-      const review = state.review;
-      const panel = make('section', '', 'folder-requirements__review');
-      panel.setAttribute('aria-label', `Review ${name}`);
-      panel.append(
-        make('h5', `${verb} ${name}`),
-        make(
-          'p',
-          `Release ${review.version || 'not reported'} · ${review.source || 'Source not reported'}`
-        )
-      );
-      panel.append(
-        make(
-          'p',
-          `Enabled after this action: ${review.enabled_after ? 'Yes' : 'No — enable separately afterward'}`
-        )
-      );
-      if (review.disclosure && trust) panel.append(trust(review.disclosure));
-      else
-        panel.append(
-          make(
-            'p',
-            operation === 'enable'
-              ? 'Enables the installed, reviewed package. No download.'
-              : 'Disclosure unavailable. Do not confirm an undisclosed installation.'
-          )
-        );
-      if (review.details) {
-        const details = make('details', '');
-        details.append(
-          make('summary', 'Full reviewed package details'),
-          make('pre', JSON.stringify(review.details, null, 2))
-        );
-        panel.append(details);
-      }
-      panel.append(
-        make(
-          'p',
-          'This changes only this Ori plugin. No workspace, Home, agent or model task is created or started.'
-        )
-      );
-      mount.append(panel);
-      button(
-        state.busy
-          ? 'Applying reviewed change…'
-          : `Confirm ${operation === 'enable' ? 'enablement' : operation === 'update' ? 'update' : 'installation'}`,
-        () => void controller.confirm(),
-        blocked || state.busy || ((!review.disclosure || !trust) && operation !== 'enable')
-      );
-      const cancel = () => {
-        controller.cancel();
-        row.querySelector('.folder-requirements__actions button')?.focus();
-      };
-      button('Cancel', cancel, state.busy || Boolean(state.pending));
-      mount.onkeydown = event => {
-        if (event.key !== 'Escape' || state.busy || state.pending) return;
-        event.preventDefault();
-        event.stopPropagation();
-        cancel();
-      };
-      const heading = panel.querySelector('h5');
-      heading.tabIndex = -1;
-      if (!state.busy && !state.pending && doc.activeElement === doc.body) {
-        heading.focus({ preventScroll: true });
-        globalThis.PersonalAssistantTranscript?.revealControl?.(heading);
-      }
-    } else if (selected && state.busy) {
-      const status = make('p', 'Reading the reviewed package…');
-      status.setAttribute('role', 'status');
-      mount.append(status);
-    }
+    const kind = row.dataset.requirementKind;
+    // One launch control. The review, its consent and its progress live in the
+    // wizard. An unknown confirmation result keeps its own wording, so the user
+    // is sent back to the same installation rather than to a new one.
+    const launch = doc.createElement('button');
+    launch.type = 'button';
+    launch.className = 'personal-assistant-panel__chip';
+    launch.textContent =
+      selected && state.pending ? 'Check the same installation' : `${verb} ${name}`;
+    launch.disabled = blocked || state.busy || !openWizard;
+    launch.addEventListener('click', () => openWizard?.(kind, launch));
+    mount.append(launch);
     if (selected && state.error) {
-      const error = make('p', state.error, 'folder-requirements__error');
+      const error = doc.createElement('p');
+      error.textContent = state.error;
+      error.className = 'folder-requirements__error';
       error.setAttribute('role', 'alert');
       mount.append(error);
     }
-    if (selected && state.pending && !state.busy)
-      button('Check the same installation', () => void controller.confirm(), blocked);
     mount.setAttribute('aria-busy', selected && state.busy ? 'true' : 'false');
   }
 }

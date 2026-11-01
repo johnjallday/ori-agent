@@ -45,6 +45,7 @@ import {
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import { setupQuestActionURL } from './setup-quest-links.js';
 import { createFolderPrerequisites, renderFolderPrerequisites } from './folder-prerequisites.js';
+import { createPluginSetupWizard } from './plugin-setup-wizard.js';
 import {
   declinedLine,
   proposalView,
@@ -2968,9 +2969,21 @@ const prerequisites = createFolderPrerequisites({
     showError(message || '');
     // Explicit package repair refreshes only this still-unaccepted canonical
     // review. It never confirms the newly available workspace/model plan.
-    window.PersonalAssistantFolderSetup?.recheckReview?.(state.offer, document.activeElement);
+    return window.PersonalAssistantFolderSetup?.recheckReview?.(
+      state.offer,
+      document.activeElement
+    );
   }
 });
+
+// The wizard opens only from the card's own buttons, never from a folder attach.
+const pluginSetupWizard = createPluginSetupWizard({
+  doc: globalThis.document,
+  controller: prerequisites,
+  onClose: () => render()
+});
+const pluginSetupRows = () =>
+  globalThis.OriFolderSetupVisual.requirementsView({ offer: state.offer }).rows;
 
 // announceOffer tells the mission card (progression-widget.js) what the
 // chooser shows, so the two render the same offer in the same state. It also
@@ -3859,9 +3872,10 @@ function renderOffer(place) {
     prerequisites,
     {
       blocked: state.busy || conversationReviewLoading(),
-      trust: window.PluginLifecycle?.renderTrustReport
+      openWizard: (kind, trigger) => pluginSetupWizard.open(pluginSetupRows(), { kind, trigger })
     }
   );
+  pluginSetupWizard.sync();
   setText(
     document.getElementById('personalAssistantFolderActionSummary'),
     view.plan && !view.setup && !receipt.visible ? confirmationSummary(view.plan) : ''
