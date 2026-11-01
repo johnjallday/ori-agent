@@ -116,7 +116,7 @@ func (j *JournalService) Propose(ctx context.Context, userID, localDate string) 
 	}
 	localDate = strings.TrimSpace(localDate)
 	if localDate == "" {
-		localDate = j.now().UTC().Format("2006-01-02")
+		localDate = j.now().Format("2006-01-02")
 	}
 
 	var snap JournalSnapshot
@@ -172,7 +172,7 @@ func (j *JournalService) SaveMirrored(ctx context.Context, userID, localDate, co
 	}
 	localDate = strings.TrimSpace(localDate)
 	if localDate == "" {
-		localDate = j.now().UTC().Format("2006-01-02")
+		localDate = j.now().Format("2006-01-02")
 	}
 	now := j.now().UTC()
 	note := &session.WorkspaceNote{

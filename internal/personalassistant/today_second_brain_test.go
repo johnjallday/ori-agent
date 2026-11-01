@@ -28,7 +28,7 @@ func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 
 	t.Run("a running look is Working on", func(t *testing.T) {
 		s := &TodayService{secondBrain: fakeTodayNotes{view: connected, look: SecondBrainLookView{State: secondbrain.LookRunning, LookID: "look-2"}}}
-		working, needs, done := s.secondBrainItems(context.Background(), "local", now)
+		working, needs, done := s.secondBrainItems(context.Background(), "local", "my-hq", now)
 		if len(working) != 1 || working[0].Title != "Reading Second Brain…" || working[0].Kind != "second_brain_look" || len(needs) != 0 || len(done) != 0 {
 			t.Fatalf("working %+v needs %+v done %+v", working, needs, done)
 		}
@@ -38,9 +38,13 @@ func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 		view := connected
 		view.LastLook = &SecondBrainLookSummary{ID: "look-1", At: now.Add(-time.Hour), OpenItems: 12, Headline: "12 open items across 6 notes, 4 with dates."}
 		s := &TodayService{secondBrain: fakeTodayNotes{view: view, look: SecondBrainLookView{State: secondbrain.LookFinished, LookID: "look-1"}}}
-		_, needs, done := s.secondBrainItems(context.Background(), "local", now)
-		if len(needs) != 1 || needs[0].Kind != "second_brain_result" || needs[0].Detail != view.LastLook.Headline {
+		_, needs, done := s.secondBrainItems(context.Background(), "local", "my-hq", now)
+		if len(needs) != 1 || needs[0].Kind != "second_brain_result" || needs[0].Detail != view.LastLook.Headline ||
+			needs[0].Route != "/workspaces/my-hq?station=second-brain" {
 			t.Fatalf("needs = %+v", needs)
+		}
+		if got := notesPanelRoute("../elsewhere"); got != "" {
+			t.Fatalf("an unsafe slug made a route: %q", got)
 		}
 		if len(done) != 1 || done[0].Title != "Looked at Second Brain · 12 open items" {
 			t.Fatalf("done = %+v", done)
@@ -48,10 +52,10 @@ func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 
 		view.LastLook.Acted = true
 		s = &TodayService{secondBrain: fakeTodayNotes{view: view, look: SecondBrainLookView{State: secondbrain.LookFinished, LookID: "look-1"}}}
-		if _, needs, _ := s.secondBrainItems(context.Background(), "local", now); len(needs) != 0 {
+		if _, needs, _ := s.secondBrainItems(context.Background(), "local", "my-hq", now); len(needs) != 0 {
 			t.Fatalf("an acted result still needs the user: %+v", needs)
 		}
-		if _, _, done := s.secondBrainItems(context.Background(), "local", now.Add(8*24*time.Hour)); len(done) != 0 {
+		if _, _, done := s.secondBrainItems(context.Background(), "local", "my-hq", now.Add(8*24*time.Hour)); len(done) != 0 {
 			t.Fatalf("a week-old look is still Done: %+v", done)
 		}
 	})
@@ -59,11 +63,11 @@ func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 	t.Run("nothing connected or unreadable leaves Today alone", func(t *testing.T) {
 		for _, reader := range []fakeTodayNotes{{view: SecondBrainView{Status: SecondBrainNotConnected}}, {err: errors.New("down")}} {
 			s := &TodayService{secondBrain: reader}
-			if w, n, d := s.secondBrainItems(context.Background(), "local", now); len(w)+len(n)+len(d) != 0 {
+			if w, n, d := s.secondBrainItems(context.Background(), "local", "my-hq", now); len(w)+len(n)+len(d) != 0 {
 				t.Fatalf("items = %+v %+v %+v", w, n, d)
 			}
 		}
-		if w, n, d := (&TodayService{}).secondBrainItems(context.Background(), "local", now); len(w)+len(n)+len(d) != 0 {
+		if w, n, d := (&TodayService{}).secondBrainItems(context.Background(), "local", "my-hq", now); len(w)+len(n)+len(d) != 0 {
 			t.Fatal("no reader produced items")
 		}
 	})

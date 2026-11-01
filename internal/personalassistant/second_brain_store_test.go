@@ -82,7 +82,7 @@ func fullSecondBrainLook(source secondbrain.Source) *secondbrain.Look {
 		itemText := fmt.Sprintf("%d %s", i, text)[:secondbrain.MaxTaskTextRunes]
 		look.Items = append(look.Items, secondbrain.LookItem{
 			ID: secondbrain.ItemID(source.ID, itemNote, itemText), Text: itemText, Note: itemNote, Line: 100000 + i, Due: "2026-10-25",
-			Suggested: true, InDecision: true, Link: itemLink,
+			Suggested: true, InDecision: true, Link: itemLink, ActedAs: secondbrain.ActedFollowUp, ActedAt: &finished,
 		})
 	}
 	for range secondbrain.MaxLookSignals {

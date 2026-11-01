@@ -84,6 +84,14 @@ const (
 	LookFailed   = "failed"
 )
 
+// What the user did with one open item in the Notes panel. None of them edits
+// the note: Done and Dismiss are Ori's own memory of the choice.
+const (
+	ActedFollowUp  = "follow_up"
+	ActedDone      = "done"
+	ActedDismissed = "dismissed"
+)
+
 // Who wrote a look's headline.
 const (
 	HeadlineByRules = "rules"
@@ -193,6 +201,44 @@ type LookItem struct {
 	// Link opens the note in Obsidian (FR26); "" for a plain Markdown folder.
 	// It is built from the vault's name and the note's path, never read.
 	Link string `json:"link,omitempty"`
+	// ActedAs is what the user did with the item (ActedFollowUp, ActedDone or
+	// ActedDismissed), "" while untouched; ActedAt is when.
+	ActedAs string     `json:"acted_as,omitempty"`
+	ActedAt *time.Time `json:"acted_at,omitempty"`
+}
+
+// Item returns the look's item with this id, for changing in place.
+func (l *Look) Item(id string) (*LookItem, bool) {
+	if l == nil {
+		return nil, false
+	}
+	for index := range l.Items {
+		if l.Items[index].ID == id {
+			return &l.Items[index], true
+		}
+	}
+	return nil, false
+}
+
+// CarryMarks copies what the user decided about an item that is still open
+// from the look before. Done stays until a look finds the line ticked or gone,
+// and is never suggested meanwhile; a follow-up keeps its mark because the
+// follow-up still exists. Dismissed is not carried: it lasts until the next look.
+func (l *Look) CarryMarks(previous *Look) {
+	if l == nil || previous == nil {
+		return
+	}
+	for index := range l.Items {
+		item := &l.Items[index]
+		before, ok := previous.Item(item.ID)
+		if !ok || (before.ActedAs != ActedDone && before.ActedAs != ActedFollowUp) {
+			continue
+		}
+		item.ActedAs, item.ActedAt = before.ActedAs, before.ActedAt
+		if item.ActedAs == ActedDone {
+			item.Suggested = false
+		}
+	}
 }
 
 // LookPerson is a person note and how many other notes mention it.
@@ -232,6 +278,9 @@ type Receipt struct {
 	Skipped   int       `json:"skipped,omitempty"`
 	// Note is the Inbox path a capture wrote, so a replay links the same note.
 	Note string `json:"note,omitempty"`
+	// Item is the open item a triage acted on, so the id cannot be reused for
+	// another item.
+	Item string `json:"item,omitempty"`
 }
 
 // Connected returns the connected source, or nil.
@@ -407,6 +456,9 @@ var (
 // ValidRequestID reports whether a request_id has the shape every write takes.
 func ValidRequestID(id string) bool { return requestIDPattern.MatchString(id) }
 
+// ValidItemID reports whether id has the shape of an open item's content hash.
+func ValidItemID(id string) bool { return itemIDPattern.MatchString(id) }
+
 // Validate checks every bound and shape the record must hold.
 func (r Record) Validate() error {
 	if len(r.Sources) > MaxSources || len(r.Receipts) > MaxReceipts {
@@ -435,7 +487,8 @@ func (r Record) Validate() error {
 	}
 	for _, receipt := range r.Receipts {
 		if !ValidRequestID(receipt.RequestID) || receipt.Action == "" || len(receipt.Action) > 32 || receipt.Created < 0 || receipt.Skipped < 0 ||
-			(receipt.Note != "" && (len(receipt.Note) > 300 || !strings.HasPrefix(receipt.Note, FolderInbox+"/") || strings.Contains(receipt.Note, ".."))) {
+			(receipt.Note != "" && (len(receipt.Note) > 300 || !strings.HasPrefix(receipt.Note, FolderInbox+"/") || strings.Contains(receipt.Note, ".."))) ||
+			(receipt.Item != "" && !ValidItemID(receipt.Item)) {
 			return ErrInvalidRecord
 		}
 	}
@@ -515,7 +568,9 @@ func validateItem(item LookItem) error {
 		!validNotePath(item.Note),
 		item.Line < 1,
 		item.Due != "" && (!isoDayPattern.MatchString(item.Due) || !validDate(item.Due)),
-		!validLink(item.Link):
+		!validLink(item.Link),
+		item.ActedAs != "" && item.ActedAs != ActedFollowUp && item.ActedAs != ActedDone && item.ActedAs != ActedDismissed,
+		(item.ActedAs == "") != (item.ActedAt == nil):
 		return ErrInvalidRecord
 	}
 	return nil

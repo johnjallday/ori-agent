@@ -28,6 +28,8 @@ type SecondBrainService interface {
 	LookAgain(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainLookView, error)
 	AcceptFollowUps(ctx context.Context, userID, lookID string, input personalassistant.SecondBrainAcceptInput) (personalassistant.SecondBrainAcceptView, error)
 	DismissLook(ctx context.Context, userID, lookID, requestID string) (personalassistant.SecondBrainLookView, error)
+	ActOnItem(ctx context.Context, userID, lookID, itemID, action, requestID string) (personalassistant.SecondBrainLookView, error)
+	Inbox(ctx context.Context, userID string) (personalassistant.SecondBrainInboxView, error)
 	Disconnect(ctx context.Context, userID, requestID string, ifVersion int64) (personalassistant.SecondBrainView, error)
 }
 
@@ -337,6 +339,56 @@ func (h *Handler) DismissSecondBrainLook(w http.ResponseWriter, r *http.Request)
 	orihttp.Success(w, map[string]any{"look": view})
 }
 
+type secondBrainItemRequest struct {
+	Action    string `json:"action"`
+	RequestID string `json:"request_id"`
+}
+
+// ActOnSecondBrainItem makes one open item a follow-up, marks it done, or
+// dismisses it until the next look. It never edits a note.
+func (h *Handler) ActOnSecondBrainItem(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	lookID, itemID := strings.TrimSpace(r.PathValue("lookID")), strings.TrimSpace(r.PathValue("itemID"))
+	if lookID == "" || itemID == "" {
+		orihttp.BadRequest(w, "Look id and item id are required")
+		return
+	}
+	var req secondBrainItemRequest
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "action", "request_id") {
+		return
+	}
+	view, err := h.secondBrain.ActOnItem(r.Context(), userID, lookID, itemID, strings.TrimSpace(req.Action), strings.TrimSpace(req.RequestID))
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"look": view})
+}
+
+// GetSecondBrainInbox lists the notes directly under Inbox in a second brain Ori
+// set up. It reads on request only.
+func (h *Handler) GetSecondBrainInbox(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	view, err := h.secondBrain.Inbox(r.Context(), userID)
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"inbox": view})
+}
+
 type secondBrainDisconnectRequest struct {
 	RequestID string `json:"request_id"`
 	IfVersion *int64 `json:"if_version"`
@@ -400,6 +452,12 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		orihttp.Conflict(w, "A notes folder is already connected. Disconnect it before setting one up")
 	case errors.Is(err, personalassistant.ErrSecondBrainLookNotFound):
 		orihttp.NotFound(w, "That look is no longer here")
+	case errors.Is(err, personalassistant.ErrSecondBrainItemNotFound):
+		orihttp.NotFound(w, "That item is no longer here")
+	case errors.Is(err, personalassistant.ErrSecondBrainNoInbox):
+		orihttp.NotFound(w, "Only a second brain Ori set up has an Inbox here")
+	case errors.Is(err, personalassistant.ErrSecondBrainSeededItem):
+		orihttp.Conflict(w, "That item came from a follow-up you already have")
 	case errors.Is(err, personalassistant.ErrValidation):
 		orihttp.BadRequest(w, "The request is not valid")
 	case errors.Is(err, personalassistant.ErrNeedsHQ):

@@ -60,7 +60,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			needs = append(needs, item)
 		}
 	}
-	notesWorking, notesNeeds, notesDone := s.secondBrainItems(ctx, userID, now)
+	notesWorking, notesNeeds, notesDone := s.secondBrainItems(ctx, userID, hq.FolderSlug, now)
 	working = append(working, notesWorking...)
 	needs = append(needs, notesNeeds...)
 	if item, ok := s.unfinishedBuildItem(ctx, userID, out); ok {

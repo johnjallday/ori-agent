@@ -16,8 +16,8 @@ const todaySecondBrainDoneWindow = 7 * 24 * time.Hour
 // on while a look runs, Needs you while a finished result waits for a
 // decision (the drawer card renders it there itself), and Done for a week. A
 // notes folder that cannot be read leaves Today as it was; the Notes slot says
-// so instead.
-func (s *TodayService) secondBrainItems(ctx context.Context, userID string, now time.Time) (working, needs, done []TodayItem) {
+// so instead. The result row leads to the HQ map with the Notes panel open.
+func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug string, now time.Time) (working, needs, done []TodayItem) {
 	if s.secondBrain == nil {
 		return nil, nil, nil
 	}
@@ -32,7 +32,7 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID string, now 
 			working = append(working, TodayItem{ID: "second-brain-look-" + look.LookID, Kind: "second_brain_look", Title: "Reading " + name + "…"})
 		case look.State == secondbrain.LookFinished && view.LastLook != nil && !view.LastLook.Acted && look.LookID == view.LastLook.ID:
 			needs = append(needs, TodayItem{ID: view.LastLook.ID, Kind: "second_brain_result",
-				Title: "What's open in " + name, Detail: view.LastLook.Headline, SourceAt: view.LastLook.At})
+				Title: "What's open in " + name, Detail: view.LastLook.Headline, SourceAt: view.LastLook.At, Route: notesPanelRoute(hqSlug)})
 		}
 	}
 	if last := view.LastLook; last != nil && !last.At.IsZero() && !last.At.After(now) && now.Sub(last.At) <= todaySecondBrainDoneWindow {
@@ -44,4 +44,13 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID string, now 
 			Title: fmt.Sprintf("Looked at %s · %d %s", name, last.OpenItems, items), SourceAt: last.At})
 	}
 	return working, needs, done
+}
+
+// notesPanelRoute opens the Notes station's panel on the HQ map, or "" when the
+// slug is not one a route can carry.
+func notesPanelRoute(hqSlug string) string {
+	if !todaySafeSlug.MatchString(hqSlug) {
+		return ""
+	}
+	return "/workspaces/" + hqSlug + "?station=second-brain"
 }

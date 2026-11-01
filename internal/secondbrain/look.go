@@ -129,7 +129,7 @@ func (l Looker) run(ctx context.Context, source Source, previous *Look, lookID, 
 		Notes: signals.Notes, OpenItems: len(signals.OpenLoops), NotesWithOpen: signals.NotesWithOpen,
 		Dated: signals.Dated, Done: signals.Done, Partial: reading.Partial,
 	}
-	look.Items = lookItems(source, signals.OpenLoops, seededNotes(source, reading))
+	look.Items = lookItems(source, signals.OpenLoops, seededNotes(source, reading), doneItems(previous))
 	look.People, look.Stale, look.Decisions = lookSignals(source, signals)
 	look.Headline, look.HeadlineBy = RulesHeadline(source.Name, look.Counts), HeadlineByRules
 	var note string
@@ -148,22 +148,66 @@ func (l Looker) run(ctx context.Context, source Source, previous *Look, lookID, 
 
 	run := LookRun{Look: look, Signals: signals, HeadlineNote: note}
 	if previous != nil {
+		run.Look.CarryMarks(previous)
+		run.Look.Items = keepUnreadMarks(previous.Items, run.Look.Items, reading)
 		run.Look.NewSince, run.Gone = compareLooks(previous.Items, run.Look.Items, reading)
 		run.Look.DoneSince = len(run.Gone)
 	}
 	return run
 }
 
+// doneItems are the ids the user marked done on the look before: they are not
+// suggested again while their line stays open.
+func doneItems(previous *Look) map[string]bool {
+	if previous == nil {
+		return nil
+	}
+	done := map[string]bool{}
+	for _, item := range previous.Items {
+		if item.ActedAs == ActedDone {
+			done[item.ID] = true
+		}
+	}
+	return done
+}
+
+// keepUnreadMarks keeps a triaged item whose note a partial read left out. The
+// line was not seen either way, so a done mark must not lapse and bring the item
+// back the next time the note is read.
+func keepUnreadMarks(before, after []LookItem, reading Reading) []LookItem {
+	if !reading.Partial {
+		return after
+	}
+	read := make(map[string]bool, len(reading.Notes))
+	for _, note := range reading.Notes {
+		read[note.RelPath] = true
+	}
+	have := make(map[string]bool, len(after))
+	for _, item := range after {
+		have[item.ID] = true
+	}
+	for _, item := range before {
+		if len(after) == MaxLookItems {
+			break
+		}
+		if !have[item.ID] && !read[item.Note] && (item.ActedAs == ActedDone || item.ActedAs == ActedFollowUp) {
+			item.Suggested = false
+			after = append(after, item)
+		}
+	}
+	return after
+}
+
 // lookItems turns open loops into the items a look keeps, marking the
 // suggested set, within MaxLookItems and the stored-bytes budget. Two
 // identical lines in one note are one item.
-func lookItems(source Source, loops []OpenLoop, seeded map[string]bool) []LookItem {
+func lookItems(source Source, loops []OpenLoop, seeded, done map[string]bool) []LookItem {
 	// Items in seeded notes are never suggested: the user already has them as
-	// follow-ups (FR10).
+	// follow-ups (FR10). Items the user marked done are not suggested either.
 	eligible := make([]OpenLoop, 0, len(loops))
 	eligibleAt := make([]int, 0, len(loops))
 	for index, loop := range loops {
-		if !seeded[loop.Note] {
+		if !seeded[loop.Note] && !done[ItemID(source.ID, loop.Note, loop.Text)] {
 			eligible, eligibleAt = append(eligible, loop), append(eligibleAt, index)
 		}
 	}

@@ -302,6 +302,18 @@ func TestRecord_ValidateBoundsWhatALookKeeps(t *testing.T) {
 		"signal link to elsewhere": func(r *Record) {
 			r.Sources[0].LastLook.Decisions = []LookDecision{{Note: "D.md", Title: "D", Link: "javascript:alert(1)"}}
 		},
+		"unknown triage": func(r *Record) {
+			at := storeNow
+			r.Sources[0].LastLook.Items[0].ActedAs, r.Sources[0].LastLook.Items[0].ActedAt = "snoozed", &at
+		},
+		"triage without a time": func(r *Record) { r.Sources[0].LastLook.Items[0].ActedAs = ActedDone },
+		"a time without triage": func(r *Record) {
+			at := storeNow
+			r.Sources[0].LastLook.Items[0].ActedAt = &at
+		},
+		"receipt for a bad item": func(r *Record) {
+			r.Receipts = []Receipt{{RequestID: "t-1", Action: "item_done", Item: "abc"}}
+		},
 		"decision without time": func(r *Record) { r.Ask.Decision = DecisionLater },
 		"bad receipt":           func(r *Record) { r.Receipts = []Receipt{{RequestID: "", Action: "look"}} },
 	} {
