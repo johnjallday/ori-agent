@@ -33,8 +33,12 @@ export function createFolderPrerequisites({
     },
     view: () => value,
     active: () => Boolean(owner && (value.busy || value.review || value.pending)),
+    // The operation the server actually reviewed, which outranks the card's row.
+    operation: () => value.review?.operation || value.review?.action || '',
+    // A review still being read can be abandoned; its late reply is ignored by
+    // the epoch check. A sent confirmation cannot, so its envelope survives.
     cancel() {
-      if (value.busy || value.pending) return;
+      if (value.pending) return;
       reset();
       changed();
     },
@@ -72,7 +76,7 @@ export function createFolderPrerequisites({
       }
     },
     async confirm() {
-      if (!owner || value.busy || (!value.review && !value.pending)) return;
+      if (!owner || value.busy || (!value.review && !value.pending)) return { completed: false };
       const visit = epoch,
         current = owner;
       const review = value.review;
@@ -114,9 +118,16 @@ export function createFolderPrerequisites({
             )
           );
         }
+        const applied = {
+          completed: true,
+          action: review?.operation || review?.action || '',
+          enabledAfter: Boolean(review?.enabled_after)
+        };
         reset();
         changed();
+        // Awaited so a caller reads the refreshed requirements, not the old ones.
         await refreshed();
+        return applied;
       } catch (error) {
         if (visit === epoch && current === key()) value.error = error.message;
       } finally {
@@ -125,6 +136,7 @@ export function createFolderPrerequisites({
           changed();
         }
       }
+      return { completed: false };
     }
   };
 }

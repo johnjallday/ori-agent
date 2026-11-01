@@ -2259,18 +2259,39 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   flex-direction: column;
   gap: 8px;
 }
+.plugin-trust-summary {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
 .plugin-trust-section-title {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
   opacity: 0.85;
+  cursor: pointer;
+}
+.plugin-trust-section-title:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+.plugin-trust-copy {
+  margin-left: 6px;
+  padding: 0 6px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentcolor;
+  border-radius: 4px;
+  cursor: pointer;
 }
 .plugin-trust-list {
   margin: 4px 0 0;
   padding-left: 18px;
   font-size: 12px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 /* A command line is often long and unbroken. It must wrap: a command the user
    cannot read in full is a command they cannot meaningfully consent to. */

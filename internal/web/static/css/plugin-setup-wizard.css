@@ -51,6 +51,77 @@
   outline-offset: 2px;
 }
 
+.plugin-setup-wizard__progress {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  color: var(--psw-muted);
+}
+
+.plugin-setup-wizard__decision {
+  flex: none;
+  order: 1;
+  padding: 0.75rem 1rem 0.25rem;
+  font-size: 0.85rem;
+}
+
+.plugin-setup-wizard__decision p {
+  margin: 0 0 0.25rem;
+}
+
+.plugin-setup-wizard__list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.plugin-setup-wizard__list > li {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--psw-line);
+}
+
+.plugin-setup-wizard__list > li:last-child {
+  border-bottom: 0;
+}
+
+.plugin-setup-wizard__list p {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+}
+
+.plugin-setup-wizard__final {
+  font-weight: 600;
+}
+
+.plugin-setup-wizard__muted {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--psw-muted);
+}
+
+.plugin-setup-wizard__details {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.plugin-setup-wizard__details summary {
+  min-height: 32px;
+  align-content: center;
+  cursor: pointer;
+}
+
+.plugin-setup-wizard__details pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.plugin-setup-wizard__error {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .plugin-setup-wizard__body {
   flex: 1 1 auto;
   order: 2;
@@ -81,6 +152,17 @@
   min-height: 44px;
 }
 
+/* Bootstrap's outline grey is under 4.5:1 here and reads as disabled in dark. */
+.plugin-setup-wizard__footer > .btn-outline-secondary:not(:disabled) {
+  color: var(--psw-ink);
+  border-color: var(--psw-ink);
+}
+
+.plugin-setup-wizard__footer > .btn-outline-secondary:not(:disabled):hover {
+  color: var(--psw-paper);
+  background: var(--psw-ink);
+}
+
 @media (max-height: 520px) {
   .plugin-setup-wizard {
     max-height: calc(100dvh - 8px);
@@ -93,5 +175,16 @@
 
   .plugin-setup-wizard__body {
     padding-block: 0.35rem;
+  }
+
+  .plugin-setup-wizard__decision {
+    max-height: 35dvh;
+    padding-block: 0.35rem 0;
+    overflow: auto;
+    font-size: 0.8rem;
+  }
+
+  .plugin-setup-wizard__progress {
+    margin-top: 0;
   }
 }

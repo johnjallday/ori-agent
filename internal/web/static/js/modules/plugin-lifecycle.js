@@ -159,12 +159,63 @@ function plCreate(tag, className) {
   return el;
 }
 
-function plSection(title, className) {
-  const wrapper = plCreate('div', className);
-  const heading = plCreate('div', 'plugin-trust-section-title');
+// Each section is a disclosure. `open` says whether it starts expanded.
+function plSection(title, className, open = false) {
+  const wrapper = plCreate('details', className);
+  wrapper.open = open;
+  const heading = plCreate('summary', 'plugin-trust-section-title');
   heading.textContent = title;
   wrapper.appendChild(heading);
   return wrapper;
+}
+
+/**
+ * trustSummary counts a trust model in one line, what can act on the machine
+ * first. It is a signpost to the full report, never a replacement for it.
+ */
+function plTrustSummary(model) {
+  const counts = [
+    [model.mcpCommands, 'command'],
+    [model.scopes, 'permission'],
+    [model.services, 'background service'],
+    [model.artifacts, 'download'],
+    [model.surfaces, 'screen'],
+    [model.capabilities, 'capability'],
+    [model.blueprints, 'blueprint'],
+    [model.homes, 'Home'],
+    [model.skills, 'skill'],
+    [model.unsupported, 'skipped item'],
+    [model.warnings, 'warning']
+  ];
+  const parts = counts
+    .filter(([items]) => items.length > 0)
+    .map(([items, label]) => {
+      const plural = label === 'capability' ? 'capabilities' : `${label}s`;
+      return `${items.length} ${items.length === 1 ? label : plural}`;
+    });
+  return parts.length ? parts.join(' · ') : 'Nothing disclosed';
+}
+
+// The digest is what makes a download verifiable, so it can be taken away and
+// compared. Clipboard access is optional; the digest stays readable either way.
+function plCopyButton(value) {
+  const button = plCreate('button', 'plugin-trust-copy');
+  button.type = 'button';
+  button.textContent = 'Copy';
+  button.setAttribute('aria-label', 'Copy sha256');
+  button.addEventListener('click', () => {
+    const written = globalThis.navigator?.clipboard?.writeText?.(value);
+    if (!written) return;
+    written.then(
+      () => {
+        button.textContent = 'Copied';
+      },
+      () => {
+        button.textContent = 'Copy failed';
+      }
+    );
+  });
+  return button;
 }
 
 /**
@@ -172,14 +223,19 @@ function plSection(title, className) {
  *
  * Complete is the point. This is the last thing a user sees before a plugin
  * gains the ability to run commands on their machine, so nothing here is
- * summarized, truncated, or hidden behind a "show more": the MCP commands are
- * the actual command lines, and the warnings are shown even when they make the
- * plugin look worse.
+ * truncated: the MCP commands are the actual command lines, and the warnings
+ * are shown even when they make the plugin look worse. Sections are collapsible
+ * so the report can be read in a small space, but anything that runs on the
+ * machine, grants a permission, was skipped or warns starts open. Only what a
+ * plugin adds inside Ori starts collapsed, with its count in the summary line.
  *
  * Text goes in as textContent. A plugin manifest is third-party input, and a
  * command line rendered as markup is a command line that can carry script.
+ *
+ * options.summary: false leaves out the summary line, for a surface that has
+ * already shown it above its decision.
  */
-function plRenderTrustReport(report) {
+function plRenderTrustReport(report, options) {
   const model = plTrustModel(report);
   const root = plCreate('div', 'plugin-trust-report');
 
@@ -190,8 +246,14 @@ function plRenderTrustReport(report) {
     return root;
   }
 
+  if (options?.summary !== false) {
+    const summary = plCreate('p', 'plugin-trust-summary');
+    summary.textContent = plTrustSummary(model);
+    root.appendChild(summary);
+  }
+
   if (model.mcpCommands.length > 0) {
-    const section = plSection('Runs these commands on your computer', 'plugin-trust-section');
+    const section = plSection('Runs these commands on your computer', 'plugin-trust-section', true);
     const list = plCreate('ul', 'plugin-trust-list');
     model.mcpCommands.forEach(command => {
       const item = plCreate('li', '');
@@ -205,7 +267,7 @@ function plRenderTrustReport(report) {
   }
 
   if (model.services.length > 0) {
-    const section = plSection('Runs these background services', 'plugin-trust-section');
+    const section = plSection('Runs these background services', 'plugin-trust-section', true);
     const list = plCreate('ul', 'plugin-trust-list');
     model.services.forEach(service => {
       const item = plCreate('li', '');
@@ -218,7 +280,7 @@ function plRenderTrustReport(report) {
   }
 
   if (model.artifacts.length > 0) {
-    const section = plSection('Downloads and runs these files', 'plugin-trust-section');
+    const section = plSection('Downloads and runs these files', 'plugin-trust-section', true);
     const list = plCreate('ul', 'plugin-trust-list');
     model.artifacts.forEach(artifact => {
       const item = plCreate('li', '');
@@ -227,7 +289,10 @@ function plRenderTrustReport(report) {
       // The digest is what makes the download verifiable, so it is shown
       // rather than summarized away.
       if (artifact.sha256) parts.push(`sha256 ${artifact.sha256}`);
-      item.textContent = parts.join(' · ');
+      const label = plCreate('span', '');
+      label.textContent = parts.join(' · ');
+      item.appendChild(label);
+      if (artifact.sha256) item.appendChild(plCopyButton(artifact.sha256));
       list.appendChild(item);
     });
     section.appendChild(list);
@@ -237,7 +302,7 @@ function plRenderTrustReport(report) {
   if (model.scopes.length > 0) {
     // Permission grants, listed individually. Folding these into a count would
     // be the single most misleading thing this panel could do.
-    const section = plSection('Grants these permissions', 'plugin-trust-section is-warning');
+    const section = plSection('Grants these permissions', 'plugin-trust-section is-warning', true);
     const list = plCreate('ul', 'plugin-trust-list');
     model.scopes.forEach(scope => {
       const item = plCreate('li', '');
@@ -295,7 +360,7 @@ function plRenderTrustReport(report) {
   }
 
   if (model.unsupported.length > 0) {
-    const section = plSection('Skipped — not supported yet', 'plugin-trust-section');
+    const section = plSection('Skipped — not supported yet', 'plugin-trust-section', true);
     const list = plCreate('ul', 'plugin-trust-list');
     model.unsupported.forEach(entry => {
       const item = plCreate('li', '');
@@ -307,7 +372,7 @@ function plRenderTrustReport(report) {
   }
 
   if (model.warnings.length > 0) {
-    const section = plSection('Warnings', 'plugin-trust-section is-warning');
+    const section = plSection('Warnings', 'plugin-trust-section is-warning', true);
     const list = plCreate('ul', 'plugin-trust-list');
     model.warnings.forEach(warning => {
       const item = plCreate('li', 'plugin-trust-warning');
@@ -438,6 +503,7 @@ window.PluginLifecycle = {
   errorText: plErrorText,
   trustModel: plTrustModel,
   isEmptyTrust: plIsEmptyTrust,
+  trustSummary: plTrustSummary,
   renderTrustReport: plRenderTrustReport,
   createFlow: plCreateFlow
 };

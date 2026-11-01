@@ -10,6 +10,11 @@
  *
  * Stages:
  *   open     Attach a folder, open the wizard, Cancel, check the card is unchanged.
+ *   full     Real install of both plugins from a fresh sandbox: provider, then
+ *            REAPER install chained to its enable review, then the summary.
+ *   stop     Fresh sandbox. Install REAPER, Cancel on the enable step, read the
+ *            summary and the card, then reopen and finish both plugins.
+ *   matrix   No install. Layout at each viewport and theme, then a keyboard pass.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -86,7 +91,224 @@ async function shot(page, name) {
   await page.screenshot({ path: join(outDir, `${name}.png`) });
 }
 
+const WIZARD = '#pluginSetupWizard';
+const INSTALL_TIMEOUT = 180_000;
+
+const wizardButton = (page, name) =>
+  page.locator(WIZARD).getByRole('button', { name, exact: true });
+
+async function waitForTitle(page, text) {
+  await page
+    .locator('#pluginSetupWizardTitle', { hasText: text })
+    .waitFor({ timeout: INSTALL_TIMEOUT });
+}
+
+async function clickWhenEnabled(page, name) {
+  const control = wizardButton(page, name);
+  await control.waitFor({ timeout: INSTALL_TIMEOUT });
+  await page.waitForFunction(
+    ([selector, label]) =>
+      [...document.querySelectorAll(`${selector} button`)].some(
+        node => node.textContent === label && !node.disabled
+      ),
+    [WIZARD, name],
+    { timeout: INSTALL_TIMEOUT }
+  );
+  await control.click();
+}
+
+// The primary decision must be on screen with no scrolling, at this viewport.
+async function layoutFacts(page, name) {
+  return page.locator(WIZARD).evaluate((dialog, label) => {
+    const buttons = [...dialog.querySelectorAll('footer button')];
+    const primary = buttons.find(node => node.textContent === label);
+    const rect = primary?.getBoundingClientRect();
+    return {
+      primaryVisible: Boolean(rect && rect.top >= 0 && rect.bottom <= innerHeight),
+      tallEnough: buttons.every(node => node.getBoundingClientRect().height >= 44),
+      noSidewaysScroll: dialog.scrollWidth <= dialog.clientWidth + 1,
+      inViewport: dialog.getBoundingClientRect().right <= innerWidth
+    };
+  }, name);
+}
+
+async function pluginStates() {
+  const { plugins } = await api('/api/plugins');
+  return Object.fromEntries(plugins.map(plugin => [plugin.name, Boolean(plugin.enabled)]));
+}
+
 const stages = {
+  async full(page) {
+    const before = (await api('/api/workspaces')).folders.length;
+    const requirements = await attachFolder(page);
+    await requirements
+      .getByRole('button', { name: 'Install Music Project Management', exact: true })
+      .click();
+    await waitForTitle(page, 'What this setup needs');
+    await shot(page, 'g4-intro');
+    const intro = await page.locator(WIZARD).innerText();
+    check('intro frames plugins as app-wide', /Ori plugins are app-wide/.test(intro));
+    await wizardButton(page, 'Continue').click();
+    await waitForTitle(page, 'Plugin 1 of 2 · Music Project Management');
+    await wizardButton(page, 'Confirm installation').waitFor({ timeout: 60_000 });
+    let facts = await layoutFacts(page, 'Confirm installation');
+    check('Confirm is visible at 1280x800', facts.primaryVisible, JSON.stringify(facts));
+    await shot(page, 'g2-provider-review-1280');
+    await page.setViewportSize({ width: 390, height: 844 });
+    facts = await layoutFacts(page, 'Confirm installation');
+    check('Confirm is visible at 390x844', facts.primaryVisible, JSON.stringify(facts));
+    await shot(page, 'g2-provider-review-390');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const review = await page.locator(WIZARD).innerText();
+    check('review reads Enabled after: Yes', /Enabled after this action: Yes/.test(review));
+    await clickWhenEnabled(page, 'Confirm installation');
+    await waitForTitle(page, 'Plugin 2 of 2 · REAPER');
+    check(
+      'provider enabled by its one confirm',
+      (await pluginStates())['music-project-management']
+    );
+    await wizardButton(page, 'Confirm installation').waitFor({ timeout: 60_000 });
+    await shot(page, 'g3-reaper-install-review');
+    const reaper = await page.locator(WIZARD).innerText();
+    check('install says the next step enables', /No — the next step enables it/.test(reaper));
+    await clickWhenEnabled(page, 'Confirm installation');
+    await wizardButton(page, 'Confirm enablement').waitFor({ timeout: INSTALL_TIMEOUT });
+    check('enable review opened by itself', true);
+    const states = await pluginStates();
+    check('REAPER installed and still disabled before consent', states['reaper-plugin'] === false);
+    await waitForTitle(page, 'Plugin 2 of 2 · REAPER');
+    const progress = await page.locator('.plugin-setup-wizard__progress').innerText();
+    check(
+      'progress names both plugins',
+      /REAPER: /.test(progress) && /Music/.test(progress),
+      progress
+    );
+    await shot(page, 'g3-enable-review-chained');
+    await clickWhenEnabled(page, 'Confirm enablement');
+    await waitForTitle(page, 'Plugin setup summary');
+    const summary = await page.locator(WIZARD).innerText();
+    check(
+      'summary reports both as installed and enabled',
+      (summary.match(/Installed and enabled/g) || []).length === 2,
+      summary
+    );
+    check(
+      'summary says nothing was created',
+      /No workspace, Home, agent or model task/.test(summary)
+    );
+    await shot(page, 'g3-summary');
+    await wizardButton(page, 'Back to setup').click();
+    await page.locator(WIZARD).waitFor({ state: 'hidden' });
+    const finalStates = await pluginStates();
+    check(
+      'both plugins are enabled on the server',
+      finalStates['reaper-plugin'] && finalStates['music-project-management'],
+      JSON.stringify(finalStates)
+    );
+    check('no workspace was created', (await api('/api/workspaces')).folders.length === before);
+    await shot(page, 'g3-card-after-finish');
+  },
+
+  async stop(page) {
+    const requirements = await attachFolder(page);
+    await requirements.getByRole('button', { name: 'Install REAPER', exact: true }).click();
+    await waitForTitle(page, 'What this setup needs');
+    await wizardButton(page, 'Continue').click();
+    await clickWhenEnabled(page, 'Confirm installation');
+    await wizardButton(page, 'Confirm enablement').waitFor({ timeout: INSTALL_TIMEOUT });
+    await wizardButton(page, 'Cancel').click();
+    await waitForTitle(page, 'Plugin setup summary');
+    const summary = await page.locator(WIZARD).innerText();
+    check('summary reads Installed, not enabled', /Installed, not enabled/.test(summary), summary);
+    check('summary never claims an enable', !/Installed and enabled/.test(summary));
+    check('the untouched plugin reads Not changed', /Not changed/.test(summary));
+    await shot(page, 'g3-summary-stopped');
+    await wizardButton(page, 'Back to setup').click();
+    await page.locator(WIZARD).waitFor({ state: 'hidden' });
+    const row = requirements.locator('[data-requirement-kind="integration"]');
+    await row
+      .getByRole('button', { name: 'Enable REAPER', exact: true })
+      .waitFor({ timeout: 60_000 });
+    const card = await row.innerText();
+    check('card shows Disabled · Enable', /Disabled · Enable/.test(card), card);
+    check('REAPER is disabled on the server', (await pluginStates())['reaper-plugin'] === false);
+    await shot(page, 'g3-card-disabled');
+    // Reopen and finish: the stop-here exit lost nothing.
+    await row.getByRole('button', { name: 'Enable REAPER', exact: true }).click();
+    await waitForTitle(page, 'What this setup needs');
+    await shot(page, 'g4-reopened-intro');
+    await wizardButton(page, 'Continue').click();
+    await clickWhenEnabled(page, 'Confirm enablement');
+    await waitForTitle(page, 'Plugin 2 of 2 · Music Project Management');
+    await clickWhenEnabled(page, 'Confirm installation');
+    await waitForTitle(page, 'Plugin setup summary');
+    const finished = await page.locator(WIZARD).innerText();
+    check(
+      'reopened run finishes both',
+      (finished.match(/Installed and enabled/g) || []).length === 2,
+      finished
+    );
+    await shot(page, 'g4-summary-finished');
+    await wizardButton(page, 'Back to setup').click();
+  },
+
+  async matrix(page) {
+    const requirements = await attachFolder(page);
+    await page.evaluate(() => document.fonts.ready);
+    const launch = requirements.getByRole('button', { name: 'Install REAPER', exact: true });
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(value => {
+        document.documentElement.setAttribute('data-bs-theme', value);
+      }, theme);
+      for (const [width, height] of [
+        [1280, 800],
+        [1024, 700],
+        [390, 844],
+        [1024, 500]
+      ]) {
+        await page.setViewportSize({ width, height });
+        await launch.scrollIntoViewIfNeeded();
+        await launch.click();
+        await waitForTitle(page, 'What this setup needs');
+        await wizardButton(page, 'Continue').click();
+        await wizardButton(page, 'Confirm installation').waitFor({ timeout: 60_000 });
+        const facts = await layoutFacts(page, 'Confirm installation');
+        check(
+          `layout ${width}x${height} ${theme}`,
+          facts.primaryVisible && facts.tallEnough && facts.noSidewaysScroll && facts.inViewport,
+          JSON.stringify(facts)
+        );
+        await shot(page, `g5-${theme}-${width}x${height}`);
+        await wizardButton(page, 'Cancel').click();
+        await page.locator(WIZARD).waitFor({ state: 'hidden' });
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await launch.focus();
+    await page.keyboard.press('Enter');
+    await waitForTitle(page, 'What this setup needs');
+    const active = () => page.evaluate(() => document.activeElement?.textContent || '');
+    check('opening focuses the title', /What this setup needs/.test(await active()));
+    await page.keyboard.press('Tab');
+    check('Tab reaches Continue first', (await active()) === 'Continue', await active());
+    await page.keyboard.press('Enter');
+    await wizardButton(page, 'Confirm installation').waitFor({ timeout: 60_000 });
+    await page.keyboard.press('Tab');
+    const first = await active();
+    check('the decision precedes the report in Tab order', /Back|Confirm/.test(first), first);
+    await page.keyboard.press('Escape');
+    await page.locator(WIZARD).waitFor({ state: 'hidden' });
+    check(
+      'Escape returns focus to the launcher',
+      (await active()) === 'Install REAPER',
+      await active()
+    );
+    const name = await page
+      .locator(WIZARD)
+      .evaluate(node => document.getElementById(node.getAttribute('aria-labelledby'))?.id);
+    check('dialog is labelled by its title', name === 'pluginSetupWizardTitle', name);
+  },
+
   async open(page) {
     const requirements = await attachFolder(page);
     const before = await requirements.innerText();

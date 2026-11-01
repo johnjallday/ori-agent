@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
+import { finishPluginSetupWizard } from './helpers/plugin-setup-wizard';
 
 // Explicit phases against the same disposable wt demo sandbox: seed/reopen,
 // repick, home-seed/home-reopen, then build-seed/build-reopen. Restart only the
@@ -81,7 +82,7 @@ test('the project file is chosen before setup and kept through the separate mana
     const enable = card.getByRole('button', { name: 'Enable REAPER', exact: true });
     if (await enable.count()) {
       await enable.click();
-      await card.getByRole('button', { name: 'Confirm enablement', exact: true }).click();
+      await finishPluginSetupWizard(page);
       await expect(enable).toHaveCount(0, { timeout: 60_000 });
     }
     const check = card.getByRole('button', { name: 'Check again', exact: true });
@@ -369,23 +370,14 @@ test('an opened folder review survives a server restart without a new pick', asy
   if (seeding) {
     // These reviewed packages install only inside the disposable server's
     // plugin store. Each download uses its real disclosure/confirmation UI.
-    for (const name of ['REAPER', 'Music Project Management']) {
-      const install = card.getByRole('button', { name: `Install ${name}`, exact: true });
-      if (await install.count()) {
-        await install.click();
-        const confirm = card.getByRole('button', { name: 'Confirm installation', exact: true });
-        await expect(confirm).toBeEnabled({ timeout: 30_000 });
-        await confirm.click();
-        await expect(install).toHaveCount(0, { timeout: 120_000 });
-      }
-    }
-  }
-  if (phase === 'seed') {
-    const enable = card.getByRole('button', { name: 'Enable REAPER', exact: true });
-    if (await enable.count()) {
-      await enable.click();
-      await card.getByRole('button', { name: 'Confirm enablement', exact: true }).click();
-      await expect(enable).toHaveCount(0, { timeout: 60_000 });
+    // One wizard run covers every pending package, including REAPER's enable.
+    const install = card.getByRole('button', {
+      name: /^(Install|Enable) (REAPER|Music Project Management)$/
+    });
+    if (await install.count()) {
+      await install.first().click();
+      await finishPluginSetupWizard(page);
+      await expect(install).toHaveCount(0, { timeout: 120_000 });
     }
   }
   // Explicit Review again must also work using the restored authority, while

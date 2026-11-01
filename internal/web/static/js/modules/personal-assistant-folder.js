@@ -2977,13 +2977,29 @@ const prerequisites = createFolderPrerequisites({
 });
 
 // The wizard opens only from the card's own buttons, never from a folder attach.
+const pluginSetupRows = () =>
+  globalThis.OriFolderSetupVisual.requirementsView({ offer: state.offer }).rows;
 const pluginSetupWizard = createPluginSetupWizard({
   doc: globalThis.document,
   controller: prerequisites,
-  onClose: () => render()
+  readRows: pluginSetupRows,
+  blocked: () => state.busy || conversationReviewLoading(),
+  trust: {
+    render: (report, options) => window.PluginLifecycle?.renderTrustReport?.(report, options),
+    summary: report => {
+      const lifecycle = window.PluginLifecycle;
+      return lifecycle?.trustSummary?.(lifecycle.trustModel(report)) || '';
+    }
+  },
+  onClose: ({ changed }) => {
+    if (changed)
+      void window.PersonalAssistantFolderSetup?.recheckReview?.(
+        state.offer,
+        document.activeElement
+      );
+    render();
+  }
 });
-const pluginSetupRows = () =>
-  globalThis.OriFolderSetupVisual.requirementsView({ offer: state.offer }).rows;
 
 // announceOffer tells the mission card (progression-widget.js) what the
 // chooser shows, so the two render the same offer in the same state. It also

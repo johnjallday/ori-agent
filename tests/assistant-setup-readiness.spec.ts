@@ -168,7 +168,7 @@ for (const route of ['/?panel=today', '/settings']) {
 test(
   liveProvider
     ? 'real fresh inline setup continues through model Settings to a saved live report'
-    : 'real fresh cards independently review and install both plugins inline without a model',
+    : 'real fresh wizard reviews and installs both plugins with separate consents and no model',
   async ({ page, request }) => {
     test.skip(
       process.env.ORI_READINESS_INSTALL !== '1',
@@ -220,24 +220,29 @@ test(
     await provider
       .getByRole('button', { name: 'Install Music Project Management', exact: true })
       .click();
-    await expect(
-      provider.getByRole('region', { name: 'Review Music Project Management' })
-    ).toBeVisible({ timeout: 60_000 });
-    await expect(provider).toContainText('johnjallday/music-project-management');
-    await expect(provider).toContainText('No workspace, Home, agent or model task');
+    const wizard = page.locator('#pluginSetupWizard');
+    const wizardTitle = page.locator('#pluginSetupWizardTitle');
+    const wizardButton = (name: string) => wizard.getByRole('button', { name, exact: true });
+    // Two pending plugins open on the framing step, which asks the server nothing.
+    await expect(wizardTitle).toHaveText('What this setup needs');
+    await expect(wizard).toContainText('Ori plugins are app-wide');
+    await wizardButton('Continue').click();
+    await expect(wizardTitle).toHaveText('Plugin 1 of 2 · Music Project Management');
+    await expect(wizardButton('Confirm installation')).toBeEnabled({ timeout: 60_000 });
+    await expect(wizard).toContainText('johnjallday/music-project-management');
+    await expect(wizard).toContainText('No workspace, Home, agent or model task');
     expect((await json(request, '/api/plugins')).plugins).toEqual([]);
-    await provider.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await wizardButton('Cancel').click();
+    await expect(wizard).toBeHidden();
     await expect(
       provider.getByRole('button', { name: 'Install Music Project Management', exact: true })
-    ).toBeVisible();
+    ).toBeFocused();
     expect(mutations).toHaveLength(0);
     await provider
       .getByRole('button', { name: 'Install Music Project Management', exact: true })
       .click();
-    const confirmProvider = provider.getByRole('button', {
-      name: 'Confirm installation',
-      exact: true
-    });
+    await wizardButton('Continue').click();
+    const confirmProvider = wizardButton('Confirm installation');
     await expect(confirmProvider).toBeEnabled({ timeout: 60_000 });
     const offerId = await page
       .locator('#personalAssistantFolderOffer')
@@ -258,28 +263,28 @@ test(
     expect((await json(request, '/api/plugins')).plugins).toEqual([]);
     if (evidence) await page.screenshot({ path: join(evidence, 'inline-provider-consent.png') });
     await confirmProvider.click();
-    await expect(provider).toContainText('Ready · No download', { timeout: 120_000 });
+    await expect(wizardTitle).toHaveText('Plugin 2 of 2 · REAPER', { timeout: 120_000 });
+    await expect(provider).toContainText('Ready · No download');
     let plugins = (await json(request, '/api/plugins')).plugins;
     expect(plugins).toHaveLength(1);
     expect(plugins[0].name).toBe('music-project-management');
     expect(plugins[0].enabled).toBe(true);
-    await integration.getByRole('button', { name: 'Install REAPER', exact: true }).click();
-    await expect(
-      integration.getByRole('button', { name: 'Confirm installation', exact: true })
-    ).toBeEnabled({ timeout: 60_000 });
-    await expect(integration).toContainText('johnjallday/reaper-plugin');
-    await expect(integration).toContainText('No — enable separately afterward');
+    await expect(wizardButton('Confirm installation')).toBeEnabled({ timeout: 60_000 });
+    await expect(wizard).toContainText('johnjallday/reaper-plugin');
+    await expect(wizard).toContainText('No — the next step enables it');
     if (evidence) await page.screenshot({ path: join(evidence, 'inline-integration-consent.png') });
-    await integration.getByRole('button', { name: 'Confirm installation', exact: true }).click();
-    await expect(
-      integration.getByRole('button', { name: 'Enable REAPER', exact: true })
-    ).toBeVisible({ timeout: 120_000 });
+    await wizardButton('Confirm installation').click();
+    // The enable review opens by itself, on the same step, and still waits for
+    // its own explicit consent.
+    await expect(wizardButton('Confirm enablement')).toBeEnabled({ timeout: 120_000 });
+    await expect(wizardTitle).toHaveText('Plugin 2 of 2 · REAPER');
     plugins = (await json(request, '/api/plugins')).plugins;
     expect(plugins.find((p: any) => p.name === 'reaper-plugin').enabled).toBe(false);
-    await integration.getByRole('button', { name: 'Enable REAPER', exact: true }).click();
-    await integration
-      .getByRole('button', { name: 'Confirm enablement', exact: true })
-      .click({ timeout: 60_000 });
+    await wizardButton('Confirm enablement').click();
+    await expect(wizardTitle).toHaveText('Plugin setup summary', { timeout: 120_000 });
+    await expect(wizard).toContainText('No workspace, Home, agent or model task was created.');
+    await wizardButton('Back to setup').click();
+    await expect(wizard).toBeHidden();
     await expect(requirements).toContainText('Nothing to download', { timeout: 120_000 });
     await expect(
       page.getByRole('button', { name: 'Configure project model', exact: true })

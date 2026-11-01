@@ -30,6 +30,9 @@ class FakeElement {
   setAttribute(name, value) {
     this.attributes[name] = String(value);
   }
+  addEventListener(type, handler) {
+    this.listeners = { ...this.listeners, [type]: handler };
+  }
   descendants() {
     return this.children.flatMap(c => [c, ...c.descendants()]);
   }
@@ -188,6 +191,71 @@ test('the disclosure covers services, artifacts, permissions, and surfaces', () 
   assert.match(text, /Adds these workspace capabilities/);
   assert.match(text, /Adds these blueprints/);
   assert.match(text, /demo-workspace/);
+});
+
+const FULL_REPORT = {
+  MCPCommands: ['/bin/thing'],
+  Services: [{ ID: 'demo', Executable: 'demo-service' }],
+  Artifacts: [{ ID: 'svc', Platform: 'darwin/arm64', SHA256: 'abc123' }],
+  SymbolicScopes: ['network.outbound', 'workspace.files.read'],
+  Surfaces: [{ Label: 'Console' }, { Label: 'Mixer' }],
+  Blueprints: ['one', 'two'],
+  Skills: ['a', 'b', 'c', 'd'],
+  Warnings: ['careful']
+};
+
+test('the summary line counts what is disclosed, omits zero counts and leads with risk', () => {
+  const PL = load(async () => jsonResponse(200, {}));
+  assert.equal(
+    PL.trustSummary(PL.trustModel(FULL_REPORT)),
+    '1 command · 2 permissions · 1 background service · 1 download · 2 screens · 2 blueprints · 4 skills · 1 warning'
+  );
+  assert.equal(PL.trustSummary(PL.trustModel({})), 'Nothing disclosed');
+});
+
+test('the report leads with the summary unless a surface already showed it', () => {
+  const PL = load(async () => jsonResponse(200, {}));
+  const first = PL.renderTrustReport(FULL_REPORT).children[0];
+  assert.equal(first.className, 'plugin-trust-summary');
+  const without = PL.renderTrustReport(FULL_REPORT, { summary: false }).children[0];
+  assert.notEqual(without.className, 'plugin-trust-summary');
+});
+
+test('anything that acts on the machine starts open; what is added inside Ori starts closed', () => {
+  const PL = load(async () => jsonResponse(200, {}));
+  const report = PL.renderTrustReport(FULL_REPORT, { summary: false });
+  const sections = Object.fromEntries(
+    report.children.map(section => [section.children[0].textContent, section.open])
+  );
+  assert.deepEqual(sections, {
+    'Runs these commands on your computer': true,
+    'Runs these background services': true,
+    'Downloads and runs these files': true,
+    'Grants these permissions': true,
+    'Adds these screens inside Ori': false,
+    'Adds these blueprints': false,
+    'Adds these skills': false,
+    Warnings: true
+  });
+  for (const section of report.children) {
+    assert.equal(section.tagName, 'DETAILS');
+    assert.equal(section.children[0].tagName, 'SUMMARY');
+  }
+});
+
+test('a download row carries its digest and a button that copies it', () => {
+  const PL = load(async () => jsonResponse(200, {}));
+  const report = PL.renderTrustReport({ Artifacts: [{ ID: 'svc', SHA256: 'abc123' }] });
+  const copy = report.descendants().find(node => node.hasClass('plugin-trust-copy'));
+  assert.equal(copy.tagName, 'BUTTON');
+  assert.equal(copy.type, 'button');
+  assert.equal(copy.attributes['aria-label'], 'Copy sha256');
+  // No clipboard here: the click does nothing and the digest stays readable.
+  copy.listeners.click();
+  assert.equal(copy.textContent, 'Copy');
+  assert.match(report.textContent, /sha256 abc123/);
+  const plain = PL.renderTrustReport({ Artifacts: [{ ID: 'svc' }] });
+  assert.equal(plain.descendants().filter(node => node.hasClass('plugin-trust-copy')).length, 0);
 });
 
 // A content-only Home provider adds a Home and a skill. The Home is the thing

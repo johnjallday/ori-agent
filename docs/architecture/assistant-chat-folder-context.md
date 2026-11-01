@@ -379,7 +379,22 @@ previews still acquire no independent release facts; the automatically opened
 canonical creation review intentionally reads them. Partial `readiness` remains
 inert: no digest, setup confirmation or new source access.
 
-The assistant's package rows provide separate inline review/confirm controls.
+Each package row has one Install, Update or Enable button, which opens the plugin
+setup wizard: a `<dialog>` on `document.body`, with a fixed header and footer and
+a scrolling trust report. Attaching a folder never opens it. With more than one
+package pending it starts on a "What this setup needs" step. The wizard owns no
+server call and no consent; it drives the same controller and route. After a
+confirmed change it reads the refreshed requirements and follows only what the
+server offers: a `ready` row moves on, and an install that left the row at
+`enable` opens the enable review on the same step, which still needs its own
+Confirm. Any other row stops on that package with its status and offers Back and
+Finish, never a second install. Cancel or Escape works on every step except while
+a confirmation is in flight. Once anything has changed they lead to a summary
+built from the refreshed offer, which says that no workspace, Home, agent or model
+task was created. An unknown confirmation result keeps its exact request envelope
+through closing and reopening. Plugins → Guided Setup is unchanged and remains the
+entry when no folder offer exists.
+
 `POST …/folder-digest/offers/{id}/prerequisites` accepts only a package kind and
 bounded consent envelope, not a source, path or executable input. The current
 canonical owner, pending creation status, live selection and destination are

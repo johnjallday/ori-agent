@@ -554,7 +554,7 @@
       details.dataset.requirementDisclosure = requirement.kind;
       details.open = opened.has(requirement.kind);
       details.append(
-        node('summary', 'Source details'),
+        node('summary', 'Where it comes from'),
         node('p', requirement.source || 'Source not reported', 'folder-visual__note')
       );
       row.append(details, node('div', '', 'folder-requirements__actions'));
