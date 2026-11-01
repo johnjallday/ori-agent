@@ -36,6 +36,10 @@ const (
 	FillInAllow = "allow"
 	FillInLater = "later"
 
+	// How the drawer's project question ended.
+	ProjectAnswered = "answered"
+	ProjectSkipped  = "skipped"
+
 	// FillInAskAgainAfter is how long Not now waits before the card comes back,
 	// as the ask's does.
 	FillInAskAgainAfter = AskAgainAfter
@@ -137,6 +141,16 @@ type FillIn struct {
 	// did not, for want of the answer. It is what puts the card under Needs you:
 	// a setup with nothing to write is never asked.
 	Withheld bool `json:"withheld,omitempty"`
+	// ProjectAsk is how the drawer's one project question ended: ProjectAnswered
+	// or ProjectSkipped. Either way it is never asked again in the drawer; the
+	// Profile page's interview is separate (first-week FR23).
+	ProjectAsk   string     `json:"project_ask,omitempty"`
+	ProjectAskAt *time.Time `json:"project_ask_at,omitempty"`
+	// WeekShownAt is when Today first showed the first-week recap row, and
+	// WeekDismissedAt when the user dismissed it. The row is shown once: neither
+	// a later look nor a later sync brings it back (first-week FR25).
+	WeekShownAt     *time.Time `json:"week_shown_at,omitempty"`
+	WeekDismissedAt *time.Time `json:"week_dismissed_at,omitempty"`
 	// Report collects what the Today row says, until the row has been seen (FR9).
 	Report *FillInReport `json:"report,omitempty"`
 }
@@ -264,6 +278,13 @@ func validateFillIn(fillIn FillIn) error {
 	if fillIn.Consent != "" && fillIn.Consent != ConsentAllowed && fillIn.Consent != ConsentLater ||
 		(fillIn.Consent == "") != (fillIn.ConsentAt == nil) ||
 		fillIn.ConsentRequestID != "" && !ValidRequestID(fillIn.ConsentRequestID) {
+		return ErrInvalidRecord
+	}
+	if fillIn.ProjectAsk != "" && fillIn.ProjectAsk != ProjectAnswered && fillIn.ProjectAsk != ProjectSkipped ||
+		(fillIn.ProjectAsk == "") != (fillIn.ProjectAskAt == nil) {
+		return ErrInvalidRecord
+	}
+	if fillIn.WeekDismissedAt != nil && fillIn.WeekShownAt == nil {
 		return ErrInvalidRecord
 	}
 	if report := fillIn.Report; report != nil {

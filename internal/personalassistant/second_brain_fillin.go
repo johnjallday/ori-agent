@@ -144,6 +144,7 @@ func fillInView(fillIn *secondbrain.FillIn, now time.Time) *SecondBrainFillInVie
 		return view
 	}
 	view.LastAt = fillIn.LastAt
+	view.ProjectAsk = fillIn.ProjectAsk
 	for _, mirror := range fillIn.Mirrors {
 		switch mirror.State {
 		case secondbrain.MirrorUserOwned:

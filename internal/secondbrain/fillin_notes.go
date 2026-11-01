@@ -110,6 +110,35 @@ func followUpNoteRel(title string) string {
 	return prefix + stem + suffix
 }
 
+// ProjectAnswerLine folds the user's answer to the project question to one line,
+// or reports that it cannot be a note: empty, or looking like a secret.
+func ProjectAnswerLine(answer string) (string, bool) {
+	line := cleanSeedLine(answer)
+	return line, line != "" && !sensitive.ContainsSecretLikeText(line)
+}
+
+// ProjectAnswerNote is the README the project question writes: the project's name
+// as the heading, the user's own words as the first paragraph, and where the note
+// came from. A workspace made later with the same name replaces it with the
+// workspace's own README, the same file (first-week FR21, FR22).
+func ProjectAnswerNote(name, answer, date string) []byte {
+	var out strings.Builder
+	out.WriteString("# " + name + "\n\n" + answer + "\n")
+	out.WriteString("\n## How Ori knows this\n\n- " + howLine(HeldFact{How: "You told Ori this", Date: date}) + "\n")
+	return []byte(out.String())
+}
+
+// ProjectNoteRel is the path of a project's note: Projects/<name>/README.md. ok is
+// false for a name that is not one plain folder name.
+func ProjectNoteRel(name string) (string, bool) {
+	if !ValidFolderName(name) {
+		return "", false
+	}
+	rel := FolderProjects + "/" + name + "/" + projectNoteName
+	_, _, err := splitOwnedPath(rel)
+	return rel, err == nil && mirrorRelFits(rel)
+}
+
 func projectNotes(projects []HeldProject) []PlannedNote {
 	notes := make([]PlannedNote, 0, len(projects))
 	for _, project := range projects {

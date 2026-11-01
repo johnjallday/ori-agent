@@ -49,6 +49,12 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 				Title: report.Sentence, SourceAt: report.At, Route: notesPanelRoute(hqSlug)})
 		}
 	}
+	if reporter, ok := s.secondBrain.(secondBrainWeekReporter); ok {
+		if report, found := reporter.WeekReport(ctx, userID); found {
+			done = append(done, TodayItem{ID: report.ID, Kind: "second_brain_week",
+				Title: report.Sentence, SourceAt: report.At, Route: notesPanelRoute(hqSlug), Actions: []string{"dismiss"}})
+		}
+	}
 	return working, needs, done
 }
 
@@ -56,6 +62,12 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 // wrote since the row was last seen (FR9).
 type secondBrainWrittenReporter interface {
 	WrittenReport(ctx context.Context, userID string) (SecondBrainWrittenReport, bool)
+}
+
+// secondBrainWeekReporter is the part that says what the first week gained
+// (first-week FR25).
+type secondBrainWeekReporter interface {
+	WeekReport(ctx context.Context, userID string) (SecondBrainWeekReport, bool)
 }
 
 // notesPanelRoute opens the Notes station's panel on the HQ map, or "" when the

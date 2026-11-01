@@ -23,6 +23,9 @@ type fakeSecondBrain struct {
 	create  personalassistant.SecondBrainCreateInput
 	capture [2]string // text, request id
 	fillIn  [2]string // decision, request id
+	project personalassistant.SecondBrainProjectInput
+	skipID  string
+	weekID  string
 	item    [4]string // look id, item id, action, request id
 	accept  personalassistant.SecondBrainAcceptInput
 	lookID  string
@@ -50,6 +53,21 @@ func (f *fakeSecondBrain) DecideAsk(context.Context, string, string, string) (pe
 func (f *fakeSecondBrain) FillInDecision(_ context.Context, _ string, decision, requestID string) (personalassistant.SecondBrainView, error) {
 	f.fillIn = [2]string{decision, requestID}
 	return personalassistant.SecondBrainView{}, f.record("fill_in")
+}
+
+func (f *fakeSecondBrain) WriteProject(_ context.Context, _ string, input personalassistant.SecondBrainProjectInput) (personalassistant.SecondBrainProjectNote, error) {
+	f.project = input
+	return personalassistant.SecondBrainProjectNote{Name: input.Name, Rel: "Projects/" + input.Name + "/README.md"}, f.record("project")
+}
+
+func (f *fakeSecondBrain) SkipProject(_ context.Context, _ string, requestID string) (personalassistant.SecondBrainView, error) {
+	f.skipID = requestID
+	return personalassistant.SecondBrainView{}, f.record("project_skip")
+}
+
+func (f *fakeSecondBrain) DismissWeek(_ context.Context, _ string, requestID string) (personalassistant.SecondBrainView, error) {
+	f.weekID = requestID
+	return personalassistant.SecondBrainView{}, f.record("week_dismiss")
 }
 
 func (f *fakeSecondBrain) Connect(_ context.Context, _ string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error) {
@@ -107,6 +125,9 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("POST "+base+"/prompted", h.PromptedSecondBrain)
 	mux.HandleFunc("POST "+base+"/ask", h.AskSecondBrain)
 	mux.HandleFunc("POST "+base+"/fill-in", h.FillInSecondBrain)
+	mux.HandleFunc("POST "+base+"/project", h.ProjectSecondBrain)
+	mux.HandleFunc("POST "+base+"/project/skip", h.SkipProjectSecondBrain)
+	mux.HandleFunc("POST "+base+"/week/dismiss", h.DismissWeekSecondBrain)
 	mux.HandleFunc("POST "+base+"/connect", h.ConnectSecondBrain)
 	mux.HandleFunc("POST "+base+"/create", h.CreateSecondBrain)
 	mux.HandleFunc("POST "+base+"/capture", h.CaptureSecondBrain)
@@ -139,6 +160,9 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 		{http.MethodPost, "/prompted", `{"request_id":"p-1"}`},
 		{http.MethodPost, "/ask", `{"decision":"later","request_id":"a-1"}`},
 		{http.MethodPost, "/fill-in", `{"decision":"allow","request_id":"fi-1"}`},
+		{http.MethodPost, "/project", `{"name":"Launch","answer":"Finishing the Launch album.","request_id":"pj-1"}`},
+		{http.MethodPost, "/project/skip", `{"request_id":"ps-1"}`},
+		{http.MethodPost, "/week/dismiss", `{"request_id":"wk-1"}`},
 		{http.MethodPost, "/connect", `{"detected_id":"v_1","request_id":"c-1"}`},
 		{http.MethodPost, "/create", `{"selection_token":"t-1","name":"Second Brain","request_id":"s-1"}`},
 		{http.MethodPost, "/capture", `{"text":"Call Dana","request_id":"n-1"}`},
@@ -157,8 +181,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 			t.Errorf("%s %s from Ori's page = %d, want 200", route.method, route.path, got)
 		}
 	}
-	if len(fake.calls) != 14 {
-		t.Fatalf("calls = %v, want only the fourteen local requests", fake.calls)
+	if len(fake.calls) != 17 {
+		t.Fatalf("calls = %v, want only the seventeen local requests", fake.calls)
 	}
 
 	rebound := httptest.NewRequest(http.MethodGet, "http://attacker.example/api/personal-assistant/second-brain", nil)
@@ -231,6 +255,10 @@ func TestSecondBrainRoutes_RefuseUnknownFieldsAndAnyPath(t *testing.T) {
 		{"/fill-in", `{"decision":"allow","request_id":"fi-1","path":"/Users/sam/Second Brain"}`},
 		{"/fill-in", `{"decision":"allow","request_id":"fi-1","folders":["People"]}`},
 		{"/fill-in", `{"decision":"allow"}{"decision":"later"}`},
+		{"/project", `{"name":"Launch","answer":"x","request_id":"pj-1","path":"/Users/sam/Second Brain/Projects/Launch"}`},
+		{"/project", `{"name":"Launch","answer":"x","request_id":"pj-1","folder":"Music"}`},
+		{"/project/skip", `{"request_id":"ps-1","name":"Launch"}`},
+		{"/week/dismiss", `{"request_id":"wk-1","counts":{"facts":99}}`},
 		{"/connect", `{"path":"/Users/sam/Notes","request_id":"c-1"}`},
 		{"/connect", `{"detected_id":"v_1","request_id":"c-1","vault_path":"/Users/sam/Notes"}`},
 		{"/connect", `{"detected_id":"v_1","request_id":"c-1","name":"Notes"}`},

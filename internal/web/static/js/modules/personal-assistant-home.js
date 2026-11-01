@@ -117,6 +117,8 @@ export function todayLabel(value) {
 const WORKSPACE_BUILD_ACTIONS = ['resume', 'discard'];
 // The protection line's only in-place control; "Check protection" is its route.
 const BACKUP_COVERAGE_ACTIONS = ['not_now'];
+// The first-week recap's only control: it is shown once and put away (FR25).
+const SECOND_BRAIN_WEEK_ACTIONS = ['dismiss'];
 
 export function todaySectionItems(section) {
   const seen = new Set();
@@ -159,6 +161,11 @@ export function todaySectionItems(section) {
           BACKUP_COVERAGE_ACTIONS.includes(action)
         );
       }
+      if (row.kind === 'second_brain_week') {
+        row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
+          SECOND_BRAIN_WEEK_ACTIONS.includes(action)
+        );
+      }
       return row;
     });
 }
@@ -183,6 +190,24 @@ export async function declineBackupCoverage(fetchImpl = fetch) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: '{}'
+    });
+    return Boolean(response?.ok);
+  } catch (_) {
+    return false;
+  }
+}
+
+// The recap row's Dismiss: the server records it in the second brain's record,
+// so the row does not come back on another load or in another tab.
+export async function dismissSecondBrainWeek(fetchImpl = fetch) {
+  const random =
+    globalThis.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  try {
+    const response = await fetchImpl('/api/personal-assistant/second-brain/week/dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ request_id: `week-${random}` })
     });
     return Boolean(response?.ok);
   } catch (_) {
@@ -758,6 +783,23 @@ function renderCompactRows(list, rows, skipCards = false) {
         }
         actions.append(element);
       }
+      li.append(actions);
+    }
+    if (row.kind === 'second_brain_week' && row.actions?.includes('dismiss')) {
+      const actions = document.createElement('div');
+      actions.className = 'personal-assistant-today__actions';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'personal-assistant-today__action personal-assistant-today__action--quiet';
+      button.dataset.secondBrainWeekAction = 'dismiss';
+      button.textContent = 'Dismiss';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        if (await dismissSecondBrainWeek()) li.remove();
+        else button.disabled = false;
+        void loadToday();
+      });
+      actions.append(button);
       li.append(actions);
     }
     if (row.kind === 'hq_setup') {

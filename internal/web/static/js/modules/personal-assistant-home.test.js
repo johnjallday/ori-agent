@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   backupCoverageControls,
   declineBackupCoverage,
+  dismissSecondBrainWeek,
   MEETING_BADGES,
   meetingsSectionView,
   modelUnavailableBanner,
@@ -193,6 +194,50 @@ test('Not now posts no data and reports only success', async () => {
   assert.equal(await declineBackupCoverage(async () => ({ ok: false })), false);
   assert.equal(
     await declineBackupCoverage(async () => {
+      throw new Error('offline');
+    }),
+    false
+  );
+});
+
+test('the first-week recap keeps its route to the Notes station and only a Dismiss', () => {
+  const [recap, other] = todaySectionItems({
+    items: [
+      {
+        id: 'second-brain-week-20261108',
+        kind: 'second_brain_week',
+        title: 'This week your second brain gained 4 facts, 2 people, 1 project and 5 captures.',
+        route: '/workspaces/personal-hq?station=second-brain',
+        actions: ['dismiss', 'delete_everything']
+      },
+      {
+        id: 'second-brain-written-1',
+        kind: 'second_brain_written',
+        title: 'Ori added a person',
+        actions: ['dismiss']
+      }
+    ]
+  });
+  assert.deepEqual(recap.actions, ['dismiss'], 'an unlisted control is dropped');
+  assert.equal(recap.route, '/workspaces/personal-hq?station=second-brain');
+  assert.equal(other.actions, undefined, 'only the recap has a Dismiss');
+});
+
+test('Dismiss on the recap posts a request id and reports only success', async () => {
+  const calls = [];
+  const ok = await dismissSecondBrainWeek(async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true };
+  });
+  assert.equal(ok, true);
+  assert.equal(calls[0].url, '/api/personal-assistant/second-brain/week/dismiss');
+  assert.equal(calls[0].init.method, 'POST');
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual(Object.keys(body), ['request_id']);
+  assert.match(body.request_id, /^week-[A-Za-z0-9-]{8,}$/);
+  assert.equal(await dismissSecondBrainWeek(async () => ({ ok: false })), false);
+  assert.equal(
+    await dismissSecondBrainWeek(async () => {
       throw new Error('offline');
     }),
     false

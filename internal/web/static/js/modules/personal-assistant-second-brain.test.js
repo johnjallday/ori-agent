@@ -13,6 +13,10 @@ import {
   secondBrainFillInView,
   secondBrainFolderOffer,
   secondBrainFolderOfferShows,
+  PROJECT_QUESTION_ID,
+  projectNameFromAnswer,
+  saveProjectFact,
+  secondBrainProjectAskView,
   setupLearningClosing,
   setupLearningView,
   SETUP_LEARNING_HEADING,
@@ -763,4 +767,201 @@ test('each answer carries one retry key and the Profile page action, and dismiss
   );
   assert.match(source, /SETUP_LEARNING_ENDPOINT\}\/dismiss/);
   assert.match(source, /openLearned,/);
+});
+
+test('the project question belongs to a second brain that may keep project notes, once', () => {
+  const brain = (over = {}) => ({
+    status: 'connected',
+    source: { name: 'Second Brain', origin: 'created_by_ori' },
+    fill_in: { state: 'allowed' },
+    projects: [],
+    ...over
+  });
+  assert.equal(secondBrainProjectAskView(brain()).show, true);
+  for (const hidden of [
+    brain({ fill_in: { state: 'pending' } }),
+    brain({ fill_in: { state: 'later' } }),
+    brain({ fill_in: { state: 'allowed', project_ask: 'skipped' } }),
+    brain({ fill_in: { state: 'allowed', project_ask: 'answered' } }),
+    brain({ projects: [{ name: 'Launch' }] }),
+    brain({ source: { name: 'Vault', origin: 'connected' } }),
+    brain({ status: 'missing' }),
+    brain({ fill_in: undefined }),
+    null
+  ]) {
+    assert.equal(secondBrainProjectAskView(hidden).show, false, JSON.stringify(hidden));
+  }
+  assert.equal(PROJECT_QUESTION_ID, 'priority');
+});
+
+test('a project name is proposed from the first clause, short, and always a valid folder name', () => {
+  for (const [answer, want] of Object.entries({
+    'Finishing the Launch album': 'Launch Album',
+    "I'm working on the Zine, and the website": 'Zine',
+    'My podcast relaunch.': 'Podcast Relaunch',
+    'widget, a Go module': 'Widget',
+    'building a very long named thing today': 'Very Long Named',
+    'Q3 planning': 'Q3 Planning',
+    the: 'Project',
+    '...': 'Project',
+    '   ': 'Project',
+    '../../etc': 'Project',
+    'a/b/c': 'B C',
+    'Café Müller': 'Café Müller'
+  })) {
+    const name = projectNameFromAnswer(answer);
+    assert.equal(name, want, answer);
+    assert.equal(secondBrainFolderNameProblem(name), '', `${answer} → ${name}`);
+  }
+});
+
+test('the project question saves the fact and the note with their own retry keys, and skipping posts one id', () => {
+  const source = readFileSync(
+    new URL('./personal-assistant-second-brain.js', import.meta.url),
+    'utf8'
+  );
+  // The fact is the user's own words, through the canonical explicit save that the
+  // interview's rows end in; the Profile page's interview is not completed.
+  assert.match(source, /EXPLICIT_ENDPOINT = '\/api\/personal-assistant\/knowledge\/explicit'/);
+  assert.match(source, /category: 'projects'/);
+  assert.match(source, /project\.keys\.fact = project\.keys\.fact \|\| newRequestID\('projfact'\)/);
+  assert.match(source, /project\.keys\.note = project\.keys\.note \|\| newRequestID\('projnote'\)/);
+  assert.doesNotMatch(source, /interview\/save/);
+  assert.match(source, /request\('\/project\/skip'/);
+  assert.match(source, /request\('\/project',/);
+  // Make it a workspace opens the existing form with the project chosen; it
+  // creates nothing.
+  assert.match(source, /makeWorkspace\(name\)/);
+  // A freed card slot asks the consent question first, then this one.
+  assert.match(
+    source,
+    /async function showNextCard\(\) \{\s*await showFillInIfOffered\(\);\s*await showProjectAskIfDue\(\);/
+  );
+});
+
+// The version the save names is the assistant record's, and it moves while the
+// user types. The card reads it again and saves once more, under the same key.
+function fakeFetch(...responses) {
+  const calls = [];
+  const impl = async (url, init = {}) => {
+    calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
+    const next = responses.shift() || { status: 500, body: {} };
+    return { ok: next.status < 400, status: next.status, json: async () => next.body };
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+const answered = () => ({
+  keys: { fact: 'projfact-1' },
+  stateVersion: 4,
+  answer: ' Finishing the Launch album '
+});
+
+test('a save refused because the version moved reads it again and saves once more under the same key', async () => {
+  const project = answered();
+  const fetchImpl = fakeFetch(
+    {
+      status: 409,
+      body: { error: 'The review changed or needs repair. Refresh before continuing' }
+    },
+    { status: 200, body: { state_version: 9 } },
+    { status: 200, body: { item: { id: 'k1' } } }
+  );
+  const result = await saveProjectFact(project, fetchImpl);
+  assert.equal(result.ok, true);
+  assert.equal(project.stateVersion, 9);
+  assert.deepEqual(
+    fetchImpl.calls.map(call => [call.url.split('/').pop(), call.body?.state_version]),
+    [
+      ['explicit', 4],
+      ['interview', undefined],
+      ['explicit', 9]
+    ]
+  );
+  const [first, , second] = fetchImpl.calls;
+  assert.equal(first.body.request_id, 'projfact-1');
+  assert.equal(
+    second.body.request_id,
+    'projfact-1',
+    'the retry is the same save, not a second one'
+  );
+  assert.equal(second.body.category, 'projects');
+  assert.equal(second.body.text, 'Finishing the Launch album');
+});
+
+test('a save is not retried when nothing about the version changed, or for any other refusal', async () => {
+  const same = fakeFetch(
+    { status: 409, body: { error: 'The review queue is full' } },
+    { status: 200, body: { state_version: 4 } },
+    {
+      status: 200,
+      body: { items: [{ state: 'approved', category: 'projects', text: 'Something else' }] }
+    }
+  );
+  const stuck = await saveProjectFact(answered(), same);
+  assert.equal(stuck.ok, false);
+  assert.equal(stuck.status, 409);
+  assert.deepEqual(
+    same.calls.map(call => call.url.split('/').pop()),
+    ['explicit', 'interview', 'knowledge'],
+    'it looked, found the same version, found no such fact, and did not send again'
+  );
+
+  const broken = fakeFetch({ status: 503, body: {} });
+  assert.equal((await saveProjectFact(answered(), broken)).status, 503);
+  assert.equal(broken.calls.length, 1);
+
+  const offline = async () => {
+    throw new Error('offline');
+  };
+  const result = await saveProjectFact(answered(), offline);
+  assert.equal(result.ok, false);
+});
+
+test('an answer the user already gave is a fact already held, so the note can still be written', async () => {
+  const fetchImpl = fakeFetch(
+    {
+      status: 409,
+      body: { error: 'The review changed or needs repair. Refresh before continuing' }
+    },
+    { status: 200, body: { state_version: 4 } },
+    {
+      status: 200,
+      body: {
+        items: [
+          { state: 'forgotten', category: 'projects', text: 'Finishing the Launch album' },
+          { state: 'approved', category: 'people', text: 'Finishing the Launch album' },
+          { state: 'approved', category: 'projects', text: 'Finishing the Launch album' }
+        ]
+      }
+    }
+  );
+  const result = await saveProjectFact(answered(), fetchImpl);
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.already_held, true);
+  assert.equal(
+    fetchImpl.calls.filter(call => call.url.endsWith('/explicit')).length,
+    1,
+    'it never saved a second copy'
+  );
+
+  // Only an approved fact in the same category counts.
+  const forgotten = fakeFetch(
+    { status: 409, body: {} },
+    { status: 200, body: { state_version: 4 } },
+    {
+      status: 200,
+      body: {
+        items: [{ state: 'forgotten', category: 'projects', text: 'Finishing the Launch album' }]
+      }
+    }
+  );
+  assert.equal((await saveProjectFact(answered(), forgotten)).ok, false);
+});
+
+test('a save that works the first time asks nothing else', async () => {
+  const fetchImpl = fakeFetch({ status: 200, body: { item: { id: 'k1' } } });
+  assert.equal((await saveProjectFact(answered(), fetchImpl)).ok, true);
+  assert.equal(fetchImpl.calls.length, 1);
 });

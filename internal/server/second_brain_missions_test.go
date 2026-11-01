@@ -1,6 +1,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -78,6 +80,40 @@ func TestFirstWeekMissions_CompleteFromWhatOriWrites(t *testing.T) {
 	}
 	if done := firstWeekCompleted(f.builder); !done[progression.GiveProjectQuestID] {
 		t.Fatalf("after a project note for %s: %v", project, done)
+	}
+}
+
+// The Journal toast says "copied to Daily in your notes" only when a note was
+// written, and that is the only time the mission completes (FR24): a day the
+// user already wrote in Daily is theirs, the toast says so, and nothing was
+// added.
+func TestFirstWeekMissions_AJournalDayTheUserOwnsDoesNotCompleteTheMission(t *testing.T) {
+	f := newDraftServerFixture(t)
+	setUpSecondBrain(t, f)
+	view, err := f.builder.personalAssistantSecondBrain.Status(t.Context(), "local")
+	if err != nil || view.Source == nil {
+		t.Fatalf("status = %+v, %v", view.Source, err)
+	}
+	daily := filepath.Join(view.Source.Path, "Daily")
+	if err := os.MkdirAll(daily, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(daily, "2026-11-03.md"), []byte("My own day.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mirror := journalDailyMirror{builder: f.builder}
+	if got := mirror.MirrorDaily(t.Context(), "local", "2026-11-03", "# Journal\n\nShipped the mix."); got != personalhq.DailyUserOwned {
+		t.Fatalf("a day the user wrote = %q, want %q", got, personalhq.DailyUserOwned)
+	}
+	if f.builder.progressionEngine.HasCompleted(progression.SaveFirstJournalQuestID) {
+		t.Fatal("a journal that was not copied completed the mission")
+	}
+	// The next day's Journal is copied, and that one counts.
+	if got := mirror.MirrorDaily(t.Context(), "local", "2026-11-04", "# Journal\n\nMixed the second song."); got != personalhq.DailyMirrored {
+		t.Fatalf("the next day = %q", got)
+	}
+	if !f.builder.progressionEngine.HasCompleted(progression.SaveFirstJournalQuestID) {
+		t.Fatal("the first Journal copied to Daily did not complete the mission")
 	}
 }
 

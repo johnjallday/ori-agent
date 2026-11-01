@@ -32,6 +32,9 @@ type SecondBrainService interface {
 	Inbox(ctx context.Context, userID string) (personalassistant.SecondBrainInboxView, error)
 	Disconnect(ctx context.Context, userID, requestID string, ifVersion int64) (personalassistant.SecondBrainView, error)
 	FillInDecision(ctx context.Context, userID, decision, requestID string) (personalassistant.SecondBrainView, error)
+	WriteProject(ctx context.Context, userID string, input personalassistant.SecondBrainProjectInput) (personalassistant.SecondBrainProjectNote, error)
+	SkipProject(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
+	DismissWeek(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 }
 
 // SetSecondBrain adds the second-brain boundary. origin refuses a request that
@@ -137,6 +140,83 @@ func (h *Handler) AskSecondBrain(w http.ResponseWriter, r *http.Request) {
 type secondBrainFillInRequest struct {
 	Decision  string `json:"decision"`
 	RequestID string `json:"request_id"`
+}
+
+type secondBrainProjectRequest struct {
+	Name      string `json:"name"`
+	Answer    string `json:"answer"`
+	RequestID string `json:"request_id"`
+}
+
+// ProjectSecondBrain handles POST …/second-brain/project: the drawer's answer to
+// "What's the main thing you're working on right now?" becomes
+// Projects/<name>/README.md. It names a project, never a folder: the body has a
+// name and the user's own words, and the note's place is Ori's to choose.
+func (h *Handler) ProjectSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainProjectRequest
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "name", "answer", "request_id") {
+		return
+	}
+	note, err := h.secondBrain.WriteProject(r.Context(), userID, personalassistant.SecondBrainProjectInput{
+		Name: req.Name, Answer: req.Answer, RequestID: strings.TrimSpace(req.RequestID),
+	})
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"project": note})
+}
+
+// SkipProjectSecondBrain handles POST …/second-brain/project/skip: the drawer
+// stops asking, and the Profile page's interview is untouched.
+func (h *Handler) SkipProjectSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainRequestOnly
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "request_id") {
+		return
+	}
+	view, err := h.secondBrain.SkipProject(r.Context(), userID, strings.TrimSpace(req.RequestID))
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"second_brain": view})
+}
+
+// DismissWeekSecondBrain handles POST …/second-brain/week/dismiss: the first-week
+// recap row's one control. The row is shown once; this records that it was put
+// away.
+func (h *Handler) DismissWeekSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainRequestOnly
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "request_id") {
+		return
+	}
+	view, err := h.secondBrain.DismissWeek(r.Context(), userID, strings.TrimSpace(req.RequestID))
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"second_brain": view})
 }
 
 // FillInSecondBrain records the answer to the consent card: "allow" or "later".
@@ -483,6 +563,10 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "That item is no longer here")
 	case errors.Is(err, personalassistant.ErrSecondBrainNoInbox):
 		orihttp.NotFound(w, "Only a second brain Ori set up has an Inbox here")
+	case errors.Is(err, personalassistant.ErrSecondBrainProjectName):
+		orihttp.BadRequest(w, "Choose a simple project name, without slashes.")
+	case errors.Is(err, personalassistant.ErrSecondBrainFillInNotAllowed):
+		orihttp.Conflict(w, "Let Ori keep project notes in your second brain first")
 	case errors.Is(err, personalassistant.ErrSecondBrainSeededItem):
 		orihttp.Conflict(w, "That item came from a follow-up you already have")
 	case errors.Is(err, personalassistant.ErrValidation):

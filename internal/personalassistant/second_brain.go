@@ -345,12 +345,15 @@ type SecondBrainWrittenView struct {
 type SecondBrainFillInView struct {
 	// State is "allowed", "pending" (a setup from before the fill-in, not yet
 	// asked) or "later". Offer says the consent card belongs under Needs you.
-	State     string     `json:"state"`
-	Offer     bool       `json:"offer"`
-	Written   int        `json:"written"`
-	UserOwned int        `json:"user_owned"`
-	Stale     int        `json:"stale"`
-	LastAt    *time.Time `json:"last_at,omitempty"`
+	State string `json:"state"`
+	Offer bool   `json:"offer"`
+	// ProjectAsk is how the drawer's project question ended: "answered" or
+	// "skipped", or "" while it is still to be asked.
+	ProjectAsk string     `json:"project_ask,omitempty"`
+	Written    int        `json:"written"`
+	UserOwned  int        `json:"user_owned"`
+	Stale      int        `json:"stale"`
+	LastAt     *time.Time `json:"last_at,omitempty"`
 }
 
 // SecondBrainDetected is one vault Obsidian lists. Path is shown only in the

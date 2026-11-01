@@ -1325,6 +1325,9 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST "+secondBrain+"/prompted", s.Handlers.PersonalAssistant.PromptedSecondBrain)
 		mux.HandleFunc("POST "+secondBrain+"/ask", s.Handlers.PersonalAssistant.AskSecondBrain)
 		mux.HandleFunc("POST "+secondBrain+"/fill-in", s.Handlers.PersonalAssistant.FillInSecondBrain)
+		mux.HandleFunc("POST "+secondBrain+"/project", s.Handlers.PersonalAssistant.ProjectSecondBrain)
+		mux.HandleFunc("POST "+secondBrain+"/project/skip", s.Handlers.PersonalAssistant.SkipProjectSecondBrain)
+		mux.HandleFunc("POST "+secondBrain+"/week/dismiss", s.Handlers.PersonalAssistant.DismissWeekSecondBrain)
 		// What the user's approved filing taught Ori, answered on one card: the
 		// list, and turning away what is left. Approve and reject are the Profile
 		// page's own actions under /knowledge/{item_id}/{action}.
