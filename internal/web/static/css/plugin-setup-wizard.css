@@ -1,0 +1,190 @@
+/* The plugin setup wizard: a fixed header, the decision, a fixed footer and one
+   scrolling region. The footer follows the decision in the DOM so keyboard and
+   screen-reader users reach the choice before the long trust report; `order`
+   keeps it at the bottom of the screen. */
+.plugin-setup-wizard {
+  --psw-ink: var(--pa-ink, var(--text-primary));
+  --psw-muted: var(--pa-ink-dim, var(--text-secondary));
+  --psw-line: var(--ori-border, var(--border-color));
+  --psw-paper: var(--ori-paper, var(--bg-primary));
+  width: min(560px, calc(100vw - 24px));
+  max-width: none;
+  max-height: min(720px, calc(100dvh - 24px));
+  padding: 0;
+  color: var(--psw-ink);
+  background: var(--psw-paper);
+  border: 1px solid var(--psw-line);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.plugin-setup-wizard[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-setup-wizard::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.plugin-setup-wizard__header {
+  flex: none;
+  order: 0;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--psw-line);
+}
+
+.plugin-setup-wizard__title {
+  margin: 0;
+  font:
+    700 0.95rem "Chakra Petch",
+    sans-serif;
+}
+
+.plugin-setup-wizard__title:focus {
+  outline: none;
+}
+
+.plugin-setup-wizard__title:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+
+.plugin-setup-wizard__progress {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  color: var(--psw-muted);
+}
+
+.plugin-setup-wizard__decision {
+  flex: none;
+  order: 1;
+  padding: 0.75rem 1rem 0.25rem;
+  font-size: 0.85rem;
+}
+
+.plugin-setup-wizard__decision p {
+  margin: 0 0 0.25rem;
+}
+
+.plugin-setup-wizard__list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.plugin-setup-wizard__list > li {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--psw-line);
+}
+
+.plugin-setup-wizard__list > li:last-child {
+  border-bottom: 0;
+}
+
+.plugin-setup-wizard__list p {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+}
+
+.plugin-setup-wizard__final {
+  font-weight: 600;
+}
+
+.plugin-setup-wizard__muted {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--psw-muted);
+}
+
+.plugin-setup-wizard__details {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.plugin-setup-wizard__details summary {
+  min-height: 32px;
+  align-content: center;
+  cursor: pointer;
+}
+
+.plugin-setup-wizard__details pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.plugin-setup-wizard__error {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.plugin-setup-wizard__body {
+  flex: 1 1 auto;
+  order: 2;
+  min-height: 0;
+  padding: 0.75rem 1rem;
+  overflow: auto;
+}
+
+.plugin-setup-wizard__body h3 {
+  margin: 0 0 0.25rem;
+  font:
+    700 1.05rem "Chakra Petch",
+    sans-serif;
+}
+
+.plugin-setup-wizard__footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  order: 3;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--psw-line);
+}
+
+.plugin-setup-wizard__footer > button {
+  min-height: 44px;
+}
+
+/* Bootstrap's outline grey is under 4.5:1 here and reads as disabled in dark. */
+.plugin-setup-wizard__footer > .btn-outline-secondary:not(:disabled) {
+  color: var(--psw-ink);
+  border-color: var(--psw-ink);
+}
+
+.plugin-setup-wizard__footer > .btn-outline-secondary:not(:disabled):hover {
+  color: var(--psw-paper);
+  background: var(--psw-ink);
+}
+
+@media (max-height: 520px) {
+  .plugin-setup-wizard {
+    max-height: calc(100dvh - 8px);
+  }
+
+  .plugin-setup-wizard__header,
+  .plugin-setup-wizard__footer {
+    padding-block: 0.35rem;
+  }
+
+  .plugin-setup-wizard__body {
+    padding-block: 0.35rem;
+  }
+
+  .plugin-setup-wizard__decision {
+    max-height: 35dvh;
+    padding-block: 0.35rem 0;
+    overflow: auto;
+    font-size: 0.8rem;
+  }
+
+  .plugin-setup-wizard__progress {
+    margin-top: 0;
+  }
+}

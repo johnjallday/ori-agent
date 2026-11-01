@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chooseAttach } from './helpers/assistant-menus';
+import { finishPluginSetupWizard } from './helpers/plugin-setup-wizard';
 
 // Real host/observation/review/packages/persistence; only the provider is scripted.
 // Run scripts/e2e-folder-summary.sh. No native/live REAPER or paid model claim.
@@ -145,24 +146,10 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
       { timeout: 60_000 }
     );
     const requirements = card.locator('#personalAssistantFolderRequirements');
-    for (const name of ['Music Project Management', 'REAPER']) {
-      const update = upgrade && name === 'REAPER';
-      await requirements
-        .getByRole('button', { name: `${update ? 'Update' : 'Install'} ${name}`, exact: true })
-        .click();
-      const confirm = requirements.getByRole('button', {
-        name: update ? 'Confirm update' : 'Confirm installation',
-        exact: true
-      });
-      await expect(confirm).toBeEnabled({ timeout: 60_000 });
-      await confirm.click();
-      if (name === 'REAPER') {
-        await requirements
-          .getByRole('button', { name: 'Enable REAPER', exact: true })
-          .click({ timeout: 60_000 });
-        await requirements.getByRole('button', { name: 'Confirm enablement', exact: true }).click();
-      }
-    }
+    await requirements
+      .getByRole('button', { name: 'Install Music Project Management', exact: true })
+      .click();
+    await finishPluginSetupWizard(page);
     await expect(requirements).toContainText('Nothing to download', { timeout: 60_000 });
     console.log('Unrelated scripted background calls:', calls.length - summaryCalls().length);
     expect(summaryCalls().length).toBe(before);

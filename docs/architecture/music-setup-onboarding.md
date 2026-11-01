@@ -448,8 +448,12 @@ this was fixed, so no link is offered when the slug cannot be resolved.
 - **Target:** the exact owner/Home/catalog entry (and queue position when queued),
   carried as a bounded host-projected return binding.
 - **Next action:** reviewed install/enable with source, version, artifact/trust,
-  and platform disclosure, shown in the current guided context. The install quest's
-  generic follow-on must not connect the song by a second creator.
+  and platform disclosure, shown in the current guided context. On the assistant's
+  folder setup card that context is the plugin setup wizard, a dialog that chains
+  a confirmed install to its enable review and lets the user stop at any step; see
+  [assistant chat folder context](assistant-chat-folder-context.md#setup-requirements-and-configuration-return).
+  The Plugins → Guided Setup quest is unchanged. The install quest's generic
+  follow-on must not connect the song by a second creator.
 - **Cancel or failure:** return to the *same* song, re-read provider/root/file/
   ownership/Home state, then offer a fresh project review. Installing creates no
   child, restores no revoked root, and launches neither REAPER nor live control.

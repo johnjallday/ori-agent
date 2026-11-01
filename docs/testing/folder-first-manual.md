@@ -274,11 +274,12 @@ env -u CODEX_HOME -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u GEMINI_API_KEY \
 ```
 
 To additionally exercise real reviewed integration and Home-provider installation,
-add `--env ORI_READINESS_INSTALL=1` to that fresh runner. It uses Install on each
-requirement card, reads the full inline source/version/trust disclosure, and
-explicitly confirms only that plugin. Cancel or Escape before confirming and
-check focus/draft retention. The Home provider can be installed first. REAPER
-installation leaves it disabled until a separate reviewed Enable confirmation;
+add `--env ORI_READINESS_INSTALL=1` to that fresh runner. It presses Install on a
+requirement card, which opens the plugin setup wizard, reads the full
+source/version/trust disclosure there, and explicitly confirms one plugin at a
+time. Cancel or Escape before confirming and check focus/draft retention. The
+Home provider can be installed first. REAPER installation leaves it disabled until
+a separate reviewed Enable confirmation, whose review the wizard opens by itself;
 the Home provider's existing installer discloses installation and enablement
 together. Successful explicit repair refreshes readiness automatically, but never
 confirms workspace setup, configures a model or starts an agent. Record the

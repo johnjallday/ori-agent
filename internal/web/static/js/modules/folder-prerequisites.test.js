@@ -1,6 +1,55 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFolderPrerequisites } from './folder-prerequisites.js';
+import { createFolderPrerequisites, renderFolderPrerequisites } from './folder-prerequisites.js';
+
+// Just enough DOM for one setup card: rows are found by data-requirement-kind
+// and each mount records what the renderer put in it.
+function fakeCard(rows) {
+  const doc = {
+    createElement: tag => {
+      const node = {
+        tag,
+        listeners: {},
+        attributes: {},
+        addEventListener(type, handler) {
+          this.listeners[type] = handler;
+        },
+        setAttribute(name, value) {
+          this.attributes[name] = value;
+        },
+        click() {
+          this.listeners.click?.();
+        }
+      };
+      return node;
+    }
+  };
+  const built = rows.map(({ kind, operation, name }) => {
+    const mount = {
+      dataset: {},
+      children: [],
+      attributes: {},
+      replaceChildren() {
+        this.children = [];
+      },
+      append(node) {
+        this.children.push(node);
+      },
+      setAttribute(name, value) {
+        this.attributes[name] = value;
+      }
+    };
+    return {
+      mount,
+      dataset: { requirementKind: kind, operation },
+      classList: { toggle() {} },
+      querySelector: selector =>
+        selector === '.folder-requirements__actions' ? mount : { textContent: name }
+    };
+  });
+  return { container: { ownerDocument: doc, querySelectorAll: () => built }, rows: built };
+}
+const eligibleOffer = { prerequisites_available: true, status: 'pending' };
 
 function fixture() {
   let owner = 'generation:offer';
@@ -46,6 +95,55 @@ const reviewed = () => ({
       version: '1.0'
     }
   }
+});
+
+test('the row button launches the wizard with its kind and renders no inline review', () => {
+  const f = fixture();
+  const card = fakeCard([
+    { kind: 'integration', operation: 'install', name: 'REAPER' },
+    { kind: 'provider', operation: 'enable', name: 'Music Project Management' }
+  ]);
+  const opened = [];
+  renderFolderPrerequisites(card.container, eligibleOffer, f.controller, {
+    openWizard: (kind, trigger) => opened.push([kind, trigger])
+  });
+  const [install] = card.rows[0].mount.children;
+  assert.equal(card.rows[0].mount.children.length, 1);
+  assert.equal(install.textContent, 'Install REAPER');
+  assert.equal(card.rows[1].mount.children[0].textContent, 'Enable Music Project Management');
+  install.click();
+  assert.deepEqual(opened, [['integration', install]]);
+  // Launching asks the server for nothing; the wizard owns the review request.
+  assert.equal(f.calls.length, 0);
+});
+
+test('a loaded review stays out of the card, and blocked rows cannot launch', async () => {
+  const f = fixture();
+  f.responses.push(reviewed());
+  await f.controller.review('integration');
+  const card = fakeCard([{ kind: 'integration', operation: 'install', name: 'REAPER' }]);
+  renderFolderPrerequisites(card.container, eligibleOffer, f.controller, {
+    blocked: true,
+    openWizard: () => assert.fail('a blocked row must not open')
+  });
+  assert.equal(card.rows[0].mount.children.length, 1);
+  assert.equal(card.rows[0].mount.children[0].tag, 'button');
+  assert.equal(card.rows[0].mount.children[0].disabled, true);
+});
+
+test('an unknown confirmation result keeps the same-installation wording and its error', async () => {
+  const f = fixture();
+  f.responses.push(reviewed(), () => {
+    throw new Error('lost response');
+  });
+  await f.controller.review('integration');
+  await f.controller.confirm();
+  const card = fakeCard([{ kind: 'integration', operation: 'install', name: 'REAPER' }]);
+  renderFolderPrerequisites(card.container, eligibleOffer, f.controller, { openWizard() {} });
+  const [button, error] = card.rows[0].mount.children;
+  assert.equal(button.textContent, 'Check the same installation');
+  assert.equal(error.textContent, 'lost response');
+  assert.equal(error.attributes.role, 'alert');
 });
 
 test('a card review never installs, confirms, refreshes or chooses another requirement', async () => {
