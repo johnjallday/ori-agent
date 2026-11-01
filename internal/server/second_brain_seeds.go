@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // secondBrainSeeds gathers what Ori already holds, for the one setup that
@@ -117,7 +118,10 @@ func (s secondBrainSeeds) knowledge(ctx context.Context, userID string, seeds *s
 	return nil
 }
 
-var errSecondBrainLearningUnavailable = errors.New("server: the learning service is unavailable")
+var (
+	errSecondBrainLearningUnavailable  = errors.New("server: the learning service is unavailable")
+	errSecondBrainFollowUpsUnavailable = errors.New("server: follow-ups are unavailable")
+)
 
 // factsNoteCategories are the approved facts the facts note lists (FR4). People
 // get notes of their own, and projects come from workspaces and the project
@@ -154,7 +158,88 @@ func (s secondBrainSeeds) Holdings(ctx context.Context, userID string) (secondbr
 	var seeds secondbrain.Seeds
 	s.agreement(ctx, userID, &seeds)
 	holdings.WorkingAgreement = seeds.WorkingAgreement
+	if holdings.FollowUps, err = s.heldFollowUps(ctx, userID); err != nil {
+		return holdings, err
+	}
+	if holdings.Projects, err = s.heldProjects(); err != nil {
+		return holdings, err
+	}
 	return holdings, nil
+}
+
+// heldFollowUps are the follow-ups the user has confirmed, as at setup, plus the
+// completed ones so a note Ori keeps can be ticked. A candidate is not confirmed
+// and a dismissed one simply goes stale.
+func (s secondBrainSeeds) heldFollowUps(ctx context.Context, userID string) ([]secondbrain.HeldFollowUp, error) {
+	service := s.builder.followUpService
+	if service == nil {
+		return nil, errSecondBrainFollowUpsUnavailable
+	}
+	items, err := service.List(ctx, followup.Filter{
+		UserID:   userID,
+		Statuses: []followup.Status{followup.StatusActive, followup.StatusSnoozed, followup.StatusReopened, followup.StatusCompleted},
+	})
+	if err != nil {
+		return nil, err
+	}
+	held := make([]secondbrain.HeldFollowUp, 0, len(items))
+	for _, item := range items {
+		one := secondbrain.HeldFollowUp{
+			ID: item.ID, Title: item.Title, Source: followUpSourceLabel(item), Done: item.Status == followup.StatusCompleted,
+			FromNotes: item.Source.Type == secondbrain.FollowUpSourceType,
+		}
+		if item.DueAt != nil {
+			one.Due = item.DueAt.Local().Format("2006-01-02")
+		}
+		held = append(held, one)
+	}
+	return held, nil
+}
+
+// heldProjects are the user's workspaces. Personal HQ is not a project, and a
+// group holds workspaces rather than being one.
+func (s secondBrainSeeds) heldProjects() ([]secondbrain.HeldProject, error) {
+	store := s.builder.workspaceStore
+	if store == nil {
+		return nil, errWorkspaceStoreUnavailable
+	}
+	active, err := store.ListActive()
+	if err != nil {
+		return nil, err
+	}
+	held := make([]secondbrain.HeldProject, 0, len(active))
+	for _, listed := range active {
+		if listed == nil || listed.Designation != "" || listed.Kind == "group" {
+			continue
+		}
+		// The store's listing is a lighter scan that leaves out the goal and the
+		// folder references, so each project is read whole. A workspace that
+		// cannot be read is described by what the listing has.
+		ws := listed
+		if whole, err := store.Get(listed.ID); err == nil && whole != nil {
+			ws = whole
+		}
+		held = append(held, secondbrain.HeldProject{
+			ID: ws.ID, Name: ws.Name, Goal: ws.Mission, Folder: anchoredFolder(ws), Agents: ws.AgentNames(),
+			Date: ws.CreatedAt.Local().Format("2 Jan 2006"),
+		})
+	}
+	return held, nil
+}
+
+// anchoredFolder is the folder a workspace is anchored to, or "". The reference
+// holds the path; the anchor itself only names the reference.
+func anchoredFolder(ws *workspace.Workspace) string {
+	id := ws.AnchorDirectoryReferenceID()
+	if id == "" {
+		return ""
+	}
+	for _, reference := range ws.DirectoryReferences {
+		if reference.ID == id {
+			return reference.Path
+		}
+	}
+	return ""
 }
 
 // knowledgeHowPhrase says in plain words how Ori came to know a fact, so a user

@@ -231,6 +231,8 @@ type SecondBrainView struct {
 	// WrittenByOri counts what Ori has put in Inbox and Daily; only a status
 	// read of a second brain Ori set up carries it (FR16).
 	WrittenByOri *SecondBrainWrittenView `json:"written_by_ori,omitempty"`
+	// FillIn says how keeping the notes filled in stands (FR8), for the same reads.
+	FillIn *SecondBrainFillInView `json:"fill_in,omitempty"`
 	// SetupDefault is where Set one up for me puts the folder without asking;
 	// absent while a folder is connected or no default is available.
 	SetupDefault *SecondBrainSetupDefault `json:"setup_default,omitempty"`
@@ -297,8 +299,19 @@ type SecondBrainProjectView struct {
 
 // SecondBrainWrittenView is the "Written by Ori" count.
 type SecondBrainWrittenView struct {
-	Count  int       `json:"count"`
-	LastAt time.Time `json:"last_at,omitempty"`
+	Count  int            `json:"count"`
+	ByKind map[string]int `json:"by_kind,omitempty"`
+	LastAt time.Time      `json:"last_at,omitempty"`
+}
+
+// SecondBrainFillInView counts the notes Ori keeps by how they stand. UserOwned
+// are the ones the user took over, which Ori stopped updating.
+type SecondBrainFillInView struct {
+	State     string     `json:"state"`
+	Written   int        `json:"written"`
+	UserOwned int        `json:"user_owned"`
+	Stale     int        `json:"stale"`
+	LastAt    *time.Time `json:"last_at,omitempty"`
 }
 
 // SecondBrainDetected is one vault Obsidian lists. Path is shown only in the
@@ -388,9 +401,10 @@ func (s *SecondBrainService) Status(ctx context.Context, userID string) (SecondB
 	view := s.view(doc)
 	if connected := doc.Connected(); connected != nil && connected.CreatedByOri() && view.Status == SecondBrainConnected {
 		if written, err := secondbrain.CountWritten(connected.Path); err == nil {
-			view.WrittenByOri = &SecondBrainWrittenView{Count: written.Count, LastAt: written.LastAt}
+			view.WrittenByOri = &SecondBrainWrittenView{Count: written.Count, ByKind: written.ByKind, LastAt: written.LastAt}
 		}
-		view.Projects = projectViews(connected.Path)
+		view.FillIn = fillInView(connected.FillIn)
+		view.Projects = offerableProjects(connected)
 		if inbox, err := s.inboxListing(*connected); err == nil {
 			count := inbox.Total
 			view.InboxCount = &count
@@ -413,6 +427,8 @@ func (s *SecondBrainService) Inbox(ctx context.Context, userID string) (SecondBr
 	if !connected.CreatedByOri() {
 		return SecondBrainInboxView{}, ErrSecondBrainNoInbox
 	}
+	// Only the Notes panel reads this, so this is the panel opening (FR6).
+	s.SyncSoon(userID, "notes opened")
 	return s.inboxListing(*connected)
 }
 
@@ -486,7 +502,29 @@ func (s *SecondBrainService) Projects(ctx context.Context, userID string) []Seco
 	if source == nil || !source.CreatedByOri() {
 		return nil
 	}
-	return projectViews(source.Path)
+	return offerableProjects(source)
+}
+
+// offerableProjects leaves out a project note Ori keeps for a workspace: offering
+// to make it a workspace would make a second one.
+func offerableProjects(source *secondbrain.Source) []SecondBrainProjectView {
+	views := projectViews(source.Path)
+	if source.FillIn == nil {
+		return views
+	}
+	kept := make(map[string]bool, len(source.FillIn.Mirrors))
+	for _, mirror := range source.FillIn.Mirrors {
+		if mirror.Ref.Kind == secondbrain.NoteKindProject && mirror.State == secondbrain.MirrorCurrent {
+			kept[mirror.Rel] = true
+		}
+	}
+	offered := make([]SecondBrainProjectView, 0, len(views))
+	for _, view := range views {
+		if !kept[view.Rel+"/README.md"] {
+			offered = append(offered, view)
+		}
+	}
+	return offered
 }
 
 // MarkPrompted records that the ask was shown, once per relationship (FR5).
@@ -991,6 +1029,7 @@ func (s *SecondBrainService) LookAgain(ctx context.Context, userID, requestID st
 	if started != nil {
 		s.startLook(userID, *connected, previous, started.ID, requestID, nil)
 	}
+	s.SyncSoon(userID, "look again")
 	return s.lookView(userID, connected), nil
 }
 

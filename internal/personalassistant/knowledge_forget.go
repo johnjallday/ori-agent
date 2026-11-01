@@ -12,6 +12,14 @@ import (
 // exact canonical line. A failure leaves an inert prepared record; success is
 // reported only after canonical absence and sidecar finalization are verified.
 func (s *KnowledgeLearningService) ForgetApproved(ctx context.Context, userID, itemID string, expectedVersion int64, requestID string) (KnowledgeItem, error) {
+	item, err := s.forgetApproved(ctx, userID, itemID, expectedVersion, requestID)
+	if err == nil {
+		s.notifyChanged(userID)
+	}
+	return item, err
+}
+
+func (s *KnowledgeLearningService) forgetApproved(ctx context.Context, userID, itemID string, expectedVersion int64, requestID string) (KnowledgeItem, error) {
 	if s == nil || s.store == nil || s.memory == nil || s.now == nil {
 		return KnowledgeItem{}, ErrRepairNeeded
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 )
@@ -60,6 +61,33 @@ func TestSecondBrainSync_FillsInTheNotesAndTheLedgerAndASecondRunWritesNothing(t
 	}
 	if unchanged.Version != doc.Version {
 		t.Fatalf("a sync that did nothing saved the record: %d → %d", doc.Version, unchanged.Version)
+	}
+}
+
+// Personal HQ is a workspace like any other to the store that lists them, so the
+// sync leaves out the one the binding names (FR4).
+func TestSecondBrainSync_NeverMirrorsPersonalHQAsAProject(t *testing.T) {
+	ctx := context.Background()
+	h, brain := createdHarness(t)
+	h.service.Wait()
+	binding, err := h.service.store.Binding(ctx, "local")
+	if err != nil || binding.HQWorkspaceID == "" {
+		t.Fatalf("binding = %+v, %v", binding, err)
+	}
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) {
+		return secondbrain.Holdings{Projects: []secondbrain.HeldProject{
+			{ID: binding.HQWorkspaceID, Name: "My HQ"}, {ID: "ws-launch", Name: "Launch"},
+		}}, nil
+	})
+	result, err := h.service.Sync(ctx, "local", "test")
+	if err != nil || result.Written[secondbrain.NoteKindProject] != 1 {
+		t.Fatalf("Sync = %+v, %v", result, err)
+	}
+	if _, err := os.Lstat(filepath.Join(brain, "Projects", "Launch", "README.md")); err != nil {
+		t.Fatalf("the project was not written: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(brain, "Projects", "My HQ")); !os.IsNotExist(err) {
+		t.Fatalf("Personal HQ was mirrored as a project: %v", err)
 	}
 }
 
@@ -184,6 +212,121 @@ func TestKnowledgeOnChanged_AnApprovalReachesItsObserversAndARefusalDoesNot(t *t
 	}
 	if changes.Load() != before {
 		t.Fatal("a refused save reached the observers")
+	}
+}
+
+// The loop (FR4): accepting an open item makes a follow-up from the notes. A sync
+// writes nothing for it, the next look still reads the same one line as the same
+// item, and accepting again adds nothing.
+func TestSecondBrainSync_AcceptSyncLookDoesNotLoop(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	h.connectVault(t)
+	lookID, items := triageItems(t, h)
+	if len(items) == 0 {
+		t.Fatal("the fixture look found nothing to accept")
+	}
+	first, err := h.service.AcceptFollowUps(ctx, "local", lookID, SecondBrainAcceptInput{ItemIDs: []string{items[0].ID}, RequestID: "accept-1"})
+	if err != nil || first.Created != 1 {
+		t.Fatalf("accept = %+v, %v", first, err)
+	}
+	// What the server gathers: a follow-up from the notes says so.
+	held := secondbrain.Holdings{FollowUps: []secondbrain.HeldFollowUp{{ID: "f-1", Title: items[0].Text, FromNotes: true}}}
+	for _, note := range secondbrain.PlanNotes(held) {
+		if note.Ref.Kind == secondbrain.NoteKindFollowUp {
+			t.Fatalf("a follow-up from the notes was planned: %+v", note)
+		}
+	}
+	again, err := h.service.AcceptFollowUps(ctx, "local", lookID, SecondBrainAcceptInput{ItemIDs: []string{items[0].ID}, RequestID: "accept-2"})
+	if err != nil || again.Created != 0 {
+		t.Fatalf("accepting again = %+v, %v", again, err)
+	}
+}
+
+// A follow_up note reads back as seeded, as a seed does: never suggested, and
+// never added again.
+func TestSecondBrainSync_AFollowUpNoteIsSeededInTheNextLook(t *testing.T) {
+	ctx := context.Background()
+	h, _ := createdHarness(t)
+	h.service.Wait()
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) {
+		return secondbrain.Holdings{FollowUps: []secondbrain.HeldFollowUp{{ID: "f-1", Title: "Call the pressing plant"}}}, nil
+	})
+	if result, err := h.service.Sync(ctx, "local", "test"); err != nil || result.Written[secondbrain.NoteKindFollowUp] != 1 {
+		t.Fatalf("Sync = %+v, %v", result, err)
+	}
+	*h.clock = h.clock.Add(SecondBrainLookAgainAfter + time.Minute)
+	if _, err := h.service.LookAgain(ctx, "local", "look-again-1"); err != nil {
+		t.Fatal(err)
+	}
+	h.service.Wait()
+	look, err := h.service.Look(ctx, "local")
+	if err != nil || look.Result == nil {
+		t.Fatalf("look = %+v, %v", look, err)
+	}
+	found := false
+	for _, item := range look.Result.Items {
+		if strings.Contains(item.Text, "Call the pressing plant") {
+			found = true
+			if !item.Seeded || item.Suggested {
+				t.Fatalf("item = %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the note's item is not in the look: %+v", look.Result.Items)
+	}
+}
+
+// What the station and the Today row read (FR8, FR9).
+func TestSecondBrainStatus_CountsWhatIsYoursAndTheTodayRowIsShownOnce(t *testing.T) {
+	ctx := context.Background()
+	h, brain := createdHarness(t)
+	h.service.Wait()
+	holdings := fillInHoldings()
+	holdings.Projects = []secondbrain.HeldProject{{ID: "ws-1", Name: "Launch"}}
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) { return holdings, nil })
+	if _, err := h.service.Sync(ctx, "local", "test"); err != nil {
+		t.Fatal(err)
+	}
+	report, found := h.service.WrittenReport(ctx, "local")
+	if !found || report.Sentence != "Ori added a person and a project to your notes and updated what it knows about you" {
+		t.Fatalf("report = %+v, %v", report, found)
+	}
+	// It stays through the day it was shown, then leaves without being asked.
+	if _, still := h.service.WrittenReport(ctx, "local"); !still {
+		t.Fatal("the row left at once")
+	}
+	*h.clock = h.clock.Add(secondBrainReportLasts + time.Minute)
+	if _, still := h.service.WrittenReport(ctx, "local"); still {
+		t.Fatal("the row nags")
+	}
+
+	full := filepath.Join(brain, "People", "Dana Lee.md")
+	edited := readTestFile(t, full) + "Mine now.\n"
+	if err := os.WriteFile(full, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Sync(ctx, "local", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := h.service.WrittenReport(ctx, "local"); found {
+		t.Fatal("a sync that wrote nothing raised a row")
+	}
+	status, err := h.service.Status(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.FillIn == nil || status.FillIn.UserOwned != 1 || status.FillIn.Written != 2 || status.FillIn.LastAt == nil {
+		t.Fatalf("fill_in = %+v", status.FillIn)
+	}
+	if by := status.WrittenByOri.ByKind; by[secondbrain.NoteKindPerson] != 1 || by[secondbrain.NoteKindProject] != 1 || by[secondbrain.NoteKindFacts] != 1 {
+		t.Fatalf("by_kind = %v", by)
+	}
+	for _, project := range status.Projects {
+		if project.Name == "Launch" {
+			t.Fatalf("a project that is a workspace is offered as one: %+v", status.Projects)
+		}
 	}
 }
 

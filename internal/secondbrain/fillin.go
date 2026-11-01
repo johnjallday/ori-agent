@@ -106,11 +106,88 @@ type FillIn struct {
 	MorePending bool `json:"more_pending,omitempty"`
 	// LastAt is when a sync last wrote a note.
 	LastAt *time.Time `json:"last_at,omitempty"`
+	// Report collects what the Today row says, until the row has been seen (FR9).
+	Report *FillInReport `json:"report,omitempty"`
+}
+
+// FillInReport is what was added to the notes since the Today row was last seen.
+type FillInReport struct {
+	// Counts holds the notes added, by kind; for the facts note, its updates.
+	Counts map[string]int `json:"counts"`
+	// At is the newest addition.
+	At time.Time `json:"at"`
+	// ShownAt is when the row was first shown. The next addition starts over.
+	ShownAt *time.Time `json:"shown_at,omitempty"`
+}
+
+// AddToReport folds a sync's additions into the report. A report already shown is
+// finished with, so what comes next is new.
+func (f *FillIn) AddToReport(added map[string]int, now time.Time) {
+	total := 0
+	for _, count := range added {
+		total += count
+	}
+	if total == 0 {
+		return
+	}
+	if f.Report == nil || f.Report.ShownAt != nil {
+		f.Report = &FillInReport{Counts: map[string]int{}}
+	}
+	for kind, count := range added {
+		f.Report.Counts[kind] += count
+	}
+	f.Report.At = now.UTC()
+}
+
+// ReportSentence is the Today row: "Ori added 2 people and a project to your
+// notes". The facts note has one copy that changes, so it says updated.
+func ReportSentence(counts map[string]int) string {
+	var parts []string
+	for _, kind := range []struct{ key, one, many string }{
+		{NoteKindPerson, "a person", "people"},
+		{NoteKindProject, "a project", "projects"},
+		{NoteKindFollowUp, "a follow-up", "follow-ups"},
+	} {
+		switch count := counts[kind.key]; {
+		case count == 1:
+			parts = append(parts, kind.one)
+		case count > 1:
+			parts = append(parts, fmt.Sprintf("%d %s", count, kind.many))
+		}
+	}
+	added := ""
+	switch len(parts) {
+	case 0:
+	case 1:
+		added = parts[0]
+	default:
+		added = strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
+	switch {
+	case added != "" && counts[NoteKindFacts] > 0:
+		return "Ori added " + added + " to your notes and updated what it knows about you"
+	case added != "":
+		return "Ori added " + added + " to your notes"
+	case counts[NoteKindFacts] > 0:
+		return "Ori updated what it knows about you in your notes"
+	default:
+		return ""
+	}
 }
 
 func validateFillIn(fillIn FillIn) error {
 	if len(fillIn.Mirrors) > MaxMirrors {
 		return ErrInvalidRecord
+	}
+	if report := fillIn.Report; report != nil {
+		if len(report.Counts) > len(noteKinds) || report.At.IsZero() {
+			return ErrInvalidRecord
+		}
+		for kind, count := range report.Counts {
+			if !validMirrorKind(kind) || count < 0 {
+				return ErrInvalidRecord
+			}
+		}
 	}
 	seen := make(map[MirrorRef]bool, len(fillIn.Mirrors))
 	for _, mirror := range fillIn.Mirrors {
@@ -151,13 +228,26 @@ type PlannedNote struct {
 	// OnlyIfTracked plans a refresh and never a first write: the facts note is
 	// emptied when the last fact is forgotten, and is not created empty.
 	OnlyIfTracked bool
+	// Numbered takes the next free name when Rel is taken, rather than treating
+	// what is there as this note. Follow-ups use it: two can share a title, and a
+	// note of the same name in Inbox is not about the same thing.
+	Numbered bool
+	// Tick says the source is done: tick the note's open line if Ori still keeps
+	// it, and never write it for the first time.
+	Tick bool
 }
+
+// maxNumberedAttempts bounds the numbering of a note whose name is taken.
+const maxNumberedAttempts = 50
 
 // SyncOutcome is what one reconcile did.
 type SyncOutcome struct {
 	Mirrors []Mirror
-	// Written counts the notes written, by kind.
+	// Written counts the notes written, by kind. A tick is one of them.
 	Written map[string]int
+	// Added is what the user is told about: new notes by kind, and each update
+	// of the facts note. A tick or a refreshed person is not news.
+	Added map[string]int
 	// MorePending says the write bound stopped the run.
 	MorePending bool
 	// Err is the first failure; the rest of the run still went ahead.
@@ -182,7 +272,7 @@ func (o SyncOutcome) WrittenTotal() int {
 func Reconcile(writer *Writer, ledger []Mirror, planned []PlannedNote, now time.Time) SyncOutcome {
 	run := reconcileRun{
 		writer: writer, now: now.UTC(),
-		out:     SyncOutcome{Mirrors: append([]Mirror(nil), ledger...), Written: map[string]int{}},
+		out:     SyncOutcome{Mirrors: append([]Mirror(nil), ledger...), Written: map[string]int{}, Added: map[string]int{}},
 		tracked: make(map[MirrorRef]int, len(ledger)),
 		rels:    make(map[string]bool, len(ledger)),
 		counts:  map[string]int{},
@@ -245,14 +335,68 @@ func (r *reconcileRun) checkDisk(mirror *Mirror) {
 }
 
 func (r *reconcileRun) apply(note PlannedNote) {
-	if index, ok := r.tracked[note.Ref]; ok {
+	index, ok := r.tracked[note.Ref]
+	switch {
+	case ok && note.Tick:
+		r.tick(&r.out.Mirrors[index], note)
+	case ok:
 		r.refresh(&r.out.Mirrors[index], note)
+	case note.Tick || note.OnlyIfTracked:
+	case r.hasRoom(note.Ref.Kind) || r.evictStale(note.Ref.Kind):
+		r.first(note)
+	}
+}
+
+// tick closes a note whose source is done. An entry already stale was ticked
+// before, or closed some other way, and stays as it is.
+func (r *reconcileRun) tick(mirror *Mirror, note PlannedNote) {
+	if mirror.State != MirrorCurrent || r.unknown[mirror.Ref] {
 		return
 	}
-	if note.OnlyIfTracked || !r.hasRoom(note.Ref.Kind) {
+	if r.writes == MaxSyncWrites {
+		r.out.MorePending = true
 		return
 	}
-	r.first(note)
+	hash, ticked, err := r.writer.Tick(mirror.Rel)
+	switch {
+	case err == nil:
+		mirror.Hash, mirror.State = hash, MirrorStale
+		if ticked {
+			mirror.WrittenAt = r.now
+			r.writes++
+			r.out.Written[note.Kind]++
+		}
+	case errors.Is(err, ErrUserModified), errors.Is(err, ErrOutsideOwnedFolders):
+		mirror.State = MirrorUserOwned
+	default:
+		r.fail(fmt.Errorf("ticking a note: %w", err))
+	}
+}
+
+// evictStale frees a follow-up's ledger entry for a new one when the cap is
+// full. A closed follow-up's note stays on disk and is simply no longer tracked,
+// so years of follow-ups never stop new ones reaching the notes. Other kinds
+// keep their entries: their notes can come back.
+func (r *reconcileRun) evictStale(kind string) bool {
+	if kind != NoteKindFollowUp {
+		return false
+	}
+	for index, mirror := range r.out.Mirrors {
+		if mirror.Ref.Kind != kind || mirror.State != MirrorStale {
+			continue
+		}
+		r.out.Mirrors = append(r.out.Mirrors[:index], r.out.Mirrors[index+1:]...)
+		delete(r.rels, strings.ToLower(mirror.Rel))
+		delete(r.tracked, mirror.Ref)
+		r.counts[kind]--
+		for ref, at := range r.tracked {
+			if at > index {
+				r.tracked[ref] = at - 1
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // refresh updates a note Ori already keeps, at the path it first wrote.
@@ -273,7 +417,7 @@ func (r *reconcileRun) refresh(mirror *Mirror, note PlannedNote) {
 	switch {
 	case err == nil:
 		mirror.Hash, mirror.WrittenAt, mirror.State = hash, r.now, MirrorCurrent
-		r.wrote(note.Kind)
+		r.wrote(note.Kind, note.Kind == NoteKindFacts)
 	case errors.Is(err, ErrUserModified), errors.Is(err, ErrOutsideOwnedFolders):
 		// The user saved the note since the disk check.
 		mirror.State = MirrorUserOwned
@@ -286,50 +430,81 @@ func (r *reconcileRun) refresh(mirror *Mirror, note PlannedNote) {
 // name is adopted as it stands: it already says what the note would, and copying
 // it again would announce notes the user has had all along. A note left by a
 // run whose ledger write failed is recognised by its hash, so that crash costs
-// nothing either. Anything else at the name is the user's.
+// nothing either. Anything else at the name is the user's, unless the note is
+// Numbered and can go next to it.
 func (r *reconcileRun) first(note PlannedNote) {
-	if !mirrorRelFits(note.Rel) || r.rels[strings.ToLower(note.Rel)] {
-		return
+	for attempt := 1; attempt <= maxNumberedAttempts; attempt++ {
+		rel := note.Rel
+		if attempt > 1 {
+			if !note.Numbered {
+				return
+			}
+			rel = numberedRel(note.Rel, attempt)
+		}
+		if r.place(note, rel) {
+			return
+		}
 	}
-	status, err := r.writer.Inspect(note.Rel)
+}
+
+// numberedRel is Inbox/<stem>-<n>.md, the setup's own numbering.
+func numberedRel(rel string, attempt int) string {
+	return fmt.Sprintf("%s-%d.md", strings.TrimSuffix(rel, ".md"), attempt)
+}
+
+// place tries one name. false says the name is taken and the note may try another.
+func (r *reconcileRun) place(note PlannedNote, rel string) bool {
+	if !mirrorRelFits(rel) || r.rels[strings.ToLower(rel)] {
+		return false
+	}
+	status, err := r.writer.Inspect(rel)
 	if err != nil {
 		r.fail(fmt.Errorf("reading a note: %w", err))
-		return
+		return true
 	}
 	hash := mirrorHash(note.Body)
 	switch {
-	case status.Exists && !status.Owned:
-		r.track(note, hash, MirrorUserOwned)
-		return
 	case status.Owned && (status.Kind == NoteKindSeed || status.Hash[:mirrorHashLength] == hash):
-		r.track(note, hash, MirrorCurrent)
-		return
+		r.track(note, rel, hash, MirrorCurrent)
+		return true
+	case status.Exists && note.Numbered:
+		return false
+	case status.Exists && !status.Owned:
+		r.track(note, rel, hash, MirrorUserOwned)
+		return true
 	}
 	if r.writes == MaxSyncWrites {
 		r.out.MorePending = true
-		return
+		return true
 	}
-	_, err = r.writer.Write(note.Rel, note.Kind, note.Body)
+	_, err = r.writer.Write(rel, note.Kind, note.Body)
 	switch {
 	case err == nil:
-		r.track(note, hash, MirrorCurrent)
-		r.wrote(note.Kind)
+		r.track(note, rel, hash, MirrorCurrent)
+		r.wrote(note.Kind, true)
 	case errors.Is(err, ErrUserModified), errors.Is(err, ErrOutsideOwnedFolders):
-		r.track(note, hash, MirrorUserOwned)
+		if note.Numbered {
+			return false
+		}
+		r.track(note, rel, hash, MirrorUserOwned)
 	default:
 		r.fail(fmt.Errorf("writing a note: %w", err))
 	}
+	return true
 }
 
-func (r *reconcileRun) wrote(kind string) {
+func (r *reconcileRun) wrote(kind string, news bool) {
 	r.writes++
 	r.out.Written[kind]++
+	if news {
+		r.out.Added[kind]++
+	}
 }
 
-func (r *reconcileRun) track(note PlannedNote, hash, state string) {
-	r.out.Mirrors = append(r.out.Mirrors, Mirror{Ref: note.Ref, Rel: note.Rel, Hash: hash, WrittenAt: r.now, State: state})
+func (r *reconcileRun) track(note PlannedNote, rel, hash, state string) {
+	r.out.Mirrors = append(r.out.Mirrors, Mirror{Ref: note.Ref, Rel: rel, Hash: hash, WrittenAt: r.now, State: state})
 	r.tracked[note.Ref] = len(r.out.Mirrors) - 1
-	r.rels[strings.ToLower(note.Rel)] = true
+	r.rels[strings.ToLower(rel)] = true
 	r.counts[note.Ref.Kind]++
 }
 

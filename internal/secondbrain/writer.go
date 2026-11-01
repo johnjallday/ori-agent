@@ -258,6 +258,49 @@ type NoteStatus struct {
 	// Kind is the marker's kind, and Hash its body hash, when the note is Owned.
 	Kind string
 	Hash string
+	// body is the note without its marker, when the note is Owned.
+	body []byte
+}
+
+// openTaskPrefix and doneTaskPrefix are the one line a follow-up note carries.
+const (
+	openTaskPrefix = "- [ ] "
+	doneTaskPrefix = "- [x] "
+)
+
+// Tick marks the first open task line done in a follow-up or seed note Ori wrote
+// and the user never edited, through the replace path, so the marker's hash is
+// rewritten and the note stays Ori's. It returns the new body's ledger hash, and
+// whether a line was ticked: a note with no open line is left alone. Any other
+// note is ErrUserModified and gets no write (FR5).
+func (w *Writer) Tick(rel string) (hash string, ticked bool, err error) {
+	status, err := w.Inspect(rel)
+	if err != nil {
+		return "", false, err
+	}
+	if !status.Owned || (status.Kind != NoteKindFollowUp && status.Kind != NoteKindSeed) {
+		return "", false, ErrUserModified
+	}
+	body, changed := tickFirstOpenLine(status.body)
+	if !changed {
+		return status.Hash[:mirrorHashLength], false, nil
+	}
+	if _, err := w.Write(rel, status.Kind, body); err != nil {
+		return "", false, err
+	}
+	return mirrorHash(body), true, nil
+}
+
+// tickFirstOpenLine changes one line and nothing else.
+func tickFirstOpenLine(body []byte) ([]byte, bool) {
+	lines := strings.SplitAfter(string(body), "\n")
+	for index, line := range lines {
+		if rest, found := strings.CutPrefix(line, openTaskPrefix); found {
+			lines[index] = doneTaskPrefix + rest
+			return []byte(strings.Join(lines, "")), true
+		}
+	}
+	return body, false
 }
 
 // Inspect reads what is at rel without changing anything: no folder is
@@ -316,7 +359,8 @@ func inspectNote(dir *os.Root, name string) (NoteStatus, error) {
 	if !mark.OwnedByOri {
 		return NoteStatus{Exists: true}, nil
 	}
-	return NoteStatus{Exists: true, Owned: true, Kind: mark.Kind, Hash: mark.Hash}, nil
+	_, body, _ := cutFrontmatter(content[len(markerOpen):])
+	return NoteStatus{Exists: true, Owned: true, Kind: mark.Kind, Hash: mark.Hash, body: body}, nil
 }
 
 // checkReplaceable reports whether name already exists, refusing anything that

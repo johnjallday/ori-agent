@@ -226,8 +226,8 @@ func TestSecondBrainStatus_CountsWhatOriWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := h.service.Status(ctx, "local")
-	if err != nil || status.WrittenByOri == nil || status.WrittenByOri.Count != 2 {
-		t.Fatalf("status after setup = %+v, %v; want the 2 seeded Inbox notes", status.WrittenByOri, err)
+	if err != nil || status.WrittenByOri == nil || status.WrittenByOri.Count != 3 {
+		t.Fatalf("status after setup = %+v, %v; want the 2 seeded Inbox notes and the seeded person", status.WrittenByOri, err)
 	}
 
 	if _, err := h.service.Capture(ctx, "local", "Call Dana", "c-1"); err != nil {
@@ -237,7 +237,7 @@ func TestSecondBrainStatus_CountsWhatOriWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err = h.service.Status(ctx, "local")
-	if err != nil || status.WrittenByOri.Count != 4 || status.WrittenByOri.LastAt.Before(time.Now().Add(-time.Minute)) {
+	if err != nil || status.WrittenByOri.Count != 5 || status.WrittenByOri.LastAt.Before(time.Now().Add(-time.Minute)) {
 		t.Fatalf("status after a capture and a journal = %+v, %v", status.WrittenByOri, err)
 	}
 

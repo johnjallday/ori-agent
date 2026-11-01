@@ -2,6 +2,7 @@ package personalassistant
 
 import (
 	"context"
+	"errors"
 	"os"
 	"slices"
 	"time"
@@ -67,6 +68,15 @@ func (s *SecondBrainService) Sync(ctx context.Context, userID, reason string) (S
 	if err != nil {
 		return SecondBrainSyncResult{}, err
 	}
+	// Personal HQ is not a project (FR4). The binding names it; a workspace's own
+	// designation is only a best-effort projection of that.
+	binding, err := s.store.Binding(ctx, userID)
+	if err != nil {
+		return SecondBrainSyncResult{}, err
+	}
+	holdings.Projects = slices.DeleteFunc(slices.Clone(holdings.Projects), func(project secondbrain.HeldProject) bool {
+		return project.ID == binding.HQWorkspaceID
+	})
 	var ledger []secondbrain.Mirror
 	var wasPending bool
 	if source.FillIn != nil {
@@ -105,10 +115,78 @@ func (s *SecondBrainService) saveLedger(ctx context.Context, userID, sourceID st
 			at := now.UTC()
 			fillIn.LastAt = &at
 		}
+		fillIn.AddToReport(outcome.Added, now)
 		connected.FillIn = fillIn
 		return nil
 	})
 	return err
+}
+
+// fillInStateAllowed says Ori may keep every kind of note up to date.
+const fillInStateAllowed = "allowed"
+
+func fillInView(fillIn *secondbrain.FillIn) *SecondBrainFillInView {
+	view := &SecondBrainFillInView{State: fillInStateAllowed}
+	if fillIn == nil {
+		return view
+	}
+	view.LastAt = fillIn.LastAt
+	for _, mirror := range fillIn.Mirrors {
+		switch mirror.State {
+		case secondbrain.MirrorUserOwned:
+			view.UserOwned++
+		case secondbrain.MirrorStale:
+			view.Stale++
+			view.Written++
+		default:
+			view.Written++
+		}
+	}
+	return view
+}
+
+// secondBrainReportLasts is how long the Today row stays once it has been shown.
+const secondBrainReportLasts = 24 * time.Hour
+
+// SecondBrainWrittenReport is the Today row's content.
+type SecondBrainWrittenReport struct {
+	Sentence string
+	At       time.Time
+}
+
+// WrittenReport returns what the Today row should say, recording the first time
+// it was asked, so the row collapses every write since it was last seen, leaves
+// after a day, and never nags (FR9). Anything written later starts a new row.
+func (s *SecondBrainService) WrittenReport(ctx context.Context, userID string) (SecondBrainWrittenReport, bool) {
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return SecondBrainWrittenReport{}, false
+	}
+	source := doc.Connected()
+	if source == nil || source.FillIn == nil || source.FillIn.Report == nil {
+		return SecondBrainWrittenReport{}, false
+	}
+	report := source.FillIn.Report
+	now := s.deps.Now()
+	if report.ShownAt != nil && now.Sub(*report.ShownAt) > secondBrainReportLasts {
+		return SecondBrainWrittenReport{}, false
+	}
+	sentence := secondbrain.ReportSentence(report.Counts)
+	if sentence == "" {
+		return SecondBrainWrittenReport{}, false
+	}
+	if report.ShownAt == nil {
+		if _, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
+			if connected := doc.Connected(); connected != nil && connected.FillIn != nil && connected.FillIn.Report != nil && connected.FillIn.Report.ShownAt == nil {
+				at := now.UTC()
+				connected.FillIn.Report.ShownAt = &at
+			}
+			return nil
+		}); err != nil {
+			logger.Warn("The notes row could not be marked as seen", logger.Fields{"error": err.Error()})
+		}
+	}
+	return SecondBrainWrittenReport{Sentence: sentence, At: report.At}, true
 }
 
 // secondBrainSyncTrigger says a background sync is running for a user, and
@@ -137,7 +215,9 @@ func (s *SecondBrainService) SyncSoon(userID, reason string) {
 		defer s.syncs.Done()
 		for {
 			ctx, cancel := context.WithTimeout(context.Background(), secondBrainSyncTimeout)
-			if _, err := s.Sync(ctx, userID, reason); err != nil {
+			// No Personal HQ yet, or none to repair, means no notes to fill in: not a
+			// failure, and the first trigger after the HQ exists catches up.
+			if _, err := s.Sync(ctx, userID, reason); err != nil && !errors.Is(err, ErrNeedsHQ) && !errors.Is(err, ErrNotFound) {
 				logger.Warn("The second brain could not be filled in", logger.Fields{"reason": reason, "error": err.Error()})
 			}
 			cancel()

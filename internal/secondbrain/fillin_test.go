@@ -1,6 +1,7 @@
 package secondbrain
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -317,6 +318,284 @@ func TestPersonNoteRel_ALongNameIsCutInTheFileNameOnly(t *testing.T) {
 	}
 	if _, _, err := splitOwnedPath(personNoteRel("Readme")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func followUpHoldings(followUps ...HeldFollowUp) Holdings { return Holdings{FollowUps: followUps} }
+
+func TestReconcile_AFollowUpBecomesAnInboxNoteAndAnotherOfTheSameTitleGetsANumber(t *testing.T) {
+	tree := newWriterTree(t)
+	writeNote(t, tree.vault, "Inbox/call-dana-2.md", "# The user's note at the next name\n")
+	first := reconcileTree(t, tree.vault, nil, followUpHoldings(
+		HeldFollowUp{ID: "f-1", Title: "Call Dana", Due: "2026-11-05", Source: "Added by you"},
+		HeldFollowUp{ID: "f-2", Title: "Call Dana"},
+	))
+	if first.Err != nil || first.Written[NoteKindFollowUp] != 2 {
+		t.Fatalf("first = %+v", first)
+	}
+	content := noteContent(t, tree.vault, "Inbox/call-dana.md")
+	for _, want := range []string{"ori: follow_up", "# Call Dana\n", "- [ ] Call Dana 📅 2026-11-05\n", "From: Added by you\n"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("note lacks %q:\n%s", want, content)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(tree.vault, "Inbox", "call-dana-3.md")); err != nil {
+		t.Fatalf("the second follow-up skipped past the user's note: %v", err)
+	}
+	if got := noteContent(t, tree.vault, "Inbox/call-dana-2.md"); got != "# The user's note at the next name\n" {
+		t.Fatalf("the user's note changed: %q", got)
+	}
+}
+
+// The loop guard (FR4): a follow-up made from a line in the notes is never
+// written back, so the next look cannot find it a second time.
+func TestReconcile_AFollowUpFromTheNotesIsNeverWrittenBack(t *testing.T) {
+	tree := newWriterTree(t)
+	before := snapshot(t, tree.base)
+	outcome := reconcileTree(t, tree.vault, nil, followUpHoldings(HeldFollowUp{ID: "f-1", Title: "Line from a note", FromNotes: true}))
+	if outcome.WrittenTotal() != 0 || len(outcome.Mirrors) != 0 {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	if after := snapshot(t, tree.base); after != before {
+		t.Fatalf("the tree changed.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestReconcile_AdoptsASeededFollowUpAndTicksItWhenDone(t *testing.T) {
+	tree := newWriterTree(t)
+	body, ok := followUpNote(SeedFollowUp{Title: "Call Dana", Source: "Added by you"})
+	if !ok {
+		t.Fatal("no seed")
+	}
+	writeNote(t, tree.vault, "Inbox/call-dana.md", string(RenderNote(NoteKindSeed, body)))
+	open := HeldFollowUp{ID: "f-1", Title: "Call Dana", Source: "Added by you"}
+	first := reconcileTree(t, tree.vault, nil, followUpHoldings(open))
+	if first.WrittenTotal() != 0 || mirrorFor(t, first.Mirrors, "Inbox/call-dana.md").State != MirrorCurrent {
+		t.Fatalf("adopting = %+v", first)
+	}
+
+	done := open
+	done.Done = true
+	second := reconcileTree(t, tree.vault, first.Mirrors, followUpHoldings(done))
+	if second.Written[NoteKindFollowUp] != 1 || len(second.Added) != 0 {
+		t.Fatalf("ticking = %+v", second)
+	}
+	content := noteContent(t, tree.vault, "Inbox/call-dana.md")
+	mark := ReadMark([]byte(content))
+	if !mark.OwnedByOri || mark.Kind != NoteKindSeed || !strings.Contains(content, "- [x] Call Dana\n") || strings.Contains(content, "- [ ]") {
+		t.Fatalf("mark %+v, note:\n%s", mark, content)
+	}
+	if entry := mirrorFor(t, second.Mirrors, "Inbox/call-dana.md"); entry.State != MirrorStale {
+		t.Fatalf("entry = %+v", entry)
+	}
+	before := snapshot(t, tree.base)
+	third := reconcileTree(t, tree.vault, second.Mirrors, followUpHoldings(done))
+	if third.WrittenTotal() != 0 || snapshot(t, tree.base) != before {
+		t.Fatalf("a second tick wrote: %+v", third)
+	}
+
+	// Reopened in Ori, the note is opened again.
+	fourth := reconcileTree(t, tree.vault, third.Mirrors, followUpHoldings(open))
+	if fourth.Written[NoteKindFollowUp] != 1 || !strings.Contains(noteContent(t, tree.vault, "Inbox/call-dana.md"), "- [ ] Call Dana\n") {
+		t.Fatalf("reopening = %+v", fourth)
+	}
+}
+
+// An edited note gets no write, ever: the look's "Done in your notes" path stays
+// the only one for it (FR5).
+func TestReconcile_ACompletedFollowUpNeverTouchesAnEditedNote(t *testing.T) {
+	tree := newWriterTree(t)
+	open := HeldFollowUp{ID: "f-1", Title: "Call Dana"}
+	first := reconcileTree(t, tree.vault, nil, followUpHoldings(open))
+	edited := noteContent(t, tree.vault, "Inbox/call-dana.md") + "More from the user.\n"
+	if err := os.WriteFile(filepath.Join(tree.vault, "Inbox", "call-dana.md"), []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := open
+	done.Done = true
+	second := reconcileTree(t, tree.vault, first.Mirrors, followUpHoldings(done))
+	if second.WrittenTotal() != 0 || second.Err != nil {
+		t.Fatalf("second = %+v", second)
+	}
+	if got := noteContent(t, tree.vault, "Inbox/call-dana.md"); got != edited {
+		t.Fatalf("the edited note changed: %q", got)
+	}
+	if entry := mirrorFor(t, second.Mirrors, "Inbox/call-dana.md"); entry.State != MirrorUserOwned {
+		t.Fatalf("entry = %+v", entry)
+	}
+}
+
+func TestReconcile_ACompletedFollowUpIsNeverWrittenForTheFirstTime(t *testing.T) {
+	tree := newWriterTree(t)
+	outcome := reconcileTree(t, tree.vault, nil, followUpHoldings(HeldFollowUp{ID: "f-1", Title: "Long done", Done: true}))
+	if outcome.WrittenTotal() != 0 || len(outcome.Mirrors) != 0 {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+func TestWriterTick_OnlyInAnOriFollowUpOrSeedNote(t *testing.T) {
+	tree := newWriterTree(t)
+	writer := newWriterFor(t, tree.vault)
+	writeNote(t, tree.vault, "Inbox/follow.md", string(RenderNote(NoteKindFollowUp, []byte("# A\n\n- [ ] A\n- [ ] B\n"))))
+	writeNote(t, tree.vault, "Inbox/capture.md", string(RenderNote(NoteKindCapture, []byte("- [ ] mine\n"))))
+	writeNote(t, tree.vault, "Inbox/edited.md", string(RenderNote(NoteKindFollowUp, []byte("- [ ] x\n")))+"edit\n")
+	writeNote(t, tree.vault, "Inbox/users.md", "- [ ] the user's\n")
+	if err := os.Symlink(filepath.Join(tree.vault, "Inbox", "follow.md"), filepath.Join(tree.vault, "Inbox", "link.md")); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"Inbox/capture.md", "Inbox/edited.md", "Inbox/users.md", "Inbox/link.md", "Inbox/absent.md"} {
+		before := snapshot(t, tree.base)
+		if _, _, err := writer.Tick(rel); !errors.Is(err, ErrUserModified) {
+			t.Errorf("Tick(%s): err = %v", rel, err)
+		}
+		if after := snapshot(t, tree.base); after != before {
+			t.Errorf("Tick(%s) changed the tree", rel)
+		}
+	}
+	hash, ticked, err := writer.Tick("Inbox/follow.md")
+	if err != nil || !ticked || hash == "" {
+		t.Fatalf("Tick = %q, %v, %v", hash, ticked, err)
+	}
+	content := noteContent(t, tree.vault, "Inbox/follow.md")
+	mark := ReadMark([]byte(content))
+	if !mark.OwnedByOri || mark.Hash[:mirrorHashLength] != hash || !strings.HasSuffix(content, "- [x] A\n- [ ] B\n") {
+		t.Fatalf("one line, and the hash rewritten: %+v\n%s", mark, content)
+	}
+	writeNote(t, tree.vault, "Inbox/none.md", string(RenderNote(NoteKindFollowUp, []byte("- [x] done\n"))))
+	before := snapshot(t, tree.base)
+	if _, ticked, err := writer.Tick("Inbox/none.md"); err != nil || ticked {
+		t.Fatalf("nothing to tick = %v, %v", ticked, err)
+	}
+	if after := snapshot(t, tree.base); after != before {
+		t.Fatal("a note with no open line was rewritten")
+	}
+}
+
+func TestReconcile_AFullFollowUpLedgerMakesRoomFromClosedOnes(t *testing.T) {
+	tree := newWriterTree(t)
+	var held []HeldFollowUp
+	for i := range MaxMirrorFollowUps {
+		held = append(held, HeldFollowUp{ID: fmt.Sprintf("f-%d", i), Title: fmt.Sprintf("Item %d", i)})
+	}
+	var ledger []Mirror
+	for range 10 {
+		outcome := reconcileTree(t, tree.vault, ledger, followUpHoldings(held...))
+		ledger = outcome.Mirrors
+	}
+	if len(ledger) != MaxMirrorFollowUps {
+		t.Fatalf("ledger = %d", len(ledger))
+	}
+	// Every slot is taken by an open follow-up: a new one waits, and nothing is lost.
+	extra := HeldFollowUp{ID: "f-new", Title: "Brand new"}
+	full := reconcileTree(t, tree.vault, ledger, followUpHoldings(append(held[:len(held):len(held)], extra)...))
+	if len(full.Mirrors) != MaxMirrorFollowUps || full.WrittenTotal() != 0 {
+		t.Fatalf("over the cap = %d mirrors, %d written", len(full.Mirrors), full.WrittenTotal())
+	}
+	// One closes, and its entry makes room. Its note stays.
+	done := held[0]
+	done.Done = true
+	rest := append([]HeldFollowUp{done}, held[1:]...)
+	closed := reconcileTree(t, tree.vault, ledger, followUpHoldings(rest...))
+	roomy := reconcileTree(t, tree.vault, closed.Mirrors, followUpHoldings(append(rest[:len(rest):len(rest)], extra)...))
+	if len(roomy.Mirrors) != MaxMirrorFollowUps || roomy.Written[NoteKindFollowUp] != 1 {
+		t.Fatalf("room = %d mirrors, written %v", len(roomy.Mirrors), roomy.Written)
+	}
+	if !strings.Contains(noteContent(t, tree.vault, "Inbox/item-0.md"), "- [x] Item 0") || !strings.Contains(noteContent(t, tree.vault, "Inbox/brand-new.md"), "Brand new") {
+		t.Fatal("the closed note or the new one is wrong")
+	}
+	if err := (Record{Sources: []Source{withLedger(createdSource(tree.vault), roomy.Mirrors)}}).Validate(); err != nil {
+		t.Fatalf("the ledger does not validate: %v", err)
+	}
+}
+
+func withLedger(source Source, mirrors []Mirror) Source {
+	source.FillIn = &FillIn{Mirrors: mirrors}
+	return source
+}
+
+func TestReconcile_AWorkspaceBecomesAProjectNoteAndItsGoalRefreshesIt(t *testing.T) {
+	tree := newWriterTree(t)
+	project := HeldProject{
+		ID: "ws-1", Name: "Launch: the album", Goal: "Ship the record.\n\n## Done looks like\n- [ ] Master is approved\nkey sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
+		Folder: "/Users/sam/Music/Launch", Agents: []string{"Ada", "Bo"}, Date: "2 Nov 2026",
+	}
+	first := reconcileTree(t, tree.vault, nil, Holdings{Projects: []HeldProject{project}})
+	if first.Written[NoteKindProject] != 1 || first.Added[NoteKindProject] != 1 {
+		t.Fatalf("first = %+v", first)
+	}
+	rel := "Projects/Launch the album/README.md"
+	content := noteContent(t, tree.vault, rel)
+	if mark := ReadMark([]byte(content)); !mark.OwnedByOri || mark.Kind != NoteKindProject {
+		t.Fatalf("mark = %+v", mark)
+	}
+	for _, want := range []string{"# Launch: the album\n", "Ship the record.\n", "## Done looks like\n- Master is approved\n", "Folder: /Users/sam/Music/Launch\n", "Agents: Ada, Bo\n", "[Open in Ori](/?workspace=ws-1)\n", "2 Nov 2026"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("project note lacks %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "sk-ant") || strings.Contains(content, "- [ ]") {
+		t.Errorf("a secret or a task line reached the note:\n%s", content)
+	}
+
+	project.Goal = "Ship the record by June."
+	project.Name = "Renamed"
+	second := reconcileTree(t, tree.vault, first.Mirrors, Holdings{Projects: []HeldProject{project}})
+	if second.Written[NoteKindProject] != 1 || len(second.Added) != 0 {
+		t.Fatalf("second = %+v", second)
+	}
+	// The note stays where it was: Ori never renames one.
+	if got := noteContent(t, tree.vault, rel); !strings.Contains(got, "Ship the record by June.") || !strings.Contains(got, "# Renamed\n") {
+		t.Fatalf("refreshed note:\n%s", got)
+	}
+	if _, err := os.Lstat(filepath.Join(tree.vault, "Projects", "Renamed")); !os.IsNotExist(err) {
+		t.Fatalf("a rename made a second folder: %v", err)
+	}
+}
+
+func TestProjectNoteRel_AlwaysAPathTheWriterAccepts(t *testing.T) {
+	for _, name := range []string{"Launch", "a/b", "..", ".hidden", "name.", strings.Repeat("語", 200), strings.Repeat("&", 200), "README"} {
+		rel := projectNoteRel(name)
+		if _, _, err := splitOwnedPath(rel); err != nil {
+			t.Errorf("projectNoteRel(%q) = %q: %v", name, rel, err)
+		}
+		if !mirrorRelFits(rel) {
+			t.Errorf("projectNoteRel(%q) = %q does not fit", name, rel)
+		}
+	}
+}
+
+func TestReportSentence_SaysWhatWasAdded(t *testing.T) {
+	for want, counts := range map[string]map[string]int{
+		"Ori added 2 people and a project to your notes":                        {NoteKindPerson: 2, NoteKindProject: 1},
+		"Ori added a person to your notes":                                      {NoteKindPerson: 1},
+		"Ori added 3 follow-ups to your notes":                                  {NoteKindFollowUp: 3},
+		"Ori added a person, 2 projects and a follow-up to your notes":          {NoteKindPerson: 1, NoteKindProject: 2, NoteKindFollowUp: 1},
+		"Ori updated what it knows about you in your notes":                     {NoteKindFacts: 4},
+		"Ori added a project to your notes and updated what it knows about you": {NoteKindProject: 1, NoteKindFacts: 1},
+		"": {},
+	} {
+		if got := ReportSentence(counts); got != want {
+			t.Errorf("ReportSentence(%v) = %q, want %q", counts, got, want)
+		}
+	}
+}
+
+func TestFillInReport_FoldsUntilShownThenStartsOver(t *testing.T) {
+	var fillIn FillIn
+	fillIn.AddToReport(map[string]int{}, fillInNow)
+	if fillIn.Report != nil {
+		t.Fatalf("nothing added = %+v", fillIn.Report)
+	}
+	fillIn.AddToReport(map[string]int{NoteKindPerson: 1}, fillInNow)
+	fillIn.AddToReport(map[string]int{NoteKindPerson: 1, NoteKindProject: 1}, fillInNow.Add(time.Hour))
+	if fillIn.Report.Counts[NoteKindPerson] != 2 || fillIn.Report.Counts[NoteKindProject] != 1 || !fillIn.Report.At.Equal(fillInNow.Add(time.Hour)) {
+		t.Fatalf("report = %+v", fillIn.Report)
+	}
+	shown := fillInNow.Add(2 * time.Hour)
+	fillIn.Report.ShownAt = &shown
+	fillIn.AddToReport(map[string]int{NoteKindFollowUp: 1}, fillInNow.Add(3*time.Hour))
+	if fillIn.Report.ShownAt != nil || fillIn.Report.Counts[NoteKindPerson] != 0 || fillIn.Report.Counts[NoteKindFollowUp] != 1 {
+		t.Fatalf("after being shown = %+v", fillIn.Report)
 	}
 }
 

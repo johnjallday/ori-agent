@@ -33,10 +33,25 @@ type Service struct {
 	store     Store
 	now       func() time.Time
 	automatic func(ctx context.Context, workspaceID string) bool
+	onChanged []func(userID string)
 }
 
 // NewService constructs the follow-up service.
 func NewService(store Store) *Service { return &Service{store: store, now: time.Now} }
+
+// OnChanged runs fn after a follow-up was captured or changed. It must not
+// block: the change has already been saved. Initialization only.
+func (s *Service) OnChanged(fn func(userID string)) {
+	if fn != nil {
+		s.onChanged = append(s.onChanged, fn)
+	}
+}
+
+func (s *Service) notifyChanged(userID string) {
+	for _, fn := range s.onChanged {
+		fn(userID)
+	}
+}
 
 // SetAutomaticAdmission limits background changes (snooze wake-ups, nudges)
 // to workspaces this installation runs routines for. An imported workspace's
@@ -93,6 +108,7 @@ func (s *Service) Capture(ctx context.Context, in CaptureInput) (*FollowUp, erro
 				if err := s.store.Update(ctx, existing); err != nil {
 					return nil, err
 				}
+				s.notifyChanged(in.UserID)
 			}
 			return existing, nil
 		}
@@ -128,6 +144,7 @@ func (s *Service) Capture(ctx context.Context, in CaptureInput) (*FollowUp, erro
 	if err := s.store.Create(ctx, f); err != nil {
 		return nil, err
 	}
+	s.notifyChanged(in.UserID)
 	return f, nil
 }
 
@@ -173,6 +190,7 @@ func (s *Service) transition(ctx context.Context, userID, id string, fn func(*Fo
 	if err := s.store.Update(ctx, f); err != nil {
 		return nil, err
 	}
+	s.notifyChanged(userID)
 	return f, nil
 }
 

@@ -355,7 +355,7 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
   };
 }
 
-// secondBrainWrittenLine says what Ori has put in Inbox and Daily (FR16).
+// secondBrainWrittenLine says what Ori has put in the notes it keeps (FR16).
 export function secondBrainWrittenLine(written, now = Date.now()) {
   const count = Number(written?.count) || 0;
   if (count === 0) return 'Ori has not written to your notes yet.';

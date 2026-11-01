@@ -357,6 +357,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			b.personalAssistantSecondBrain.OnDisconnected(notes.Unlearn)
 			// Every approval reaches the notes, after its own write has succeeded.
 			learning.OnChanged(func(userID string) { b.personalAssistantSecondBrain.SyncSoon(userID, "knowledge") })
+			b.wireSecondBrainTriggers()
 		}
 		b.personalAssistantMemory.SetReviewedHQWriter(learning)
 		rememberedReader = learning

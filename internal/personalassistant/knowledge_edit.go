@@ -12,6 +12,14 @@ import (
 // Preparing immediately removes eligibility; the new revision becomes active
 // only after a verified exact-line mutation and a durable finalization receipt.
 func (s *KnowledgeLearningService) EditApproved(ctx context.Context, userID, itemID string, expectedVersion int64, requestID, text string) (KnowledgeItem, error) {
+	item, err := s.editApproved(ctx, userID, itemID, expectedVersion, requestID, text)
+	if err == nil {
+		s.notifyChanged(userID)
+	}
+	return item, err
+}
+
+func (s *KnowledgeLearningService) editApproved(ctx context.Context, userID, itemID string, expectedVersion int64, requestID, text string) (KnowledgeItem, error) {
 	if s == nil || s.store == nil || s.memory == nil || s.now == nil {
 		return KnowledgeItem{}, ErrRepairNeeded
 	}

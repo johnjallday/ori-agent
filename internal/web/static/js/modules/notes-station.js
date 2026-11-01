@@ -66,7 +66,7 @@ export function notesBadge(secondBrain, now = Date.now()) {
   const at = secondBrain.last_look?.at;
   const since = at ? shortSince(at, now) : '';
   if (isCreatedByOri(secondBrain)) {
-    const description = since ? 'set up by Ori · last look ' + since : 'set up by Ori';
+    const description = createdDescription(secondBrain, since);
     if (!Number.isFinite(secondBrain.inbox_count)) {
       return { value: name, description, tone: 'clear' };
     }
@@ -75,6 +75,19 @@ export function notesBadge(secondBrain, now = Date.now()) {
   const description = since ? 'connected · last look ' + since : 'connected';
   if (!secondBrain.last_look) return { value: name, description, tone: 'clear' };
   return { value: openItemCount(secondBrain.last_look) + ' open', description, tone: 'clear' };
+}
+
+// createdDescription is the line under a folder Ori set up. Once the user has
+// taken a note over it says so plainly, since that is the promise working: "set
+// up by Ori · 14 written by Ori · 2 are yours now".
+function createdDescription(secondBrain, since) {
+  const yours = Number(secondBrain?.fill_in?.user_owned) || 0;
+  if (yours > 0) {
+    const written = Number(secondBrain?.written_by_ori?.count) || 0;
+    const verb = yours === 1 ? 'is' : 'are';
+    return `set up by Ori · ${written} written by Ori · ${yours} ${verb} yours now`;
+  }
+  return since ? 'set up by Ori · last look ' + since : 'set up by Ori';
 }
 
 // shortSince is "2h" or "3d", for the badge's narrow line.
@@ -261,7 +274,7 @@ export function notesPanelCount(sections) {
 
 const ACTION_LABELS = { follow_up: 'Follow up', done: 'Done', dismiss: 'Dismiss' };
 const HANDLED_LABELS = { follow_up: 'Follow-up made', done: 'Done', dismissed: 'Dismissed' };
-const KIND_LABELS = { capture: 'Captured', seed: 'Seeded', user: 'Yours' };
+const KIND_LABELS = { capture: 'Captured', seed: 'Seeded', follow_up: 'Follow-up', user: 'Yours' };
 
 function obsidianAnchor(link, name) {
   const href = safeLink(link);
