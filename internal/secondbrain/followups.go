@@ -170,27 +170,52 @@ func CompleteGone(ctx context.Context, closer FollowUpCloser, userID string, gon
 	}
 	completed := 0
 	for _, id := range gone {
-		existing, err := closer.FindBySource(ctx, userID, FollowUpSourceType, id)
-		if errors.Is(err, followup.ErrNotFound) {
-			continue
-		}
+		closed, err := closeFollowUp(ctx, closer, userID, id, DoneInNotes)
 		if err != nil {
 			return completed, err
 		}
-		if !existing.IsOpen() {
-			continue
+		if closed {
+			completed++
 		}
-		detail := strings.TrimSpace(existing.Detail)
-		if !strings.Contains(detail, DoneInNotes) {
-			detail = strings.TrimSpace(detail + "\n" + DoneInNotes)
-		}
-		if _, err := closer.Edit(ctx, userID, existing.ID, existing.Title, detail, existing.DueAt); err != nil {
-			return completed, err
-		}
-		if _, err := closer.Complete(ctx, userID, existing.ID); err != nil {
-			return completed, err
-		}
-		completed++
 	}
 	return completed, nil
+}
+
+// DoneInView is what a follow-up says once its item is marked done in the Notes
+// panel. The note itself is not edited.
+const DoneInView = "Done from your notes view."
+
+// CompleteDone completes the open follow-up made from an item the user marked
+// done, if there is one. It reports whether one was completed.
+func CompleteDone(ctx context.Context, closer FollowUpCloser, userID, itemID string) (bool, error) {
+	if closer == nil {
+		return false, nil
+	}
+	return closeFollowUp(ctx, closer, userID, itemID, DoneInView)
+}
+
+// closeFollowUp records why in the follow-up's detail and completes it. A
+// missing follow-up, or one the user already closed, is left alone.
+func closeFollowUp(ctx context.Context, closer FollowUpCloser, userID, itemID, why string) (bool, error) {
+	existing, err := closer.FindBySource(ctx, userID, FollowUpSourceType, itemID)
+	if errors.Is(err, followup.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !existing.IsOpen() {
+		return false, nil
+	}
+	detail := strings.TrimSpace(existing.Detail)
+	if !strings.Contains(detail, why) {
+		detail = strings.TrimSpace(detail + "\n" + why)
+	}
+	if _, err := closer.Edit(ctx, userID, existing.ID, existing.Title, detail, existing.DueAt); err != nil {
+		return false, err
+	}
+	if _, err := closer.Complete(ctx, userID, existing.ID); err != nil {
+		return false, err
+	}
+	return true, nil
 }

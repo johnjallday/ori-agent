@@ -22,6 +22,7 @@ type fakeSecondBrain struct {
 	connect personalassistant.SecondBrainConnectInput
 	create  personalassistant.SecondBrainCreateInput
 	capture [2]string // text, request id
+	item    [4]string // look id, item id, action, request id
 	accept  personalassistant.SecondBrainAcceptInput
 	lookID  string
 	version int64
@@ -82,6 +83,15 @@ func (f *fakeSecondBrain) Disconnect(_ context.Context, _ string, _ string, ifVe
 	return personalassistant.SecondBrainView{}, f.record("disconnect")
 }
 
+func (f *fakeSecondBrain) ActOnItem(_ context.Context, _ string, lookID, itemID, action, requestID string) (personalassistant.SecondBrainLookView, error) {
+	f.item = [4]string{lookID, itemID, action, requestID}
+	return personalassistant.SecondBrainLookView{State: "finished", LookID: lookID}, f.record("item")
+}
+
+func (f *fakeSecondBrain) Inbox(context.Context, string) (personalassistant.SecondBrainInboxView, error) {
+	return personalassistant.SecondBrainInboxView{Notes: []personalassistant.SecondBrainInboxNote{{Name: "a.md", Kind: "capture", Title: "A", OwnedByOri: true}}, Total: 1}, f.record("inbox")
+}
+
 func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	h := NewHandler(nil, userprofile.LocalUserProvider{})
 	h.SetSecondBrain(fake, connectionshttp.NewOriginGuard().Check)
@@ -97,6 +107,8 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("POST "+base+"/look", h.LookSecondBrainAgain)
 	mux.HandleFunc("POST "+base+"/look/{lookID}/follow-ups", h.AcceptSecondBrainFollowUps)
 	mux.HandleFunc("POST "+base+"/look/{lookID}/dismiss", h.DismissSecondBrainLook)
+	mux.HandleFunc("POST "+base+"/look/{lookID}/items/{itemID}", h.ActOnSecondBrainItem)
+	mux.HandleFunc("GET "+base+"/inbox", h.GetSecondBrainInbox)
 	mux.HandleFunc("POST "+base+"/disconnect", h.DisconnectSecondBrain)
 	return mux
 }
@@ -126,6 +138,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 		{http.MethodPost, "/look", `{"request_id":"l-1"}`},
 		{http.MethodPost, "/look/look-1/follow-ups", `{"items":"suggested","request_id":"f-1"}`},
 		{http.MethodPost, "/look/look-1/dismiss", `{"request_id":"x-1"}`},
+		{http.MethodPost, "/look/look-1/items/item-1", `{"action":"done","request_id":"i-1"}`},
+		{http.MethodGet, "/inbox", ""},
 		{http.MethodPost, "/disconnect", `{"request_id":"d-1","if_version":1}`},
 	} {
 		if got := secondBrainRequest(handler, route.method, route.path, route.body, "https://evil.example").Code; got != http.StatusForbidden {
@@ -135,8 +149,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 			t.Errorf("%s %s from Ori's page = %d, want 200", route.method, route.path, got)
 		}
 	}
-	if len(fake.calls) != 11 {
-		t.Fatalf("calls = %v, want only the eleven local requests", fake.calls)
+	if len(fake.calls) != 13 {
+		t.Fatalf("calls = %v, want only the thirteen local requests", fake.calls)
 	}
 
 	rebound := httptest.NewRequest(http.MethodGet, "http://attacker.example/api/personal-assistant/second-brain", nil)
@@ -144,6 +158,60 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 	handler.ServeHTTP(recorder, rebound)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("a rebound host = %d, want 403", recorder.Code)
+	}
+}
+
+func TestSecondBrainItemRoute_TakesAClosedBodyAndMapsEachRefusal(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	handler := newSecondBrainHandler(fake)
+	const origin = "http://localhost:8931"
+	response := secondBrainRequest(handler, http.MethodPost, "/look/look-1/items/item-1", `{"action":" done ","request_id":" i-1 "}`, origin)
+	if response.Code != http.StatusOK || fake.item != [4]string{"look-1", "item-1", "done", "i-1"} {
+		t.Fatalf("code = %d, reached the service with %v", response.Code, fake.item)
+	}
+	if !strings.Contains(response.Body.String(), `"look"`) {
+		t.Fatalf("body = %s", response.Body)
+	}
+
+	calls := len(fake.calls)
+	if got := secondBrainRequest(handler, http.MethodPost, "/look/look-1/items/item-1", `{"action":"done","request_id":"i-2","path":"/etc/passwd"}`, origin).Code; got != http.StatusBadRequest {
+		t.Fatalf("an unknown field = %d, want 400", got)
+	}
+	if len(fake.calls) != calls {
+		t.Fatal("a refused body reached the service")
+	}
+
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		"unknown look":       {personalassistant.ErrSecondBrainLookNotFound, http.StatusNotFound},
+		"unknown item":       {personalassistant.ErrSecondBrainItemNotFound, http.StatusNotFound},
+		"seeded follow-up":   {personalassistant.ErrSecondBrainSeededItem, http.StatusConflict},
+		"bad action":         {personalassistant.ErrValidation, http.StatusBadRequest},
+		"id used for others": {secondbrain.ErrRequestReused, http.StatusConflict},
+		"nothing connected":  {personalassistant.ErrSecondBrainNotConnected, http.StatusConflict},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake.err = tc.err
+			if got := secondBrainRequest(handler, http.MethodPost, "/look/look-1/items/item-1", `{"action":"done","request_id":"i-3"}`, origin).Code; got != tc.want {
+				t.Fatalf("code = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSecondBrainInboxRoute_ListsAndIsAbsentForAConnectedVault(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	handler := newSecondBrainHandler(fake)
+	const origin = "http://localhost:8931"
+	response := secondBrainRequest(handler, http.MethodGet, "/inbox", "", origin)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"owned_by_ori":true`) {
+		t.Fatalf("inbox = %d %s", response.Code, response.Body)
+	}
+	fake.err = personalassistant.ErrSecondBrainNoInbox
+	if got := secondBrainRequest(handler, http.MethodGet, "/inbox", "", origin).Code; got != http.StatusNotFound {
+		t.Fatalf("a connected vault's Inbox = %d, want 404", got)
 	}
 }
 

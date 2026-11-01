@@ -213,6 +213,15 @@ export function journalPromptView(proposal) {
   };
 }
 
+// journalRequested says the page was opened to write the journal (/?journal=1).
+export function journalRequested(search) {
+  try {
+    return new URLSearchParams(search || '').get('journal') === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
 // journalSavedMessage is what the Saved toast says, given the save's response.
 // When the user has a second brain Ori set up the response also says what
 // became of the Daily copy; a copy that was left alone or failed is said, the
@@ -1484,7 +1493,24 @@ export function followUpView(f) {
     }
     mount.hidden = false;
     mount.innerHTML = '';
-    mount.appendChild(journalLauncher(mount));
+    const launcher = journalLauncher(mount);
+    mount.appendChild(launcher);
+    // The Notes panel's "Write today's Journal" arrives here: open the editor,
+    // then scrub the query so a reload does not open it again.
+    if (journalRequested(window.location.search)) {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('journal');
+        window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+      } catch (_) {
+        /* a cosmetic tidy never blocks the editor */
+      }
+      // On Home the journal lives in the Updates flyout, closed until asked for.
+      const updates = document.getElementById('cockpitRailToggle');
+      if (updates?.getAttribute('aria-expanded') === 'false') updates.click();
+      mount.scrollIntoView?.({ block: 'center' });
+      launcher.click();
+    }
   }
 
   async function initializeWorkspaceDerivedUI() {

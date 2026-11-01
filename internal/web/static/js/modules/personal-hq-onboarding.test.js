@@ -9,6 +9,7 @@ import {
   followUpView,
   followUpCategoryLabel,
   journalPromptView,
+  journalRequested,
   journalSavedMessage,
   hqWorkspaceRootView,
   hqBuildTarget,
@@ -299,6 +300,13 @@ test('followUpView: a candidate is flagged for confirm/dismiss', () => {
     title: 'Maybe send deck'
   });
   assert.equal(view.isCandidate, true);
+});
+
+test('journalRequested: only ?journal=1 opens the editor', () => {
+  assert.equal(journalRequested('?journal=1'), true);
+  assert.equal(journalRequested('?journal=0'), false);
+  assert.equal(journalRequested('?quest=second-brain'), false);
+  assert.equal(journalRequested(''), false);
 });
 
 test('journalPromptView: carries the editable draft and degraded flag', () => {

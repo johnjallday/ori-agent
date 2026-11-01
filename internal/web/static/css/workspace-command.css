@@ -5770,6 +5770,215 @@ button.ws-cmd-rpg-class-card:focus-visible {
     padding: calc(var(--navbar-offset, 76px) + 8px) 8px 8px;
   }
 }
+/* The Notes station's panel: tabbed views of short rows, read-mostly. The tabs
+   stay put while a view scrolls under them. */
+.ws-notes-tabs {
+  flex: 0 0 auto;
+  padding: 10px 14px 8px;
+}
+.ws-notes-tab-count {
+  margin-left: 4px;
+  color: var(--ws-ink-faint);
+}
+.ws-notes-body {
+  gap: 14px;
+  overflow-x: hidden;
+}
+.ws-notes-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.ws-notes-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  scroll-margin-top: 8px;
+}
+.ws-notes-section + .ws-notes-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-notes-section-title {
+  margin: 0;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim);
+}
+.ws-notes-group {
+  margin: 6px 0 0;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+}
+.ws-notes-group-count {
+  color: var(--ws-ink-dim);
+}
+.ws-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ws-notes-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  min-width: 0;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-notes-item:last-child {
+  border-bottom: 0;
+}
+.ws-notes-item-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-notes-item-text {
+  font-size: 13px;
+  color: var(--ws-ink);
+  overflow-wrap: anywhere;
+}
+.ws-notes-item-meta,
+.ws-notes-muted,
+.ws-notes-empty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ws-ink-faint);
+  overflow-wrap: anywhere;
+}
+.ws-notes-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ws-ink);
+}
+.ws-notes-kind {
+  color: var(--ws-ink-dim);
+}
+/* The triage row appears on hover or focus, and stays in the tab order; on a
+   touch screen it is always there. */
+.ws-notes-item-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.13s;
+}
+.ws-notes-item:hover .ws-notes-item-actions,
+.ws-notes-item:focus-within .ws-notes-item-actions,
+.ws-notes-item-actions.is-always {
+  opacity: 1;
+}
+@media (hover: none) {
+  .ws-notes-item-actions {
+    opacity: 1;
+  }
+}
+@media (max-width: 760px) {
+  .ws-notes-item {
+    flex-wrap: wrap;
+  }
+  .ws-notes-item-actions {
+    opacity: 1;
+  }
+}
+.ws-notes-action,
+.ws-notes-link,
+.ws-notes-bulk {
+  padding: 4px 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ws-notes-link {
+  border-color: transparent;
+  padding-inline: 2px;
+  text-decoration: underline;
+}
+.ws-notes-action:hover,
+.ws-notes-link:hover {
+  color: var(--ws-ink);
+  border-color: var(--ws-line-bright);
+}
+.ws-notes-bulk {
+  align-self: flex-start;
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.09);
+  color: var(--ws-faction);
+}
+.ws-notes-bulk:hover {
+  background: rgba(70, 211, 154, 0.16);
+  border-color: var(--ws-faction);
+}
+.ws-notes-action:focus-visible,
+.ws-notes-link:focus-visible,
+.ws-notes-bulk:focus-visible,
+.ws-notes-capture-input:focus-visible,
+.ws-notes-handled summary:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-notes-action:disabled,
+.ws-notes-bulk:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.ws-notes-footer .ws-notes-action {
+  align-self: flex-start;
+}
+.ws-notes-capture {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.ws-notes-capture-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  font-size: 13px;
+}
+.ws-notes-capture .ws-notes-bulk {
+  align-self: stretch;
+}
+.ws-notes-receipt {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ws-faction);
+}
+.ws-notes-problem {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ws-keeper);
+}
+.ws-notes-handled summary {
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+}
 .ws-cmd-modal-config-body {
   flex: 1 1 auto;
   min-height: 0;

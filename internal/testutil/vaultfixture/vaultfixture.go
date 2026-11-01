@@ -284,7 +284,7 @@ func research(now time.Time) (Vault, []note) {
 	journal := func(t time.Time) string { return "journals/" + t.Format("2006_01_02") + ".md" }
 	vault := Vault{
 		Kind: KindMarkdown, Name: "Thesis Notes",
-		Notes: 6, OpenItems: 8, NotesWithOpen: 4, Dated: 1, Done: 2, DailyNotes: 2,
+		Notes: 7, OpenItems: 8, NotesWithOpen: 4, Dated: 1, Done: 2, DailyNotes: 2,
 		Decision: "pages/Chapter 3.md", Stale: "pages/Grant Application.md",
 		TopPerson: "Dr. Lee", TopMentions: 2,
 	}
@@ -300,8 +300,9 @@ func research(now time.Time) (Vault, []note) {
 			"- DOING Rewrite the methods section\n" +
 			"- TODO Redo figure 4\n"},
 		{rel: "pages/Dr. Lee.md", age: 50 * day, text: "tags:: person\n\n- Advisor, office hours on Thursdays\n"},
+		{rel: "pages/Mina Park.md", age: 40 * day, text: "tags:: person\n\n- Runs the lab's data archive\n"},
 		{rel: "pages/Grant Application.md", age: 75 * day, text: "- TODO Draft the budget\n- TODO Get two letters of support\n- DONE Pick the funder\n"},
-		{rel: journal(now.Add(-day)), age: day, text: "- TODO Back up the lab data\n- Met [[Dr. Lee]] about the outline\n"},
+		{rel: journal(now.Add(-day)), age: day, text: "- TODO Back up the lab data with [[Mina Park]]\n- Met [[Dr. Lee]] about the outline\n"},
 		{rel: journal(now), age: 3 * time.Hour, text: "- Reading day, nothing due\n"},
 	}
 }

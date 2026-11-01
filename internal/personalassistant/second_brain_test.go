@@ -130,8 +130,12 @@ func TestSecondBrain_ConnectStartsTheFirstLookAndAReplayReturnsTheSameResult(t *
 	if err != nil || again.LookID != "look-1" {
 		t.Fatalf("a replay started another look: %+v", again)
 	}
-	if status, _ := h.service.Status(ctx, "local"); status.LastLook == nil || status.LastLook.OpenItems != 12 || status.LastLook.Acted {
+	if status, _ := h.service.Status(ctx, "local"); status.LastLook == nil || status.LastLook.OpenItems != 12 || status.LastLook.Acted ||
+		status.LastLook.People != 2 || status.LastLook.Stale != 1 || status.LastLook.Decisions != 1 {
 		t.Fatalf("last look summary = %+v", status.LastLook)
+	}
+	if len(look.Result.People) != 2 || len(look.Result.Stale) != 1 || len(look.Result.Decisions) != 1 {
+		t.Fatalf("look signals = %+v / %+v / %+v", look.Result.People, look.Result.Stale, look.Result.Decisions)
 	}
 }
 

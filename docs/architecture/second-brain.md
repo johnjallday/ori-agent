@@ -349,6 +349,59 @@ and mtime snapshot before and after.
 Disconnecting removes the record exactly as for any source, and with it the
 permission to write. The folder and everything in it stay on disk.
 
+## The Notes panel
+
+The Notes building on the HQ map opens a panel when a folder is connected
+(`?station=second-brain` opens it too, which is where Today's "What's open in
+{name}" row and its result card lead). With nothing connected, or a folder Ori cannot find, it opens
+the drawer card as before; the ask, setup, consent and first look stay in the
+drawer, and the panel's **Connection…** goes there too.
+
+The panel is a window onto what the look and the Writer already do. It adds no
+reader outside `internal/secondbrain`, no writer, and no stored note contents.
+
+It has tabs rather than one long page, and it stays one station: its parts share a
+folder and a look, and most would be empty as buildings of their own. **Inbox**
+(Capture, the notes, Today) exists only for a second brain Ori set up. **Open loops**
+holds triage and Look again. **People**, or **People & Projects** for a second brain
+Ori set up, holds the rest. The panel opens on the first tab with something in it.
+
+**Signals.** A look keeps up to 20 each of `people`, `stale` and `decisions`, as
+names, relative paths, counts and dates, within an 80 KB budget beside the items'
+300 KB. A decision's own line is not kept. A person's `note` is the person's own
+note, which is what the extractor knows; it counts how many notes mention them,
+not which mentions them most.
+
+**Triage.** `POST …/look/{lookID}/items/{itemID}` takes `follow_up`, `done` or
+`dismiss`, and records `acted_as` and `acted_at` on the item. No note is edited,
+by any of them:
+
+| Action | Now | On the next look |
+| --- | --- | --- |
+| `follow_up` | Makes the follow-up (same dedup as the bulk action); seeded items refuse it | Mark kept while the line stays open |
+| `done` | Completes the item's follow-up with "Done from your notes view." if it has one; otherwise nothing but the mark | Mark kept and never suggested while the line stays open. Ticked or gone: the mark drops and the usual "Done in your notes." path applies |
+| `dismiss` | Only the mark | Mark gone; the item may be suggested again |
+
+A partial read that did not see an item's note keeps its `follow_up` or `done`
+mark and item, so a mark never lapses because the bounds left a note out. The bulk
+**Add N suggested** skips triaged items, counts them as skipped, and marks what it
+adds as `follow_up`.
+
+**Inbox and Today**, for a second brain Ori set up only. `GET …/inbox` lists the
+Markdown notes directly under `Inbox/` through the pinned root, as `CountWritten`
+does: links and hidden entries skipped, nothing followed, at most 2,000 entries
+looked at, the newest 100 returned, and at most 4 KB read from each. Each folder's
+README is the layout's and is left out. `kind` is `capture` or `seed` only when
+that prefix proves the note is as Ori wrote it, so a note longer than 4 KB reads as
+`user`. `title` is read for the listing and never stored. A listing is reused for
+30 seconds and a capture drops it; it never runs on a timer. The status read's
+`today_note` says whether `Daily/<date>.md` exists and whether its marker says it
+is Ori's, by the server's local date, the same day the Journal proposes.
+
+`TestListInbox_ListsNewestFirstWithKindAndTitleAndWritesNothing` and
+`TestActOnItem_FollowUpDoneAndDismissLeaveTheNotesUntouched` prove all this against
+a byte, mode and mtime snapshot.
+
 ## What is never done
 
 Never, for any source:

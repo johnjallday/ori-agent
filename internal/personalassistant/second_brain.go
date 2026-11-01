@@ -28,6 +28,14 @@ var (
 	// folder is connected; Create has no replace, since neither entry point
 	// offers it with a folder connected.
 	ErrSecondBrainAlreadyConnected = errors.New("personal assistant: a notes folder is already connected")
+	// ErrSecondBrainItemNotFound names an item the look does not hold.
+	ErrSecondBrainItemNotFound = errors.New("personal assistant: that item is no longer here")
+	// ErrSecondBrainSeededItem refuses a follow-up from an item that was seeded
+	// from a follow-up the user already has.
+	ErrSecondBrainSeededItem = errors.New("personal assistant: that item already came from a follow-up")
+	// ErrSecondBrainNoInbox says the connected folder is not one Ori set up, so
+	// the panel has no Inbox for it.
+	ErrSecondBrainNoInbox = errors.New("personal assistant: only a second brain Ori set up has an Inbox here")
 
 	errSecondBrainLookSuperseded = errors.New("personal assistant: look superseded")
 )
@@ -65,8 +73,17 @@ const (
 	secondBrainActionCreate     = "create"
 	secondBrainActionCapture    = "capture"
 
+	// SecondBrainItemFollowUp, SecondBrainItemDone and SecondBrainItemDismiss
+	// are what the Notes panel can do with one open item.
+	SecondBrainItemFollowUp = "follow_up"
+	SecondBrainItemDone     = "done"
+	SecondBrainItemDismiss  = "dismiss"
+
 	// maxCaptureAttempts bounds the numbering of a capture whose name is taken.
 	maxCaptureAttempts = 50
+	// secondBrainInboxCacheFor is how long a listing of Inbox is reused. It only
+	// ever runs on request, never on a timer.
+	secondBrainInboxCacheFor = 30 * time.Second
 )
 
 // Connection states for the API.
@@ -122,6 +139,9 @@ type SecondBrainService struct {
 	// captureMu serialises captures, so two in one minute number their names
 	// instead of racing for one.
 	captureMu sync.Mutex
+	// inboxCache holds the last listing of Inbox, per source.
+	inboxMu    sync.Mutex
+	inboxCache *secondBrainInboxEntry
 
 	// Hooks for the mission and the learned fact, bound at startup.
 	onConnected    []func(ctx context.Context, userID string, source secondbrain.Source)
@@ -207,9 +227,46 @@ type SecondBrainView struct {
 	// Projects lists the folders under Projects, so one can be offered as a
 	// workspace when the user asks (FR18); a second brain Ori set up only.
 	Projects []SecondBrainProjectView `json:"projects,omitempty"`
-	Version  int64                    `json:"version"`
+	// InboxCount and TodayNote feed the Notes station; a status read of a second
+	// brain Ori set up carries them.
+	InboxCount *int                  `json:"inbox_count,omitempty"`
+	TodayNote  *SecondBrainTodayNote `json:"today_note,omitempty"`
+	Version    int64                 `json:"version"`
 	// LookID names the look a connect started (or the replayed one).
 	LookID string `json:"look_id,omitempty"`
+}
+
+// SecondBrainTodayNote says whether today has a Daily note, and whose it is.
+type SecondBrainTodayNote struct {
+	Date string `json:"date"`
+	// State is "ori", "user" or "none".
+	State string `json:"state"`
+	Link  string `json:"link,omitempty"`
+}
+
+// SecondBrainInboxView is GET …/second-brain/inbox: a bounded listing, newest
+// first. Titles are read for it and never stored.
+type SecondBrainInboxView struct {
+	Notes   []SecondBrainInboxNote `json:"notes"`
+	Total   int                    `json:"total"`
+	Partial bool                   `json:"partial"`
+}
+
+// SecondBrainInboxNote is one note directly under Inbox.
+type SecondBrainInboxNote struct {
+	Name string `json:"name"`
+	// Kind is "capture", "seed" or "user".
+	Kind       string    `json:"kind"`
+	Title      string    `json:"title"`
+	Modified   time.Time `json:"modified"`
+	Link       string    `json:"link,omitempty"`
+	OwnedByOri bool      `json:"owned_by_ori"`
+}
+
+type secondBrainInboxEntry struct {
+	sourceID string
+	at       time.Time
+	view     SecondBrainInboxView
 }
 
 // SecondBrainSetupDefault is the folder a one-click setup would make.
@@ -264,6 +321,14 @@ type SecondBrainLookSummary struct {
 	OpenItems int       `json:"open_items"`
 	Headline  string    `json:"headline"`
 	Acted     bool      `json:"acted"`
+	// People, Stale and Decisions count the signals the look kept; GET …/look
+	// holds the lists.
+	People    int `json:"people"`
+	Stale     int `json:"stale"`
+	Decisions int `json:"decisions"`
+	// Handled counts the items the user has triaged, so the Notes station can
+	// say how many are still open without changing what the look found.
+	Handled int `json:"handled"`
 }
 
 // SecondBrainAskView is the ask's state.
@@ -316,8 +381,75 @@ func (s *SecondBrainService) Status(ctx context.Context, userID string) (SecondB
 			view.WrittenByOri = &SecondBrainWrittenView{Count: written.Count, LastAt: written.LastAt}
 		}
 		view.Projects = projectViews(connected.Path)
+		if inbox, err := s.inboxListing(*connected); err == nil {
+			count := inbox.Total
+			view.InboxCount = &count
+		}
+		view.TodayNote = s.todayNote(*connected)
 	}
 	return view, nil
+}
+
+// Inbox lists the notes directly under Inbox in a second brain Ori set up.
+func (s *SecondBrainService) Inbox(ctx context.Context, userID string) (SecondBrainInboxView, error) {
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return SecondBrainInboxView{}, err
+	}
+	connected := doc.Connected()
+	if connected == nil {
+		return SecondBrainInboxView{}, ErrSecondBrainNotConnected
+	}
+	if !connected.CreatedByOri() {
+		return SecondBrainInboxView{}, ErrSecondBrainNoInbox
+	}
+	return s.inboxListing(*connected)
+}
+
+// inboxListing reads Inbox, or returns a listing younger than
+// secondBrainInboxCacheFor. A capture drops the cached listing.
+func (s *SecondBrainService) inboxListing(source secondbrain.Source) (SecondBrainInboxView, error) {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	now := s.deps.Now()
+	if cached := s.inboxCache; cached != nil && cached.sourceID == source.ID && now.Sub(cached.at) < secondBrainInboxCacheFor {
+		return cached.view, nil
+	}
+	inbox, err := secondbrain.ListInbox(source.Path)
+	if err != nil {
+		logger.Warn("The notes Inbox could not be listed", logger.Fields{"error": err.Error()})
+		return SecondBrainInboxView{}, ErrSecondBrainUnavailable
+	}
+	view := SecondBrainInboxView{Notes: make([]SecondBrainInboxNote, 0, len(inbox.Notes)), Total: inbox.Total, Partial: inbox.Partial}
+	for _, note := range inbox.Notes {
+		view.Notes = append(view.Notes, SecondBrainInboxNote{
+			Name: note.Name, Kind: note.Kind, Title: note.Title, Modified: note.Modified.UTC(), OwnedByOri: note.OwnedByOri,
+			Link: secondbrain.ObsidianPathLink(filepath.Join(source.Path, secondbrain.FolderInbox, note.Name)),
+		})
+	}
+	s.inboxCache = &secondBrainInboxEntry{sourceID: source.ID, at: now, view: view}
+	return view, nil
+}
+
+func (s *SecondBrainService) dropInboxCache() {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	s.inboxCache = nil
+}
+
+// todayNote reads today's Daily note, by the server's local date: the day the
+// Journal proposes and mirrors. An unreadable folder leaves the field out.
+func (s *SecondBrainService) todayNote(source secondbrain.Source) *SecondBrainTodayNote {
+	date := s.deps.Now().Format("2006-01-02")
+	state, err := secondbrain.ReadTodayNote(source.Path, date)
+	if err != nil {
+		return nil
+	}
+	note := &SecondBrainTodayNote{Date: date, State: state}
+	if state != secondbrain.TodayNoteNone {
+		note.Link = secondbrain.ObsidianPathLink(filepath.Join(source.Path, secondbrain.FolderDaily, date+".md"))
+	}
+	return note
 }
 
 // projectViews lists the folders under Projects in a folder Ori set up.
@@ -617,6 +749,7 @@ func (s *SecondBrainService) Capture(ctx context.Context, userID, text, requestI
 		logger.Warn("A capture could not be written", logger.Fields{"error": err.Error()})
 		return SecondBrainCaptureView{}, err
 	}
+	s.dropInboxCache()
 	if _, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 		if _, replayed, err := doc.Replay(requestID, secondBrainActionCapture); err != nil || replayed {
 			return err
@@ -874,7 +1007,7 @@ func (s *SecondBrainService) AcceptFollowUps(ctx context.Context, userID, lookID
 	if connected.LastLook == nil || connected.LastLook.ID != lookID {
 		return SecondBrainAcceptView{}, ErrSecondBrainLookNotFound
 	}
-	items, err := chosenItems(connected.LastLook.Items, input)
+	items, alreadyHandled, err := chosenItems(connected.LastLook.Items, input)
 	if err != nil {
 		return SecondBrainAcceptView{}, err
 	}
@@ -888,6 +1021,7 @@ func (s *SecondBrainService) AcceptFollowUps(ctx context.Context, userID, lookID
 	if err != nil {
 		return SecondBrainAcceptView{}, err
 	}
+	skipped += alreadyHandled
 	if _, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 		if _, replayed, err := doc.Replay(input.RequestID, secondBrainActionFollowUps); err != nil || replayed {
 			return err
@@ -895,6 +1029,12 @@ func (s *SecondBrainService) AcceptFollowUps(ctx context.Context, userID, lookID
 		if c := doc.Connected(); c != nil && c.LastLook != nil && c.LastLook.ID == lookID {
 			at := s.deps.Now().UTC()
 			c.LastLook.ActedAt = &at
+			// Each one now has a follow-up, so the Notes panel files it as handled.
+			for _, chosen := range items {
+				if item, ok := c.LastLook.Item(chosen.ID); ok && !item.Seeded {
+					item.ActedAs, item.ActedAt = secondbrain.ActedFollowUp, &at
+				}
+			}
 		}
 		doc.Remember(secondbrain.Receipt{
 			RequestID: input.RequestID, Action: secondBrainActionFollowUps, At: s.deps.Now(), LookID: lookID, Created: created, Skipped: skipped,
@@ -906,15 +1046,20 @@ func (s *SecondBrainService) AcceptFollowUps(ctx context.Context, userID, lookID
 	return SecondBrainAcceptView{LookID: lookID, Created: created, Skipped: skipped}, nil
 }
 
-func chosenItems(items []secondbrain.LookItem, input SecondBrainAcceptInput) ([]secondbrain.LookItem, error) {
-	var chosen []secondbrain.LookItem
+// chosenItems picks the items to add. The suggested set skips items the user has
+// already triaged, and says how many, so the receipt can count them as skipped.
+func chosenItems(items []secondbrain.LookItem, input SecondBrainAcceptInput) (chosen []secondbrain.LookItem, alreadyHandled int, err error) {
 	if input.Suggested {
 		for _, item := range items {
-			if item.Suggested {
+			switch {
+			case !item.Suggested:
+			case item.ActedAs != "":
+				alreadyHandled++
+			default:
 				chosen = append(chosen, item)
 			}
 		}
-		return chosen, nil
+		return chosen, alreadyHandled, nil
 	}
 	byID := make(map[string]secondbrain.LookItem, len(items))
 	for _, item := range items {
@@ -924,14 +1069,114 @@ func chosenItems(items []secondbrain.LookItem, input SecondBrainAcceptInput) ([]
 	for _, id := range input.ItemIDs {
 		item, ok := byID[id]
 		if !ok {
-			return nil, ErrValidation
+			return nil, 0, ErrValidation
 		}
 		if !seen[id] {
 			seen[id] = true
 			chosen = append(chosen, item)
 		}
 	}
-	return chosen, nil
+	return chosen, 0, nil
+}
+
+// ActOnItem triages one open item of the last finished look: make it a
+// follow-up, mark it done, or dismiss it until the next look. Nothing here
+// touches the notes. Done completes the item's follow-up if it has one and is
+// otherwise only remembered here; a later look that finds the line ticked or
+// gone drops the mark. A replay returns the look without acting again.
+func (s *SecondBrainService) ActOnItem(ctx context.Context, userID, lookID, itemID, action, requestID string) (SecondBrainLookView, error) {
+	receiptAction, actedAs := "", ""
+	switch action {
+	case SecondBrainItemFollowUp:
+		receiptAction, actedAs = "item_follow_up", secondbrain.ActedFollowUp
+	case SecondBrainItemDone:
+		receiptAction, actedAs = "item_done", secondbrain.ActedDone
+	case SecondBrainItemDismiss:
+		receiptAction, actedAs = "item_dismiss", secondbrain.ActedDismissed
+	}
+	if receiptAction == "" || !secondbrain.ValidRequestID(requestID) || lookID == "" || !secondbrain.ValidItemID(itemID) {
+		return SecondBrainLookView{}, ErrValidation
+	}
+	replayed := func(doc *SecondBrainDocument) (bool, error) {
+		receipt, found, err := doc.Replay(requestID, receiptAction)
+		if err != nil || !found {
+			return false, err
+		}
+		if receipt.Item != itemID {
+			return false, secondbrain.ErrRequestReused
+		}
+		return true, nil
+	}
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return SecondBrainLookView{}, err
+	}
+	connected := doc.Connected()
+	if connected == nil {
+		return SecondBrainLookView{}, ErrSecondBrainNotConnected
+	}
+	if done, err := replayed(&doc); err != nil || done {
+		if err != nil {
+			return SecondBrainLookView{}, err
+		}
+		return s.lookView(userID, connected), nil
+	}
+	if connected.LastLook == nil || connected.LastLook.ID != lookID {
+		return SecondBrainLookView{}, ErrSecondBrainLookNotFound
+	}
+	item, ok := connected.LastLook.Item(itemID)
+	if !ok {
+		return SecondBrainLookView{}, ErrSecondBrainItemNotFound
+	}
+	switch action {
+	case SecondBrainItemFollowUp:
+		if item.Seeded {
+			return SecondBrainLookView{}, ErrSecondBrainSeededItem
+		}
+		if s.deps.FollowUps == nil {
+			return SecondBrainLookView{}, ErrSecondBrainUnavailable
+		}
+		binding, err := s.store.Binding(ctx, userID)
+		if err != nil {
+			return SecondBrainLookView{}, err
+		}
+		if _, _, err := secondbrain.Accept(ctx, s.deps.FollowUps, secondbrain.Acceptance{
+			UserID: userID, WorkspaceID: binding.HQWorkspaceID, Source: *connected, Items: []secondbrain.LookItem{*item},
+		}); err != nil {
+			return SecondBrainLookView{}, err
+		}
+	case SecondBrainItemDone:
+		if closer, ok := s.deps.FollowUps.(secondbrain.FollowUpCloser); ok {
+			if _, err := secondbrain.CompleteDone(ctx, closer, userID, itemID); err != nil {
+				return SecondBrainLookView{}, err
+			}
+		}
+	}
+	updated, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
+		if done, err := replayed(doc); err != nil || done {
+			return err
+		}
+		current := doc.Connected()
+		if current == nil {
+			return ErrSecondBrainNotConnected
+		}
+		if current.LastLook == nil || current.LastLook.ID != lookID {
+			return ErrSecondBrainLookNotFound
+		}
+		target, ok := current.LastLook.Item(itemID)
+		if !ok {
+			return ErrSecondBrainItemNotFound
+		}
+		at := s.deps.Now().UTC()
+		target.ActedAs, target.ActedAt = actedAs, &at
+		current.LastLook.ActedAt = &at
+		doc.Remember(secondbrain.Receipt{RequestID: requestID, Action: receiptAction, At: at, LookID: lookID, Item: itemID})
+		return nil
+	})
+	if err != nil {
+		return SecondBrainLookView{}, err
+	}
+	return s.lookView(userID, updated.Connected()), nil
 }
 
 // OwnsFirstPrompt says the second-brain ask is the first message after HQ for
@@ -1076,6 +1321,8 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 			}
 			look := run.Look
 			if look.State == secondbrain.LookFinished {
+				// A triage that landed while this look ran is kept too.
+				look.CarryMarks(connected.LastLook)
 				connected.LastLook, connected.Current = &look, nil
 			} else {
 				connected.Current = &look
@@ -1165,6 +1412,12 @@ func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
 	if last := connected.LastLook; last != nil {
 		summary := &SecondBrainLookSummary{
 			ID: last.ID, OpenItems: last.Counts.OpenItems, Headline: last.Headline, Acted: last.ActedAt != nil,
+			People: len(last.People), Stale: len(last.Stale), Decisions: len(last.Decisions),
+		}
+		for _, item := range last.Items {
+			if item.ActedAs != "" {
+				summary.Handled++
+			}
 		}
 		if last.FinishedAt != nil {
 			summary.At = *last.FinishedAt

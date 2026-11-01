@@ -69,6 +69,26 @@ import {
 // "notes", which names the workspace's own notes section on the map.
 export const NOTES_STATION = 'second-brain';
 import {
+  LOOK_TOO_SOON_LINE,
+  NOTES_ITEM_ACTIONS,
+  defaultNotesTab,
+  isCreatedByOri,
+  nextNotesTab,
+  notesBadge,
+  notesPanelAvailable,
+  notesPanelHTML,
+  notesSections,
+  notesTabs
+} from './notes-station.js';
+import {
+  SECOND_BRAIN_ENDPOINT,
+  followUpReceiptLine,
+  newRequestID,
+  secondBrainCaptureProblem,
+  secondBrainCaptureReceipt,
+  secondBrainError
+} from './personal-assistant-second-brain.js';
+import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
   statesEqual as urlStatesEqual,
@@ -2896,6 +2916,8 @@ export class WorkspaceCommandView {
         return { title: 'Daily Brief', addLabel: '' };
       case MEMORY_STATION:
         return { title: 'Memory', addLabel: '' };
+      case NOTES_STATION:
+        return { title: 'Notes', addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -3116,10 +3138,54 @@ export class WorkspaceCommandView {
         btn.getAttribute('data-cmd-id')
       );
     });
+    // The Notes panel's capture box keeps its draft through a repaint.
+    el.addEventListener('input', event => {
+      if (event.target && event.target.matches && event.target.matches('[data-notes-capture]')) {
+        this.notesPanel().captureDraft = event.target.value;
+      }
+    });
+    // Its handled list stays as the user left it. Toggle does not bubble.
+    el.addEventListener(
+      'toggle',
+      event => {
+        if (event.target && event.target.matches && event.target.matches('.ws-notes-handled')) {
+          this.notesPanel().handledOpen = event.target.open;
+        }
+      },
+      true
+    );
     el.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.stopPropagation();
         this.closeStatModal();
+        return;
+      }
+      if (
+        event.key === 'Enter' &&
+        event.target &&
+        event.target.matches &&
+        event.target.matches('[data-notes-capture]')
+      ) {
+        event.preventDefault();
+        this.captureFromNotesPanel();
+        return;
+      }
+      if (
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+        event.target &&
+        event.target.matches &&
+        event.target.matches('[data-notes-tab]')
+      ) {
+        event.preventDefault();
+        const panel = this.notesPanel();
+        const tabs = notesTabs(this.notesPanelSections(panel));
+        this.setNotesTab(
+          nextNotesTab(
+            tabs,
+            event.target.getAttribute('data-cmd-id'),
+            event.key === 'ArrowRight' ? 1 : -1
+          )
+        );
         return;
       }
       this.trapStatModalFocus(event);
@@ -3154,8 +3220,18 @@ export class WorkspaceCommandView {
       panel.classList.toggle('is-daily-brief', isBrief);
       panel.classList.toggle('is-memory', this.statModalSection === MEMORY_STATION);
     }
+    // The Notes panel repaints on every triage: the list stays where the user
+    // had scrolled it, rather than jumping back to the top.
+    const notesScroll =
+      this.statModalSection === NOTES_STATION
+        ? panel.querySelector('.ws-notes-body')?.scrollTop || 0
+        : 0;
     if (isBrief) this.mountDailyBriefPanel(panel);
     else panel.innerHTML = this.statModalHTML(this.statModalSection);
+    if (notesScroll) {
+      const notesBody = panel.querySelector('.ws-notes-body');
+      if (notesBody) notesBody.scrollTop = notesScroll;
+    }
     this.syncBoardSurface();
     this.syncConfigModalSurface();
     this.syncToolsModalSurface();
@@ -3461,6 +3537,12 @@ export class WorkspaceCommandView {
     if (!meta) return '';
     if (section === 'watchtower') return this.watchtowerPanelHTML();
     if (section === 'calendar-ops') return this.calendarOpsPanelHTML();
+    if (section === NOTES_STATION) {
+      return notesPanelHTML({
+        secondBrain: this.notesState().secondBrain,
+        panel: this.notesPanel()
+      });
+    }
     // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
     // Find Tools discovery flow behind one tabbed surface.
     if (section === 'tools') {
@@ -3868,6 +3950,10 @@ export class WorkspaceCommandView {
     const a = String(action || '');
     if (a === 'close') {
       this.closeStatModal();
+      return;
+    }
+    if (section === NOTES_STATION && a.startsWith('notes-')) {
+      this.handleNotesPanelAction(a, id);
       return;
     }
     if (a === 'refresh-watchtower' && section === 'watchtower') {
@@ -7874,9 +7960,10 @@ export class WorkspaceCommandView {
   // The user's notes folder as an HQ building beside Email. It joins the
   // registry after Memory, so no station the user never dragged moves, and
   // stands by Email through its own default position. Its badge reads the
-  // connection; activating it opens the connection's card in the assistant
-  // drawer (personal-assistant-second-brain.js), which also asks when nothing
-  // is connected.
+  // connection. With a folder connected, activating it opens the Notes panel;
+  // otherwise it opens the connection's card in the assistant drawer
+  // (personal-assistant-second-brain.js), which also asks when nothing is
+  // connected.
   notesStation() {
     return {
       key: NOTES_STATION,
@@ -7885,8 +7972,277 @@ export class WorkspaceCommandView {
       defaultX: 0.76,
       defaultY: 0.39,
       state: () => this.notesStationState(),
-      action: trigger => this.openNotesStation(trigger)
+      action: trigger => this.activateNotesStation(trigger),
+      onPanelClosed: () => {
+        clearTimeout(this._notesPanelPoll);
+        clearTimeout(this._notesPanelReceiptTimer);
+        this.requestNotesData(true);
+      }
     };
+  }
+
+  // A deep link can arrive before the connection is known, so read it first
+  // rather than sending a connected user to the drawer.
+  activateNotesStation(trigger) {
+    const state = this.notesState();
+    if (state.status === 'ready' && state.secondBrain) {
+      this.openNotesFor(state.secondBrain, trigger);
+      return;
+    }
+    this.fetchNotesStatus().then(
+      secondBrain => this.openNotesFor(secondBrain, trigger),
+      () => this.openNotesStation(trigger)
+    );
+  }
+
+  openNotesFor(secondBrain, trigger) {
+    if (notesPanelAvailable(secondBrain)) this.openNotesPanel(trigger);
+    else this.openNotesStation(trigger);
+  }
+
+  fetchNotesStatus() {
+    return this.stationJSON(SECOND_BRAIN_ENDPOINT, true).then(payload => {
+      const state = this.notesState();
+      state.status = 'ready';
+      state.secondBrain = (payload && payload.second_brain) || null;
+      return state.secondBrain;
+    });
+  }
+
+  // What the open panel holds. A fresh object per opening, so a closed panel's
+  // answers never paint a new one.
+  notesPanel() {
+    if (!this._notesPanel) this._notesPanel = { status: 'idle' };
+    return this._notesPanel;
+  }
+
+  openNotesPanel(trigger) {
+    clearTimeout(this._notesPanelPoll);
+    this._notesPanel = { status: 'loading' };
+    this.openStatModal(NOTES_STATION, this.stationOpener(NOTES_STATION, trigger));
+    this.loadNotesPanel();
+  }
+
+  notesPanelOpen() {
+    return (
+      this.statModalSection === NOTES_STATION &&
+      Boolean(this.statModalEl) &&
+      !this.statModalEl.hidden
+    );
+  }
+
+  paintNotesPanel(panel) {
+    if (panel !== this._notesPanel || !this.notesPanelOpen()) return;
+    // A repaint rebuilds the panel's controls: focus stays in the dialog, and in
+    // the capture box when that is where the user was typing.
+    this.captureStatModalFocus();
+    const typing = this._statModalFocus?.el?.hasAttribute?.('data-notes-capture');
+    this.renderStatModalBody();
+    const box = typing ? this.statModalEl.querySelector('[data-notes-capture]') : null;
+    if (box && !box.disabled) box.focus();
+    else this.restoreStatModalFocus();
+  }
+
+  notesPanelSections(panel) {
+    return notesSections({
+      secondBrain: this.notesState().secondBrain,
+      look: panel.look,
+      inbox: panel.inbox
+    });
+  }
+
+  // Switching views starts the new one at its top, with focus on its tab.
+  setNotesTab(key) {
+    const panel = this.notesPanel();
+    panel.tab = key;
+    this.renderStatModalBody();
+    if (!this.statModalEl) return;
+    const body = this.statModalEl.querySelector('.ws-notes-body');
+    if (body) body.scrollTop = 0;
+    const tab = this.statModalEl.querySelector('[data-notes-tab][aria-selected="true"]');
+    if (tab && typeof tab.focus === 'function') tab.focus();
+  }
+
+  async loadNotesPanel() {
+    const panel = this.notesPanel();
+    const created = isCreatedByOri(this.notesState().secondBrain);
+    try {
+      const [look, inbox] = await Promise.all([
+        this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look'),
+        created ? this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true) : null
+      ]);
+      panel.look = (look && look.look) || { state: 'none' };
+      if (created) panel.inbox = (inbox && inbox.inbox) || { notes: [], total: 0 };
+      panel.tab = defaultNotesTab(this.notesPanelSections(panel));
+      panel.status = 'ready';
+    } catch {
+      panel.status = 'error';
+    }
+    this.paintNotesPanel(panel);
+    this.pollNotesPanelLook(panel);
+  }
+
+  // A running look is read again until it ends; closing the panel stops it.
+  pollNotesPanelLook(panel) {
+    clearTimeout(this._notesPanelPoll);
+    if (panel !== this._notesPanel || panel.look?.state !== 'running') return;
+    this._notesPanelPoll = setTimeout(async () => {
+      if (panel !== this._notesPanel || !this.notesPanelOpen()) return;
+      try {
+        const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
+        panel.look = (look && look.look) || panel.look;
+      } catch {
+        panel.look = { state: 'none' };
+      }
+      this.paintNotesPanel(panel);
+      if (panel.look?.state === 'running') this.pollNotesPanelLook(panel);
+      else this.notesChanged();
+    }, 1500);
+  }
+
+  // Another surface may be showing this connection: the drawer's own copy and
+  // the badge both read it again.
+  notesChanged() {
+    const notes = typeof window !== 'undefined' ? window.PersonalAssistantSecondBrain : null;
+    if (notes && typeof notes.changed === 'function') {
+      void notes.changed();
+      return;
+    }
+    if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') {
+      document.dispatchEvent(new CustomEvent('personal-assistant:second-brain'));
+    }
+  }
+
+  notesPost(path, body) {
+    return fetch(SECOND_BRAIN_ENDPOINT + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, request_id: newRequestID('notes') })
+    }).then(async response => {
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const error = new Error(secondBrainError(payload));
+        error.status = response.status;
+        throw error;
+      }
+      return payload;
+    });
+  }
+
+  handleNotesPanelAction(action, id) {
+    if (action === 'notes-tab') {
+      this.setNotesTab(id);
+      return;
+    }
+    if (action === 'notes-connection') {
+      const trigger = this.statModalTrigger;
+      this.closeStatModal();
+      this.openNotesStation(trigger);
+      return;
+    }
+    if (action === 'notes-look-again') {
+      void this.lookAgainFromNotesPanel();
+      return;
+    }
+    if (action === 'notes-capture') {
+      void this.captureFromNotesPanel();
+      return;
+    }
+    if (action === 'notes-add-suggested') {
+      void this.addSuggestedFromNotesPanel();
+      return;
+    }
+    const item = action.startsWith('notes-item-') ? action.slice('notes-item-'.length) : '';
+    if (NOTES_ITEM_ACTIONS.includes(item)) void this.triageFromNotesPanel(item, id);
+  }
+
+  async triageFromNotesPanel(action, itemID) {
+    const panel = this.notesPanel();
+    const lookID = panel.look?.look_id;
+    if (!lookID || !itemID) return;
+    panel.message = '';
+    try {
+      const payload = await this.notesPost(
+        '/look/' + encodeURIComponent(lookID) + '/items/' + encodeURIComponent(itemID),
+        { action }
+      );
+      panel.look = (payload && payload.look) || panel.look;
+    } catch (error) {
+      panel.message = error.message;
+      // The look may have moved on; show the one there is now.
+      if (error.status === 404) {
+        try {
+          const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
+          panel.look = (look && look.look) || panel.look;
+        } catch {
+          /* the sentence above still stands */
+        }
+      }
+    }
+    this.paintNotesPanel(panel);
+    this.notesChanged();
+  }
+
+  async addSuggestedFromNotesPanel() {
+    const panel = this.notesPanel();
+    const lookID = panel.look?.look_id;
+    if (!lookID) return;
+    panel.message = '';
+    try {
+      const payload = await this.notesPost('/look/' + encodeURIComponent(lookID) + '/follow-ups', {
+        items: 'suggested'
+      });
+      panel.message = followUpReceiptLine(payload && payload.follow_ups);
+      const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
+      panel.look = (look && look.look) || panel.look;
+    } catch (error) {
+      panel.message = error.message;
+    }
+    this.paintNotesPanel(panel);
+    this.notesChanged();
+  }
+
+  async lookAgainFromNotesPanel() {
+    const panel = this.notesPanel();
+    panel.lookMessage = '';
+    try {
+      const payload = await this.notesPost('/look', {});
+      panel.look = (payload && payload.look) || panel.look;
+    } catch (error) {
+      panel.lookMessage = error.status === 429 ? LOOK_TOO_SOON_LINE : error.message;
+    }
+    this.paintNotesPanel(panel);
+    this.pollNotesPanelLook(panel);
+  }
+
+  async captureFromNotesPanel() {
+    const panel = this.notesPanel();
+    if (panel.captureBusy) return;
+    const text = String(panel.captureDraft || '');
+    panel.captureProblem = secondBrainCaptureProblem(text);
+    if (panel.captureProblem) {
+      this.paintNotesPanel(panel);
+      return;
+    }
+    panel.captureBusy = true;
+    this.paintNotesPanel(panel);
+    try {
+      const payload = await this.notesPost('/capture', { text });
+      panel.captureDraft = '';
+      panel.captureReceipt = secondBrainCaptureReceipt(payload && payload.capture);
+      const inbox = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true);
+      panel.inbox = (inbox && inbox.inbox) || panel.inbox;
+      clearTimeout(this._notesPanelReceiptTimer);
+      this._notesPanelReceiptTimer = setTimeout(() => {
+        panel.captureReceipt = '';
+        this.paintNotesPanel(panel);
+      }, 3000);
+    } catch (error) {
+      panel.captureProblem = error.message;
+    }
+    panel.captureBusy = false;
+    this.paintNotesPanel(panel);
+    this.notesChanged();
   }
 
   notesState() {
@@ -7906,31 +8262,9 @@ export class WorkspaceCommandView {
     if (state.status !== 'ready' || !state.secondBrain) {
       return { value: '—', description: 'checking notes', tone: 'loading' };
     }
-    const secondBrain = state.secondBrain;
-    const name = String(secondBrain.source?.name || '');
-    if (secondBrain.status === 'missing' && name) {
-      return { value: "Can't find " + name, description: 'needs attention', tone: 'attention' };
-    }
-    if (secondBrain.status === 'connected' && name) {
-      const since = this.formatRelativeTime(secondBrain.last_look?.at);
-      // A folder Ori set up says so, and what Ori has written in it (FR16).
-      if (secondBrain.source?.origin === 'created_by_ori' && secondBrain.written_by_ori) {
-        const written = Number(secondBrain.written_by_ori.count) || 0;
-        const lastWrite = this.formatRelativeTime(secondBrain.written_by_ori.last_at);
-        let line = 'set up by Ori · ' + written + ' written by Ori';
-        if (written > 0 && lastWrite) line += ' · last write ' + lastWrite;
-        return { value: name, description: line, tone: 'clear' };
-      }
-      const lead = secondBrain.source?.origin === 'created_by_ori' ? 'set up by Ori' : 'connected';
-      return {
-        value: name,
-        description: since ? lead + ' · last look ' + since : lead,
-        tone: 'clear'
-      };
-    }
-    // The station is one target; the card it opens offers both Choose folder
-    // and Set one up for me.
-    return { value: 'Not set up', description: 'connect or set one up' };
+    // Not set up is one target; the card it opens offers both Choose folder and
+    // Set one up for me.
+    return notesBadge(state.secondBrain);
   }
 
   // Fetch the notes connection once for the active HQ; a stale response after

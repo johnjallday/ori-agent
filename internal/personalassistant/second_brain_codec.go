@@ -58,6 +58,15 @@ func encodeSecondBrain(doc SecondBrainDocument) ([]byte, error) {
 	}
 	data = append(data, '\n')
 	if len(data) > secondbrain.RecordMaxBytes {
+		// Only a look with every cap full and every item triaged gets here, and
+		// the indentation alone is what overflows: drop it rather than refuse the
+		// user's triage. The file stays readable in every ordinary case.
+		if data, err = json.Marshal(doc); err != nil {
+			return nil, err
+		}
+		data = append(data, '\n')
+	}
+	if len(data) > secondbrain.RecordMaxBytes {
 		return nil, ErrKnowledgeLimit
 	}
 	return data, nil

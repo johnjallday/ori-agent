@@ -2,11 +2,14 @@ package secondbrain
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/followup"
@@ -50,6 +53,195 @@ func TestLooker_RulesOnlyLookFinishesWithOneHeadlineAndASuggestedSet(t *testing.
 	record.Sources[0].LastLook = &look
 	if err := record.Validate(); err != nil {
 		t.Fatalf("the look does not fit the record: %v", err)
+	}
+}
+
+func TestLooker_KeepsBoundedSignalsAndNoLineText(t *testing.T) {
+	source, vault := musicSource(t)
+	look := fixedLooker().Run(context.Background(), source, nil, "look-1", "connect-1").Look
+	if len(look.People) != 2 || look.People[0].Name != vault.TopPerson || look.People[0].Mentions != vault.TopMentions ||
+		look.People[0].Note != "People/Marco.md" || !strings.HasPrefix(look.People[0].Link, "obsidian://") {
+		t.Fatalf("people = %+v", look.People)
+	}
+	if len(look.Stale) != 1 || look.Stale[0].Note != vault.Stale || look.Stale[0].Title != "Studio Website" || look.Stale[0].Open != 3 || look.Stale[0].Modified.IsZero() {
+		t.Fatalf("stale = %+v", look.Stale)
+	}
+	if len(look.Decisions) != 1 || look.Decisions[0].Note != vault.Decision || look.Decisions[0].Title != "Distribution Decision" || look.Decisions[0].Open != 2 {
+		t.Fatalf("decisions = %+v", look.Decisions)
+	}
+	encoded, err := json.Marshal(struct {
+		P []LookPerson
+		S []LookStaleNote
+		D []LookDecision
+	}{look.People, look.Stale, look.Decisions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"Decide by", "Label manager", "Last touched", "Designer for"} {
+		if strings.Contains(string(encoded), line) {
+			t.Fatalf("the signals kept a note's words %q: %s", line, encoded)
+		}
+	}
+}
+
+func TestLookSignals_CapsFoldsAndSkipsWhatCannotBeKept(t *testing.T) {
+	var signals Signals
+	for i := range MaxLookSignals + 5 {
+		name := fmt.Sprintf("n%d", i)
+		signals.People = append(signals.People, Person{Name: name, Note: "People/" + name + ".md", Mentions: 1})
+		signals.Stale = append(signals.Stale, StaleNote{Note: name + ".md", Title: name, Open: 1, Modified: fixtureNow})
+		signals.Decisions = append(signals.Decisions, DecisionNote{Note: name + ".md", Title: name, Text: "the decision line", Open: 1})
+	}
+	people, stale, decisions := lookSignals(Source{Kind: KindMarkdown, Name: "Brain"}, signals)
+	if len(people) != MaxLookSignals || len(stale) != MaxLookSignals || len(decisions) != MaxLookSignals || people[0].Link != "" {
+		t.Fatalf("kept %d/%d/%d, first person %+v", len(people), len(stale), len(decisions), people[0])
+	}
+
+	// Notes whose links run long hit the byte budget before the count cap.
+	var heavy Signals
+	for i := range MaxLookSignals {
+		name := fmt.Sprintf("%02d %s.md", i, strings.Repeat("語", 90))
+		heavy.Stale = append(heavy.Stale, StaleNote{Note: name, Title: strings.Repeat("語", MaxSignalTitleRunes), Open: 1, Modified: fixtureNow})
+		heavy.Decisions = append(heavy.Decisions, DecisionNote{Note: name, Title: strings.Repeat("語", MaxSignalTitleRunes), Open: 1})
+		heavy.People = append(heavy.People, Person{Name: name, Note: name, Mentions: 1})
+	}
+	heavyPeople, heavyStale, heavyDecisions := lookSignals(Source{Kind: KindObsidian, Name: "Brain"}, heavy)
+	encoded, err := json.Marshal([]any{heavyPeople, heavyStale, heavyDecisions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxStoredSignalBytes+64 || len(heavyPeople)+len(heavyStale)+len(heavyDecisions) == 3*MaxLookSignals {
+		t.Fatalf("kept %d bytes in %d/%d/%d signals, want the budget to stop them", len(encoded), len(heavyPeople), len(heavyStale), len(heavyDecisions))
+	}
+
+	long := strings.Repeat("é", MaxSignalTitleRunes+40)
+	_, stale, decisions = lookSignals(Source{Kind: KindMarkdown, Name: "Brain"}, Signals{
+		Stale:     []StaleNote{{Note: `odd\name.md`, Title: "skipped", Modified: fixtureNow}, {Note: "kept.md", Title: "  two\n lines ", Modified: fixtureNow}},
+		Decisions: []DecisionNote{{Note: "a.md", Title: long}, {Note: strings.Repeat("x", maxSignalNoteBytes+1), Title: "skipped"}},
+	})
+	if len(stale) != 1 || stale[0].Title != "two lines" {
+		t.Fatalf("stale = %+v", stale)
+	}
+	if len(decisions) != 1 || utf8.RuneCountInString(decisions[0].Title) > MaxSignalTitleRunes {
+		t.Fatalf("decisions = %+v", decisions)
+	}
+}
+
+// markItem triages a look's item as the service would.
+func markItem(t *testing.T, look *Look, id, as string) {
+	t.Helper()
+	item, ok := look.Item(id)
+	if !ok {
+		t.Fatalf("no item %s", id)
+	}
+	at := fixtureNow
+	item.ActedAs, item.ActedAt = as, &at
+}
+
+func TestLooker_TriageMarksAcrossLooks(t *testing.T) {
+	source, _ := musicSource(t)
+	looker := fixedLooker()
+	first := looker.Run(context.Background(), source, nil, "look-1", "r-1").Look
+	if len(first.Items) < 4 {
+		t.Fatalf("items = %d", len(first.Items))
+	}
+	var suggested []LookItem
+	for _, item := range first.Items {
+		if item.Suggested {
+			suggested = append(suggested, item)
+		}
+	}
+	done, dismissed, followed := suggested[0], suggested[1], suggested[2]
+	markItem(t, &first, done.ID, ActedDone)
+	markItem(t, &first, dismissed.ID, ActedDismissed)
+	markItem(t, &first, followed.ID, ActedFollowUp)
+
+	second := looker.Run(context.Background(), source, &first, "look-2", "r-2")
+	item := func(id string) LookItem {
+		t.Helper()
+		found, ok := second.Look.Item(id)
+		if !ok {
+			t.Fatalf("item %s is gone", id)
+		}
+		return *found
+	}
+	if got := item(done.ID); got.ActedAs != ActedDone || got.ActedAt == nil || got.Suggested {
+		t.Fatalf("a done item whose line is still open = %+v, want hidden and never suggested", got)
+	}
+	if got := item(dismissed.ID); got.ActedAs != "" || got.ActedAt != nil || !got.Suggested {
+		t.Fatalf("a dismissed item on the next look = %+v, want untouched and suggested again", got)
+	}
+	if got := item(followed.ID); got.ActedAs != ActedFollowUp {
+		t.Fatalf("a followed-up item = %+v, want its mark kept", got)
+	}
+	if len(second.Gone) != 0 || second.Look.NewSince != 0 {
+		t.Fatalf("gone = %v, new = %d", second.Gone, second.Look.NewSince)
+	}
+}
+
+func TestLooker_ADoneMarkDropsWhenTheLineIsTickedOrGone(t *testing.T) {
+	source, _ := musicSource(t)
+	looker := fixedLooker()
+	first := looker.Run(context.Background(), source, nil, "look-1", "r-1").Look
+	var done *LookItem
+	for index := range first.Items {
+		if first.Items[index].Note == "Reading List.md" {
+			done = &first.Items[index]
+		}
+	}
+	if done == nil {
+		t.Fatal("no item in Reading List.md")
+	}
+	markItem(t, &first, done.ID, ActedDone)
+	path := filepath.Join(source.Path, "Reading List.md")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(content), "- [ ] Read Making", "- [x] Read Making", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := looker.Run(context.Background(), source, &first, "look-2", "r-2")
+	if _, ok := second.Look.Item(done.ID); ok {
+		t.Fatal("a ticked line stayed on the look")
+	}
+	if len(second.Gone) != 1 || second.Gone[0] != done.ID {
+		t.Fatalf("gone = %v, want the ticked item", second.Gone)
+	}
+}
+
+func TestLooker_APartialReadKeepsTheMarkOfAnItemItDidNotSee(t *testing.T) {
+	source, _ := musicSource(t)
+	looker := fixedLooker()
+	first := looker.Run(context.Background(), source, nil, "look-1", "r-1").Look
+	unread, read := first.Items[len(first.Items)-1], first.Items[0]
+	if unread.Note == read.Note {
+		t.Fatal("the fixture needs two notes")
+	}
+	markItem(t, &first, unread.ID, ActedDone)
+	looker.read = func(ctx context.Context, root string, opts ReadOptions) (Reading, error) {
+		reading, err := Read(ctx, root, opts)
+		var kept []Note
+		for _, note := range reading.Notes {
+			if note.RelPath != unread.Note {
+				kept = append(kept, note)
+			}
+		}
+		reading.Notes, reading.Partial = kept, true
+		return reading, err
+	}
+	second := looker.Run(context.Background(), source, &first, "look-2", "r-2")
+	got, ok := second.Look.Item(unread.ID)
+	if !ok || got.ActedAs != ActedDone || got.Suggested {
+		t.Fatalf("the unread done item = %+v (%v), want it kept", got, ok)
+	}
+	for _, id := range second.Gone {
+		if id == unread.ID {
+			t.Fatal("an item the bounds left out was counted as finished")
+		}
+	}
+	if err := (Record{Sources: []Source{{ID: source.ID, Kind: source.Kind, Name: source.Name, Path: source.Path, ConnectedAt: fixtureNow, RequestID: "connect-1", LastLook: &second.Look}}}).Validate(); err != nil {
+		t.Fatalf("the kept look does not fit the record: %v", err)
 	}
 }
 
