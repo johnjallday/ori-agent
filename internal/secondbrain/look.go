@@ -93,8 +93,13 @@ type SetupCounts struct {
 	People    int
 }
 
+// EmptySetupHeadline is what a fresh second brain says when nothing was seeded:
+// it is empty because Ori does not know the user yet, and the offer under it
+// is the first thing to show it (FR13).
+const EmptySetupHeadline = "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it."
+
 // SetupHeadline reports a fresh second brain honestly (FR10): what was seeded,
-// or that the folder is ready when nothing was.
+// or that it is empty and why when nothing was.
 func SetupHeadline(counts SetupCounts) string {
 	var parts []string
 	if counts.FollowUps > 0 {
@@ -104,7 +109,7 @@ func SetupHeadline(counts SetupCounts) string {
 		parts = append(parts, plural(counts.People, "person", "people"))
 	}
 	if len(parts) == 0 {
-		return "Your second brain is ready. Ask me to note something and it lands in Inbox."
+		return EmptySetupHeadline
 	}
 	return "Your second brain is set up: " + strings.Join(parts, ", ") + "."
 }

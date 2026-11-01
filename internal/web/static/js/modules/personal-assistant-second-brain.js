@@ -13,8 +13,11 @@ import {
   folderDialogOffNote,
   FOLDER_PATH_ENDPOINT
 } from './folder-path-entry.js';
+import { folderChooserView } from './personal-assistant-folder-chooser.js';
 
 export const SECOND_BRAIN_ENDPOINT = '/api/personal-assistant/second-brain';
+// The usual folders the Add folder sheet offers, and so the offer under a first look.
+const FOLDER_CHOICES_ENDPOINT = '/api/home-assistant/folder-context/choices';
 const SYSTEM_MODEL_ENDPOINT = '/api/settings/system-model';
 const LOOK_POLL_MS = 1000;
 // A look reads within five seconds and its headline model has 45 more; the
@@ -63,6 +66,70 @@ export function secondBrainAskView(secondBrain, available) {
   };
 }
 
+// What the consent card says to a second brain Ori set up before it kept People,
+// projects and the facts note up to date (FR10). It belongs under Needs you only
+// while there is something to write that the answer would let through.
+export const FILL_IN_LINE =
+  'I can also keep People, a note per project and what I know about you up to date in your second brain. Yours are never touched.';
+
+export function secondBrainFillInView(secondBrain) {
+  const show =
+    secondBrain?.status === 'connected' &&
+    secondBrain?.source?.origin === 'created_by_ori' &&
+    secondBrain?.fill_in?.offer === true;
+  return {
+    show,
+    line: FILL_IN_LINE,
+    actions: [
+      { id: 'allow', label: 'Let Ori write there', style: 'primary' },
+      { id: 'later', label: 'Not now', style: 'link' }
+    ]
+  };
+}
+
+// secondBrainFillInAnsweredLine is the one line the card leaves behind.
+export function secondBrainFillInAnsweredLine(decision) {
+  return decision === 'allow'
+    ? "Done. I'll keep People, a note per project and what I know about you up to date."
+    : "OK. I'll leave those alone for now.";
+}
+
+// The first look at a new second brain offers the first thing to show Ori
+// (FR13, FR14). The server's headline carries the sentence when the brain is
+// empty; under a headline that counts seeded notes the offer says it itself.
+export const FOLDER_OFFER_LINE = "Show me a folder and I'll start filling it.";
+// The usual folders, Downloads first. Which of them the offer shows is the
+// server's list (the one the Add folder sheet uses), so it never offers a folder
+// that is not there; this order only sorts it.
+export const FOLDER_OFFER_ORDER = ['downloads', 'music', 'documents', 'desktop'];
+
+// secondBrainFolderOffer builds the offer from the folders the server approved.
+// available is that list ({id, label}); null means it is not known yet, and then
+// only Choose a folder… is offered rather than a folder that may not exist.
+export function secondBrainFolderOffer(headline, available = null) {
+  const rank = id => {
+    const at = FOLDER_OFFER_ORDER.indexOf(id);
+    return at < 0 ? FOLDER_OFFER_ORDER.length : at;
+  };
+  const chips = (Array.isArray(available) ? available : [])
+    .filter(chip => chip && typeof chip.id === 'string' && chip.id)
+    .map(chip => ({ id: chip.id, label: String(chip.label || chip.id) }))
+    .sort((a, b) => rank(a.id) - rank(b.id));
+  return {
+    line: String(headline || '').includes(FOLDER_OFFER_LINE) ? '' : FOLDER_OFFER_LINE,
+    chips,
+    choose: { id: 'choose', label: 'Choose a folder…' }
+  };
+}
+
+// secondBrainFolderOfferShows: the offer follows the first look of a second brain
+// Ori just set up, and also any result whose own headline asks to be shown a
+// folder, so a reload does not take it away. Choosing a folder ends it.
+export function secondBrainFolderOfferShows({ justSetUp, headline, dismissed } = {}) {
+  if (dismissed === true) return false;
+  return justSetUp === true || String(headline || '').includes(FOLDER_OFFER_LINE);
+}
+
 export const DEFAULT_SECOND_BRAIN_NAME = 'Second Brain';
 
 // secondBrainFolderNameProblem is the one sentence for a name that is not one
@@ -87,7 +154,7 @@ export function secondBrainFolderNameProblem(name) {
 
 // What Ori says it will write, before it writes anything.
 const SECOND_BRAIN_SETUP_LINES = [
-  "I'll keep Inbox and Daily up to date; everything else is yours.",
+  "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours.",
   'It starts with your open follow-ups and the people I already know. Plain Markdown that opens in Obsidian or any editor, and stays yours if you stop using Ori.'
 ];
 
@@ -443,8 +510,15 @@ export function newRequestID(prefix = 'sb') {
 const state = {
   available: false,
   secondBrain: null,
-  phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed
+  phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed | fillin
   pinned: false,
+  // The folder offer under the first look of a second brain Ori just set up;
+  // offerDismissed ends it once a folder is attached. folderChips are the usual
+  // folders the server approved, null until it has answered.
+  offerFolder: false,
+  offerDismissed: false,
+  folderChips: null,
+  folderChipsLoading: false,
   panelRoute: '',
   chosen: null, // { detectedId | selectionToken, name, path }
   // Setting one up: the parent the user picked ({ selectionToken, name, path})
@@ -553,6 +627,7 @@ function back() {
 
 function setPhase(phase, { focus = true } = {}) {
   if (phase === 'idle' || phase === 'reading') state.history = [];
+  if (phase === 'idle') state.offerFolder = false;
   state.phase = phase;
   state.focusNext = focus;
   render();
@@ -562,6 +637,102 @@ function renderAsk(body) {
   const view = secondBrainAskView(state.secondBrain, true);
   body.append(node('p', 'pa-specialist-offer__headline', view.line));
   body.append(actionRow(view.actions, onAskAction));
+}
+
+function renderFillIn(body) {
+  const view = secondBrainFillInView(state.secondBrain);
+  body.append(node('p', 'pa-specialist-offer__headline', view.line));
+  body.append(actionRow(view.actions, action => void answerFillIn(action.id)));
+}
+
+// answerFillIn sends the answer, then leaves one line behind. Allowing writes
+// what was held back before the user leaves the card.
+async function answerFillIn(decision) {
+  if (state.busy) return;
+  state.busy = true;
+  showError('');
+  render();
+  const { ok, payload } = await request('/fill-in', {
+    method: 'POST',
+    body: { decision, request_id: newRequestID('fillin') }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload));
+    render();
+    return;
+  }
+  state.secondBrain = payload.second_brain || state.secondBrain;
+  state.answer = secondBrainFillInAnsweredLine(decision);
+  state.pinned = false;
+  setPhase('answered', { focus: false });
+  announce();
+}
+
+// renderFolderOffer is the first thing to show Ori: the usual folders that exist
+// and Choose a folder…, both starting the Show a folder turn in this conversation.
+function renderFolderOffer(body, headline) {
+  const offer = secondBrainFolderOffer(headline, state.folderChips);
+  if (offer.line) body.append(node('p', 'pa-folder__note', offer.line));
+  const row = node('div', 'pa-specialist-offer__actions');
+  row.dataset.secondBrainFolderOffer = '';
+  offer.chips.forEach(chip =>
+    row.append(
+      button({ ...chip, label: chip.label, style: 'outline' }, () => void showFolder(chip.id))
+    )
+  );
+  row.append(button({ ...offer.choose, style: 'link' }, () => void showFolder('')));
+  body.append(row);
+  if (state.folderChips === null) void loadFolderChips();
+}
+
+// loadFolderChips asks the server which usual folders exist, the way the Add
+// folder sheet does. Until it answers only Choose a folder… is shown. A failure
+// leaves that, which still works.
+async function loadFolderChips() {
+  if (state.folderChips !== null || state.folderChipsLoading) return;
+  state.folderChipsLoading = true;
+  try {
+    const response = await fetch(FOLDER_CHOICES_ENDPOINT, {
+      headers: { Accept: 'application/json' }
+    });
+    const payload = response.ok ? await response.json() : {};
+    state.folderChips = folderChooserView(payload).chips;
+  } catch (_) {
+    state.folderChips = [];
+  } finally {
+    state.folderChipsLoading = false;
+  }
+  render();
+}
+
+// showFolder hands the folder to the Show a folder flow, which holds it for the
+// next message exactly as Add folder does. Nothing is read until the user sends.
+// The offer stays until a folder is actually attached, so a chip that could not
+// be chosen leaves the others to try.
+async function showFolder(chip) {
+  const context = window.PersonalAssistantFolderContext;
+  if (chip && typeof context?.selectChip === 'function') {
+    if ((await context.selectChip(chip)) === true) {
+      state.offerDismissed = true;
+      render();
+    }
+    return;
+  }
+  // Choose a folder… opens the Add folder chooser, where the choice is made.
+  state.offerDismissed = true;
+  render();
+  window.PersonalAssistantFolder?.openChooser?.();
+}
+
+// showFillInIfOffered is the consent card's turn once a result that was waiting
+// has been dealt with: the one card slot is free, so the question follows at once.
+async function showFillInIfOffered() {
+  await refresh();
+  if (state.phase === 'idle' && secondBrainFillInView(state.secondBrain).show) {
+    state.pinned = true;
+    setPhase('fillin', { focus: false });
+  }
 }
 
 function renderAnswered(body) {
@@ -941,6 +1112,14 @@ function renderLook(body) {
     line.append(open);
     body.append(line);
   }
+  if (
+    secondBrainFolderOfferShows({
+      justSetUp: state.offerFolder,
+      headline: view.headline,
+      dismissed: state.offerDismissed
+    })
+  )
+    renderFolderOffer(body, view.headline);
   // A result waiting under Needs you leads to the HQ's Notes panel.
   if (state.pinned && state.panelRoute) {
     const panel = node('a', 'pa-second-brain__open', 'See it all in Notes');
@@ -1052,6 +1231,7 @@ function render() {
     else if (state.phase === 'setup') renderSetup(els.body);
     else if (state.phase === 'consent') renderConsent(els.body);
     else if (state.phase === 'manage') renderManage(els.body);
+    else if (state.phase === 'fillin') renderFillIn(els.body);
     else renderLook(els.body);
   }
   if (els.status) {
@@ -1202,6 +1382,10 @@ async function createSecondBrain() {
   state.secondBrain = payload.second_brain || state.secondBrain;
   state.chosen = { name, path: parent ? parent.path : place.path };
   state.receipt = '';
+  // The first look ends with the first thing to show Ori (FR13, FR14).
+  state.offerFolder = true;
+  state.offerDismissed = false;
+  void loadFolderChips();
   state.look = { state: 'running', look_id: payload.look_id };
   state.polls = 0;
   setPhase('reading', { focus: false });
@@ -1407,6 +1591,7 @@ async function dismiss() {
   }
   state.pinned = false;
   setPhase('idle', { focus: false });
+  await showFillInIfOffered();
 }
 
 // announce tells Home's Today and the mission card that the turn moved.
@@ -1444,6 +1629,12 @@ async function load() {
     }
     if (state.phase === 'idle' && state.secondBrain?.status !== 'not_connected') {
       await placeWaitingResult();
+    }
+    // One card at a time: a result still waiting goes first, and the consent
+    // card follows once it is dealt with (FR10).
+    if (state.phase === 'idle' && secondBrainFillInView(state.secondBrain).show) {
+      state.pinned = true;
+      setPhase('fillin', { focus: false });
     }
   } catch (_) {
     // The ask can wait for the next status change; nothing else depends on it.
@@ -1573,7 +1764,7 @@ function init() {
       await refresh();
       if (
         state.secondBrain?.status === 'not_connected' &&
-        ['result', 'reading', 'failed', 'manage'].includes(state.phase)
+        ['result', 'reading', 'failed', 'manage', 'fillin'].includes(state.phase)
       ) {
         clearTimeout(state.pollTimer);
         state.pinned = false;

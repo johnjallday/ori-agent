@@ -5,8 +5,14 @@ import { readFileSync } from 'node:fs';
 import {
   CAPTURE_MAX_CHARACTERS,
   DEFAULT_SECOND_BRAIN_NAME,
+  FILL_IN_LINE,
+  FOLDER_OFFER_LINE,
   followUpReceiptLine,
   newRequestID,
+  secondBrainFillInAnsweredLine,
+  secondBrainFillInView,
+  secondBrainFolderOffer,
+  secondBrainFolderOfferShows,
   secondBrainAnsweredLine,
   secondBrainAskView,
   secondBrainAvailable,
@@ -158,7 +164,10 @@ test('the one-click setup says where it goes and offers somewhere else', () => {
   });
   assert.equal(view.title, 'Set up your second brain in Ori Workspaces?');
   assert.equal(view.path, '/Users/sam/Ori Workspaces/Second Brain');
-  assert.equal(view.lines[0], "I'll keep Inbox and Daily up to date; everything else is yours.");
+  assert.equal(
+    view.lines[0],
+    "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
+  );
   assert.deepEqual(
     view.actions.map(action => action.label),
     ['Set it up', 'Somewhere else…', 'Not now']
@@ -181,7 +190,10 @@ test('setting one up asks where first, then names the folder and what Ori will w
   );
   assert.equal(confirm.title, 'Set up "Second Brain" in Documents?');
   assert.equal(confirm.path, '/Users/sam/Documents');
-  assert.equal(confirm.lines[0], "I'll keep Inbox and Daily up to date; everything else is yours.");
+  assert.equal(
+    confirm.lines[0],
+    "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
+  );
   assert.deepEqual(
     confirm.actions.map(action => action.label),
     ['Set it up', 'Back', 'Not now']
@@ -557,4 +569,122 @@ test('the module sends no path to its own endpoint', () => {
   assert.match(source, /: \{ request_id: state\.setup\.requestId \}/);
   // Server text is only ever set as text.
   assert.doesNotMatch(source, /innerHTML/);
+});
+
+test('the consent card shows only for a second brain Ori set up with something held back', () => {
+  const brain = (fillIn, origin = 'created_by_ori', status = 'connected') => ({
+    status,
+    source: { name: 'Second Brain', origin },
+    fill_in: fillIn
+  });
+  const view = secondBrainFillInView(brain({ state: 'pending', offer: true }));
+  assert.equal(view.show, true);
+  assert.equal(
+    view.line,
+    'I can also keep People, a note per project and what I know about you up to date in your second brain. Yours are never touched.'
+  );
+  assert.equal(view.line, FILL_IN_LINE);
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label]),
+    [
+      ['allow', 'Let Ori write there'],
+      ['later', 'Not now']
+    ]
+  );
+  // No card without something to write, once answered, for a connected vault,
+  // or for a folder that is gone.
+  for (const hidden of [
+    brain({ state: 'pending', offer: false }),
+    brain({ state: 'allowed', offer: false }),
+    brain({ state: 'later', offer: false }),
+    brain({ state: 'pending', offer: true }, 'connected'),
+    brain({ state: 'pending', offer: true }, 'created_by_ori', 'missing'),
+    brain(undefined),
+    null
+  ]) {
+    assert.equal(secondBrainFillInView(hidden).show, false);
+  }
+  assert.equal(secondBrainFillInAnsweredLine('allow').startsWith('Done.'), true);
+  assert.match(secondBrainFillInAnsweredLine('later'), /leave those alone/);
+});
+
+test('the consent card waits in Needs you, where a waiting result waits', () => {
+  assert.equal(secondBrainPlacement({ available: true, phase: 'fillin', pinned: true }), 'needs');
+  assert.equal(secondBrainPlacement({ available: false, phase: 'fillin', pinned: true }), 'none');
+});
+
+test('the first look offers the folders the server approved, Downloads first, and never repeats the empty headline', () => {
+  const approved = [
+    { id: 'desktop', label: 'Desktop' },
+    { id: 'music', label: 'Music' },
+    { id: 'downloads', label: 'Downloads' },
+    { id: 'documents', label: 'Documents' }
+  ];
+  const counted = secondBrainFolderOffer(
+    'Your second brain is set up: 3 follow-ups in Inbox, 2 people.',
+    approved
+  );
+  assert.equal(counted.line, FOLDER_OFFER_LINE);
+  assert.deepEqual(
+    counted.chips.map(chip => chip.id),
+    ['downloads', 'music', 'documents', 'desktop']
+  );
+  assert.equal(counted.chips[0].label, 'Downloads');
+  assert.equal(counted.choose.label, 'Choose a folder…');
+
+  // A folder the server did not approve is never offered, and one it added comes last.
+  const some = secondBrainFolderOffer('', [
+    { id: 'documents', label: 'Documents' },
+    { id: 'pictures', label: 'Pictures' }
+  ]);
+  assert.deepEqual(
+    some.chips.map(chip => chip.id),
+    ['documents', 'pictures']
+  );
+  // Not known yet, or nothing approved: only Choose a folder… (which always works).
+  for (const unknown of [null, undefined, [], 'downloads', [null, {}]]) {
+    const offer = secondBrainFolderOffer('', unknown);
+    assert.deepEqual(offer.chips, []);
+    assert.equal(offer.choose.label, 'Choose a folder…');
+  }
+
+  const empty = secondBrainFolderOffer(
+    "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.",
+    approved
+  );
+  assert.equal(empty.line, '');
+  assert.equal(empty.chips.length, 4);
+  assert.equal(secondBrainFolderOffer('', approved).line, FOLDER_OFFER_LINE);
+});
+
+test('the folder offer survives a reload when the result itself asks for a folder, and ends when one is chosen', () => {
+  const asking =
+    "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.";
+  const counted = 'Your second brain is set up: 3 follow-ups in Inbox, 2 people.';
+  assert.equal(secondBrainFolderOfferShows({ justSetUp: true, headline: counted }), true);
+  assert.equal(secondBrainFolderOfferShows({ justSetUp: false, headline: asking }), true);
+  // A counted headline after a reload asks nothing, and a look that is not a setup never offers.
+  assert.equal(secondBrainFolderOfferShows({ justSetUp: false, headline: counted }), false);
+  assert.equal(secondBrainFolderOfferShows({}), false);
+  // Once a folder is attached it is done, whichever way it was shown.
+  assert.equal(
+    secondBrainFolderOfferShows({ justSetUp: true, headline: asking, dismissed: true }),
+    false
+  );
+});
+
+test('the card posts the answer with a fresh request id and leaves one line behind', () => {
+  const source = readFileSync(
+    new URL('./personal-assistant-second-brain.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(source, /request\('\/fill-in'/);
+  assert.match(source, /body: \{ decision, request_id: newRequestID\('fillin'\) \}/);
+  // The folder offer hands off to the Show a folder flow; it reads nothing itself.
+  assert.match(source, /await context\.selectChip\(chip\)/);
+  assert.match(source, /PersonalAssistantFolder\?\.openChooser\?\.\(\)/);
+  // The chips come from the same list the Add folder sheet uses.
+  assert.match(source, /folder-context\/choices/);
+  // A result dealt with frees the one card slot for the consent question.
+  assert.match(source, /await showFillInIfOffered\(\)/);
 });

@@ -56,8 +56,8 @@ func TestPersonalAssistantQuests_PlanFirstDayIsABranchNotAQuest(t *testing.T) {
 	if connect == nil || connect.Tier != 2 || !connect.Optional || connect.ActionURL != PlanFirstDayActionURL {
 		t.Fatalf("unexpected Connect one source mission: %+v", connect)
 	}
-	if paf.Status().TotalCount != 6 {
-		t.Fatalf("visible PAF missions = %d, want six", paf.Status().TotalCount)
+	if paf.Status().TotalCount != 9 {
+		t.Fatalf("visible PAF missions = %d, want nine", paf.Status().TotalCount)
 	}
 }
 

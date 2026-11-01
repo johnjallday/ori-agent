@@ -91,6 +91,180 @@ func TestSecondBrainSync_NeverMirrorsPersonalHQAsAProject(t *testing.T) {
 	}
 }
 
+// beforeTheFillIn makes the created setup look like one from before the fill-in
+// shipped: no consent on record.
+func beforeTheFillIn(t *testing.T, h *secondBrainHarness) {
+	t.Helper()
+	h.service.Wait()
+	if _, err := h.service.mutate(context.Background(), "local", func(doc *SecondBrainDocument) error {
+		doc.Connected().FillIn = nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func consentHoldings() secondbrain.Holdings {
+	holdings := fillInHoldings()
+	holdings.Projects = []secondbrain.HeldProject{{ID: "ws-1", Name: "Launch"}}
+	holdings.FollowUps = []secondbrain.HeldFollowUp{{ID: "f-1", Title: "Call the pressing plant"}}
+	return holdings
+}
+
+// A new setup said what it keeps up to date, so it needs no card (FR10).
+func TestSecondBrainConsent_ANewSetupStartsAllowedAndNeverAsks(t *testing.T) {
+	ctx := context.Background()
+	h, _ := createdHarness(t)
+	h.service.Wait()
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) { return consentHoldings(), nil })
+	result, err := h.service.Sync(ctx, "local", "test")
+	if err != nil || result.Written[secondbrain.NoteKindPerson] != 1 || result.Written[secondbrain.NoteKindProject] != 1 {
+		t.Fatalf("Sync = %+v, %v", result, err)
+	}
+	status, err := h.service.Status(ctx, "local")
+	if err != nil || status.FillIn == nil || status.FillIn.State != "allowed" || status.FillIn.Offer {
+		t.Fatalf("fill_in = %+v, %v", status.FillIn, err)
+	}
+}
+
+// Before the answer only Inbox and Daily are written. What would go elsewhere is
+// held back, remembered, and offered under Needs you (FR10).
+func TestSecondBrainConsent_AnOldSetupWritesOnlyInboxAndDailyUntilAllowed(t *testing.T) {
+	ctx := context.Background()
+	h, brain := createdHarness(t)
+	beforeTheFillIn(t, h)
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) { return consentHoldings(), nil })
+
+	status, err := h.service.Status(ctx, "local")
+	if err != nil || status.FillIn.State != "pending" || status.FillIn.Offer {
+		t.Fatalf("nothing withheld yet = %+v, %v", status.FillIn, err)
+	}
+	result, err := h.service.Sync(ctx, "local", "test")
+	if err != nil || result.Written[secondbrain.NoteKindFollowUp] != 1 || len(result.Written) != 1 {
+		t.Fatalf("Sync = %+v, %v", result, err)
+	}
+	for _, rel := range []string{"What Ori knows about you.md", "People/Dana Lee.md", "Projects/Launch/README.md"} {
+		if _, err := os.Lstat(filepath.Join(brain, rel)); !os.IsNotExist(err) {
+			t.Errorf("%s was written before the answer: %v", rel, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(brain, "Inbox", "call-the-pressing-plant.md")); err != nil {
+		t.Errorf("a follow-up note needs no answer: %v", err)
+	}
+	status, err = h.service.Status(ctx, "local")
+	if err != nil || status.FillIn.State != "pending" || !status.FillIn.Offer {
+		t.Fatalf("fill_in = %+v, %v", status.FillIn, err)
+	}
+	if _, found := h.service.WrittenReport(ctx, "local"); !found {
+		t.Fatal("the follow-up that was written raised no row")
+	}
+}
+
+func TestSecondBrainConsent_NothingToWriteMeansNoCard(t *testing.T) {
+	ctx := context.Background()
+	h, _ := createdHarness(t)
+	beforeTheFillIn(t, h)
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) { return secondbrain.Holdings{}, nil })
+	if _, err := h.service.Sync(ctx, "local", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := h.service.Status(ctx, "local"); err != nil || status.FillIn.Offer {
+		t.Fatalf("an empty holding raised the card: %+v, %v", status.FillIn, err)
+	}
+}
+
+func TestSecondBrainConsent_AllowWritesWhatWasHeldBackAndAReplayChangesNothing(t *testing.T) {
+	ctx := context.Background()
+	h, brain := createdHarness(t)
+	beforeTheFillIn(t, h)
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) { return consentHoldings(), nil })
+	if _, err := h.service.Sync(ctx, "local", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := h.service.FillInDecision(ctx, "local", "allow", "fi-1")
+	if err != nil || view.FillIn == nil || view.FillIn.State != "allowed" || view.FillIn.Offer {
+		t.Fatalf("allow = %+v, %v", view.FillIn, err)
+	}
+	h.service.Wait()
+	for _, rel := range []string{"What Ori knows about you.md", "People/Dana Lee.md", "Projects/Launch/README.md"} {
+		if mark := secondbrain.ReadMark([]byte(readTestFile(t, brain, rel))); !mark.OwnedByOri {
+			t.Errorf("%s = %+v", rel, mark)
+		}
+	}
+	before := snapshotTree(t, brain)
+	if replay, err := h.service.FillInDecision(ctx, "local", "allow", "fi-1"); err != nil || replay.FillIn.State != "allowed" {
+		t.Fatalf("replay = %+v, %v", replay.FillIn, err)
+	}
+	if _, err := h.service.FillInDecision(ctx, "local", "later", "fi-1"); err != nil {
+		t.Fatalf("the same id for the same action: %v", err)
+	}
+	if _, err := h.service.Connect(ctx, "local", SecondBrainConnectInput{DetectedID: h.vaultID, RequestID: "fi-1"}); !errors.Is(err, secondbrain.ErrRequestReused) {
+		t.Fatalf("the id reused for another action: %v", err)
+	}
+	if after := snapshotTree(t, brain); after != before {
+		t.Fatalf("a replay wrote.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	// Once allowed, a later Not now does not take it back.
+	if view, err := h.service.FillInDecision(ctx, "local", "later", "fi-2"); err != nil || view.FillIn.State != "allowed" {
+		t.Fatalf("later after allow = %+v, %v", view.FillIn, err)
+	}
+}
+
+func TestSecondBrainConsent_NotNowHoldsForAWeekThenAsksAgain(t *testing.T) {
+	ctx := context.Background()
+	h, brain := createdHarness(t)
+	beforeTheFillIn(t, h)
+	h.service.SetHoldings(func(context.Context, string) (secondbrain.Holdings, error) { return consentHoldings(), nil })
+	if _, err := h.service.Sync(ctx, "local", "test"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.FillInDecision(ctx, "local", "later", "fi-1")
+	if err != nil || view.FillIn.State != "later" || view.FillIn.Offer {
+		t.Fatalf("later = %+v, %v", view.FillIn, err)
+	}
+	h.service.Wait()
+	if _, err := os.Lstat(filepath.Join(brain, "People", "Dana Lee.md")); !os.IsNotExist(err) {
+		t.Fatalf("Not now wrote a person: %v", err)
+	}
+	*h.clock = h.clock.Add(secondbrain.FillInAskAgainAfter - time.Hour)
+	if status, _ := h.service.Status(ctx, "local"); status.FillIn.Offer {
+		t.Fatal("asked again before the week was up")
+	}
+	*h.clock = h.clock.Add(2 * time.Hour)
+	if status, _ := h.service.Status(ctx, "local"); !status.FillIn.Offer || status.FillIn.State != "later" {
+		t.Fatalf("not asked again after a week: %+v", status.FillIn)
+	}
+	if _, err := h.service.FillInDecision(ctx, "local", "allow", "fi-2"); err != nil {
+		t.Fatal(err)
+	}
+	h.service.Wait()
+	if _, err := os.Lstat(filepath.Join(brain, "People", "Dana Lee.md")); err != nil {
+		t.Fatalf("allow after Not now wrote nothing: %v", err)
+	}
+}
+
+func TestSecondBrainConsent_OnlyForASecondBrainOriSetUpAndOnlyTwoAnswers(t *testing.T) {
+	ctx := context.Background()
+	if _, err := newSecondBrainHarness(t).service.FillInDecision(ctx, "local", "allow", "fi-1"); !errors.Is(err, ErrSecondBrainNotConnected) {
+		t.Fatalf("nothing connected: %v", err)
+	}
+	connected := newSecondBrainHarness(t)
+	connected.connectVault(t)
+	if _, err := connected.service.FillInDecision(ctx, "local", "allow", "fi-1"); !errors.Is(err, secondbrain.ErrNotOwned) {
+		t.Fatalf("a connected vault: %v", err)
+	}
+	h, _ := createdHarness(t)
+	for _, decision := range []string{"", "yes", "none", "ALLOW"} {
+		if _, err := h.service.FillInDecision(ctx, "local", decision, "fi-1"); !errors.Is(err, ErrValidation) {
+			t.Errorf("decision %q: %v", decision, err)
+		}
+	}
+	if _, err := h.service.FillInDecision(ctx, "local", "allow", "has a space"); !errors.Is(err, ErrValidation) {
+		t.Errorf("a bad request id: %v", err)
+	}
+}
+
 // A connected vault is never written, whatever HQ holds (FR12, US8).
 func TestSecondBrainSync_NeverWritesAFolderTheUserConnected(t *testing.T) {
 	ctx := context.Background()

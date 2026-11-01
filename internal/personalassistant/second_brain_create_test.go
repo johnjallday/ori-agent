@@ -162,7 +162,7 @@ func TestSecondBrainCreate_AnEmptySeedIsReportedHonestly(t *testing.T) {
 		t.Fatal(err)
 	}
 	look, err := h.service.Look(context.Background(), "local")
-	if err != nil || look.Result.Headline != "Your second brain is ready. Ask me to note something and it lands in Inbox." {
+	if err != nil || look.Result.Headline != secondbrain.EmptySetupHeadline {
 		t.Fatalf("look = %+v, %v", look, err)
 	}
 }

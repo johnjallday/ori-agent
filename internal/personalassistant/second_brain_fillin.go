@@ -78,22 +78,36 @@ func (s *SecondBrainService) Sync(ctx context.Context, userID, reason string) (S
 		return project.ID == binding.HQWorkspaceID
 	})
 	var ledger []secondbrain.Mirror
-	var wasPending bool
+	var wasPending, wasWithheld bool
 	if source.FillIn != nil {
-		ledger, wasPending = source.FillIn.Mirrors, source.FillIn.MorePending
+		ledger, wasPending, wasWithheld = source.FillIn.Mirrors, source.FillIn.MorePending, source.FillIn.Withheld
+	}
+	// Until the user allows more, only Inbox and Daily are written: what would go
+	// anywhere else is held back, and remembered so the card can ask (FR10).
+	planned, withheld := secondbrain.PlanNotes(holdings), false
+	if !source.FillIn.Allowed() {
+		planned = slices.DeleteFunc(planned, func(note secondbrain.PlannedNote) bool {
+			if secondbrain.PlainFolder(note.Rel) {
+				return false
+			}
+			withheld = withheld || !note.OnlyIfTracked
+			return true
+		})
 	}
 	now := s.deps.Now()
-	outcome := secondbrain.Reconcile(writer, ledger, secondbrain.PlanNotes(holdings), now)
+	outcome := secondbrain.Reconcile(writer, ledger, planned, now)
 	result := SecondBrainSyncResult{Written: outcome.Written, MorePending: outcome.MorePending}
 
 	written := outcome.WrittenTotal()
-	if written > 0 || outcome.MorePending != wasPending || !slices.Equal(ledger, outcome.Mirrors) {
+	if written > 0 || outcome.MorePending != wasPending || withheld != wasWithheld || !slices.Equal(ledger, outcome.Mirrors) {
+		outcome.Withheld = withheld
 		if err := s.saveLedger(ctx, userID, source.ID, outcome, now); err != nil {
 			return result, err
 		}
 	}
 	if written > 0 {
 		s.dropInboxCache()
+		s.wrote(ctx, userID, outcome.Written)
 		logger.Info("Filled in the second brain", logger.Fields{"reason": reason, "written": written, "more_pending": outcome.MorePending})
 	}
 	return result, outcome.Err
@@ -111,6 +125,8 @@ func (s *SecondBrainService) saveLedger(ctx context.Context, userID, sourceID st
 			fillIn = &secondbrain.FillIn{}
 		}
 		fillIn.Mirrors, fillIn.MorePending = outcome.Mirrors, outcome.MorePending
+		// An answer that landed while this sync ran leaves nothing to ask about.
+		fillIn.Withheld = outcome.Withheld && !fillIn.Allowed()
 		if outcome.WrittenTotal() > 0 {
 			at := now.UTC()
 			fillIn.LastAt = &at
@@ -122,11 +138,8 @@ func (s *SecondBrainService) saveLedger(ctx context.Context, userID, sourceID st
 	return err
 }
 
-// fillInStateAllowed says Ori may keep every kind of note up to date.
-const fillInStateAllowed = "allowed"
-
-func fillInView(fillIn *secondbrain.FillIn) *SecondBrainFillInView {
-	view := &SecondBrainFillInView{State: fillInStateAllowed}
+func fillInView(fillIn *secondbrain.FillIn, now time.Time) *SecondBrainFillInView {
+	view := &SecondBrainFillInView{State: fillIn.State(), Offer: fillIn.Offer(now)}
 	if fillIn == nil {
 		return view
 	}
@@ -187,6 +200,43 @@ func (s *SecondBrainService) WrittenReport(ctx context.Context, userID string) (
 		}
 	}
 	return SecondBrainWrittenReport{Sentence: sentence, At: report.At}, true
+}
+
+// FillInDecision records the answer to the consent card: allow, or later (FR10).
+// Allowing starts a sync, so the notes the answer let through are written before
+// the user leaves the card. A replay returns what the first call did, and the
+// answer is only ever for a second brain Ori set up.
+func (s *SecondBrainService) FillInDecision(ctx context.Context, userID, decision, requestID string) (SecondBrainView, error) {
+	if !secondbrain.ValidRequestID(requestID) || (decision != secondbrain.FillInAllow && decision != secondbrain.FillInLater) {
+		return SecondBrainView{}, ErrValidation
+	}
+	_, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
+		if _, replayed, err := doc.Replay(requestID, secondBrainActionFillIn); err != nil || replayed {
+			return err
+		}
+		connected := doc.Connected()
+		if connected == nil {
+			return ErrSecondBrainNotConnected
+		}
+		if !connected.CreatedByOri() {
+			return ErrSecondBrainNotOwned
+		}
+		if connected.FillIn == nil {
+			connected.FillIn = &secondbrain.FillIn{}
+		}
+		if err := connected.FillIn.Decide(decision, requestID, s.deps.Now()); err != nil {
+			return ErrValidation
+		}
+		doc.Remember(secondbrain.Receipt{RequestID: requestID, Action: secondBrainActionFillIn, At: s.deps.Now()})
+		return nil
+	})
+	if err != nil {
+		return SecondBrainView{}, err
+	}
+	if decision == secondbrain.FillInAllow {
+		s.SyncSoon(userID, "fill-in allowed")
+	}
+	return s.Status(ctx, userID)
 }
 
 // secondBrainSyncTrigger says a background sync is running for a user, and

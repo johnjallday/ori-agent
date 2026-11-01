@@ -4,7 +4,7 @@
 # with a fixture notes vault, ready for the "Connect your second brain" ask.
 #
 # Usage:
-#   ./scripts/second-brain-demo.sh [--flavour music|software|research] [--no-vault-list] [--create] [--codex] [port]
+#   ./scripts/second-brain-demo.sh [--flavour music|software|research] [--no-vault-list] [--create|--empty] [--codex] [port]
 #
 # It refuses a port that is already in use (default 8947, not wt demo's 8931),
 # writes a fixture vault under <sandbox>/Documents and, unless --no-vault-list,
@@ -19,7 +19,10 @@
 # is no vault list (so the ask offers no vault), and the sandbox gets three
 # open follow-ups and two approved People entries for the setup to seed. The
 # line then reads VAULT= (empty) DOCUMENTS=<sandbox>/Documents FOLLOW_UPS=3
-# PEOPLE=2.
+# PEOPLE=2. --empty is --create without those: Ori knows nothing about the
+# user yet, so the first look is the empty-seed card (FOLLOW_UPS=0 PEOPLE=0).
+# To see the consent card an older setup gets, set one up and then run
+# ./scripts/second-brain-legacy.sh <SANDBOX>.
 #
 # The server stays in the foreground; stop it with
 # ./scripts/stop-demo-server.sh <port>. --codex passes your Codex home through
@@ -31,6 +34,7 @@ set -euo pipefail
 flavour="music"
 vault_list=1
 create=0
+empty=0
 codex=0
 port="8947"
 while (($#)); do
@@ -47,12 +51,19 @@ while (($#)); do
 		create=1
 		shift
 		;;
+	--empty)
+		# Like --create, but Ori knows nothing about the user yet: no follow-ups
+		# and no People, so the first look is the empty-seed card.
+		create=1
+		empty=1
+		shift
+		;;
 	--codex)
 		codex=1
 		shift
 		;;
 	-h | --help)
-		sed -n '3,28p' "$0"
+		sed -n '3,32p' "$0"
 		exit 0
 		;;
 	*)
@@ -62,7 +73,7 @@ while (($#)); do
 	esac
 done
 if ! [[ "$port" =~ ^[0-9]+$ ]]; then
-	echo "usage: $0 [--flavour music|software|research] [--no-vault-list] [--create] [--codex] [port]" >&2
+	echo "usage: $0 [--flavour music|software|research] [--no-vault-list] [--create|--empty] [--codex] [port]" >&2
 	exit 2
 fi
 if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -118,7 +129,9 @@ post /api/personal-assistant/hire '{"request_id":"demo-hire","if_version":0,"dis
 version="$(curl -fsS "$url/api/personal-assistant" | sed -n 's/.*"state_version":\([0-9]*\).*/\1/p' | head -1)"
 post /api/personal-assistant/hq "{\"request_id\":\"demo-hq\",\"if_version\":${version:-2},\"name\":\"Personal HQ\",\"timezone\":\"Asia/Seoul\",\"schedule_days\":[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\"],\"schedule_time\":\"08:00\",\"scope\":\"all\",\"include_future_workspaces\":true,\"notify_on_ready\":false}" >/dev/null
 
-if ((create)); then
+if ((create && empty)); then
+	echo "READY SANDBOX=$sandbox ORI_URL=$url VAULT= DOCUMENTS=$sandbox/Documents FOLLOW_UPS=0 PEOPLE=0"
+elif ((create)); then
 	# What the setup seeds: open follow-ups the user confirmed (manual ones are
 	# active, not candidates) and approved People entries.
 	for title in "Call the distributor" "Renew the studio lease" "Send the invoice to Sam"; do

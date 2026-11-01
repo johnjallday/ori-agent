@@ -81,6 +81,13 @@ func TestMeetAssistant_RealBuilderCompletesTheMissionFromTheHireOnce(t *testing.
 				t.Fatalf("the Daily loop must wait for Starter: %+v", mission)
 			}
 			continue
+		case progression.CaptureFirstNoteQuestID, progression.SaveFirstJournalQuestID, progression.GiveProjectQuestID:
+			// The first-week missions are about the notes, so they wait for the
+			// second brain, not for the hire.
+			if !mission.Locked || mission.LockedReason != "Connect your second brain first" {
+				t.Fatalf("%s must wait for the second brain: %+v", mission.ID, mission)
+			}
+			continue
 		}
 		if mission.Locked {
 			t.Fatalf("mission %s is still locked after the hire", mission.ID)

@@ -108,6 +108,40 @@ const showFolderReconcileKey = "show-folder-v1"
 // what your assistant found. Never change it: a new key re-runs the pass.
 const folderFirstLookReconcileKey = "folder-first-look-v1"
 
+// secondBrainFirstWeekReconcileKey names the one-time grandfathering pass for
+// the second brain's first-week missions. Never change it: a new key re-runs the
+// pass.
+const secondBrainFirstWeekReconcileKey = "second-brain-first-week-v1"
+
+// skipFirstWeekMissions resolves the first-week missions for a user whose second
+// brain Ori will not write to. Skipping is idempotent and never undoes a
+// completion.
+func skipFirstWeekMissions(engine *progression.Engine) {
+	for _, id := range progression.SecondBrainFirstWeekQuestIDs() {
+		if err := engine.Skip(id); err != nil {
+			logger.Debug("First-week mission not skipped", logger.Fields{"quest": id, "error": err.Error()})
+		}
+	}
+}
+
+// skipFirstWeekWithoutASecondBrainOriWrites is the same, for an install that
+// already declined the ask or connected its own vault when the missions arrived.
+func (b *ServerBuilder) skipFirstWeekWithoutASecondBrainOriWrites(engine *progression.Engine) {
+	if b.personalAssistantSecondBrain == nil {
+		return
+	}
+	view, err := b.personalAssistantSecondBrain.Status(context.Background(), userprofile.LocalUserID)
+	if err != nil {
+		return
+	}
+	switch {
+	case view.Status == personalassistant.SecondBrainNotConnected && view.Ask.State == secondbrain.AskDeclined:
+		skipFirstWeekMissions(engine)
+	case view.Source != nil && view.Source.Origin != secondbrain.OriginCreatedByOri:
+		skipFirstWeekMissions(engine)
+	}
+}
+
 // completeProgressionWiring installs the progression hooks whose owners are
 // built in initializeDailyBrief, then runs the one-time backfill and the
 // startup reconcile. Call it after that phase. Safe when progression was not
@@ -167,12 +201,30 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		if b.personalAssistantToday != nil {
 			b.personalAssistantToday.SetSecondBrainReader(b.personalAssistantSecondBrain)
 		}
-		b.personalAssistantSecondBrain.OnConnected(func(context.Context, string, secondbrain.Source) {
+		b.personalAssistantSecondBrain.OnConnected(func(_ context.Context, _ string, source secondbrain.Source) {
 			engine.Complete(progression.SecondBrainQuestID)
+			// A vault the user connected is never written to, so the missions that
+			// ask Ori to write would wait for nothing.
+			if !source.CreatedByOri() {
+				skipFirstWeekMissions(engine)
+			}
 		})
 		b.personalAssistantSecondBrain.OnDeclined(func(context.Context, string) {
 			if err := engine.Skip(progression.SecondBrainQuestID); err != nil {
 				logger.Debug("Second-brain mission not skipped", logger.Fields{"error": err.Error()})
+			}
+			skipFirstWeekMissions(engine)
+		})
+		// The first-week missions complete from what Ori wrote, observed here.
+		b.personalAssistantSecondBrain.OnWritten(func(_ context.Context, _ string, kinds map[string]int) {
+			if kinds[secondbrain.NoteKindCapture] > 0 {
+				engine.Complete(progression.CaptureFirstNoteQuestID)
+			}
+			if kinds[secondbrain.NoteKindJournal] > 0 {
+				engine.Complete(progression.SaveFirstJournalQuestID)
+			}
+			if kinds[secondbrain.NoteKindProject] > 0 {
+				engine.Complete(progression.GiveProjectQuestID)
 			}
 		})
 	}
@@ -256,6 +308,16 @@ func (b *ServerBuilder) completeProgressionWiring() {
 	} else if marked > 0 {
 		logger.Info("See what your assistant found grandfathered", logger.Fields{"quests": marked})
 	}
+
+	// Installs with a second brain Ori set up before the first-week missions
+	// existed see a capture, a journal or a project they already have as done,
+	// silently, from the notes on disk.
+	if marked, err := engine.ReconcileOnce(secondBrainFirstWeekReconcileKey, scanner, progression.SecondBrainFirstWeekQuestIDs()...); err != nil {
+		logger.Warn("Second brain first-week reconcile failed", logger.Fields{"error": err})
+	} else if marked > 0 {
+		logger.Info("Second brain first-week missions grandfathered", logger.Fields{"quests": marked})
+	}
+	b.skipFirstWeekWithoutASecondBrainOriWrites(engine)
 
 	// One-time backfill so established installs are grandfathered silently.
 	if err := engine.Backfill(scanner); err != nil {
@@ -350,6 +412,12 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	if b.personalAssistantSecondBrain != nil {
 		if _, connected, err := b.personalAssistantSecondBrain.ConnectedSource(context.Background(), userprofile.LocalUserID); err == nil {
 			snap.SecondBrainConnected = connected
+		}
+		// The first-week missions read what Ori already wrote into the folder.
+		if kinds, ok := b.personalAssistantSecondBrain.WrittenKinds(context.Background(), userprofile.LocalUserID); ok {
+			snap.SecondBrainCaptured = kinds[secondbrain.NoteKindCapture] > 0
+			snap.SecondBrainJournaled = kinds[secondbrain.NoteKindJournal] > 0
+			snap.SecondBrainProject = kinds[secondbrain.NoteKindProject] > 0
 		}
 	}
 

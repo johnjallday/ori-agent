@@ -31,6 +31,7 @@ type SecondBrainService interface {
 	ActOnItem(ctx context.Context, userID, lookID, itemID, action, requestID string) (personalassistant.SecondBrainLookView, error)
 	Inbox(ctx context.Context, userID string) (personalassistant.SecondBrainInboxView, error)
 	Disconnect(ctx context.Context, userID, requestID string, ifVersion int64) (personalassistant.SecondBrainView, error)
+	FillInDecision(ctx context.Context, userID, decision, requestID string) (personalassistant.SecondBrainView, error)
 }
 
 // SetSecondBrain adds the second-brain boundary. origin refuses a request that
@@ -126,6 +127,32 @@ func (h *Handler) AskSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view, err := h.secondBrain.DecideAsk(r.Context(), userID, strings.TrimSpace(req.Decision), strings.TrimSpace(req.RequestID))
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"second_brain": view})
+}
+
+type secondBrainFillInRequest struct {
+	Decision  string `json:"decision"`
+	RequestID string `json:"request_id"`
+}
+
+// FillInSecondBrain records the answer to the consent card: "allow" or "later".
+func (h *Handler) FillInSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainFillInRequest
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "decision", "request_id") {
+		return
+	}
+	view, err := h.secondBrain.FillInDecision(r.Context(), userID, strings.TrimSpace(req.Decision), strings.TrimSpace(req.RequestID))
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return

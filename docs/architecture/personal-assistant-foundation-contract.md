@@ -506,11 +506,12 @@ Source: `tasks/prd-starter-missions.md`,
 the UI ("Missions · Starter", "Missions · Daily loop"). **Starter** is the folder
 story: Mission 01 hires the assistant (the only required mission), Mission 02
 shows it a folder, Mission 03 is what it found. **Daily loop** is Missions 04
-and 05, listed locked ("Starter first") beneath Starter and open once every
-Starter mission is resolved, completed or skipped. Starter also holds the
+and 05 plus the three second-brain first-week missions (06 to 08, below), listed
+locked ("Starter first") beneath Starter and open once every Starter mission is
+resolved, completed or skipped. Starter also holds the
 unnumbered, optional **Connect your second brain** between Mission 01 and
 Mission 02 (see [Connect your second brain](#connect-your-second-brain)). All
-six are featured, the others are optional, and each ends with Ori visibly
+nine are featured, the others are optional, and each ends with Ori visibly
 doing something.
 
 Locking is presentation only: `Match`, `Complete`, and backfill still run for a
@@ -539,6 +540,14 @@ place, and a `t1-plan-first-day` completion counts as evidence for Mission 04.
 | 03 | `pa-folder-first-look` | See what your assistant found; locked until Mission 02 is **completed**. Its card follows the latest folder workspace's first look (below) | a folder first task finishing with a non-empty result, observed from `task.completed` (`folderFirstTaskFinished`), wherever it was started |
 | 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
 | 05 | `pa-first-brief` | Read your first Daily Brief, **Open Daily Brief** → `/workspaces/<hq-slug>?station=daily-brief` (`/?panel=today` while no Personal HQ slug is known); while open and with no model configured, adds "Add a model in Settings to generate one." | the Daily Brief panel in My HQ first shows a brief for a hired assistant (`POST /api/personal-hq/brief/seen`, sent by the panel). Home preparing the brief in the background, or Today being read, does not complete it |
+| 06 | `pa-capture-first-note` | Capture your first note, **Capture a note** → `/?quest=second-brain` (the connection card's capture box). Optional; **locked until Connect your second brain** ("Connect your second brain first") | a `capture` note written to a second brain Ori set up (`SecondBrainService.OnWritten`); an existing install is grandfathered from the notes on disk |
+| 07 | `pa-save-first-journal` | Save your first Journal, **Open Today** → `/?panel=today`. Optional; locked like 06 | a saved Journal copied to `Daily/<date>.md` (`DailyMirrored`); an existing `journal` note grandfathers it |
+| 08 | `pa-give-project` | Give Ori a project, **Open my notes** → `/?quest=second-brain`. Optional; locked like 06 | a `project` note exists, written by the sync for a workspace or for the project the user told the assistant about; an existing one grandfathers it |
+
+Missions 06 to 08 complete from what Ori wrote, observed on the server, never from
+a browser claim. They are skipped for a user who declined the second brain and for
+one who connected a vault of their own, which Ori never writes to, so they cannot
+hold the Daily loop open. Their reconcile key is `second-brain-first-week-v1`.
 
 ### The HQ gate
 
@@ -906,6 +915,22 @@ over them.
   Disconnect; the `second_brain` fact "You keep your notes in…", sent back to
   review on Disconnect. A folder Ori can no longer find reads "Can't find
   {name}" with Choose again, with no dialog.
+- **A second brain Ori set up** (#750, #757, #759). **Set one up for me** makes a
+  Markdown folder in the Workspace Directory (`<root>/Second Brain`, beside the
+  workspaces and `Agents/`) and seeds it once with the user's open follow-ups,
+  approved facts and known people. After that Ori keeps it filled in: an approved
+  fact or person, a confirmed or completed follow-up, a new workspace or a changed
+  goal, and a saved Journal each become a note Ori marks as its own, in `Inbox/`,
+  `Daily/`, `People/`, `Projects/<name>/README.md` and
+  `What Ori knows about you.md`. A note the user edits, moves or deletes becomes
+  theirs and is never written again; nothing is deleted or renamed; nothing is
+  written on a timer. The first look says what was seeded, or that the folder is
+  empty because Ori does not know the user yet, and offers a folder to show it
+  first (Downloads, Music, Documents, Desktop, or any). A setup from before the
+  fill-in is asked once, under Needs you, before Ori writes outside Inbox and
+  Daily. A folder the user connected is never written to. The four setup beats,
+  the sync's rules, the ledger and the consent card are in
+  [second-brain.md](second-brain.md#filling-in-after-setup).
 
 ## Surfaces and routing
 

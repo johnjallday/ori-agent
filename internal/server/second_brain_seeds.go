@@ -93,13 +93,31 @@ func followUpSourceLabel(item *followup.FollowUp) string {
 // knowledge seeds the approved facts and the people Ori knows. A fact whose
 // source is unavailable, or that is the second-brain fact itself, is left out.
 func (s secondBrainSeeds) knowledge(ctx context.Context, userID string, seeds *secondbrain.Seeds) error {
-	learning := s.builder.personalAssistantLearning
-	if learning == nil {
+	if s.builder.personalAssistantLearning == nil {
 		return nil
 	}
-	items, err := learning.ReviewItems(ctx, userID)
+	facts, people, err := s.approvedFacts(ctx, userID)
 	if err != nil {
 		return err
+	}
+	for _, held := range people {
+		if person, ok := secondbrain.PersonFromSentence(held.Text); ok && len(seeds.People) < secondbrain.MaxSeedPeople {
+			seeds.People = append(seeds.People, person)
+		}
+	}
+	seeds.Facts = facts
+	return nil
+}
+
+// approvedFacts are the facts the user has approved, split into the ones the
+// facts note lists and the ones about people. Setup and the fill-in both read
+// them here, so the facts note a setup writes is the one the first sync would
+// have written, and the sync says nothing about it. A fact whose source is
+// unavailable, or the second-brain fact itself, is left out.
+func (s secondBrainSeeds) approvedFacts(ctx context.Context, userID string) (facts, people []secondbrain.HeldFact, err error) {
+	items, err := s.builder.personalAssistantLearning.ReviewItems(ctx, userID)
+	if err != nil {
+		return nil, nil, err
 	}
 	for _, item := range items {
 		text := strings.TrimSpace(item.Text)
@@ -107,15 +125,15 @@ func (s secondBrainSeeds) knowledge(ctx context.Context, userID string, seeds *s
 			item.SourceKind == personalassistant.SecondBrainSourceKind {
 			continue
 		}
-		if item.Category == "people" {
-			if person, ok := secondbrain.PersonFromSentence(text); ok && len(seeds.People) < secondbrain.MaxSeedPeople {
-				seeds.People = append(seeds.People, person)
-			}
-			continue
+		held := secondbrain.HeldFact{Text: text, How: knowledgeHowPhrase(item), Date: item.UpdatedAt.Local().Format("2 Jan 2006")}
+		switch {
+		case item.Category == "people":
+			people = append(people, held)
+		case factsNoteCategories[item.Category]:
+			facts = append(facts, held)
 		}
-		seeds.Facts = append(seeds.Facts, text)
 	}
-	return nil
+	return facts, people, nil
 }
 
 var (
@@ -137,23 +155,9 @@ func (s secondBrainSeeds) Holdings(ctx context.Context, userID string) (secondbr
 	if s.builder == nil || s.builder.personalAssistantLearning == nil {
 		return holdings, errSecondBrainLearningUnavailable
 	}
-	items, err := s.builder.personalAssistantLearning.ReviewItems(ctx, userID)
-	if err != nil {
+	var err error
+	if holdings.Facts, holdings.People, err = s.approvedFacts(ctx, userID); err != nil {
 		return holdings, err
-	}
-	for _, item := range items {
-		text := strings.TrimSpace(item.Text)
-		if item.State != personalassistant.KnowledgeApproved || item.ReviewUnavailable != "" || text == "" ||
-			item.SourceKind == personalassistant.SecondBrainSourceKind {
-			continue
-		}
-		held := secondbrain.HeldFact{Text: text, How: knowledgeHowPhrase(item), Date: item.UpdatedAt.Local().Format("2 Jan 2006")}
-		switch {
-		case item.Category == "people":
-			holdings.People = append(holdings.People, held)
-		case factsNoteCategories[item.Category]:
-			holdings.Facts = append(holdings.Facts, held)
-		}
 	}
 	var seeds secondbrain.Seeds
 	s.agreement(ctx, userID, &seeds)

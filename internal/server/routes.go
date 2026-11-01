@@ -1324,6 +1324,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET "+secondBrain, s.Handlers.PersonalAssistant.GetSecondBrain)
 		mux.HandleFunc("POST "+secondBrain+"/prompted", s.Handlers.PersonalAssistant.PromptedSecondBrain)
 		mux.HandleFunc("POST "+secondBrain+"/ask", s.Handlers.PersonalAssistant.AskSecondBrain)
+		mux.HandleFunc("POST "+secondBrain+"/fill-in", s.Handlers.PersonalAssistant.FillInSecondBrain)
 		mux.HandleFunc("POST "+secondBrain+"/connect", s.Handlers.PersonalAssistant.ConnectSecondBrain)
 		mux.HandleFunc("POST "+secondBrain+"/create", s.Handlers.PersonalAssistant.CreateSecondBrain)
 		mux.HandleFunc("POST "+secondBrain+"/capture", s.Handlers.PersonalAssistant.CaptureSecondBrain)

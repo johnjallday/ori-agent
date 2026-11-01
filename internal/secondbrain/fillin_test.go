@@ -146,6 +146,35 @@ func TestReconcile_AdoptsASeedRatherThanDuplicatingIt(t *testing.T) {
 	}
 }
 
+// The facts note a setup writes is the note the first sync would write, so the
+// sync adopts it and says nothing: no write, and nothing for the Today row.
+func TestReconcile_AdoptsTheFactsNoteTheSetupWrote(t *testing.T) {
+	parent := canonicalTemp(t)
+	holdings := fillInHoldings()
+	made, err := Creator{}.Create(parent, "Notes", Seeds{Facts: holdings.Facts, WorkingAgreement: holdings.WorkingAgreement})
+	if err != nil || !made.Facts {
+		t.Fatalf("Create = %+v, %v", made, err)
+	}
+	holdings.People = nil
+	before := snapshot(t, parent)
+	outcome := Reconcile(newWriterFor(t, made.Path), nil, PlanNotes(holdings), fillInNow)
+	if outcome.WrittenTotal() != 0 || len(outcome.Added) != 0 || outcome.Err != nil {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	if entry := mirrorFor(t, outcome.Mirrors, FactsNoteRel); entry.State != MirrorCurrent {
+		t.Fatalf("entry = %+v", entry)
+	}
+	if after := snapshot(t, parent); after != before {
+		t.Fatalf("adopting changed the tree.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	// A fact approved later is a refresh of the same note.
+	holdings.Facts = append(holdings.Facts, heldFact("You keep the masters on a drive."))
+	next := Reconcile(newWriterFor(t, made.Path), outcome.Mirrors, PlanNotes(holdings), fillInNow)
+	if next.Written[NoteKindFacts] != 1 || !strings.Contains(noteContent(t, made.Path, FactsNoteRel), "You keep the masters on a drive.") {
+		t.Fatalf("next = %+v", next)
+	}
+}
+
 // A crash between the write and the ledger's save leaves a note with no entry.
 // The next run recognises its own note and writes nothing.
 func TestReconcile_RecognisesItsOwnNoteAfterALostLedger(t *testing.T) {

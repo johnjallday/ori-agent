@@ -190,12 +190,15 @@ var createdFolders = []string{"Inbox", "Daily", "Projects", "Areas", "Resources"
 func created(now time.Time) (Vault, []note) {
 	vault := Vault{
 		Kind: KindObsidian, Name: "My Second Brain", Origin: "created_by_ori",
-		// 8 READMEs, 3 Inbox notes, a person, a Journal day, one project note.
-		Notes: 14, OpenItems: 4, NotesWithOpen: 4, Dated: 1, Done: 0, DailyNotes: 1,
+		// 8 READMEs, 4 Inbox notes (two seeds, a follow-up Ori copied, the user's
+		// own), a person, a Journal day, a project plan, and the three notes the
+		// fill-in adds after setup: the facts note, a project README and a
+		// follow-up.
+		Notes: 17, OpenItems: 5, NotesWithOpen: 5, Dated: 1, Done: 0, DailyNotes: 1,
 	}
 	notes := []note{
 		{rel: ".obsidian/app.json", age: 3 * day, text: "{\n  \"alwaysUpdateLinks\": false,\n  \"promptDelete\": true\n}\n"},
-		{rel: "README.md", age: 3 * day, text: "I'll keep Inbox and Daily up to date; everything else is yours.\n\nThis is your second brain.\n"},
+		{rel: "README.md", age: 3 * day, text: "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours.\n\nThis is your second brain.\n"},
 	}
 	for _, folder := range createdFolders {
 		notes = append(notes, note{rel: folder + "/README.md", age: 3 * day, text: "# " + folder + "\n"})
@@ -208,6 +211,12 @@ func created(now time.Time) (Vault, []note) {
 		note{rel: "People/Dana Lee.md", age: 3 * day, text: oriNote("seed", "# Dana Lee\n\nDana Lee is your distributor.\n")},
 		note{rel: "Daily/" + iso(now.Add(-day)) + ".md", age: day, text: oriNote("journal", "Shipped the mix and talked to Dana.\n")},
 		note{rel: "Projects/Launch/Plan.md", age: 2 * day, text: "# Launch plan\n\n- [ ] Book the venue\n"},
+		// What the fill-in writes after setup, each marked as Ori's.
+		note{rel: "What Ori knows about you.md", age: day, text: oriNote("facts",
+			"# What Ori knows about you\n\n- You mix on Fridays.\n\n## How Ori knows this\n\nYou approved each of these in Ori.\n")},
+		note{rel: "Projects/Launch/README.md", age: day, text: oriNote("project",
+			"# Launch\n\nRelease the debut EP.\n\n## How Ori knows this\n\n- This is your workspace in Ori.\n")},
+		note{rel: "Inbox/mail-the-masters.md", age: day, text: oriNote("follow_up", "# Mail the masters\n\n- [ ] Mail the masters\n\nFrom: Added by you\n")},
 	)
 }
 

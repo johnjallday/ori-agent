@@ -41,8 +41,21 @@ func TestCreate_MakesTheLayoutWithAReadmeInEachFolder(t *testing.T) {
 	if !strings.HasPrefix(rootReadmeText, OwnedFoldersSentence+"\n") {
 		t.Fatalf("the README does not open with the ownership sentence: %q", rootReadmeText)
 	}
-	if strings.Contains(rootReadmeText, "What Ori knows about you") {
-		t.Fatal("an empty seed still wrote the knowledge section")
+	if strings.Contains(rootReadmeText, "## What Ori knows about you") || strings.Contains(rootReadmeText, "[[") {
+		t.Fatal("an empty seed still linked a facts note")
+	}
+	if _, err := os.Lstat(filepath.Join(root, FactsNoteRel)); !os.IsNotExist(err) || creation.Facts {
+		t.Fatalf("an empty seed wrote a facts note: %v", err)
+	}
+	for _, folder := range []string{"Projects", "People"} {
+		if readme := readTestFile(t, root, folder, "README.md"); !strings.Contains(readme, "Ori writes here") {
+			t.Errorf("%s/README.md does not say Ori writes there: %q", folder, readme)
+		}
+	}
+	for _, folder := range []string{"Areas", "Resources", "Archive"} {
+		if readme := readTestFile(t, root, folder, "README.md"); !strings.Contains(readme, "Ori does not write here") {
+			t.Errorf("%s/README.md: %q", folder, readme)
+		}
 	}
 	var app map[string]any
 	if err := json.Unmarshal([]byte(readTestFile(t, root, ".obsidian", "app.json")), &app); err != nil {
@@ -209,21 +222,29 @@ func TestCreate_SeedsFollowUpsThatReadBackAsOpenItems(t *testing.T) {
 func TestCreate_SeedsPeopleAndWhatOriKnows(t *testing.T) {
 	parent := canonicalTemp(t)
 	creation, err := Creator{}.Create(parent, "Notes", Seeds{
-		Facts:            []string{"You run a small label.", "You work\nmornings."},
+		Facts:            []HeldFact{{Text: "You run a small label.", Date: "2 Nov 2026"}, {Text: "You work\nmornings.", Date: "3 Nov 2026"}},
 		WorkingAgreement: "Ask before sending anything.",
 		People:           []SeedPerson{{Name: "Dana Lee", How: "Your distributor"}, {Name: "../../Evil: Name", How: ""}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creation.People != 2 {
-		t.Fatalf("people = %d", creation.People)
+	if creation.People != 2 || !creation.Facts {
+		t.Fatalf("creation = %+v", creation)
 	}
 	root := filepath.Join(parent, "Notes")
+	// The README links the facts note rather than carrying the facts (FR11).
 	readme := readTestFile(t, root, "README.md")
-	for _, want := range []string{"## What Ori knows about you", "- You run a small label.", "- You work mornings.", "How you work with Ori: Ask before sending anything."} {
-		if !strings.Contains(readme, want) {
-			t.Errorf("README lacks %q:\n%s", want, readme)
+	if !strings.Contains(readme, "[[What Ori knows about you]]") || strings.Contains(readme, "You run a small label.") {
+		t.Errorf("README:\n%s", readme)
+	}
+	facts := readTestFile(t, root, FactsNoteRel)
+	if mark := ReadMark([]byte(facts)); !mark.OwnedByOri || mark.Kind != NoteKindFacts {
+		t.Fatalf("facts note mark = %+v", mark)
+	}
+	for _, want := range []string{"- You run a small label.", "- You work mornings.", "How you work with Ori: Ask before sending anything.", "most recently on 3 Nov 2026"} {
+		if !strings.Contains(facts, want) {
+			t.Errorf("facts note lacks %q:\n%s", want, facts)
 		}
 	}
 	dana := readTestFile(t, root, "People", "Dana Lee.md")
@@ -250,7 +271,7 @@ func TestCreate_EverySeededLinePassesTheSecretFilter(t *testing.T) {
 			{Title: "Use key " + secret},
 			{Title: "Clean title", Source: "token " + secret},
 		},
-		Facts:            []string{"Your key is " + secret, "You keep a clean fact."},
+		Facts:            []HeldFact{{Text: "Your key is " + secret}, {Text: "You keep a clean fact."}},
 		WorkingAgreement: "password: " + secret,
 		People:           []SeedPerson{{Name: secret}, {Name: "Sam", How: "key " + secret}},
 	})
@@ -273,7 +294,7 @@ func TestCreate_EverySeededLinePassesTheSecretFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(readTestFile(t, root, "README.md"), "You keep a clean fact.") {
+	if !strings.Contains(readTestFile(t, root, FactsNoteRel), "You keep a clean fact.") {
 		t.Fatal("a clean fact was dropped with the secret one")
 	}
 }
@@ -301,7 +322,7 @@ func TestSetupHeadline_ReportsWhatWasSeededAndIsHonestWhenNothingWas(t *testing.
 		{FollowUps: 1, People: 1}: "Your second brain is set up: 1 follow-up in Inbox, 1 person.",
 		{FollowUps: 4}:            "Your second brain is set up: 4 follow-ups in Inbox.",
 		{People: 5}:               "Your second brain is set up: 5 people.",
-		{}:                        "Your second brain is ready. Ask me to note something and it lands in Inbox.",
+		{}:                        EmptySetupHeadline,
 	} {
 		if got := SetupHeadline(counts); got != want {
 			t.Errorf("SetupHeadline(%+v) = %q, want %q", counts, got, want)

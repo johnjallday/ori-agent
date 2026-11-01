@@ -28,6 +28,25 @@ const (
 	mirrorHashLength  = 16
 )
 
+// The consent answers a ledger holds, and the decisions that make them (FR10).
+const (
+	ConsentAllowed = "allowed"
+	ConsentLater   = "later"
+
+	FillInAllow = "allow"
+	FillInLater = "later"
+
+	// FillInAskAgainAfter is how long Not now waits before the card comes back,
+	// as the ask's does.
+	FillInAskAgainAfter = AskAgainAfter
+)
+
+// PlainFolder says rel is directly in Inbox or Daily: the two places Ori wrote
+// before the fill-in, which need no further answer.
+func PlainFolder(rel string) bool {
+	return strings.HasPrefix(rel, FolderInbox+"/") || strings.HasPrefix(rel, FolderDaily+"/")
+}
+
 // Mirror states (FR8).
 const (
 	// MirrorCurrent is a note Ori wrote and keeps up to date.
@@ -106,6 +125,18 @@ type FillIn struct {
 	MorePending bool `json:"more_pending,omitempty"`
 	// LastAt is when a sync last wrote a note.
 	LastAt *time.Time `json:"last_at,omitempty"`
+	// Consent is the user's answer to "keep People, a note per project and what
+	// I know about you up to date": ConsentAllowed or ConsentLater. A setup made
+	// after the fill-in shipped is allowed from the start. One from before has no
+	// answer, which reads as pending, and until it is allowed the sync writes
+	// only Inbox and Daily (FR10).
+	Consent          string     `json:"consent,omitempty"`
+	ConsentAt        *time.Time `json:"consent_at,omitempty"`
+	ConsentRequestID string     `json:"consent_request_id,omitempty"`
+	// Withheld says the last sync had notes outside Inbox and Daily to write and
+	// did not, for want of the answer. It is what puts the card under Needs you:
+	// a setup with nothing to write is never asked.
+	Withheld bool `json:"withheld,omitempty"`
 	// Report collects what the Today row says, until the row has been seen (FR9).
 	Report *FillInReport `json:"report,omitempty"`
 }
@@ -118,6 +149,57 @@ type FillInReport struct {
 	At time.Time `json:"at"`
 	// ShownAt is when the row was first shown. The next addition starts over.
 	ShownAt *time.Time `json:"shown_at,omitempty"`
+}
+
+// Allowed says the user, or the setup, let Ori keep every kind of note.
+func (f *FillIn) Allowed() bool { return f != nil && f.Consent == ConsentAllowed }
+
+// Decide records the user's answer. Answering twice with the same decision is
+// the same as once, whatever the request id.
+func (f *FillIn) Decide(decision, requestID string, now time.Time) error {
+	consent := ""
+	switch decision {
+	case FillInAllow:
+		consent = ConsentAllowed
+	case FillInLater:
+		consent = ConsentLater
+	default:
+		return ErrInvalidRecord
+	}
+	if f.Consent == ConsentAllowed {
+		return nil
+	}
+	at := now.UTC()
+	f.Consent, f.ConsentAt, f.ConsentRequestID = consent, &at, requestID
+	return nil
+}
+
+// State is the consent as the API reports it.
+func (f *FillIn) State() string {
+	switch {
+	case f.Allowed():
+		return ConsentAllowed
+	case f != nil && f.Consent == ConsentLater:
+		return ConsentLater
+	default:
+		return "pending"
+	}
+}
+
+// Offer says the card should be under Needs you: there is something to write
+// that the answer would let through, and the user has not said yes. Not now
+// holds for a week (FR10).
+func (f *FillIn) Offer(now time.Time) bool {
+	switch {
+	case f.Allowed():
+		return false
+	case f == nil || !f.Withheld:
+		return false
+	case f.Consent == ConsentLater:
+		return f.ConsentAt != nil && now.Sub(*f.ConsentAt) >= FillInAskAgainAfter
+	default:
+		return true
+	}
 }
 
 // AddToReport folds a sync's additions into the report. A report already shown is
@@ -177,6 +259,11 @@ func ReportSentence(counts map[string]int) string {
 
 func validateFillIn(fillIn FillIn) error {
 	if len(fillIn.Mirrors) > MaxMirrors {
+		return ErrInvalidRecord
+	}
+	if fillIn.Consent != "" && fillIn.Consent != ConsentAllowed && fillIn.Consent != ConsentLater ||
+		(fillIn.Consent == "") != (fillIn.ConsentAt == nil) ||
+		fillIn.ConsentRequestID != "" && !ValidRequestID(fillIn.ConsentRequestID) {
 		return ErrInvalidRecord
 	}
 	if report := fillIn.Report; report != nil {
@@ -250,6 +337,9 @@ type SyncOutcome struct {
 	Added map[string]int
 	// MorePending says the write bound stopped the run.
 	MorePending bool
+	// Withheld is set by the caller: notes were left out of the plan for want of
+	// consent.
+	Withheld bool
 	// Err is the first failure; the rest of the run still went ahead.
 	Err error
 }
