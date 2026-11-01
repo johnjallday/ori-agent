@@ -133,6 +133,9 @@ if [[ "$recurring_names" == 1 ]]; then
 	for name in Chase_Statement_Jan.pdf Chase_Statement_Feb.pdf Chase_Statement_balance-4521.88_Mar.pdf \
 		Dana_Lee_Contract.pdf Dana_Lee_Proposal.docx Acme_Invoice_0412.pdf; do
 		printf 'fixture\n' >"$sandbox/Downloads/$name"
+		# Dated like the loose files: a file written a moment ago is not settled, so
+		# the first review would leave it out and nothing would recur.
+		touch -t "$(date -v-4d +%Y%m%d%H%M)" "$sandbox/Downloads/$name" 2>/dev/null || true
 	done
 	echo "RECURRING_NAMES=Chase,Dana Lee (Acme appears once and must not be learned)"
 fi

@@ -928,9 +928,16 @@ over them.
   empty because Ori does not know the user yet, and offers a folder to show it
   first (Downloads, Music, Documents, Desktop, or any). A setup from before the
   fill-in is asked once, under Needs you, before Ori writes outside Inbox and
-  Daily. A folder the user connected is never written to. The four setup beats,
-  the sync's rules, the ledger and the consent card are in
-  [second-brain.md](second-brain.md#filling-in-after-setup).
+  Daily. A folder the user connected is never written to. The first week is four
+  optional beats: a folder to learn from; names that recur in the files the user
+  approved for filing (file names only, never contents) offered as reviewable
+  learnings that become People notes once approved; one drawer question about the
+  current project that writes `Projects/<name>/README.md` and can open Create
+  Workspace with the name filled in; and, seven local days after setup, one Today
+  row counting what the second brain gained, shown once. The sync's rules, the
+  ledger, the consent card and the beats are in
+  [second-brain.md](second-brain.md#filling-in-after-setup) and
+  [The first week](second-brain.md#the-first-week).
 
 ## Surfaces and routing
 

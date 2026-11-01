@@ -22,7 +22,7 @@ no tool over them in the assistant's chat. The look service is the only reader.
 | The drawer turn | `internal/web/static/js/modules/personal-assistant-second-brain.js`, `templates/components/personal-assistant-second-brain.tmpl` |
 | HQ map Notes station | `workspace-command.js` (`notesStation`) |
 | Profile Sources row | `personal-hq-sources.js` (`notesSourceView`) |
-| Fixtures and demo | `internal/testutil/vaultfixture/`, `scripts/second-brain-demo.sh` |
+| Fixtures and demo | `internal/testutil/vaultfixture/`, `scripts/second-brain-demo.sh` (`--create`, `--empty`), `scripts/second-brain-legacy.sh` (an older setup), `scripts/second-brain-age.sh` (a setup made days ago), `scripts/demo-inbox-folder.sh --recurring-names`; `scripts/second-brain-e2e.sh` runs the Playwright specs on their own sandboxes |
 
 ## Detection
 
@@ -171,6 +171,9 @@ write idempotent.
 | `POST /create` | `{selection_token, name, request_id}`: the token names the parent, `name` one folder name; `{request_id}` alone uses the default place | status and `look_id`; sets up a second brain (see below) |
 | `POST /capture` | `{text, request_id}` | `capture` `{note, name, link?}`; one new Inbox note, second brain Ori set up only |
 | `POST /fill-in` | `{decision: allow\|later, request_id}` | status; the consent card's answer, second brain Ori set up only (see "Filling in after setup") |
+| `POST /project` | `{name, answer, request_id}`: `name` one folder name (no slash, not hidden), `answer` the user's own words, folded to one line and refused if empty or secret-like | `{project: {name, rel, link?}}`; writes `Projects/<name>/README.md` and records the question as answered ("The first week") |
+| `POST /project/skip` | `{request_id}` | status; records the project question as skipped, once |
+| `POST /week/dismiss` | `{request_id}` | status; records that the first-week recap row was put away |
 | `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}` |
 | `POST /look` | `{request_id}` | Look again (429 within 10 minutes of the last look) |
 | `POST /look/{lookID}/follow-ups` | `{items: "suggested"}` or `{items: [id…]}`, `request_id` | `{created, skipped}` |
@@ -370,8 +373,8 @@ allow|later, request_id}` is closed-body, origin-guarded and idempotent; allowin
 starts a sync. An existing setup's own READMEs are never rewritten, since Ori
 cannot prove they are unedited; the answer is the record of the change.
 
-**What the user sees.** `GET` adds `fill_in {state, offer, written, user_owned,
-stale, last_at}` and `written_by_ori.by_kind`, and counts every place Ori keeps
+**What the user sees.** `GET` adds `fill_in {state, offer, project_ask, written,
+user_owned, stale, last_at}` and `written_by_ori.by_kind`, and counts every place Ori keeps
 notes. A sync that wrote something adds one Today Done row, "Ori added 2 people
 and a project to your notes", collapsing every write since it was last seen,
 linking to the Notes station and leaving after a day. A tick, or a refresh of a
@@ -402,6 +405,78 @@ FR19): one read-only filesystem binding over exactly `Projects/<name>`, Ori's
 own state in the sidecar, and nothing written into the notes. Agents there have
 no access to the rest of the notes. `TestCreateAnchoredWorkspace_AProjectOfASecondBrainIsAnOrdinaryAnchoredWorkspace`
 proves it against a real set-up folder.
+
+### The first week
+
+Amendment for Issue #759. The fill-in is the engine; the first week is four short
+beats that feed it, each optional and each ending in a note the user can open.
+The assistant drawer shows one second-brain card at a time: the consent card (for
+a setup from before), then the project question.
+
+1. **A folder to learn from.** A setup that seeded nothing says so, once ("Your
+   second brain is empty because I don't know you yet. Show me a folder and I'll
+   start filling it.") and offers the folders the server's own `/choices` list
+   names, so a folder this machine does not have is never offered. The offer
+   stays until a first look succeeds, through a reload or a failed attempt. Three
+   Tier 2 missions follow from what Ori writes (**Capture your first note**,
+   **Save your first Journal**, **Give Ori a project**); they are optional, locked
+   behind **Connect your second brain**, and skipped, never failed, for a user who
+   declined the ask or connected a vault Ori does not write to.
+2. **Downloads teaches Ori.** After the user approves files for filing, the
+   `approved_files` producer reads the File Janitor action journal's file *names*
+   (the base name without its extension, for moves that are approved, applied and
+   not undone, through the same gate as the filing-preference suggestions). A
+   company or person whose name recurs in at least two of those names becomes one
+   reviewable learning: "You deal with Acme (seen in 2 files you filed)." A name is
+   a run of capitalised words joined by exactly one space, underscore or hyphen;
+   digits never reach a learning, every line passes
+   `sensitive.ContainsSecretLikeText`, and no file is opened. Learnings live in
+   the `setup_batch` pool of reviewed knowledge (12 pending, no daily limit), so
+   they neither use up nor wait behind the shared suggestions' 6 pending and 3 a
+   day. Their evidence is `<workspaceId>:<actionId>`, the count follows the
+   journal as more files are filed, and a rejected one is not proposed again. The
+   first-batch report gains "I learned N things from this folder; approve them
+   and they go into your second brain." with **Review what Ori learned**, which
+   opens a card listing these and the Janitor's filing preferences
+   (`GET /api/personal-assistant/setup-learning`; `POST …/setup-learning/dismiss
+   {request_id}` turns the rest away for good). Approving or rejecting is the
+   Profile page's own `POST /api/personal-assistant/knowledge/{id}/approve|reject
+   {version, request_id}`: nothing is a fact until the user says so. An approved
+   person then reaches the notes the ordinary way, as `People/<Name>.md`, through
+   the sync.
+3. **The current project.** Once the card slot is free (nothing else is waiting
+   for an answer) in a second brain Ori set up and may write project notes, with no
+   project under `Projects/` yet and the question neither answered nor skipped,
+   the drawer asks "What's the main thing you're working on right now?" (the
+   interview's `priority` question, at most 500 characters), offering a suggestion
+   from the folder Ori was shown (`GET /api/personal-assistant/knowledge/interview`'s
+   `suggestion {text, folder}`) as one button, and a typed answer otherwise. The answer is saved as
+   an explicit fact (`POST /api/personal-assistant/knowledge/explicit`, not the
+   interview's `save`, which would complete the Profile interview) and then
+   written by `POST …/project` to `Projects/<name>/README.md`: the name as the
+   heading, the user's words as the first paragraph, and "How Ori knows this". The
+   name is the suggestion's folder name, or one Ori proposes from the answer and
+   the user confirms; a name that is not one plain folder name is refused before
+   anything is written. **Make it a workspace** opens the ordinary Create Workspace
+   flow with the name filled in (`/?create=1&second_brain_project=<name>`), creates
+   nothing until the user presses Create, and the workspace's README then replaces
+   this one in place, a single file under `Projects/`. **Skip** is recorded once
+   (`fill_in.project_ask: skipped`); the question never returns to the drawer and
+   stays on the Profile page. Answering writes only where the setup allows project
+   notes, and never over a README the user already has.
+4. **The week.** Seven local days after `connected_at`, Today's Done section shows
+   one row, kind `second_brain_week`: "This week your second brain gained 4 facts,
+   2 people, 1 project and 5 captures.", linking to the Notes station, with
+   **Dismiss**. The counts are the ledger's notes by kind (people, projects,
+   follow-ups), the written-by-Ori listing's captures and journal entries, and the
+   facts the facts note lists once Ori has written it; no note is opened. A quiet
+   week says so plainly. The row is shown once: it appears in the seven days after
+   it is due (a setup older than two weeks never gets a recap of its "first week"),
+   stays for seven days after it was first shown, and is gone for good once
+   dismissed (`fill_in.week_shown_at`, `fill_in.week_dismissed_at`,
+   `POST …/week/dismiss {request_id}`). If the fact count cannot be read the row
+   waits for the next load instead of showing a wrong number. It is only for a
+   second brain Ori set up.
 
 ### The note marker
 

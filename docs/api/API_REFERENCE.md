@@ -2409,8 +2409,13 @@ Every route refuses a request that did not come from Ori's own page (`connection
 
 | Method and route | Body | Result |
 |---|---|---|
-| `GET /api/personal-assistant/second-brain` | none | `second_brain`: `{status: not_connected\|connected\|missing, detected: [{id, name, parent, path}], source?: {id, kind: obsidian\|markdown, name, path, connected_at, origin: connected\|created_by_ori, open_link?}, written_by_ori?: {count, by_kind?: {capture, seed, journal, facts, person, project, follow_up}, last_at?}, fill_in?: {state: allowed\|pending\|later, offer, written, user_owned, stale, last_at?}, projects?: [{name, rel, path}], inbox_count?, today_note?: {date, state: ori\|user\|none, link?}, last_look?: {id, at, open_items, headline, acted, people, stale, decisions, handled}, ask: {state: pending\|shown\|deferred\|declined, offer_again?}, version}`. `written_by_ori`, `fill_in`, `projects`, `inbox_count` and `today_note` come only with a second brain Ori set up. `fill_in.state` is `allowed` for a setup made with the fill-in, `pending` for an older one not yet asked, `later` after Not now; `offer` is true when the consent card belongs under Needs you; `user_owned` counts notes the user took over, which Ori no longer updates |
+| `GET /api/personal-assistant/second-brain` | none | `second_brain`: `{status: not_connected\|connected\|missing, detected: [{id, name, parent, path}], source?: {id, kind: obsidian\|markdown, name, path, connected_at, origin: connected\|created_by_ori, open_link?}, written_by_ori?: {count, by_kind?: {capture, seed, journal, facts, person, project, follow_up}, last_at?}, fill_in?: {state: allowed\|pending\|later, offer, project_ask?: answered\|skipped, written, user_owned, stale, last_at?}, projects?: [{name, rel, path}], inbox_count?, today_note?: {date, state: ori\|user\|none, link?}, last_look?: {id, at, open_items, headline, acted, people, stale, decisions, handled}, ask: {state: pending\|shown\|deferred\|declined, offer_again?}, version}`. `written_by_ori`, `fill_in`, `projects`, `inbox_count` and `today_note` come only with a second brain Ori set up. `fill_in.state` is `allowed` for a setup made with the fill-in, `pending` for an older one not yet asked, `later` after Not now; `offer` is true when the consent card belongs under Needs you; `user_owned` counts notes the user took over, which Ori no longer updates |
 | `POST …/second-brain/fill-in` | `{decision: "allow"\|"later", request_id}` | the consent card's answer: whether Ori keeps People, a note per project and what it knows about you up to date. Returns `second_brain`. `allow` starts a sync. A replay of the same `request_id` changes nothing, a later answer after `allow` is ignored, `409` for a folder the user connected or nothing connected, `400` for another decision |
+| `POST …/second-brain/project` | `{name, answer, request_id}` | the drawer's project question: writes `Projects/<name>/README.md` (the answer as its first paragraph) and records the question as answered. Returns `project: {name, rel, link?}`. A replay of the same `request_id` returns the same note and writes nothing; `409` for nothing connected, a folder the user connected, or a setup that has not yet let Ori keep project notes, or a README already there that is not exactly as Ori wrote it; `400` for a name that is not one plain folder name, or an empty or secret-like answer |
+| `POST …/second-brain/project/skip` | `{request_id}` | records the project question as skipped, once; it is never asked again in the drawer. A skip after an answer leaves the answer standing. Returns `second_brain`. `409` for nothing connected or a folder the user connected |
+| `POST …/second-brain/week/dismiss` | `{request_id}` | records that the first-week recap row was put away, so it does not return. Returns `second_brain`. `409` for nothing connected or a folder the user connected |
+| `GET /api/personal-assistant/setup-learning` | none | `learning: {items: [{id, version, category, text, evidence?: [string], source: files\|filing}], total}`: what the user's approved filing taught Ori, still waiting for an answer. Reads the review queue; writes nothing. Each item is answered with the Profile page's own `POST /api/personal-assistant/knowledge/{id}/approve` or `…/reject` (`{version, request_id}`); nothing becomes a fact before that |
+| `POST /api/personal-assistant/setup-learning/dismiss` | `{request_id}` | turns away every learning still waiting, for good. Returns `{dismissed: n}` |
 | `POST …/second-brain/prompted` | `{request_id}` | records that the ask was shown (once) |
 | `POST …/second-brain/ask` | `{decision: "later"\|"none", request_id}` | Not now / I don't keep notes |
 | `POST …/second-brain/connect` | `{detected_id}` or `{selection_token}`, `request_id`, optional `replace: true` | `second_brain` and `look_id`; the first look starts. `400` `no_notes` "No Markdown notes found in {name}.", `400` `repair: choose_folder` for a refused folder, `409` `needs_pick` for an expired token, `404` for a vault no longer listed, `409` `needs_confirm` when another folder is connected and `replace` was not sent |
@@ -2443,6 +2448,24 @@ then `+N more`), `attribution` `"Backup & Recovery"`, `state` `"not_covered"`,
 `actions` `["not_now"]`, and `route`: `/?protect=folders` (the chooser) when no
 Backup & Recovery workspace is in scope, otherwise
 `/workspaces/{slug}?panel=backup-recovery&tab=overview&section=coverage`.
+
+### Today's second-brain rows
+
+For a second brain Ori set up, the `done` section of `GET /api/personal-assistant/today`
+can carry two rows, both linking (`route`) to the Notes station
+(`/workspaces/{hq}?station=second-brain`) and neither reading a note:
+
+- `second_brain_written`: "Ori added 2 people and a project to your notes",
+  collapsing every write since it was last seen; it leaves a day after it is first
+  shown.
+- `second_brain_week`: "This week your second brain gained 4 facts, 2 people,
+  1 project and 5 captures." (a quiet week says "Your second brain had a quiet
+  week: nothing new was added."), with `actions` `["dismiss"]`. It appears from
+  the seventh local day after `source.connected_at`, once: never for a setup more
+  than two weeks past that day, for seven days after it is first shown, and not
+  again after `POST /api/personal-assistant/second-brain/week/dismiss`. The counts
+  are the fill-in ledger's notes by kind and the written-by-Ori listing's captures
+  and journal entries, plus the facts the facts note lists.
 
 ### Decline the Protection Line
 
