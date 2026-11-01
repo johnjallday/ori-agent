@@ -85,13 +85,35 @@ export function secondBrainFolderNameProblem(name) {
   return '';
 }
 
-// secondBrainSetupWhereView is the first step of setting one up: where. Only
+// What Ori says it will write, before it writes anything.
+const SECOND_BRAIN_SETUP_LINES = [
+  "I'll keep Inbox and Daily up to date; everything else is yours.",
+  'It starts with your open follow-ups and the people I already know. Plain Markdown that opens in Obsidian or any editor, and stays yours if you stop using Ori.'
+];
+
+// secondBrainSetupDefaultView is the one-click setup: the place is already
+// decided, so there is nothing to pick or name, and Somewhere else is the way
+// to choose another.
+export function secondBrainSetupDefaultView(place) {
+  return {
+    title: `Set up your second brain in ${String(place?.parent_name || 'your workspaces')}?`,
+    path: String(place?.path || ''),
+    lines: SECOND_BRAIN_SETUP_LINES,
+    actions: [
+      { id: 'create', label: 'Set it up', style: 'primary' },
+      { id: 'elsewhere', label: 'Somewhere else…', style: 'outline' },
+      { id: 'later', label: 'Not now', style: 'link' }
+    ]
+  };
+}
+
+// secondBrainSetupWhereView is the step for choosing another place. Only
 // a parent is picked here, through the same folder dialog or typed path as
 // connecting a folder (FR4).
 export function secondBrainSetupWhereView({ pickerOff = '', message = '' } = {}) {
   return {
     title: 'Where should I set up your second brain?',
-    note: 'Pick the folder it goes in. Documents is a good place.',
+    note: 'Pick the folder it goes in.',
     pickLabel: 'Choose where…',
     pickerOff: String(pickerOff || ''),
     message: String(message || '')
@@ -108,10 +130,7 @@ export function secondBrainSetupConfirmView(parent, name, { message = '' } = {})
     path: String(parent?.path || ''),
     nameLabel: 'Folder name',
     name: String(name ?? DEFAULT_SECOND_BRAIN_NAME),
-    lines: [
-      "I'll keep Inbox and Daily up to date; everything else is yours.",
-      'It starts with your open follow-ups and the people I already know. Plain Markdown that opens in Obsidian or any editor, and stays yours if you stop using Ori.'
-    ],
+    lines: SECOND_BRAIN_SETUP_LINES,
     message: String(message || ''),
     actions: [
       { id: 'create', label: 'Set it up', style: 'primary' },
@@ -692,7 +711,8 @@ function startSetup() {
     parent: null,
     name: DEFAULT_SECOND_BRAIN_NAME,
     message: '',
-    requestId: newRequestID('create')
+    requestId: newRequestID('create'),
+    useDefault: Boolean(state.secondBrain?.setup_default)
   };
   showError('');
   go('setup');
@@ -701,6 +721,10 @@ function startSetup() {
 function renderSetup(body) {
   if (state.setup.parent) {
     renderSetupConfirm(body);
+    return;
+  }
+  if (state.setup.useDefault && state.secondBrain?.setup_default) {
+    renderSetupDefault(body);
     return;
   }
   const view = secondBrainSetupWhereView({
@@ -733,7 +757,35 @@ function renderSetup(body) {
   setupPathEntry.setNote(view.pickerOff);
   setupPathEntry.setDisabled(state.busy);
   body.append(setupPathEntry.element);
-  body.append(actionRow([{ id: 'back', label: 'Back', style: 'link' }], back));
+  body.append(
+    actionRow([{ id: 'back', label: 'Back', style: 'link' }], () => {
+      if (state.secondBrain?.setup_default) {
+        state.setup.useDefault = true;
+        state.setup.message = '';
+        render();
+      } else back();
+    })
+  );
+}
+
+function renderSetupDefault(body) {
+  const view = secondBrainSetupDefaultView(state.secondBrain.setup_default);
+  body.append(node('p', 'pa-specialist-offer__headline', view.title));
+  if (view.path) body.append(node('p', 'pa-second-brain__path', view.path));
+  const list = node('ul', 'pa-folder__receipt pa-second-brain__consent');
+  list.dataset.layout = 'list';
+  view.lines.forEach(line => list.append(node('li', '', line)));
+  body.append(list);
+  body.append(
+    actionRow(view.actions, action => {
+      if (action.id === 'create') void createSecondBrain();
+      else if (action.id === 'elsewhere') {
+        state.setup.useDefault = false;
+        state.setup.message = '';
+        render();
+      } else void decide('later');
+    })
+  );
 }
 
 function renderSetupConfirm(body) {
@@ -1100,11 +1152,13 @@ async function pickFolder(purpose = 'connect') {
 }
 
 // createSecondBrain asks the server to make the folder inside the picked
-// parent, seed it, connect it, and start the first look. The request carries
-// the parent's selection token and the name, never a path.
+// parent or the default place, seed it, connect it, and start the first look.
+// The request carries the parent's selection token and the name, or neither
+// for the default place, never a path.
 async function createSecondBrain() {
   const parent = state.setup.parent;
-  if (state.busy || !parent) return;
+  const place = parent ? null : state.setup.useDefault && state.secondBrain?.setup_default;
+  if (state.busy || (!parent && !place)) return;
   const problem = secondBrainFolderNameProblem(state.setup.name);
   if (problem) {
     state.setup.message = problem;
@@ -1118,12 +1172,16 @@ async function createSecondBrain() {
   render();
   const { ok, payload } = await request('/create', {
     method: 'POST',
-    body: { selection_token: parent.selectionToken, name, request_id: state.setup.requestId }
+    body: parent
+      ? { selection_token: parent.selectionToken, name, request_id: state.setup.requestId }
+      : { request_id: state.setup.requestId }
   }).catch(() => ({ ok: false, payload: {} }));
   state.busy = false;
   if (!ok) {
     if (payload.needs_pick) state.setup.parent = null;
     if (payload.needs_pick || payload.repair === 'choose_folder') {
+      // The default place is taken or gone: only choosing another can help.
+      state.setup.useDefault = false;
       state.setup.message = secondBrainError(payload);
       render();
       return;
@@ -1133,7 +1191,7 @@ async function createSecondBrain() {
     return;
   }
   state.secondBrain = payload.second_brain || state.secondBrain;
-  state.chosen = { name, path: parent.path };
+  state.chosen = { name, path: parent ? parent.path : place.path };
   state.receipt = '';
   state.look = { state: 'running', look_id: payload.look_id };
   state.polls = 0;

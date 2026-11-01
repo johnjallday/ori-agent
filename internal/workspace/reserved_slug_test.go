@@ -114,12 +114,35 @@ func TestCreatingATopLevelWorkspaceNamedSkillsIsRejectedWithItsOwnMessage(t *tes
 	}
 }
 
+// <root>/Second Brain holds the user's notes. Its folder name is not its slug,
+// so both spellings must be refused, and binding the folder in place must not
+// write workspace.json into the vault.
+func TestTheSecondBrainFolderCannotBecomeATopLevelWorkspace(t *testing.T) {
+	for _, name := range []string{"Second Brain", "second-brain"} {
+		fs, root := reservedSlugStore(t)
+		if err := fs.Save(&Workspace{ID: "ws-" + name, Name: name}); !errors.Is(err, ErrReservedWorkspaceSlug) {
+			t.Errorf("Save(%q): err = %v, want ErrReservedWorkspaceSlug", name, err)
+		}
+		vault := filepath.Join(root, "Second Brain")
+		if err := os.Mkdir(vault, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.RebindExistingFolder(&Workspace{ID: "bound", Name: "Notes"}, vault); !errors.Is(err, ErrReservedWorkspaceSlug) {
+			t.Errorf("RebindExistingFolder: err = %v, want ErrReservedWorkspaceSlug", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(vault, WorkspaceConfigFile)); !os.IsNotExist(statErr) {
+			t.Error("the refused bind wrote workspace.json into the second brain")
+		}
+	}
+}
+
 func TestReservedTopLevelSlugMessageNamesTheFolder(t *testing.T) {
 	cases := map[string]string{
-		"Agents":   `"Agents" is reserved for your agents folder. Choose another name.`,
-		" skills ": `"Skills" is reserved for your skills folder. Choose another name.`,
-		"Skillset": "",
-		"":         "",
+		"Agents":       `"Agents" is reserved for your agents folder. Choose another name.`,
+		" skills ":     `"Skills" is reserved for your skills folder. Choose another name.`,
+		"Second Brain": `"Second Brain" is reserved for your second brain. Choose another name.`,
+		"Skillset":     "",
+		"":             "",
 	}
 	for name, want := range cases {
 		if got := ReservedTopLevelSlugMessage(name); got != want {

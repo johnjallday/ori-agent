@@ -83,7 +83,9 @@ operations afterward.
 
 The [API reference](../api/API_REFERENCE.md#anchored-workspaces) documents
 `anchor_path` and the read-only chooser check. An anchor must be a real,
-non-symlink directory outside the Workspace Directory. Existing `workspace.json`
+non-symlink directory outside the Workspace Directory; the one exception is a
+folder inside `<root>/Second Brain/Projects/`, which holds the user's notes rather
+than a managed workspace. Existing `workspace.json`
 and exact ownership conflicts are refused. The final check and sidecar write use
 the project-attachment commit lock; failures roll back newly created resources
 without touching the external folder.

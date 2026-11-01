@@ -890,11 +890,13 @@ func workspaceReservesSlug(ws *Workspace) bool {
 }
 
 // reservedTopLevelSlugs are the workspace-root folders that are not
-// workspaces (config.AgentsFolderName and config.SkillsFolderName, slugified),
-// each with what the user is told when a name would take it.
+// workspaces (config.AgentsFolderName, config.SkillsFolderName and
+// config.SecondBrainFolderName, slugified), each with what the user is told
+// when a name would take it.
 var reservedTopLevelSlugs = map[string]string{
-	"agents": `"Agents" is reserved for your agents folder. Choose another name.`,
-	"skills": `"Skills" is reserved for your skills folder. Choose another name.`,
+	"agents":       `"Agents" is reserved for your agents folder. Choose another name.`,
+	"skills":       `"Skills" is reserved for your skills folder. Choose another name.`,
+	"second-brain": `"Second Brain" is reserved for your second brain. Choose another name.`,
 }
 
 // ReservedSlugError refuses a top-level workspace folder that would take one
@@ -958,12 +960,12 @@ func ReservedTopLevelSlugError(nameOrSlug string) error {
 }
 
 // reservedTopLevelPathErrLocked refuses folderPath when it is one of the
-// reserved folders of this store's root. The name is compared
-// case-insensitively because macOS file systems are. Only the top level is
-// reserved: a group may hold a workspace called "Agents" or "Skills". Callers
-// must hold s.mu.
+// reserved folders of this store's root. The name is compared by slug, so case
+// does not matter (macOS file systems ignore it) and "Second Brain" matches its
+// own folder. Only the top level is reserved: a group may hold a workspace
+// called "Agents" or "Skills". Callers must hold s.mu.
 func (s *FileStore) reservedTopLevelPathErrLocked(folderPath string) error {
-	slug := strings.ToLower(filepath.Base(folderPath))
+	slug := Slugify(filepath.Base(folderPath))
 	if _, reserved := reservedTopLevelSlugs[slug]; !reserved {
 		return nil
 	}

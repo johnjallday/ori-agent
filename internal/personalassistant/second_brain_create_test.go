@@ -37,6 +37,75 @@ func seedsFor(followUps, people int) SecondBrainSeeds {
 	}
 }
 
+func TestSecondBrainCreate_WithoutAPickUsesTheDefaultPlace(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	root := filepath.Join(filepath.Dir(h.documents()), "Ori Workspaces")
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	h.service.deps.DefaultParent = func() string { return root }
+
+	status, err := h.service.Status(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "Second Brain")
+	if status.SetupDefault == nil || status.SetupDefault.ParentName != "Ori Workspaces" || status.SetupDefault.Path != want {
+		t.Fatalf("setup default = %+v", status.SetupDefault)
+	}
+
+	// A name sent with no pick cannot steer the folder somewhere else.
+	view, err := h.service.Create(ctx, "local", SecondBrainCreateInput{Name: "../escape", RequestID: "default-1"})
+	h.service.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Source == nil || view.Source.Origin != secondbrain.OriginCreatedByOri || filepath.Base(view.Source.Path) != "Second Brain" {
+		t.Fatalf("source = %+v", view.Source)
+	}
+	if _, err := os.Stat(filepath.Join(want, "Inbox")); err != nil {
+		t.Fatalf("the layout was not written: %v", err)
+	}
+	if view.SetupDefault != nil {
+		t.Fatalf("a connected folder still offers a default: %+v", view.SetupDefault)
+	}
+}
+
+func TestSecondBrainCreate_WithoutAPickOrADefaultAsksForAPick(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	h.service.deps.DefaultParent = func() string { return "" }
+	status, err := h.service.Status(ctx, "local")
+	if err != nil || status.SetupDefault != nil {
+		t.Fatalf("status = %+v, %v", status.SetupDefault, err)
+	}
+	if _, err := h.service.Create(ctx, "local", SecondBrainCreateInput{RequestID: "default-2"}); !errors.Is(err, ErrSecondBrainSelection) {
+		t.Fatalf("err = %v, want ErrSecondBrainSelection", err)
+	}
+}
+
+func TestSecondBrainCreate_ATakenDefaultPlaceIsRefusedAndLeftAlone(t *testing.T) {
+	h := newSecondBrainHarness(t)
+	root := t.TempDir()
+	note := filepath.Join(root, "Second Brain", "mine.md")
+	if err := os.MkdirAll(filepath.Dir(note), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(note, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.service.deps.DefaultParent = func() string { return root }
+	_, err := h.service.Create(context.Background(), "local", SecondBrainCreateInput{RequestID: "default-3"})
+	var folderErr *SecondBrainFolderError
+	if !errors.As(err, &folderErr) {
+		t.Fatalf("err = %v, want a folder error", err)
+	}
+	if data, readErr := os.ReadFile(note); readErr != nil || string(data) != "mine" {
+		t.Fatalf("the existing note changed: %q, %v", data, readErr)
+	}
+}
+
 func TestSecondBrainCreate_SetsUpConnectsAndReportsTheSeed(t *testing.T) {
 	ctx := context.Background()
 	h := newSecondBrainHarness(t)
@@ -152,8 +221,8 @@ func TestSecondBrainCreate_RefusesWithOneSentenceAndLeavesTheTreeAlone(t *testin
 	if _, err := h.service.Create(context.Background(), "local", SecondBrainCreateInput{SelectionToken: "documents", Name: "Brain", RequestID: "has space"}); !errors.Is(err, ErrValidation) {
 		t.Errorf("a bad request id: %v", err)
 	}
-	if _, err := h.service.Create(context.Background(), "local", SecondBrainCreateInput{Name: "Brain", RequestID: "c-5"}); !errors.Is(err, ErrValidation) {
-		t.Errorf("no token: %v", err)
+	if _, err := h.service.Create(context.Background(), "local", SecondBrainCreateInput{Name: "Brain", RequestID: "c-5"}); !errors.Is(err, ErrSecondBrainSelection) {
+		t.Errorf("no token and no default place: %v", err)
 	}
 	if after := snapshotTree(t, h.documents()); after != before {
 		t.Fatalf("a refusal changed the tree.\nbefore:\n%s\nafter:\n%s", before, after)

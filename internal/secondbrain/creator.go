@@ -11,12 +11,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/sensitive"
 )
 
 const (
 	// DefaultFolderName is the name Ori proposes for a folder it sets up.
-	DefaultFolderName = "Second Brain"
+	DefaultFolderName = config.SecondBrainFolderName
 	// MaxSeedFollowUps and MaxSeedPeople bound what one setup seeds (FR8).
 	MaxSeedFollowUps = 200
 	MaxSeedPeople    = 100

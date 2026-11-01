@@ -169,14 +169,15 @@ func (h *Handler) ConnectSecondBrain(w http.ResponseWriter, r *http.Request) {
 
 type secondBrainCreateRequest struct {
 	// SelectionToken names the parent the folder picker returned; Name is the
-	// new folder's own name, one path segment the service validates.
+	// new folder's own name, one path segment the service validates. Without a
+	// token the folder goes in the default place under its default name.
 	SelectionToken string `json:"selection_token"`
 	Name           string `json:"name"`
 	RequestID      string `json:"request_id"`
 }
 
-// CreateSecondBrain sets up a second brain inside the picked parent, connects
-// it as created by Ori, and starts the first look.
+// CreateSecondBrain sets up a second brain inside the picked parent or the
+// default place, connects it as created by Ori, and starts the first look.
 func (h *Handler) CreateSecondBrain(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
@@ -190,10 +191,6 @@ func (h *Handler) CreateSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.SelectionToken = strings.TrimSpace(req.SelectionToken)
-	if req.SelectionToken == "" {
-		orihttp.BadRequest(w, "Choose where to set up your second brain")
-		return
-	}
 	view, err := h.secondBrain.Create(r.Context(), userID, personalassistant.SecondBrainCreateInput{
 		SelectionToken: req.SelectionToken, Name: strings.TrimSpace(req.Name), RequestID: strings.TrimSpace(req.RequestID),
 	})

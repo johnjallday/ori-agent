@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -72,6 +73,17 @@ func (h *Handler) parentAnchorOwner(path string) *projectconnection.FolderOwner 
 	return owner
 }
 
+// insideSecondBrainProjects reports whether path is a project folder in the
+// second brain Ori keeps in the Workspace Directory. That folder holds the
+// user's notes rather than a managed workspace, so its projects can anchor a
+// workspace like any folder elsewhere. Only Projects qualifies: Inbox and Daily
+// are Ori's to write, and the second brain itself is not a project.
+func insideSecondBrainProjects(path, root string) bool {
+	projects := filepath.Join(root, config.SecondBrainFolderName, "Projects")
+	rel, err := filepath.Rel(projects, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func (h *Handler) validateAnchorPath(input, ignoreID string) (string, *anchorPathError) {
 	input = strings.TrimSpace(input)
 	if input == "~" || strings.HasPrefix(input, "~/") {
@@ -112,7 +124,7 @@ func (h *Handler) validateAnchorPath(input, ignoreID string) (string, *anchorPat
 		if normalizeErr != nil {
 			return "", anchorError("anchor_unavailable", "The Workspace Directory could not be checked.", http.StatusServiceUnavailable)
 		}
-		if _, inside := rewriteWorkspaceContentPath(path, normalized, normalized); inside {
+		if _, inside := rewriteWorkspaceContentPath(path, normalized, normalized); inside && !insideSecondBrainProjects(path, normalized) {
 			return "", anchorError("anchor_inside_workspace_root", "Choose a folder outside the Workspace Directory; folders inside it are managed workspaces.", http.StatusBadRequest)
 		}
 	}

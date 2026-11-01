@@ -199,6 +199,43 @@ func TestAnchorChooserCheckIsReadOnly(t *testing.T) {
 	}
 }
 
+// secondBrainFolderForTest makes rel inside <root>/Second Brain and returns it.
+func secondBrainFolderForTest(t *testing.T, h *Handler, rel string) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(h.workspaceStore.BasePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "Second Brain", rel)
+	if err := os.MkdirAll(path, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A project in the second brain kept in the Workspace Directory anchors a
+// workspace, and nothing is written into the project folder.
+func TestAProjectInTheSecondBrainInTheWorkspaceDirectoryCanAnchor(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	project := secondBrainFolderForTest(t, h, filepath.Join("Projects", "Album"))
+	body, err := json.Marshal(map[string]any{"name": "Album", "anchor_path": project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, payload := postCreateWorkspace(t, h, string(body))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", response.Code, response.Body.String())
+	}
+	if created := payload["folder"].(map[string]any); created["shape"] != "anchored" {
+		t.Fatalf("shape: %v", created["shape"])
+	}
+	entries, err := os.ReadDir(project)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("the project folder was written to: %v / %v", entries, err)
+	}
+}
+
 func TestCreateAnchorRejections(t *testing.T) {
 	for _, tc := range []struct {
 		name, code string
@@ -229,6 +266,15 @@ func TestCreateAnchorRejections(t *testing.T) {
 				t.Fatal(err)
 			}
 			return path
+		}},
+		{"second-brain-itself", "anchor_inside_workspace_root", func(t *testing.T, h *Handler) string {
+			return secondBrainFolderForTest(t, h, "")
+		}},
+		{"second-brain-inbox", "anchor_inside_workspace_root", func(t *testing.T, h *Handler) string {
+			return secondBrainFolderForTest(t, h, "Inbox")
+		}},
+		{"second-brain-projects-folder", "anchor_inside_workspace_root", func(t *testing.T, h *Handler) string {
+			return secondBrainFolderForTest(t, h, "Projects")
 		}},
 		{"workspace-config", "anchor_contains_workspace", func(t *testing.T, _ *Handler) string {
 			path := canonicalAnchorTestDir(t)
