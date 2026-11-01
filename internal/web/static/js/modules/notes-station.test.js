@@ -7,7 +7,10 @@ import {
   lookAgeLine,
   notesBadge,
   notesPanelAvailable,
+  defaultNotesTab,
+  nextNotesTab,
   notesPanelCount,
+  notesTabs,
   notesPanelHTML,
   notesSections,
   openItemCount,
@@ -196,27 +199,42 @@ test('the count chip is Inbox for a folder Ori set up and open items for a vault
 test('the panel escapes what notes say and links only to Obsidian', () => {
   assert.equal(safeLink('javascript:alert(1)'), '');
   assert.equal(safeLink('obsidian://open?vault=a'), 'obsidian://open?vault=a');
-  const html = notesPanelHTML({
-    secondBrain: vault(),
-    now: NOW,
-    panel: {
-      status: 'ready',
-      look: {
-        state: 'finished',
-        look_id: 'look-1',
-        result: {
-          items: [item('x', { text: '<img src=x onerror=alert(1)>', link: 'javascript:alert(1)' })],
-          people: [{ name: '<b>Dana</b>', mentions: 2, link: 'obsidian://open?vault=a&file=b' }]
+  const view = tab =>
+    notesPanelHTML({
+      secondBrain: vault(),
+      now: NOW,
+      panel: {
+        status: 'ready',
+        tab,
+        look: {
+          state: 'finished',
+          look_id: 'look-1',
+          result: {
+            items: [
+              item('x', { text: '<img src=x onerror=alert(1)>', link: 'javascript:alert(1)' })
+            ],
+            people: [{ name: '<b>Dana</b>', mentions: 2, link: 'obsidian://open?vault=a&file=b' }]
+          }
         }
       }
-    }
+    });
+  const loops = view('loops');
+  assert.ok(!loops.includes('<img'));
+  assert.ok(!loops.includes('javascript:'));
+  assert.ok(loops.includes('&lt;img'));
+  const people = view('more');
+  assert.ok(!people.includes('<b>Dana'));
+  assert.ok(people.includes('href="obsidian://open?vault=a&amp;file=b"'));
+  assert.ok(people.includes('2 mentions'));
+});
+
+test('People & Projects offers Make a workspace', () => {
+  const html = notesPanelHTML({
+    secondBrain: created(),
+    now: NOW,
+    panel: { status: 'ready', tab: 'more', inbox: { notes: [], total: 0 }, look: { state: 'none' } }
   });
-  assert.ok(!html.includes('<img'));
-  assert.ok(!html.includes('<b>Dana'));
-  assert.ok(!html.includes('javascript:'));
-  assert.ok(html.includes('&lt;img'));
-  assert.ok(html.includes('href="obsidian://open?vault=a&amp;file=b"'));
-  assert.ok(html.includes('2 mentions'));
+  assert.ok(html.includes('/?create=1&amp;second_brain_project=Launch'));
 });
 
 test('the panel offers triage per item, the bulk action, and says partial and failed', () => {
@@ -258,6 +276,91 @@ test('the panel offers triage per item, the bulk action, and says partial and fa
   });
   assert.ok(failed.includes('Can&#39;t find it.'));
   assert.ok(failed.includes('notes-look-again'));
+});
+
+test('a folder Ori set up has three views and a vault has two', () => {
+  const look = { state: 'finished', result: { items: [item('a')] } };
+  const madeSections = notesSections({
+    secondBrain: created(),
+    look,
+    inbox: { notes: [{ name: 'a.md' }], total: 12 }
+  });
+  assert.deepEqual(
+    notesTabs(madeSections).map(tab => [tab.key, tab.title, tab.count]),
+    [
+      ['inbox', 'Inbox', 12],
+      ['loops', 'Open loops', 1],
+      ['more', 'People & Projects', 1]
+    ]
+  );
+  assert.deepEqual(
+    notesTabs(madeSections)[0].sections.map(section => section.key),
+    ['capture', 'inbox', 'today']
+  );
+  assert.deepEqual(
+    notesTabs(notesSections({ secondBrain: vault(), look })).map(tab => [tab.key, tab.title]),
+    [
+      ['loops', 'Open loops'],
+      ['more', 'People']
+    ]
+  );
+});
+
+test('the panel opens on the view with something in it', () => {
+  const look = { state: 'finished', result: { items: [item('a')] } };
+  const inbox = total => ({ notes: total ? [{ name: 'a.md' }] : [], total });
+  const none = created({ today_note: { state: 'none' } });
+  assert.equal(
+    defaultNotesTab(notesSections({ secondBrain: none, look, inbox: inbox(1) })),
+    'inbox'
+  );
+  assert.equal(
+    defaultNotesTab(notesSections({ secondBrain: none, look, inbox: inbox(0) })),
+    'loops'
+  );
+  // Nothing anywhere: the Inbox view, because its capture box is the way to start.
+  assert.equal(
+    defaultNotesTab(
+      notesSections({
+        secondBrain: created({ today_note: { state: 'none' }, projects: [] }),
+        look: { state: 'none' },
+        inbox: inbox(0)
+      })
+    ),
+    'inbox'
+  );
+  assert.equal(defaultNotesTab(notesSections({ secondBrain: vault(), look })), 'loops');
+});
+
+test('arrow keys wrap around the views', () => {
+  const tabs = [{ key: 'inbox' }, { key: 'loops' }, { key: 'more' }];
+  assert.equal(nextNotesTab(tabs, 'inbox', 1), 'loops');
+  assert.equal(nextNotesTab(tabs, 'more', 1), 'inbox');
+  assert.equal(nextNotesTab(tabs, 'inbox', -1), 'more');
+});
+
+test('only the chosen view renders, and the footer belongs to Open loops', () => {
+  const html = tab =>
+    notesPanelHTML({
+      secondBrain: created(),
+      now: NOW,
+      panel: {
+        status: 'ready',
+        tab,
+        inbox: { notes: [], total: 0 },
+        look: { state: 'finished', look_id: 'look-1', result: { items: [item('a')] } }
+      }
+    });
+  assert.ok(html('inbox').includes('data-notes-section="capture"'));
+  assert.ok(!html('inbox').includes('data-notes-section="loops"'));
+  assert.ok(!html('inbox').includes('data-notes-section="footer"'));
+  assert.ok(html('loops').includes('data-notes-section="footer"'));
+  assert.ok(!html('loops').includes('data-notes-section="capture"'));
+  assert.ok(html('more').includes('data-notes-section="projects"'));
+  assert.ok(html('loops').includes('id="notes-tab-loops" class="ws-cmd-system-tab is-active"'));
+  assert.ok(html('loops').includes('aria-labelledby="notes-tab-loops"'));
+  // A view this folder lacks falls back to the first rather than an empty panel.
+  assert.ok(html('gone').includes('data-notes-section="capture"'));
 });
 
 test('an expanded handled list stays expanded through a repaint', () => {
@@ -319,5 +422,4 @@ test('Inbox rows say whose they are, and a bound says it was hit', () => {
   assert.ok(html.includes('b.md'));
   assert.ok(html.includes('Showing the newest 2 of 140.'));
   assert.ok(html.includes('Saved to Inbox as call-dana.'));
-  assert.ok(html.includes('/?create=1&amp;second_brain_project=Launch'));
 });

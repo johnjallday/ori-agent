@@ -206,6 +206,49 @@ export function firstNonEmptySection(sections) {
   return found ? found.key : '';
 }
 
+// notesTabs folds the sections into the panel's views. Capture and Today sit with
+// Inbox, since they are about what lands there; Look again sits with Open loops.
+// A connected vault has no Inbox view and no Projects.
+export function notesTabs(sections) {
+  const list = Array.isArray(sections) ? sections : [];
+  const pick = keys => list.filter(section => keys.includes(section.key));
+  const tab = (key, title, keys, count) => {
+    const held = pick(keys);
+    return { key, title, sections: held, count: count(held) };
+  };
+  const total = held => held.reduce((sum, section) => sum + section.count, 0);
+  const more = pick(['projects']).length ? 'People & Projects' : 'People';
+  return [
+    tab('inbox', 'Inbox', ['capture', 'inbox', 'today'], held =>
+      total(held.filter(section => section.key === 'inbox'))
+    ),
+    tab('loops', 'Open loops', ['loops'], total),
+    tab('more', more, ['people', 'projects'], total)
+  ].filter(entry => entry.sections.length > 0);
+}
+
+// defaultNotesTab is the view the panel opens on: the one holding the first
+// section with something in it, else the first view.
+export function defaultNotesTab(sections) {
+  const tabs = notesTabs(sections);
+  const first = firstNonEmptySection(sections);
+  const found = tabs.find(entry => entry.sections.some(section => section.key === first));
+  return (found || tabs[0])?.key || '';
+}
+
+// activeNotesTab is the view to show. A view this folder does not have falls
+// back to the first.
+export function activeNotesTab(tabs, wanted) {
+  return tabs.find(entry => entry.key === wanted) || tabs[0];
+}
+
+// nextNotesTab is the view an arrow key moves to, wrapping at the ends.
+export function nextNotesTab(tabs, current, step) {
+  const index = tabs.findIndex(entry => entry.key === current);
+  if (index < 0 || !tabs.length) return current;
+  return tabs[(index + step + tabs.length) % tabs.length].key;
+}
+
 // notesPanelCount is the header chip: Inbox for a folder Ori set up, open items
 // for a connected vault.
 export function notesPanelCount(sections) {
@@ -477,33 +520,73 @@ function sectionBodyHTML(section, panel, now) {
   }
 }
 
+function tabsHTML(tabs, active) {
+  return (
+    '<div class="ws-cmd-system-tabs ws-notes-tabs" role="tablist" aria-label="Notes views">' +
+    tabs
+      .map(tab => {
+        const selected = tab.key === active.key;
+        return (
+          '<button type="button" role="tab" id="notes-tab-' +
+          tab.key +
+          '" class="ws-cmd-system-tab' +
+          (selected ? ' is-active' : '') +
+          '" data-notes-tab data-cmd-modal-action="notes-tab" data-cmd-id="' +
+          tab.key +
+          '" aria-selected="' +
+          selected +
+          '" tabindex="' +
+          (selected ? '0' : '-1') +
+          '">' +
+          escapeHtml(tab.title) +
+          ' <span class="ws-notes-tab-count">' +
+          tab.count +
+          '</span></button>'
+        );
+      })
+      .join('') +
+    '</div>'
+  );
+}
+
 // notesPanelHTML is the whole panel. `panel` is what workspace-command.js holds
 // about it: look, inbox, status, message, and the capture box's state.
 export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {}) {
   const look = panel.look || null;
   const sections = notesSections({ secondBrain, look, inbox: panel.inbox });
+  const tabs = notesTabs(sections);
+  const active = activeNotesTab(tabs, panel.tab);
+  const ready = panel.status === 'ready';
   const body =
     panel.status === 'error'
       ? '<p class="ws-notes-problem" role="alert">Ori could not read your notes view. Close this and try again.</p>'
-      : panel.status !== 'ready'
+      : !ready
         ? '<p class="ws-notes-empty">Reading your notes…</p>'
-        : sections
+        : '<div role="tabpanel" class="ws-notes-tabpanel" aria-labelledby="notes-tab-' +
+          active.key +
+          '">' +
+          active.sections
             .map(
               section =>
                 '<section class="ws-notes-section" data-notes-section="' +
                 section.key +
                 '" aria-label="' +
                 escapeHtml(section.title + ', ' + plural(section.count, 'item', 'items')) +
-                '"><h4 class="ws-notes-section-title">' +
-                escapeHtml(section.title) +
-                '</h4>' +
+                '">' +
+                // A section that is the whole tab is already named by the tab.
+                (section.title === active.title
+                  ? ''
+                  : '<h4 class="ws-notes-section-title">' + escapeHtml(section.title) + '</h4>') +
                 sectionBodyHTML(section, panel, now) +
                 '</section>'
             )
             .join('') +
-          '<section class="ws-notes-section ws-notes-footer" data-notes-section="footer" aria-label="About this look">' +
-          footerHTML(look, panel, now) +
-          '</section>';
+          (active.key === 'loops'
+            ? '<section class="ws-notes-section ws-notes-footer" data-notes-section="footer" aria-label="About this look">' +
+              footerHTML(look, panel, now) +
+              '</section>'
+            : '') +
+          '</div>';
   const notice = panel.message
     ? '<p class="ws-notes-receipt" role="status">' + escapeHtml(panel.message) + '</p>'
     : '';
@@ -514,7 +597,9 @@ export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {
     '</span><div class="ws-cmd-modal-head-actions">' +
     '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">Connection…</button>' +
     '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close Notes">×</button>' +
-    '</div></header><div class="ws-cmd-modal-body ws-notes-body">' +
+    '</div></header>' +
+    (ready ? tabsHTML(tabs, active) : '') +
+    '<div class="ws-cmd-modal-body ws-notes-body">' +
     notice +
     body +
     '</div>'

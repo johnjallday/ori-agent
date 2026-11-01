@@ -5770,10 +5770,25 @@ button.ws-cmd-rpg-class-card:focus-visible {
     padding: calc(var(--navbar-offset, 76px) + 8px) 8px 8px;
   }
 }
-/* The Notes station's panel: sections of short rows, read-mostly. */
+/* The Notes station's panel: tabbed views of short rows, read-mostly. The tabs
+   stay put while a view scrolls under them. */
+.ws-notes-tabs {
+  flex: 0 0 auto;
+  padding: 10px 14px 8px;
+}
+.ws-notes-tab-count {
+  margin-left: 4px;
+  color: var(--ws-ink-faint);
+}
 .ws-notes-body {
   gap: 14px;
   overflow-x: hidden;
+}
+.ws-notes-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 .ws-notes-section {
   display: flex;

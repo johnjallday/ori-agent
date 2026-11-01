@@ -66,6 +66,7 @@ async function hqSlug(request: APIRequestContext): Promise<string> {
 
 const panel = (page: Page) => page.locator('.ws-cmd-modal-panel.is-station');
 const section = (page: Page, key: string) => panel(page).locator(`[data-notes-section="${key}"]`);
+const tab = (page: Page, key: string) => panel(page).locator(`#notes-tab-${key}`);
 
 async function openPanel(page: Page, request: APIRequestContext) {
   await page.goto(`/workspaces/${await hqSlug(request)}?station=second-brain`);
@@ -118,11 +119,18 @@ test.describe('a connected vault', () => {
   }) => {
     await openPanel(page, request);
     await expect(section(page, 'loops').locator('.ws-notes-item').first()).toBeVisible();
-    await expect(section(page, 'people')).toContainText('mention');
     await expect(section(page, 'footer')).toContainText('open item');
+    await expect(panel(page).getByRole('tab')).toHaveText([/Open loops/, /People/]);
     for (const absent of ['capture', 'inbox', 'today', 'projects']) {
       await expect(section(page, absent)).toHaveCount(0);
     }
+    await tab(page, 'more').click();
+    await expect(section(page, 'people')).toContainText('mention');
+    await expect(section(page, 'loops')).toHaveCount(0);
+    // Arrow keys move between the views and take focus with them.
+    await page.keyboard.press('ArrowLeft');
+    await expect(section(page, 'loops')).toBeVisible();
+    await expect(tab(page, 'loops')).toBeFocused();
   });
 
   test('triage files three items without a reload and writes nothing', async ({
@@ -157,6 +165,33 @@ test.describe('a connected vault', () => {
     expect(folderSnapshot(vault)).toBe(folderBefore);
   });
 
+  test('triaging low in a long list stays where the user had scrolled', async ({
+    page,
+    request
+  }) => {
+    await page.setViewportSize({ width: 1000, height: 560 });
+    await openPanel(page, request);
+    const body = panel(page).locator('.ws-notes-body');
+    const row = section(page, 'loops')
+      .locator('.ws-notes-list:not(.ws-notes-handled *) .ws-notes-item')
+      .last();
+    await row.scrollIntoViewIfNeeded();
+    const before = await body.evaluate(element => element.scrollTop);
+    expect(before).toBeGreaterThan(0);
+    await row.hover();
+    // The badge's re-read repaints once more after the triage itself.
+    const reread = page.waitForResponse(
+      response => new URL(response.url()).pathname === ENDPOINT && response.ok()
+    );
+    await row.locator('[data-cmd-modal-action="notes-item-dismiss"]').click();
+    await expect(section(page, 'loops').locator('.ws-notes-handled summary')).toHaveText(
+      '4 handled'
+    );
+    await reread;
+    await page.waitForTimeout(200);
+    expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  });
+
   test('Look again inside the limit says so', async ({ page, request }) => {
     await openPanel(page, request);
     await section(page, 'footer').locator('[data-cmd-modal-action="notes-look-again"]').click();
@@ -181,7 +216,14 @@ test.describe('a second brain Ori set up', () => {
   test('the panel opens on Inbox, and a capture lands at its top', async ({ page, request }) => {
     await openPanel(page, request);
     await expect(section(page, 'inbox').locator('.ws-notes-item').first()).toBeVisible();
+    await expect(panel(page).getByRole('tab')).toHaveText([
+      /Inbox/,
+      /Open loops/,
+      /People & Projects/
+    ]);
+    await tab(page, 'more').click();
     await expect(section(page, 'projects')).toBeVisible();
+    await tab(page, 'inbox').click();
     const note = `Call Dana about the mix ${Date.now()}`;
     await section(page, 'capture').locator('[data-notes-capture]').fill(note);
     await section(page, 'capture').locator('[data-cmd-modal-action="notes-capture"]').click();

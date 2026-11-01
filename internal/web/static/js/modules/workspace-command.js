@@ -71,12 +71,14 @@ export const NOTES_STATION = 'second-brain';
 import {
   LOOK_TOO_SOON_LINE,
   NOTES_ITEM_ACTIONS,
-  firstNonEmptySection,
+  defaultNotesTab,
   isCreatedByOri,
+  nextNotesTab,
   notesBadge,
   notesPanelAvailable,
   notesPanelHTML,
-  notesSections
+  notesSections,
+  notesTabs
 } from './notes-station.js';
 import {
   SECOND_BRAIN_ENDPOINT,
@@ -3168,6 +3170,24 @@ export class WorkspaceCommandView {
         this.captureFromNotesPanel();
         return;
       }
+      if (
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+        event.target &&
+        event.target.matches &&
+        event.target.matches('[data-notes-tab]')
+      ) {
+        event.preventDefault();
+        const panel = this.notesPanel();
+        const tabs = notesTabs(this.notesPanelSections(panel));
+        this.setNotesTab(
+          nextNotesTab(
+            tabs,
+            event.target.getAttribute('data-cmd-id'),
+            event.key === 'ArrowRight' ? 1 : -1
+          )
+        );
+        return;
+      }
       this.trapStatModalFocus(event);
     });
     this.statModalEl = el;
@@ -3200,8 +3220,18 @@ export class WorkspaceCommandView {
       panel.classList.toggle('is-daily-brief', isBrief);
       panel.classList.toggle('is-memory', this.statModalSection === MEMORY_STATION);
     }
+    // The Notes panel repaints on every triage: the list stays where the user
+    // had scrolled it, rather than jumping back to the top.
+    const notesScroll =
+      this.statModalSection === NOTES_STATION
+        ? panel.querySelector('.ws-notes-body')?.scrollTop || 0
+        : 0;
     if (isBrief) this.mountDailyBriefPanel(panel);
     else panel.innerHTML = this.statModalHTML(this.statModalSection);
+    if (notesScroll) {
+      const notesBody = panel.querySelector('.ws-notes-body');
+      if (notesBody) notesBody.scrollTop = notesScroll;
+    }
     this.syncBoardSurface();
     this.syncConfigModalSurface();
     this.syncToolsModalSurface();
@@ -7988,7 +8018,7 @@ export class WorkspaceCommandView {
 
   openNotesPanel(trigger) {
     clearTimeout(this._notesPanelPoll);
-    this._notesPanel = { status: 'loading', scrollPending: true };
+    this._notesPanel = { status: 'loading' };
     this.openStatModal(NOTES_STATION, this.stationOpener(NOTES_STATION, trigger));
     this.loadNotesPanel();
   }
@@ -8011,27 +8041,26 @@ export class WorkspaceCommandView {
     const box = typing ? this.statModalEl.querySelector('[data-notes-capture]') : null;
     if (box && !box.disabled) box.focus();
     else this.restoreStatModalFocus();
-    if (panel.scrollPending && panel.status === 'ready') {
-      panel.scrollPending = false;
-      this.scrollNotesPanelToContent(panel);
-    }
   }
 
-  // The panel opens on the first section with something in it, unless that is
-  // already the first thing on screen.
-  scrollNotesPanelToContent(panel) {
-    const key = firstNonEmptySection(
-      notesSections({
-        secondBrain: this.notesState().secondBrain,
-        look: panel.look,
-        inbox: panel.inbox
-      })
-    );
-    if (!key || key === 'inbox' || !this.statModalEl) return;
-    const section = this.statModalEl.querySelector('[data-notes-section="' + key + '"]');
-    if (section && typeof section.scrollIntoView === 'function') {
-      section.scrollIntoView({ block: 'start' });
-    }
+  notesPanelSections(panel) {
+    return notesSections({
+      secondBrain: this.notesState().secondBrain,
+      look: panel.look,
+      inbox: panel.inbox
+    });
+  }
+
+  // Switching views starts the new one at its top, with focus on its tab.
+  setNotesTab(key) {
+    const panel = this.notesPanel();
+    panel.tab = key;
+    this.renderStatModalBody();
+    if (!this.statModalEl) return;
+    const body = this.statModalEl.querySelector('.ws-notes-body');
+    if (body) body.scrollTop = 0;
+    const tab = this.statModalEl.querySelector('[data-notes-tab][aria-selected="true"]');
+    if (tab && typeof tab.focus === 'function') tab.focus();
   }
 
   async loadNotesPanel() {
@@ -8044,6 +8073,7 @@ export class WorkspaceCommandView {
       ]);
       panel.look = (look && look.look) || { state: 'none' };
       if (created) panel.inbox = (inbox && inbox.inbox) || { notes: [], total: 0 };
+      panel.tab = defaultNotesTab(this.notesPanelSections(panel));
       panel.status = 'ready';
     } catch {
       panel.status = 'error';
@@ -8100,6 +8130,10 @@ export class WorkspaceCommandView {
   }
 
   handleNotesPanelAction(action, id) {
+    if (action === 'notes-tab') {
+      this.setNotesTab(id);
+      return;
+    }
     if (action === 'notes-connection') {
       const trigger = this.statModalTrigger;
       this.closeStatModal();

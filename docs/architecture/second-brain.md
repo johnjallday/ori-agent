@@ -360,6 +360,12 @@ drawer, and the panel's **Connection…** goes there too.
 The panel is a window onto what the look and the Writer already do. It adds no
 reader outside `internal/secondbrain`, no writer, and no stored note contents.
 
+It has tabs rather than one long page, and it stays one station: its parts share a
+folder and a look, and most would be empty as buildings of their own. **Inbox**
+(Capture, the notes, Today) exists only for a second brain Ori set up. **Open loops**
+holds triage and Look again. **People**, or **People & Projects** for a second brain
+Ori set up, holds the rest. The panel opens on the first tab with something in it.
+
 **Signals.** A look keeps up to 20 each of `people`, `stale` and `decisions`, as
 names, relative paths, counts and dates, within an 80 KB budget beside the items'
 300 KB. A decision's own line is not kept. A person's `note` is the person's own
