@@ -1436,7 +1436,7 @@ smoke_gosec_new() {
   top="$(git rev-parse --show-toplevel)" || fail "not in a git checkout"
   report="${TMPDIR:-/tmp}/gosec-new-$$.json"
   diff="${TMPDIR:-/tmp}/gosec-new-$$.diff"
-  packages="$(git diff --name-only --diff-filter=ACMR "$base"...HEAD -- '*.go' | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|')"
+  packages="$(git diff --name-only --diff-filter=ACMR "$base"...HEAD -- '*.go' | xargs -r -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|')"
   if [[ -z "$packages" ]]; then
     echo "no Go changes vs $base"
     return 0
