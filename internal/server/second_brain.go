@@ -56,6 +56,7 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 	// Setting one up copies what Ori already holds into the new folder; the
 	// learning services it reads are built later, so they are looked up then.
 	service.SetSeeds(secondBrainSeeds{builder: b}.Seeds)
+	service.SetHoldings(secondBrainSeeds{builder: b}.Holdings)
 	b.personalAssistantSecondBrain = service
 	b.personalAssistantHandler.SetSecondBrain(service, connectionshttp.NewOriginGuard().Check)
 }

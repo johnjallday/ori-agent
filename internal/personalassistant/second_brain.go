@@ -143,6 +143,13 @@ type SecondBrainService struct {
 	inboxMu    sync.Mutex
 	inboxCache *secondBrainInboxEntry
 
+	// holdings reads what HQ holds for the fill-in sync; syncMu keeps it to one
+	// run at a time, and the rest coalesce repeat triggers.
+	holdings  SecondBrainHoldings
+	syncMu    sync.Mutex
+	syncs     sync.WaitGroup
+	syncState map[string]*secondBrainSyncTrigger
+
 	// Hooks for the mission and the learned fact, bound at startup.
 	onConnected    []func(ctx context.Context, userID string, source secondbrain.Source)
 	onDisconnected []func(ctx context.Context, userID string, source secondbrain.Source)
@@ -205,11 +212,14 @@ func NewSecondBrainService(store *SecondBrainStore, deps SecondBrainDeps) *Secon
 	if deps.NewID == nil {
 		deps.NewID = func() string { return "look-" + uuid.NewString() }
 	}
-	return &SecondBrainService{store: store, deps: deps, running: map[string]string{}}
+	return &SecondBrainService{store: store, deps: deps, running: map[string]string{}, syncState: map[string]*secondBrainSyncTrigger{}}
 }
 
-// Wait blocks until every look this service started has been written.
-func (s *SecondBrainService) Wait() { s.looks.Wait() }
+// Wait blocks until every look and sync this service started has finished.
+func (s *SecondBrainService) Wait() {
+	s.looks.Wait()
+	s.syncs.Wait()
+}
 
 // SecondBrainView is GET /api/personal-assistant/second-brain.
 type SecondBrainView struct {

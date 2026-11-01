@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"regexp"
+	"slices"
+	"strings"
 )
 
 // The kinds of note Ori writes into a folder it created.
@@ -12,14 +14,25 @@ const (
 	NoteKindJournal = "journal"
 	NoteKindCapture = "capture"
 	NoteKindSeed    = "seed"
+	// The fill-in's kinds: the facts note, a person, a project and a follow-up.
+	NoteKindFacts    = "facts"
+	NoteKindPerson   = "person"
+	NoteKindProject  = "project"
+	NoteKindFollowUp = "follow_up"
 )
+
+// noteKinds is the one list of kinds. The marker's patterns are built from it,
+// so a new kind cannot be written and then read back as the user's.
+var noteKinds = []string{
+	NoteKindJournal, NoteKindCapture, NoteKindSeed, NoteKindFacts, NoteKindPerson, NoteKindProject, NoteKindFollowUp,
+}
 
 const (
 	markerOpen  = "---\n"
 	markerClose = "---\n"
 )
 
-var markerPattern = regexp.MustCompile(`\Aori: (journal|capture|seed)\nori_hash: ([0-9a-f]{64})\n\z`)
+var markerPattern = regexp.MustCompile(`\Aori: (` + strings.Join(noteKinds, "|") + `)\nori_hash: ([0-9a-f]{64})\n\z`)
 
 // NoteMark is what a note's first lines say about who wrote it.
 type NoteMark struct {
@@ -32,6 +45,8 @@ type NoteMark struct {
 	// hash that no longer matches, or frontmatter the user added. Anything
 	// Ori cannot prove it wrote counts as the user's.
 	UserModified bool
+	// Hash is the marker's body hash when OwnedByOri.
+	Hash string
 }
 
 // Marked reports whether the note carries Ori's marker at all, edited or not.
@@ -58,7 +73,7 @@ func ReadMark(content []byte) NoteMark {
 	if hash != bodyHash(body) {
 		return NoteMark{Kind: kind, UserModified: true}
 	}
-	return NoteMark{Kind: kind, OwnedByOri: true}
+	return NoteMark{Kind: kind, OwnedByOri: true, Hash: hash}
 }
 
 // cutFrontmatter splits what follows the opening fence at the closing one.
@@ -81,7 +96,7 @@ func parseMarker(front []byte) (kind, hash string, ok bool) {
 	return string(match[1]), string(match[2]), true
 }
 
-var markerKindLine = regexp.MustCompile(`(?m)^ori: (journal|capture|seed)$`)
+var markerKindLine = regexp.MustCompile(`(?m)^ori: (` + strings.Join(noteKinds, "|") + `)$`)
 
 // markInFrontmatter handles frontmatter the user extended: Ori's kind is still
 // there, so the note counts as written by Ori, but it is no longer Ori's to
@@ -100,7 +115,7 @@ func bodyHash(body []byte) string {
 }
 
 func validNoteKind(kind string) bool {
-	return kind == NoteKindJournal || kind == NoteKindCapture || kind == NoteKindSeed
+	return slices.Contains(noteKinds, kind)
 }
 
 // RenderNote is a note as Ori writes it: the marker, then the body.

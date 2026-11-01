@@ -11,16 +11,19 @@ import (
 	"unicode/utf8"
 )
 
-// seededNotes are the notes in Inbox that Ori seeded from the user's own
-// follow-ups, for a folder Ori created. A connected folder has none: a note
-// there that happens to carry the same frontmatter is the user's.
+// seededNotes are the notes in Inbox that Ori copied from the user's own
+// follow-ups, at setup or since, for a folder Ori created. A connected folder has
+// none: a note there that happens to carry the same frontmatter is the user's.
 func seededNotes(source Source, reading Reading) map[string]bool {
 	if !source.CreatedByOri() {
 		return nil
 	}
 	seeded := map[string]bool{}
 	for _, note := range reading.Notes {
-		if strings.HasPrefix(note.RelPath, FolderInbox+"/") && ReadMark(note.Content).Kind == NoteKindSeed {
+		if !strings.HasPrefix(note.RelPath, FolderInbox+"/") {
+			continue
+		}
+		if kind := ReadMark(note.Content).Kind; kind == NoteKindSeed || kind == NoteKindFollowUp {
 			seeded[note.RelPath] = true
 		}
 	}

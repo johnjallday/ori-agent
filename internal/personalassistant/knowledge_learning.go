@@ -53,6 +53,24 @@ type KnowledgeLearningService struct {
 	profiles  ProfileCASStore
 	authority KnowledgeSourceAuthority
 	now       func() time.Time
+	onChanged []func(userID string)
+}
+
+// OnChanged runs fn after the set of approved facts changed. It must not block:
+// the approval it follows has already succeeded. Startup wiring only.
+func (s *KnowledgeLearningService) OnChanged(fn func(userID string)) {
+	if s != nil && fn != nil {
+		s.onChanged = append(s.onChanged, fn)
+	}
+}
+
+func (s *KnowledgeLearningService) notifyChanged(userID string) {
+	if s == nil {
+		return
+	}
+	for _, fn := range s.onChanged {
+		fn(userID)
+	}
 }
 
 // ProfileCASStore changes a single reviewed profile field atomically; an

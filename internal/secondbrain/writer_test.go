@@ -55,12 +55,32 @@ func newWriterTree(t *testing.T) writerTree {
 	return tree
 }
 
+// addFillInTargets gives a tree the user's own notes, and links, where the
+// fill-in writes: People and a project folder.
+func addFillInTargets(t *testing.T, tree writerTree) {
+	t.Helper()
+	writeNote(t, tree.vault, "People/README.md", "# People\n")
+	writeNote(t, tree.vault, "People/Mine.md", "# Someone the user wrote about\n")
+	writeNote(t, tree.vault, "Projects/README.md", "# Projects\n")
+	writeNote(t, tree.vault, "Projects/Album/README.md", "# The user's project\n")
+	if err := os.Symlink(filepath.Join(tree.outside, "secret.md"), filepath.Join(tree.vault, "People", "linked-note.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(tree.outside, filepath.Join(tree.vault, "Projects", "Linked Out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(tree.vault, "Projects", "Album"), filepath.Join(tree.vault, "Projects", "Linked In")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes is
 // the write-side twin of TestRead_NeverLeavesTheFolderNeverFollowsALinkNeverWrites
 // (FR21). Each refusal leaves a byte, mode and mtime snapshot of the whole tree
 // unchanged, and each allowed write changes only its own path.
 func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *testing.T) {
 	tree := newWriterTree(t)
+	addFillInTargets(t, tree)
 	writer := newWriterFor(t, tree.vault)
 	body := []byte("new text\n")
 
@@ -87,6 +107,30 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 		"a different case of the owned": {"inbox/new.md", ErrOutsideOwnedFolders},
 		"a control character":           {"Inbox/a\nb.md", ErrOutsideOwnedFolders},
 		"nothing":                       {"", ErrOutsideOwnedFolders},
+
+		// The fill-in's targets hold the same line.
+		"a person the user wrote":      {"People/Mine.md", ErrUserModified},
+		"a project the user wrote":     {"Projects/Album/README.md", ErrUserModified},
+		"People's own README":          {"People/README.md", ErrOutsideOwnedFolders},
+		"People's README in lower":     {"People/readme.md", ErrOutsideOwnedFolders},
+		"a link in People":             {"People/linked-note.md", ErrOutsideOwnedFolders},
+		"nested in People":             {"People/sub/new.md", ErrOutsideOwnedFolders},
+		"hidden in People":             {"People/.hidden.md", ErrOutsideOwnedFolders},
+		"not Markdown in People":       {"People/run.sh", ErrOutsideOwnedFolders},
+		"a different case of People":   {"people/new.md", ErrOutsideOwnedFolders},
+		"Projects' own README":         {"Projects/README.md", ErrOutsideOwnedFolders},
+		"another note in a project":    {"Projects/Album/notes.md", ErrOutsideOwnedFolders},
+		"nested in a project":          {"Projects/Album/sub/README.md", ErrOutsideOwnedFolders},
+		"a hidden project":             {"Projects/.hidden/README.md", ErrOutsideOwnedFolders},
+		"a project linked out":         {"Projects/Linked Out/README.md", ErrOutsideOwnedFolders},
+		"a project linked across":      {"Projects/Linked In/README.md", ErrOutsideOwnedFolders},
+		"climbing out of a project":    {"Projects/../../outside/README.md", ErrOutsideOwnedFolders},
+		"another root note":            {"Other.md", ErrOutsideOwnedFolders},
+		"the facts note in lower case": {"what ori knows about you.md", ErrOutsideOwnedFolders},
+		"the facts note in a folder":   {"Inbox/../" + FactsNoteRel, ErrOutsideOwnedFolders},
+		"Areas":                        {"Areas/new.md", ErrOutsideOwnedFolders},
+		"Resources":                    {"Resources/new.md", ErrOutsideOwnedFolders},
+		"Archive":                      {"Archive/new.md", ErrOutsideOwnedFolders},
 	}
 	for name, tc := range refusals {
 		t.Run(name, func(t *testing.T) {
@@ -102,7 +146,8 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 
 	allowed := func(t *testing.T, rel string, wantReplaced bool) {
 		t.Helper()
-		protected := withoutPath(snapshot(t, tree.base), filepath.Join(filepath.Base(tree.vault), filepath.FromSlash(rel)), filepath.Join(filepath.Base(tree.vault), filepath.Dir(filepath.FromSlash(rel))))
+		changes := ownPaths(tree.vault, rel)
+		protected := withoutPath(snapshot(t, tree.base), changes...)
 		result, err := writer.Write(rel, NoteKindCapture, body)
 		if err != nil {
 			t.Fatalf("Write(%s): %v", rel, err)
@@ -110,7 +155,7 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 		if result.Rel != rel || result.Replaced != wantReplaced {
 			t.Fatalf("result = %+v", result)
 		}
-		after := withoutPath(snapshot(t, tree.base), filepath.Join(filepath.Base(tree.vault), filepath.FromSlash(rel)), filepath.Join(filepath.Base(tree.vault), filepath.Dir(filepath.FromSlash(rel))))
+		after := withoutPath(snapshot(t, tree.base), changes...)
 		if after != protected {
 			t.Fatalf("writing %s changed something else.\nbefore:\n%s\nafter:\n%s", rel, protected, after)
 		}
@@ -132,6 +177,12 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 	allowed(t, "Inbox/new.md", false)
 	allowed(t, "Daily/2026-10-31.md", false)
 	allowed(t, "Inbox/ori-note.md", true)
+	allowed(t, "People/Dana Lee.md", false)
+	allowed(t, "People/Dana Lee.md", true)
+	allowed(t, "Projects/Launch/README.md", false)
+	allowed(t, "Projects/Launch/README.md", true)
+	allowed(t, FactsNoteRel, false)
+	allowed(t, FactsNoteRel, true)
 
 	assertNoTempFiles(t, tree.vault)
 }
@@ -197,17 +248,71 @@ func TestWrite_RefusesARootThatIsALink(t *testing.T) {
 
 func TestWrite_RecreatesAnOwnedFolderTheUserDeleted(t *testing.T) {
 	tree := newWriterTree(t)
-	for _, folder := range []string{FolderInbox, FolderDaily} {
+	for folder, rel := range map[string]string{
+		FolderInbox: "Inbox/note.md", FolderDaily: "Daily/note.md", FolderPeople: "People/note.md", FolderProjects: "Projects/Launch/README.md",
+	} {
 		if err := os.RemoveAll(filepath.Join(tree.vault, folder)); err != nil {
 			t.Fatal(err)
 		}
-		rel := folder + "/note.md"
 		if _, err := newWriterFor(t, tree.vault).Write(rel, NoteKindCapture, []byte("x\n")); err != nil {
 			t.Fatalf("Write(%s): %v", rel, err)
 		}
-		if _, err := os.Lstat(filepath.Join(tree.vault, folder, "note.md")); err != nil {
+		if _, err := os.Lstat(filepath.Join(tree.vault, filepath.FromSlash(rel))); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestWrite_RefusesAFactsNoteThatIsALink(t *testing.T) {
+	tree := newWriterTree(t)
+	if err := os.Symlink(filepath.Join(tree.outside, "secret.md"), filepath.Join(tree.vault, FactsNoteRel)); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, tree.base)
+	if _, err := newWriterFor(t, tree.vault).Write(FactsNoteRel, NoteKindFacts, []byte("x")); !errors.Is(err, ErrOutsideOwnedFolders) {
+		t.Fatalf("err = %v, want ErrOutsideOwnedFolders", err)
+	}
+	if after := snapshot(t, tree.base); after != before {
+		t.Fatalf("the tree changed.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestInspect_ReadsWithoutChangingAnything(t *testing.T) {
+	tree := newWriterTree(t)
+	addFillInTargets(t, tree)
+	writer := newWriterFor(t, tree.vault)
+	if err := os.RemoveAll(filepath.Join(tree.vault, FolderDaily)); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, tree.base)
+	for rel, want := range map[string]struct{ exists, owned bool }{
+		"Inbox/ori-note.md":             {true, true},
+		"Inbox/mine.md":                 {true, false},
+		"Inbox/linked-note.md":          {true, false},
+		"Inbox/absent.md":               {false, false},
+		"Daily/2026-10-31.md":           {false, false},
+		"People/Mine.md":                {true, false},
+		"Projects/Album/README.md":      {true, false},
+		"Projects/Absent/README.md":     {false, false},
+		"Projects/Linked Out/README.md": {true, false},
+		FactsNoteRel:                    {false, false},
+	} {
+		status, err := writer.Inspect(rel)
+		if err != nil {
+			t.Fatalf("Inspect(%s): %v", rel, err)
+		}
+		if status.Exists != want.exists || status.Owned != want.owned {
+			t.Errorf("Inspect(%s) = %+v, want %+v", rel, status, want)
+		}
+	}
+	if status, _ := writer.Inspect("Inbox/ori-note.md"); status.Kind != NoteKindCapture || status.Hash == "" {
+		t.Errorf("an owned note's status = %+v", status)
+	}
+	if _, err := writer.Inspect("Areas/new.md"); !errors.Is(err, ErrOutsideOwnedFolders) {
+		t.Errorf("a path Ori never writes: err = %v", err)
+	}
+	if after := snapshot(t, tree.base); after != before {
+		t.Fatalf("Inspect changed the tree.\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 
@@ -276,7 +381,7 @@ func TestCreate_NeverReplacesWhateverIsAtTheName(t *testing.T) {
 	if err != nil || result.Replaced || result.Rel != "Inbox/fresh.md" {
 		t.Fatalf("Create = %+v, %v", result, err)
 	}
-	for _, rel := range []string{"Projects/new.md", "Inbox/sub/new.md", "README.md"} {
+	for _, rel := range []string{"Projects/new.md", "Inbox/sub/new.md", "README.md", "People/README.md"} {
 		if _, err := writer.Create(rel, NoteKindCapture, []byte("x")); !errors.Is(err, ErrOutsideOwnedFolders) {
 			t.Errorf("Create(%s): err = %v", rel, err)
 		}
@@ -329,7 +434,20 @@ func TestPublish_NeverClobbersANoteSavedDuringTheWrite(t *testing.T) {
 	}
 }
 
-// withoutPath drops the lines for one note and its folder (whose size and
+// ownPaths are the snapshot paths one write may change: the note and every
+// folder above it, up to and including the root the note is in.
+func ownPaths(vault, rel string) []string {
+	base := filepath.Base(vault)
+	paths := []string{filepath.Join(base, filepath.FromSlash(rel))}
+	for dir := filepath.Dir(filepath.FromSlash(rel)); ; dir = filepath.Dir(dir) {
+		paths = append(paths, filepath.Join(base, dir))
+		if dir == "." {
+			return paths
+		}
+	}
+}
+
+// withoutPath drops the lines for one note and its folders (whose size and
 // mtime a new entry changes) from a snapshot.
 func withoutPath(snapshot string, paths ...string) string {
 	var kept []string

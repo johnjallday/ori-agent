@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/followup"
@@ -114,6 +115,59 @@ func (s secondBrainSeeds) knowledge(ctx context.Context, userID string, seeds *s
 		seeds.Facts = append(seeds.Facts, text)
 	}
 	return nil
+}
+
+var errSecondBrainLearningUnavailable = errors.New("server: the learning service is unavailable")
+
+// factsNoteCategories are the approved facts the facts note lists (FR4). People
+// get notes of their own, and projects come from workspaces and the project
+// question.
+var factsNoteCategories = map[string]bool{"how_you_work": true, "routines": true, "sources": true}
+
+// Holdings gathers what the fill-in copies into the notes on each sync. It reads
+// only what the user has approved. Without the learning service the holdings are
+// unknown rather than empty, so the error stops the sync before any note goes
+// stale.
+func (s secondBrainSeeds) Holdings(ctx context.Context, userID string) (secondbrain.Holdings, error) {
+	var holdings secondbrain.Holdings
+	if s.builder == nil || s.builder.personalAssistantLearning == nil {
+		return holdings, errSecondBrainLearningUnavailable
+	}
+	items, err := s.builder.personalAssistantLearning.ReviewItems(ctx, userID)
+	if err != nil {
+		return holdings, err
+	}
+	for _, item := range items {
+		text := strings.TrimSpace(item.Text)
+		if item.State != personalassistant.KnowledgeApproved || item.ReviewUnavailable != "" || text == "" ||
+			item.SourceKind == personalassistant.SecondBrainSourceKind {
+			continue
+		}
+		held := secondbrain.HeldFact{Text: text, How: knowledgeHowPhrase(item), Date: item.UpdatedAt.Local().Format("2 Jan 2006")}
+		switch {
+		case item.Category == "people":
+			holdings.People = append(holdings.People, held)
+		case factsNoteCategories[item.Category]:
+			holdings.Facts = append(holdings.Facts, held)
+		}
+	}
+	var seeds secondbrain.Seeds
+	s.agreement(ctx, userID, &seeds)
+	holdings.WorkingAgreement = seeds.WorkingAgreement
+	return holdings, nil
+}
+
+// knowledgeHowPhrase says in plain words how Ori came to know a fact, so a user
+// auditing the folder in Obsidian sees why each note exists.
+func knowledgeHowPhrase(item personalassistant.KnowledgeReviewItem) string {
+	switch item.Source.Kind {
+	case personalassistant.KnowledgeInterviewSourceKind:
+		return "You told Ori this when it asked about you"
+	case "explicit":
+		return "You told Ori this"
+	default:
+		return "You approved this on the Profile page"
+	}
 }
 
 // agreement seeds the working agreement's summary: what the user asked the

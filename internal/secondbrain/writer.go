@@ -15,10 +15,17 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
-// The only folders Ori may write in, and only in a folder it created (FR12).
+// The only places Ori may write, and only in a folder it created (FR12, and FR1
+// of the first-week fill-in). splitOwnedPath is the one place the rule lives.
 const (
-	FolderInbox = "Inbox"
-	FolderDaily = "Daily"
+	FolderInbox  = "Inbox"
+	FolderDaily  = "Daily"
+	FolderPeople = "People"
+
+	// FactsNoteRel is the one root note Ori keeps.
+	FactsNoteRel = "What Ori knows about you.md"
+	// projectNoteName is the one note Ori keeps in a project's folder.
+	projectNoteName = "README.md"
 
 	noteFileMode   fs.FileMode = 0o644
 	noteFolderMode fs.FileMode = 0o755
@@ -29,9 +36,9 @@ const (
 var (
 	// ErrNotOwned refuses a source Ori did not create.
 	ErrNotOwned = errors.New("secondbrain: Ori did not create this notes folder")
-	// ErrOutsideOwnedFolders refuses a path that is not a note directly in
-	// Inbox or Daily, or that reaches through a link.
-	ErrOutsideOwnedFolders = errors.New("secondbrain: Ori only writes to Inbox and Daily")
+	// ErrOutsideOwnedFolders refuses a path that is not one of the notes Ori
+	// keeps, or that reaches through a link.
+	ErrOutsideOwnedFolders = errors.New("secondbrain: Ori does not write there")
 	// ErrUserModified refuses to replace a note Ori cannot prove is untouched.
 	ErrUserModified = errors.New("secondbrain: that note is the user's")
 	// ErrNoteTooLarge refuses a note the reader could never read back.
@@ -63,9 +70,9 @@ type WriteResult struct {
 	Replaced bool
 }
 
-// Write puts one marked note at rel, which must be <Inbox|Daily>/<name>.md.
-// A missing Inbox or Daily is recreated. An existing note is replaced only
-// when it is still exactly what Ori wrote. Nothing is ever deleted or renamed
+// Write puts one marked note at rel, which must be a path splitOwnedPath allows.
+// A missing owned folder is recreated. An existing note is replaced only when
+// it is still exactly what Ori wrote. Nothing is ever deleted or renamed
 // except this call's own temp file, which becomes the note.
 func (w *Writer) Write(rel, kind string, body []byte) (WriteResult, error) {
 	return w.write(rel, kind, body, false)
@@ -124,13 +131,42 @@ func (w *Writer) write(rel, kind string, body []byte, create bool) (WriteResult,
 	return WriteResult{Rel: rel, Replaced: exists}, nil
 }
 
-// splitOwnedPath accepts exactly <Inbox|Daily>/<visible name>.md.
+// splitOwnedPath is the whole rule for where Ori writes. It accepts exactly:
+//
+//	Inbox/<name>.md
+//	Daily/<name>.md
+//	People/<name>.md
+//	Projects/<name>/README.md
+//	What Ori knows about you.md
+//
+// folder is "." for the root note. Each folder's own README stays the user's,
+// so People/README.md and Projects/README.md are refused by name or by shape.
 func splitOwnedPath(rel string) (folder, name string, err error) {
 	if rel == "" || path.IsAbs(rel) || path.Clean(rel) != rel || strings.ContainsAny(rel, "\\\x00") {
 		return "", "", ErrOutsideOwnedFolders
 	}
-	folder, name, found := strings.Cut(rel, "/")
-	if !found || (folder != FolderInbox && folder != FolderDaily) {
+	if rel == FactsNoteRel {
+		return ".", rel, nil
+	}
+	top, rest, found := strings.Cut(rel, "/")
+	if !found {
+		return "", "", ErrOutsideOwnedFolders
+	}
+	switch top {
+	case FolderInbox, FolderDaily:
+		folder, name = top, rest
+	case FolderPeople:
+		if strings.EqualFold(rest, projectNoteName) {
+			return "", "", ErrOutsideOwnedFolders
+		}
+		folder, name = top, rest
+	case FolderProjects:
+		project, note, nested := strings.Cut(rest, "/")
+		if !nested || note != projectNoteName || !ValidFolderName(project) {
+			return "", "", ErrOutsideOwnedFolders
+		}
+		return top + "/" + project, note, nil
+	default:
 		return "", "", ErrOutsideOwnedFolders
 	}
 	if strings.Contains(name, "/") || strings.HasPrefix(name, ".") || !IsMarkdown(name) {
@@ -164,13 +200,32 @@ func pinFolder(dir string) (*os.Root, error) {
 	return root, nil
 }
 
-// pinOwnedFolder pins Inbox or Daily, recreating it if the user removed it.
-// os.Root allows a link that stays inside the root, so the folder itself is
-// checked: Inbox as a link to Projects would otherwise write there. Once
-// pinned, a link swapped into its place can no longer redirect the write.
+// pinOwnedFolder pins the folder a note goes in, one level at a time, recreating
+// a level the user removed. folder is "." for the root note.
 func pinOwnedFolder(root *os.Root, folder string) (*os.Root, error) {
+	return pinFolderPath(root, folder, true)
+}
+
+func pinFolderPath(root *os.Root, folder string, create bool) (*os.Root, error) {
+	if folder == "." {
+		return root.OpenRoot(".")
+	}
+	first, rest, nested := strings.Cut(folder, "/")
+	dir, err := pinOneFolder(root, first, create)
+	if err != nil || !nested {
+		return dir, err
+	}
+	defer func() { _ = dir.Close() }()
+	return pinFolderPath(dir, rest, create)
+}
+
+// pinOneFolder pins one folder level. os.Root allows a link that stays inside
+// the root, so the folder itself is checked: Inbox as a link to Projects would
+// otherwise write there. Once pinned, a link swapped into its place can no
+// longer redirect the write.
+func pinOneFolder(root *os.Root, folder string, create bool) (*os.Root, error) {
 	before, err := root.Lstat(folder)
-	if errors.Is(err, fs.ErrNotExist) {
+	if create && errors.Is(err, fs.ErrNotExist) {
 		if err := root.Mkdir(folder, noteFolderMode); err != nil && !errors.Is(err, fs.ErrExist) {
 			return nil, err
 		}
@@ -194,6 +249,76 @@ func pinOwnedFolder(root *os.Root, folder string) (*os.Root, error) {
 	return dir, nil
 }
 
+// NoteStatus is what is at a path Ori may write, as Inspect found it.
+type NoteStatus struct {
+	// Exists says something is at the path, or a link stands in its way.
+	Exists bool
+	// Owned says the note is still exactly what Ori wrote.
+	Owned bool
+	// Kind is the marker's kind, and Hash its body hash, when the note is Owned.
+	Kind string
+	Hash string
+}
+
+// Inspect reads what is at rel without changing anything: no folder is
+// recreated. A link at the path, or in place of a folder on the way to it, is
+// something Ori can never write through, so it reads as existing and not owned.
+func (w *Writer) Inspect(rel string) (NoteStatus, error) {
+	folder, name, err := splitOwnedPath(rel)
+	if err != nil {
+		return NoteStatus{}, err
+	}
+	root, err := pinFolder(w.root)
+	if err != nil {
+		return NoteStatus{}, err
+	}
+	defer func() { _ = root.Close() }()
+	dir, err := pinFolderPath(root, folder, false)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return NoteStatus{}, nil
+	case errors.Is(err, ErrOutsideOwnedFolders):
+		return NoteStatus{Exists: true}, nil
+	case err != nil:
+		return NoteStatus{}, err
+	}
+	defer func() { _ = dir.Close() }()
+	return inspectNote(dir, name)
+}
+
+// inspectNote reads one entry's marker. Anything that is not a small regular
+// note cannot be proved Ori's. An evicted iCloud placeholder is not opened (that
+// would start a download), so it cannot be either.
+func inspectNote(dir *os.Root, name string) (NoteStatus, error) {
+	info, err := dir.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return NoteStatus{}, nil
+	}
+	if err != nil {
+		return NoteStatus{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > MaxNoteBytes || folderdigest.IsDataless(info) {
+		return NoteStatus{Exists: true}, nil
+	}
+	file, err := openNote(dir, name)
+	if err != nil {
+		return NoteStatus{Exists: true}, err
+	}
+	defer func() { _ = file.Close() }()
+	content, err := io.ReadAll(io.LimitReader(file, MaxNoteBytes+1))
+	if err != nil {
+		return NoteStatus{Exists: true}, err
+	}
+	if int64(len(content)) > MaxNoteBytes {
+		return NoteStatus{Exists: true}, nil
+	}
+	mark := ReadMark(content)
+	if !mark.OwnedByOri {
+		return NoteStatus{Exists: true}, nil
+	}
+	return NoteStatus{Exists: true, Owned: true, Kind: mark.Kind, Hash: mark.Hash}, nil
+}
+
 // checkReplaceable reports whether name already exists, refusing anything that
 // is not a small regular note still exactly as Ori wrote it.
 func checkReplaceable(dir *os.Root, name string) (exists bool, err error) {
@@ -207,21 +332,14 @@ func checkReplaceable(dir *os.Root, name string) (exists bool, err error) {
 	if info.Mode()&fs.ModeSymlink != 0 {
 		return true, ErrOutsideOwnedFolders
 	}
-	// An evicted iCloud placeholder is not opened (that would start a
-	// download), so it cannot be proved untouched.
-	if !info.Mode().IsRegular() || info.Size() > MaxNoteBytes || folderdigest.IsDataless(info) {
-		return true, ErrUserModified
-	}
-	file, err := openNote(dir, name)
+	status, err := inspectNote(dir, name)
 	if err != nil {
 		return true, err
 	}
-	defer func() { _ = file.Close() }()
-	content, err := io.ReadAll(io.LimitReader(file, MaxNoteBytes+1))
-	if err != nil {
-		return true, err
+	if !status.Exists {
+		return false, nil
 	}
-	if int64(len(content)) > MaxNoteBytes || ReadMark(content).UserModified {
+	if !status.Owned {
 		return true, ErrUserModified
 	}
 	return true, nil

@@ -14,8 +14,18 @@ import (
 // ApproveCandidate is an internal, explicitly confirmed transition. Until a
 // real source-specific authority is wired, it fails closed. A prepared
 // candidate is always excluded from context; the final approved state is
-// written only after the exact canonical value is durably verified.
+// written only after the exact canonical value is durably verified. Every way a
+// fact gets approved comes through here, the explicit save and the interview
+// included, so this is where observers learn of it.
 func (s *KnowledgeLearningService) ApproveCandidate(ctx context.Context, userID, itemID string, expectedVersion int64, requestID string) (KnowledgeItem, error) {
+	item, err := s.approveCandidate(ctx, userID, itemID, expectedVersion, requestID)
+	if err == nil {
+		s.notifyChanged(userID)
+	}
+	return item, err
+}
+
+func (s *KnowledgeLearningService) approveCandidate(ctx context.Context, userID, itemID string, expectedVersion int64, requestID string) (KnowledgeItem, error) {
 	if s == nil || s.store == nil || s.memory == nil || s.now == nil {
 		return KnowledgeItem{}, ErrRepairNeeded
 	}
