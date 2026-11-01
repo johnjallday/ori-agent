@@ -196,8 +196,7 @@ func TestSecondBrainCreate_TakesATokenAndANameNeverAPath(t *testing.T) {
 	for body, want := range map[string]int{
 		`{"selection_token":"token-1","name":"My Brain","request_id":"s-1"}`:                http.StatusOK,
 		`{"selection_token":" token-1 ","name":" My Brain ","request_id":"s-1"}`:            http.StatusOK,
-		`{"name":"My Brain","request_id":"s-1"}`:                                            http.StatusBadRequest,
-		`{"selection_token":"  ","name":"My Brain","request_id":"s-1"}`:                     http.StatusBadRequest,
+		`{"selection_token":"token-1","name":"My Brain","request_id":"s-1","path":"/tmp"}`:  http.StatusBadRequest,
 		`{"selection_token":"token-1","name":"My Brain","request_id":"s-1","replace":true}`: http.StatusBadRequest,
 	} {
 		fake := &fakeSecondBrain{}
@@ -215,6 +214,21 @@ func TestSecondBrainCreate_TakesATokenAndANameNeverAPath(t *testing.T) {
 			}
 		} else if len(fake.calls) != 0 {
 			t.Errorf("create %s reached the service", body)
+		}
+	}
+}
+
+// No token asks for the default place; the service decides whether there is one.
+func TestSecondBrainCreate_WithoutATokenAsksTheServiceForTheDefaultPlace(t *testing.T) {
+	for _, body := range []string{`{"request_id":"s-1"}`, `{"selection_token":"  ","request_id":"s-1"}`} {
+		fake := &fakeSecondBrain{}
+		response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/create", body, "")
+		if response.Code != http.StatusOK {
+			t.Errorf("create %s = %d", body, response.Code)
+			continue
+		}
+		if fake.create.SelectionToken != "" || fake.create.RequestID != "s-1" {
+			t.Errorf("create input = %+v", fake.create)
 		}
 	}
 }

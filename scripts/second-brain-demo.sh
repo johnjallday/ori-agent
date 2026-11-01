@@ -105,6 +105,12 @@ post() {
 	curl -fsS -X POST -H "Origin: $url" -H 'Content-Type: application/json' -d "$2" "$url$1"
 }
 post /api/onboarding/complete '{}' >/dev/null
+if ((create)); then
+	# The HQ form confirms the Workspace Directory before it builds; without it
+	# Set one up for me has no default place.
+	mkdir -p "$sandbox/Ori Workspaces"
+	post /api/settings/workspace-root "{\"workspace_root\":\"$sandbox/Ori Workspaces\"}" >/dev/null
+fi
 if ((codex)); then
 	post /api/settings/system-model '{"provider":"codex","model":"gpt-5.6-luna"}' >/dev/null
 fi

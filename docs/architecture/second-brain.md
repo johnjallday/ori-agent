@@ -168,7 +168,7 @@ write idempotent.
 | `POST /prompted` | `{request_id}` | status |
 | `POST /ask` | `{decision: later\|none, request_id}` | status |
 | `POST /connect` | `{detected_id}` or `{selection_token}`, `request_id`, optional `replace` | status and `look_id` |
-| `POST /create` | `{selection_token, name, request_id}`: the token names the parent, `name` one folder name | status and `look_id`; sets up a second brain (see below) |
+| `POST /create` | `{selection_token, name, request_id}`: the token names the parent, `name` one folder name; `{request_id}` alone uses the default place | status and `look_id`; sets up a second brain (see below) |
 | `POST /capture` | `{text, request_id}` | `capture` `{note, name, link?}`; one new Inbox note, second brain Ori set up only |
 | `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}` |
 | `POST /look` | `{request_id}` | Look again (429 within 10 minutes of the last look) |
@@ -206,8 +206,18 @@ a missing value can never grant a write. A connected vault cannot become
 
 ### Setting one up
 
-`POST /create` takes the parent from the folder picker's selection token (so it
-passes `folderpath.Check`), and the new folder's name. `secondbrain.Creator`
+By default the folder goes in the Workspace Directory as `<root>/Second Brain`,
+next to `Agents/` and the workspaces, so it travels with the root. The card asks
+one question with the place already named, and **Somewhere else…** leads to the
+picker. It holds no `workspace.json`, the name is a reserved top-level slug, and
+deleting a workspace or Start Fresh does not touch it. Before a Workspace
+Directory is chosen the root is a staging folder, so `setup_default` is absent
+and the card asks where. Changing the Workspace Directory later leaves the
+folder where it is and it stays connected by its path.
+
+`POST /create` with no selection token uses that place and the fixed name.
+With a token it takes the parent from the folder picker (so it passes
+`folderpath.Check`) and the new folder's name. `secondbrain.Creator`
 makes `<parent>/<name>`, which must not exist or must be empty (a lone
 `.DS_Store` counts as empty); it writes the layout above, one README per
 top-level folder, the root README (it opens with "I'll keep Inbox and Daily up

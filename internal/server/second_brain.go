@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderpath"
@@ -35,6 +36,16 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 		},
 		CheckFolder: func(path string) (folderpath.Checked, error) {
 			return folderpath.Check(path, filejanitor.DefaultRootGuards())
+		},
+		// Read on every call: the Workspace Directory can be chosen or changed
+		// while the server runs. The staging folder used before it is chosen
+		// is not a home for the user's notes, so it offers no default.
+		DefaultParent: func() string {
+			root := resolveWorkspaceRoot(b.configManager)
+			if root == config.UnconfirmedWorkspaceRoot() {
+				return ""
+			}
+			return root
 		},
 		FollowUps: lateFollowUps{builder: b},
 		// The headline is written by the system model, through the same path as

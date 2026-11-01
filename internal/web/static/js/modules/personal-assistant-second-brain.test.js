@@ -25,6 +25,7 @@ import {
   secondBrainProjectsView,
   secondBrainQuestRequested,
   secondBrainSetupConfirmView,
+  secondBrainSetupDefaultView,
   secondBrainSetupWhereView,
   secondBrainWrittenLine,
   sinceLabel,
@@ -148,6 +149,20 @@ test('the ask no longer offers "I don\'t keep notes", but a decline on record st
   }
   assert.equal(secondBrainAskView({ ...detected, ask: { state: 'declined' } }, true).show, false);
   assert.equal(secondBrainAnsweredLine('none'), "Got it. I won't ask about notes again.");
+});
+
+test('the one-click setup says where it goes and offers somewhere else', () => {
+  const view = secondBrainSetupDefaultView({
+    parent_name: 'Ori Workspaces',
+    path: '/Users/sam/Ori Workspaces/Second Brain'
+  });
+  assert.equal(view.title, 'Set up your second brain in Ori Workspaces?');
+  assert.equal(view.path, '/Users/sam/Ori Workspaces/Second Brain');
+  assert.equal(view.lines[0], "I'll keep Inbox and Daily up to date; everything else is yours.");
+  assert.deepEqual(
+    view.actions.map(action => action.label),
+    ['Set it up', 'Somewhere else…', 'Not now']
+  );
 });
 
 test('setting one up asks where first, then names the folder and what Ori will write', () => {
@@ -533,11 +548,13 @@ test('the module sends no path to its own endpoint', () => {
     source,
     /body: \{ text: state\.capture\.text, request_id: state\.capture\.requestId \}/
   );
-  // Setting one up sends the parent's token and the folder's name, no path.
+  // Setting one up sends the parent's token and the folder's name, or only a
+  // request id for the default place; never a path.
   assert.match(
     source,
-    /body: \{ selection_token: parent\.selectionToken, name, request_id: state\.setup\.requestId \}/
+    /\{ selection_token: parent\.selectionToken, name, request_id: state\.setup\.requestId \}/
   );
+  assert.match(source, /: \{ request_id: state\.setup\.requestId \}/);
   // Server text is only ever set as text.
   assert.doesNotMatch(source, /innerHTML/);
 });

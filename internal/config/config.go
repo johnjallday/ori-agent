@@ -307,6 +307,18 @@ func RootSkillsDir(root string) string {
 	return filepath.Join(root, SkillsFolderName)
 }
 
+// SecondBrainFolderName is the folder inside the workspace root where "Set
+// one up for me" puts the user's second brain unless they choose another
+// place. It is the user's notes, not Ori's state: no workspace.json, no
+// sidecar, and no reset ever touches it. Like Agents, the name is reserved as
+// a top-level workspace slug.
+const SecondBrainFolderName = "Second Brain"
+
+// RootSecondBrainDir returns <root>/Second Brain for a workspace root.
+func RootSecondBrainDir(root string) string {
+	return filepath.Join(root, SecondBrainFolderName)
+}
+
 // AgentAvatarsDirName is the shared data-dir folder of uploaded agent images.
 const AgentAvatarsDirName = "agent_avatars"
 

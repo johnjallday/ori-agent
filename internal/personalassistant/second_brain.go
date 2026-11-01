@@ -92,10 +92,17 @@ type SecondBrainDeps struct {
 	ResolveSelection func(token string) (string, error)
 	// CheckFolder applies the typed-path rules (folderpath.Check).
 	CheckFolder func(path string) (folderpath.Checked, error)
-	FollowUps   secondbrain.FollowUps
-	Looker      secondbrain.Looker
-	Now         func() time.Time
-	NewID       func() string
+	// DefaultParent is the folder "Set one up for me" uses when the user picks
+	// none: the Workspace Directory, so the second brain sits next to the
+	// workspaces and Agents and travels with the root. It is Ori's own choice,
+	// never a caller's path, and it is the one parent the folder rules would
+	// refuse (the Workspace Directory itself), so it bypasses CheckFolder; the
+	// folder made inside it is checked like any other.
+	DefaultParent func() string
+	FollowUps     secondbrain.FollowUps
+	Looker        secondbrain.Looker
+	Now           func() time.Time
+	NewID         func() string
 }
 
 // SecondBrainService connects the user's notes to the HQ and looks at them.
@@ -194,12 +201,22 @@ type SecondBrainView struct {
 	// WrittenByOri counts what Ori has put in Inbox and Daily; only a status
 	// read of a second brain Ori set up carries it (FR16).
 	WrittenByOri *SecondBrainWrittenView `json:"written_by_ori,omitempty"`
+	// SetupDefault is where Set one up for me puts the folder without asking;
+	// absent while a folder is connected or no default is available.
+	SetupDefault *SecondBrainSetupDefault `json:"setup_default,omitempty"`
 	// Projects lists the folders under Projects, so one can be offered as a
 	// workspace when the user asks (FR18); a second brain Ori set up only.
 	Projects []SecondBrainProjectView `json:"projects,omitempty"`
 	Version  int64                    `json:"version"`
 	// LookID names the look a connect started (or the replayed one).
 	LookID string `json:"look_id,omitempty"`
+}
+
+// SecondBrainSetupDefault is the folder a one-click setup would make.
+type SecondBrainSetupDefault struct {
+	// ParentName is the folder it goes in, by name, for the sentence.
+	ParentName string `json:"parent_name"`
+	Path       string `json:"path"`
 }
 
 // SecondBrainProjectView is one folder under Projects. Path is the folder the
@@ -433,7 +450,9 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 }
 
 // SecondBrainCreateInput names the parent by a selection token and the new
-// folder by a name, never by path (FR4).
+// folder by a name, never by path (FR4). No selection token means the default
+// place: DefaultParent, under the fixed name secondbrain.DefaultFolderName, so
+// Name is ignored.
 type SecondBrainCreateInput struct {
 	SelectionToken string
 	Name           string
@@ -446,7 +465,11 @@ type SecondBrainCreateInput struct {
 // failure after the folder was made removes what this call made.
 func (s *SecondBrainService) Create(ctx context.Context, userID string, input SecondBrainCreateInput) (SecondBrainView, error) {
 	name := strings.TrimSpace(input.Name)
-	if !secondbrain.ValidRequestID(input.RequestID) || input.SelectionToken == "" {
+	useDefault := input.SelectionToken == ""
+	if useDefault {
+		name = secondbrain.DefaultFolderName
+	}
+	if !secondbrain.ValidRequestID(input.RequestID) {
 		return SecondBrainView{}, ErrValidation
 	}
 	if !secondbrain.ValidFolderName(name) {
@@ -470,12 +493,21 @@ func (s *SecondBrainService) Create(ctx context.Context, userID string, input Se
 	if current.Connected() != nil {
 		return SecondBrainView{}, ErrSecondBrainAlreadyConnected
 	}
-	parent, err := s.checkedFolder(input.SelectionToken)
-	if err != nil {
-		return SecondBrainView{}, err
+	var parent string
+	if useDefault {
+		// No default (the Workspace Directory is not chosen yet) asks for a pick.
+		if parent = s.defaultParent(); parent == "" {
+			return SecondBrainView{}, ErrSecondBrainSelection
+		}
+	} else {
+		checked, err := s.checkedFolder(input.SelectionToken)
+		if err != nil {
+			return SecondBrainView{}, err
+		}
+		parent = checked.Path
 	}
 
-	creation, err := s.createFolder(ctx, userID, parent.Path, name)
+	creation, err := s.createFolder(ctx, userID, parent, name)
 	if err != nil {
 		return SecondBrainView{}, err
 	}
@@ -687,6 +719,15 @@ func (s *SecondBrainService) createFolder(ctx context.Context, userID, parent, n
 		logger.Warn("A second brain could not be set up", logger.Fields{"error": err.Error()})
 		return secondbrain.Creation{}, &SecondBrainFolderError{Message: "Ori couldn't set up the folder there. Check that you can write to that location, then try again."}
 	}
+}
+
+// defaultParent is where a second brain goes when the user picks nowhere, or
+// "" when there is no such place.
+func (s *SecondBrainService) defaultParent() string {
+	if s.deps.DefaultParent == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.deps.DefaultParent())
 }
 
 // checkedFolder resolves a folder-picker selection token and applies the
@@ -1100,6 +1141,11 @@ func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
 	}
 	connected := doc.Connected()
 	if connected == nil {
+		if parent := s.defaultParent(); parent != "" {
+			view.SetupDefault = &SecondBrainSetupDefault{
+				ParentName: filepath.Base(parent), Path: filepath.Join(parent, secondbrain.DefaultFolderName),
+			}
+		}
 		return view
 	}
 	view.Status = SecondBrainConnected

@@ -4,6 +4,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   writeFileSync
 } from 'node:fs';
 import { join } from 'node:path';
@@ -102,6 +103,7 @@ async function startSetup(page: Page, request: APIRequestContext) {
   await resetGettingStarted(request);
   await openDrawer(page);
   await action(page, 'setup').click();
+  await action(page, 'elsewhere').click();
   await expect(card(page)).toContainText('Where should I set up your second brain?');
   await card(page).getByLabel('or paste a folder path').fill(documents);
   await card(page).getByRole('button', { name: 'Use this path' }).click();
@@ -125,6 +127,58 @@ test('the ask offers to set one up when no vault is found', async ({ page, reque
     'Set one up for me',
     'Not now'
   ]);
+});
+
+test('set one up in one click: the Workspace Directory, no picker, and Somewhere else comes back', async ({
+  page,
+  request
+}) => {
+  await disconnect(request);
+  await resetGettingStarted(request);
+  const place = (await secondBrain(request)) as SecondBrain & {
+    setup_default?: { parent_name: string; path: string };
+  };
+  expect(place.setup_default?.path.endsWith('/Second Brain')).toBe(true);
+  await openDrawer(page);
+  await action(page, 'setup').click();
+  await expect(card(page)).toContainText(
+    `Set up your second brain in ${place.setup_default?.parent_name}?`
+  );
+  await expect(card(page)).toContainText(place.setup_default?.path as string);
+  await action(page, 'elsewhere').click();
+  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  await card(page).getByRole('button', { name: 'Back' }).click();
+  await action(page, 'create').click();
+  // The server records the canonical path (on macOS /var is /private/var).
+  await expect
+    .poll(async () => (await secondBrain(request)).source?.path, { timeout: 25_000 })
+    .toBe(join(realpathSync(join(place.setup_default?.path as string, '..')), 'Second Brain'));
+  await expect(card(page)).not.toContainText('Where should I set up');
+  await disconnect(request);
+  // The folder stays after a disconnect; move it so later cases start clean.
+  renameSync(place.setup_default?.path as string, `${place.setup_default?.path} ${stamp}`);
+});
+
+test('a default place that is already taken says so and asks where, changing nothing', async ({
+  page,
+  request
+}) => {
+  await disconnect(request);
+  await resetGettingStarted(request);
+  const place = (await secondBrain(request)) as SecondBrain & {
+    setup_default?: { path: string };
+  };
+  const taken = place.setup_default?.path as string;
+  mkdirSync(taken);
+  writeFileSync(join(taken, 'mine.md'), 'mine');
+  await openDrawer(page);
+  await action(page, 'setup').click();
+  await action(page, 'create').click();
+  await expect(card(page)).toContainText('already has something in it');
+  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  expect(readdirSync(taken)).toEqual(['mine.md']);
+  expect((await secondBrain(request)).status).toBe('not_connected');
+  renameSync(taken, `${taken} taken ${stamp}`);
 });
 
 test('set one up: parent, name, confirm; the folder is made, seeded, connected and looked at', async ({
