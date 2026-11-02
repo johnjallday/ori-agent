@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/folderpath"
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 )
@@ -1046,7 +1047,7 @@ func (s *SecondBrainService) Look(ctx context.Context, userID string) (SecondBra
 	if connected == nil {
 		return SecondBrainLookView{}, ErrSecondBrainNotConnected
 	}
-	return s.lookView(userID, connected), nil
+	return s.lookView(ctx, userID, connected), nil
 }
 
 // LookAgain re-reads the folder without a new consent, at most once per
@@ -1089,7 +1090,7 @@ func (s *SecondBrainService) LookAgain(ctx context.Context, userID, requestID st
 		s.startLook(userID, *connected, previous, started.ID, requestID, nil)
 	}
 	s.SyncSoon(userID, "look again")
-	return s.lookView(userID, connected), nil
+	return s.lookView(ctx, userID, connected), nil
 }
 
 // AcceptFollowUps adds the chosen items of the last finished look as HQ
@@ -1228,7 +1229,7 @@ func (s *SecondBrainService) ActOnItem(ctx context.Context, userID, lookID, item
 		if err != nil {
 			return SecondBrainLookView{}, err
 		}
-		return s.lookView(userID, connected), nil
+		return s.lookView(ctx, userID, connected), nil
 	}
 	if connected.LastLook == nil || connected.LastLook.ID != lookID {
 		return SecondBrainLookView{}, ErrSecondBrainLookNotFound
@@ -1292,7 +1293,7 @@ func (s *SecondBrainService) ActOnItem(ctx context.Context, userID, lookID, item
 	if err != nil {
 		return SecondBrainLookView{}, err
 	}
-	return s.lookView(userID, updated.Connected()), nil
+	return s.lookView(ctx, userID, updated.Connected()), nil
 }
 
 // OwnsFirstPrompt says the second-brain ask is the first message after HQ for
@@ -1340,7 +1341,7 @@ func (s *SecondBrainService) DismissLook(ctx context.Context, userID, lookID, re
 	if err != nil {
 		return SecondBrainLookView{}, err
 	}
-	return s.lookView(userID, doc.Connected()), nil
+	return s.lookView(ctx, userID, doc.Connected()), nil
 }
 
 // Disconnect removes the connection at ifVersion (FR37). The follow-ups it
@@ -1470,8 +1471,35 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 // lookView reports a source's look. A running look this process is not
 // running was cut off by a restart; it reads as failed so the look never
 // hangs (FR27).
-func (s *SecondBrainService) lookView(userID string, connected *secondbrain.Source) SecondBrainLookView {
-	return s.withDestinations(connected, s.plainLookView(userID, connected))
+func (s *SecondBrainService) lookView(ctx context.Context, userID string, connected *secondbrain.Source) SecondBrainLookView {
+	return s.withAccepted(ctx, userID, s.withDestinations(connected, s.plainLookView(userID, connected)))
+}
+
+// withAccepted marks, on a copy of a finished look's items, each line a
+// follow-up was already made from, in any state, and stops suggesting it. It
+// reads the follow-ups fresh and saves nothing. When the follow-ups cannot be
+// read the items stay unmarked: the look still reads.
+func (s *SecondBrainService) withAccepted(ctx context.Context, userID string, view SecondBrainLookView) SecondBrainLookView {
+	if s.deps.FollowUps == nil || view.Result == nil || view.State != secondbrain.LookFinished || len(view.Result.Items) == 0 {
+		return view
+	}
+	items := append([]secondbrain.LookItem(nil), view.Result.Items...)
+	for i := range items {
+		existing, err := s.deps.FollowUps.FindBySource(ctx, userID, secondbrain.FollowUpSourceType, items[i].ID)
+		if errors.Is(err, followup.ErrNotFound) || (err == nil && existing == nil) {
+			continue
+		}
+		if err != nil {
+			logger.Warn("The notes look could not check which lines are follow-ups", logger.Fields{"error": err.Error()})
+			return view
+		}
+		items[i].Accepted = true
+		items[i].Suggested = false
+	}
+	result := *view.Result
+	result.Items = items
+	view.Result = &result
+	return view
 }
 
 // projectTickets is the routing for an acceptance. A typed nil would pass as set,

@@ -117,7 +117,8 @@ discipline: no-follow directory handle, its own lock, temp file + fsync +
 rename, mode 0600, a 512 KB cap, schema and owner checks, unknown fields
 refused. It holds the connected source (`id`, `kind`, `name`, `path`,
 `connected_at`, `request_id`, `last_look`, and a running or failed `current`
-look), the ask's state, and up to 32 request receipts. A look keeps only the
+look), the ask's state, when the stale-notes nudge was last put away
+(`nudge_dismissed_at`), and up to 32 request receipts. A look keeps only the
 open-item lines (text, relative path, line, date, content hash, the Obsidian
 link), the headline, the Also noticed line and the counts. Note contents are
 never stored.
@@ -179,7 +180,8 @@ write idempotent.
 | `POST /project` | `{name, answer, request_id}`: `name` one folder name (no slash, not hidden), `answer` the user's own words, folded to one line and refused if empty or secret-like | `{project: {name, rel, link?}}`; writes `Projects/<name>/README.md` and records the question as answered ("The first week") |
 | `POST /project/skip` | `{request_id}` | status; records the project question as skipped, once |
 | `POST /week/dismiss` | `{request_id}` | status; records that the first-week recap row was put away |
-| `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}` |
+| `POST /nudge/dismiss` | `{request_id}` | status; the stale-notes nudge's "Not now" (see "Coming back to the notes") |
+| `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}`; each item of a finished result carries `accepted` when a follow-up made from it exists, read fresh and never stored |
 | `POST /look` | `{request_id}` | Look again (429 within 10 minutes of the last look) |
 | `POST /look/{lookID}/follow-ups` | `{items: "suggested"}` or `{items: [id…]}`, `request_id` | `{created, skipped}` |
 | `POST /look/{lookID}/dismiss` | `{request_id}` | takes a result off Needs you |
@@ -588,6 +590,23 @@ is Ori's, by the server's local date, the same day the Journal proposes.
 `TestListInbox_ListsNewestFirstWithKindAndTitleAndWritesNothing` and
 `TestActOnItem_FollowUpDoneAndDismissLeaveTheNotesUntouched` prove all this against
 a byte, mode and mtime snapshot.
+
+## Coming back to the notes
+
+A look is never run on a timer, so the record says when the notes deserve
+another one, and Today asks. `secondbrain.Nudge` decides it from the stored look
+alone: the last finished look is more than 7 days old (`StaleLookAfter`), or an
+untouched dated line of it came due since (its date is after the look's local
+day and on or before today; done, dismissed, follow-up and seeded lines do not
+count). Today's Needs you then shows one `second_brain_stale` row, "Your notes
+were last read 8 days ago" and/or "2 items in your notes came due", linking to
+the Notes panel, with **Not now** (`POST …/nudge/dismiss`). Not now records
+`nudge_dismissed_at` and holds until a look finishes after it. The row never
+shows while a look runs or while that look's own result row still waits.
+
+`GET …/look` marks each line a follow-up was already made from, in any state,
+as `accepted` and stops suggesting it. The mark is read from the follow-ups on
+every response and refused if a record ever carries it, so it is never stored.
 
 ## What is never done
 

@@ -32,6 +32,75 @@ func (f fakeTodayNotesWithReport) WrittenReport(context.Context, string) (Second
 	return f.report, f.found
 }
 
+type fakeTodayNotesWithNudge struct {
+	fakeTodayNotes
+	report secondbrain.NudgeReport
+}
+
+func (f fakeTodayNotesWithNudge) Nudge(context.Context, string) (secondbrain.NudgeReport, bool) {
+	return f.report, f.report.Any()
+}
+
+func TestTodaySecondBrain_StaleNotesNudge(t *testing.T) {
+	now := time.Date(2026, 10, 29, 9, 0, 0, 0, time.UTC)
+	lookAt := now.Add(-8 * 24 * time.Hour)
+	view := SecondBrainView{Status: SecondBrainConnected, Source: &SecondBrainSourceView{Name: "Second Brain"},
+		LastLook: &SecondBrainLookSummary{ID: "look-1", At: lookAt, OpenItems: 4, Acted: true}}
+	finished := SecondBrainLookView{State: secondbrain.LookFinished, LookID: "look-1"}
+
+	for name, tc := range map[string]struct {
+		report secondbrain.NudgeReport
+		title  string
+	}{
+		"stale":        {secondbrain.NudgeReport{Stale: true, Days: 8}, "Your notes were last read 8 days ago"},
+		"came due":     {secondbrain.NudgeReport{CameDue: 1}, "1 item in your notes came due"},
+		"several due":  {secondbrain.NudgeReport{CameDue: 3}, "3 items in your notes came due"},
+		"both":         {secondbrain.NudgeReport{Stale: true, Days: 8, CameDue: 2}, "Your notes were last read 8 days ago · 2 items came due"},
+		"one day long": {secondbrain.NudgeReport{Stale: true, Days: 1}, "Your notes were last read 1 day ago"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tc.report.LookID, tc.report.LookAt = "look-1", lookAt
+			s := &TodayService{secondBrain: fakeTodayNotesWithNudge{fakeTodayNotes{view: view, look: finished}, tc.report}}
+			_, needs, _ := s.secondBrainItems(context.Background(), "local", "my-hq", now)
+			if len(needs) != 1 {
+				t.Fatalf("needs = %+v", needs)
+			}
+			got := needs[0]
+			if got.Kind != "second_brain_stale" || got.Title != tc.title || got.ID != "second-brain-stale-look-1" ||
+				got.Route != "/workspaces/my-hq?station=second-brain" || !got.SourceAt.Equal(lookAt) ||
+				len(got.Actions) != 1 || got.Actions[0] != "not_now" {
+				t.Fatalf("nudge = %+v", got)
+			}
+		})
+	}
+
+	t.Run("an unacted result card wins over the nudge", func(t *testing.T) {
+		waiting := view
+		summary := *view.LastLook
+		summary.Acted = false
+		waiting.LastLook = &summary
+		s := &TodayService{secondBrain: fakeTodayNotesWithNudge{fakeTodayNotes{view: waiting, look: finished}, secondbrain.NudgeReport{Stale: true, Days: 8}}}
+		_, needs, _ := s.secondBrainItems(context.Background(), "local", "my-hq", now)
+		if len(needs) != 1 || needs[0].Kind != "second_brain_result" {
+			t.Fatalf("needs = %+v, want only the result card", needs)
+		}
+	})
+
+	t.Run("a running look holds the nudge back", func(t *testing.T) {
+		s := &TodayService{secondBrain: fakeTodayNotesWithNudge{fakeTodayNotes{view: view, look: SecondBrainLookView{State: secondbrain.LookRunning, LookID: "look-2"}}, secondbrain.NudgeReport{Stale: true, Days: 8}}}
+		if _, needs, _ := s.secondBrainItems(context.Background(), "local", "my-hq", now); len(needs) != 0 {
+			t.Fatalf("needs = %+v", needs)
+		}
+	})
+
+	t.Run("nothing to nudge about is no row", func(t *testing.T) {
+		s := &TodayService{secondBrain: fakeTodayNotesWithNudge{fakeTodayNotes{view: view, look: finished}, secondbrain.NudgeReport{}}}
+		if _, needs, _ := s.secondBrainItems(context.Background(), "local", "my-hq", now); len(needs) != 0 {
+			t.Fatalf("needs = %+v", needs)
+		}
+	})
+}
+
 func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 	connected := SecondBrainView{Status: SecondBrainConnected, Source: &SecondBrainSourceView{Name: "Second Brain"}}
