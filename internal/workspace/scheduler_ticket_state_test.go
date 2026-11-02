@@ -2,7 +2,8 @@ package workspace
 
 import (
 	"fmt"
-	"os"
+	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -199,23 +200,22 @@ func assertScheduleFiring(t *testing.T, tc scheduleFiringCase, got scheduleFirin
 		}
 	}
 	if tc.wantFires {
-		if got.executions != 1 {
-			t.Errorf("execution count = %d, want 1", got.executions)
+		if got.status != TaskStatusAssigned {
+			t.Errorf("legacy status = %q, want assigned: the executor must find this firing's run", got.status)
 		}
 		return
 	}
-	if got.executions != 0 {
-		t.Errorf("execution count = %d, want 0 for a ticket that must not fire", got.executions)
+	if got.status == TaskStatusAssigned {
+		t.Errorf("a ticket that must not fire was queued")
 	}
 	if !got.ticketFailure {
 		t.Errorf("a refused firing must be shown on the ticket (a failed execution entry)")
 	}
 }
 
-// TestScheduledFiring_MovesTicketStateOnlyThroughLegalTransitions is the
-// failing-first test for FR-30 on the schedule stored on the task.
+// TestScheduledFiring_MovesTicketStateOnlyThroughLegalTransitions is FR-30 on the
+// schedule stored on the task.
 func TestScheduledFiring_MovesTicketStateOnlyThroughLegalTransitions(t *testing.T) {
-	skipUntilScheduledFiringsAreLegal(t)
 	for _, tc := range scheduleFiringCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			got := fireScheduleOnTicket(t, tc, func(ts *TaskScheduler, ws *Workspace, _ *ScheduledTask, now time.Time) {
@@ -233,7 +233,6 @@ func TestScheduledFiring_MovesTicketStateOnlyThroughLegalTransitions(t *testing.
 // TestScheduledFiring_ScheduledTaskEntityMovesTicketStateLegally is the same
 // contract for a ScheduledTask entity that targets the ticket.
 func TestScheduledFiring_ScheduledTaskEntityMovesTicketStateLegally(t *testing.T) {
-	skipUntilScheduledFiringsAreLegal(t)
 	for _, tc := range scheduleFiringCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			got := fireScheduleOnTicket(t, tc, func(ts *TaskScheduler, ws *Workspace, st *ScheduledTask, now time.Time) {
@@ -286,12 +285,178 @@ func TestScheduledTaskEntity_IsMigratedOntoItsTicketOnLoad(t *testing.T) {
 	}
 }
 
-// skipUntilScheduledFiringsAreLegal keeps the FR-30 contract written but off
-// the gate until task 4.3 closes it; ORI_RUN_FR30_CONTRACT=1 runs it red now.
-// Task 4.3 deletes this helper and its two call sites.
-func skipUntilScheduledFiringsAreLegal(t *testing.T) {
+// fireAndRun fires the ticket's schedule, then lets the real executor run what
+// the firing queued, and waits for that run to finish.
+func fireAndRun(t *testing.T, store Store, ts *TaskScheduler, te *TaskExecutor, wsID string, wantCalls int64, handler *fakeTaskHandler) *Task {
 	t.Helper()
-	if os.Getenv("ORI_RUN_FR30_CONTRACT") == "" {
-		t.Skip("FR-30 gap recorded in tasks/findings (1.2); closed by task 4.3")
+	ws, err := store.Get(wsID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	task, err := ws.GetTask("t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	ts.executeTaskSchedule(ws, task, time.Now())
+	te.checkAndExecuteTasks()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ws, err = store.Get(wsID)
+		if err != nil {
+			t.Fatalf("get workspace: %v", err)
+		}
+		got, err := ws.GetTask("t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if atomic.LoadInt64(&handler.calls) == wantCalls && got.Status == TaskStatusCompleted {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run did not finish: calls=%d status=%q", atomic.LoadInt64(&handler.calls), got.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func scheduledTicketFixture(t *testing.T, schedule ScheduleType) (Store, *TaskScheduler, *TaskExecutor, *fakeTaskHandler, string) {
+	t.Helper()
+	store := newExecutorTestStore(t)
+	ws := newWorkspaceWithTasks(t, []Task{{
+		ID:              "t1",
+		To:              "agent-a",
+		TicketState:     TicketStateReady,
+		Status:          TaskStatusPending,
+		Schedule:        &ScheduleConfig{Type: schedule, Interval: time.Hour},
+		ScheduleEnabled: true,
+	}})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	handler := &fakeTaskHandler{}
+	te := NewTaskExecutor(store, handler, ExecutorConfig{PollInterval: time.Hour, MaxConcurrent: 5})
+	return store, NewTaskScheduler(store, SchedulerConfig{}), te, handler, ws.ID
+}
+
+// PRD 760 metric 6: two firings are two runs on one ticket, with legal history.
+func TestScheduledFiring_TwoFiringsOfARecurringTicketAreTwoAttempts(t *testing.T) {
+	store, ts, te, handler, wsID := scheduledTicketFixture(t, ScheduleInterval)
+
+	first := fireAndRun(t, store, ts, te, wsID, 1, handler)
+	if first.CanonicalState() != TicketStateInProgress {
+		t.Errorf("after one occurrence state = %q, want In Progress (recurring work is never finished by one, FR-41)", first.CanonicalState())
+	}
+
+	second := fireAndRun(t, store, ts, te, wsID, 2, handler)
+	if second.CanonicalState() != TicketStateInProgress {
+		t.Errorf("after two occurrences state = %q", second.CanonicalState())
+	}
+	if calls := atomic.LoadInt64(&handler.calls); calls != 2 {
+		t.Errorf("runs = %d, want 2", calls)
+	}
+	if second.ExecutionCount != 2 {
+		t.Errorf("ExecutionCount = %d, want 2: one for each run, not one more for each firing", second.ExecutionCount)
+	}
+	if len(second.StateHistory) != 1 ||
+		second.StateHistory[0].From != TicketStateReady ||
+		second.StateHistory[0].To != TicketStateInProgress ||
+		second.StateHistory[0].Actor != TicketActorScheduler {
+		t.Errorf("history = %+v, want only Ready to In Progress by the scheduler", second.StateHistory)
+	}
+}
+
+func TestScheduledFiring_AOneTimeTicketGoesToReviewAndCanFireAgain(t *testing.T) {
+	store, ts, te, handler, wsID := scheduledTicketFixture(t, ScheduleOnce)
+
+	first := fireAndRun(t, store, ts, te, wsID, 1, handler)
+	if first.CanonicalState() != TicketStateReview {
+		t.Fatalf("state = %q, want Review: a finished one-time run waits for a person", first.CanonicalState())
+	}
+	last := first.StateHistory[len(first.StateHistory)-1]
+	if last.To != TicketStateReview || last.Actor != TicketActorRun {
+		t.Errorf("last history entry = %+v, want In Progress to Review by the run", last)
+	}
+
+	// Review back to In Progress is the retry path; the run ends in Review again.
+	second := fireAndRun(t, store, ts, te, wsID, 2, handler)
+	if second.CanonicalState() != TicketStateReview {
+		t.Errorf("state = %q, want Review", second.CanonicalState())
+	}
+	var froms []TicketState
+	for _, change := range second.StateHistory {
+		froms = append(froms, change.From)
+	}
+	if want := []TicketState{TicketStateReady, TicketStateInProgress, TicketStateReview, TicketStateInProgress}; !slices.Equal(froms, want) {
+		t.Errorf("history froms = %v, want %v", froms, want)
+	}
+}
+
+func TestScheduledFiring_ARunStillQueuedIsNotFiredTwice(t *testing.T) {
+	store, ts, _, _, wsID := scheduledTicketFixture(t, ScheduleInterval)
+	for range 2 {
+		ws, err := store.Get(wsID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		task, err := ws.GetTask("t1")
+		if err != nil {
+			t.Fatalf("task: %v", err)
+		}
+		ts.executeTaskSchedule(ws, task, time.Now())
+	}
+	ws, err := store.Get(wsID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	got, err := ws.GetTask("t1")
+	if err != nil {
+		t.Fatalf("task: %v", err)
+	}
+	if got.Status != TaskStatusAssigned || got.FailureCount != 1 {
+		t.Errorf("status %q failures %d, want one queued run and the second firing refused and shown", got.Status, got.FailureCount)
+	}
+}
+
+// An executor run of a record with no stored ticket state stays as it was: this
+// feature moves tickets a firing moved, not every legacy row.
+func TestExecutorRun_LeavesARecordWithNoStoredStateAlone(t *testing.T) {
+	task := Task{ID: "t", Status: TaskStatusCompleted}
+	if task.ApplyRunOutcome(TicketRunResult{Outcome: TicketRunSucceeded}) {
+		t.Error("a completed legacy record reads as Done, and a run outcome must not move it")
+	}
+	if task.TicketState != "" {
+		t.Errorf("TicketState = %q, want nothing stored", task.TicketState)
+	}
+}
+
+// A ticket stopped back to Ready waits for someone: legacy assigned alone does not
+// mean run this (ticket PRD FR-24). A firing clears the wait, because it is a start.
+func TestExecutor_LeavesATicketWaitingAtReadyAlone(t *testing.T) {
+	store := newExecutorTestStore(t)
+	ws := newWorkspaceWithTasks(t, []Task{{
+		ID:                      "t1",
+		To:                      "agent-a",
+		TicketState:             TicketStateReady,
+		Status:                  TaskStatusAssigned,
+		AwaitingExecutionIntent: true,
+	}})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	handler := &fakeTaskHandler{}
+	te := NewTaskExecutor(store, handler, ExecutorConfig{PollInterval: time.Hour, MaxConcurrent: 5})
+	te.checkAndExecuteTasks()
+	time.Sleep(50 * time.Millisecond)
+	if calls := atomic.LoadInt64(&handler.calls); calls != 0 {
+		t.Errorf("runs = %d, want 0", calls)
+	}
+
+	task := Task{ID: "t2", To: "agent-a", TicketState: TicketStateReady, Status: TaskStatusAssigned, AwaitingExecutionIntent: true}
+	if err := task.PrepareScheduledFiring(time.Now()); err != nil {
+		t.Fatalf("firing: %v", err)
+	}
+	if task.AwaitingExecutionIntent || task.Status != TaskStatusAssigned {
+		t.Errorf("after a firing: waiting %v status %q, want queued", task.AwaitingExecutionIntent, task.Status)
 	}
 }

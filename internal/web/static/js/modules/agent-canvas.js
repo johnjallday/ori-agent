@@ -1518,7 +1518,7 @@ class AgentCanvas {
 
     // Create backend task for this combiner
     try {
-      const response = await apiPost(`/api/workspaces/${this.workspaceId}/tasks`, {
+      const response = await window.WorkspaceHubTickets.api.createStep(this.workspaceId, {
         description: `${combinerType.name}: ${combinerType.description}`,
         from: '',
         to: '',
@@ -1735,8 +1735,8 @@ class AgentCanvas {
    */
   async createWorkflowTaskNode(node, x, y) {
     const config = node.config || {};
-    const response = await apiPost(`/api/workspaces/${this.workspaceId}/tasks`, {
-      description: config.description || 'New Task',
+    const response = await window.WorkspaceHubTickets.api.createStep(this.workspaceId, {
+      description: config.description || 'New step',
       to: config.to || 'unassigned',
       from: config.from || 'user',
       priority: config.priority || 0

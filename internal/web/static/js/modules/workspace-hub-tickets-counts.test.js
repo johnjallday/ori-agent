@@ -139,6 +139,23 @@ test('ticketEditChanges turns the edit form into an update carrying the version'
   assert.equal(api.ticketEditChanges({ due: '' }, { version: 1 }).dueDate, null, 'clearing due');
 });
 
+test('a connected step goes through the client and announces the change', async () => {
+  let call = null;
+  const { api, announced } = loadTickets((url, options) => {
+    call = { url, body: JSON.parse(options.body) };
+    return { body: { task: { id: 't-1' } } };
+  });
+  const result = await api.api.createStep('ws 1', {
+    description: 'Merge',
+    combiner_type: 'merge',
+    x: 10
+  });
+  assert.equal(call.url, '/api/workspaces/ws%201/tasks');
+  assert.equal(call.body.combiner_type, 'merge');
+  assert.equal(result.task.id, 't-1');
+  assert.equal(announced.length, 1);
+});
+
 test('a failed create announces nothing', async () => {
   const { api, announced } = loadTickets(() => ({
     ok: false,

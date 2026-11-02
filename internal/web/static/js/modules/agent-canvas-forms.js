@@ -80,25 +80,14 @@ export class AgentCanvasForms {
     }
 
     try {
-      const response = await fetch('/api/orchestration/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Failed to create task');
-      }
-
-      await response.json();
+      await window.WorkspaceHubTickets.api.createStep(this.canvas.workspaceId, requestBody);
 
       this.hideCreateTaskForm();
       await this.canvas.init();
-      alert(`✅ Task created successfully!`);
+      alert(`✅ Ticket created.`);
     } catch (error) {
-      console.error('❌ Error creating task:', error);
-      alert('Failed to create task: ' + error.message);
+      console.error('❌ Error creating ticket:', error);
+      alert('Could not create the ticket: ' + error.message);
     }
   }
 

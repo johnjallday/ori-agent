@@ -466,9 +466,9 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 	}
 	logger.Debug("📅 Executing scheduled task", logger.Fields{"task_id": task.ID, "name": task.ScheduleName})
 
-	// A Backlog task cannot legitimately carry a schedule (see
-	// ValidateBacklogTaskInvariants), but guard explicitly anyway (FR7-9).
-	if err := RequireTaskNotBacklog(task, "cannot schedule task"); err != nil {
+	// Backlog, Cancelled and a run already active or queued do not fire. The
+	// refusal is recorded on the ticket, where a person can see it (FR-30).
+	if err := scheduledFiringRefusal(task); err != nil {
 		ts.recordTaskScheduleFailure(ws, task, err)
 		return
 	}
@@ -476,12 +476,6 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 	// Validate task is assigned to an agent
 	if task.To == "" || task.To == "unassigned" {
 		ts.recordTaskScheduleFailure(ws, task, fmt.Errorf("task is not assigned to an agent"))
-		return
-	}
-
-	// Don't interrupt in-progress tasks
-	if task.Status == TaskStatusInProgress {
-		ts.recordTaskScheduleFailure(ws, task, fmt.Errorf("task is already in progress"))
 		return
 	}
 
@@ -496,26 +490,17 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 			return fmt.Errorf("task %q has no schedule", t.ID)
 		}
 
-		// Reset task state for re-execution
-		if err := t.SetStatus(TaskStatusAssigned); err != nil {
-			return fmt.Errorf("scheduler: reset task to assigned: %w", err)
+		// Move the ticket and queue this firing's run.
+		if err := t.PrepareScheduledFiring(now); err != nil {
+			return fmt.Errorf("scheduler: %w", err)
 		}
-		ResetTaskRuntime(t)
 
 		// Update schedule tracking
+		// The run this firing queued records its own execution and count, with
+		// its real outcome. Counting the firing too made one run read as two, and
+		// made MaxRuns stop at half.
 		t.LastRun = &now
-		t.ExecutionCount++
 		t.FailureCount = 0 // Reset failure count on successful trigger
-
-		// Add to execution history
-		t.ExecutionHistory = append(t.ExecutionHistory, TaskExecution{
-			TaskID:     t.ID,
-			ExecutedAt: now,
-			Status:     "success",
-		})
-		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
-			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
-		}
 
 		// Calculate next run
 		nextRun = CalculateNextRun(*t.Schedule, now)
@@ -532,6 +517,9 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 		return nil
 	}); err != nil {
 		logger.Error("Failed to record scheduled task execution", logger.Fields{"error": err, "task_id": task.ID})
+		// A firing that could not start is a failure the ticket shows, never a
+		// silent skip.
+		ts.recordTaskScheduleFailure(ws, task, err)
 		return
 	}
 
@@ -647,13 +635,8 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 		return
 	}
 
-	if err := RequireTaskNotBacklog(targetTask, "cannot schedule task"); err != nil {
+	if err := scheduledFiringRefusal(targetTask); err != nil {
 		ts.recordScheduleFailure(ws, st, err, targetTask.ID)
-		return
-	}
-
-	if targetTask.Status == TaskStatusInProgress {
-		ts.recordScheduleFailure(ws, st, fmt.Errorf("target task %s is already in progress", targetTask.ID), targetTask.ID)
 		return
 	}
 
@@ -662,13 +645,9 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 		return
 	}
 
-	// Reset task state for rerun and queue it for the executor
+	// Move the ticket and queue this firing's run.
 	if err := ws.MutateTask(targetTask.ID, func(t *Task) error {
-		if err := t.SetStatus(TaskStatusAssigned); err != nil {
-			return fmt.Errorf("scheduler: reset target task to assigned: %w", err)
-		}
-		ResetTaskRuntime(t)
-		return nil
+		return t.PrepareScheduledFiring(now)
 	}); err != nil {
 		ts.recordScheduleFailure(ws, st, fmt.Errorf("failed to queue target task %s: %w", targetTask.ID, err), targetTask.ID)
 		return
@@ -698,9 +677,10 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 		logger.Info("Scheduled task completed (one-time execution), disabling", logger.Fields{"scheduler_id": st.ID})
 	}
 
+	// The ticket has already moved, so it is saved even if the entity's own
+	// bookkeeping cannot be updated.
 	if err := ws.UpdateScheduledTask(*st); err != nil {
 		logger.Error("Failed to update scheduled task", logger.Fields{"error": err})
-		return
 	}
 
 	if err := ts.workspaceStore.Save(ws); err != nil {
@@ -756,6 +736,16 @@ func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask,
 
 	if err := ws.UpdateScheduledTask(*st); err != nil {
 		logger.Error("Failed to update scheduled task", logger.Fields{"error": err})
+	}
+	// The failure is shown on the ticket too, not only on the schedule (FR-30).
+	if err := ws.MutateTask(taskID, func(t *Task) error {
+		t.ExecutionHistory = append(t.ExecutionHistory, execution)
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
+		}
+		return nil
+	}); err != nil {
+		logger.Debug("Scheduled failure has no ticket to show it on", logger.Fields{"task_id": taskID})
 	}
 	if err := ts.workspaceStore.Save(ws); err != nil {
 		logger.Error("Failed to save workspace", logger.Fields{"error": err})

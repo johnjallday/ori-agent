@@ -8488,7 +8488,7 @@ export class WorkspaceTaskPage {
     if (this.elements.scheduleModalHeading) {
       this.elements.scheduleModalHeading.textContent = hasSchedule
         ? 'Edit Repeat Schedule'
-        : 'Repeat Task';
+        : 'Repeat this ticket';
     }
     if (this.elements.scheduleModalMeta) {
       const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);

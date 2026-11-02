@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -157,6 +158,59 @@ func RequireTicketRunnable(task *Task, action string) error {
 				"; reopen it to Ready before running it again",
 		}
 	}
+	return nil
+}
+
+// scheduledFiringRefusal reports why a schedule must not fire on this ticket now,
+// or nil when it may (PRD 760 FR-30). Backlog is not committed and Cancelled was a
+// decision to stop. "In Progress" only refuses while a run is active or queued: a
+// recurring ticket stays In Progress between occurrences, and its next firing is
+// a new attempt on the same ticket.
+func scheduledFiringRefusal(t *Task) error {
+	if err := RequireTaskNotBacklog(t, "cannot schedule task"); err != nil {
+		return err
+	}
+	state := t.CanonicalState()
+	if state == TicketStateCancelled {
+		return &TicketValidationError{Field: "state", Message: "cannot schedule task: ticket is Cancelled"}
+	}
+	switch t.Status {
+	case TaskStatusInProgress, TaskStatusWaitingForChoice:
+		return fmt.Errorf("task %s is already in progress", t.ID)
+	case TaskStatusAssigned:
+		if state == TicketStateInProgress {
+			return fmt.Errorf("task %s is already queued to run", t.ID)
+		}
+	}
+	return nil
+}
+
+// PrepareScheduledFiring moves a ticket for one firing and queues it for the
+// executor (PRD 760 FR-30). State moves only through legal transitions, recorded
+// with actor scheduler: Ready to In Progress, Review back to In Progress, Done
+// through Ready to In Progress. Legacy assigned is set last because it is how the
+// executor finds queued work; TransitionTicket's projection alone would read as
+// already running, and nothing would pick it up.
+func (t *Task) PrepareScheduledFiring(at time.Time) error {
+	if err := scheduledFiringRefusal(t); err != nil {
+		return err
+	}
+	at = at.UTC()
+	ResetTaskRuntime(t)
+	change := TicketStateChange{Actor: TicketActorScheduler, Reason: "Scheduled run", Timestamp: at}
+	if t.CanonicalState() == TicketStateDone {
+		if err := t.TransitionTicket(TicketStateReady, change); err != nil {
+			return err
+		}
+	}
+	if t.CanonicalState() != TicketStateInProgress {
+		if err := t.TransitionTicket(TicketStateInProgress, change); err != nil {
+			return err
+		}
+	}
+	t.AwaitingExecutionIntent = false
+	t.ForceStatus(TaskStatusAssigned)
+	touchTicket(t)
 	return nil
 }
 

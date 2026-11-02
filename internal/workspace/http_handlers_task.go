@@ -136,6 +136,16 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A connected step is a ticket like any other (PRD 760 FR-16): it has a state,
+	// a number, a place on the board and a first history entry. Status stays
+	// pending, so it waits for its turn rather than running on its own.
+	task.TicketState = TicketStateReady
+	task.TicketNumber = allocateTicketNumber(workspace)
+	task.StateRank = nextTicketRank(workspace, TicketStateReady)
+	task.TicketVersion = 1
+	task.SourceType = TicketSourceManual
+	task.StateHistory = []TicketStateChange{{To: TicketStateReady, Actor: TicketActorUser, Timestamp: time.Now().UTC()}}
+
 	// Add task to workspace
 	if err := workspace.AddTask(task); err != nil {
 		logger.Error("CreateTask - AddTask failed", logger.Fields{"task_id": task.ID, "error": err})

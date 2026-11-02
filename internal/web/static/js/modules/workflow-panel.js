@@ -450,24 +450,14 @@ class WorkflowPanel {
    */
   async createTaskNode(node, x, y) {
     const config = node.config || {};
-    const response = await fetch(`/api/workspaces/${this.workspaceId}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        description: config.description || 'New Task',
-        to: config.to || 'unassigned',
-        from: config.from || 'user',
-        priority: config.priority || 0,
-        x: x,
-        y: y
-      })
+    return window.WorkspaceHubTickets.api.createStep(this.workspaceId, {
+      description: config.description || 'New step',
+      to: config.to || 'unassigned',
+      from: config.from || 'user',
+      priority: config.priority || 0,
+      x: x,
+      y: y
     });
-
-    if (!response.ok) {
-      throw new Error('Failed to create task');
-    }
-
-    return response.json();
   }
 
   /**

@@ -723,7 +723,17 @@ function showAddTaskModal() {
     return;
   }
 
-  // Use shared task modal controller
+  // The canvas toolbar opens the one Give work flow (PRD 760 FR-15).
+  if (window.OriGiveWork && typeof window.OriGiveWork.open === 'function') {
+    const agents = window.agentCanvas?.state?.agents || [];
+    window.OriGiveWork.open({
+      workspaceId,
+      agents: agents.map(agent => agent.name).filter(Boolean),
+      trigger: document.activeElement,
+      onSaved: () => window.agentCanvas?.loadWorkspaceData?.()
+    });
+    return;
+  }
   if (window.taskModalController) {
     window.taskModalController.openForCreate(workspaceId, '', () => {
       // Refresh canvas after task creation

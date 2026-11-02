@@ -352,6 +352,22 @@
       return ticket;
     },
 
+    /**
+     * Creates a connected step for the canvas and the workflow panel (PRD 760
+     * FR-16). They need fields a ticket form never asks for: combiner settings,
+     * sender and a free-form assignee. The result is a normal ticket on the board.
+     * Resolves to the server's { task } envelope, which those callers lay out.
+     */
+    async createStep(studioId, step) {
+      const payload = await request(
+        'POST',
+        `/api/workspaces/${encodeURIComponent(studioId)}/tasks`,
+        step
+      );
+      announceChange(studioId);
+      return payload;
+    },
+
     async get(studioId, ticketId) {
       const payload = await request(
         'GET',
@@ -1368,7 +1384,7 @@
     const execution = document.createElement('dl');
     execution.className = 'ticket-detail-summary';
     appendDetailRow(execution, 'Assignee', ticket.assignee || 'Unassigned');
-    appendDetailRow(execution, 'Schedule', ticket.scheduleEnabled ? 'Enabled' : 'None');
+    appendDetailRow(execution, 'Schedule', ticket.scheduleEnabled ? 'On' : 'Off');
     appendDetailRow(
       execution,
       'Waiting for intent',
