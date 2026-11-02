@@ -116,6 +116,9 @@ type ticketListResponse struct {
 	// client can distinguish "that is all of them" from "there are more".
 	Total     int  `json:"total"`
 	Truncated bool `json:"truncated,omitempty"`
+	// Counts is the workspace's own tickets by state, whatever the filters, so a
+	// one-row request refreshes the count line (PRD 760 FR-11).
+	Counts workspace.TicketCounts `json:"counts"`
 	// PartialOwners names descendant workspaces that could not be read during
 	// a roll-up, so the UI can say the list is incomplete rather than present
 	// it as whole (FR-133).
@@ -254,6 +257,7 @@ func (th *TicketHandler) handleList(w http.ResponseWriter, r *http.Request, stud
 		Count:              len(page.Tickets),
 		Total:              page.Total,
 		Truncated:          page.Truncated,
+		Counts:             page.Counts,
 		PartialOwners:      page.PartialOwners,
 		StudioID:           studioID,
 		IncludeDescendants: query.IncludeDescendants,

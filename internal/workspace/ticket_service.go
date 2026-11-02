@@ -312,7 +312,7 @@ func (s *TicketService) Search(query TicketQuery) (TicketPage, error) {
 		return TicketPage{}, err
 	}
 
-	page := TicketPage{Tickets: localTickets(ws, filter)}
+	page := TicketPage{Tickets: localTickets(ws, filter), Counts: ws.TicketCounts()}
 	if query.IncludeDescendants {
 		descendantIDs, err := s.descendantWorkspaceIDs(query.WorkspaceID)
 		if err != nil {

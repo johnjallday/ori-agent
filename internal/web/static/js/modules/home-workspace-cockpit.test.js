@@ -336,30 +336,57 @@ test('folderDisplayFor distinguishes a linked folder from no folder at all', () 
 // Signals (FR30, FR63, FR121)
 // ---------------------------------------------------------------------------
 
-test('workspaceSignals: attention outranks running, which outranks open tasks', () => {
+// The server's canonical count by ticket state (PRD 760 FR-6, FR-10). A helper
+// keeps the fixtures about the behavior rather than the shape.
+const work = (ready = 0, extra = {}) => ({ ticket_counts: { ready, ...extra } });
+
+test('workspaceSignals: attention outranks running, which outranks open work', () => {
   assert.equal(
-    workspaceSignals({ needs_attention_count: 2, active: true, open_task_count: 5 }).status,
+    workspaceSignals({ needs_attention_count: 2, active: true, ...work(5) }).status,
     'attention'
   );
   assert.equal(
-    workspaceSignals({ needs_attention_count: 0, active: true, open_task_count: 5 }).status,
+    workspaceSignals({ needs_attention_count: 0, active: true, ...work(5) }).status,
     'running'
   );
   assert.equal(
-    workspaceSignals({ needs_attention_count: 0, active: false, open_task_count: 5 }).status,
+    workspaceSignals({ needs_attention_count: 0, active: false, ...work(5) }).status,
     'active'
   );
   assert.equal(
-    workspaceSignals({ needs_attention_count: 0, active: false, open_task_count: 0 }).status,
+    workspaceSignals({ needs_attention_count: 0, active: false, ...work(0) }).status,
     'idle'
   );
+});
+
+test('workspaceSignals counts Review, In Progress and Ready as open work, and nothing else', () => {
+  const signals = workspaceSignals({
+    needs_attention_count: 0,
+    ticket_counts: { backlog: 9, ready: 1, in_progress: 2, review: 3, done: 7, cancelled: 4 }
+  });
+  assert.equal(signals.openWork, 6);
+  assert.equal(signals.tickets.review, 3);
+  const closedOnly = workspaceSignals({
+    needs_attention_count: 0,
+    ticket_counts: { backlog: 9, done: 7 }
+  });
+  assert.equal(closedOnly.openWork, 0);
+  assert.equal(closedOnly.status, 'idle');
+});
+
+test('workspaceSignals never reads the legacy open_task_count', () => {
+  const signals = workspaceSignals({ needs_attention_count: 0, active: false, open_task_count: 5 });
+  assert.equal(signals.openWork, null, 'a workspace without ticket_counts has unknown work');
+  assert.equal(signals.status, 'unknown');
+  assert.equal(signals.partial, true);
 });
 
 test('workspaceSignals: a payload carrying no signal fields is unknown, not idle (FR121)', () => {
   const signals = workspaceSignals({ id: 'w1', name: 'No data' });
   assert.equal(signals.status, 'unknown');
   assert.equal(signals.label, 'Status unavailable');
-  assert.equal(signals.openTasks, null);
+  assert.equal(signals.openWork, null);
+  assert.equal(signals.tickets, null);
   assert.equal(signals.attention, null);
   assert.equal(signals.agents, null);
 });
@@ -378,14 +405,14 @@ test('workspaceSignals derives an agent count from either the count or the roste
 test('recommendedNextMove is deterministic and attention-first', () => {
   const move = recommendedNextMove({
     needs_attention_count: 3,
-    open_task_count: 9,
+    ...work(9),
     active: true
   });
   assert.equal(move.kind, 'attention');
   assert.match(move.label, /3 tasks needing attention/);
   // Same input, same answer — no randomness, no model call.
   assert.deepEqual(
-    recommendedNextMove({ needs_attention_count: 3, open_task_count: 9, active: true }),
+    recommendedNextMove({ needs_attention_count: 3, ...work(9), active: true }),
     move
   );
 });
@@ -394,7 +421,7 @@ test('recommendedNextMove singularizes a single attention item', () => {
   assert.match(recommendedNextMove({ needs_attention_count: 1 }).label, /1 task needing attention/);
 });
 
-test('recommendedNextMove walks setup, running, schedule, then open tasks', () => {
+test('recommendedNextMove walks setup, running, schedule, then open tickets', () => {
   assert.equal(
     recommendedNextMove({ needs_attention_count: 0, setup_required: true }).kind,
     'setup'
@@ -404,11 +431,20 @@ test('recommendedNextMove walks setup, running, schedule, then open tasks', () =
     recommendedNextMove({ needs_attention_count: 0, next_scheduled_run: 'in 2 hours' }).kind,
     'scheduled'
   );
-  assert.equal(recommendedNextMove({ needs_attention_count: 0, open_task_count: 4 }).kind, 'tasks');
+  const pickUp = recommendedNextMove({
+    needs_attention_count: 0,
+    ticket_counts: { review: 1, in_progress: 1, ready: 2, backlog: 8 }
+  });
+  assert.equal(pickUp.kind, 'tasks');
+  assert.equal(pickUp.label, 'Pick up 4 open tickets', 'Backlog is not open work');
+  assert.equal(
+    recommendedNextMove({ needs_attention_count: 0, ...work(1) }).label,
+    'Pick up 1 open ticket'
+  );
 });
 
 test('recommendedNextMove says "No immediate action" honestly when nothing qualifies (FR66)', () => {
-  const move = recommendedNextMove({ needs_attention_count: 0, open_task_count: 0 });
+  const move = recommendedNextMove({ needs_attention_count: 0, ...work(0) });
   assert.equal(move.kind, 'none');
   assert.equal(move.label, 'No immediate action');
 });
@@ -428,8 +464,8 @@ test('recommendedNextMove never claims an AI produced the recommendation (FR65)'
     { setup_required: true },
     { active: true },
     { next_scheduled_run: 'soon' },
-    { open_task_count: 1 },
-    { open_task_count: 0, needs_attention_count: 0 },
+    work(1),
+    { ...work(0), needs_attention_count: 0 },
     {}
   ];
   for (const input of inputs) {
@@ -500,7 +536,7 @@ test('renderWorkspaceRailHTML keeps Open Workspace available even with no next m
       id: 'uuid-1',
       folder_slug: 'quiet-workspace',
       name: 'Quiet',
-      open_task_count: 0,
+      ...work(0),
       needs_attention_count: 0
     })
   );
@@ -520,13 +556,41 @@ test('renderWorkspaceRailHTML prints an authoritative zero as 0, not as unavaila
     workspaceRailView({
       id: 'w1',
       name: 'Empty',
-      open_task_count: 0,
+      ...work(0),
       agent_count: 0,
       needs_attention_count: 0
     })
   );
   assert.doesNotMatch(html, /data-unavailable="true"/);
   assert.match(html, />0</);
+  // A known all-zero count is a claim the server made: "No open work".
+  assert.match(html, /cockpit-rail-work-value">No open work</);
+});
+
+test('renderWorkspaceRailHTML shows the one count line for a workspace', () => {
+  const html = renderWorkspaceRailHTML(
+    workspaceRailView({
+      id: 'w1',
+      name: 'Busy',
+      agent_count: 2,
+      needs_attention_count: 0,
+      ticket_counts: { review: 1, in_progress: 2, ready: 3, backlog: 6, done: 4 }
+    })
+  );
+  assert.match(
+    html,
+    /cockpit-rail-work-label">Tickets<\/span><span class="cockpit-rail-work-value">1 in review · 2 in progress · 3 ready</
+  );
+  assert.doesNotMatch(html, /Open tasks/);
+});
+
+test('renderWorkspaceRailHTML dims the count line when the server sent no counts', () => {
+  const html = renderWorkspaceRailHTML(
+    workspaceRailView({ id: 'w1', name: 'Legacy', open_task_count: 7, needs_attention_count: 0 })
+  );
+  assert.match(html, /cockpit-rail-work" data-unavailable="true"/);
+  assert.match(html, /cockpit-rail-work-value">—</);
+  assert.doesNotMatch(html, /No open work/);
 });
 
 test('renderWorkspaceRailHTML carries status as text, not by color alone (FR131)', () => {
@@ -1066,19 +1130,31 @@ function groupFixture() {
       kind: 'group',
       description: 'Everything platform.',
       children: [
-        { id: 'w1', name: 'API', open_task_count: 3, agent_count: 2, needs_attention_count: 1 },
-        { id: 'w2', name: 'Web', open_task_count: 1, agent_count: 1, needs_attention_count: 0 },
+        { id: 'w1', name: 'API', ...work(3), agent_count: 2, needs_attention_count: 1 },
+        {
+          id: 'w2',
+          name: 'Web',
+          ticket_counts: { review: 1, backlog: 4 },
+          agent_count: 1,
+          needs_attention_count: 0
+        },
         {
           id: 'g2',
           name: 'Infra',
           kind: 'group',
           children: [
-            { id: 'w3', name: 'DB', open_task_count: 5, agent_count: 4, needs_attention_count: 2 }
+            {
+              id: 'w3',
+              name: 'DB',
+              ticket_counts: { in_progress: 5, done: 8 },
+              agent_count: 4,
+              needs_attention_count: 2
+            }
           ]
         }
       ]
     },
-    { id: 'w4', name: 'Outside', open_task_count: 99, agent_count: 99 }
+    { id: 'w4', name: 'Outside', ...work(99), agent_count: 99 }
   ]);
 }
 
@@ -1088,7 +1164,15 @@ test('groupAggregates sums the whole subtree and excludes workspaces outside it'
   assert.equal(a.childCount, 3); // w1, w2, g2
   assert.equal(a.descendantWorkspaces, 3); // w1, w2, w3
   assert.equal(a.descendantGroups, 1); // g2
-  assert.equal(a.openTasks.total, 9); // 3 + 1 + 5, NOT 108
+  // 3 ready + 1 in review + 5 in progress, NOT the outside workspace's 99.
+  // Backlog and Done are summed but are not open work.
+  assert.deepEqual(
+    { r: a.work.counts.ready, v: a.work.counts.review, p: a.work.counts.in_progress },
+    { r: 3, v: 1, p: 5 }
+  );
+  assert.equal(a.work.counts.backlog, 4);
+  assert.equal(a.work.counts.done, 8);
+  assert.equal(a.work.missing, 0);
   assert.equal(a.agents.total, 7);
   assert.equal(a.attention.total, 3);
 });
@@ -1098,7 +1182,8 @@ test('groupAggregates reports null totals when NO descendant reported a metric',
     { id: 'g', name: 'G', kind: 'group', children: [{ id: 'w', name: 'W' }] }
   ]);
   const a = groupAggregates({ id: 'g' }, rows);
-  assert.equal(a.openTasks.total, null);
+  assert.equal(a.work.counts, null);
+  assert.equal(a.work.missing, 1);
   assert.equal(a.agents.total, null);
 });
 
@@ -1109,14 +1194,17 @@ test('groupAggregates counts partially-reported metrics and says how many are mi
       name: 'G',
       kind: 'group',
       children: [
-        { id: 'w1', name: 'A', open_task_count: 4 },
+        { id: 'w1', name: 'A', ...work(4) },
         { id: 'w2', name: 'B' }
       ]
     }
   ]);
   const a = groupAggregates({ id: 'g' }, rows);
-  assert.equal(a.openTasks.total, 4);
-  assert.equal(a.openTasks.missing, 1);
+  assert.equal(a.work.counts.ready, 4);
+  assert.equal(a.work.missing, 1, 'the workspace that sent no counts is named as unreported');
+  const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, 'g'), rows));
+  assert.match(html, /cockpit-rail-work-value">4 ready</);
+  assert.match(html, /1 unreported/);
 });
 
 test('an empty group aggregates to an authoritative zero, not to unknown', () => {
@@ -1126,7 +1214,8 @@ test('an empty group aggregates to an authoritative zero, not to unknown', () =>
   const a = groupAggregates({ id: 'g' }, rows);
   assert.equal(a.childCount, 0);
   assert.equal(a.descendantWorkspaces, 0);
-  assert.equal(a.openTasks.total, 0);
+  assert.equal(a.work.counts.ready, 0);
+  assert.equal(a.work.missing, 0);
   assert.equal(a.agents.total, 0);
   assert.equal(a.attention.total, 0);
 
@@ -1369,7 +1458,10 @@ test('summaryView totals come from the same shared state, groups counted separat
   const view = summaryView(rows, {});
   assert.equal(view.workspaces, 4); // w1..w4
   assert.equal(view.groups, 2); // g1, g2
-  assert.equal(view.openTasks, 108); // 3 + 1 + 5 + 99
+  // 3 + 99 ready, 1 in review, 5 in progress: the same figures the group rail sums.
+  assert.equal(view.work.ready, 102);
+  assert.equal(view.work.review, 1);
+  assert.equal(view.work.in_progress, 5);
   assert.equal(view.agents, 106);
   assert.equal(view.attention, 3);
 });
@@ -1771,7 +1863,7 @@ test('unreadable and unclassified tasks do not become idle or fabricated zeros',
   assert.equal(workspaceSignals({ active: false }).status, 'unknown');
   const failed = {
     task_summary_available: false,
-    open_task_count: 0,
+    ...work(0),
     needs_attention_count: 0,
     active: false
   };
@@ -1779,7 +1871,7 @@ test('unreadable and unclassified tasks do not become idle or fabricated zeros',
   assert.equal(workspaceSignals(failed).attention, null);
   assert.equal(matchesSignal(failed, SIGNAL_RUNNING), null);
   const partial = {
-    open_task_count: 0,
+    ...work(0),
     needs_attention_count: 0,
     unknown_task_count: 1,
     active: false

@@ -2,7 +2,7 @@
  * Counts ticket-list fetches per user action, so the Tickets view mode cannot
  * quietly become chatty.
  *
- *   node scripts/check-tickets-view-fetches.mjs <studioId> [baseUrl]
+ *   node scripts/check-tickets-view-fetches.mjs <workspaceSlug> [baseUrl]
  *
  * The view is shown and hidden by render(), and render() runs on every
  * workspace refresh — so an unguarded "load on render" turns one board move
@@ -13,7 +13,7 @@ import { chromium } from 'playwright';
 
 const studioId = process.argv[2];
 if (!studioId) {
-  console.error('usage: node scripts/check-tickets-view-fetches.mjs <studioId> [baseUrl]');
+  console.error('usage: node scripts/check-tickets-view-fetches.mjs <workspaceSlug> [baseUrl]');
   process.exit(1);
 }
 const base = process.argv[3] || 'http://localhost:8933';
@@ -70,10 +70,10 @@ const verdicts = {
   'entering fetches exactly once': counts.enter === 1,
   'an unrelated re-render fetches nothing': counts.idle === 0,
   'the List/Board toggle fetches nothing': counts.toBoard === 0,
-  // Leaving costs one request by design, and it is not the list: returning to
-  // Details refreshes the header's ticket-count tile, which is suppressed
-  // while the view itself is showing the count.
-  'leaving refreshes the count tile once': counts.leave === 1,
+  // The header's work tile paints from the workspace the page already loaded
+  // and refreshes only on a ticket change (PRD 760 FR-11), so changing view
+  // costs nothing.
+  'leaving fetches nothing': counts.leave === 0,
   're-entering refetches (never shows stale data)': counts.reenter === 1
 };
 console.log('\n' + JSON.stringify(verdicts, null, 2));

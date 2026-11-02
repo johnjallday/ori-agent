@@ -2373,14 +2373,29 @@
   function computeStats(workspaces) {
     var list = Array.isArray(workspaces) ? workspaces : [];
     var agents = 0,
-      openTasks = 0,
       groups = 0;
     list.forEach(function (ws) {
       agents += Number((ws && ws.agent_count) || 0);
-      openTasks += Number((ws && ws.open_task_count) || 0);
       if (isGroup(ws)) groups += 1;
     });
-    return { workspaces: list.length, agents: agents, openTasks: openTasks, groups: groups };
+    // The work count is the server's, summed (PRD 760 FR-10); null when no
+    // workspace reported one, so the stat shows a dash rather than a zero.
+    var api = window.OriTicketCounts;
+    var work = api
+      ? api.sum(
+          list.map(function (ws) {
+            return ws && ws.ticket_counts;
+          })
+        ).counts
+      : null;
+    return { workspaces: list.length, agents: agents, work: work, groups: groups };
+  }
+
+  // The one count line ("1 in review · 2 in progress · 3 ready"), or '' when
+  // the counts are missing. ticket-count-line.js loads before this script.
+  function workCountLine(counts) {
+    var api = window.OriTicketCounts;
+    return api ? api.format(counts) : '';
   }
 
   function statBox(value, label) {
@@ -2493,14 +2508,11 @@
 
   function tileMeta(ws) {
     var agents = Number(ws.agent_count || 0);
-    var openTasks = Number(ws.open_task_count || 0);
-    return (
-      agents +
-      (agents === 1 ? ' agent' : ' agents') +
-      ' · ' +
-      openTasks +
-      (openTasks === 1 ? ' task' : ' tasks')
-    );
+    var agentsText = agents + (agents === 1 ? ' agent' : ' agents');
+    // Counts the server did not send leave the line at the agents alone: a dash
+    // in a tile's name would be read out as nothing at all.
+    var work = workCountLine(ws.ticket_counts);
+    return work ? agentsText + ' · ' + work : agentsText;
   }
 
   /**
@@ -3589,7 +3601,7 @@
     var mode = opsModeLabel(ws.ops_mode);
     var entry = String(ws.entry_agent_name || '').trim();
     var agents = (Array.isArray(ws.agents) ? ws.agents : []).filter(Boolean);
-    var openTasks = Number(ws.open_task_count || 0);
+    var workLine = workCountLine(ws.ticket_counts) || '—';
     var backlogCount = Number(ws.backlog_count || 0);
     var mcp = Number(ws.mcp_count || 0);
     var skills = Number(ws.skill_count || 0);
@@ -3652,10 +3664,10 @@
       '<div class="ws-map-ov-roster">' +
       roster +
       '</div>' +
-      '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tasks</span>' +
+      '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tickets</span>' +
       '<span class="ws-map-ov-v">' +
-      openTasks +
-      ' open</span></div>' +
+      escapeHtml(workLine) +
+      '</span></div>' +
       // Local count + open action only (FR58-59): no individual items render on
       // the global canvas and no global aggregate/edit surface exists here.
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Backlog</span>' +
@@ -3775,7 +3787,7 @@
       '<div class="ws-map-readout">' +
       statBox(stats.workspaces, 'Workspaces') +
       statBox(stats.agents, 'Agents') +
-      statBox(stats.openTasks, 'Open Tasks') +
+      statBox(workCountLine(stats.work) || '—', 'Tickets') +
       statBox(stats.groups, 'Groups') +
       '</div>' +
       '<button type="button" class="ws-map-create" data-ws-map-create>⊕ New Workspace</button>' +

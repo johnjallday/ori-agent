@@ -95,6 +95,10 @@ func addWorkspaceMapFields(ws *workspace.Workspace, summary map[string]any) {
 	summary["skill_count"] = fields.SkillCount
 	summary["ops_mode"] = fields.OpsMode
 	summary["open_task_count"] = fields.OpenTaskCount
+	// ticket_counts is the one canonical count by ticket state (PRD 760 FR-6).
+	// Browser surfaces read this, not open_task_count, which stays for older
+	// clients.
+	summary["ticket_counts"] = fields.TicketCounts
 	// backlog_count is the workspace's own Backlog item count, shown by the
 	// global Workspace Map as a local count/link only — never aggregated or
 	// editable from that surface (PRD workspace-backlog FR58-59).
@@ -157,6 +161,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"shared_data":                           ws.SharedData,
 			"messages":                              ws.Messages,
 			"tasks":                                 ws.Tasks,
+			"ticket_counts":                         workspace.ComputeMapSummaryFields(ws).TicketCounts,
 			"attachments":                           ws.Attachments,
 			"scheduled_tasks":                       ws.ScheduledTasks,
 			"store_nodes":                           ws.StoreNodes,

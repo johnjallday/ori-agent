@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { TicketCounts } from './ticket-count-line.js';
 
 const source = readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8');
 const buildingArtSource = readFileSync(
@@ -20,7 +21,9 @@ const cockpitCSS = readFileSync(
 
 // Load the IIFE in a sandbox and grab the exposed pure layout function.
 function loadComputeLayout() {
-  const window = {};
+  // The ES module that mounts the map imports ticket-count-line.js first,
+  // which registers window.OriTicketCounts; a sandbox does the same.
+  const window = { OriTicketCounts: TicketCounts };
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
   vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
@@ -30,7 +33,7 @@ function loadComputeLayout() {
 
 // Load the IIFE and grab the full exposed API (used for meta-rendering tests).
 function loadOriWorkspaceMap() {
-  const window = {};
+  const window = { OriTicketCounts: TicketCounts };
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
   vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
@@ -1760,17 +1763,31 @@ test('content bounds grow around placed content with a viewport of margin (FR-10
   assert.ok(far.world.maxY >= far.bounds.maxY + viewport.height);
 });
 
-test('computeStats sums enriched agent/task counts and counts groups', () => {
+test('computeStats sums agents and the server ticket counts and counts groups', () => {
   const { computeStats } = loadOriWorkspaceMap();
   const stats = computeStats([
-    { id: 'a', agent_count: 2, open_task_count: 1 },
-    { id: 'b', kind: 'group', agent_count: 1, open_task_count: 0 },
+    { id: 'a', agent_count: 2, ticket_counts: { ready: 1, review: 2, done: 7 } },
+    { id: 'b', kind: 'group', agent_count: 1, ticket_counts: { in_progress: 3 } },
     { id: 'c' } // missing fields degrade to 0, not NaN
   ]);
   assert.equal(stats.workspaces, 3);
   assert.equal(stats.agents, 3);
-  assert.equal(stats.openTasks, 1);
   assert.equal(stats.groups, 1);
+  assert.equal(stats.work.review, 2);
+  assert.equal(stats.work.in_progress, 3);
+  assert.equal(stats.work.ready, 1);
+  assert.equal(stats.work.done, 7);
+  assert.equal(
+    stats.openTasks,
+    undefined,
+    'the browser no longer carries a legacy open-task total'
+  );
+});
+
+test('computeStats leaves the work count unknown when no workspace reported one', () => {
+  const { computeStats } = loadOriWorkspaceMap();
+  const stats = computeStats([{ id: 'a', agent_count: 1, open_task_count: 5 }, { id: 'b' }]);
+  assert.equal(stats.work, null, 'open_task_count is not read, so nothing reported');
 });
 
 test('hqSiteView exposes a missing, skipped, or broken Personal HQ site without treating a valid HQ as missing', () => {
@@ -1954,21 +1971,44 @@ test('no ordinary create pad is allocated among the real and reserved sites (#36
   assert.equal(layout.bounds.maxY, Math.max(...sites.map(s => s.y)) + cellH);
 });
 
-test('tileHTML meta line reflects enriched agent/task counts with correct pluralization', () => {
+test('tileHTML meta line reflects the agents and the server ticket counts', () => {
   const { tileHTML } = loadOriWorkspaceMap();
   const plural = tileHTML({
-    ws: { id: 'a', name: 'Deep Sea Research', agent_count: 2, open_task_count: 3 },
+    ws: {
+      id: 'a',
+      name: 'Deep Sea Research',
+      agent_count: 2,
+      ticket_counts: { ready: 3, in_progress: 2, review: 1, backlog: 9 }
+    },
     col: 0,
     row: 0
   });
-  assert.match(plural, /ws-map-tile-meta">2 agents · 3 tasks</);
+  assert.match(plural, /ws-map-tile-meta">2 agents · 1 in review · 2 in progress · 3 ready</);
 
   const singular = tileHTML({
-    ws: { id: 'b', name: 'Solo', agent_count: 1, open_task_count: 1 },
+    ws: { id: 'b', name: 'Solo', agent_count: 1, ticket_counts: { ready: 1 } },
     col: 0,
     row: 0
   });
-  assert.match(singular, /ws-map-tile-meta">1 agent · 1 task</);
+  assert.match(singular, /ws-map-tile-meta">1 agent · 1 ready</);
+
+  const empty = tileHTML({
+    ws: { id: 'c', name: 'Quiet', agent_count: 1, ticket_counts: { backlog: 4, done: 2 } },
+    col: 0,
+    row: 0
+  });
+  assert.match(empty, /ws-map-tile-meta">1 agent · No open work</);
+});
+
+test('tileHTML never reads open_task_count and leaves unreported counts out', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const html = tileHTML({
+    ws: { id: 'd', name: 'Legacy', agent_count: 2, open_task_count: 5 },
+    col: 0,
+    row: 0
+  });
+  assert.match(html, /ws-map-tile-meta">2 agents</);
+  assert.doesNotMatch(html, /5 tasks|open task/);
 });
 
 test('tileHTML uses built-in blueprint provenance for a specialized building', () => {
@@ -2142,7 +2182,7 @@ test('overviewBodyHTML renders generated pocket residents for the Commander and 
     ops_mode: 'guided',
     entry_agent_name: 'Research Lead',
     agents: ['Research Lead', 'Source Scout'],
-    open_task_count: 2,
+    ticket_counts: { review: 1, ready: 1 },
     mcp_count: 1,
     skill_count: 3
   });
@@ -2196,7 +2236,10 @@ test('overviewBodyHTML renders generated pocket residents for the Commander and 
     'the name deterministically selects the same palette color'
   );
 
-  assert.match(html, /2 open</);
+  assert.match(
+    html,
+    /ws-map-ov-k">Tickets<\/span><span class="ws-map-ov-v">1 in review · 1 ready</
+  );
   assert.match(html, /ws-map-ov-k">Tools · MCP<\/span><span class="ws-map-ov-v">1</);
   assert.match(html, /ws-map-ov-k">Skills<\/span><span class="ws-map-ov-v">3</);
 });
@@ -2595,8 +2638,9 @@ test('the selection bar is hidden at zero and counts what is checked', () => {
 // workspace's own Setup Wizard, never a second copy of its state.
 
 function loadMapWithSetup(workspaceId, status) {
-  const window = {};
-  vm.runInNewContext(source, { window, document: {} }, { filename: 'workspace-map.js' });
+  const window = { OriTicketCounts: TicketCounts };
+  const sandbox = { window, document: {} };
+  vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   window.OriWorkspaceMap._setSetupStatusForTest(workspaceId, status);
   return window.OriWorkspaceMap;
 }
@@ -11655,6 +11699,7 @@ async function activityHarness({
     URLSearchParams,
     console: { error() {}, warn() {}, log() {} }
   };
+  window.OriTicketCounts = TicketCounts;
   vm.runInNewContext(bubbleLinesSource, sandbox, { filename: 'activity-bubble-lines.js' });
   vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   const map = window.OriWorkspaceMap;
@@ -11759,7 +11804,7 @@ test('activity: a started run lights the tile, and its finish darkens it and say
   assert.equal(bubbleLine(tile), 'On it.');
   assert.equal(flagText(tile), 'Working');
   assert.equal(ledWorking(tile), true);
-  assert.match(tile.getAttribute('aria-label'), /Alpha, 0 agents · 0 tasks, Working, Theo/);
+  assert.match(tile.getAttribute('aria-label'), /Alpha, 0 agents, Working, Theo/);
   assert.equal(overlayOf(h.tile('ws-2')), null, 'the neighbour stays dark');
 
   h.advance(3000);

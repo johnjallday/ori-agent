@@ -216,6 +216,24 @@
     return payload;
   }
 
+  // Announced after a ticket is created, moved or deleted, so a surface that
+  // shows the count (the workspace header's work tile) can refresh it without
+  // fetching on every render (PRD 760 FR-11). detail.studioId names the
+  // workspace that owns the ticket.
+  const CHANGED_EVENT = 'ori:tickets-changed';
+
+  function announceChange(studioId) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
+    try {
+      window.dispatchEvent(
+        new CustomEvent(CHANGED_EVENT, { detail: { studioId: String(studioId || '') } })
+      );
+    } catch (_error) {
+      // A listener's failure must never turn a saved ticket into an error.
+    }
+  }
+
   const api = {
     /**
      * Lists a workspace's tickets. `includeDescendants` opts into the
@@ -267,6 +285,10 @@
         tickets: normalizeTicketList(payload && payload.tickets),
         count: (payload && payload.count) || 0,
         total: (payload && payload.total) || 0,
+        // The workspace's own tickets by state, whatever the filters or the page
+        // size (PRD 760 FR-6). Null when the server did not send one.
+        counts:
+          payload && payload.counts && typeof payload.counts === 'object' ? payload.counts : null,
         truncated: Boolean(payload && payload.truncated),
         partialOwners: (payload && payload.partial_owners) || [],
         includeDescendants: Boolean(payload && payload.include_descendants)
@@ -298,6 +320,7 @@
         source_id: input.sourceId || '',
         linked_note_ids: input.linkedNoteIds || []
       });
+      announceChange(studioId);
       return normalizeTicket(payload);
     },
 
@@ -342,6 +365,7 @@
         `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}/transition`,
         body
       );
+      announceChange(studioId);
       return normalizeTicket(payload);
     },
 
@@ -477,6 +501,7 @@
         due_date: input.dueDate || null,
         reference_url: input.referenceUrl || ''
       });
+      announceChange(studioId);
       return normalizeTicket(payload);
     },
 
@@ -486,6 +511,7 @@
         'DELETE',
         `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}${suffix}`
       );
+      announceChange(studioId);
       return true;
     }
   };
@@ -1899,6 +1925,7 @@
     TICKET_STATES,
     CAPTURE_STATES,
     TicketApiError,
+    CHANGED_EVENT,
     api,
     assistantDraftResumeHref,
     canTransitionTo,

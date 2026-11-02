@@ -313,6 +313,18 @@ type CanvasLayout struct {
 	OffsetY             float64                    `json:"offset_y,omitempty"`
 }
 
+// WorkspaceTicketCounts mirrors workspace.TicketCounts: how many of a
+// workspace's tickets sit in each canonical state. It is a mirror because this
+// package does not import internal/workspace.
+type WorkspaceTicketCounts struct {
+	Backlog    int `json:"backlog"`
+	Ready      int `json:"ready"`
+	InProgress int `json:"in_progress"`
+	Review     int `json:"review"`
+	Done       int `json:"done"`
+	Cancelled  int `json:"cancelled"`
+}
+
 // Workspace represents a hierarchical workspace for organizing sessions.
 // Workspaces can be nested to create a tree structure.
 // Workspaces also serve as unified containers for multi-agent orchestration.
@@ -377,14 +389,18 @@ type Workspace struct {
 	// BacklogCount is this workspace's own Backlog item count (PRD
 	// workspace-backlog FR40, 49, 58) — separate from OpenTaskCount, which
 	// stays Ready-and-later only.
-	BacklogCount         int    `json:"backlog_count"`
-	TaskSummaryAvailable bool   `json:"task_summary_available"`
-	UnknownTaskCount     int    `json:"unknown_task_count"`
-	NeedsAttentionCount  int    `json:"needs_attention_count"`
-	MCPCount             int    `json:"mcp_count"`
-	SkillCount           int    `json:"skill_count"`
-	OpsMode              string `json:"ops_mode,omitempty"`
-	Active               bool   `json:"active"`
+	BacklogCount int `json:"backlog_count"`
+	// TicketCounts is the canonical per-state ticket count (PRD 760 FR-6),
+	// mirroring workspace.TicketCounts. It is the one number every surface
+	// shows; OpenTaskCount is the older legacy-status projection.
+	TicketCounts         WorkspaceTicketCounts `json:"ticket_counts"`
+	TaskSummaryAvailable bool                  `json:"task_summary_available"`
+	UnknownTaskCount     int                   `json:"unknown_task_count"`
+	NeedsAttentionCount  int                   `json:"needs_attention_count"`
+	MCPCount             int                   `json:"mcp_count"`
+	SkillCount           int                   `json:"skill_count"`
+	OpsMode              string                `json:"ops_mode,omitempty"`
+	Active               bool                  `json:"active"`
 
 	// BlueprintID and BlueprintBuiltin are inert template provenance projected
 	// from workspace.json for visual identity in the Build Catalog and Workspace

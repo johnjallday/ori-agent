@@ -194,7 +194,9 @@ test('computeStats reads counts from the page instance', () => {
     tasks: [{ status: 'pending' }, { status: 'in_progress' }, { status: 'completed' }],
     workspace: { mcp_bindings: [{}, {}], skill_bindings: [{}] }
   };
-  assert.deepEqual(view.computeStats(), { agents: 2, openTasks: 2, mcp: 2, skills: 1, tools: 3 });
+  // No open-task figure: the work count is the server's, never derived from
+  // this task list (PRD 760 FR-6).
+  assert.deepEqual(view.computeStats(), { agents: 2, mcp: 2, skills: 1, tools: 3 });
 });
 
 test('rendered command copy uses detailed-view vocabulary', () => {
@@ -280,7 +282,9 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /data-cmd-edit-identity="name"/);
   assert.match(container.innerHTML, /data-cmd-edit-identity="description"/);
   assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
-  assert.match(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
+  // One work tile replaces the Open Tasks and Tickets pair (PRD 760 FR-7).
+  assert.match(container.innerHTML, /<div class="ws-l">Tickets<\/div>/);
+  assert.doesNotMatch(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Notes</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
@@ -309,11 +313,6 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   commandView.railPointerFocus = true;
   commandView.render();
   assert.match(container.innerHTML, /<aside class="ws-cmd-rail is-pointer">/);
-  // "Open Tasks" is now the deliberate exception: the summary stat chip's
-  // label was unified with Map/Cards (see workspace-hub-ui-ux task 5.2). It
-  // reflects the filtered open-task count specifically — the modal title and
-  // per-agent quest-log header stay "Tasks" since those list every task
-  // regardless of status, so "Open Tasks" there would misdescribe them.
   assert.doesNotMatch(
     container.innerHTML,
     /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/
@@ -1419,7 +1418,7 @@ test('escape closes the active rail manager without leaving Command', () => {
   assert.deepEqual(renders, ['']);
 });
 
-test('Open Tasks stat is tinted when any task needs attention', () => {
+test('the work tile is tinted when any ticket needs attention', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     identityExpanded: false,
@@ -1439,7 +1438,246 @@ test('Open Tasks stat is tinted when any task needs attention', () => {
     commandView.computeStats()
   );
 
-  assert.match(html, /class="ws-cmd-stat is-alert" data-cmd-section="tasks"/);
+  assert.match(html, /class="ws-cmd-stat ws-cmd-stat-work is-alert" data-cmd-section="tickets"/);
+  assert.doesNotMatch(html, /data-cmd-section="tasks"/, 'the Open Tasks tile is gone');
+});
+
+// ---- the one work tile (PRD 760 FR-6, FR-7, FR-11) ----
+
+// Two helpers on purpose: a sync body must fail the test directly, and an async
+// body must hold `window` until it has finished.
+function withPageWindow(run) {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    return run(globalThis.window);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+}
+
+async function withPageWindowAsync(run) {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    return await run(globalThis.window);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+}
+
+function workTileView(ticketCounts) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      workspaceId: 'workspace-1',
+      workspace: { id: 'workspace-1', name: 'Counted', ticket_counts: ticketCounts },
+      // Legacy task rows the tile must ignore: the old tile counted these.
+      tasks: [{ status: 'pending' }, { status: 'in_progress' }, { status: 'pending' }],
+      buildAgentGroups: () => []
+    }
+  });
+  return commandView;
+}
+
+test('the work tile shows the server counts by state', () => {
+  withPageWindow(() => {
+    const view = workTileView({
+      backlog: 5,
+      ready: 3,
+      in_progress: 2,
+      review: 1,
+      done: 9,
+      cancelled: 1
+    });
+    const html = view.workTileHTML();
+    assert.match(html, /<div class="ws-v">1 in review · 2 in progress · 3 ready<\/div>/);
+    assert.match(html, /<div class="ws-l">Tickets<\/div>/);
+    assert.match(html, /data-cmd-section="tickets"/);
+    assert.match(
+      html,
+      /aria-label="Open tickets\. 1 ticket in review, 2 tickets in progress, 3 tickets ready"/
+    );
+  });
+});
+
+test('the work tile never reads the browser task list', () => {
+  withPageWindow(() => {
+    // Three legacy rows would have read "3" on the old tile. The server says
+    // there is only one ready ticket, and that is all the tile may say.
+    const view = workTileView({ ready: 1 });
+    assert.match(view.workTileHTML(), /<div class="ws-v">1 ready<\/div>/);
+  });
+});
+
+test('the work tile says "No open work" only when the server counted zero', () => {
+  withPageWindow(() => {
+    const view = workTileView({ backlog: 4, done: 2, cancelled: 1 });
+    assert.match(view.workTileHTML(), /<div class="ws-v">No open work<\/div>/);
+  });
+});
+
+test('the work tile shows a dash, not "No open work", before counts arrive', () => {
+  withPageWindow(() => {
+    const view = workTileView(undefined);
+    const html = view.workTileHTML();
+    assert.match(html, /<div class="ws-v">—<\/div>/);
+    assert.doesNotMatch(html, /No open work/);
+  });
+});
+
+test('selecting the work tile opens the ticket board', () => {
+  const readoutRoot = makeListenerRoot();
+  const modes = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: { querySelector: selector => (selector === '.ws-cmd-readout' ? readoutRoot : null) },
+    setCommandViewMode: (mode, options) => modes.push([mode, options]),
+    openStatModal: () => assert.fail('the work tile must not open the legacy task modal')
+  });
+  commandView.bindReadout();
+  readoutRoot.listener({ target: makeSectionClickTarget('tickets') });
+  assert.deepEqual(modes, [['tickets', { focus: false }]]);
+});
+
+test('rendering the command bar makes no ticket request', () => {
+  withPageWindow(win => {
+    let requests = 0;
+    win.WorkspaceHubTickets = {
+      api: {
+        list: async () => {
+          requests += 1;
+          return { counts: null };
+        }
+      }
+    };
+    const view = workTileView({ ready: 1 });
+    for (let i = 0; i < 5; i += 1) {
+      view.commandBarHTML(view.page.workspace, 'Counted', '', view.computeStats());
+    }
+    assert.equal(requests, 0, 'counts come from the loaded workspace, not a fetch per render');
+  });
+});
+
+test('a ticket change refreshes the counts once and repaints the tile in place', async () => {
+  const tile = {
+    attrs: {},
+    value: { textContent: '' },
+    querySelector(selector) {
+      return selector === '.ws-v' ? this.value : null;
+    },
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    }
+  };
+  await withPageWindowAsync(async win => {
+    const requests = [];
+    win.WorkspaceHubTickets = {
+      api: {
+        list: async (studioId, options) => {
+          requests.push([studioId, options]);
+          return { counts: { ready: 0, in_progress: 1, review: 2 } };
+        }
+      }
+    };
+    const view = workTileView({ ready: 3 });
+    view.container = {
+      querySelector: selector => (selector === '[data-cmd-section="tickets"]' ? tile : null)
+    };
+
+    await view.refreshTicketCounts();
+
+    assert.deepEqual(requests, [['workspace-1', { limit: 1 }]]);
+    assert.equal(view.page.workspace.ticket_counts.review, 2, 'the loaded workspace is updated');
+    assert.equal(tile.value.textContent, '2 in review · 1 in progress');
+    assert.match(tile.attrs['aria-label'], /2 tickets in review, 1 ticket in progress/);
+  });
+});
+
+test('a change during a refresh asks for exactly one more pass', async () => {
+  await withPageWindowAsync(async win => {
+    let calls = 0;
+    let releaseFirst;
+    win.WorkspaceHubTickets = {
+      api: {
+        list: () => {
+          calls += 1;
+          if (calls === 1) {
+            return new Promise(resolve => {
+              releaseFirst = () => resolve({ counts: { ready: 1 } });
+            });
+          }
+          return Promise.resolve({ counts: { ready: 2 } });
+        }
+      }
+    };
+    const view = workTileView({ ready: 0 });
+    view.container = { querySelector: () => null };
+
+    const first = view.refreshTicketCounts();
+    // Three more changes arrive while the first request is still out.
+    await view.refreshTicketCounts();
+    await view.refreshTicketCounts();
+    await view.refreshTicketCounts();
+    assert.equal(calls, 1, 'overlapping changes do not stack requests');
+    releaseFirst();
+    await first;
+
+    assert.equal(calls, 2, 'one follow-up pass picks up what the first one predates');
+    assert.equal(view.page.workspace.ticket_counts.ready, 2);
+  });
+});
+
+test('a failed refresh keeps the last known counts and clears its in-flight flag', async () => {
+  await withPageWindowAsync(async win => {
+    let fail = true;
+    win.WorkspaceHubTickets = {
+      api: {
+        list: async () => {
+          if (fail) throw new Error('offline');
+          return { counts: { ready: 4 } };
+        }
+      }
+    };
+    const view = workTileView({ ready: 1 });
+    view.container = { querySelector: () => null };
+
+    await view.refreshTicketCounts();
+    assert.equal(view.page.workspace.ticket_counts.ready, 1, 'the old count survives a failure');
+
+    fail = false;
+    await view.refreshTicketCounts();
+    assert.equal(view.page.workspace.ticket_counts.ready, 4, 'a stuck flag would block this');
+  });
+});
+
+test('the tile listens for the ticket client change event and ignores other workspaces', async () => {
+  const originalWindow = globalThis.window;
+  const listeners = {};
+  globalThis.window = {
+    addEventListener: (name, handler) => {
+      listeners[name] = handler;
+    }
+  };
+  try {
+    const view = workTileView({ ready: 1 });
+    let refreshes = 0;
+    view.refreshTicketCounts = async () => {
+      refreshes += 1;
+    };
+
+    view.bindTicketChangeEvents();
+    view.bindTicketChangeEvents(); // binding twice must not double-fire
+    assert.equal(typeof listeners['ori:tickets-changed'], 'function');
+
+    listeners['ori:tickets-changed']({ detail: { studioId: 'another-workspace' } });
+    assert.equal(refreshes, 0, "another workspace's change is not this tile's business");
+
+    listeners['ori:tickets-changed']({ detail: { studioId: 'workspace-1' } });
+    assert.equal(refreshes, 1);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });
 
 test('stat clicks open the in-place manager modal without leaving Command view', () => {

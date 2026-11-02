@@ -28,6 +28,7 @@ import {
 } from './workspace-folder-shape.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
+import { TicketCounts } from './ticket-count-line.js';
 import {
   consumeGroupTemplateLanding,
   fetchGroupTemplateStatus,
@@ -1410,16 +1411,13 @@ export class WorkspaceCommandView {
     } catch (err) {
       agents = Array.isArray(ws.agent_instances) ? ws.agent_instances.length : 0;
     }
-    // Same actionable-task projection as ComputeMapSummaryFields. Backlog and
-    // closed history never contribute; failed attempts remain open work.
-    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    const openTasks =
-      page.tasksLoadFailed || page.tasksLoading ? '—' : resolveTaskCounts(tasks)[FILTER.ACTIONABLE];
+    // The work count is not a stat here: it comes from the server's per-state
+    // ticket counts, never from the browser's task list (see workTileHTML).
     const mcp = Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings.length : 0;
     const skills = Array.isArray(ws.skill_bindings) ? ws.skill_bindings.length : 0;
     // "Tools" groups the capability providers (MCP + Skills + Plugins). Plugins install
     // themselves as MCP/skill bindings, so they are already reflected in this count.
-    return { agents, openTasks, mcp, skills, tools: mcp + skills };
+    return { agents, mcp, skills, tools: mcp + skills };
   }
 
   opsModeLabel() {
@@ -1922,75 +1920,115 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-readout">' +
       this.statBoxHTML(stats.agents, 'Agents', 'agents', 'View agents') +
       this.statBoxHTML(
-        stats.openTasks,
-        'Open Tasks',
-        'tasks',
-        'View open tasks',
-        this.hasAttentionTasks() ? 'is-alert' : ''
-      ) +
-      this.statBoxHTML(
         stats.tools,
         'Tools',
         'tools',
         'Open tools: MCP, skills, plugins, and find tools'
       ) +
-      // Tickets is the canonical destination for durable workspace work. The
-      // count is loaded asynchronously (see refreshTicketCount) rather than
-      // read from page.tasks, because Ticket state is server-authoritative and
-      // deriving a count from legacy task status would be the exact inference
-      // this feature exists to remove (FR-7, FR-101).
-      this.statBoxHTML(
-        this.ticketCountLabel(),
-        'Tickets',
-        'tickets',
-        'View tickets: backlog, ready, in progress, review, and done'
-      ) +
+      // One tile says how much work there is (PRD 760 FR-7). It replaces the
+      // old Open Tasks and Tickets pair, which counted the same rows two ways.
+      this.workTileHTML() +
       '</div>' +
       '</header>'
     );
   }
 
-  /** The Tickets stat value; an em dash until the real count arrives. */
-  ticketCountLabel() {
-    return typeof this.ticketCount === 'number' ? String(this.ticketCount) : '–';
+  /**
+   * This workspace's tickets by state, as the server counted them. It is read
+   * from the workspace the page already loaded, so painting costs no request;
+   * refreshTicketCounts replaces it after a ticket is created or moved.
+   */
+  currentTicketCounts() {
+    const ws = (this.page && this.page.workspace) || null;
+    return ws && ws.ticket_counts && typeof ws.ticket_counts === 'object' ? ws.ticket_counts : null;
   }
 
   /**
-   * Fetches the workspace's ticket count and paints it into the stat tile in
-   * place. It updates only the tile's value node rather than re-rendering the
-   * command view, so an in-flight count can never clobber an open modal or
-   * reset the user's scroll position.
+   * The one work tile: "1 in review · 2 in progress · 3 ready", or "No open
+   * work". Selecting it opens the ticket board. The count is server-authored
+   * (PRD 760 FR-6): deriving it here from legacy task status is the inference
+   * this feature removes. The alert treatment stays for work that needs a
+   * person (FR-9).
    */
-  async refreshTicketCount() {
-    // While the Tickets view is open, the view itself is the count: it shows
-    // "N tickets" from the fetch it just made. Counting again here would mean
-    // two list requests per render for one number the user can already read.
-    // Leaving the view re-renders, which refreshes the tile.
-    if (this.viewMode === 'tickets') return;
+  workTileHTML() {
+    const counts = this.currentTicketCounts();
+    // An em dash until the server's counts have arrived: "No open work" is a
+    // claim, and an unloaded page cannot back it.
+    const line = TicketCounts.format(counts) || '—';
+    const spoken = TicketCounts.describe(counts);
+    return this.statBoxHTML(
+      line,
+      'Tickets',
+      'tickets',
+      spoken ? 'Open tickets. ' + spoken : 'Open tickets',
+      ('ws-cmd-stat-work ' + (this.hasAttentionTasks() ? 'is-alert' : '')).trim()
+    );
+  }
+
+  /** Repaints the work tile's value and name in place, without a full render. */
+  paintWorkTile() {
+    if (!this.container || typeof this.container.querySelector !== 'function') return;
+    const tile = this.container.querySelector('[data-cmd-section="tickets"]');
+    if (!tile) return;
+    const counts = this.currentTicketCounts();
+    const line = TicketCounts.format(counts) || '—';
+    const spoken = TicketCounts.describe(counts);
+    const value = tile.querySelector('.ws-v');
+    if (value) value.textContent = line;
+    tile.setAttribute('aria-label', spoken ? 'Open tickets. ' + spoken : 'Open tickets');
+  }
+
+  /**
+   * Asks the server for the workspace's counts and repaints the tile. It runs
+   * when a ticket is created, moved or deleted (the ori:tickets-changed event),
+   * never from render(): render() fires on every workspace refresh, and a
+   * fetch there turned one board move into five list requests.
+   *
+   * A one-row list request is enough, because every list response carries the
+   * workspace-wide counts. A change that lands while a request is in flight
+   * asks for one more pass afterwards, so the tile cannot settle on a count
+   * that predates the last change.
+   */
+  async refreshTicketCounts() {
     const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
     const studioId = this.workspaceId();
     if (!tickets || !studioId) return;
-    // render() runs many times while a workspace page boots as data arrives,
-    // and each pass lands here. Without this, one page load issues a dozen
-    // identical list requests for a single number. One in flight is enough;
-    // the next render paints whatever it resolves to.
-    if (this.ticketCountInFlight) return;
-    this.ticketCountInFlight = true;
+    if (this.ticketCountsInFlight) {
+      this.ticketCountsStale = true;
+      return;
+    }
+    this.ticketCountsInFlight = true;
+    this.ticketCountsStale = false;
     try {
-      const result = await tickets.api.list(studioId);
-      this.ticketCount = result.count;
+      const result = await tickets.api.list(studioId, { limit: 1 });
+      const ws = this.page && this.page.workspace;
+      if (ws && result && result.counts) ws.ticket_counts = result.counts;
     } catch (_error) {
-      // A failed count leaves the placeholder rather than showing a wrong
-      // number; the Tickets view surfaces the real error when opened.
+      // A failed refresh leaves the last known count rather than showing a
+      // wrong one; the board surfaces the real error when it is opened.
       return;
     } finally {
-      // Always clear, including on the failure path — a stuck flag would
+      // Always clear, including on the failure path: a stuck flag would
       // silently retire the count for the rest of the session.
-      this.ticketCountInFlight = false;
+      this.ticketCountsInFlight = false;
     }
-    if (!this.container || typeof this.container.querySelector !== 'function') return;
-    const tile = this.container.querySelector('[data-cmd-section="tickets"] .ws-v');
-    if (tile) tile.textContent = this.ticketCountLabel();
+    this.paintWorkTile();
+    if (this.ticketCountsStale) {
+      this.ticketCountsStale = false;
+      await this.refreshTicketCounts();
+    }
+  }
+
+  /** Listens once for the ticket client's change event (see workspace-hub-tickets.js). */
+  bindTicketChangeEvents() {
+    if (this.ticketChangeBound || typeof window === 'undefined') return;
+    if (typeof window.addEventListener !== 'function') return;
+    this.ticketChangeBound = true;
+    window.addEventListener('ori:tickets-changed', event => {
+      const changed = String((event && event.detail && event.detail.studioId) || '');
+      if (changed && changed !== this.workspaceId()) return;
+      Promise.resolve(this.refreshTicketCounts()).catch(() => {});
+    });
   }
 
   // ---------- Unstaffed guidance ----------
@@ -2646,10 +2684,9 @@ export class WorkspaceCommandView {
       }
     }
 
-    // Paint the real ticket count over the placeholder. Fire-and-forget: the
-    // count is a readout, so a slow or failed fetch must never delay or break
-    // the rest of the command view.
-    Promise.resolve(this.refreshTicketCount()).catch(() => {});
+    // The work tile refreshes on a ticket change, never on render (PRD 760
+    // FR-11). Binding is idempotent, so doing it here costs one check.
+    this.bindTicketChangeEvents();
 
     // The Backlog drawer survives full re-renders too — same pattern.
     if (this.backlogDrawerEl && this.container && this.container.appendChild) {

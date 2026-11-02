@@ -72,8 +72,20 @@ function tree() {
       name: 'Platform',
       kind: 'group',
       children: [
-        { id: 'w1', name: 'API', open_task_count: 3, agent_count: 2, needs_attention_count: 1 },
-        { id: 'w2', name: 'Web', open_task_count: 0, agent_count: 1, needs_attention_count: 0 },
+        {
+          id: 'w1',
+          name: 'API',
+          ticket_counts: { ready: 3 },
+          agent_count: 2,
+          needs_attention_count: 1
+        },
+        {
+          id: 'w2',
+          name: 'Web',
+          ticket_counts: { ready: 0 },
+          agent_count: 1,
+          needs_attention_count: 0
+        },
         {
           id: 'g2',
           name: 'Infra',
@@ -1163,7 +1175,11 @@ test('indeterminate rolls up through nesting levels', () => {
 // ---------------------------------------------------------------------------
 
 test('a workspace needing attention shows the count, and nothing else', () => {
-  const marker = workspaceMarker({ needs_attention_count: 2, active: true, open_task_count: 5 });
+  const marker = workspaceMarker({
+    needs_attention_count: 2,
+    active: true,
+    ticket_counts: { ready: 5 }
+  });
   assert.equal(marker.attention, 2);
   assert.equal(marker.dot, false);
   assert.equal(marker.statusLabel, 'Needs attention');
@@ -1172,9 +1188,17 @@ test('a workspace needing attention shows the count, and nothing else', () => {
 test('a running or active workspace shows the dot; an idle one shows nothing', () => {
   const running = workspaceMarker({ needs_attention_count: 0, active: true });
   assert.deepEqual([running.attention, running.dot, running.statusLabel], [0, true, 'Running']);
-  const busy = workspaceMarker({ needs_attention_count: 0, active: false, open_task_count: 3 });
+  const busy = workspaceMarker({
+    needs_attention_count: 0,
+    active: false,
+    ticket_counts: { in_progress: 3 }
+  });
   assert.deepEqual([busy.dot, busy.statusLabel], [true, 'Active']);
-  const idle = workspaceMarker({ needs_attention_count: 0, active: false, open_task_count: 0 });
+  const idle = workspaceMarker({
+    needs_attention_count: 0,
+    active: false,
+    ticket_counts: { backlog: 4, done: 2 }
+  });
   assert.deepEqual([idle.attention, idle.dot, idle.statusLabel], [0, false, 'Idle']);
 });
 
@@ -1332,7 +1356,7 @@ test('a workspace row shows its attention count and names its status in words (F
   assert.match(w1, /class="cockpit-tree-badge">1</);
   assert.match(w1, /class="visually-hidden">Needs attention</);
   assert.doesNotMatch(w1, /cockpit-tree-dot/);
-  // w2 reports zero attention and no open tasks: no marker at all.
+  // w2 reports zero attention and no open work: no marker at all.
   const w2 = rowMarkup(html(), 'w2');
   assert.doesNotMatch(w2, /cockpit-tree-badge|cockpit-tree-dot/);
   assert.match(w2, /class="visually-hidden">Idle</);
@@ -1343,7 +1367,13 @@ test('Personal HQ shows the HQ label, and a running workspace shows the dot', ()
     visibleTreeRows(
       [
         { id: 'hq', name: 'My HQ', is_personal_hq: true, needs_attention_count: 0, active: true },
-        { id: 'plain', name: 'Plain', needs_attention_count: 0, active: false, open_task_count: 0 }
+        {
+          id: 'plain',
+          name: 'Plain',
+          needs_attention_count: 0,
+          active: false,
+          ticket_counts: { ready: 0 }
+        }
       ],
       new Set()
     ),

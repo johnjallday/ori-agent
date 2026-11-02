@@ -37,9 +37,19 @@ import {
   sectionOfKind
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
+import { TicketCounts } from './ticket-count-line.js';
 import { renderMarkdown } from './note-editor.js';
 import { workspaceNotePath } from './note-routes.js';
 import { workspacePageURL } from './workspace-routes.js';
+
+/**
+ * The overview's work stat: the one count line the header, the map and the
+ * rail show (PRD 760 FR-10). It is words, not a number, so it is marked `line`
+ * and renders smaller; missing counts are a dash, never "No open work".
+ */
+export function workStat(counts) {
+  return { value: TicketCounts.format(counts) || '—', label: 'Tickets', line: true };
+}
 
 // ---------------------------------------------------------------------------
 // Tab state (FR25, FR26)
@@ -533,7 +543,7 @@ const VIEW_FILLERS = {
     view.lead = rail.mission;
     view.stats = [
       { value: formatCount(rail.status.agents), label: 'Agents' },
-      { value: formatCount(rail.status.openTasks), label: 'Open tasks' },
+      workStat(rail.status.tickets),
       { value: formatCount(rail.status.attention), label: 'Need attention' }
     ];
     view.fields = [
@@ -558,7 +568,7 @@ const VIEW_FILLERS = {
     view.lead = rail.description;
     view.stats = [
       { value: formatCount(rail.aggregates.descendantWorkspaces), label: 'Workspaces' },
-      { value: formatCount(rail.aggregates.openTasks.total), label: 'Open tasks' },
+      workStat(rail.aggregates.work.counts),
       { value: formatCount(rail.aggregates.attention.total), label: 'Need attention' }
     ];
     const children = flattened
@@ -742,7 +752,7 @@ function contentHTML(view) {
           .map(
             stat =>
               '<div class="cockpit-pane-stat">' +
-              `<span class="cockpit-pane-stat-value">${escapeHtml(stat.value)}</span>` +
+              `<span class="cockpit-pane-stat-value${stat.line ? ' is-line' : ''}">${escapeHtml(stat.value)}</span>` +
               `<span class="cockpit-pane-kicker">${escapeHtml(stat.label)}</span>` +
               '</div>'
           )

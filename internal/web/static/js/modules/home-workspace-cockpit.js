@@ -1,6 +1,9 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
+// Importing this also registers window.OriTicketCounts, which is how the classic
+// workspace-map.js reaches the same count line before it renders a tile.
+import { TicketCounts } from './ticket-count-line.js';
 import { createLibraryBadgeLoader, libraryShelfRoute } from './home-library-badges.js';
 import { workspacePageURL } from './workspace-routes.js';
 import {
@@ -413,7 +416,12 @@ export function workspaceSignals(workspace) {
   const available = ws.task_summary_available !== false;
   const unknown = readCount(ws.unknown_task_count) || 0;
   const attention = available ? readCount(ws.needs_attention_count) : null;
-  const openTasks = available ? readCount(ws.open_task_count) : null;
+  // The server's canonical count by ticket state (PRD 760 FR-6, FR-10). This
+  // never reads the legacy open_task_count: a workspace that did not send
+  // ticket_counts has an unknown amount of work, not none.
+  const tickets =
+    available && ws.ticket_counts && typeof ws.ticket_counts === 'object' ? ws.ticket_counts : null;
+  const openWork = tickets ? TicketCounts.openCount(tickets) : null;
   const agents = readCount(
     ws.agent_count !== undefined
       ? ws.agent_count
@@ -426,8 +434,8 @@ export function workspaceSignals(workspace) {
   let status;
   if (attention !== null && attention > 0) status = 'attention';
   else if (active) status = 'running';
-  else if (openTasks !== null && openTasks > 0) status = 'active';
-  else if (attention === null || openTasks === null || unknown > 0) status = 'unknown';
+  else if (openWork !== null && openWork > 0) status = 'active';
+  else if (attention === null || openWork === null || unknown > 0) status = 'unknown';
   else status = 'idle';
 
   const label = {
@@ -442,11 +450,12 @@ export function workspaceSignals(workspace) {
     status,
     label,
     attention,
-    openTasks,
+    tickets,
+    openWork,
     agents,
     active,
     unknown,
-    partial: attention === null || openTasks === null || unknown > 0
+    partial: attention === null || openWork === null || unknown > 0
   };
 }
 
@@ -458,7 +467,7 @@ export function workspaceSignals(workspace) {
 //
 //   active: bool                 -> Running
 //   needs_attention_count: int   -> Attention
-//   open_task_count: int         -> workspace context + next move
+//   ticket_counts: object        -> workspace context + next move
 //   agent_count: int             -> roster size
 //   backlog_count / session_count / mcp_count / skill_count: int
 //   status / ops_mode / kind: string
@@ -700,15 +709,17 @@ export function recommendedNextMove(workspace) {
       detail: nextRun
     };
   }
-  if (signals.openTasks !== null && signals.openTasks > 0) {
+  if (signals.openWork !== null && signals.openWork > 0) {
     return {
       kind: 'tasks',
       label:
-        signals.openTasks === 1 ? 'Pick up 1 open task' : `Pick up ${signals.openTasks} open tasks`,
+        signals.openWork === 1
+          ? 'Pick up 1 open ticket'
+          : `Pick up ${signals.openWork} open tickets`,
       detail: 'Open work already queued in this workspace.'
     };
   }
-  if (signals.openTasks === null && signals.attention === null) {
+  if (signals.openWork === null && signals.attention === null) {
     return {
       kind: 'unavailable',
       label: 'Next move unavailable',
@@ -809,7 +820,9 @@ export function groupAggregates(group, flattened) {
     descendantGroups: groups.length,
     partialWorkspaces: workspaces.filter(ws => workspaceSignals(ws).partial).length,
     agents: sum(ws => workspaceSignals(ws).agents),
-    openTasks: sum(ws => workspaceSignals(ws).openTasks),
+    // { counts, known, missing }: counts is null when nothing reported, and an
+    // empty group is an authoritative zero (see TicketCounts.sum).
+    work: TicketCounts.sum(workspaces.map(ws => workspaceSignals(ws).tickets)),
     attention: sum(ws => workspaceSignals(ws).attention)
   };
 }
@@ -906,7 +919,8 @@ export function summaryView(flattened, scheduleIndex, now) {
     groups: groups.length,
     partialWorkspaces: workspaces.filter(ws => workspaceSignals(ws).partial).length,
     agents: sum(ws => workspaceSignals(ws).agents),
-    openTasks: sum(ws => workspaceSignals(ws).openTasks),
+    // Summed ticket counts; null when no workspace reported any.
+    work: TicketCounts.sum(workspaces.map(ws => workspaceSignals(ws).tickets)).counts,
     attention: sum(ws => workspaceSignals(ws).attention),
     runningWorkspaces: runningWorkspaces.map(ws => ({ id: ws.id, name: ws.name })),
     upcomingCount: upcoming,
@@ -1053,6 +1067,27 @@ function metricHTML(label, value) {
   );
 }
 
+/**
+ * The work count line as a full-width row ("1 in review · 2 in progress"),
+ * the same wording as the workspace header and the map (PRD 760 FR-10). A
+ * missing count is a dimmed dash, never "No open work". `unreported` is how
+ * many workspaces in a total sent no counts, so a partial total says so.
+ */
+function workLineHTML(label, counts, unreported = 0) {
+  const line = TicketCounts.format(counts);
+  const note =
+    line && unreported > 0
+      ? `<span class="cockpit-rail-metric-note">${unreported} unreported</span>`
+      : '';
+  return (
+    `<div class="cockpit-rail-work"${line ? '' : ' data-unavailable="true"'}>` +
+    `<span class="cockpit-rail-work-label">${escapeHtml(label)}</span>` +
+    `<span class="cockpit-rail-work-value">${escapeHtml(line || '—')}</span>` +
+    note +
+    '</div>'
+  );
+}
+
 function mapAgentPortraitHTML(name, isCommander = false) {
   const map = typeof window !== 'undefined' ? window.OriWorkspaceMap : null;
   if (map && typeof map.agentPortraitHTML === 'function') {
@@ -1162,8 +1197,8 @@ export function renderGroupRailHTML(view) {
     '<div class="cockpit-rail-actions">' +
     `<a class="modern-btn modern-btn-primary cockpit-rail-open" href="${escapeHtml(view.openHref)}" data-cockpit-rail-open data-workspace-id="${escapeHtml(view.id)}">Open Group</a>` +
     '</div>' +
+    workLineHTML('Tickets', a.work.counts, a.work.missing) +
     '<div class="cockpit-rail-metrics" aria-label="Group totals">' +
-    aggregateHTML('Open tasks', a.openTasks) +
     aggregateHTML('Agents', a.agents) +
     aggregateHTML('Attention tasks', a.attention) +
     '</div>' +
@@ -1293,8 +1328,8 @@ export function renderSummaryRailHTML(view) {
     metricHTML('Groups', view.groups) +
     metricHTML('Agents', view.agents) +
     '</div>' +
+    workLineHTML('Tickets', view.work) +
     '<div class="cockpit-rail-metrics" aria-label="Work totals">' +
-    metricHTML('Open tasks', view.openTasks) +
     metricHTML('Attention tasks', view.attention) +
     metricHTML('Workspaces due today', view.dueToday) +
     '</div>' +
@@ -1357,8 +1392,8 @@ export function renderWorkspaceRailHTML(view) {
       ? `<button type="button" class="modern-btn modern-btn-secondary" data-cockpit-rail-ask data-workspace-id="${escapeHtml(view.id)}">Open assistant</button>`
       : `<p class="cockpit-rail-note">${escapeHtml(view.commanderUnavailableReason)}</p>`) +
     '</div>' +
+    workLineHTML('Tickets', view.status.tickets) +
     '<div class="cockpit-rail-metrics" aria-label="Workspace metrics">' +
-    metricHTML('Open tasks', view.status.openTasks) +
     metricHTML('Agents', view.status.agents) +
     metricHTML('Attention tasks', view.status.attention) +
     '</div>' +
