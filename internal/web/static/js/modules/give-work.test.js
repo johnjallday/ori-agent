@@ -37,7 +37,10 @@ test('an agent makes it Ready, and only Start now starts it', () => {
 });
 
 test('a due day becomes an instant, and no due stays empty', () => {
-  assert.equal(giveWorkRequest({ what: 'X', due: '2026-12-01' }, 'k').input.dueDate, '2026-12-01T00:00:00Z');
+  assert.equal(
+    giveWorkRequest({ what: 'X', due: '2026-12-01' }, 'k').input.dueDate,
+    '2026-12-01T00:00:00Z'
+  );
   assert.equal(giveWorkRequest({ what: 'X', due: '' }, 'k').input.dueDate, null);
 });
 
@@ -58,10 +61,7 @@ test('the outcome says where the ticket went', () => {
     kind: 'saved',
     message: '#7 is in Backlog.'
   });
-  assert.equal(
-    giveWorkOutcome({ displayNumber: '#7', start: { started: true } }).kind,
-    'started'
-  );
+  assert.equal(giveWorkOutcome({ displayNumber: '#7', start: { started: true } }).kind, 'started');
 });
 
 test('a refused start says the ticket is Ready and why', () => {
@@ -88,7 +88,10 @@ test('the door can preselect an agent, even one not in the list it passed', () =
     giveWorkHTML({ agents: ['Writer', 'Editor'], assignee: 'Editor' }),
     /<option value="Editor" selected>Editor/
   );
-  assert.match(giveWorkHTML({ agents: [], assignee: 'Writer' }), /<option value="Writer" selected>/);
+  assert.match(
+    giveWorkHTML({ agents: [], assignee: 'Writer' }),
+    /<option value="Writer" selected>/
+  );
 });
 
 test('with no agents the form explains where the work goes', () => {

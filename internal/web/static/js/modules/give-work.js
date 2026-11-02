@@ -116,9 +116,7 @@ export function giveWorkHTML({ workspaceName = '', agents = [], assignee = '' } 
   return (
     '<form class="give-work-form" method="dialog" novalidate>' +
     '<h2 class="give-work-title" id="giveWorkTitle">Give work' +
-    (workspaceName
-      ? ` <span class="give-work-where">to ${escapeHTML(workspaceName)}</span>`
-      : '') +
+    (workspaceName ? ` <span class="give-work-where">to ${escapeHTML(workspaceName)}</span>` : '') +
     '</h2>' +
     '<label class="give-work-label" for="giveWorkWhat">What needs doing?</label>' +
     '<input class="form-control" id="giveWorkWhat" name="what" type="text" maxlength="300" required autocomplete="off">' +

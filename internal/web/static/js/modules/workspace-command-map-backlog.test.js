@@ -187,10 +187,3 @@ test('closing the drawer opened from the Map returns focus to the triggering Map
 });
 
 // ---------- New Quest intent choice (FR56) ----------
-
-function makeComposerView(extraPage = {}) {
-  const view = new WorkspaceCommandView(null);
-  view.page = { workspaceId: 'w1', ...extraPage };
-  view.render = () => {};
-  return view;
-}

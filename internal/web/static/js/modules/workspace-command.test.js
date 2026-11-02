@@ -4104,25 +4104,6 @@ test('Operations Map renders units first and keeps support panels hidden by defa
   }
 });
 
-function makeQuestComposerView(overrides = {}) {
-  const commandView = Object.create(WorkspaceCommandView.prototype);
-  Object.assign(
-    commandView,
-    {
-      taskComposerOpen: false,
-      taskComposerDraft: '',
-      taskComposerError: '',
-      taskComposerSubmitting: false,
-      renderCalls: 0,
-      render() {
-        this.renderCalls += 1;
-      }
-    },
-    overrides
-  );
-  return commandView;
-}
-
 function makeLoadoutView(overrides = {}) {
   const view = Object.create(WorkspaceCommandView.prototype);
   Object.assign(
