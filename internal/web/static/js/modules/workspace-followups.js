@@ -515,10 +515,17 @@ export function renderManagementPanel(doc, mount, view, act, focusID = '', optio
   return focusedCard;
 }
 
+// isRendered reports whether the node has a box on screen, i.e. it is not
+// inside a hidden host.
+function isRendered(node) {
+  return typeof node.getClientRects === 'function' && node.getClientRects().length > 0;
+}
+
 // wireWorkspaceFollowUps fetches the workspace's follow-ups and renders the
 // management panel, re-fetching after each mutation. Dependencies are injected
-// for testability. It returns a controller whose refocus() scrolls the
-// deep-linked card into view again after the mount has moved.
+// for testability. It returns a controller whose refocus() scrolls a
+// deep-linked card into view once the mount has a visible place: the command
+// view parks the mount in a hidden host and moves it into its layout later.
 export async function wireWorkspaceFollowUps({
   doc,
   workspaceId,
@@ -530,16 +537,21 @@ export async function wireWorkspaceFollowUps({
   storage = defaultStorage(),
   now = () => new Date()
 }) {
-  const controller = { refocus: () => false, hasItems: () => false };
+  const controller = { refocus: () => false };
   if (!mount || !workspaceId) return controller;
   const focusID = followUpIDFromSearch(locationSearch);
   const state = { filter: 'all', open: null };
   let focusedCard = null;
   let focusedTitle = '';
   let deepLinkConsumed = false;
-  let hasItems = false;
-  controller.refocus = () => focusManagementCard(focusedCard, focusedTitle);
-  controller.hasItems = () => hasItems;
+  // True while a deep-linked card was focused out of sight. refocus() does the
+  // focus once, so later re-renders of the command view never scroll the page.
+  let refocusPending = false;
+  controller.refocus = () => {
+    if (!refocusPending) return false;
+    refocusPending = false;
+    return focusManagementCard(focusedCard, focusedTitle);
+  };
 
   const load = async () => {
     let items = [];
@@ -577,7 +589,6 @@ export async function wireWorkspaceFollowUps({
     };
     const current = now();
     const view = managementView(items);
-    hasItems = view.show;
     if (state.open === null) {
       const remembered = readFollowUpsOpen(storage, workspaceId);
       state.open = remembered === null ? defaultOpen(view.items, current) : remembered;
@@ -602,9 +613,7 @@ export async function wireWorkspaceFollowUps({
       focusedCard = card;
       focusedTitle = view.items.find(item => item.id === focusID)?.title || '';
       state.open = true;
-    }
-    if (doc && typeof doc.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
-      doc.dispatchEvent(new CustomEvent('workspace-followups:rendered', { detail: { hasItems } }));
+      refocusPending = !isRendered(mount);
     }
   };
   await load();
@@ -651,8 +660,7 @@ export async function wireWorkspaceFollowUps({
     // deep-linked card is scrolled into view in its new place (FR4).
     window.WorkspaceFollowUps = {
       ready,
-      refocus: () => ready.then(controller => controller.refocus()),
-      hasItems: () => ready.then(controller => controller.hasItems())
+      refocus: () => ready.then(controller => controller.refocus())
     };
   }
 })();

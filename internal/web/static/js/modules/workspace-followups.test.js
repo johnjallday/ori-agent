@@ -568,11 +568,15 @@ test('wireWorkspaceFollowUps focuses an exact owner-local deep link without muta
   // The deep link does not overwrite the remembered choice.
   assert.equal(storage.data['ori:followups-open:eo-1'], 'false');
 
-  // refocus() scrolls the same card into view again after the mount moves.
+  // The card was focused while the mount had no box (the stub has no
+  // getClientRects), so refocus() scrolls it into view once the mount has
+  // moved, and only once.
   f2.scrolledWith = null;
   assert.equal(controller.refocus(), true);
   assert.deepEqual(f2.scrolledWith, { block: 'center' });
-  assert.equal(controller.hasItems(), true);
+  f2.scrolledWith = null;
+  assert.equal(controller.refocus(), false);
+  assert.equal(f2.scrolledWith, null);
 
   const untouched = doc.createElement('div');
   const none = await wireWorkspaceFollowUps({

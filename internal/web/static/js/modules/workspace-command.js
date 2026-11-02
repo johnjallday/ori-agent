@@ -2599,13 +2599,14 @@ export class WorkspaceCommandView {
       this.viewMode === 'tickets' || this.viewMode === 'dashboard'
         ? ''
         : this.viewMode === 'map'
-          ? this.renderOperationsMap()
+          ? this.renderOperationsMap() + this.renderFollowUpsHost()
           : '<div class="ws-cmd-layout">' +
             '<main class="ws-cmd-main">' +
             this.renderWorkFirst() +
             this.renderWorkspaceAdmin() +
             this.renderUnstaffedBanner() +
             this.renderMissionPanel() +
+            this.renderFollowUpsHost() +
             '<section class="ws-cmd-garrison">' +
             this.renderGarrison() +
             '</section>' +
@@ -2621,6 +2622,10 @@ export class WorkspaceCommandView {
       this.container.classList.toggle('is-settled', this.detailsViewSettled());
     }
 
+    // The follow-ups panel may be mounted inside this container; take it home
+    // before the rebuild so it is never detached (syncSharedSurfaces mounts it
+    // again below).
+    this.parkFollowUpsSurface();
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +
       body +
@@ -13194,6 +13199,64 @@ export class WorkspaceCommandView {
     this.restoreSharedSurface('tools');
     this.restoreSharedSurface('members');
     this.restoreSharedSurface('board');
+    this.parkFollowUpsSurface();
+  }
+
+  // ── Follow-ups panel (#workspaceFollowupMount) ──────────────────────────
+  // Live DOM owned by workspace-followups.js, with its own listeners, focus and
+  // collapse state. It lives in #workspace-detail-shared-hosts at rest; Details
+  // shows it below the Goal panel and Map below the map shell (PRD
+  // hq-details-landing FR1-FR3). Tickets and Dashboard leave it at home.
+
+  renderFollowUpsHost() {
+    return '<div class="ws-cmd-followups-host" data-cmd-followups-host></div>';
+  }
+
+  // Before a rebuild or a mode switch: remember a focused control inside the
+  // panel, then put the panel back at home so the innerHTML write cannot detach
+  // it. A mode switch parks it before render() parks it again, so a capture is
+  // kept until the next syncFollowUpsSurface() uses or drops it.
+  parkFollowUpsSurface() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors.followups;
+    if (!record || !record.node) return;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (
+      active &&
+      active !== record.node &&
+      typeof record.node.contains === 'function' &&
+      record.node.contains(active)
+    ) {
+      this.followUpsFocus = active;
+    }
+    this.restoreSharedSurface('followups');
+  }
+
+  syncFollowUpsSurface() {
+    const focus = this.followUpsFocus || null;
+    this.followUpsFocus = null;
+    const host =
+      this.active && this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-followups-host]')
+        : null;
+    if (!host) {
+      this.restoreSharedSurface('followups');
+      return;
+    }
+    const node = this.mountSharedSurface('followups', '#workspaceFollowupMount', host);
+    if (!node) return;
+    // mountSharedSurface unhides the node; the panel itself decides whether it
+    // has anything to show, so a workspace without follow-ups shows nothing (FR5).
+    const rendered =
+      typeof node.querySelector === 'function' &&
+      Boolean(node.querySelector('.workspace-followups'));
+    node.hidden = !rendered;
+    if (focus && typeof focus.focus === 'function' && node.contains(focus)) {
+      focus.focus({ preventScroll: true });
+    }
+    // A deep-linked card rendered while the panel was parked is scrolled into
+    // view now that it has a place; the module does this once (FR4).
+    const api = typeof window !== 'undefined' ? window.WorkspaceFollowUps : null;
+    if (rendered && api && typeof api.refocus === 'function') api.refocus();
   }
 
   showConfigTab(tab) {
@@ -13289,6 +13352,7 @@ export class WorkspaceCommandView {
   }
 
   syncSharedSurfaces() {
+    this.syncFollowUpsSurface();
     this.syncSystemsSurface();
     this.syncDetachmentSurface();
   }

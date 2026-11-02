@@ -9102,8 +9102,17 @@ button.ws-cmd-rpg-class-card:focus-visible {
   background: var(--ws-panel, var(--bg-secondary));
   color: var(--ws-ink, var(--text-primary));
 }
+/* The host adds no box of its own: in the Details column the panel is the flex
+   item (so an empty, hidden panel leaves no gap), and below the Map shell it
+   takes the column's spacing itself. */
+.ws-cmd-followups-host {
+  display: contents;
+}
 .ws-cmd .workspace-followup-mount {
   margin: 0;
+}
+.ws-cmd-map-shell ~ .ws-cmd-followups-host > .workspace-followup-mount {
+  margin-top: 18px;
 }
 .workspace-followups-head {
   display: flex;
