@@ -37,16 +37,18 @@ for (const theme of ['light', 'dark']) {
     try {
       await page.goto(`/workspaces/${folder.folder_slug}`);
       const area = page.getByRole('region', { name: 'Next action', exact: true });
-      await expect(area.getByRole('button', { name: 'Give Task' })).toBeVisible();
+      await expect(area.getByRole('button', { name: 'Give work', exact: true })).toBeVisible();
       await page.keyboard.press('Tab');
-      await area.getByRole('button', { name: 'All Tasks' }).focus();
-      await expect(area.getByRole('button', { name: 'All Tasks' })).toHaveCSS(
+      await area.getByRole('button', { name: 'All tickets', exact: true }).focus();
+      await expect(area.getByRole('button', { name: 'All tickets', exact: true })).toHaveCSS(
         'outline-style',
         'solid'
       );
+      // All tickets opens the board (the legacy tasks drawer is gone, PRD 760 FR-33).
       await page.keyboard.press('Enter');
-      await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
-      await expect(area.getByRole('button', { name: 'All Tasks' })).toBeFocused();
+      await expect(page.locator('#hubTicketsGiveWork')).toBeVisible();
+      await page.locator('[data-cmd-view-mode="details"]').click();
+      await expect(area.getByRole('button', { name: 'All tickets', exact: true })).toBeVisible();
       await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
       await expect(page.locator('#onboardingModal')).toBeHidden();
       // Response fixture only: no task or agent execution, and an unbroken name

@@ -28,7 +28,7 @@ function completionAt(value) {
 }
 
 function taskTitle(task) {
-  return String(task.description || task.name || task.title || 'Untitled task');
+  return String(task.description || task.name || task.title || 'Untitled ticket');
 }
 
 function resultOrder(a, b) {
@@ -82,10 +82,10 @@ export function resolveWorkspaceNextAction(input) {
   const qualify = (name, source) => {
     if (!source || ['ready', 'not_applicable'].includes(source.state)) return;
     qualifications.push(
-      `${name} ${name === 'Tasks' ? 'are' : 'is'} ${source.state === 'unavailable' ? 'unavailable' : 'loading'}.${source.stale ? ' Last known information may be out of date.' : ''}`
+      `${name} ${name === 'Tickets' ? 'are' : 'is'} ${source.state === 'unavailable' ? 'unavailable' : 'loading'}.${source.stale ? ' Last known information may be out of date.' : ''}`
     );
   };
-  qualify('Tasks', { state: taskState });
+  qualify('Tickets', { state: taskState });
   qualify('File review status', janitor?.status || { state: 'loading' });
   if (known) {
     qualify('File review', janitor.batch);

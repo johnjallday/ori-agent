@@ -581,7 +581,7 @@ export class AgentCanvasInitialization {
     if (!infoEl) return;
 
     const workflowLabel = this.state.selectedWorkflowId ? ' (filtered)' : '';
-    infoEl.textContent = `Workspace: ${this.parent.workspace?.name || this.parent.workspaceId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length}${workflowLabel} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
+    infoEl.textContent = `Workspace: ${this.parent.workspace?.name || this.parent.workspaceId} | Agents: ${this.state.agents.length} | Tickets: ${this.state.tasks.length}${workflowLabel} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
   }
 
   /**

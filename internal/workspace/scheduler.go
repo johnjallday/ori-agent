@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -469,6 +470,10 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 	// Backlog, Cancelled and a run already active or queued do not fire. The
 	// refusal is recorded on the ticket, where a person can see it (FR-30).
 	if err := scheduledFiringRefusal(task); err != nil {
+		if errors.Is(err, ErrScheduledRunBusy) {
+			ts.skipBusyFiring(ws, task, now)
+			return
+		}
 		ts.recordTaskScheduleFailure(ws, task, err)
 		return
 	}
@@ -538,6 +543,32 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 			"execution_count": executionCount,
 			"next_run":        nextRun,
 		}))
+	}
+}
+
+// skipBusyFiring records a firing that found the ticket's run still going and
+// moves the schedule to its next time. It counts no failure, so a long run never
+// switches a recurring schedule off.
+func (ts *TaskScheduler) skipBusyFiring(ws *Workspace, task *Task, now time.Time) {
+	if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
+		t.ExecutionHistory = append(t.ExecutionHistory, TaskExecution{
+			TaskID:     t.ID,
+			ExecutedAt: now,
+			Status:     "skipped",
+			Error:      "Skipped: the last run of this ticket was still going.",
+		})
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
+		}
+		if t.Schedule != nil {
+			t.NextRun = CalculateNextRun(*t.Schedule, now)
+			if t.NextRun == nil {
+				t.ScheduleEnabled = false
+			}
+		}
+		return nil
+	}); err != nil {
+		logger.Error("Failed to record a skipped firing", logger.Fields{"error": err, "task_id": task.ID})
 	}
 }
 

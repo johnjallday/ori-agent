@@ -410,7 +410,9 @@ export function secondBrainItemGroups(items) {
       due: String(item.due || ''),
       checked: item.suggested === true,
       // Copied from a follow-up the user already has: shown, never added again.
-      seeded: item.seeded === true
+      seeded: item.seeded === true,
+      // Already a ticket in its project's workspace: shown, never added again.
+      ticketed: item.ticketed === true
     });
   }
   return groups;
@@ -421,7 +423,7 @@ export function secondBrainItemGroups(items) {
 export function secondBrainDestinationLine(group) {
   if (group?.destination) return `Tickets in ${group.destination}`;
   const items = Array.isArray(group?.items) ? group.items : [];
-  return items.some(item => !item.seeded) ? 'Follow-ups in Personal HQ' : '';
+  return items.some(item => !item.seeded && !item.ticketed) ? 'Follow-ups in Personal HQ' : '';
 }
 
 // secondBrainLookView is the result card (FR23–FR27): one headline and one
@@ -1856,18 +1858,21 @@ function renderEverything(view) {
       box.type = 'checkbox';
       box.value = item.id;
       box.checked = item.checked;
-      box.disabled = state.busy || view.acted || item.seeded;
+      box.disabled = state.busy || view.acted || item.seeded || item.ticketed;
       label.append(box, document.createTextNode(` ${item.text}`));
       if (item.due) label.append(node('span', 'pa-second-brain__due', ` · ${item.due}`));
       if (item.seeded)
         label.append(node('span', 'pa-second-brain__due', ' · already in your follow-ups'));
+      if (item.ticketed) label.append(node('span', 'pa-second-brain__due', ' · already a ticket'));
       fieldset.append(label);
     });
     form.append(fieldset);
   });
   details.append(form);
   // Nothing to add when every item is one Ori copied from a follow-up.
-  const addable = view.groups.some(group => group.items.some(item => !item.seeded));
+  const addable = view.groups.some(group =>
+    group.items.some(item => !item.seeded && !item.ticketed)
+  );
   if (!view.acted && addable) {
     details.append(
       actionRow([{ id: 'add-selected', label: 'Add selected', style: 'outline' }], () => {

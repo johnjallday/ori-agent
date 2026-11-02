@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -385,64 +384,6 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task deleted successfully",
-		"task_id":   taskID,
-		"workspace": workspaceID,
-	}); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
-}
-
-// ExecuteTaskManually handles POST /api/workspaces/:id/tasks/:task_id/execute
-func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.PathValue("workspaceID")
-	taskID := r.PathValue("taskId")
-
-	// Get workspace
-	workspace, err := h.store.Get(workspaceID)
-	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
-		return
-	}
-
-	// Find the task
-	var targetTask *Task
-	for i := range workspace.Tasks {
-		if workspace.Tasks[i].ID == taskID {
-			targetTask = &workspace.Tasks[i]
-			break
-		}
-	}
-
-	if targetTask == nil {
-		orihttp.NotFound(w, "Task not found")
-		return
-	}
-	if err := RequireTaskNotBacklog(targetTask, "cannot execute task"); err != nil {
-		orihttp.BadRequest(w, err.Error())
-		return
-	}
-
-	logger.Debug("Manually executing task in workspace", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
-
-	// Register and detach before acknowledging so request cancellation cannot
-	// erase accepted work and reset cannot fence between response and launch.
-	finishTask, err := h.admissionGate.Enter()
-	if err != nil {
-		orihttp.ServiceUnavailable(w, err.Error())
-		return
-	}
-	execCtx := context.WithoutCancel(r.Context())
-	go func() {
-		defer finishTask()
-		if err := h.orchestrator.ExecuteTask(execCtx, workspaceID, *targetTask); err != nil {
-			logger.Error("Failed to execute task", logger.Fields{"task_id": taskID, "err": err})
-		}
-	}()
-
-	// Return success
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]any{
-		"message":   "Task execution started",
 		"task_id":   taskID,
 		"workspace": workspaceID,
 	}); encErr != nil {

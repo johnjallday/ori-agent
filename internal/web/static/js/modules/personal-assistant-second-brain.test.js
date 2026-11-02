@@ -480,8 +480,15 @@ test('show everything groups the items by note, suggested ones checked', () => {
       link: '',
       destination: '',
       items: [
-        { id: 'a', text: 'Master track 7', due: '2026-10-24', checked: true, seeded: false },
-        { id: 'b', text: 'Upload stems', due: '', checked: true, seeded: false }
+        {
+          id: 'a',
+          text: 'Master track 7',
+          due: '2026-10-24',
+          checked: true,
+          seeded: false,
+          ticketed: false
+        },
+        { id: 'b', text: 'Upload stems', due: '', checked: true, seeded: false, ticketed: false }
       ]
     },
     {
@@ -489,7 +496,16 @@ test('show everything groups the items by note, suggested ones checked', () => {
       label: 'Reading List',
       link: '',
       destination: '',
-      items: [{ id: 'c', text: 'Read Making Music', due: '', checked: false, seeded: false }]
+      items: [
+        {
+          id: 'c',
+          text: 'Read Making Music',
+          due: '',
+          checked: false,
+          seeded: false,
+          ticketed: false
+        }
+      ]
     }
   ]);
 });
@@ -992,4 +1008,18 @@ test('each group of a look names where it goes', () => {
   assert.equal(secondBrainDestinationLine(project), 'Tickets in Album');
   assert.equal(secondBrainDestinationLine(daily), 'Follow-ups in Personal HQ');
   assert.equal(secondBrainDestinationLine({ destination: '', items: [{ seeded: true }] }), '');
+});
+
+test('a line that is already a ticket is shown, not offered again', () => {
+  const [group] = secondBrainItemGroups([
+    {
+      id: 'a',
+      text: 'Mix',
+      note: 'Projects/Album/plan.md',
+      ticket_workspace: 'Album',
+      ticketed: true
+    }
+  ]);
+  assert.equal(group.items[0].ticketed, true);
+  assert.equal(secondBrainDestinationLine(group), 'Tickets in Album');
 });

@@ -211,6 +211,9 @@ type LookItem struct {
 	// TicketWorkspace names the workspace this line would become a ticket in. It is
 	// set on the view of a look, read fresh, and never saved.
 	TicketWorkspace string `json:"ticket_workspace,omitempty"`
+	// Ticketed says that workspace already holds this line's ticket, so the look
+	// neither suggests nor adds it again. Also read fresh, never saved.
+	Ticketed bool `json:"ticketed,omitempty"`
 }
 
 // Item returns the look's item with this id, for changing in place.

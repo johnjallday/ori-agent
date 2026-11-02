@@ -67,8 +67,8 @@ for (const [task, action] of [
 }
 
 test('loading and failure never masquerade as an idle workspace; Retry has one owner', () => {
-  assert.match(view(undefined).renderWorkFirst(), /Tasks are loading/);
-  assert.match(view([], { tasksLoading: true }).renderWorkFirst(), /Tasks are loading/);
+  assert.match(view(undefined).renderWorkFirst(), /Tickets are loading/);
+  assert.match(view([], { tasksLoading: true }).renderWorkFirst(), /Tickets are loading/);
   const failed = view([], { tasksLoadFailed: true });
   assert.match(failed.renderWorkFirst(), /Retry workspace status/);
   assert.doesNotMatch(failed.renderWorkFirst(), /Give work|No open work/);
@@ -310,7 +310,7 @@ test('stable live region announces changes, not polling starts or unchanged refr
     assert.match(writes[1], /5 files ready for review/);
     command.page.tasksLoadFailed = true;
     command.announceNextAction();
-    assert.match(writes[2], /Tasks are unavailable/);
+    assert.match(writes[2], /Tickets are unavailable/);
   } finally {
     globalThis.document = previous;
   }

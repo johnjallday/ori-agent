@@ -154,7 +154,7 @@ func (h *Handler) MakeTicketFromFollowUp(w http.ResponseWriter, r *http.Request)
 	}
 
 	target := strings.TrimSpace(req.WorkspaceID)
-	if target == "" && !h.isPersonalHQ(r.Context(), userID, item.WorkspaceID) {
+	if target == "" && h.ownsWork(r.Context(), userID, item.WorkspaceID) {
 		target = strings.TrimSpace(item.WorkspaceID)
 	}
 	if target == "" {
@@ -184,7 +184,9 @@ func (h *Handler) MakeTicketFromFollowUp(w http.ResponseWriter, r *http.Request)
 			orihttp.BadRequest(w, validation.Message)
 			return
 		}
-		orihttp.NotFound(w, "Workspace not found")
+		// The workspace was checked above, so this is the store, not a missing
+		// workspace; say so rather than sending the person looking for one.
+		orihttp.InternalError(w, "The ticket could not be saved. Try again.")
 		return
 	}
 	linked, err := h.followUpLinker.LinkTask(r.Context(), userID, item.ID, followup.TaskRef{
@@ -203,12 +205,35 @@ func (h *Handler) MakeTicketFromFollowUp(w http.ResponseWriter, r *http.Request)
 	respondFollowUpTicket(w, status, linked, ticket, created)
 }
 
-func (h *Handler) isPersonalHQ(ctx context.Context, userID, workspaceID string) bool {
-	if h == nil || h.service == nil || strings.TrimSpace(workspaceID) == "" {
+// ownsWork says whether a follow-up's own workspace can take its ticket: it is
+// not Personal HQ, which holds commitments rather than workspace work. When HQ
+// cannot be told apart (no HQ service, or its status unreadable), the person
+// chooses rather than the ticket landing in HQ by default.
+func (h *Handler) ownsWork(ctx context.Context, userID, workspaceID string) bool {
+	if h == nil || strings.TrimSpace(workspaceID) == "" {
 		return false
 	}
+	hq, known := h.personalHQWorkspace(ctx, userID)
+	return known && hq != workspaceID
+}
+
+// personalHQWorkspace is the user's Personal HQ workspace ID, "" when they have
+// none; known is false when that cannot be read.
+func (h *Handler) personalHQWorkspace(ctx context.Context, userID string) (string, bool) {
+	if h.hqWorkspace != nil {
+		return h.hqWorkspace(ctx, userID)
+	}
+	if h.service == nil {
+		return "", false
+	}
 	status, err := h.service.Status(ctx, userID)
-	return err == nil && status != nil && status.HasDesignation() && status.WorkspaceID == workspaceID
+	if err != nil || status == nil {
+		return "", false
+	}
+	if !status.HasDesignation() {
+		return "", true
+	}
+	return status.WorkspaceID, true
 }
 
 func respondFollowUpTicket(w http.ResponseWriter, status int, item *followup.FollowUp, ticket *workspace.Ticket, created bool) {

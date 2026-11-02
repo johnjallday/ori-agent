@@ -1609,6 +1609,46 @@ filters, `limit` and roll-up: `{ "backlog", "ready", "in_progress", "review", "d
 `GET /api/orchestration/workspace?id={id}` and the workspace lists carry the same object as
 `ticket_counts`. The product's count line reads Review, In Progress and Ready from it.
 
+### Start this
+
+`POST /api/workspaces/{id}/tickets/{ticketID}/start` with `{ "assignee": "<agent>" }`.
+
+Moves a `backlog` ticket to `ready` through the recorded transition, names the agent, and starts
+one run. `assignee` may be empty when the ticket already has someone.
+
+- `200` with the ticket and `start: { "started": bool, "error": "..." }`, as for create. A repeat
+  within 30 seconds answers `started` without starting again, because the run begins asynchronously.
+- `400` with `details.field`: `assignee` when nobody is named (the client asks who), or an agent
+  outside the workspace; `state` for a ticket past `ready`.
+
+### Where a ticket came from
+
+The ticket carries `source` and `source_id`. Two sources link to other records:
+
+- `followup`: made from a follow-up; `source_id` is the follow-up's ID.
+- `note_item`: made from an open line in a project's notes; `source_id` is the line's ID. When that
+  line is later ticked, marked DONE or removed, the ticket keeps its state and carries
+  `source_note` saying so. Ori never edits the note.
+
+### Follow-ups and tickets
+
+- `POST /api/personal-hq/followups/ticket` with `{ "id", "workspace_id" }` makes a `backlog` ticket
+  from a follow-up and links it. `workspace_id` defaults to the follow-up's own workspace; for one
+  held in Personal HQ it is required, and leaving it out is `400` with `details.field:
+  workspace_id`. A workspace that does not exist, is not active or is someone else's is `404`.
+  `201` with `{ followup, ticket, created: true }`; a repeat is `200` with the same ticket and
+  `created: false`.
+- `GET /api/personal-hq/followups/item?id=` returns one follow-up.
+- Follow-up lists carry `related_ticket: { id, workspace_id, display_number, state, state_label,
+  href }` with the ticket's current state, and `href` to open the follow-up. Closing either side
+  leaves the other open.
+
+### Retired
+
+`DELETE /api/orchestration/tasks/bulk` and `POST /api/workspaces/{id}/tasks/{taskID}/execute` had
+no remaining caller and were removed.
+Any other method or path under `/api/workspaces/{id}/tasks` that is not listed here is `404`.
+
 ## Anchored Workspaces
 
 `POST /api/workspaces` accepts `anchor_path` for an explicitly selected existing

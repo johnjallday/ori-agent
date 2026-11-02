@@ -1303,7 +1303,7 @@ export class AssistantProgramPage {
         link.href = project?.folder_slug
           ? `${workspaceRootURL(project.folder_slug)}/task/${encodeURIComponent(suggestion.task_id)}`
           : '#';
-        link.textContent = 'Review task';
+        link.textContent = 'Review ticket';
         actions.append(link);
       } else if (this.program?.plugin_available !== false) {
         actions.append(

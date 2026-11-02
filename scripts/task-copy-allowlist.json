@@ -1,0 +1,57 @@
+{
+  "entries": [
+    {
+      "file": "internal/web/static/js/app.js",
+      "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\").",
+      "texts": [
+        "Create a practical task execution assistant",
+        "You are a helpful assistant focused on completing practical user tasks",
+        "User task:"
+      ]
+    },
+    {
+      "file": "internal/web/static/js/modules/agent-canvas-helpers.js",
+      "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\"). buildCombinationInstruction lists the inputs for the model.",
+      "texts": ["Task : "]
+    },
+    {
+      "file": "internal/web/static/js/modules/dashboard.js",
+      "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\"). Also the calendar intent keywords, matched against what a person types; the new words sit beside them. The email and calendar dispatch messages are prompts to those agents.",
+      "texts": [
+        "scheduled task",
+        "workspace tasks",
+        "Create a practical task execution assistant",
+        "You are a helpful assistant focused on completing practical user tasks",
+        "User task:",
+        "Email task:",
+        "Calendar task:"
+      ]
+    },
+    {
+      "file": "internal/web/static/js/modules/workspace-detail.js",
+      "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\"). The workspace manager's system prompt.",
+      "texts": ["the request only needs shared context, and break work into tasks"]
+    },
+    {
+      "file": "internal/web/static/js/modules/workspace-task-skill-draft.js",
+      "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\"). The skill-generation prompt.",
+      "texts": [
+        "Create a reusable Ori Agent skill from this successful task.",
+        "Generalize the workflow; do not include task IDs",
+        "Original task title:",
+        "Original task details:",
+        "User clarification collected during the task:"
+      ]
+    },
+    {
+      "file": "internal/web/static/js/modules/workspace-task.js",
+      "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\"). buildAutoParseWorkflowPrompt.",
+      "texts": [
+        "Turn this completed task result into a concrete workflow draft.",
+        "Keep notes, tips, materials, and reference sections in the parent task details",
+        "Original task title:",
+        "Task result:"
+      ]
+    }
+  ]
+}

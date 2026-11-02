@@ -127,7 +127,7 @@ export async function readManagedHomeStatus(manager, creator) {
     ui.result = home;
     ui.layoutSubjectNew = result.layout_subject_new === true;
     ui.message =
-      'The original Home is ready. Its actual agents are shown. Reading status did not resume staffing, setup, tasks or positioning. Open the group to review any unfinished roles.';
+      'The original Home is ready. Its actual agents are shown. Reading status did not resume staffing, setup, tickets or positioning. Open the group to review any unfinished roles.';
     if (ui.reference.candidate && ui.layoutSubjectNew) {
       const layoutResponse = await fetch('/api/workspace-map/layout', {
         headers: { Accept: 'application/json' }
@@ -258,7 +258,7 @@ async function act(manager, creator, context, intent) {
       );
       ui.positionFailed = saved !== true;
       ui.message = saved
-        ? 'The original Home Group position was saved. No creation, staffing, membership, setup or task was repeated.'
+        ? 'The original Home Group position was saved. No creation, staffing, membership, setup or ticket was repeated.'
         : 'The original point is unavailable or its save failed. The Home is unchanged; no creation or staffing was repeated.';
     } finally {
       ui.busy = false;
@@ -447,7 +447,7 @@ export async function syncManagedHomeReview(manager, creator) {
       { label: 'Blueprint', value: creator.templateMeta(entry) },
       {
         label: 'Now',
-        value: `${reuse ? 'Reuse the existing Home' : 'Create one Home Group'}${staffing.length ? `, then staff ${staffing.map(item => item.label).join(', ')}` : '; no roles are staffed'}. No project, scan, schedule, task, tool access or application opening.`
+        value: `${reuse ? 'Reuse the existing Home' : 'Create one Home Group'}${staffing.length ? `, then staff ${staffing.map(item => item.label).join(', ')}` : '; no roles are staffed'}. No project, scan, schedule, ticket, tool access or application opening.`
       },
       {
         label: 'Team',

@@ -409,7 +409,7 @@ test('recommendedNextMove is deterministic and attention-first', () => {
     active: true
   });
   assert.equal(move.kind, 'attention');
-  assert.match(move.label, /3 tasks needing attention/);
+  assert.match(move.label, /3 tickets needing attention/);
   // Same input, same answer — no randomness, no model call.
   assert.deepEqual(
     recommendedNextMove({ needs_attention_count: 3, ...work(9), active: true }),
@@ -418,7 +418,10 @@ test('recommendedNextMove is deterministic and attention-first', () => {
 });
 
 test('recommendedNextMove singularizes a single attention item', () => {
-  assert.match(recommendedNextMove({ needs_attention_count: 1 }).label, /1 task needing attention/);
+  assert.match(
+    recommendedNextMove({ needs_attention_count: 1 }).label,
+    /1 ticket needing attention/
+  );
 });
 
 test('recommendedNextMove walks setup, running, schedule, then open tickets', () => {
@@ -1881,7 +1884,7 @@ test('unreadable and unclassified tasks do not become idle or fabricated zeros',
   const rows = [failed, { id: 'w1', folder_slug: 'first', needs_attention_count: 2 }];
   assert.equal(signalCounts(rows, null).attention, 1);
   assert.equal(summaryView(rows, null).partialWorkspaces, 2);
-  assert.match(renderSummaryRailHTML(summaryView(rows, null)), /Known task totals only/);
+  assert.match(renderSummaryRailHTML(summaryView(rows, null)), /Known ticket totals only/);
   assert.match(renderSignalFiltersHTML(signalCounts(rows, null), '', [SIGNAL_ATTENTION]), /1\+/);
   assert.equal(attentionItems(rows)[0].href, '/workspaces/first?panel=tasks');
   assert.match(
@@ -2173,7 +2176,7 @@ test('Craft help says how to earn it and what it buys', () => {
   assert.match(view.what, /by hand/);
   assert.equal(view.earn.length, 2);
   assert.match(view.earn[0], /chat message/);
-  assert.match(view.earn[1], /ran yourself/);
+  assert.match(view.earn[1], /started yourself/);
   assert.match(view.spend, /25 Craft/);
 });
 

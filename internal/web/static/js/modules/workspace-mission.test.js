@@ -66,7 +66,7 @@ test('run history lists counts and a failed run raw output', () => {
     /<summary>Show output<\/summary><pre>I think &lt;b&gt;everything&lt;\/b&gt; is fine<\/pre>/
   );
   assert.match(html, /<strong>Completed<\/strong>\s*<span>Scheduled<\/span>/);
-  assert.match(html, /3 tasks suggested · 2 findings · 1 duplicate skipped · 2 over the limit/);
+  assert.match(html, /3 tickets suggested · 2 findings · 1 duplicate skipped · 2 over the limit/);
   assert.equal((html.match(/Show output/g) || []).length, 1, 'only the failed run keeps output');
   assert.match(mission.runHistoryHTML([]), /No goal runs yet\./);
 });
@@ -110,7 +110,7 @@ test('a finished run reports its counts; a failed one its error', () => {
   });
   assert.equal(
     done.message,
-    'Run complete — 3 tasks suggested · 2 findings · 1 duplicate skipped.'
+    'Run complete — 3 tickets suggested · 2 findings · 1 duplicate skipped.'
   );
   assert.equal(done.kind, null);
 
@@ -138,7 +138,7 @@ test('a finished run reports its counts; a failed one its error', () => {
   assert.match(slow.message, /Still running/);
   assert.equal(
     mission.runCountsText({ tasks_created: 1, findings_created: 0 }),
-    '1 task suggested · 0 findings'
+    '1 ticket suggested · 0 findings'
   );
 });
 
@@ -442,7 +442,7 @@ test('a run that assessed and suggested nothing says so', () => {
     failed: false,
     record: { succeeded: true, tasks_created: 0, findings_created: 0 }
   });
-  assert.equal(old.message, 'Run complete — 0 tasks suggested · 0 findings.');
+  assert.equal(old.message, 'Run complete — 0 tickets suggested · 0 findings.');
 });
 
 // FR19: a plain goal whose newest run proposed a charter gets the Suggested

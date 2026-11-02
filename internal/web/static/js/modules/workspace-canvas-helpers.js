@@ -4,6 +4,20 @@
  */
 
 let currentWorkspaceId = null;
+
+// canvasWorkspaceId is this canvas's workspace. loadCanvasWorkspace sets the module
+// value, but the canvas page itself only sets window.currentWorkspaceId, so every
+// helper reads through here rather than the bare variable (which stayed null and
+// sent edits to /api/workspaces/null).
+function canvasWorkspaceId() {
+  return (
+    currentWorkspaceId ||
+    window.currentWorkspaceId ||
+    window.agentCanvas?.workspaceId ||
+    window.canvasWorkspaceId ||
+    null
+  );
+}
 const currentWorkspaceDashboard = null;
 
 /**
@@ -88,7 +102,7 @@ function showTaskDetails(task) {
     html = `
       <div class="mb-3">
         <div style="font-size: 32px; text-align: center; margin-bottom: 10px;">${combinerType.icon}</div>
-        <strong style="color: var(--text-primary); font-size: 1.1rem;">${combinerType.name} Task</strong>
+        <strong style="color: var(--text-primary); font-size: 1.1rem;">${combinerType.name} Ticket</strong>
         <div style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 5px;">${combinerType.description}</div>
       </div>
       <div class="mb-3">
@@ -109,7 +123,7 @@ function showTaskDetails(task) {
         task.input_task_ids && task.input_task_ids.length > 0
           ? `
         <div class="mb-3">
-          <strong style="color: var(--text-primary);">Input Tasks:</strong>
+          <strong style="color: var(--text-primary);">Input Tickets:</strong>
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
             ${task.input_task_ids
               .map((id, idx) => {
@@ -158,7 +172,7 @@ function showTaskDetails(task) {
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
-          Add Input Task
+          Add Input Ticket
         </button>
         <button class="btn btn-sm btn-success w-100 mb-2" onclick="assignCurrentTask()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -199,7 +213,7 @@ function showTaskDetails(task) {
 
     html = `
       <div class="mb-3">
-        <strong style="color: var(--text-primary);">Task ID:</strong>
+        <strong style="color: var(--text-primary);">Ticket ID:</strong>
         <div style="color: var(--text-secondary); font-family: monospace; font-size: 0.85rem;">${task.id || 'N/A'}</div>
       </div>
       <div class="mb-3">
@@ -214,7 +228,7 @@ function showTaskDetails(task) {
         task.input_task_ids && task.input_task_ids.length > 0
           ? `
         <div class="mb-3">
-          <strong style="color: var(--text-primary);">Input Tasks (${task.input_task_ids.length}):</strong>
+          <strong style="color: var(--text-primary);">Input Tickets (${task.input_task_ids.length}):</strong>
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
             ${task.input_task_ids
               .map((id, idx) => {
@@ -249,7 +263,7 @@ function showTaskDetails(task) {
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
-            Add Input Task
+            Add Input Ticket
           </button>
         </div>
       `
@@ -689,7 +703,7 @@ function showCombinerDetails(combiner) {
       combiner.taskId
         ? `
       <div class="mb-3">
-        <strong style="color: var(--text-primary);">Associated Task:</strong>
+        <strong style="color: var(--text-primary);">Associated Ticket:</strong>
         <div style="color: var(--text-secondary); font-size: 0.85rem; font-family: monospace;">${combiner.taskId.substring(0, 8)}...</div>
       </div>
     `
@@ -719,7 +733,7 @@ function showAddTaskModal() {
     window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
   if (!workspaceId) {
     console.error('No workspace ID available for creating task');
-    alert('Unable to create task: workspace not loaded');
+    alert('Unable to create a ticket: workspace not loaded');
     return;
   }
 
@@ -730,7 +744,7 @@ function showAddTaskModal() {
       workspaceId,
       agents: agents.map(agent => agent.name).filter(Boolean),
       trigger: document.activeElement,
-      onSaved: () => window.agentCanvas?.loadWorkspaceData?.()
+      onSaved: () => window.agentCanvas?.initModule?.fetchInitialProgressData?.()
     });
     return;
   }
@@ -738,12 +752,12 @@ function showAddTaskModal() {
     window.taskModalController.openForCreate(workspaceId, '', () => {
       // Refresh canvas after task creation
       if (window.agentCanvas) {
-        window.agentCanvas.loadWorkspaceData();
+        window.agentCanvas.initModule?.fetchInitialProgressData?.();
       }
     });
   } else {
     console.error('TaskModalController not available');
-    alert('Task creation modal not available');
+    alert('Ticket creation modal not available');
   }
 }
 
@@ -1057,21 +1071,21 @@ async function deleteCurrentTask() {
 
   const task = window.agentCanvas.state.expandedTask;
   if (!task) {
-    alert('No task selected');
+    alert('No ticket selected');
     return;
   }
 
   // Confirm deletion
   if (
     !confirm(
-      `Are you sure you want to delete this task?\n\n"${task.description || 'Task'}"\n\nThis action cannot be undone.`
+      `Are you sure you want to delete this ticket?\n\n"${task.description || 'Ticket'}"\n\nThis action cannot be undone.`
     )
   ) {
     return;
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${task.id}`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/tasks/${task.id}`, {
       method: 'DELETE'
     });
 
@@ -1091,11 +1105,11 @@ async function deleteCurrentTask() {
       window.agentCanvas.draw();
     } else {
       const error = await response.text();
-      alert(`Failed to delete task: ${error}`);
+      alert(`Failed to delete ticket: ${error}`);
     }
   } catch (error) {
-    console.error('Error deleting task:', error);
-    alert(`Error deleting task: ${error.message}`);
+    console.error('Error deleting ticket:', error);
+    alert(`Error deleting ticket: ${error.message}`);
   }
 }
 
@@ -1110,12 +1124,12 @@ async function editCurrentTask() {
 
   const task = window.agentCanvas.state.expandedTask;
   if (!task) {
-    alert('No task selected');
+    alert('No ticket selected');
     return;
   }
 
   // Prompt for new description
-  const newDescription = prompt('Enter new task description:', task.description);
+  const newDescription = prompt('Enter new ticket description:', task.description);
   if (!newDescription || newDescription.trim() === '') {
     return;
   }
@@ -1125,7 +1139,7 @@ async function editCurrentTask() {
   const assignedNodeId = task.assigned_node_id || '';
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${task.id}`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1149,11 +1163,11 @@ async function editCurrentTask() {
       window.agentCanvas.init();
     } else {
       const error = await response.text();
-      alert(`Failed to update task: ${error}`);
+      alert(`Failed to update ticket: ${error}`);
     }
   } catch (error) {
-    console.error('Error updating task:', error);
-    alert(`Error updating task: ${error.message}`);
+    console.error('Error updating ticket:', error);
+    alert(`Error updating ticket: ${error.message}`);
   }
 }
 
@@ -1168,12 +1182,12 @@ async function unassignCurrentTask() {
 
   const task = window.agentCanvas.state.expandedTask;
   if (!task) {
-    alert('No task selected');
+    alert('No ticket selected');
     return;
   }
 
   if (!task.to || task.to === 'unassigned') {
-    alert('Task is not assigned to any agent');
+    alert('Ticket is not assigned to any agent');
     return;
   }
 
@@ -1220,11 +1234,11 @@ async function unassignCurrentTask() {
       window.agentCanvas.draw();
     } else {
       const error = await response.text();
-      alert(`Failed to unassign task: ${error}`);
+      alert(`Failed to unassign ticket: ${error}`);
     }
   } catch (error) {
-    console.error('Error unassigning task:', error);
-    alert(`Error unassigning task: ${error.message}`);
+    console.error('Error unassigning ticket:', error);
+    alert(`Error unassigning ticket: ${error.message}`);
   }
 }
 
@@ -1351,7 +1365,7 @@ function showStoreDetails(storeNode) {
       <div class="form-check form-switch">
         <input class="form-check-input" type="checkbox" id="store-edit-autostore" ${storeNode.auto_store !== false ? 'checked' : ''}>
         <label class="form-check-label" for="store-edit-autostore" style="color: var(--text-primary); font-size: 0.85rem;">
-          Auto-store on task completion
+          Auto-store on run completion
         </label>
       </div>
     </div>
@@ -1528,7 +1542,7 @@ async function addCombinerInput(combinerTaskId) {
 
   const combinerTask = window.agentCanvas.state.tasks.find(t => t.id === combinerTaskId);
   if (!combinerTask) {
-    alert('Combiner task not found');
+    alert('Combiner ticket not found');
     return;
   }
 
@@ -1538,7 +1552,7 @@ async function addCombinerInput(combinerTaskId) {
   );
 
   if (availableTasks.length === 0) {
-    alert('No tasks available to add as input. Create some tasks first.');
+    alert('No tickets available to add as input. Create some tickets first.');
     return;
   }
 
@@ -1550,7 +1564,10 @@ async function addCombinerInput(combinerTaskId) {
     )
     .join('\n');
 
-  const choice = prompt(`Select task to add as input:\n\n${taskList}\n\nEnter task number:`, '');
+  const choice = prompt(
+    `Select ticket to add as input:\n\n${taskList}\n\nEnter ticket number:`,
+    ''
+  );
 
   if (!choice) return;
 
@@ -1565,14 +1582,14 @@ async function addCombinerInput(combinerTaskId) {
   // Update combiner task with new input
   const currentInputs = combinerTask.input_task_ids || [];
   if (currentInputs.includes(selectedTask.id)) {
-    alert('This task is already an input');
+    alert('This ticket is already an input');
     return;
   }
 
   const newInputs = [...currentInputs, selectedTask.id];
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${combinerTaskId}`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/tasks/${combinerTaskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1584,7 +1601,7 @@ async function addCombinerInput(combinerTaskId) {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to update task: ${response.statusText}`);
+      throw new Error(`Failed to update ticket: ${response.statusText}`);
     }
 
     // Update local state
@@ -1621,7 +1638,7 @@ async function addTaskInput(taskId) {
 
   const task = window.agentCanvas.state.tasks.find(t => t.id === taskId);
   if (!task) {
-    alert('Task not found');
+    alert('Ticket not found');
     return;
   }
 
@@ -1629,7 +1646,7 @@ async function addTaskInput(taskId) {
   const availableTasks = window.agentCanvas.state.tasks.filter(t => t.id !== taskId);
 
   if (availableTasks.length === 0) {
-    alert('No other tasks available to add as input. Create some tasks first.');
+    alert('No other tickets available to add as input. Create some tickets first.');
     return;
   }
 
@@ -1641,7 +1658,10 @@ async function addTaskInput(taskId) {
     )
     .join('\n');
 
-  const choice = prompt(`Select task to add as input:\n\n${taskList}\n\nEnter task number:`, '');
+  const choice = prompt(
+    `Select ticket to add as input:\n\n${taskList}\n\nEnter ticket number:`,
+    ''
+  );
 
   if (!choice) return;
 
@@ -1656,14 +1676,14 @@ async function addTaskInput(taskId) {
   // Update task with new input
   const currentInputs = task.input_task_ids || [];
   if (currentInputs.includes(selectedTask.id)) {
-    alert('This task is already an input');
+    alert('This ticket is already an input');
     return;
   }
 
   const newInputs = [...currentInputs, selectedTask.id];
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${taskId}`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1679,7 +1699,7 @@ async function addTaskInput(taskId) {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to update task: ${response.statusText}`);
+      throw new Error(`Failed to update ticket: ${response.statusText}`);
     }
 
     // Update local state
@@ -1713,7 +1733,7 @@ window.addTaskInput = addTaskInput;
  * Remove an input task from a task's input_task_ids array
  */
 async function removeTaskInput(taskId, inputTaskIdToRemove) {
-  if (!currentWorkspaceId) {
+  if (!canvasWorkspaceId()) {
     alert('No workspace selected');
     return;
   }
@@ -1725,12 +1745,12 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
 
   const task = window.agentCanvas.state.tasks.find(t => t.id === taskId);
   if (!task) {
-    alert('Task not found');
+    alert('Ticket not found');
     return;
   }
 
   if (!task.input_task_ids || !task.input_task_ids.includes(inputTaskIdToRemove)) {
-    alert('Input task not found in task inputs');
+    alert('Input ticket not found in ticket inputs');
     return;
   }
 
@@ -1741,7 +1761,7 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
     : inputTaskIdToRemove.substring(0, 8);
   if (
     !confirm(
-      `Remove input connection?\n\n"${inputDesc}..."\n\nThis will disconnect this input from the task.`
+      `Remove input connection?\n\n"${inputDesc}..."\n\nThis will disconnect this input from the ticket.`
     )
   ) {
     return;
@@ -1752,7 +1772,7 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
   const newInputs = currentInputs.filter(id => id !== inputTaskIdToRemove);
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${taskId}`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1768,7 +1788,7 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to update task: ${response.statusText}`);
+      throw new Error(`Failed to update ticket: ${response.statusText}`);
     }
 
     // Update local state
@@ -1807,7 +1827,7 @@ function assignCurrentTask() {
 
   const task = window.agentCanvas.state.expandedTask;
   if (!task) {
-    alert('No task selected');
+    alert('No ticket selected');
     return;
   }
 
@@ -1818,7 +1838,7 @@ function assignCurrentTask() {
 
   // Show notification
   if (window.agentCanvas.showNotification) {
-    window.agentCanvas.showNotification('Click an agent to assign this task', 'info');
+    window.agentCanvas.showNotification('Click an agent to assign this ticket', 'info');
   }
 
   // Close the task details panel to see the canvas
@@ -1838,19 +1858,19 @@ async function executeCombinerTask(combinerTaskId) {
 
   const combinerTask = window.agentCanvas.state.tasks.find(t => t.id === combinerTaskId);
   if (!combinerTask) {
-    alert('Combiner task not found');
+    alert('Combiner ticket not found');
     return;
   }
 
   // Validate combiner has inputs
   if (!combinerTask.input_task_ids || combinerTask.input_task_ids.length === 0) {
-    alert('Please add input tasks before running the merge');
+    alert('Please add input tickets before running the merge');
     return;
   }
 
   // Validate combiner has output agent
   if (!combinerTask.to || combinerTask.to === '' || combinerTask.to === 'unassigned') {
-    alert('Please assign the merge task to an agent before running');
+    alert('Please assign the merge ticket to an agent before running');
     return;
   }
 
@@ -1867,7 +1887,7 @@ async function executeCombinerTask(combinerTaskId) {
     }
 
     alert(
-      `Executing merge task...\n\nInputs: ${combinerTask.input_task_ids.length} tasks\nOutput: ${combinerTask.to}`
+      `Running merge...\n\nInputs: ${combinerTask.input_task_ids.length} tickets\nOutput: ${combinerTask.to}`
     );
 
     // Close task details
@@ -2014,7 +2034,7 @@ function loadCanvasWorkspace(workspaceId) {
  * Execute mission
  */
 async function executeMission() {
-  if (!currentWorkspaceId) {
+  if (!canvasWorkspaceId()) {
     alert('Please select a workspace first');
     return;
   }
@@ -2030,7 +2050,7 @@ async function executeMission() {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Executing...';
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/mission`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/mission`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mission })
@@ -2100,13 +2120,13 @@ async function addAgentToCanvas() {
     return;
   }
 
-  if (!currentWorkspaceId) {
+  if (!canvasWorkspaceId()) {
     alert('Please select a workspace first');
     return;
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/agents`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/agents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_name: agentName })
@@ -2114,7 +2134,7 @@ async function addAgentToCanvas() {
 
     if (response.ok) {
       // Reload the canvas to show new agent
-      loadCanvasWorkspace(currentWorkspaceId);
+      loadCanvasWorkspace(canvasWorkspaceId());
       select.value = '';
     } else {
       alert('Failed to add agent');
@@ -2133,18 +2153,18 @@ async function removeAgentFromCanvas(agentName) {
     return;
   }
 
-  if (!currentWorkspaceId) {
+  if (!canvasWorkspaceId()) {
     return;
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/agents/${agentName}`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/agents/${agentName}`, {
       method: 'DELETE'
     });
 
     if (response.ok) {
       // Reload the canvas to update
-      loadCanvasWorkspace(currentWorkspaceId);
+      loadCanvasWorkspace(canvasWorkspaceId());
     } else {
       alert('Failed to remove agent');
     }
@@ -2238,22 +2258,22 @@ async function createTask() {
   const toAgent = document.getElementById('task-to-agent').value;
 
   if (!description) {
-    alert('Please enter a task description');
+    alert('Please enter a ticket description');
     return;
   }
 
   if (!toAgent) {
-    alert('Please select an agent to assign the task to');
+    alert('Please select an agent to assign the ticket to');
     return;
   }
 
-  if (!currentWorkspaceId) {
+  if (!canvasWorkspaceId()) {
     alert('Please select a workspace first');
     return;
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks`, {
+    const response = await fetch(`/api/workspaces/${canvasWorkspaceId()}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2270,14 +2290,14 @@ async function createTask() {
       document.getElementById('task-to-agent').value = '';
 
       // Reload canvas to show new task
-      loadCanvasWorkspace(currentWorkspaceId);
+      loadCanvasWorkspace(canvasWorkspaceId());
     } else {
       const error = await response.text();
-      alert('Failed to create task: ' + error);
+      alert('Failed to create ticket: ' + error);
     }
   } catch (error) {
-    console.error('Failed to create task:', error);
-    alert('Failed to create task');
+    console.error('Failed to create ticket:', error);
+    alert('Failed to create ticket');
   }
 }
 
@@ -2698,10 +2718,10 @@ async function createMergeWorkflowTasks() {
       `Input Agents: ${inputConnections.map(c => c.from).join(', ')}\n` +
       `Target Agent: ${targetAgentName}\n\n` +
       `Next Steps:\n` +
-      `1. Create tasks for input agents\n` +
-      `2. Run those tasks to completion\n` +
-      `3. Create a task for ${targetAgentName}\n` +
-      `4. That task can reference previous results\n\n` +
+      `1. Create tickets for input agents\n` +
+      `2. Run those tickets to completion\n` +
+      `3. Create a ticket for ${targetAgentName}\n` +
+      `4. That ticket can reference previous results\n\n` +
       `Check the console (F12) for more details!`
   );
 }
@@ -3069,14 +3089,8 @@ function parseCronExpression(cronExpr) {
 // Store Node Functions
 // =============================================================================
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// escapeHtml comes from dom-utils.js, which every page loads first. A second
+// global declaration here stopped this whole script at load.
 
 function normalizeWorkspaceFolderPath(value) {
   return String(value || '')

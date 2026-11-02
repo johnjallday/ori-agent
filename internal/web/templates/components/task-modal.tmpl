@@ -5,8 +5,8 @@
   <div class="task-modal-content" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle" aria-describedby="taskModalDescriptionText" tabindex="-1">
     <div class="task-modal-header">
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <h6 class="task-modal-title" id="taskModalTitle">Add Task</h6>
-        <p id="taskModalDescriptionText" class="visually-hidden">Create or update a task, configure workflow steps, scheduling, and attachments.</p>
+        <h6 class="task-modal-title" id="taskModalTitle">Add Ticket</h6>
+        <p id="taskModalDescriptionText" class="visually-hidden">Create or update a ticket, configure workflow steps, scheduling, and attachments.</p>
         <!-- Workspace badge (shown when workspace is pre-selected) -->
         <div id="taskModalWorkspaceBadge" style="display: none; font-size: 0.75rem; color: var(--text-secondary);">
           <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-tertiary); border-radius: 4px;">
@@ -39,7 +39,7 @@
       <div id="taskModalResultSection" class="task-modal-field" style="display: none; margin-bottom: 16px;">
         <div style="border: 1px solid var(--border-color); border-radius: 12px; background: color-mix(in srgb, var(--bg-secondary) 88%, transparent); padding: 14px;">
           <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary);">Task Output</div>
+            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary);">Run Output</div>
             <div id="taskModalResultMeta" style="font-size: 0.78rem; color: var(--text-secondary);"></div>
           </div>
           <div id="taskModalMCPRequirement" class="task-modal-remediation" style="display: none;" role="status" aria-live="polite">
@@ -50,8 +50,8 @@
             </div>
             <div class="task-modal-remediation-copy">
               <div class="task-modal-remediation-kicker">Connector Required</div>
-              <div class="task-modal-remediation-title">This task requires <code id="taskModalMCPRequirementServer">fetch</code>.</div>
-              <div class="task-modal-remediation-body" id="taskModalMCPRequirementBody">Add the missing MCP connector to My Servers, then retry the task.</div>
+              <div class="task-modal-remediation-title">This ticket requires <code id="taskModalMCPRequirementServer">fetch</code>.</div>
+              <div class="task-modal-remediation-body" id="taskModalMCPRequirementBody">Add the missing MCP connector to My Servers, then retry the run.</div>
               <div class="task-modal-remediation-status" id="taskModalMCPRequirementStatus"></div>
             </div>
             <div class="task-modal-remediation-actions">
@@ -73,7 +73,7 @@
       <div class="task-modal-field" style="margin-bottom: 16px;">
         <div style="display: flex; align-items: center; gap: 12px;">
           <label class="task-modal-label" style="margin: 0; font-size: 0.75rem; color: var(--text-secondary);">Mode</label>
-          <div class="btn-group" role="group" aria-label="Task mode toggle">
+          <div class="btn-group" role="group" aria-label="Ticket mode toggle">
             <input type="radio" class="btn-check" name="taskConfigMode" id="taskConfigModeManual" value="manual" checked>
             <label class="btn btn-outline-secondary btn-sm" for="taskConfigModeManual">Manual</label>
             <input type="radio" class="btn-check" name="taskConfigMode" id="taskConfigModeAuto" value="auto">
@@ -107,12 +107,12 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; color: #3b82f6;">
                 <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
               </svg>
-              Describe your task in natural language. Include timing like "at 6pm", "every Monday", or "in 2 hours".
+              Describe your ticket in natural language. Include timing like "at 6pm", "every Monday", or "in 2 hours".
             </div>
           </div>
 	          <div class="task-modal-field">
 	            <div class="task-modal-label-row">
-	              <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
+	              <label for="taskAutoDescription" class="task-modal-label">Describe your ticket</label>
               <button
                 type="button"
                 class="btn btn-sm voice-input-btn voice-input-btn--icon"
@@ -138,7 +138,7 @@
 	            </div>
 	            <div class="task-modal-auto-parse-error-copy">
 	              <div class="task-modal-auto-parse-error-title">Auto parsing did not work</div>
-	              <div id="taskAutoParseErrorMessage" class="task-modal-auto-parse-error-message">No task was created. Try again or switch to Manual.</div>
+	              <div id="taskAutoParseErrorMessage" class="task-modal-auto-parse-error-message">No ticket was created. Try again or switch to Manual.</div>
 	            </div>
 	          </div>
 	          <div class="task-modal-field">
@@ -153,12 +153,12 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; color: #3b82f6;">
                 <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
               </svg>
-              Describe how you want to modify this task. The AI will update it based on your instructions.
+              Describe how you want to modify this ticket. The AI will update it based on your instructions.
             </div>
           </div>
           <!-- Current Task Display -->
           <div class="task-modal-field" style="margin-bottom: 12px;">
-            <label class="task-modal-label">Current Task</label>
+            <label class="task-modal-label">Current Ticket</label>
             <div id="taskAutoEditCurrentTask" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
               <div id="taskAutoEditCurrentTitle" style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;"></div>
               <div id="taskAutoEditCurrentDetails" style="font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap;"></div>
@@ -257,34 +257,34 @@
         </div>
       </div>
       <div class="task-modal-field" id="taskModalInputTasksField">
-        <label class="task-modal-label">Input Tasks <span class="task-modal-optional">(optional)</span></label>
-        <div id="taskModalInputTasks" class="task-modal-input-chips" data-selected-inputs="[]" role="group" aria-label="Input tasks"></div>
-        <div id="taskModalInputTasksEmpty" class="task-modal-input-empty" style="display: none;">No other tasks available yet.</div>
-        <div id="taskModalInputTasksNotice" class="task-modal-input-hint" style="display: none;">Inputs are set per subtask when this is a workflow.</div>
-        <div class="task-modal-input-hint">Click a task to use its result as an input. Use <code>{previous}</code> or <code>{result}</code> in the title for the most recent input, or <code>{input1}</code>, <code>{input2}</code>, ... for specific inputs.</div>
+        <label class="task-modal-label">Input Tickets <span class="task-modal-optional">(optional)</span></label>
+        <div id="taskModalInputTasks" class="task-modal-input-chips" data-selected-inputs="[]" role="group" aria-label="Input tickets"></div>
+        <div id="taskModalInputTasksEmpty" class="task-modal-input-empty" style="display: none;">No other tickets available yet.</div>
+        <div id="taskModalInputTasksNotice" class="task-modal-input-hint" style="display: none;">Inputs are set per subticket when this is a workflow.</div>
+        <div class="task-modal-input-hint">Click a ticket to use its result as an input. Use <code>{previous}</code> or <code>{result}</code> in the title for the most recent input, or <code>{input1}</code>, <code>{input2}</code>, ... for specific inputs.</div>
       </div>
       <!-- Subtasks Section -->
       <div id="taskModalSubtaskSection" class="task-modal-subtask-section">
         <div class="task-modal-subtask-header">
           <div>
-            <label class="task-modal-label">Subtasks <span class="task-modal-optional">(optional)</span></label>
-            <div class="task-modal-subtask-hint" id="taskModalSubtaskHint">Add steps to turn this task into a workflow.</div>
+            <label class="task-modal-label">Subtickets <span class="task-modal-optional">(optional)</span></label>
+            <div class="task-modal-subtask-hint" id="taskModalSubtaskHint">Add steps to turn this ticket into a workflow.</div>
           </div>
           <button type="button" class="task-modal-btn task-modal-btn-secondary" id="taskModalAddSubtask">
-            Add Subtask
+            Add Subticket
           </button>
         </div>
         <div id="taskModalSubtaskDisabled" class="task-modal-subtask-disabled" style="display: none;">
-          This task is already part of a workflow. Subtasks can only be added to top-level tasks.
+          This ticket is already part of a workflow. Subtickets can only be added to top-level tickets.
         </div>
         <div id="taskModalSubtaskList" class="task-modal-subtask-list"></div>
-        <div id="taskModalSubtaskEmpty" class="task-modal-subtask-empty">No subtasks yet.</div>
+        <div id="taskModalSubtaskEmpty" class="task-modal-subtask-empty">No subtickets yet.</div>
       </div>
       <!-- Automation Section: Schedule + Auto-save Results -->
       <div class="task-modal-automation" style="margin-top: 18px;">
         <div class="task-modal-automation-header">
           <div class="task-modal-automation-title">Automation</div>
-          <div class="task-modal-automation-subtitle">Run this task on a schedule and persist its output between runs.</div>
+          <div class="task-modal-automation-subtitle">Run this ticket on a schedule and persist its output between runs.</div>
         </div>
 
       <!-- Schedule Section -->
@@ -499,7 +499,7 @@
       <button type="button" class="task-modal-btn task-modal-btn-cancel" id="taskModalCancel">Cancel</button>
       <button type="button" class="task-modal-btn task-modal-btn-save" id="taskModalSave">
         <span class="task-modal-btn-spinner" aria-hidden="true"></span>
-        <span id="taskModalSaveText">Save Task</span>
+        <span id="taskModalSaveText">Save Ticket</span>
       </button>
     </div>
 	    <div class="task-modal-progress" id="taskModalProgress" hidden>
@@ -521,19 +521,19 @@
 	    <div class="task-modal-auto-confirm" id="taskAutoConfirm" role="dialog" aria-modal="true" aria-labelledby="taskAutoConfirmTitle" hidden>
 	      <div class="task-modal-auto-confirm-card">
 	        <div class="task-modal-auto-confirm-header">
-	          <div class="task-modal-auto-confirm-eyebrow" id="taskAutoConfirmEyebrow">Auto Parsed Task</div>
-	          <button type="button" class="task-modal-auto-confirm-close" id="taskAutoConfirmClose" aria-label="Cancel task creation">
+	          <div class="task-modal-auto-confirm-eyebrow" id="taskAutoConfirmEyebrow">Auto Parsed Ticket</div>
+	          <button type="button" class="task-modal-auto-confirm-close" id="taskAutoConfirmClose" aria-label="Cancel ticket creation">
 	            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 	              <path d="M18.3 5.71L12 12L5.7 5.71L4.29 7.12L10.59 13.41L4.29 19.71L5.7 21.12L12 14.83L18.3 21.12L19.71 19.71L13.41 13.41L19.71 7.12L18.3 5.71Z"/>
 	            </svg>
 	          </button>
 	        </div>
-	        <div class="task-modal-auto-confirm-title" id="taskAutoConfirmTitle">Create this task?</div>
-	        <div class="task-modal-auto-confirm-message" id="taskAutoConfirmMessage">Review the task parsed from your request before it is created.</div>
+	        <div class="task-modal-auto-confirm-title" id="taskAutoConfirmTitle">Create this ticket?</div>
+	        <div class="task-modal-auto-confirm-message" id="taskAutoConfirmMessage">Review the ticket parsed from your request before it is created.</div>
 	        <div class="task-modal-auto-confirm-grid">
 	          <div class="task-modal-auto-confirm-row">
 	            <span>Title</span>
-	            <strong id="taskAutoConfirmParsedTitle">New Task</strong>
+	            <strong id="taskAutoConfirmParsedTitle">New Ticket</strong>
 	          </div>
 	          <div class="task-modal-auto-confirm-row">
 	            <span>Assigned Agent</span>
@@ -555,7 +555,7 @@
 	        <div class="task-modal-auto-confirm-steps" id="taskAutoConfirmSteps" hidden></div>
 	        <div class="task-modal-auto-confirm-footer">
 	          <button type="button" class="task-modal-btn task-modal-btn-cancel" id="taskAutoConfirmCancel">Cancel</button>
-	          <button type="button" class="task-modal-btn task-modal-btn-save" id="taskAutoConfirmCreate">Create Task</button>
+	          <button type="button" class="task-modal-btn task-modal-btn-save" id="taskAutoConfirmCreate">Create Ticket</button>
 	        </div>
 	      </div>
 	    </div>

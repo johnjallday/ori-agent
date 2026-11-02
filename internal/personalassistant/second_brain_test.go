@@ -57,6 +57,8 @@ func (r *recordingProjectTickets) WorkspaceForFolder(path string) (string, strin
 	return "album-id", "Album", true
 }
 
+func (r *recordingProjectTickets) HasNoteTicket(_, itemID string) bool { return r.made[itemID] }
+
 func (r *recordingProjectTickets) CreateNoteTicket(_ context.Context, _ string, ticket secondbrain.NoteTicket) (bool, error) {
 	if r.made[ticket.ItemID] {
 		return false, nil
@@ -374,6 +376,12 @@ func TestSecondBrain_AProjectLineBecomesATicketAndHearsWhenTheLineCloses(t *test
 	}
 	if _, err := h.followUps.FindBySource(ctx, "local", secondbrain.FollowUpSourceType, line.ID); !errors.Is(err, followup.ErrNotFound) {
 		t.Fatalf("a follow-up was made for the ticket's line: %v", err)
+	}
+	again, _ := h.service.Look(ctx, "local")
+	for _, item := range again.Result.Items {
+		if item.ID == line.ID && (!item.Ticketed || item.Suggested) {
+			t.Errorf("after the ticket exists the item reads %+v, want it shown as a ticket and not suggested", item)
+		}
 	}
 
 	ticked := []byte("# Plan\n\n- [x] Mix the single\n")

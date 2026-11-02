@@ -1120,11 +1120,11 @@ function renderSavedCompletion(slot, offer, receipt, completion) {
       node('h3', result.title),
       node(
         'p',
-        result.excerpt || 'The task finished. No saved excerpt is available here.',
+        result.excerpt || 'The run finished. No saved excerpt is available here.',
         'pa-folder__first-look'
       )
     );
-    if (result.next) block.append(node('p', `Suggested next task: ${result.next}`));
+    if (result.next) block.append(node('p', `Suggested next ticket: ${result.next}`));
     result.actions.forEach(action => link(block, action.href, action.label));
     const execution = node('details', '', 'folder-setup-details');
     execution.open = executionExpanded;
@@ -1138,7 +1138,7 @@ function renderSavedCompletion(slot, offer, receipt, completion) {
     const look = receipt.firstLook;
     const task = node('section');
     task.append(
-      node('h4', offer.first_task?.description || 'First task'),
+      node('h4', offer.first_task?.description || 'First ticket'),
       node('p', look.status || look.message || look.hint)
     );
     look.actions

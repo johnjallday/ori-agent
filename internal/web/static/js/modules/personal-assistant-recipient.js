@@ -203,7 +203,7 @@ export function writeEntrySession(workspaceId, sessionId, storage) {
 /** The composer placeholder for the entry agent, in the workspace's own copy. */
 export function entryAgentPlaceholder(recipient) {
   if (recipient?.loading) return 'Finding this workspace’s Commander…';
-  return `Ask ${text(recipient?.name) || 'the Commander'} about this workspace… (/task creates a task)`;
+  return `Ask ${text(recipient?.name) || 'the Commander'} about this workspace… (/task creates a ticket)`;
 }
 
 function sameName(a, b) {

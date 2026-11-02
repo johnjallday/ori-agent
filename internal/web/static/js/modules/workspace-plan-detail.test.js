@@ -257,7 +257,7 @@ test('adding a group marks the draft unsaved and announces the change', async ()
   assert.equal(page.editor.content.groups.length, 2);
   assert.equal(doc.elements['#plan-save-state'].dataset.state, 'unsaved');
   assert.match(doc.elements['#plan-save-state'].textContent, /Unsaved changes/);
-  assert.equal(doc.elements['#plan-detail-status'].textContent, 'Task group added');
+  assert.equal(doc.elements['#plan-detail-status'].textContent, 'Ticket group added');
 });
 
 // Removing depended-on work is refused with the specifics, and nothing changes
@@ -475,14 +475,14 @@ test('the approval button is labelled by what it does', () => {
     'Approve and Start'
   );
   assert.equal(
-    approvalButtonLabel({ action_label: 'Approve and Create Tasks' }),
-    'Approve and Create Tasks'
+    approvalButtonLabel({ action_label: 'Approve and Create Tickets' }),
+    'Approve and Create Tickets'
   );
   // A contract with no label is a bug, not a reason to render a bare
   // "Approve" over an action that starts agents.
   assert.equal(approvalButtonLabel({ starts_execution: true }), 'Approve and Start');
-  assert.equal(approvalButtonLabel({}), 'Approve and Create Tasks');
-  assert.equal(approvalButtonLabel(null), 'Approve and Create Tasks');
+  assert.equal(approvalButtonLabel({}), 'Approve and Create Tickets');
+  assert.equal(approvalButtonLabel(null), 'Approve and Create Tickets');
 });
 
 // The diff says what happened, not only that something did (FR-36).
@@ -511,10 +511,10 @@ test('diffSummary distinguishes added, removed, moved, and modified', () => {
   assert.match(lines, /Objective changed to “New”/);
   assert.match(lines, /Scope added: archival/);
   assert.match(lines, /Group moved: Prepare \(position 2 → 1\)/);
-  assert.match(lines, /Task added: A new task/);
-  assert.match(lines, /Task removed: A dropped task/);
-  assert.match(lines, /Task modified: A changed task \(assignee\)/);
-  assert.match(lines, /Task reordered: A reordered task/);
+  assert.match(lines, /Ticket added: A new task/);
+  assert.match(lines, /Ticket removed: A dropped task/);
+  assert.match(lines, /Ticket modified: A changed task \(assignee\)/);
+  assert.match(lines, /Ticket reordered: A reordered task/);
   assert.match(lines, /Execution mode changed from step_through to auto/);
   assert.match(lines, /Enforced precondition added: safe_branch/);
 });
@@ -544,7 +544,7 @@ function contractFixture(overrides = {}) {
     dependency_count: 1,
     unassigned: 1,
     effect: 'create_tasks',
-    action_label: 'Approve and Create Tasks',
+    action_label: 'Approve and Create Tickets',
     starts_execution: false,
     approvable: true,
     blockers: [],
@@ -566,9 +566,9 @@ test('the review contract renders every effect approval authorizes', async () =>
 
   assert.equal(doc.elements['#plan-review-panel'].hidden, false);
   assert.equal(doc.elements['#plan-review-version'].textContent, 'Version 2');
-  assert.match(doc.elements['#plan-review-counts'].textContent, /2 task\(s\) in 1 group\(s\)/);
+  assert.match(doc.elements['#plan-review-counts'].textContent, /2 ticket\(s\) in 1 group\(s\)/);
   assert.match(doc.elements['#plan-review-effects'].innerHTML, /Create 2 workspace task\(s\)/);
-  assert.equal(doc.elements['#plan-approve'].textContent, 'Approve and Create Tasks');
+  assert.equal(doc.elements['#plan-approve'].textContent, 'Approve and Create Tickets');
   assert.equal(doc.elements['#plan-approve'].disabled, false);
   assert.equal(doc.elements['#plan-review-blockers'].hidden, true);
 });
@@ -650,15 +650,15 @@ test('approving sends the reviewed version and hash', async () => {
 test('the materialization message says what was created and what happens next', () => {
   assert.equal(
     materializedMessage({ task_ids: ['a', 'b'], start_execution: false }),
-    'Created 2 task(s). Nothing starts until you start it.'
+    'Created 2 ticket(s). Nothing starts until you start it.'
   );
   assert.equal(
     materializedMessage({ task_ids: ['a'], artifact_paths: ['x.md'], start_execution: true }),
-    'Created 1 task(s) and 1 file(s). Eligible tasks will start automatically.'
+    'Created 1 ticket(s) and 1 file(s). Eligible tickets will start automatically.'
   );
   assert.match(
     materializedMessage({ task_ids: ['a'], replayed: true }),
-    /^This approval was already used\. It created 1 task\(s\)\./
+    /^This approval was already used\. It created 1 ticket\(s\)\./
   );
   assert.equal(
     materializedMessage({
@@ -667,7 +667,7 @@ test('the materialization message says what was created and what happens next', 
       start_execution: false,
       handoff: { kind: 'wt', feature: 'demo', command: 'source scripts/wt.sh && wt start demo' }
     }),
-    'Created 1 task(s) and 1 file(s). Nothing starts until you start it. Planning is complete; run “source scripts/wt.sh && wt start demo”. Do not run wt plan again.'
+    'Created 1 ticket(s) and 1 file(s). Nothing starts until you start it. Planning is complete; run “source scripts/wt.sh && wt start demo”. Do not run wt plan again.'
   );
 });
 
@@ -772,7 +772,7 @@ test('comparing versions renders the change summary', async () => {
   await page.compareVersions(1, 2);
 
   assert.equal(doc.elements['#plan-compare-panel'].hidden, false);
-  assert.match(doc.elements['#plan-compare-list'].innerHTML, /Task added: A new task/);
+  assert.match(doc.elements['#plan-compare-list'].innerHTML, /Ticket added: A new task/);
 });
 
 test('approving without a loaded contract asks for the review first', async () => {
@@ -808,7 +808,7 @@ test('materializing reports the work it created and links to it by slug', async 
   await page.materialize('apr-1');
 
   assert.equal(doc.elements['#plan-materialization-panel'].hidden, false);
-  assert.match(doc.elements['#plan-materialization-summary'].textContent, /Created 2 task\(s\)/);
+  assert.match(doc.elements['#plan-materialization-summary'].textContent, /Created 2 ticket\(s\)/);
   assert.match(doc.elements['#plan-materialization-summary'].textContent, /1 file\(s\)/);
   assert.match(
     doc.elements['#plan-materialization-summary'].textContent,
@@ -873,7 +873,7 @@ test('a failed materialization offers a retry', async () => {
   // Retrying with the same approval succeeds.
   await page.materialize('apr-1');
   assert.equal(doc.elements['#plan-materialization-retry'].hidden, true);
-  assert.match(doc.elements['#plan-materialization-summary'].textContent, /Created 1 task\(s\)/);
+  assert.match(doc.elements['#plan-materialization-summary'].textContent, /Created 1 ticket\(s\)/);
 });
 
 // Approving and spending the approval are one user gesture: the button said it
@@ -948,7 +948,7 @@ function correctivePreview(overrides = {}) {
 test('the reconciliation summary leads with what will be cancelled', () => {
   const summary = reconcileSummary(correctivePreview());
   assert.ok(
-    summary.startsWith('1 existing task(s) will be cancelled'),
+    summary.startsWith('1 existing ticket(s) will be cancelled'),
     `summary buried the cancellation: ${summary}`
   );
 });

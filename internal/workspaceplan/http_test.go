@@ -614,7 +614,7 @@ func TestAPIReviewApprovalRoundTrip(t *testing.T) {
 	if contract["content_hash"] != hash {
 		t.Errorf("contract hash = %v, want %q", contract["content_hash"], hash)
 	}
-	if contract["action_label"] != "Approve and Create Tasks" {
+	if contract["action_label"] != "Approve and Create Tickets" {
 		t.Errorf("action label = %v", contract["action_label"])
 	}
 	if contract["starts_execution"] != false {

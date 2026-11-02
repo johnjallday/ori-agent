@@ -54,7 +54,7 @@ test('a group task reads as a group rather than a step', () => {
   const provenance = relatedPlanProvenance(
     relatedFixture({ provenance: { role: 'group', approved_by: 'jj' } })
   );
-  assert.match(provenance, /task group/);
+  assert.match(provenance, /ticket group/);
 });
 
 // --- The link keeps route identity separate from API identity --------------

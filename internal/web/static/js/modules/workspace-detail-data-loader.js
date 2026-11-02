@@ -17,7 +17,7 @@ export function createWorkspaceDetailDataLoader(fetchImpl = (...args) => fetch(.
       const data = await loadJSON(
         `/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceId)}`,
         signal,
-        'Failed to load tasks'
+        'Failed to load tickets'
       );
       return { tasks: data.tasks || [] };
     },

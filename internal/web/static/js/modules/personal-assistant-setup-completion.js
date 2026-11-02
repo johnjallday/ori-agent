@@ -66,7 +66,7 @@ export function completedTaskView(offer, firstLook, completion) {
     return { visible: false };
   return {
     visible: true,
-    title: offer.first_task?.recipe === 'folder_summary' ? 'Summary' : 'First task result',
+    title: offer.first_task?.recipe === 'folder_summary' ? 'Summary' : 'First run result',
     excerpt: String(firstLook.excerpt || ''),
     next: String(firstLook.next || offer.first_task?.next_request || '').trim(),
     actions: firstLook.actions.filter(action => action.href && action.id !== 'open')

@@ -85,7 +85,7 @@ export class AgentCanvasWorkflowSelector {
     const hasWorkflows = workflows.length > 0;
 
     // Determine display text
-    let displayText = 'All Tasks';
+    let displayText = 'All Tickets';
     let displayCount = totalTasks;
     if (selectedWorkflow) {
       displayText = selectedWorkflow.name || selectedWorkflow.description || 'Workflow';
@@ -114,7 +114,7 @@ export class AgentCanvasWorkflowSelector {
             <span class="workflow-selector-item-icon">
               ${!selectedWorkflow ? '✓' : ''}
             </span>
-            <span class="workflow-selector-item-text">All Tasks</span>
+            <span class="workflow-selector-item-text">All Tickets</span>
             <span class="workflow-selector-item-count">${totalTasks}</span>
           </div>
 

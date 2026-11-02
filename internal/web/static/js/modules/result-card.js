@@ -78,7 +78,7 @@
     var kind = parcel && parcel.kind;
     if (kind === 'daily_brief') return 'Open brief';
     if (kind === 'file_janitor') return 'Review files';
-    return isFailure(parcel) ? 'Open task' : 'Open full result';
+    return isFailure(parcel) ? 'Open ticket' : 'Open full result';
   }
 
   function stageChange(payload) {

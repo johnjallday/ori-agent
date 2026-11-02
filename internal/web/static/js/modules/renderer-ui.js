@@ -63,7 +63,7 @@ export class RendererUI {
     const statsY = panelY + padding + 18;
     this.ctx.fillStyle = '#4b5563';
     this.ctx.font = '10px system-ui';
-    let statusText = `${this.state.workspaceProgress.completed_tasks}/${this.state.workspaceProgress.total_tasks} tasks complete | ${this.state.workspaceProgress.in_progress_tasks} running | ${this.state.workspaceProgress.pending_tasks} pending`;
+    let statusText = `${this.state.workspaceProgress.completed_tasks}/${this.state.workspaceProgress.total_tasks} tickets complete | ${this.state.workspaceProgress.in_progress_tasks} running | ${this.state.workspaceProgress.pending_tasks} pending`;
     if (this.state.workspaceProgress.failed_tasks > 0) {
       statusText += ` | ${this.state.workspaceProgress.failed_tasks} failed`;
     }
@@ -232,7 +232,7 @@ export class RendererUI {
     this.ctx.font = 'bold 14px system-ui';
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    this.ctx.fillText('+ Create Task', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
+    this.ctx.fillText('+ Create Ticket', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
     this.ctx.textAlign = 'left';
     this.ctx.textBaseline = 'alphabetic';
   }
@@ -521,7 +521,7 @@ export class RendererUI {
     // Menu items
     const items = [
       { icon: '👁️', label: 'View Details', action: 'view' },
-      { icon: '📋', label: 'Assign Task', action: 'assign' },
+      { icon: '📋', label: 'Assign Ticket', action: 'assign' },
       { icon: '🗑️', label: 'Remove', action: 'remove' }
     ];
 
@@ -780,9 +780,9 @@ export class RendererUI {
       { key: 'Click Agent', desc: 'Select agent' },
       { key: 'Right-click', desc: 'Agent quick actions' },
       { key: 'Drag Agent', desc: 'Move agent position' },
-      { section: 'Tasks', items: [] },
-      { key: 'Click Task', desc: 'View task details' },
-      { key: 'Drag Task', desc: 'Assign to agent' },
+      { section: 'Tickets', items: [] },
+      { key: 'Click Ticket', desc: 'View ticket details' },
+      { key: 'Drag Ticket', desc: 'Assign to agent' },
       { section: 'General', items: [] },
       { key: 'H', desc: 'Toggle this help' },
       { key: 'ESC', desc: 'Cancel/Close' }

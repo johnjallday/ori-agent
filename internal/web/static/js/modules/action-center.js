@@ -108,7 +108,7 @@
       ? `<a href="${escapeHtml(sourceURL)}" class="action-center-goal-backlog-link">Open Backlog</a>`
       : '';
     const titles = item.evidence
-      ? `<details class="action-center-details"><summary>Suggested tasks</summary><div class="action-center-details-body">${escapeHtml(item.evidence)}</div></details>`
+      ? `<details class="action-center-details"><summary>Suggested tickets</summary><div class="action-center-details-body">${escapeHtml(item.evidence)}</div></details>`
       : '';
     return `<div class="action-center-goal-suggestions">${titles}${link}</div>`;
   }

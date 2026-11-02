@@ -544,12 +544,6 @@ func (h *Handler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.ScheduledTaskHandler(w, r)
 }
 
-// BulkDeleteTasksHandler handles bulk deletion of tasks
-// Delegates to TaskHandler for modular organization
-func (h *Handler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Request) {
-	h.taskHandlerSub.BulkDeleteTasksHandler(w, r)
-}
-
 // BacklogListHandler handles GET (list) and POST (create) on
 // /api/orchestration/backlog. Delegates to BacklogHandler.
 func (h *Handler) BacklogListHandler(w http.ResponseWriter, r *http.Request) {

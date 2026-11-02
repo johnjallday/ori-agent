@@ -359,7 +359,7 @@ test('task snapshot publication retains board rendering, accessible counts, and 
   page.elements.taskCount = { setAttribute: (name, value) => (attributes[name] = value) };
   await page.loadTasks();
   assert.equal(page.elements.taskCount.textContent, 2);
-  assert.deepEqual(attributes, { 'aria-busy': 'false', 'aria-label': '2 tasks' });
+  assert.deepEqual(attributes, { 'aria-busy': 'false', 'aria-label': '2 tickets' });
   for (const method of [
     'renderAgentGroups',
     'renderBoard',

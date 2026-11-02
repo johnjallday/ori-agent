@@ -37,7 +37,7 @@ export function relatedPlanProvenance(related) {
   const approvedBy = String(provenance.approved_by || '').trim();
 
   const parts = [];
-  if (role === 'group') parts.push('A task group from this plan');
+  if (role === 'group') parts.push('A ticket group from this plan');
   else if (role === 'item') parts.push('A step from this plan');
   if (approvedBy) parts.push(`approved by ${approvedBy}`);
 

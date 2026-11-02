@@ -1026,10 +1026,10 @@ class AgentCanvas {
       this.draw();
 
       // Show success notification
-      this.addNotification(`✅ Task assigned to ${agent.name}`, 'success');
+      this.addNotification(`✅ Ticket assigned to ${agent.name}`, 'success');
     } catch (error) {
       console.error('❌ Error assigning task:', error);
-      this.addNotification('Failed to assign task: ' + error.message, 'error');
+      this.addNotification('Failed to assign ticket: ' + error.message, 'error');
       this.assignmentMode = false;
       this.assignmentSourceTask = null;
       this.assignmentMouseX = 0;
@@ -1106,7 +1106,7 @@ class AgentCanvas {
 
     // Confirm deletion
     const confirmed = confirm(
-      `Are you sure you want to delete this task?\n\n"${task.description || 'Task'}"\n\nThis action cannot be undone.`
+      `Are you sure you want to delete this ticket?\n\n"${task.description || 'Ticket'}"\n\nThis action cannot be undone.`
     );
     if (!confirmed) return;
 
@@ -1137,7 +1137,7 @@ class AgentCanvas {
       setTimeout(() => this.init(), 500);
     } catch (error) {
       console.error('❌ Error deleting task:', error);
-      alert('Failed to delete task: ' + error.message);
+      alert('Failed to delete ticket: ' + error.message);
     }
   }
 
@@ -1218,7 +1218,7 @@ class AgentCanvas {
 
         // Show notification
         const unassignNote =
-          affectedTasks.length > 0 ? ` and unassigned ${affectedTasks.length} task(s)` : '';
+          affectedTasks.length > 0 ? ` and unassigned ${affectedTasks.length} ticket(s)` : '';
         this.showNotification(`Agent "${agentName}" removed${unassignNote}`, 'success');
 
         // Reload to ensure consistency
@@ -1585,7 +1585,7 @@ class AgentCanvas {
     // Enforce attachment direction: attachments can only connect outward to tasks/agents
     if (fromNode.type === 'attachment' && !(toNode.type === 'task' || toNode.type === 'agent')) {
       this.notifications?.showNotification?.(
-        'Attachments can only connect to tasks or agents',
+        'Attachments can only connect to tickets or agents',
         'warning'
       );
       return null;
@@ -1754,7 +1754,7 @@ class AgentCanvas {
       return task;
     }
 
-    throw new Error('Failed to create task');
+    throw new Error('Failed to create ticket');
   }
 
   /**

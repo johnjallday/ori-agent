@@ -146,7 +146,7 @@ export class AgentCanvasLayoutManager {
     this.zoomToFitContent();
 
     this.parent.draw();
-    this.parent.showNotification('✨ Tasks auto-arranged', 'success');
+    this.parent.showNotification('✨ Tickets auto-arranged', 'success');
 
     // Save the new layout
     this.saveLayout();

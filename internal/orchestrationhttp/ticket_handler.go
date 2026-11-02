@@ -415,7 +415,7 @@ func (th *TicketHandler) TicketStartHandler(w http.ResponseWriter, r *http.Reque
 		th.respondTicketError(w, "start ticket", studioID, ticketID, err)
 		return
 	}
-	_ = orihttp.RespondJSON(w, http.StatusOK, ticketCreateResponse{Ticket: ticket, Start: th.startThis(studioID, ticket.ID)})
+	_ = orihttp.RespondJSON(w, http.StatusOK, ticketCreateResponse{Ticket: ticket, Start: th.startThis(studioID, ticket)})
 }
 
 // startThisWindow is how long a Start this answers a repeat without starting
@@ -424,13 +424,18 @@ func (th *TicketHandler) TicketStartHandler(w http.ResponseWriter, r *http.Reque
 // that comes back to Ready later can be started again.
 const startThisWindow = 30 * time.Second
 
-func (th *TicketHandler) startThis(studioID, ticketID string) *ticketStartOutcome {
+func (th *TicketHandler) startThis(studioID string, ticket *workspace.Ticket) *ticketStartOutcome {
 	if th.starter == nil {
 		return &ticketStartOutcome{Error: "Starting work is not available right now."}
 	}
+	ticketID := ticket.ID
 	now := time.Now()
 	if previous, claimed := th.startThisClaims.LoadOrStore(ticketID, now); claimed {
-		if now.Sub(previous.(time.Time)) < startThisWindow || !th.startThisClaims.CompareAndSwap(ticketID, previous, now) {
+		// A claim only covers the same moment: once the ticket has moved since (its
+		// run started and was stopped, say), this is a new start, not a repeat.
+		claimedAt := previous.(time.Time)
+		fresh := now.Sub(claimedAt) < startThisWindow && !movedSince(ticket, claimedAt)
+		if fresh || !th.startThisClaims.CompareAndSwap(ticketID, previous, now) {
 			return &ticketStartOutcome{Started: true}
 		}
 	}
@@ -440,6 +445,12 @@ func (th *TicketHandler) startThis(studioID, ticketID string) *ticketStartOutcom
 		return &ticketStartOutcome{Error: err.Error()}
 	}
 	return &ticketStartOutcome{Started: true}
+}
+
+// movedSince reports whether the ticket's state changed after the given moment.
+func movedSince(ticket *workspace.Ticket, at time.Time) bool {
+	history := ticket.StateHistory
+	return len(history) > 0 && history[len(history)-1].Timestamp.After(at)
 }
 
 // startCreatedTicket begins the one run a create request asked for. A ticket that

@@ -79,7 +79,7 @@ func TestMissionBridge_WritesSuggestionsToTheBacklog(t *testing.T) {
 		t.Fatalf("summary rows = %d, want 1", len(summaries))
 	}
 	summary := summaries[0]
-	if summary.Title != "3 suggested tasks in Brand" || summary.SourceID != runID ||
+	if summary.Title != "3 suggested tickets in Brand" || summary.SourceID != runID ||
 		summary.SourceURL != "/workspaces/"+fresh.FolderSlug+"?panel=backlog" || !strings.Contains(summary.Evidence, "- Plan next week's posts") {
 		t.Fatalf("summary row = %+v", summary)
 	}

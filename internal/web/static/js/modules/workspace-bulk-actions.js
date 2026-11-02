@@ -433,7 +433,7 @@ async function resolveDisconnectReview(ctx, session, row, review, mode, homeHref
   const impact = deleteTarget
     ? [
         `It stops appearing in the portfolio of "${homeName}", and Home handoffs to it stop.`,
-        'The workspace, its team, tasks and files move to the Trash together and can be restored with Undo.',
+        'The workspace, its team, tickets and files move to the Trash together and can be restored with Undo.',
         `"${homeName}" itself is not removed.`
       ]
     : Array.isArray(preview.impact)

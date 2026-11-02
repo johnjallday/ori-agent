@@ -93,7 +93,7 @@ test('persisted attention tasks project once and open their real owner', async (
     await page.goto('/');
     await page.getByRole('button', { name: 'Show Updates', exact: true }).click();
     const owner = page.locator('#cockpitTodayAttention a').filter({ hasText: folder.name });
-    await expect(owner).toContainText('2 tasks needing attention');
+    await expect(owner).toContainText('2 tickets needing attention');
     await page.screenshot({ path: testInfo.outputPath('home-real-attention.png') });
     await owner.focus();
     await page.keyboard.press('Enter');

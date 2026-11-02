@@ -286,9 +286,9 @@ func TestRenderCreateWorkspaceProjectOpenOption(t *testing.T) {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
 
-	html, err := r.RenderTemplate("workspaces", TemplateData{Title: "Workspaces - Ori Agent"})
+	html, err := r.RenderTemplate("index", GetDefaultData())
 	if err != nil {
-		t.Fatalf("RenderTemplate(workspaces) failed: %v", err)
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
 	}
 	for _, want := range []string{
 		`id="projectTemplateOpenAfterCreate"`,
@@ -329,9 +329,9 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
 
-	page, err := r.RenderTemplate("workspaces", TemplateData{Title: "Workspaces - Ori Agent"})
+	page, err := r.RenderTemplate("index", GetDefaultData())
 	if err != nil {
-		t.Fatalf("RenderTemplate(workspaces) failed: %v", err)
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
 	}
 	// Scope every assertion to the Create Workspace modal. The page also renders
 	// unrelated modals (onboarding has its own "Step N of 3" label), so a
@@ -460,7 +460,7 @@ func TestSharedAgentCreateFormIsCanonicalAndLoadsBeforeConsumers(t *testing.T) {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
 
-	pages := []string{"index", "workspaces", "workspace-detail", "workspace-canvas", "workspace-task"}
+	pages := []string{"index", "workspace-detail", "workspace-canvas", "workspace-task"}
 	for _, page := range pages {
 		html, err := r.RenderTemplate(page, TemplateData{
 			Title: page + " - Ori Agent",
@@ -525,7 +525,7 @@ func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 	// Every page whose layout includes session-modals.tmpl, which renders
 	// components/workspaces/create-workspace-modal.tmpl. "index" covers
 	// layout/base.tmpl, which owns its own script block.
-	pages := []string{"index", "workspaces", "workspace-detail", "workspace-canvas", "workspace-task"}
+	pages := []string{"index", "workspace-detail", "workspace-canvas", "workspace-task"}
 	helpers := []string{
 		`/js/modules/create-workspace-team-draft.js`,
 		`/js/modules/create-workspace-placement-draft.js`,
@@ -616,7 +616,6 @@ func TestNavbarCollapsesToHomeAgentsAndSettingsGear(t *testing.T) {
 		{"index", "index", false},
 		{"agents-roster", "agents", false},
 		{"action-center", "action-center", false},
-		{"workspace-detail", "workspaces", false},
 		{"vault", "vault", false},
 		{"settings", "settings", true},
 		{"skills", "skills", true},

@@ -143,7 +143,9 @@ test('Hire and start creates a Researcher with a Research Project whose goal is 
   await expect(lines.nth(1)).toContainText('A Research Project workspace named');
   await expect(lines.nth(1)).toContainText(`Goal: ${brief}`);
   await expect(lines.nth(2)).toContainText('Other roles stay open to fill later');
-  await expect(lines.nth(3)).toContainText('First look: read the brief and suggest the first task');
+  await expect(lines.nth(3)).toContainText(
+    'First look: read the brief and suggest the first ticket'
+  );
 
   const response = page.waitForResponse(
     r => r.url().endsWith('/api/agents/hire') && r.request().method() === 'POST'

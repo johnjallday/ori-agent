@@ -170,7 +170,7 @@ test('a run that fails and is marked failed says it needs a look', async ({ page
   await row.click();
   const card = page.locator('[data-result-card]');
   await expect(card).toContainText('Needs a look');
-  await expect(card.locator('[data-result-primary]')).toHaveText('Open task');
+  await expect(card.locator('[data-result-primary]')).toHaveText('Open ticket');
 });
 
 test('Give work from Home creates and starts the ticket, and the building lights', async ({

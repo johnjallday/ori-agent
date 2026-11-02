@@ -70,7 +70,7 @@ var registry = []Entry{
 		DisplayName: "Commander",
 		Emblem:      "diagram-3",
 		AccentColor: "#f59e0b",
-		Tagline:     "Leads the workspace — receives requests, dispatches tasks, coordinates the team",
+		Tagline:     "Leads the workspace — receives requests, hands out tickets, coordinates the team",
 		Description: "Front door for the workspace. Triages incoming work and dispatches it to the right specialist instead of doing domain work itself.",
 		ModelTier:   TierBalanced,
 		StarterPrompt: "You are the Commander for this workspace. You receive incoming requests, decide whether " +

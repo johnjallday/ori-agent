@@ -468,7 +468,7 @@ export class RendererNodes {
     this.ctx.fillStyle = '#212529';
     this.ctx.font = 'bold 11px system-ui';
     const maxTextWidth = cardWidth - 32; // Reserve space for padding and delete button
-    let description = task.description || 'Task';
+    let description = task.description || 'Ticket';
 
     // Manually truncate text if it exceeds maxWidth
     let textWidth = this.ctx.measureText(description).width;
@@ -504,12 +504,12 @@ export class RendererNodes {
           const nodeName = connectedNode.node.name || connectedNode.node.id || 'Unknown';
           statusText = `→ ${nodeName}`;
         } else if (isSimpleTask) {
-          statusText = '📝 Manual task';
+          statusText = '📝 Manual ticket';
         } else {
           statusText = isOrphaned ? `⚠️ MISSING: ${task.to}` : '⚠️ UNASSIGNED';
         }
       } else if (isSimpleTask) {
-        statusText = '📝 Manual task';
+        statusText = '📝 Manual ticket';
       } else {
         statusText = isOrphaned ? `⚠️ MISSING: ${task.to}` : '⚠️ UNASSIGNED';
       }

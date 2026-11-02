@@ -1493,8 +1493,12 @@ func (s *SecondBrainService) withDestinations(connected *secondbrain.Source, vie
 	result := *view.Result
 	result.Items = append([]secondbrain.LookItem(nil), result.Items...)
 	for i := range result.Items {
-		if _, name, ok := secondbrain.ItemDestination(tickets, connected.Path, result.Items[i]); ok {
+		if workspaceID, name, ok := secondbrain.ItemDestination(tickets, connected.Path, result.Items[i]); ok {
 			result.Items[i].TicketWorkspace = name
+			if tickets.HasNoteTicket(workspaceID, result.Items[i].ID) {
+				result.Items[i].Ticketed = true
+				result.Items[i].Suggested = false
+			}
 		}
 	}
 	view.Result = &result

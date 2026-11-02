@@ -230,7 +230,7 @@ test(
     await expect(wizardTitle).toHaveText('Plugin 1 of 2 · Music Project Management');
     await expect(wizardButton('Confirm installation')).toBeEnabled({ timeout: 60_000 });
     await expect(wizard).toContainText('johnjallday/music-project-management');
-    await expect(wizard).toContainText('No workspace, Home, agent or model task');
+    await expect(wizard).toContainText('No workspace, Home, agent or model run');
     expect((await json(request, '/api/plugins')).plugins).toEqual([]);
     await wizardButton('Cancel').click();
     await expect(wizard).toBeHidden();
@@ -282,7 +282,7 @@ test(
     expect(plugins.find((p: any) => p.name === 'reaper-plugin').enabled).toBe(false);
     await wizardButton('Confirm enablement').click();
     await expect(wizardTitle).toHaveText('Plugin setup summary', { timeout: 120_000 });
-    await expect(wizard).toContainText('No workspace, Home, agent or model task was created.');
+    await expect(wizard).toContainText('No workspace, Home, agent or model run was created.');
     await wizardButton('Back to setup').click();
     await expect(wizard).toBeHidden();
     await expect(requirements).toContainText('Nothing to download', { timeout: 120_000 });

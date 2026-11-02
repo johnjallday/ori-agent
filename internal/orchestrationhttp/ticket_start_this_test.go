@@ -183,3 +183,25 @@ func TestStartThis_RefusesAnAgentFromElsewhereAndAnyLaterState(t *testing.T) {
 		t.Errorf("%d runs started", f.starts.Load())
 	}
 }
+
+// Review finding: once a run started and was stopped, the ticket is back in Ready
+// and a new Start this is a new start, even within the repeat window.
+func TestStartThis_ATicketBackInReadyStartsAgain(t *testing.T) {
+	f := newStartThisFixture(t)
+	ticket := f.backlogTicket(t)
+	f.start(t, ticket.ID, "Writer")
+	for _, to := range []workspace.TicketState{workspace.TicketStateInProgress, workspace.TicketStateReady} {
+		if _, err := f.service.Transition(f.ws.ID, ticket.ID, workspace.TicketTransitionInput{
+			To: to, Actor: workspace.TicketActorUser,
+		}); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+	_, reply := f.start(t, ticket.ID, "")
+	if reply.Start == nil || !reply.Start.Started {
+		t.Fatalf("start = %+v", reply.Start)
+	}
+	if f.starts.Load() != 2 {
+		t.Errorf("%d runs started, want the second start to reach the starter", f.starts.Load())
+	}
+}

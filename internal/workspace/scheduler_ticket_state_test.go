@@ -169,7 +169,9 @@ func fireScheduleOnTicket(t *testing.T, tc scheduleFiringCase, fire scheduleFire
 		out.moves = append(out.moves, got.StateHistory[1:]...)
 	}
 	for _, e := range got.ExecutionHistory {
-		if e.Status == "failed" {
+		// A firing that finds a run still going is shown as skipped; any other
+		// refusal as failed. Either way the ticket says it did not fire.
+		if e.Status == "failed" || e.Status == "skipped" {
 			out.ticketFailure = true
 		}
 	}
@@ -209,7 +211,7 @@ func assertScheduleFiring(t *testing.T, tc scheduleFiringCase, got scheduleFirin
 		t.Errorf("a ticket that must not fire was queued")
 	}
 	if !got.ticketFailure {
-		t.Errorf("a refused firing must be shown on the ticket (a failed execution entry)")
+		t.Errorf("a refused firing must be shown on the ticket (a failed or skipped execution entry)")
 	}
 }
 
@@ -413,8 +415,18 @@ func TestScheduledFiring_ARunStillQueuedIsNotFiredTwice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("task: %v", err)
 	}
-	if got.Status != TaskStatusAssigned || got.FailureCount != 1 {
-		t.Errorf("status %q failures %d, want one queued run and the second firing refused and shown", got.Status, got.FailureCount)
+	if got.Status != TaskStatusAssigned {
+		t.Errorf("status %q, want one queued run", got.Status)
+	}
+	// Review finding: a firing that finds the run still queued is skipped and
+	// shown, not counted as a failure, so five of them never switch a recurring
+	// schedule off; the schedule moves on to its next time.
+	if got.FailureCount != 0 || !got.ScheduleEnabled || got.NextRun == nil {
+		t.Errorf("failures %d enabled %v next %v, want the skip to leave the schedule running", got.FailureCount, got.ScheduleEnabled, got.NextRun)
+	}
+	last := got.ExecutionHistory[len(got.ExecutionHistory)-1]
+	if last.Status != "skipped" {
+		t.Errorf("last history entry = %+v, want the skipped firing shown", last)
 	}
 }
 

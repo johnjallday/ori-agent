@@ -18,7 +18,7 @@
   const DOMAIN_MAX = 80;
 
   const BRIEF_HINT = 'This becomes the workspace goal. You can change it later.';
-  const FIRST_LOOK_LINE = 'First look: read the brief and suggest the first task';
+  const FIRST_LOOK_LINE = 'First look: read the brief and suggest the first ticket';
   const OPEN_ROLES_LINE = 'Other roles stay open to fill later';
 
   // assistantAllowsHire reads a personal_assistant payload (or its state).

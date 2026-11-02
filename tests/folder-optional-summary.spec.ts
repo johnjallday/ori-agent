@@ -199,7 +199,7 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     await page.locator('#personalAssistantClose').click();
     await expect(page.locator('#personalAssistantPanel')).toBeHidden();
-    await expect(banner).toContainText('Optional project task');
+    await expect(banner).toContainText('Optional project ticket');
     await expect(banner).toContainText(task.executor.model);
     expect(summaryCalls().length).toBe(before); // Opening never starts it.
     attack = true;

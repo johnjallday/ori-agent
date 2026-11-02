@@ -111,12 +111,12 @@ test('a role-less workspace without a Commander is offered one, dismissibly', ()
     assert.equal(offer.title, 'Hire a Commander for this workspace?');
     assert.equal(
       offer.message,
-      'Launch Plan routes chats and tasks through its Commander. The first agent you hire here takes that seat.'
+      'Launch Plan routes chats and tickets through its Commander. The first agent you hire here takes that seat.'
     );
     assert.equal(offer.confirmLabel, 'Hire a Commander');
     assert.equal(offer.cancelLabel, 'Not now');
     assert.deepEqual(offer.details, [
-      'The Commander receives chats and dispatches tasks.',
+      'The Commander receives chats and dispatches tickets.',
       'You can rename or replace it later.',
       'Nothing is created until you finish the form.'
     ]);

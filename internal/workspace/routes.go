@@ -36,7 +36,6 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks", h.CreateTask)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/tasks/{taskId}", h.UpdateTask)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/tasks/{taskId}", h.DeleteTask)
-	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/execute", h.ExecuteTaskManually)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/results/append-csv", h.AppendResultToCSV)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/tasks/{taskId}/results/export-csv", h.ExportResultCSV)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/draft", h.SaveTaskOutputSpecDraft)

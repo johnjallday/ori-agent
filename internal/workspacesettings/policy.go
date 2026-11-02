@@ -212,7 +212,7 @@ func enforcedControls(settings Settings, caps WorkspaceCapabilities) []EnforcedC
 		{
 			Key:   ControlPlanApproval,
 			Label: "Explicit plan approval",
-			Description: "No tasks, files, or runs are created until you approve " +
+			Description: "No tickets, files, or runs are created until you approve " +
 				"one exact plan version.",
 			// This one is not a setting. It is an invariant: no preset turns it
 			// off, including Autonomous (FR-140, FR-168).
@@ -221,8 +221,8 @@ func enforcedControls(settings Settings, caps WorkspaceCapabilities) []EnforcedC
 		},
 		{
 			Key:   ControlTaskMaterialization,
-			Label: "Approval creates the tasks",
-			Description: "Approved plan items become workspace tasks, with the " +
+			Label: "Approval creates the tickets",
+			Description: "Approved plan items become workspace tickets, with the " +
 				"approval recorded on each one.",
 			Enabled:   true,
 			Available: true,

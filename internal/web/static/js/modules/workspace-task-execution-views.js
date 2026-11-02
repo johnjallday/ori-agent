@@ -557,7 +557,7 @@ export const taskExecutionViewsMethods = {
       ];
     } else {
       baseSteps = [
-        toStep('Understanding the request', 'Clarify intent and constraints from task context.'),
+        toStep('Understanding the request', 'Clarify intent and constraints from the ticket.'),
         toStep('Producing final recommendation', 'Generate the final answer with clear reasoning.')
       ];
     }
@@ -877,7 +877,7 @@ export const taskExecutionViewsMethods = {
       case 'task.started':
         return {
           status: 'started',
-          summary: stringifyTraceValue(data?.description || 'Task execution started.', 700),
+          summary: stringifyTraceValue(data?.description || 'Run started.', 700),
           meta: [meta, data?.manual ? 'manual run' : ''].filter(Boolean).join(' • ')
         };
       case 'task.progress': {
@@ -886,7 +886,7 @@ export const taskExecutionViewsMethods = {
         const waiting = data?.waiting_for_next_step === true;
         return {
           status: waiting ? 'waiting' : 'progress',
-          summary: stringifyTraceValue(currentStep || 'Task progress updated.', 900),
+          summary: stringifyTraceValue(currentStep || 'Run progress updated.', 900),
           meta
         };
       }
@@ -894,7 +894,7 @@ export const taskExecutionViewsMethods = {
         return {
           status: 'thinking',
           summary: stringifyTraceValue(
-            data?.message || data?.summary || 'Agent is analyzing the task.',
+            data?.message || data?.summary || 'Agent is analyzing the work.',
             900
           ),
           meta
@@ -925,23 +925,20 @@ export const taskExecutionViewsMethods = {
       case 'task.completed':
         return {
           status: 'completed',
-          summary: stringifyTraceValue(
-            data?.result || data?.description || 'Task completed.',
-            1000
-          ),
+          summary: stringifyTraceValue(data?.result || data?.description || 'Run completed.', 1000),
           meta
         };
       case 'task.failed':
         return {
           status: 'failed',
-          summary: stringifyTraceValue(data?.error || 'Task failed.', 1000),
+          summary: stringifyTraceValue(data?.error || 'Run failed.', 1000),
           meta
         };
       case 'task.blocked':
         return {
           status: 'blocked',
           summary: stringifyTraceValue(
-            data?.reason || data?.agent_response || 'Task paused for user input.',
+            data?.reason || data?.agent_response || 'Run paused for user input.',
             1000
           ),
           meta
@@ -949,7 +946,7 @@ export const taskExecutionViewsMethods = {
       case 'task.resumed':
         return {
           status: 'resumed',
-          summary: stringifyTraceValue(data?.message || 'Task resumed after user guidance.', 700),
+          summary: stringifyTraceValue(data?.message || 'Run resumed after user guidance.', 700),
           meta
         };
       default:

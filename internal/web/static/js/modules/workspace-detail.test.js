@@ -1997,7 +1997,7 @@ test('a refused start says why on the banner and leaves the button', async () =>
     ],
     [
       { started: false, reason: 'unassigned' },
-      'The first task has no agent yet. Assign one, then start the first look.'
+      'The first ticket has no agent yet. Assign one, then start the first look.'
     ],
     [
       { started: false, reason: 'local_activation_required' },
@@ -2257,7 +2257,7 @@ test('Start assessment asks the one-time start once and follows the same task', 
     phase: 'working',
     hidden: false,
     buttons: [],
-    links: ['Watch the task']
+    links: ['Watch the run']
   });
 });
 
@@ -2346,7 +2346,7 @@ test('a failure that needs a repair first offers the repair and sends no retry',
     phase: 'failed',
     hidden: false,
     buttons: [],
-    links: ['Show the folder', 'Open the task']
+    links: ['Show the folder', 'Open the ticket']
   });
   // Even asked directly, nothing is sent while a repair is owed.
   await page.startAssessment({ retry: true });
@@ -2389,7 +2389,7 @@ test('the assessment banner is read again whenever its task moves, and only then
     phase: 'done',
     hidden: false,
     buttons: ['Dismiss'],
-    links: ['Open the assessment', 'Plan the suggested task']
+    links: ['Open the assessment', 'Plan the suggested ticket']
   });
   // The realtime end-of-task signal reads the same thing.
   await page.refreshFirstTaskBanner();

@@ -78,7 +78,7 @@ test('a finished run shows its title, outcome, duration, summary and rewards', (
   assert.doesNotMatch(html, /data-result-stage/, 'no stage change, no banner');
 });
 
-test('a failed run shows its reason, says Needs a look, and offers the task', () => {
+test('a failed run shows its reason, says Needs a look, and offers the ticket', () => {
   const { card } = load();
   const html = card.cardHTML(
     payload({
@@ -91,7 +91,7 @@ test('a failed run shows its reason, says Needs a look, and offers the task', ()
   assert.match(html, /is-attention/);
   assert.match(html, />Needs a look</);
   assert.match(html, /The import file is missing\./);
-  assert.match(html, /data-result-primary>Open task</);
+  assert.match(html, /data-result-primary>Open ticket</);
   assert.doesNotMatch(html, /data-result-rewards/);
 });
 

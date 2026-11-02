@@ -3352,7 +3352,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       `${counts.workspaces || 0} workspace(s)`,
       `${counts.sessions || 0} session(s)`,
       `${counts.notes || 0} note(s)`,
-      `${counts.tasks || 0} task(s)`
+      `${counts.tasks || 0} ticket(s)`
     ];
     let summary = parts.join(', ');
     const templates = Array.isArray(usage?.templates) ? usage.templates : [];
@@ -3367,7 +3367,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   function renderRows(pool) {
     if (!Array.isArray(pool) || pool.length === 0) {
       tableBody.innerHTML =
-        '<tr><td colspan="7" class="text-muted">No tags yet. Tags you add to workspaces, sessions, notes, or tasks show up here.</td></tr>';
+        '<tr><td colspan="7" class="text-muted">No tags yet. Tags you add to workspaces, sessions, notes, or tickets show up here.</td></tr>';
       return;
     }
 

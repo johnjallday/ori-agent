@@ -57,7 +57,7 @@ function calls() {
 async function screenshot(page: Page, name: string) {
   const dir = join(sandbox, 'upgrade-evidence');
   mkdirSync(dir, { recursive: true, mode: 0o750 });
-  await expect(page.getByText('Loading workspace tasks…', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Loading tickets…', { exact: true })).toHaveCount(0);
   await page.evaluate(async () => {
     await document.fonts.ready;
     window.scrollTo(0, 0);

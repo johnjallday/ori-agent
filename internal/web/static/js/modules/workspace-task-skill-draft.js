@@ -86,11 +86,11 @@ export const taskSkillDraftMethods = {
   },
 
   buildTaskSkillSavedDescription() {
-    const title = stripSkillUnsafeMarkup(this.getTaskDisplayLabel()) || 'completed task';
+    const title = stripSkillUnsafeMarkup(this.getTaskDisplayLabel()) || 'completed ticket';
     const details = stripSkillUnsafeMarkup(this.task?.details || '');
     const result = stripSkillUnsafeMarkup(this.getCurrentResultText());
     const parts = [
-      `Repeatable workflow derived from a completed Ori task: ${trimTaskSkillText(title, 140)}.`
+      `Repeatable workflow derived from a completed Ori run: ${trimTaskSkillText(title, 140)}.`
     ];
 
     if (details) {
@@ -183,7 +183,7 @@ export const taskSkillDraftMethods = {
     if (!this.canCreateSkillFromTask()) {
       this.notify(
         'warning',
-        'Only completed tasks with a successful result and assigned agent can become skills.'
+        'Only completed tickets with a successful result and assigned agent can become skills.'
       );
       return;
     }

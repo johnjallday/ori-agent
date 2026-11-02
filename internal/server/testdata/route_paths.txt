@@ -103,7 +103,6 @@
 /api/orchestration/tasks
 /api/orchestration/tasks/auto-edit
 /api/orchestration/tasks/auto-parse
-/api/orchestration/tasks/bulk
 /api/orchestration/tasks/execute
 /api/orchestration/tasks/output-contract/telemetry
 /api/orchestration/tasks/output-spec/suggest

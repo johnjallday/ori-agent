@@ -2294,8 +2294,8 @@
       kind: linkable.length === 1 && !partial ? 'one' : 'choose',
       members: linkable,
       copy: partial
-        ? 'Some workspace destinations are unavailable. Choose a known workspace to inspect its tasks.'
-        : 'Open a workspace to see this agent’s current tasks and results, or give it work.'
+        ? 'Some workspace destinations are unavailable. Choose a known workspace to inspect its tickets.'
+        : 'Open a workspace to see this agent’s current tickets and runs, or give it work.'
     };
   }
 
@@ -4146,7 +4146,7 @@
       if (!card) return;
       var rect = card.getBoundingClientRect();
       openCardMenu(card, { x: rect.left + 12, y: rect.top + rect.height - 8 }, null, {
-        label: 'Give ' + name + ' a task in',
+        label: 'Give ' + name + ' a ticket in',
         items: target.workspaces.map(function (ws) {
           return { label: ws.name, action: GIVE_TASK_IN + ws.slug };
         })

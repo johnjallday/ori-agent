@@ -36,8 +36,10 @@ type Handler struct {
 	followups              FollowUpAPI
 	followUpLinker         FollowUpLinker
 	followUpTickets        func() *workspace.TicketService
-	journal                JournalAPI
-	provider               userprofile.UserProvider
+	// hqWorkspace overrides the HQ lookup Make a ticket uses; tests set it.
+	hqWorkspace func(ctx context.Context, userID string) (workspaceID string, known bool)
+	journal     JournalAPI
+	provider    userprofile.UserProvider
 	// watchtowerSources is intentionally a factory: workspace storage is wired
 	// after this handler during server startup, so source access must be lazy.
 	watchtowerSources func() dailybrief.SnapshotSources

@@ -653,7 +653,7 @@ test('only a distinct reviewed child staffing action fills the existing-file pro
   await recapForm.getByRole('button', { name: 'Review session' }).click();
   const shareReview = page.getByRole('dialog', { name: 'Save this recap?' });
   await expect(shareReview).toContainText(`linked workspace ${saved.existingID}`);
-  await expect(shareReview).toContainText('No files, chats, tasks or DAW state were read');
+  await expect(shareReview).toContainText('No files, chats, tickets or DAW state were read');
   await screenshot(page, 'guidance-existing-file-shared-recap-review');
   await shareReview.getByRole('button', { name: 'Cancel' }).click();
   const entryID = catalog.rows[0].id;

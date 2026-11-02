@@ -304,7 +304,7 @@ test.describe('ordinary attached-source review on a real isolated host', () => {
         throw new Error(`${error}\nRead-only setup state: ${JSON.stringify(state)}`);
       });
     await expect(review).toContainText('Development Assistant');
-    await expect(review).toContainText('first task is prepared, not started');
+    await expect(review).toContainText('first ticket is prepared, not started');
     await expect(review.getByRole('button', { name: 'Change blueprint', exact: true })).toHaveCount(
       0
     );

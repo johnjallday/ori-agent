@@ -33,9 +33,12 @@ func TestSecondBrainProjectTickets_WorkspaceForFolder(t *testing.T) {
 		ws.SharedData = map[string]any{projecttemplates.PrimaryDirectoryIDKey: "d"}
 		workspaces[id] = ws
 	}
+	twin := filepath.Join(root, "Projects", "Twin")
 	add("album", "Album", album, workspace.StatusActive)
 	add("stems", "Stems", nested, workspace.StatusActive)
 	add("paused", "Paused", paused, workspace.StatusTrashed)
+	add("twin-a", "Twin A", twin, workspace.StatusActive)
+	add("twin-b", "Twin B", twin, workspace.StatusActive)
 
 	tickets := secondBrainProjectTickets{source: fakeStarterSource(workspaces)}
 
@@ -48,6 +51,7 @@ func TestSecondBrainProjectTickets_WorkspaceForFolder(t *testing.T) {
 		{"no workspace", filepath.Join(root, "Projects", "None"), "", false},
 		{"inactive workspace", paused, "", false},
 		{"outside any project", root, "", false},
+		{"two workspaces on one folder is ambiguous", twin, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,6 +89,12 @@ func TestSecondBrainProjectTickets_CreateNoteTicketOnceAndNoteTheLine(t *testing
 	again, err := tickets.CreateNoteTicket(ctx, ws.ID, note)
 	if err != nil || again {
 		t.Fatalf("second create = %v, %v, want a replay", again, err)
+	}
+	// Review finding: the person renames the ticket; the line is still the same.
+	renamed := note
+	renamed.Title = "Mix the single, final"
+	if again, err := tickets.CreateNoteTicket(ctx, ws.ID, renamed); err != nil || again {
+		t.Fatalf("create after a rename = %v, %v, want the existing ticket found", again, err)
 	}
 
 	loaded, err := store.Get(ws.ID)

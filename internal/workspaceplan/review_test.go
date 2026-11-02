@@ -546,7 +546,7 @@ func TestReviewContractShowsEverythingApprovalAuthorizes(t *testing.T) {
 
 	// Every side effect is stated in plain language (FR-63).
 	joined := strings.Join(contract.Effects, " | ")
-	for _, want := range []string{"Create 2 workspace task(s)", "tasks/prd.md", "repo_scan", "Nothing starts running"} {
+	for _, want := range []string{"Create 2 workspace ticket(s)", "tasks/prd.md", "repo_scan", "Nothing starts running"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("effects omit %q: %s", want, joined)
 		}
@@ -567,7 +567,7 @@ func TestReviewContractLabelsTheActionByItsEffect(t *testing.T) {
 		label string
 		start bool
 	}{
-		{ExecutionStepThrough, "Approve and Create Tasks", false},
+		{ExecutionStepThrough, "Approve and Create Tickets", false},
 		{ExecutionAuto, "Approve and Start", true},
 	} {
 		service := reviewService(t)

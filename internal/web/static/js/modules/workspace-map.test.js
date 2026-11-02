@@ -2430,7 +2430,7 @@ test('overviewBodyHTML renders the select-a-workspace placeholder when nothing i
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   assert.match(
     overviewBodyHTML(null),
-    /Select a workspace to see its agents, tasks, tools, and skills\./
+    /Select a workspace to see its agents, tickets, tools, and skills\./
   );
 });
 

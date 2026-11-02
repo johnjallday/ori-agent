@@ -38,7 +38,7 @@
                 class="workspace-task-page-title"
                 tabindex="0"
                 role="button"
-                aria-label="Edit task title">Loading task...</h1>
+                aria-label="Edit ticket title">Loading ticket...</h1>
               <!-- Copy link + Delete folded into a single overflow menu so the
                    title row stays clean and the destructive Delete is one step
                    removed from an accidental click. The button ids are kept so
@@ -52,7 +52,7 @@
                     aria-haspopup="menu"
                     aria-expanded="false"
                     aria-controls="workspace-task-hero-overflow-menu"
-                    aria-label="More task actions"
+                    aria-label="More ticket actions"
                     title="More actions">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z"/></svg>
                   </button>
@@ -63,20 +63,20 @@
                     </button>
                     <button type="button" id="workspace-task-delete" class="workspace-task-hero-overflow-item workspace-task-hero-overflow-item-danger" role="menuitem">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>
-                      <span>Delete task</span>
+                      <span>Delete ticket</span>
                     </button>
                   </div>
                 </div>
               </div>
             </div>
             <div class="workspace-task-page-subtitle-row">
-              <p id="workspace-task-subtitle" class="workspace-task-page-subtitle">Pulling task context, agent assignment, and response state.</p>
+              <p id="workspace-task-subtitle" class="workspace-task-page-subtitle">Pulling ticket context, agent assignment, and response state.</p>
               <button
                 type="button"
                 id="workspace-task-details-edit"
                 class="workspace-task-page-subtitle-edit"
-                aria-label="Edit additional task details"
-                title="Edit additional task details">
+                aria-label="Edit additional ticket details"
+                title="Edit additional ticket details">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
                 </svg>
@@ -91,7 +91,7 @@
             <span id="workspace-task-status" class="workspace-task-page-status" data-state="pending" aria-live="polite">Pending</span>
             <label class="workspace-task-page-agent-picker" id="workspace-task-hero-agent-wrap" hidden>
               <span class="workspace-task-page-agent-picker-label">Agent</span>
-              <select id="workspace-task-hero-agent" class="workspace-task-page-agent-picker-select" aria-label="Reassign task agent"></select>
+              <select id="workspace-task-hero-agent" class="workspace-task-page-agent-picker-select" aria-label="Reassign ticket agent"></select>
             </label>
             <div id="workspace-task-hero-actions" class="workspace-task-page-hero-actions"></div>
           </div>
@@ -130,8 +130,8 @@
 
         <div id="workspace-task-page-empty" class="workspace-task-page-empty" hidden>
           <div class="workspace-task-page-empty-icon">!</div>
-          <h2>Task not found</h2>
-          <p>This task could not be loaded from the workspace.</p>
+          <h2>Ticket not found</h2>
+          <p>This ticket could not be loaded from the workspace.</p>
           <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-secondary">Return To Workspace</a>
         </div>
 
@@ -146,7 +146,7 @@
               <div class="workspace-task-assist-panel-header">
                 <div>
                   <div class="workspace-task-assist-kicker">Action Required</div>
-                  <h2>Unblock this task</h2>
+                  <h2>Unblock this run</h2>
                 </div>
               </div>
 
@@ -202,7 +202,7 @@
                       </div>
                     </div>
                     <div class="workspace-task-assist-secondary-actions">
-                      <button type="button" id="workspace-task-assist-retry" class="modern-btn modern-btn-secondary">Retry Task</button>
+                      <button type="button" id="workspace-task-assist-retry" class="modern-btn modern-btn-secondary">Retry Run</button>
                       <button type="button" id="workspace-task-assist-fail" class="workspace-task-page-text-button workspace-task-assist-fail">Mark as Failed</button>
                     </div>
                   </div>
@@ -224,8 +224,8 @@
               <section class="workspace-task-page-card workspace-task-brief-card">
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Task</div>
-                    <h2>What this task does</h2>
+                    <div class="workspace-task-page-card-kicker">Ticket</div>
+                    <h2>What this ticket does</h2>
                   </div>
                 </div>
                 <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
@@ -252,7 +252,7 @@
                     </button>
                     <button type="button" id="workspace-task-output-followup" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
                       <i class="bi bi-arrow-down-right-circle" aria-hidden="true"></i>
-                      <span>Follow-up task</span>
+                      <span>Follow-up ticket</span>
                     </button>
                     <div class="workspace-task-output-overflow" data-open="false">
                       <button
@@ -277,7 +277,7 @@
                         </button>
                         <button type="button" id="workspace-task-output-promote" class="workspace-task-output-overflow-item" role="menuitem" hidden>
                           <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                          <span>Create Workflow Task</span>
+                          <span>Create Workflow Ticket</span>
                         </button>
                       </div>
                     </div>
@@ -286,8 +286,8 @@
                 <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
                 <div id="workspace-task-output"></div>
                 <div id="workspace-task-followup-panel" class="workspace-task-followup-panel" hidden>
-                  <div class="workspace-task-followup-kicker">New follow-up task</div>
-                  <p class="workspace-task-followup-copy">Creates a new task that receives this task's result as input. The downstream agent reads it via runtime inputs at execution time.</p>
+                  <div class="workspace-task-followup-kicker">New follow-up ticket</div>
+                  <p class="workspace-task-followup-copy">Creates a new ticket that receives this run's result as input. The downstream agent reads it via runtime inputs at execution time.</p>
                   <label class="workspace-task-followup-field">
                     <span>What should the follow-up do?</span>
                     <input type="text" id="workspace-task-followup-description" maxlength="500" placeholder="e.g. Draft a calendar reminder from this allergy report" />
@@ -333,7 +333,7 @@
                 <div class="workspace-task-page-card-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Blocked Context</div>
-                    <h2>Why the task paused</h2>
+                    <h2>Why the run paused</h2>
                   </div>
                 </div>
                 <div class="workspace-task-blocked-reason">
@@ -360,7 +360,7 @@
                   </div>
                 </div>
                 <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
-                  <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
+                  <div class="workspace-task-workflow-empty-copy">No steps yet. Break this run's result into a runnable list of steps.</div>
                   <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
                 </div>
                 <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
@@ -431,7 +431,7 @@
                 <div class="workspace-task-page-card-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Connections</div>
-                    <h2>Connected tasks</h2>
+                    <h2>Connected tickets</h2>
                   </div>
                 </div>
                 <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
@@ -446,14 +446,14 @@
                 <section class="workspace-task-page-card">
                   <div class="workspace-task-page-card-header">
                     <div>
-                      <h2>Task ID</h2>
+                      <h2>Ticket ID</h2>
                     </div>
                   <button
                     type="button"
                     id="workspace-task-copy-id"
                     class="modern-btn modern-btn-secondary"
-                    aria-label="Copy task ID"
-                    title="Copy task ID">
+                    aria-label="Copy ticket ID"
+                    title="Copy ticket ID">
                     <i class="bi bi-copy" aria-hidden="true"></i>
                     <span>Copy ID</span>
                   </button>
@@ -6524,8 +6524,8 @@
 
               <div class="workspace-task-schedule-enable-row">
                 <div class="workspace-task-schedule-enable-copy">
-                  <div class="workspace-task-schedule-enable-title">Wake this Mac before the task runs</div>
-                  <div class="workspace-task-schedule-enable-subtitle">Ori programs the next macOS wake event for the earliest wake-enabled task.</div>
+                  <div class="workspace-task-schedule-enable-title">Wake this Mac before the ticket runs</div>
+                  <div class="workspace-task-schedule-enable-subtitle">Ori programs the next macOS wake event for the earliest wake-enabled ticket.</div>
                 </div>
                 <input type="checkbox" id="workspace-task-schedule-wake-mac" class="form-check-input workspace-task-schedule-switch" role="switch" aria-label="Wake this Mac before scheduled runs">
               </div>
@@ -6569,17 +6569,17 @@
       <div class="modal-content">
         <div class="modal-header">
           <div>
-            <h5 class="modal-title" id="workspace-task-result-promote-heading">Create Workflow Task</h5>
+            <h5 class="modal-title" id="workspace-task-result-promote-heading">Create Workflow Ticket</h5>
             <div id="workspace-task-result-promote-meta" class="workspace-task-result-promote-meta"></div>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <div class="workspace-task-result-promote-field">
-            <label for="workspace-task-result-promote-title" class="form-label">Parent Task</label>
+            <label for="workspace-task-result-promote-title" class="form-label">Parent Ticket</label>
             <input type="text" class="form-control" id="workspace-task-result-promote-title" autocomplete="off">
           </div>
-          <div class="workspace-task-result-promote-subtasks-label">Subtasks</div>
+          <div class="workspace-task-result-promote-subtasks-label">Subtickets</div>
           <div id="workspace-task-result-promote-groups" class="workspace-task-result-promote-groups"></div>
         </div>
         <div class="modal-footer">
@@ -6595,7 +6595,7 @@
       <div class="modal-content">
         <div class="modal-header">
           <div>
-            <h5 class="modal-title" id="workspace-task-skill-heading">Create Skill From Task</h5>
+            <h5 class="modal-title" id="workspace-task-skill-heading">Create Skill From Ticket</h5>
             <div id="workspace-task-skill-meta" class="workspace-task-skill-meta"></div>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -6657,7 +6657,7 @@
           <div class="workspace-task-result-research-grid">
             <div class="workspace-task-result-research-main">
               <div class="workspace-task-result-research-field">
-                <label for="workspace-task-result-research-title" class="form-label">Task title</label>
+                <label for="workspace-task-result-research-title" class="form-label">Ticket title</label>
                 <input type="text" class="form-control" id="workspace-task-result-research-title" autocomplete="off">
               </div>
               <div class="workspace-task-result-research-field">
@@ -6681,7 +6681,7 @@
                 </label>
                 <label class="workspace-task-result-research-check" for="workspace-task-result-research-open-after-create">
                   <input type="checkbox" id="workspace-task-result-research-open-after-create" checked>
-                  <span>Open follow-up task after creation</span>
+                  <span>Open follow-up ticket after creation</span>
                 </label>
               </div>
               <div class="workspace-task-result-research-field">

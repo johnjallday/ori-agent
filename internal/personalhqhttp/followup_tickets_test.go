@@ -2,6 +2,7 @@ package personalhqhttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,6 +30,7 @@ func newFollowUpTicketFixture(t *testing.T) followUpTicketFixture {
 	}
 	tickets := workspace.NewTicketService(store)
 	handler.SetFollowUpTickets(services, func() *workspace.TicketService { return tickets })
+	handler.hqWorkspace = func(context.Context, string) (string, bool) { return "hq-id", true }
 	return followUpTicketFixture{handler: handler, store: store, tickets: tickets, services: services}
 }
 
@@ -142,6 +144,22 @@ func TestMakeTicket_ARepeatNamingAnotherWorkspaceStillOpensTheFirstTicket(t *tes
 	}
 	if len(loaded.Tasks) != 0 {
 		t.Errorf("%d tickets in the other workspace, want none", len(loaded.Tasks))
+	}
+}
+
+// An HQ follow-up, or one whose HQ cannot be told apart, asks which workspace.
+func TestMakeTicket_HQOrAnUnknownHQAsksForAWorkspace(t *testing.T) {
+	f := newFollowUpTicketFixture(t)
+	hq := f.followUpIn(t, "hq-id", "An HQ commitment")
+	if reply := f.makeTicket(t, hq.ID, ""); reply.Status != http.StatusBadRequest || reply.Details.Field != "workspace_id" {
+		t.Errorf("HQ follow-up = %d %q, want 400 asking for workspace_id", reply.Status, reply.Details.Field)
+	}
+
+	album := f.workspace(t, "album")
+	owned := f.followUpIn(t, album.ID, "Owned by Album")
+	f.handler.hqWorkspace = func(context.Context, string) (string, bool) { return "", false }
+	if reply := f.makeTicket(t, owned.ID, ""); reply.Status != http.StatusBadRequest || reply.Details.Field != "workspace_id" {
+		t.Errorf("unknown HQ = %d %q, want the person asked rather than a guess", reply.Status, reply.Details.Field)
 	}
 }
 

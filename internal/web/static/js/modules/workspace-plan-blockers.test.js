@@ -65,7 +65,7 @@ test('failed work reports how much failed', () => {
     planFixture({ status: 'paused', progress: { failed: 2, waiting_for_slot: 0 } })
   );
   assert.equal(blocker.kind, 'failure');
-  assert.match(blocker.reason, /2 task\(s\) failed/);
+  assert.match(blocker.reason, /2 ticket\(s\) failed/);
 });
 
 // Waiting for the slot resolves itself, so it explains rather than demands.

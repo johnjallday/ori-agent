@@ -57,8 +57,12 @@ func (t secondBrainProjectTickets) activeWorkspaces() map[string]*workspace.Work
 
 // WorkspaceForFolder finds the active workspace whose primary directory is
 // exactly this folder. A workspace on a parent or a child of it does not count.
+// Two active workspaces on the same folder is ambiguous, and the look and the
+// accept could pick different ones; such a line stays a follow-up.
 func (t secondBrainProjectTickets) WorkspaceForFolder(path string) (string, string, bool) {
 	want := resolvedPath(path)
+	var matchID, matchName string
+	matches := 0
 	for id, ws := range t.activeWorkspaces() {
 		primary, _ := ws.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string)
 		if strings.TrimSpace(primary) == "" {
@@ -69,17 +73,43 @@ func (t secondBrainProjectTickets) WorkspaceForFolder(path string) (string, stri
 			continue
 		}
 		if resolvedPath(ref.Path) == want {
-			return id, ws.Name, true
+			matches++
+			matchID, matchName = id, ws.Name
 		}
 	}
-	return "", "", false
+	if matches != 1 {
+		return "", "", false
+	}
+	return matchID, matchName, true
 }
 
-// CreateNoteTicket makes the Backlog ticket for a line, once.
+// HasNoteTicket looks in the store, not the cache, for the line's ticket.
+func (t secondBrainProjectTickets) HasNoteTicket(workspaceID, itemID string) bool {
+	if t.b == nil || t.b.workspaceStore == nil {
+		return false
+	}
+	ws, err := t.b.workspaceStore.Get(workspaceID)
+	if err != nil || ws == nil {
+		return false
+	}
+	for i := range ws.Tasks {
+		if ws.Tasks[i].SourceType == workspace.TicketSourceNoteItem && ws.Tasks[i].SourceID == itemID {
+			return true
+		}
+	}
+	return false
+}
+
+// CreateNoteTicket makes the Backlog ticket for a line, once. A ticket the person
+// has since renamed or moved is still that line's ticket, so it is found by its
+// source before the keyed create, which would refuse a different title.
 func (t secondBrainProjectTickets) CreateNoteTicket(_ context.Context, workspaceID string, ticket secondbrain.NoteTicket) (bool, error) {
 	service := t.b.ticketServiceForBridges()
 	if service == nil {
 		return false, errBridgeTicketsUnavailable
+	}
+	if t.HasNoteTicket(workspaceID, ticket.ItemID) {
+		return false, nil
 	}
 	_, created, err := service.CreateWithKey(workspace.TicketCreateInput{
 		WorkspaceID: workspaceID,

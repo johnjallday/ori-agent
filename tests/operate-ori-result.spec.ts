@@ -72,7 +72,7 @@ test('wt demo (seed): results belong to the request own run; reruns, input and l
     items: page.locator('#personalAssistantOperationRecapList > li')
   };
   const here = drawer(page);
-  const startButton = here.actions.getByRole('button', { name: 'Start task' });
+  const startButton = here.actions.getByRole('button', { name: 'Start ticket' });
   const openResult = here.actions.getByRole('button', { name: 'Open result' });
 
   /** Ask for a draft, save the form unchanged and return the operation and task. */
@@ -198,7 +198,7 @@ test('wt demo (seed): results belong to the request own run; reruns, input and l
     "Engineer finished “Bounce the stems”. The task has run again since, so what it shows now is a later run's result. This request's result is in the task's run history."
   );
   await expect(openResult).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Open the task' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open the ticket' })).toBeVisible();
   recorded = (await readOperation(request, first.operationId, tab.tab)).body.operation;
   expect(recorded.outcome).toEqual({ run: 'succeeded', result: 'history', later_runs: 1 });
   expect(recorded.task.run_id).toBe(firstRun); // the request keeps its own run
@@ -243,7 +243,7 @@ test('wt demo (seed): results belong to the request own run; reruns, input and l
   await expect(here.status).toHaveText(waitingText, { timeout: 30_000 });
   await expect(tray).toHaveCount(0);
   await shot('05-followed-from-another-page.png');
-  await page.getByRole('link', { name: 'Open the task' }).click();
+  await page.getByRole('link', { name: 'Open the ticket' }).click();
   await page.waitForURL(
     url =>
       url.pathname === albumPath &&

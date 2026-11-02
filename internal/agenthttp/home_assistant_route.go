@@ -249,12 +249,12 @@ var (
 	}
 	homeAssistantDefaultIntent = homeAssistantIntent{
 		Key:              "general_task",
-		Label:            "general task",
+		Label:            "general work",
 		Keywords:         []string{},
 		PreferredPlugins: []string{},
 		// Not "Task Assistant": another retired label, and this one surfaces in the
 		// panel's routing summary for every unmatched request (FR61).
-		SuggestedName: "Task Specialist",
+		SuggestedName: "General Specialist",
 		MinScore:      3,
 	}
 	// homeAssistantAppIntrospectionIntent matches questions about the user's own

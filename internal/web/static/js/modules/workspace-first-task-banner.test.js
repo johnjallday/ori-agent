@@ -84,7 +84,7 @@ test('a first look with no agent says so instead of offering a button', () => {
     assert.equal(view.action, null, agentName);
     assert.equal(
       view.note,
-      'The first task has no agent yet. Assign one, then start the first look.',
+      'The first ticket has no agent yet. Assign one, then start the first look.',
       agentName
     );
   }
@@ -145,7 +145,7 @@ test('the rendered banner wires the button to its start and disables it while st
     mount.children.some(node => node.tag === 'button'),
     false
   );
-  assert.equal(mount.children.find(node => node.tag === 'a').textContent, 'Watch the task');
+  assert.equal(mount.children.find(node => node.tag === 'a').textContent, 'Watch the run');
   renderFirstTaskBanner(mount, null, doc);
   assert.equal(mount.hidden, true);
   assert.deepEqual(mount.children, []);
@@ -159,17 +159,17 @@ test('a running first task says the agent is working and that it is read-only', 
     href: '/workspaces/session/task/t1'
   });
   assert.equal(view.phase, 'working');
-  assert.equal(view.heading, 'REAPER Assistant is working on its first task');
+  assert.equal(view.heading, 'REAPER Assistant is working on its first ticket');
   assert.match(view.detail, /Summarize the session/);
   assert.match(view.detail, /read-only/);
-  assert.equal(view.linkLabel, 'Watch the task');
+  assert.equal(view.linkLabel, 'Watch the run');
   assert.equal(view.href, '/workspaces/session/task/t1');
 });
 
 test('the banner follows the task to its end', () => {
   const at = state => firstTaskBannerView({ state, agentName: 'Atlas' });
   assert.equal(at('completed').phase, 'done');
-  assert.equal(at('completed').heading, 'Atlas finished its first task');
+  assert.equal(at('completed').heading, 'Atlas finished its first ticket');
   assert.equal(at('blocked').phase, 'needs-you');
   assert.equal(at('waiting_for_choice').phase, 'needs-you');
   for (const failed of ['failed', 'timeout', 'cancelled']) {
@@ -182,7 +182,7 @@ test('the banner follows the task to its end', () => {
 test('without an agent name the banner still reads, and only same-site links are kept', () => {
   assert.equal(
     firstTaskBannerView({ state: 'pending' }).heading,
-    'Your agent is working on its first task'
+    'Your agent is working on its first ticket'
   );
   assert.equal(firstTaskBannerView({ state: 'pending', href: '//evil.example/x' }).href, '');
   assert.equal(firstTaskBannerView({ state: 'pending', href: 'https://evil.example/x' }).href, '');
@@ -269,7 +269,7 @@ test('a running assessment says nothing is being run and has nothing to press', 
   assert.match(view.detail, /Nothing in it is being run or changed\./);
   assert.equal(view.action, null);
   assert.deepEqual(view.links, [
-    { id: 'task', label: 'Watch the task', href: taskHref, primary: false }
+    { id: 'task', label: 'Watch the run', href: taskHref, primary: false }
   ]);
 });
 
@@ -285,7 +285,7 @@ test('a finished assessment opens its report and hands on one suggestion', () =>
   const view = assessmentBannerView(done, { taskHref });
   assert.equal(view.phase, 'done');
   assert.equal(view.heading, 'The first assessment of widget is ready');
-  assert.equal(view.detail, 'It suggests one next task: Add a health check endpoint.');
+  assert.equal(view.detail, 'It suggests one next ticket: Add a health check endpoint.');
   assert.equal(view.action, null);
   assert.deepEqual(view.links, [
     {
@@ -297,7 +297,7 @@ test('a finished assessment opens its report and hands on one suggestion', () =>
     },
     {
       id: 'next',
-      label: 'Plan the suggested task',
+      label: 'Plan the suggested ticket',
       href: '/workspaces/widget/plans?next=assessment',
       primary: false
     }
@@ -479,7 +479,7 @@ test('the rendered assessment banner wires each control to its own handler', () 
   buttons()[0].listeners.click();
   assert.deepEqual(
     links().map(node => [node.textContent, node.href]),
-    [['Open the task', taskHref]]
+    [['Open the ticket', taskHref]]
   );
 
   renderFirstTaskBanner(
@@ -506,7 +506,7 @@ test('the rendered assessment banner wires each control to its own handler', () 
   const text = mount.children.find(node => node.className === 'first-task-banner__text');
   assert.equal(
     text.children[1].textContent,
-    'It suggests one next task: <img src=x onerror=alert(1)>'
+    'It suggests one next ticket: <img src=x onerror=alert(1)>'
   );
   assert.equal(text.children[1].innerHTML, undefined);
   const dismiss = buttons().find(node => node.dataset.firstTaskAction === 'dismiss');

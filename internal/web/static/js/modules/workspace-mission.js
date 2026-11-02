@@ -1290,7 +1290,7 @@
   // "3 tasks suggested · 2 findings · 1 duplicate skipped" for a run record.
   function runCountsText(run) {
     const counts = [
-      plural(run.tasks_created || 0, 'task suggested', 'tasks suggested'),
+      plural(run.tasks_created || 0, 'ticket suggested', 'tickets suggested'),
       plural(run.findings_created || 0, 'finding', 'findings')
     ];
     if (run.duplicates_skipped)

@@ -41,7 +41,7 @@ export function createTaskPageDataLoader(fetchImpl = (...args) => fetch(...args)
       signal
     });
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error('Failed to load task details.');
+    if (!response.ok) throw new Error('Failed to load ticket details.');
     return response.json();
   }
 

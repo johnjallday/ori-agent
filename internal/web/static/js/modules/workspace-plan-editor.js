@@ -59,7 +59,7 @@ export function addGroup(content, title = 'New group') {
   return next;
 }
 
-export function addItem(content, groupId, description = 'New task') {
+export function addItem(content, groupId, description = 'New ticket') {
   const next = cloneContent(content);
   const group = findGroup(next, groupId);
   if (!group) return next;

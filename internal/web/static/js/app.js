@@ -72,7 +72,7 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
       'You are a desktop app launcher assistant. For requests like "open obsidian", launch the requested app immediately and confirm success or report the exact failure reason.'
   },
   general_task: {
-    suggestedName: 'Task Assistant',
+    suggestedName: 'General Assistant',
     tags: ['tasks', 'assistant'],
     domains: ['tasks'],
     externalSystems: [],
@@ -981,10 +981,10 @@ function buildChatSpecialistRoutingProfile(originalMessage, handoff) {
 }
 
 function buildUniqueChatSpecialistAgentName(baseName, existingNames) {
-  let sanitized = String(baseName || 'Task Assistant')
+  let sanitized = String(baseName || 'General Assistant')
     .replace(/[^a-zA-Z0-9 _-]/g, '')
     .trim();
-  if (!sanitized) sanitized = 'Task Assistant';
+  if (!sanitized) sanitized = 'General Assistant';
 
   const lowerNames = Object.create(null);
   for (const existingName of Array.isArray(existingNames) ? existingNames : []) {
@@ -2265,7 +2265,7 @@ function renderPlannerPlanSummary(data) {
   const tasks = data.planner_plan.tasks || [];
   if (!Array.isArray(tasks) || tasks.length === 0) return;
 
-  const lines = tasks.map((task, idx) => `${idx + 1}. ${task.description || 'Task'}`);
+  const lines = tasks.map((task, idx) => `${idx + 1}. ${task.description || 'Ticket'}`);
   const message = `**Plan**\n${lines.join('\n')}`;
   addMessageToChat(message, false, false, true, true);
 }
@@ -2351,15 +2351,15 @@ async function handleTaskCommand(message) {
   try {
     const task = await API.post(`/api/sessions/${sessionId}/tasks`, { description: args });
 
-    addMessageToChat(`✓ Task created: "${task.description}"`, false, false);
+    addMessageToChat(`✓ Ticket created: "${task.description}"`, false, false);
 
     // Refresh session tasks
     if (window.sessionManager?.loadSessionTasks) {
       await window.sessionManager.loadSessionTasks();
     }
   } catch (error) {
-    appLog.error('Failed to create task:', error);
-    addMessageToChat(`✗ Failed to create task: ${error.message}`, false, true);
+    appLog.error('Failed to create ticket:', error);
+    addMessageToChat(`✗ Failed to create ticket: ${error.message}`, false, true);
   }
 }
 
@@ -2371,7 +2371,7 @@ async function displayTaskList(sessionId) {
 
     if (tasks.length === 0) {
       addMessageToChat(
-        'No tasks for this session. Use `/task <description>` to create one.',
+        'No tickets for this session. Use `/task <description>` to create one.',
         false,
         false
       );
@@ -2379,7 +2379,7 @@ async function displayTaskList(sessionId) {
     }
 
     // Build task list message
-    let message = `**Session Tasks** (${data.counts?.pending || 0} pending, ${data.counts?.completed || 0} completed)\n\n`;
+    let message = `**Session Tickets** (${data.counts?.pending || 0} pending, ${data.counts?.completed || 0} completed)\n\n`;
 
     // Sort: pending first
     const sortedTasks = [...tasks].sort((a, b) => {
@@ -2398,8 +2398,8 @@ async function displayTaskList(sessionId) {
 
     addMessageToChat(message, false, false);
   } catch (error) {
-    appLog.error('Failed to load tasks:', error);
-    addMessageToChat(`✗ Failed to load tasks: ${error.message}`, false, true);
+    appLog.error('Failed to load tickets:', error);
+    addMessageToChat(`✗ Failed to load tickets: ${error.message}`, false, true);
   }
 }
 

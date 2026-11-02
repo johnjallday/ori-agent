@@ -157,7 +157,7 @@
       required +
       ' Craft; you have ' +
       balance +
-      '. Send messages or finish tasks by hand to earn more.'
+      '. Send messages or finish tickets by hand to earn more.'
     );
   }
 

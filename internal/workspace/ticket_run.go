@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -166,6 +167,11 @@ func RequireTicketRunnable(task *Task, action string) error {
 // decision to stop. "In Progress" only refuses while a run is active or queued: a
 // recurring ticket stays In Progress between occurrences, and its next firing is
 // a new attempt on the same ticket.
+// ErrScheduledRunBusy is a firing that found this ticket's run still going: in
+// progress, queued, or waiting for a choice. That firing is skipped and the
+// schedule moves on; it is not a failure of the schedule.
+var ErrScheduledRunBusy = errors.New("a run of this ticket is still going")
+
 func scheduledFiringRefusal(t *Task) error {
 	if err := RequireTaskNotBacklog(t, "cannot schedule task"); err != nil {
 		return err
@@ -176,10 +182,10 @@ func scheduledFiringRefusal(t *Task) error {
 	}
 	switch t.Status {
 	case TaskStatusInProgress, TaskStatusWaitingForChoice:
-		return fmt.Errorf("task %s is already in progress", t.ID)
+		return fmt.Errorf("ticket %s: %w", t.ID, ErrScheduledRunBusy)
 	case TaskStatusAssigned:
 		if state == TicketStateInProgress {
-			return fmt.Errorf("task %s is already queued to run", t.ID)
+			return fmt.Errorf("ticket %s is queued to run: %w", t.ID, ErrScheduledRunBusy)
 		}
 	}
 	return nil

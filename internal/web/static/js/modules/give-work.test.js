@@ -39,7 +39,7 @@ test('an agent makes it Ready, and only Start now starts it', () => {
 test('a due day becomes an instant, and no due stays empty', () => {
   assert.equal(
     giveWorkRequest({ what: 'X', due: '2026-12-01' }, 'k').input.dueDate,
-    '2026-12-01T00:00:00Z'
+    new Date('2026-12-01T23:59:59').toISOString()
   );
   assert.equal(giveWorkRequest({ what: 'X', due: '' }, 'k').input.dueDate, null);
 });

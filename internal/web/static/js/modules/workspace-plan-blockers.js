@@ -49,7 +49,7 @@ export function blockersFor(plan) {
   if (progress.failed > 0) {
     blockers.push({
       kind: 'failure',
-      reason: `${progress.failed} task(s) failed. Nothing downstream can start until they are resolved.`,
+      reason: `${progress.failed} ticket(s) failed. Nothing downstream can start until they are resolved.`,
       action: { label: 'Review the failed work', href: planHref(plan) }
     });
   }

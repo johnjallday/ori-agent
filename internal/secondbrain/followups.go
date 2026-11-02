@@ -86,6 +86,9 @@ type ProjectTickets interface {
 	// CreateNoteTicket makes a Backlog ticket with the item's id as its key. A
 	// later attempt finds the same ticket and reports created false.
 	CreateNoteTicket(ctx context.Context, workspaceID string, ticket NoteTicket) (created bool, err error)
+	// HasNoteTicket says whether this workspace already holds the line's ticket,
+	// whatever has happened to it since (renamed, moved, closed).
+	HasNoteTicket(workspaceID, itemID string) bool
 }
 
 // NoteTicket is a ticket made from an open line.

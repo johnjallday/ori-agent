@@ -187,6 +187,12 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				h.ReviewRequiredGroupRequirementDeletion(w, r, id)
 				return
 			}
+		case "tasks":
+			// Every live tasks route is registered on its own pattern. One that
+			// reaches here was retired (PRD 760 FR-36) and must not fall through to
+			// the collection, where a POST would create a workspace.
+			orihttp.NotFound(w, "Not found")
+			return
 		}
 	}
 

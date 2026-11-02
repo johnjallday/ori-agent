@@ -464,7 +464,7 @@ export function resolveTaskStatusPresentation(task) {
     label: presentation.label,
     isBlocked,
     reason: stepPaused
-      ? 'This task is paused between internal execution steps.'
+      ? 'This run is paused between internal execution steps.'
       : isBlocked
         ? String(task?.context?.human_loop?.reason || '').trim()
         : ''

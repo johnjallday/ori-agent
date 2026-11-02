@@ -3594,7 +3594,7 @@
     if (!ws) {
       return (
         '<div class="ws-map-overview-empty"><span class="ws-big">◈</span>' +
-        'Select a workspace to see its agents, tasks, tools, and skills.</div>'
+        'Select a workspace to see its agents, tickets, tools, and skills.</div>'
       );
     }
     var pal = paletteFor(ws.id);
@@ -6270,12 +6270,12 @@
     if (taskStartWatches[taskId]) clearTimeout(taskStartWatches[taskId]);
     taskStartWatches[taskId] = setTimeout(function () {
       delete taskStartWatches[taskId];
-      taskToast('info', 'Task created. It has not started yet.', {
+      taskToast('info', 'Ticket created. It has not started yet.', {
         title: name,
         // Long enough to reach the link; the default is gone in five seconds.
         duration: 10000,
         action: {
-          label: 'Open task',
+          label: 'Open ticket',
           onClick: function () {
             openWorkspace(workspaceId, { taskId: taskId });
           }
@@ -6395,7 +6395,7 @@
       // on the user (FR27). The tile's click handler routes it.
       fresh.setAttribute('data-activity-open-task', state.taskId);
       fresh.setAttribute('data-activity-workspace', state.workspaceId);
-      fresh.setAttribute('title', 'Open this task');
+      fresh.setAttribute('title', 'Open this ticket');
     }
     if (state.agent) {
       var face = activitySpan('ws-map-activity-face');

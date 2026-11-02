@@ -6,6 +6,9 @@ template `goal` → legacy bootstrap goal) or in Goal Settings, and it is inject
 into every workspace prompt: the chat snapshot, the protected task header
 (`GoalPromptLine`), Plans and the Home summary.
 
+The work a goal run proposes becomes tickets, and each attempt is a run; see
+[One work-item model](work-item-model.md).
+
 ## The goal charter
 
 A goal is a charter when its text has at least one of five part headings, as a

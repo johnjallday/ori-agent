@@ -161,15 +161,15 @@ export function setupCreationReviewMaterial(session = {}, brief = '') {
           folder: 'Linked folder',
           agents: 'Team',
           mode: 'Working mode',
-          task: 'First task',
+          task: 'First ticket',
           home: 'Home',
           placement: 'Placement'
         }[line.kind] || 'Setup step',
       value: [line.name, line.detail].filter(Boolean).join(' — ')
     })),
     later: plan.first_task_deferred
-      ? 'The first task is prepared, not started. Run it from the workspace when you choose.'
-      : 'This setup may run its disclosed first task. Review the exact host-owned steps above before confirming.'
+      ? 'The first ticket is prepared, not started. Run it from the workspace when you choose.'
+      : 'This setup may run its disclosed first ticket. Review the exact host-owned steps above before confirming.'
   };
 }
 

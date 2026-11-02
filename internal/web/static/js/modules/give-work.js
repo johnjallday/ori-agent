@@ -46,6 +46,15 @@ export function canStartNow(fields) {
  * Turns the form's fields into the ticket client's input, or returns an error
  * naming the field. The state follows from who was chosen (FR-13).
  */
+// dueDateISO is a picked day as the end of that day in the person's own time
+// zone, so it reads as that day everywhere and is overdue only once it is over.
+export function dueDateISO(day) {
+  const text = String(day || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const end = new Date(`${text}T23:59:59`);
+  return Number.isNaN(end.getTime()) ? null : end.toISOString();
+}
+
 export function giveWorkRequest(fields, key) {
   const what = String((fields && fields.what) || '').trim();
   if (!what) return { error: 'Say what needs doing.', field: 'what' };
@@ -59,7 +68,7 @@ export function giveWorkRequest(fields, key) {
       assignee: who,
       start: Boolean(fields.startNow) && who !== '',
       // A date input gives a day; the API takes an instant.
-      dueDate: due ? `${due}T00:00:00Z` : null,
+      dueDate: dueDateISO(due),
       idempotencyKey: key
     }
   };

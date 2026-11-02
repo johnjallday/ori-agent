@@ -639,6 +639,14 @@
     return labels[key] || `Move to ${stateLabel(toState)}`;
   }
 
+  /** A due instant as the person's own calendar day, for a date input. */
+  function localDay(value) {
+    const at = value ? new Date(value) : null;
+    if (!at || Number.isNaN(at.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+  }
+
   /** Start this is offered on open work nobody has picked up (PRD 760 FR-27). */
   function canStartThis(ticket) {
     if (!ticket || ticket.archived) return false;
@@ -1288,7 +1296,8 @@
         .split(',')
         .map(tag => tag.trim())
         .filter(Boolean),
-      dueDate: due ? `${due}T00:00:00Z` : null,
+      // The end of that day where the person is (see give-work.js dueDateISO).
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(due) ? new Date(`${due}T23:59:59`).toISOString() : null,
       referenceUrl: String(values.reference || '').trim(),
       version: ticket.version
     };
@@ -1345,11 +1354,7 @@
     buildEditField(form, 'Priority', priority);
 
     buildEditField(form, 'Tags (comma separated)', input('tags', 'text', ticket.tags.join(', ')));
-    buildEditField(
-      form,
-      'Due',
-      input('due', 'date', ticket.dueDate ? String(ticket.dueDate).slice(0, 10) : '')
-    );
+    buildEditField(form, 'Due', input('due', 'date', localDay(ticket.dueDate)));
     buildEditField(form, 'Reference', input('reference', 'url', ticket.referenceUrl));
 
     const save = document.createElement('button');
@@ -2343,6 +2348,7 @@
     api,
     canStartThis,
     followUpStandingLabel,
+    localDay,
     ticketSourceLabel,
     assistantDraftResumeHref,
     canTransitionTo,

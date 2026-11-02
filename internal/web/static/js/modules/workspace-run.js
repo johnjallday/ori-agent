@@ -43,11 +43,11 @@ function formatKind(value) {
     .trim()
     .toLowerCase();
   const labels = {
-    task_raw_result: 'Task Raw Result',
-    task_normalized_row: 'Task Normalized Row',
-    task_output_validation: 'Task Output Validation',
-    task_output_repair: 'Task Output Repair',
-    task_storage_receipt: 'Task Storage Receipt'
+    task_raw_result: 'Run Raw Result',
+    task_normalized_row: 'Run Normalized Row',
+    task_output_validation: 'Run Output Validation',
+    task_output_repair: 'Run Output Repair',
+    task_storage_receipt: 'Run Storage Receipt'
   };
   if (labels[normalized]) return labels[normalized];
   return formatStatus(value);
@@ -421,7 +421,7 @@ export class WorkspaceRunPage {
             .join(' / ') || 'Tracked'
       });
     }
-    if (taskID) summaryItems.push({ label: 'Task', value: taskID, href: this.taskHref(taskID) });
+    if (taskID) summaryItems.push({ label: 'Ticket', value: taskID, href: this.taskHref(taskID) });
     if (referenceURL)
       summaryItems.push({
         label: 'Reference URL',
@@ -822,7 +822,7 @@ export class WorkspaceRunPage {
       ? `
       <article class="workspace-run-validation-item">
         <div class="workspace-run-validation-head">
-          <strong>Task Output</strong>
+          <strong>Run Output</strong>
           <span class="workspace-run-validation-status" data-state="${escapeHtml(taskOutput.validation_status || taskOutput.storage_status || '')}">
             ${escapeHtml(formatTaskOutputStatus(taskOutput))}
           </span>

@@ -288,13 +288,13 @@ test('fixture ticket-only output and File Janitor preserve truthful link labels'
   const offer: any = completed();
   offer.first_task = { state: 'finished', ticket_route: '/workspaces/album-three?ticket=legacy' };
   const { card, effects } = await mount(page, offer);
-  await expect(card.getByRole('link', { name: 'Open task', exact: true })).toBeVisible();
+  await expect(card.getByRole('link', { name: 'Open ticket', exact: true })).toBeVisible();
   await expect(card.getByRole('link', { name: /summary|report/i })).toHaveCount(0);
   await expect(card).toContainText('No saved excerpt is available here.');
   delete offer.first_task.ticket_route;
   await redraw(page, offer);
   await expect(card).toContainText('No saved excerpt is available here.');
-  await expect(card.getByRole('link', { name: /task|summary|report/i })).toHaveCount(0);
+  await expect(card.getByRole('link', { name: /ticket|task|summary|report/i })).toHaveCount(0);
   delete offer.first_task;
   offer.outcome.first_look = {
     batch: { outcome: 'batch', route: '/workspaces/album-three?panel=file-janitor&batch_id=one' }

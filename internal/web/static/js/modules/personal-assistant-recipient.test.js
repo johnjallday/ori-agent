@@ -232,7 +232,7 @@ test('storage that throws never breaks resolution', () => {
 test('the entry agent placeholder reuses the workspace copy', () => {
   assert.equal(
     entryAgentPlaceholder({ name: 'REAPER Assistant' }),
-    'Ask REAPER Assistant about this workspace… (/task creates a task)'
+    'Ask REAPER Assistant about this workspace… (/task creates a ticket)'
   );
   assert.equal(entryAgentPlaceholder({ loading: true }), 'Finding this workspace’s Commander…');
 });

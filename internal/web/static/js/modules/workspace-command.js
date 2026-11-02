@@ -2962,7 +2962,10 @@ export class WorkspaceCommandView {
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
-        return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
+        return {
+          title: this.taskModalShowAll ? 'Tickets' : 'Open Tickets',
+          addLabel: '＋ Add Ticket'
+        };
       case 'mcp':
         return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
       case 'skills':
@@ -3710,7 +3713,7 @@ export class WorkspaceCommandView {
     if (String(section || '') !== 'tasks') return '';
     const board = this.taskModalBoardMode;
     return (
-      '<div class="ws-cmd-modal-viewtoggle" role="tablist" aria-label="Task view">' +
+      '<div class="ws-cmd-modal-viewtoggle" role="tablist" aria-label="Ticket view">' +
       '<button type="button" class="ws-cmd-modal-view' +
       (board ? '' : ' is-active') +
       '" data-cmd-modal-action="view-list" aria-pressed="' +
@@ -3910,14 +3913,14 @@ export class WorkspaceCommandView {
     if (!tasks.length) {
       return this.modalEmptyHTML(
         this.taskModalShowAll
-          ? 'No tasks yet. Add one to get started.'
-          : 'No open tasks. Use Show all to view completed tasks.'
+          ? 'No tickets yet. Add one to get started.'
+          : 'No open tickets. Use Show all to view completed tickets.'
       );
     }
     return tasks
       .map(t => {
         const id = String(t.id || '');
-        const label = String(t.description || t.name || t.title || 'Task');
+        const label = String(t.description || t.name || t.title || 'Ticket');
         const assignee = String(t.to || t.agent_name || t.assigned_to || '');
         const tone = this.taskTone(t.status);
         const statusText = this.ticketStatusText(t);
@@ -3939,17 +3942,17 @@ export class WorkspaceCommandView {
           '<div class="ws-cmd-mrow-actions">' +
           '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="run" data-cmd-id="' +
           escapeHtml(id) +
-          '" title="Run" aria-label="Run task ' +
+          '" title="Run" aria-label="Run ticket ' +
           escapeHtml(label) +
           '">▶</button>' +
           '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="open" data-cmd-id="' +
           escapeHtml(id) +
-          '" title="Open" aria-label="Open task ' +
+          '" title="Open" aria-label="Open ticket ' +
           escapeHtml(label) +
           '">↗</button>' +
           '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
           escapeHtml(id) +
-          '" title="Delete" aria-label="Delete task ' +
+          '" title="Delete" aria-label="Delete ticket ' +
           escapeHtml(label) +
           '">✕</button>' +
           '</div>' +
@@ -4540,7 +4543,7 @@ export class WorkspaceCommandView {
     const rosterStatus =
       typeof page.getAgentRosterStatus === 'function'
         ? page.getAgentRosterStatus(name)
-        : { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+        : { key: 'idle', label: 'Idle', detail: 'No active tickets' };
     const role = this.agentRolePresentation(group);
     const skills =
       typeof page.getAgentSkillSummary === 'function'
@@ -4727,7 +4730,7 @@ export class WorkspaceCommandView {
       '"></span><strong>' +
       escapeHtml(agent.status?.label || 'Idle') +
       '</strong><span>' +
-      escapeHtml(agent.status?.detail || 'No active tasks') +
+      escapeHtml(agent.status?.detail || 'No active tickets') +
       '</span></p>' +
       '</div>' +
       '<div class="ws-cmd-stage-actions">' +
@@ -4752,17 +4755,17 @@ export class WorkspaceCommandView {
       ? ''
       : '<button type="button" class="ws-cmd-icon-btn sm" data-cmd-add-task="' +
         escapeHtml(encoded) +
-        '" aria-label="Add task">＋</button>';
+        '" aria-label="Add ticket">＋</button>';
     const head =
-      '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tasks · ' +
+      '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tickets · ' +
       tasks.length +
       '</span>' +
       add +
       '</div>';
     if (!tasks.length) {
       const emptyText = this.taskFilterActiveTags().length
-        ? '— no tasks match the tag filter —'
-        : '— no tasks yet —';
+        ? '— no tickets match the tag filter —'
+        : '— no tickets yet —';
       return (
         '<div class="ws-cmd-questlog">' +
         head +
@@ -4773,7 +4776,7 @@ export class WorkspaceCommandView {
     }
     const items = tasks
       .map(t => {
-        const label = String(t.description || t.name || t.title || 'Task');
+        const label = String(t.description || t.name || t.title || 'Ticket');
         const tone = this.taskTone(t.status);
         const statusText = this.ticketStatusText(t);
         const taskId = String(t.id || '');
@@ -4782,7 +4785,7 @@ export class WorkspaceCommandView {
           '<span class="ws-cmd-q-glyph">&bull;</span>' +
           '<button type="button" class="ws-cmd-q-name" data-cmd-open-task="' +
           escapeHtml(taskId) +
-          '" aria-label="Open task ' +
+          '" aria-label="Open ticket ' +
           escapeHtml(label) +
           '">' +
           escapeHtml(label) +
@@ -4794,7 +4797,7 @@ export class WorkspaceCommandView {
           '</span>' +
           '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' +
           escapeHtml(taskId) +
-          '" title="Run" aria-label="Run task ' +
+          '" title="Run" aria-label="Run ticket ' +
           escapeHtml(label) +
           '">▶</button>' +
           '</div>'
@@ -4806,8 +4809,8 @@ export class WorkspaceCommandView {
 
   overviewTabHTML(agent) {
     const currentTask = agent.currentTask
-      ? escapeHtml(agent.currentTask.description || agent.currentTask.name || 'Current task')
-      : 'No task in progress';
+      ? escapeHtml(agent.currentTask.description || agent.currentTask.name || 'Current ticket')
+      : 'No ticket in progress';
     const currentDetail = agent.currentTask
       ? 'This agent is actively executing assigned work.'
       : 'Ready for a new assignment.';
@@ -4825,7 +4828,7 @@ export class WorkspaceCommandView {
       escapeHtml(agent.status?.label || 'Idle') +
       '</span></div>' +
       '<div class="ws-cmd-overview-stats">' +
-      '<div><span>Tasks</span><strong>' +
+      '<div><span>Tickets</span><strong>' +
       agent.tasks.length +
       '</strong></div>' +
       '<div><span>Skills</span><strong>' +
@@ -4845,7 +4848,7 @@ export class WorkspaceCommandView {
       '</p>' +
       '<span class="ws-cmd-overview-label">Status detail</span>' +
       '<p>' +
-      escapeHtml(agent.status?.detail || 'No active tasks') +
+      escapeHtml(agent.status?.detail || 'No active tickets') +
       '</p>' +
       '</div>'
     );
@@ -5019,8 +5022,8 @@ export class WorkspaceCommandView {
       if (!Number.isFinite(time)) return;
       items.push({
         id: String(task.id || ''),
-        kind: 'Task',
-        title: String(task.description || task.name || task.title || 'Untitled task'),
+        kind: 'Ticket',
+        title: String(task.description || task.name || task.title || 'Untitled ticket'),
         status: String(task.status || 'pending').replaceAll('_', ' '),
         timestamp: String(timestamp),
         time
@@ -5056,7 +5059,7 @@ export class WorkspaceCommandView {
     if (!items.length) {
       return (
         '<div class="ws-cmd-tab-empty"><strong>No recent activity</strong>' +
-        '<span>Tasks and sessions attributed to this agent will appear here.</span></div>'
+        '<span>Tickets and sessions attributed to this agent will appear here.</span></div>'
       );
     }
     return (
@@ -5065,7 +5068,7 @@ export class WorkspaceCommandView {
         .map(
           item =>
             '<button type="button" class="ws-cmd-activity-item" data-cmd-' +
-            (item.kind === 'Task' ? 'open-task' : 'open-session') +
+            (item.kind === 'Ticket' ? 'open-task' : 'open-session') +
             '="' +
             escapeHtml(item.id) +
             '">' +
@@ -5095,7 +5098,7 @@ export class WorkspaceCommandView {
     return (
       '<section class="ws-cmd-unassigned" aria-labelledby="ws-cmd-unassigned-title">' +
       '<div><span class="ws-cmd-unassigned-kicker">Dispatch queue</span>' +
-      '<strong id="ws-cmd-unassigned-title">Unassigned tasks</strong></div>' +
+      '<strong id="ws-cmd-unassigned-title">Unassigned tickets</strong></div>' +
       '<span class="ws-cmd-unassigned-count">' +
       tasks.length +
       '</span>' +
@@ -5107,7 +5110,7 @@ export class WorkspaceCommandView {
   agentTabsHTML(agent) {
     const tabs = [
       { key: 'overview', label: 'Overview' },
-      { key: 'tasks', label: 'Tasks' },
+      { key: 'tasks', label: 'Tickets' },
       // The tab KEY stays `loadout` — it is persisted in URL state and read by
       // the tab tests — while the visible label uses the cozy vocabulary
       // (PRD FR-168: Loadout → Toolbox).
@@ -5714,26 +5717,26 @@ export class WorkspaceCommandView {
       return { key: 'needs-input', label: 'Needs input', detail: 'Waiting for user input' };
     }
     if (tasks.some(task => ['failed', 'timed_out'].includes(resolveTaskPresentation(task).state))) {
-      return { key: 'blocked', label: 'Needs attention', detail: 'Inspect the task result' };
+      return { key: 'blocked', label: 'Needs attention', detail: 'Inspect the run result' };
     }
     if (tasks.some(task => this.isWorkingTask(task))) {
-      return { key: 'working', label: 'Working', detail: 'Task in progress' };
+      return { key: 'working', label: 'Working', detail: 'Ticket in progress' };
     }
     if (
       tasks.some(task =>
         ['ready', 'needs_assignment'].includes(resolveTaskPresentation(task).state)
       )
     ) {
-      return { key: 'waiting', label: 'Waiting', detail: 'Task queued' };
+      return { key: 'waiting', label: 'Waiting', detail: 'Ticket queued' };
     }
     if (tasks.some(task => resolveTaskPresentation(task).isUnknown)) {
-      return { key: 'unknown', label: 'Check tasks', detail: 'Task state is unrecognized' };
+      return { key: 'unknown', label: 'Check tickets', detail: 'Ticket state is unrecognized' };
     }
     if (this.page?.tasksLoading || this.page?.tasksLoadFailed) {
-      return { key: 'unknown', label: 'Checking work', detail: 'Task status is not confirmed' };
+      return { key: 'unknown', label: 'Checking work', detail: 'Ticket status is not confirmed' };
     }
     if (agent?.status && agent.status.key !== 'idle') return agent.status;
-    return { key: 'idle', label: 'Ready to help', detail: 'No queued or active tasks' };
+    return { key: 'idle', label: 'Ready to help', detail: 'No queued or active tickets' };
   }
 
   mapAgentViewModels() {
@@ -5809,7 +5812,7 @@ export class WorkspaceCommandView {
     const activity = this.latestTaskActivity(task);
     const timestamp = activity?.at || this.taskUpdatedTime(task);
     return {
-      taskLabel: String(task.description || task.name || task.title || 'Untitled task'),
+      taskLabel: String(task.description || task.name || task.title || 'Untitled ticket'),
       statusLabel: this.ticketStatusText(task),
       activityLabel: activity?.label || '',
       whenLabel: this.formatRelativeTime(timestamp),
@@ -5864,7 +5867,7 @@ export class WorkspaceCommandView {
     // the tool-belt button never obscures the real Backlog lifecycle (FR50).
     return [
       { key: 'objective', label: 'Workspace Goal', icon: 'bi-bullseye' },
-      { key: 'objectives', label: 'Tasks', icon: 'bi-list-check' },
+      { key: 'objectives', label: 'Tickets', icon: 'bi-list-check' },
       { key: 'backlog', label: 'Backlog · Quest Board', icon: 'bi-journal-bookmark' },
       { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
       { key: 'stations', label: 'Stations', icon: 'bi-cpu' }
@@ -5917,7 +5920,7 @@ export class WorkspaceCommandView {
       ? shown
           .map((task, index) => {
             const id = String(task.id || '');
-            const label = String(task.description || task.name || task.title || 'Untitled task');
+            const label = String(task.description || task.name || task.title || 'Untitled ticket');
             const status = String(task.status || 'pending')
               .trim()
               .toLowerCase();
@@ -5949,7 +5952,7 @@ export class WorkspaceCommandView {
       : '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest log clear</strong><span>No active objectives assigned.</span></div>';
     return (
       '<div class="ws-cmd-map-window-section is-objectives">' +
-      this.mapZoneHeaderHTML('Tasks', 'Active Tasks', tasks.length) +
+      this.mapZoneHeaderHTML('Tickets', 'Active Tickets', tasks.length) +
       '<div class="ws-cmd-map-task-list">' +
       rows +
       '</div>' +
@@ -6809,15 +6812,15 @@ export class WorkspaceCommandView {
     const confirming = this.backlogPromoteConfirmId === id;
     const promoteControl = confirming
       ? '<div class="ws-cmd-backlog-promote-confirm">' +
-        '<p>Turn into a task? It becomes eligible for assignment and execution (promoted to Ready), but nothing runs automatically — you’ll get a chance to assign it next.</p>' +
+        '<p>Turn into a ticket? It becomes eligible for assignment and execution (promoted to Ready), but nothing runs automatically — you’ll get a chance to assign it next.</p>' +
         '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote-confirm' +
         (this.backlogPromoteBusy ? ' disabled' : '') +
-        '>Confirm — Turn into Task</button>' +
+        '>Confirm — Turn into Ticket</button>' +
         '<button type="button" class="ws-cmd-backlog-quick-cancel" data-cmd-backlog-promote-cancel>Cancel</button>' +
         '</div>'
       : '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote data-cmd-backlog-item="' +
         escapeHtml(id) +
-        '">Turn into Task</button>';
+        '">Turn into Ticket</button>';
     // Reordering only has a coherent meaning within this workspace's own
     // rank space (FR65) — a rolled-up descendant item hides the move
     // controls rather than reordering across unrelated workspaces.
@@ -9378,7 +9381,7 @@ export class WorkspaceCommandView {
   // roster excluding the entry agent, unassigned placeholders, and duplicate
   // records — agentGroups() already dedupes and drops unassigned (FR69).
   commandNodeOrchestrationCopy(specialistCount) {
-    if (specialistCount <= 0) return 'Works directly on assigned tasks';
+    if (specialistCount <= 0) return 'Works directly on assigned tickets';
     return (
       'Routes work to ' + specialistCount + ' specialist agent' + (specialistCount === 1 ? '' : 's')
     );
@@ -9389,7 +9392,7 @@ export class WorkspaceCommandView {
     return (
       '<div class="ws-cmd-map-command-repair">' +
       '<strong>No Commander</strong>' +
-      '<span>Chats, routing, and task orchestration need a Commander.</span>' +
+      '<span>Chats, routing, and ticket orchestration need a Commander.</span>' +
       '<button type="button" class="ws-cmd-agent-action' +
       this.secondaryActionClass() +
       '" data-cmd-add-agent>Hire a Commander</button>' +
@@ -11117,7 +11120,7 @@ export class WorkspaceCommandView {
       '"></span><strong>' +
       escapeHtml(agent.status?.label || 'Idle') +
       '</strong><span>' +
-      escapeHtml(agent.status?.detail || 'No active tasks') +
+      escapeHtml(agent.status?.detail || 'No active tickets') +
       '</span></div>' +
       '<div class="ws-cmd-rpg-stat-grid">' +
       statCards
@@ -11132,7 +11135,7 @@ export class WorkspaceCommandView {
         .join('') +
       '</div>' +
       '<section class="ws-cmd-rpg-quest-card"><span>Current Quest</span><strong>' +
-      escapeHtml(summary?.taskLabel || 'No task in progress') +
+      escapeHtml(summary?.taskLabel || 'No ticket in progress') +
       '</strong><p>' +
       escapeHtml(questMeta) +
       '</p></section>' +

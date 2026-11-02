@@ -9,6 +9,11 @@ is open in the notes, and a tap that turns those open items into HQ follow-ups.
 There is no project workspace for the notes, no agent with access to them, and
 no tool over them in the assistant's chat. The look service is the only reader.
 
+An open line under `Projects/<name>/` is the exception to "becomes a follow-up":
+when an active workspace's primary folder is exactly that project, accepting the
+look makes it a Backlog ticket there instead, and the card names that
+destination. See [One work-item model](work-item-model.md).
+
 ## Where it lives
 
 | Piece | Code |

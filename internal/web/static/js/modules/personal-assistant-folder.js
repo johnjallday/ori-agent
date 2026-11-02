@@ -625,7 +625,7 @@ const KEPT_NOUNS = {
   assistant: 'the agent',
   integration: 'the plugin',
   provider: 'the plugin',
-  task: 'the first task'
+  task: 'the first ticket'
 };
 
 // removeConfirmView is the card while the user is asked to confirm Remove: the
@@ -890,8 +890,8 @@ export function setupResultView(offer, { songs = [], total = 0, now = new Date()
           : software
             ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
             : receipt.group
-              ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
-              : 'Here is what I set up. The first task starts when you open the workspace.',
+              ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no ticket was created.'
+              : 'Here is what I set up. The first ticket starts when you open the workspace.',
       count: steps ? `${completed} of ${steps} steps finished` : '',
       lines: settled,
       profile: receipt.profile || null,
@@ -1568,7 +1568,7 @@ function folderOfferViewWithoutLead(offer, options = {}) {
   if (view.visible && status === 'pending' && offer.operation === 'link_supporting_folder') {
     return {
       ...view,
-      question: `Link ${subject} as a supporting folder? ${folderSetupDestinationLabel(offer)} This grants read access to this folder only. The primary project entry, blueprint, mode, agents and tasks stay unchanged.`,
+      question: `Link ${subject} as a supporting folder? ${folderSetupDestinationLabel(offer)} This grants read access to this folder only. The primary project entry, blueprint, mode, agents and tickets stay unchanged.`,
       capabilityDetail: '',
       plan: null,
       actions: offer.create_available
@@ -2461,7 +2461,7 @@ export function hireLookView(offer) {
       read.state = 'done';
       suggest.state = 'done';
       const next = String(look.next_request || '').trim();
-      suggest.detail = next ? `Suggests: ${next}` : 'It did not name one next task.';
+      suggest.detail = next ? `Suggests: ${next}` : 'It did not name one next ticket.';
       break;
     }
     case 'failed':
@@ -2520,7 +2520,7 @@ export function firstLookStartMessage(reason, workspaceName) {
     case 'setup_wizard_opening':
       return `Open ${name} to finish its setup first.`;
     case 'unassigned':
-      return `The first task has no agent yet. Open ${name} to assign one.`;
+      return `The first ticket has no agent yet. Open ${name} to assign one.`;
     case 'no_model':
       return 'Add a model in Settings to run the first look.';
     case 'local_activation_required':
@@ -2624,7 +2624,7 @@ function assessmentLookView(look, { state, base, open, busy, said, local }) {
           ? [
               {
                 id: 'next',
-                label: 'Plan the suggested task',
+                label: 'Plan the suggested ticket',
                 style: 'outline',
                 href: nextRoute
               }
@@ -2775,7 +2775,7 @@ export function folderFirstLookView(look, options = {}) {
       const link = ASSESSMENT_REPORT_ROUTE.test(report)
         ? [{ id: 'report', label: 'Open the full report', style: 'primary', href: report }]
         : FIRST_LOOK_TICKET.test(ticket)
-          ? [{ id: 'report', label: 'Open task', style: 'primary', href: ticket }]
+          ? [{ id: 'report', label: 'Open ticket', style: 'primary', href: ticket }]
           : [];
       return {
         ...base,
@@ -3025,7 +3025,7 @@ const RECEIPT_LABELS = {
   folder: ['Folder', '▤'],
   blueprint: ['Blueprint', '✦'],
   agent: ['Agent', '●'],
-  task: ['First task', '✓'],
+  task: ['First ticket', '✓'],
   batch: ['First batch', '▦'],
   home: ['Home', '⌂'],
   library: ['Library', '☰'],
@@ -3593,7 +3593,7 @@ export function conversationFolderOfferView(offer, options = {}) {
         actions[i] = { id: 'rename', label: 'Adjust name', style: 'outline', rename: true };
     }
     const type = offer.blueprint ? offer.blueprint_label || offer.blueprint : 'Blank workspace';
-    view.question += ` Type: ${type}. Confirming creates the workspace, links this selected folder, and seeds its existing read-only first task. That task starts only when you press Start first look; it then reads file contents under its workspace permissions. Provider and staffing steps keep their existing gates.`;
+    view.question += ` Type: ${type}. Confirming creates the workspace, links this selected folder, and seeds its existing read-only first ticket. That ticket runs only when you press Start first look; it then reads file contents under its workspace permissions. Provider and staffing steps keep their existing gates.`;
   }
   actions.push({ id: 'keep-chatting', label: 'Keep chatting', style: 'link', closeReview: true });
   return { ...view, actions };
@@ -3780,13 +3780,13 @@ function renderOffer(place) {
     taskPanel.classList.toggle('folder-task-result', result.visible);
     setText(
       document.getElementById('personalAssistantFolderTaskLabel'),
-      result.visible ? '' : 'Optional project task · separate from setup'
+      result.visible ? '' : 'Optional project ticket · separate from setup'
     );
     setText(
       document.getElementById('personalAssistantFolderTaskTitle'),
       result.visible
         ? result.title
-        : state.offer?.first_task?.description || 'Optional project task'
+        : state.offer?.first_task?.description || 'Optional project ticket'
     );
     const disclosure = document.getElementById('personalAssistantFolderTaskDisclosure');
     const execution = document.getElementById('personalAssistantFolderTaskDetails');
@@ -4040,11 +4040,11 @@ function renderOffer(place) {
   // wrote: they are set as text, never as markup.
   setText(
     els.result,
-    result.visible ? result.excerpt || 'The task finished. No saved excerpt is available here.' : ''
+    result.visible ? result.excerpt || 'The run finished. No saved excerpt is available here.' : ''
   );
   if (els.result && result.visible && result.next) {
     const label = document.createElement('strong');
-    label.textContent = 'Suggested next task: ';
+    label.textContent = 'Suggested next ticket: ';
     els.result.append(document.createElement('br'), label, result.next);
     els.result.hidden = false;
   }
@@ -4992,7 +4992,7 @@ function renderSourceCreationReview() {
   const deferred = Boolean(offer.software || offer.plan?.optional_task);
   review.actionLabel = deferred
     ? 'Create & prepare workspace'
-    : 'Create workspace & start first task';
+    : 'Create workspace & start first ticket';
   if (offer.plan?.visual?.entity?.operation === 'reuse')
     review.actionLabel = 'Prepare existing workspace';
   const firstPress = handoffFirstPressLabel(offer.plan);
@@ -5015,7 +5015,7 @@ function renderSourceCreationReview() {
           : `This press · ${fact.label}`
     }));
     projection.later = handoffLineParts(offer.plan.lines)
-      ? 'The Portfolio Manager offers Open later. This press sets up the Home and lists the song; it does not open its workspace or start its task.'
+      ? 'The Portfolio Manager offers Open later. This press sets up the Home and lists the song; it does not open its workspace or start its ticket.'
       : 'Library entries are not opened project workspaces. Open each project separately from the Home when you choose.';
   }
   review.panel.update({

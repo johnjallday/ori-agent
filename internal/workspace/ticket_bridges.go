@@ -93,7 +93,11 @@ func (s *TicketService) PrepareStart(workspaceID, ticketID string, input TicketS
 				AssignedBy: TaskAssignedByManual,
 				Reason:     "Named when starting this ticket",
 			})
-			task.AwaitingExecutionIntent = false
+			// The person's start is the run. Until it moves the ticket to In Progress
+			// (StartTicketRun clears this), the executor's poll must not pick the
+			// same ticket up as auto-runnable and start a second run. A refused start
+			// leaves it waiting for the next Start this.
+			task.AwaitingExecutionIntent = true
 			touchTicket(task)
 			updated = *task
 			return nil

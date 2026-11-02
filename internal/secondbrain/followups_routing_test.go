@@ -36,6 +36,8 @@ func (f *fakeProjectTickets) WorkspaceForFolder(path string) (string, string, bo
 	return "ws-" + name, name, ok
 }
 
+func (f *fakeProjectTickets) HasNoteTicket(_, itemID string) bool { return f.made[itemID] }
+
 func (f *fakeProjectTickets) CreateNoteTicket(_ context.Context, _ string, ticket NoteTicket) (bool, error) {
 	f.calls = append(f.calls, ticket)
 	if f.made == nil {

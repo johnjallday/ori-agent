@@ -94,7 +94,7 @@ export function countOpenClarifications(plan) {
 export function progressSummary(plan) {
   const progress = plan?.progress;
   if (!progress || !progress.total) {
-    return { text: 'No tasks yet', percent: 0, detail: '' };
+    return { text: 'No tickets yet', percent: 0, detail: '' };
   }
   const done = progress.completed || 0;
   const percent = Math.round((done / progress.total) * 100);
@@ -104,7 +104,7 @@ export function progressSummary(plan) {
   if (progress.failed) parts.push(`${progress.failed} failed`);
   if (progress.waiting_for_slot) parts.push('waiting for the execution slot');
   return {
-    text: `${done} of ${progress.total} tasks complete`,
+    text: `${done} of ${progress.total} tickets complete`,
     percent,
     detail: parts.join(' · ')
   };
@@ -220,7 +220,7 @@ export class WorkspacePlansPage {
     }
     const suggestion = String(look?.next_request || '').trim();
     if (!look || !String(look.recipe || '').trim() || look.state !== 'finished' || !suggestion) {
-      this.setStatus('This workspace has no finished assessment with a suggested next task.');
+      this.setStatus('This workspace has no finished assessment with a suggested next ticket.');
       return;
     }
     if (!this.planningEnabled) {
@@ -240,7 +240,7 @@ export class WorkspacePlansPage {
     if (!String(input.value || '').trim()) input.value = `${suggestion}\n\n(${source})`;
     input.focus?.();
     this.setStatus(
-      'The first assessment suggested this next task. Edit it if you like, then press Create plan. Nothing is created until you do, and creating a plan starts no work.'
+      'The first assessment suggested this next ticket. Edit it if you like, then press Create plan. Nothing is created until you do, and creating a plan starts no work.'
     );
   }
 

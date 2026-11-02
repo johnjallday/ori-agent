@@ -120,7 +120,7 @@ for (const invalid of [
 
 for (const [url, message] of [
   [workspaceURL, 'Failed to load workspace details.'],
-  [taskURL, 'Failed to load task details.']
+  [taskURL, 'Failed to load ticket details.']
 ]) {
   test(`initial required endpoint failure propagates: ${url}`, async () => {
     const { loader, request } = fixture({ [url]: response(null, 500) });

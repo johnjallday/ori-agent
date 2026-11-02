@@ -337,7 +337,7 @@ async function showMissingAgentState(message) {
       ? `"${requestedName}" is still referenced as the Commander for "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
       : `The Commander for "${recovery.workspaceName}" no longer exists.`;
     detail =
-      'Create a replacement Commander to restore workspace routing, chats, and task execution. You can also open the workspace first to inspect the current configuration.';
+      'Create a replacement Commander to restore workspace routing, chats, and ticket runs. You can also open the workspace first to inspect the current configuration.';
   } else if (recovery?.workspaceId) {
     body = requestedName
       ? `"${requestedName}" is still referenced inside "${recovery.workspaceName}", but the runnable agent definition no longer exists.`

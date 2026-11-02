@@ -59,11 +59,11 @@ export function materializedMessage(result) {
   const files = result?.artifact_paths?.length || 0;
 
   const created = result?.replayed
-    ? `This approval was already used. It created ${tasks} task(s)`
-    : `Created ${tasks} task(s)`;
+    ? `This approval was already used. It created ${tasks} ticket(s)`
+    : `Created ${tasks} ticket(s)`;
   const withFiles = files > 0 ? `${created} and ${files} file(s)` : created;
   const next = result?.start_execution
-    ? 'Eligible tasks will start automatically.'
+    ? 'Eligible tickets will start automatically.'
     : 'Nothing starts until you start it.';
   const handoff = result?.handoff?.command
     ? ` Planning is complete; run “${result.handoff.command}”. Do not run wt plan again.`
@@ -80,7 +80,7 @@ export function approvalButtonLabel(contract) {
   if (label) return label;
   // A contract with no label is a bug, not a reason to render a generic
   // "Approve" over an action that might start agents (PRD 6.3).
-  return contract?.starts_execution ? 'Approve and Start' : 'Approve and Create Tasks';
+  return contract?.starts_execution ? 'Approve and Start' : 'Approve and Create Tickets';
 }
 
 // diffSummary turns a version comparison into one line per change, saying what
@@ -152,10 +152,10 @@ export function reconcileSummary(preview) {
   const summary = preview.summary || {};
   const cancelled = (summary.cancel || 0) + (summary.replace || 0);
   const parts = [];
-  if (cancelled > 0) parts.push(`${cancelled} existing task(s) will be cancelled`);
+  if (cancelled > 0) parts.push(`${cancelled} existing ticket(s) will be cancelled`);
   if (summary.immutable > 0) parts.push(`${summary.immutable} already ran and are left alone`);
-  if (summary.follow_up > 0) parts.push(`${summary.follow_up} follow-up task(s) will be added`);
-  if (summary.created > 0) parts.push(`${summary.created} new task(s) will be created`);
+  if (summary.follow_up > 0) parts.push(`${summary.follow_up} follow-up ticket(s) will be added`);
+  if (summary.created > 0) parts.push(`${summary.created} new ticket(s) will be created`);
   if (summary.retained > 0) parts.push(`${summary.retained} kept as-is`);
 
   if (parts.length === 0) return 'This revision changes no existing work.';
@@ -181,10 +181,10 @@ function itemChangeLine(change) {
   if (change.kind === 'moved') {
     const across = change.from_group_id && change.from_group_id !== change.group_id;
     return across
-      ? `Task moved to another group: ${change.description}`
-      : `Task reordered: ${change.description} (position ${change.from_index + 1} → ${change.to_index + 1})`;
+      ? `Ticket moved to another group: ${change.description}`
+      : `Ticket reordered: ${change.description} (position ${change.from_index + 1} → ${change.to_index + 1})`;
   }
-  return `Task ${change.kind}: ${change.description}${fieldSuffix(change.fields)}`;
+  return `Ticket ${change.kind}: ${change.description}${fieldSuffix(change.fields)}`;
 }
 
 function fieldSuffix(fields) {
@@ -258,7 +258,7 @@ export class WorkspacePlanPage {
 
     const addGroupBtn = this.el('#plan-add-group');
     if (addGroupBtn) {
-      addGroupBtn.addEventListener('click', () => this.addGroup('New task group'));
+      addGroupBtn.addEventListener('click', () => this.addGroup('New ticket group'));
     }
     const saveBtn = this.el('#plan-save');
     if (saveBtn) {
@@ -328,7 +328,7 @@ export class WorkspacePlanPage {
         this.moveGroup(groupId, 'down');
         break;
       case 'group-add-item':
-        this.addItem(groupId, 'New task');
+        this.addItem(groupId, 'New ticket');
         break;
       case 'group-remove':
         this.removeGroup(groupId);
@@ -412,38 +412,40 @@ export class WorkspacePlanPage {
   }
 
   addGroup(title) {
-    return this.mutate(content => addGroup(content, title), { announce: 'Task group added' });
+    return this.mutate(content => addGroup(content, title), { announce: 'Ticket group added' });
   }
 
   addItem(groupId, description) {
     return this.mutate(content => addItem(content, groupId, description), {
-      announce: 'Task added'
+      announce: 'Ticket added'
     });
   }
 
   duplicateItem(itemId) {
-    return this.mutate(content => duplicateItem(content, itemId), { announce: 'Task duplicated' });
+    return this.mutate(content => duplicateItem(content, itemId), {
+      announce: 'Ticket duplicated'
+    });
   }
 
   moveGroup(groupId, direction) {
     return this.mutate(content => moveGroup(content, groupId, direction), {
-      announce: `Task group moved ${direction}`
+      announce: `Ticket group moved ${direction}`
     });
   }
 
   moveItem(itemId, direction) {
     return this.mutate(content => moveItem(content, itemId, direction), {
-      announce: `Task moved ${direction}`
+      announce: `Ticket moved ${direction}`
     });
   }
 
   removeItem(itemId) {
-    return this.mutate(content => removeItem(content, itemId), { announce: 'Task removed' });
+    return this.mutate(content => removeItem(content, itemId), { announce: 'Ticket removed' });
   }
 
   removeGroup(groupId) {
     return this.mutate(content => removeGroup(content, groupId), {
-      announce: 'Task group removed'
+      announce: 'Ticket group removed'
     });
   }
 
@@ -451,7 +453,7 @@ export class WorkspacePlanPage {
   // is never applied on the user's behalf (FR-51).
   resolveDependencies(itemId) {
     return this.mutate(content => resolveDependencies(content, itemId), {
-      announce: 'Dependencies on this task were removed'
+      announce: 'Dependencies on this ticket were removed'
     });
   }
 
@@ -545,7 +547,7 @@ export class WorkspacePlanPage {
     this.setText('#plan-review-objective', contract.objective || '');
     this.setText(
       '#plan-review-counts',
-      `${contract.task_count} task(s) in ${contract.group_count} group(s) · ` +
+      `${contract.task_count} ticket(s) in ${contract.group_count} group(s) · ` +
         `${contract.dependency_count} dependency(ies) · ${contract.unassigned} unassigned`
     );
 
@@ -807,8 +809,8 @@ export class WorkspacePlanPage {
           ? ` Planning is complete; run “${state.handoff.command}”. Do not run wt plan again.`
           : '';
         summary.textContent = state.replayed
-          ? `This approval had already been used. It created ${state.task_ids.length} task(s)${files}.${handoff}`
-          : `Created ${state.task_ids.length} task(s)${files}.${handoff}`;
+          ? `This approval had already been used. It created ${state.task_ids.length} ticket(s)${files}.${handoff}`
+          : `Created ${state.task_ids.length} ticket(s)${files}.${handoff}`;
       }
     }
 
@@ -1009,7 +1011,7 @@ export class WorkspacePlanPage {
               <div class="plan-group-actions">
                 <button type="button" data-action="group-up" data-group-id="${escapeHtml(group.id)}" ${groupIndex === 0 ? 'disabled' : ''}>Move group up</button>
                 <button type="button" data-action="group-down" data-group-id="${escapeHtml(group.id)}" ${groupIndex === groups.length - 1 ? 'disabled' : ''}>Move group down</button>
-                <button type="button" data-action="group-add-item" data-group-id="${escapeHtml(group.id)}">Add task</button>
+                <button type="button" data-action="group-add-item" data-group-id="${escapeHtml(group.id)}">Add ticket</button>
                 <button type="button" data-action="group-remove" data-group-id="${escapeHtml(group.id)}">Remove group</button>
               </div>
             </div>

@@ -44,6 +44,28 @@ func TestPrepareStart_MovesBacklogToReadyLegallyAndAssigns(t *testing.T) {
 	}
 }
 
+// Review finding: a Ready ticket with an agent reads as auto-runnable to the
+// executor's poll. Until the person's start moves it to In Progress, the executor
+// must leave it alone, or two runs start.
+func TestPrepareStart_HoldsTheTicketBackFromTheExecutor(t *testing.T) {
+	svc, store, ws := bridgeWorkspace(t)
+	created := mustCreateTicket(t, svc, TicketCreateInput{WorkspaceID: ws.ID, State: TicketStateReady, Title: "Do it", Assignee: "Writer"})
+	if _, err := svc.PrepareStart(ws.ID, created.ID, TicketStartInput{}); err != nil {
+		t.Fatalf("PrepareStart: %v", err)
+	}
+	loaded, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	task, err := loaded.GetTask(created.ID)
+	if err != nil {
+		t.Fatalf("task: %v", err)
+	}
+	if !task.AwaitingExecutionIntent {
+		t.Error("the executor could pick this ticket up while the person's start is under way")
+	}
+}
+
 func TestPrepareStart_AsksWhoWhenNobodyIsSet(t *testing.T) {
 	svc, store, ws := bridgeWorkspace(t)
 	created := mustCreateTicket(t, svc, TicketCreateInput{WorkspaceID: ws.ID, State: TicketStateBacklog, Title: "Do it"})

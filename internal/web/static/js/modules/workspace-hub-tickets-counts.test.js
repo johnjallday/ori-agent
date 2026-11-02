@@ -132,7 +132,8 @@ test('ticketEditChanges turns the edit form into an update carrying the version'
     description: 'Body',
     priority: 2,
     tags: ['a', 'b'],
-    dueDate: '2026-12-01T00:00:00Z',
+    // The end of that day where the person is, so it reads as Dec 1 everywhere.
+    dueDate: new Date('2026-12-01T23:59:59').toISOString(),
     referenceUrl: 'https://x.test',
     version: 4
   });
@@ -183,4 +184,12 @@ test('a listener that throws never turns a saved ticket into an error', async ()
     title: 'A thing'
   });
   assert.equal(created.id, 'tkt-1');
+});
+
+test('the edit form shows the due date as the same local day the ticket reads', () => {
+  const { api } = loadTickets();
+  const due = new Date('2026-12-20T23:59:59').toISOString();
+  assert.equal(api.localDay(due), '2026-12-20');
+  assert.equal(api.localDay(''), '');
+  assert.equal(api.ticketEditChanges({ due: api.localDay(due) }, { version: 1 }).dueDate, due);
 });

@@ -85,15 +85,15 @@ test('a needs_input plan counts the questions still open', () => {
 // "No tasks yet" and "0 of 0 complete" are different claims. A Plan that has
 // materialized nothing must not read as finished work (FR-12).
 test('progressSummary distinguishes no tasks from no progress', () => {
-  assert.equal(progressSummary(plan()).text, 'No tasks yet');
-  assert.equal(progressSummary(plan({ progress: { total: 0 } })).text, 'No tasks yet');
+  assert.equal(progressSummary(plan()).text, 'No tickets yet');
+  assert.equal(progressSummary(plan({ progress: { total: 0 } })).text, 'No tickets yet');
 
   const running = progressSummary(
     plan({
       progress: { total: 4, completed: 1, running: 1, blocked: 1, failed: 1 }
     })
   );
-  assert.equal(running.text, '1 of 4 tasks complete');
+  assert.equal(running.text, '1 of 4 tickets complete');
   assert.equal(running.percent, 25);
   assert.match(running.detail, /1 running/);
   assert.match(running.detail, /1 blocked/);

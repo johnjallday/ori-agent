@@ -73,7 +73,7 @@ export class AgentCanvasNotifications {
     const logs = this.parent.executionLogs[task.id] || [];
 
     if (logs.length === 0) {
-      this.showNotification('No execution log available for this task', 'info');
+      this.showNotification('No execution log available for this run', 'info');
       return;
     }
 
@@ -200,15 +200,15 @@ export class AgentCanvasNotifications {
 
     switch (event.type) {
       case 'task.created':
-        return `Task created: ${truncDesc}`;
+        return `Ticket created: ${truncDesc}`;
       case 'task.started':
-        return `Task started: ${truncDesc}`;
+        return `Run started: ${truncDesc}`;
       case 'task.completed':
-        return `Task completed: ${truncDesc}`;
+        return `Run completed: ${truncDesc}`;
       case 'task.failed':
-        return `Task failed: ${truncDesc}`;
+        return `Run failed: ${truncDesc}`;
       case 'task.deleted':
-        return `Task deleted: ${truncDesc}`;
+        return `Ticket deleted: ${truncDesc}`;
       case 'workspace.progress':
         return 'Workspace progress updated';
       case 'agent.active':

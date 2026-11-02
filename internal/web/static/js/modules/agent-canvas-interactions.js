@@ -1017,12 +1017,12 @@ export class AgentCanvasInteractionHandler {
           // Use existing linkTaskResult function from parent
           this.parent.linkTaskResult(latestTask.id, targetTask.id);
           this.parent.showNotification(
-            `Linked ${this.state.resultSourceAgent.name}'s latest result to task`,
+            `Linked ${this.state.resultSourceAgent.name}'s latest result to ticket`,
             'success'
           );
         } else {
           this.parent.showNotification(
-            `Agent ${this.state.resultSourceAgent.name} has no completed tasks`,
+            `Agent ${this.state.resultSourceAgent.name} has no completed runs`,
             'warning'
           );
         }
@@ -1848,7 +1848,7 @@ export class AgentCanvasInteractionHandler {
               this.state.assignmentMouseX = 0;
               this.state.assignmentMouseY = 0;
               this.canvas.style.cursor = 'grab';
-              this.parent.showNotification('Connected task output as input', 'success');
+              this.parent.showNotification('Connected ticket output as input', 'success');
               this.parent.draw();
             } else {
               // Otherwise start assignment from this task
@@ -1874,7 +1874,7 @@ export class AgentCanvasInteractionHandler {
             this.state.assignmentMouseX = 0;
             this.state.assignmentMouseY = 0;
             this.canvas.style.cursor = 'grab';
-            this.parent.showNotification('Connected task output as input', 'success');
+            this.parent.showNotification('Connected ticket output as input', 'success');
             this.parent.draw();
             return;
           }

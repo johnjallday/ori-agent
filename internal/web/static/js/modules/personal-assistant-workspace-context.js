@@ -89,7 +89,7 @@ export function workspaceContextLabel(context, { historical = false } = {}) {
   const kind = subject.kind === 'home' ? 'Home' : subject.kind === 'group' ? 'Group' : 'Project';
   const parts = [kind + ': ' + String(subject.name || 'Unnamed workspace')];
   if (parent) parts.push(String(parent.name || 'Parent'));
-  if (context.selected_task_id || context.overview?.selected_task) parts.push('Selected task');
+  if (context.selected_task_id || context.overview?.selected_task) parts.push('Selected ticket');
   if (context.location && context.location.id !== subject.id)
     parts.push('from ' + String(context.location.name || 'current page'));
   return parts.join(' · ');
@@ -110,7 +110,7 @@ export function renderTurnWorkspace(row, attribution, { historical = false } = {
   return true;
 }
 
-const SOURCE_KINDS = { note: 'Note', task: 'Task', file: 'File', attachment: 'Attachment' };
+const SOURCE_KINDS = { note: 'Note', task: 'Ticket', file: 'File', attachment: 'Attachment' };
 // Only an in-app page of a workspace is linked. The server writes these; a
 // model cannot, and nothing else is turned into a link. A file has no page of
 // its own, so it is named with where it lives instead of being linked.

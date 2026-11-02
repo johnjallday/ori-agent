@@ -304,7 +304,7 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.doesNotMatch(container.innerHTML, /No linked folders yet\./);
   assert.match(container.innerHTML, /★ Acting Commander/);
   assert.match(container.innerHTML, />Model<\/span>/);
-  assert.match(container.innerHTML, /Tasks · 1/);
+  assert.match(container.innerHTML, /Tickets · 1/);
   assert.match(container.innerHTML, /title="Run"/);
   assert.match(container.innerHTML, /data-cmd-manage-section="notes" aria-expanded="false"/);
   // The rail element is new on every render, so the "last used with a
@@ -2856,7 +2856,7 @@ test('tasks manager modal defaults to open tasks and can show all rows', () => {
   });
 
   let html = commandView.statModalHTML('tasks');
-  assert.match(html, /Open Tasks/);
+  assert.match(html, /Open Tickets/);
   assert.match(html, /<span class="ws-cmd-modal-count">2<\/span>/);
   assert.match(html, /Pending task/);
   assert.match(html, /Running task/);
@@ -3257,7 +3257,7 @@ test('recent activity uses attributable persisted timestamps and orders newest f
   );
   assert.deepEqual(
     items.map(item => item.kind),
-    ['Task', 'Session', 'Task']
+    ['Ticket', 'Session', 'Ticket']
   );
 });
 
@@ -4067,8 +4067,8 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     commandView.activeMapWindow = 'objectives';
     const windowHTML = commandView.renderOperationsMap();
     // 'objectives' is the panel KEY (unchanged, FR5a); its user-visible label
-    // is now "Tasks" (group 8 terminology sweep, FR4).
-    assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Tasks"/);
+    // is now "Tickets" (group 8 terminology sweep, FR4).
+    assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Tickets"/);
     assert.match(windowHTML, /Collect sources/);
 
     commandView.activeMapWindow = 'inspector';

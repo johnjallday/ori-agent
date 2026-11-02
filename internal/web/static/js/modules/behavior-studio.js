@@ -1539,7 +1539,7 @@
               <div class="behavior-subsection__head">
                 <div>
                   <div class="behavior-subsection__title">Execution Model</div>
-                  <div class="behavior-subsection__copy">Choose how the parent task runs and how child results are combined.</div>
+                  <div class="behavior-subsection__copy">Choose how the parent ticket runs and how child results are combined.</div>
                 </div>
               </div>
               <div class="behavior-form-grid behavior-form-grid--rules">
@@ -1701,7 +1701,7 @@
           </div>
 
           <label class="behavior-field">
-            <span class="behavior-field__label">Task Description</span>
+            <span class="behavior-field__label">Step Description</span>
             <textarea class="behavior-textarea behavior-textarea--compact" rows="2" data-step-index="${index}" data-step-field="description" placeholder="What this step should accomplish.">${escapeHtml(step.description)}</textarea>
           </label>
 
@@ -1747,7 +1747,7 @@
             <div class="behavior-subsection__head">
               <div>
                 <div class="behavior-subsection__title">${escapeHtml(heading)}</div>
-                <div class="behavior-subsection__copy">Require this task to return valid JSON matching a schema.</div>
+                <div class="behavior-subsection__copy">Require this step to return valid JSON matching a schema.</div>
               </div>
               <button class="behavior-btn behavior-btn--secondary" type="button" data-action="${scope === 'template' ? 'enable-template-schema' : 'enable-step-schema'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''}>Enable schema</button>
             </div>
@@ -2086,7 +2086,7 @@
           <div class="behavior-subsection__head">
             <div>
               <div class="behavior-subsection__title">Parameters</div>
-              <div class="behavior-subsection__copy">These values are rendered into the orchestration skill before tasks are created.</div>
+              <div class="behavior-subsection__copy">These values are rendered into the orchestration skill before tickets are created.</div>
             </div>
           </div>
           ${parameterFields || '<div class="behavior-launch-note">This orchestration skill has no parameters.</div>'}

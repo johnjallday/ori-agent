@@ -743,12 +743,10 @@ func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/delegate", s.Handlers.Orchestration.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/dynamic-agents/approve", s.Handlers.Orchestration.DynamicAgentApprovalHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.Handlers.Orchestration.TasksHandler)
-	mux.HandleFunc("/api/orchestration/tasks/bulk", s.Handlers.Orchestration.BulkDeleteTasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.Handlers.Orchestration.ExecuteTaskHandler)
 	mux.HandleFunc("/api/orchestration/workflows", s.Handlers.Orchestration.WorkflowCreateHandler)
 	if s.Handlers.AutoTask != nil {
 		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.Handlers.AutoTask.HandleAutoTask)
-		mux.HandleFunc("/api/orchestration/tasks/output-contract/suggest", s.Handlers.AutoTask.HandleOutputContractSuggestion)
 		mux.HandleFunc("/api/orchestration/tasks/output-spec/suggest", s.Handlers.AutoTask.HandleOutputContractSuggestion)
 		mux.HandleFunc("/api/orchestration/tasks/output-contract/telemetry", s.Handlers.AutoTask.HandleOutputContractTelemetry)
 	}

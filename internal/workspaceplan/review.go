@@ -474,7 +474,7 @@ func (s *Service) BuildReviewContract(ctx context.Context, workspaceID, planID s
 // an execution-mode enum (FR-63).
 func describeEffects(version *Version, effect ApprovalEffect) []string {
 	effects := []string{
-		fmt.Sprintf("Create %d workspace task(s) in %d group(s)",
+		fmt.Sprintf("Create %d workspace ticket(s) in %d group(s)",
 			version.Content.ActionableItemCount(), len(version.Content.Groups)),
 	}
 	for _, artifact := range version.Content.EnabledArtifacts() {

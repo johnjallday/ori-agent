@@ -299,11 +299,11 @@ test('auto mode parse failure shows inline error and does not create task', asyn
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, '/api/orchestration/tasks/auto-parse');
   assert.equal(errorBox.hidden, false);
-  assert.match(errorMessage.textContent, /No task was created/);
+  assert.match(errorMessage.textContent, /No ticket was created/);
   assert.equal(attributes.get('aria-invalid'), 'true');
   assert.equal(focused, true);
   assert.deepEqual(toasts.at(-1), {
-    message: 'Auto parsing did not work. No task was created.',
+    message: 'Auto parsing did not work. No ticket was created.',
     type: 'error'
   });
 });
@@ -349,7 +349,7 @@ test('auto mode asks for confirmation before creating an unassigned parsed task'
   assert.equal(calls[0].url, '/api/orchestration/tasks/auto-parse');
   assert.match(confirmText, /Assignment: Unassigned/);
   assert.deepEqual(toasts.at(-1), {
-    message: 'Task creation cancelled',
+    message: 'Ticket creation cancelled',
     type: 'info'
   });
 });
@@ -722,7 +722,7 @@ test('an ended request is said plainly, and only the next Save makes an ordinary
     assert.equal(toasts[0].kind, 'error');
     assert.match(
       toasts[0].message,
-      /Nothing was saved\. Save again to create this as your own task\./
+      /Nothing was saved\. Save again to create this as your own ticket\./
     );
 
     // The user's own second click is an ordinary create.
@@ -754,7 +754,7 @@ test('a transient operation error keeps the binding, and other errors are untouc
     {
       text: async () => JSON.stringify({ code: 'operation_expired', message: 'Ran out of time.' })
     },
-    'Failed to create task'
+    'Failed to create ticket'
   );
   assert.equal(parsed.code, 'operation_expired');
   assert.equal(parsed.message, 'Ran out of time.');
