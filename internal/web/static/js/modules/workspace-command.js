@@ -326,16 +326,6 @@ export class WorkspaceCommandView {
     this.trayEl = null;
     this.trayOpen = false;
     this.trayCollapsed = false;
-    // Quick "New Quest" composer on the operations map (create task → entry-agent default).
-    this.taskComposerOpen = false;
-    this.taskComposerDraft = '';
-    this.taskComposerError = '';
-    this.taskComposerSubmitting = false;
-    // Composer commitment choice (FR56): 'ready' creates a direct, unassigned
-    // Ready task (existing default behavior); 'backlog' routes through the
-    // same createBacklogItem() the Backlog panel/drawer use. Resets to
-    // 'ready' each time the composer opens (openTaskComposer).
-    this.taskComposerIntent = 'ready';
     this.identityExpanded = false;
     this.identityEditMode = '';
     this.identitySaving = false;
@@ -1357,10 +1347,6 @@ export class WorkspaceCommandView {
       this.toggleTrayCollapsed();
       return;
     }
-    if (this.viewMode === 'map' && this.taskComposerOpen) {
-      this.closeTaskComposer();
-      return;
-    }
     if (this.loadoutAddOpen) {
       this.closeLoadoutPicker();
       return;
@@ -2019,7 +2005,7 @@ export class WorkspaceCommandView {
     }
   }
 
-  /** Listens once for the ticket client's change event (see workspace-hub-tickets.js). */
+  /** Listens once for the ticket client's events (see workspace-hub-tickets.js). */
   bindTicketChangeEvents() {
     if (this.ticketChangeBound || typeof window === 'undefined') return;
     if (typeof window.addEventListener !== 'function') return;
@@ -2029,6 +2015,34 @@ export class WorkspaceCommandView {
       if (changed && changed !== this.workspaceId()) return;
       Promise.resolve(this.refreshTicketCounts()).catch(() => {});
     });
+    // Any list response already carries the counts, so a board load or its
+    // Refresh updates the tile without another request.
+    window.addEventListener('ori:ticket-counts', event => {
+      const detail = (event && event.detail) || {};
+      if (String(detail.studioId || '') !== this.workspaceId() || !detail.counts) return;
+      const ws = this.page && this.page.workspace;
+      if (ws) ws.ticket_counts = detail.counts;
+      this.paintWorkTile();
+    });
+  }
+
+  /**
+   * A live event says a ticket may have moved: a run started or finished with no
+   * click here. Runs in bursts, so this settles first, then makes one request: the
+   * open board's load when it is showing (its response updates the tile), or a
+   * count refresh otherwise.
+   */
+  noteTicketWorkChanged() {
+    if (this.ticketWorkChangedTimer) clearTimeout(this.ticketWorkChangedTimer);
+    this.ticketWorkChangedTimer = setTimeout(() => {
+      this.ticketWorkChangedTimer = null;
+      const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+      const work =
+        this.viewMode === 'tickets' && tickets && typeof tickets.load === 'function'
+          ? tickets.load()
+          : this.refreshTicketCounts();
+      Promise.resolve(work).catch(() => {});
+    }, 300);
   }
 
   // ---------- Unstaffed guidance ----------
@@ -4731,7 +4745,7 @@ export class WorkspaceCommandView {
       this.secondaryActionClass() +
       '" data-cmd-add-task="' +
       escapeHtml(agent.encodedName) +
-      '">Give Task</button>' +
+      '">Give work</button>' +
       detailAction +
       (agent.entry
         ? '<button type="button" class="ws-cmd-agent-action" data-cmd-manager-settings="1">Manager Settings</button>'
@@ -6174,9 +6188,8 @@ export class WorkspaceCommandView {
         return;
       }
       if (event.target.closest('[data-cmd-drawer-add]')) {
-        // Reuse the Map's New Quest composer — create a task without leaving
-        // Map mode (FR23). The composer floats over the Map beside the drawer.
-        if (typeof this.openTaskComposer === 'function') this.openTaskComposer();
+        // Give work opens over the Map, so nobody has to leave it (FR23).
+        this.page?.showAddTaskModal?.();
         return;
       }
       if (event.target.closest('[data-cmd-drawer-retry]')) {
@@ -6604,11 +6617,9 @@ export class WorkspaceCommandView {
           if (selectId && typeof tickets.openDetail === 'function') {
             return tickets.openDetail(this.workspaceId(), selectId);
           }
-          // An "Add to Backlog" affordance asked to CAPTURE, so land the user
-          // in the create form already typing rather than in a list.
-          if (options.openCapture && typeof tickets.focusCreate === 'function') {
-            tickets.focusCreate('backlog');
-          }
+          // An "Add to Backlog" affordance asked to CAPTURE, so open Give work
+          // with nobody chosen, which is what makes a Backlog ticket.
+          if (options.openCapture) this.page?.showAddTaskModal?.();
           return undefined;
         })
         .catch(() => {
@@ -11372,7 +11383,7 @@ export class WorkspaceCommandView {
     }
     actions.push(
       action({
-        label: 'Give Task',
+        label: 'Give work',
         detail: taskId ? 'New assignment' : 'Assign first quest',
         icon: 'bi-plus-lg',
         className: taskId ? '' : 'is-primary',
@@ -11772,7 +11783,7 @@ export class WorkspaceCommandView {
       this.renderMapAgentsZone(agents) +
       this.renderMapToolTray() +
       '</div>' +
-      this.renderMapQuickTask() +
+      this.mapGiveWorkHTML() +
       this.renderMapWindow(selected) +
       '</div>'
     );
@@ -11810,211 +11821,19 @@ export class WorkspaceCommandView {
       this.renderDetachmentToolbar() +
       this.renderMapToolTray() +
       '</div>' +
-      this.renderMapQuickTask() +
+      this.mapGiveWorkHTML() +
       this.renderMapWindow(selected) +
       '</div>'
     );
   }
 
-  // Floating "New Quest" button + inline composer. Creating with no assignee lets the
-  // server stamp the task onto the workspace's entry agent (entry_agent_default).
-  renderMapQuickTask() {
-    const open = this.taskComposerOpen;
-    const submitting = this.taskComposerSubmitting;
-    const button =
-      '<button type="button" class="ws-cmd-map-quest-fab' +
-      (open ? ' is-open' : '') +
-      '" data-cmd-map-quest-toggle aria-haspopup="dialog" aria-expanded="' +
-      (open ? 'true' : 'false') +
-      '" aria-label="New quest"><i class="bi bi-plus-lg" aria-hidden="true"></i><span>New Quest</span></button>';
-    if (!open) {
-      return '<div class="ws-cmd-map-quest-dock">' + button + '</div>';
-    }
-    const intent = this.taskComposerIntent === 'backlog' ? 'backlog' : 'ready';
-    const draft = escapeHtml(this.taskComposerDraft || '');
-    const error = this.taskComposerError
-      ? '<p class="ws-cmd-map-quest-error" role="alert">' +
-        escapeHtml(this.taskComposerError) +
-        '</p>'
-      : '';
-    const disabledAttr = submitting ? ' disabled' : '';
-    // FR56: distinguish direct Ready creation from Add to Backlog, and show
-    // the commitment consequence before saving.
-    const intentToggle =
-      '<div class="ws-cmd-map-quest-intent" role="group" aria-label="Quest commitment">' +
-      '<button type="button" class="ws-cmd-map-quest-intent-btn' +
-      (intent === 'ready' ? ' is-active' : '') +
-      '" data-cmd-map-quest-intent="ready" aria-pressed="' +
-      (intent === 'ready' ? 'true' : 'false') +
-      '">Ready Quest</button>' +
-      '<button type="button" class="ws-cmd-map-quest-intent-btn' +
-      (intent === 'backlog' ? ' is-active' : '') +
-      '" data-cmd-map-quest-intent="backlog" aria-pressed="' +
-      (intent === 'backlog' ? 'true' : 'false') +
-      '">Add to Backlog</button></div>';
-    // With no role filled there is no Commander to name, and saying otherwise
-    // would promise an assignment that cannot happen. The quest is still
-    // created and still stays visible — it simply says it is waiting for
-    // someone, and points at the roster (FR46, FR47).
-    const unstaffed = Boolean(this.roleRoster && this.roleRoster.filled_count === 0);
-    const consequence =
-      '<p class="ws-cmd-map-quest-consequence">' +
-      (intent === 'backlog'
-        ? 'Saves the idea without committing it — nothing is assigned, scheduled, or run until you promote it to Ready.'
-        : unstaffed
-          ? 'No agent is filling this workspace’s primary role yet, so this quest is created unassigned and waits until you fill a role.'
-          : 'Commits now — creates an unassigned Ready quest that waits for an explicit assign, run, or schedule.') +
-      '</p>';
-    const placeholder =
-      intent === 'backlog'
-        ? 'Describe the idea…'
-        : unstaffed
-          ? 'Describe the quest… (nobody is assigned yet)'
-          : 'Describe the quest… (assigned to the Commander)';
-    const primaryLabel = submitting
-      ? intent === 'backlog'
-        ? 'Adding…'
-        : 'Creating…'
-      : intent === 'backlog'
-        ? 'Add to Backlog'
-        : 'Create';
-    const hint =
-      intent === 'backlog'
-        ? 'Enter to add to the backlog'
-        : 'Enter to create · ⌘/Ctrl+Enter to create &amp; start';
+  // The Map's door into Give work.
+  mapGiveWorkHTML() {
     return (
-      '<div class="ws-cmd-map-quest-dock is-open">' +
-      button +
-      '<section class="ws-cmd-map-quest-composer" role="dialog" aria-modal="false" aria-label="New quest">' +
-      '<header class="ws-cmd-map-quest-head"><span>New Quest</span>' +
-      '<button type="button" class="ws-cmd-map-quest-close" data-cmd-map-quest-cancel aria-label="Close new quest">×</button></header>' +
-      intentToggle +
-      '<textarea class="ws-cmd-map-quest-input" data-cmd-map-quest-input rows="2" ' +
-      'placeholder="' +
-      escapeHtml(placeholder) +
-      '"' +
-      disabledAttr +
-      '>' +
-      draft +
-      '</textarea>' +
-      consequence +
-      error +
-      '<div class="ws-cmd-map-quest-actions">' +
-      '<button type="button" class="ws-cmd-map-quest-btn is-primary" data-cmd-map-quest-create' +
-      disabledAttr +
-      '>' +
-      primaryLabel +
-      '</button>' +
-      (intent === 'ready'
-        ? '<button type="button" class="ws-cmd-map-quest-btn" data-cmd-map-quest-start' +
-          disabledAttr +
-          '>Create &amp; Start</button>'
-        : '') +
-      '</div>' +
-      '<p class="ws-cmd-map-quest-hint">' +
-      hint +
-      '</p>' +
-      '</section></div>'
+      '<div class="ws-cmd-map-quest-dock">' +
+      '<button type="button" class="ws-cmd-map-quest-fab" data-cmd-map-give-work aria-haspopup="dialog">' +
+      '<i class="bi bi-plus-lg" aria-hidden="true"></i><span>Give work</span></button></div>'
     );
-  }
-
-  openTaskComposer() {
-    this.taskComposerOpen = true;
-    this.taskComposerError = '';
-    this.taskComposerIntent = 'ready';
-    this.render();
-  }
-
-  closeTaskComposer({ clearDraft = true } = {}) {
-    this.taskComposerOpen = false;
-    this.taskComposerError = '';
-    this.taskComposerSubmitting = false;
-    if (clearDraft) this.taskComposerDraft = '';
-    this.render();
-  }
-
-  setTaskComposerIntent(intent) {
-    const next = intent === 'backlog' ? 'backlog' : 'ready';
-    if (this.taskComposerIntent === next) return;
-    this.taskComposerIntent = next;
-    this.taskComposerError = '';
-    this.render();
-  }
-
-  async submitTaskComposer({ start = false } = {}) {
-    if (this.taskComposerSubmitting) return;
-    const description = String(this.taskComposerDraft || '').trim();
-    if (!description) {
-      this.taskComposerError = 'Enter a quest description.';
-      this.render();
-      return;
-    }
-    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    if (!page) return;
-
-    if (this.taskComposerIntent === 'backlog') {
-      if (typeof page.createBacklogItem !== 'function') return;
-      this.taskComposerSubmitting = true;
-      this.taskComposerError = '';
-      this.render();
-      const created = await page.createBacklogItem({ description });
-      this.taskComposerSubmitting = false;
-      if (!created) {
-        this.taskComposerError = 'Could not add to the backlog. Try again.';
-        this.render();
-        return;
-      }
-      // page.createBacklogItem() already toasts "Added to backlog" and
-      // refreshes the Backlog panel/Quest Board via loadBacklog().
-      this.taskComposerDraft = '';
-      this.taskComposerOpen = false;
-      this.taskComposerError = '';
-      this.render();
-      return;
-    }
-
-    if (typeof page.createTask !== 'function') return;
-
-    this.taskComposerSubmitting = true;
-    this.taskComposerError = '';
-    this.render();
-
-    let created = null;
-    try {
-      // No assignee → server applies the entry-agent default; suppress the generic
-      // "Task created" toast so we can name the resolved assignee instead.
-      created = await page.createTask(description, '', '', { successToast: false });
-    } catch (_error) {
-      created = null;
-    }
-
-    if (!created || !created.id) {
-      this.taskComposerSubmitting = false;
-      this.taskComposerError = 'Could not create the quest. Try again.';
-      this.render();
-      return;
-    }
-
-    const assignee = String(created.to || '').trim();
-    if (start && typeof page.executeTask === 'function') {
-      try {
-        await page.executeTask(created.id, { skipConfirm: true });
-      } catch (_error) {
-        /* execution failures surface via executeTask's own toast */
-      }
-    }
-    if (window.Toast) {
-      const target = assignee || 'the Commander';
-      window.Toast.success(
-        (start ? 'Quest started · assigned to ' : 'Quest assigned to ') + target
-      );
-    }
-    // loadTasks() (via createTask/executeTask) already refreshed the view; close cleanly.
-    this.taskComposerDraft = '';
-    this.taskComposerOpen = false;
-    this.taskComposerSubmitting = false;
-    this.taskComposerError = '';
-    this.render();
   }
 
   runMapInventoryAction(sectionKey, triggerButton) {
@@ -12097,32 +11916,8 @@ export class WorkspaceCommandView {
         page.openAgentModelModal(modelBtn.getAttribute('data-cmd-edit-model'));
         return;
       }
-      const questToggle = event.target.closest('[data-cmd-map-quest-toggle]');
-      if (questToggle) {
-        if (this.taskComposerOpen) this.closeTaskComposer();
-        else this.openTaskComposer();
-        return;
-      }
-      if (event.target.closest('[data-cmd-map-quest-cancel]')) {
-        this.closeTaskComposer();
-        return;
-      }
-      const intentBtn = event.target.closest('[data-cmd-map-quest-intent]');
-      if (intentBtn) {
-        this.setTaskComposerIntent(intentBtn.getAttribute('data-cmd-map-quest-intent'));
-        return;
-      }
-      if (event.target.closest('[data-cmd-map-quest-create]')) {
-        this.submitTaskComposer({ start: false });
-        return;
-      }
-      if (event.target.closest('[data-cmd-map-quest-start]')) {
-        this.submitTaskComposer({ start: true });
-        return;
-      }
-      // Click outside the composer (but still on the map) dismisses it, keeping the draft.
-      if (this.taskComposerOpen && !event.target.closest('.ws-cmd-map-quest-dock')) {
-        this.closeTaskComposer({ clearDraft: false });
+      if (event.target.closest('[data-cmd-map-give-work]')) {
+        page?.showAddTaskModal?.();
         return;
       }
       const closeWindow = event.target.closest('[data-cmd-map-window-close]');
@@ -12309,45 +12104,6 @@ export class WorkspaceCommandView {
       if (this.handleLoadoutAddKeydown(event)) return;
       this.handleCapabilityInspectorKeydown(event);
     });
-    this.bindTaskComposer(root);
-  }
-
-  // Wire the quest composer's textarea: track the draft and handle keyboard submits.
-  // The composer only exists in the DOM while open, so this re-binds on each render.
-  bindTaskComposer(root) {
-    if (!root || !this.taskComposerOpen) return;
-    const input = root.querySelector('[data-cmd-map-quest-input]');
-    if (!input) return;
-    input.addEventListener('input', event => {
-      this.taskComposerDraft = event.target.value;
-      if (this.taskComposerError) this.taskComposerError = '';
-    });
-    input.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        this.closeTaskComposer();
-        return;
-      }
-      if (event.key === 'Enter') {
-        // Newlines are not needed for a one-line quest; Enter submits.
-        event.preventDefault();
-        this.taskComposerDraft = event.target.value;
-        const start = this.taskComposerIntent !== 'backlog' && (event.metaKey || event.ctrlKey);
-        this.submitTaskComposer({ start });
-      }
-    });
-    // Restore focus + caret after the re-render that opened/updated the composer.
-    if (!this.taskComposerSubmitting && typeof input.focus === 'function') {
-      input.focus();
-      const end = input.value.length;
-      if (typeof input.setSelectionRange === 'function') {
-        try {
-          input.setSelectionRange(end, end);
-        } catch (_error) {
-          /* setSelectionRange unsupported on some inputs */
-        }
-      }
-    }
   }
 
   captureAgentDeckViewState() {

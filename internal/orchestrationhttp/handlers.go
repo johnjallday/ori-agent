@@ -191,6 +191,7 @@ func (h *Handler) initializeSubHandlers() {
 	h.backlogHandler = NewBacklogHandler(backlogService)
 	h.backlogHandler.SetFileSynchronizer(backlogFileSync)
 	h.ticketHandler = NewTicketHandler(newTicketService(h.workspaceStore, h.eventBus))
+	h.ticketHandler.SetStarter(h.startTicketByPerson)
 
 	// Optional sub-handlers (created if dependencies are available)
 	if h.orchestrator != nil {
@@ -257,6 +258,7 @@ func (h *Handler) SetEventBus(eb *workspace.EventBus) {
 	h.backlogHandler = NewBacklogHandler(backlogService)
 	h.backlogHandler.SetFileSynchronizer(legacyBacklogFileSync)
 	h.ticketHandler = NewTicketHandler(newTicketService(h.workspaceStore, eb))
+	h.ticketHandler.SetStarter(h.startTicketByPerson)
 	h.initializeTemplateHandlerLegacy()
 	h.initializeStreamingHandlerLegacy()
 	h.initializeTaskHandlerLegacy()
@@ -497,6 +499,15 @@ func (h *Handler) StartTaskAsync(workspaceID, taskID string) error {
 		return fmt.Errorf("task execution not available")
 	}
 	return h.taskHandlerSub.StartTaskAsync(workspaceID, taskID)
+}
+
+// startTicketByPerson is the ticket API's starter: a create request's start
+// intent is a person's explicit act.
+func (h *Handler) startTicketByPerson(workspaceID, ticketID string) error {
+	if h == nil || h.taskHandlerSub == nil {
+		return fmt.Errorf("task execution not available")
+	}
+	return h.taskHandlerSub.StartTaskByPerson(workspaceID, ticketID)
 }
 
 // StopTaskToReady stops a task's run and puts the task back to Ready (see

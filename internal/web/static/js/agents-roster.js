@@ -3909,7 +3909,7 @@
       menuDivider(),
       // The page's one verb about work: a task for this agent, where it works.
       {
-        label: 'Give a task…',
+        label: 'Give work…',
         action: 'give-task',
         disabled: vm.builtIn || vm.workspaceOwned || vm.unreadable
       },
@@ -4117,7 +4117,7 @@
         openBulkDelete();
         return;
       default:
-        // A workspace picked in Give a task…'s chooser.
+        // A workspace picked in Give work…'s chooser.
         if (action.indexOf(GIVE_TASK_IN) === 0) {
           var api = window.OriAgentGiveTask;
           var href = api ? api.newTaskHref(action.slice(GIVE_TASK_IN.length), name) : '';
@@ -4128,7 +4128,7 @@
 
   var GIVE_TASK_IN = 'give-task-in:';
 
-  // giveTask is Give a task… (agents-hire-with-a-brief FR18): the agent's one
+  // giveTask is Give work… (agents-hire-with-a-brief FR18): the agent's one
   // workspace opens with its task form and this agent chosen; with several,
   // the workspaces are offered in the card's own menu first; with none, the
   // Hire card opens for this agent's role, since work happens in a workspace.

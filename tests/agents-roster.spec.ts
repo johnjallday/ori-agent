@@ -1884,7 +1884,7 @@ test.describe('Agents collection controls', () => {
     await page.waitForTimeout(150);
     await expect(menu).toBeVisible();
 
-    // Open, Open full page, Give a task…, Favorite, Set role, Assign, Delete.
+    // Open, Open full page, Give work…, Favorite, Set role, Assign, Delete.
     await expect(menu.locator('[data-menu-action]')).toHaveCount(7);
     await expect(menu.locator('[data-menu-action="open"]')).toBeFocused();
   });

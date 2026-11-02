@@ -59,9 +59,9 @@ test('an agent with no workspace is offered the Hire card, with a note saying wh
   assert.equal(giveTask.newTaskHref('compare-apps', ''), '');
 });
 
-test('the roster offers Give a task… and the workspace page opens the task form for the named agent', () => {
+test('the roster offers Give work… and the workspace page opens the task form for the named agent', () => {
   const roster = read('../agents-roster.js');
-  assert.match(roster, /label: 'Give a task…',\s*action: 'give-task'/);
+  assert.match(roster, /label: 'Give work…',\s*action: 'give-task'/);
   assert.match(roster, /case 'give-task':\s*giveTask\(name, vm\);/);
   assert.match(roster, /prefill: \{ role: vm\.role, note: target\.note \}/);
   assert.match(roster, /slug: String\(\(w && w\.folder_slug\) \|\| ''\)\.trim\(\)/);

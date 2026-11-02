@@ -234,6 +234,21 @@
     }
   }
 
+  // Hands fresh counts from a list response to whoever shows them.
+  function announceCounts(studioId, counts) {
+    if (!counts || typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+      return;
+    }
+    if (typeof CustomEvent !== 'function') return;
+    try {
+      window.dispatchEvent(
+        new CustomEvent('ori:ticket-counts', { detail: { studioId: String(studioId), counts } })
+      );
+    } catch (_error) {
+      // A listener's failure must never break the board.
+    }
+  }
+
   const api = {
     /**
      * Lists a workspace's tickets. `includeDescendants` opts into the
@@ -318,10 +333,22 @@
         reference_url: input.referenceUrl || '',
         source: input.source || '',
         source_id: input.sourceId || '',
-        linked_note_ids: input.linkedNoteIds || []
+        linked_note_ids: input.linkedNoteIds || [],
+        assignee: input.assignee || '',
+        start: Boolean(input.start),
+        idempotency_key: input.idempotencyKey || ''
       });
       announceChange(studioId);
-      return normalizeTicket(payload);
+      const ticket = normalizeTicket(payload);
+      // A start intent's outcome travels beside the ticket: a refused start is
+      // a saved ticket plus a reason, never a failed create (PRD 760 FR-14).
+      if (ticket && payload && payload.start) {
+        ticket.start = {
+          started: Boolean(payload.start.started),
+          error: payload.start.error || ''
+        };
+      }
+      return ticket;
     },
 
     async get(studioId, ticketId) {
@@ -1054,6 +1081,7 @@
       });
       view.tickets = result.tickets;
       view.lastPage = result;
+      announceCounts(studioId, result.counts);
       render();
       setStatus('');
     } catch (error) {
@@ -1132,6 +1160,125 @@
    * them separate is what stops a Run outcome from reading as the Ticket's
    * own state (FR-69, FR-70).
    */
+  /**
+   * Turns the edit form's values into an update. Give work asks only for what,
+   * details, who and due, so everything else a ticket can carry is set here (PRD
+   * 760 FR-17). The version comes along so a stale edit is refused, not applied.
+   */
+  function ticketEditChanges(values, ticket) {
+    const due = String(values.due || '').trim();
+    return {
+      title: String(values.title || '').trim(),
+      description: String(values.description || ''),
+      priority: Number(values.priority) || 0,
+      tags: String(values.tags || '')
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean),
+      dueDate: due ? `${due}T00:00:00Z` : null,
+      referenceUrl: String(values.reference || '').trim(),
+      version: ticket.version
+    };
+  }
+
+  function buildEditField(form, label, control) {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'ticket-detail-edit-field';
+    const text = document.createElement('span');
+    text.textContent = label;
+    wrapper.append(text, control);
+    form.appendChild(wrapper);
+  }
+
+  /** A closed disclosure holding the ticket's editable fields. */
+  function buildEditDisclosure(ticket) {
+    const disclosure = document.createElement('details');
+    disclosure.className = 'ticket-detail-edit';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Edit';
+    disclosure.appendChild(summary);
+
+    const form = document.createElement('form');
+    const input = (name, type, value) => {
+      const element = document.createElement('input');
+      element.className = 'form-control form-control-sm';
+      element.name = name;
+      element.type = type;
+      element.value = value || '';
+      return element;
+    };
+    const title = input('title', 'text', ticket.title);
+    title.required = true;
+    title.maxLength = 300;
+    buildEditField(form, 'Title', title);
+
+    const description = document.createElement('textarea');
+    description.className = 'form-control form-control-sm';
+    description.name = 'description';
+    description.rows = 3;
+    description.value = ticket.description || '';
+    buildEditField(form, 'Details', description);
+
+    const priority = document.createElement('select');
+    priority.className = 'form-select form-select-sm';
+    priority.name = 'priority';
+    [1, 2, 3, 4, 5].forEach(level => {
+      const option = document.createElement('option');
+      option.value = String(level);
+      option.textContent = `P${level}`;
+      option.selected = level === (ticket.priority || 3);
+      priority.appendChild(option);
+    });
+    buildEditField(form, 'Priority', priority);
+
+    buildEditField(form, 'Tags (comma separated)', input('tags', 'text', ticket.tags.join(', ')));
+    buildEditField(
+      form,
+      'Due',
+      input('due', 'date', ticket.dueDate ? String(ticket.dueDate).slice(0, 10) : '')
+    );
+    buildEditField(form, 'Reference', input('reference', 'url', ticket.referenceUrl));
+
+    const save = document.createElement('button');
+    save.type = 'submit';
+    save.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    save.textContent = 'Save';
+    form.appendChild(save);
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const owner = ticket.owningWorkspaceId || currentStudioId();
+      save.disabled = true;
+      try {
+        await api.update(
+          owner,
+          ticket.id,
+          ticketEditChanges(
+            {
+              title: title.value,
+              description: description.value,
+              priority: priority.value,
+              tags: form.elements.tags.value,
+              due: form.elements.due.value,
+              reference: form.elements.reference.value
+            },
+            ticket
+          )
+        );
+        setStatus('Saved.', 'success');
+      } catch (error) {
+        setStatus(error.message, 'error');
+        if (!error.isVersionConflict) return;
+      } finally {
+        save.disabled = false;
+      }
+      await openDetail(owner, ticket.id);
+      await load();
+    });
+    disclosure.appendChild(form);
+    return disclosure;
+  }
+
   function renderDetail(ticket) {
     view.selectedTicket = ticket;
     if (view.elements.detailTitle) {
@@ -1162,6 +1309,7 @@
     appendDetailRow(summary, 'Reference', ticket.referenceUrl);
     appendDetailRow(summary, 'Source', ticket.source);
     body.appendChild(summary);
+    body.appendChild(buildEditDisclosure(ticket));
 
     // A draft saved from an assistant conversation can be continued there.
     // Following the link only reads; nothing about this Ticket changes.
@@ -1650,47 +1798,19 @@
     return String(value).replace(/["\\]/g, '\\$&');
   }
 
-  /** Handles the create form. The Backlog/Ready choice is required (FR-19). */
-  async function handleCreate(event) {
-    if (event && event.preventDefault) event.preventDefault();
-
+  /** The ticket view's door into Give work (PRD 760 FR-15). */
+  function openGiveWorkHere() {
+    const giveWork = typeof window !== 'undefined' ? window.OriGiveWork : null;
     const studioId = currentStudioId();
-    if (!studioId) {
-      setStatus('Select a workspace before creating a ticket.', 'error');
-      return;
-    }
-
-    const titleInput = view.elements.formTitle;
-    const descriptionInput = view.elements.formDescription;
-    const stateInput =
-      typeof document !== 'undefined'
-        ? document.querySelector('input[name="hubTicketCreateState"]:checked')
-        : null;
-
-    if (!stateInput) {
-      setStatus('Choose whether to add this to Backlog or create it Ready.', 'error');
-      return;
-    }
-
-    setStatus('Creating ticket…');
-    try {
-      const ticket = await api.create(studioId, {
-        state: stateInput.value,
-        title: titleInput ? titleInput.value : '',
-        description: descriptionInput ? descriptionInput.value : ''
-      });
-      if (titleInput) titleInput.value = '';
-      if (descriptionInput) descriptionInput.value = '';
-      setStatus(`Created ${ticket.displayNumber} in ${ticket.stateLabel}.`, 'success');
-      await load();
-    } catch (error) {
-      // The message names what the server actually refused, so the user can
-      // fix it rather than guess (FR-94).
-      setStatus(error.message, 'error');
-      if (error.field && titleInput && error.field === 'title' && titleInput.focus) {
-        titleInput.focus();
-      }
-    }
+    if (!giveWork || !studioId) return;
+    const workspace = (window.workspaceDetail && window.workspaceDetail.workspace) || {};
+    giveWork.open({
+      workspaceId: studioId,
+      workspaceName: workspace.name || '',
+      agents: workspace.agents || [],
+      trigger: view.elements.giveWork || null,
+      onSaved: () => void load()
+    });
   }
 
   function init() {
@@ -1712,9 +1832,7 @@
       empty: el('hubTicketsEmpty'),
       count: el('hubTicketsCount'),
       status: el('hubTicketsStatus'),
-      form: el('hubTicketCreateForm'),
-      formTitle: el('hubTicketCreateTitle'),
-      formDescription: el('hubTicketCreateDescription'),
+      giveWork: el('hubTicketsGiveWork'),
       refresh: el('hubTicketsRefreshBtn'),
       detail: el('hubTicketDetail'),
       detailTitle: el('hubTicketDetailTitle'),
@@ -1731,8 +1849,8 @@
       boardBtn: el('hubTicketsViewBoard')
     };
 
-    if (view.elements.form) {
-      view.elements.form.addEventListener('submit', handleCreate);
+    if (view.elements.giveWork) {
+      view.elements.giveWork.addEventListener('click', () => openGiveWorkHere());
     }
     if (view.elements.refresh) {
       view.elements.refresh.addEventListener('click', () => void load());
@@ -1879,25 +1997,12 @@
   }
 
   /**
-   * Puts the cursor in the create form and preselects a capture state.
-   *
-   * This is where an "Add to Backlog" affordance from another surface lands:
-   * the user asked to capture something, so they should arrive typing rather
-   * than hunting for the field (FR-19, FR-80).
+   * Opens Give work: where an "Add to Backlog" affordance from another surface
+   * lands. The user asked to capture something, so they arrive typing (FR-80).
    */
-  function focusCreate(state) {
+  function focusCreate() {
     init();
-    const wanted = String(state || '')
-      .trim()
-      .toLowerCase();
-    if (CAPTURE_STATES.includes(wanted) && typeof document !== 'undefined') {
-      const choice = document.querySelector(
-        `input[name="hubTicketCreateState"][value="${wanted}"]`
-      );
-      if (choice) choice.checked = true;
-    }
-    const title = view.elements.formTitle;
-    if (title && typeof title.focus === 'function') title.focus();
+    openGiveWorkHere();
   }
 
   /** Reflects the active state filters onto the chips, including aria-pressed. */
@@ -1926,6 +2031,7 @@
     CAPTURE_STATES,
     TicketApiError,
     CHANGED_EVENT,
+    ticketEditChanges,
     api,
     assistantDraftResumeHref,
     canTransitionTo,

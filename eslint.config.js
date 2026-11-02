@@ -280,6 +280,7 @@ export default defineConfig([
       'internal/web/static/js/modules/tag-filter-bar.js',
       'internal/web/static/js/modules/task-presentation.js',
       'internal/web/static/js/modules/ticket-count-line.js',
+      'internal/web/static/js/modules/give-work.js',
       'internal/web/static/js/modules/workspace-next-action.js',
       'internal/web/static/js/modules/template-onboarding.js',
       'internal/web/static/js/modules/user-knowledge.js',

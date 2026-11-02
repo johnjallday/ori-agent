@@ -252,8 +252,8 @@ export function resolveWorkspaceNextAction(input) {
   return finish({
     kind: 'idle',
     title: 'No open work',
-    description: 'Give your team a task to start something new.',
+    description: 'Give your team something to do.',
     tone: 'neutral',
-    action: { owner: 'workspace', kind: 'create', id: '', key: 'create', label: 'Give Task' }
+    action: { owner: 'workspace', kind: 'create', id: '', key: 'create', label: 'Give work' }
   });
 }

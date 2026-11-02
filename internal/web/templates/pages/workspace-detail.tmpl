@@ -246,35 +246,9 @@
             </div>
           </div>
 
-          <form class="hub-ticket-create" id="hubTicketCreateForm">
-            <label class="hub-ticket-create-label" for="hubTicketCreateTitle">Title</label>
-            <input type="text" class="form-control" id="hubTicketCreateTitle" name="title" placeholder="What needs doing?" required maxlength="300">
-
-            <label class="hub-ticket-create-label" for="hubTicketCreateDescription">Description <span class="hub-ticket-create-optional">(optional, Markdown)</span></label>
-            <textarea class="form-control" id="hubTicketCreateDescription" name="description" rows="2" placeholder="Context, links, acceptance criteria…"></textarea>
-
-            <!--
-              The Backlog/Ready choice is explicit and required (FR-19).
-              Nothing is pre-selected: "captured an idea" and "committed
-              to doing this" are different decisions, and defaulting one
-              would make them indistinguishable afterwards.
-            -->
-            <fieldset class="hub-ticket-create-state">
-              <legend class="hub-ticket-create-label">Where does this go?</legend>
-              <label class="hub-ticket-state-choice">
-                <input type="radio" name="hubTicketCreateState" value="backlog" required>
-                <span class="hub-ticket-state-choice-label">Add to Backlog</span>
-                <span class="hub-ticket-state-choice-hint">Captured for later. Cannot be assigned, scheduled, or run.</span>
-              </label>
-              <label class="hub-ticket-state-choice">
-                <input type="radio" name="hubTicketCreateState" value="ready">
-                <span class="hub-ticket-state-choice-label">Create Ready</span>
-                <span class="hub-ticket-state-choice-hint">Committed work. Stays idle until you start it.</span>
-              </label>
-            </fieldset>
-
-            <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm hub-ticket-create-submit">Create ticket</button>
-          </form>
+          <div class="hub-ticket-create">
+            <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" id="hubTicketsGiveWork" aria-haspopup="dialog">Give work</button>
+          </div>
 
           <div class="hub-tickets-body">
             <ul class="hub-tickets-list" id="hubTicketsList" aria-label="Tickets"></ul>

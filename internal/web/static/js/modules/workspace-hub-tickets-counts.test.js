@@ -88,6 +88,57 @@ test('reads and content edits do not announce a change', async () => {
   assert.equal(announced.length, 0, 'none of these can change a count');
 });
 
+test('create sends the assignee, the start intent and the key, and keeps the start outcome', async () => {
+  let sent = null;
+  const { api } = loadTickets((_url, options) => {
+    sent = JSON.parse(options.body);
+    return { body: { ...ticket, start: { started: false, error: 'workspace is paused' } } };
+  });
+  const created = await api.api.create('ws-1', {
+    state: 'ready',
+    title: 'Write',
+    assignee: 'Writer',
+    start: true,
+    idempotencyKey: 'k1'
+  });
+  assert.equal(sent.assignee, 'Writer');
+  assert.equal(sent.start, true);
+  assert.equal(sent.idempotency_key, 'k1');
+  assert.equal(created.start.started, false);
+  assert.equal(created.start.error, 'workspace is paused');
+});
+
+test('a create with no start intent carries no start outcome', async () => {
+  const { api } = loadTickets(() => ({ body: ticket }));
+  const created = await api.api.create('ws-1', { state: 'backlog', title: 'X' });
+  assert.equal(created.start, undefined);
+});
+
+test('ticketEditChanges turns the edit form into an update carrying the version', () => {
+  const { api } = loadTickets();
+  const changes = api.ticketEditChanges(
+    {
+      title: ' New ',
+      description: 'Body',
+      priority: '2',
+      tags: 'a, b,, ',
+      due: '2026-12-01',
+      reference: ' https://x.test '
+    },
+    { version: 4 }
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(changes)), {
+    title: 'New',
+    description: 'Body',
+    priority: 2,
+    tags: ['a', 'b'],
+    dueDate: '2026-12-01T00:00:00Z',
+    referenceUrl: 'https://x.test',
+    version: 4
+  });
+  assert.equal(api.ticketEditChanges({ due: '' }, { version: 1 }).dueDate, null, 'clearing due');
+});
+
 test('a failed create announces nothing', async () => {
   const { api, announced } = loadTickets(() => ({
     ok: false,

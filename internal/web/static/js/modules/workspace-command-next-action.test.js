@@ -73,10 +73,10 @@ test('loading and failure never masquerade as an idle workspace; Retry has one o
   assert.match(view([], { tasksLoading: true }).renderWorkFirst(), /Tasks are loading/);
   const failed = view([], { tasksLoadFailed: true });
   assert.match(failed.renderWorkFirst(), /Retry workspace status/);
-  assert.doesNotMatch(failed.renderWorkFirst(), /Give Task|No open work/);
+  assert.doesNotMatch(failed.renderWorkFirst(), /Give work|No open work/);
   assert.match(failed.drawerListHTML(), /Tasks unavailable/);
   assert.match(failed.taskDrawerHTML(), /—/);
-  assert.match(view([]).renderWorkFirst(), /Give Task/);
+  assert.match(view([]).renderWorkFirst(), /Give work/);
 });
 
 test('closed and Backlog records do not invent work or a missing result', () => {

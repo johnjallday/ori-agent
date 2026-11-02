@@ -35,6 +35,25 @@ import { flattenWorkspaceTree, isGroupWorkspace } from './workspace-map-snapshot
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 import { openParcelByRef } from './parcel-open.js';
 import { taskCreateBody } from './quick-task.js';
+// Importing this registers window.OriGiveWork, the flow every door opens.
+import './give-work.js';
+
+// Live events after which a ticket's state may differ. Frequent phase events
+// (thinking, tool calls, heartbeats) are left out on purpose.
+const TICKET_MOVING_EVENTS = new Set([
+  'task_created',
+  'task_updated',
+  'task_deleted',
+  'task.created',
+  'task.started',
+  'task.completed',
+  'task.failed',
+  'task.blocked',
+  'task.resumed',
+  'task.deleted',
+  'task.backlog.captured',
+  'task.backlog.promoted'
+]);
 import {
   getStatusClass,
   getDisplayStatus,
@@ -573,7 +592,7 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !startedSetupTask) {
       this.showFolderFirstTaskBanner();
     }
-    // Give a task… on the Agents page arrives here with the agent named; its
+    // Give work… on the Agents page arrives here with the agent named; its
     // task form opens once nothing of the blueprint's own goes first.
     if (!restoredBlockedTask && !setupOwned && !startedSetupTask) {
       this.checkAutoOpenNewTaskFor();
@@ -581,7 +600,7 @@ export class WorkspaceDetailPage {
   }
 
   /**
-   * Check for ?newTaskFor=<agent> (Give a task… on the Agents page,
+   * Check for ?newTaskFor=<agent> (Give work… on the Agents page,
    * agent-give-task.js) and open the task form with that agent chosen.
    * The parameter is removed so a reload does not open it again.
    */
@@ -16970,6 +16989,9 @@ export class WorkspaceDetailPage {
     this.handleTaskExecutionRealtimeEvent(event);
     // The Operations map shows its units working from this same stream.
     window.workspaceCommand?.handleActivityEvent?.(event);
+    // A run moves its ticket with no click on this page, so the work tile and an
+    // open board follow these events (PRD 760 FR-11).
+    if (TICKET_MOVING_EVENTS.has(event.type)) window.workspaceCommand?.noteTicketWorkChanged?.();
 
     switch (event.type) {
       case 'task_created':
@@ -17269,7 +17291,7 @@ export class WorkspaceDetailPage {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // The same request the Home map's "Give a task…" composer sends
+        // The same request the Home map's "Give work…" composer sends
         // (quick-task.js), so the two can never drift apart (task-run-show FR50).
         body: JSON.stringify(
           taskCreateBody(this.workspaceId, normalizedName, {
@@ -17304,23 +17326,15 @@ export class WorkspaceDetailPage {
    * Show add task modal
    */
   showAddTaskModal(options = {}) {
-    // Use existing task modal controller
-    if (
-      window.taskModalController &&
-      typeof window.taskModalController.openForCreate === 'function'
-    ) {
-      const createOptions = options && typeof options === 'object' ? options : {};
-      window.taskModalController.openForCreate(
-        this.workspaceId,
-        '',
-        () => this.loadTasks(),
-        createOptions
-      );
-    } else {
-      // Fallback to prompt
-      const name = prompt('Enter task name:');
-      if (name) this.createTask(name);
-    }
+    // Every door on this page opens the one Give work flow (PRD 760 FR-15).
+    window.OriGiveWork?.open({
+      workspaceId: this.workspaceId,
+      workspaceName: this.workspace?.name || '',
+      agents: this.workspace?.agents || [],
+      assignee: options?.assignee || '',
+      trigger: typeof document !== 'undefined' ? document.activeElement : null,
+      onSaved: () => this.loadTasks()
+    });
   }
 
   showAddTaskModalForAgent(encodedAgentName = '') {
@@ -17336,9 +17350,7 @@ export class WorkspaceDetailPage {
       this.showAddTaskModal();
       return;
     }
-    // The assignment dropdown keys agents as `node:<name>-node-1` (see task modal
-    // populateAgentDropdown); draftAssignmentValue is applied after it populates.
-    this.showAddTaskModal({ draftAssignmentValue: `node:${agentName}-node-1` });
+    this.showAddTaskModal({ assignee: agentName });
   }
 
   /**

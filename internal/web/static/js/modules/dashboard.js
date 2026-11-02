@@ -11855,6 +11855,23 @@
   }
 
   function openWorkspaceTaskModalForConfiguration(workspaceId, description) {
+    // Pages with Give work use it (PRD 760 FR-15). The canvas still falls through
+    // to the modal until its own door moves.
+    if (window.OriGiveWork && typeof window.OriGiveWork.open === 'function') {
+      var detail = window.workspaceDetail || null;
+      var workspace = (detail && detail.workspace) || {};
+      window.OriGiveWork.open({
+        workspaceId: workspaceId,
+        workspaceName: workspace.name || '',
+        agents: workspace.agents || [],
+        what: String(description || '').trim(),
+        trigger: document.activeElement,
+        onSaved: function () {
+          if (detail && typeof detail.loadTasks === 'function') detail.loadTasks();
+        }
+      });
+      return true;
+    }
     if (
       window.taskModalController &&
       typeof window.taskModalController.openForCreate === 'function'

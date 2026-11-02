@@ -93,6 +93,11 @@ type TicketCreateInput struct {
 	Source        string
 	SourceID      string
 	LinkedNoteIDs []string
+	// Assignee names the workspace agent who will do the work (PRD 760 FR-13).
+	// Only a Ready ticket can have one: ValidateBacklogTaskInvariants refuses it
+	// on Backlog. The ticket stays quiet in legacy pending, because the executor
+	// auto-runs legacy assigned and naming someone is not asking them to start.
+	Assignee string
 	// Context seeds Task.Context, e.g. a goal suggestion's structured reason.
 	Context map[string]any
 	// Actor records who captured the work for the initial history entry.
@@ -433,6 +438,44 @@ func (s *TicketService) CreateIdempotent(input TicketCreateInput) (ticket *Ticke
 	})
 }
 
+// CreateWithKey captures one Ticket per client retry key, held in SourceID (PRD
+// 760 FR-14). Unlike CreateIdempotent, a replay does not require the record to
+// still look as it was created: a retry that arrives after the ticket started
+// must find that ticket, not report a conflict because its state moved on. The
+// same key with a different title is a client bug and is refused.
+func (s *TicketService) CreateWithKey(input TicketCreateInput) (ticket *Ticket, created bool, err error) {
+	return s.createIdempotent(input, func(candidate, requested *Task) (bool, error) {
+		if candidate.SourceType != requested.SourceType || candidate.SourceID != requested.SourceID {
+			return false, nil
+		}
+		if candidate.Description != requested.Description {
+			return false, fmt.Errorf("%w: %s/%s", ErrTicketSourceConflict, requested.SourceType, requested.SourceID)
+		}
+		return true, nil
+	})
+}
+
+// assignCreatedTicket records the assignee a create request named. It runs inside
+// the store transaction so membership is checked against the workspace being
+// written. An agent outside the workspace is the caller's mistake, never a reason
+// to add the agent.
+func assignCreatedTicket(ws *Workspace, task *Task, input TicketCreateInput) error {
+	agent := strings.TrimSpace(input.Assignee)
+	if agent == "" {
+		return nil
+	}
+	err := ws.ApplyTaskAssignment(task, TaskAssignment{
+		AgentName:  agent,
+		Mode:       TaskAssignmentModeManual,
+		AssignedBy: TaskAssignedByManual,
+		Reason:     "Named when the work was given",
+	})
+	if errors.Is(err, ErrAssigneeNotInWorkspace) {
+		return invalidTicketField("assignee", "%s is not an agent in this workspace", agent)
+	}
+	return err
+}
+
 // ticketReplayMatcher decides whether an existing record is the result of an
 // earlier attempt at the same creation. It returns (true, nil) to replay that
 // record, (false, nil) to keep looking, and an error to refuse the request.
@@ -473,6 +516,9 @@ func (s *TicketService) createIdempotent(input TicketCreateInput, replay ticketR
 		task.StateRank = nextTicketRank(ws, input.State)
 		if input.State == TicketStateBacklog {
 			task.BacklogRank = task.StateRank
+		}
+		if err := assignCreatedTicket(ws, &task, input); err != nil {
+			return err
 		}
 		if err := ws.AddTask(task); err != nil {
 			return err
@@ -547,6 +593,9 @@ func (s *TicketService) createRecord(input TicketCreateInput) (Task, error) {
 			// would silently flatten that ordering during the compatibility
 			// window. StateRank remains the authority; Group 7 retires this.
 			task.BacklogRank = task.StateRank
+		}
+		if err := assignCreatedTicket(ws, &task, input); err != nil {
+			return err
 		}
 		if err := ws.AddTask(task); err != nil {
 			return err
@@ -647,7 +696,9 @@ func buildTicketRecord(workspaceID string, state TicketState, input TicketCreate
 	}
 	if state == TicketStateBacklog {
 		// Backlog safety invariants apply to every capture path, not just the
-		// legacy Backlog service (FR-20).
+		// legacy Backlog service (FR-20). The requested assignee is checked with
+		// them, before any store work: Backlog is not committed to anyone.
+		task.To = strings.TrimSpace(input.Assignee)
 		if err := ValidateBacklogTaskInvariants(&task); err != nil {
 			return Task{}, &TicketValidationError{Field: "state", Message: err.Error()}
 		}

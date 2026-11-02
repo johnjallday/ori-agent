@@ -25016,7 +25016,18 @@ const sessionManager = {
           window.taskModalController.openForEdit(task, reloadTasks);
         }
       } else {
-        // Creating new task
+        // Creating new work: the one flow, where the page has it (PRD 760 FR-15).
+        if (window.OriGiveWork && typeof window.OriGiveWork.open === 'function') {
+          window.OriGiveWork.open({
+            workspaceId,
+            what: prefillTitle,
+            agents: window.workspaceDetail?.workspace?.agents || [],
+            workspaceName: window.workspaceDetail?.workspace?.name || '',
+            trigger: document.activeElement,
+            onSaved: reloadTasks
+          });
+          return;
+        }
         window.taskModalController.openForCreate(workspaceId, prefillTitle, reloadTasks);
       }
       return;

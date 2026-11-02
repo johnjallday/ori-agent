@@ -1651,6 +1651,55 @@ test('a failed refresh keeps the last known counts and clears its in-flight flag
   });
 });
 
+test('a board load hands its counts to the tile without another request', () => {
+  const listeners = {};
+  withPageWindow(win => {
+    win.addEventListener = (name, handler) => {
+      listeners[name] = handler;
+    };
+    const view = workTileView({ ready: 1 });
+    view.container = { querySelector: () => null };
+    view.bindTicketChangeEvents();
+    listeners['ori:ticket-counts']({ detail: { studioId: 'other', counts: { ready: 9 } } });
+    assert.equal(view.page.workspace.ticket_counts.ready, 1, 'another workspace is ignored');
+    listeners['ori:ticket-counts']({ detail: { studioId: 'workspace-1', counts: { ready: 4 } } });
+    assert.equal(view.page.workspace.ticket_counts.ready, 4);
+  });
+});
+
+test('live events settle into one refresh, through the board when it is open', async () => {
+  await withPageWindowAsync(async win => {
+    let loads = 0;
+    let lists = 0;
+    win.WorkspaceHubTickets = {
+      load: async () => {
+        loads += 1;
+      },
+      api: {
+        list: async () => {
+          lists += 1;
+          return { counts: { ready: 1 } };
+        }
+      }
+    };
+    const view = workTileView({ ready: 1 });
+    view.container = { querySelector: () => null };
+    const settle = () => new Promise(resolve => setTimeout(resolve, 340));
+
+    view.viewMode = 'details';
+    view.noteTicketWorkChanged();
+    view.noteTicketWorkChanged();
+    view.noteTicketWorkChanged();
+    await settle();
+    assert.deepEqual([loads, lists], [0, 1], 'a burst is one count refresh');
+
+    view.viewMode = 'tickets';
+    view.noteTicketWorkChanged();
+    await settle();
+    assert.deepEqual([loads, lists], [1, 1], 'an open board reloads instead');
+  });
+});
+
 test('the tile listens for the ticket client change event and ignores other workspaces', async () => {
   const originalWindow = globalThis.window;
   const listeners = {};
@@ -4073,132 +4122,6 @@ function makeQuestComposerView(overrides = {}) {
   );
   return commandView;
 }
-
-test('operations map shows a New Quest button and reveals the composer when open', () => {
-  const closed = makeQuestComposerView();
-  const closedHTML = closed.renderMapQuickTask();
-  assert.match(closedHTML, /data-cmd-map-quest-toggle/);
-  assert.match(closedHTML, /New Quest/);
-  assert.match(closedHTML, /aria-expanded="false"/);
-  assert.doesNotMatch(closedHTML, /data-cmd-map-quest-input/);
-
-  const open = makeQuestComposerView({
-    taskComposerOpen: true,
-    taskComposerDraft: 'Draft copy edits'
-  });
-  const openHTML = open.renderMapQuickTask();
-  assert.match(openHTML, /aria-expanded="true"/);
-  assert.match(openHTML, /data-cmd-map-quest-input/);
-  assert.match(openHTML, /Draft copy edits/);
-  assert.match(openHTML, /data-cmd-map-quest-create/);
-  assert.match(openHTML, /data-cmd-map-quest-start/);
-});
-
-test('quest composer Create posts with no assignee so the entry-agent default applies', async () => {
-  const originalWindow = globalThis.window;
-  const toasts = [];
-  globalThis.window = { Toast: { success: msg => toasts.push(msg) } };
-  try {
-    const createArgs = [];
-    const view = makeQuestComposerView({
-      taskComposerOpen: true,
-      taskComposerDraft: 'Summarize the weekly report',
-      page: {
-        async createTask(name, description, columnId, options) {
-          createArgs.push([name, description, columnId, options]);
-          return { id: 't-42', to: 'Atlas' };
-        }
-      }
-    });
-
-    await view.submitTaskComposer({ start: false });
-
-    assert.equal(createArgs.length, 1);
-    const [name, , columnId, options] = createArgs[0];
-    assert.equal(name, 'Summarize the weekly report');
-    assert.equal(columnId, '');
-    assert.equal(options.successToast, false);
-    assert.ok(!('to' in options) && !('assignee' in options), 'no assignee is sent');
-    assert.deepEqual(toasts, ['Quest assigned to Atlas']);
-    assert.equal(view.taskComposerOpen, false);
-    assert.equal(view.taskComposerDraft, '');
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('quest composer Create & Start executes the created task and names the assignee', async () => {
-  const originalWindow = globalThis.window;
-  const toasts = [];
-  globalThis.window = { Toast: { success: msg => toasts.push(msg) } };
-  try {
-    const executed = [];
-    const view = makeQuestComposerView({
-      taskComposerOpen: true,
-      taskComposerDraft: 'Kick off ingest',
-      page: {
-        async createTask() {
-          return { id: 't-9', to: 'Scribe' };
-        },
-        async executeTask(id, options) {
-          executed.push([id, options]);
-        }
-      }
-    });
-
-    await view.submitTaskComposer({ start: true });
-
-    assert.deepEqual(executed, [['t-9', { skipConfirm: true }]]);
-    assert.deepEqual(toasts, ['Quest started · assigned to Scribe']);
-    assert.equal(view.taskComposerOpen, false);
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('quest composer keeps the draft and shows an error when creation fails', async () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { Toast: { success() {} } };
-  try {
-    const view = makeQuestComposerView({
-      taskComposerOpen: true,
-      taskComposerDraft: 'Retryable quest',
-      page: {
-        async createTask() {
-          return null;
-        }
-      }
-    });
-
-    await view.submitTaskComposer({ start: false });
-
-    assert.equal(view.taskComposerOpen, true);
-    assert.equal(view.taskComposerDraft, 'Retryable quest');
-    assert.equal(view.taskComposerSubmitting, false);
-    assert.match(view.taskComposerError, /could not create/i);
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('quest composer rejects an empty draft without calling the page', async () => {
-  let called = false;
-  const view = makeQuestComposerView({
-    taskComposerOpen: true,
-    taskComposerDraft: '   ',
-    page: {
-      async createTask() {
-        called = true;
-        return { id: 'x' };
-      }
-    }
-  });
-
-  await view.submitTaskComposer({ start: false });
-
-  assert.equal(called, false);
-  assert.match(view.taskComposerError, /enter a quest/i);
-});
 
 function makeLoadoutView(overrides = {}) {
   const view = Object.create(WorkspaceCommandView.prototype);

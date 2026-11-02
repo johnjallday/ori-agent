@@ -173,7 +173,7 @@ test('a run that fails and is marked failed says it needs a look', async ({ page
   await expect(card.locator('[data-result-primary]')).toHaveText('Open task');
 });
 
-test('Give a task… from Home creates and starts the task, and the building lights', async ({
+test('Give work from Home creates and starts the ticket, and the building lights', async ({
   page
 }) => {
   const ws = await seedWorkspace(page.request, 'Give');
@@ -181,13 +181,14 @@ test('Give a task… from Home creates and starts the task, and the building lig
 
   await tile.click({ button: 'right' });
   await page.locator('[data-menu-action="give-task"]').click();
-  const composer = page.locator('[data-ws-map-composer]');
-  await expect(composer).toBeVisible();
-  await expect(composer.locator('[data-composer-input]')).toBeFocused();
-  await composer.locator('[data-composer-input]').fill('Draft the launch agenda');
-  await composer.locator('[data-composer-start]').click();
+  const dialog = page.locator('dialog.give-work');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('#giveWorkWhat')).toBeFocused();
+  await dialog.locator('#giveWorkWhat').fill('Draft the launch agenda');
+  await dialog.locator('input[name="startNow"]').check();
+  await dialog.locator('[data-give-work-submit]').click();
 
-  await expect(composer).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
   await expect(tile.locator('.ws-map-activity.is-lit')).toBeVisible({ timeout: 10_000 });
   const tasks = await (
     await page.request.get(`/api/orchestration/tasks?workspace_id=${ws.id}`)

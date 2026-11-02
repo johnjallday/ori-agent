@@ -1,0 +1,107 @@
+/* Give work: the one dialog for handing a workspace something to do. */
+.give-work {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 20px;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.give-work::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.give-work-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.give-work-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.give-work-where {
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+  overflow-wrap: anywhere;
+}
+
+.give-work-label {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.give-work-optional,
+.give-work-note {
+  color: var(--bs-secondary-color);
+  font-weight: 400;
+}
+
+.give-work-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.give-work-start {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.give-work-start.is-disabled {
+  color: var(--bs-secondary-color);
+}
+
+.give-work-status {
+  min-height: 20px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.give-work-status[data-tone="error"] {
+  color: var(--bs-danger-text-emphasis);
+}
+
+/* Everything else a ticket can carry is set from its detail, behind this. */
+.ticket-detail-edit {
+  margin: 8px 0 16px;
+}
+
+.ticket-detail-edit summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ticket-detail-edit form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ticket-detail-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  font-size: 13px;
+}
+
+.give-work-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
