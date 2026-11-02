@@ -195,7 +195,10 @@ test.describe('a connected vault', () => {
   test('Look again inside the limit says so', async ({ page, request }) => {
     await openPanel(page, request);
     await section(page, 'footer').locator('[data-cmd-modal-action="notes-look-again"]').click();
-    await expect(section(page, 'footer')).toContainText('Looked less than 10 minutes ago');
+    // It says when Ori looked and how long to wait (notes-station-panel FR18).
+    await expect(section(page, 'footer').locator('[role="status"]')).toHaveText(
+      /^Looked .+\. Try again in \d+ minutes?\.$/
+    );
   });
 });
 

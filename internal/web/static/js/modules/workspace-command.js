@@ -7799,6 +7799,7 @@ export class WorkspaceCommandView {
     const panel = this._notesPanel;
     if (!panel || panel.status !== 'ready' || panel.refreshing || !this.notesPanelOpen()) return;
     panel.refreshing = true;
+    const before = JSON.stringify(panel.look || null);
     try {
       const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
       if (panel !== this._notesPanel) return;
@@ -7810,6 +7811,9 @@ export class WorkspaceCommandView {
     } finally {
       panel.refreshing = false;
     }
+    // The drawer announces every step of its own turn; a look that did not
+    // change is not repainted, so the rows under the user's pointer stay put.
+    if (JSON.stringify(panel.look || null) === before) return;
     this.paintNotesPanel(panel);
     // Polling replaces any timer already set, so a look is never read twice.
     this.pollNotesPanelLook(panel);

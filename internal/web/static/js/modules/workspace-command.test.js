@@ -9013,6 +9013,15 @@ test('one second-brain announcement re-reads the badge once and an open Notes pa
     assert.equal(panel.look.look_id, 'look-2');
     assert.equal(painted, 1);
 
+    // The same look again (the drawer announcing a step of its own turn) does
+    // not repaint the panel.
+    reads.length = 0;
+    listeners['personal-assistant:second-brain'][0]();
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(reads.length, 2);
+    assert.equal(painted, 1, 'an unchanged look is not repainted');
+
     // A closed panel is not read.
     reads.length = 0;
     hq.notesPanelOpen = () => false;
