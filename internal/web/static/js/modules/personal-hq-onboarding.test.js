@@ -302,6 +302,41 @@ test('followUpView: a candidate is flagged for confirm/dismiss', () => {
   assert.equal(view.isCandidate, true);
 });
 
+test('followUpView: carries status, dates, source and presentation for the workspace panel', () => {
+  const view = followUpView({
+    id: 'f3',
+    status: 'snoozed',
+    category: 'needs_decision',
+    title: 'Pick a mastering engineer',
+    due_at: '2026-11-05T23:59:59Z',
+    snoozed_until: '2026-11-03T09:00:00Z',
+    updated_at: '2026-11-01T10:00:00Z',
+    source: { type: 'note_item', id: 'item-1' },
+    presentation: {
+      source_label: 'Studio',
+      source_name: 'Album Release',
+      link: 'obsidian://open?vault=Studio&file=Album%20Release.md'
+    }
+  });
+  assert.equal(view.status, 'snoozed');
+  assert.equal(view.categoryKey, 'needs_decision');
+  assert.equal(view.dueAt, '2026-11-05T23:59:59Z');
+  assert.equal(view.snoozedUntil, '2026-11-03T09:00:00Z');
+  assert.equal(view.updatedAt, '2026-11-01T10:00:00Z');
+  assert.deepEqual(view.source, { type: 'note_item' });
+  assert.deepEqual(view.presentation, {
+    sourceLabel: 'Studio',
+    sourceName: 'Album Release',
+    link: 'obsidian://open?vault=Studio&file=Album%20Release.md'
+  });
+
+  const bare = followUpView({ id: 'f4', title: 'Bare' });
+  assert.equal(bare.status, 'active');
+  assert.equal(bare.dueAt, '');
+  assert.equal(bare.source, null);
+  assert.equal(bare.presentation, null);
+});
+
 test('journalRequested: only ?journal=1 opens the editor', () => {
   assert.equal(journalRequested('?journal=1'), true);
   assert.equal(journalRequested('?journal=0'), false);

@@ -402,7 +402,23 @@ export function followUpView(f) {
     counterparty: f.counterparty || '',
     category: followUpCategoryLabel(f.category),
     isCandidate: status === 'candidate',
-    relatedTicket: f.related_ticket || null
+    relatedTicket: f.related_ticket || null,
+    // Additive fields for the workspace follow-ups panel (hq-details-landing).
+    // Home's projection ignores them.
+    status,
+    categoryKey: f.category || '',
+    dueAt: f.due_at || '',
+    snoozedUntil: f.snoozed_until || '',
+    updatedAt: f.updated_at || '',
+    source: f.source && typeof f.source === 'object' ? { type: String(f.source.type || '') } : null,
+    presentation:
+      f.presentation && typeof f.presentation === 'object'
+        ? {
+            sourceLabel: String(f.presentation.source_label || ''),
+            sourceName: String(f.presentation.source_name || ''),
+            link: String(f.presentation.link || '')
+          }
+        : null
   };
 }
 

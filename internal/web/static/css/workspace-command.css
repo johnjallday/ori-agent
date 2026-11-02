@@ -9088,3 +9088,186 @@ button.ws-cmd-rpg-class-card:focus-visible {
     animation: none;
   }
 }
+
+/* ── Follow-ups panel (#workspaceFollowupMount) ─────────────────────────────
+   Live DOM owned by workspace-followups.js. The command view moves the mount
+   below the Goal panel (Details) or below the map shell (Map), so it takes the
+   `.ws-cmd` tokens there; each token falls back to the app shell variable for
+   the moment it is rendered outside `.ws-cmd` (hidden in the shared hosts).
+   Class names are panel-specific, so nothing here reaches other surfaces. */
+.workspace-followup-mount {
+  margin: 0 0 1rem;
+  padding: 14px 16px;
+  border: 1px solid var(--ws-line, var(--border-color));
+  background: var(--ws-panel, var(--bg-secondary));
+  color: var(--ws-ink, var(--text-primary));
+}
+.ws-cmd .workspace-followup-mount {
+  margin: 0;
+}
+.workspace-followups-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.workspace-followups-heading {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.workspace-followups-title {
+  margin: 0;
+  font-family: var(--ws-font-mono, inherit);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ws-faction, var(--primary-color));
+}
+.workspace-followups-summary {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--ws-ink, var(--text-primary));
+}
+.workspace-followups-toggle {
+  flex: 0 0 auto;
+}
+.workspace-followups-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-basis: 100%;
+}
+.workspace-followups-chip {
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--ws-line, var(--border-color));
+  border-radius: 999px;
+  background: transparent;
+  font-size: 0.78rem;
+  color: var(--ws-ink-dim, var(--text-secondary));
+  cursor: pointer;
+}
+.workspace-followups-chip:hover {
+  border-color: var(--ws-line-bright, var(--text-secondary));
+  color: var(--ws-ink, var(--text-primary));
+}
+.workspace-followups-chip[aria-pressed="true"] {
+  border-color: var(--ws-faction, var(--primary-color));
+  background: var(--ws-faction-deep, var(--primary-light));
+  color: var(--ws-ink, var(--text-primary));
+}
+.workspace-followups-chip:focus-visible,
+.workspace-followup-source-link:focus-visible {
+  outline: 2px solid var(--ws-faction, var(--primary-color));
+  outline-offset: 2px;
+}
+.workspace-followups-body {
+  margin-top: 12px;
+}
+.workspace-followups-body[hidden],
+.workspace-followups-group[hidden] {
+  display: none;
+}
+.workspace-followups-group + .workspace-followups-group {
+  margin-top: 14px;
+}
+.workspace-followups-group-title {
+  margin: 0 0 6px;
+  font-family: var(--ws-font-mono, inherit);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim, var(--text-secondary));
+}
+.workspace-followups-group-count {
+  font-weight: 400;
+}
+.workspace-followup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* A card is one row: what it is on the left, its actions on the right. It
+   stacks on a narrow screen. */
+.workspace-followup-mount .workspace-followup-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  margin: 0;
+  padding: 8px 12px;
+  border-color: var(--ws-line, var(--border-color));
+  border-radius: 0;
+  background: var(--ws-panel-2, var(--bg-secondary));
+}
+.workspace-followup-card > * {
+  grid-column: 1;
+}
+.workspace-followup-card > .hq-followup-actions {
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  justify-content: flex-end;
+}
+.workspace-followup-card > .hq-followup-chooser {
+  grid-column: 1 / -1;
+}
+.workspace-followup-mount .hq-followup-title {
+  margin: 2px 0;
+}
+@media (max-width: 640px) {
+  .workspace-followup-mount .workspace-followup-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-followup-card > .hq-followup-actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+    margin-top: 6px;
+  }
+}
+.workspace-followup-mount .hq-followup-category,
+.workspace-followup-mount .hq-followup-detail,
+.workspace-followup-mount .hq-followup-ticket {
+  color: var(--ws-ink-dim, var(--text-secondary));
+}
+.workspace-followup-mount .hq-followup-title {
+  font-size: 0.9rem;
+  color: var(--ws-ink, var(--text-primary));
+}
+.workspace-followup-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.workspace-followup-due {
+  display: inline-block;
+  padding: 0 8px;
+  border: 1px solid var(--ws-line, var(--border-color));
+  border-radius: 999px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ws-ink, var(--text-primary));
+}
+/* Attention tone: overdue and due today. The ink stays the body colour, so the
+   amber carries the signal without becoming low-contrast text. */
+.workspace-followup-due.is-attention {
+  border-color: var(--ws-keeper, #b45309);
+  background: rgba(232, 181, 75, 0.16);
+}
+.workspace-followup-source {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ws-ink-dim, var(--text-secondary));
+}
+.workspace-followup-source-link {
+  color: var(--ws-faction, var(--primary-color));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.workspace-followup-source-name {
+  color: var(--ws-ink, var(--text-primary));
+}
