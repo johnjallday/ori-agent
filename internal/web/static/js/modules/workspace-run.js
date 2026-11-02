@@ -385,7 +385,7 @@ export class WorkspaceRunPage {
     }
     if (taskID && this.elements.backlink) {
       this.elements.backlink.href = this.taskHref(taskID);
-      this.elements.backlink.lastChild.textContent = 'Back to Task';
+      this.elements.backlink.lastChild.textContent = 'Back to ticket';
     }
   }
 

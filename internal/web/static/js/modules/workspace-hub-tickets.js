@@ -119,6 +119,7 @@
       // Hierarchy is detail-only; a list response leaves these empty (FR-142).
       parent: raw.parent ? normalizeTicketSummary(raw.parent) : null,
       subtickets: Array.isArray(raw.subtickets) ? raw.subtickets.map(normalizeTicketSummary) : [],
+      latestResult: raw.latest_result || '',
       archived: Boolean(raw.archived),
       startedAt: raw.started_at || null,
       completedAt: raw.completed_at || null,
@@ -1378,6 +1379,15 @@
     appendDetailRow(execution, 'Closed', ticket.completedAt ? formatDate(ticket.completedAt) : '');
     body.appendChild(execution);
 
+    // What came back, readable here without going to the Runs page (FR-19).
+    if (ticket.latestResult) {
+      appendSectionTitle(body, 'Latest result');
+      const result = document.createElement('div');
+      result.className = 'ticket-detail-result';
+      result.textContent = ticket.latestResult;
+      body.appendChild(result);
+    }
+
     // Run history loads separately and asynchronously: it is attempt-level
     // data on a different store, and a slow or failing runs endpoint must not
     // stop the Ticket itself from rendering.
@@ -1435,6 +1445,14 @@
     if (!runs.length) return;
 
     appendSectionTitle(host, `Runs (${runs.length})`);
+    const slug = ticket.owningWorkspaceSlug;
+    if (slug) {
+      const all = document.createElement('a');
+      all.className = 'ticket-detail-runs-link';
+      all.href = `/workspaces/${encodeURIComponent(slug)}/task/${encodeURIComponent(ticket.id)}`;
+      all.textContent = 'Open Runs';
+      host.appendChild(all);
+    }
     const list = document.createElement('ol');
     list.className = 'ticket-detail-runs-list';
     runs.forEach((run, index) => {
@@ -1446,12 +1464,18 @@
       status.className = 'ticket-detail-run-status';
       status.dataset.status = run.status;
       status.textContent = index === 0 ? `${run.status} (latest)` : run.status;
+      const label = slug && run.id ? document.createElement('a') : status;
+      if (label !== status) {
+        label.href = `/workspaces/${encodeURIComponent(slug)}/runs/${encodeURIComponent(run.id)}`;
+        label.className = 'ticket-detail-run-link';
+        label.appendChild(status);
+      }
 
       const when = document.createElement('span');
       when.className = 'ticket-detail-run-when';
       when.textContent = run.startedAt ? formatDate(run.startedAt) : '';
 
-      item.appendChild(status);
+      item.appendChild(label);
       item.appendChild(when);
       if (run.error) {
         const error = document.createElement('span');

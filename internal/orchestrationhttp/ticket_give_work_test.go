@@ -96,6 +96,35 @@ func (f *giveWorkFixture) ticketCount(t *testing.T) int {
 	return len(ws.Tasks)
 }
 
+// PRD 760 FR-19: what came back is readable from ticket detail, and only there.
+func TestTicketDetail_CarriesTheLatestResultButTheListDoesNot(t *testing.T) {
+	f := newGiveWorkFixture(t)
+	_, created := f.post(t, `{"state":"ready","title":"Write it"}`)
+	if err := f.store.Update(f.ws.ID, func(ws *workspace.Workspace) error {
+		return ws.MutateTask(created.ID, func(task *workspace.Task) error {
+			task.Result = "The finished draft"
+			return nil
+		})
+	}); err != nil {
+		t.Fatalf("store result: %v", err)
+	}
+	service := workspace.NewTicketService(f.store)
+	detail, err := service.Get(f.ws.ID, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if detail.LatestResult != "The finished draft" {
+		t.Errorf("detail LatestResult = %q", detail.LatestResult)
+	}
+	page, err := service.Search(workspace.TicketQuery{WorkspaceID: f.ws.ID})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(page.Tickets) != 1 || page.Tickets[0].LatestResult != "" {
+		t.Errorf("list must not carry results: %+v", page.Tickets)
+	}
+}
+
 func TestGiveWork_NoAgentIsBacklogAndStartsNothing(t *testing.T) {
 	f := newGiveWorkFixture(t)
 	rec, got := f.post(t, `{"state":"backlog","title":"A thing to do"}`)

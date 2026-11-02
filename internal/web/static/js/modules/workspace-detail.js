@@ -60,7 +60,9 @@ import {
   isTaskAwaitingNextStep as taskAwaitingNextStep,
   PRESENTATION_STATE,
   resolveTaskState,
-  resolveTaskStatusPresentation
+  resolveTaskStatusPresentation,
+  resolveTicketStatePill,
+  resolveRunSignal
 } from './task-presentation.js';
 
 /**
@@ -5713,6 +5715,10 @@ export class WorkspaceDetailPage {
     const isParent = isParentHint || subtasks.length > 0;
     const parentSubtaskCount = subtaskCount || subtasks.length;
     const statusInfo = this.getTaskStatusPresentation(task);
+    // The row shows the ticket's state; how the latest run went sits beside it
+    // and never replaces it (PRD 760 FR-4).
+    const ticketPill = resolveTicketStatePill(task);
+    const runSignal = resolveRunSignal(task);
     const awaitingNextStep = this.isTaskAwaitingNextStep(task);
     const hasUnassignedSubtasks =
       isParent && subtasks.some(subtask => !subtask.to || subtask.to === 'unassigned');
@@ -5883,7 +5889,7 @@ export class WorkspaceDetailPage {
             </div>
             <div class="workspace-detail-task-status-group">
               <span class="workspace-detail-task-activity" data-task-activity-slot hidden></span>
-              <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
+              <span class="workspace-detail-task-status ${ticketPill.className}">${this.escapeHtml(runSignal ? `${ticketPill.label} · ${runSignal}` : ticketPill.label)}</span>
             </div>
           </div>
           <div class="workspace-detail-item-meta">

@@ -3,7 +3,9 @@ import {
   FILTER,
   resolveTaskPresentation,
   sortTasksForDrawer,
-  taskMatchesFilter
+  taskMatchesFilter,
+  resolveTicketStatePill,
+  resolveRunSignal
 } from './task-presentation.js';
 
 /** @typedef {'loading'|'ready'|'unavailable'|'not_applicable'} SourceState */
@@ -113,7 +115,8 @@ export function resolveWorkspaceNextAction(input) {
     return finish({
       kind: 'task',
       title: taskTitle(task),
-      description: presentation.label,
+      // The ticket's state, or how its latest run went; never a legacy status.
+      description: resolveRunSignal(task) || resolveTicketStatePill(task).label,
       tone: presentation.tone,
       action:
         action && task.id
@@ -122,7 +125,7 @@ export function resolveWorkspaceNextAction(input) {
               kind: action.id,
               id: String(task.id),
               key: `task:${action.id}:${task.id}`,
-              label: action.label
+              label: 'Open ticket'
             }
           : null
     });

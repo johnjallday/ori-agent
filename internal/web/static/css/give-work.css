@@ -98,6 +98,29 @@
   font-size: 13px;
 }
 
+.ticket-detail-result {
+  max-height: 320px;
+  margin-bottom: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.ticket-detail-runs-link {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+/* How the latest run went, beside the ticket's state and never as it. */
+.workspace-task-run-signal {
+  margin-right: 8px;
+  color: var(--bs-danger-text-emphasis);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .give-work-actions {
   display: flex;
   flex-wrap: wrap;

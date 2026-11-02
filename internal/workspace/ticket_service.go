@@ -219,6 +219,7 @@ func (s *TicketService) Get(workspaceID, ticketID string) (*Ticket, error) {
 	ticket := NewTicket(task, ws.ID, ws.Name, ws.FolderSlug)
 	ticket.Archived = ticket.State.Terminal() && ticketIsArchived(task, s.clock())
 	attachTicketHierarchy(ws, task, &ticket)
+	ticket.LatestResult = task.Result
 	return &ticket, nil
 }
 

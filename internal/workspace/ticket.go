@@ -682,6 +682,10 @@ type Ticket struct {
 	// deliberately leave these empty.
 	Parent     *TicketSummary  `json:"parent,omitempty"`
 	Subtickets []TicketSummary `json:"subtickets,omitempty"`
+	// LatestResult is what the latest run wrote. Detail reads only, like the
+	// hierarchy above: a result can be long, and the board shows cards (PRD 760
+	// FR-19).
+	LatestResult string `json:"latest_result,omitempty"`
 
 	// Archived reports that this terminal Ticket has aged past the 14-day
 	// recent window (FR-143). It is a presentation flag derived at read time,

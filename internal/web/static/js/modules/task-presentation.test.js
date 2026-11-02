@@ -12,7 +12,9 @@ import {
   taskShortId,
   taskLatestActivityAt,
   taskBlockedRepair,
-  isRepairGatedTask
+  isRepairGatedTask,
+  resolveTicketStatePill,
+  resolveRunSignal
 } from './task-presentation.js';
 
 const attentionCases = JSON.parse(
@@ -464,4 +466,49 @@ test('a failure with no fixable cause keeps the ordinary Retry action', () => {
   });
   assert.equal(pres.primaryAction.id, 'retry');
   assert.equal(pres.repair, null);
+});
+
+test('a stored ticket state is the pill, whatever legacy status says (PRD 760 FR-4)', () => {
+  const cases = [
+    ['backlog', 'backlog', 'Backlog'],
+    ['ready', 'assigned', 'Ready'],
+    ['in_progress', 'failed', 'In Progress'],
+    ['review', 'completed', 'In Review'],
+    ['done', 'completed', 'Done'],
+    ['cancelled', 'cancelled', 'Cancelled']
+  ];
+  for (const [ticket_state, status, label] of cases) {
+    const pill = resolveTicketStatePill({ ticket_state, status });
+    assert.equal(pill.state, ticket_state);
+    assert.equal(pill.label, label);
+  }
+});
+
+test('a record with only legacy status reads as the server reads it', () => {
+  const cases = {
+    backlog: 'backlog',
+    pending: 'ready',
+    assigned: 'ready',
+    in_progress: 'in_progress',
+    waiting_for_choice: 'in_progress',
+    failed: 'in_progress',
+    timeout: 'in_progress',
+    completed: 'done',
+    cancelled: 'cancelled',
+    '': 'ready'
+  };
+  for (const [status, state] of Object.entries(cases)) {
+    assert.equal(resolveTicketStatePill({ status }).state, state, status);
+  }
+  assert.equal(resolveTicketStatePill(null).state, 'ready');
+});
+
+test('the run signal says how the latest run went, separately from state', () => {
+  assert.equal(resolveRunSignal({ status: 'failed' }), 'Latest run failed');
+  assert.equal(resolveRunSignal({ status: 'timeout' }), 'Latest run timed out');
+  assert.equal(resolveRunSignal({ status: 'waiting_for_choice' }), 'Waiting for your choice');
+  for (const quiet of ['pending', 'assigned', 'in_progress', 'completed', 'cancelled']) {
+    assert.equal(resolveRunSignal({ status: quiet, to: 'Writer' }), '', quiet);
+  }
+  assert.equal(resolveRunSignal(null), '');
 });

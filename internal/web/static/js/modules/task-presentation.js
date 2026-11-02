@@ -533,8 +533,62 @@ export function taskShortId(task) {
   return tail ? `#${tail}` : '';
 }
 
+const TICKET_STATE_PILLS = Object.freeze({
+  backlog: Object.freeze({ label: 'Backlog', className: 'backlog' }),
+  ready: Object.freeze({ label: 'Ready', className: 'pending' }),
+  in_progress: Object.freeze({ label: 'In Progress', className: 'in_progress' }),
+  review: Object.freeze({ label: 'In Review', className: 'completed' }),
+  done: Object.freeze({ label: 'Done', className: 'completed' }),
+  cancelled: Object.freeze({ label: 'Cancelled', className: 'cancelled' })
+});
+
+// Mirrors the server's reading of a record that predates ticket_state
+// (ticketStateForLegacyStatus). A stored ticket_state is always the answer.
+const STATE_FOR_LEGACY_STATUS = Object.freeze({
+  backlog: 'backlog',
+  pending: 'ready',
+  assigned: 'ready',
+  in_progress: 'in_progress',
+  waiting_for_choice: 'in_progress',
+  failed: 'in_progress',
+  timeout: 'in_progress',
+  completed: 'done',
+  cancelled: 'cancelled'
+});
+
+/** A ticket's one state, never a legacy status (PRD 760 FR-4). */
+export function resolveTicketStatePill(task) {
+  const stored = String(task?.ticket_state || '').trim();
+  const state = TICKET_STATE_PILLS[stored]
+    ? stored
+    : STATE_FOR_LEGACY_STATUS[String(task?.status || '').trim()] || 'ready';
+  return { state, ...TICKET_STATE_PILLS[state] };
+}
+
+/**
+ * How the latest run went, when a person should know: a signal beside the
+ * ticket's state, never the state itself (PRD 760 FR-4). '' when there is
+ * nothing to say.
+ */
+export function resolveRunSignal(task) {
+  switch (resolveTaskState(task || {})) {
+    case PRESENTATION_STATE.FAILED:
+      return 'Latest run failed';
+    case PRESENTATION_STATE.TIMED_OUT:
+      return 'Latest run timed out';
+    case PRESENTATION_STATE.NEEDS_INPUT:
+      return 'Waiting for your choice';
+    case PRESENTATION_STATE.BLOCKED:
+      return 'Latest run is blocked';
+    default:
+      return '';
+  }
+}
+
 export const TaskPresentation = {
   PRESENTATION_STATE,
+  resolveTicketStatePill,
+  resolveRunSignal,
   FILTER,
   resolveTaskState,
   resolveTaskPresentation,

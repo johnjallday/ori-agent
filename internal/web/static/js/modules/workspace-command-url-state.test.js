@@ -125,27 +125,54 @@ function withHarness(initialSearch, fn) {
   }
 }
 
-test('boot with valid mode+panel+task+agent applies all of them (FR80, FR82-84)', () => {
-  withHarness('?mode=map&panel=tasks&task=task-1&agent=writer', ({ harness }) => {
-    const view = new WorkspaceCommandView(makePage());
-    assert.equal(view.viewMode, 'map');
-    assert.equal(view.taskDrawerOpen, true);
-    assert.equal(view.taskDrawerSelectedId, 'task-1');
-    assert.equal(view.selectedAgentKey, 'writer');
-    // The incoming URL was already fully valid and canonical, so boot makes
-    // NO history calls — proving it doesn't needlessly rewrite an accurate URL.
-    assert.deepEqual(harness.calls, []);
+// Old links to the retired task drawer keep working: they land on the board, on
+// that ticket (PRD 760 FR-24, FR-33).
+function withTicketsSpy(run) {
+  const original = WorkspaceCommandView.prototype.openTicketsView;
+  const opened = [];
+  WorkspaceCommandView.prototype.openTicketsView = function (id) {
+    opened.push(id);
+  };
+  try {
+    run(opened);
+  } finally {
+    WorkspaceCommandView.prototype.openTicketsView = original;
+  }
+}
+
+test('an old panel=tasks link opens that ticket on the board, and keeps the agent', () => {
+  withHarness('?mode=map&panel=tasks&task=task-1&agent=writer', () => {
+    withTicketsSpy(opened => {
+      const view = new WorkspaceCommandView(makePage());
+      assert.deepEqual(opened, ['task-1']);
+      assert.equal(view.selectedAgentKey, 'writer');
+    });
   });
 });
 
-test('boot drops a stale task id; a stale agent falls back to the default selection (FR91)', () => {
+test('an old link waits for the task list before reading its ticket as gone', () => {
+  withHarness('?panel=tasks&task=task-1', () => {
+    withTicketsSpy(opened => {
+      const tasks = [];
+      const page = { tasks, workspaceId: 'ws-1', buildAgentGroups: () => [] };
+      const view = new WorkspaceCommandView(page);
+      assert.deepEqual(opened, [], 'an empty list is not loaded yet');
+      tasks.push({ id: 'task-1', status: 'pending' });
+      view.refresh();
+      assert.deepEqual(opened, ['task-1']);
+    });
+  });
+});
+
+test('an old link to a ticket that is gone still lands on the board; a stale agent falls back', () => {
   withHarness('?panel=tasks&task=deleted-task&agent=ghost-agent', () => {
-    const view = new WorkspaceCommandView(makePage());
-    assert.equal(view.taskDrawerSelectedId, '', 'stale task id dropped, not applied');
-    assert.equal(view.taskDrawerOpen, true, 'panel=tasks alone is still honored');
-    // The stale agent is dropped rather than applied; normal default-selection
-    // (first/entry agent) takes over exactly as if no agent had been in the URL.
-    assert.equal(view.selectedAgentKey, 'writer');
+    withTicketsSpy(opened => {
+      const view = new WorkspaceCommandView(makePage());
+      assert.deepEqual(opened, [''], 'the stale id is dropped, the board still opens');
+      // The stale agent is dropped rather than applied; normal default-selection
+      // (first/entry agent) takes over exactly as if no agent had been in the URL.
+      assert.equal(view.selectedAgentKey, 'writer');
+    });
   });
 });
 
@@ -225,18 +252,17 @@ test('collapsing the tray is presentational: no push/replace with a new URL, onl
   });
 });
 
-test('Back/Forward (popstate) restores mode, panel, task, and agent (FR88)', () => {
+test('Back/Forward (popstate) restores mode and agent, and an old panel=tasks entry opens the board (FR88)', () => {
   withHarness('', ({ harness }) => {
-    const view = new WorkspaceCommandView(makePage());
-    harness.fireExternalNavigation('?mode=map&panel=tasks&task=task-2&agent=writer', {
-      drawerScroll: 0,
-      focusSelector: null,
-      trayCollapsed: false
+    withTicketsSpy(opened => {
+      const view = new WorkspaceCommandView(makePage());
+      harness.fireExternalNavigation('?mode=map&panel=tasks&task=task-2&agent=writer', {
+        focusSelector: null,
+        trayCollapsed: false
+      });
+      assert.equal(view.selectedAgentKey, 'writer');
+      assert.deepEqual(opened, ['task-2']);
     });
-    assert.equal(view.viewMode, 'map');
-    assert.equal(view.taskDrawerOpen, true);
-    assert.equal(view.taskDrawerSelectedId, 'task-2');
-    assert.equal(view.selectedAgentKey, 'writer');
   });
 });
 
@@ -253,7 +279,6 @@ test('Back from an explicit Map entry restores the clean Details entry', () => {
     // was just persisted, so resolving this popstate through local preference
     // incorrectly leaves the rendered map active even though Back removed mode.
     harness.fireExternalNavigation('?agent=writer', {
-      drawerScroll: 0,
       focusSelector: null,
       trayCollapsed: false
     });
@@ -287,68 +312,53 @@ test('taskHrefWithReturn builds a safe, workspace-scoped href with a validated r
   });
 });
 
-test('boot restoration survives the real async-load race: tasks/agents are empty at construction and arrive via a later refresh() (regression)', () => {
+test('boot restoration survives the real async-load race: tasks/agents are empty at construction and arrive via a later refresh', () => {
   // Reproduces a live-browser finding: WorkspaceCommandView is constructed
-  // synchronously right after the page kicks off its async data load, so
-  // page.tasks/agent groups are still [] on the first applyBootURLState() pass.
-  // A naive `Array.isArray(page.tasks)` gate treated that empty array as
-  // "loaded", sanitized the boot URL against zero valid ids, and permanently
-  // dropped the task+agent before the real data ever arrived.
+  // synchronously right after the page kicks off its async data load, so the
+  // agent groups are still empty on the first applyBootURLState() pass.
   withHarness('?mode=map&panel=tasks&task=task-1&agent=writer', ({ harness }) => {
-    let tasks = []; // starts empty, exactly like the real page constructor
-    const page = {
-      tasks,
-      workspaceId: 'ws-1',
-      buildAgentGroups: () => [], // no agents loaded yet either
-      isWorkspaceEntryAgent: () => false,
-      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' })
-    };
-    const view = new WorkspaceCommandView(page);
+    withTicketsSpy(opened => {
+      const tasks = [];
+      const page = {
+        tasks,
+        workspaceId: 'ws-1',
+        buildAgentGroups: () => [],
+        isWorkspaceEntryAgent: () => false,
+        getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' })
+      };
+      const view = new WorkspaceCommandView(page);
+      assert.equal(view.selectedAgentKey, '');
+      assert.deepEqual(opened, [], 'nothing is applied before the data is here');
 
-    // First pass (construction/activate()): data isn't here yet, nothing applied.
-    assert.equal(view.taskDrawerSelectedId, '');
-    assert.equal(view.selectedAgentKey, '');
+      tasks.push({ id: 'task-1', status: 'pending', to: 'writer' });
+      page.buildAgentGroups = () => [
+        {
+          key: 'writer',
+          name: 'Writer',
+          isWorkspaceAgent: true,
+          instanceCount: 1,
+          roles: ['Agent'],
+          tasks: []
+        }
+      ];
+      harness.calls.length = 0;
+      view.refresh();
 
-    // Real data arrives; the page mutates `page.tasks` in place and swaps in a
-    // real buildAgentGroups, then calls refresh() exactly as workspace-detail.js
-    // does in loadTasks()'s finally block.
-    tasks.push({ id: 'task-1', status: 'pending', to: 'writer' });
-    page.buildAgentGroups = () => [
-      {
-        key: 'writer',
-        name: 'Writer',
-        isWorkspaceAgent: true,
-        instanceCount: 1,
-        roles: ['Agent'],
-        tasks: []
-      }
-    ];
-    harness.calls.length = 0;
-    view.refresh();
-
-    assert.equal(view.taskDrawerOpen, true);
-    assert.equal(
-      view.taskDrawerSelectedId,
-      'task-1',
-      'the task now resolves once real data has loaded'
-    );
-    assert.equal(
-      view.selectedAgentKey,
-      'writer',
-      'the agent now resolves once real data has loaded'
-    );
+      assert.deepEqual(opened, ['task-1'], 'the ticket resolves once real data has loaded');
+      assert.equal(view.selectedAgentKey, 'writer');
+    });
   });
 });
 
 test('a boot reference to a task/agent that never appears is eventually dropped, not retried forever (FR91)', () => {
   withHarness('?panel=tasks&task=ghost-task&agent=ghost-agent', () => {
-    const page = { tasks: [], workspaceId: 'ws-1', buildAgentGroups: () => [] };
-    const view = new WorkspaceCommandView(page);
-    // Simulate many refreshes of a workspace that genuinely never gets this
-    // task/agent (deleted, or a bad link) — it must give up eventually.
-    for (let i = 0; i < 25; i++) view.refresh();
-    assert.equal(view.taskDrawerSelectedId, '');
-    assert.equal(view.selectedAgentKey, '');
+    withTicketsSpy(opened => {
+      const page = { tasks: [], workspaceId: 'ws-1', buildAgentGroups: () => [] };
+      const view = new WorkspaceCommandView(page);
+      for (let i = 0; i < 25; i++) view.refresh();
+      assert.deepEqual(opened, [''], 'it gives up once, on the board');
+      assert.equal(view.selectedAgentKey, '');
+    });
   });
 });
 
@@ -357,7 +367,6 @@ test('boot with panel=backlog + a valid backlog item id opens the shared drawer 
     const view = new WorkspaceCommandView(makePage());
     assert.equal(view.backlogDrawerOpen, true);
     assert.equal(view.backlogDrawerSelectedId, 'backlog-1');
-    assert.equal(view.taskDrawerOpen, false, 'the Tasks drawer stays closed');
     // The incoming URL was already fully valid and canonical (agent included),
     // so boot makes no history calls.
     assert.deepEqual(harness.calls, []);
@@ -386,36 +395,6 @@ test('opening the Backlog drawer via openBacklogDrawer() syncs panel=backlog int
     const pushed = harness.calls.find(([kind]) => kind === 'push');
     assert.ok(pushed);
     assert.match(pushed[1], /panel=backlog/);
-  });
-});
-
-test('opening the Tasks drawer while the Backlog drawer is open closes the Backlog drawer (only one drawer at a time)', () => {
-  withHarness('', () => {
-    const view = new WorkspaceCommandView(makePage());
-    view.openBacklogDrawer(null);
-    assert.equal(view.backlogDrawerOpen, true);
-    view.openTaskDrawer(null);
-    assert.equal(view.taskDrawerOpen, true);
-    assert.equal(
-      view.backlogDrawerOpen,
-      false,
-      'opening Tasks closes the already-open Backlog drawer'
-    );
-  });
-});
-
-test('opening the Backlog drawer while the Tasks drawer is open closes the Tasks drawer (only one drawer at a time)', () => {
-  withHarness('', () => {
-    const view = new WorkspaceCommandView(makePage());
-    view.openTaskDrawer(null);
-    assert.equal(view.taskDrawerOpen, true);
-    view.openBacklogDrawer(null);
-    assert.equal(view.backlogDrawerOpen, true);
-    assert.equal(
-      view.taskDrawerOpen,
-      false,
-      'opening Backlog closes the already-open Tasks drawer'
-    );
   });
 });
 
@@ -543,21 +522,4 @@ test('a Create form without a prompt sends no system_prompt; one with a prompt s
     globalThis.document = originalDocument;
     globalThis.bootstrap = originalBootstrap;
   }
-});
-
-test('opening the drawer syncs the URL; closing it removes panel/task from the URL', () => {
-  withHarness('', ({ harness }) => {
-    const view = new WorkspaceCommandView(makePage());
-    harness.calls.length = 0;
-    view.openTaskDrawer(null);
-    let pushed = harness.calls.find(([kind]) => kind === 'push');
-    assert.ok(pushed);
-    assert.match(pushed[1], /panel=tasks/);
-
-    harness.calls.length = 0;
-    view.closeTaskDrawer();
-    pushed = harness.calls.find(([kind]) => kind === 'push');
-    assert.ok(pushed);
-    assert.ok(!pushed[1].includes('panel=tasks'), 'panel/task cleared from the URL on close');
-  });
 });

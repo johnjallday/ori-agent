@@ -919,7 +919,7 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, workspaceID, worksp
 
 func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, workspaceSlug, taskID string) {
 	data := s.prepareBasePageData("workspaces")
-	data.Title = "Task - Ori Agent"
+	data.Title = "Runs - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
@@ -929,7 +929,7 @@ func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, workspac
 
 func (s *Server) serveWorkspaceRun(w http.ResponseWriter, workspaceID, workspaceSlug, runID string) {
 	data := s.prepareBasePageData("workspaces")
-	data.Title = "Workspace Run - Ori Agent"
+	data.Title = "Run - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug

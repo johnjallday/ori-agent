@@ -15,10 +15,9 @@ import {
   isWorkingTask as sharedIsWorkingTask,
   isQueuedTask as sharedIsQueuedTask,
   resolveTaskPresentation,
-  resolveTaskCounts,
-  sortTasksForDrawer,
+  resolveTicketStatePill,
+  resolveRunSignal,
   taskMatchesFilter,
-  taskShortId,
   FILTER
 } from './task-presentation.js';
 import {
@@ -285,12 +284,6 @@ export class WorkspaceCommandView {
     this.detachmentUnitsSignature = '';
     this.detachmentPickerOpen = false;
     this.pendingDetachmentSelectionId = '';
-    this.taskDrawerOpen = false;
-    this.taskDrawerEl = null;
-    this.taskDrawerTrigger = null;
-    this.taskDrawerFilter = FILTER.ACTIONABLE;
-    this.taskDrawerSelectedId = '';
-    this._drawerAnnounce = '';
     // Persistent, non-modal Backlog drawer (PRD workspace-backlog FR30, 35-37)
     // — the shared full interaction surface opened from both the Details rail
     // panel and the Map Quest Board (group 5). Backlog is presented
@@ -954,8 +947,6 @@ export class WorkspaceCommandView {
   refresh() {
     if (this.active) this.render();
     else if (this.statModalSection) this.renderStatModalBody();
-    // Live-refresh the drawer body in place (preserves selection + scroll, FR25).
-    if (this.taskDrawerOpen) this.renderTaskDrawerBody();
     // Data may not have been ready the first time activate() ran; retry once
     // page.tasks/agents are actually populated (FR90: refresh restores from URL).
     this.applyBootURLState();
@@ -1088,9 +1079,9 @@ export class WorkspaceCommandView {
     const context = this.urlStateContext();
     const boot = this._urlBootState;
     const bootWantsBacklogTask = Boolean(boot.task) && boot.panel === 'backlog';
-    const bootWantsTaskDrawerTask = Boolean(boot.task) && boot.panel !== 'backlog';
+    const bootWantsTicket = Boolean(boot.task) && boot.panel === 'tasks';
     const dataLooksUnready =
-      (bootWantsTaskDrawerTask && context.validTaskIds.length === 0) ||
+      (bootWantsTicket && context.validTaskIds.length === 0) ||
       (bootWantsBacklogTask && context.validBacklogIds.length === 0) ||
       (boot.agent && context.validAgentKeys.length === 0) ||
       (boot.run && (context.validRunTaskIds || context.validTaskIds).length === 0);
@@ -1127,8 +1118,8 @@ export class WorkspaceCommandView {
       // mount into markup that render() is about to replace.
       this._pendingSettingsPanel = true;
     } else if (state.panel === 'tasks') {
-      this.taskDrawerOpen = true;
-      if (state.task) this.taskDrawerSelectedId = state.task;
+      // An older link to the task drawer lands on the board, on that ticket.
+      this._pendingTicketsView = { ticketId: state.task || '' };
     } else if (state.panel === 'backlog') {
       // Global Workspace Map deep link (FR59): opens the shared Backlog
       // drawer, never mutates/promotes/deletes directly.
@@ -1139,12 +1130,10 @@ export class WorkspaceCommandView {
 
     this._urlSyncEnabled = true;
     this.render();
-    if (this.taskDrawerOpen) {
-      const el = this.ensureTaskDrawer();
-      if (el) {
-        el.hidden = false;
-        this.renderTaskDrawerBody();
-      }
+    if (this._pendingTicketsView) {
+      const { ticketId } = this._pendingTicketsView;
+      this._pendingTicketsView = null;
+      this.openTicketsView(ticketId);
     }
     if (this.backlogDrawerOpen) {
       const el = this.ensureBacklogDrawer();
@@ -1175,18 +1164,12 @@ export class WorkspaceCommandView {
       // still owns the URL. It is reported at all so that the Plans page's
       // "Open Workspace Settings" link survives a reload instead of
       // normalizing itself away the moment it arrives.
-      panel: this.taskDrawerOpen
-        ? 'tasks'
-        : this.backlogDrawerOpen
-          ? 'backlog'
-          : this.statModalSection === 'settings'
-            ? 'settings'
-            : '',
-      task: this.taskDrawerOpen
-        ? this.taskDrawerSelectedId
-        : this.backlogDrawerOpen
-          ? this.backlogDrawerSelectedId
+      panel: this.backlogDrawerOpen
+        ? 'backlog'
+        : this.statModalSection === 'settings'
+          ? 'settings'
           : '',
+      task: this.backlogDrawerOpen ? this.backlogDrawerSelectedId : '',
       agent: this.selectedAgentKey || '',
       run:
         this.execController && typeof this.execController.getSelectedTaskId === 'function'
@@ -1202,8 +1185,7 @@ export class WorkspaceCommandView {
     if (!active || typeof active.getAttribute !== 'function') return null;
     for (const attr of [
       'data-cmd-map-select-agent',
-      'data-cmd-drawer-select',
-      'data-cmd-open-task-drawer',
+      'data-cmd-open-tickets',
       'data-cmd-backlog-select',
       'data-cmd-open-backlog-drawer'
     ]) {
@@ -1217,15 +1199,9 @@ export class WorkspaceCommandView {
   captureHistoryPresentationState() {
     if (typeof window === 'undefined' || !window.history) return;
     const current = window.history.state || {};
-    const drawerList =
-      this.taskDrawerEl && typeof this.taskDrawerEl.querySelector === 'function'
-        ? this.taskDrawerEl.querySelector('.ws-cmd-drawer-list')
-        : null;
-    const drawerScroll = drawerList ? drawerList.scrollTop : current.drawerScroll || 0;
     window.history.replaceState(
       {
         ...current,
-        drawerScroll,
         focusSelector: this.currentFocusSelector() || current.focusSelector || null,
         trayCollapsed: this.trayCollapsed
       },
@@ -1296,21 +1272,12 @@ export class WorkspaceCommandView {
       this.selectedAgentKey = state.agent;
       this.agentSelectionInitialized = true;
     }
-    this.taskDrawerOpen = state.panel === 'tasks';
-    if (this.taskDrawerOpen && state.task) this.taskDrawerSelectedId = state.task;
     const historyState = (event && event.state) || {};
     this.trayCollapsed = Boolean(historyState.trayCollapsed);
     if (state.run) this.trackAndShowTray(state.run);
 
     this.render();
-    const el = this.taskDrawerOpen ? this.ensureTaskDrawer() : null;
-    if (el) {
-      el.hidden = false;
-      this.renderTaskDrawerBody();
-      const list = el.querySelector('.ws-cmd-drawer-list');
-      if (list && typeof historyState.drawerScroll === 'number')
-        list.scrollTop = historyState.drawerScroll;
-    }
+    if (state.panel === 'tasks') this.openTicketsView(state.task || '');
     if (
       historyState.focusSelector &&
       this.container &&
@@ -1335,10 +1302,6 @@ export class WorkspaceCommandView {
     if (this.statModalSection || this.identityEditMode) return;
     if (this.backlogDrawerOpen) {
       this.closeBacklogDrawer();
-      return;
-    }
-    if (this.taskDrawerOpen) {
-      this.closeTaskDrawer();
       return;
     }
     // Collapse (not close) an expanded tray on Escape — collapsing is
@@ -2407,7 +2370,7 @@ export class WorkspaceCommandView {
     return (
       '<section id="workspaceNextActionRegion" class="ws-cmd-work-first" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
-      '<button type="button" class="ws-cmd-agent-action" data-cmd-open-task-drawer data-cmd-work-key="tasks">All Tasks</button></div>' +
+      '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
       `<h3>${escapeHtml(view.title)}</h3><p>${escapeHtml(view.description)}</p>` +
       primary +
@@ -2472,14 +2435,50 @@ export class WorkspaceCommandView {
     );
   }
 
-  runWorkAction(action, id, trigger) {
-    const task = this.drawerTasks().find(task => String(task.id) === String(id));
-    const currentAction = task && resolveTaskPresentation(task).primaryAction?.id;
-    this.workNotice =
-      currentAction !== action ? 'This task changed. Review its current state in Tasks.' : '';
-    this.taskDrawerSelectedId = String(id || '');
-    this.openTaskDrawer(trigger);
-    if (currentAction && currentAction === action) this.runDrawerAction(action, id);
+  // A Next action about a ticket opens that ticket on the board (PRD 760 FR-32).
+  // What to do next is decided there, with the ticket's current state in view.
+  runWorkAction(_action, id) {
+    this.workNotice = '';
+    this.openTicketsView(id);
+  }
+
+  /** The detail renders below the board, so bring it into view and move focus. */
+  revealTicketDetail() {
+    if (typeof document === 'undefined') return;
+    const detail = document.getElementById('hubTicketDetail');
+    if (!detail) return;
+    if (typeof detail.scrollIntoView === 'function') detail.scrollIntoView({ block: 'start' });
+    const title = document.getElementById('hubTicketDetailTitle');
+    if (title && typeof title.focus === 'function') {
+      if (typeof title.setAttribute === 'function') title.setAttribute('tabindex', '-1');
+      title.focus({ preventScroll: true });
+    }
+  }
+
+  /** A ticket's state, plus how its latest run went when that matters (FR-4). */
+  ticketStatusText(task) {
+    const state = resolveTicketStatePill(task).label;
+    const signal = resolveRunSignal(task);
+    return signal ? state + ' · ' + signal : state;
+  }
+
+  /** Opens the board, and one ticket on it when given. The URL says which. */
+  openTicketsView(ticketId = '') {
+    const id = String(ticketId || '').trim();
+    this.setCommandViewMode('tickets', { focus: false });
+    if (!id) return;
+    const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+    if (tickets && typeof tickets.openDetail === 'function') {
+      if (typeof tickets.init === 'function') tickets.init();
+      Promise.resolve(tickets.openDetail(this.workspaceId(), id))
+        .then(() => this.revealTicketDetail())
+        .catch(() => {});
+    }
+    if (typeof window !== 'undefined' && window.history && window.location) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('ticket', id);
+      window.history.replaceState(window.history.state, '', url);
+    }
   }
 
   bindWorkFirst() {
@@ -2500,8 +2499,8 @@ export class WorkspaceCommandView {
         this.page?.showAddTaskModal?.();
         return;
       }
-      if (button.hasAttribute('data-cmd-open-task-drawer')) {
-        this.openTaskDrawer(button);
+      if (button.hasAttribute('data-cmd-open-tickets')) {
+        this.openTicketsView();
         return;
       }
       if (button.hasAttribute('data-cmd-work-action'))
@@ -2686,15 +2685,6 @@ export class WorkspaceCommandView {
         this.setCommandBackgroundInert(true);
         this.restoreDailyBriefPanelView();
         this.restoreStatModalFocus();
-      }
-    }
-
-    // The task drawer likewise survives full re-renders: re-attach + repaint it.
-    if (this.taskDrawerEl && this.container && this.container.appendChild) {
-      this.container.appendChild(this.taskDrawerEl);
-      if (this.taskDrawerOpen) {
-        this.taskDrawerEl.hidden = false;
-        this.renderTaskDrawerBody();
       }
     }
 
@@ -3930,7 +3920,7 @@ export class WorkspaceCommandView {
         const label = String(t.description || t.name || t.title || 'Task');
         const assignee = String(t.to || t.agent_name || t.assigned_to || '');
         const tone = this.taskTone(t.status);
-        const statusText = String(t.status || 'pending').replace('_', ' ');
+        const statusText = this.ticketStatusText(t);
         return (
           '<div class="ws-cmd-mrow">' +
           '<div class="ws-cmd-mrow-main">' +
@@ -4785,7 +4775,7 @@ export class WorkspaceCommandView {
       .map(t => {
         const label = String(t.description || t.name || t.title || 'Task');
         const tone = this.taskTone(t.status);
-        const statusText = String(t.status || 'pending').replace('_', ' ');
+        const statusText = this.ticketStatusText(t);
         const taskId = String(t.id || '');
         return (
           '<div class="ws-cmd-quest">' +
@@ -5820,7 +5810,7 @@ export class WorkspaceCommandView {
     const timestamp = activity?.at || this.taskUpdatedTime(task);
     return {
       taskLabel: String(task.description || task.name || task.title || 'Untitled task'),
-      statusLabel: this.taskStatusLabel(task.status),
+      statusLabel: this.ticketStatusText(task),
       activityLabel: activity?.label || '',
       whenLabel: this.formatRelativeTime(timestamp),
       timestamp: task.updated_at || task.created_at || ''
@@ -5944,7 +5934,7 @@ export class WorkspaceCommandView {
               '</span><span class="ws-cmd-map-task-name">' +
               escapeHtml(label) +
               '</span><span class="ws-cmd-map-task-status">' +
-              escapeHtml(this.taskStatusLabel(status)) +
+              escapeHtml(this.ticketStatusText(task)) +
               '</span></button>';
             const startButton = startable
               ? '<button type="button" class="ws-cmd-map-task-start" data-cmd-map-start-task="' +
@@ -5963,7 +5953,7 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-task-list">' +
       rows +
       '</div>' +
-      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-open-task-drawer>Open Tasks</button>' +
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-open-tickets>All tickets</button>' +
       '</div>'
     );
   }
@@ -6080,392 +6070,6 @@ export class WorkspaceCommandView {
   // in the same transition so the two task surfaces never coexist (FR9-FR11). The
   // element lives inside .ws-cmd (inherits tactical tokens) and survives full
   // re-renders so selection and scroll are preserved on live refresh (FR25).
-
-  // All non-subtask tasks for this workspace, resolver-sorted (FR24).
-  drawerTasks() {
-    const page = this.page || {};
-    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    return sortTasksForDrawer(tasks.filter(task => !task?.parent_task_id));
-  }
-
-  drawerFilteredTasks() {
-    return this.drawerTasks().filter(task => taskMatchesFilter(task, this.taskDrawerFilter));
-  }
-
-  openTaskDrawer(trigger) {
-    this._drawerAnnounce = '';
-    this.taskDrawerTrigger = trigger || null;
-    // Close the Objectives Map window so the drawer never opens beneath it (FR11).
-    if (this.activeMapWindow) this.activeMapWindow = '';
-    // The two persistent drawers share the same screen position; only one may
-    // be open at a time (reachable via Details→Map view switches, or a
-    // ?panel=backlog deep link landing while Tasks was already open).
-    if (this.backlogDrawerOpen) {
-      this.backlogDrawerOpen = false;
-      if (this.backlogDrawerEl) this.backlogDrawerEl.hidden = true;
-    }
-    this.taskDrawerOpen = true;
-    if (!this.taskDrawerSelectedId) {
-      const first = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
-      this.taskDrawerSelectedId = first ? String(first.id || '') : '';
-    }
-    this.render();
-    const el = this.ensureTaskDrawer();
-    if (el) {
-      el.hidden = false;
-      this.renderTaskDrawerBody();
-      const heading = el.querySelector('.ws-cmd-drawer-title');
-      if (heading && typeof heading.focus === 'function') {
-        try {
-          heading.focus({ preventScroll: true });
-        } catch (_e) {
-          heading.focus();
-        }
-      }
-    }
-    this.syncURLState();
-  }
-
-  closeTaskDrawer() {
-    const trigger = this.taskDrawerTrigger;
-    this.taskDrawerOpen = false;
-    this.taskDrawerTrigger = null;
-    if (this.taskDrawerEl) this.taskDrawerEl.hidden = true;
-    // Renders may have replaced the opener; never focus a detached element.
-    let target =
-      trigger && trigger.isConnected !== false && typeof trigger.focus === 'function'
-        ? trigger
-        : null;
-    if (!target && this.container) {
-      const fallback = this.container.querySelector('[data-cmd-open-task-drawer]');
-      if (fallback && typeof fallback.focus === 'function') target = fallback;
-    }
-    if (target) target.focus();
-    this.syncURLState();
-  }
-
-  setDrawerFilter(filter) {
-    const next = String(filter || '').trim();
-    if (!next || next === this.taskDrawerFilter) return;
-    this.taskDrawerFilter = next;
-    // Keep the selected task visible even if it no longer matches the filter
-    // (FR26): only reselect when the current selection is gone entirely.
-    if (!this.drawerTasks().some(t => String(t.id || '') === this.taskDrawerSelectedId)) {
-      const first = this.drawerFilteredTasks()[0];
-      this.taskDrawerSelectedId = first ? String(first.id || '') : '';
-    }
-    this.renderTaskDrawerBody();
-  }
-
-  selectDrawerTask(taskId) {
-    const id = String(taskId || '').trim();
-    if (!id) return;
-    this._drawerAnnounce = '';
-    this.taskDrawerSelectedId = id;
-    this.renderTaskDrawerBody();
-    this.syncURLState();
-  }
-
-  drawerSelectedTask() {
-    const id = this.taskDrawerSelectedId;
-    return this.drawerTasks().find(t => String(t.id || '') === id) || null;
-  }
-
-  ensureTaskDrawer() {
-    if (this.taskDrawerEl) return this.taskDrawerEl;
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
-      return null;
-    const el = document.createElement('aside');
-    el.className = 'ws-cmd-drawer';
-    el.setAttribute('role', 'region');
-    el.setAttribute('aria-label', 'Tasks');
-    el.hidden = true;
-    el.style.zIndex = 'var(--wsx-layer-drawer)';
-    // The drawer lives outside the map-shell delegate, so it owns its clicks.
-    el.addEventListener('click', event => {
-      if (event.target.closest('[data-cmd-drawer-close]')) {
-        this.closeTaskDrawer();
-        return;
-      }
-      if (event.target.closest('[data-cmd-drawer-add]')) {
-        // Give work opens over the Map, so nobody has to leave it (FR23).
-        this.page?.showAddTaskModal?.();
-        return;
-      }
-      if (event.target.closest('[data-cmd-drawer-retry]')) {
-        void this.page?.loadTasks?.();
-        return;
-      }
-      const filterBtn = event.target.closest('[data-cmd-drawer-filter]');
-      if (filterBtn) {
-        this.setDrawerFilter(filterBtn.getAttribute('data-cmd-drawer-filter'));
-        return;
-      }
-      const actionBtn = event.target.closest('[data-cmd-drawer-action]');
-      if (actionBtn) {
-        this.runDrawerAction(
-          actionBtn.getAttribute('data-cmd-drawer-action'),
-          actionBtn.getAttribute('data-cmd-drawer-task')
-        );
-        return;
-      }
-      const row = event.target.closest('[data-cmd-drawer-select]');
-      if (row) this.selectDrawerTask(row.getAttribute('data-cmd-drawer-select'));
-    });
-    this.taskDrawerEl = el;
-    if (this.container && this.container.appendChild) this.container.appendChild(el);
-    return el;
-  }
-
-  // If the selected task vanished on a live refresh (deleted/became unavailable),
-  // announce it and pick the next task by deterministic order (FR27).
-  reconcileDrawerSelection() {
-    this._drawerAnnounce ||= '';
-    if (
-      this.page?.tasksLoading ||
-      this.page?.tasksLoadFailed ||
-      this.page?.initialListsLoaded === false
-    )
-      return;
-    if (!this.taskDrawerSelectedId) {
-      // Summary-only links can arrive before tasks. Select once data lands,
-      // without moving focus or overriding an explicit selection.
-      if (this.taskDrawerOpen) {
-        const first = this.drawerFilteredTasks()[0];
-        if (first) this.taskDrawerSelectedId = String(first.id || '');
-      }
-      return;
-    }
-    const stillHere = this.drawerTasks().some(
-      t => String(t.id || '') === this.taskDrawerSelectedId
-    );
-    if (stillHere) return;
-    this._drawerAnnounce = 'The selected task is no longer available.';
-    const next = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
-    this.taskDrawerSelectedId = next ? String(next.id || '') : '';
-  }
-
-  renderTaskDrawerBody() {
-    const el = this.ensureTaskDrawer();
-    if (!el || el.hidden) return;
-    this.reconcileDrawerSelection();
-    // Preserve list scroll across body repaints (live refresh — FR25).
-    const prevList = el.querySelector('.ws-cmd-drawer-list');
-    const prevScroll = prevList ? prevList.scrollTop : 0;
-    const focusAttrs = [
-      'data-cmd-drawer-select',
-      'data-cmd-drawer-filter',
-      'data-cmd-drawer-action',
-      'data-cmd-drawer-task',
-      'data-cmd-drawer-retry'
-    ];
-    const focused =
-      typeof document !== 'undefined' && el.contains?.(document.activeElement)
-        ? document.activeElement
-        : null;
-    const focusKey = focused
-      ? focusAttrs
-          .filter(attr => focused.hasAttribute?.(attr))
-          .map(attr => [attr, focused.getAttribute(attr)])
-      : [];
-    el.innerHTML = this.taskDrawerHTML();
-    const nextList = el.querySelector('.ws-cmd-drawer-list');
-    if (nextList) nextList.scrollTop = prevScroll;
-    if (focusKey.length) {
-      const replacement = Array.from(el.querySelectorAll('button')).find(button =>
-        focusKey.every(([attr, value]) => button.getAttribute(attr) === value)
-      );
-      (replacement || el.querySelector('.ws-cmd-drawer-title'))?.focus({ preventScroll: true });
-    }
-  }
-
-  taskDrawerHTML() {
-    const counts = resolveTaskCounts(this.drawerTasks());
-    const filters = [
-      { key: FILTER.ACTIONABLE, label: 'Actionable' },
-      { key: FILTER.ACTIVE, label: 'Active' },
-      { key: FILTER.NEEDS_ATTENTION, label: 'Needs Attention' },
-      { key: FILTER.COMPLETED, label: 'Completed' },
-      { key: FILTER.ALL, label: 'All' }
-    ]
-      .map(f => {
-        const active = this.taskDrawerFilter === f.key;
-        const count =
-          this.page?.tasksLoading || this.page?.tasksLoadFailed ? '—' : counts[f.key] || 0;
-        return (
-          '<button type="button" class="ws-cmd-drawer-filter' +
-          (active ? ' is-active' : '') +
-          '" data-cmd-drawer-filter="' +
-          escapeHtml(f.key) +
-          '" aria-pressed="' +
-          (active ? 'true' : 'false') +
-          '">' +
-          escapeHtml(f.label) +
-          '<span class="ws-cmd-drawer-filter-count">' +
-          escapeHtml(String(count)) +
-          '</span></button>'
-        );
-      })
-      .join('');
-    return (
-      '<header class="ws-cmd-drawer-head">' +
-      '<h2 class="ws-cmd-drawer-title" tabindex="-1">Tasks</h2>' +
-      '<div class="ws-cmd-drawer-head-actions">' +
-      '<button type="button" class="ws-cmd-drawer-add" data-cmd-drawer-add aria-label="Add task">＋ Add Task</button>' +
-      '<button type="button" class="ws-cmd-drawer-close" data-cmd-drawer-close aria-label="Close tasks">×</button>' +
-      '</div>' +
-      '</header>' +
-      '<div class="ws-cmd-drawer-live sr-only" role="status" aria-live="polite" aria-atomic="true">' +
-      escapeHtml(this._drawerAnnounce || '') +
-      '</div>' +
-      '<div class="ws-cmd-drawer-filters" role="group" aria-label="Filter tasks">' +
-      filters +
-      '</div>' +
-      '<div class="ws-cmd-drawer-list" role="list">' +
-      this.drawerListHTML() +
-      '</div>' +
-      '<div class="ws-cmd-drawer-preview">' +
-      this.drawerPreviewHTML() +
-      '</div>'
-    );
-  }
-
-  drawerListHTML() {
-    if (this.page?.tasksLoading) return '<p role="status">Loading tasks…</p>';
-    if (this.page?.tasksLoadFailed)
-      return '<div class="ws-cmd-drawer-empty"><strong>Tasks unavailable</strong><button type="button" class="ws-cmd-drawer-action" data-cmd-drawer-retry>Retry tasks</button></div>';
-    const tasks = this.drawerFilteredTasks();
-    if (!tasks.length) {
-      return (
-        '<div class="ws-cmd-drawer-empty"><strong>No tasks here</strong>' +
-        '<span>Nothing matches the ' +
-        escapeHtml(this.taskDrawerFilter) +
-        ' filter.</span></div>'
-      );
-    }
-    return tasks
-      .map(task => {
-        const id = String(task.id || '');
-        const pres = resolveTaskPresentation(task);
-        const title = String(task.description || task.name || task.title || 'Untitled task');
-        const selected = id === this.taskDrawerSelectedId;
-        const assignee = pres.assignee || 'Unassigned';
-        return (
-          '<button type="button" role="listitem" class="ws-cmd-drawer-row' +
-          (selected ? ' is-selected' : '') +
-          ' tone-' +
-          escapeHtml(pres.tone) +
-          '" data-cmd-drawer-select="' +
-          escapeHtml(id) +
-          '" aria-current="' +
-          (selected ? 'true' : 'false') +
-          '">' +
-          '<span class="ws-cmd-drawer-row-main">' +
-          '<span class="ws-cmd-drawer-row-title">' +
-          escapeHtml(title) +
-          '</span>' +
-          '<span class="ws-cmd-drawer-row-meta">' +
-          escapeHtml(taskShortId(task)) +
-          ' · ' +
-          escapeHtml(assignee) +
-          '</span></span>' +
-          '<span class="ws-cmd-drawer-row-state tone-' +
-          escapeHtml(pres.tone) +
-          '">' +
-          escapeHtml(pres.label) +
-          '</span></button>'
-        );
-      })
-      .join('');
-  }
-
-  drawerPreviewHTML() {
-    const task = this.drawerSelectedTask();
-    if (!task) {
-      return '<div class="ws-cmd-drawer-preview-empty">Select a task to see details.</div>';
-    }
-    const id = String(task.id || '');
-    const pres = resolveTaskPresentation(task);
-    const title = String(task.description || task.name || task.title || 'Untitled task');
-    const brief = String(task.details || task.brief || task.prompt || '').trim();
-    const assignee = pres.assignee || 'Unassigned';
-    // A safe, same-origin href carrying a validated `return` target so Back To
-    // Workspace (group 7) can restore this exact Map/drawer/task/agent/run
-    // context (FR92-93).
-    const fullHref = this.taskHrefWithReturn(id);
-    // Off-filter notice: the selected task is still shown even if it left the
-    // current filter mid-interaction (FR26).
-    const offFilter = !taskMatchesFilter(task, this.taskDrawerFilter);
-    const primary = pres.primaryAction
-      ? '<button type="button" class="ws-cmd-drawer-action" data-cmd-drawer-action="' +
-        escapeHtml(pres.primaryAction.id) +
-        '" data-cmd-drawer-task="' +
-        escapeHtml(id) +
-        '">' +
-        escapeHtml(pres.primaryAction.label) +
-        '</button>'
-      : '';
-    return (
-      (offFilter
-        ? '<div class="ws-cmd-drawer-offfilter">This task moved out of the ' +
-          escapeHtml(this.taskDrawerFilter) +
-          ' filter. <button type="button" class="ws-cmd-drawer-reveal" data-cmd-drawer-filter="' +
-          escapeHtml(FILTER.ALL) +
-          '">Show in All</button></div>'
-        : '') +
-      '<div class="ws-cmd-drawer-preview-head">' +
-      '<span class="ws-cmd-drawer-preview-state tone-' +
-      escapeHtml(pres.tone) +
-      '">' +
-      escapeHtml(pres.label) +
-      '</span>' +
-      '<h3 class="ws-cmd-drawer-preview-title">' +
-      escapeHtml(title) +
-      '</h3>' +
-      '<span class="ws-cmd-drawer-preview-assignee">' +
-      escapeHtml(assignee) +
-      '</span></div>' +
-      (brief
-        ? '<p class="ws-cmd-drawer-preview-brief">' + escapeHtml(brief.slice(0, 400)) + '</p>'
-        : '') +
-      '<div class="ws-cmd-drawer-preview-actions">' +
-      primary +
-      '<a class="ws-cmd-drawer-openfull" href="' +
-      escapeHtml(fullHref) +
-      '">Open Full Task</a>' +
-      '</div>'
-    );
-  }
-
-  // Route a drawer primary action to the page's existing handlers (group 3 wires
-  // to what already works; the sticky tray in group 4 upgrades where runs show).
-  runDrawerAction(actionId, taskId) {
-    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    const id = String(taskId || '').trim();
-    if (!page || !id) return;
-    switch (actionId) {
-      case 'start':
-      case 'assign_start':
-      case 'retry':
-        // skipModal: the sticky tray owns monitoring, so suppress the legacy
-        // execution modal (FR46). Monitoring is task-ID-keyed and continues
-        // regardless of drawer/tray view state.
-        if (typeof page.executeTask === 'function')
-          page.executeTask(id, { skipConfirm: true, skipModal: true });
-        this.trackAndShowTray(id);
-        break;
-      case 'view_result':
-        if (typeof page.showTaskResult === 'function') page.showTaskResult(id);
-        else if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
-        break;
-      case 'track':
-      case 'respond':
-      case 'inspect':
-      default:
-        if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
-        break;
-    }
-  }
 
   // ---------- Backlog panel + drawer (PRD workspace-backlog) ----------
   //
@@ -6638,13 +6242,8 @@ export class WorkspaceCommandView {
     const options = opts || {};
     this.backlogDrawerTrigger = trigger || null;
     // Close the Map's Quest Board window so the drawer never opens beneath it
-    // (mirrors openTaskDrawer's Objectives-window handling).
+    // (the same reason the Objectives window closes for other layers).
     if (this.activeMapWindow) this.activeMapWindow = '';
-    // Only one persistent drawer may be open at a time (see openTaskDrawer).
-    if (this.taskDrawerOpen) {
-      this.taskDrawerOpen = false;
-      if (this.taskDrawerEl) this.taskDrawerEl.hidden = true;
-    }
     this.backlogDrawerOpen = true;
     if (options.selectId) {
       this.backlogDrawerSelectedId = String(options.selectId);
@@ -7604,7 +7203,7 @@ export class WorkspaceCommandView {
       }
       const actionBtn = event.target.closest('[data-cmd-tray-action]');
       if (actionBtn) {
-        this.runDrawerAction(
+        this.runTrayAction(
           actionBtn.getAttribute('data-cmd-tray-action'),
           actionBtn.getAttribute('data-cmd-tray-task')
         );
@@ -7614,6 +7213,30 @@ export class WorkspaceCommandView {
     this.trayEl = el;
     if (this.container && this.container.appendChild) this.container.appendChild(el);
     return el;
+  }
+
+  runTrayAction(actionId, taskId) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(taskId || '').trim();
+    if (!page || !id) return;
+    switch (actionId) {
+      case 'start':
+      case 'assign_start':
+      case 'retry':
+        // skipModal: the sticky tray owns monitoring, so suppress the legacy
+        // execution modal (FR46).
+        if (typeof page.executeTask === 'function')
+          page.executeTask(id, { skipConfirm: true, skipModal: true });
+        this.trackAndShowTray(id);
+        break;
+      case 'view_result':
+        if (typeof page.showTaskResult === 'function') page.showTaskResult(id);
+        else if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
+        break;
+      default:
+        if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
+        break;
+    }
   }
 
   renderTrayBody() {
@@ -12006,9 +11629,8 @@ export class WorkspaceCommandView {
         this.setActiveAgentTab(agentTabBtn.getAttribute('data-cmd-map-agent-tab'));
         return;
       }
-      const drawerBtn = event.target.closest('[data-cmd-open-task-drawer]');
-      if (drawerBtn) {
-        this.openTaskDrawer(drawerBtn);
+      if (event.target.closest('[data-cmd-open-tickets]')) {
+        this.openTicketsView();
         return;
       }
       // Quest Board → shared Backlog drawer handoff (FR52): the drawer opener
@@ -13091,7 +12713,7 @@ export class WorkspaceCommandView {
    * Keep the mounted map and the freshly rendered zone in step.
    *
    * PRD §9 Q1: the host node is owned by this view and re-attached after every
-   * render (the taskDrawerEl pattern), so a Command re-render never re-mounts
+   * render , so a Command re-render never re-mounts
    * the map. The map re-mounts only when the member snapshot changes.
    */
   syncDetachmentMap() {

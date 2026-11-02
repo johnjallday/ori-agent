@@ -30,7 +30,7 @@
             <div class="workspace-task-page-breadcrumbs">
               <a href="/workspaces/{{.Extra.WorkspaceSlug}}" id="workspace-task-workspace-name" class="workspace-task-page-breadcrumb-link">Workspace</a>
               <span aria-hidden="true">/</span>
-              <span id="workspace-task-breadcrumb-title">Task</span>
+              <span id="workspace-task-breadcrumb-title">Runs</span>
             </div>
             <div class="workspace-task-page-title-row">
               <h1
@@ -87,6 +87,7 @@
             </div>
           </div>
           <div class="workspace-task-page-hero-meta">
+            <span id="workspace-task-run-signal" class="workspace-task-run-signal" role="status" hidden></span>
             <span id="workspace-task-status" class="workspace-task-page-status" data-state="pending" aria-live="polite">Pending</span>
             <label class="workspace-task-page-agent-picker" id="workspace-task-hero-agent-wrap" hidden>
               <span class="workspace-task-page-agent-picker-label">Agent</span>
@@ -381,7 +382,7 @@
               <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <h2>Automation &amp; output</h2>
+                    <h2>Schedule and results</h2>
                   </div>
                   <div class="workspace-task-schedule-header-actions">
                     <!-- Lifted out of Advanced > storage so a task that writes
@@ -401,17 +402,15 @@
                 <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
                 <div id="workspace-task-automation-summary" class="workspace-task-automation-summary"></div>
 
-                <!-- Expected output shape, folded in as a subsection. Hidden by
-                     default; renderTaskOutputShape reveals it only when the task
-                     declares a structured schema / CSV contract. -->
-                <div id="workspace-task-output-shape-wrap" class="workspace-task-output-shape-section" hidden>
-                  <h3 class="workspace-task-page-subheading">Expected output shape</h3>
-                  <div id="workspace-task-output-shape" class="workspace-task-output-shape"></div>
-                </div>
-
+                <!-- Output specs and contracts live only here (PRD 760 FR-20, FR-22).
+                     Existing specs show here and keep running. -->
                 <details class="workspace-task-advanced">
-                  <summary class="workspace-task-advanced-summary">Advanced settings</summary>
+                  <summary class="workspace-task-advanced-summary">Advanced</summary>
                   <div class="workspace-task-advanced-body">
+                    <div id="workspace-task-output-shape-wrap" class="workspace-task-output-shape-section" hidden>
+                      <h3 class="workspace-task-page-subheading">Expected output shape</h3>
+                      <div id="workspace-task-output-shape" class="workspace-task-output-shape"></div>
+                    </div>
                     <div id="workspace-task-automation-columns" class="workspace-task-automation-section"></div>
                     <div id="workspace-task-automation-storage" class="workspace-task-automation-section"></div>
                   </div>
@@ -1270,7 +1269,8 @@
       flex-wrap: wrap;
       align-items: center;
       gap: 0.5rem;
-      flex-shrink: 0;
+      flex-shrink: 1;
+      min-width: 0;
     }
 
     /* Subsections inside a card (e.g. "Expected output shape" folded into the

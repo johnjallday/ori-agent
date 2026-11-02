@@ -13,7 +13,9 @@ import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 import {
   getStatusClass,
   getDisplayStatus,
-  resolveTaskStatusPresentation
+  resolveTaskStatusPresentation,
+  resolveTicketStatePill,
+  resolveRunSignal
 } from './task-presentation.js';
 import { renderRelatedPlan } from './workspace-related-plan.js';
 import { createTaskPageDataLoader } from './workspace-task-data-loader.js';
@@ -2847,19 +2849,31 @@ export class WorkspaceTaskPage {
     if (this.elements.title) {
       this.elements.title.textContent = taskTitle;
     }
-    document.title = `${taskTitle} - Ori Agent`;
+    // The page is the ticket's Runs (PRD 760 FR-24); /runs/{id} is one Run.
+    document.title = `${taskTitle} · Runs - Ori Agent`;
     if (this.elements.subtitle) {
       this.elements.subtitle.textContent = detailsSummary || 'No additional details provided.';
     }
     if (this.elements.breadcrumbTitle) {
-      this.elements.breadcrumbTitle.textContent = summarizeText(taskTitle, 40) || 'Task';
+      this.elements.breadcrumbTitle.textContent = summarizeText(taskTitle, 40)
+        ? `${summarizeText(taskTitle, 40)} · Runs`
+        : 'Runs';
     }
     if (this.elements.idValue) {
       this.elements.idValue.textContent = String(this.task?.id || this.taskId || '').trim();
     }
     if (this.elements.status) {
-      this.elements.status.textContent = statusInfo.label;
-      this.elements.status.dataset.state = statusInfo.className;
+      // The pill is the ticket's own state; how the latest run went is a separate
+      // signal beside it, never a state (PRD 760 FR-4).
+      const pill = resolveTicketStatePill(this.task);
+      this.elements.status.textContent = pill.label;
+      this.elements.status.dataset.state = pill.className;
+    }
+    const runSignal = document.getElementById('workspace-task-run-signal');
+    if (runSignal) {
+      const signal = resolveRunSignal(this.task);
+      runSignal.textContent = signal;
+      runSignal.hidden = !signal;
     }
     if (statusInfo.className !== 'in_progress') {
       // Drop stale activity when the task transitions out of in_progress so a
@@ -4486,27 +4500,6 @@ export class WorkspaceTaskPage {
         </div>
       </div>`;
 
-    const contractColumns = this.getResultContractColumns();
-
-    // Bottom CTA on the artifact card is just a small link routing to the
-    // Automation card, which owns the storage on/off toggle and column
-    // designer. The label adapts so the user knows what they'll see when
-    // they get there.
-    let bottomLinkLabel;
-    if (!appendCtx.configured) {
-      bottomLinkLabel = 'Set up CSV storage in Automation →';
-    } else if (contractColumns.length > 0) {
-      bottomLinkLabel = 'Edit output columns in Automation →';
-    } else {
-      bottomLinkLabel = 'Design columns from this result →';
-    }
-    const bottomCtaHtml = `
-      <div class="workspace-task-result-artifact-design-link">
-        <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
-          ${this.escapeHtml(bottomLinkLabel)}
-        </button>
-      </div>`;
-
     return `
       <section class="workspace-task-result-artifact" aria-label="CSV-ready task result">
         ${chipHtml}
@@ -4531,7 +4524,7 @@ export class WorkspaceTaskPage {
             ${appendButton}
           </div>
         </div>
-        ${bottomCtaHtml}
+        
         ${chooserHtml}
         <div class="workspace-task-result-artifact-meta">
           <span>${this.escapeHtml(sourceLabel)}</span>
@@ -4633,6 +4626,34 @@ export class WorkspaceTaskPage {
   //   1. Saved contract + not editing -> "Columns: ... (Edit)" badge.
   //   2. No contract + not editing  -> assistant-first column suggestion CTA.
   //   3. Editing                    -> reviewable draft columns with manual escape hatches.
+  // A saved draft that has not been approved can be thrown away (PRD 760 FR-20).
+  renderOutputSpecDraftNotice() {
+    if (!this.getTaskResultStorageTask()?.draft_output_spec) return '';
+    return `
+      <div class="workspace-task-result-contract-draft">
+        <span>There is a draft that is not in use yet.</span>
+        <button type="button" class="workspace-task-page-text-button" data-action="discard-output-spec-draft">Discard draft</button>
+      </div>`;
+  }
+
+  async discardOutputSpecDraft() {
+    const owner = this.getTaskResultStorageTask();
+    const ownerId = String(owner?.id || '').trim();
+    if (!ownerId) return;
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}/output-spec/discard`,
+        { method: 'POST' }
+      );
+      if (!response.ok) throw new Error(`Discard failed (HTTP ${response.status})`);
+      owner.draft_output_spec = null;
+      this.notify('success', 'Draft discarded.');
+    } catch (error) {
+      this.notify('error', error?.message || 'Could not discard the draft.');
+    }
+    this.refreshResultRender();
+  }
+
   renderResultContractBlock() {
     const editing = Array.isArray(this.resultContractDraft);
     const columns = this.getResultContractColumns();
@@ -4936,6 +4957,9 @@ export class WorkspaceTaskPage {
   // that container re-renders.
   bindAutomationColumnsActions(root = this.elements.automationColumns) {
     if (!root) return;
+    root
+      .querySelector('[data-action="discard-output-spec-draft"]')
+      ?.addEventListener('click', () => void this.discardOutputSpecDraft());
     root
       .querySelector('[data-action="edit-result-contract"]')
       ?.addEventListener('click', () => this.startResultContractEdit());
@@ -5353,7 +5377,10 @@ export class WorkspaceTaskPage {
           <span class="workspace-task-automation-storage-help">Turns on Append mode so every run is saved as a record in a shared JSONL file (export to CSV anytime).</span>
         </span>
       </label>`;
-    container.innerHTML = toggleHtml + (ctx.configured ? this.renderResultContractBlock() : '');
+    container.innerHTML =
+      toggleHtml +
+      this.renderOutputSpecDraftNotice() +
+      (ctx.configured ? this.renderResultContractBlock() : '');
     this.bindAutomationColumnsActions();
     container
       .querySelector('[data-action="toggle-csv-storage"]')
@@ -5873,7 +5900,14 @@ export class WorkspaceTaskPage {
       });
       const text = await response.text();
       if (!response.ok) {
-        throw new Error(text || `Suggestion failed (HTTP ${response.status})`);
+        let message = '';
+        try {
+          message = String(JSON.parse(text)?.message || '');
+        } catch {
+          // A plain-text error is already readable.
+          message = text;
+        }
+        throw new Error(message || `Suggestion failed (HTTP ${response.status})`);
       }
       const parsed = text ? JSON.parse(text) : {};
       // Capture the verbatim prompt the backend echoed back so the preview can
@@ -7079,21 +7113,6 @@ export class WorkspaceTaskPage {
           </summary>
           ${this.renderResultArtifact(artifact)}
         </details>
-      `);
-    }
-    // Entry point to structure a plain-text result into CSV columns. The
-    // artifact card carries its own "Design columns" link, so only offer this
-    // when there's a result, no tabular artifact, and no columns yet.
-    if (result && !artifact && this.getResultContractColumns().length === 0) {
-      const ctaLabel = this.getAppendCSVContext().configured
-        ? 'Define the structured output →'
-        : 'Make this task return structured output →';
-      blocks.push(`
-        <div class="workspace-task-output-design-cta">
-          <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
-            <i class="bi bi-table" aria-hidden="true"></i> ${this.escapeHtml(ctaLabel)}
-          </button>
-        </div>
       `);
     }
     if (error) {
@@ -8911,31 +8930,8 @@ export class WorkspaceTaskPage {
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const executionCount = Number(this.task?.execution_count) || 0;
     const failureCount = Number(this.task?.failure_count) || 0;
-    // The card is now "Automation & output", not just Schedule, so an output
-    // contract, configured storage destination, or a declared output shape is
-    // enough to surface it even when the task has never run on a cadence.
-    const storageOwner = this.getTaskResultStorageTask();
-    const hasContract =
-      Array.isArray(storageOwner?.output_contract?.columns) &&
-      storageOwner.output_contract.columns.length > 0;
-    const hasStorage = Boolean(storageOwner?.result_storage?.enabled);
-    const editingColumns = Array.isArray(this.resultContractDraft);
-    const hasStructuredOutput = this.hasStructuredOutputShape();
-
-    if (
-      !hasSchedule &&
-      history.length === 0 &&
-      executionCount === 0 &&
-      !hasContract &&
-      !hasStorage &&
-      !editingColumns &&
-      !hasStructuredOutput
-    ) {
-      this.elements.scheduleCard.hidden = true;
-      this.elements.schedule.innerHTML = '';
-      this.renderAutomationSections();
-      return;
-    }
+    // Always shown: it holds Advanced, the one home of output specs and contracts,
+    // which has to be reachable before a ticket has ever run (PRD 760 FR-20).
 
     this.elements.scheduleCard.hidden = false;
 
@@ -8945,7 +8941,7 @@ export class WorkspaceTaskPage {
     // only reveals the default folder; for those the buried per-destination
     // control in Advanced > storage remains the right entry point.
     if (this.elements.scheduleOpenFolderBtn) {
-      const storage = storageOwner?.result_storage || null;
+      const storage = this.getTaskResultStorageTask()?.result_storage || null;
       const usesDefaultOutputDir =
         Boolean(storage?.enabled) &&
         !String(storage.store_node_id || '').trim() &&
