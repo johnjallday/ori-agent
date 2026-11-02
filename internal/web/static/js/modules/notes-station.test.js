@@ -590,3 +590,43 @@ test('Look again too soon says when Ori looked and how long to wait', async () =
     LOOK_TOO_SOON_LINE
   );
 });
+
+test('the badge turns to attention when the notes deserve another look, and says why', async () => {
+  const { notesNudge } = await import('./notes-station.js');
+  const stale = vault({ nudge: { stale: true, days: 8, came_due: 0 } });
+  assert.deepEqual(notesBadge(stale, NOW), {
+    value: 'looked 8d ago',
+    description: '14 open · looked 8d ago',
+    tone: 'attention'
+  });
+  const due = vault({ nudge: { stale: false, days: 0, came_due: 2 } });
+  assert.deepEqual(notesBadge(due, NOW), {
+    value: '2 came due',
+    description: '14 open · 2 came due',
+    tone: 'attention'
+  });
+  const both = vault({ nudge: { stale: true, days: 9, came_due: 1 } });
+  assert.deepEqual(notesBadge(both, NOW), {
+    value: '1 came due',
+    description: '14 open · 1 came due · looked 9d ago',
+    tone: 'attention'
+  });
+  // Dismissed or fresh: the server sends no nudge, and the badge is calm.
+  assert.deepEqual(notesBadge(vault(), NOW), {
+    value: '14 open',
+    description: 'connected · last look 2h',
+    tone: 'clear'
+  });
+  assert.equal(notesNudge(vault({ nudge: { stale: false, came_due: 0 } })), null);
+  const setUp = notesBadge(created({ nudge: { stale: true, days: 8, came_due: 0 } }), NOW);
+  assert.deepEqual(setUp, {
+    value: '12 in Inbox',
+    description: 'set up by Ori · last look 2h · looked 8d ago',
+    tone: 'attention'
+  });
+  // A missing folder keeps its own words.
+  assert.equal(
+    notesBadge(vault({ status: 'missing', nudge: { stale: true, days: 8 } }), NOW).value,
+    "Can't find Second Brain"
+  );
+});

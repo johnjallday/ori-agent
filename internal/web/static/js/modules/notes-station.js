@@ -53,8 +53,30 @@ export function openItemCount(lastLook) {
   return Math.max(0, open - handled);
 }
 
+// notesNudge is the server's word that the notes deserve another look (the same
+// rule as Today's Needs you row), or null.
+export function notesNudge(secondBrain) {
+  const nudge = secondBrain?.nudge;
+  if (!nudge) return null;
+  const cameDue = Number(nudge.came_due) || 0;
+  const stale = nudge.stale === true;
+  if (!stale && !cameDue) return null;
+  return { stale, days: Number(nudge.days) || 0, cameDue };
+}
+
+// nudgeParts are the badge's words for a nudge: what came due, and how old the
+// look is once that is the point.
+function nudgeParts(nudge) {
+  const parts = [];
+  if (nudge.cameDue) parts.push(nudge.cameDue + ' came due');
+  if (nudge.stale) parts.push('looked ' + nudge.days + 'd ago');
+  return parts;
+}
+
 // notesBadge is the building's status. A folder Ori set up leads with its Inbox,
-// a connected vault with what is still open.
+// a connected vault with what is still open. When the notes deserve another
+// look the building turns to attention and says why: what came due, or how old
+// the last look is.
 export function notesBadge(secondBrain, now = Date.now()) {
   const name = String(secondBrain?.source?.name || '');
   if (secondBrain?.status === 'missing' && name) {
@@ -65,16 +87,29 @@ export function notesBadge(secondBrain, now = Date.now()) {
   }
   const at = secondBrain.last_look?.at;
   const since = at ? shortSince(at, now) : '';
+  const nudge = secondBrain.last_look ? notesNudge(secondBrain) : null;
+  const tone = nudge ? 'attention' : 'clear';
   if (isCreatedByOri(secondBrain)) {
-    const description = createdDescription(secondBrain, since);
+    const description = [createdDescription(secondBrain, since)]
+      .concat(nudge ? nudgeParts(nudge) : [])
+      .join(' · ');
     if (!Number.isFinite(secondBrain.inbox_count)) {
-      return { value: name, description, tone: 'clear' };
+      return { value: name, description, tone };
     }
-    return { value: secondBrain.inbox_count + ' in Inbox', description, tone: 'clear' };
+    return { value: secondBrain.inbox_count + ' in Inbox', description, tone };
+  }
+  if (!secondBrain.last_look) {
+    return { value: name, description: 'connected', tone: 'clear' };
+  }
+  const open = openItemCount(secondBrain.last_look) + ' open';
+  if (nudge) {
+    // The building's one visible line carries the reason; the full sentence is
+    // its description, which the rail row and the building's name read out.
+    const reasons = nudgeParts(nudge);
+    return { value: reasons[0], description: [open].concat(reasons).join(' · '), tone };
   }
   const description = since ? 'connected · last look ' + since : 'connected';
-  if (!secondBrain.last_look) return { value: name, description, tone: 'clear' };
-  return { value: openItemCount(secondBrain.last_look) + ' open', description, tone: 'clear' };
+  return { value: open, description, tone };
 }
 
 // createdDescription is the line under a folder Ori set up. Once the user has

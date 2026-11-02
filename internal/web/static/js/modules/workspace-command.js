@@ -7792,6 +7792,29 @@ export class WorkspaceCommandView {
     this.pollNotesPanelLook(panel);
   }
 
+  // Another surface changed the connection or the look (the drawer's Look again,
+  // a follow-up added there): an open panel reads the look again in place,
+  // keeping its view, and polls a look that started elsewhere.
+  async refreshOpenNotesPanel() {
+    const panel = this._notesPanel;
+    if (!panel || panel.status !== 'ready' || panel.refreshing || !this.notesPanelOpen()) return;
+    panel.refreshing = true;
+    try {
+      const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
+      if (panel !== this._notesPanel) return;
+      const wasRunning = panel.look?.state === 'running';
+      panel.look = (look && look.look) || panel.look;
+      if (!wasRunning && panel.look?.state === 'running') panel.polls = 0;
+    } catch {
+      return;
+    } finally {
+      panel.refreshing = false;
+    }
+    this.paintNotesPanel(panel);
+    // Polling replaces any timer already set, so a look is never read twice.
+    this.pollNotesPanelLook(panel);
+  }
+
   // A running look is read again until it ends, at the drawer's pace and for
   // no longer than the drawer waits; closing the panel stops it. A look that
   // outlasts the poll says so, and opening the panel again reads it afresh.
@@ -8019,7 +8042,10 @@ export class WorkspaceCommandView {
       typeof document !== 'undefined' &&
       typeof document.addEventListener === 'function'
     ) {
-      this.boundNotesChanged = () => this.requestNotesData(true);
+      this.boundNotesChanged = () => {
+        this.requestNotesData(true);
+        void this.refreshOpenNotesPanel();
+      };
       document.addEventListener('personal-assistant:second-brain', this.boundNotesChanged);
     }
     const state = this.notesState();

@@ -119,10 +119,17 @@ func TestSecondBrain_NudgeAfterAWeekAndNotNowHoldsUntilTheNextLook(t *testing.T)
 	if _, ok := h.service.Nudge(ctx, "local"); ok {
 		t.Fatal("a fresh look nudges")
 	}
+	if status, _ := h.service.Status(ctx, "local"); status.Nudge != nil {
+		t.Fatalf("a fresh look's status nudges: %+v", status.Nudge)
+	}
 	*h.clock = h.clock.Add(8 * 24 * time.Hour)
 	report, ok := h.service.Nudge(ctx, "local")
 	if !ok || !report.Stale || report.Days != 8 {
 		t.Fatalf("after eight days = %+v, %v", report, ok)
+	}
+	status, err := h.service.Status(ctx, "local")
+	if err != nil || status.Nudge == nil || !status.Nudge.Stale || status.Nudge.Days != 8 {
+		t.Fatalf("status nudge = %+v, %v", status.Nudge, err)
 	}
 
 	if _, err := h.service.DismissNudge(ctx, "local", "nudge-1"); err != nil {
@@ -133,6 +140,9 @@ func TestSecondBrain_NudgeAfterAWeekAndNotNowHoldsUntilTheNextLook(t *testing.T)
 	}
 	if _, ok := h.service.Nudge(ctx, "local"); ok {
 		t.Fatal("Not now did not put the nudge away")
+	}
+	if status, _ := h.service.Status(ctx, "local"); status.Nudge != nil {
+		t.Fatalf("status still nudges after Not now: %+v", status.Nudge)
 	}
 	if _, err := h.service.DismissNudge(ctx, "local", "connect-1"); !errors.Is(err, secondbrain.ErrRequestReused) {
 		t.Fatalf("a connect's request id: %v", err)

@@ -8925,3 +8925,103 @@ test('a map building keeps focus when the map repaints under it', () => {
     globalThis.window = originalWindow;
   }
 });
+
+test('the Notes station turns to attention for a stale or came-due look, and the rail row says why', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const at = new Date(Date.now() - 8 * 24 * 3600000).toISOString();
+    const notes = nudge => {
+      hq._notes = {
+        hqWorkspaceID: 'hq-1',
+        status: 'ready',
+        secondBrain: {
+          status: 'connected',
+          source: { name: 'Second Brain' },
+          last_look: { at, open_items: 12 },
+          ...(nudge ? { nudge } : {})
+        }
+      };
+      return hq.notesStationState();
+    };
+    assert.deepEqual(notes({ stale: true, days: 8, came_due: 0 }), {
+      value: 'looked 8d ago',
+      description: '12 open · looked 8d ago',
+      tone: 'attention'
+    });
+    assert.deepEqual(notes({ stale: false, days: 0, came_due: 3 }), {
+      value: '3 came due',
+      description: '12 open · 3 came due',
+      tone: 'attention'
+    });
+    // Not now (or a fresh look) leaves no nudge in the status: calm again.
+    assert.equal(notes(null).tone, 'clear');
+
+    notes({ stale: true, days: 8, came_due: 0 });
+    hq.mapStationRegistry = () => [hq.notesStation()];
+    hq.activeRailSection = 'stations';
+    const rail = hq.renderStationsRailPanel();
+    assert.match(rail, /aria-label="Notes station, 12 open · looked 8d ago"/);
+    assert.match(rail, /<span class="ws-cmd-rail-m">looked 8d ago<\/span>/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('one second-brain announcement re-reads the badge once and an open Notes panel once', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.window = {};
+    const listeners = {};
+    globalThis.document = {
+      getElementById: () => null,
+      addEventListener: (name, fn) => (listeners[name] = listeners[name] || []).push(fn)
+    };
+    const reads = [];
+    globalThis.fetch = async url => {
+      reads.push(url);
+      return {
+        ok: true,
+        json: async () =>
+          url.endsWith('/look')
+            ? { look: { state: 'finished', look_id: 'look-2', result: { id: 'look-2' } } }
+            : { second_brain: { status: 'connected', source: { name: 'Second Brain' } } }
+      };
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.active = false;
+    hq.requestNotesData();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(listeners['personal-assistant:second-brain'].length, 1);
+    reads.length = 0;
+
+    const panel = { status: 'ready', look: { state: 'finished', look_id: 'look-1' } };
+    hq._notesPanel = panel;
+    hq.notesPanelOpen = () => true;
+    let painted = 0;
+    hq.paintNotesPanel = () => (painted += 1);
+    listeners['personal-assistant:second-brain'][0]();
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(reads.sort(), [
+      '/api/personal-assistant/second-brain',
+      '/api/personal-assistant/second-brain/look'
+    ]);
+    assert.equal(panel.look.look_id, 'look-2');
+    assert.equal(painted, 1);
+
+    // A closed panel is not read.
+    reads.length = 0;
+    hq.notesPanelOpen = () => false;
+    listeners['personal-assistant:second-brain'][0]();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(reads, ['/api/personal-assistant/second-brain']);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+    globalThis.fetch = originalFetch;
+  }
+});

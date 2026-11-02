@@ -119,6 +119,8 @@ const WORKSPACE_BUILD_ACTIONS = ['resume', 'discard'];
 const BACKUP_COVERAGE_ACTIONS = ['not_now'];
 // The first-week recap's only control: it is shown once and put away (FR25).
 const SECOND_BRAIN_WEEK_ACTIONS = ['dismiss'];
+// The stale-notes nudge's only control; its route opens the Notes panel.
+const SECOND_BRAIN_STALE_ACTIONS = ['not_now'];
 
 export function todaySectionItems(section) {
   const seen = new Set();
@@ -164,6 +166,11 @@ export function todaySectionItems(section) {
       if (row.kind === 'second_brain_week') {
         row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
           SECOND_BRAIN_WEEK_ACTIONS.includes(action)
+        );
+      }
+      if (row.kind === 'second_brain_stale') {
+        row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
+          SECOND_BRAIN_STALE_ACTIONS.includes(action)
         );
       }
       return row;
@@ -213,6 +220,38 @@ export async function dismissSecondBrainWeek(fetchImpl = fetch) {
   } catch (_) {
     return false;
   }
+}
+
+// The stale-notes nudge's Not now: the server records it in the second brain's
+// record, so the row stays away until a look finishes after it, in every tab.
+export async function dismissSecondBrainNudge(fetchImpl = fetch) {
+  const random =
+    globalThis.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  try {
+    const response = await fetchImpl('/api/personal-assistant/second-brain/nudge/dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ request_id: `nudge-${random}` })
+    });
+    return Boolean(response?.ok);
+  } catch (_) {
+    return false;
+  }
+}
+
+// secondBrainRefresher folds the second brain's change announcements into one
+// Today read: the drawer announces every step of a turn, and the HQ Notes panel
+// announces what it did, so a burst becomes a single refresh.
+export function secondBrainRefresher(refresh, wait = 300, timers = globalThis) {
+  let timer = null;
+  return () => {
+    if (timer !== null) timers.clearTimeout(timer);
+    timer = timers.setTimeout(() => {
+      timer = null;
+      void refresh();
+    }, wait);
+  };
 }
 
 // Resume opens the Create Workspace dialog in build mode on the open build.
@@ -796,6 +835,23 @@ function renderCompactRows(list, rows, skipCards = false) {
       button.addEventListener('click', async () => {
         button.disabled = true;
         if (await dismissSecondBrainWeek()) li.remove();
+        else button.disabled = false;
+        void loadToday();
+      });
+      actions.append(button);
+      li.append(actions);
+    }
+    if (row.kind === 'second_brain_stale' && row.actions?.includes('not_now')) {
+      const actions = document.createElement('div');
+      actions.className = 'personal-assistant-today__actions';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'personal-assistant-today__action personal-assistant-today__action--quiet';
+      button.dataset.secondBrainNudgeAction = 'not_now';
+      button.textContent = 'Not now';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        if (await dismissSecondBrainNudge()) li.remove();
         else button.disabled = false;
         void loadToday();
       });
@@ -1404,6 +1460,9 @@ function init() {
   // A saved or deferred interview changes `interview_status`, which decides
   // whether the "Optional interview" link shows.
   document.addEventListener('personal-assistant-knowledge-changed', () => void loadToday());
+  // A connect, look, follow-up or disconnect from the drawer or the HQ Notes
+  // panel changes what Today says about the notes.
+  document.addEventListener('personal-assistant:second-brain', secondBrainRefresher(loadToday));
   document.getElementById('personalAssistantProgressRow')?.addEventListener('click', () => {
     state.progressOpen = !state.progressOpen;
     syncProgressLists();

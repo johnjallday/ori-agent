@@ -292,6 +292,17 @@ type SecondBrainView struct {
 	Version    int64                 `json:"version"`
 	// LookID names the look a connect started (or the replayed one).
 	LookID string `json:"look_id,omitempty"`
+	// Nudge says the notes deserve another look, by the same rule Today's
+	// Needs you row follows, so the Notes station never disagrees with it.
+	Nudge *SecondBrainNudgeView `json:"nudge,omitempty"`
+}
+
+// SecondBrainNudgeView is why the notes deserve another look: the last look's
+// age, and how many of its dated lines came due since.
+type SecondBrainNudgeView struct {
+	Stale   bool `json:"stale"`
+	Days    int  `json:"days"`
+	CameDue int  `json:"came_due"`
 }
 
 // SecondBrainTodayNote says whether today has a Daily note, and whose it is.
@@ -1608,6 +1619,11 @@ func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
 			summary.At = *last.FinishedAt
 		}
 		view.LastLook = summary
+	}
+	if view.Status == SecondBrainConnected {
+		if nudge := secondbrain.Nudge(&doc.Record, s.deps.Now()); nudge.Any() {
+			view.Nudge = &SecondBrainNudgeView{Stale: nudge.Stale, Days: nudge.Days, CameDue: nudge.CameDue}
+		}
 	}
 	return view
 }

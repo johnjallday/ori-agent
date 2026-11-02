@@ -6,6 +6,8 @@ import {
   backupCoverageControls,
   declineBackupCoverage,
   dismissSecondBrainWeek,
+  dismissSecondBrainNudge,
+  secondBrainRefresher,
   MEETING_BADGES,
   meetingsSectionView,
   modelUnavailableBanner,
@@ -864,4 +866,67 @@ test('meeting routes that leave the app are dropped', () => {
   });
   assert.equal(nudge.noteRoute, '');
   assert.equal(nudge.noteLinkLabel, '');
+});
+
+test('the stale-notes nudge keeps its route to the Notes panel and only a Not now', () => {
+  const [nudge] = todaySectionItems({
+    items: [
+      {
+        id: 'second-brain-stale-look-1',
+        kind: 'second_brain_stale',
+        title: 'Your notes were last read 8 days ago',
+        route: '/workspaces/personal-hq?station=second-brain',
+        actions: ['not_now', 'disconnect']
+      }
+    ]
+  });
+  assert.deepEqual(nudge.actions, ['not_now'], 'an unlisted control is dropped');
+  assert.equal(nudge.route, '/workspaces/personal-hq?station=second-brain');
+});
+
+test('Not now on the nudge posts only a request id and reports only success', async () => {
+  const calls = [];
+  const ok = await dismissSecondBrainNudge(async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true };
+  });
+  assert.equal(ok, true);
+  assert.equal(calls[0].url, '/api/personal-assistant/second-brain/nudge/dismiss');
+  assert.equal(calls[0].init.method, 'POST');
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual(Object.keys(body), ['request_id']);
+  assert.match(body.request_id, /^nudge-[A-Za-z0-9-]{8,}$/);
+  assert.equal(await dismissSecondBrainNudge(async () => ({ ok: false })), false);
+  assert.equal(
+    await dismissSecondBrainNudge(async () => {
+      throw new Error('offline');
+    }),
+    false
+  );
+});
+
+test('a burst of second-brain announcements is one Today read', async () => {
+  let reads = 0;
+  const pending = new Map();
+  let next = 0;
+  const timers = {
+    setTimeout: (fn, ms) => {
+      next += 1;
+      pending.set(next, { fn, ms });
+      return next;
+    },
+    clearTimeout: id => pending.delete(id)
+  };
+  const announce = secondBrainRefresher(() => (reads += 1), 300, timers);
+  announce();
+  announce();
+  announce();
+  assert.equal(pending.size, 1, 'only the last announcement keeps a timer');
+  const [{ fn, ms }] = pending.values();
+  assert.equal(ms, 300);
+  fn();
+  assert.equal(reads, 1);
+  announce();
+  [...pending.values()].at(-1).fn();
+  assert.equal(reads, 2, 'a later change reads again');
 });
