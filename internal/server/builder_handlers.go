@@ -244,6 +244,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		// SQLite domain over the shared database, same pattern as follow-ups.
 		b.meetingPrepStore = meetingprep.NewSQLiteStore(sessionStore.DB())
 		b.personalHQHandler.SetFollowUps(b.followUpService)
+		b.personalHQHandler.SetFollowUpTickets(b.followUpService, b.ticketServiceForBridges)
 		// End-of-day journal (Group 7): grounded on the day's closed follow-ups,
 		// saved as a dated Personal HQ note (never MEMORY.md by default).
 		journal := personalhq.NewJournalService(

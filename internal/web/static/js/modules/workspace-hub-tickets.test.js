@@ -278,7 +278,7 @@ test('the same transition is labelled by intent, not by destination', () => {
   assert.equal(labelFor('in_progress', ['ready'], 'ready'), 'Stop work');
 
   // `in_progress` likewise.
-  assert.equal(labelFor('ready', ['in_progress'], 'in_progress'), 'Start work');
+  assert.equal(labelFor('ready', ['in_progress'], 'in_progress'), 'Mark in progress');
   assert.equal(labelFor('review', ['in_progress'], 'in_progress'), 'Request changes');
 });
 
@@ -623,4 +623,51 @@ test('state metadata never relies on color alone', () => {
   });
   // Cancelled is not a default board column (FR-45).
   assert.equal(api.stateMeta('cancelled').activeColumn, false);
+});
+
+test('Start this is offered on open Backlog and Ready tickets only (PRD 760 FR-27)', () => {
+  const { api } = loadTickets();
+  assert.equal(api.canStartThis({ state: 'backlog' }), true);
+  assert.equal(api.canStartThis({ state: 'ready' }), true);
+  assert.equal(api.canStartThis({ state: 'ready', archived: true }), false);
+  for (const state of ['in_progress', 'review', 'done', 'cancelled']) {
+    assert.equal(api.canStartThis({ state }), false, state);
+  }
+});
+
+test('start carries the refusal beside the saved ticket', async () => {
+  const { api, calls } = loadTickets(() => ({
+    body: { ...serverTicket({ state: 'ready' }), start: { error: 'No key' } }
+  }));
+  const ticket = await api.api.start('ws-1', 't 1', { assignee: 'Writer' });
+  assert.equal(calls[0].url, '/api/workspaces/ws-1/tickets/t%201/start');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].body.assignee, 'Writer');
+  assert.equal(ticket.state, 'ready');
+  assert.equal(ticket.start.error, 'No key');
+  assert.equal(ticket.start.started, false);
+});
+
+test('a ticket keeps the note about the line it came from', () => {
+  const { api } = loadTickets();
+  const ticket = api.normalizeTicket(
+    serverTicket({ source: 'note_item', source_note: 'The line is gone.' })
+  );
+  assert.equal(ticket.sourceNote, 'The line is gone.');
+  assert.equal(api.ticketSourceLabel('note_item'), 'Your notes');
+  assert.equal(api.ticketSourceLabel('followup'), 'A follow-up');
+  assert.equal(api.followUpStandingLabel('completed'), 'done');
+});
+
+test('a ticket reads its follow-up and its workspace agents', async () => {
+  const { api, calls } = loadTickets(url =>
+    url.includes('followups')
+      ? { body: { followup: { id: 'f1', title: 'Send it' } } }
+      : { body: { agents: ['Writer'] } }
+  );
+  assert.equal((await api.api.followUp('f 1')).title, 'Send it');
+  assert.equal(calls[0].url, '/api/personal-hq/followups/item?id=f%201');
+  const names = await api.api.workspaceAgents('ws-1');
+  assert.equal(names.length, 1);
+  assert.equal(names[0], 'Writer');
 });

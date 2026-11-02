@@ -29,6 +29,7 @@ import {
   secondBrainConsentView,
   secondBrainError,
   secondBrainFolderNameProblem,
+  secondBrainDestinationLine,
   secondBrainItemGroups,
   secondBrainLookView,
   secondBrainManageView,
@@ -477,6 +478,7 @@ test('show everything groups the items by note, suggested ones checked', () => {
       note: 'Projects/Album Release.md',
       label: 'Projects/Album Release',
       link: '',
+      destination: '',
       items: [
         { id: 'a', text: 'Master track 7', due: '2026-10-24', checked: true, seeded: false },
         { id: 'b', text: 'Upload stems', due: '', checked: true, seeded: false }
@@ -486,6 +488,7 @@ test('show everything groups the items by note, suggested ones checked', () => {
       note: 'Reading List.md',
       label: 'Reading List',
       link: '',
+      destination: '',
       items: [{ id: 'c', text: 'Read Making Music', due: '', checked: false, seeded: false }]
     }
   ]);
@@ -523,10 +526,7 @@ test('the receipt says what was added and what was already there', () => {
     followUpReceiptLine({ created: 2, skipped: 1 }),
     'Added 2 follow-ups to Personal HQ. 1 was already there.'
   );
-  assert.equal(
-    followUpReceiptLine({ created: 0, skipped: 3 }),
-    'Those are already in your follow-ups.'
-  );
+  assert.equal(followUpReceiptLine({ created: 0, skipped: 3 }), 'You already added those.');
 });
 
 test('errors read either shape the server writes', () => {
@@ -964,4 +964,32 @@ test('a save that works the first time asks nothing else', async () => {
   const fetchImpl = fakeFetch({ status: 200, body: { item: { id: 'k1' } } });
   assert.equal((await saveProjectFact(answered(), fetchImpl)).ok, true);
   assert.equal(fetchImpl.calls.length, 1);
+});
+
+test('the receipt stays true when a look makes tickets and follow-ups together', () => {
+  assert.equal(
+    followUpReceiptLine({ created: 2, skipped: 0, tickets: { Album: 3 } }),
+    'Added 3 tickets to Album and 2 follow-ups to Personal HQ.'
+  );
+  assert.equal(
+    followUpReceiptLine({ created: 0, skipped: 1, tickets: { Album: 1, EP: 2 } }),
+    'Added 1 ticket to Album and 2 tickets to EP. 1 was already there.'
+  );
+  assert.equal(followUpReceiptLine({ created: 0, skipped: 2 }), 'You already added those.');
+});
+
+test('the primary action counts tickets and follow-ups separately', () => {
+  assert.equal(suggestedLabel(3, 3), 'Add 3 tickets');
+  assert.equal(suggestedLabel(4, 1), 'Add 1 ticket and 3 follow-ups');
+  assert.equal(suggestedLabel(2, 0), 'Add 2 as follow-ups');
+});
+
+test('each group of a look names where it goes', () => {
+  const [project, daily] = secondBrainItemGroups([
+    { id: 'a', text: 'Mix', note: 'Projects/Album/plan.md', ticket_workspace: 'Album' },
+    { id: 'b', text: 'Call', note: 'Daily/today.md' }
+  ]);
+  assert.equal(secondBrainDestinationLine(project), 'Tickets in Album');
+  assert.equal(secondBrainDestinationLine(daily), 'Follow-ups in Personal HQ');
+  assert.equal(secondBrainDestinationLine({ destination: '', items: [{ seeded: true }] }), '');
 });

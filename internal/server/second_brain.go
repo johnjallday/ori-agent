@@ -28,7 +28,8 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 	}
 	guards := filejanitor.DefaultRootGuards()
 	service := personalassistant.NewSecondBrainService(personalassistant.NewSecondBrainStore(knowledge), personalassistant.SecondBrainDeps{
-		Vaults: secondbrain.NewDetector(guards.HomeDir, guards),
+		Vaults:         secondbrain.NewDetector(guards.HomeDir, guards),
+		ProjectTickets: secondBrainProjectTickets{b: b},
 		// The store may be created by a later phase; look it up at call time.
 		ResolveSelection: func(token string) (string, error) {
 			if b.pathSelectionStore == nil {

@@ -34,6 +34,8 @@ type Handler struct {
 	needsYou               NeedsYouService
 	replies                ReplyService
 	followups              FollowUpAPI
+	followUpLinker         FollowUpLinker
+	followUpTickets        func() *workspace.TicketService
 	journal                JournalAPI
 	provider               userprofile.UserProvider
 	// watchtowerSources is intentionally a factory: workspace storage is wired

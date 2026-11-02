@@ -172,7 +172,9 @@
 /api/personal-hq/followups/confirm
 /api/personal-hq/followups/dismiss
 /api/personal-hq/followups/home
+/api/personal-hq/followups/item
 /api/personal-hq/followups/snooze
+/api/personal-hq/followups/ticket
 /api/personal-hq/journal/dismiss
 /api/personal-hq/journal/propose
 /api/personal-hq/journal/save

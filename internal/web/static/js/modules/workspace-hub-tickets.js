@@ -104,6 +104,7 @@
       referenceUrl: raw.reference_url || '',
       source: raw.source || '',
       sourceId: raw.source_id || '',
+      sourceNote: raw.source_note || '',
       linkedNoteIds: Array.isArray(raw.linked_note_ids) ? raw.linked_note_ids.slice() : [],
       assignee: raw.assignee || '',
       parentTicketId: raw.parent_ticket_id || '',
@@ -413,6 +414,42 @@
       return normalizeTicket(payload);
     },
 
+    /**
+     * Start this (PRD 760 FR-27): moves a Backlog ticket to Ready, names who does
+     * it, and starts one run. A refused start is a saved ticket plus a reason.
+     */
+    async start(studioId, ticketId, { assignee = '' } = {}) {
+      const payload = await request(
+        'POST',
+        `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}/start`,
+        { assignee }
+      );
+      announceChange(studioId);
+      const ticket = normalizeTicket(payload);
+      if (ticket && payload && payload.start) {
+        ticket.start = {
+          started: Boolean(payload.start.started),
+          error: payload.start.error || ''
+        };
+      }
+      return ticket;
+    },
+
+    /** Who can be asked to do a ticket: the owning workspace's agents, by name. */
+    async workspaceAgents(studioId) {
+      const payload = await request('GET', `/api/workspaces/${encodeURIComponent(studioId)}`);
+      return Array.isArray(payload && payload.agents) ? payload.agents.slice() : [];
+    },
+
+    /** The follow-up a ticket was made from (PRD 760 FR-26). */
+    async followUp(id) {
+      const payload = await request(
+        'GET',
+        `/api/personal-hq/followups/item?id=${encodeURIComponent(id)}`
+      );
+      return (payload && payload.followup) || null;
+    },
+
     /** Reorders within one owner and one state; all-or-nothing (FR-91). */
     async reorder(studioId, state, orderedIds) {
       const payload = await request('POST', `${ticketsBasePath(studioId)}/reorder`, {
@@ -588,7 +625,7 @@
       'backlog->ready': 'Promote to Ready',
       'backlog->cancelled': 'Cancel',
       'ready->backlog': 'Return to Backlog',
-      'ready->in_progress': 'Start work',
+      'ready->in_progress': 'Mark in progress',
       'ready->cancelled': 'Cancel',
       'in_progress->ready': 'Stop work',
       'in_progress->review': 'Send for review',
@@ -600,6 +637,32 @@
       'cancelled->ready': 'Reopen'
     };
     return labels[key] || `Move to ${stateLabel(toState)}`;
+  }
+
+  /** Start this is offered on open work nobody has picked up (PRD 760 FR-27). */
+  function canStartThis(ticket) {
+    if (!ticket || ticket.archived) return false;
+    return ticket.state === 'backlog' || ticket.state === 'ready';
+  }
+
+  /** Where a ticket came from, in words. Older sources read as they are stored. */
+  function ticketSourceLabel(source) {
+    if (source === 'followup') return 'A follow-up';
+    if (source === 'note_item') return 'Your notes';
+    return source || '';
+  }
+
+  /** A follow-up's standing, beside the ticket it led to. */
+  function followUpStandingLabel(status) {
+    const labels = {
+      candidate: 'not confirmed yet',
+      active: 'open',
+      reopened: 'open',
+      snoozed: 'snoozed',
+      completed: 'done',
+      dismissed: 'dismissed'
+    };
+    return labels[status] || '';
   }
 
   function transitionOptions(ticket) {
@@ -617,7 +680,12 @@
   // placeholder data, so anything on screen is something the server actually
   // persisted.
 
+  // How long a reload leaves an action's own message in place.
+  const OUTCOME_HOLD_MS = 6000;
+
   const view = {
+    outcomeAt: 0,
+    detailOutcome: null,
     elements: {},
     tickets: [],
     selectedTicketId: '',
@@ -1086,7 +1154,9 @@
       return;
     }
 
-    setStatus('Loading tickets…');
+    // A reload follows every change, so it must not wipe what that change said.
+    const holdOutcome = Date.now() - view.outcomeAt < OUTCOME_HOLD_MS;
+    if (!holdOutcome) setStatus('Loading tickets…');
     try {
       const result = await api.list(studioId, {
         states: view.filters.states,
@@ -1100,7 +1170,8 @@
       view.lastPage = result;
       announceCounts(studioId, result.counts);
       render();
-      setStatus('');
+      if (!holdOutcome) setStatus('');
+      void followSelectedTicket(result.tickets);
     } catch (error) {
       view.tickets = [];
       view.lastPage = null;
@@ -1109,11 +1180,36 @@
     }
   }
 
+  /**
+   * Keeps open detail in step with the list: a run moves a ticket after Start this
+   * answered, and buttons for a state it has left would only be refused. It leaves
+   * alone a detail the person is typing in or choosing from.
+   */
+  async function followSelectedTicket(tickets) {
+    const shown = view.selectedTicket;
+    if (!shown || shown.id !== view.selectedTicketId) return;
+    const listed = tickets.find(ticket => ticket.id === shown.id);
+    if (!listed || (listed.version === shown.version && listed.state === shown.state)) return;
+    const body = view.elements.detailBody;
+    if (body?.querySelector('details[open], .ticket-start-chooser')) return;
+    let fresh;
+    try {
+      fresh = await api.get(shown.owningWorkspaceId, shown.id);
+    } catch {
+      return;
+    }
+    if (view.selectedTicketId !== fresh.id) return;
+    const hadFocus = Boolean(body && body.contains(document.activeElement));
+    renderDetail(fresh);
+    if (hadFocus) focusDetailActions();
+  }
+
   /** Opens the server-backed detail view for one ticket. */
   async function openDetail(owningWorkspaceId, ticketId) {
     const detail = view.elements.detail;
     if (!detail) return;
 
+    if (view.selectedTicketId !== ticketId) view.detailOutcome = null;
     view.selectedTicketId = ticketId;
     detail.hidden = false;
     if (view.elements.detailBody) {
@@ -1309,6 +1405,14 @@
 
     body.appendChild(buildActionRow(ticket));
 
+    if (view.detailOutcome && view.detailOutcome.ticketId === ticket.id) {
+      const outcome = document.createElement('p');
+      outcome.className = `ticket-detail-outcome is-${view.detailOutcome.tone}`;
+      outcome.setAttribute('role', 'status');
+      outcome.textContent = view.detailOutcome.message;
+      body.appendChild(outcome);
+    }
+
     // --- Work ---
     appendSectionTitle(body, 'Work');
     const summary = document.createElement('dl');
@@ -1324,8 +1428,23 @@
       ticket.dueDate ? `${formatDate(ticket.dueDate)}${isOverdue(ticket) ? ' — overdue' : ''}` : ''
     );
     appendDetailRow(summary, 'Reference', ticket.referenceUrl);
-    appendDetailRow(summary, 'Source', ticket.source);
+    appendDetailRow(summary, 'Source', ticketSourceLabel(ticket.source));
     body.appendChild(summary);
+
+    // Where it came from. A link, not ownership: closing the follow-up or ticking
+    // the line leaves this ticket where it is (PRD 760 FR-26, FR-29).
+    if (ticket.sourceNote) {
+      const note = document.createElement('p');
+      note.className = 'ticket-detail-origin ticket-detail-source-note';
+      note.textContent = ticket.sourceNote;
+      body.appendChild(note);
+    }
+    if (ticket.source === 'followup' && ticket.sourceId) {
+      const origin = document.createElement('p');
+      origin.className = 'ticket-detail-origin ticket-detail-followup';
+      body.appendChild(origin);
+      void renderLinkedFollowUp(origin, ticket);
+    }
     body.appendChild(buildEditDisclosure(ticket));
 
     // A draft saved from an assistant conversation can be continued there.
@@ -1706,9 +1825,158 @@
    * Group 2 exposes the planning actions. Review, Done, Cancel, and Reopen are
    * execution-sensitive and land with the Run lifecycle in Group 4.
    */
+  async function renderLinkedFollowUp(host, ticket) {
+    let item = null;
+    try {
+      item = await api.followUp(ticket.sourceId);
+    } catch {
+      item = null;
+    }
+    // The detail may have moved on while this loaded.
+    if (view.selectedTicket?.id !== ticket.id || !host.isConnected) return;
+    if (!item) {
+      host.textContent = 'Made from a follow-up that is no longer available.';
+      return;
+    }
+    host.textContent = 'Made from your follow-up: ';
+    const title = item.title || 'Open follow-up';
+    if (item.href) {
+      const link = document.createElement('a');
+      link.href = item.href;
+      link.textContent = title;
+      host.appendChild(link);
+    } else {
+      host.appendChild(document.createTextNode(title));
+    }
+    const standing = followUpStandingLabel(item.status);
+    if (standing) host.appendChild(document.createTextNode(` (${standing})`));
+  }
+
+  function focusDetailActions() {
+    view.elements.detailBody?.querySelector('.ticket-detail-actions button')?.focus();
+  }
+
+  /**
+   * Asks who should do the work. The server decides whether anyone is already
+   * named, so the rule lives in one place; this only runs when it says no one is.
+   */
+  async function askWhoStarts(ticket, trigger) {
+    const row = trigger.closest('.ticket-detail-actions');
+    row?.parentElement?.querySelector('.ticket-start-chooser')?.remove();
+    let names = [];
+    try {
+      names = await api.workspaceAgents(ticket.owningWorkspaceId);
+    } catch (error) {
+      setStatus(error.message, 'error');
+      trigger.disabled = false;
+      trigger.focus();
+      return;
+    }
+
+    const chooser = document.createElement('div');
+    chooser.className = 'ticket-start-chooser';
+    const close = () => {
+      chooser.remove();
+      trigger.disabled = false;
+      trigger.focus();
+    };
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+
+    if (!names.length) {
+      const empty = document.createElement('p');
+      empty.className = 'ticket-detail-origin';
+      empty.setAttribute('role', 'status');
+      empty.textContent = 'This workspace has no agents yet. Add one, then start this.';
+      chooser.append(empty, cancel);
+      row?.after(chooser);
+      cancel.focus();
+      return;
+    }
+
+    const label = document.createElement('label');
+    label.textContent = 'Who should do this?';
+    const select = document.createElement('select');
+    select.className = 'form-select form-select-sm';
+    select.dataset.startAssignee = '';
+    names.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+    label.appendChild(select);
+    const start = document.createElement('button');
+    start.type = 'button';
+    start.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    start.dataset.startConfirm = '';
+    start.textContent = 'Start';
+    start.addEventListener('click', () => {
+      start.disabled = true;
+      void applyStart(ticket, select.value, trigger);
+    });
+    chooser.append(label, start, cancel);
+    row?.after(chooser);
+    select.focus();
+  }
+
+  function noteStartOutcome(ticketId, message, tone) {
+    view.detailOutcome = { ticketId, message, tone };
+    setStatus(message, tone);
+    view.outcomeAt = Date.now();
+  }
+
+  async function applyStart(ticket, assignee, trigger) {
+    setStatus(`Starting ${ticket.displayNumber}…`);
+    try {
+      const updated = await api.start(ticket.owningWorkspaceId, ticket.id, { assignee });
+      const refusal = updated.start && updated.start.error;
+      const message = refusal
+        ? `${updated.displayNumber} is Ready, but it could not start: ${refusal}`
+        : `${updated.displayNumber} has started.`;
+      noteStartOutcome(updated.id, message, refusal ? 'error' : 'success');
+      if (view.selectedTicketId === updated.id) renderDetail(updated);
+      await load();
+      announce(message);
+      focusDetailActions();
+    } catch (error) {
+      if (!assignee && error.details && error.details.field === 'assignee') {
+        setStatus('');
+        await askWhoStarts(ticket, trigger);
+        return;
+      }
+      noteStartOutcome(ticket.id, error.message, 'error');
+      if (view.selectedTicketId === ticket.id) renderDetail(view.selectedTicket);
+      announce(`Start failed: ${error.message}`);
+      await load();
+      if (trigger.isConnected) {
+        trigger.disabled = false;
+        trigger.focus();
+      } else {
+        focusDetailActions();
+      }
+    }
+  }
+
   function buildActionRow(ticket) {
     const row = document.createElement('div');
     row.className = 'ticket-detail-actions';
+
+    if (canStartThis(ticket)) {
+      const start = document.createElement('button');
+      start.type = 'button';
+      start.className = 'modern-btn modern-btn-primary modern-btn-sm ticket-action';
+      start.dataset.startThis = '';
+      start.textContent = 'Start this';
+      start.addEventListener('click', () => {
+        start.disabled = true;
+        void applyStart(ticket, '', start);
+      });
+      row.appendChild(start);
+    }
 
     // "Mark done" is the ONLY path to Done and it exists only from Review.
     // That is what makes acceptance an explicit human act rather than
@@ -1716,7 +1984,7 @@
     transitionOptions(ticket).forEach(option => {
       const button = document.createElement('button');
       button.type = 'button';
-      const primary = option.id === 'done' || (ticket.state === 'backlog' && option.id === 'ready');
+      const primary = option.id === 'done';
       button.className = `modern-btn ${primary ? 'modern-btn-primary' : 'modern-btn-secondary'} modern-btn-sm ticket-action`;
       button.dataset.transition = option.id;
       button.textContent = option.label;
@@ -2073,6 +2341,9 @@
     CHANGED_EVENT,
     ticketEditChanges,
     api,
+    canStartThis,
+    followUpStandingLabel,
+    ticketSourceLabel,
     assistantDraftResumeHref,
     canTransitionTo,
     formatQualifiedNumber,

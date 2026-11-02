@@ -90,5 +90,5 @@ func (h *Handler) WorkspaceFollowUps(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, "Failed to list follow-ups: "+err.Error())
 		return
 	}
-	orihttp.Success(w, map[string]any{"followups": items})
+	orihttp.Success(w, map[string]any{"followups": h.followUpViews(items)})
 }

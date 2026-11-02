@@ -104,7 +104,7 @@ func (h *Handler) ListFollowUps(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, "Failed to list follow-ups: "+err.Error())
 		return
 	}
-	orihttp.Success(w, map[string]any{"followups": items})
+	orihttp.Success(w, map[string]any{"followups": h.followUpViews(items)})
 }
 
 // HomeFollowUps handles GET /api/personal-hq/followups/home: the bounded Home
@@ -122,7 +122,7 @@ func (h *Handler) HomeFollowUps(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, "Failed to load follow-ups: "+err.Error())
 		return
 	}
-	orihttp.Success(w, map[string]any{"followups": items})
+	orihttp.Success(w, map[string]any{"followups": h.followUpViews(items)})
 }
 
 // CreateFollowUp handles POST /api/personal-hq/followups: manual create.

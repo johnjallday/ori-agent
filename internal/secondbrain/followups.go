@@ -3,6 +3,7 @@ package secondbrain
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -75,12 +76,65 @@ type FollowUps interface {
 	FindBySource(ctx context.Context, userID, sourceType, sourceID string) (*followup.FollowUp, error)
 }
 
-// Acceptance turns chosen open items into HQ follow-ups.
+// ProjectTickets offers an open line in a project's notes as that project's
+// ticket, when an active workspace's primary directory is exactly that project's
+// folder (PRD 760 FR-28).
+type ProjectTickets interface {
+	// WorkspaceForFolder finds the active workspace whose primary directory is
+	// exactly this folder.
+	WorkspaceForFolder(path string) (workspaceID, workspaceName string, ok bool)
+	// CreateNoteTicket makes a Backlog ticket with the item's id as its key. A
+	// later attempt finds the same ticket and reports created false.
+	CreateNoteTicket(ctx context.Context, workspaceID string, ticket NoteTicket) (created bool, err error)
+}
+
+// NoteTicket is a ticket made from an open line.
+type NoteTicket struct {
+	ItemID string
+	Title  string
+	Detail string
+	DueAt  *time.Time
+}
+
+// ProjectFolderOf returns the folder of a note directly or deeper inside
+// Projects/<name>/, relative to the root. A note path that climbs out, or one not
+// inside a project, has none.
+func ProjectFolderOf(note string) (string, bool) {
+	parts := strings.Split(note, "/")
+	if len(parts) < 3 || parts[0] != FolderProjects {
+		return "", false
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return "", false
+		}
+	}
+	if !validProjectName(parts[1]) {
+		return "", false
+	}
+	return FolderProjects + "/" + parts[1], true
+}
+
+// ItemDestination is the workspace an item would become a ticket in, if any.
+func ItemDestination(tickets ProjectTickets, root string, item LookItem) (workspaceID, workspaceName string, ok bool) {
+	if tickets == nil || item.Seeded {
+		return "", "", false
+	}
+	folder, inProject := ProjectFolderOf(item.Note)
+	if !inProject {
+		return "", "", false
+	}
+	return tickets.WorkspaceForFolder(filepath.Join(root, filepath.FromSlash(folder)))
+}
+
+// Acceptance turns chosen open items into HQ follow-ups, or into a project's
+// tickets when Tickets is set.
 type Acceptance struct {
 	UserID      string
 	WorkspaceID string
 	Source      Source
 	Items       []LookItem
+	Tickets     ProjectTickets
 	// Location places a due date; it defaults to the server's own zone.
 	Location *time.Location
 }
@@ -91,8 +145,36 @@ type Acceptance struct {
 // before, by this look or an earlier one, in whatever state the user left it,
 // is skipped and counted, never captured again.
 func Accept(ctx context.Context, followUps FollowUps, in Acceptance) (created, skipped int, err error) {
+	result, err := AcceptRouted(ctx, followUps, in)
+	return result.FollowUps, result.Skipped, err
+}
+
+// AcceptResult says where accepted items went.
+type AcceptResult struct {
+	FollowUps int
+	Skipped   int
+	// Tickets counts the tickets made, by workspace name.
+	Tickets map[string]int
+}
+
+// TicketCount is every ticket made.
+func (r AcceptResult) TicketCount() int {
+	total := 0
+	for _, count := range r.Tickets {
+		total += count
+	}
+	return total
+}
+
+// AcceptRouted is Accept with project routing (PRD 760 FR-28, FR-29). An item
+// already held as a follow-up stays one and is skipped, never moved. Otherwise a
+// line in a project with a workspace becomes that workspace's Backlog ticket,
+// keyed by the item's id so a later look makes no duplicate. Everything else
+// becomes a follow-up, as before.
+func AcceptRouted(ctx context.Context, followUps FollowUps, in Acceptance) (AcceptResult, error) {
+	var result AcceptResult
 	if followUps == nil {
-		return 0, 0, errors.New("secondbrain: follow-ups unavailable")
+		return result, errors.New("secondbrain: follow-ups unavailable")
 	}
 	location := in.Location
 	if location == nil {
@@ -102,23 +184,41 @@ func Accept(ctx context.Context, followUps FollowUps, in Acceptance) (created, s
 		if item.Seeded {
 			// Seeded from a follow-up the user already has; its own source is
 			// not this note, so the dedup below could not see it.
-			skipped++
+			result.Skipped++
 			continue
 		}
 		_, err := followUps.FindBySource(ctx, in.UserID, FollowUpSourceType, item.ID)
 		switch {
 		case err == nil:
-			skipped++
+			result.Skipped++
 			continue
 		case !errors.Is(err, followup.ErrNotFound):
-			return created, skipped, err
+			return result, err
 		}
-		if _, err := followUps.Capture(ctx, captureInput(in, item, location)); err != nil {
-			return created, skipped, err
+		capture := captureInput(in, item, location)
+		if workspaceID, name, routed := ItemDestination(in.Tickets, in.Source.Path, item); routed {
+			created, err := in.Tickets.CreateNoteTicket(ctx, workspaceID, NoteTicket{
+				ItemID: item.ID, Title: item.Text, Detail: item.Note, DueAt: capture.DueAt,
+			})
+			if err != nil {
+				return result, err
+			}
+			if created {
+				if result.Tickets == nil {
+					result.Tickets = map[string]int{}
+				}
+				result.Tickets[name]++
+			} else {
+				result.Skipped++
+			}
+			continue
 		}
-		created++
+		if _, err := followUps.Capture(ctx, capture); err != nil {
+			return result, err
+		}
+		result.FollowUps++
 	}
-	return created, skipped, nil
+	return result, nil
 }
 
 func captureInput(in Acceptance, item LookItem, location *time.Location) followup.CaptureInput {

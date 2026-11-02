@@ -578,6 +578,12 @@ func (h *Handler) TicketItemHandler(w http.ResponseWriter, r *http.Request) {
 	h.ticketHandler.TicketItemHandler(w, r)
 }
 
+// TicketStartHandler handles POST
+// /api/workspaces/{studioID}/tickets/{ticketID}/start.
+func (h *Handler) TicketStartHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketStartHandler(w, r)
+}
+
 // TicketTransitionHandler handles POST
 // /api/workspaces/{studio_id}/tickets/{ticket_id}/transition.
 func (h *Handler) TicketTransitionHandler(w http.ResponseWriter, r *http.Request) {

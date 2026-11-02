@@ -7,6 +7,7 @@
 // personal-hq-onboarding.test.js can exercise it without a DOM.
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+import { renderRelatedTicket, startMakeTicket } from './follow-up-ticket.js';
 
 // upgradeView turns an upgrade plan (from GET /api/personal-hq/upgrade/preview)
 // into the view-model the DOM code renders, so all the branching lives here and
@@ -400,7 +401,8 @@ export function followUpView(f) {
     detail: f.detail || '',
     counterparty: f.counterparty || '',
     category: followUpCategoryLabel(f.category),
-    isCandidate: status === 'candidate'
+    isCandidate: status === 'candidate',
+    relatedTicket: f.related_ticket || null
   };
 }
 
@@ -1301,9 +1303,10 @@ export function followUpView(f) {
     return Array.isArray(data.followups) ? data.followups : [];
   }
 
-  function renderFollowUpCard(view) {
+  function renderFollowUpCard(view, mount) {
     const card = document.createElement('div');
     card.className = 'hq-followup-card';
+    card.dataset.followupId = view.id;
 
     const cat = document.createElement('span');
     cat.className = 'hq-followup-category';
@@ -1321,8 +1324,28 @@ export function followUpView(f) {
       detail.textContent = view.detail;
       card.appendChild(detail);
     }
-    // Read-only on HQ (Mail spin-off FR20): the brief/Home surfaces follow-ups
-    // but does not mutate them — management lives in the Email Ops workspace.
+    // HQ does not close or snooze follow-ups (Mail spin-off FR20); management
+    // lives in the Email Ops workspace. Make a ticket changes neither: it only adds
+    // a link, and it is how an HQ commitment becomes a workspace's work (PRD 760).
+    if (view.relatedTicket) {
+      card.appendChild(renderRelatedTicket(document, view.relatedTicket));
+    } else if (!view.isCandidate) {
+      const actions = document.createElement('div');
+      actions.className = 'hq-followup-actions';
+      const make = document.createElement('button');
+      make.type = 'button';
+      make.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+      make.textContent = 'Make a ticket';
+      make.addEventListener('click', () => {
+        void startMakeTicket(document, card, make, view.id, {
+          fetchImpl: (url, options) => fetch(url, options),
+          onChanged: wireFollowUps,
+          root: mount
+        });
+      });
+      actions.appendChild(make);
+      card.appendChild(actions);
+    }
     return card;
   }
 
@@ -1359,7 +1382,7 @@ export function followUpView(f) {
     mount.appendChild(heading);
     items.forEach(f => {
       const view = followUpView(f);
-      if (view) mount.appendChild(renderFollowUpCard(view));
+      if (view) mount.appendChild(renderFollowUpCard(view, mount));
     });
     // Read-only surfacing: send the user to the Email Ops workspace to act on
     // these (Mail spin-off FR20). Best-effort — omit the link if no Email Ops

@@ -369,7 +369,13 @@ export function secondBrainConsentView(chosen, model, platform = '') {
 }
 
 // suggestedLabel is the primary action's label, naming how many items it adds.
-export function suggestedLabel(count) {
+export function suggestedLabel(count, tickets = 0) {
+  if (tickets > 0) {
+    const made = tickets === 1 ? '1 ticket' : `${tickets} tickets`;
+    const held = count - tickets;
+    if (held <= 0) return `Add ${made}`;
+    return `Add ${made} and ${held === 1 ? '1 follow-up' : `${held} follow-ups`}`;
+  }
   const n = Number(count) || 0;
   return n === 1 ? 'Add 1 as a follow-up' : `Add ${n} as follow-ups`;
 }
@@ -386,11 +392,19 @@ export function secondBrainItemGroups(items) {
     const note = String(item.note || '');
     if (!byNote.has(note)) {
       const link = String(item.link || '').startsWith('obsidian://open?') ? item.link : '';
-      const group = { note, label: note.replace(/\.(md|markdown)$/i, ''), link, items: [] };
+      const group = {
+        note,
+        label: note.replace(/\.(md|markdown)$/i, ''),
+        link,
+        destination: '',
+        items: []
+      };
       byNote.set(note, group);
       groups.push(group);
     }
-    byNote.get(note).items.push({
+    const group = byNote.get(note);
+    if (item.ticket_workspace && !group.destination) group.destination = item.ticket_workspace;
+    group.items.push({
       id: item.id,
       text: item.text,
       due: String(item.due || ''),
@@ -400,6 +414,14 @@ export function secondBrainItemGroups(items) {
     });
   }
   return groups;
+}
+
+// secondBrainDestinationLine names where a group's items go when accepted (PRD
+// 760 FR-28). A group that only holds what is already a follow-up goes nowhere.
+export function secondBrainDestinationLine(group) {
+  if (group?.destination) return `Tickets in ${group.destination}`;
+  const items = Array.isArray(group?.items) ? group.items : [];
+  return items.some(item => !item.seeded) ? 'Follow-ups in Personal HQ' : '';
 }
 
 // secondBrainLookView is the result card (FR23–FR27): one headline and one
@@ -420,7 +442,9 @@ export function secondBrainLookView(look, { name = '', acted = false } = {}) {
   }
   if (state !== 'finished' || !result) return { state: 'none' };
   const items = Array.isArray(result.items) ? result.items : [];
-  const suggested = items.filter(item => item?.suggested === true).length;
+  const suggestedItems = items.filter(item => item?.suggested === true);
+  const suggested = suggestedItems.length;
+  const suggestedTickets = suggestedItems.filter(item => item.ticket_workspace).length;
   const changes = [];
   if (Number(result.new_since) > 0) changes.push(`${result.new_since} new`);
   if (Number(result.done_since) > 0) changes.push(`${result.done_since} done`);
@@ -432,7 +456,7 @@ export function secondBrainLookView(look, { name = '', acted = false } = {}) {
     alsoNoticed: String(result.also_noticed || ''),
     primary:
       suggested > 0 && !acted
-        ? { id: 'add', label: suggestedLabel(suggested), style: 'primary' }
+        ? { id: 'add', label: suggestedLabel(suggested, suggestedTickets), style: 'primary' }
         : null,
     showAll: items.length ? `Show everything (${items.length})` : '',
     groups: secondBrainItemGroups(items),
@@ -443,15 +467,24 @@ export function secondBrainLookView(look, { name = '', acted = false } = {}) {
   };
 }
 
-// followUpReceiptLine says what Add as follow-ups did.
+// followUpReceiptLine says what accepting a look did: tickets by workspace and
+// follow-ups together, so it stays true when a look does both.
 export function followUpReceiptLine(receipt) {
   const created = Number(receipt?.created) || 0;
   const skipped = Number(receipt?.skipped) || 0;
-  if (created === 0 && skipped > 0) return 'Those are already in your follow-ups.';
-  const added =
-    created === 1
-      ? 'Added 1 follow-up to Personal HQ.'
-      : `Added ${created} follow-ups to Personal HQ.`;
+  const tickets = Object.entries(receipt?.tickets || {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, count]) =>
+      Number(count) === 1 ? `1 ticket to ${name}` : `${count} tickets to ${name}`
+    );
+  if (created === 0 && tickets.length === 0 && skipped > 0) return 'You already added those.';
+  const followUps =
+    created === 1 ? '1 follow-up to Personal HQ' : `${created} follow-ups to Personal HQ`;
+  const parts = created > 0 || tickets.length === 0 ? [...tickets, followUps] : tickets;
+  const list =
+    parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
+  const added = `Added ${list}.`;
   if (skipped === 0) return added;
   return `${added} ${skipped === 1 ? '1 was' : `${skipped} were`} already there.`;
 }
@@ -1815,6 +1848,8 @@ function renderEverything(view) {
       legend.textContent = group.label;
     }
     fieldset.append(legend);
+    const destination = secondBrainDestinationLine(group);
+    if (destination) fieldset.append(node('p', 'pa-second-brain__destination', destination));
     group.items.forEach(item => {
       const label = node('label', 'pa-second-brain__item');
       const box = node('input');

@@ -210,7 +210,7 @@ test('read the vault: consent, one headline, add the open items once, and Look a
   // A re-run reconnects the same vault: its items keep their ids, so the
   // follow-ups made the first time are found instead of made again.
   await expect(card(page)).toContainText(
-    /Added 8 follow-ups to Personal HQ\.|Those are already in your follow-ups\./
+    /Added 8 follow-ups to Personal HQ\.|You already added those\./
   );
   const look = (await (await request.get(`${ENDPOINT}/look`)).json()).look;
   const again = await request.post(`${ENDPOINT}/look/${look.look_id}/follow-ups`, {

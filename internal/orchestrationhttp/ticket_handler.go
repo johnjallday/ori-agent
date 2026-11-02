@@ -41,6 +41,8 @@ type TicketHandler struct {
 	// asynchronously, so a fast retry can still read Ready; this keeps that retry
 	// from starting a second run.
 	startClaims sync.Map
+	// startThisClaims holds when each ticket was last started by Start this.
+	startThisClaims sync.Map
 }
 
 // SetStarter wires how a create request's start intent begins a run.
@@ -383,6 +385,61 @@ func (th *TicketHandler) handleCreate(w http.ResponseWriter, r *http.Request, st
 		status = http.StatusOK
 	}
 	_ = orihttp.RespondJSON(w, status, response)
+}
+
+// TicketStartHandler serves POST /api/workspaces/{studio_id}/tickets/{ticket_id}/start:
+// Start this (PRD 760 FR-27). It records each legal move and starts one run. With
+// no agent set and none named, the error's field asks who.
+func (th *TicketHandler) TicketStartHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	studioID := strings.TrimSpace(r.PathValue("studioID"))
+	ticketID := strings.TrimSpace(r.PathValue("ticketID"))
+	if studioID == "" || ticketID == "" {
+		orihttp.BadRequest(w, "studio_id and ticket_id are required")
+		return
+	}
+	var req struct {
+		Assignee string `json:"assignee"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	ticket, err := th.service.PrepareStart(studioID, ticketID, workspace.TicketStartInput{
+		Assignee: req.Assignee,
+		Actor:    workspace.TicketActorUser,
+	})
+	if err != nil {
+		th.respondTicketError(w, "start ticket", studioID, ticketID, err)
+		return
+	}
+	_ = orihttp.RespondJSON(w, http.StatusOK, ticketCreateResponse{Ticket: ticket, Start: th.startThis(studioID, ticket.ID)})
+}
+
+// startThisWindow is how long a Start this answers a repeat without starting
+// again. A run begins asynchronously, so for a moment a started ticket still
+// reads Ready, and a double click must not make a second run (FR-27). A ticket
+// that comes back to Ready later can be started again.
+const startThisWindow = 30 * time.Second
+
+func (th *TicketHandler) startThis(studioID, ticketID string) *ticketStartOutcome {
+	if th.starter == nil {
+		return &ticketStartOutcome{Error: "Starting work is not available right now."}
+	}
+	now := time.Now()
+	if previous, claimed := th.startThisClaims.LoadOrStore(ticketID, now); claimed {
+		if now.Sub(previous.(time.Time)) < startThisWindow || !th.startThisClaims.CompareAndSwap(ticketID, previous, now) {
+			return &ticketStartOutcome{Started: true}
+		}
+	}
+	if err := th.starter(studioID, ticketID); err != nil {
+		th.startThisClaims.Delete(ticketID)
+		logger.Warn("Start this was refused", logger.Fields{"ticket_id": ticketID, "error": err})
+		return &ticketStartOutcome{Error: err.Error()}
+	}
+	return &ticketStartOutcome{Started: true}
 }
 
 // startCreatedTicket begins the one run a create request asked for. A ticket that

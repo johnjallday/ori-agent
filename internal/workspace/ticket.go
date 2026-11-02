@@ -267,6 +267,8 @@ var validTicketSources = map[string]struct{}{
 	TicketSourceMigration:           {},
 	TicketSourceGoalSuggestion:      {},
 	TicketSourceFirstLookSuggestion: {},
+	TicketSourceFollowUp:            {},
+	TicketSourceNoteItem:            {},
 }
 
 // NormalizeTicketSource validates provenance, defaulting empty to manual.
@@ -686,6 +688,8 @@ type Ticket struct {
 	// hierarchy above: a result can be long, and the board shows cards (PRD 760
 	// FR-19).
 	LatestResult string `json:"latest_result,omitempty"`
+	// SourceNote says what became of the line a note-made ticket came from.
+	SourceNote string `json:"source_note,omitempty"`
 
 	// Archived reports that this terminal Ticket has aged past the 14-day
 	// recent window (FR-143). It is a presentation flag derived at read time,
@@ -796,6 +800,7 @@ func NewTicket(task *Task, owningWorkspaceID, owningWorkspaceName string, owning
 		ScheduleEnabled:         task.ScheduleEnabled,
 		AwaitingExecutionIntent: task.AwaitingExecutionIntent,
 		CurrentRunID:            task.CurrentRunID,
+		SourceNote:              ticketSourceNote(task),
 		NeedsAttention:          task.NeedsAttention(),
 		StartedAt:               task.StartedAt,
 		CompletedAt:             task.CompletedAt,

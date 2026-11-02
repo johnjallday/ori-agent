@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +40,34 @@ type secondBrainHarness struct {
 	vaultID   string
 	tokens    map[string]string
 	clock     *time.Time
+	tickets   *recordingProjectTickets
+}
+
+// recordingProjectTickets routes one project folder to one workspace.
+type recordingProjectTickets struct {
+	folder string
+	made   map[string]bool
+	closed []string
+}
+
+func (r *recordingProjectTickets) WorkspaceForFolder(path string) (string, string, bool) {
+	if r.folder == "" || path != r.folder {
+		return "", "", false
+	}
+	return "album-id", "Album", true
+}
+
+func (r *recordingProjectTickets) CreateNoteTicket(_ context.Context, _ string, ticket secondbrain.NoteTicket) (bool, error) {
+	if r.made[ticket.ItemID] {
+		return false, nil
+	}
+	r.made[ticket.ItemID] = true
+	return true, nil
+}
+
+func (r *recordingProjectTickets) MarkNoteLinesClosed(_ context.Context, itemIDs []string) error {
+	r.closed = append(r.closed, itemIDs...)
+	return nil
 }
 
 func newSecondBrainHarness(t *testing.T) *secondBrainHarness {
@@ -68,7 +98,10 @@ func newSecondBrainHarness(t *testing.T) *secondBrainHarness {
 	followUps := followup.NewService(followup.NewSQLiteStore(db))
 
 	clock := secondBrainNow
-	h := &secondBrainHarness{followUps: followUps, music: music, research: research, clock: &clock, tokens: map[string]string{}}
+	h := &secondBrainHarness{
+		followUps: followUps, music: music, research: research, clock: &clock, tokens: map[string]string{},
+		tickets: &recordingProjectTickets{made: map[string]bool{}},
+	}
 	h.vaultID = secondbrain.SourceID(music.Path)
 	guards := filejanitor.RootGuards{HomeDir: home, DataDir: filepath.Join(base, "data"), WorkspaceRoot: filepath.Join(home, "Ori Workspaces")}
 	ids := 0
@@ -81,10 +114,11 @@ func newSecondBrainHarness(t *testing.T) *secondBrainHarness {
 			}
 			return path, nil
 		},
-		CheckFolder: func(path string) (folderpath.Checked, error) { return folderpath.Check(path, guards) },
-		FollowUps:   followUps,
-		Looker:      secondbrain.Looker{Now: func() time.Time { return *h.clock }},
-		Now:         func() time.Time { return *h.clock },
+		CheckFolder:    func(path string) (folderpath.Checked, error) { return folderpath.Check(path, guards) },
+		FollowUps:      followUps,
+		ProjectTickets: h.tickets,
+		Looker:         secondbrain.Looker{Now: func() time.Time { return *h.clock }},
+		Now:            func() time.Time { return *h.clock },
 		NewID: func() string {
 			ids++
 			return "look-" + string(rune('0'+ids))
@@ -200,7 +234,7 @@ func TestSecondBrain_FollowUpsAreCreatedOnceAndAReplayReturnsTheReceipt(t *testi
 		t.Fatalf("first accept = %+v, %v", first, err)
 	}
 	replay, err := h.service.AcceptFollowUps(ctx, "local", look.LookID, SecondBrainAcceptInput{Suggested: true, RequestID: "accept-1"})
-	if err != nil || replay != first {
+	if err != nil || !reflect.DeepEqual(replay, first) {
 		t.Fatalf("replay = %+v, %v; want %+v", replay, err, first)
 	}
 	second, err := h.service.AcceptFollowUps(ctx, "local", look.LookID, SecondBrainAcceptInput{Suggested: true, RequestID: "accept-2"})
@@ -293,6 +327,66 @@ func TestSecondBrain_LookAgainClosesFollowUpsDoneInTheNotes(t *testing.T) {
 	f, err := h.followUps.FindBySource(ctx, "local", secondbrain.FollowUpSourceType, reading.ID)
 	if err != nil || f.Status != followup.StatusCompleted || !strings.Contains(f.Detail, secondbrain.DoneInNotes) {
 		t.Fatalf("follow-up after the tick = %+v, %v", f, err)
+	}
+	after, err := os.ReadFile(note) // #nosec G304 -- the test's own fixture
+	if err != nil || string(after) != string(ticked) {
+		t.Fatal("the look edited the note")
+	}
+}
+
+// PRD 760 FR-28, FR-29: a project's line becomes that workspace's ticket, no
+// follow-up is made for it, and when the line goes the ticket is told. The note is
+// never edited.
+func TestSecondBrain_AProjectLineBecomesATicketAndHearsWhenTheLineCloses(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	project := filepath.Join(h.music.Path, "Projects", "Album")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	note := filepath.Join(project, "plan.md")
+	if err := os.WriteFile(note, []byte("# Plan\n\n- [ ] Mix the single\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.tickets.folder = project
+	h.connectVault(t)
+
+	look, _ := h.service.Look(ctx, "local")
+	var line secondbrain.LookItem
+	for _, item := range look.Result.Items {
+		if item.Text == "Mix the single" {
+			line = item
+		}
+	}
+	if line.TicketWorkspace != "Album" {
+		t.Fatalf("look item = %+v, want it offered to Album", line)
+	}
+	if len(h.tickets.made) != 0 {
+		t.Fatal("the look made a ticket before anyone accepted")
+	}
+
+	accepted, err := h.service.AcceptFollowUps(ctx, "local", look.LookID, SecondBrainAcceptInput{ItemIDs: []string{line.ID}, RequestID: "accept-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Tickets["Album"] != 1 || accepted.Created != 0 || !h.tickets.made[line.ID] {
+		t.Fatalf("accepted = %+v, made = %v", accepted, h.tickets.made)
+	}
+	if _, err := h.followUps.FindBySource(ctx, "local", secondbrain.FollowUpSourceType, line.ID); !errors.Is(err, followup.ErrNotFound) {
+		t.Fatalf("a follow-up was made for the ticket's line: %v", err)
+	}
+
+	ticked := []byte("# Plan\n\n- [x] Mix the single\n")
+	if err := os.WriteFile(note, ticked, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	*h.clock = h.clock.Add(SecondBrainLookAgainAfter)
+	if _, err := h.service.LookAgain(ctx, "local", "look-again-1"); err != nil {
+		t.Fatal(err)
+	}
+	h.service.Wait()
+	if !slices.Contains(h.tickets.closed, line.ID) {
+		t.Fatalf("closed = %v, want the ticket told about %s", h.tickets.closed, line.ID)
 	}
 	after, err := os.ReadFile(note) // #nosec G304 -- the test's own fixture
 	if err != nil || string(after) != string(ticked) {
