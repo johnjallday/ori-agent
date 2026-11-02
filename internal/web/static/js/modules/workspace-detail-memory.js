@@ -48,6 +48,7 @@ const PROMOTE_CATEGORIES = [
 ];
 
 const PROFILE_GLOBAL_MEMORY = '/profile#personalHQKnowledge';
+const PROFILE_INTERVIEW = '/profile#personalHQInterview';
 
 // defaultPromoteCategory: user feedback is about how the user works; any other
 // entry most often describes their projects.
@@ -386,14 +387,25 @@ export class WorkspaceMemoryManager {
 
   // renderGlobal is the workspace's line to global memory (FR21): how many
   // entries were copied from it and where to browse it, or why it is not
-  // there yet. The Personal HQ's memory is global memory, so it has none.
+  // there yet. The Personal HQ's memory is global memory, so it has no copies;
+  // its header carries the ways into what Ori knows about the user instead
+  // (PRD hq-details-landing FR19).
   renderGlobal() {
     const row = this.elements.global;
     if (!row) return;
     const global = this.globalMemory || {};
     if (global.is_personal_hq) {
-      row.hidden = true;
-      row.innerHTML = '';
+      const review = safeLocalHref(global.review_href, PROFILE_GLOBAL_MEMORY);
+      row.hidden = false;
+      row.innerHTML = `
+        <div class="workspace-detail-memory-global-head">
+          <h4 class="workspace-detail-memory-heading" id="workspace-detail-memory-global-title">Global memory</h4>
+          <nav class="workspace-detail-memory-global-links" aria-labelledby="workspace-detail-memory-global-title">
+            <a href="${this.esc(review)}">Review what Ori knows about you</a>
+            <a href="${PROFILE_INTERVIEW}">Start interview</a>
+          </nav>
+        </div>
+        <p class="workspace-detail-memory-global-text">This workspace's memory is your global memory: what your personal assistant reads about you.</p>`;
       return;
     }
     row.hidden = false;

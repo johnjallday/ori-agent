@@ -245,6 +245,14 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.meetingPrepStore = meetingprep.NewSQLiteStore(sessionStore.DB())
 		b.personalHQHandler.SetFollowUps(b.followUpService)
 		b.personalHQHandler.SetFollowUpTickets(b.followUpService, b.ticketServiceForBridges)
+		// A note follow-up names the connected notes folder. Lazy: the
+		// second-brain service is built in a later phase.
+		b.personalHQHandler.SetNoteSources(func() personalhqhttp.NoteSourceReader {
+			if b.personalAssistantSecondBrain == nil {
+				return nil
+			}
+			return b.personalAssistantSecondBrain
+		})
 		// End-of-day journal (Group 7): grounded on the day's closed follow-ups,
 		// saved as a dated Personal HQ note (never MEMORY.md by default).
 		journal := personalhq.NewJournalService(

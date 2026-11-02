@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { WorkspaceCommandView } from './workspace-command.js';
+import { wireWorkspaceFollowUps } from './workspace-followups.js';
 
 // The constructor only reads the DOM (getElementById) and returns early from
 // setup() when there's no container — a null-returning stub is enough to build
@@ -550,7 +551,8 @@ test('detailed view is deleted; shared hosts and goal modal survive in the templ
     'id="workspace-detail-tools-card"',
     'id="workspace-detail-settings-panel"',
     'id="workspace-detail-tasks-board"',
-    'id="workspace-detail-members-panel"'
+    'id="workspace-detail-members-panel"',
+    'id="workspaceFollowupMount"'
   ]) {
     const idx = template.indexOf(id);
     assert.ok(
@@ -558,6 +560,12 @@ test('detailed view is deleted; shared hosts and goal modal survive in the templ
       id + ' must live inside the shared-hosts container'
     );
   }
+
+  // The follow-ups panel is never above the command view (PRD
+  // hq-details-landing FR1): it rests in the shared hosts and is moved in.
+  assert.ok(
+    template.indexOf('id="workspaceFollowupMount"') > template.indexOf('id="workspaceCommandView"')
+  );
 
   // Goal modal is still present with its accessibility hooks.
   assert.match(template, /aria-labelledby="workspace-detail-goal-modal-title"/);
@@ -1273,6 +1281,8 @@ test('systems shared surface mounts config without cloning persistence logic', (
   commandView.syncSharedSurfaces();
 
   assert.deepEqual(calls, [
+    // No follow-ups host in this layout, so the panel stays home.
+    ['restore', 'followups'],
     ['restore', 'tools'],
     ['restore', 'capabilities'],
     ['mount', 'config', '#workspace-detail-settings-panel'],
@@ -8480,4 +8490,315 @@ test('a full render keeps focus on the group link, or hands it to Home if the li
   } finally {
     globalThis.document.activeElement = previousActive;
   }
+});
+
+// ── Follow-ups panel relocation (PRD hq-details-landing FR1-FR5) ──────────
+//
+// A small tree DOM: nodes have real parents, so a moved node leaves its old
+// place, and moving a focused node blurs it the way a browser does. render()
+// runs for real; every other method is stubbed except the shared-surface
+// machinery and the follow-ups surface.
+
+function makeTreeDoc() {
+  const doc = { activeElement: null };
+  class TreeNode {
+    constructor(tag, nodeType = 1) {
+      this.tagName = tag;
+      this.nodeType = nodeType;
+      this.id = '';
+      this.className = '';
+      this.textContent = '';
+      this.type = '';
+      this.href = '';
+      this.hidden = false;
+      this.dataset = {};
+      this.attributes = {};
+      this.children = [];
+      this.parentNode = null;
+      this.listeners = {};
+    }
+    detach() {
+      if (!this.parentNode) return;
+      const siblings = this.parentNode.children;
+      siblings.splice(siblings.indexOf(this), 1);
+      this.parentNode = null;
+      // Leaving the tree blurs a focused descendant.
+      if (doc.activeElement && this.contains(doc.activeElement)) doc.activeElement = doc.body;
+    }
+    appendChild(child) {
+      child.detach();
+      this.children.push(child);
+      child.parentNode = this;
+      return child;
+    }
+    append(...nodes) {
+      nodes.forEach(node => this.appendChild(node));
+    }
+    insertBefore(child, ref) {
+      child.detach();
+      const index = ref ? this.children.indexOf(ref) : -1;
+      if (index < 0) this.children.push(child);
+      else this.children.splice(index, 0, child);
+      child.parentNode = this;
+      return child;
+    }
+    contains(node) {
+      for (let at = node; at; at = at.parentNode) if (at === this) return true;
+      return false;
+    }
+    set innerHTML(html) {
+      [...this.children].forEach(child => child.detach());
+      if (this.onHTML) this.onHTML(String(html));
+    }
+    get innerHTML() {
+      return '';
+    }
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    }
+    getAttribute(name) {
+      return name in this.attributes ? this.attributes[name] : null;
+    }
+    hasAttribute(name) {
+      return name in this.attributes;
+    }
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    }
+    click() {
+      return this.listeners.click && this.listeners.click();
+    }
+    focus() {
+      doc.activeElement = this;
+    }
+    scrollIntoView(options) {
+      this.scrolledWith = options;
+    }
+    getClientRects() {
+      for (let at = this; at; at = at.parentNode) {
+        if (at.hidden) return [];
+        if (at === doc.body) return [{}];
+      }
+      return [];
+    }
+    matches(selector) {
+      if (selector.startsWith('#')) return this.id === selector.slice(1);
+      if (selector.startsWith('.')) return this.className.split(/\s+/).includes(selector.slice(1));
+      if (selector.startsWith('[')) return this.hasAttribute(selector.slice(1, -1));
+      return false;
+    }
+    querySelectorAll(selector) {
+      const out = [];
+      const walk = node =>
+        node.children.forEach(child => {
+          if (child.nodeType === 1 && child.matches(selector)) out.push(child);
+          walk(child);
+        });
+      walk(this);
+      return out;
+    }
+    querySelector(selector) {
+      return this.querySelectorAll(selector)[0] || null;
+    }
+  }
+  doc.createElement = tag => new TreeNode(tag);
+  doc.createComment = () => new TreeNode('#comment', 8);
+  doc.body = new TreeNode('body');
+  doc.getElementById = id => doc.body.querySelector('#' + id);
+  doc.querySelector = selector => doc.body.querySelector(selector);
+  doc.activeElement = doc.body;
+  return doc;
+}
+
+const FOLLOW_UPS_KEEP = new Set([
+  'constructor',
+  'render',
+  'renderFollowUpsHost',
+  'parkFollowUpsSurface',
+  'syncFollowUpsSurface',
+  'syncSharedSurfaces',
+  'ensureSharedSurfaceAnchor',
+  'mountSharedSurface',
+  'restoreSharedSurface',
+  'restoreSharedSurfaces',
+  'setCommandViewMode',
+  'normalizeCommandViewMode'
+]);
+
+async function followUpsPage({ followups, search = '' } = {}) {
+  const doc = makeTreeDoc();
+  const container = doc.createElement('div');
+  container.id = 'workspaceCommandView';
+  // Each render writes fresh markup; only the follow-ups host matters here.
+  container.onHTML = html => {
+    if (!html.includes('data-cmd-followups-host')) return;
+    const host = doc.createElement('div');
+    host.setAttribute('data-cmd-followups-host', '');
+    container.appendChild(host);
+  };
+  const sharedHosts = doc.createElement('div');
+  sharedHosts.id = 'workspace-detail-shared-hosts';
+  sharedHosts.hidden = true;
+  const mount = doc.createElement('div');
+  mount.id = 'workspaceFollowupMount';
+  mount.hidden = true;
+  doc.body.append(container, sharedHosts);
+  sharedHosts.appendChild(mount);
+
+  const posted = [];
+  const controller = await wireWorkspaceFollowUps({
+    doc,
+    workspaceId: 'hq-1',
+    mount,
+    locationSearch: search,
+    storage: null,
+    now: () => new Date(2026, 10, 2, 15),
+    fetchImpl: async () => ({ ok: true, json: async () => ({ followups }) }),
+    postImpl: async (url, body) => posted.push([url, body.id])
+  });
+
+  const commandView = new WorkspaceCommandView(null);
+  for (const name of Object.getOwnPropertyNames(WorkspaceCommandView.prototype)) {
+    if (FOLLOW_UPS_KEEP.has(name)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(WorkspaceCommandView.prototype, name);
+    if (typeof descriptor.value === 'function') commandView[name] = () => '';
+  }
+  Object.assign(commandView, {
+    container,
+    active: true,
+    viewMode: 'details',
+    page: { workspace: {} },
+    sharedSurfaceAnchors: {}
+  });
+  const count = () => doc.body.querySelectorAll('#workspaceFollowupMount').length;
+  const host = () => container.querySelector('[data-cmd-followups-host]');
+  return { doc, commandView, mount, sharedHosts, posted, controller, count, host };
+}
+
+function withFollowUpsGlobals(doc, api, run) {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  globalThis.document = doc;
+  globalThis.window = api ? { WorkspaceFollowUps: api } : {};
+  return Promise.resolve()
+    .then(run)
+    .finally(() => {
+      globalThis.document = originalDocument;
+      globalThis.window = originalWindow;
+    });
+}
+
+const HQ_FOLLOW_UPS = [
+  {
+    id: 'f1',
+    title: 'Master track 7',
+    category: 'i_owe',
+    status: 'active',
+    due_at: new Date(2026, 10, 5, 23, 59, 59).toISOString(),
+    source: { type: 'note_item' },
+    presentation: { source_label: 'Second Brain', source_name: 'Album Release', link: '' }
+  },
+  {
+    id: 'f2',
+    title: 'Ask Marco which one the label prefers',
+    category: 'needs_decision',
+    status: 'active',
+    source: { type: 'note_item' }
+  }
+];
+
+test('follow-ups: render, re-render and every mode switch leave one live panel in the right place', async () => {
+  const page = await followUpsPage({ followups: HQ_FOLLOW_UPS });
+  const { doc, commandView, mount, sharedHosts, posted, count, host } = page;
+  await withFollowUpsGlobals(doc, null, async () => {
+    const inHost = label => {
+      assert.equal(count(), 1, label + ': exactly one panel node');
+      assert.ok(host(), label + ': the layout has a follow-ups host');
+      assert.equal(mount.parentNode, host(), label + ': the panel sits in the host');
+      assert.equal(mount.hidden, false, label + ': the panel shows');
+    };
+    const atHome = label => {
+      assert.equal(count(), 1, label + ': exactly one panel node');
+      assert.equal(mount.parentNode, sharedHosts, label + ': the panel is back home');
+    };
+
+    commandView.render();
+    inHost('first render');
+    commandView.render();
+    inHost('re-render');
+    commandView.setCommandViewMode('map', { focus: false });
+    inHost('map');
+    commandView.setCommandViewMode('details', { focus: false });
+    inHost('back to details');
+    commandView.setCommandViewMode('tickets', { focus: false });
+    atHome('tickets');
+    assert.equal(host(), null, 'tickets renders no host');
+    commandView.setCommandViewMode('dashboard', { focus: false });
+    atHome('dashboard');
+    commandView.setCommandViewMode('details', { focus: false });
+    inHost('details again');
+
+    // The node kept its listeners through every move: Done still posts.
+    const done = mount
+      .querySelectorAll('.modern-btn-primary')
+      .find(button => button.textContent === 'Done');
+    await done.click();
+    assert.deepEqual(posted, [
+      ['/api/personal-hq/followups/complete', done.parentNode.parentNode.dataset.followupId]
+    ]);
+
+    // Leaving the page's command view puts the panel home too.
+    commandView.restoreSharedSurfaces();
+    atHome('restoreSharedSurfaces');
+  });
+});
+
+test('follow-ups: a focused control keeps focus through a background re-render', async () => {
+  const page = await followUpsPage({ followups: HQ_FOLLOW_UPS });
+  const { doc, commandView, mount } = page;
+  await withFollowUpsGlobals(doc, null, async () => {
+    commandView.render();
+    const toggle = mount.querySelector('.workspace-followups-toggle');
+    toggle.focus();
+    commandView.render();
+    assert.equal(doc.activeElement, toggle);
+    commandView.setCommandViewMode('map', { focus: false });
+    assert.equal(doc.activeElement, toggle);
+  });
+});
+
+test('follow-ups: a workspace without follow-ups renders nothing (FR5)', async () => {
+  const page = await followUpsPage({ followups: [] });
+  const { doc, commandView, mount, count, host } = page;
+  await withFollowUpsGlobals(doc, null, async () => {
+    commandView.render();
+    assert.equal(count(), 1);
+    assert.equal(mount.parentNode, host());
+    assert.equal(mount.hidden, true, 'mounting does not unhide an empty panel');
+    assert.equal(mount.children.length, 0);
+  });
+});
+
+test('follow-ups: a deep-linked card rendered while parked is scrolled into view once it has a place (FR4)', async () => {
+  const page = await followUpsPage({ followups: HQ_FOLLOW_UPS, search: '?follow_up=f2' });
+  const { doc, commandView, mount, controller } = page;
+  const card = mount
+    .querySelectorAll('.hq-followup-card')
+    .find(node => node.dataset.followupId === 'f2');
+  assert.match(card.className, /is-deep-linked/);
+  card.scrolledWith = null;
+  const api = { refocus: () => controller.refocus() };
+  await withFollowUpsGlobals(doc, api, async () => {
+    doc.activeElement = doc.body;
+    commandView.render();
+    assert.deepEqual(card.scrolledWith, { block: 'center' });
+    assert.equal(doc.activeElement, card);
+
+    // Later re-renders keep focus on the card but never scroll again.
+    card.scrolledWith = null;
+    commandView.render();
+    commandView.setCommandViewMode('map', { focus: false });
+    assert.equal(card.scrolledWith, null);
+    assert.equal(doc.activeElement, card);
+  });
 });

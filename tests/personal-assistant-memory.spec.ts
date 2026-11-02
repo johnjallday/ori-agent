@@ -79,7 +79,9 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await page.locator('#welcomeNextBtn').click();
     await expect(page.locator('#onboardingModal')).toBeHidden();
     await page.goto(hqPath);
-    await expect(page.locator('#personalHQKnowledgeEntry')).toBeVisible();
+    // The HQ page opens on its own header, not a knowledge card above it; the
+    // knowledge links live in the Memory station (hq-details-landing FR18, FR19).
+    await expect(page.locator('#personalHQKnowledgeEntry')).toHaveCount(0);
     await page.locator('[data-cmd-view-mode="details"]').click();
     // The HQ's memory is its Memory station; an empty HQ already has Stations open.
     const stations = page.locator('[data-cmd-manage-section="stations"]');
@@ -87,10 +89,14 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await page.locator('.ws-cmd-rail [data-cmd-hq-station="memory"]').click();
     await expect(page.locator('#workspace-detail-config-memory-pane')).toBeVisible();
     await expect(page.locator('#workspace-detail-memory-add-type')).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.locator('#workspace-detail-config-memory-pane')).toBeHidden();
+    const knowledge = page.locator('#workspace-detail-memory-global');
+    await expect(
+      knowledge.locator('a[href="/profile#personalHQKnowledge"]', {
+        hasText: 'Review what Ori knows about you'
+      })
+    ).toBeVisible();
     const hqUrl = page.url();
-    await page.locator('#personalHQKnowledgeEntry a[href="/profile#personalHQInterview"]').click();
+    await knowledge.locator('a[href="/profile#personalHQInterview"]').click();
     await expect(page.locator('#personalHQInterviewWizard')).toBeVisible();
     expect(page.url()).toBe(hqUrl); // opens in place, no navigation
     await expect(page.locator('#personalHQInterviewWizard').getByRole('textbox')).toBeFocused(); // fade-in done

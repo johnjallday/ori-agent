@@ -67,9 +67,11 @@ func TestPersonalHQPageEntryLinksRequireCurrentHiredHQAndEntryAgent(t *testing.T
 		t.Fatalf("HQ workspace missing: %+v %v", ws, err)
 	}
 	workspacePath := "/workspaces/" + ws.FolderSlug
-	if !strings.Contains(get(workspacePath), `id="personalHQKnowledgeEntry"`) ||
-		!strings.Contains(get(workspacePath), `href="/profile#personalHQInterview"`) {
-		t.Fatal("designated HQ workspace must offer the dossier and interview")
+	// The HQ page no longer opens with a knowledge card above its own title;
+	// its Memory station links to the dossier and the interview instead, from
+	// the memory payload's is_personal_hq (PRD hq-details-landing FR18, FR19).
+	if strings.Contains(get(workspacePath), `id="personalHQKnowledgeEntry"`) {
+		t.Fatal("the HQ workspace page must not carry the knowledge card")
 	}
 	entry := workspacePath + "/agents/Atlas"
 	if !strings.Contains(get(entry), `id="personalHQAgentKnowledgeEntry"`) ||

@@ -18,14 +18,6 @@
   <div class="main-content-wrapper">
     <div class="main-content">
       <div class="container-fluid py-4">
-        {{if .Extra.IsPersonalHQ}}
-        <div class="modern-card p-3 mb-3" id="personalHQKnowledgeEntry">
-          <strong>Personal HQ knowledge</strong>
-          <p class="mb-2">Review what your assistant remembers and finish the optional interview. Workspace Memory remains available below for direct editing.</p>
-          <a class="modern-btn modern-btn-secondary" href="/profile#personalHQKnowledge">Review what Ori knows about you</a>
-          <a class="modern-btn modern-btn-secondary" href="/profile#personalHQInterview">Start interview</a>
-        </div>
-        {{end}}
         <section id="workspaceGroupRequirementStatus" class="workspace-group-requirement-status" aria-live="polite" hidden>
           <strong id="workspaceGroupRequirementStatusTitle"></strong>
           <span id="workspaceGroupRequirementStatusSummary"></span>
@@ -42,12 +34,6 @@
              knowing, and what can be ignored. Populated by email-needs-you.js
              for a workspace with a linked mailbox; hidden everywhere else. -->
         <section id="workspaceNeedsYouMount" class="needs-you" aria-labelledby="needsYouTitle" hidden></section>
-        <!-- Workspace follow-up management panel (Mail spin-off): populated by
-             workspace-followups.js for a workspace that owns follow-ups (the
-             Email Ops workspace). Additive; hidden when there are none. Placed
-             above the command view so it stays visible (the command view locks
-             body scroll for map panning). -->
-        <div id="workspaceFollowupMount" class="workspace-followup-mount" hidden></div>
         <!-- A workspace's own Daily Brief history, read-only: populated by
              workspace-daily-briefs.js only for a workspace that owns briefs
              and is not the Personal HQ here (imported with its history). -->
@@ -56,11 +42,6 @@
           .workspace-group-requirement-status { display: grid; gap: 0.2rem; margin: 0 0 1rem; padding: 0.85rem 1rem; border: 1px solid rgba(37, 99, 235, 0.28); border-radius: 12px; background: rgba(37, 99, 235, 0.08); color: var(--text-primary); }
           .workspace-group-requirement-status[data-state="group_requirement_unfulfilled"], .workspace-group-requirement-status[data-state="contract_invalid"] { border-color: rgba(217, 119, 6, 0.38); background: rgba(217, 119, 6, 0.1); }
           .workspace-group-requirement-status__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; color: var(--text-secondary); font-size: 0.8rem; }
-          .workspace-followup-mount { margin-bottom: 1rem; padding: 1rem 1.25rem; border-radius: 12px;
-            background: var(--surface-1, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, rgba(255,255,255,0.08)); }
-          .workspace-followup-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #e8e8e8); }
-          .workspace-followup-sub { font-size: 0.8rem; margin: 0.15rem 0 0.75rem; color: var(--text-secondary, #9aa0a6); }
-          .workspace-followup-list { display: flex; flex-direction: column; gap: 0.6rem; }
           .workspace-email-connect-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
             margin-bottom: 1rem; padding: 1rem 1.25rem; border-radius: 12px;
             background: var(--surface-1, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, rgba(255,255,255,0.08)); }
@@ -280,6 +261,13 @@
              Hidden at rest; workspace-command.js relocates these nodes on
              demand and restores them here (see mountSharedSurface). -->
         <div id="workspace-detail-shared-hosts" hidden>
+          <!-- Follow-ups panel: populated by workspace-followups.js for a
+               workspace that owns follow-ups (the Personal HQ, an Email Ops
+               workspace, or one imported with its own). Hidden when there are
+               none. workspace-command.js shows it below the Goal panel in
+               Details and below the map shell in Map, and returns it here in
+               Tickets and Dashboard, so it is never above the header. -->
+          <div id="workspaceFollowupMount" class="workspace-followup-mount" hidden></div>
           <section class="modern-card workspace-detail-tools-card mb-4" id="workspace-detail-tools-card" aria-labelledby="workspace-detail-tools-title">
             <div class="workspace-detail-tools-head">
               <div>
@@ -3801,6 +3789,31 @@
       margin-top: 0.85rem;
       padding-top: 0.6rem;
       border-top: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    }
+
+    .workspace-detail-memory-global-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.25rem 1rem;
+      margin-bottom: 0.3rem;
+    }
+
+    .workspace-detail-memory-global-head .workspace-detail-memory-heading {
+      margin: 0;
+    }
+
+    .workspace-detail-memory-global-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 1rem;
+      font-size: 0.8rem;
+    }
+
+    .workspace-detail-memory-global-links a {
+      color: var(--accent-color, #4a7dff);
+      font-weight: 600;
     }
 
     .workspace-detail-memory-global-text {

@@ -688,7 +688,7 @@ test('the learnings strip links each run and hides when no run wrote memory or t
   }
 });
 
-test('the global memory row counts copies and links to the Profile, or explains, or is absent in the HQ (FR21)', () => {
+test('the global memory row counts copies and links to the Profile, or explains; the HQ gets its knowledge links (FR21)', () => {
   const m = makeManager();
   const row = { hidden: true, innerHTML: '' };
   m.elements = { global: row };
@@ -710,10 +710,28 @@ test('the global memory row counts copies and links to the Profile, or explains,
   m.renderGlobal();
   assert.match(row.innerHTML, /Set one up from Home\. <a href="\/">Go to Home<\/a>/);
 
+  // Not the HQ: no knowledge links (PRD hq-details-landing FR19).
+  assert.doesNotMatch(row.innerHTML, /Review what Ori knows about you|Start interview/);
+
   m.globalMemory = { available: true, is_personal_hq: true };
   m.renderGlobal();
-  assert.equal(row.hidden, true);
-  assert.equal(row.innerHTML, '');
+  assert.equal(row.hidden, false);
+  assert.match(
+    row.innerHTML,
+    /<h4 class="workspace-detail-memory-heading"[^>]*>Global memory<\/h4>/
+  );
+  assert.match(
+    row.innerHTML,
+    /<a href="\/profile#personalHQKnowledge">Review what Ori knows about you<\/a>/
+  );
+  assert.match(row.innerHTML, /<a href="\/profile#personalHQInterview">Start interview<\/a>/);
+  assert.doesNotMatch(row.innerHTML, /copied from global memory/);
+
+  // A review link from the server that is not local falls back to the Profile.
+  m.globalMemory = { available: true, is_personal_hq: true, review_href: '//evil.example' };
+  m.renderGlobal();
+  assert.doesNotMatch(row.innerHTML, /evil\.example/);
+  assert.match(row.innerHTML, /href="\/profile#personalHQKnowledge"/);
 });
 
 test('a copied-from-global entry stays editable but cannot be promoted again', () => {

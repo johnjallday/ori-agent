@@ -1643,6 +1643,26 @@ The ticket carries `source` and `source_id`. Two sources link to other records:
   href }` with the ticket's current state, and `href` to open the follow-up. Closing either side
   leaves the other open.
 
+### A workspace's follow-ups
+
+`GET /api/workspaces/{id}/followups` returns `{ followups: [...] }`, the open follow-ups that
+workspace owns, for its follow-ups panel. Each row is the follow-up as above plus a read-time
+`presentation` that names where it came from. Nothing in it is stored, and `detail` is returned as
+stored.
+
+```json
+{ "source_label": "Studio", "source_name": "Album Release", "link": "obsidian://open?vault=Studio&file=..." }
+```
+
+| `source.type` | `source_label` | `source_name` | `link` |
+| --- | --- | --- | --- |
+| `note_item` | The connected notes folder's name, or `Notes` when it cannot be read | The note's file name without `.md`/`.markdown` | The note's link, only when it starts with `obsidian://open?` |
+| `email_thread` | `Email Ops` | The counterparty | Empty |
+| `journal` | `Journal` | Empty | Empty |
+| `manual` and anything else | Empty | Empty | Empty |
+
+`GET /api/personal-hq/followups` and the Home projection do not carry `presentation`.
+
 ### Retired
 
 `DELETE /api/orchestration/tasks/bulk` and `POST /api/workspaces/{id}/tasks/{taskID}/execute` had

@@ -47,6 +47,9 @@ type Handler struct {
 	// MUST hydrate template provenance (folder-store field), so it is wired to
 	// the FileStore, not the SQLite-primary store whose Get drops provenance.
 	emailOpsSource func() workspace.EmailOpsWorkspaceSource
+	// noteSources reads the connected notes folder for a note follow-up's
+	// source line. Lazy: the second-brain service is built later at startup.
+	noteSources func() NoteSourceReader
 }
 
 // NewHandler constructs a Personal HQ HTTP handler. provider may be nil, in
