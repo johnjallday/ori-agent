@@ -69,7 +69,8 @@ func (h *Handler) EmailOpsStatusHandler(w http.ResponseWriter, r *http.Request) 
 // management panel (Email Ops). User-scoped by follow-up ownership, so a user
 // only ever sees their own; the workspace filter narrows to that workspace's
 // items. Follow-up mutations reuse the existing /api/personal-hq/followups/*
-// endpoints (keyed by follow-up id + user).
+// endpoints (keyed by follow-up id + user). Each row carries a read-time
+// presentation naming where it came from (PRD hq-details-landing FR16).
 func (h *Handler) WorkspaceFollowUps(w http.ResponseWriter, r *http.Request) {
 	if !h.followUpsReady(w, r, http.MethodGet) {
 		return
@@ -90,5 +91,5 @@ func (h *Handler) WorkspaceFollowUps(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, "Failed to list follow-ups: "+err.Error())
 		return
 	}
-	orihttp.Success(w, map[string]any{"followups": h.followUpViews(items)})
+	orihttp.Success(w, map[string]any{"followups": h.workspaceFollowUpViews(r.Context(), userID, items)})
 }

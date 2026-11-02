@@ -243,13 +243,34 @@ func captureInput(in Acceptance, item LookItem, location *time.Location) followu
 	return capture
 }
 
+// detailLinkPrefix starts the line of a follow-up's detail that carries the
+// Obsidian link. itemDetail writes it and SplitDetail reads it, so the stored
+// format has one owner.
+const detailLinkPrefix = "Open in Obsidian: "
+
 // itemDetail is a follow-up's detail: the note it came from and, for an
 // Obsidian vault, the link that opens it (FR28).
 func itemDetail(item LookItem) string {
 	if item.Link == "" {
 		return item.Note
 	}
-	return item.Note + "\nOpen in Obsidian: " + item.Link
+	return item.Note + "\n" + detailLinkPrefix + item.Link
+}
+
+// SplitDetail reads a note follow-up's stored detail back into the note's path
+// and, when the detail carries one, the link that opens it. Lines added later,
+// such as DoneInNotes, are ignored. The link is returned as stored; callers
+// decide which schemes they render.
+func SplitDetail(detail string) (note, link string) {
+	lines := strings.Split(strings.ReplaceAll(detail, "\r\n", "\n"), "\n")
+	note = strings.TrimSpace(lines[0])
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, detailLinkPrefix); ok && link == "" {
+			link = strings.TrimSpace(rest)
+		}
+	}
+	return note, link
 }
 
 // DoneInNotes is what a follow-up says once its line is done in the notes.
