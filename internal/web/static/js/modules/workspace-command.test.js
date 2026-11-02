@@ -8802,3 +8802,126 @@ test('follow-ups: a deep-linked card rendered while parked is scrolled into view
     assert.equal(doc.activeElement, card);
   });
 });
+
+// --- notes-station-panel ------------------------------------------------------
+
+test('Look again inside the rate limit names the wait from Retry-After', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.window = {};
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 429,
+      headers: { get: name => (name === 'Retry-After' ? '361' : null) },
+      json: async () => ({ error: 'Ori looked a moment ago.', retry_after_seconds: 361 })
+    });
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const fourMinutesAgo = new Date(Date.now() - 4 * 60000).toISOString();
+    hq._notesPanel = {
+      status: 'ready',
+      look: { state: 'finished', result: { finished_at: fourMinutesAgo } }
+    };
+    await hq.lookAgainFromNotesPanel();
+    assert.equal(hq._notesPanel.lookMessage, 'Looked 4 minutes ago. Try again in 7 minutes.');
+    assert.equal(hq._notesPanel.lookBusy, false);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the Notes panel stops polling a look at the drawer limit and says it is still reading', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  try {
+    globalThis.window = {};
+    const delays = [];
+    let pending = null;
+    globalThis.setTimeout = (fn, ms) => {
+      delays.push(ms);
+      pending = fn;
+      return delays.length;
+    };
+    let reads = 0;
+    globalThis.fetch = async () => {
+      reads += 1;
+      return { ok: true, json: async () => ({ look: { state: 'running', look_id: 'look-2' } }) };
+    };
+    const { LOOK_POLL_LIMIT, LOOK_POLL_MS } = await import('./personal-assistant-second-brain.js');
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const panel = { status: 'ready', look: { state: 'running', look_id: 'look-2' } };
+    hq._notesPanel = panel;
+    hq.notesPanelOpen = () => true;
+    hq.paintNotesPanel = () => {};
+    hq.pollNotesPanelLook(panel);
+    for (let i = 0; i < LOOK_POLL_LIMIT && pending; i += 1) {
+      const fn = pending;
+      pending = null;
+      await fn();
+    }
+    assert.equal(reads, LOOK_POLL_LIMIT);
+    assert.ok(delays.every(ms => ms === LOOK_POLL_MS));
+    assert.equal(pending, null, 'no poll is scheduled past the limit');
+    assert.equal(panel.lookMessage, 'Still reading. Check back in a moment.');
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('Show all lists every open item in the Notes panel', () => {
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = {};
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const painted = [];
+    hq._notesPanel = { status: 'ready', look: { state: 'finished' } };
+    hq.paintNotesPanel = panel => painted.push(panel.showAll);
+    hq.handleNotesPanelAction('notes-show-all');
+    assert.deepEqual(painted, [true]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a map building keeps focus when the map repaints under it', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = {};
+    const building = key => {
+      const node = {
+        key,
+        focused: 0,
+        getAttribute: name => (name === 'data-cmd-hq-station' ? key : null),
+        closest: selector => (selector.includes('ws-cmd-map-hq-station') ? node : null),
+        focus: () => {
+          node.focused += 1;
+          globalThis.document.activeElement = node;
+        }
+      };
+      return node;
+    };
+    const before = building('second-brain');
+    globalThis.document = { activeElement: before };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    let buildings = [building('memory'), before];
+    hq.container = { contains: () => true, querySelectorAll: () => buildings };
+    hq.rememberMapStationFocus();
+    // The repaint replaced every building; focus sits on the old, detached one.
+    const after = building('second-brain');
+    buildings = [building('memory'), after];
+    hq.restoreMapStationFocus();
+    assert.equal(after.focused, 1);
+    assert.equal(globalThis.document.activeElement, after);
+    // Nothing remembered, nothing moved.
+    hq.restoreMapStationFocus();
+    assert.equal(after.focused, 1);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});

@@ -19,11 +19,13 @@ export const SECOND_BRAIN_ENDPOINT = '/api/personal-assistant/second-brain';
 // The usual folders the Add folder sheet offers, and so the offer under a first look.
 const FOLDER_CHOICES_ENDPOINT = '/api/home-assistant/folder-context/choices';
 const SYSTEM_MODEL_ENDPOINT = '/api/settings/system-model';
-const LOOK_POLL_MS = 1000;
+// The HQ Notes panel polls a running look the same way, so both surfaces give
+// up at the same moment.
+export const LOOK_POLL_MS = 1000;
 // A look reads within five seconds and its headline model has 45 more; the
 // poll gives up after the server's own bound and says so, so the turn never
 // hangs.
-const LOOK_POLL_LIMIT = 75;
+export const LOOK_POLL_LIMIT = 75;
 
 // secondBrainAvailable: the ask belongs to an active relationship only. A
 // paused assistant does not start a conversation.
