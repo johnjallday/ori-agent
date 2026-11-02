@@ -9025,3 +9025,47 @@ test('one second-brain announcement re-reads the badge once and an open Notes pa
     globalThis.fetch = originalFetch;
   }
 });
+
+test('the Notes panel hands Connection… to the drawer, and a missing folder goes straight there', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const calls = [];
+    globalThis.window = {
+      location: { assign: p => calls.push('nav ' + p) },
+      PersonalAssistantPanel: {
+        open: (trigger, options) =>
+          calls.push('open ' + (trigger ? trigger.id : null) + ' ' + options.focus) || true
+      },
+      PersonalAssistantSecondBrain: { openManage: async () => calls.push('manage') }
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const row = { id: 'notes-row' };
+    hq.statModalTrigger = row;
+    hq.closeStatModal = () => calls.push('close');
+    hq.handleNotesPanelAction('notes-connection');
+    assert.deepEqual(calls, ['close', 'open notes-row false', 'manage']);
+
+    calls.length = 0;
+    hq._notes = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      secondBrain: { status: 'missing', source: { name: 'Second Brain' } }
+    };
+    hq.openStatModal = () => calls.push('panel');
+    hq.runHQStationAction('second-brain');
+    assert.deepEqual(
+      calls,
+      ['open null false', 'manage'],
+      'a missing folder never opens the panel'
+    );
+
+    // Without a drawer on the page, Home's mission link opens the chooser.
+    calls.length = 0;
+    globalThis.window = { location: { assign: p => calls.push('nav ' + p) } };
+    hq.statModalTrigger = row;
+    hq.handleNotesPanelAction('notes-connection');
+    assert.deepEqual(calls, ['close', 'nav /?quest=second-brain']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
