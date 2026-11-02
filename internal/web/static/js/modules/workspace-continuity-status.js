@@ -39,6 +39,10 @@
     const view = window.WorkspaceContinuity?.describeStatus?.(state.status);
     const chip = chipElement();
     if (!view || !chip) return;
+    // The Personal HQ header shows a short word for this state rather than
+    // the chip and its timestamp (PRD 766 FR5); it reads the view from here.
+    window.WorkspaceContinuityStatus = { view };
+    document.dispatchEvent(new CustomEvent('ori:workspace-continuity-changed'));
     chip.hidden = false;
     chip.dataset.state = view.state;
     chip.textContent =

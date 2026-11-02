@@ -100,7 +100,20 @@ import {
   buildWorkspaceURL
 } from './workspace-url-state.js';
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
-import { HQ_LABELS } from './hq-labels.js';
+import { HQ_LABELS, portabilityWord } from './hq-labels.js';
+import { capAttentionLines, hqAttentionLines } from './hq-attention.js';
+import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
+
+// The feature mounts the HQ's Details page hides above its header, read for
+// the attention strip in its setup order (PRD 766 FR11.2, FR13). Each keeps
+// running; the strip shows what it says and clicks its own buttons.
+const HQ_SETUP_MOUNTS = [
+  { key: 'wizard', id: 'setupWizardBanner' },
+  { key: 'intake', id: 'blueprintIntakePending' },
+  { key: 'group', id: 'workspaceGroupRequirementStatus' },
+  { key: 'email', id: 'workspaceEmailConnectMount', category: 'Email' },
+  { key: 'first-task', id: 'workspaceFirstTaskBanner' }
+];
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -854,6 +867,14 @@ export class WorkspaceCommandView {
     if (!dataset) return;
     const previous = dataset.workspaceViewMode || '';
     dataset.workspaceViewMode = mode;
+    // The HQ's Details page hides the feature mounts above the Command view
+    // (PRD 766 FR13). The server marks a known HQ before the first paint; once
+    // the workspace has loaded, this keeps the mark right for the view mode.
+    if (this.page && this.page.workspace && this.page.workspace.id) {
+      const hqDetails = this.isPersonalHQ() && mode === 'details';
+      if (hqDetails) dataset.hqDetails = '1';
+      else delete dataset.hqDetails;
+    }
     if (previous === mode || typeof document.dispatchEvent !== 'function') return;
     if (typeof CustomEvent !== 'function') return;
     document.dispatchEvent(
@@ -2634,8 +2655,11 @@ export class WorkspaceCommandView {
     // again below). The HQ's Notes panel is parked the same way.
     this.parkFollowUpsSurface();
     this.parkHQPanels();
+    const hqDetails = this.viewMode === 'details' && this.isPersonalHQ();
     this.container.innerHTML =
-      this.commandBarHTML(ws, name, mode, stats) +
+      (hqDetails
+        ? this.hqCommandBarHTML(ws, name, mode, stats)
+        : this.commandBarHTML(ws, name, mode, stats)) +
       body +
       this.loadoutAddModalHTML(this.loadoutAddAgent);
 
@@ -2657,6 +2681,7 @@ export class WorkspaceCommandView {
     this.bindBuildSummary();
     this.bindReadout();
     this.bindMissionPanel();
+    if (hqDetails) this.bindHQDetails();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
       this.paintMapActivity();
@@ -13385,6 +13410,8 @@ export class WorkspaceCommandView {
 
   renderHQDetails() {
     return (
+      this.hqAttentionHTML() +
+      this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
       this.renderHQNotesHost() +
@@ -13401,6 +13428,627 @@ export class WorkspaceCommandView {
 
   renderHQNotesHost() {
     return '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>';
+  }
+
+  // ── HQ header (FR5–FR9) ──
+  // Name, "Your HQ" and the workflow chip, the description, and one line of
+  // facts: the lead, the goal and a portability word with no timestamp. The
+  // name, description and goal edit exactly as they do in Map mode. The view
+  // switch keeps Details / Map / Tickets / Plans; the rarer destinations sit
+  // behind "More views".
+
+  hqCommandBarHTML(ws, name, mode, stats) {
+    const description = String((ws && ws.description) || '').trim();
+    const isLongDescription = Array.from(description).length > 150;
+    const descriptionClass =
+      'ws-cmd-description' +
+      (!description ? ' is-empty' : '') +
+      (isLongDescription && !this.identityExpanded ? ' is-collapsed' : '');
+    return (
+      '<header class="ws-cmd-topbar ws-hq-header" aria-labelledby="ws-hq-title">' +
+      '<div class="ws-cmd-nav">' +
+      '<a class="ws-cmd-nav-btn" data-cmd-nav-home href="/" aria-label="Back to the workspace map on Home">Home</a>' +
+      this.parentGroupLinkHTML() +
+      this.projectOpenActionHTML() +
+      this.commandViewSwitchHTML() +
+      this.hqMoreViewsHTML() +
+      '</div>' +
+      '<div class="ws-cmd-title ws-hq-title">' +
+      '<div class="ws-cmd-title-row">' +
+      '<h2 id="ws-hq-title">' +
+      escapeHtml(name) +
+      '</h2>' +
+      '<span class="ws-hq-chip is-hq">' +
+      escapeHtml(HQ_LABELS.yourHQ) +
+      '</span>' +
+      (mode ? '<span class="ws-hq-chip">Workflow · ' + escapeHtml(mode) + '</span>' : '') +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
+      '</div>' +
+      '<div class="ws-cmd-description-row">' +
+      '<p class="' +
+      descriptionClass +
+      '">' +
+      escapeHtml(description || 'No description') +
+      '</p>' +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>' +
+      (isLongDescription
+        ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
+          (this.identityExpanded ? 'true' : 'false') +
+          '">' +
+          (this.identityExpanded ? 'Less' : 'More') +
+          '</button>'
+        : '') +
+      '</div>' +
+      '<p class="ws-hq-facts" data-cmd-hq-facts>' +
+      this.hqFactsHTML() +
+      '</p>' +
+      this.identityEditorHTML(name, description) +
+      '</div>' +
+      '<div class="ws-cmd-readout ws-hq-tiles" role="group" aria-label="At a glance">' +
+      this.hqTilesHTML(stats) +
+      '</div>' +
+      '</header>'
+    );
+  }
+
+  // The lead holds the entry-agent slot; first in the team either way.
+  hqTeam() {
+    const page = this.page || {};
+    let groups = [];
+    try {
+      groups = typeof page.buildAgentGroups === 'function' ? page.buildAgentGroups() || [] : [];
+    } catch (_error) {
+      groups = [];
+    }
+    return groups
+      .filter(group => group && !group.isUnassigned && String(group.name || '').trim())
+      .map(group => ({
+        name: String(group.name),
+        isLead: this.isEntryAgentGroup(group),
+        tasks: Array.isArray(group.tasks) ? group.tasks : []
+      }))
+      .sort((a, b) => (a.isLead === b.isLead ? 0 : a.isLead ? -1 : 1));
+  }
+
+  hqFactsHTML() {
+    const lead = this.hqTeam().find(agent => agent.isLead);
+    const mission = this.missionSummary();
+    const goal = String(mission.mission || '').trim();
+    const goalLoaded = typeof mission.mission === 'string';
+    const portability = portabilityWord(
+      typeof window !== 'undefined' ? window.WorkspaceContinuityStatus?.view : null
+    );
+    const fact = (label, value, extra = '') =>
+      '<span class="ws-hq-fact"><span class="ws-hq-fact-label">' +
+      escapeHtml(label) +
+      '</span> ' +
+      '<span class="ws-hq-fact-value">' +
+      escapeHtml(value) +
+      '</span>' +
+      extra +
+      '</span>';
+    return (
+      fact(HQ_LABELS.lead, lead ? lead.name : 'No lead yet') +
+      fact(
+        HQ_LABELS.goal,
+        goal || (goalLoaded ? 'Not set' : '…'),
+        '<button type="button" class="ws-cmd-mini-btn" data-cmd-hq-goal-edit aria-label="' +
+          (goal ? 'Edit goal' : 'Set goal') +
+          '">' +
+          (goal ? 'Edit' : 'Set') +
+          '</button>'
+      ) +
+      (portability ? fact(HQ_LABELS.portability, portability) : '')
+    );
+  }
+
+  hqFollowUpsCount() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function')
+      return null;
+    const mount = document.getElementById('workspaceFollowupMount');
+    const raw = mount && mount.dataset ? mount.dataset.followupCount : undefined;
+    return raw === undefined || raw === '' ? null : Number(raw) || 0;
+  }
+
+  // How many things want the user. Until the Needs you panel exists this is
+  // the attention strip's line count.
+  hqNeedsYouCount() {
+    return this.hqAttentionAll().length;
+  }
+
+  hqTilesHTML(stats) {
+    const jump = (value, label, key, aria) =>
+      '<button type="button" class="ws-cmd-stat" data-cmd-hq-jump="' +
+      escapeHtml(key) +
+      '" aria-label="' +
+      escapeHtml(aria) +
+      '"><div class="ws-v">' +
+      escapeHtml(value) +
+      '</div><div class="ws-l">' +
+      escapeHtml(label) +
+      '</div></button>';
+    const needs = this.hqNeedsYouCount();
+    const followUps = this.hqFollowUpsCount();
+    const counts = this.currentTicketCounts();
+    const open = TicketCounts.isKnown(counts) ? TicketCounts.openCount(counts) : null;
+    const team = Number(stats && stats.agents) || 0;
+    return (
+      jump(needs, HQ_LABELS.needsYou, 'needs-you', HQ_LABELS.needsYou + ': ' + needs) +
+      jump(
+        followUps === null ? '—' : followUps,
+        HQ_LABELS.followUps,
+        'followups',
+        HQ_LABELS.followUps + (followUps === null ? '' : ': ' + followUps)
+      ) +
+      this.statBoxHTML(
+        open === null ? '—' : open,
+        HQ_LABELS.openTasks,
+        'tickets',
+        HQ_LABELS.openTasks + (open === null ? '' : ': ' + open)
+      ) +
+      jump(team, HQ_LABELS.team, 'team', HQ_LABELS.team + ': ' + team)
+    );
+  }
+
+  hqMoreViewsHTML() {
+    const open = this.hqMoreViewsOpen === true;
+    const item = (href, label) =>
+      '<a role="menuitem" class="ws-hq-menu-item" href="' +
+      escapeHtml(href) +
+      '">' +
+      escapeHtml(label) +
+      '</a>';
+    return (
+      '<div class="ws-hq-more" data-cmd-hq-more>' +
+      '<button type="button" class="ws-cmd-view-btn ws-hq-more-btn" data-cmd-hq-more-toggle ' +
+      'aria-haspopup="menu" aria-expanded="' +
+      (open ? 'true' : 'false') +
+      '" aria-controls="ws-hq-more-menu">' +
+      escapeHtml(HQ_LABELS.moreViews) +
+      '</button>' +
+      '<div class="ws-hq-menu" id="ws-hq-more-menu" role="menu" aria-label="' +
+      escapeHtml(HQ_LABELS.moreViews) +
+      '"' +
+      (open ? '' : ' hidden') +
+      '>' +
+      item(this.workspaceRoute('/canvas'), 'Canvas') +
+      item(this.workspaceRoute('/diagnostics'), 'Diagnostics') +
+      item(this.workflowHref(), 'Orchestration Skills') +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  // ── Attention strip (FR10–FR13) ──
+
+  // Plain values for hqAttentionLines, read from what the page already has.
+  hqAttentionState() {
+    const page = this.page || {};
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    const waiting = tasks
+      .filter(task => sharedIsNeedsInputTask(task))
+      .map(task => {
+        const agent = String(task.to || task.agent_name || task.assigned_to || '').trim();
+        return {
+          agent,
+          isLead: Boolean(
+            agent &&
+            typeof page.isWorkspaceEntryAgent === 'function' &&
+            page.isWorkspaceEntryAgent(agent)
+          ),
+          title: String(task.description || task.name || task.title || '').trim(),
+          taskId: String(task.id || '')
+        };
+      });
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    let goalState = null;
+    try {
+      goalState = mission && typeof mission.getState === 'function' ? mission.getState() : null;
+    } catch (_error) {
+      goalState = null;
+    }
+    const briefData = this.dailyBriefStationData();
+    const brief = briefData.status === 'ready' ? dailyBriefStatus(briefData) : null;
+    return {
+      waiting,
+      setup: this.hqMountSignals(),
+      goal: { reason: String((goalState && goalState.needs_attention) || '').trim() },
+      brief:
+        brief && brief.kind === 'ready'
+          ? { readyToday: brief.today === true, time: brief.time }
+          : null,
+      github: this.hqGitHubSignal()
+    };
+  }
+
+  hqAttentionAll() {
+    return hqAttentionLines(this.hqAttentionState());
+  }
+
+  // The visible controls of a top mount, in document order.
+  hqMountControls(el) {
+    if (!el || typeof el.querySelectorAll !== 'function') return [];
+    return Array.from(el.querySelectorAll('button, a[href]')).filter(
+      control =>
+        !control.hidden &&
+        !control.disabled &&
+        String(control.textContent || '').trim() &&
+        !(typeof control.closest === 'function' && control.closest('[hidden]'))
+    );
+  }
+
+  // What a mount says, without its buttons' words.
+  hqMountText(node, controls) {
+    if (!node) return '';
+    if (node.nodeType === 3) return node.nodeValue || '';
+    if (node.nodeType !== 1 || node.hidden || controls.includes(node)) return '';
+    const tag = String(node.tagName || '').toLowerCase();
+    if (tag === 'style' || tag === 'script' || tag === 'dialog') return '';
+    return Array.from(node.childNodes || [])
+      .map(child => this.hqMountText(child, controls))
+      .join(' ');
+  }
+
+  hqMountSignals() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return [];
+    return HQ_SETUP_MOUNTS.map(source => {
+      const el = document.getElementById(source.id);
+      if (!el || el.hidden) return null;
+      const controls = this.hqMountControls(el);
+      return {
+        key: source.key,
+        category: source.category || 'Setup',
+        sentence: this.hqMountText(el, controls),
+        actions: controls.map((control, index) => ({
+          label: String(control.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim(),
+          kind: 'mount',
+          key: source.key,
+          index
+        }))
+      };
+    }).filter(Boolean);
+  }
+
+  hqGitHubSignal() {
+    if (typeof window === 'undefined' || !window.GitHubProposalsPanel) return null;
+    const mount =
+      typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('githubProposalsMount')
+        : null;
+    if (!mount || mount.hidden || typeof mount.querySelectorAll !== 'function') {
+      return { installed: true, count: 0 };
+    }
+    const pending = Array.from(mount.querySelectorAll('.ghp-proposal')).filter(
+      card => !(card.classList && card.classList.contains('ghp-applied'))
+    );
+    return { installed: true, count: pending.length };
+  }
+
+  // Hidden entirely when there is nothing to say (FR10).
+  hqAttentionHTML() {
+    const inner = this.hqAttentionInnerHTML();
+    return (
+      '<section class="ws-hq-attention" data-cmd-hq-attention aria-labelledby="ws-hq-attention-title"' +
+      (inner ? '' : ' hidden') +
+      '>' +
+      inner +
+      '</section>'
+    );
+  }
+
+  hqAttentionInnerHTML() {
+    const lines = this.hqAttentionAll();
+    this._hqAttentionLines = lines;
+    if (!lines.length) return '';
+    const { shown, hidden } = capAttentionLines(lines, { expanded: this.hqAttentionExpanded });
+    return (
+      '<h3 class="ws-hq-attention-title" id="ws-hq-attention-title">' +
+      escapeHtml(HQ_LABELS.needsYourAttention) +
+      '</h3>' +
+      '<ul class="ws-hq-attention-list">' +
+      shown
+        .map(
+          entry =>
+            '<li class="ws-hq-attention-line">' +
+            '<span class="ws-hq-chip is-' +
+            escapeHtml(entry.category.toLowerCase()) +
+            '">' +
+            escapeHtml(entry.category) +
+            '</span>' +
+            '<span class="ws-hq-attention-text">' +
+            escapeHtml(entry.sentence) +
+            '</span>' +
+            '<span class="ws-hq-attention-actions">' +
+            entry.actions
+              .map(
+                (action, index) =>
+                  '<button type="button" class="ws-cmd-agent-action' +
+                  (index === 0 ? ' is-primary' : '') +
+                  '" data-cmd-hq-attention-action="' +
+                  escapeHtml(entry.key + '#' + index) +
+                  '">' +
+                  escapeHtml(action.label) +
+                  '</button>'
+              )
+              .join('') +
+            '</span>' +
+            '</li>'
+        )
+        .join('') +
+      '</ul>' +
+      (hidden
+        ? '<button type="button" class="ws-hq-attention-more" data-cmd-hq-attention-more aria-expanded="false">and ' +
+          hidden +
+          ' more</button>'
+        : '')
+    );
+  }
+
+  // Repaints the parts of the HQ header and strip that other modules change
+  // (setup mounts, the goal, follow-ups, portability) without a full render,
+  // so nothing else on the page moves. Focus stays on the same action.
+  paintHQLive() {
+    if (!this.active || this.viewMode !== 'details' || !this.isPersonalHQ()) return;
+    const root = this.container;
+    if (!root || typeof root.querySelector !== 'function') return;
+    const strip = root.querySelector('[data-cmd-hq-attention]');
+    if (strip) {
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      const focusKey =
+        active && strip.contains?.(active)
+          ? active.getAttribute?.('data-cmd-hq-attention-action') ||
+            (active.hasAttribute?.('data-cmd-hq-attention-more') ? 'more' : '')
+          : '';
+      const html = this.hqAttentionInnerHTML();
+      if (strip.innerHTML !== html) {
+        strip.innerHTML = html;
+        if (focusKey) {
+          const target =
+            focusKey === 'more'
+              ? strip.querySelector('[data-cmd-hq-attention-more]')
+              : Array.from(strip.querySelectorAll('[data-cmd-hq-attention-action]')).find(
+                  el => el.getAttribute('data-cmd-hq-attention-action') === focusKey
+                );
+          target?.focus?.({ preventScroll: true });
+        }
+      }
+      strip.hidden = !this._hqAttentionLines.length;
+    }
+    const facts = root.querySelector('[data-cmd-hq-facts]');
+    if (facts) {
+      const html = this.hqFactsHTML();
+      const focused = typeof document !== 'undefined' ? document.activeElement : null;
+      // Never rebuild the line under a focused Edit goal button.
+      if (facts.innerHTML !== html && !(focused && facts.contains?.(focused))) {
+        facts.innerHTML = html;
+      }
+    }
+    const tiles = root.querySelector('.ws-hq-tiles');
+    if (tiles && typeof tiles.querySelectorAll === 'function') {
+      const fresh = this.hqTilesValues();
+      tiles.querySelectorAll('.ws-cmd-stat').forEach(tile => {
+        const key = tile.getAttribute('data-cmd-hq-jump') || tile.getAttribute('data-cmd-section');
+        if (!(key in fresh)) return;
+        const value = tile.querySelector('.ws-v');
+        if (value && value.textContent !== String(fresh[key].value)) {
+          value.textContent = String(fresh[key].value);
+        }
+        tile.setAttribute('aria-label', fresh[key].aria);
+      });
+    }
+  }
+
+  hqTilesValues() {
+    const needs = this.hqNeedsYouCount();
+    const followUps = this.hqFollowUpsCount();
+    const counts = this.currentTicketCounts();
+    const open = TicketCounts.isKnown(counts) ? TicketCounts.openCount(counts) : null;
+    return {
+      'needs-you': { value: needs, aria: HQ_LABELS.needsYou + ': ' + needs },
+      followups: {
+        value: followUps === null ? '—' : followUps,
+        aria: HQ_LABELS.followUps + (followUps === null ? '' : ': ' + followUps)
+      },
+      tickets: {
+        value: open === null ? '—' : open,
+        aria: HQ_LABELS.openTasks + (open === null ? '' : ': ' + open)
+      }
+    };
+  }
+
+  scheduleHQLivePaint() {
+    if (this._hqLivePaintTimer) return;
+    this._hqLivePaintTimer = setTimeout(() => {
+      this._hqLivePaintTimer = null;
+      this.paintHQLive();
+    }, 60);
+  }
+
+  // Once per page: the events and mount changes that feed the header live.
+  watchHQSources() {
+    if (this._hqSourcesWatched || typeof document === 'undefined') return;
+    if (typeof document.addEventListener !== 'function') return;
+    this._hqSourcesWatched = true;
+    const repaint = () => this.scheduleHQLivePaint();
+    [
+      'ori:workspace-goal-state',
+      'ori:followups-changed',
+      'ori:workspace-continuity-changed',
+      'ori:email-setup-connected'
+    ].forEach(type => document.addEventListener(type, repaint));
+    const mounts =
+      typeof document.getElementById === 'function'
+        ? document.getElementById('workspaceTopMounts')
+        : null;
+    if (mounts && typeof MutationObserver === 'function') {
+      new MutationObserver(repaint).observe(mounts, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['hidden', 'disabled']
+      });
+    }
+  }
+
+  // GitHub proposals live in their own mount, hidden above the header on the
+  // HQ; "Review" brings that live panel under the strip until it is empty.
+  renderHQGitHubHost() {
+    return this.hqGitHubShown
+      ? '<div class="ws-hq-panel-host ws-hq-github-host" data-cmd-hq-host="github"></div>'
+      : '';
+  }
+
+  runHQAttentionAction(key, trigger) {
+    const [lineKey, indexText] = String(key || '').split('#');
+    const entry = (this._hqAttentionLines || []).find(item => item.key === lineKey);
+    const action = entry && entry.actions[Number(indexText)];
+    if (!action) return;
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    switch (action.kind) {
+      case 'ticket':
+        this.runWorkAction('open', action.id, trigger);
+        return;
+      case 'tickets-waiting':
+        this.setCommandViewMode('tickets', { focus: false });
+        return;
+      case 'mount': {
+        const source = HQ_SETUP_MOUNTS.find(item => item.key === action.key);
+        const el = source && document.getElementById(source.id);
+        const control = this.hqMountControls(el)[action.index];
+        if (control && typeof control.click === 'function') control.click();
+        return;
+      }
+      case 'model':
+        if (typeof window !== 'undefined' && window.location)
+          window.location.assign(MODEL_SETTINGS_URL);
+        return;
+      case 'goal':
+        if (mission && typeof mission.openGoalModal === 'function') mission.openGoalModal();
+        return;
+      case 'brief':
+        this.openDailyBriefPanel(trigger);
+        return;
+      case 'github':
+        this.hqGitHubShown = true;
+        this.render();
+        this.container?.querySelector?.('[data-cmd-hq-host="github"]')?.scrollIntoView?.({
+          block: 'nearest'
+        });
+        return;
+      default:
+    }
+  }
+
+  setHQMoreViewsOpen(open, { focus = '' } = {}) {
+    this.hqMoreViewsOpen = open;
+    const root = this.container?.querySelector?.('[data-cmd-hq-more]');
+    if (!root) return;
+    const toggle = root.querySelector('[data-cmd-hq-more-toggle]');
+    const menu = root.querySelector('[role="menu"]');
+    if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (menu) menu.hidden = !open;
+    if (focus === 'first') menu?.querySelector('[role="menuitem"]')?.focus?.();
+    if (focus === 'toggle') toggle?.focus?.();
+  }
+
+  bindHQDetails() {
+    this.watchHQSources();
+    const root = this.container;
+    if (!root || typeof root.querySelector !== 'function') return;
+    const header = root.querySelector('.ws-hq-header');
+    header?.addEventListener?.('click', event => {
+      const goal = event.target.closest?.('[data-cmd-hq-goal-edit]');
+      if (goal) {
+        const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+        if (mission && typeof mission.openGoalModal === 'function') mission.openGoalModal();
+        return;
+      }
+      const toggle = event.target.closest?.('[data-cmd-hq-more-toggle]');
+      if (toggle) {
+        this.setHQMoreViewsOpen(!this.hqMoreViewsOpen, {
+          focus: this.hqMoreViewsOpen ? '' : 'first'
+        });
+        return;
+      }
+      const jump = event.target.closest?.('[data-cmd-hq-jump]');
+      if (jump) this.runHQJump(jump.getAttribute('data-cmd-hq-jump'), jump);
+    });
+    const more = root.querySelector('[data-cmd-hq-more]');
+    more?.addEventListener?.('keydown', event => {
+      const items = Array.from(more.querySelectorAll('[role="menuitem"]'));
+      if (event.key === 'Escape' && this.hqMoreViewsOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setHQMoreViewsOpen(false, { focus: 'toggle' });
+        return;
+      }
+      if (event.key === 'ArrowDown' && event.target.matches?.('[data-cmd-hq-more-toggle]')) {
+        event.preventDefault();
+        this.setHQMoreViewsOpen(true, { focus: 'first' });
+        return;
+      }
+      const at = items.indexOf(event.target);
+      if (at < 0) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        items[(at + step + items.length) % items.length].focus();
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        items[event.key === 'Home' ? 0 : items.length - 1].focus();
+      } else if (event.key === 'Tab') {
+        this.setHQMoreViewsOpen(false);
+      }
+    });
+    more?.addEventListener?.('focusout', event => {
+      if (this.hqMoreViewsOpen && event.relatedTarget && !more.contains(event.relatedTarget)) {
+        this.setHQMoreViewsOpen(false);
+      }
+    });
+    const strip = root.querySelector('[data-cmd-hq-attention]');
+    if (strip) {
+      strip.addEventListener('click', event => {
+        const btn = event.target.closest?.('[data-cmd-hq-attention-action]');
+        if (btn) {
+          this.runHQAttentionAction(btn.getAttribute('data-cmd-hq-attention-action'), btn);
+          return;
+        }
+        if (event.target.closest?.('[data-cmd-hq-attention-more]')) {
+          this.hqAttentionExpanded = true;
+          this.paintHQLive();
+          strip.querySelectorAll?.('[data-cmd-hq-attention-action]')[3]?.focus?.();
+        }
+      });
+    }
+    this.syncHQGitHubSurface();
+  }
+
+  // Where a header tile leads: the panel or rail row behind its number.
+  runHQJump(key, trigger) {
+    if (key === 'team') {
+      this.openStatModal('agents', trigger);
+      return;
+    }
+    const selector = key === 'followups' ? '[data-cmd-followups-host]' : '[data-cmd-hq-attention]';
+    const target = this.container?.querySelector?.(selector);
+    if (!target) return;
+    target.scrollIntoView?.({ block: 'start' });
+    const control = target.querySelector?.('button, a[href], [tabindex="0"]');
+    control?.focus?.({ preventScroll: true });
+  }
+
+  syncHQGitHubSurface() {
+    const host = this.container?.querySelector?.('[data-cmd-hq-host="github"]');
+    if (!host) {
+      this.restoreSharedSurface('hq-github');
+      return;
+    }
+    const node = this.mountSharedSurface('hq-github', '#githubProposalsMount', host);
+    // Nothing left to review: the host goes away on the next render.
+    if (!node || !this.hqGitHubSignal()?.count) this.hqGitHubShown = false;
   }
 
   hqNotesHost() {
@@ -13436,6 +14084,7 @@ export class WorkspaceCommandView {
       };
     }
     this.restoreSharedSurface('hq-notes');
+    this.restoreSharedSurface('hq-github');
   }
 
   syncHQPanels() {

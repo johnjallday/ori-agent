@@ -615,6 +615,14 @@ export async function wireWorkspaceFollowUps({
       state.open = true;
       refocusPending = !isRendered(mount);
     }
+    // The Personal HQ header counts follow-ups without a second request: the
+    // count rides on the mount, and the change is announced (PRD 766 FR7).
+    if (mount.dataset) mount.dataset.followupCount = String(view.count);
+    if (typeof doc.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      doc.dispatchEvent(
+        new CustomEvent('ori:followups-changed', { detail: { count: view.count } })
+      );
+    }
   };
   await load();
   return controller;

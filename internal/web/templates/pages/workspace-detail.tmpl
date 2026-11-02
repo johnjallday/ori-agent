@@ -6,7 +6,7 @@
      an agent's face is the same here as on /agents and Home (PRD FR-99). Its
      stylesheet and scripts come from head.tmpl, which every page shares. -->
 
-<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}"{{if .Extra.IsPersonalHQ}} data-hq-details="1"{{end}}>
   <script>
     // Publish server-resolved route identity before deferred page scripts run.
     // Browser links use the slug; every API and in-memory relationship uses the UUID.
@@ -18,6 +18,13 @@
   <div class="main-content-wrapper">
     <div class="main-content">
       <div class="container-fluid py-4">
+        <!-- Feature mounts above the Command view. On the Personal HQ's Details
+             page none of them shows above the header (PRD 766 FR13): the server
+             marks the body data-hq-details="1" so the CSS hides this wrapper on
+             the first paint, workspace-command.js keeps that mark right per
+             view mode, and the HQ's attention strip and panels carry what the
+             mounts say. Every module keeps running; other pages are untouched. -->
+        <div id="workspaceTopMounts" class="workspace-top-mounts">
         <section id="workspaceGroupRequirementStatus" class="workspace-group-requirement-status" aria-live="polite" hidden>
           <strong id="workspaceGroupRequirementStatusTitle"></strong>
           <span id="workspaceGroupRequirementStatusSummary"></span>
@@ -113,6 +120,12 @@
         {{template "components/workspaces/setup-wizard-modal.tmpl" .}}
         <!-- Reviewed re-intake proposals are inert until opened and applied. -->
         <div id="blueprintIntakePending" class="blueprint-intake-pending" role="status" aria-live="polite" hidden></div>
+        </div>
+        <style>
+          /* Children, not the wrapper: the setup wizard's <dialog> lives in here
+             and must still open (from the attention strip) on the HQ. */
+          body[data-hq-details="1"] #workspaceTopMounts > :not(dialog) { display: none !important; }
+        </style>
         <!-- Stable across Command rerenders: announce changed recommendations, not every poll. -->
         <div id="workspaceNextActionStatus" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->

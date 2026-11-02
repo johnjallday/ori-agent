@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HQ_LABELS, TACTICAL_TERMS, hqLabel, tacticalTermsIn } from './hq-labels.js';
+import {
+  HQ_LABELS,
+  TACTICAL_TERMS,
+  hqLabel,
+  portabilityWord,
+  tacticalTermsIn
+} from './hq-labels.js';
 
 test('the map carries every plain name the HQ page needs', () => {
   const expected = {
@@ -42,6 +48,25 @@ test('hqLabel falls back for an unknown key', () => {
   assert.equal(hqLabel('nope', ''), '');
   // Inherited object keys are not labels.
   assert.equal(hqLabel('toString', 'x'), 'x');
+});
+
+test('portabilityWord is a short state word, never a timestamp', () => {
+  assert.equal(portabilityWord(null), '');
+  assert.equal(
+    portabilityWord({ state: 'ready', label: 'Ready to move as of 11/3 9:00' }),
+    'Ready to move'
+  );
+  assert.equal(portabilityWord({ state: 'preparing' }), 'Preparing');
+  assert.equal(portabilityWord({ state: 'update_needed' }), 'Saving latest work');
+  assert.equal(portabilityWord({ state: 'unavailable' }), 'Not ready to move');
+  assert.equal(
+    portabilityWord({ state: 'ready', imported: true, backgroundAllowed: false }),
+    'Imported · routines off'
+  );
+  assert.equal(
+    portabilityWord({ state: 'ready', imported: true, backgroundAllowed: true }),
+    'Imported · ready to move'
+  );
 });
 
 test('tacticalTermsIn finds each term, ignoring case', () => {

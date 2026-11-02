@@ -9302,3 +9302,220 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .workspace-followup-source-name {
   color: var(--ws-ink, var(--text-primary));
 }
+
+/* ── Personal HQ Details (PRD 766) ────────────────────────────────────────
+   The HQ's station-first Details page. Everything here is scoped to classes
+   only the HQ branch renders (.ws-hq-*, .ws-cmd-layout.is-hq), so no other
+   workspace changes. Colours come from the .ws-cmd tokens, which light and
+   dark themes both redefine. */
+
+.ws-hq-header {
+  flex-wrap: wrap;
+  row-gap: 14px;
+}
+.ws-hq-title {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+.ws-hq-title h2 {
+  overflow-wrap: anywhere;
+}
+.ws-hq-chip {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 2px 8px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 999px;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.ws-hq-chip.is-hq {
+  border-color: var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.12);
+  color: var(--ws-keeper);
+}
+.ws-hq-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 8px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+}
+.ws-hq-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ws-hq-fact-label {
+  color: var(--ws-ink-faint);
+}
+.ws-hq-fact-value {
+  color: var(--ws-ink);
+  overflow-wrap: anywhere;
+}
+.ws-hq-tiles {
+  align-self: flex-start;
+}
+
+/* "More views": a disclosure menu beside the view switch. */
+.ws-hq-more {
+  position: relative;
+  display: inline-flex;
+}
+.ws-hq-more-btn::after {
+  content: "";
+  display: inline-block;
+  margin-left: 6px;
+  border: 4px solid transparent;
+  border-top-color: currentColor;
+  vertical-align: -1px;
+}
+.ws-hq-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-panel-2);
+  box-shadow: var(--ws-glow);
+}
+.ws-hq-menu[hidden] {
+  display: none;
+}
+.ws-hq-menu-item {
+  padding: 8px 10px;
+  color: var(--ws-ink);
+  text-decoration: none;
+  font-size: 13px;
+}
+.ws-hq-menu-item:hover,
+.ws-hq-menu-item:focus-visible {
+  background: rgba(70, 211, 154, 0.1);
+  outline: none;
+}
+.ws-hq-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ws-faction);
+}
+
+/* The attention strip: calm, neutral, one accent per category chip. */
+.ws-hq-attention {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+}
+.ws-hq-attention[hidden] {
+  display: none;
+}
+.ws-hq-attention-title {
+  margin: 0 0 8px;
+  color: var(--ws-ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-hq-attention-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-hq-attention-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.ws-hq-attention-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  color: var(--ws-ink);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.ws-hq-attention-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ws-hq-chip.is-lead {
+  border-color: var(--ws-input);
+  color: var(--ws-input);
+}
+.ws-hq-chip.is-setup {
+  border-color: var(--ws-idle);
+  color: var(--ws-idle);
+}
+.ws-hq-chip.is-email,
+.ws-hq-chip.is-calendar {
+  border-color: var(--ws-faction);
+  color: var(--ws-faction);
+}
+.ws-hq-chip.is-brief,
+.ws-hq-chip.is-notes {
+  border-color: var(--ws-keeper);
+  color: var(--ws-keeper);
+}
+.ws-hq-attention-more {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ws-faction);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.ws-hq-attention-more:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-hq-github-host {
+  margin: 0 0 18px;
+}
+
+/* The Notes panel inline: the station panel's own markup, minus the dialog's
+   close button, which has nothing to close in the main column. */
+.ws-hq-notes {
+  display: block;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+}
+.ws-hq-notes[hidden] {
+  display: none;
+}
+.ws-hq-notes .ws-cmd-modal-close {
+  display: none;
+}
+.ws-hq-notes .ws-notes-body {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+  .ws-hq-tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .ws-hq-tiles .ws-cmd-stat {
+    min-width: 0;
+  }
+  .ws-hq-menu {
+    right: auto;
+    left: 0;
+  }
+}

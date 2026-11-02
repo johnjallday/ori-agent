@@ -64,6 +64,26 @@ export const TACTICAL_TERMS = Object.freeze([
   'Keeper'
 ]);
 
+/**
+ * The header's one-word portability state, from WorkspaceContinuity's
+ * describeStatus view. Never a timestamp: the full status stays in the rail's
+ * Portability row (PRD 766 FR5). '' while the status is unknown.
+ */
+export function portabilityWord(view) {
+  if (!view || !view.state) return '';
+  if (view.imported && !view.backgroundAllowed) return 'Imported · routines off';
+  switch (view.state) {
+    case 'ready':
+      return view.imported ? 'Imported · ready to move' : 'Ready to move';
+    case 'preparing':
+      return 'Preparing';
+    case 'update_needed':
+      return 'Saving latest work';
+    default:
+      return 'Not ready to move';
+  }
+}
+
 /** The plain label for `key`, or `fallback` (default: the key) when unknown. */
 export function hqLabel(key, fallback) {
   if (Object.prototype.hasOwnProperty.call(HQ_LABELS, key)) return HQ_LABELS[key];
