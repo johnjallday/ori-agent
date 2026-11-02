@@ -35,6 +35,7 @@ type SecondBrainService interface {
 	WriteProject(ctx context.Context, userID string, input personalassistant.SecondBrainProjectInput) (personalassistant.SecondBrainProjectNote, error)
 	SkipProject(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DismissWeek(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
+	DismissNudge(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 }
 
 // SetSecondBrain adds the second-brain boundary. origin refuses a request that
@@ -212,6 +213,28 @@ func (h *Handler) DismissWeekSecondBrain(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	view, err := h.secondBrain.DismissWeek(r.Context(), userID, strings.TrimSpace(req.RequestID))
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"second_brain": view})
+}
+
+// DismissNudgeSecondBrain handles POST …/second-brain/nudge/dismiss: the
+// stale-notes nudge's "Not now". It stays away until the next finished look.
+func (h *Handler) DismissNudgeSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainRequestOnly
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "request_id") {
+		return
+	}
+	view, err := h.secondBrain.DismissNudge(r.Context(), userID, strings.TrimSpace(req.RequestID))
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return

@@ -69,7 +69,7 @@ import {
 // "notes", which names the workspace's own notes section on the map.
 export const NOTES_STATION = 'second-brain';
 import {
-  LOOK_TOO_SOON_LINE,
+  LOOK_STILL_READING_LINE,
   NOTES_ITEM_ACTIONS,
   defaultNotesTab,
   isCreatedByOri,
@@ -78,9 +78,12 @@ import {
   notesPanelAvailable,
   notesPanelHTML,
   notesSections,
-  notesTabs
+  notesTabs,
+  lookTooSoonLine
 } from './notes-station.js';
 import {
+  LOOK_POLL_LIMIT,
+  LOOK_POLL_MS,
   SECOND_BRAIN_ENDPOINT,
   followUpReceiptLine,
   newRequestID,
@@ -2566,6 +2569,7 @@ export class WorkspaceCommandView {
     this.rememberCapabilityInspectorFocus();
     this.rememberLoadoutAddFocus();
     this.rememberRailFocus();
+    this.rememberMapStationFocus();
     this.captureAgentDeckViewState();
     this.captureDailyBriefPanelView();
     this.captureStatModalFocus();
@@ -2676,6 +2680,7 @@ export class WorkspaceCommandView {
     this.restoreCapabilityInspectorFocus();
     this.restoreLoadoutAddFocus();
     this.restoreRailFocus();
+    this.restoreMapStationFocus();
     this.hydrateActiveAgentPrompt();
     // The Workshop host only exists once the Toolbox tab has rendered, so it is
     // mounted here rather than at page load. Idempotent per instance.
@@ -4244,6 +4249,32 @@ export class WorkspaceCommandView {
         this._railFocus = { attribute, value };
         return;
       }
+    }
+  }
+
+  // A map building keeps focus through a repaint too: a station's badge re-reads
+  // after its panel closes and returns focus to the building, and that answer
+  // arrives after focus did, rebuilding the map under it.
+  rememberMapStationFocus() {
+    this._mapStationFocus = '';
+    if (typeof document === 'undefined') return;
+    const active = document.activeElement;
+    if (!active || typeof active.closest !== 'function' || !this.container) return;
+    const building = active.closest('.ws-cmd-map-hq-station[data-cmd-hq-station]');
+    if (building && this.container.contains(building)) {
+      this._mapStationFocus = building.getAttribute('data-cmd-hq-station') || '';
+    }
+  }
+
+  restoreMapStationFocus() {
+    const key = this._mapStationFocus;
+    this._mapStationFocus = '';
+    if (!key || !this.container || typeof this.container.querySelectorAll !== 'function') return;
+    const building = Array.from(
+      this.container.querySelectorAll('.ws-cmd-map-hq-station[data-cmd-hq-station]')
+    ).find(node => node.getAttribute('data-cmd-hq-station') === key);
+    if (building && document.activeElement !== building && typeof building.focus === 'function') {
+      building.focus({ preventScroll: true });
     }
   }
 
@@ -7761,12 +7792,47 @@ export class WorkspaceCommandView {
     this.pollNotesPanelLook(panel);
   }
 
-  // A running look is read again until it ends; closing the panel stops it.
+  // Another surface changed the connection or the look (the drawer's Look again,
+  // a follow-up added there): an open panel reads the look again in place,
+  // keeping its view, and polls a look that started elsewhere.
+  async refreshOpenNotesPanel() {
+    const panel = this._notesPanel;
+    if (!panel || panel.status !== 'ready' || panel.refreshing || !this.notesPanelOpen()) return;
+    panel.refreshing = true;
+    const before = JSON.stringify(panel.look || null);
+    try {
+      const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
+      if (panel !== this._notesPanel) return;
+      const wasRunning = panel.look?.state === 'running';
+      panel.look = (look && look.look) || panel.look;
+      if (!wasRunning && panel.look?.state === 'running') panel.polls = 0;
+    } catch {
+      return;
+    } finally {
+      panel.refreshing = false;
+    }
+    // The drawer announces every step of its own turn; a look that did not
+    // change is not repainted, so the rows under the user's pointer stay put.
+    if (JSON.stringify(panel.look || null) === before) return;
+    this.paintNotesPanel(panel);
+    // Polling replaces any timer already set, so a look is never read twice.
+    this.pollNotesPanelLook(panel);
+  }
+
+  // A running look is read again until it ends, at the drawer's pace and for
+  // no longer than the drawer waits; closing the panel stops it. A look that
+  // outlasts the poll says so, and opening the panel again reads it afresh.
   pollNotesPanelLook(panel) {
     clearTimeout(this._notesPanelPoll);
     if (panel !== this._notesPanel || panel.look?.state !== 'running') return;
+    if ((panel.polls || 0) >= LOOK_POLL_LIMIT) {
+      panel.lookMessage = LOOK_STILL_READING_LINE;
+      this.paintNotesPanel(panel);
+      return;
+    }
     this._notesPanelPoll = setTimeout(async () => {
       if (panel !== this._notesPanel || !this.notesPanelOpen()) return;
+      panel.polls = (panel.polls || 0) + 1;
       try {
         const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
         panel.look = (look && look.look) || panel.look;
@@ -7776,7 +7842,7 @@ export class WorkspaceCommandView {
       this.paintNotesPanel(panel);
       if (panel.look?.state === 'running') this.pollNotesPanelLook(panel);
       else this.notesChanged();
-    }, 1500);
+    }, LOOK_POLL_MS);
   }
 
   // Another surface may be showing this connection: the drawer's own copy and
@@ -7802,6 +7868,9 @@ export class WorkspaceCommandView {
       if (!response.ok) {
         const error = new Error(secondBrainError(payload));
         error.status = response.status;
+        const retryAfter = Number(response.headers?.get?.('Retry-After'));
+        error.retryAfterSeconds =
+          retryAfter > 0 ? retryAfter : Number(payload?.retry_after_seconds) || 0;
         throw error;
       }
       return payload;
@@ -7821,6 +7890,11 @@ export class WorkspaceCommandView {
     }
     if (action === 'notes-look-again') {
       void this.lookAgainFromNotesPanel();
+      return;
+    }
+    if (action === 'notes-show-all') {
+      this.notesPanel().showAll = true;
+      this.paintNotesPanel(this.notesPanel());
       return;
     }
     if (action === 'notes-capture') {
@@ -7883,15 +7957,30 @@ export class WorkspaceCommandView {
 
   async lookAgainFromNotesPanel() {
     const panel = this.notesPanel();
+    if (panel.lookBusy) return;
     panel.lookMessage = '';
+    panel.lookBusy = true;
+    let started = false;
     try {
       const payload = await this.notesPost('/look', {});
       panel.look = (payload && payload.look) || panel.look;
+      panel.polls = 0;
+      started = true;
     } catch (error) {
-      panel.lookMessage = error.status === 429 ? LOOK_TOO_SOON_LINE : error.message;
+      panel.lookMessage =
+        error.status === 429
+          ? lookTooSoonLine({
+              retryAfterSeconds: error.retryAfterSeconds,
+              lastLookAt: panel.look?.result?.finished_at,
+              now: Date.now()
+            })
+          : error.message;
     }
+    panel.lookBusy = false;
     this.paintNotesPanel(panel);
     this.pollNotesPanelLook(panel);
+    // Today and the drawer show a running look too.
+    if (started) this.notesChanged();
   }
 
   async captureFromNotesPanel() {
@@ -7957,7 +8046,10 @@ export class WorkspaceCommandView {
       typeof document !== 'undefined' &&
       typeof document.addEventListener === 'function'
     ) {
-      this.boundNotesChanged = () => this.requestNotesData(true);
+      this.boundNotesChanged = () => {
+        this.requestNotesData(true);
+        void this.refreshOpenNotesPanel();
+      };
       document.addEventListener('personal-assistant:second-brain', this.boundNotesChanged);
     }
     const state = this.notesState();

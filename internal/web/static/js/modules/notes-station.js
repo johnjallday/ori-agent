@@ -53,8 +53,30 @@ export function openItemCount(lastLook) {
   return Math.max(0, open - handled);
 }
 
+// notesNudge is the server's word that the notes deserve another look (the same
+// rule as Today's Needs you row), or null.
+export function notesNudge(secondBrain) {
+  const nudge = secondBrain?.nudge;
+  if (!nudge) return null;
+  const cameDue = Number(nudge.came_due) || 0;
+  const stale = nudge.stale === true;
+  if (!stale && !cameDue) return null;
+  return { stale, days: Number(nudge.days) || 0, cameDue };
+}
+
+// nudgeParts are the badge's words for a nudge: what came due, and how old the
+// look is once that is the point.
+function nudgeParts(nudge) {
+  const parts = [];
+  if (nudge.cameDue) parts.push(nudge.cameDue + ' came due');
+  if (nudge.stale) parts.push('looked ' + nudge.days + 'd ago');
+  return parts;
+}
+
 // notesBadge is the building's status. A folder Ori set up leads with its Inbox,
-// a connected vault with what is still open.
+// a connected vault with what is still open. When the notes deserve another
+// look the building turns to attention and says why: what came due, or how old
+// the last look is.
 export function notesBadge(secondBrain, now = Date.now()) {
   const name = String(secondBrain?.source?.name || '');
   if (secondBrain?.status === 'missing' && name) {
@@ -65,16 +87,29 @@ export function notesBadge(secondBrain, now = Date.now()) {
   }
   const at = secondBrain.last_look?.at;
   const since = at ? shortSince(at, now) : '';
+  const nudge = secondBrain.last_look ? notesNudge(secondBrain) : null;
+  const tone = nudge ? 'attention' : 'clear';
   if (isCreatedByOri(secondBrain)) {
-    const description = createdDescription(secondBrain, since);
+    const description = [createdDescription(secondBrain, since)]
+      .concat(nudge ? nudgeParts(nudge) : [])
+      .join(' · ');
     if (!Number.isFinite(secondBrain.inbox_count)) {
-      return { value: name, description, tone: 'clear' };
+      return { value: name, description, tone };
     }
-    return { value: secondBrain.inbox_count + ' in Inbox', description, tone: 'clear' };
+    return { value: secondBrain.inbox_count + ' in Inbox', description, tone };
+  }
+  if (!secondBrain.last_look) {
+    return { value: name, description: 'connected', tone: 'clear' };
+  }
+  const open = openItemCount(secondBrain.last_look) + ' open';
+  if (nudge) {
+    // The building's one visible line carries the reason; the full sentence is
+    // its description, which the rail row and the building's name read out.
+    const reasons = nudgeParts(nudge);
+    return { value: reasons[0], description: [open].concat(reasons).join(' · '), tone };
   }
   const description = since ? 'connected · last look ' + since : 'connected';
-  if (!secondBrain.last_look) return { value: name, description, tone: 'clear' };
-  return { value: openItemCount(secondBrain.last_look) + ' open', description, tone: 'clear' };
+  return { value: open, description, tone };
 }
 
 // createdDescription is the line under a folder Ori set up. Once the user has
@@ -102,15 +137,22 @@ function shortSince(at, now) {
   return Math.round(hours / 24) + 'd';
 }
 
+// isHandled says the user has answered the item: triaged in the panel, or a
+// follow-up already made from it some other way (`accepted`, read fresh by the
+// server and never stored).
+export function isHandled(item) {
+  return Boolean(item?.acted_as || item?.accepted);
+}
+
 // openLoopGroups files each untouched item once: Dated (soonest first), then
-// Decisions, then Stale (its note has sat untouched), then Other. Triaged items
-// go to handled.
+// Decisions, then Stale (its note has sat untouched), then Other. Triaged and
+// accepted items go to handled.
 export function openLoopGroups(items, stale) {
   const staleNotes = new Set((Array.isArray(stale) ? stale : []).map(note => note?.note));
   const groups = { dated: [], decisions: [], stale: [], other: [], handled: [] };
   for (const item of Array.isArray(items) ? items : []) {
     if (!item?.id || !item?.text) continue;
-    if (item.acted_as) groups.handled.push(item);
+    if (isHandled(item)) groups.handled.push(item);
     else if (item.due) groups.dated.push(item);
     else if (item.in_decision) groups.decisions.push(item);
     else if (staleNotes.has(item.note)) groups.stale.push(item);
@@ -125,6 +167,8 @@ export function openLoopGroups(items, stale) {
 // can still be finished; anything else handled offers nothing.
 export function itemActions(item) {
   if (item?.acted_as === 'follow_up') return ['done'];
+  // A follow-up made elsewhere can still be finished from here.
+  if (!item?.acted_as && item?.accepted) return ['done'];
   if (item?.acted_as) return [];
   return NOTES_ITEM_ACTIONS.filter(action => !(action === 'follow_up' && item?.seeded));
 }
@@ -132,7 +176,7 @@ export function itemActions(item) {
 // suggestedCount is how many items the bulk action would still add.
 export function suggestedCount(items) {
   return (Array.isArray(items) ? items : []).filter(
-    item => item?.suggested === true && !item?.acted_as && !item?.seeded
+    item => item?.suggested === true && !isHandled(item) && !item?.seeded
   ).length;
 }
 
@@ -144,6 +188,85 @@ export function lookAgeLine(at, now = Date.now()) {
 }
 
 export const LOOK_TOO_SOON_LINE = 'Looked less than 10 minutes ago';
+
+// LOOK_AGAIN_AFTER_MS is the server's rate limit on Look again.
+const LOOK_AGAIN_AFTER_MS = 10 * 60 * 1000;
+
+// lookTooSoonLine is the answer to a Look again inside the rate limit: when the
+// last look was and how long to wait. The wait comes from the server's
+// Retry-After when it sent one, else from the last look's time; with neither,
+// the plain sentence stands.
+export function lookTooSoonLine({ retryAfterSeconds, lastLookAt, now = Date.now() } = {}) {
+  let wait = Number(retryAfterSeconds) * 1000;
+  const then = Date.parse(lastLookAt || '');
+  if (!(wait > 0) && Number.isFinite(then)) wait = LOOK_AGAIN_AFTER_MS - (Number(now) - then);
+  if (!(wait > 0)) return LOOK_TOO_SOON_LINE;
+  const minutes = Math.max(1, Math.ceil(wait / 60000));
+  const looked = Number.isFinite(then) ? 'Looked ' + sinceLabel(lastLookAt, now) + '. ' : '';
+  return looked + 'Try again in ' + plural(minutes, 'minute', 'minutes') + '.';
+}
+
+// LOOK_STILL_READING_LINE is what the panel says when a look outlasts its poll.
+export const LOOK_STILL_READING_LINE = 'Still reading. Check back in a moment.';
+
+// NOTES_PRIVACY_LINE sits under the look: what Ori keeps of the notes.
+export const NOTES_PRIVACY_LINE = 'Ori keeps the folder path and these lines, never your notes.';
+
+// MAX_ITEMS_SHOWN is how many open items the panel lists before Show all.
+export const MAX_ITEMS_SHOWN = 30;
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// localDay is now's calendar day where the user is, as YYYY-MM-DD, the form a
+// look writes dates in.
+function localDay(now) {
+  const date = new Date(Number(now));
+  const pad = value => String(value).padStart(2, '0');
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate());
+}
+
+// dueChip is an item's date as a person reads it: "Due Oct 25", "Due today" or
+// "Overdue · Oct 3". The date is a calendar day, so it is never shifted by a
+// time zone. Anything that is not a date shows nothing.
+export function dueChip(due, now = Date.now()) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(due || ''));
+  if (!match) return null;
+  const month = MONTHS[Number(match[2]) - 1];
+  if (!month) return null;
+  const label = month + ' ' + Number(match[3]);
+  const today = localDay(now);
+  if (due === today) return { label: 'Due today', tone: 'today' };
+  if (due < today) return { label: 'Overdue · ' + label, tone: 'overdue' };
+  return { label: 'Due ' + label, tone: 'upcoming' };
+}
+
+// sinceLookLine compares the look with the one before it.
+export function sinceLookLine(result) {
+  const added = Number(result?.new_since) || 0;
+  const done = Number(result?.done_since) || 0;
+  if (!added && !done) return '';
+  return 'Since your last look: ' + added + ' new, ' + done + ' done.';
+}
+
+// lookCountsLine is the look's numbers in one line: what is open, where, how
+// many carry dates, and how many sit in open decisions.
+export function lookCountsLine(result) {
+  const counts = result?.counts;
+  if (!counts) return '';
+  const items = Array.isArray(result?.items) ? result.items : [];
+  const decisions = items.filter(item => item?.in_decision).length;
+  const parts = [
+    plural(Number(counts.open_items) || 0, 'open item', 'open items') +
+      ' in ' +
+      plural(Number(counts.notes_with_open) || 0, 'note', 'notes'),
+    (Number(counts.dated) || 0) + ' with dates'
+  ];
+  if (decisions) parts.push(decisions + ' in decisions');
+  parts.push('read ' + plural(Number(counts.notes) || 0, 'note', 'notes'));
+  let line = parts.join(' · ');
+  if (counts.partial) line += ' (partial look)';
+  return line;
+}
 
 // noteLabel is a note's path without its extension.
 function noteLabel(note) {
@@ -274,6 +397,7 @@ export function notesPanelCount(sections) {
 
 const ACTION_LABELS = { follow_up: 'Follow up', done: 'Done', dismiss: 'Dismiss' };
 const HANDLED_LABELS = { follow_up: 'Follow-up made', done: 'Done', dismissed: 'Dismissed' };
+const ACCEPTED_LABEL = 'In follow-ups';
 const KIND_LABELS = { capture: 'Captured', seed: 'Seeded', follow_up: 'Follow-up', user: 'Yours' };
 
 function obsidianAnchor(link, name) {
@@ -288,7 +412,7 @@ function obsidianAnchor(link, name) {
   );
 }
 
-function itemRowHTML(item, lookId) {
+function itemRowHTML(item, lookId, now) {
   const actions = itemActions(item)
     .map(
       action =>
@@ -304,8 +428,12 @@ function itemRowHTML(item, lookId) {
     )
     .join('');
   const facts = [noteLabel(item.note)];
-  if (item.due) facts.push('due ' + item.due);
   if (item.acted_as) facts.push(HANDLED_LABELS[item.acted_as] || '');
+  else if (item.accepted) facts.push(ACCEPTED_LABEL);
+  const chip = dueChip(item.due, now);
+  const due = chip
+    ? '<span class="ws-notes-due is-' + chip.tone + '">' + escapeHtml(chip.label) + '</span>'
+    : '';
   return (
     '<li class="ws-notes-item" data-notes-item="' +
     escapeHtml(item.id) +
@@ -315,14 +443,16 @@ function itemRowHTML(item, lookId) {
     escapeHtml(item.text) +
     '</span><span class="ws-notes-item-meta">' +
     escapeHtml(facts.filter(Boolean).join(' · ')) +
-    '</span></div><div class="ws-notes-item-actions">' +
+    '</span>' +
+    due +
+    '</div><div class="ws-notes-item-actions">' +
     actions +
     obsidianAnchor(item.link, noteLabel(item.note)) +
     '</div></li>'
   );
 }
 
-function loopsHTML(section, panel) {
+function loopsHTML(section, panel, now) {
   const { groups, lookId } = section;
   const named = [
     ['Dated', groups.dated],
@@ -337,16 +467,27 @@ function loopsHTML(section, panel) {
       section.suggested +
       ' suggested as follow-ups</button>';
   }
+  // A long look lists its first items and offers the rest, so the panel stays
+  // a page rather than a scroll of hundreds of lines.
+  let room = panel.showAll ? Infinity : MAX_ITEMS_SHOWN;
   for (const [title, items] of named) {
-    if (!items.length) continue;
+    if (!items.length || room <= 0) continue;
+    const shown = items.slice(0, room);
+    room -= shown.length;
     html +=
       '<h5 class="ws-notes-group">' +
       escapeHtml(title) +
       ' <span class="ws-notes-group-count">' +
       items.length +
       '</span></h5><ul class="ws-notes-list">' +
-      items.map(item => itemRowHTML(item, lookId)).join('') +
+      shown.map(item => itemRowHTML(item, lookId, now)).join('') +
       '</ul>';
+  }
+  if (!panel.showAll && section.count > MAX_ITEMS_SHOWN) {
+    html +=
+      '<button type="button" class="ws-notes-action ws-notes-show-all" data-cmd-modal-action="notes-show-all">Show all ' +
+      section.count +
+      '</button>';
   }
   if (!section.count) html += '<p class="ws-notes-empty">' + escapeHtml(section.empty) + '</p>';
   if (groups.handled.length) {
@@ -356,7 +497,7 @@ function loopsHTML(section, panel) {
       '><summary>' +
       groups.handled.length +
       ' handled</summary><ul class="ws-notes-list">' +
-      groups.handled.map(item => itemRowHTML(item, lookId)).join('') +
+      groups.handled.map(item => itemRowHTML(item, lookId, now)).join('') +
       '</ul></details>';
   }
   return html;
@@ -486,16 +627,16 @@ function footerHTML(look, panel, now) {
       '<p class="ws-notes-muted">Also noticed: ' + escapeHtml(result.also_noticed) + '</p>'
     );
   }
-  const counts = result?.counts;
+  const since = sinceLookLine(result);
+  if (since) lines.push('<p class="ws-notes-muted">' + escapeHtml(since) + '</p>');
+  const counts = lookCountsLine(result);
   if (counts) {
-    let line =
-      plural(Number(counts.notes) || 0, 'note', 'notes') +
-      ' · ' +
-      plural(Number(counts.open_items) || 0, 'open item', 'open items');
-    if (counts.partial) line += ' (partial look)';
     const at = result.finished_at ? sinceLabel(result.finished_at, now) : '';
-    if (at) line += ' · last look ' + at;
-    lines.push('<p class="ws-notes-muted">' + escapeHtml(line) + '</p>');
+    lines.push(
+      '<p class="ws-notes-muted ws-notes-counts">' +
+        escapeHtml(counts + (at ? ' · last look ' + at : '')) +
+        '</p>'
+    );
   }
   const age = lookAgeLine(result?.finished_at, now);
   if (age) lines.push('<p class="ws-notes-muted">' + escapeHtml(age) + '</p>');
@@ -503,6 +644,9 @@ function footerHTML(look, panel, now) {
     ? '<p class="ws-notes-muted" role="status">' + escapeHtml(panel.lookMessage) + '</p>'
     : '';
   const running = look?.state === 'running';
+  const privacy = result
+    ? '<p class="ws-notes-muted">' + escapeHtml(NOTES_PRIVACY_LINE) + '</p>'
+    : '';
   return (
     lines.join('') +
     message +
@@ -510,7 +654,8 @@ function footerHTML(look, panel, now) {
     (running ? ' disabled' : '') +
     '>' +
     (running ? 'Reading…' : 'Look again') +
-    '</button>'
+    '</button>' +
+    privacy
   );
 }
 
@@ -523,7 +668,7 @@ function sectionBodyHTML(section, panel, now) {
     case 'today':
       return todayHTML(section);
     case 'loops':
-      return loopsHTML(section, panel);
+      return loopsHTML(section, panel, now);
     case 'people':
       return peopleHTML(section);
     case 'projects':

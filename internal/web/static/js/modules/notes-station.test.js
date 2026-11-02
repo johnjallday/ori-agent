@@ -440,3 +440,193 @@ test('Inbox rows say whose they are, and a bound says it was hit', () => {
   assert.ok(html.includes('Showing the newest 3 of 140.'));
   assert.ok(html.includes('Saved to Inbox as call-dana.'));
 });
+
+// --- notes-station-panel (PRD notes-station-panel) ---------------------------
+
+test('a line already a follow-up is handled, offers only Done, and is never suggested', async () => {
+  const { isHandled } = await import('./notes-station.js');
+  const accepted = item('made', { accepted: true, suggested: true });
+  assert.equal(isHandled(accepted), true);
+  assert.deepEqual(itemActions(accepted), ['done']);
+  assert.equal(suggestedCount([accepted, item('new', { suggested: true })]), 1);
+  const groups = openLoopGroups([accepted, item('open')], []);
+  assert.deepEqual(
+    groups.handled.map(entry => entry.id),
+    ['made']
+  );
+  assert.deepEqual(
+    groups.other.map(entry => entry.id),
+    ['open']
+  );
+  const html = notesPanelHTML({
+    secondBrain: vault(),
+    panel: {
+      status: 'ready',
+      tab: 'loops',
+      handledOpen: true,
+      look: { state: 'finished', look_id: 'look-1', result: { items: [accepted, item('open')] } }
+    },
+    now: NOW
+  });
+  assert.match(
+    html,
+    /Item made<\/span><span class="ws-notes-item-meta">Notes\/made · In follow-ups/
+  );
+});
+
+test('due dates read as chips: upcoming, today and overdue, by the local calendar day', async () => {
+  const { dueChip } = await import('./notes-station.js');
+  const now = new Date(2026, 10, 2, 9, 0, 0).getTime();
+  assert.deepEqual(dueChip('2026-11-02', now), { label: 'Due today', tone: 'today' });
+  assert.deepEqual(dueChip('2026-10-03', now), { label: 'Overdue · Oct 3', tone: 'overdue' });
+  assert.deepEqual(dueChip('2026-12-25', now), { label: 'Due Dec 25', tone: 'upcoming' });
+  assert.equal(dueChip('', now), null);
+  assert.equal(dueChip('soon', now), null);
+  assert.equal(dueChip('2026-13-01', now), null);
+  const html = notesPanelHTML({
+    secondBrain: vault(),
+    panel: {
+      status: 'ready',
+      tab: 'loops',
+      look: {
+        state: 'finished',
+        look_id: 'look-1',
+        result: { items: [item('rent', { due: '2026-10-03' })] }
+      }
+    },
+    now
+  });
+  assert.match(html, /<span class="ws-notes-due is-overdue">Overdue · Oct 3<\/span>/);
+  assert.doesNotMatch(html, /due 2026-10-03/);
+});
+
+test('the footer says what changed, the counts, and what Ori keeps', async () => {
+  const { lookCountsLine, sinceLookLine, NOTES_PRIVACY_LINE } = await import('./notes-station.js');
+  const result = {
+    headline: '12 open items across 6 notes, 4 with dates.',
+    finished_at: hoursAgo(3),
+    new_since: 2,
+    done_since: 1,
+    counts: { notes: 40, open_items: 12, notes_with_open: 6, dated: 4, partial: true },
+    items: [item('a', { in_decision: true }), item('b', { in_decision: true }), item('c')]
+  };
+  assert.equal(sinceLookLine(result), 'Since your last look: 2 new, 1 done.');
+  assert.equal(sinceLookLine({ new_since: 0, done_since: 0 }), '');
+  assert.equal(
+    lookCountsLine(result),
+    '12 open items in 6 notes · 4 with dates · 2 in decisions · read 40 notes (partial look)'
+  );
+  assert.equal(
+    lookCountsLine({ counts: { notes: 1, open_items: 1, notes_with_open: 1, dated: 0 } }),
+    '1 open item in 1 note · 0 with dates · read 1 note'
+  );
+  const html = notesPanelHTML({
+    secondBrain: vault(),
+    panel: {
+      status: 'ready',
+      tab: 'loops',
+      look: { state: 'finished', look_id: 'look-1', result }
+    },
+    now: NOW
+  });
+  assert.match(html, /Since your last look: 2 new, 1 done\./);
+  assert.match(html, /read 40 notes \(partial look\) · last look 3 hours ago/);
+  assert.ok(html.includes(NOTES_PRIVACY_LINE));
+  const empty = notesPanelHTML({
+    secondBrain: vault(),
+    panel: { status: 'ready', tab: 'loops', look: { state: 'none' } },
+    now: NOW
+  });
+  assert.ok(!empty.includes(NOTES_PRIVACY_LINE), 'no look, nothing kept to speak of');
+});
+
+test('a long look lists its first 30 items and offers Show all', async () => {
+  const { MAX_ITEMS_SHOWN } = await import('./notes-station.js');
+  const items = Array.from({ length: 34 }, (_, index) => item('n' + index));
+  const look = { state: 'finished', look_id: 'look-1', result: { items } };
+  const rows = html => (html.match(/<li class="ws-notes-item"/g) || []).length;
+  const short = notesPanelHTML({
+    secondBrain: vault(),
+    panel: { status: 'ready', tab: 'loops', look },
+    now: NOW
+  });
+  assert.equal(rows(short), MAX_ITEMS_SHOWN);
+  assert.match(short, /data-cmd-modal-action="notes-show-all">Show all 34<\/button>/);
+  const all = notesPanelHTML({
+    secondBrain: vault(),
+    panel: { status: 'ready', tab: 'loops', look, showAll: true },
+    now: NOW
+  });
+  assert.equal(rows(all), 34);
+  assert.doesNotMatch(all, /notes-show-all/);
+  const few = notesPanelHTML({
+    secondBrain: vault(),
+    panel: {
+      status: 'ready',
+      tab: 'loops',
+      look: { state: 'finished', look_id: 'look-1', result: { items: items.slice(0, 30) } }
+    },
+    now: NOW
+  });
+  assert.doesNotMatch(few, /notes-show-all/);
+});
+
+test('Look again too soon says when Ori looked and how long to wait', async () => {
+  const { lookTooSoonLine, LOOK_TOO_SOON_LINE } = await import('./notes-station.js');
+  const now = NOW;
+  const fourMinutesAgo = new Date(now - 4 * 60000).toISOString();
+  assert.equal(
+    lookTooSoonLine({ retryAfterSeconds: 361, lastLookAt: fourMinutesAgo, now }),
+    'Looked 4 minutes ago. Try again in 7 minutes.'
+  );
+  assert.equal(
+    lookTooSoonLine({ lastLookAt: fourMinutesAgo, now }),
+    'Looked 4 minutes ago. Try again in 6 minutes.'
+  );
+  assert.equal(lookTooSoonLine({ retryAfterSeconds: 30, now }), 'Try again in 1 minute.');
+  assert.equal(lookTooSoonLine({ now }), LOOK_TOO_SOON_LINE);
+  assert.equal(
+    lookTooSoonLine({ lastLookAt: new Date(now - 11 * 60000).toISOString(), now }),
+    LOOK_TOO_SOON_LINE
+  );
+});
+
+test('the badge turns to attention when the notes deserve another look, and says why', async () => {
+  const { notesNudge } = await import('./notes-station.js');
+  const stale = vault({ nudge: { stale: true, days: 8, came_due: 0 } });
+  assert.deepEqual(notesBadge(stale, NOW), {
+    value: 'looked 8d ago',
+    description: '14 open · looked 8d ago',
+    tone: 'attention'
+  });
+  const due = vault({ nudge: { stale: false, days: 0, came_due: 2 } });
+  assert.deepEqual(notesBadge(due, NOW), {
+    value: '2 came due',
+    description: '14 open · 2 came due',
+    tone: 'attention'
+  });
+  const both = vault({ nudge: { stale: true, days: 9, came_due: 1 } });
+  assert.deepEqual(notesBadge(both, NOW), {
+    value: '1 came due',
+    description: '14 open · 1 came due · looked 9d ago',
+    tone: 'attention'
+  });
+  // Dismissed or fresh: the server sends no nudge, and the badge is calm.
+  assert.deepEqual(notesBadge(vault(), NOW), {
+    value: '14 open',
+    description: 'connected · last look 2h',
+    tone: 'clear'
+  });
+  assert.equal(notesNudge(vault({ nudge: { stale: false, came_due: 0 } })), null);
+  const setUp = notesBadge(created({ nudge: { stale: true, days: 8, came_due: 0 } }), NOW);
+  assert.deepEqual(setUp, {
+    value: '12 in Inbox',
+    description: 'set up by Ori · last look 2h · looked 8d ago',
+    tone: 'attention'
+  });
+  // A missing folder keeps its own words.
+  assert.equal(
+    notesBadge(vault({ status: 'missing', nudge: { stale: true, days: 8 } }), NOW).value,
+    "Can't find Second Brain"
+  );
+});

@@ -8802,3 +8802,279 @@ test('follow-ups: a deep-linked card rendered while parked is scrolled into view
     assert.equal(doc.activeElement, card);
   });
 });
+
+// --- notes-station-panel ------------------------------------------------------
+
+test('Look again inside the rate limit names the wait from Retry-After', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.window = {};
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 429,
+      headers: { get: name => (name === 'Retry-After' ? '361' : null) },
+      json: async () => ({ error: 'Ori looked a moment ago.', retry_after_seconds: 361 })
+    });
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const fourMinutesAgo = new Date(Date.now() - 4 * 60000).toISOString();
+    hq._notesPanel = {
+      status: 'ready',
+      look: { state: 'finished', result: { finished_at: fourMinutesAgo } }
+    };
+    await hq.lookAgainFromNotesPanel();
+    assert.equal(hq._notesPanel.lookMessage, 'Looked 4 minutes ago. Try again in 7 minutes.');
+    assert.equal(hq._notesPanel.lookBusy, false);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the Notes panel stops polling a look at the drawer limit and says it is still reading', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  try {
+    globalThis.window = {};
+    const delays = [];
+    let pending = null;
+    globalThis.setTimeout = (fn, ms) => {
+      delays.push(ms);
+      pending = fn;
+      return delays.length;
+    };
+    let reads = 0;
+    globalThis.fetch = async () => {
+      reads += 1;
+      return { ok: true, json: async () => ({ look: { state: 'running', look_id: 'look-2' } }) };
+    };
+    const { LOOK_POLL_LIMIT, LOOK_POLL_MS } = await import('./personal-assistant-second-brain.js');
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const panel = { status: 'ready', look: { state: 'running', look_id: 'look-2' } };
+    hq._notesPanel = panel;
+    hq.notesPanelOpen = () => true;
+    hq.paintNotesPanel = () => {};
+    hq.pollNotesPanelLook(panel);
+    for (let i = 0; i < LOOK_POLL_LIMIT && pending; i += 1) {
+      const fn = pending;
+      pending = null;
+      await fn();
+    }
+    assert.equal(reads, LOOK_POLL_LIMIT);
+    assert.ok(delays.every(ms => ms === LOOK_POLL_MS));
+    assert.equal(pending, null, 'no poll is scheduled past the limit');
+    assert.equal(panel.lookMessage, 'Still reading. Check back in a moment.');
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('Show all lists every open item in the Notes panel', () => {
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = {};
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const painted = [];
+    hq._notesPanel = { status: 'ready', look: { state: 'finished' } };
+    hq.paintNotesPanel = panel => painted.push(panel.showAll);
+    hq.handleNotesPanelAction('notes-show-all');
+    assert.deepEqual(painted, [true]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a map building keeps focus when the map repaints under it', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = {};
+    const building = key => {
+      const node = {
+        key,
+        focused: 0,
+        getAttribute: name => (name === 'data-cmd-hq-station' ? key : null),
+        closest: selector => (selector.includes('ws-cmd-map-hq-station') ? node : null),
+        focus: () => {
+          node.focused += 1;
+          globalThis.document.activeElement = node;
+        }
+      };
+      return node;
+    };
+    const before = building('second-brain');
+    globalThis.document = { activeElement: before };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    let buildings = [building('memory'), before];
+    hq.container = { contains: () => true, querySelectorAll: () => buildings };
+    hq.rememberMapStationFocus();
+    // The repaint replaced every building; focus sits on the old, detached one.
+    const after = building('second-brain');
+    buildings = [building('memory'), after];
+    hq.restoreMapStationFocus();
+    assert.equal(after.focused, 1);
+    assert.equal(globalThis.document.activeElement, after);
+    // Nothing remembered, nothing moved.
+    hq.restoreMapStationFocus();
+    assert.equal(after.focused, 1);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Notes station turns to attention for a stale or came-due look, and the rail row says why', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const at = new Date(Date.now() - 8 * 24 * 3600000).toISOString();
+    const notes = nudge => {
+      hq._notes = {
+        hqWorkspaceID: 'hq-1',
+        status: 'ready',
+        secondBrain: {
+          status: 'connected',
+          source: { name: 'Second Brain' },
+          last_look: { at, open_items: 12 },
+          ...(nudge ? { nudge } : {})
+        }
+      };
+      return hq.notesStationState();
+    };
+    assert.deepEqual(notes({ stale: true, days: 8, came_due: 0 }), {
+      value: 'looked 8d ago',
+      description: '12 open · looked 8d ago',
+      tone: 'attention'
+    });
+    assert.deepEqual(notes({ stale: false, days: 0, came_due: 3 }), {
+      value: '3 came due',
+      description: '12 open · 3 came due',
+      tone: 'attention'
+    });
+    // Not now (or a fresh look) leaves no nudge in the status: calm again.
+    assert.equal(notes(null).tone, 'clear');
+
+    notes({ stale: true, days: 8, came_due: 0 });
+    hq.mapStationRegistry = () => [hq.notesStation()];
+    hq.activeRailSection = 'stations';
+    const rail = hq.renderStationsRailPanel();
+    assert.match(rail, /aria-label="Notes station, 12 open · looked 8d ago"/);
+    assert.match(rail, /<span class="ws-cmd-rail-m">looked 8d ago<\/span>/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('one second-brain announcement re-reads the badge once and an open Notes panel once', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.window = {};
+    const listeners = {};
+    globalThis.document = {
+      getElementById: () => null,
+      addEventListener: (name, fn) => (listeners[name] = listeners[name] || []).push(fn)
+    };
+    const reads = [];
+    globalThis.fetch = async url => {
+      reads.push(url);
+      return {
+        ok: true,
+        json: async () =>
+          url.endsWith('/look')
+            ? { look: { state: 'finished', look_id: 'look-2', result: { id: 'look-2' } } }
+            : { second_brain: { status: 'connected', source: { name: 'Second Brain' } } }
+      };
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.active = false;
+    hq.requestNotesData();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(listeners['personal-assistant:second-brain'].length, 1);
+    reads.length = 0;
+
+    const panel = { status: 'ready', look: { state: 'finished', look_id: 'look-1' } };
+    hq._notesPanel = panel;
+    hq.notesPanelOpen = () => true;
+    let painted = 0;
+    hq.paintNotesPanel = () => (painted += 1);
+    listeners['personal-assistant:second-brain'][0]();
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(reads.sort(), [
+      '/api/personal-assistant/second-brain',
+      '/api/personal-assistant/second-brain/look'
+    ]);
+    assert.equal(panel.look.look_id, 'look-2');
+    assert.equal(painted, 1);
+
+    // The same look again (the drawer announcing a step of its own turn) does
+    // not repaint the panel.
+    reads.length = 0;
+    listeners['personal-assistant:second-brain'][0]();
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(reads.length, 2);
+    assert.equal(painted, 1, 'an unchanged look is not repainted');
+
+    // A closed panel is not read.
+    reads.length = 0;
+    hq.notesPanelOpen = () => false;
+    listeners['personal-assistant:second-brain'][0]();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(reads, ['/api/personal-assistant/second-brain']);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the Notes panel hands Connection… to the drawer, and a missing folder goes straight there', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const calls = [];
+    globalThis.window = {
+      location: { assign: p => calls.push('nav ' + p) },
+      PersonalAssistantPanel: {
+        open: (trigger, options) =>
+          calls.push('open ' + (trigger ? trigger.id : null) + ' ' + options.focus) || true
+      },
+      PersonalAssistantSecondBrain: { openManage: async () => calls.push('manage') }
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const row = { id: 'notes-row' };
+    hq.statModalTrigger = row;
+    hq.closeStatModal = () => calls.push('close');
+    hq.handleNotesPanelAction('notes-connection');
+    assert.deepEqual(calls, ['close', 'open notes-row false', 'manage']);
+
+    calls.length = 0;
+    hq._notes = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      secondBrain: { status: 'missing', source: { name: 'Second Brain' } }
+    };
+    hq.openStatModal = () => calls.push('panel');
+    hq.runHQStationAction('second-brain');
+    assert.deepEqual(
+      calls,
+      ['open null false', 'manage'],
+      'a missing folder never opens the panel'
+    );
+
+    // Without a drawer on the page, Home's mission link opens the chooser.
+    calls.length = 0;
+    globalThis.window = { location: { assign: p => calls.push('nav ' + p) } };
+    hq.statModalTrigger = row;
+    hq.handleNotesPanelAction('notes-connection');
+    assert.deepEqual(calls, ['close', 'nav /?quest=second-brain']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});

@@ -427,6 +427,54 @@ func TestDecodeSecondBrain_RefusesUnknownFieldsForeignOwnersAndOtherSchemas(t *t
 	}
 }
 
+func TestSecondBrainCodec_TheNudgeDismissalRoundTripsAndAcceptedIsNeverStored(t *testing.T) {
+	owner := KnowledgeOwner{UserID: "local", HQWorkspaceID: "hq"}
+	source := secondBrainSource("/Users/sam/Brain")
+	finished := secondBrainNow.Add(time.Minute)
+	item := secondbrain.LookItem{ID: secondbrain.ItemID(source.ID, "Plans.md", "Pay rent"), Text: "Pay rent", Note: "Plans.md", Line: 3}
+	source.LastLook = &secondbrain.Look{ID: "look-1", State: secondbrain.LookFinished, StartedAt: secondBrainNow, FinishedAt: &finished, Items: []secondbrain.LookItem{item}}
+	dismissed := secondBrainNow.Add(time.Hour)
+	doc := SecondBrainDocument{SchemaVersion: secondbrain.RecordSchemaVersion, Version: 1, Owner: owner,
+		Record: secondbrain.Record{Sources: []secondbrain.Source{source}, NudgeDismissedAt: &dismissed}}
+
+	data, err := encodeSecondBrain(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"nudge_dismissed_at"`) {
+		t.Fatalf("the dismissal is not in the file:\n%s", data)
+	}
+	back, err := decodeSecondBrain(data, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.NudgeDismissedAt == nil || !back.NudgeDismissedAt.Equal(dismissed) {
+		t.Fatalf("nudge_dismissed_at = %v, want %v", back.NudgeDismissedAt, dismissed)
+	}
+
+	unknown := strings.Replace(string(data), `"nudge_dismissed_at"`, `"nudge_snoozed_at": "2026-10-21T10:00:00Z", "nudge_dismissed_at"`, 1)
+	if _, err := decodeSecondBrain([]byte(unknown), owner); !errors.Is(err, ErrKnowledgeCorrupt) {
+		t.Fatalf("an unknown field beside the dismissal: err = %v, want ErrKnowledgeCorrupt", err)
+	}
+
+	accepted := doc
+	accepted.Sources = []secondbrain.Source{source}
+	look := *source.LastLook
+	look.Items = []secondbrain.LookItem{item}
+	look.Items[0].Accepted = true
+	accepted.Sources[0].LastLook = &look
+	if _, err := encodeSecondBrain(accepted); err == nil {
+		t.Fatal("a look carrying the read-time accepted mark was written")
+	}
+	stored := strings.Replace(string(data), `"line": 3`, `"line": 3, "accepted": true`, 1)
+	if stored == string(data) {
+		t.Fatal("fixture: no item line to mark")
+	}
+	if _, err := decodeSecondBrain([]byte(stored), owner); !errors.Is(err, ErrKnowledgeCorrupt) {
+		t.Fatalf("a stored accepted mark: err = %v, want ErrKnowledgeCorrupt", err)
+	}
+}
+
 func TestSecondBrainStore_NeverFollowsALinkedSidecarFolder(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the Windows store checks the .ori path instead of opening it without following")

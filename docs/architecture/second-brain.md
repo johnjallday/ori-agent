@@ -18,14 +18,14 @@ destination. See [One work-item model](work-item-model.md).
 
 | Piece | Code |
 |---|---|
-| Vault detection, bounded reader, extraction, the record's schema, the look, follow-ups, the headline prompt | `internal/secondbrain/` |
+| Vault detection, bounded reader, extraction, the record's schema, the look, follow-ups, the headline prompt, the stale-notes nudge (`nudge.go`) | `internal/secondbrain/` |
 | The HQ sidecar store (knowledge-store discipline) and the service | `internal/personalassistant/second_brain_store.go`, `second_brain_codec.go`, `second_brain.go` |
 | The learned fact | `internal/personalassistant/knowledge_second_brain.go`, `internal/server/personal_assistant_second_brain_learning.go` |
-| Home Today rows | `internal/personalassistant/today_second_brain.go` |
+| Home Today rows, including the stale-notes nudge | `internal/personalassistant/today_second_brain.go`, `second_brain_nudge.go`; Home renders them in `personal-assistant-home.js` |
 | HTTP | `internal/personalassistanthttp/second_brain.go` |
 | Composition | `internal/server/second_brain.go`, wired beside the folder digest in `builder_dailybrief.go`; missions and Today in `builder_progression.go` |
 | The drawer turn | `internal/web/static/js/modules/personal-assistant-second-brain.js`, `templates/components/personal-assistant-second-brain.tmpl` |
-| HQ map Notes station | `workspace-command.js` (`notesStation`) |
+| HQ Notes station and its panel | `workspace-command.js` (`notesStation`, fetching and clicks), `notes-station.js` (badge, sections and the panel's HTML) |
 | Profile Sources row | `personal-hq-sources.js` (`notesSourceView`) |
 | Fixtures and demo | `internal/testutil/vaultfixture/`, `scripts/second-brain-demo.sh` (`--create`, `--empty`), `scripts/second-brain-legacy.sh` (an older setup), `scripts/second-brain-age.sh` (a setup made days ago), `scripts/demo-inbox-folder.sh --recurring-names`; `scripts/second-brain-e2e.sh` runs the Playwright specs on their own sandboxes |
 
@@ -117,7 +117,8 @@ discipline: no-follow directory handle, its own lock, temp file + fsync +
 rename, mode 0600, a 512 KB cap, schema and owner checks, unknown fields
 refused. It holds the connected source (`id`, `kind`, `name`, `path`,
 `connected_at`, `request_id`, `last_look`, and a running or failed `current`
-look), the ask's state, and up to 32 request receipts. A look keeps only the
+look), the ask's state, when the stale-notes nudge was last put away
+(`nudge_dismissed_at`), and up to 32 request receipts. A look keeps only the
 open-item lines (text, relative path, line, date, content hash, the Obsidian
 link), the headline, the Also noticed line and the counts. Note contents are
 never stored.
@@ -169,7 +170,7 @@ write idempotent.
 
 | Method and route | Body | Result |
 |---|---|---|
-| `GET` | none | `{status: not_connected\|connected\|missing, detected[{id,name,parent,path}], source?, last_look?, ask{state, offer_again}, version}` |
+| `GET` | none | `{status: not_connected\|connected\|missing, detected[{id,name,parent,path}], source?, last_look?, ask{state, offer_again}, nudge?{stale, days, came_due}, version}` |
 | `POST /prompted` | `{request_id}` | status |
 | `POST /ask` | `{decision: later\|none, request_id}` | status |
 | `POST /connect` | `{detected_id}` or `{selection_token}`, `request_id`, optional `replace` | status and `look_id` |
@@ -179,7 +180,8 @@ write idempotent.
 | `POST /project` | `{name, answer, request_id}`: `name` one folder name (no slash, not hidden), `answer` the user's own words, folded to one line and refused if empty or secret-like | `{project: {name, rel, link?}}`; writes `Projects/<name>/README.md` and records the question as answered ("The first week") |
 | `POST /project/skip` | `{request_id}` | status; records the project question as skipped, once |
 | `POST /week/dismiss` | `{request_id}` | status; records that the first-week recap row was put away |
-| `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}` |
+| `POST /nudge/dismiss` | `{request_id}` | status; the stale-notes nudge's "Not now" (see "Coming back to the notes") |
+| `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}`; each item of a finished result carries `accepted` when a follow-up made from it exists, read fresh and never stored |
 | `POST /look` | `{request_id}` | Look again (429 within 10 minutes of the last look) |
 | `POST /look/{lookID}/follow-ups` | `{items: "suggested"}` or `{items: [id…]}`, `request_id` | `{created, skipped}` |
 | `POST /look/{lookID}/dismiss` | `{request_id}` | takes a result off Needs you |
@@ -546,6 +548,20 @@ drawer, and the panel's **Connection…** goes there too.
 
 The panel is a window onto what the look and the Writer already do. It adds no
 reader outside `internal/secondbrain`, no writer, and no stored note contents.
+It reads `GET …/look` when it opens, when another surface announces a change
+(`personal-assistant:second-brain`), and once a second while a look runs, for
+no longer than the drawer waits (`LOOK_POLL_MS`, `LOOK_POLL_LIMIT`); it stops
+when closed. A dated line shows a chip ("Due Nov 4", "Due today", "Overdue ·
+Oct 3"), a line already in follow-ups (`accepted`) sits with the handled ones,
+and a look over 30 open lines offers Show all. The footer adds what changed
+since the previous look, the counts, and "Ori keeps the folder path and these
+lines, never your notes." Look again inside the 10 minutes says when Ori looked
+and how long to wait.
+
+The building's badge is the open count, or, while the stale-notes nudge holds
+(see "Coming back to the notes"), the reason in its place ("2 came due",
+"looked 8d ago") with the attention tone; the status read carries the nudge, so
+the badge and Today never disagree.
 
 It has tabs rather than one long page, and it stays one station: its parts share a
 folder and a look, and most would be empty as buildings of their own. **Inbox**
@@ -588,6 +604,23 @@ is Ori's, by the server's local date, the same day the Journal proposes.
 `TestListInbox_ListsNewestFirstWithKindAndTitleAndWritesNothing` and
 `TestActOnItem_FollowUpDoneAndDismissLeaveTheNotesUntouched` prove all this against
 a byte, mode and mtime snapshot.
+
+## Coming back to the notes
+
+A look is never run on a timer, so the record says when the notes deserve
+another one, and Today asks. `secondbrain.Nudge` decides it from the stored look
+alone: the last finished look is more than 7 days old (`StaleLookAfter`), or an
+untouched dated line of it came due since (its date is after the look's local
+day and on or before today; done, dismissed, follow-up and seeded lines do not
+count). Today's Needs you then shows one `second_brain_stale` row, "Your notes
+were last read 8 days ago" and/or "2 items in your notes came due", linking to
+the Notes panel, with **Not now** (`POST …/nudge/dismiss`). Not now records
+`nudge_dismissed_at` and holds until a look finishes after it. The row never
+shows while a look runs or while that look's own result row still waits.
+
+`GET …/look` marks each line a follow-up was already made from, in any state,
+as `accepted` and stops suggesting it. The mark is read from the follow-ups on
+every response and refused if a record ever carries it, so it is never stored.
 
 ## What is never done
 

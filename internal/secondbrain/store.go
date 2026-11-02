@@ -112,6 +112,9 @@ type Record struct {
 	Sources  []Source  `json:"sources,omitempty"`
 	Ask      Ask       `json:"ask"`
 	Receipts []Receipt `json:"receipts,omitempty"`
+	// NudgeDismissedAt is when the user put the stale-notes nudge away with
+	// "Not now". The nudge stays away until a look finishes after it.
+	NudgeDismissedAt *time.Time `json:"nudge_dismissed_at,omitempty"`
 }
 
 // Source is the connected notes folder (FR15).
@@ -214,6 +217,9 @@ type LookItem struct {
 	// Ticketed says that workspace already holds this line's ticket, so the look
 	// neither suggests nor adds it again. Also read fresh, never saved.
 	Ticketed bool `json:"ticketed,omitempty"`
+	// Accepted says a follow-up made from this line exists, in any state. It is
+	// set on the view of a look, read fresh from the follow-ups, and never saved.
+	Accepted bool `json:"accepted,omitempty"`
 }
 
 // Item returns the look's item with this id, for changing in place.
@@ -412,6 +418,27 @@ func (a Ask) OfferAgain(now time.Time) bool {
 	return a.State() == AskDeferred && a.DecidedAt != nil && now.Sub(*a.DecidedAt) >= AskAgainAfter
 }
 
+// ActionNudgeDismiss is the receipt action of the stale-notes nudge's "Not now".
+const ActionNudgeDismiss = "nudge_dismiss"
+
+// DismissNudge puts the stale-notes nudge away until the next finished look.
+// A replay of the same request changes nothing; dismissing again moves the time.
+func (r *Record) DismissNudge(now time.Time, requestID string) error {
+	if !ValidRequestID(requestID) {
+		return ErrInvalidRecord
+	}
+	if _, replayed, err := r.Replay(requestID, ActionNudgeDismiss); err != nil || replayed {
+		return err
+	}
+	if r.Connected() == nil {
+		return ErrNotConnected
+	}
+	at := now.UTC()
+	r.NudgeDismissedAt = &at
+	r.Remember(Receipt{RequestID: requestID, Action: ActionNudgeDismiss, At: at})
+	return nil
+}
+
 // Receipt returns the remembered write for requestID.
 func (r *Record) Receipt(requestID string) (Receipt, bool) {
 	for _, receipt := range r.Receipts {
@@ -586,7 +613,10 @@ func validateItem(item LookItem) error {
 		item.Due != "" && (!isoDayPattern.MatchString(item.Due) || !validDate(item.Due)),
 		!validLink(item.Link),
 		item.ActedAs != "" && item.ActedAs != ActedFollowUp && item.ActedAs != ActedDone && item.ActedAs != ActedDismissed,
-		(item.ActedAs == "") != (item.ActedAt == nil):
+		(item.ActedAs == "") != (item.ActedAt == nil),
+		// Accepted is read fresh from the follow-ups for each view; a record
+		// that carries it was written by something else.
+		item.Accepted:
 		return ErrInvalidRecord
 	}
 	return nil

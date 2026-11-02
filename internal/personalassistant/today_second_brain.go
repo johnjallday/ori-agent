@@ -26,6 +26,9 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 		return nil, nil, nil
 	}
 	name := view.Source.Name
+	// The nudge waits while a look runs or a result card waits: either already
+	// answers "look at your notes again".
+	nudgeAllowed := false
 	if look, err := s.secondBrain.Look(ctx, userID); err == nil {
 		switch {
 		case look.State == secondbrain.LookRunning:
@@ -33,6 +36,14 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 		case look.State == secondbrain.LookFinished && view.LastLook != nil && !view.LastLook.Acted && look.LookID == view.LastLook.ID:
 			needs = append(needs, TodayItem{ID: view.LastLook.ID, Kind: "second_brain_result",
 				Title: "What's open in " + name, Detail: view.LastLook.Headline, SourceAt: view.LastLook.At, Route: notesPanelRoute(hqSlug)})
+		default:
+			nudgeAllowed = true
+		}
+	}
+	if reader, ok := s.secondBrain.(secondBrainNudgeReader); ok && nudgeAllowed {
+		if report, found := reader.Nudge(ctx, userID); found {
+			needs = append(needs, TodayItem{ID: "second-brain-stale-" + report.LookID, Kind: "second_brain_stale",
+				Title: secondBrainNudgeTitle(report), SourceAt: report.LookAt, Route: notesPanelRoute(hqSlug), Actions: []string{"not_now"}})
 		}
 	}
 	if last := view.LastLook; last != nil && !last.At.IsZero() && !last.At.After(now) && now.Sub(last.At) <= todaySecondBrainDoneWindow {
@@ -56,6 +67,33 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 		}
 	}
 	return working, needs, done
+}
+
+// secondBrainNudgeReader is the part of the service that says the notes deserve
+// another look (notes-station-panel FR21).
+type secondBrainNudgeReader interface {
+	Nudge(ctx context.Context, userID string) (secondbrain.NudgeReport, bool)
+}
+
+// secondBrainNudgeTitle says why the notes deserve another look: their age, the
+// dates that came due since, or both.
+func secondBrainNudgeTitle(report secondbrain.NudgeReport) string {
+	days := "days"
+	if report.Days == 1 {
+		days = "day"
+	}
+	items := "items"
+	if report.CameDue == 1 {
+		items = "item"
+	}
+	switch {
+	case report.Stale && report.CameDue > 0:
+		return fmt.Sprintf("Your notes were last read %d %s ago · %d %s came due", report.Days, days, report.CameDue, items)
+	case report.Stale:
+		return fmt.Sprintf("Your notes were last read %d %s ago", report.Days, days)
+	default:
+		return fmt.Sprintf("%d %s in your notes came due", report.CameDue, items)
+	}
 }
 
 // secondBrainWrittenReporter is the part of the service that says what the fill-in

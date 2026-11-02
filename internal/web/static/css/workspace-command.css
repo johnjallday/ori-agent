@@ -5876,6 +5876,28 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 13px;
   color: var(--ws-ink);
 }
+/* A dated line's chip, drawn like the follow-ups panel's: overdue and due today
+   take the amber border and keep the body ink, so the colour never carries the
+   meaning alone and the text stays readable in both themes. */
+.ws-notes-due {
+  align-self: flex-start;
+  display: inline-block;
+  padding: 0 8px;
+  border: 1px solid var(--ws-line, var(--border-color));
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ws-ink, var(--text-primary));
+}
+.ws-notes-due.is-overdue,
+.ws-notes-due.is-today {
+  border-color: var(--ws-keeper, #b45309);
+  background: rgba(232, 181, 75, 0.16);
+}
+.ws-notes-show-all {
+  align-self: flex-start;
+  margin-top: 6px;
+}
 .ws-notes-kind {
   color: var(--ws-ink-dim);
 }

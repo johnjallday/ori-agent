@@ -26,6 +26,7 @@ type fakeSecondBrain struct {
 	project personalassistant.SecondBrainProjectInput
 	skipID  string
 	weekID  string
+	nudgeID string
 	item    [4]string // look id, item id, action, request id
 	accept  personalassistant.SecondBrainAcceptInput
 	lookID  string
@@ -68,6 +69,11 @@ func (f *fakeSecondBrain) SkipProject(_ context.Context, _ string, requestID str
 func (f *fakeSecondBrain) DismissWeek(_ context.Context, _ string, requestID string) (personalassistant.SecondBrainView, error) {
 	f.weekID = requestID
 	return personalassistant.SecondBrainView{}, f.record("week_dismiss")
+}
+
+func (f *fakeSecondBrain) DismissNudge(_ context.Context, _ string, requestID string) (personalassistant.SecondBrainView, error) {
+	f.nudgeID = requestID
+	return personalassistant.SecondBrainView{}, f.record("nudge_dismiss")
 }
 
 func (f *fakeSecondBrain) Connect(_ context.Context, _ string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error) {
@@ -128,6 +134,7 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("POST "+base+"/project", h.ProjectSecondBrain)
 	mux.HandleFunc("POST "+base+"/project/skip", h.SkipProjectSecondBrain)
 	mux.HandleFunc("POST "+base+"/week/dismiss", h.DismissWeekSecondBrain)
+	mux.HandleFunc("POST "+base+"/nudge/dismiss", h.DismissNudgeSecondBrain)
 	mux.HandleFunc("POST "+base+"/connect", h.ConnectSecondBrain)
 	mux.HandleFunc("POST "+base+"/create", h.CreateSecondBrain)
 	mux.HandleFunc("POST "+base+"/capture", h.CaptureSecondBrain)
@@ -163,6 +170,7 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 		{http.MethodPost, "/project", `{"name":"Launch","answer":"Finishing the Launch album.","request_id":"pj-1"}`},
 		{http.MethodPost, "/project/skip", `{"request_id":"ps-1"}`},
 		{http.MethodPost, "/week/dismiss", `{"request_id":"wk-1"}`},
+		{http.MethodPost, "/nudge/dismiss", `{"request_id":"nd-1"}`},
 		{http.MethodPost, "/connect", `{"detected_id":"v_1","request_id":"c-1"}`},
 		{http.MethodPost, "/create", `{"selection_token":"t-1","name":"Second Brain","request_id":"s-1"}`},
 		{http.MethodPost, "/capture", `{"text":"Call Dana","request_id":"n-1"}`},
@@ -181,8 +189,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 			t.Errorf("%s %s from Ori's page = %d, want 200", route.method, route.path, got)
 		}
 	}
-	if len(fake.calls) != 17 {
-		t.Fatalf("calls = %v, want only the seventeen local requests", fake.calls)
+	if len(fake.calls) != 18 {
+		t.Fatalf("calls = %v, want only the eighteen local requests", fake.calls)
 	}
 
 	rebound := httptest.NewRequest(http.MethodGet, "http://attacker.example/api/personal-assistant/second-brain", nil)
@@ -259,6 +267,8 @@ func TestSecondBrainRoutes_RefuseUnknownFieldsAndAnyPath(t *testing.T) {
 		{"/project", `{"name":"Launch","answer":"x","request_id":"pj-1","folder":"Music"}`},
 		{"/project/skip", `{"request_id":"ps-1","name":"Launch"}`},
 		{"/week/dismiss", `{"request_id":"wk-1","counts":{"facts":99}}`},
+		{"/nudge/dismiss", `{"request_id":"nd-1","days":30}`},
+		{"/nudge/dismiss", `{"request_id":"nd-1","path":"/Users/sam/Notes"}`},
 		{"/connect", `{"path":"/Users/sam/Notes","request_id":"c-1"}`},
 		{"/connect", `{"detected_id":"v_1","request_id":"c-1","vault_path":"/Users/sam/Notes"}`},
 		{"/connect", `{"detected_id":"v_1","request_id":"c-1","name":"Notes"}`},
@@ -442,5 +452,73 @@ func TestSecondBrainErrors_SayOneSentenceEach(t *testing.T) {
 		if strings.Contains(response.Body.String(), "disk on fire") {
 			t.Errorf("an internal error leaked: %s", response.Body.String())
 		}
+	}
+}
+
+func TestSecondBrainNudgeDismiss_PassesTheRequestIDAndMapsRefusals(t *testing.T) {
+	const origin = "http://localhost:8931"
+	fake := &fakeSecondBrain{}
+	handler := newSecondBrainHandler(fake)
+	if got := secondBrainRequest(handler, http.MethodPost, "/nudge/dismiss", `{"request_id":" nd-1 "}`, origin).Code; got != http.StatusOK {
+		t.Fatalf("dismiss = %d", got)
+	}
+	if fake.nudgeID != "nd-1" {
+		t.Fatalf("request id = %q, want it trimmed", fake.nudgeID)
+	}
+	if got := secondBrainRequest(handler, http.MethodGet, "/nudge/dismiss", "", origin).Code; got != http.StatusMethodNotAllowed {
+		t.Fatalf("GET = %d, want 405", got)
+	}
+	for err, want := range map[error]int{
+		personalassistant.ErrSecondBrainNotConnected: http.StatusConflict,
+		secondbrain.ErrRequestReused:                 http.StatusConflict,
+		personalassistant.ErrValidation:              http.StatusBadRequest,
+	} {
+		fake := &fakeSecondBrain{err: err}
+		if got := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/nudge/dismiss", `{"request_id":"nd-2"}`, origin).Code; got != want {
+			t.Errorf("%v = %d, want %d", err, got, want)
+		}
+	}
+}
+
+// fakeAcceptedLook answers GET …/look with an item a follow-up was made from.
+type fakeAcceptedLook struct{ fakeSecondBrain }
+
+func (f *fakeAcceptedLook) Look(context.Context, string) (personalassistant.SecondBrainLookView, error) {
+	finished := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
+	return personalassistant.SecondBrainLookView{State: "finished", LookID: "look-1", Result: &secondbrain.Look{
+		ID: "look-1", State: "finished", StartedAt: finished, FinishedAt: &finished,
+		Items: []secondbrain.LookItem{
+			{ID: strings.Repeat("a", 64), Text: "Pay rent", Note: "Plans.md", Line: 1, Accepted: true},
+			{ID: strings.Repeat("b", 64), Text: "Call Ana", Note: "Plans.md", Line: 2},
+		},
+	}}, nil
+}
+
+func TestSecondBrainLook_CarriesTheAcceptedMark(t *testing.T) {
+	fake := &fakeAcceptedLook{}
+	h := NewHandler(nil, userprofile.LocalUserProvider{})
+	h.SetSecondBrain(fake, connectionshttp.NewOriginGuard().Check)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/personal-assistant/second-brain/look", h.GetSecondBrainLook)
+	response := secondBrainRequest(mux, http.MethodGet, "/look", "", "http://localhost:8931")
+	if response.Code != http.StatusOK {
+		t.Fatalf("look = %d", response.Code)
+	}
+	var body struct {
+		Look struct {
+			Result struct {
+				Items []map[string]any `json:"items"`
+			} `json:"result"`
+		} `json:"look"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	items := body.Look.Result.Items
+	if len(items) != 2 || items[0]["accepted"] != true {
+		t.Fatalf("items = %+v, want the first accepted", items)
+	}
+	if _, present := items[1]["accepted"]; present {
+		t.Fatalf("an unaccepted item carries the key: %+v", items[1])
 	}
 }
