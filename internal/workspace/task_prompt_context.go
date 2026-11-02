@@ -501,7 +501,7 @@ func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName strin
 			Kind:   "workspace_snapshot",
 			Name:   "Workspace snapshot",
 			Access: "injected",
-			Detail: "Workspace metadata plus bounded summaries for tasks, files, directories, notes, and recent sessions are injected into the prompt.",
+			Detail: "Workspace metadata plus bounded summaries for tickets, files, directories, notes, and recent sessions are injected into the prompt.",
 		})
 	}
 

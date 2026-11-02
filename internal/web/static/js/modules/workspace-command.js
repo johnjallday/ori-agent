@@ -15,10 +15,9 @@ import {
   isWorkingTask as sharedIsWorkingTask,
   isQueuedTask as sharedIsQueuedTask,
   resolveTaskPresentation,
-  resolveTaskCounts,
-  sortTasksForDrawer,
+  resolveTicketStatePill,
+  resolveRunSignal,
   taskMatchesFilter,
-  taskShortId,
   FILTER
 } from './task-presentation.js';
 import {
@@ -28,6 +27,7 @@ import {
 } from './workspace-folder-shape.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
+import { TicketCounts } from './ticket-count-line.js';
 import {
   consumeGroupTemplateLanding,
   fetchGroupTemplateStatus,
@@ -284,12 +284,6 @@ export class WorkspaceCommandView {
     this.detachmentUnitsSignature = '';
     this.detachmentPickerOpen = false;
     this.pendingDetachmentSelectionId = '';
-    this.taskDrawerOpen = false;
-    this.taskDrawerEl = null;
-    this.taskDrawerTrigger = null;
-    this.taskDrawerFilter = FILTER.ACTIONABLE;
-    this.taskDrawerSelectedId = '';
-    this._drawerAnnounce = '';
     // Persistent, non-modal Backlog drawer (PRD workspace-backlog FR30, 35-37)
     // — the shared full interaction surface opened from both the Details rail
     // panel and the Map Quest Board (group 5). Backlog is presented
@@ -325,16 +319,6 @@ export class WorkspaceCommandView {
     this.trayEl = null;
     this.trayOpen = false;
     this.trayCollapsed = false;
-    // Quick "New Quest" composer on the operations map (create task → entry-agent default).
-    this.taskComposerOpen = false;
-    this.taskComposerDraft = '';
-    this.taskComposerError = '';
-    this.taskComposerSubmitting = false;
-    // Composer commitment choice (FR56): 'ready' creates a direct, unassigned
-    // Ready task (existing default behavior); 'backlog' routes through the
-    // same createBacklogItem() the Backlog panel/drawer use. Resets to
-    // 'ready' each time the composer opens (openTaskComposer).
-    this.taskComposerIntent = 'ready';
     this.identityExpanded = false;
     this.identityEditMode = '';
     this.identitySaving = false;
@@ -963,8 +947,6 @@ export class WorkspaceCommandView {
   refresh() {
     if (this.active) this.render();
     else if (this.statModalSection) this.renderStatModalBody();
-    // Live-refresh the drawer body in place (preserves selection + scroll, FR25).
-    if (this.taskDrawerOpen) this.renderTaskDrawerBody();
     // Data may not have been ready the first time activate() ran; retry once
     // page.tasks/agents are actually populated (FR90: refresh restores from URL).
     this.applyBootURLState();
@@ -1097,9 +1079,9 @@ export class WorkspaceCommandView {
     const context = this.urlStateContext();
     const boot = this._urlBootState;
     const bootWantsBacklogTask = Boolean(boot.task) && boot.panel === 'backlog';
-    const bootWantsTaskDrawerTask = Boolean(boot.task) && boot.panel !== 'backlog';
+    const bootWantsTicket = Boolean(boot.task) && boot.panel === 'tasks';
     const dataLooksUnready =
-      (bootWantsTaskDrawerTask && context.validTaskIds.length === 0) ||
+      (bootWantsTicket && context.validTaskIds.length === 0) ||
       (bootWantsBacklogTask && context.validBacklogIds.length === 0) ||
       (boot.agent && context.validAgentKeys.length === 0) ||
       (boot.run && (context.validRunTaskIds || context.validTaskIds).length === 0);
@@ -1136,8 +1118,8 @@ export class WorkspaceCommandView {
       // mount into markup that render() is about to replace.
       this._pendingSettingsPanel = true;
     } else if (state.panel === 'tasks') {
-      this.taskDrawerOpen = true;
-      if (state.task) this.taskDrawerSelectedId = state.task;
+      // An older link to the task drawer lands on the board, on that ticket.
+      this._pendingTicketsView = { ticketId: state.task || '' };
     } else if (state.panel === 'backlog') {
       // Global Workspace Map deep link (FR59): opens the shared Backlog
       // drawer, never mutates/promotes/deletes directly.
@@ -1148,12 +1130,10 @@ export class WorkspaceCommandView {
 
     this._urlSyncEnabled = true;
     this.render();
-    if (this.taskDrawerOpen) {
-      const el = this.ensureTaskDrawer();
-      if (el) {
-        el.hidden = false;
-        this.renderTaskDrawerBody();
-      }
+    if (this._pendingTicketsView) {
+      const { ticketId } = this._pendingTicketsView;
+      this._pendingTicketsView = null;
+      this.openTicketsView(ticketId);
     }
     if (this.backlogDrawerOpen) {
       const el = this.ensureBacklogDrawer();
@@ -1184,18 +1164,12 @@ export class WorkspaceCommandView {
       // still owns the URL. It is reported at all so that the Plans page's
       // "Open Workspace Settings" link survives a reload instead of
       // normalizing itself away the moment it arrives.
-      panel: this.taskDrawerOpen
-        ? 'tasks'
-        : this.backlogDrawerOpen
-          ? 'backlog'
-          : this.statModalSection === 'settings'
-            ? 'settings'
-            : '',
-      task: this.taskDrawerOpen
-        ? this.taskDrawerSelectedId
-        : this.backlogDrawerOpen
-          ? this.backlogDrawerSelectedId
+      panel: this.backlogDrawerOpen
+        ? 'backlog'
+        : this.statModalSection === 'settings'
+          ? 'settings'
           : '',
+      task: this.backlogDrawerOpen ? this.backlogDrawerSelectedId : '',
       agent: this.selectedAgentKey || '',
       run:
         this.execController && typeof this.execController.getSelectedTaskId === 'function'
@@ -1211,8 +1185,7 @@ export class WorkspaceCommandView {
     if (!active || typeof active.getAttribute !== 'function') return null;
     for (const attr of [
       'data-cmd-map-select-agent',
-      'data-cmd-drawer-select',
-      'data-cmd-open-task-drawer',
+      'data-cmd-open-tickets',
       'data-cmd-backlog-select',
       'data-cmd-open-backlog-drawer'
     ]) {
@@ -1226,15 +1199,9 @@ export class WorkspaceCommandView {
   captureHistoryPresentationState() {
     if (typeof window === 'undefined' || !window.history) return;
     const current = window.history.state || {};
-    const drawerList =
-      this.taskDrawerEl && typeof this.taskDrawerEl.querySelector === 'function'
-        ? this.taskDrawerEl.querySelector('.ws-cmd-drawer-list')
-        : null;
-    const drawerScroll = drawerList ? drawerList.scrollTop : current.drawerScroll || 0;
     window.history.replaceState(
       {
         ...current,
-        drawerScroll,
         focusSelector: this.currentFocusSelector() || current.focusSelector || null,
         trayCollapsed: this.trayCollapsed
       },
@@ -1305,21 +1272,12 @@ export class WorkspaceCommandView {
       this.selectedAgentKey = state.agent;
       this.agentSelectionInitialized = true;
     }
-    this.taskDrawerOpen = state.panel === 'tasks';
-    if (this.taskDrawerOpen && state.task) this.taskDrawerSelectedId = state.task;
     const historyState = (event && event.state) || {};
     this.trayCollapsed = Boolean(historyState.trayCollapsed);
     if (state.run) this.trackAndShowTray(state.run);
 
     this.render();
-    const el = this.taskDrawerOpen ? this.ensureTaskDrawer() : null;
-    if (el) {
-      el.hidden = false;
-      this.renderTaskDrawerBody();
-      const list = el.querySelector('.ws-cmd-drawer-list');
-      if (list && typeof historyState.drawerScroll === 'number')
-        list.scrollTop = historyState.drawerScroll;
-    }
+    if (state.panel === 'tasks') this.openTicketsView(state.task || '');
     if (
       historyState.focusSelector &&
       this.container &&
@@ -1346,18 +1304,10 @@ export class WorkspaceCommandView {
       this.closeBacklogDrawer();
       return;
     }
-    if (this.taskDrawerOpen) {
-      this.closeTaskDrawer();
-      return;
-    }
     // Collapse (not close) an expanded tray on Escape — collapsing is
     // reversible and never stops monitoring, unlike closing (FR52, FR123).
     if (this.trayOpen && !this.trayCollapsed) {
       this.toggleTrayCollapsed();
-      return;
-    }
-    if (this.viewMode === 'map' && this.taskComposerOpen) {
-      this.closeTaskComposer();
       return;
     }
     if (this.loadoutAddOpen) {
@@ -1410,16 +1360,13 @@ export class WorkspaceCommandView {
     } catch (err) {
       agents = Array.isArray(ws.agent_instances) ? ws.agent_instances.length : 0;
     }
-    // Same actionable-task projection as ComputeMapSummaryFields. Backlog and
-    // closed history never contribute; failed attempts remain open work.
-    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    const openTasks =
-      page.tasksLoadFailed || page.tasksLoading ? '—' : resolveTaskCounts(tasks)[FILTER.ACTIONABLE];
+    // The work count is not a stat here: it comes from the server's per-state
+    // ticket counts, never from the browser's task list (see workTileHTML).
     const mcp = Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings.length : 0;
     const skills = Array.isArray(ws.skill_bindings) ? ws.skill_bindings.length : 0;
     // "Tools" groups the capability providers (MCP + Skills + Plugins). Plugins install
     // themselves as MCP/skill bindings, so they are already reflected in this count.
-    return { agents, openTasks, mcp, skills, tools: mcp + skills };
+    return { agents, mcp, skills, tools: mcp + skills };
   }
 
   opsModeLabel() {
@@ -1922,75 +1869,143 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-readout">' +
       this.statBoxHTML(stats.agents, 'Agents', 'agents', 'View agents') +
       this.statBoxHTML(
-        stats.openTasks,
-        'Open Tasks',
-        'tasks',
-        'View open tasks',
-        this.hasAttentionTasks() ? 'is-alert' : ''
-      ) +
-      this.statBoxHTML(
         stats.tools,
         'Tools',
         'tools',
         'Open tools: MCP, skills, plugins, and find tools'
       ) +
-      // Tickets is the canonical destination for durable workspace work. The
-      // count is loaded asynchronously (see refreshTicketCount) rather than
-      // read from page.tasks, because Ticket state is server-authoritative and
-      // deriving a count from legacy task status would be the exact inference
-      // this feature exists to remove (FR-7, FR-101).
-      this.statBoxHTML(
-        this.ticketCountLabel(),
-        'Tickets',
-        'tickets',
-        'View tickets: backlog, ready, in progress, review, and done'
-      ) +
+      // One tile says how much work there is (PRD 760 FR-7). It replaces the
+      // old Open Tasks and Tickets pair, which counted the same rows two ways.
+      this.workTileHTML() +
       '</div>' +
       '</header>'
     );
   }
 
-  /** The Tickets stat value; an em dash until the real count arrives. */
-  ticketCountLabel() {
-    return typeof this.ticketCount === 'number' ? String(this.ticketCount) : '–';
+  /**
+   * This workspace's tickets by state, as the server counted them. It is read
+   * from the workspace the page already loaded, so painting costs no request;
+   * refreshTicketCounts replaces it after a ticket is created or moved.
+   */
+  currentTicketCounts() {
+    const ws = (this.page && this.page.workspace) || null;
+    return ws && ws.ticket_counts && typeof ws.ticket_counts === 'object' ? ws.ticket_counts : null;
   }
 
   /**
-   * Fetches the workspace's ticket count and paints it into the stat tile in
-   * place. It updates only the tile's value node rather than re-rendering the
-   * command view, so an in-flight count can never clobber an open modal or
-   * reset the user's scroll position.
+   * The one work tile: "1 in review · 2 in progress · 3 ready", or "No open
+   * work". Selecting it opens the ticket board. The count is server-authored
+   * (PRD 760 FR-6): deriving it here from legacy task status is the inference
+   * this feature removes. The alert treatment stays for work that needs a
+   * person (FR-9).
    */
-  async refreshTicketCount() {
-    // While the Tickets view is open, the view itself is the count: it shows
-    // "N tickets" from the fetch it just made. Counting again here would mean
-    // two list requests per render for one number the user can already read.
-    // Leaving the view re-renders, which refreshes the tile.
-    if (this.viewMode === 'tickets') return;
+  workTileHTML() {
+    const counts = this.currentTicketCounts();
+    // An em dash until the server's counts have arrived: "No open work" is a
+    // claim, and an unloaded page cannot back it.
+    const line = TicketCounts.format(counts) || '—';
+    const spoken = TicketCounts.describe(counts);
+    return this.statBoxHTML(
+      line,
+      'Tickets',
+      'tickets',
+      spoken ? 'Open tickets. ' + spoken : 'Open tickets',
+      ('ws-cmd-stat-work ' + (this.hasAttentionTasks() ? 'is-alert' : '')).trim()
+    );
+  }
+
+  /** Repaints the work tile's value and name in place, without a full render. */
+  paintWorkTile() {
+    if (!this.container || typeof this.container.querySelector !== 'function') return;
+    const tile = this.container.querySelector('[data-cmd-section="tickets"]');
+    if (!tile) return;
+    const counts = this.currentTicketCounts();
+    const line = TicketCounts.format(counts) || '—';
+    const spoken = TicketCounts.describe(counts);
+    const value = tile.querySelector('.ws-v');
+    if (value) value.textContent = line;
+    tile.setAttribute('aria-label', spoken ? 'Open tickets. ' + spoken : 'Open tickets');
+  }
+
+  /**
+   * Asks the server for the workspace's counts and repaints the tile. It runs
+   * when a ticket is created, moved or deleted (the ori:tickets-changed event),
+   * never from render(): render() fires on every workspace refresh, and a
+   * fetch there turned one board move into five list requests.
+   *
+   * A one-row list request is enough, because every list response carries the
+   * workspace-wide counts. A change that lands while a request is in flight
+   * asks for one more pass afterwards, so the tile cannot settle on a count
+   * that predates the last change.
+   */
+  async refreshTicketCounts() {
     const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
     const studioId = this.workspaceId();
     if (!tickets || !studioId) return;
-    // render() runs many times while a workspace page boots as data arrives,
-    // and each pass lands here. Without this, one page load issues a dozen
-    // identical list requests for a single number. One in flight is enough;
-    // the next render paints whatever it resolves to.
-    if (this.ticketCountInFlight) return;
-    this.ticketCountInFlight = true;
+    if (this.ticketCountsInFlight) {
+      this.ticketCountsStale = true;
+      return;
+    }
+    this.ticketCountsInFlight = true;
+    this.ticketCountsStale = false;
     try {
-      const result = await tickets.api.list(studioId);
-      this.ticketCount = result.count;
+      const result = await tickets.api.list(studioId, { limit: 1 });
+      const ws = this.page && this.page.workspace;
+      if (ws && result && result.counts) ws.ticket_counts = result.counts;
     } catch (_error) {
-      // A failed count leaves the placeholder rather than showing a wrong
-      // number; the Tickets view surfaces the real error when opened.
+      // A failed refresh leaves the last known count rather than showing a
+      // wrong one; the board surfaces the real error when it is opened.
       return;
     } finally {
-      // Always clear, including on the failure path — a stuck flag would
+      // Always clear, including on the failure path: a stuck flag would
       // silently retire the count for the rest of the session.
-      this.ticketCountInFlight = false;
+      this.ticketCountsInFlight = false;
     }
-    if (!this.container || typeof this.container.querySelector !== 'function') return;
-    const tile = this.container.querySelector('[data-cmd-section="tickets"] .ws-v');
-    if (tile) tile.textContent = this.ticketCountLabel();
+    this.paintWorkTile();
+    if (this.ticketCountsStale) {
+      this.ticketCountsStale = false;
+      await this.refreshTicketCounts();
+    }
+  }
+
+  /** Listens once for the ticket client's events (see workspace-hub-tickets.js). */
+  bindTicketChangeEvents() {
+    if (this.ticketChangeBound || typeof window === 'undefined') return;
+    if (typeof window.addEventListener !== 'function') return;
+    this.ticketChangeBound = true;
+    window.addEventListener('ori:tickets-changed', event => {
+      const changed = String((event && event.detail && event.detail.studioId) || '');
+      if (changed && changed !== this.workspaceId()) return;
+      Promise.resolve(this.refreshTicketCounts()).catch(() => {});
+    });
+    // Any list response already carries the counts, so a board load or its
+    // Refresh updates the tile without another request.
+    window.addEventListener('ori:ticket-counts', event => {
+      const detail = (event && event.detail) || {};
+      if (String(detail.studioId || '') !== this.workspaceId() || !detail.counts) return;
+      const ws = this.page && this.page.workspace;
+      if (ws) ws.ticket_counts = detail.counts;
+      this.paintWorkTile();
+    });
+  }
+
+  /**
+   * A live event says a ticket may have moved: a run started or finished with no
+   * click here. Runs in bursts, so this settles first, then makes one request: the
+   * open board's load when it is showing (its response updates the tile), or a
+   * count refresh otherwise.
+   */
+  noteTicketWorkChanged() {
+    if (this.ticketWorkChangedTimer) clearTimeout(this.ticketWorkChangedTimer);
+    this.ticketWorkChangedTimer = setTimeout(() => {
+      this.ticketWorkChangedTimer = null;
+      const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+      const work =
+        this.viewMode === 'tickets' && tickets && typeof tickets.load === 'function'
+          ? tickets.load()
+          : this.refreshTicketCounts();
+      Promise.resolve(work).catch(() => {});
+    }, 300);
   }
 
   // ---------- Unstaffed guidance ----------
@@ -2355,7 +2370,7 @@ export class WorkspaceCommandView {
     return (
       '<section id="workspaceNextActionRegion" class="ws-cmd-work-first" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
-      '<button type="button" class="ws-cmd-agent-action" data-cmd-open-task-drawer data-cmd-work-key="tasks">All Tasks</button></div>' +
+      '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
       `<h3>${escapeHtml(view.title)}</h3><p>${escapeHtml(view.description)}</p>` +
       primary +
@@ -2420,14 +2435,50 @@ export class WorkspaceCommandView {
     );
   }
 
-  runWorkAction(action, id, trigger) {
-    const task = this.drawerTasks().find(task => String(task.id) === String(id));
-    const currentAction = task && resolveTaskPresentation(task).primaryAction?.id;
-    this.workNotice =
-      currentAction !== action ? 'This task changed. Review its current state in Tasks.' : '';
-    this.taskDrawerSelectedId = String(id || '');
-    this.openTaskDrawer(trigger);
-    if (currentAction && currentAction === action) this.runDrawerAction(action, id);
+  // A Next action about a ticket opens that ticket on the board (PRD 760 FR-32).
+  // What to do next is decided there, with the ticket's current state in view.
+  runWorkAction(_action, id) {
+    this.workNotice = '';
+    this.openTicketsView(id);
+  }
+
+  /** The detail renders below the board, so bring it into view and move focus. */
+  revealTicketDetail() {
+    if (typeof document === 'undefined') return;
+    const detail = document.getElementById('hubTicketDetail');
+    if (!detail) return;
+    if (typeof detail.scrollIntoView === 'function') detail.scrollIntoView({ block: 'start' });
+    const title = document.getElementById('hubTicketDetailTitle');
+    if (title && typeof title.focus === 'function') {
+      if (typeof title.setAttribute === 'function') title.setAttribute('tabindex', '-1');
+      title.focus({ preventScroll: true });
+    }
+  }
+
+  /** A ticket's state, plus how its latest run went when that matters (FR-4). */
+  ticketStatusText(task) {
+    const state = resolveTicketStatePill(task).label;
+    const signal = resolveRunSignal(task);
+    return signal ? state + ' · ' + signal : state;
+  }
+
+  /** Opens the board, and one ticket on it when given. The URL says which. */
+  openTicketsView(ticketId = '') {
+    const id = String(ticketId || '').trim();
+    this.setCommandViewMode('tickets', { focus: false });
+    if (!id) return;
+    const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+    if (tickets && typeof tickets.openDetail === 'function') {
+      if (typeof tickets.init === 'function') tickets.init();
+      Promise.resolve(tickets.openDetail(this.workspaceId(), id))
+        .then(() => this.revealTicketDetail())
+        .catch(() => {});
+    }
+    if (typeof window !== 'undefined' && window.history && window.location) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('ticket', id);
+      window.history.replaceState(window.history.state, '', url);
+    }
   }
 
   bindWorkFirst() {
@@ -2448,8 +2499,8 @@ export class WorkspaceCommandView {
         this.page?.showAddTaskModal?.();
         return;
       }
-      if (button.hasAttribute('data-cmd-open-task-drawer')) {
-        this.openTaskDrawer(button);
+      if (button.hasAttribute('data-cmd-open-tickets')) {
+        this.openTicketsView();
         return;
       }
       if (button.hasAttribute('data-cmd-work-action'))
@@ -2637,19 +2688,9 @@ export class WorkspaceCommandView {
       }
     }
 
-    // The task drawer likewise survives full re-renders: re-attach + repaint it.
-    if (this.taskDrawerEl && this.container && this.container.appendChild) {
-      this.container.appendChild(this.taskDrawerEl);
-      if (this.taskDrawerOpen) {
-        this.taskDrawerEl.hidden = false;
-        this.renderTaskDrawerBody();
-      }
-    }
-
-    // Paint the real ticket count over the placeholder. Fire-and-forget: the
-    // count is a readout, so a slow or failed fetch must never delay or break
-    // the rest of the command view.
-    Promise.resolve(this.refreshTicketCount()).catch(() => {});
+    // The work tile refreshes on a ticket change, never on render (PRD 760
+    // FR-11). Binding is idempotent, so doing it here costs one check.
+    this.bindTicketChangeEvents();
 
     // The Backlog drawer survives full re-renders too — same pattern.
     if (this.backlogDrawerEl && this.container && this.container.appendChild) {
@@ -2921,7 +2962,10 @@ export class WorkspaceCommandView {
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
-        return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
+        return {
+          title: this.taskModalShowAll ? 'Tickets' : 'Open Tickets',
+          addLabel: '＋ Add Ticket'
+        };
       case 'mcp':
         return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
       case 'skills':
@@ -3669,7 +3713,7 @@ export class WorkspaceCommandView {
     if (String(section || '') !== 'tasks') return '';
     const board = this.taskModalBoardMode;
     return (
-      '<div class="ws-cmd-modal-viewtoggle" role="tablist" aria-label="Task view">' +
+      '<div class="ws-cmd-modal-viewtoggle" role="tablist" aria-label="Ticket view">' +
       '<button type="button" class="ws-cmd-modal-view' +
       (board ? '' : ' is-active') +
       '" data-cmd-modal-action="view-list" aria-pressed="' +
@@ -3869,17 +3913,17 @@ export class WorkspaceCommandView {
     if (!tasks.length) {
       return this.modalEmptyHTML(
         this.taskModalShowAll
-          ? 'No tasks yet. Add one to get started.'
-          : 'No open tasks. Use Show all to view completed tasks.'
+          ? 'No tickets yet. Add one to get started.'
+          : 'No open tickets. Use Show all to view completed tickets.'
       );
     }
     return tasks
       .map(t => {
         const id = String(t.id || '');
-        const label = String(t.description || t.name || t.title || 'Task');
+        const label = String(t.description || t.name || t.title || 'Ticket');
         const assignee = String(t.to || t.agent_name || t.assigned_to || '');
         const tone = this.taskTone(t.status);
-        const statusText = String(t.status || 'pending').replace('_', ' ');
+        const statusText = this.ticketStatusText(t);
         return (
           '<div class="ws-cmd-mrow">' +
           '<div class="ws-cmd-mrow-main">' +
@@ -3898,17 +3942,17 @@ export class WorkspaceCommandView {
           '<div class="ws-cmd-mrow-actions">' +
           '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="run" data-cmd-id="' +
           escapeHtml(id) +
-          '" title="Run" aria-label="Run task ' +
+          '" title="Run" aria-label="Run ticket ' +
           escapeHtml(label) +
           '">▶</button>' +
           '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="open" data-cmd-id="' +
           escapeHtml(id) +
-          '" title="Open" aria-label="Open task ' +
+          '" title="Open" aria-label="Open ticket ' +
           escapeHtml(label) +
           '">↗</button>' +
           '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
           escapeHtml(id) +
-          '" title="Delete" aria-label="Delete task ' +
+          '" title="Delete" aria-label="Delete ticket ' +
           escapeHtml(label) +
           '">✕</button>' +
           '</div>' +
@@ -4499,7 +4543,7 @@ export class WorkspaceCommandView {
     const rosterStatus =
       typeof page.getAgentRosterStatus === 'function'
         ? page.getAgentRosterStatus(name)
-        : { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+        : { key: 'idle', label: 'Idle', detail: 'No active tickets' };
     const role = this.agentRolePresentation(group);
     const skills =
       typeof page.getAgentSkillSummary === 'function'
@@ -4686,7 +4730,7 @@ export class WorkspaceCommandView {
       '"></span><strong>' +
       escapeHtml(agent.status?.label || 'Idle') +
       '</strong><span>' +
-      escapeHtml(agent.status?.detail || 'No active tasks') +
+      escapeHtml(agent.status?.detail || 'No active tickets') +
       '</span></p>' +
       '</div>' +
       '<div class="ws-cmd-stage-actions">' +
@@ -4694,7 +4738,7 @@ export class WorkspaceCommandView {
       this.secondaryActionClass() +
       '" data-cmd-add-task="' +
       escapeHtml(agent.encodedName) +
-      '">Give Task</button>' +
+      '">Give work</button>' +
       detailAction +
       (agent.entry
         ? '<button type="button" class="ws-cmd-agent-action" data-cmd-manager-settings="1">Manager Settings</button>'
@@ -4711,17 +4755,17 @@ export class WorkspaceCommandView {
       ? ''
       : '<button type="button" class="ws-cmd-icon-btn sm" data-cmd-add-task="' +
         escapeHtml(encoded) +
-        '" aria-label="Add task">＋</button>';
+        '" aria-label="Add ticket">＋</button>';
     const head =
-      '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tasks · ' +
+      '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tickets · ' +
       tasks.length +
       '</span>' +
       add +
       '</div>';
     if (!tasks.length) {
       const emptyText = this.taskFilterActiveTags().length
-        ? '— no tasks match the tag filter —'
-        : '— no tasks yet —';
+        ? '— no tickets match the tag filter —'
+        : '— no tickets yet —';
       return (
         '<div class="ws-cmd-questlog">' +
         head +
@@ -4732,16 +4776,16 @@ export class WorkspaceCommandView {
     }
     const items = tasks
       .map(t => {
-        const label = String(t.description || t.name || t.title || 'Task');
+        const label = String(t.description || t.name || t.title || 'Ticket');
         const tone = this.taskTone(t.status);
-        const statusText = String(t.status || 'pending').replace('_', ' ');
+        const statusText = this.ticketStatusText(t);
         const taskId = String(t.id || '');
         return (
           '<div class="ws-cmd-quest">' +
           '<span class="ws-cmd-q-glyph">&bull;</span>' +
           '<button type="button" class="ws-cmd-q-name" data-cmd-open-task="' +
           escapeHtml(taskId) +
-          '" aria-label="Open task ' +
+          '" aria-label="Open ticket ' +
           escapeHtml(label) +
           '">' +
           escapeHtml(label) +
@@ -4753,7 +4797,7 @@ export class WorkspaceCommandView {
           '</span>' +
           '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' +
           escapeHtml(taskId) +
-          '" title="Run" aria-label="Run task ' +
+          '" title="Run" aria-label="Run ticket ' +
           escapeHtml(label) +
           '">▶</button>' +
           '</div>'
@@ -4765,8 +4809,8 @@ export class WorkspaceCommandView {
 
   overviewTabHTML(agent) {
     const currentTask = agent.currentTask
-      ? escapeHtml(agent.currentTask.description || agent.currentTask.name || 'Current task')
-      : 'No task in progress';
+      ? escapeHtml(agent.currentTask.description || agent.currentTask.name || 'Current ticket')
+      : 'No ticket in progress';
     const currentDetail = agent.currentTask
       ? 'This agent is actively executing assigned work.'
       : 'Ready for a new assignment.';
@@ -4784,7 +4828,7 @@ export class WorkspaceCommandView {
       escapeHtml(agent.status?.label || 'Idle') +
       '</span></div>' +
       '<div class="ws-cmd-overview-stats">' +
-      '<div><span>Tasks</span><strong>' +
+      '<div><span>Tickets</span><strong>' +
       agent.tasks.length +
       '</strong></div>' +
       '<div><span>Skills</span><strong>' +
@@ -4804,7 +4848,7 @@ export class WorkspaceCommandView {
       '</p>' +
       '<span class="ws-cmd-overview-label">Status detail</span>' +
       '<p>' +
-      escapeHtml(agent.status?.detail || 'No active tasks') +
+      escapeHtml(agent.status?.detail || 'No active tickets') +
       '</p>' +
       '</div>'
     );
@@ -4978,8 +5022,8 @@ export class WorkspaceCommandView {
       if (!Number.isFinite(time)) return;
       items.push({
         id: String(task.id || ''),
-        kind: 'Task',
-        title: String(task.description || task.name || task.title || 'Untitled task'),
+        kind: 'Ticket',
+        title: String(task.description || task.name || task.title || 'Untitled ticket'),
         status: String(task.status || 'pending').replaceAll('_', ' '),
         timestamp: String(timestamp),
         time
@@ -5015,7 +5059,7 @@ export class WorkspaceCommandView {
     if (!items.length) {
       return (
         '<div class="ws-cmd-tab-empty"><strong>No recent activity</strong>' +
-        '<span>Tasks and sessions attributed to this agent will appear here.</span></div>'
+        '<span>Tickets and sessions attributed to this agent will appear here.</span></div>'
       );
     }
     return (
@@ -5024,7 +5068,7 @@ export class WorkspaceCommandView {
         .map(
           item =>
             '<button type="button" class="ws-cmd-activity-item" data-cmd-' +
-            (item.kind === 'Task' ? 'open-task' : 'open-session') +
+            (item.kind === 'Ticket' ? 'open-task' : 'open-session') +
             '="' +
             escapeHtml(item.id) +
             '">' +
@@ -5054,7 +5098,7 @@ export class WorkspaceCommandView {
     return (
       '<section class="ws-cmd-unassigned" aria-labelledby="ws-cmd-unassigned-title">' +
       '<div><span class="ws-cmd-unassigned-kicker">Dispatch queue</span>' +
-      '<strong id="ws-cmd-unassigned-title">Unassigned tasks</strong></div>' +
+      '<strong id="ws-cmd-unassigned-title">Unassigned tickets</strong></div>' +
       '<span class="ws-cmd-unassigned-count">' +
       tasks.length +
       '</span>' +
@@ -5066,7 +5110,7 @@ export class WorkspaceCommandView {
   agentTabsHTML(agent) {
     const tabs = [
       { key: 'overview', label: 'Overview' },
-      { key: 'tasks', label: 'Tasks' },
+      { key: 'tasks', label: 'Tickets' },
       // The tab KEY stays `loadout` — it is persisted in URL state and read by
       // the tab tests — while the visible label uses the cozy vocabulary
       // (PRD FR-168: Loadout → Toolbox).
@@ -5673,26 +5717,26 @@ export class WorkspaceCommandView {
       return { key: 'needs-input', label: 'Needs input', detail: 'Waiting for user input' };
     }
     if (tasks.some(task => ['failed', 'timed_out'].includes(resolveTaskPresentation(task).state))) {
-      return { key: 'blocked', label: 'Needs attention', detail: 'Inspect the task result' };
+      return { key: 'blocked', label: 'Needs attention', detail: 'Inspect the run result' };
     }
     if (tasks.some(task => this.isWorkingTask(task))) {
-      return { key: 'working', label: 'Working', detail: 'Task in progress' };
+      return { key: 'working', label: 'Working', detail: 'Ticket in progress' };
     }
     if (
       tasks.some(task =>
         ['ready', 'needs_assignment'].includes(resolveTaskPresentation(task).state)
       )
     ) {
-      return { key: 'waiting', label: 'Waiting', detail: 'Task queued' };
+      return { key: 'waiting', label: 'Waiting', detail: 'Ticket queued' };
     }
     if (tasks.some(task => resolveTaskPresentation(task).isUnknown)) {
-      return { key: 'unknown', label: 'Check tasks', detail: 'Task state is unrecognized' };
+      return { key: 'unknown', label: 'Check tickets', detail: 'Ticket state is unrecognized' };
     }
     if (this.page?.tasksLoading || this.page?.tasksLoadFailed) {
-      return { key: 'unknown', label: 'Checking work', detail: 'Task status is not confirmed' };
+      return { key: 'unknown', label: 'Checking work', detail: 'Ticket status is not confirmed' };
     }
     if (agent?.status && agent.status.key !== 'idle') return agent.status;
-    return { key: 'idle', label: 'Ready to help', detail: 'No queued or active tasks' };
+    return { key: 'idle', label: 'Ready to help', detail: 'No queued or active tickets' };
   }
 
   mapAgentViewModels() {
@@ -5768,8 +5812,8 @@ export class WorkspaceCommandView {
     const activity = this.latestTaskActivity(task);
     const timestamp = activity?.at || this.taskUpdatedTime(task);
     return {
-      taskLabel: String(task.description || task.name || task.title || 'Untitled task'),
-      statusLabel: this.taskStatusLabel(task.status),
+      taskLabel: String(task.description || task.name || task.title || 'Untitled ticket'),
+      statusLabel: this.ticketStatusText(task),
       activityLabel: activity?.label || '',
       whenLabel: this.formatRelativeTime(timestamp),
       timestamp: task.updated_at || task.created_at || ''
@@ -5823,7 +5867,7 @@ export class WorkspaceCommandView {
     // the tool-belt button never obscures the real Backlog lifecycle (FR50).
     return [
       { key: 'objective', label: 'Workspace Goal', icon: 'bi-bullseye' },
-      { key: 'objectives', label: 'Tasks', icon: 'bi-list-check' },
+      { key: 'objectives', label: 'Tickets', icon: 'bi-list-check' },
       { key: 'backlog', label: 'Backlog · Quest Board', icon: 'bi-journal-bookmark' },
       { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
       { key: 'stations', label: 'Stations', icon: 'bi-cpu' }
@@ -5876,7 +5920,7 @@ export class WorkspaceCommandView {
       ? shown
           .map((task, index) => {
             const id = String(task.id || '');
-            const label = String(task.description || task.name || task.title || 'Untitled task');
+            const label = String(task.description || task.name || task.title || 'Untitled ticket');
             const status = String(task.status || 'pending')
               .trim()
               .toLowerCase();
@@ -5893,7 +5937,7 @@ export class WorkspaceCommandView {
               '</span><span class="ws-cmd-map-task-name">' +
               escapeHtml(label) +
               '</span><span class="ws-cmd-map-task-status">' +
-              escapeHtml(this.taskStatusLabel(status)) +
+              escapeHtml(this.ticketStatusText(task)) +
               '</span></button>';
             const startButton = startable
               ? '<button type="button" class="ws-cmd-map-task-start" data-cmd-map-start-task="' +
@@ -5908,11 +5952,11 @@ export class WorkspaceCommandView {
       : '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest log clear</strong><span>No active objectives assigned.</span></div>';
     return (
       '<div class="ws-cmd-map-window-section is-objectives">' +
-      this.mapZoneHeaderHTML('Tasks', 'Active Tasks', tasks.length) +
+      this.mapZoneHeaderHTML('Tickets', 'Active Tickets', tasks.length) +
       '<div class="ws-cmd-map-task-list">' +
       rows +
       '</div>' +
-      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-open-task-drawer>Open Tasks</button>' +
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-open-tickets>All tickets</button>' +
       '</div>'
     );
   }
@@ -6029,393 +6073,6 @@ export class WorkspaceCommandView {
   // in the same transition so the two task surfaces never coexist (FR9-FR11). The
   // element lives inside .ws-cmd (inherits tactical tokens) and survives full
   // re-renders so selection and scroll are preserved on live refresh (FR25).
-
-  // All non-subtask tasks for this workspace, resolver-sorted (FR24).
-  drawerTasks() {
-    const page = this.page || {};
-    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    return sortTasksForDrawer(tasks.filter(task => !task?.parent_task_id));
-  }
-
-  drawerFilteredTasks() {
-    return this.drawerTasks().filter(task => taskMatchesFilter(task, this.taskDrawerFilter));
-  }
-
-  openTaskDrawer(trigger) {
-    this._drawerAnnounce = '';
-    this.taskDrawerTrigger = trigger || null;
-    // Close the Objectives Map window so the drawer never opens beneath it (FR11).
-    if (this.activeMapWindow) this.activeMapWindow = '';
-    // The two persistent drawers share the same screen position; only one may
-    // be open at a time (reachable via Details→Map view switches, or a
-    // ?panel=backlog deep link landing while Tasks was already open).
-    if (this.backlogDrawerOpen) {
-      this.backlogDrawerOpen = false;
-      if (this.backlogDrawerEl) this.backlogDrawerEl.hidden = true;
-    }
-    this.taskDrawerOpen = true;
-    if (!this.taskDrawerSelectedId) {
-      const first = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
-      this.taskDrawerSelectedId = first ? String(first.id || '') : '';
-    }
-    this.render();
-    const el = this.ensureTaskDrawer();
-    if (el) {
-      el.hidden = false;
-      this.renderTaskDrawerBody();
-      const heading = el.querySelector('.ws-cmd-drawer-title');
-      if (heading && typeof heading.focus === 'function') {
-        try {
-          heading.focus({ preventScroll: true });
-        } catch (_e) {
-          heading.focus();
-        }
-      }
-    }
-    this.syncURLState();
-  }
-
-  closeTaskDrawer() {
-    const trigger = this.taskDrawerTrigger;
-    this.taskDrawerOpen = false;
-    this.taskDrawerTrigger = null;
-    if (this.taskDrawerEl) this.taskDrawerEl.hidden = true;
-    // Renders may have replaced the opener; never focus a detached element.
-    let target =
-      trigger && trigger.isConnected !== false && typeof trigger.focus === 'function'
-        ? trigger
-        : null;
-    if (!target && this.container) {
-      const fallback = this.container.querySelector('[data-cmd-open-task-drawer]');
-      if (fallback && typeof fallback.focus === 'function') target = fallback;
-    }
-    if (target) target.focus();
-    this.syncURLState();
-  }
-
-  setDrawerFilter(filter) {
-    const next = String(filter || '').trim();
-    if (!next || next === this.taskDrawerFilter) return;
-    this.taskDrawerFilter = next;
-    // Keep the selected task visible even if it no longer matches the filter
-    // (FR26): only reselect when the current selection is gone entirely.
-    if (!this.drawerTasks().some(t => String(t.id || '') === this.taskDrawerSelectedId)) {
-      const first = this.drawerFilteredTasks()[0];
-      this.taskDrawerSelectedId = first ? String(first.id || '') : '';
-    }
-    this.renderTaskDrawerBody();
-  }
-
-  selectDrawerTask(taskId) {
-    const id = String(taskId || '').trim();
-    if (!id) return;
-    this._drawerAnnounce = '';
-    this.taskDrawerSelectedId = id;
-    this.renderTaskDrawerBody();
-    this.syncURLState();
-  }
-
-  drawerSelectedTask() {
-    const id = this.taskDrawerSelectedId;
-    return this.drawerTasks().find(t => String(t.id || '') === id) || null;
-  }
-
-  ensureTaskDrawer() {
-    if (this.taskDrawerEl) return this.taskDrawerEl;
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
-      return null;
-    const el = document.createElement('aside');
-    el.className = 'ws-cmd-drawer';
-    el.setAttribute('role', 'region');
-    el.setAttribute('aria-label', 'Tasks');
-    el.hidden = true;
-    el.style.zIndex = 'var(--wsx-layer-drawer)';
-    // The drawer lives outside the map-shell delegate, so it owns its clicks.
-    el.addEventListener('click', event => {
-      if (event.target.closest('[data-cmd-drawer-close]')) {
-        this.closeTaskDrawer();
-        return;
-      }
-      if (event.target.closest('[data-cmd-drawer-add]')) {
-        // Reuse the Map's New Quest composer — create a task without leaving
-        // Map mode (FR23). The composer floats over the Map beside the drawer.
-        if (typeof this.openTaskComposer === 'function') this.openTaskComposer();
-        return;
-      }
-      if (event.target.closest('[data-cmd-drawer-retry]')) {
-        void this.page?.loadTasks?.();
-        return;
-      }
-      const filterBtn = event.target.closest('[data-cmd-drawer-filter]');
-      if (filterBtn) {
-        this.setDrawerFilter(filterBtn.getAttribute('data-cmd-drawer-filter'));
-        return;
-      }
-      const actionBtn = event.target.closest('[data-cmd-drawer-action]');
-      if (actionBtn) {
-        this.runDrawerAction(
-          actionBtn.getAttribute('data-cmd-drawer-action'),
-          actionBtn.getAttribute('data-cmd-drawer-task')
-        );
-        return;
-      }
-      const row = event.target.closest('[data-cmd-drawer-select]');
-      if (row) this.selectDrawerTask(row.getAttribute('data-cmd-drawer-select'));
-    });
-    this.taskDrawerEl = el;
-    if (this.container && this.container.appendChild) this.container.appendChild(el);
-    return el;
-  }
-
-  // If the selected task vanished on a live refresh (deleted/became unavailable),
-  // announce it and pick the next task by deterministic order (FR27).
-  reconcileDrawerSelection() {
-    this._drawerAnnounce ||= '';
-    if (
-      this.page?.tasksLoading ||
-      this.page?.tasksLoadFailed ||
-      this.page?.initialListsLoaded === false
-    )
-      return;
-    if (!this.taskDrawerSelectedId) {
-      // Summary-only links can arrive before tasks. Select once data lands,
-      // without moving focus or overriding an explicit selection.
-      if (this.taskDrawerOpen) {
-        const first = this.drawerFilteredTasks()[0];
-        if (first) this.taskDrawerSelectedId = String(first.id || '');
-      }
-      return;
-    }
-    const stillHere = this.drawerTasks().some(
-      t => String(t.id || '') === this.taskDrawerSelectedId
-    );
-    if (stillHere) return;
-    this._drawerAnnounce = 'The selected task is no longer available.';
-    const next = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
-    this.taskDrawerSelectedId = next ? String(next.id || '') : '';
-  }
-
-  renderTaskDrawerBody() {
-    const el = this.ensureTaskDrawer();
-    if (!el || el.hidden) return;
-    this.reconcileDrawerSelection();
-    // Preserve list scroll across body repaints (live refresh — FR25).
-    const prevList = el.querySelector('.ws-cmd-drawer-list');
-    const prevScroll = prevList ? prevList.scrollTop : 0;
-    const focusAttrs = [
-      'data-cmd-drawer-select',
-      'data-cmd-drawer-filter',
-      'data-cmd-drawer-action',
-      'data-cmd-drawer-task',
-      'data-cmd-drawer-retry'
-    ];
-    const focused =
-      typeof document !== 'undefined' && el.contains?.(document.activeElement)
-        ? document.activeElement
-        : null;
-    const focusKey = focused
-      ? focusAttrs
-          .filter(attr => focused.hasAttribute?.(attr))
-          .map(attr => [attr, focused.getAttribute(attr)])
-      : [];
-    el.innerHTML = this.taskDrawerHTML();
-    const nextList = el.querySelector('.ws-cmd-drawer-list');
-    if (nextList) nextList.scrollTop = prevScroll;
-    if (focusKey.length) {
-      const replacement = Array.from(el.querySelectorAll('button')).find(button =>
-        focusKey.every(([attr, value]) => button.getAttribute(attr) === value)
-      );
-      (replacement || el.querySelector('.ws-cmd-drawer-title'))?.focus({ preventScroll: true });
-    }
-  }
-
-  taskDrawerHTML() {
-    const counts = resolveTaskCounts(this.drawerTasks());
-    const filters = [
-      { key: FILTER.ACTIONABLE, label: 'Actionable' },
-      { key: FILTER.ACTIVE, label: 'Active' },
-      { key: FILTER.NEEDS_ATTENTION, label: 'Needs Attention' },
-      { key: FILTER.COMPLETED, label: 'Completed' },
-      { key: FILTER.ALL, label: 'All' }
-    ]
-      .map(f => {
-        const active = this.taskDrawerFilter === f.key;
-        const count =
-          this.page?.tasksLoading || this.page?.tasksLoadFailed ? '—' : counts[f.key] || 0;
-        return (
-          '<button type="button" class="ws-cmd-drawer-filter' +
-          (active ? ' is-active' : '') +
-          '" data-cmd-drawer-filter="' +
-          escapeHtml(f.key) +
-          '" aria-pressed="' +
-          (active ? 'true' : 'false') +
-          '">' +
-          escapeHtml(f.label) +
-          '<span class="ws-cmd-drawer-filter-count">' +
-          escapeHtml(String(count)) +
-          '</span></button>'
-        );
-      })
-      .join('');
-    return (
-      '<header class="ws-cmd-drawer-head">' +
-      '<h2 class="ws-cmd-drawer-title" tabindex="-1">Tasks</h2>' +
-      '<div class="ws-cmd-drawer-head-actions">' +
-      '<button type="button" class="ws-cmd-drawer-add" data-cmd-drawer-add aria-label="Add task">＋ Add Task</button>' +
-      '<button type="button" class="ws-cmd-drawer-close" data-cmd-drawer-close aria-label="Close tasks">×</button>' +
-      '</div>' +
-      '</header>' +
-      '<div class="ws-cmd-drawer-live sr-only" role="status" aria-live="polite" aria-atomic="true">' +
-      escapeHtml(this._drawerAnnounce || '') +
-      '</div>' +
-      '<div class="ws-cmd-drawer-filters" role="group" aria-label="Filter tasks">' +
-      filters +
-      '</div>' +
-      '<div class="ws-cmd-drawer-list" role="list">' +
-      this.drawerListHTML() +
-      '</div>' +
-      '<div class="ws-cmd-drawer-preview">' +
-      this.drawerPreviewHTML() +
-      '</div>'
-    );
-  }
-
-  drawerListHTML() {
-    if (this.page?.tasksLoading) return '<p role="status">Loading tasks…</p>';
-    if (this.page?.tasksLoadFailed)
-      return '<div class="ws-cmd-drawer-empty"><strong>Tasks unavailable</strong><button type="button" class="ws-cmd-drawer-action" data-cmd-drawer-retry>Retry tasks</button></div>';
-    const tasks = this.drawerFilteredTasks();
-    if (!tasks.length) {
-      return (
-        '<div class="ws-cmd-drawer-empty"><strong>No tasks here</strong>' +
-        '<span>Nothing matches the ' +
-        escapeHtml(this.taskDrawerFilter) +
-        ' filter.</span></div>'
-      );
-    }
-    return tasks
-      .map(task => {
-        const id = String(task.id || '');
-        const pres = resolveTaskPresentation(task);
-        const title = String(task.description || task.name || task.title || 'Untitled task');
-        const selected = id === this.taskDrawerSelectedId;
-        const assignee = pres.assignee || 'Unassigned';
-        return (
-          '<button type="button" role="listitem" class="ws-cmd-drawer-row' +
-          (selected ? ' is-selected' : '') +
-          ' tone-' +
-          escapeHtml(pres.tone) +
-          '" data-cmd-drawer-select="' +
-          escapeHtml(id) +
-          '" aria-current="' +
-          (selected ? 'true' : 'false') +
-          '">' +
-          '<span class="ws-cmd-drawer-row-main">' +
-          '<span class="ws-cmd-drawer-row-title">' +
-          escapeHtml(title) +
-          '</span>' +
-          '<span class="ws-cmd-drawer-row-meta">' +
-          escapeHtml(taskShortId(task)) +
-          ' · ' +
-          escapeHtml(assignee) +
-          '</span></span>' +
-          '<span class="ws-cmd-drawer-row-state tone-' +
-          escapeHtml(pres.tone) +
-          '">' +
-          escapeHtml(pres.label) +
-          '</span></button>'
-        );
-      })
-      .join('');
-  }
-
-  drawerPreviewHTML() {
-    const task = this.drawerSelectedTask();
-    if (!task) {
-      return '<div class="ws-cmd-drawer-preview-empty">Select a task to see details.</div>';
-    }
-    const id = String(task.id || '');
-    const pres = resolveTaskPresentation(task);
-    const title = String(task.description || task.name || task.title || 'Untitled task');
-    const brief = String(task.details || task.brief || task.prompt || '').trim();
-    const assignee = pres.assignee || 'Unassigned';
-    // A safe, same-origin href carrying a validated `return` target so Back To
-    // Workspace (group 7) can restore this exact Map/drawer/task/agent/run
-    // context (FR92-93).
-    const fullHref = this.taskHrefWithReturn(id);
-    // Off-filter notice: the selected task is still shown even if it left the
-    // current filter mid-interaction (FR26).
-    const offFilter = !taskMatchesFilter(task, this.taskDrawerFilter);
-    const primary = pres.primaryAction
-      ? '<button type="button" class="ws-cmd-drawer-action" data-cmd-drawer-action="' +
-        escapeHtml(pres.primaryAction.id) +
-        '" data-cmd-drawer-task="' +
-        escapeHtml(id) +
-        '">' +
-        escapeHtml(pres.primaryAction.label) +
-        '</button>'
-      : '';
-    return (
-      (offFilter
-        ? '<div class="ws-cmd-drawer-offfilter">This task moved out of the ' +
-          escapeHtml(this.taskDrawerFilter) +
-          ' filter. <button type="button" class="ws-cmd-drawer-reveal" data-cmd-drawer-filter="' +
-          escapeHtml(FILTER.ALL) +
-          '">Show in All</button></div>'
-        : '') +
-      '<div class="ws-cmd-drawer-preview-head">' +
-      '<span class="ws-cmd-drawer-preview-state tone-' +
-      escapeHtml(pres.tone) +
-      '">' +
-      escapeHtml(pres.label) +
-      '</span>' +
-      '<h3 class="ws-cmd-drawer-preview-title">' +
-      escapeHtml(title) +
-      '</h3>' +
-      '<span class="ws-cmd-drawer-preview-assignee">' +
-      escapeHtml(assignee) +
-      '</span></div>' +
-      (brief
-        ? '<p class="ws-cmd-drawer-preview-brief">' + escapeHtml(brief.slice(0, 400)) + '</p>'
-        : '') +
-      '<div class="ws-cmd-drawer-preview-actions">' +
-      primary +
-      '<a class="ws-cmd-drawer-openfull" href="' +
-      escapeHtml(fullHref) +
-      '">Open Full Task</a>' +
-      '</div>'
-    );
-  }
-
-  // Route a drawer primary action to the page's existing handlers (group 3 wires
-  // to what already works; the sticky tray in group 4 upgrades where runs show).
-  runDrawerAction(actionId, taskId) {
-    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    const id = String(taskId || '').trim();
-    if (!page || !id) return;
-    switch (actionId) {
-      case 'start':
-      case 'assign_start':
-      case 'retry':
-        // skipModal: the sticky tray owns monitoring, so suppress the legacy
-        // execution modal (FR46). Monitoring is task-ID-keyed and continues
-        // regardless of drawer/tray view state.
-        if (typeof page.executeTask === 'function')
-          page.executeTask(id, { skipConfirm: true, skipModal: true });
-        this.trackAndShowTray(id);
-        break;
-      case 'view_result':
-        if (typeof page.showTaskResult === 'function') page.showTaskResult(id);
-        else if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
-        break;
-      case 'track':
-      case 'respond':
-      case 'inspect':
-      default:
-        if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
-        break;
-    }
-  }
 
   // ---------- Backlog panel + drawer (PRD workspace-backlog) ----------
   //
@@ -6567,11 +6224,9 @@ export class WorkspaceCommandView {
           if (selectId && typeof tickets.openDetail === 'function') {
             return tickets.openDetail(this.workspaceId(), selectId);
           }
-          // An "Add to Backlog" affordance asked to CAPTURE, so land the user
-          // in the create form already typing rather than in a list.
-          if (options.openCapture && typeof tickets.focusCreate === 'function') {
-            tickets.focusCreate('backlog');
-          }
+          // An "Add to Backlog" affordance asked to CAPTURE, so open Give work
+          // with nobody chosen, which is what makes a Backlog ticket.
+          if (options.openCapture) this.page?.showAddTaskModal?.();
           return undefined;
         })
         .catch(() => {
@@ -6590,13 +6245,8 @@ export class WorkspaceCommandView {
     const options = opts || {};
     this.backlogDrawerTrigger = trigger || null;
     // Close the Map's Quest Board window so the drawer never opens beneath it
-    // (mirrors openTaskDrawer's Objectives-window handling).
+    // (the same reason the Objectives window closes for other layers).
     if (this.activeMapWindow) this.activeMapWindow = '';
-    // Only one persistent drawer may be open at a time (see openTaskDrawer).
-    if (this.taskDrawerOpen) {
-      this.taskDrawerOpen = false;
-      if (this.taskDrawerEl) this.taskDrawerEl.hidden = true;
-    }
     this.backlogDrawerOpen = true;
     if (options.selectId) {
       this.backlogDrawerSelectedId = String(options.selectId);
@@ -7162,15 +6812,15 @@ export class WorkspaceCommandView {
     const confirming = this.backlogPromoteConfirmId === id;
     const promoteControl = confirming
       ? '<div class="ws-cmd-backlog-promote-confirm">' +
-        '<p>Turn into a task? It becomes eligible for assignment and execution (promoted to Ready), but nothing runs automatically — you’ll get a chance to assign it next.</p>' +
+        '<p>Turn into a ticket? It becomes eligible for assignment and execution (promoted to Ready), but nothing runs automatically — you’ll get a chance to assign it next.</p>' +
         '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote-confirm' +
         (this.backlogPromoteBusy ? ' disabled' : '') +
-        '>Confirm — Turn into Task</button>' +
+        '>Confirm — Turn into Ticket</button>' +
         '<button type="button" class="ws-cmd-backlog-quick-cancel" data-cmd-backlog-promote-cancel>Cancel</button>' +
         '</div>'
       : '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote data-cmd-backlog-item="' +
         escapeHtml(id) +
-        '">Turn into Task</button>';
+        '">Turn into Ticket</button>';
     // Reordering only has a coherent meaning within this workspace's own
     // rank space (FR65) — a rolled-up descendant item hides the move
     // controls rather than reordering across unrelated workspaces.
@@ -7556,7 +7206,7 @@ export class WorkspaceCommandView {
       }
       const actionBtn = event.target.closest('[data-cmd-tray-action]');
       if (actionBtn) {
-        this.runDrawerAction(
+        this.runTrayAction(
           actionBtn.getAttribute('data-cmd-tray-action'),
           actionBtn.getAttribute('data-cmd-tray-task')
         );
@@ -7566,6 +7216,30 @@ export class WorkspaceCommandView {
     this.trayEl = el;
     if (this.container && this.container.appendChild) this.container.appendChild(el);
     return el;
+  }
+
+  runTrayAction(actionId, taskId) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(taskId || '').trim();
+    if (!page || !id) return;
+    switch (actionId) {
+      case 'start':
+      case 'assign_start':
+      case 'retry':
+        // skipModal: the sticky tray owns monitoring, so suppress the legacy
+        // execution modal (FR46).
+        if (typeof page.executeTask === 'function')
+          page.executeTask(id, { skipConfirm: true, skipModal: true });
+        this.trackAndShowTray(id);
+        break;
+      case 'view_result':
+        if (typeof page.showTaskResult === 'function') page.showTaskResult(id);
+        else if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
+        break;
+      default:
+        if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
+        break;
+    }
   }
 
   renderTrayBody() {
@@ -9707,7 +9381,7 @@ export class WorkspaceCommandView {
   // roster excluding the entry agent, unassigned placeholders, and duplicate
   // records — agentGroups() already dedupes and drops unassigned (FR69).
   commandNodeOrchestrationCopy(specialistCount) {
-    if (specialistCount <= 0) return 'Works directly on assigned tasks';
+    if (specialistCount <= 0) return 'Works directly on assigned tickets';
     return (
       'Routes work to ' + specialistCount + ' specialist agent' + (specialistCount === 1 ? '' : 's')
     );
@@ -9718,7 +9392,7 @@ export class WorkspaceCommandView {
     return (
       '<div class="ws-cmd-map-command-repair">' +
       '<strong>No Commander</strong>' +
-      '<span>Chats, routing, and task orchestration need a Commander.</span>' +
+      '<span>Chats, routing, and ticket orchestration need a Commander.</span>' +
       '<button type="button" class="ws-cmd-agent-action' +
       this.secondaryActionClass() +
       '" data-cmd-add-agent>Hire a Commander</button>' +
@@ -11335,7 +11009,7 @@ export class WorkspaceCommandView {
     }
     actions.push(
       action({
-        label: 'Give Task',
+        label: 'Give work',
         detail: taskId ? 'New assignment' : 'Assign first quest',
         icon: 'bi-plus-lg',
         className: taskId ? '' : 'is-primary',
@@ -11446,7 +11120,7 @@ export class WorkspaceCommandView {
       '"></span><strong>' +
       escapeHtml(agent.status?.label || 'Idle') +
       '</strong><span>' +
-      escapeHtml(agent.status?.detail || 'No active tasks') +
+      escapeHtml(agent.status?.detail || 'No active tickets') +
       '</span></div>' +
       '<div class="ws-cmd-rpg-stat-grid">' +
       statCards
@@ -11461,7 +11135,7 @@ export class WorkspaceCommandView {
         .join('') +
       '</div>' +
       '<section class="ws-cmd-rpg-quest-card"><span>Current Quest</span><strong>' +
-      escapeHtml(summary?.taskLabel || 'No task in progress') +
+      escapeHtml(summary?.taskLabel || 'No ticket in progress') +
       '</strong><p>' +
       escapeHtml(questMeta) +
       '</p></section>' +
@@ -11735,7 +11409,7 @@ export class WorkspaceCommandView {
       this.renderMapAgentsZone(agents) +
       this.renderMapToolTray() +
       '</div>' +
-      this.renderMapQuickTask() +
+      this.mapGiveWorkHTML() +
       this.renderMapWindow(selected) +
       '</div>'
     );
@@ -11773,211 +11447,19 @@ export class WorkspaceCommandView {
       this.renderDetachmentToolbar() +
       this.renderMapToolTray() +
       '</div>' +
-      this.renderMapQuickTask() +
+      this.mapGiveWorkHTML() +
       this.renderMapWindow(selected) +
       '</div>'
     );
   }
 
-  // Floating "New Quest" button + inline composer. Creating with no assignee lets the
-  // server stamp the task onto the workspace's entry agent (entry_agent_default).
-  renderMapQuickTask() {
-    const open = this.taskComposerOpen;
-    const submitting = this.taskComposerSubmitting;
-    const button =
-      '<button type="button" class="ws-cmd-map-quest-fab' +
-      (open ? ' is-open' : '') +
-      '" data-cmd-map-quest-toggle aria-haspopup="dialog" aria-expanded="' +
-      (open ? 'true' : 'false') +
-      '" aria-label="New quest"><i class="bi bi-plus-lg" aria-hidden="true"></i><span>New Quest</span></button>';
-    if (!open) {
-      return '<div class="ws-cmd-map-quest-dock">' + button + '</div>';
-    }
-    const intent = this.taskComposerIntent === 'backlog' ? 'backlog' : 'ready';
-    const draft = escapeHtml(this.taskComposerDraft || '');
-    const error = this.taskComposerError
-      ? '<p class="ws-cmd-map-quest-error" role="alert">' +
-        escapeHtml(this.taskComposerError) +
-        '</p>'
-      : '';
-    const disabledAttr = submitting ? ' disabled' : '';
-    // FR56: distinguish direct Ready creation from Add to Backlog, and show
-    // the commitment consequence before saving.
-    const intentToggle =
-      '<div class="ws-cmd-map-quest-intent" role="group" aria-label="Quest commitment">' +
-      '<button type="button" class="ws-cmd-map-quest-intent-btn' +
-      (intent === 'ready' ? ' is-active' : '') +
-      '" data-cmd-map-quest-intent="ready" aria-pressed="' +
-      (intent === 'ready' ? 'true' : 'false') +
-      '">Ready Quest</button>' +
-      '<button type="button" class="ws-cmd-map-quest-intent-btn' +
-      (intent === 'backlog' ? ' is-active' : '') +
-      '" data-cmd-map-quest-intent="backlog" aria-pressed="' +
-      (intent === 'backlog' ? 'true' : 'false') +
-      '">Add to Backlog</button></div>';
-    // With no role filled there is no Commander to name, and saying otherwise
-    // would promise an assignment that cannot happen. The quest is still
-    // created and still stays visible — it simply says it is waiting for
-    // someone, and points at the roster (FR46, FR47).
-    const unstaffed = Boolean(this.roleRoster && this.roleRoster.filled_count === 0);
-    const consequence =
-      '<p class="ws-cmd-map-quest-consequence">' +
-      (intent === 'backlog'
-        ? 'Saves the idea without committing it — nothing is assigned, scheduled, or run until you promote it to Ready.'
-        : unstaffed
-          ? 'No agent is filling this workspace’s primary role yet, so this quest is created unassigned and waits until you fill a role.'
-          : 'Commits now — creates an unassigned Ready quest that waits for an explicit assign, run, or schedule.') +
-      '</p>';
-    const placeholder =
-      intent === 'backlog'
-        ? 'Describe the idea…'
-        : unstaffed
-          ? 'Describe the quest… (nobody is assigned yet)'
-          : 'Describe the quest… (assigned to the Commander)';
-    const primaryLabel = submitting
-      ? intent === 'backlog'
-        ? 'Adding…'
-        : 'Creating…'
-      : intent === 'backlog'
-        ? 'Add to Backlog'
-        : 'Create';
-    const hint =
-      intent === 'backlog'
-        ? 'Enter to add to the backlog'
-        : 'Enter to create · ⌘/Ctrl+Enter to create &amp; start';
+  // The Map's door into Give work.
+  mapGiveWorkHTML() {
     return (
-      '<div class="ws-cmd-map-quest-dock is-open">' +
-      button +
-      '<section class="ws-cmd-map-quest-composer" role="dialog" aria-modal="false" aria-label="New quest">' +
-      '<header class="ws-cmd-map-quest-head"><span>New Quest</span>' +
-      '<button type="button" class="ws-cmd-map-quest-close" data-cmd-map-quest-cancel aria-label="Close new quest">×</button></header>' +
-      intentToggle +
-      '<textarea class="ws-cmd-map-quest-input" data-cmd-map-quest-input rows="2" ' +
-      'placeholder="' +
-      escapeHtml(placeholder) +
-      '"' +
-      disabledAttr +
-      '>' +
-      draft +
-      '</textarea>' +
-      consequence +
-      error +
-      '<div class="ws-cmd-map-quest-actions">' +
-      '<button type="button" class="ws-cmd-map-quest-btn is-primary" data-cmd-map-quest-create' +
-      disabledAttr +
-      '>' +
-      primaryLabel +
-      '</button>' +
-      (intent === 'ready'
-        ? '<button type="button" class="ws-cmd-map-quest-btn" data-cmd-map-quest-start' +
-          disabledAttr +
-          '>Create &amp; Start</button>'
-        : '') +
-      '</div>' +
-      '<p class="ws-cmd-map-quest-hint">' +
-      hint +
-      '</p>' +
-      '</section></div>'
+      '<div class="ws-cmd-map-quest-dock">' +
+      '<button type="button" class="ws-cmd-map-quest-fab" data-cmd-map-give-work aria-haspopup="dialog">' +
+      '<i class="bi bi-plus-lg" aria-hidden="true"></i><span>Give work</span></button></div>'
     );
-  }
-
-  openTaskComposer() {
-    this.taskComposerOpen = true;
-    this.taskComposerError = '';
-    this.taskComposerIntent = 'ready';
-    this.render();
-  }
-
-  closeTaskComposer({ clearDraft = true } = {}) {
-    this.taskComposerOpen = false;
-    this.taskComposerError = '';
-    this.taskComposerSubmitting = false;
-    if (clearDraft) this.taskComposerDraft = '';
-    this.render();
-  }
-
-  setTaskComposerIntent(intent) {
-    const next = intent === 'backlog' ? 'backlog' : 'ready';
-    if (this.taskComposerIntent === next) return;
-    this.taskComposerIntent = next;
-    this.taskComposerError = '';
-    this.render();
-  }
-
-  async submitTaskComposer({ start = false } = {}) {
-    if (this.taskComposerSubmitting) return;
-    const description = String(this.taskComposerDraft || '').trim();
-    if (!description) {
-      this.taskComposerError = 'Enter a quest description.';
-      this.render();
-      return;
-    }
-    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    if (!page) return;
-
-    if (this.taskComposerIntent === 'backlog') {
-      if (typeof page.createBacklogItem !== 'function') return;
-      this.taskComposerSubmitting = true;
-      this.taskComposerError = '';
-      this.render();
-      const created = await page.createBacklogItem({ description });
-      this.taskComposerSubmitting = false;
-      if (!created) {
-        this.taskComposerError = 'Could not add to the backlog. Try again.';
-        this.render();
-        return;
-      }
-      // page.createBacklogItem() already toasts "Added to backlog" and
-      // refreshes the Backlog panel/Quest Board via loadBacklog().
-      this.taskComposerDraft = '';
-      this.taskComposerOpen = false;
-      this.taskComposerError = '';
-      this.render();
-      return;
-    }
-
-    if (typeof page.createTask !== 'function') return;
-
-    this.taskComposerSubmitting = true;
-    this.taskComposerError = '';
-    this.render();
-
-    let created = null;
-    try {
-      // No assignee → server applies the entry-agent default; suppress the generic
-      // "Task created" toast so we can name the resolved assignee instead.
-      created = await page.createTask(description, '', '', { successToast: false });
-    } catch (_error) {
-      created = null;
-    }
-
-    if (!created || !created.id) {
-      this.taskComposerSubmitting = false;
-      this.taskComposerError = 'Could not create the quest. Try again.';
-      this.render();
-      return;
-    }
-
-    const assignee = String(created.to || '').trim();
-    if (start && typeof page.executeTask === 'function') {
-      try {
-        await page.executeTask(created.id, { skipConfirm: true });
-      } catch (_error) {
-        /* execution failures surface via executeTask's own toast */
-      }
-    }
-    if (window.Toast) {
-      const target = assignee || 'the Commander';
-      window.Toast.success(
-        (start ? 'Quest started · assigned to ' : 'Quest assigned to ') + target
-      );
-    }
-    // loadTasks() (via createTask/executeTask) already refreshed the view; close cleanly.
-    this.taskComposerDraft = '';
-    this.taskComposerOpen = false;
-    this.taskComposerSubmitting = false;
-    this.taskComposerError = '';
-    this.render();
   }
 
   runMapInventoryAction(sectionKey, triggerButton) {
@@ -12060,32 +11542,8 @@ export class WorkspaceCommandView {
         page.openAgentModelModal(modelBtn.getAttribute('data-cmd-edit-model'));
         return;
       }
-      const questToggle = event.target.closest('[data-cmd-map-quest-toggle]');
-      if (questToggle) {
-        if (this.taskComposerOpen) this.closeTaskComposer();
-        else this.openTaskComposer();
-        return;
-      }
-      if (event.target.closest('[data-cmd-map-quest-cancel]')) {
-        this.closeTaskComposer();
-        return;
-      }
-      const intentBtn = event.target.closest('[data-cmd-map-quest-intent]');
-      if (intentBtn) {
-        this.setTaskComposerIntent(intentBtn.getAttribute('data-cmd-map-quest-intent'));
-        return;
-      }
-      if (event.target.closest('[data-cmd-map-quest-create]')) {
-        this.submitTaskComposer({ start: false });
-        return;
-      }
-      if (event.target.closest('[data-cmd-map-quest-start]')) {
-        this.submitTaskComposer({ start: true });
-        return;
-      }
-      // Click outside the composer (but still on the map) dismisses it, keeping the draft.
-      if (this.taskComposerOpen && !event.target.closest('.ws-cmd-map-quest-dock')) {
-        this.closeTaskComposer({ clearDraft: false });
+      if (event.target.closest('[data-cmd-map-give-work]')) {
+        page?.showAddTaskModal?.();
         return;
       }
       const closeWindow = event.target.closest('[data-cmd-map-window-close]');
@@ -12174,9 +11632,8 @@ export class WorkspaceCommandView {
         this.setActiveAgentTab(agentTabBtn.getAttribute('data-cmd-map-agent-tab'));
         return;
       }
-      const drawerBtn = event.target.closest('[data-cmd-open-task-drawer]');
-      if (drawerBtn) {
-        this.openTaskDrawer(drawerBtn);
+      if (event.target.closest('[data-cmd-open-tickets]')) {
+        this.openTicketsView();
         return;
       }
       // Quest Board → shared Backlog drawer handoff (FR52): the drawer opener
@@ -12272,45 +11729,6 @@ export class WorkspaceCommandView {
       if (this.handleLoadoutAddKeydown(event)) return;
       this.handleCapabilityInspectorKeydown(event);
     });
-    this.bindTaskComposer(root);
-  }
-
-  // Wire the quest composer's textarea: track the draft and handle keyboard submits.
-  // The composer only exists in the DOM while open, so this re-binds on each render.
-  bindTaskComposer(root) {
-    if (!root || !this.taskComposerOpen) return;
-    const input = root.querySelector('[data-cmd-map-quest-input]');
-    if (!input) return;
-    input.addEventListener('input', event => {
-      this.taskComposerDraft = event.target.value;
-      if (this.taskComposerError) this.taskComposerError = '';
-    });
-    input.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        this.closeTaskComposer();
-        return;
-      }
-      if (event.key === 'Enter') {
-        // Newlines are not needed for a one-line quest; Enter submits.
-        event.preventDefault();
-        this.taskComposerDraft = event.target.value;
-        const start = this.taskComposerIntent !== 'backlog' && (event.metaKey || event.ctrlKey);
-        this.submitTaskComposer({ start });
-      }
-    });
-    // Restore focus + caret after the re-render that opened/updated the composer.
-    if (!this.taskComposerSubmitting && typeof input.focus === 'function') {
-      input.focus();
-      const end = input.value.length;
-      if (typeof input.setSelectionRange === 'function') {
-        try {
-          input.setSelectionRange(end, end);
-        } catch (_error) {
-          /* setSelectionRange unsupported on some inputs */
-        }
-      }
-    }
   }
 
   captureAgentDeckViewState() {
@@ -13298,7 +12716,7 @@ export class WorkspaceCommandView {
    * Keep the mounted map and the freshly rendered zone in step.
    *
    * PRD §9 Q1: the host node is owned by this view and re-attached after every
-   * render (the taskDrawerEl pattern), so a Command re-render never re-mounts
+   * render , so a Command re-render never re-mounts
    * the map. The map re-mounts only when the member snapshot changes.
    */
   syncDetachmentMap() {

@@ -214,7 +214,9 @@ function taskView(view, state) {
       return view;
     case PHASE.RUNNING:
     case PHASE.NAVIGATING:
-      view.text = opened ? `Opened ${workspace}. Opening the task form…` : `Opening ${workspace}…`;
+      view.text = opened
+        ? `Opened ${workspace}. Opening the ticket form…`
+        : `Opening ${workspace}…`;
       view.tone = 'working';
       return view;
     case PHASE.WAITING:
@@ -239,7 +241,7 @@ function taskView(view, state) {
     case PHASE.SETTLED:
       if (failed) {
         const reason = String(failed.reason || '').trim();
-        view.text = `Ori could not ${failed.action === 'open_workspace' ? `open ${workspace}` : 'open the task form'}.${reason ? ' ' + reason : ''}`;
+        view.text = `Ori could not ${failed.action === 'open_workspace' ? `open ${workspace}` : 'open the ticket form'}.${reason ? ' ' + reason : ''}`;
         view.tone = 'attention';
         view.actions = [dismiss];
         view.link = opened ? null : manual();
@@ -251,7 +253,7 @@ function taskView(view, state) {
         view.actions = [{ id: 'open_draft', label: 'Open draft again', primary: true }, dismiss];
       } else if (shown) {
         // True whether the form is still open or the user has closed it.
-        view.text = `Draft for ${agent}: “${title}”. Review it in the task form. ${unsaved}`;
+        view.text = `Draft for ${agent}: “${title}”. Review it in the ticket form. ${unsaved}`;
         view.tone = 'done';
         // The form can be reopened from the same draft on its own page.
         view.actions = state.onWorkspace
@@ -297,23 +299,23 @@ function committedTaskView(view, state) {
   const stop = {
     id: 'dismiss',
     label: 'Stop following',
-    hint: 'Stops updates here. The task keeps going; cancel it from the task itself.'
+    hint: 'Stops updates here. The ticket keeps going; cancel it from the ticket itself.'
   };
   const dismiss = { id: 'dismiss', label: 'Dismiss' };
   const taskHref = operationTaskURL(slug, snapshot.task.task_id);
-  view.link = taskHref ? { href: taskHref, label: 'Open the task' } : null;
+  view.link = taskHref ? { href: taskHref, label: 'Open the ticket' } : null;
 
   if (state.phase === PHASE.ENDED) {
     // The request ended. The task is the workspace's own and is still there,
     // unless it is the task itself that is gone.
     const ended = lastReceipt(snapshot, ['continuation_ended']);
     if (ended && /no longer exists/.test(String(ended.reason || ''))) {
-      view.text = 'The task was deleted, so there is nothing left to follow.';
+      view.text = 'The ticket was deleted, so there is nothing left to follow.';
       view.link = null;
     } else if (snapshot.status === 'expired') {
-      view.text = `That request ran out of time. The task for ${agent} is still in ${workspace}.`;
+      view.text = `That request ran out of time. The ticket for ${agent} is still in ${workspace}.`;
     } else if (snapshot.status === 'invalidated') {
-      view.text = `That request is no longer valid. The task for ${agent} is still in ${workspace}.`;
+      view.text = `That request is no longer valid. The ticket for ${agent} is still in ${workspace}.`;
     }
     if (view.text) {
       view.tone = 'attention';
@@ -325,7 +327,7 @@ function committedTaskView(view, state) {
   }
   if (state.startUnconfirmed) {
     view.text =
-      'Ori could not be reached, so it is not known whether the task started. Check before starting it again.';
+      'Ori could not be reached, so it is not known whether the ticket started. Check before starting it again.';
     view.tone = 'attention';
     view.actions = [{ id: 'check', label: 'Check again', primary: true }, dismiss];
     return view;
@@ -334,20 +336,20 @@ function committedTaskView(view, state) {
   switch (snapshot.status) {
     case 'reviewed': {
       if (state.starting) {
-        view.text = `Asking Ori to start the task for ${agent}…`;
+        view.text = `Asking Ori to start the ticket for ${agent}…`;
         view.tone = 'working';
         return view;
       }
       const last = lastReceipt(snapshot, ['start_refused', 'start_accepted', 'task_created']);
       if (last && last.kind === 'start_refused') {
-        view.text = `The task for ${agent} was not started. ${sentence(last.reason)}`.trim();
+        view.text = `The ticket for ${agent} was not started. ${sentence(last.reason)}`.trim();
         view.tone = 'attention';
         view.actions = [{ id: 'start', label: 'Try starting again', primary: true }, dismiss];
         return view;
       }
-      view.text = `Task created for ${agent}: “${title}”. It has not started.`;
+      view.text = `Ticket created for ${agent}: “${title}”. It has not started.`;
       view.tone = 'done';
-      view.actions = [{ id: 'start', label: 'Start task', primary: true }, dismiss];
+      view.actions = [{ id: 'start', label: 'Start ticket', primary: true }, dismiss];
       return view;
     }
     case 'start_requested':
@@ -361,7 +363,7 @@ function committedTaskView(view, state) {
     case 'unresolved': {
       const why = lastReceipt(snapshot, ['start_unresolved']);
       view.text =
-        `Ori could not confirm that the task for ${agent} started. ${sentence(why && why.reason)} Nothing was started again.`.replace(
+        `Ori could not confirm that the ticket for ${agent} started. ${sentence(why && why.reason)} Nothing was started again.`.replace(
           /\s+/g,
           ' '
         );
@@ -395,23 +397,23 @@ function runningTaskView(view, state, { agent, title, stop }) {
   if (outcome && outcome.run === 'interrupted') {
     view.text =
       later > 0
-        ? `This request's run of “${title}” was interrupted before it finished. The task has run again since; that result belongs to the later run.`
-        : `The run of “${title}” was interrupted before it finished, and nothing was started again. Run it from the task when you are ready.`;
+        ? `This request's run of “${title}” was interrupted before it finished. The ticket has run again since; that result belongs to the later run.`
+        : `The run of “${title}” was interrupted before it finished, and nothing was started again. Run it from the ticket when you are ready.`;
     view.tone = 'attention';
     view.actions = [dismiss];
     return view;
   }
   if (outcome && later > 0) {
     if (outcome.run === 'succeeded' && outcome.result === 'history') {
-      view.text = `${agent} finished “${title}”. The task has run again since, so what it shows now is a later run's result. This request's result is in the task's run history.`;
+      view.text = `${agent} finished “${title}”. The ticket has run again since, so what it shows now is a later run's result. This request's result is in the ticket's run history.`;
     } else if (outcome.run === 'succeeded') {
-      view.text = `${agent} finished “${title}”. The task has run again since, and this request's own result is no longer kept.`;
+      view.text = `${agent} finished “${title}”. The ticket has run again since, and this request's own result is no longer kept.`;
     } else if (outcome.run === 'stopped') {
-      view.text = `This request's run of “${title}” stopped and asked for input. It was continued from the task, and the result there is from that later attempt.`;
+      view.text = `This request's run of “${title}” stopped and asked for input. It was continued from the ticket, and the result there is from that later attempt.`;
     } else if (outcome.run === 'unknown') {
-      view.text = `“${title}” has run again since, and the task no longer keeps this request's own run.`;
+      view.text = `“${title}” has run again since, and the ticket no longer keeps this request's own run.`;
     } else {
-      view.text = `This request's run of “${title}” did not finish. The task has run again since.`;
+      view.text = `This request's run of “${title}” did not finish. The ticket has run again since.`;
     }
     view.tone = 'quiet';
     view.actions = [dismiss];
@@ -437,7 +439,7 @@ function runningTaskView(view, state, { agent, title, stop }) {
       view.tone = 'attention';
       return view;
     case 'blocked':
-      view.text = `“${title}” is blocked. Open the task to see what it needs.`;
+      view.text = `“${title}” is blocked. Open the ticket to see what it needs.`;
       view.tone = 'attention';
       return view;
     case 'failed':
@@ -457,7 +459,7 @@ function runningTaskView(view, state, { agent, title, stop }) {
         // The server confirmed the task's present result is this run's.
         view.actions = [{ id: 'open_result', label: 'Open result', primary: true }, dismiss];
       } else if (outcome && outcome.result === 'gone') {
-        view.text += ' Its result is no longer kept on the task.';
+        view.text += ' Its result is no longer kept on the ticket.';
         view.tone = 'quiet';
       }
       return view;
@@ -468,17 +470,17 @@ function runningTaskView(view, state, { agent, title, stop }) {
       return view;
     case '':
       // The run was observed by the server; this tab has not read the task yet.
-      view.text = `The task for ${agent} started.`;
+      view.text = `The ticket for ${agent} started.`;
       view.tone = 'working';
       return view;
     case 'ready':
     case 'needs_assignment':
       // Started, and now waiting again without a result: not finished.
-      view.text = `“${title}” started and is waiting again. Open the task to see why.`;
+      view.text = `“${title}” started and is waiting again. Open the ticket to see why.`;
       view.tone = 'attention';
       return view;
     default:
-      view.text = `Ori cannot tell what state “${title}” is in. Open the task to check.`;
+      view.text = `Ori cannot tell what state “${title}” is in. Open the ticket to check.`;
       view.tone = 'quiet';
       return view;
   }
@@ -487,7 +489,7 @@ function runningTaskView(view, state, { agent, title, stop }) {
 const RECAP_SOURCE = Object.freeze({
   tab: 'Seen in this tab',
   ori: 'Recorded by Ori',
-  task: 'From the task'
+  task: 'From the ticket'
 });
 
 const OUTCOME_SENTENCE = Object.freeze({
@@ -498,7 +500,7 @@ const OUTCOME_SENTENCE = Object.freeze({
   failed: 'It failed.',
   cancelled: 'It was cancelled.',
   interrupted: 'It was interrupted before it finished.',
-  unknown: 'The task no longer keeps this run.'
+  unknown: 'The ticket no longer keeps this run.'
 });
 
 /**
@@ -536,13 +538,13 @@ export function operationRecap(state = {}) {
         add('tab', `${selected} was selected.`);
         break;
       case 'draft_opened':
-        add('tab', 'The draft was shown in the task form.');
+        add('tab', 'The draft was shown in the ticket form.');
         break;
       case 'target_unavailable':
         add('tab', `A step could not be shown here. ${reason}`);
         break;
       case 'task_created':
-        add('ori', 'You saved the form, and the task was created.');
+        add('ori', 'You saved the form, and the ticket was created.');
         break;
       case 'start_accepted':
         add('ori', 'You pressed Start, and it was accepted.');
@@ -554,7 +556,7 @@ export function operationRecap(state = {}) {
         add('ori', `A Start could not be confirmed. ${reason}`);
         break;
       case 'run_established':
-        add('task', 'The task reported that it had started.');
+        add('task', 'The run reported that it had started.');
         break;
       case 'continuation_ended':
         add('ori', `This request ended${receipt.ref ? ` (${receipt.ref})` : ''}.`);
@@ -567,7 +569,7 @@ export function operationRecap(state = {}) {
   if (outcome && OUTCOME_SENTENCE[outcome.run]) {
     const later = Number(outcome.later_runs || 0);
     const again =
-      later > 0 ? ` The task has run ${later === 1 ? 'once' : `${later} times`} more since.` : '';
+      later > 0 ? ` The ticket has run ${later === 1 ? 'once' : `${later} times`} more since.` : '';
     add('task', `${OUTCOME_SENTENCE[outcome.run]}${again}`);
   }
   // One line is the status line again, not a recap.
@@ -756,7 +758,9 @@ function mount() {
       // The form the user saved created the task; this only says so.
       note:
         state.note ||
-        (!snapshot && client.saved ? 'Task saved from the draft. It is in the workspace now.' : ''),
+        (!snapshot && client.saved
+          ? 'Ticket saved from the draft. It is in the workspace now.'
+          : ''),
       onWorkspace: Boolean(
         snapshot &&
         snapshot.context &&
@@ -892,7 +896,7 @@ function mount() {
       // The user asked to see it. The result view takes focus as its own
       // dialog does; nothing is reported and nothing is changed.
       if (client.openResult() === 'unavailable') {
-        state.note = 'The result could not be opened here. Open the task to see it.';
+        state.note = 'The result could not be opened here. Open the ticket to see it.';
         render();
       }
     }
@@ -900,9 +904,9 @@ function mount() {
       void client.openDraft().then(outcome => {
         // The user's own edits are never replaced by reopening the proposal.
         if (outcome === 'kept') {
-          state.note = 'The task form is open with your changes. Nothing was replaced.';
+          state.note = 'The ticket form is open with your changes. Nothing was replaced.';
         } else if (outcome === 'unavailable') {
-          state.note = 'The task form could not be opened here.';
+          state.note = 'The ticket form could not be opened here.';
         }
         render();
       });

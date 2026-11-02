@@ -98,10 +98,10 @@
     },
     general_task: {
       key: 'general_task',
-      label: 'general task',
+      label: 'general work',
       keywords: [],
       preferredPlugins: [],
-      suggestedName: 'Task Specialist',
+      suggestedName: 'General Specialist',
       tags: ['tasks', 'assistant']
     },
     app_introspection: {
@@ -1445,7 +1445,7 @@
       return;
     }
     if (hasVisibleHomeAssistantInlineReply()) {
-      els.thinkingModalLabel.textContent = label + ' has a planning subtask ready';
+      els.thinkingModalLabel.textContent = label + ' has a planning subticket ready';
       return;
     }
     if (
@@ -1520,7 +1520,7 @@
           'Full transcript, progress notes, and manager replies appear here.';
       } else {
         els.conversationSummary.textContent =
-          'Progress updates will appear here after you send a task.';
+          'Progress updates will appear here after you send a request.';
       }
     }
   }
@@ -1587,7 +1587,7 @@
     } else if (hasVisibleHomeAssistantActions()) {
       statusText = 'Review the latest manager update, open full chat, or dismiss this window.';
     } else {
-      statusText = 'Ready for your next task.';
+      statusText = 'Ready for your next request.';
     }
 
     var textNode = els.thinkingStatus.querySelector('span:last-child');
@@ -1662,7 +1662,7 @@
             : 'Work activity'
           : homeAssistantState.busy
             ? 'Live Activity'
-            : 'Task Activity';
+            : 'Work Activity';
     }
 
     var workStatus = document.getElementById('personalAssistantWorkStatus');
@@ -1758,7 +1758,7 @@
     var normalized = normalizeWorkspacePromptMode(mode);
     if (normalized === 'ask') return 'Ask';
     if (normalized === 'note') return 'Save Note';
-    return 'Create Task';
+    return 'Create Ticket';
   }
 
   // The send button used to wrap its text in a .hub-support-chat-send-label
@@ -1812,14 +1812,14 @@
     if (routeContext.surface === 'workspace_canvas') {
       if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace canvas…';
       if (workspaceMode === 'note') return 'Save a note on this workspace canvas…';
-      return 'Create a task for ' + displayName + ' from this canvas…';
+      return 'Create a ticket for ' + displayName + ' from this canvas…';
     }
     if (hasWorkspaceRouteContext(routeContext)) {
       if (workspaceMode === 'ask')
-        return 'Ask ' + displayName + ' about this workspace… (/task creates a task)';
+        return 'Ask ' + displayName + ' about this workspace… (/task creates a ticket)';
       if (workspaceMode === 'note')
-        return 'Save a workspace note… (/task creates a task, /ask asks)';
-      return 'Create a task for ' + displayName + '… (/ask asks, /note saves a note)';
+        return 'Save a workspace note… (/task creates a ticket, /ask asks)';
+      return 'Create a ticket for ' + displayName + '… (/ask asks, /note saves a note)';
     }
     return document.querySelector('#homeAssistantCard[data-first-run="true"]')
       ? 'Plan a product launch…'
@@ -2520,10 +2520,10 @@
       .trim();
 
     if (!normalized) {
-      normalized = String(fallbackTitle || 'Planning task').trim();
+      normalized = String(fallbackTitle || 'Planning ticket').trim();
     }
     if (!normalized) {
-      normalized = 'Planning task';
+      normalized = 'Planning ticket';
     }
 
     return truncateText(normalized.charAt(0).toUpperCase() + normalized.slice(1), 140);
@@ -2554,7 +2554,7 @@
 
   // eslint-disable-next-line no-unused-vars
   function buildPlanningReviewTaskDescription(planningState) {
-    if (!planningState) return 'Planning task';
+    if (!planningState) return 'Planning ticket';
     return buildPlanningTaskDescriptionFromPrompt(
       planningState.prompt,
       planningState.schema && planningState.schema.title
@@ -2773,13 +2773,13 @@
       ? String(routeContext.workspace_id || '').trim()
       : '';
     if (!workspaceId) {
-      throw new Error('Workspace context is required to create the planning task');
+      throw new Error('Workspace context is required to create the planning ticket');
     }
 
     var response = await createWorkspaceTaskRecord(workspaceId, {
       description: buildPlanningTaskDescriptionFromPrompt(
         prompt,
-        options && options.fallbackTitle ? options.fallbackTitle : 'Planning task'
+        options && options.fallbackTitle ? options.fallbackTitle : 'Planning ticket'
       ),
       details: buildPlanningTaskDetails(
         prompt,
@@ -2791,7 +2791,7 @@
     var createdTask = response && response.task ? response.task : response;
     var normalizedTask = normalizeCreatedPlanningTask(createdTask);
     if (!normalizedTask || !normalizedTask.id) {
-      throw new Error('Failed to create the main workspace task');
+      throw new Error('Failed to create the main workspace ticket');
     }
 
     syncCreatedTaskIntoWorkspaceDetail(normalizedTask);
@@ -2967,7 +2967,7 @@
     sections.push(
       [
         'Workspace manager handoff:',
-        normalizedManager + ' routed this workspace task to ' + normalizedAgent + '.'
+        normalizedManager + ' routed this workspace ticket to ' + normalizedAgent + '.'
       ].join('\n')
     );
 
@@ -2997,7 +2997,7 @@
     var prefix = String((config && (config.taskTitle || config.label)) || '').trim();
     var base = buildPlanningTaskDescriptionFromPrompt(
       planningState && planningState.prompt,
-      prefix || (config && config.label) || 'Specialist task'
+      prefix || (config && config.label) || 'Specialist ticket'
     );
     if (!prefix) return base;
     if (normalizeToken(base).indexOf(normalizeToken(prefix)) === 0) {
@@ -3018,7 +3018,7 @@
     sections.push(
       [
         'Workspace manager handoff:',
-        managerLabel + ' handed this travel-planning task to ' + assignee + '.'
+        managerLabel + ' handed this travel-planning ticket to ' + assignee + '.'
       ].join('\n')
     );
 
@@ -3072,7 +3072,7 @@
   async function fetchWorkspaceTaskRecord(taskId) {
     var normalizedTaskId = String(taskId || '').trim();
     if (!normalizedTaskId) {
-      throw new Error('Task ID is required');
+      throw new Error('Ticket ID is required');
     }
 
     if (typeof API !== 'undefined' && typeof API.get === 'function') {
@@ -3089,7 +3089,7 @@
       } catch (_error) {
         text = '';
       }
-      throw new Error(text || 'Failed to load task');
+      throw new Error(text || 'Failed to load ticket');
     }
     return await response.json();
   }
@@ -3109,7 +3109,7 @@
 
     if (planningState && planningState.specialistBusy === specialistKey) {
       if (status && status.taskId) {
-        return 'Opening ' + config.label + ' Task…';
+        return 'Opening ' + config.label + ' Ticket…';
       }
       if (status && status.agentName) {
         return 'Handing Off To ' + status.agentName + '…';
@@ -3118,7 +3118,7 @@
     }
 
     if (status && status.taskId) {
-      return 'Open ' + config.label + ' Task';
+      return 'Open ' + config.label + ' Ticket';
     }
     if (status && status.agentName) {
       return 'Handoff To ' + status.agentName;
@@ -3174,7 +3174,7 @@
     agentName
   ) {
     if (!planningState || !mainTask || !mainTask.id || !config || !agentName) {
-      throw new Error('Missing specialist task context');
+      throw new Error('Missing specialist ticket context');
     }
 
     var existingTask = await findPlanningSpecialistTask(planningState, specialistKey, agentName);
@@ -3209,7 +3209,7 @@
     var createdTask =
       createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
     if (!createdTask || !createdTask.id) {
-      throw new Error('Failed to create the specialist task');
+      throw new Error('Failed to create the specialist ticket');
     }
 
     syncCreatedTaskIntoWorkspaceDetail(createdTask);
@@ -3239,7 +3239,7 @@
 
   async function openPlanningSpecialistTask(task, routeContext) {
     if (!task || !task.id) {
-      throw new Error('Specialist task is missing');
+      throw new Error('Specialist ticket is missing');
     }
 
     var latestTask = task;
@@ -3387,11 +3387,11 @@
         (existingAgent ? 'Added ' : 'Created and added ') +
           '"' +
           agentName +
-          '" to this workspace, then handed off a specialist task.'
+          '" to this workspace, then handed off a specialist ticket.'
       );
       setHomeAssistantRoutingSummary(
         config.label,
-        '"' + agentName + '" is handling a workspace task now.'
+        '"' + agentName + '" is handling a workspace ticket now.'
       );
       await openPlanningSpecialistTask(specialistTask, planningState.routeContext);
       clearHomeAssistantTaskLaunchState();
@@ -3406,7 +3406,7 @@
       );
       setHomeAssistantRoutingSummary(
         config.label,
-        'Could not create the specialist handoff task right now.'
+        'Could not create the specialist handoff ticket right now.'
       );
     } finally {
       planningState.specialistBusy = '';
@@ -3426,29 +3426,29 @@
       if (!planningState.mainTask || !planningState.mainTask.id) {
         planningState.mainTaskCreating = true;
         renderHomeAssistantPlanning();
-        setHomeAssistantBusy(true, 'Adding Main Task…');
+        setHomeAssistantBusy(true, 'Adding Main Ticket…');
         setHomeAssistantRoutingSummary(
           'Planning Review',
-          'Adding the main task to this workspace before the planning subtasks continue.'
+          'Adding the main ticket to this workspace before the planning subtickets continue.'
         );
 
         var createdTask = await ensurePlanningReviewMainTask(planningState);
         if (createdTask && createdTask.description) {
           appendHomeAssistantMessage(
             'assistant',
-            'Added main workspace task "' + createdTask.description + '".'
+            'Added main workspace ticket "' + createdTask.description + '".'
           );
         }
       }
 
       planningState.mainTaskCreating = false;
       renderHomeAssistantPlanning();
-      setHomeAssistantBusy(true, 'Starting Task…');
+      setHomeAssistantBusy(true, 'Starting Ticket…');
       setHomeAssistantRoutingSummary(
         planningState.agentLabel,
         isTravelPlanningReviewState(planningState)
-          ? 'Starting the workspace task with the workspace manager using the reviewed intake summary.'
-          : 'Starting the workspace task using the reviewed intake summary.'
+          ? 'Starting the workspace ticket with the workspace manager using the reviewed intake summary.'
+          : 'Starting the workspace ticket using the reviewed intake summary.'
       );
 
       var preparedTask = await preparePlanningReviewMainTaskForExecution(planningState);
@@ -3458,19 +3458,22 @@
       dashLog.debug('Planning review handoff failed', { error: (error && error.message) || error });
       planningState.mainTaskCreating = false;
       if (planningState.mainTask && planningState.mainTask.id) {
-        appendHomeAssistantMessage('assistant', 'I could not start the workspace task right now.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'I could not start the workspace ticket right now.'
+        );
         setHomeAssistantRoutingSummary(
           'Planning Review',
-          'Could not start the workspace task right now.'
+          'Could not start the workspace ticket right now.'
         );
       } else {
         appendHomeAssistantMessage(
           'assistant',
-          'I could not add the main workspace task right now.'
+          'I could not add the main workspace ticket right now.'
         );
         setHomeAssistantRoutingSummary(
           'Planning Review',
-          'Could not add the main workspace task right now.'
+          'Could not add the main workspace ticket right now.'
         );
       }
     } finally {
@@ -3808,12 +3811,12 @@
         reviewSubtitle.textContent =
           planningState.mainTask && planningState.mainTask.description
             ? 'Review the intake summary, then add the right specialist to the workspace. Keep it with the workspace manager only if you want a lightweight follow-up.'
-            : 'Review the intake summary, then add the right specialist to the workspace. The main task will be added before specialist work begins.';
+            : 'Review the intake summary, then add the right specialist to the workspace. The main ticket will be added before specialist work begins.';
       } else {
         reviewSubtitle.textContent =
           planningState.mainTask && planningState.mainTask.description
-            ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
-            : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
+            ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main ticket is already in the workspace.'
+            : 'Review the summary, save it to a note if you want, and continue when you are ready. The main ticket will be added to the workspace before subtickets begin.';
       }
       reviewCard.appendChild(reviewSubtitle);
 
@@ -3833,7 +3836,7 @@
         var taskStatus = document.createElement('div');
         taskStatus.className = 'home-assistant-planning-help';
         taskStatus.textContent =
-          'Added main workspace task "' + planningState.mainTask.description + '".';
+          'Added main workspace ticket "' + planningState.mainTask.description + '".';
         reviewCard.appendChild(taskStatus);
       }
 
@@ -3861,12 +3864,12 @@
         : 'modern-btn modern-btn-primary';
       continueButton.disabled = isReviewBusy;
       continueButton.textContent = planningState.mainTaskCreating
-        ? 'Adding Main Task…'
+        ? 'Adding Main Ticket…'
         : planningState.continuing
           ? 'Continuing…'
           : specialistFirstReview
-            ? 'Keep Task With ' + planningState.agentLabel
-            : 'Start Task With ' + planningState.agentLabel;
+            ? 'Keep Ticket With ' + planningState.agentLabel
+            : 'Start Ticket With ' + planningState.agentLabel;
       continueButton.addEventListener('click', function () {
         continuePlanningReviewWithManager();
       });
@@ -3877,8 +3880,8 @@
       specialistHelp.className = 'home-assistant-planning-help';
       specialistHelp.style.marginTop = '0.35rem';
       specialistHelp.textContent = specialistFirstReview
-        ? 'Recommended: hand off full planning to a specialist task now. Use the workspace manager only for lighter follow-ups.'
-        : 'Create specialist tasks now, or open an existing specialist task.';
+        ? 'Recommended: hand off full planning to a specialist ticket now. Use the workspace manager only for lighter follow-ups.'
+        : 'Create specialist tickets now, or open an existing specialist ticket.';
       reviewCard.appendChild(specialistHelp);
 
       var specialistActions = document.createElement('div');
@@ -3911,7 +3914,7 @@
       askAnotherButton.type = 'button';
       askAnotherButton.className = 'modern-btn modern-btn-secondary';
       askAnotherButton.disabled = isReviewBusy;
-      askAnotherButton.textContent = 'Ask Another Task';
+      askAnotherButton.textContent = 'Ask Something Else';
       askAnotherButton.addEventListener('click', function () {
         focusHomeAssistantInput();
       });
@@ -4143,7 +4146,7 @@
     var resetButton = document.createElement('button');
     resetButton.type = 'button';
     resetButton.className = 'modern-btn modern-btn-secondary';
-    resetButton.textContent = 'Ask Another Task';
+    resetButton.textContent = 'Ask Something Else';
     resetButton.disabled = isSubmitting;
     resetButton.addEventListener('click', function () {
       focusHomeAssistantInput();
@@ -4215,7 +4218,7 @@
 
     var header = document.createElement('div');
     header.className = 'home-assistant-inline-reply-header';
-    header.textContent = 'Planning Subtask';
+    header.textContent = 'Planning Subticket';
     card.appendChild(header);
 
     var meta = document.createElement('div');
@@ -4238,7 +4241,7 @@
     planChip.className = 'home-assistant-inline-reply-chip';
     planChip.textContent =
       replyState.linkedTask && replyState.linkedTask.id
-        ? 'Main task added'
+        ? 'Main ticket added'
         : 'Linked to workspace plan';
     meta.appendChild(planChip);
     card.appendChild(meta);
@@ -4246,7 +4249,7 @@
     if (replyState.linkedTask && replyState.linkedTask.description) {
       var linkedTaskMeta = document.createElement('div');
       linkedTaskMeta.className = 'home-assistant-inline-reply-preview-meta';
-      linkedTaskMeta.textContent = 'Main workspace task: ' + replyState.linkedTask.description;
+      linkedTaskMeta.textContent = 'Main workspace ticket: ' + replyState.linkedTask.description;
       card.appendChild(linkedTaskMeta);
     }
 
@@ -4255,7 +4258,7 @@
     title.textContent =
       choiceStep && String(choiceStep.title || '').trim()
         ? String(choiceStep.title || '').trim()
-        : 'Review the current plan, then complete this subtask.';
+        : 'Review the current plan, then complete this subticket.';
     card.appendChild(title);
 
     if (replyState.latestReplyText) {
@@ -4287,7 +4290,7 @@
 
       var choicePromptsTitle = document.createElement('div');
       choicePromptsTitle.className = 'home-assistant-inline-reply-prompts-title';
-      choicePromptsTitle.textContent = 'Complete This Subtask';
+      choicePromptsTitle.textContent = 'Complete This Subticket';
       choicePrompts.appendChild(choicePromptsTitle);
 
       var choicePromptsBody = document.createElement('div');
@@ -4305,7 +4308,7 @@
 
       var promptsTitle = document.createElement('div');
       promptsTitle.className = 'home-assistant-inline-reply-prompts-title';
-      promptsTitle.textContent = 'Complete This Subtask';
+      promptsTitle.textContent = 'Complete This Subticket';
       prompts.appendChild(promptsTitle);
 
       var promptsList = document.createElement('ul');
@@ -4324,10 +4327,10 @@
     var copy = document.createElement('div');
     copy.className = 'home-assistant-inline-reply-copy';
     copy.textContent = choiceStep
-      ? 'Choose one option to move the workspace plan forward. Open full chat instead if this subtask needs more explanation.'
+      ? 'Choose one option to move the workspace plan forward. Open full chat instead if this subticket needs more explanation.'
       : replyState.questionPrompts && replyState.questionPrompts.length > 0
         ? 'Answer the open planning questions below, or move this to full chat if you want a longer back-and-forth.'
-        : 'Complete this subtask below, or move this to full chat if the plan needs a longer back-and-forth.';
+        : 'Complete this subticket below, or move this to full chat if the plan needs a longer back-and-forth.';
     card.appendChild(copy);
 
     var form = document.createElement('form');
@@ -4384,7 +4387,7 @@
       var label = document.createElement('label');
       label.className = 'home-assistant-inline-reply-input-label';
       label.setAttribute('for', 'homeAssistantInlineReplyMessage');
-      label.textContent = choiceStep ? 'Optional Planning Note' : 'Subtask Response';
+      label.textContent = choiceStep ? 'Optional Planning Note' : 'Subticket Response';
       form.appendChild(label);
 
       var textarea = document.createElement('textarea');
@@ -4413,8 +4416,8 @@
     sendButton.textContent = isSubmitting
       ? 'Sending…'
       : choiceStep
-        ? 'Complete Subtask'
-        : 'Submit Subtask';
+        ? 'Complete Subticket'
+        : 'Submit Subticket';
     actions.appendChild(sendButton);
 
     var openChatButton = document.createElement('button');
@@ -6546,7 +6549,7 @@
         }
       },
       {
-        label: 'Ask Another Task',
+        label: 'Ask Something Else',
         variant: 'secondary',
         onClick: function () {
           focusHomeAssistantInput();
@@ -6574,7 +6577,7 @@
 
     appendHomeAssistantMessage(
       'assistant',
-      'Before handoff, select an email connector or browser-control connector so this task can access your inbox.'
+      'Before handoff, select an email connector or browser-control connector so this request can access your inbox.'
     );
     setHomeAssistantRoutingSummary(
       'Email MCP Required',
@@ -6632,7 +6635,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -6652,7 +6655,7 @@
     }
     setHomeAssistantRoutingSummary(
       'Waiting for MCP Selection',
-      'Email task is paused until MCP setup is completed.'
+      'Email request is paused until MCP setup is completed.'
     );
     return { continueHandoff: false };
   }
@@ -6696,7 +6699,7 @@
         message:
           'MCP connector "' +
           existing.name +
-          '" matches this task but is not enabled in this workspace.'
+          '" matches this request but is not enabled in this workspace.'
       };
     }
 
@@ -6715,7 +6718,7 @@
           return {
             status: 'not_found',
             message:
-              'This task may need MCP (' +
+              'This request may need MCP (' +
               requirement.label +
               '), but no matching connector is currently configured.'
           };
@@ -6843,12 +6846,15 @@
     var workspaceSignals = [
       'workspace schedule',
       'scheduled task',
+      'scheduled ticket',
       'scheduled tasks',
+      'scheduled tickets',
       'scheduler',
       'next run',
       'cron',
       'run today in this workspace',
-      'workspace tasks'
+      'workspace tasks',
+      'workspace tickets'
     ];
     var personalSignals = [
       'my calendar',
@@ -6938,7 +6944,7 @@
 
     if (plan.classification === 'solvable_now') {
       if (plan.executionMode === 'workspace_schedule') {
-        return 'I can check the scheduled tasks in this workspace directly.';
+        return 'I can check the scheduled tickets in this workspace directly.';
       }
       return 'This request is already solvable with the current capabilities.';
     }
@@ -6946,7 +6952,7 @@
       return plan.summary || 'This needs manual connector setup before I can continue.';
     }
     if (plan.classification === 'implementation_request') {
-      return 'This looks like product work rather than an executable task. I can create a workspace to implement it.';
+      return 'This looks like product work rather than something I can run directly. I can create a workspace to implement it.';
     }
     if (plan.classification === 'reusable_feature_gap') {
       return 'I can’t satisfy this with the current capabilities, but I can create a workspace to implement support for it.';
@@ -7046,7 +7052,7 @@
           intentVariant: intentVariant,
           actions: [{ type: 'pause_for_user_choice' }],
           summary:
-            'This could mean your personal calendar or the scheduled tasks in this workspace.',
+            'This could mean your personal calendar or the scheduled tickets in this workspace.',
           gaps: [],
           requirement: findCapabilityRequirementByKey('calendar_access')
         };
@@ -7062,8 +7068,8 @@
           executionMode: hasWorkspaceRouteContext(routeContext) ? 'workspace_schedule' : '',
           actions: [],
           summary: hasWorkspaceRouteContext(routeContext)
-            ? 'I can inspect the scheduled tasks in this workspace directly.'
-            : 'I need you to choose or open a workspace before I can inspect scheduled tasks.',
+            ? 'I can inspect the scheduled tickets in this workspace directly.'
+            : 'I need you to choose or open a workspace before I can inspect scheduled tickets.',
           gaps: hasWorkspaceRouteContext(routeContext)
             ? []
             : ['No workspace context is available for the requested scheduled-task lookup.'],
@@ -7082,7 +7088,7 @@
         intentVariant: intentVariant,
         requirement: null,
         actions: [{ type: 'offer_workspace' }],
-        summary: 'This looks like implementation work rather than an executable task.',
+        summary: 'This looks like implementation work rather than something I can run directly.',
         gaps: ['No existing capability requirement matches this request.']
       };
       implementationPlan.brief = buildCapabilityImplementationBrief(implementationPlan, prompt);
@@ -7137,7 +7143,7 @@
       plan.actions.push({
         type: 'create_agent',
         desiredAgentName:
-          requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Specialist'
+          requirement.defaultAgentName || (intent && intent.suggestedName) || 'General Specialist'
       });
       plan.gaps.push('No existing agent is a strong match for ' + requirement.label + '.');
       if (repoScopedSkill) {
@@ -7284,7 +7290,7 @@
     var seedName =
       requirement && requirement.defaultAgentName
         ? requirement.defaultAgentName
-        : (intent && intent.suggestedName) || 'Task Specialist';
+        : (intent && intent.suggestedName) || 'General Specialist';
     var description = buildAutoConfigDescription(prompt, intent || HOME_INTENTS.general_task);
     var autoConfig = await maybeLoadAutoConfig(description);
     var agentName = buildUniqueAgentName(
@@ -7460,7 +7466,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -7601,7 +7607,7 @@
     if (plan.actions.length > 0 && plan.actions[0].type === 'pause_for_user_choice') {
       appendHomeAssistantMessage(
         'assistant',
-        plan.summary || 'Do you mean your personal calendar or scheduled tasks in this workspace?'
+        plan.summary || 'Do you mean your personal calendar or scheduled tickets in this workspace?'
       );
       setHomeAssistantRoutingSummary(
         'Schedule Choice',
@@ -7637,7 +7643,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -7676,7 +7682,7 @@
       if (plan.intentVariant === 'workspace_schedule' && !hasWorkspaceRouteContext(routeContext)) {
         appendHomeAssistantMessage(
           'assistant',
-          plan.summary || 'I need a workspace before I can inspect scheduled tasks.'
+          plan.summary || 'I need a workspace before I can inspect scheduled tickets.'
         );
         setHomeAssistantRoutingSummary(
           'Workspace Needed',
@@ -7691,7 +7697,7 @@
             }
           },
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -7909,10 +7915,10 @@
   }
 
   function buildUniqueAgentName(baseName, existingNames) {
-    var sanitized = String(baseName || 'Task Specialist')
+    var sanitized = String(baseName || 'General Specialist')
       .replace(/[^a-zA-Z0-9 _-]/g, '')
       .trim();
-    if (!sanitized) sanitized = 'Task Specialist';
+    if (!sanitized) sanitized = 'General Specialist';
     var lowerNames = Object.create(null);
     for (var i = 0; i < existingNames.length; i++) {
       lowerNames[normalizeToken(existingNames[i])] = true;
@@ -8351,7 +8357,7 @@
               fallbackTitle:
                 workflowStep && String(workflowStep.title || '').trim()
                   ? String(workflowStep.title || '').trim()
-                  : 'Planning task'
+                  : 'Planning ticket'
             }
           );
           if (createdInlineTask && homeAssistantState.inlineReplyState === inlineReplyState) {
@@ -8359,7 +8365,7 @@
             renderHomeAssistantInlineReply();
           }
         } catch (taskError) {
-          dashLog.debug('Failed to create inline planning task', {
+          dashLog.debug('Failed to create inline planning ticket', {
             error: (taskError && taskError.message) || taskError
           });
         }
@@ -8368,7 +8374,7 @@
         try {
           taskAssistHandoffTask = await persistPlanningSubtaskToTask(inlineReplyState);
         } catch (taskContextError) {
-          dashLog.debug('Failed to persist planning subtask onto task', {
+          dashLog.debug('Failed to persist planning subticket onto ticket', {
             error: (taskContextError && taskContextError.message) || taskContextError
           });
         }
@@ -8382,11 +8388,11 @@
       setHomeAssistantRoutingSummary(
         entryLabel,
         hasChoiceStep
-          ? 'The workspace manager created a planning subtask for this workspace. Complete it below, or open full chat.'
+          ? 'The workspace manager created a planning subticket for this workspace. Complete it below, or open full chat.'
           : inlineReplyState
             ? assistantSessionResult.reused
-              ? 'The manager needs one more planning answer. Review the subtask below, or open full chat.'
-              : 'The workspace manager replied inline. Review the planning subtask below, or open full chat.'
+              ? 'The manager needs one more planning answer. Review the subticket below, or open full chat.'
+              : 'The workspace manager replied inline. Review the planning subticket below, or open full chat.'
             : assistantSessionResult.reused
               ? 'The workspace manager updated the workspace. Review the latest update below, or open full chat if you want to continue.'
               : 'The workspace manager replied with an update. Review the latest result below, or open full chat if you want to continue.'
@@ -8416,7 +8422,7 @@
       });
     }
     workspaceActions.push({
-      label: 'Ask Another Task',
+      label: 'Ask Something Else',
       variant: 'secondary',
       onClick: function () {
         focusHomeAssistantInput();
@@ -8704,14 +8710,14 @@
     appendHomeAssistantMessage(
       'assistant',
       candidates.length > 0
-        ? 'I found more than one workspace that may fit this task. Choose where Ori should continue.'
-        : 'I do not see another existing workspace that clearly fits this task.'
+        ? 'I found more than one workspace that may fit this request. Choose where Ori should continue.'
+        : 'I do not see another existing workspace that clearly fits this request.'
     );
     setHomeAssistantRoutingSummary(
       'Choose Workspace',
       candidates.length > 0
         ? 'Several workspaces look relevant. Select the one that owns this request.'
-        : 'No alternate workspace matched strongly enough. Create a new one or ask another task.'
+        : 'No alternate workspace matched strongly enough. Create a new one or ask something else.'
     );
 
     var actions = candidates.map(function (candidate) {
@@ -8744,7 +8750,7 @@
       }
     });
     actions.push({
-      label: 'Ask Another Task',
+      label: 'Ask Something Else',
       variant: 'secondary',
       onClick: function () {
         focusHomeAssistantInput();
@@ -8757,7 +8763,7 @@
   function renderWorkspaceNoFitState(prompt, routeContext, routeData) {
     appendHomeAssistantMessage(
       'assistant',
-      'I could not find an existing workspace that clearly owns this task.'
+      'I could not find an existing workspace that clearly owns this request.'
     );
     setHomeAssistantRoutingSummary(
       'Workspace Needed',
@@ -8799,7 +8805,7 @@
       }
     });
     actions.push({
-      label: 'Ask Another Task',
+      label: 'Ask Something Else',
       variant: 'secondary',
       onClick: function () {
         focusHomeAssistantInput();
@@ -8821,7 +8827,7 @@
       'Commander Required',
       '"' +
         workspaceName +
-        '" matched this task but needs workspace setup before Ori can continue.',
+        '" matched this request but needs workspace setup before Ori can continue.',
       {
         detail: reason
       }
@@ -8858,7 +8864,7 @@
         }
       },
       {
-        label: 'Ask Another Task',
+        label: 'Ask Something Else',
         variant: 'secondary',
         onClick: function () {
           focusHomeAssistantInput();
@@ -9246,9 +9252,9 @@
   function getHomeAssistantLLMRequirementMessage(availability) {
     var systemModelConfigured = Boolean(availability && availability.system_model_configured);
     if (!systemModelConfigured) {
-      return 'No suitable agent is configured for this task, and a Default model must be configured before I can create one. Open Settings to configure it.';
+      return 'No suitable agent is configured for this request, and a Default model must be configured before I can create one. Open Settings to configure it.';
     }
-    return 'No suitable agent is configured for this task, and no LLM provider is available right now. Open Settings to configure a provider or model.';
+    return 'No suitable agent is configured for this request, and no LLM provider is available right now. Open Settings to configure a provider or model.';
   }
 
   async function createAgentForPendingTask() {
@@ -9272,7 +9278,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -9287,8 +9293,8 @@
 
     setHomeAssistantBusy(true, 'Creating…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Creating a new agent for this task…');
-    setHomeAssistantRoutingSummary('Agent Creation', 'Creating a new agent for this task…');
+    appendHomeAssistantMessage('assistant', 'Creating a new agent for this request…');
+    setHomeAssistantRoutingSummary('Agent Creation', 'Creating a new agent for this request…');
 
     try {
       var listData = await API.get('/api/agents');
@@ -9367,7 +9373,7 @@
               }
             },
             {
-              label: 'Ask Another Task',
+              label: 'Ask Something Else',
               variant: 'secondary',
               onClick: function () {
                 focusHomeAssistantInput();
@@ -9412,7 +9418,7 @@
               }
             },
             {
-              label: 'Ask Another Task',
+              label: 'Ask Something Else',
               variant: 'secondary',
               onClick: function () {
                 focusHomeAssistantInput();
@@ -9475,7 +9481,7 @@
       if (isSemiAutoMode()) {
         appendHomeAssistantMessage(
           'assistant',
-          'Agent is ready. Handing off this task to chat now.'
+          'Agent is ready. Handing off this request to chat now.'
         );
         setHomeAssistantRoutingSummary(
           'Semi-auto',
@@ -9598,7 +9604,7 @@
         }
       },
       {
-        label: 'Ask Another Task',
+        label: 'Ask Something Else',
         variant: 'secondary',
         onClick: function () {
           focusHomeAssistantInput();
@@ -10038,7 +10044,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -10087,7 +10093,7 @@
   }
 
   function formatWorkspaceScheduleTask(task) {
-    if (!task || typeof task !== 'object') return 'Scheduled task';
+    if (!task || typeof task !== 'object') return 'Scheduled ticket';
     if (task.schedule_summary) return String(task.schedule_summary);
     if (task.schedule_expression) return String(task.schedule_expression);
     if (task.schedule_name) return String(task.schedule_name);
@@ -10116,7 +10122,7 @@
     if (!workspaceId) {
       appendHomeAssistantMessage(
         'assistant',
-        'I need a workspace before I can inspect scheduled tasks.'
+        'I need a workspace before I can inspect scheduled tickets.'
       );
       setHomeAssistantRoutingSummary(
         'Workspace Needed',
@@ -10131,7 +10137,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -10143,10 +10149,10 @@
 
     setHomeAssistantBusy(true, 'Checking Workspace Schedule…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Checking scheduled tasks in the current workspace.');
+    appendHomeAssistantMessage('assistant', 'Checking scheduled tickets in the current workspace.');
     setHomeAssistantRoutingSummary(
       'Workspace Schedule',
-      'Loading scheduled tasks for this workspace.'
+      'Loading scheduled tickets for this workspace.'
     );
 
     try {
@@ -10177,9 +10183,9 @@
       if (scheduledTasks.length === 0) {
         appendHomeAssistantMessage(
           'assistant',
-          'This workspace does not have any scheduled tasks yet.'
+          'This workspace does not have any scheduled tickets yet.'
         );
-        setHomeAssistantRoutingSummary('Workspace Schedule', 'No scheduled tasks found.');
+        setHomeAssistantRoutingSummary('Workspace Schedule', 'No scheduled tickets found.');
         renderHomeAssistantActions([
           {
             label: 'Open Workspace',
@@ -10191,7 +10197,7 @@
             }
           },
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -10205,14 +10211,14 @@
         return Boolean(task && task.schedule_enabled);
       }).length;
       var lines = [
-        'Scheduled tasks in this workspace: ' + scheduledTasks.length,
+        'Scheduled tickets in this workspace: ' + scheduledTasks.length,
         'Enabled schedules: ' + enabledCount,
         ''
       ];
       for (var i = 0; i < scheduledTasks.length && i < 5; i++) {
         var task = scheduledTasks[i];
         var description = String(
-          (task && (task.description || task.name || task.id)) || 'Untitled task'
+          (task && (task.description || task.name || task.id)) || 'Untitled ticket'
         ).trim();
         lines.push(
           i +
@@ -10228,12 +10234,12 @@
       if (scheduledTasks.length > 5) {
         lines.push('');
         lines.push(
-          scheduledTasks.length - 5 + ' more scheduled task(s) available in the workspace.'
+          scheduledTasks.length - 5 + ' more scheduled ticket(s) available in the workspace.'
         );
       }
 
       appendHomeAssistantMessage('assistant', lines.join('\n'));
-      setHomeAssistantRoutingSummary('Workspace Schedule', 'Scheduled task summary is ready.');
+      setHomeAssistantRoutingSummary('Workspace Schedule', 'Scheduled ticket summary is ready.');
       renderHomeAssistantActions([
         {
           label: 'Open Workspace',
@@ -10256,7 +10262,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -10270,11 +10276,11 @@
       });
       appendHomeAssistantMessage(
         'assistant',
-        'I could not load scheduled tasks for this workspace right now.'
+        'I could not load scheduled tickets for this workspace right now.'
       );
       setHomeAssistantRoutingSummary(
         'Workspace Schedule Failed',
-        'Could not load scheduled tasks.'
+        'Could not load scheduled tickets.'
       );
       renderHomeAssistantActions([
         {
@@ -10341,7 +10347,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -10369,7 +10375,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -10490,7 +10496,7 @@
         ? 'Applying your confirmed action…'
         : isConversation
           ? 'Writing a reply…'
-          : 'Reviewing your workspaces, tasks, and activity…'
+          : 'Reviewing your workspaces, tickets, and activity…'
     );
 
     try {
@@ -10858,7 +10864,7 @@
       // "ask another task" prompt after every reply.
       if (!isConversation) {
         buttons.push({
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -10905,7 +10911,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -11278,7 +11284,7 @@
           setHomeAssistantRoutingSummary('Cancelled', 'No changes made.');
           renderHomeAssistantActions([
             {
-              label: 'Ask Another Task',
+              label: 'Ask Something Else',
               variant: 'secondary',
               onClick: function () {
                 focusHomeAssistantInput();
@@ -11586,7 +11592,7 @@
   }
 
   function buildScheduleNameFromConfig(schedule) {
-    if (!schedule || typeof schedule !== 'object') return 'Scheduled Task';
+    if (!schedule || typeof schedule !== 'object') return 'Scheduled Ticket';
     var type = normalizeToken(schedule.type);
     var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -11630,7 +11636,7 @@
       return 'One-time schedule';
     }
 
-    return 'Scheduled Task';
+    return 'Scheduled Ticket';
   }
 
   function formatScheduleSummary(schedule, scheduleName) {
@@ -11829,7 +11835,7 @@
           workspaceAgents = normalizeAgentNameList(merged);
         }
       } catch (error) {
-        dashLog.debug('Failed to load workspace agents for scheduled task', {
+        dashLog.debug('Failed to load workspace agents for scheduled ticket', {
           workspaceId: workspaceId,
           error: (error && error.message) || error
         });
@@ -11840,7 +11846,7 @@
     try {
       allAgents = await fetchAgentsForMatching();
     } catch (error) {
-      dashLog.debug('Failed to load global agents for scheduled task', {
+      dashLog.debug('Failed to load global agents for scheduled ticket', {
         error: (error && error.message) || error
       });
       allAgents = [];
@@ -11855,6 +11861,44 @@
   }
 
   function openWorkspaceTaskModalForConfiguration(workspaceId, description) {
+    // Every page loads Give work (PRD 760 FR-15); the modal below is only a
+    // fallback for a page that somehow lacks it.
+    if (window.OriGiveWork && typeof window.OriGiveWork.open === 'function') {
+      var detail = window.workspaceDetail || null;
+      // The open page's workspace only when it is the one asked for; Home and
+      // other pages read the target's own name and agents first. A schedule is
+      // set on the ticket once it exists (PRD 760 2A).
+      var local =
+        detail && detail.workspace && detail.workspace.id === workspaceId ? detail.workspace : null;
+      var trigger = document.activeElement;
+      var openFor = function (workspace) {
+        window.OriGiveWork.open({
+          workspaceId: workspaceId,
+          workspaceName: (workspace && workspace.name) || '',
+          agents: (workspace && workspace.agents) || [],
+          what: String(description || '').trim(),
+          trigger: trigger,
+          onSaved: function () {
+            if (local && typeof detail.loadTasks === 'function') detail.loadTasks();
+          }
+        });
+      };
+      if (local) {
+        openFor(local);
+      } else {
+        fetch('/api/workspaces/' + encodeURIComponent(workspaceId), {
+          headers: { Accept: 'application/json' }
+        })
+          .then(function (res) {
+            return res.ok ? res.json() : null;
+          })
+          .catch(function () {
+            return null;
+          })
+          .then(openFor);
+      }
+      return true;
+    }
     if (
       window.taskModalController &&
       typeof window.taskModalController.openForCreate === 'function'
@@ -11936,7 +11980,7 @@
       } catch (_error) {
         text = '';
       }
-      throw new Error(text || 'Failed to create task');
+      throw new Error(text || 'Failed to create ticket');
     }
     return await response.json();
   }
@@ -11944,7 +11988,7 @@
   async function updateWorkspaceTaskRecord(taskId, payload) {
     var normalizedTaskId = String(taskId || '').trim();
     if (!normalizedTaskId) {
-      throw new Error('Task ID is required');
+      throw new Error('Ticket ID is required');
     }
 
     if (typeof API !== 'undefined' && typeof API.put === 'function') {
@@ -11966,7 +12010,7 @@
       } catch (_error) {
         text = '';
       }
-      throw new Error(text || 'Failed to update task');
+      throw new Error(text || 'Failed to update ticket');
     }
     return await response.json();
   }
@@ -11974,7 +12018,7 @@
   async function executeWorkspaceTaskRecord(taskId) {
     var normalizedTaskId = String(taskId || '').trim();
     if (!normalizedTaskId) {
-      throw new Error('Task ID is required');
+      throw new Error('Ticket ID is required');
     }
 
     if (typeof API !== 'undefined' && typeof API.post === 'function') {
@@ -11997,7 +12041,7 @@
       } catch (_error) {
         text = '';
       }
-      throw new Error(text || 'Failed to execute task');
+      throw new Error(text || 'Failed to execute ticket');
     }
     return await response.json();
   }
@@ -12135,7 +12179,7 @@
   async function preparePlanningReviewMainTaskForExecution(planningState) {
     var mainTask = await ensurePlanningReviewMainTask(planningState);
     if (!mainTask || !mainTask.id) {
-      throw new Error('Failed to create the main workspace task');
+      throw new Error('Failed to create the main workspace ticket');
     }
 
     var updatedTask = await updateWorkspaceTaskRecord(mainTask.id, {
@@ -12149,7 +12193,7 @@
 
   async function launchWorkspaceTaskExecutionFromHomeAssistant(task, routeContext) {
     if (!task || !task.id) {
-      throw new Error('Workspace task is missing');
+      throw new Error('Workspace ticket is missing');
     }
 
     var detail = window.workspaceDetail;
@@ -12186,11 +12230,11 @@
       'assistant',
       '"' +
         config.label +
-        '" should own this travel-planning task. Create it first, then hand the task off there?'
+        '" should own this travel-planning ticket. Create it first, then hand the ticket off there?'
     );
     setHomeAssistantRoutingSummary(
       config.label,
-      'Create the travel specialist, then start the workspace task there.'
+      'Create the travel specialist, then start the workspace ticket there.'
     );
     renderHomeAssistantActions([
       {
@@ -12211,7 +12255,7 @@
         }
       },
       {
-        label: 'Ask Another Task',
+        label: 'Ask Something Else',
         variant: 'secondary',
         onClick: function () {
           focusHomeAssistantInput();
@@ -12236,17 +12280,17 @@
     var allowCreate = options && options.allowCreate === true;
     var managerLabel = getWorkspaceHomeAssistantDisplayName();
 
-    setHomeAssistantBusy(true, allowCreate ? 'Creating Specialist…' : 'Routing Task…');
+    setHomeAssistantBusy(true, allowCreate ? 'Creating Specialist…' : 'Routing Ticket…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage(
       'assistant',
       allowCreate
-        ? 'Creating "' + config.label + '" and handing this task off there.'
+        ? 'Creating "' + config.label + '" and handing this ticket off there.'
         : 'This looks like specialist-owned travel work. Routing it to "' +
             config.label +
             '" before execution starts.'
     );
-    setHomeAssistantRoutingSummary(config.label, 'Preparing a specialist-owned workspace task.');
+    setHomeAssistantRoutingSummary(config.label, 'Preparing a specialist-owned workspace ticket.');
 
     try {
       var inventory = await fetchWorkspaceTaskAgentInventory(workspaceId);
@@ -12285,7 +12329,7 @@
       var createdTask =
         createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
       if (!createdTask || !createdTask.id) {
-        throw new Error('Failed to create the specialist task');
+        throw new Error('Failed to create the specialist ticket');
       }
 
       syncCreatedTaskIntoWorkspaceDetail(createdTask);
@@ -12302,21 +12346,21 @@
 
       appendHomeAssistantMessage(
         'assistant',
-        '"' + agentName + '" is handling this workspace task now.'
+        '"' + agentName + '" is handling this workspace ticket now.'
       );
-      setHomeAssistantRoutingSummary(config.label, 'Task handed off to "' + agentName + '".');
+      setHomeAssistantRoutingSummary(config.label, 'Ticket handed off to "' + agentName + '".');
       await launchWorkspaceTaskExecutionFromHomeAssistant(updatedTask, normalizedContext);
       clearHomeAssistantTaskLaunchState();
       return true;
     } catch (error) {
-      dashLog.debug('Failed to hand off workspace travel task to specialist', {
+      dashLog.debug('Failed to hand off workspace travel ticket to specialist', {
         prompt: prompt,
         specialist: config && config.key,
         error: (error && error.message) || error
       });
       appendHomeAssistantMessage(
         'assistant',
-        'I could not hand off this task to "' + config.label + '" right now.'
+        'I could not hand off this ticket to "' + config.label + '" right now.'
       );
       setHomeAssistantRoutingSummary(
         config.label,
@@ -12341,7 +12385,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -12388,7 +12432,7 @@
       try {
         detail.openTaskAssistModal(updatedTask.id, eventData);
       } catch (error) {
-        dashLog.debug('Failed to hand off planning subtask to task assist modal', {
+        dashLog.debug('Failed to hand off planning subticket to ticket assist modal', {
           taskId: updatedTask.id,
           error: (error && error.message) || error
         });
@@ -12427,7 +12471,7 @@
   }
 
   function buildPlanningTaskQuestion(replyState) {
-    if (!replyState) return 'How should I continue this planning task?';
+    if (!replyState) return 'How should I continue this planning ticket?';
 
     if (
       replyState.workflowStep &&
@@ -12445,7 +12489,7 @@
       var prefix = String(
         replyState.workflowStep.summary || replyState.workflowStep.title || ''
       ).trim();
-      var prompt = prefix || 'Choose the next step for this planning task.';
+      var prompt = prefix || 'Choose the next step for this planning ticket.';
       if (choiceLabels.length > 0) {
         prompt += '\n\nOptions:\n- ' + choiceLabels.join('\n- ');
       }
@@ -12456,7 +12500,7 @@
       return replyState.questionPrompts.join('\n');
     }
 
-    return 'How should I continue this planning task?';
+    return 'How should I continue this planning ticket?';
   }
 
   async function persistPlanningSubtaskToTask(replyState) {
@@ -12466,7 +12510,7 @@
       state: 'blocked',
       block_id: 'planning:' + String(replyState.linkedTask.id || '').trim(),
       reason_code: 'planning_input_required',
-      reason: 'This planning task needs your input before it can continue.',
+      reason: 'This planning ticket needs your input before it can continue.',
       question: buildPlanningTaskQuestion(replyState),
       agent_response: String(replyState.latestReplyText || '').trim(),
       workflow_step: replyState.workflowStep || null,
@@ -12500,7 +12544,7 @@
       } catch (_error) {
         text = '';
       }
-      throw new Error(text || 'Failed to update planning task');
+      throw new Error(text || 'Failed to update planning ticket');
     }
 
     var updatedTask = await response.json();
@@ -12518,7 +12562,7 @@
   ) {
     var assignedAgent = String(agentName || '').trim();
     if (!assignedAgent) {
-      throw new Error('Scheduled tasks require an assigned agent.');
+      throw new Error('Scheduled tickets require an assigned agent.');
     }
     var normalizedSchedule = normalizeScheduleConfigForTaskCreation(scheduleConfig);
     if (!normalizedSchedule) {
@@ -12553,11 +12597,11 @@
     if (candidateAgents.length === 0) {
       appendHomeAssistantMessage(
         'assistant',
-        'This task looks scheduled, and scheduled tasks need an assigned agent. There are no agents available yet.'
+        'This looks scheduled, and scheduled tickets need an assigned agent. There are no agents available yet.'
       );
       setHomeAssistantRoutingSummary(
-        'Scheduled Task Needs Agent',
-        'Create an agent first, then assign the scheduled task.'
+        'Scheduled Ticket Needs Agent',
+        'Create an agent first, then assign the scheduled ticket.'
       );
       renderHomeAssistantActions([
         {
@@ -12568,14 +12612,14 @@
           }
         },
         {
-          label: 'Open Task Modal',
+          label: 'Open Ticket Modal',
           variant: 'secondary',
           onClick: function () {
             openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -12592,18 +12636,18 @@
       );
       setHomeAssistantRoutingSummary(
         'Schedule Confirmation',
-        'Review schedule details in the task modal.'
+        'Review schedule details in the ticket modal.'
       );
       renderHomeAssistantActions([
         {
-          label: 'Configure in Task Modal',
+          label: 'Configure in Ticket Modal',
           variant: 'primary',
           onClick: function () {
             openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -12680,13 +12724,16 @@
       var chosenAgent = String(agentName || '').trim();
       if (!chosenAgent) return;
 
-      setHomeAssistantBusy(true, 'Creating Scheduled Task…');
+      setHomeAssistantBusy(true, 'Creating Scheduled Ticket…');
       renderHomeAssistantActions([]);
       appendHomeAssistantMessage(
         'assistant',
-        'Creating a scheduled task and assigning it to "' + chosenAgent + '"…'
+        'Creating a scheduled ticket and assigning it to "' + chosenAgent + '"…'
       );
-      setHomeAssistantRoutingSummary('Scheduled Task', 'Creating and assigning scheduled task…');
+      setHomeAssistantRoutingSummary(
+        'Scheduled Ticket',
+        'Creating and assigning scheduled ticket…'
+      );
 
       try {
         await createScheduledWorkspaceTask(
@@ -12701,22 +12748,22 @@
         var summary = formatScheduleSummary(scheduleConfig, scheduleName);
         appendHomeAssistantMessage(
           'assistant',
-          'Scheduled task created for "' + chosenAgent + '" (' + summary + ').'
+          'Scheduled ticket created for "' + chosenAgent + '" (' + summary + ').'
         );
         if (!workspaceHasSelectedAgent) {
           appendHomeAssistantMessage(
             'assistant',
-            '"' + chosenAgent + '" was added to this workspace for this scheduled task.'
+            '"' + chosenAgent + '" was added to this workspace for this scheduled ticket.'
           );
         }
         setHomeAssistantRoutingSummary(
-          'Scheduled Task Created',
+          'Scheduled Ticket Created',
           'Assigned to "' + chosenAgent + '" with ' + summary + '.'
         );
         renderHomeAssistantActions([
           openSchedulesAction,
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -12724,15 +12771,18 @@
           }
         ]);
       } catch (error) {
-        dashLog.debug('Failed to create scheduled workspace task', {
+        dashLog.debug('Failed to create scheduled workspace ticket', {
           workspaceId: workspaceId,
           error: (error && error.message) || error
         });
         appendHomeAssistantMessage(
           'assistant',
-          'I could not create the scheduled task right now. Please try again.'
+          'I could not create the scheduled ticket right now. Please try again.'
         );
-        setHomeAssistantRoutingSummary('Scheduled Task Failed', 'Could not create scheduled task.');
+        setHomeAssistantRoutingSummary(
+          'Scheduled Ticket Failed',
+          'Could not create scheduled ticket.'
+        );
         renderHomeAssistantActions([
           {
             label: 'Retry',
@@ -12742,7 +12792,7 @@
             }
           },
           {
-            label: 'Open Task Modal',
+            label: 'Open Ticket Modal',
             variant: 'secondary',
             onClick: function () {
               openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
@@ -12765,7 +12815,7 @@
         : 'Daily schedule';
       appendHomeAssistantMessage(
         'assistant',
-        'I detected a scheduled task. Should this run once or every day? I can assign it to "' +
+        'I detected a scheduled ticket. Should this run once or every day? I can assign it to "' +
           selectedAgent +
           '".'
       );
@@ -12797,7 +12847,7 @@
           }
         },
         {
-          label: 'Open Task Modal',
+          label: 'Open Ticket Modal',
           variant: 'secondary',
           onClick: function () {
             openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
@@ -12809,7 +12859,7 @@
 
     appendHomeAssistantMessage(
       'assistant',
-      'This task includes scheduling. I can assign it to "' +
+      'This ticket includes scheduling. I can assign it to "' +
         selectedAgent +
         '" and set "' +
         scheduleSummary +
@@ -12820,17 +12870,19 @@
         'assistant',
         '"' +
           selectedAgent +
-          '" is not in this workspace yet. I can add and assign this agent when creating the task.'
+          '" is not in this workspace yet. I can add and assign this agent when creating the ticket.'
       );
     }
     setHomeAssistantRoutingSummary(
-      'Scheduled Task Ready',
+      'Scheduled Ticket Ready',
       'Confirm agent assignment and schedule.'
     );
 
     var actions = [
       {
-        label: workspaceHasSelectedAgent ? 'Create Scheduled Task' : 'Add + Create Scheduled Task',
+        label: workspaceHasSelectedAgent
+          ? 'Create Scheduled Ticket'
+          : 'Add + Create Scheduled Ticket',
         variant: 'primary',
         onClick: function () {
           finalizeScheduledCreation(
@@ -12865,14 +12917,14 @@
     }
 
     actions.push({
-      label: 'Open Task Modal',
+      label: 'Open Ticket Modal',
       variant: 'secondary',
       onClick: function () {
         openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
       }
     });
     actions.push({
-      label: 'Ask Another Task',
+      label: 'Ask Something Else',
       variant: 'secondary',
       onClick: function () {
         focusHomeAssistantInput();
@@ -12889,12 +12941,12 @@
     var assignee = String((options && options.assignee) || '').trim();
 
     var dialogOptions = {
-      eyebrow: 'Assistant Task',
-      title: 'Create this task?',
-      message: 'Assistant wants to add this task to the workspace.',
-      confirmLabel: 'Create Task',
+      eyebrow: 'Assistant Ticket',
+      title: 'Create this ticket?',
+      message: 'Assistant wants to add this ticket to the workspace.',
+      confirmLabel: 'Create Ticket',
       cancelLabel: 'Cancel',
-      metaItems: assignee ? ['Assistant', 'Task', assignee] : ['Assistant', 'Task'],
+      metaItems: assignee ? ['Assistant', 'Ticket', assignee] : ['Assistant', 'Ticket'],
       details: assignee ? [taskText, 'Assigned to: ' + assignee] : [taskText]
     };
 
@@ -12935,14 +12987,14 @@
     var isInferredAction = Boolean(options && options.inferred);
     var commandSummaryTitle = isInferredAction
       ? command === 'task'
-        ? 'Task Mode'
+        ? 'Ticket Mode'
         : command === 'note'
           ? 'Note Mode'
           : 'Workspace Action'
       : 'Workspace Command';
     var commandSummaryText = 'Executing ' + displayCommand + ' in this workspace.';
     if (isInferredAction && command === 'task') {
-      commandSummaryText = 'Creating a manager task in this workspace.';
+      commandSummaryText = 'Creating a manager ticket in this workspace.';
     } else if (isInferredAction && command === 'note') {
       commandSummaryText = 'Saving a note in this workspace.';
     }
@@ -12950,7 +13002,7 @@
     setHomeAssistantBusy(
       true,
       command === 'task'
-        ? 'Creating Task…'
+        ? 'Creating Ticket…'
         : command === 'note'
           ? 'Saving Note…'
           : 'Running Command…'
@@ -12988,14 +13040,14 @@
             cancelToast: false
           });
           if (createdTask === false) {
-            appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
+            appendHomeAssistantMessage('assistant', 'Ticket creation cancelled.');
             setHomeAssistantRoutingSummary(
-              'Task Cancelled',
-              'Task creation was cancelled before anything was created.'
+              'Ticket Cancelled',
+              'Ticket creation was cancelled before anything was created.'
             );
             renderHomeAssistantActions([
               {
-                label: 'Ask Another Task',
+                label: 'Ask Something Else',
                 variant: 'secondary',
                 onClick: function () {
                   focusHomeAssistantInput();
@@ -13005,21 +13057,21 @@
             return true;
           }
           if (!createdTask) {
-            throw new Error('Failed to create task');
+            throw new Error('Failed to create ticket');
           }
         } else if (typeof API !== 'undefined' && typeof API.post === 'function') {
           var confirmedByApi = await confirmWorkspaceAssistantTaskCreation(content, {
             assignee: taskAssignee
           });
           if (!confirmedByApi) {
-            appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
+            appendHomeAssistantMessage('assistant', 'Ticket creation cancelled.');
             setHomeAssistantRoutingSummary(
-              'Task Cancelled',
-              'Task creation was cancelled before anything was created.'
+              'Ticket Cancelled',
+              'Ticket creation was cancelled before anything was created.'
             );
             renderHomeAssistantActions([
               {
-                label: 'Ask Another Task',
+                label: 'Ask Something Else',
                 variant: 'secondary',
                 onClick: function () {
                   focusHomeAssistantInput();
@@ -13041,14 +13093,14 @@
             assignee: taskAssignee
           });
           if (!confirmedByFetch) {
-            appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
+            appendHomeAssistantMessage('assistant', 'Ticket creation cancelled.');
             setHomeAssistantRoutingSummary(
-              'Task Cancelled',
-              'Task creation was cancelled before anything was created.'
+              'Ticket Cancelled',
+              'Ticket creation was cancelled before anything was created.'
             );
             renderHomeAssistantActions([
               {
-                label: 'Ask Another Task',
+                label: 'Ask Something Else',
                 variant: 'secondary',
                 onClick: function () {
                   focusHomeAssistantInput();
@@ -13069,24 +13121,24 @@
               required_capabilities: requiredCapabilities.length ? requiredCapabilities : undefined
             })
           });
-          if (!taskResponse.ok) throw new Error('Failed to create task');
+          if (!taskResponse.ok) throw new Error('Failed to create ticket');
         }
 
         appendHomeAssistantMessage(
           'assistant',
           taskAssignee
-            ? 'Created a task for "' + taskAssignee + '".'
-            : 'Created a task in this workspace.'
+            ? 'Created a ticket for "' + taskAssignee + '".'
+            : 'Created a ticket in this workspace.'
         );
         setHomeAssistantRoutingSummary(
-          'Task Created',
+          'Ticket Created',
           taskAssignee
-            ? 'Task assigned to "' + taskAssignee + '".'
-            : 'Task added to this workspace.'
+            ? 'Ticket assigned to "' + taskAssignee + '".'
+            : 'Ticket added to this workspace.'
         );
         renderHomeAssistantActions([
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -13127,7 +13179,7 @@
         setHomeAssistantRoutingSummary('Note Created', 'Note added to this workspace.');
         renderHomeAssistantActions([
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -13155,7 +13207,7 @@
             }
           },
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -13223,7 +13275,7 @@
         }
         renderHomeAssistantActions([
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -13264,7 +13316,7 @@
         );
         renderHomeAssistantActions([
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -13296,7 +13348,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -13372,7 +13424,7 @@
   function buildWorkspaceDescriptionFromPrompt(prompt) {
     var text = truncateText(String(prompt || '').trim(), 280);
     if (!text) return 'Created from Ask Ori.';
-    return 'Created from Ask Ori task: "' + text + '"';
+    return 'Created from an Ask Ori request: "' + text + '"';
   }
 
   function buildWorkspaceBootstrapFromPrompt(prompt) {
@@ -13511,7 +13563,7 @@
       );
       renderHomeAssistantActions([
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -13539,7 +13591,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -13614,7 +13666,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -13653,7 +13705,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -13687,7 +13739,7 @@
     setHomeAssistantBusy(true, 'Opening Chat…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Opening a chat session with "' + agentName + '"…');
-    setHomeAssistantRoutingSummary('Handoff', 'Routing task to "' + agentName + '"…');
+    setHomeAssistantRoutingSummary('Handoff', 'Routing request to "' + agentName + '"…');
     if (appLaunchRequest && appLaunchRequest.appName) {
       appendHomeAssistantMessage(
         'assistant',
@@ -13716,7 +13768,10 @@
           'Launch command queued for "' + appLaunchRequest.appName + '". Continue in chat.'
         );
       } else {
-        appendHomeAssistantMessage('assistant', 'Your task was queued in chat. Continue in chat.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'Your request was queued in chat. Continue in chat.'
+        );
       }
 
       renderHomeAssistantActions([
@@ -13728,7 +13783,7 @@
           }
         },
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'secondary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -13736,10 +13791,10 @@
         }
       ]);
     } catch (error) {
-      dashLog.debug('Task session launch failed', { error: (error && error.message) || error });
+      dashLog.debug('Ticket session launch failed', { error: (error && error.message) || error });
       appendHomeAssistantMessage(
         'assistant',
-        'I could not open chat for this task. You can retry or open agent settings.'
+        'I could not open chat for this request. You can retry or open agent settings.'
       );
       setHomeAssistantRoutingSummary(
         'Handoff Failed',
@@ -13783,15 +13838,15 @@
       inWorkspaceContext
         ? 'I found "' +
             agentName +
-            '" for this workspace task. Do you want to use this agent, or create a new one before I continue?'
+            '" for this workspace ticket. Do you want to use this agent, or create a new one before I continue?'
         : 'I found "' +
             agentName +
-            '" for this task. Do you want to use this agent, or create a new one before I continue?'
+            '" for this request. Do you want to use this agent, or create a new one before I continue?'
     );
     setHomeAssistantRoutingSummary(
       'Confirmation Required',
       inWorkspaceContext
-        ? 'Choose an existing agent or create a new one for this workspace task.'
+        ? 'Choose an existing agent or create a new one for this workspace ticket.'
         : 'Choose an existing agent or create a new one before handoff.'
     );
     renderHomeAssistantActions([
@@ -13813,7 +13868,7 @@
         }
       },
       {
-        label: 'Ask Another Task',
+        label: 'Ask Something Else',
         variant: 'secondary',
         onClick: function () {
           focusHomeAssistantInput();
@@ -14146,11 +14201,11 @@
     ) {
       appendHomeAssistantMessage('user', text);
       homeAssistantState.awaitingCreateConfirmation = false;
-      appendHomeAssistantMessage('assistant', 'No problem. Ask another task when you are ready.');
-      setHomeAssistantRoutingSummary('Agent Creation', 'Canceled. Ready for another task.');
+      appendHomeAssistantMessage('assistant', 'No problem. Ask something else when you are ready.');
+      setHomeAssistantRoutingSummary('Agent Creation', 'Canceled. Ready for something else.');
       renderHomeAssistantActions([
         {
-          label: 'Ask Another Task',
+          label: 'Ask Something Else',
           variant: 'primary',
           onClick: function () {
             focusHomeAssistantInput();
@@ -14256,7 +14311,7 @@
             }
           },
           {
-            label: 'Ask Another Task',
+            label: 'Ask Something Else',
             variant: 'secondary',
             onClick: function () {
               focusHomeAssistantInput();
@@ -14271,7 +14326,7 @@
 
     setHomeAssistantBusy(true, 'Routing…');
     renderHomeAssistantActions([]);
-    setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent…');
+    setHomeAssistantRoutingSummary('Routing', 'Analyzing request and selecting the best agent…');
 
     try {
       var routeData = acceptedPanelRoute || (await routePromptWithBackend(text, routeContext));
@@ -14392,7 +14447,7 @@
         appendHomeAssistantMessage('assistant', summary);
         setHomeAssistantRoutingSummary(
           'Match Found',
-          '"' + match.agent.name + '" is best for this task.'
+          '"' + match.agent.name + '" is best for this request.'
         );
 
         if (homeAssistantState.pendingIntent.key === 'email_check') {
@@ -14430,7 +14485,7 @@
         if (workspaceRecommended) {
           appendHomeAssistantMessage(
             'assistant',
-            'This looks like a complex project. I recommend starting in a Workspace so files, tasks, and context stay organized. Do you want me to create one now?'
+            'This looks like a complex project. I recommend starting in a Workspace so files, tickets, and context stay organized. Do you want me to create one now?'
           );
           setHomeAssistantRoutingSummary(
             'Workspace Recommended',
@@ -14466,7 +14521,7 @@
               }
             },
             {
-              label: 'Ask Another Task',
+              label: 'Ask Something Else',
               variant: 'secondary',
               onClick: function () {
                 focusHomeAssistantInput();
@@ -14512,7 +14567,7 @@
               }
             },
             {
-              label: 'Ask Another Task',
+              label: 'Ask Something Else',
               variant: 'secondary',
               onClick: function () {
                 focusHomeAssistantInput();
@@ -14536,7 +14591,7 @@
           }
           appendHomeAssistantMessage(
             'assistant',
-            'No suitable agent found for this task. I will open the Create Agent modal so you can review details.'
+            'No suitable agent found for this request. I will open the Create Agent modal so you can review details.'
           );
           setHomeAssistantRoutingSummary(
             'Semi-auto',
@@ -14547,7 +14602,7 @@
           homeAssistantState.awaitingCreateConfirmation = true;
           appendHomeAssistantMessage(
             'assistant',
-            'No suitable agent found for this task. Would you like me to create one?'
+            'No suitable agent found for this request. Would you like me to create one?'
           );
           setHomeAssistantRoutingSummary(
             'No Match',
@@ -14571,7 +14626,7 @@
         }
       }
     } catch (error) {
-      dashLog.debug('Task routing failed', { error: (error && error.message) || error });
+      dashLog.debug('Ticket routing failed', { error: (error && error.message) || error });
       homeAssistantState.awaitingCreateConfirmation = false;
       appendHomeAssistantMessage(
         'assistant',

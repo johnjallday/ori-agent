@@ -246,7 +246,7 @@ test.describe('[collection:composer] the legacy unmarked-sketch collection', () 
     // folder is linked, so nothing is read until the run says it is done.
     const done = card(page);
     await expect(done).toContainText('Workspace · Downloads (group)', { timeout: 90_000 });
-    await expect(done).toContainText('No automatic task');
+    await expect(done).toContainText('No automatic ticket');
     if (process.env.ORI_VISUAL_EVIDENCE) {
       await page.setViewportSize({ width: 1440, height: 1100 });
       await page.evaluate(() =>

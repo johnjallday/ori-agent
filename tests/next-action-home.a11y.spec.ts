@@ -76,7 +76,7 @@ for (const theme of ['light', 'dark']) {
     await updates.focus();
     await page.keyboard.press('Enter');
     const attention = page.locator('#cockpitTodayAttention a.cockpit-today-link');
-    await expect(attention).toContainText('2 tasks needing attention');
+    await expect(attention).toContainText('2 tickets needing attention');
     await attention.focus();
     await expect(attention).toHaveCSS('outline-style', 'solid');
     await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });

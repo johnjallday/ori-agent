@@ -993,7 +993,7 @@ test('a finished assessment opens its report and hands on one suggestion, unsubm
     [
       // The task's own page shows what the run wrote; its ticket does not.
       ['Open the assessment', '/workspaces/widget/task/task-1', 'primary'],
-      ['Plan the suggested task', '/workspaces/widget/plans?next=assessment', 'outline'],
+      ['Plan the suggested ticket', '/workspaces/widget/plans?next=assessment', 'outline'],
       ['Open workspace', '/workspaces/widget', 'outline']
     ]
   );

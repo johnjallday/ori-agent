@@ -204,7 +204,7 @@ export function createOperationTargets(env) {
       const current = env.workspacePage();
       return current && current.composer ? current : null;
     });
-    if (!page) return unavailable('This page has no task form.');
+    if (!page) return unavailable('This page has no ticket form.');
     if (String(page.workspaceId || '') !== String(command.workspace_id || '')) {
       return { outcome: OUTCOME.YIELD, reason: 'moved_elsewhere' };
     }
@@ -222,22 +222,22 @@ export function createOperationTargets(env) {
       prefillDetails: draft.brief || '',
       draftAssignmentValue: assignment,
       draftAssignmentLabel: agent,
-      modalTitle: `Review task for ${agent}`,
+      modalTitle: `Review ticket for ${agent}`,
       // The form's own save names this operation, so the server binds the one
       // task it creates. Nothing here saves or starts anything.
       assistantOperation: { id: String(snapshot.id || ''), revision: Number(draft.revision) }
     });
     const form = env.taskForm();
-    if (!form || !form.open) return unavailable('The task form did not open.');
+    if (!form || !form.open) return unavailable('The ticket form did not open.');
     if (form.assignment !== assignment) {
       // Leaving the form open would let a save hand the task to someone the
       // user was not shown. Close it and say so instead.
       composer.close({ force: true });
-      return unavailable(`${agent} cannot be assigned in the task form.`);
+      return unavailable(`${agent} cannot be assigned in the ticket form.`);
     }
     if (form.title !== String(draft.title || '') || form.brief !== String(draft.brief || '')) {
       composer.close({ force: true });
-      return unavailable('The task form did not take the draft.');
+      return unavailable('The ticket form did not take the draft.');
     }
     return { outcome: OUTCOME.ACKNOWLEDGED, observed: { draft_revision: Number(draft.revision) } };
   }

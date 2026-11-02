@@ -367,7 +367,7 @@ export class WorkspaceMembersPanel {
     if (this._destroyed || this.rollupObserver || !this.els.panel) return;
     if (this.els.rollups) {
       this.els.rollups.innerHTML =
-        '<div class="group-detail-empty">Expand the panel to load member tasks, notes, and files.</div>';
+        '<div class="group-detail-empty">Expand the panel to load member tickets, notes, and files.</div>';
     }
     this.rollupObserver = new MutationObserver(() => {
       if (
@@ -389,7 +389,7 @@ export class WorkspaceMembersPanel {
     if (this._destroyed || !this.els.rollups || !this.group) return;
     const group = this.group;
     this.els.rollups.innerHTML =
-      '<div class="group-detail-empty">Loading member tasks, notes &amp; files…</div>';
+      '<div class="group-detail-empty">Loading member tickets, notes &amp; files…</div>';
     await Promise.all([this.loadTasks(), this.loadNotesFiles()]);
     if (this._destroyed || this.group !== group) return;
     this.renderRollups();
@@ -402,7 +402,7 @@ export class WorkspaceMembersPanel {
 
     container.innerHTML = `
       ${hasSubgroups ? '<div class="group-detail-hint">Items from member sub-groups are not included.</div>' : ''}
-      <h3 class="group-detail-subtitle mt-2">Member tasks</h3>
+      <h3 class="group-detail-subtitle mt-2">Member tickets</h3>
       <div id="workspace-detail-members-tasks"></div>
       <h3 class="group-detail-subtitle mt-3">Member notes &amp; files</h3>
       <div id="workspace-detail-members-notesfiles"></div>
@@ -794,7 +794,7 @@ export class WorkspaceMembersPanel {
           `/api/orchestration/tasks?workspace_id=${encodeURIComponent(member.id)}`,
           { signal: this._readController.signal }
         );
-        if (!res.ok) throw new Error(`tasks fetch failed: ${res.status}`);
+        if (!res.ok) throw new Error(`tickets fetch failed: ${res.status}`);
         const data = await res.json();
         return (data.tasks || []).map(task => ({
           ...task,
@@ -826,10 +826,10 @@ export class WorkspaceMembersPanel {
 
     container.innerHTML = `
       ${this.taskFiltersHtml()}
-      ${this.taskLoadFailures > 0 ? '<div class="text-warning small mb-2" role="alert">Some members’ tasks could not be loaded.</div>' : ''}
+      ${this.taskLoadFailures > 0 ? '<div class="text-warning small mb-2" role="alert">Some members’ tickets could not be loaded.</div>' : ''}
       ${
         filtered.length === 0
-          ? '<div class="group-detail-empty">No tasks match the current filters.</div>'
+          ? '<div class="group-detail-empty">No tickets match the current filters.</div>'
           : `<div class="group-task-list" role="list">${filtered.map(task => this.taskRowHtml(task)).join('')}</div>`
       }
     `;
@@ -874,9 +874,9 @@ export class WorkspaceMembersPanel {
 
     return `
       <div class="group-task-filters d-flex gap-2 flex-wrap mb-2">
-        <select id="workspace-detail-members-task-status" class="form-select form-select-sm" aria-label="Filter tasks by status">${statusOptions}</select>
-        <select id="workspace-detail-members-task-member" class="form-select form-select-sm" aria-label="Filter tasks by member workspace">${memberOptions}</select>
-        <select id="workspace-detail-members-task-date" class="form-select form-select-sm" aria-label="Filter tasks by created date">${dateOptions}</select>
+        <select id="workspace-detail-members-task-status" class="form-select form-select-sm" aria-label="Filter tickets by status">${statusOptions}</select>
+        <select id="workspace-detail-members-task-member" class="form-select form-select-sm" aria-label="Filter tickets by member workspace">${memberOptions}</select>
+        <select id="workspace-detail-members-task-date" class="form-select form-select-sm" aria-label="Filter tickets by created date">${dateOptions}</select>
       </div>`;
   }
 
@@ -898,7 +898,7 @@ export class WorkspaceMembersPanel {
   }
 
   taskRowHtml(task) {
-    const desc = task.description || 'Untitled task';
+    const desc = task.description || 'Untitled ticket';
     const status = normalizeStatus(task.status);
     const wsName = task.__workspaceName || '';
     const scheduled = isScheduledTask(task) ? ' · scheduled' : '';

@@ -227,7 +227,7 @@
         }));
         onSaved({ workspace_count: members.size, workspaces: [...members.values()] });
         message(
-          'Workspace membership saved. Open a workspace to see tasks or give this agent work.'
+          'Workspace membership saved. Open a workspace to see tickets or give this agent work.'
         );
         render();
       } catch (error) {

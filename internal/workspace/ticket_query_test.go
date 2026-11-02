@@ -400,6 +400,49 @@ func TestTicketService_Search_LimitAndTotal(t *testing.T) {
 	}
 }
 
+// PRD 760 FR-6, FR-11: a list read carries the workspace's own count by state,
+// untouched by filters or the page size, so a one-row request can refresh the
+// header's count line after a create or a move.
+func TestTicketService_Search_CountsIgnoreFiltersAndLimit(t *testing.T) {
+	svc, store := newTicketTestService(t)
+	svc.SetClock(fixedClock(queryNow))
+	ws := newTicketTestWorkspace(t, store, "Alpha")
+	seedQueryTickets(t, svc, ws.ID) // 2 backlog + 2 ready
+
+	want := TicketCounts{Backlog: 2, Ready: 2}
+
+	oneRow, err := svc.Search(TicketQuery{WorkspaceID: ws.ID, Limit: 1})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(oneRow.Tickets) != 1 || oneRow.Counts != want {
+		t.Errorf("limit 1: %d tickets, counts %+v, want 1 ticket and %+v", len(oneRow.Tickets), oneRow.Counts, want)
+	}
+
+	filtered, err := svc.Search(TicketQuery{WorkspaceID: ws.ID, States: []TicketState{TicketStateBacklog}})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(filtered.Tickets) != 2 || filtered.Counts != want {
+		t.Errorf("state filter: %d tickets, counts %+v, want 2 tickets and the unfiltered %+v",
+			len(filtered.Tickets), filtered.Counts, want)
+	}
+
+	// A move shows up in the very next read, which is what FR-11 relies on.
+	// Backlog and Ready both reach Cancelled, so whichever row came back works.
+	moved := oneRow.Tickets[0].ID
+	if _, err := svc.Transition(ws.ID, moved, TicketTransitionInput{To: TicketStateCancelled, Actor: TicketActorUser}); err != nil {
+		t.Fatalf("Transition: %v", err)
+	}
+	after, err := svc.Search(TicketQuery{WorkspaceID: ws.ID, Limit: 1})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if after.Counts.Cancelled != 1 || after.Counts.Total() != 4 {
+		t.Errorf("after a move, counts = %+v, want one Cancelled and still 4 tickets", after.Counts)
+	}
+}
+
 // FR-142: hierarchy lives in Ticket detail. Collection reads stay flat so the
 // Board can render independent cards.
 func TestTicketService_Hierarchy_DetailOnly(t *testing.T) {

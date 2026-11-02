@@ -206,6 +206,64 @@ func TestCreateTaskStampsManualProvenance(t *testing.T) {
 	}
 }
 
+// PRD 760 FR-16: a connected step is a normal ticket, and waits for its turn.
+func TestCreateTaskMakesAConnectedStepARealTicket(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	handler := NewHTTPHandler(store, nil, nil)
+
+	ws := memberWorkspace("Writer")
+	ws.ID = "ws-create"
+	ws.Name = "Create"
+	ws.Status = StatusActive
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	var ids []string
+	for range 2 {
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-create/tasks",
+			strings.NewReader(`{"description":"a step","to":"Writer"}`))
+		rec := httptest.NewRecorder()
+		handler.CreateTask(rec, withTaskPath(req))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		ids = append(ids, resp.TaskID)
+	}
+
+	stored, err := store.Get("ws-create")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	numbers := map[int64]bool{}
+	for _, id := range ids {
+		task, err := stored.GetTask(id)
+		if err != nil {
+			t.Fatalf("task: %v", err)
+		}
+		if task.TicketState != TicketStateReady || task.Status != TaskStatusPending {
+			t.Errorf("state %q status %q, want Ready and not queued to run", task.TicketState, task.Status)
+		}
+		if task.TicketNumber == 0 || len(task.StateHistory) != 1 {
+			t.Errorf("number %d history %d, want a number and a first entry", task.TicketNumber, len(task.StateHistory))
+		}
+		numbers[task.TicketNumber] = true
+	}
+	if len(numbers) != 2 {
+		t.Errorf("numbers = %v, want one each", numbers)
+	}
+}
+
 func TestCreateTaskRejectsNonMemberAssignee(t *testing.T) {
 	store, err := NewFileStore(t.TempDir())
 	if err != nil {

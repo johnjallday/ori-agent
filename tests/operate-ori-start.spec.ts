@@ -71,7 +71,7 @@ test('wt demo: one reviewed task, one Start, real progress, and a refusal that c
   };
   const tray = page.locator('.ws-cmd-tray');
   const here = drawer(page);
-  const startButton = here.actions.getByRole('button', { name: 'Start task' });
+  const startButton = here.actions.getByRole('button', { name: 'Start ticket' });
 
   // --- 1. Prepare, edit, and save through the form's own review control.
   await page.goto('/');
@@ -115,7 +115,7 @@ test('wt demo: one reviewed task, one Start, real progress, and a refusal that c
     'Task created for Engineer: “Bounce the stems at 48k”. It has not started.'
   );
   await expect(startButton).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open the task' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Open the ticket' })).toHaveAttribute(
     'href',
     `${albumPath}?panel=tasks&task=${created.id}`
   );
@@ -255,7 +255,7 @@ test('wt demo: one reviewed task, one Start, real progress, and a refusal that c
     'The task for Drummer was not started. The task has no agent now. Assign it to an agent in this workspace, then start it.'
   );
   await expect(here.actions.getByRole('button', { name: 'Try starting again' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open the task' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open the ticket' })).toBeVisible();
   await shot('05-refused-start-keeps-the-task.png');
   const refusedTask = await task(secondTask.id);
   expect(refusedTask.status).toBe('pending');

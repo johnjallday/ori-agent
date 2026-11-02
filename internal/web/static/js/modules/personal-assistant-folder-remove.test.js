@@ -162,7 +162,7 @@ test('the confirm names what stays, from the lines that finished', () => {
   assert.match(confirm.question, /^Remove this setup from Needs you\? /);
   assert.match(confirm.question, /Kept: the workspace, the folder link, the agent\./);
   assert.match(confirm.question, /Show the folder again to start over\.$/);
-  assert.doesNotMatch(confirm.question, /first task|File-only/);
+  assert.doesNotMatch(confirm.question, /first ticket|File-only/);
   assert.deepEqual(
     confirm.actions.map(action => [action.id, action.label]),
     [

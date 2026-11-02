@@ -184,15 +184,15 @@ test('a save the server bound to the operation is followed, not dismissed', asyn
   const shown = view(client, { taskTitle: 'Bounce the stems at 48k' });
   assert.equal(
     shown.text,
-    'Task created for Engineer: “Bounce the stems at 48k”. It has not started.'
+    'Ticket created for Engineer: “Bounce the stems at 48k”. It has not started.'
   );
   assert.deepEqual(shown.actions, [
-    { id: 'start', label: 'Start task', primary: true },
+    { id: 'start', label: 'Start ticket', primary: true },
     { id: 'dismiss', label: 'Dismiss' }
   ]);
   assert.deepEqual(shown.link, {
     href: '/workspaces/album-1?panel=tasks&task=task-9',
-    label: 'Open the task'
+    label: 'Open the ticket'
   });
   // Created is not started: nothing here suggests work has begun.
   assert.doesNotMatch(shown.text, /is working|is running|accepted|finished/i);
@@ -255,7 +255,7 @@ test('Start is sent once, and an acceptance is shown as waiting, not as running'
   const first = client.start();
   const second = client.start();
   assert.equal(client.starting, true);
-  assert.equal(view(client).text, 'Asking Ori to start the task for Engineer…');
+  assert.equal(view(client).text, 'Asking Ori to start the ticket for Engineer…');
   assert.deepEqual(view(client).actions, [], 'no second Start while one is on its way');
   assert.equal(await second, false);
   assert.equal(await client.start(), false);
@@ -277,7 +277,10 @@ test('Start is sent once, and an acceptance is shown as waiting, not as running'
     ]
   );
   // Stopping here is not cancelling the task, and the control says so.
-  assert.match(accepted.actions[1].hint, /The task keeps going; cancel it from the task itself/);
+  assert.match(
+    accepted.actions[1].hint,
+    /The ticket keeps going; cancel it from the ticket itself/
+  );
   assert.doesNotMatch(accepted.text, /is working|finished|completed/i);
   assert.deepEqual(
     pending().map(timer => timer.ms),
@@ -336,7 +339,7 @@ test('execution is shown from the task: running, then the run the server observe
   assert.equal(done.tone, 'done');
   assert.deepEqual(done.link, {
     href: '/workspaces/album-1?panel=tasks&task=task-9',
-    label: 'Open the task'
+    label: 'Open the ticket'
   });
   await settle();
   assert.equal(calls.filter(call => call.method === 'GET').length, readsBefore + 4);
@@ -389,7 +392,7 @@ test('a refused Start keeps the task and says why; trying again is the same clai
   const refused = view(client);
   assert.equal(
     refused.text,
-    'The task for Engineer was not started. Ori is being reset, so nothing can start right now.'
+    'The ticket for Engineer was not started. Ori is being reset, so nothing can start right now.'
   );
   assert.equal(refused.tone, 'attention');
   assert.deepEqual(refused.actions[0], { id: 'start', label: 'Try starting again', primary: true });
@@ -414,7 +417,7 @@ test('a Start that got no answer claims nothing and is never repeated by itself'
   assert.equal(await client.start(), false);
   assert.equal(client.startUnconfirmed, true);
   const unknown = view(client);
-  assert.match(unknown.text, /not known whether the task started/);
+  assert.match(unknown.text, /not known whether the ticket started/);
   assert.deepEqual(unknown.actions[0], { id: 'check', label: 'Check again', primary: true });
   assert.ok(!unknown.actions.some(action => action.id === 'start'), 'no blind retry is offered');
 
@@ -456,7 +459,7 @@ test('an unresolved start offers a check first and an explicit retry, and starts
   const shown = view(client);
   assert.equal(
     shown.text,
-    'Ori could not confirm that the task for Engineer started. Ori could not confirm whether the start request arrived. Nothing was started again.'
+    'Ori could not confirm that the ticket for Engineer started. Ori could not confirm whether the start request arrived. Nothing was started again.'
   );
   assert.deepEqual(
     shown.actions.map(action => action.id),
@@ -487,7 +490,7 @@ test('a task started elsewhere is followed without opening anything in this tab'
   assert.equal(client.snapshot.status, 'started');
   assert.deepEqual(monitor.state.shown, [], 'a page load opens no tray by itself');
   assert.deepEqual(monitor.state.tracked, [{ taskId: 'task-9', select: false }]);
-  assert.equal(view(client).text, 'The task for Engineer started.');
+  assert.equal(view(client).text, 'The ticket for Engineer started.');
   assert.deepEqual(pending(), []);
   monitor.report('running');
   assert.equal(view(client).text, 'Engineer is working on “Bounce the stems at 48k”.');
@@ -567,14 +570,14 @@ test('an ended request says the task is still there, unless the task itself is g
   const expired = operationView({ snapshot: operation('expired'), phase: PHASE.ENDED });
   assert.equal(
     expired.text,
-    'That request ran out of time. The task for Engineer is still in Album 1.'
+    'That request ran out of time. The ticket for Engineer is still in Album 1.'
   );
   assert.deepEqual(expired.link, {
     href: '/workspaces/album-1?panel=tasks&task=task-9',
-    label: 'Open the task'
+    label: 'Open the ticket'
   });
   const invalid = operationView({ snapshot: operation('invalidated'), phase: PHASE.ENDED });
-  assert.match(invalid.text, /no longer valid\. The task for Engineer is still in Album 1\./);
+  assert.match(invalid.text, /no longer valid\. The ticket for Engineer is still in Album 1\./);
   const deleted = operationView({
     snapshot: operation('invalidated', {
       receipts: [
@@ -584,7 +587,7 @@ test('an ended request says the task is still there, unless the task itself is g
     }),
     phase: PHASE.ENDED
   });
-  assert.equal(deleted.text, 'The task was deleted, so there is nothing left to follow.');
+  assert.equal(deleted.text, 'The ticket was deleted, so there is nothing left to follow.');
   assert.equal(deleted.link, null);
   // A dismissed operation says nothing.
   const dismissed = operationView({ snapshot: operation('cancelled'), phase: PHASE.ENDED });
@@ -602,21 +605,21 @@ test('other task states are said in the task own words', () => {
       task,
       taskTitle: 'Bounce the stems'
     }).text;
-  assert.equal(say(''), 'The task for Engineer started.');
+  assert.equal(say(''), 'The ticket for Engineer started.');
   assert.equal(say('timed_out'), '“Bounce the stems” timed out.');
   assert.equal(say('cancelled'), '“Bounce the stems” was cancelled.');
   assert.equal(
     say('blocked'),
-    '“Bounce the stems” is blocked. Open the task to see what it needs.'
+    '“Bounce the stems” is blocked. Open the ticket to see what it needs.'
   );
   // Started, then waiting again with nothing to show: said as it is.
   assert.equal(
     say('ready'),
-    '“Bounce the stems” started and is waiting again. Open the task to see why.'
+    '“Bounce the stems” started and is waiting again. Open the ticket to see why.'
   );
   assert.equal(
     say('unknown'),
-    'Ori cannot tell what state “Bounce the stems” is in. Open the task to check.'
+    'Ori cannot tell what state “Bounce the stems” is in. Open the ticket to check.'
   );
   // A long error is cut, not dumped into the drawer.
   const long = say('failed', { error: 'x'.repeat(400) });

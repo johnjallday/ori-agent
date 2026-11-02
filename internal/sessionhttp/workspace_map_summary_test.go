@@ -82,6 +82,19 @@ func assertMapSummaryFields(t *testing.T, entry map[string]any) {
 	if got, ok := entry["open_task_count"].(float64); !ok || got != 3 {
 		t.Errorf("open_task_count = %v, want 3 actionable tasks", entry["open_task_count"])
 	}
+	// The four fixture tasks carry only legacy status: pending, two in progress
+	// and one completed. The canonical counts map them to 1 ready, 2 in
+	// progress and 1 done (PRD 760 FR-6, FR-8).
+	counts, ok := entry["ticket_counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("ticket_counts = %v, want the per-state object", entry["ticket_counts"])
+	}
+	wantCounts := map[string]float64{"backlog": 0, "ready": 1, "in_progress": 2, "review": 0, "done": 1, "cancelled": 0}
+	for state, want := range wantCounts {
+		if got, ok := counts[state].(float64); !ok || got != want {
+			t.Errorf("ticket_counts[%q] = %v, want %v (%v)", state, counts[state], want, counts)
+		}
+	}
 	if entry["task_summary_available"] != true || entry["needs_attention_count"] != float64(2) || entry["unknown_task_count"] != float64(0) {
 		t.Errorf("attention projection must be available with two attention tasks: %+v", entry)
 	}

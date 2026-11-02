@@ -71,7 +71,7 @@
       footer: !entity
         ? 'See the saved receipt for the confirmed result.'
         : kind === 'group'
-          ? 'Member workspaces are listed in the receipt. No automatic task.'
+          ? 'Member workspaces are listed in the receipt. No automatic ticket.'
           : kind === 'home'
             ? 'A library listing does not mean every project has a workspace.'
             : 'Workspace ready. First-look status is separate.'

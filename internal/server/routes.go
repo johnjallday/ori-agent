@@ -743,12 +743,10 @@ func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/delegate", s.Handlers.Orchestration.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/dynamic-agents/approve", s.Handlers.Orchestration.DynamicAgentApprovalHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.Handlers.Orchestration.TasksHandler)
-	mux.HandleFunc("/api/orchestration/tasks/bulk", s.Handlers.Orchestration.BulkDeleteTasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.Handlers.Orchestration.ExecuteTaskHandler)
 	mux.HandleFunc("/api/orchestration/workflows", s.Handlers.Orchestration.WorkflowCreateHandler)
 	if s.Handlers.AutoTask != nil {
 		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.Handlers.AutoTask.HandleAutoTask)
-		mux.HandleFunc("/api/orchestration/tasks/output-contract/suggest", s.Handlers.AutoTask.HandleOutputContractSuggestion)
 		mux.HandleFunc("/api/orchestration/tasks/output-spec/suggest", s.Handlers.AutoTask.HandleOutputContractSuggestion)
 		mux.HandleFunc("/api/orchestration/tasks/output-contract/telemetry", s.Handlers.AutoTask.HandleOutputContractTelemetry)
 	}
@@ -1215,6 +1213,9 @@ func registerTicketRoutes(mux *http.ServeMux, s *Server) {
 	// Collection-level reorder: atomic within one owner and one state (FR-91).
 	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets/reorder", s.Handlers.Orchestration.TicketReorderHandler)
 
+	// Start this: legal moves, then one run (PRD 760 FR-27).
+	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets/{ticketID}/start", s.Handlers.Orchestration.TicketStartHandler)
+
 	mux.HandleFunc("GET /api/workspaces/{studioID}/tickets/{ticketID}", s.Handlers.Orchestration.TicketItemHandler)
 	mux.HandleFunc("PATCH /api/workspaces/{studioID}/tickets/{ticketID}", s.Handlers.Orchestration.TicketItemHandler)
 	mux.HandleFunc("DELETE /api/workspaces/{studioID}/tickets/{ticketID}", s.Handlers.Orchestration.TicketItemHandler)
@@ -1492,6 +1493,8 @@ func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-hq/mail/confirm", s.Handlers.PersonalHQ.ConfirmSend)
 		mux.HandleFunc("GET /api/personal-hq/followups", s.Handlers.PersonalHQ.ListFollowUps)
 		mux.HandleFunc("GET /api/personal-hq/followups/home", s.Handlers.PersonalHQ.HomeFollowUps)
+		mux.HandleFunc("GET /api/personal-hq/followups/item", s.Handlers.PersonalHQ.GetFollowUp)
+		mux.HandleFunc("POST /api/personal-hq/followups/ticket", s.Handlers.PersonalHQ.MakeTicketFromFollowUp)
 		mux.HandleFunc("POST /api/personal-hq/followups", s.Handlers.PersonalHQ.CreateFollowUp)
 		mux.HandleFunc("POST /api/personal-hq/followups/confirm", s.Handlers.PersonalHQ.ConfirmFollowUp)
 		mux.HandleFunc("POST /api/personal-hq/followups/edit", s.Handlers.PersonalHQ.EditFollowUp)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -33,6 +34,23 @@ import (
 // legacy task/backlog shape (FR-92).
 type TicketHandler struct {
 	service *workspace.TicketService
+	// starter begins one run of a ticket through the manual execution path. Nil
+	// means a start intent reports that starting is unavailable.
+	starter func(workspaceID, ticketID string) error
+	// startClaims holds tickets a create request has started. The run begins
+	// asynchronously, so a fast retry can still read Ready; this keeps that retry
+	// from starting a second run.
+	startClaims sync.Map
+	// startThisClaims holds when each ticket was last started by Start this.
+	startThisClaims sync.Map
+}
+
+// SetStarter wires how a create request's start intent begins a run.
+func (th *TicketHandler) SetStarter(starter func(workspaceID, ticketID string) error) {
+	if th == nil {
+		return
+	}
+	th.starter = starter
 }
 
 // NewTicketHandler constructs a TicketHandler over the given service.
@@ -76,6 +94,30 @@ type ticketCreateRequest struct {
 	Source        string     `json:"source"`
 	SourceID      string     `json:"source_id"`
 	LinkedNoteIDs []string   `json:"linked_note_ids"`
+	// Assignee names the workspace agent who will do the work. Only Ready can
+	// have one (PRD 760 FR-13).
+	Assignee string `json:"assignee"`
+	// Start asks for one run as soon as the ticket exists. It needs Ready and an
+	// assignee. A start that fails leaves the ticket Ready and says why in the
+	// response; it is never a failed create (FR-14).
+	Start bool `json:"start"`
+	// IdempotencyKey makes a repeated request return the same ticket, and start
+	// it only if it has not started yet (FR-14).
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// ticketStartOutcome reports what a create request's start intent did.
+type ticketStartOutcome struct {
+	Started bool `json:"started"`
+	// Error is why it did not start, in words a person can act on.
+	Error string `json:"error,omitempty"`
+}
+
+// ticketCreateResponse is the canonical Ticket envelope, plus the start outcome
+// when the request asked for a start.
+type ticketCreateResponse struct {
+	*workspace.Ticket
+	Start *ticketStartOutcome `json:"start,omitempty"`
 }
 
 // ticketUpdateRequest is the PATCH body. Every field is a pointer so the
@@ -116,6 +158,9 @@ type ticketListResponse struct {
 	// client can distinguish "that is all of them" from "there are more".
 	Total     int  `json:"total"`
 	Truncated bool `json:"truncated,omitempty"`
+	// Counts is the workspace's own tickets by state, whatever the filters, so a
+	// one-row request refreshes the count line (PRD 760 FR-11).
+	Counts workspace.TicketCounts `json:"counts"`
 	// PartialOwners names descendant workspaces that could not be read during
 	// a roll-up, so the UI can say the list is incomplete rather than present
 	// it as whole (FR-133).
@@ -254,6 +299,7 @@ func (th *TicketHandler) handleList(w http.ResponseWriter, r *http.Request, stud
 		Count:              len(page.Tickets),
 		Total:              page.Total,
 		Truncated:          page.Truncated,
+		Counts:             page.Counts,
 		PartialOwners:      page.PartialOwners,
 		StudioID:           studioID,
 		IncludeDescendants: query.IncludeDescendants,
@@ -289,7 +335,17 @@ func (th *TicketHandler) handleCreate(w http.ResponseWriter, r *http.Request, st
 		return
 	}
 
-	ticket, err := th.service.Create(workspace.TicketCreateInput{
+	assignee := strings.TrimSpace(req.Assignee)
+	if req.Start && assignee == "" {
+		respondTicketFieldError(w, "assignee", "Choose who should start this")
+		return
+	}
+	if req.Start && state != workspace.TicketStateReady {
+		respondTicketFieldError(w, "state", "Only a ready ticket can start")
+		return
+	}
+
+	input := workspace.TicketCreateInput{
 		WorkspaceID:   studioID,
 		State:         state,
 		Title:         req.Title,
@@ -301,14 +357,129 @@ func (th *TicketHandler) handleCreate(w http.ResponseWriter, r *http.Request, st
 		Source:        req.Source,
 		SourceID:      req.SourceID,
 		LinkedNoteIDs: req.LinkedNoteIDs,
+		Assignee:      assignee,
 		Actor:         workspace.TicketActorUser,
-	})
+	}
+
+	var ticket *workspace.Ticket
+	created := true
+	if key := strings.TrimSpace(req.IdempotencyKey); key != "" {
+		if input.SourceID == "" {
+			input.SourceID = key
+		}
+		ticket, created, err = th.service.CreateWithKey(input)
+	} else {
+		ticket, err = th.service.Create(input)
+	}
 	if err != nil {
 		th.respondTicketError(w, "create ticket", studioID, "", err)
 		return
 	}
 
-	_ = orihttp.RespondJSON(w, http.StatusCreated, ticket)
+	response := ticketCreateResponse{Ticket: ticket}
+	if req.Start {
+		response.Start = th.startCreatedTicket(studioID, ticket)
+	}
+	status := http.StatusCreated
+	if !created {
+		status = http.StatusOK
+	}
+	_ = orihttp.RespondJSON(w, status, response)
+}
+
+// TicketStartHandler serves POST /api/workspaces/{studio_id}/tickets/{ticket_id}/start:
+// Start this (PRD 760 FR-27). It records each legal move and starts one run. With
+// no agent set and none named, the error's field asks who.
+func (th *TicketHandler) TicketStartHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	studioID := strings.TrimSpace(r.PathValue("studioID"))
+	ticketID := strings.TrimSpace(r.PathValue("ticketID"))
+	if studioID == "" || ticketID == "" {
+		orihttp.BadRequest(w, "studio_id and ticket_id are required")
+		return
+	}
+	var req struct {
+		Assignee string `json:"assignee"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	ticket, err := th.service.PrepareStart(studioID, ticketID, workspace.TicketStartInput{
+		Assignee: req.Assignee,
+		Actor:    workspace.TicketActorUser,
+	})
+	if err != nil {
+		th.respondTicketError(w, "start ticket", studioID, ticketID, err)
+		return
+	}
+	_ = orihttp.RespondJSON(w, http.StatusOK, ticketCreateResponse{Ticket: ticket, Start: th.startThis(studioID, ticket)})
+}
+
+// startThisWindow is how long a Start this answers a repeat without starting
+// again. A run begins asynchronously, so for a moment a started ticket still
+// reads Ready, and a double click must not make a second run (FR-27). A ticket
+// that comes back to Ready later can be started again.
+const startThisWindow = 30 * time.Second
+
+func (th *TicketHandler) startThis(studioID string, ticket *workspace.Ticket) *ticketStartOutcome {
+	if th.starter == nil {
+		return &ticketStartOutcome{Error: "Starting work is not available right now."}
+	}
+	ticketID := ticket.ID
+	now := time.Now()
+	if previous, claimed := th.startThisClaims.LoadOrStore(ticketID, now); claimed {
+		// A claim only covers the same moment: once the ticket has moved since (its
+		// run started and was stopped, say), this is a new start, not a repeat.
+		claimedAt := previous.(time.Time)
+		fresh := now.Sub(claimedAt) < startThisWindow && !movedSince(ticket, claimedAt)
+		if fresh || !th.startThisClaims.CompareAndSwap(ticketID, previous, now) {
+			return &ticketStartOutcome{Started: true}
+		}
+	}
+	if err := th.starter(studioID, ticketID); err != nil {
+		th.startThisClaims.Delete(ticketID)
+		logger.Warn("Start this was refused", logger.Fields{"ticket_id": ticketID, "error": err})
+		return &ticketStartOutcome{Error: err.Error()}
+	}
+	return &ticketStartOutcome{Started: true}
+}
+
+// movedSince reports whether the ticket's state changed after the given moment.
+func movedSince(ticket *workspace.Ticket, at time.Time) bool {
+	history := ticket.StateHistory
+	return len(history) > 0 && history[len(history)-1].Timestamp.After(at)
+}
+
+// startCreatedTicket begins the one run a create request asked for. A ticket that
+// has already started, or that this server already started, is not started again,
+// so a repeated request cannot produce a second run. A refusal releases the claim
+// so the same request can try again once its cause is fixed.
+func (th *TicketHandler) startCreatedTicket(studioID string, ticket *workspace.Ticket) *ticketStartOutcome {
+	if ticket.State != workspace.TicketStateReady || strings.TrimSpace(ticket.CurrentRunID) != "" {
+		return &ticketStartOutcome{Started: ticket.State != workspace.TicketStateBacklog}
+	}
+	if _, claimed := th.startClaims.LoadOrStore(ticket.ID, struct{}{}); claimed {
+		return &ticketStartOutcome{Started: true}
+	}
+	if th.starter == nil {
+		th.startClaims.Delete(ticket.ID)
+		return &ticketStartOutcome{Error: "Starting work is not available right now."}
+	}
+	if err := th.starter(studioID, ticket.ID); err != nil {
+		th.startClaims.Delete(ticket.ID)
+		logger.Warn("Ticket created but its start was refused", logger.Fields{"ticket_id": ticket.ID, "error": err})
+		return &ticketStartOutcome{Error: err.Error()}
+	}
+	return &ticketStartOutcome{Started: true}
+}
+
+func respondTicketFieldError(w http.ResponseWriter, field, message string) {
+	_ = orihttp.RespondAPIError(w, http.StatusBadRequest,
+		orihttp.NewAPIError(orihttp.ErrCodeValidation, message).
+			WithDetails(map[string]string{"field": field}))
 }
 
 // TicketReorderHandler serves POST

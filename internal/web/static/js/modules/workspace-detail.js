@@ -35,13 +35,34 @@ import { flattenWorkspaceTree, isGroupWorkspace } from './workspace-map-snapshot
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 import { openParcelByRef } from './parcel-open.js';
 import { taskCreateBody } from './quick-task.js';
+// Importing this registers window.OriGiveWork, the flow every door opens.
+import './give-work.js';
+
+// Live events after which a ticket's state may differ. Frequent phase events
+// (thinking, tool calls, heartbeats) are left out on purpose.
+const TICKET_MOVING_EVENTS = new Set([
+  'task_created',
+  'task_updated',
+  'task_deleted',
+  'task.created',
+  'task.started',
+  'task.completed',
+  'task.failed',
+  'task.blocked',
+  'task.resumed',
+  'task.deleted',
+  'task.backlog.captured',
+  'task.backlog.promoted'
+]);
 import {
   getStatusClass,
   getDisplayStatus,
   isTaskAwaitingNextStep as taskAwaitingNextStep,
   PRESENTATION_STATE,
   resolveTaskState,
-  resolveTaskStatusPresentation
+  resolveTaskStatusPresentation,
+  resolveTicketStatePill,
+  resolveRunSignal
 } from './task-presentation.js';
 
 /**
@@ -573,7 +594,7 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !startedSetupTask) {
       this.showFolderFirstTaskBanner();
     }
-    // Give a task… on the Agents page arrives here with the agent named; its
+    // Give work… on the Agents page arrives here with the agent named; its
     // task form opens once nothing of the blueprint's own goes first.
     if (!restoredBlockedTask && !setupOwned && !startedSetupTask) {
       this.checkAutoOpenNewTaskFor();
@@ -581,7 +602,7 @@ export class WorkspaceDetailPage {
   }
 
   /**
-   * Check for ?newTaskFor=<agent> (Give a task… on the Agents page,
+   * Check for ?newTaskFor=<agent> (Give work… on the Agents page,
    * agent-give-task.js) and open the task form with that agent chosen.
    * The parameter is removed so a reload does not open it again.
    */
@@ -714,20 +735,20 @@ export class WorkspaceDetailPage {
     this.setHomeAssistantQuickPrompt(
       homeAssistantQuickPlanBtn,
       'Plan Next',
-      `Analyze ${workspaceName} and propose the next 3 highest-impact tasks with acceptance criteria.`
+      `Analyze ${workspaceName} and propose the next 3 highest-impact tickets with acceptance criteria.`
     );
 
     if (taskCount === 0) {
       this.setHomeAssistantQuickPrompt(
         homeAssistantQuickTasksBtn,
-        'Bootstrap Tasks',
-        `Create the first 5 actionable tasks for ${workspaceName}, each with clear acceptance criteria.`
+        'Bootstrap Tickets',
+        `Create the first 5 actionable tickets for ${workspaceName}, each with clear acceptance criteria.`
       );
     } else {
       this.setHomeAssistantQuickPrompt(
         homeAssistantQuickTasksBtn,
-        'Unblock Tasks',
-        `Review tasks in ${workspaceName}, identify blockers, and suggest the next 3 tasks to move progress forward.`
+        'Unblock Tickets',
+        `Review tickets in ${workspaceName}, identify blockers, and suggest the next 3 tickets to move progress forward.`
       );
     }
 
@@ -755,7 +776,7 @@ export class WorkspaceDetailPage {
       this.setHomeAssistantQuickPrompt(
         homeAssistantQuickReviewBtn,
         'Risk Review',
-        `Run a risk review for ${workspaceName} using available tasks, notes, files, and directories. Recommend mitigation steps.`
+        `Run a risk review for ${workspaceName} using available tickets, notes, files, and directories. Recommend mitigation steps.`
       );
     }
   }
@@ -2766,7 +2787,7 @@ export class WorkspaceDetailPage {
         severity: 'error',
         title: 'Commander is missing',
         description:
-          'This workspace has no Commander assigned. Create one so chats, routing, and task orchestration have a default manager.',
+          'This workspace has no Commander assigned. Create one so chats, routing, and ticket orchestration have a default manager.',
         action: 'entry_agent',
         actionLabel: 'Create Commander',
         agentName: defaults.seedName || 'Workspace Commander',
@@ -3535,7 +3556,7 @@ export class WorkspaceDetailPage {
         if (this.elements.taskCount) {
           this.elements.taskCount.textContent = this.tasks.length;
           this.elements.taskCount.setAttribute('aria-busy', 'false');
-          this.elements.taskCount.setAttribute('aria-label', `${this.tasks.length} tasks`);
+          this.elements.taskCount.setAttribute('aria-label', `${this.tasks.length} tickets`);
         }
         this.refreshHomeAssistantQuickPrompts();
         // Keep the opt-in Command view (and its open stat manager) in sync after
@@ -4176,7 +4197,7 @@ export class WorkspaceDetailPage {
       .map(workflow => {
         const safeHref = this.buildBehaviorStudioHref(workflow.templateId);
         const workflowLabel = this.escapeHtml(workflow.templateName || workflow.templateId);
-        const taskLabel = `${workflow.taskCount} task${workflow.taskCount === 1 ? '' : 's'}`;
+        const taskLabel = `${workflow.taskCount} ticket${workflow.taskCount === 1 ? '' : 's'}`;
         const instanceLabel = `${workflow.workflowCount} run${workflow.workflowCount === 1 ? '' : 's'}`;
         const title = `Open ${workflow.templateName || workflow.templateId} in Orchestration Skills`;
 
@@ -4405,7 +4426,7 @@ export class WorkspaceDetailPage {
   getAgentRosterStatus(agentName) {
     const key = this.normalizeAgentName(agentName);
     if (!key || !Array.isArray(this.tasks)) {
-      return { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+      return { key: 'idle', label: 'Idle', detail: 'No active tickets' };
     }
 
     let hasWaiting = false;
@@ -4417,7 +4438,7 @@ export class WorkspaceDetailPage {
         .trim()
         .toLowerCase();
       if (status === 'in_progress') {
-        return { key: 'working', label: 'Working', detail: 'Task in progress' };
+        return { key: 'working', label: 'Working', detail: 'Run in progress' };
       }
       if (status === 'waiting_for_choice') {
         hasWaiting = true;
@@ -4427,7 +4448,7 @@ export class WorkspaceDetailPage {
     if (hasWaiting) {
       return { key: 'needs-input', label: 'Needs input', detail: 'Waiting for user input' };
     }
-    return { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+    return { key: 'idle', label: 'Idle', detail: 'No active tickets' };
   }
 
   getAgentSkillSummary(agentName, limit = 3) {
@@ -4516,7 +4537,7 @@ export class WorkspaceDetailPage {
     const skills = skillSummary?.label || '0 skills';
     const statusLabel = status?.label || 'Idle';
     const taskCount = Number(group?.tasks?.length || 0);
-    const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
+    const taskLabel = `${taskCount} ticket${taskCount === 1 ? '' : 's'}`;
     return `${role}. ${model}. ${skills}. ${statusLabel}. ${taskLabel}.`;
   }
 
@@ -4550,7 +4571,7 @@ export class WorkspaceDetailPage {
     this.elements.agentsList.innerHTML = groups
       .map(group => {
         const taskCount = group.tasks.length;
-        const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
+        const taskLabel = `${taskCount} ticket${taskCount === 1 ? '' : 's'}`;
         const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
         const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
         const capabilityBadges = group.isUnassigned
@@ -4562,7 +4583,7 @@ export class WorkspaceDetailPage {
           ? ''
           : this.renderAgentModelPowerBadge(group.name, agentProfile, encodedAgentName);
         const rolePresentation = group.isUnassigned
-          ? { label: 'Unassigned', detail: 'Tasks not assigned to an agent', roles: [] }
+          ? { label: 'Unassigned', detail: 'Tickets not assigned to an agent', roles: [] }
           : this.getAgentGroupRolePresentation(group);
         const modelPresentation = group.isUnassigned
           ? { label: '', model: '', tier: '', empty: true }
@@ -4571,16 +4592,16 @@ export class WorkspaceDetailPage {
           ? { count: 0, label: '0 skills', visible: [], overflow: 0, names: [] }
           : this.getAgentSkillSummary(group.name);
         const status = group.isUnassigned
-          ? { key: 'idle', label: 'Unassigned', detail: 'Tasks awaiting assignment' }
+          ? { key: 'idle', label: 'Unassigned', detail: 'Tickets awaiting assignment' }
           : this.getAgentRosterStatus(group.name);
         // Unassigned is a bucket, not an agent, so it deliberately keeps the
         // plain initials tile rather than being given an identity.
         const avatar = group.isUnassigned
-          ? { initials: '?', label: 'Unassigned tasks' }
+          ? { initials: '?', label: 'Unassigned tickets' }
           : this.getAgentAvatarPresentation(group.name);
         const summaryId = `agent-card-summary-${String(group.key || 'agent').replace(/[^a-z0-9_-]+/gi, '-')}`;
         const cardSummary = group.isUnassigned
-          ? `${taskLabel}. Tasks awaiting assignment.`
+          ? `${taskLabel}. Tickets awaiting assignment.`
           : this.buildAgentCardSummary(
               group,
               rolePresentation,
@@ -4636,8 +4657,8 @@ export class WorkspaceDetailPage {
           : `
         <button type="button"
                 class="workspace-detail-agent-section-btn"
-                title="Add task for ${this.escapeHtml(group.name)}"
-                aria-label="Add task for ${this.escapeHtml(group.name)}"
+                title="Add ticket for ${this.escapeHtml(group.name)}"
+                aria-label="Add ticket for${this.escapeHtml(group.name)}"
                 onclick="event.stopPropagation(); window.workspaceDetail?.showAddTaskModalForAgent('${encodedAgentName}')">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -4694,7 +4715,7 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-sections">
               <div class="workspace-detail-agent-section">
                 <div class="workspace-detail-agent-section-header">
-                  <div class="workspace-detail-agent-section-title">Tasks</div>
+                  <div class="workspace-detail-agent-section-title">Tickets</div>
                   ${taskActionButton}
                 </div>
                 <div class="workspace-detail-list workspace-detail-agent-list">
@@ -4794,8 +4815,8 @@ export class WorkspaceDetailPage {
             ${removeButton}
             <button type="button"
                     class="workspace-detail-agent-flip-btn"
-                    title="Back to tasks and sessions"
-                    aria-label="Back to tasks and sessions"
+                    title="Back to tickets and sessions"
+                    aria-label="Back to tickets and sessions"
                     onclick="event.stopPropagation(); window.workspaceDetail?.toggleAgentCardFlip('${encodedAgentName}')">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>
@@ -5510,13 +5531,13 @@ export class WorkspaceDetailPage {
 
   renderAgentTasksContent(tasks) {
     if (this.tasksLoading) {
-      return '<div class="workspace-detail-loading workspace-detail-loading-inline">Loading tasks...</div>';
+      return '<div class="workspace-detail-loading workspace-detail-loading-inline">Loading tickets...</div>';
     }
     if (this.tasksLoadFailed) {
-      return '<div class="workspace-detail-empty workspace-detail-empty-inline">Failed to load tasks.</div>';
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">Failed to load tickets.</div>';
     }
     if (!Array.isArray(tasks) || tasks.length === 0) {
-      return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tasks assigned.</div>';
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tickets assigned.</div>';
     }
     return tasks.map(task => this.renderTaskGroup(task)).join('');
   }
@@ -5602,10 +5623,10 @@ export class WorkspaceDetailPage {
     const isActive = task.schedule_enabled !== false;
     const scheduleName = typeof task.schedule_name === 'string' ? task.schedule_name.trim() : '';
     const title = scheduleName
-      ? `${isActive ? 'Scheduled task' : 'Scheduled task (paused)'}: ${scheduleName}`
+      ? `${isActive ? 'Scheduled ticket' : 'Scheduled ticket (paused)'}: ${scheduleName}`
       : isActive
-        ? 'Scheduled task'
-        : 'Scheduled task (paused)';
+        ? 'Scheduled ticket'
+        : 'Scheduled ticket (paused)';
 
     return { isActive, title };
   }
@@ -5686,7 +5707,7 @@ export class WorkspaceDetailPage {
       subtaskCount = 0,
       collapsed = false
     } = options;
-    const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
+    const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Ticket');
     const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
     const subtasks = isSubtask
       ? []
@@ -5694,6 +5715,10 @@ export class WorkspaceDetailPage {
     const isParent = isParentHint || subtasks.length > 0;
     const parentSubtaskCount = subtaskCount || subtasks.length;
     const statusInfo = this.getTaskStatusPresentation(task);
+    // The row shows the ticket's state; how the latest run went sits beside it
+    // and never replaces it (PRD 760 FR-4).
+    const ticketPill = resolveTicketStatePill(task);
+    const runSignal = resolveRunSignal(task);
     const awaitingNextStep = this.isTaskAwaitingNextStep(task);
     const hasUnassignedSubtasks =
       isParent && subtasks.some(subtask => !subtask.to || subtask.to === 'unassigned');
@@ -5713,9 +5738,9 @@ export class WorkspaceDetailPage {
     const isRerun = !isParent && taskTerminalState;
     const executeTitle = isParent
       ? hasUnassignedSubtasks
-        ? 'Assign agents to all subtasks before executing'
+        ? 'Assign agents to all subtickets before executing'
         : hasRunningSubtasks
-          ? 'A subtask is already running'
+          ? 'A subticket is already running'
           : 'Execute workflow now'
       : !assignedAgent
         ? isRerun
@@ -5724,15 +5749,15 @@ export class WorkspaceDetailPage {
         : awaitingNextStep
           ? 'Execute the next internal step'
           : task.status === 'in_progress'
-            ? 'Task is already running'
+            ? 'Already running'
             : isRerun
-              ? 'Re-run this task'
-              : 'Execute task now';
+              ? 'Run this ticket again'
+              : 'Run ticket now';
     const resultTitle = hasResultData
       ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
       : '';
     const assistTitle =
-      statusInfo.reason || 'Agent needs your guidance before this task can continue.';
+      statusInfo.reason || 'Agent needs your guidance before this run can continue.';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task);
     const referenceIndicator = this.renderTaskReferenceURLIndicator(task);
     const taskTags = Array.isArray(task.tags)
@@ -5783,8 +5808,8 @@ export class WorkspaceDetailPage {
                  class="workspace-detail-item-toggle"
                  aria-expanded="${collapsed ? 'false' : 'true'}"
                  aria-controls="workspace-detail-subtasks-${this.escapeHtml(task.id)}"
-                 title="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
-                 aria-label="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
+                 title="${collapsed ? 'Show subtickets' : 'Hide subtickets'}"
+                 aria-label="${collapsed ? 'Show subtickets' : 'Hide subtickets'}"
                  onclick="event.stopPropagation(); window.workspaceDetail?.toggleWorkflowExpansion('${task.id}')">
            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
              <path d="M7,10L12,15L17,10H7Z"/>
@@ -5793,14 +5818,14 @@ export class WorkspaceDetailPage {
       : '';
 
     const parentBadge = isParent
-      ? '<span class="workspace-detail-workflow-badge" title="Workflow with subtasks">Workflow</span>'
+      ? '<span class="workspace-detail-workflow-badge" title="Workflow with subtickets">Workflow</span>'
       : '';
     const stepBadge =
       isSubtask && stepNumber !== null
         ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
         : '';
 
-    const cardOpenLabel = `Open task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}`;
+    const cardOpenLabel = `Open ticket ${this.escapeHtml(task.description || task.name || 'Untitled Ticket')}`;
     return `
       <div class="${itemClasses.join(' ')}"
            data-task-id="${task.id}"
@@ -5816,7 +5841,7 @@ export class WorkspaceDetailPage {
                 class="workspace-detail-item-result"
                 onclick="event.stopPropagation(); window.workspaceDetail?.openTask('${task.id}')"
                 title="${this.escapeHtml(assistTitle)}"
-                aria-label="Help blocked task ${taskLabel}">
+                aria-label="Help blocked ticket ${taskLabel}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
             <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
           </svg>
@@ -5828,7 +5853,7 @@ export class WorkspaceDetailPage {
                 class="workspace-detail-item-result"
                 onclick="event.stopPropagation(); window.workspaceDetail?.showTaskResult('${task.id}')"
                 title="${this.escapeHtml(resultTitle)}"
-                aria-label="View result for task ${taskLabel}">
+                aria-label="View result for ticket ${taskLabel}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
             <path d="M14,17H7V15H14M17,13H7V11H17M17,9H7V7H17M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z"/>
           </svg>
@@ -5840,7 +5865,7 @@ export class WorkspaceDetailPage {
                 class="workspace-detail-item-run${isRerun ? ' is-rerun' : ''}"
                 onclick="event.stopPropagation(); window.workspaceDetail?.executeTask('${task.id}')"
                 title="${this.escapeHtml(executeTitle)}"
-                aria-label="${isRerun ? 'Re-run' : 'Execute'} task ${taskLabel}"
+                aria-label="${isRerun ? 'Run again' : 'Run'} ticket ${taskLabel}"
                 ${canExecute ? '' : 'disabled'}>
           ${
             isRerun
@@ -5852,7 +5877,7 @@ export class WorkspaceDetailPage {
                </svg>`
           }
         </button>
-        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task" aria-label="Delete task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}">
+        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete ticket" aria-label="Delete ticket ${this.escapeHtml(task.description || task.name || 'Untitled Ticket')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
@@ -5864,7 +5889,7 @@ export class WorkspaceDetailPage {
             </div>
             <div class="workspace-detail-task-status-group">
               <span class="workspace-detail-task-activity" data-task-activity-slot hidden></span>
-              <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
+              <span class="workspace-detail-task-status ${ticketPill.className}">${this.escapeHtml(runSignal ? `${ticketPill.label} · ${runSignal}` : ticketPill.label)}</span>
             </div>
           </div>
           <div class="workspace-detail-item-meta">
@@ -6098,7 +6123,7 @@ export class WorkspaceDetailPage {
       if (!result?.started || !result?.task_id) return false;
       await this.loadTasks();
       if (window.Toast) {
-        window.Toast.info('Setup task started — the workspace agent is getting things ready.');
+        window.Toast.info('Setup run started — the workspace agent is getting things ready.');
       }
       // Land where the setup conversation surfaces: the same execution monitor
       // a manual Start opens (agent questions arrive via the blocked-task flow).
@@ -6189,7 +6214,7 @@ export class WorkspaceDetailPage {
       this.firstTaskSeeded = false;
       await this.loadTasks();
       if (window.Toast) {
-        window.Toast.info('Your first task started: a read-only look at the folder.');
+        window.Toast.info('Your first run started: a read-only look at the folder.');
       }
       this.firstTaskBannerId = result.task_id;
       this.startExecutionMonitor(result.task_id);
@@ -6450,13 +6475,13 @@ export class WorkspaceDetailPage {
     const hire = await this.showTaskConfirmDialog({
       eyebrow: 'Workspace setup',
       title: 'Hire a Commander for this workspace?',
-      message: `${workspaceName || 'This workspace'} routes chats and tasks through its Commander. The first agent you hire here takes that seat.`,
+      message: `${workspaceName || 'This workspace'} routes chats and tickets through its Commander. The first agent you hire here takes that seat.`,
       confirmLabel: 'Hire a Commander',
       cancelLabel: 'Not now',
       mandatory: false,
       metaItems: [workspaceName || 'This workspace', entryAgentDefaults.seedName],
       details: [
-        'The Commander receives chats and dispatches tasks.',
+        'The Commander receives chats and dispatches tickets.',
         'You can rename or replace it later.',
         'Nothing is created until you finish the form.'
       ]
@@ -6528,7 +6553,7 @@ export class WorkspaceDetailPage {
   }
 
   getTaskDisplayLabel(task) {
-    return String(task?.description || task?.name || task?.id || 'Task').trim() || 'Task';
+    return String(task?.description || task?.name || task?.id || 'Ticket').trim() || 'Ticket';
   }
 
   resetTaskConfirmDialog() {
@@ -7020,7 +7045,7 @@ export class WorkspaceDetailPage {
       requirements.push({
         key: TASK_REQUIREMENT_KEYS.BROWSER,
         label: 'Browser access',
-        reason: 'This task appears to require visiting or interacting with webpages.'
+        reason: 'This ticket appears to require visiting or interacting with webpages.'
       });
     }
     if (this.isLikelyFilesystemIntent(description)) {
@@ -7028,7 +7053,7 @@ export class WorkspaceDetailPage {
         key: TASK_REQUIREMENT_KEYS.FILESYSTEM,
         label: 'File management',
         reason:
-          'This task appears to require gathering, moving, renaming, or organizing files and folders.'
+          'This ticket appears to require gathering, moving, renaming, or organizing files and folders.'
       });
     }
     return requirements;
@@ -7110,7 +7135,7 @@ export class WorkspaceDetailPage {
     if (keys.has(TASK_REQUIREMENT_KEYS.BROWSER)) {
       return { name: 'Browser Assistant' };
     }
-    return { name: 'Task Assistant' };
+    return { name: 'General Assistant' };
   }
 
   getTaskRequirementMatches(values, signals) {
@@ -7439,7 +7464,7 @@ export class WorkspaceDetailPage {
 
   buildCapabilityAwareAgentDescription(task, requirements = [], suggestions = {}) {
     const taskLabel = this.getTaskDisplayLabel(task);
-    const details = [`Create an agent that can complete the task "${taskLabel}".`];
+    const details = [`Create an agent that can complete the ticket "${taskLabel}".`];
 
     const requirementKeys = new Set(
       (Array.isArray(requirements) ? requirements : []).map(requirement =>
@@ -7484,11 +7509,11 @@ export class WorkspaceDetailPage {
       const confirmed = await this.showTaskConfirmDialog({
         eyebrow: 'Capability Match',
         title: alreadyInWorkspace
-          ? `Assign "${recommendedAgent.agentName}" to this task?`
+          ? `Assign "${recommendedAgent.agentName}" to this ticket?`
           : `Add "${recommendedAgent.agentName}" and assign it?`,
         message: alreadyInWorkspace
-          ? `This task needs ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match.`
-          : `This task needs ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match and can be added to this workspace.`,
+          ? `This ticket needs ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match.`
+          : `This ticket needs ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match and can be added to this workspace.`,
         confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
         metaItems: [
           taskLabel,
@@ -7516,8 +7541,8 @@ export class WorkspaceDetailPage {
         if (window.Toast) {
           window.Toast.success(
             alreadyInWorkspace
-              ? `Assigned "${recommendedAgent.agentName}" to this task.`
-              : `Added "${recommendedAgent.agentName}" and assigned it to this task.`
+              ? `Assigned "${recommendedAgent.agentName}" to this ticket.`
+              : `Added "${recommendedAgent.agentName}" and assigned it to this ticket.`
           );
         }
         return { handled: true, agentName: recommendedAgent.agentName };
@@ -7539,7 +7564,7 @@ export class WorkspaceDetailPage {
     const previewSequence = this.getPredictedTaskExecutionSequence(task);
     const createAgent = await this.showTaskConfirmDialog({
       eyebrow: 'Capability Required',
-      title: 'Create a capable agent for this task?',
+      title: 'Create a capable agent for this ticket?',
       message: `No assigned agent advertises ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')} for "${taskLabel}".`,
       confirmLabel: 'Create Agent',
       cancelLabel: 'Cancel',
@@ -7768,7 +7793,7 @@ export class WorkspaceDetailPage {
     }
     if (taskCount > 0) {
       confirmationLines.push(
-        `${taskCount} assigned task${taskCount === 1 ? '' : 's'} will be moved to Unassigned.`
+        `${taskCount} assigned ticket${taskCount === 1 ? '' : 's'} will be moved to Unassigned.`
       );
     }
     if (sessionCount > 0) {
@@ -7818,7 +7843,7 @@ export class WorkspaceDetailPage {
     if (!task || typeof task !== 'object') return '';
 
     const taskLabel =
-      String(task.description || task.name || task.id || 'this task').trim() || 'this task';
+      String(task.description || task.name || task.id || 'this ticket').trim() || 'this ticket';
     const prompt = this.getTaskAgentSuggestionPrompt(task);
     const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
       task,
@@ -7867,7 +7892,7 @@ export class WorkspaceDetailPage {
       const confirmed = await this.showTaskConfirmDialog({
         eyebrow: 'Ori Recommendation',
         title: alreadyInWorkspace
-          ? `Assign "${suggestedAgent}" to this task?`
+          ? `Assign "${suggestedAgent}" to this ticket?`
           : `Add "${suggestedAgent}" and assign it?`,
         message: alreadyInWorkspace
           ? `Ori matched ${taskLabel} to "${suggestedAgent}" and can assign it in one step.`
@@ -7896,8 +7921,8 @@ export class WorkspaceDetailPage {
         if (window.Toast) {
           window.Toast.success(
             alreadyInWorkspace
-              ? `Assigned "${suggestedAgent}" to this task.`
-              : `Added "${suggestedAgent}" and assigned it to this task.`
+              ? `Assigned "${suggestedAgent}" to this ticket.`
+              : `Added "${suggestedAgent}" and assigned it to this ticket.`
           );
         }
         return suggestedAgent;
@@ -7913,13 +7938,13 @@ export class WorkspaceDetailPage {
     const prefersBrowserAgent = this.isLikelyBrowserAutomationIntent(prompt);
     const suggestedName =
       String(routeData?.suggested_agent_name || '').trim() ||
-      (prefersBrowserAgent ? 'Browser Assistant' : 'Task Assistant');
+      (prefersBrowserAgent ? 'Browser Assistant' : 'General Assistant');
     const reasonText = this.getTaskAgentSuggestionReasonText(routeData);
     if (window.Toast) {
       const message =
         routeData?.requires_creation === true
-          ? `Ori suggests creating "${suggestedName}" for this task.`
-          : `No workspace agent matches this task yet. Ori prepared "${suggestedName}" for you.`;
+          ? `Ori suggests creating "${suggestedName}" for this ticket.`
+          : `No workspace agent matches this ticket yet. Ori prepared "${suggestedName}" for you.`;
       window.Toast.info(reasonText ? `${message} ${reasonText.replace(/\n+/g, ' ')}` : message);
     }
 
@@ -8047,7 +8072,7 @@ export class WorkspaceDetailPage {
     if (!element) return;
     const value = String(taskId || '').trim();
     element.textContent = value || '--';
-    element.title = value || 'Task ID unavailable';
+    element.title = value || 'Ticket ID unavailable';
   }
 
   showTaskResult(taskId, options = {}) {
@@ -8059,11 +8084,11 @@ export class WorkspaceDetailPage {
     const isParent = subtasks.length > 0;
     const resultData = this.getDisplayResult(task, subtasks);
     if (!resultData || !resultData.text) {
-      if (window.Toast) window.Toast.info('No result captured for this task yet.');
+      if (window.Toast) window.Toast.info('No result captured for this run yet.');
       return;
     }
 
-    const taskName = task.description || task.name || task.id || 'Task Result';
+    const taskName = task.description || task.name || task.id || 'Run Result';
     const statusText = this.getTaskStatusPresentation(task).label;
     const timestamp = formatDate(task.completed_at || task.updated_at || task.created_at);
     const answeredBy = resultData.answeredBy || 'Unknown agent';
@@ -8171,12 +8196,13 @@ export class WorkspaceDetailPage {
 
     if (canPromoteResult && nextSteps.length) {
       copyEl.textContent =
-        'Create a workflow from the checklist, or choose a next step for a follow-up task.';
+        'Create a workflow from the checklist, or choose a next step for a follow-up ticket.';
     } else if (canPromoteResult) {
-      copyEl.textContent = 'Create a parent task with subtasks from the checklist in this result.';
+      copyEl.textContent =
+        'Create a parent ticket with subtickets from the checklist in this result.';
     } else {
       copyEl.textContent =
-        'Choose the next step to create and run a follow-up task linked to this result.';
+        'Choose the next step to create and run a follow-up ticket linked to this result.';
     }
 
     const actionHtml = [];
@@ -8187,8 +8213,8 @@ export class WorkspaceDetailPage {
       const promoteLabel = this.currentTaskResultPromotionPending
         ? 'Preparing preview...'
         : this.currentTaskResultPromotionSubmitting
-          ? 'Creating workflow task...'
-          : 'Review and create parent task';
+          ? 'Creating workflow ticket...'
+          : 'Review and create parent ticket';
       actionHtml.push(`
         <button type="button"
                 class="workspace-detail-task-result-next-step-btn"
@@ -8196,7 +8222,7 @@ export class WorkspaceDetailPage {
                 ${promoteDisabled ? 'disabled' : ''}>
           <span class="workspace-detail-task-result-next-step-index">+</span>
           <span class="workspace-detail-task-result-next-step-copy">
-            <span class="workspace-detail-task-result-next-step-title">Create workflow task</span>
+            <span class="workspace-detail-task-result-next-step-title">Create workflow ticket</span>
             <span class="workspace-detail-task-result-next-step-meta">${this.escapeHtml(promoteLabel)}</span>
           </span>
         </button>
@@ -8206,8 +8232,8 @@ export class WorkspaceDetailPage {
     nextSteps.forEach(step => {
       const followUpDisabled = this.currentTaskResultFollowUpPending || promotionBusy;
       const buttonLabel = this.currentTaskResultFollowUpPending
-        ? 'Creating follow-up task...'
-        : 'Create follow-up task';
+        ? 'Creating follow-up ticket...'
+        : 'Create follow-up ticket';
       actionHtml.push(`
         <button type="button"
                 class="workspace-detail-task-result-next-step-btn"
@@ -8297,7 +8323,7 @@ export class WorkspaceDetailPage {
     );
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload?.error || payload?.message || 'Failed to preview task result');
+      throw new Error(payload?.error || payload?.message || 'Failed to preview run result');
     }
     return payload;
   }
@@ -8318,7 +8344,7 @@ export class WorkspaceDetailPage {
       const itemCount = Number(preview?.item_count || this.countTaskListResultItems(taskList));
 
       if (!taskList || itemCount < 1) {
-        throw new Error('This result does not include a task list to promote.');
+        throw new Error('This result does not include a ticket list to promote.');
       }
 
       this.currentTaskResultPromotionDraft = this.cloneTaskListResult(taskList);
@@ -8328,7 +8354,7 @@ export class WorkspaceDetailPage {
     } catch (error) {
       console.error('Failed to preview task result promotion:', error);
       if (window.Toast) {
-        window.Toast.error(error?.message || 'Failed to preview workflow task');
+        window.Toast.error(error?.message || 'Failed to preview workflow ticket');
       }
     } finally {
       this.currentTaskResultPromotionPending = false;
@@ -8378,9 +8404,9 @@ export class WorkspaceDetailPage {
 
     const itemCount = this.countTaskListResultItems(taskList);
     this.elements.taskResultPromoteTitleInput.value = String(
-      taskList.parent_title || 'Workflow task'
+      taskList.parent_title || 'Workflow ticket'
     ).trim();
-    this.elements.taskResultPromoteMeta.textContent = `${itemCount} subtask${
+    this.elements.taskResultPromoteMeta.textContent = `${itemCount} subticket${
       itemCount === 1 ? '' : 's'
     }`;
 
@@ -8443,20 +8469,20 @@ export class WorkspaceDetailPage {
 
   validateTaskResultPromotionDraft(taskList) {
     if (!taskList || typeof taskList !== 'object') {
-      return 'Task list preview is unavailable.';
+      return 'Ticket list preview is unavailable.';
     }
     if (!String(taskList.parent_title || '').trim()) {
-      return 'Parent task title is required.';
+      return 'Parent ticket title is required.';
     }
     if (this.countTaskListResultItems(taskList) < 1) {
-      return 'At least one subtask is required.';
+      return 'At least one subticket is required.';
     }
     const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
     for (const group of groups) {
       const items = Array.isArray(group?.items) ? group.items : [];
       for (const item of items) {
         if (!String(item?.title || '').trim()) {
-          return 'Every subtask needs a title.';
+          return 'Every subticket needs a title.';
         }
       }
     }
@@ -8495,13 +8521,13 @@ export class WorkspaceDetailPage {
       );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.error || payload?.message || 'Failed to create workflow task');
+        throw new Error(payload?.error || payload?.message || 'Failed to create workflow ticket');
       }
 
       const subtaskCount = this.countTaskListResultItems(taskList);
-      const subtaskLabel = `${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`;
+      const subtaskLabel = `${subtaskCount} subticket${subtaskCount === 1 ? '' : 's'}`;
       if (window.Toast) {
-        window.Toast.success(`Created workflow task with ${subtaskLabel}`);
+        window.Toast.success(`Created workflow ticket with ${subtaskLabel}`);
       }
 
       if (this.elements.taskResultPromoteModal && window.bootstrap) {
@@ -8522,7 +8548,7 @@ export class WorkspaceDetailPage {
     } catch (error) {
       console.error('Failed to promote task result:', error);
       if (window.Toast) {
-        window.Toast.error(error?.message || 'Failed to create workflow task');
+        window.Toast.error(error?.message || 'Failed to create workflow ticket');
       }
     } finally {
       this.setTaskResultPromotionSubmitState(false);
@@ -8597,7 +8623,7 @@ export class WorkspaceDetailPage {
 
   buildTaskResultFollowUpTitle(task, step) {
     const baseTitle =
-      String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
+      String(task?.description || task?.name || 'Follow-up ticket').trim() || 'Follow-up ticket';
     const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
     if (!stepLabel) return baseTitle;
     const combined = `${baseTitle} - ${stepLabel}`;
@@ -8607,7 +8633,7 @@ export class WorkspaceDetailPage {
   buildTaskResultFollowUpDetails(task, sourceTask, step) {
     const parts = [];
     const baseTitle = String(
-      task?.description || task?.name || task?.id || 'Completed task'
+      task?.description || task?.name || task?.id || 'Completed ticket'
     ).trim();
     const sourceTitle = String(
       sourceTask?.description || sourceTask?.name || sourceTask?.id || ''
@@ -8615,14 +8641,14 @@ export class WorkspaceDetailPage {
     const stepNumber = String(step?.number || '').trim();
     const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
 
-    parts.push(`Follow-up created from completed task: ${baseTitle}`);
+    parts.push(`Follow-up created from a completed run: ${baseTitle}`);
     if (sourceTitle && sourceTitle !== baseTitle) {
       parts.push(`Source result: ${sourceTitle}`);
     }
     if (stepLabel) {
       parts.push(`Selected next step: ${stepNumber ? `${stepNumber}. ` : ''}${stepLabel}`);
     }
-    parts.push('Use the linked input task result as the starting context and continue from there.');
+    parts.push('Use the linked result as the starting context and continue from there.');
 
     return parts.join('\n');
   }
@@ -8652,11 +8678,11 @@ export class WorkspaceDetailPage {
       );
 
       if (!createdTask?.id) {
-        throw new Error('Failed to create follow-up task');
+        throw new Error('Failed to create follow-up ticket');
       }
 
       if (window.Toast) {
-        window.Toast.success('Follow-up task created');
+        window.Toast.success('Follow-up ticket created');
       }
 
       if (this.elements.taskResultModal && window.bootstrap) {
@@ -8668,7 +8694,7 @@ export class WorkspaceDetailPage {
     } catch (error) {
       console.error('Failed to continue task from result:', error);
       if (window.Toast) {
-        window.Toast.error(error?.message || 'Failed to continue task');
+        window.Toast.error(error?.message || 'Failed to continue ticket');
       }
     } finally {
       this.currentTaskResultFollowUpPending = false;
@@ -9092,7 +9118,7 @@ export class WorkspaceDetailPage {
         ),
         toStep(
           'Identify DNM-related files',
-          'Match files by filename, path, and available task context.',
+          'Match files by filename, path, and available ticket context.',
           'Analysis'
         ),
         toStep(
@@ -9127,12 +9153,12 @@ export class WorkspaceDetailPage {
         ),
         toStep(
           'Open the target page',
-          'Navigate to the relevant website or URL for this task.',
+          'Navigate to the relevant website or URL for this ticket.',
           'Action'
         ),
         toStep(
           'Inspect the required information or controls',
-          'Locate the data, form, or interface element needed to complete the task.',
+          'Locate the data, form, or interface element needed to complete the ticket.',
           'Analysis'
         ),
         toStep(
@@ -9142,7 +9168,7 @@ export class WorkspaceDetailPage {
         ),
         toStep(
           'Verify the outcome',
-          'Confirm the page state or extracted result matches the task goal.',
+          'Confirm the page state or extracted result matches the ticket goal.',
           'Verify'
         ),
         toStep('Return a summary', 'Report what was done and any follow-up needed.', 'Summary')
@@ -9208,7 +9234,7 @@ export class WorkspaceDetailPage {
       ];
     } else {
       baseSteps = [
-        toStep('Understanding the request', 'Clarify intent and constraints from task context.'),
+        toStep('Understanding the request', 'Clarify intent and constraints from ticket context.'),
         toStep('Producing final recommendation', 'Generate the final answer with clear reasoning.')
       ];
     }
@@ -9331,7 +9357,7 @@ export class WorkspaceDetailPage {
       }
     }
     if (window.Toast) {
-      window.Toast.info(`"${agentName}" is ready. Switch this task to it and retry.`);
+      window.Toast.info(`"${agentName}" is ready. Switch this ticket to it and retry.`);
     }
   }
 
@@ -9396,10 +9422,10 @@ export class WorkspaceDetailPage {
       return `Recommended: Hand this off to "${agentName}" instead of keeping it with ${currentLabel}.`;
     }
     if (action?.kind === 'add_and_switch') {
-      return `Recommended: Add "${agentName}" to this workspace and hand the task off there.`;
+      return `Recommended: Add "${agentName}" to this workspace and hand the ticket off there.`;
     }
     if (action?.kind === 'create') {
-      return `Recommended: Create "${agentName}" for this workspace, then hand the task off there.`;
+      return `Recommended: Create "${agentName}" for this workspace, then hand the ticket off there.`;
     }
     return '';
   }
@@ -9530,7 +9556,7 @@ export class WorkspaceDetailPage {
         kind === 'switch'
           ? `"${agentName}" already fits this travel-planning follow-up better than ${currentAgent ? `"${currentAgent}"` : 'the current agent'}.`
           : kind === 'add_and_switch'
-            ? `"${agentName}" exists already. Add it to this workspace and hand the task off there.`
+            ? `"${agentName}" exists already. Add it to this workspace and hand the ticket off there.`
             : `This workspace does not have a dedicated travel specialist yet. Create "${agentName}" and use it for this follow-up.`,
       buttonLabel:
         kind === 'switch'
@@ -9557,7 +9583,7 @@ export class WorkspaceDetailPage {
         eyebrow: 'Specialist Match',
         title: addToWorkspace
           ? `Add "${specialistAction.agentName}" and assign it?`
-          : `Assign "${specialistAction.agentName}" to this task?`,
+          : `Assign "${specialistAction.agentName}" to this ticket?`,
         message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
         confirmLabel: addToWorkspace ? 'Add and Assign' : 'Assign Specialist',
         metaItems: [
@@ -9586,8 +9612,8 @@ export class WorkspaceDetailPage {
         if (window.Toast) {
           window.Toast.success(
             addToWorkspace
-              ? `Added "${specialistAction.agentName}" and assigned it to this task.`
-              : `Assigned "${specialistAction.agentName}" to this task.`
+              ? `Added "${specialistAction.agentName}" and assigned it to this ticket.`
+              : `Assigned "${specialistAction.agentName}" to this ticket.`
           );
         }
         return { handled: true, agentName: specialistAction.agentName };
@@ -9603,14 +9629,14 @@ export class WorkspaceDetailPage {
     if (specialistAction.kind === 'create') {
       const confirmed = await this.showTaskConfirmDialog({
         eyebrow: 'Specialist Match',
-        title: `Create "${specialistAction.agentName}" for this task?`,
+        title: `Create "${specialistAction.agentName}" for this ticket?`,
         message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
         confirmLabel: 'Create Agent',
         cancelLabel: 'Cancel',
         metaItems: [taskLabel, specialistAction.agentName, 'New travel specialist'],
         details: [
           String(specialistAction.description || '').trim(),
-          'After creation, Ori will assign this task to the new specialist.'
+          'After creation, Ori will assign this ticket to the new specialist.'
         ].filter(Boolean),
         sequenceItems: previewSequence
       });
@@ -9765,7 +9791,7 @@ export class WorkspaceDetailPage {
     return (
       this.extractAssistLeadText(displayResponse, 210) ||
       this.truncateAssistSummaryText(reason, 210) ||
-      'The task is paused waiting on your input.'
+      'The run is paused waiting on your input.'
     );
   }
 
@@ -9787,7 +9813,7 @@ export class WorkspaceDetailPage {
           210
         );
       }
-      return `Answer ${count} question${count === 1 ? '' : 's'} so the task can continue.`;
+      return `Answer ${count} question${count === 1 ? '' : 's'} so the run can continue.`;
     }
 
     if (
@@ -9796,7 +9822,7 @@ export class WorkspaceDetailPage {
       workflowStep.choices.length > 0
     ) {
       return this.truncateAssistSummaryText(
-        `Choose 1 of ${workflowStep.choices.length} suggested next steps to unblock the task.`,
+        `Choose 1 of ${workflowStep.choices.length} suggested next steps to unblock the run.`,
         210
       );
     }
@@ -9819,17 +9845,17 @@ export class WorkspaceDetailPage {
     if (workflowStep?.stepType === 'ask_form') {
       return currentAgent
         ? this.truncateAssistSummaryText(
-            `After you answer, ${currentAgent} continues the task with your details.`,
+            `After you answer, ${currentAgent} continues the run with your details.`,
             210
           )
-        : 'After you answer, the task resumes with your details.';
+        : 'After you answer, the run resumes with your details.';
     }
 
     if (workflowStep?.stepType === 'ask_choice') {
-      return 'After you choose an option, the task resumes using that direction.';
+      return 'After you choose an option, the run resumes using that direction.';
     }
 
-    return 'After you respond, Ori uses that input to continue the task.';
+    return 'After you respond, Ori uses that input to continue the run.';
   }
 
   setAssistSummaryUI(summary) {
@@ -10383,7 +10409,7 @@ export class WorkspaceDetailPage {
           return {
             stepType: 'ask_form',
             title: 'Provide the missing details',
-            summary: 'Answer the questions below so the task can continue.',
+            summary: 'Answer the questions below so the run can continue.',
             freeTextAllowed: true,
             fields
           };
@@ -10395,7 +10421,7 @@ export class WorkspaceDetailPage {
         return {
           stepType: 'ask_choice',
           title: 'Choose the next step',
-          summary: 'Pick one option below to continue this task.',
+          summary: 'Pick one option below to continue this run.',
           freeTextAllowed: true,
           choices: enumeratedChoices
         };
@@ -10406,7 +10432,7 @@ export class WorkspaceDetailPage {
         return {
           stepType: 'ask_choice',
           title: 'Choose the next step',
-          summary: 'Pick one option below to continue this task.',
+          summary: 'Pick one option below to continue this run.',
           freeTextAllowed: true,
           choices: inlineChoices
         };
@@ -10421,7 +10447,7 @@ export class WorkspaceDetailPage {
           return {
             stepType: 'ask_form',
             title: 'Provide the missing details',
-            summary: 'Answer the questions below so the task can continue.',
+            summary: 'Answer the questions below so the run can continue.',
             freeTextAllowed: true,
             fields
           };
@@ -11361,12 +11387,12 @@ export class WorkspaceDetailPage {
         throw new Error(text || 'Failed to submit assistance');
       }
 
-      if (window.Toast) window.Toast.success('Task updated');
+      if (window.Toast) window.Toast.success('Ticket updated');
       this.closeTaskAssistPage({ replaceRoute: true });
       await this.loadTasks();
     } catch (error) {
       console.error('Failed to assist blocked task:', error);
-      if (window.Toast) window.Toast.error(error.message || 'Failed to assist task');
+      if (window.Toast) window.Toast.error(error.message || 'Failed to assist ticket');
     }
   }
 
@@ -12197,20 +12223,20 @@ export class WorkspaceDetailPage {
       `Save useful outputs as workspace notes: ${normalized.workflow.save_outputs_as_notes}`,
       `Ask before specialist handoff: ${normalized.workflow.ask_before_specialist_handoff}`,
       `Structured planning workflow: ${normalized.planning.enabled ? 'enabled' : 'disabled'}`,
-      `Markdown task sync: ${normalized.task_markdown.enabled ? 'enabled' : 'disabled'}`
+      `Markdown ticket sync: ${normalized.task_markdown.enabled ? 'enabled' : 'disabled'}`
     ];
 
     if (normalized.planning.enabled) {
       summary.push(`Planning style: ${normalized.planning.mode}`);
     }
     if (normalized.workflow.sync_plans_to_tasks) {
-      summary.push('Approved plans sync into workspace tasks');
+      summary.push('Approved plans sync into workspace tickets');
     }
     if (normalized.workflow.require_repo_scan) {
       summary.push('Repo scan required before code work');
     }
     if (normalized.task_markdown.enabled) {
-      summary.push(`Markdown task map: ${normalized.task_markdown.path}`);
+      summary.push(`Markdown ticket map: ${normalized.task_markdown.path}`);
     }
 
     return summary;
@@ -12646,17 +12672,17 @@ export class WorkspaceDetailPage {
       this.elements.settingsTaskMarkdownRefreshBtn.textContent = 'Importing...';
     }
     if (this.elements.settingsTaskMarkdownStatus) {
-      this.elements.settingsTaskMarkdownStatus.textContent = 'Importing Markdown task map...';
+      this.elements.settingsTaskMarkdownStatus.textContent = 'Importing Markdown ticket map...';
     }
 
     try {
       await this.loadTasks();
       if (this.elements.settingsTaskMarkdownStatus) {
         this.elements.settingsTaskMarkdownStatus.textContent =
-          'Imported task map and refreshed tasks.';
+          'Imported ticket map and refreshed tickets.';
       }
       if (window.Toast) {
-        window.Toast.success('Markdown tasks imported');
+        window.Toast.success('Markdown tickets imported');
       }
     } catch (error) {
       console.error('Failed to import Markdown tasks:', error);
@@ -12664,7 +12690,7 @@ export class WorkspaceDetailPage {
         this.elements.settingsTaskMarkdownStatus.textContent = 'Import failed';
       }
       if (window.Toast) {
-        window.Toast.error(error.message || 'Failed to import Markdown tasks');
+        window.Toast.error(error.message || 'Failed to import Markdown tickets');
       }
     } finally {
       if (this.elements.settingsTaskMarkdownRefreshBtn) {
@@ -13313,7 +13339,7 @@ export class WorkspaceDetailPage {
           message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
           details: [
             String(specialistAction.description || '').trim(),
-            'Create the travel specialist first, then assign this task there.'
+            'Create the travel specialist first, then assign this ticket there.'
           ].filter(Boolean),
           seedName: specialistAction.agentName,
           seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
@@ -13350,7 +13376,7 @@ export class WorkspaceDetailPage {
       return {
         kind: 'switch_recommended',
         recommendedAgent: recommendedAgent.agentName,
-        message: `"${currentAgent}" likely lacks ${requirementSummary} for this task.`,
+        message: `"${currentAgent}" likely lacks ${requirementSummary} for this ticket.`,
         details: [
           ...requirements.map(requirement => requirement.reason),
           ...recommendedAgent.reasons
@@ -13367,7 +13393,7 @@ export class WorkspaceDetailPage {
 
     return {
       kind: 'create_recommended',
-      message: `This task likely needs ${requirementSummary}, but "${currentAgent}" does not advertise matching MCP servers, tools, or skills.`,
+      message: `This ticket likely needs ${requirementSummary}, but "${currentAgent}" does not advertise matching MCP servers, tools, or skills.`,
       details: [
         ...requirements.map(requirement => requirement.reason),
         suggestions.mcpServers.length > 0
@@ -13446,7 +13472,7 @@ export class WorkspaceDetailPage {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || 'Failed to assign task');
+      throw new Error(text || 'Failed to assign ticket');
     }
   }
 
@@ -13605,7 +13631,7 @@ export class WorkspaceDetailPage {
 
   openTaskExecutionModal(task) {
     if (!this.elements.taskExecutionModal || !window.bootstrap || !task) return;
-    const taskName = task.description || task.name || task.id || 'Task Execution';
+    const taskName = task.description || task.name || task.id || 'Run';
     this.currentExecutionTaskId = task.id;
     if (this.elements.taskExecutionTitle) {
       this.elements.taskExecutionTitle.textContent = taskName;
@@ -13762,7 +13788,7 @@ export class WorkspaceDetailPage {
       case 'task.started':
         this.setExecutionModalStatus('in_progress');
         this.appendExecutionLog(
-          'Agent started executing this task.',
+          'Agent started this run.',
           'info',
           `${taskId}:evt:started:${payload?.updated_at || ''}`
         );
@@ -13786,7 +13812,7 @@ export class WorkspaceDetailPage {
       }
       case 'task.thinking':
         this.setExecutionModalStatus('in_progress');
-        this.appendExecutionLog(payload?.message || 'Agent is analyzing the task...', 'info');
+        this.appendExecutionLog(payload?.message || 'Agent is analyzing the ticket...', 'info');
         break;
       case 'task.tool_call':
         this.appendExecutionLog(`Calling tool: ${payload?.tool_name || 'unknown tool'}`, 'info');
@@ -13816,7 +13842,7 @@ export class WorkspaceDetailPage {
       case 'task.completed':
         this.setExecutionModalStatus('completed');
         this.appendExecutionLog(
-          'Task completed.',
+          'Run completed.',
           'success',
           `${taskId}:evt:completed:${payload?.updated_at || ''}`
         );
@@ -13826,7 +13852,7 @@ export class WorkspaceDetailPage {
       case 'task.failed':
         this.setExecutionModalStatus('failed');
         this.appendExecutionLog(
-          payload?.error || 'Task failed.',
+          payload?.error || 'Run failed.',
           'error',
           `${taskId}:evt:failed:${payload?.updated_at || ''}`
         );
@@ -13836,7 +13862,7 @@ export class WorkspaceDetailPage {
       case 'task.resumed':
         this.setExecutionModalStatus('in_progress');
         this.appendExecutionLog(
-          'Task resumed after guidance.',
+          'Run resumed after guidance.',
           'info',
           `${taskId}:evt:resumed:${payload?.updated_at || ''}`
         );
@@ -13867,16 +13893,16 @@ export class WorkspaceDetailPage {
       const hasUnassigned = subtasks.some(subtask => !subtask.to || subtask.to === 'unassigned');
       if (hasUnassigned) {
         if (window.Toast)
-          window.Toast.error('Assign agents to all subtasks before executing this workflow.');
+          window.Toast.error('Assign agents to all subtickets before executing this workflow.');
         return;
       }
       const hasRunning = subtasks.some(subtask => subtask.status === 'in_progress');
       if (hasRunning) {
-        if (window.Toast) window.Toast.error('A subtask is already running.');
+        if (window.Toast) window.Toast.error('A subticket is already running.');
         return;
       }
     } else if (task.status === 'in_progress' && !awaitingNextStep) {
-      if (window.Toast) window.Toast.error('This task is already running.');
+      if (window.Toast) window.Toast.error('This ticket is already running.');
       return;
     }
 
@@ -13905,11 +13931,11 @@ export class WorkspaceDetailPage {
               : await this.showTaskConfirmDialog({
                   eyebrow: 'Assignment Required',
                   title: `Execute with "${fallbackAgent}"?`,
-                  message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
+                  message: `This ticket is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
                   confirmLabel: 'Assign and Execute',
                   metaItems: [this.getTaskDisplayLabel(task), fallbackAgent, 'Workspace agent'],
                   details: [
-                    'The task will be updated before dispatch.',
+                    'The ticket will be updated before dispatch.',
                     'Live execution updates will appear after confirmation.'
                   ],
                   sequenceItems: getExecutionSequencePreview(fallbackAgent)
@@ -13923,7 +13949,7 @@ export class WorkspaceDetailPage {
             this.renderTasks();
           } catch (error) {
             console.error('Failed to auto-assign task before execution:', error);
-            if (window.Toast) window.Toast.error('Failed to assign task before execution');
+            if (window.Toast) window.Toast.error('Failed to assign ticket before execution');
             return;
           }
         }
@@ -14010,21 +14036,21 @@ export class WorkspaceDetailPage {
     if (options.skipConfirm !== true) {
       const confirmed = await this.showTaskConfirmDialog({
         eyebrow:
-          stepAction === 'next' ? 'Step Launch' : isParent ? 'Workflow Launch' : 'Task Launch',
+          stepAction === 'next' ? 'Step Launch' : isParent ? 'Workflow Launch' : 'Run Launch',
         title:
           stepAction === 'next'
             ? 'Run the next step now?'
             : isParent
               ? 'Execute this workflow now?'
-              : 'Execute this task now?',
+              : 'Run this ticket now?',
         message:
           stepAction === 'next'
-            ? 'This task is paused between internal execution steps. Ori will run the next step and keep the current plan intact.'
+            ? 'This run is paused between internal execution steps. Ori will run the next step and keep the current plan intact.'
             : isParent
               ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
-              : `This task will run with "${assignedAgent}".`,
+              : `This ticket will run with "${assignedAgent}".`,
         confirmLabel:
-          stepAction === 'next' ? 'Run Next Step' : isParent ? 'Execute Workflow' : 'Execute Task',
+          stepAction === 'next' ? 'Run Next Step' : isParent ? 'Execute Workflow' : 'Run Ticket',
         metaItems:
           stepAction === 'next'
             ? [this.getTaskDisplayLabel(task), assignedAgent, 'Step-through']
@@ -14071,12 +14097,12 @@ export class WorkspaceDetailPage {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to execute task');
+        throw new Error(text || 'Failed to start run');
       }
 
-      if (window.Toast) window.Toast.success('Task started');
+      if (window.Toast) window.Toast.success('Run started');
       this.appendExecutionLog(
-        'Task dispatched. Waiting for agent updates...',
+        'Run dispatched. Waiting for agent updates...',
         'info',
         `${taskId}:dispatched`
       );
@@ -14084,7 +14110,7 @@ export class WorkspaceDetailPage {
       if (useLegacyModal) this.startExecutionMonitor(taskId);
     } catch (error) {
       console.error('Failed to execute task:', error);
-      const message = error && error.message ? error.message : 'Failed to execute task';
+      const message = error && error.message ? error.message : 'Failed to start run';
       if (this.isMissingWorkspaceAgentError(message)) {
         this.setExecutionModalStatus('blocked');
         this.appendExecutionLog(
@@ -14116,7 +14142,7 @@ export class WorkspaceDetailPage {
 
       this.setExecutionModalStatus('failed');
       this.appendExecutionLog(message, 'error', `${taskId}:dispatch-error`);
-      if (window.Toast) window.Toast.error('Failed to execute task');
+      if (window.Toast) window.Toast.error('Failed to start run');
     }
   }
 
@@ -14461,7 +14487,7 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-board-add" data-column-id="${this.escapeHtml(col.id)}">
               <button class="workspace-detail-board-add-btn" type="button">+ Add card</button>
               <div class="workspace-detail-board-add-form" hidden>
-                <input class="workspace-detail-board-add-input" type="text" placeholder="Task title" />
+                <input class="workspace-detail-board-add-input" type="text" placeholder="Ticket title" />
                 <div class="workspace-detail-board-add-actions">
                   <button class="modern-btn modern-btn-secondary workspace-detail-board-add-cancel" type="button">Cancel</button>
                   <button class="modern-btn modern-btn-primary workspace-detail-board-add-submit" type="button">Add</button>
@@ -14721,7 +14747,7 @@ export class WorkspaceDetailPage {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || 'Failed to update task');
+      throw new Error(text || 'Failed to update ticket');
     }
 
     const updated = await response.json();
@@ -14744,7 +14770,7 @@ export class WorkspaceDetailPage {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || 'Failed to move task');
+      throw new Error(text || 'Failed to move ticket');
     }
 
     const updated = await response.json();
@@ -14790,7 +14816,7 @@ export class WorkspaceDetailPage {
       this.exitBoardCardEdit(card);
     } catch (error) {
       console.error('Failed to update task:', error);
-      if (window.Toast) window.Toast.error('Failed to update task');
+      if (window.Toast) window.Toast.error('Failed to update ticket');
     } finally {
       card.dataset.saving = '';
       card.classList.remove('is-saving');
@@ -14925,7 +14951,7 @@ export class WorkspaceDetailPage {
             closeForm();
           } catch (error) {
             console.error('Failed to create task:', error);
-            if (window.Toast) window.Toast.error('Failed to create task');
+            if (window.Toast) window.Toast.error('Failed to create ticket');
           } finally {
             submitBtn.disabled = false;
           }
@@ -15199,7 +15225,7 @@ export class WorkspaceDetailPage {
             await this.updateTaskKanbanColumn(taskId, columnId);
           } catch (error) {
             console.error('Failed to update kanban column:', error);
-            if (window.Toast) window.Toast.error('Failed to move task');
+            if (window.Toast) window.Toast.error('Failed to move ticket');
           }
         });
       });
@@ -16881,7 +16907,7 @@ export class WorkspaceDetailPage {
 
     if (!this.schedules || this.schedules.length === 0) {
       this.elements.schedulesList.innerHTML =
-        '<div class="workspace-detail-empty">No scheduled tasks yet.</div>';
+        '<div class="workspace-detail-empty">No scheduled tickets yet.</div>';
       return;
     }
 
@@ -16970,6 +16996,9 @@ export class WorkspaceDetailPage {
     this.handleTaskExecutionRealtimeEvent(event);
     // The Operations map shows its units working from this same stream.
     window.workspaceCommand?.handleActivityEvent?.(event);
+    // A run moves its ticket with no click on this page, so the work tile and an
+    // open board follow these events (PRD 760 FR-11).
+    if (TICKET_MOVING_EVENTS.has(event.type)) window.workspaceCommand?.noteTicketWorkChanged?.();
 
     switch (event.type) {
       case 'task_created':
@@ -17231,7 +17260,7 @@ export class WorkspaceDetailPage {
     if (!normalizedName) return null;
 
     if (options.requireConfirmation) {
-      const metaItems = ['Assistant', 'Task'];
+      const metaItems = ['Assistant', 'Ticket'];
       const details = [normalizedName];
       if (normalizedDescription) {
         details.push(normalizedDescription);
@@ -17248,10 +17277,10 @@ export class WorkspaceDetailPage {
       }
 
       const confirmed = await this.showTaskConfirmDialog({
-        eyebrow: 'Assistant Task',
-        title: 'Create this task?',
-        message: 'Assistant wants to add this task to the workspace.',
-        confirmLabel: 'Create Task',
+        eyebrow: 'Assistant Ticket',
+        title: 'Create this ticket?',
+        message: 'Assistant wants to add this ticket to the workspace.',
+        confirmLabel: 'Create Ticket',
         cancelLabel: 'Cancel',
         metaItems,
         details
@@ -17259,7 +17288,7 @@ export class WorkspaceDetailPage {
 
       if (!confirmed) {
         if (options.cancelToast !== false && window.Toast) {
-          window.Toast.info('Task creation cancelled');
+          window.Toast.info('Ticket creation cancelled');
         }
         return false;
       }
@@ -17269,7 +17298,7 @@ export class WorkspaceDetailPage {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // The same request the Home map's "Give a task…" composer sends
+        // The same request the Home map's "Give work…" composer sends
         // (quick-task.js), so the two can never drift apart (task-run-show FR50).
         body: JSON.stringify(
           taskCreateBody(this.workspaceId, normalizedName, {
@@ -17279,7 +17308,7 @@ export class WorkspaceDetailPage {
         )
       });
 
-      if (!response.ok) throw new Error('Failed to create task');
+      if (!response.ok) throw new Error('Failed to create ticket');
 
       const data = await response.json();
       const createdTask = data.task || data;
@@ -17291,11 +17320,11 @@ export class WorkspaceDetailPage {
         await this.loadTasks();
       }
 
-      if (options.successToast !== false && window.Toast) window.Toast.success('Task created');
+      if (options.successToast !== false && window.Toast) window.Toast.success('Ticket created');
       return createdTask;
     } catch (error) {
       console.error('Failed to create task:', error);
-      if (window.Toast) window.Toast.error('Failed to create task');
+      if (window.Toast) window.Toast.error('Failed to create ticket');
       return null;
     }
   }
@@ -17304,23 +17333,15 @@ export class WorkspaceDetailPage {
    * Show add task modal
    */
   showAddTaskModal(options = {}) {
-    // Use existing task modal controller
-    if (
-      window.taskModalController &&
-      typeof window.taskModalController.openForCreate === 'function'
-    ) {
-      const createOptions = options && typeof options === 'object' ? options : {};
-      window.taskModalController.openForCreate(
-        this.workspaceId,
-        '',
-        () => this.loadTasks(),
-        createOptions
-      );
-    } else {
-      // Fallback to prompt
-      const name = prompt('Enter task name:');
-      if (name) this.createTask(name);
-    }
+    // Every door on this page opens the one Give work flow (PRD 760 FR-15).
+    window.OriGiveWork?.open({
+      workspaceId: this.workspaceId,
+      workspaceName: this.workspace?.name || '',
+      agents: this.workspace?.agents || [],
+      assignee: options?.assignee || '',
+      trigger: typeof document !== 'undefined' ? document.activeElement : null,
+      onSaved: () => this.loadTasks()
+    });
   }
 
   showAddTaskModalForAgent(encodedAgentName = '') {
@@ -17336,9 +17357,7 @@ export class WorkspaceDetailPage {
       this.showAddTaskModal();
       return;
     }
-    // The assignment dropdown keys agents as `node:<name>-node-1` (see task modal
-    // populateAgentDropdown); draftAssignmentValue is applied after it populates.
-    this.showAddTaskModal({ draftAssignmentValue: `node:${agentName}-node-1` });
+    this.showAddTaskModal({ assignee: agentName });
   }
 
   /**
@@ -17365,20 +17384,20 @@ export class WorkspaceDetailPage {
    * Delete a task
    */
   async deleteTask(taskId) {
-    if (!confirm('Are you sure you want to delete this task?')) return;
+    if (!confirm('Are you sure you want to delete this ticket?')) return;
 
     try {
       const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}`, {
         method: 'DELETE'
       });
 
-      if (!response.ok) throw new Error('Failed to delete task');
+      if (!response.ok) throw new Error('Failed to delete ticket');
 
-      if (window.Toast) window.Toast.success('Task deleted');
+      if (window.Toast) window.Toast.success('Ticket deleted');
       await this.loadTasks();
     } catch (error) {
       console.error('Failed to delete task:', error);
-      if (window.Toast) window.Toast.error('Failed to delete task');
+      if (window.Toast) window.Toast.error('Failed to delete ticket');
     }
   }
 

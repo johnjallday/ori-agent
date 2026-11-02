@@ -135,7 +135,7 @@ test('reviewed supporting links disclose their grant without promising project r
   assert.match(view.question, /grants read access to this folder only/i);
   assert.match(
     view.question,
-    /primary project entry, blueprint, mode, agents and tasks stay unchanged/i
+    /primary project entry, blueprint, mode, agents and tickets stay unchanged/i
   );
   assert.deepEqual(
     view.actions.map(action => action.label),

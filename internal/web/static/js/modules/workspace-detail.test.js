@@ -1435,46 +1435,37 @@ test('workspace-local model save posts to the workspace-scoped endpoint', async 
   assert.equal(body.llm_provider, 'claude');
 });
 
-test('showAddTaskModalForAgent preselects the chosen agent as the task assignee', () => {
-  const page = new WorkspaceDetailPage('ws-7');
+function withGiveWork(run) {
   const calls = [];
-  const originalController = global.window.taskModalController;
-  global.window.taskModalController = {
-    openForCreate(workspaceId, prefill, onSave, options) {
-      calls.push({ workspaceId, prefill, options });
-    }
-  };
+  const original = global.window.OriGiveWork;
+  global.window.OriGiveWork = { open: options => calls.push(options) };
   try {
-    page.showAddTaskModalForAgent(encodeURIComponent('Atlas Prime'));
+    run(calls);
   } finally {
-    global.window.taskModalController = originalController;
+    global.window.OriGiveWork = original;
   }
+}
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].workspaceId, 'ws-7');
-  assert.equal(calls[0].options.draftAssignmentValue, 'node:Atlas Prime-node-1');
+test('showAddTaskModalForAgent opens Give work with the chosen agent', () => {
+  const page = new WorkspaceDetailPage('ws-7');
+  page.workspace = { name: 'Studio', agents: ['Atlas Prime', 'Ada'] };
+  withGiveWork(calls => {
+    page.showAddTaskModalForAgent(encodeURIComponent('Atlas Prime'));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].workspaceId, 'ws-7');
+    assert.equal(calls[0].workspaceName, 'Studio');
+    assert.equal(calls[0].assignee, 'Atlas Prime');
+    assert.deepEqual(calls[0].agents, ['Atlas Prime', 'Ada']);
+  });
 });
 
-test('showAddTaskModalForAgent with no agent opens the modal without an assignee', () => {
+test('showAddTaskModalForAgent with no agent opens Give work with nobody chosen', () => {
   const page = new WorkspaceDetailPage('ws-7');
-  const calls = [];
-  const originalController = global.window.taskModalController;
-  global.window.taskModalController = {
-    openForCreate(workspaceId, prefill, onSave, options) {
-      calls.push({ options });
-    }
-  };
-  try {
+  withGiveWork(calls => {
     page.showAddTaskModalForAgent('');
-  } finally {
-    global.window.taskModalController = originalController;
-  }
-
-  assert.equal(calls.length, 1);
-  assert.ok(
-    !calls[0].options || !('draftAssignmentValue' in calls[0].options),
-    'no assignment value is forced when no agent is given'
-  );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].assignee, '');
+  });
 });
 
 test('setAgentWorkspaceCapabilityEnabled merges the agent into the binding access set', async () => {
@@ -2006,7 +1997,7 @@ test('a refused start says why on the banner and leaves the button', async () =>
     ],
     [
       { started: false, reason: 'unassigned' },
-      'The first task has no agent yet. Assign one, then start the first look.'
+      'The first ticket has no agent yet. Assign one, then start the first look.'
     ],
     [
       { started: false, reason: 'local_activation_required' },
@@ -2266,7 +2257,7 @@ test('Start assessment asks the one-time start once and follows the same task', 
     phase: 'working',
     hidden: false,
     buttons: [],
-    links: ['Watch the task']
+    links: ['Watch the run']
   });
 });
 
@@ -2355,7 +2346,7 @@ test('a failure that needs a repair first offers the repair and sends no retry',
     phase: 'failed',
     hidden: false,
     buttons: [],
-    links: ['Show the folder', 'Open the task']
+    links: ['Show the folder', 'Open the ticket']
   });
   // Even asked directly, nothing is sent while a repair is owed.
   await page.startAssessment({ retry: true });
@@ -2398,7 +2389,7 @@ test('the assessment banner is read again whenever its task moves, and only then
     phase: 'done',
     hidden: false,
     buttons: ['Dismiss'],
-    links: ['Open the assessment', 'Plan the suggested task']
+    links: ['Open the assessment', 'Plan the suggested ticket']
   });
   // The realtime end-of-task signal reads the same thing.
   await page.refreshFirstTaskBanner();

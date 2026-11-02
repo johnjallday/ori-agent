@@ -81,7 +81,7 @@ test('zero specialists gets a neutral copy, not "0 specialist agents"', () => {
   const view = makeView();
   const entry = agent({ name: 'Manager', key: 'manager', entry: true });
   const html = view.renderMapAgentUnits([entry]);
-  assert.match(html, /Works directly on assigned tasks/);
+  assert.match(html, /Works directly on assigned tickets/);
   assert.doesNotMatch(html, /No specialist agents yet|setup required/i);
 });
 

@@ -108,7 +108,7 @@ test('renderManagementCard wires Done to a complete action; candidates get Track
   const btns = collectButtons(active);
   assert.deepEqual(
     btns.map(b => b.textContent),
-    ['Done', 'Snooze 1 day']
+    ['Done', 'Snooze 1 day', 'Make a ticket']
   );
   btns[0].listeners.click();
   assert.deepEqual(fired, [['complete', 'f1']]);

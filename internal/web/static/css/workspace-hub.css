@@ -5035,7 +5035,71 @@ body.chat-panel-open .chat-panel-backdrop {
 
 .hq-followup-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.hq-followup-ticket {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hq-followup-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.hq-followup-chooser-label {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hq-followup-ticket-error {
+  flex-basis: 100%;
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: var(--danger, #b42318);
+}
+
+.ticket-start-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.ticket-start-chooser label {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.ticket-detail-outcome {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.ticket-detail-outcome.is-error {
+  color: var(--danger, #b42318);
+}
+
+.ticket-detail-origin {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 /* Personal HQ end-of-day journal (#hqJournalMount). */

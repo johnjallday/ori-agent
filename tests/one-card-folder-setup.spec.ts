@@ -450,7 +450,7 @@ test('setup ends clean on the same card; the workspace can separately start its 
   expect(rows).toMatch(/Agent/);
   // The song's agent is the Home's one shared assistant, not "<label> · <song>".
   expect(rows).toMatch(/REAPER Assistant[^\n·]*added/);
-  expect(rows).toMatch(/First task/);
+  expect(rows).toMatch(/First ticket/);
 
   await expect(card.locator('.folder-visual')).toContainText('Assigned here');
   await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);

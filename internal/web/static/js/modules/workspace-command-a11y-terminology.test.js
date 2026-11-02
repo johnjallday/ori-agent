@@ -42,13 +42,13 @@ function esc(view) {
   view.handleGlobalKeydown({ key: 'Escape' });
 }
 
-test('terminology: Map window labels are presentation-only Mission/Tasks, keys unchanged (FR3-5, FR5a)', () => {
+test('terminology: Map window labels are presentation-only Mission/Tickets, keys unchanged (FR3-5, FR5a)', () => {
   const view = Object.create(WorkspaceCommandView.prototype);
   const options = view.mapWindowOptions();
   const objective = options.find(o => o.key === 'objective');
   const objectives = options.find(o => o.key === 'objectives');
   assert.equal(objective.label, 'Workspace Goal');
-  assert.equal(objectives.label, 'Tasks');
+  assert.equal(objectives.label, 'Tickets');
   // Panel keys are untouched — activeMapWindow state and every reference to
   // them elsewhere keeps working without a rename.
   assert.equal(objective.key, 'objective');
@@ -122,13 +122,6 @@ test('Escape on an already-collapsed tray falls through to the next priority tie
   const view = makeView({ trayOpen: true, trayCollapsed: true, activeMapWindow: 'objectives' });
   esc(view);
   assert.equal(view.activeMapWindow, '', 'falls through to close the map window');
-});
-
-test('Escape prioritizes the task drawer over the tray (drawer closes first)', () => {
-  const view = makeView({ taskDrawerOpen: true, trayOpen: true, trayCollapsed: false });
-  esc(view);
-  assert.equal(view.taskDrawerOpen, false);
-  assert.equal(view.trayCollapsed, false, 'tray is untouched once the drawer handled Escape');
 });
 
 test('Escape no-ops while a stat modal or identity edit is active (dialog tier takes precedence)', () => {

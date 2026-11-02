@@ -82,7 +82,7 @@
     if (!t.action) return '';
     if (t.action.kind === 'mission_run') return 'Runs the workspace goal';
     if (t.action.kind === 'task_prompt') {
-      return `Creates a task for ${esc(t.action.agent || 'an agent')}`;
+      return `Creates a ticket for ${esc(t.action.agent || 'an agent')}`;
     }
     return esc(t.action.kind);
   }
@@ -258,7 +258,11 @@
         .slice()
         .reverse()
         .map(f => {
-          const ref = f.run_id ? `run ${esc(f.run_id)}` : f.task_id ? `task ${esc(f.task_id)}` : '';
+          const ref = f.run_id
+            ? `run ${esc(f.run_id)}`
+            : f.task_id
+              ? `ticket ${esc(f.task_id)}`
+              : '';
           const err = f.error
             ? `<span style="color:var(--danger-color,#c0392b);">${esc(f.error)}</span>`
             : ref;
@@ -369,16 +373,16 @@
             <label class="form-label">When it fires…</label>
             <select id="trg-action-kind" class="form-select">
               <option value="mission_run" ${a.kind === 'mission_run' ? 'selected' : ''} ${missionEnabled() ? '' : 'disabled'}>Run the workspace goal${missionEnabled() ? '' : ' (enable goal automation first)'}</option>
-              <option value="task_prompt" ${a.kind === 'task_prompt' ? 'selected' : ''}>Run a specific task</option>
+              <option value="task_prompt" ${a.kind === 'task_prompt' ? 'selected' : ''}>Run a specific ticket</option>
             </select>
           </div>
           <div id="trg-task-fields" style="${a.kind === 'task_prompt' ? '' : 'display:none;'}">
             <div class="mb-3">
-              <label class="form-label">Assign task to agent</label>
+              <label class="form-label">Assign ticket to agent</label>
               <input id="trg-agent" class="form-control" value="${esc(a.agent || '')}" placeholder="agent name">
             </div>
             <div class="mb-3">
-              <label class="form-label">Task prompt</label>
+              <label class="form-label">Ticket prompt</label>
               <textarea id="trg-prompt" class="form-control" rows="3" placeholder="e.g. File the dropped invoice and update the ledger note.">${esc(a.prompt || '')}</textarea>
             </div>
           </div>

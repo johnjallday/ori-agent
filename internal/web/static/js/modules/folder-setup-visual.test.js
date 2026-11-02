@@ -254,7 +254,7 @@ test('resolved visuals trust structured canonical receipts, never hire names or 
     assert.equal(view.entity.kind, kind);
     assert.match(
       view.footer,
-      kind === 'group' ? /No automatic task/ : /does not mean every project/
+      kind === 'group' ? /No automatic ticket/ : /does not mean every project/
     );
   }
 });

@@ -134,6 +134,18 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 // first-open auto-start, which stamps its consumed marker before calling this,
 // so a failure here leaves the task manually startable but never auto-retried.
 func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
+	return th.startTaskAsync(workspaceID, taskID, true)
+}
+
+// StartTaskByPerson is StartTaskAsync for a start a person asked for, such as
+// Start now in Give work. It passes the manual admission check the execute
+// endpoint uses, so a workspace whose automatic runs are off still runs what
+// someone explicitly starts.
+func (th *TaskHandler) StartTaskByPerson(workspaceID, taskID string) error {
+	return th.startTaskAsync(workspaceID, taskID, false)
+}
+
+func (th *TaskHandler) startTaskAsync(workspaceID, taskID string, automatic bool) error {
 	if th == nil || th.taskHandler == nil {
 		return fmt.Errorf("task execution not available")
 	}
@@ -142,7 +154,7 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 		return err
 	}
 	defer release()
-	if err := workspace.RequireWorkspaceExecution(context.Background(), th.workspaceStore, workspaceID, true); err != nil {
+	if err := workspace.RequireWorkspaceExecution(context.Background(), th.workspaceStore, workspaceID, automatic); err != nil {
 		return err
 	}
 	ws, err := th.workspaceStore.Get(workspaceID)
@@ -170,7 +182,7 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 	}
 
 	return th.startTaskWork(func() {
-		if err := workspace.RequireWorkspaceExecution(context.Background(), th.workspaceStore, workspaceID, true); err != nil {
+		if err := workspace.RequireWorkspaceExecution(context.Background(), th.workspaceStore, workspaceID, automatic); err != nil {
 			return
 		}
 		ws, err := th.workspaceStore.Get(workspaceID)

@@ -133,7 +133,7 @@ test('rowHTML renders a goal run summary row with a Backlog link', () => {
     workspace_name: 'Brand Desk',
     source_type: 'goal_suggestions',
     source_url: '/workspaces/brand-desk?panel=backlog',
-    title: '3 suggested tasks in Brand Desk',
+    title: '3 suggested tickets in Brand Desk',
     evidence: '- Draft a brand voice guide\n- Plan next week’s posts',
     priority: 'low',
     status: 'new'
@@ -142,7 +142,7 @@ test('rowHTML renders a goal run summary row with a Backlog link', () => {
     html,
     /<a href="\/workspaces\/brand-desk\?panel=backlog" class="action-center-goal-backlog-link">Open Backlog<\/a>/
   );
-  assert.match(html, /<summary>Suggested tasks<\/summary>/);
+  assert.match(html, /<summary>Suggested tickets<\/summary>/);
   assert.match(html, /Draft a brand voice guide/);
   assert.ok(
     !html.includes('data-action="add-to-backlog"'),

@@ -361,7 +361,7 @@ test('install chains to the enable review on the same step, and each needs its o
   assert.equal(f.fixture.calls[3].action, 'enable');
   assert.equal(f.wizard.view().phase, 'summary');
   assert.match(f.text(), /Installed and enabled/);
-  assert.match(f.text(), /No workspace, Home, agent or model task was created\./);
+  assert.match(f.text(), /No workspace, Home, agent or model run was created\./);
 });
 
 test('a provider that enables on install moves straight to the next plugin', async () => {

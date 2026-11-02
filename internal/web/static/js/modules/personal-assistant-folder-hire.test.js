@@ -529,7 +529,7 @@ test('a hired look follows the receipt as two lines whose states come from where
   assert.equal(finished.stoppable, false);
   assert.equal(
     hireLookView(hiredOffer({ state: 'finished' })).lines[1].detail,
-    'It did not name one next task.'
+    'It did not name one next ticket.'
   );
 
   const waiting = hireLookView(

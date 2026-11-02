@@ -54,7 +54,7 @@ type ApprovalEffect string
 
 const (
 	// EffectCreateTasks creates Tasks and any enabled artifacts, and starts
-	// nothing. Its action label is "Approve and Create Tasks" (FR-65).
+	// nothing. Its action label is "Approve and Create Tickets" (FR-65).
 	EffectCreateTasks ApprovalEffect = "create_tasks"
 	// EffectCreateTasksAndStart additionally authorizes automatic dispatch of
 	// eligible Tasks after successful materialization. Its action label is
@@ -77,7 +77,7 @@ func (e ApprovalEffect) ActionLabel() string {
 	if e.StartsExecution() {
 		return "Approve and Start"
 	}
-	return "Approve and Create Tasks"
+	return "Approve and Create Tickets"
 }
 
 // ApprovalResult is the outcome recorded when an approval is consumed. Storing

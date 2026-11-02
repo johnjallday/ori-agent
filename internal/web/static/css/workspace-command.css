@@ -608,6 +608,19 @@
 .ws-cmd-stat.is-alert .ws-l {
   color: var(--ws-alert);
 }
+/* The work tile says how much work there is in words ("1 in review · 2 in
+   progress · 3 ready"), so its value is text, not a number. It wraps rather
+   than truncates, which keeps every state readable down to 320px. */
+.ws-cmd-stat.ws-cmd-stat-work {
+  min-width: 180px;
+  max-width: 100%;
+}
+.ws-cmd-stat.ws-cmd-stat-work .ws-v {
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 /* ---------- Operations Map mode ---------- */
 .ws-cmd-map-shell {
@@ -6599,6 +6612,12 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-alert);
 }
 
+/* The work tile's value is 13px text, not a large number, so it needs body-text
+   contrast on the tinted alert background. */
+[data-bs-theme="light"] .ws-cmd-stat.ws-cmd-stat-work.is-alert .ws-v {
+  color: #9a3a2e;
+}
+
 [data-bs-theme="light"] .ws-cmd-mission,
 [data-bs-theme="light"] .ws-cmd-garrison,
 [data-bs-theme="light"] .ws-cmd-panel {
@@ -6982,6 +7001,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-readout .ws-cmd-stat {
     flex: 1 1 calc(50% - 10px);
+  }
+  .ws-cmd-readout .ws-cmd-stat.ws-cmd-stat-work {
+    flex-basis: 100%;
   }
   .ws-cmd-mission-actions .ws-cmd-mission-btn {
     flex: 1 1 calc(50% - 8px);

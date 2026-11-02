@@ -167,7 +167,7 @@ test('the view lists the roles, shows the domain only for a Specialist, and says
       name: 'A Blank workspace named Release Check',
       detail: 'Goal: Check the release notes.'
     },
-    { kind: 'task', name: 'First look: read the brief and suggest the first task' }
+    { kind: 'task', name: 'First look: read the brief and suggest the first ticket' }
   ]);
   assert.equal(view.canSubmit, true);
   assert.equal(view.buttonLabel, 'Hire and start');
@@ -198,7 +198,7 @@ test('a blueprint with other roles says they stay open', () => {
       'Hire Rosa (Researcher)',
       'A Research Project workspace named Compare Note Apps',
       'Other roles stay open to fill later',
-      'First look: read the brief and suggest the first task'
+      'First look: read the brief and suggest the first ticket'
     ]
   );
 });

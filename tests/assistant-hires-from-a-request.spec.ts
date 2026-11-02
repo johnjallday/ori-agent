@@ -129,7 +129,7 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   );
   await expect(card).toContainText('A Research Project workspace named Compare the three CRMs');
   await expect(card).toContainText('Other roles stay open to fill later');
-  await expect(card).toContainText('First look: read the brief and suggest the first task');
+  await expect(card).toContainText('First look: read the brief and suggest the first ticket');
   // The reply shows its lead line, not a second description of the card.
   await expect(drawer).not.toContainText('Offer: hire');
   const brief = card.locator('textarea');

@@ -140,8 +140,8 @@ export const taskResultActionsMethods = {
     menu.setAttribute('role', 'toolbar');
     menu.setAttribute('aria-label', 'Actions for the selected result text');
     menu.innerHTML = `
-      <button type="button" class="workspace-task-selection-action" data-selection-action="spawn" title="Turn the selection into a subtask or follow-up task">
-        <i class="bi bi-diagram-2" aria-hidden="true"></i><span>Task</span>
+      <button type="button" class="workspace-task-selection-action" data-selection-action="spawn" title="Turn the selection into a subticket or follow-up ticket">
+        <i class="bi bi-diagram-2" aria-hidden="true"></i><span>Ticket</span>
       </button>
       <button type="button" class="workspace-task-selection-action" data-selection-action="research" title="Research or verify this">
         <i class="bi bi-search" aria-hidden="true"></i><span>Research</span>
@@ -255,7 +255,7 @@ export const taskResultActionsMethods = {
       typeof this.getTaskDisplayLabel === 'function' ? this.getTaskDisplayLabel() : '';
     const sourceId = String(this.task?.id || this.taskId || '').trim();
     const footerParts = [
-      sourceLabel ? `From task: ${sourceLabel}` : '',
+      sourceLabel ? `From ticket: ${sourceLabel}` : '',
       sourceId ? `(${sourceId})` : ''
     ]
       .filter(Boolean)
@@ -299,7 +299,7 @@ export const taskResultActionsMethods = {
       typeof this.getAssignableAgentNames === 'function'
         ? this.getAssignableAgentNames(normalizedSelected)
         : [];
-    const options = ['<option value="">Unassigned (manual task)</option>'];
+    const options = ['<option value="">Unassigned (manual ticket)</option>'];
     names.forEach(agentName => {
       const name = String(agentName || '').trim();
       if (!name) return;
@@ -318,7 +318,7 @@ export const taskResultActionsMethods = {
     const selection = String(text || '').trim();
     if (!selection) return;
     if (!this.task?.id) {
-      this.notify('error', 'Source task is not loaded yet — try again in a moment.');
+      this.notify('error', 'Source ticket is not loaded yet — try again in a moment.');
       return;
     }
     this.closeSelectionTaskDialog();
@@ -335,9 +335,9 @@ export const taskResultActionsMethods = {
     const backdrop = document.createElement('div');
     backdrop.className = 'workspace-task-selection-dialog-backdrop';
     backdrop.innerHTML = `
-      <div class="workspace-task-selection-dialog" role="dialog" aria-modal="true" aria-label="${isAsk ? 'Ask about the selection' : 'Create a task from the selection'}">
+      <div class="workspace-task-selection-dialog" role="dialog" aria-modal="true" aria-label="${isAsk ? 'Ask about the selection' : 'Create a ticket from the selection'}">
         <div class="workspace-task-selection-dialog-head">
-          <h3>${isAsk ? 'Ask about this' : 'Create a task from this'}</h3>
+          <h3>${isAsk ? 'Ask about this' : 'Create a ticket from this'}</h3>
           <button type="button" class="workspace-task-selection-dialog-close" data-dialog-action="cancel" aria-label="Close">
             <i class="bi bi-x-lg" aria-hidden="true"></i>
           </button>
@@ -346,10 +346,10 @@ export const taskResultActionsMethods = {
 
         <div class="workspace-task-selection-dialog-field">
           <span class="workspace-task-selection-dialog-label">Add as</span>
-          <div class="workspace-task-selection-dialog-segmented" role="radiogroup" aria-label="Task relationship">
+          <div class="workspace-task-selection-dialog-segmented" role="radiogroup" aria-label="Ticket relationship">
             <label class="workspace-task-selection-dialog-segment">
               <input type="radio" name="selection-task-relationship" value="subtask"${defaultRelationship === 'subtask' ? ' checked' : ''} />
-              <span>Subtask of this task</span>
+              <span>Subticket of this ticket</span>
             </label>
             <label class="workspace-task-selection-dialog-segment">
               <input type="radio" name="selection-task-relationship" value="followup"${defaultRelationship === 'followup' ? ' checked' : ''} />
@@ -370,8 +370,8 @@ export const taskResultActionsMethods = {
         }
 
         <label class="workspace-task-selection-dialog-field">
-          <span class="workspace-task-selection-dialog-label">${isAsk ? 'What do you want to ask?' : 'What should the task do?'}</span>
-          <textarea class="form-control" data-dialog-field="description" rows="3" placeholder="${isAsk ? 'e.g. Explain this in more detail.' : 'Describe the task'}"></textarea>
+          <span class="workspace-task-selection-dialog-label">${isAsk ? 'What do you want to ask?' : 'What should the ticket do?'}</span>
+          <textarea class="form-control" data-dialog-field="description" rows="3" placeholder="${isAsk ? 'e.g. Explain this in more detail.' : 'Describe the ticket'}"></textarea>
         </label>
 
         <label class="workspace-task-selection-dialog-field">
@@ -389,7 +389,7 @@ export const taskResultActionsMethods = {
         <div class="workspace-task-selection-dialog-actions">
           <button type="button" class="modern-btn modern-btn-secondary" data-dialog-action="cancel">Cancel</button>
           <button type="button" class="modern-btn modern-btn-primary" data-dialog-action="submit">
-            <span>${isAsk ? 'Ask' : 'Create task'}</span>
+            <span>${isAsk ? 'Ask' : 'Create ticket'}</span>
           </button>
         </div>
       </div>
@@ -462,13 +462,13 @@ export const taskResultActionsMethods = {
     ).trim();
     if (!description) {
       this.setSelectionDialogError(
-        mode === 'ask' ? 'Type a question first.' : 'Describe what the task should do.'
+        mode === 'ask' ? 'Type a question first.' : 'Describe what the ticket should do.'
       );
       dialog.querySelector('[data-dialog-field="description"]')?.focus();
       return;
     }
     if (!this.task?.id) {
-      this.setSelectionDialogError('Source task is not loaded yet — try again in a moment.');
+      this.setSelectionDialogError('Source ticket is not loaded yet — try again in a moment.');
       return;
     }
     this.setSelectionDialogError('');
@@ -484,7 +484,7 @@ export const taskResultActionsMethods = {
       typeof this.getTaskDisplayLabel === 'function' ? this.getTaskDisplayLabel() : '';
     const sourceId = String(this.task.id);
     const details = [
-      `Created from a highlighted excerpt of ${sourceLabel ? `"${sourceLabel}"` : 'a task'} (${sourceId}):`,
+      `Created from a highlighted excerpt of ${sourceLabel ? `"${sourceLabel}"` : 'a ticket'} (${sourceId}):`,
       '',
       `"${selection}"`
     ].join('\n');
@@ -504,7 +504,7 @@ export const taskResultActionsMethods = {
 
     const submitBtn = dialog.querySelector('[data-dialog-action="submit"]');
     const submitText = submitBtn?.querySelector('span');
-    const originalText = submitText?.textContent || 'Create task';
+    const originalText = submitText?.textContent || 'Create ticket';
     this._selectionTaskSubmitting = true;
     if (submitBtn) submitBtn.disabled = true;
     if (submitText) submitText.textContent = runNow ? 'Creating & running…' : 'Creating…';
@@ -517,7 +517,7 @@ export const taskResultActionsMethods = {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(this.parseResponseError(text, 'Failed to create task.'));
+        throw new Error(this.parseResponseError(text, 'Failed to create ticket.'));
       }
       const created = await response.json().catch(() => ({}));
       const newTaskId = String(created?.task?.id || created?.id || '').trim();
@@ -531,14 +531,14 @@ export const taskResultActionsMethods = {
         if (!executeResponse.ok) {
           const text = await executeResponse.text();
           throw new Error(
-            this.parseResponseError(text, 'Task was created but could not be started.')
+            this.parseResponseError(text, 'Ticket was created but could not be started.')
           );
         }
       }
 
       this._selectionTaskSubmitting = false;
       this.closeSelectionTaskDialog();
-      this.notify('success', isSubtask ? 'Subtask created' : 'Follow-up task created');
+      this.notify('success', isSubtask ? 'Subticket created' : 'Follow-up ticket created');
 
       // A subtask belongs to this task's graph, so refresh in place to surface
       // it in the step list. A standalone follow-up is its own task, so send
@@ -555,7 +555,7 @@ export const taskResultActionsMethods = {
     } catch (error) {
       console.error('Failed to create task from selection:', error);
       this._selectionTaskSubmitting = false;
-      this.setSelectionDialogError(error?.message || 'Failed to create task.');
+      this.setSelectionDialogError(error?.message || 'Failed to create ticket.');
     } finally {
       this._selectionTaskSubmitting = false;
       if (submitBtn) submitBtn.disabled = false;

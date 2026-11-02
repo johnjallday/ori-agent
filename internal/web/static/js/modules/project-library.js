@@ -1382,7 +1382,7 @@ export class ProjectLibraryPanel {
             : sessionGoal
               ? `Suggested studio goal: ${proposal.goal.goal}. Desired outcome: ${proposal.goal.desired_outcome || 'Not set'}. Estimated effort: ${proposal.goal.time_minutes ? `${proposal.goal.time_minutes} minutes` : 'Not estimated'}. No session was saved.`
               : sessionRecap
-                ? `Suggested studio recap: ${proposal.recap}. This is not evidence that work happened, a task finished or a DAW ran. No recap was saved.`
+                ? `Suggested studio recap: ${proposal.recap}. This is not evidence that work happened, a run finished or a DAW ran. No recap was saved.`
                 : rootReview
                   ? 'Suggested navigation: inspect current discovery folder options. No folder was selected, approved or scanned.'
                   : `Suggested next action: ${proposal.next_action}`
@@ -1582,7 +1582,7 @@ export class ProjectLibraryPanel {
               `Current Home next action: ${review.before.next_action || 'Not set'}`,
               `Proposed Home next action: ${review.after.next_action}`,
               `Manager's reason (untrusted note): ${row.proposal.reason || 'None provided'}`,
-              'This saves one user-reviewed Home note only. No scan, project task, agent, DAW or source file is opened or changed.'
+              'This saves one user-reviewed Home note only. No scan, project ticket, agent, DAW or source file is opened or changed.'
             ],
             'Save next action',
             trigger
@@ -1603,7 +1603,9 @@ export class ProjectLibraryPanel {
           throw error;
         }
         await this.refresh();
-        this.status(`Saved the reviewed next action for ${row.name}. No project task was started.`);
+        this.status(
+          `Saved the reviewed next action for ${row.name}. No project ticket was started.`
+        );
       }
     );
   }
@@ -3079,7 +3081,7 @@ export class ProjectLibraryPanel {
           node(
             'p',
             '',
-            'No saved goals yet. Plan a session without connecting a project or starting a task.'
+            'No saved goals yet. Plan a session without connecting a project or starting any work.'
           )
         );
       else {
@@ -3634,7 +3636,7 @@ export class ProjectLibraryPanel {
         share = node('input');
         share.type = 'checkbox';
         labeled(
-          'Mark this Home recap as a user-authored summary of the exact linked project (no project files, chats or tasks are read)',
+          'Mark this Home recap as a user-authored summary of the exact linked project (no project files, chats or tickets are read)',
           share
         );
         handoff = node('select', 'form-select');
@@ -3697,10 +3699,10 @@ export class ProjectLibraryPanel {
         'p',
         '',
         suggestedGoal
-          ? 'Manager suggestion (untrusted draft). Edit it before your separate review and confirmation. Cancel saves no studio session, task or DAW work.'
+          ? 'Manager suggestion (untrusted draft). Edit it before your separate review and confirmation. Cancel saves no studio session, ticket or DAW work.'
           : suggestedRecap
             ? 'Manager suggestion (untrusted draft, not evidence of work). Edit and separately review/confirm it. No actual date, decisions, next action or project note was supplied. Cancel saves nothing.'
-            : 'Your notes do not start a task, open a DAW, or prove work happened.'
+            : 'Your notes do not start a run, open a DAW, or prove work happened.'
       ),
       fields,
       actions
@@ -3807,7 +3809,7 @@ export class ProjectLibraryPanel {
               ? 'Also replaces the project’s saved next action.'
               : 'The project’s saved next action is unchanged.',
             input.share_linked_project
-              ? `Mark this user-written Home recap as a summary of linked workspace ${preview.session.shared_from_project.workspace_id}. No files, chats, tasks or DAW state were read. Disconnecting the child prevents new linked summaries but keeps this accepted note.`
+              ? `Mark this user-written Home recap as a summary of linked workspace ${preview.session.shared_from_project.workspace_id}. No files, chats, tickets or DAW state were read. Disconnecting the child prevents new linked summaries but keeps this accepted note.`
               : 'Home-only note; it is not marked as a linked-project summary.',
             ...(input.handoff_ticket_id
               ? [
@@ -3819,7 +3821,7 @@ export class ProjectLibraryPanel {
             detail.row.name,
             `Goal: ${input.goal}`,
             `Desired outcome: ${input.desired_outcome || 'Not specified'}`,
-            'No project connection, task, or DAW operation is created.'
+            'No project connection, ticket, or DAW operation is created.'
           ];
       if (
         !(await this.confirm(

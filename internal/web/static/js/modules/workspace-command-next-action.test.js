@@ -57,26 +57,22 @@ for (const [task, action] of [
   test(`next action reuses the ${action} owner for ${task.status}`, () => {
     const command = view([{ ...task, id: 'task' }]);
     assert.match(command.renderWorkFirst(), new RegExp(`data-cmd-work-action="${action}"`));
-    const calls = [];
-    command.openTaskDrawer = () => calls.push(['drawer', command.taskDrawerSelectedId]);
-    command.runDrawerAction = (...args) => calls.push(args);
+    const opened = [];
+    command.openTicketsView = id => opened.push(id);
+    command.page.executeTask = () =>
+      assert.fail('a next action opens the ticket; it never runs it');
     command.runWorkAction(action, 'task', null);
-    assert.deepEqual(calls, [
-      ['drawer', 'task'],
-      [action, 'task']
-    ]);
+    assert.deepEqual(opened, ['task'], 'FR-32: it lands on the ticket');
   });
 }
 
 test('loading and failure never masquerade as an idle workspace; Retry has one owner', () => {
-  assert.match(view(undefined).renderWorkFirst(), /Tasks are loading/);
-  assert.match(view([], { tasksLoading: true }).renderWorkFirst(), /Tasks are loading/);
+  assert.match(view(undefined).renderWorkFirst(), /Tickets are loading/);
+  assert.match(view([], { tasksLoading: true }).renderWorkFirst(), /Tickets are loading/);
   const failed = view([], { tasksLoadFailed: true });
   assert.match(failed.renderWorkFirst(), /Retry workspace status/);
-  assert.doesNotMatch(failed.renderWorkFirst(), /Give Task|No open work/);
-  assert.match(failed.drawerListHTML(), /Tasks unavailable/);
-  assert.match(failed.taskDrawerHTML(), /—/);
-  assert.match(view([]).renderWorkFirst(), /Give Task/);
+  assert.doesNotMatch(failed.renderWorkFirst(), /Give work|No open work/);
+  assert.match(view([]).renderWorkFirst(), /Give work/);
 });
 
 test('closed and Backlog records do not invent work or a missing result', () => {
@@ -97,44 +93,6 @@ test('refresh replaces recommendations without changing explicit task and agent 
   assert.equal(command.nextWork().next.id, completed.id);
   assert.equal(command.taskDrawerSelectedId, running.id);
   assert.equal(command.activeAgentName, 'writer');
-});
-
-test('stale or newly repair-gated primary actions cannot start execution', () => {
-  const command = view([{ id: 't', status: 'blocked' }]);
-  command.openTaskDrawer = () => {};
-  command.runDrawerAction = () => assert.fail('must review the changed task first');
-  command.runWorkAction('start', 't');
-  assert.match(command.workNotice, /changed/);
-  command.runWorkAction('retry', 'deleted');
-  assert.equal(command.taskDrawerSelectedId, 'deleted');
-});
-
-test('explicit deep-link selection survives loading and a failed read', () => {
-  const command = view([], { tasksLoading: true });
-  command.taskDrawerOpen = true;
-  command.taskDrawerSelectedId = 'requested';
-  command.reconcileDrawerSelection();
-  assert.equal(command.taskDrawerSelectedId, 'requested');
-  command.page.tasksLoading = false;
-  command.page.tasksLoadFailed = true;
-  command.reconcileDrawerSelection();
-  assert.equal(command.taskDrawerSelectedId, 'requested');
-  command.page.tasksLoadFailed = false;
-  command.reconcileDrawerSelection();
-  assert.match(command._drawerAnnounce, /no longer available/);
-});
-
-test('summary-only drawer links acquire data without overriding an explicit task', () => {
-  const command = view([]);
-  command.taskDrawerOpen = true;
-  command.reconcileDrawerSelection();
-  assert.equal(command.taskDrawerSelectedId, '');
-  command.page.tasks = [running, completed];
-  command.reconcileDrawerSelection();
-  assert.equal(command.taskDrawerSelectedId, 'run');
-  command.taskDrawerSelectedId = 'done';
-  command.reconcileDrawerSelection();
-  assert.equal(command.taskDrawerSelectedId, 'done');
 });
 
 test('task titles stay text and configuration is a named secondary disclosure', () => {
@@ -190,7 +148,7 @@ test('Details renders one review CTA and real binding dispatches only console na
   assert.equal((primary.html.match(/is-primary/g) || []).length, 1);
   assert.match(primary.html, /4 files ready for review/);
   assert.match(primary.html, /Running: Routine work/);
-  assert.match(primary.html, /All Tasks/);
+  assert.match(primary.html, /All tickets/);
   primary.click();
   assert.deepEqual(opened, [
     { source: 'workspace-next-action', trigger: primary.button, tab: 'review' }
@@ -266,7 +224,8 @@ test('Map shell and Details render the identical action without replacing statio
   const map = command.renderOperationsMap();
   assert.ok(map.includes(details));
   assert.match(map, /Workspace operations map/);
-  assert.match(map, /data-cmd-open-task-drawer/);
+  assert.match(map, /data-cmd-open-tickets/);
+  assert.match(map, /All tickets/);
   assert.equal((map.match(/id="workspaceNextAction"/g) || []).length, 1);
   assert.equal((map.match(/ws-cmd-agent-action is-primary/g) || []).length, 1);
 });
@@ -351,7 +310,7 @@ test('stable live region announces changes, not polling starts or unchanged refr
     assert.match(writes[1], /5 files ready for review/);
     command.page.tasksLoadFailed = true;
     command.announceNextAction();
-    assert.match(writes[2], /Tasks are unavailable/);
+    assert.match(writes[2], /Tickets are unavailable/);
   } finally {
     globalThis.document = previous;
   }

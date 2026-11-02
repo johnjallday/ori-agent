@@ -61,7 +61,7 @@ export class RendererPanels {
     this.ctx.fillStyle = '#1f2937';
     this.ctx.font = 'bold 16px system-ui';
     this.ctx.textAlign = 'left';
-    this.ctx.fillText('Task Details', contentX, currentY);
+    this.ctx.fillText('Ticket Details', contentX, currentY);
     currentY += 25;
 
     // Task ID
@@ -702,12 +702,12 @@ export class RendererPanels {
     // Statistics grid
     const stats = [
       {
-        label: 'Current Tasks',
+        label: 'Current Tickets',
         value: this.state.expandedAgent.currentTasks?.length || 0,
         color: '#10b981'
       },
       {
-        label: 'Queued Tasks',
+        label: 'Queued Tickets',
         value: this.state.expandedAgent.queuedTasks?.length || 0,
         color: '#3b82f6'
       },
@@ -861,13 +861,21 @@ export class RendererPanels {
     // Task count
     this.ctx.fillStyle = '#4b5563';
     this.ctx.font = '12px system-ui';
-    this.ctx.fillText('Active Tasks:', contentX, currentY);
+    this.ctx.fillText('Active Tickets:', contentX, currentY);
     currentY += 18;
 
     this.ctx.fillStyle = '#1f2937';
     this.ctx.font = 'bold 14px system-ui';
-    const taskCount = this.state.expandedAgent.tasks ? this.state.expandedAgent.tasks.length : 0;
-    this.ctx.fillText(`${taskCount} task${taskCount !== 1 ? 's' : ''}`, contentX, currentY);
+    const expanded = this.state.expandedAgent;
+    // The agent's tickets, current then queued, as ids.
+    const agentTickets = [
+      ...(Array.isArray(expanded.currentTasks) ? expanded.currentTasks : []),
+      ...(Array.isArray(expanded.queuedTasks) ? expanded.queuedTasks : [])
+    ]
+      .map(entry => (entry && typeof entry === 'object' ? entry.id : entry))
+      .filter(Boolean);
+    const taskCount = agentTickets.length;
+    this.ctx.fillText(`${taskCount} ticket${taskCount !== 1 ? 's' : ''}`, contentX, currentY);
     currentY += 25;
 
     // Tasks list
@@ -875,12 +883,12 @@ export class RendererPanels {
       currentY += 10;
       this.ctx.fillStyle = '#059669';
       this.ctx.font = 'bold 14px system-ui';
-      this.ctx.fillText('📋 Tasks', contentX, currentY);
+      this.ctx.fillText('📋 Tickets', contentX, currentY);
       currentY += 20;
 
       // List tasks
       const maxTasksToShow = 5;
-      const tasksToShow = this.state.expandedAgent.tasks.slice(0, maxTasksToShow);
+      const tasksToShow = agentTickets.slice(0, maxTasksToShow);
 
       tasksToShow.forEach((taskId, index) => {
         // Find the task details
@@ -920,11 +928,11 @@ export class RendererPanels {
         }
       });
 
-      if (this.state.expandedAgent.tasks.length > maxTasksToShow) {
+      if (agentTickets.length > maxTasksToShow) {
         this.ctx.fillStyle = '#6b7280';
         this.ctx.font = 'italic 10px system-ui';
         this.ctx.fillText(
-          `... and ${this.state.expandedAgent.tasks.length - maxTasksToShow} more`,
+          `... and ${agentTickets.length - maxTasksToShow} more`,
           contentX,
           currentY + 5
         );

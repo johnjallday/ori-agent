@@ -64,3 +64,43 @@ func TestTaskRunBridgeCreatesRunPersistsTaskLinkAndReturnsResult(t *testing.T) {
 		t.Fatalf("CurrentRunID = %q, want %q", gotTask.CurrentRunID, result.RunID)
 	}
 }
+
+// PRD 760 FR-30: each execution of one ticket is its own run in its run list.
+func TestTaskRunBridge_EachExecutionOfATicketIsItsOwnRun(t *testing.T) {
+	ctx := context.Background()
+	runStore := NewMemoryStore()
+	workspaceStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workspace"})
+	task := workspace.Task{ID: "task-1", WorkspaceID: ws.ID, To: "Ori", Description: "do work", Status: workspace.TaskStatusAssigned}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+	if err := workspaceStore.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+	executors := NewExecutorRegistry()
+	executors.Register(ExecutorKindOriAgent, NewOriAgentExecutor(&stubOriAgentTaskRunner{result: "finished"}))
+	service := NewService(runStore, NewProfileRegistry(), executors, NewLocalEnvironmentManager(t.TempDir()), NewValidator(), nil)
+	bridge := NewTaskRunBridge(runStore, service, workspaceStore)
+
+	first, err := bridge.ExecuteTaskRun(ctx, "Ori", task)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	second, err := bridge.ExecuteTaskRun(ctx, "Ori", task)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if first.RunID == second.RunID {
+		t.Fatalf("both executions share run %q", first.RunID)
+	}
+	for _, id := range []string{first.RunID, second.RunID} {
+		run, err := runStore.GetRun(ctx, ws.ID, id)
+		if err != nil {
+			t.Fatalf("get run: %v", err)
+		}
+		if run.Scope.TargetTaskID != task.ID {
+			t.Errorf("run %s targets %q, want the ticket", id, run.Scope.TargetTaskID)
+		}
+	}
+}

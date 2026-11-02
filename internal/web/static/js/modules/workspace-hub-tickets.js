@@ -104,6 +104,7 @@
       referenceUrl: raw.reference_url || '',
       source: raw.source || '',
       sourceId: raw.source_id || '',
+      sourceNote: raw.source_note || '',
       linkedNoteIds: Array.isArray(raw.linked_note_ids) ? raw.linked_note_ids.slice() : [],
       assignee: raw.assignee || '',
       parentTicketId: raw.parent_ticket_id || '',
@@ -119,6 +120,7 @@
       // Hierarchy is detail-only; a list response leaves these empty (FR-142).
       parent: raw.parent ? normalizeTicketSummary(raw.parent) : null,
       subtickets: Array.isArray(raw.subtickets) ? raw.subtickets.map(normalizeTicketSummary) : [],
+      latestResult: raw.latest_result || '',
       archived: Boolean(raw.archived),
       startedAt: raw.started_at || null,
       completedAt: raw.completed_at || null,
@@ -216,6 +218,39 @@
     return payload;
   }
 
+  // Announced after a ticket is created, moved or deleted, so a surface that
+  // shows the count (the workspace header's work tile) can refresh it without
+  // fetching on every render (PRD 760 FR-11). detail.studioId names the
+  // workspace that owns the ticket.
+  const CHANGED_EVENT = 'ori:tickets-changed';
+
+  function announceChange(studioId) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
+    try {
+      window.dispatchEvent(
+        new CustomEvent(CHANGED_EVENT, { detail: { studioId: String(studioId || '') } })
+      );
+    } catch (_error) {
+      // A listener's failure must never turn a saved ticket into an error.
+    }
+  }
+
+  // Hands fresh counts from a list response to whoever shows them.
+  function announceCounts(studioId, counts) {
+    if (!counts || typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+      return;
+    }
+    if (typeof CustomEvent !== 'function') return;
+    try {
+      window.dispatchEvent(
+        new CustomEvent('ori:ticket-counts', { detail: { studioId: String(studioId), counts } })
+      );
+    } catch (_error) {
+      // A listener's failure must never break the board.
+    }
+  }
+
   const api = {
     /**
      * Lists a workspace's tickets. `includeDescendants` opts into the
@@ -267,6 +302,10 @@
         tickets: normalizeTicketList(payload && payload.tickets),
         count: (payload && payload.count) || 0,
         total: (payload && payload.total) || 0,
+        // The workspace's own tickets by state, whatever the filters or the page
+        // size (PRD 760 FR-6). Null when the server did not send one.
+        counts:
+          payload && payload.counts && typeof payload.counts === 'object' ? payload.counts : null,
         truncated: Boolean(payload && payload.truncated),
         partialOwners: (payload && payload.partial_owners) || [],
         includeDescendants: Boolean(payload && payload.include_descendants)
@@ -296,9 +335,38 @@
         reference_url: input.referenceUrl || '',
         source: input.source || '',
         source_id: input.sourceId || '',
-        linked_note_ids: input.linkedNoteIds || []
+        linked_note_ids: input.linkedNoteIds || [],
+        assignee: input.assignee || '',
+        start: Boolean(input.start),
+        idempotency_key: input.idempotencyKey || ''
       });
-      return normalizeTicket(payload);
+      announceChange(studioId);
+      const ticket = normalizeTicket(payload);
+      // A start intent's outcome travels beside the ticket: a refused start is
+      // a saved ticket plus a reason, never a failed create (PRD 760 FR-14).
+      if (ticket && payload && payload.start) {
+        ticket.start = {
+          started: Boolean(payload.start.started),
+          error: payload.start.error || ''
+        };
+      }
+      return ticket;
+    },
+
+    /**
+     * Creates a connected step for the canvas and the workflow panel (PRD 760
+     * FR-16). They need fields a ticket form never asks for: combiner settings,
+     * sender and a free-form assignee. The result is a normal ticket on the board.
+     * Resolves to the server's { task } envelope, which those callers lay out.
+     */
+    async createStep(studioId, step) {
+      const payload = await request(
+        'POST',
+        `/api/workspaces/${encodeURIComponent(studioId)}/tasks`,
+        step
+      );
+      announceChange(studioId);
+      return payload;
     },
 
     async get(studioId, ticketId) {
@@ -342,7 +410,44 @@
         `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}/transition`,
         body
       );
+      announceChange(studioId);
       return normalizeTicket(payload);
+    },
+
+    /**
+     * Start this (PRD 760 FR-27): moves a Backlog ticket to Ready, names who does
+     * it, and starts one run. A refused start is a saved ticket plus a reason.
+     */
+    async start(studioId, ticketId, { assignee = '' } = {}) {
+      const payload = await request(
+        'POST',
+        `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}/start`,
+        { assignee }
+      );
+      announceChange(studioId);
+      const ticket = normalizeTicket(payload);
+      if (ticket && payload && payload.start) {
+        ticket.start = {
+          started: Boolean(payload.start.started),
+          error: payload.start.error || ''
+        };
+      }
+      return ticket;
+    },
+
+    /** Who can be asked to do a ticket: the owning workspace's agents, by name. */
+    async workspaceAgents(studioId) {
+      const payload = await request('GET', `/api/workspaces/${encodeURIComponent(studioId)}`);
+      return Array.isArray(payload && payload.agents) ? payload.agents.slice() : [];
+    },
+
+    /** The follow-up a ticket was made from (PRD 760 FR-26). */
+    async followUp(id) {
+      const payload = await request(
+        'GET',
+        `/api/personal-hq/followups/item?id=${encodeURIComponent(id)}`
+      );
+      return (payload && payload.followup) || null;
     },
 
     /** Reorders within one owner and one state; all-or-nothing (FR-91). */
@@ -477,6 +582,7 @@
         due_date: input.dueDate || null,
         reference_url: input.referenceUrl || ''
       });
+      announceChange(studioId);
       return normalizeTicket(payload);
     },
 
@@ -486,6 +592,7 @@
         'DELETE',
         `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}${suffix}`
       );
+      announceChange(studioId);
       return true;
     }
   };
@@ -518,7 +625,7 @@
       'backlog->ready': 'Promote to Ready',
       'backlog->cancelled': 'Cancel',
       'ready->backlog': 'Return to Backlog',
-      'ready->in_progress': 'Start work',
+      'ready->in_progress': 'Mark in progress',
       'ready->cancelled': 'Cancel',
       'in_progress->ready': 'Stop work',
       'in_progress->review': 'Send for review',
@@ -530,6 +637,40 @@
       'cancelled->ready': 'Reopen'
     };
     return labels[key] || `Move to ${stateLabel(toState)}`;
+  }
+
+  /** A due instant as the person's own calendar day, for a date input. */
+  function localDay(value) {
+    const at = value ? new Date(value) : null;
+    if (!at || Number.isNaN(at.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+  }
+
+  /** Start this is offered on open work nobody has picked up (PRD 760 FR-27). */
+  function canStartThis(ticket) {
+    if (!ticket || ticket.archived) return false;
+    return ticket.state === 'backlog' || ticket.state === 'ready';
+  }
+
+  /** Where a ticket came from, in words. Older sources read as they are stored. */
+  function ticketSourceLabel(source) {
+    if (source === 'followup') return 'A follow-up';
+    if (source === 'note_item') return 'Your notes';
+    return source || '';
+  }
+
+  /** A follow-up's standing, beside the ticket it led to. */
+  function followUpStandingLabel(status) {
+    const labels = {
+      candidate: 'not confirmed yet',
+      active: 'open',
+      reopened: 'open',
+      snoozed: 'snoozed',
+      completed: 'done',
+      dismissed: 'dismissed'
+    };
+    return labels[status] || '';
   }
 
   function transitionOptions(ticket) {
@@ -547,7 +688,12 @@
   // placeholder data, so anything on screen is something the server actually
   // persisted.
 
+  // How long a reload leaves an action's own message in place.
+  const OUTCOME_HOLD_MS = 6000;
+
   const view = {
+    outcomeAt: 0,
+    detailOutcome: null,
     elements: {},
     tickets: [],
     selectedTicketId: '',
@@ -1016,7 +1162,9 @@
       return;
     }
 
-    setStatus('Loading tickets…');
+    // A reload follows every change, so it must not wipe what that change said.
+    const holdOutcome = Date.now() - view.outcomeAt < OUTCOME_HOLD_MS;
+    if (!holdOutcome) setStatus('Loading tickets…');
     try {
       const result = await api.list(studioId, {
         states: view.filters.states,
@@ -1028,8 +1176,10 @@
       });
       view.tickets = result.tickets;
       view.lastPage = result;
+      announceCounts(studioId, result.counts);
       render();
-      setStatus('');
+      if (!holdOutcome) setStatus('');
+      void followSelectedTicket(result.tickets);
     } catch (error) {
       view.tickets = [];
       view.lastPage = null;
@@ -1038,11 +1188,36 @@
     }
   }
 
+  /**
+   * Keeps open detail in step with the list: a run moves a ticket after Start this
+   * answered, and buttons for a state it has left would only be refused. It leaves
+   * alone a detail the person is typing in or choosing from.
+   */
+  async function followSelectedTicket(tickets) {
+    const shown = view.selectedTicket;
+    if (!shown || shown.id !== view.selectedTicketId) return;
+    const listed = tickets.find(ticket => ticket.id === shown.id);
+    if (!listed || (listed.version === shown.version && listed.state === shown.state)) return;
+    const body = view.elements.detailBody;
+    if (body?.querySelector('details[open], .ticket-start-chooser')) return;
+    let fresh;
+    try {
+      fresh = await api.get(shown.owningWorkspaceId, shown.id);
+    } catch {
+      return;
+    }
+    if (view.selectedTicketId !== fresh.id) return;
+    const hadFocus = Boolean(body && body.contains(document.activeElement));
+    renderDetail(fresh);
+    if (hadFocus) focusDetailActions();
+  }
+
   /** Opens the server-backed detail view for one ticket. */
   async function openDetail(owningWorkspaceId, ticketId) {
     const detail = view.elements.detail;
     if (!detail) return;
 
+    if (view.selectedTicketId !== ticketId) view.detailOutcome = null;
     view.selectedTicketId = ticketId;
     detail.hidden = false;
     if (view.elements.detailBody) {
@@ -1106,6 +1281,122 @@
    * them separate is what stops a Run outcome from reading as the Ticket's
    * own state (FR-69, FR-70).
    */
+  /**
+   * Turns the edit form's values into an update. Give work asks only for what,
+   * details, who and due, so everything else a ticket can carry is set here (PRD
+   * 760 FR-17). The version comes along so a stale edit is refused, not applied.
+   */
+  function ticketEditChanges(values, ticket) {
+    const due = String(values.due || '').trim();
+    return {
+      title: String(values.title || '').trim(),
+      description: String(values.description || ''),
+      priority: Number(values.priority) || 0,
+      tags: String(values.tags || '')
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean),
+      // The end of that day where the person is (see give-work.js dueDateISO).
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(due) ? new Date(`${due}T23:59:59`).toISOString() : null,
+      referenceUrl: String(values.reference || '').trim(),
+      version: ticket.version
+    };
+  }
+
+  function buildEditField(form, label, control) {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'ticket-detail-edit-field';
+    const text = document.createElement('span');
+    text.textContent = label;
+    wrapper.append(text, control);
+    form.appendChild(wrapper);
+  }
+
+  /** A closed disclosure holding the ticket's editable fields. */
+  function buildEditDisclosure(ticket) {
+    const disclosure = document.createElement('details');
+    disclosure.className = 'ticket-detail-edit';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Edit';
+    disclosure.appendChild(summary);
+
+    const form = document.createElement('form');
+    const input = (name, type, value) => {
+      const element = document.createElement('input');
+      element.className = 'form-control form-control-sm';
+      element.name = name;
+      element.type = type;
+      element.value = value || '';
+      return element;
+    };
+    const title = input('title', 'text', ticket.title);
+    title.required = true;
+    title.maxLength = 300;
+    buildEditField(form, 'Title', title);
+
+    const description = document.createElement('textarea');
+    description.className = 'form-control form-control-sm';
+    description.name = 'description';
+    description.rows = 3;
+    description.value = ticket.description || '';
+    buildEditField(form, 'Details', description);
+
+    const priority = document.createElement('select');
+    priority.className = 'form-select form-select-sm';
+    priority.name = 'priority';
+    [1, 2, 3, 4, 5].forEach(level => {
+      const option = document.createElement('option');
+      option.value = String(level);
+      option.textContent = `P${level}`;
+      option.selected = level === (ticket.priority || 3);
+      priority.appendChild(option);
+    });
+    buildEditField(form, 'Priority', priority);
+
+    buildEditField(form, 'Tags (comma separated)', input('tags', 'text', ticket.tags.join(', ')));
+    buildEditField(form, 'Due', input('due', 'date', localDay(ticket.dueDate)));
+    buildEditField(form, 'Reference', input('reference', 'url', ticket.referenceUrl));
+
+    const save = document.createElement('button');
+    save.type = 'submit';
+    save.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    save.textContent = 'Save';
+    form.appendChild(save);
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const owner = ticket.owningWorkspaceId || currentStudioId();
+      save.disabled = true;
+      try {
+        await api.update(
+          owner,
+          ticket.id,
+          ticketEditChanges(
+            {
+              title: title.value,
+              description: description.value,
+              priority: priority.value,
+              tags: form.elements.tags.value,
+              due: form.elements.due.value,
+              reference: form.elements.reference.value
+            },
+            ticket
+          )
+        );
+        setStatus('Saved.', 'success');
+      } catch (error) {
+        setStatus(error.message, 'error');
+        if (!error.isVersionConflict) return;
+      } finally {
+        save.disabled = false;
+      }
+      await openDetail(owner, ticket.id);
+      await load();
+    });
+    disclosure.appendChild(form);
+    return disclosure;
+  }
+
   function renderDetail(ticket) {
     view.selectedTicket = ticket;
     if (view.elements.detailTitle) {
@@ -1118,6 +1409,14 @@
     body.replaceChildren();
 
     body.appendChild(buildActionRow(ticket));
+
+    if (view.detailOutcome && view.detailOutcome.ticketId === ticket.id) {
+      const outcome = document.createElement('p');
+      outcome.className = `ticket-detail-outcome is-${view.detailOutcome.tone}`;
+      outcome.setAttribute('role', 'status');
+      outcome.textContent = view.detailOutcome.message;
+      body.appendChild(outcome);
+    }
 
     // --- Work ---
     appendSectionTitle(body, 'Work');
@@ -1134,8 +1433,24 @@
       ticket.dueDate ? `${formatDate(ticket.dueDate)}${isOverdue(ticket) ? ' — overdue' : ''}` : ''
     );
     appendDetailRow(summary, 'Reference', ticket.referenceUrl);
-    appendDetailRow(summary, 'Source', ticket.source);
+    appendDetailRow(summary, 'Source', ticketSourceLabel(ticket.source));
     body.appendChild(summary);
+
+    // Where it came from. A link, not ownership: closing the follow-up or ticking
+    // the line leaves this ticket where it is (PRD 760 FR-26, FR-29).
+    if (ticket.sourceNote) {
+      const note = document.createElement('p');
+      note.className = 'ticket-detail-origin ticket-detail-source-note';
+      note.textContent = ticket.sourceNote;
+      body.appendChild(note);
+    }
+    if (ticket.source === 'followup' && ticket.sourceId) {
+      const origin = document.createElement('p');
+      origin.className = 'ticket-detail-origin ticket-detail-followup';
+      body.appendChild(origin);
+      void renderLinkedFollowUp(origin, ticket);
+    }
+    body.appendChild(buildEditDisclosure(ticket));
 
     // A draft saved from an assistant conversation can be continued there.
     // Following the link only reads; nothing about this Ticket changes.
@@ -1193,7 +1508,7 @@
     const execution = document.createElement('dl');
     execution.className = 'ticket-detail-summary';
     appendDetailRow(execution, 'Assignee', ticket.assignee || 'Unassigned');
-    appendDetailRow(execution, 'Schedule', ticket.scheduleEnabled ? 'Enabled' : 'None');
+    appendDetailRow(execution, 'Schedule', ticket.scheduleEnabled ? 'On' : 'Off');
     appendDetailRow(
       execution,
       'Waiting for intent',
@@ -1203,6 +1518,15 @@
     appendDetailRow(execution, 'Started', ticket.startedAt ? formatDate(ticket.startedAt) : '');
     appendDetailRow(execution, 'Closed', ticket.completedAt ? formatDate(ticket.completedAt) : '');
     body.appendChild(execution);
+
+    // What came back, readable here without going to the Runs page (FR-19).
+    if (ticket.latestResult) {
+      appendSectionTitle(body, 'Latest result');
+      const result = document.createElement('div');
+      result.className = 'ticket-detail-result';
+      result.textContent = ticket.latestResult;
+      body.appendChild(result);
+    }
 
     // Run history loads separately and asynchronously: it is attempt-level
     // data on a different store, and a slow or failing runs endpoint must not
@@ -1261,6 +1585,14 @@
     if (!runs.length) return;
 
     appendSectionTitle(host, `Runs (${runs.length})`);
+    const slug = ticket.owningWorkspaceSlug;
+    if (slug) {
+      const all = document.createElement('a');
+      all.className = 'ticket-detail-runs-link';
+      all.href = `/workspaces/${encodeURIComponent(slug)}/task/${encodeURIComponent(ticket.id)}`;
+      all.textContent = 'Open Runs';
+      host.appendChild(all);
+    }
     const list = document.createElement('ol');
     list.className = 'ticket-detail-runs-list';
     runs.forEach((run, index) => {
@@ -1272,12 +1604,18 @@
       status.className = 'ticket-detail-run-status';
       status.dataset.status = run.status;
       status.textContent = index === 0 ? `${run.status} (latest)` : run.status;
+      const label = slug && run.id ? document.createElement('a') : status;
+      if (label !== status) {
+        label.href = `/workspaces/${encodeURIComponent(slug)}/runs/${encodeURIComponent(run.id)}`;
+        label.className = 'ticket-detail-run-link';
+        label.appendChild(status);
+      }
 
       const when = document.createElement('span');
       when.className = 'ticket-detail-run-when';
       when.textContent = run.startedAt ? formatDate(run.startedAt) : '';
 
-      item.appendChild(status);
+      item.appendChild(label);
       item.appendChild(when);
       if (run.error) {
         const error = document.createElement('span');
@@ -1492,9 +1830,158 @@
    * Group 2 exposes the planning actions. Review, Done, Cancel, and Reopen are
    * execution-sensitive and land with the Run lifecycle in Group 4.
    */
+  async function renderLinkedFollowUp(host, ticket) {
+    let item = null;
+    try {
+      item = await api.followUp(ticket.sourceId);
+    } catch {
+      item = null;
+    }
+    // The detail may have moved on while this loaded.
+    if (view.selectedTicket?.id !== ticket.id || !host.isConnected) return;
+    if (!item) {
+      host.textContent = 'Made from a follow-up that is no longer available.';
+      return;
+    }
+    host.textContent = 'Made from your follow-up: ';
+    const title = item.title || 'Open follow-up';
+    if (item.href) {
+      const link = document.createElement('a');
+      link.href = item.href;
+      link.textContent = title;
+      host.appendChild(link);
+    } else {
+      host.appendChild(document.createTextNode(title));
+    }
+    const standing = followUpStandingLabel(item.status);
+    if (standing) host.appendChild(document.createTextNode(` (${standing})`));
+  }
+
+  function focusDetailActions() {
+    view.elements.detailBody?.querySelector('.ticket-detail-actions button')?.focus();
+  }
+
+  /**
+   * Asks who should do the work. The server decides whether anyone is already
+   * named, so the rule lives in one place; this only runs when it says no one is.
+   */
+  async function askWhoStarts(ticket, trigger) {
+    const row = trigger.closest('.ticket-detail-actions');
+    row?.parentElement?.querySelector('.ticket-start-chooser')?.remove();
+    let names = [];
+    try {
+      names = await api.workspaceAgents(ticket.owningWorkspaceId);
+    } catch (error) {
+      setStatus(error.message, 'error');
+      trigger.disabled = false;
+      trigger.focus();
+      return;
+    }
+
+    const chooser = document.createElement('div');
+    chooser.className = 'ticket-start-chooser';
+    const close = () => {
+      chooser.remove();
+      trigger.disabled = false;
+      trigger.focus();
+    };
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+
+    if (!names.length) {
+      const empty = document.createElement('p');
+      empty.className = 'ticket-detail-origin';
+      empty.setAttribute('role', 'status');
+      empty.textContent = 'This workspace has no agents yet. Add one, then start this.';
+      chooser.append(empty, cancel);
+      row?.after(chooser);
+      cancel.focus();
+      return;
+    }
+
+    const label = document.createElement('label');
+    label.textContent = 'Who should do this?';
+    const select = document.createElement('select');
+    select.className = 'form-select form-select-sm';
+    select.dataset.startAssignee = '';
+    names.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+    label.appendChild(select);
+    const start = document.createElement('button');
+    start.type = 'button';
+    start.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    start.dataset.startConfirm = '';
+    start.textContent = 'Start';
+    start.addEventListener('click', () => {
+      start.disabled = true;
+      void applyStart(ticket, select.value, trigger);
+    });
+    chooser.append(label, start, cancel);
+    row?.after(chooser);
+    select.focus();
+  }
+
+  function noteStartOutcome(ticketId, message, tone) {
+    view.detailOutcome = { ticketId, message, tone };
+    setStatus(message, tone);
+    view.outcomeAt = Date.now();
+  }
+
+  async function applyStart(ticket, assignee, trigger) {
+    setStatus(`Starting ${ticket.displayNumber}…`);
+    try {
+      const updated = await api.start(ticket.owningWorkspaceId, ticket.id, { assignee });
+      const refusal = updated.start && updated.start.error;
+      const message = refusal
+        ? `${updated.displayNumber} is Ready, but it could not start: ${refusal}`
+        : `${updated.displayNumber} has started.`;
+      noteStartOutcome(updated.id, message, refusal ? 'error' : 'success');
+      if (view.selectedTicketId === updated.id) renderDetail(updated);
+      await load();
+      announce(message);
+      focusDetailActions();
+    } catch (error) {
+      if (!assignee && error.details && error.details.field === 'assignee') {
+        setStatus('');
+        await askWhoStarts(ticket, trigger);
+        return;
+      }
+      noteStartOutcome(ticket.id, error.message, 'error');
+      if (view.selectedTicketId === ticket.id) renderDetail(view.selectedTicket);
+      announce(`Start failed: ${error.message}`);
+      await load();
+      if (trigger.isConnected) {
+        trigger.disabled = false;
+        trigger.focus();
+      } else {
+        focusDetailActions();
+      }
+    }
+  }
+
   function buildActionRow(ticket) {
     const row = document.createElement('div');
     row.className = 'ticket-detail-actions';
+
+    if (canStartThis(ticket)) {
+      const start = document.createElement('button');
+      start.type = 'button';
+      start.className = 'modern-btn modern-btn-primary modern-btn-sm ticket-action';
+      start.dataset.startThis = '';
+      start.textContent = 'Start this';
+      start.addEventListener('click', () => {
+        start.disabled = true;
+        void applyStart(ticket, '', start);
+      });
+      row.appendChild(start);
+    }
 
     // "Mark done" is the ONLY path to Done and it exists only from Review.
     // That is what makes acceptance an explicit human act rather than
@@ -1502,7 +1989,7 @@
     transitionOptions(ticket).forEach(option => {
       const button = document.createElement('button');
       button.type = 'button';
-      const primary = option.id === 'done' || (ticket.state === 'backlog' && option.id === 'ready');
+      const primary = option.id === 'done';
       button.className = `modern-btn ${primary ? 'modern-btn-primary' : 'modern-btn-secondary'} modern-btn-sm ticket-action`;
       button.dataset.transition = option.id;
       button.textContent = option.label;
@@ -1624,47 +2111,19 @@
     return String(value).replace(/["\\]/g, '\\$&');
   }
 
-  /** Handles the create form. The Backlog/Ready choice is required (FR-19). */
-  async function handleCreate(event) {
-    if (event && event.preventDefault) event.preventDefault();
-
+  /** The ticket view's door into Give work (PRD 760 FR-15). */
+  function openGiveWorkHere() {
+    const giveWork = typeof window !== 'undefined' ? window.OriGiveWork : null;
     const studioId = currentStudioId();
-    if (!studioId) {
-      setStatus('Select a workspace before creating a ticket.', 'error');
-      return;
-    }
-
-    const titleInput = view.elements.formTitle;
-    const descriptionInput = view.elements.formDescription;
-    const stateInput =
-      typeof document !== 'undefined'
-        ? document.querySelector('input[name="hubTicketCreateState"]:checked')
-        : null;
-
-    if (!stateInput) {
-      setStatus('Choose whether to add this to Backlog or create it Ready.', 'error');
-      return;
-    }
-
-    setStatus('Creating ticket…');
-    try {
-      const ticket = await api.create(studioId, {
-        state: stateInput.value,
-        title: titleInput ? titleInput.value : '',
-        description: descriptionInput ? descriptionInput.value : ''
-      });
-      if (titleInput) titleInput.value = '';
-      if (descriptionInput) descriptionInput.value = '';
-      setStatus(`Created ${ticket.displayNumber} in ${ticket.stateLabel}.`, 'success');
-      await load();
-    } catch (error) {
-      // The message names what the server actually refused, so the user can
-      // fix it rather than guess (FR-94).
-      setStatus(error.message, 'error');
-      if (error.field && titleInput && error.field === 'title' && titleInput.focus) {
-        titleInput.focus();
-      }
-    }
+    if (!giveWork || !studioId) return;
+    const workspace = (window.workspaceDetail && window.workspaceDetail.workspace) || {};
+    giveWork.open({
+      workspaceId: studioId,
+      workspaceName: workspace.name || '',
+      agents: workspace.agents || [],
+      trigger: view.elements.giveWork || null,
+      onSaved: () => void load()
+    });
   }
 
   function init() {
@@ -1686,9 +2145,7 @@
       empty: el('hubTicketsEmpty'),
       count: el('hubTicketsCount'),
       status: el('hubTicketsStatus'),
-      form: el('hubTicketCreateForm'),
-      formTitle: el('hubTicketCreateTitle'),
-      formDescription: el('hubTicketCreateDescription'),
+      giveWork: el('hubTicketsGiveWork'),
       refresh: el('hubTicketsRefreshBtn'),
       detail: el('hubTicketDetail'),
       detailTitle: el('hubTicketDetailTitle'),
@@ -1705,8 +2162,8 @@
       boardBtn: el('hubTicketsViewBoard')
     };
 
-    if (view.elements.form) {
-      view.elements.form.addEventListener('submit', handleCreate);
+    if (view.elements.giveWork) {
+      view.elements.giveWork.addEventListener('click', () => openGiveWorkHere());
     }
     if (view.elements.refresh) {
       view.elements.refresh.addEventListener('click', () => void load());
@@ -1853,25 +2310,12 @@
   }
 
   /**
-   * Puts the cursor in the create form and preselects a capture state.
-   *
-   * This is where an "Add to Backlog" affordance from another surface lands:
-   * the user asked to capture something, so they should arrive typing rather
-   * than hunting for the field (FR-19, FR-80).
+   * Opens Give work: where an "Add to Backlog" affordance from another surface
+   * lands. The user asked to capture something, so they arrive typing (FR-80).
    */
-  function focusCreate(state) {
+  function focusCreate() {
     init();
-    const wanted = String(state || '')
-      .trim()
-      .toLowerCase();
-    if (CAPTURE_STATES.includes(wanted) && typeof document !== 'undefined') {
-      const choice = document.querySelector(
-        `input[name="hubTicketCreateState"][value="${wanted}"]`
-      );
-      if (choice) choice.checked = true;
-    }
-    const title = view.elements.formTitle;
-    if (title && typeof title.focus === 'function') title.focus();
+    openGiveWorkHere();
   }
 
   /** Reflects the active state filters onto the chips, including aria-pressed. */
@@ -1899,7 +2343,13 @@
     TICKET_STATES,
     CAPTURE_STATES,
     TicketApiError,
+    CHANGED_EVENT,
+    ticketEditChanges,
     api,
+    canStartThis,
+    followUpStandingLabel,
+    localDay,
+    ticketSourceLabel,
     assistantDraftResumeHref,
     canTransitionTo,
     formatQualifiedNumber,

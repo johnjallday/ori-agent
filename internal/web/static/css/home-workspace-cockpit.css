@@ -1313,6 +1313,37 @@
   text-transform: uppercase;
 }
 
+/* The work count line is words ("1 in review · 2 in progress · 3 ready"), so it
+   gets a full-width row that wraps instead of a metric cell that would truncate
+   it. A missing count is a dimmed dash, like the metrics (FR121). */
+.cockpit-rail-work {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
+.cockpit-rail-work-value {
+  color: var(--hc-ink);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.cockpit-rail-work[data-unavailable="true"] .cockpit-rail-work-value {
+  color: var(--hc-ink-faint);
+}
+
+.cockpit-rail-work-label {
+  color: var(--hc-ink-faint);
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
 .cockpit-rail-section-title {
   margin: 0 0 5px;
   color: var(--hc-ink-dim);
@@ -2544,6 +2575,15 @@ body.home-command-page {
   font-size: 26px;
   font-weight: 600;
   line-height: 1;
+}
+
+/* A stat that is a sentence (the work count line) wraps at a readable size
+   instead of the display size a one-number stat uses. */
+.cockpit-pane-stat-value.is-line {
+  max-width: 28ch;
+  font-size: 16px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .cockpit-pane-fields {

@@ -113,7 +113,7 @@ test('display separates app-wide, group, Home, project, explicit subject and old
       location: { id: 'a', name: 'A' },
       selected_task_id: 'task'
     }),
-    'Project: B · Music · Selected task · from A'
+    'Project: B · Music · Selected ticket · from A'
   );
 });
 test('a delayed/historical row uses its accepted attribution, never the current page', () => {

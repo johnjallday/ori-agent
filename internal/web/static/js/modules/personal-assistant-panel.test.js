@@ -92,7 +92,7 @@ test('the header, launcher and composer name the entry agent on a workspace page
   assert.equal(who.subline, 'Commander · test_reaper');
   assert.equal(
     who.placeholder,
-    'Ask REAPER Assistant about this workspace… (/task creates a task)'
+    'Ask REAPER Assistant about this workspace… (/task creates a ticket)'
   );
   assert.equal(who.available, true);
   assert.equal(who.launcherVisible, true);

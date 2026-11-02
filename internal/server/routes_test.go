@@ -608,11 +608,6 @@ func TestNoStaticAssetLinksTargetTheRetiredLauncher(t *testing.T) {
 		if d.IsDir() || !strings.HasSuffix(path, ".js") {
 			return nil
 		}
-		// The launcher's own modules are exempt: /workspaces still serves them
-		// until that page is deleted outright.
-		if strings.Contains(d.Name(), "workspace-hub") {
-			return nil
-		}
 		data, readErr := os.ReadFile(path) // #nosec G304 -- fixed repo-relative walk
 		if readErr != nil {
 			return readErr

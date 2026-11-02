@@ -14,7 +14,7 @@ const FAILED = new Set(['failed', 'timeout', 'cancelled', 'canceled']);
 // start endpoint's own; an unknown one says only that it did not start.
 const START_REASONS = {
   setup_wizard_opening: 'Finish this workspace’s setup first, then start the first look.',
-  unassigned: 'The first task has no agent yet. Assign one, then start the first look.',
+  unassigned: 'The first ticket has no agent yet. Assign one, then start the first look.',
   local_activation_required: 'Activate this workspace on this computer to run the first look.'
 };
 
@@ -72,20 +72,20 @@ export function firstTaskBannerView({
   }
 
   let phase = 'working';
-  let heading = `${who} is working on its first task`;
+  let heading = `${who} is working on its first ticket`;
   let detail = title ? `${title}. It is read-only, so nothing in your folder changes.` : '';
   if (key === 'completed') {
     phase = 'done';
-    heading = `${who} finished its first task`;
-    detail = 'Open the task to read what it found.';
+    heading = `${who} finished its first ticket`;
+    detail = 'Open the ticket to read what it found.';
   } else if (NEEDS_YOU.has(key)) {
     phase = 'needs-you';
-    heading = `${who} needs you on its first task`;
+    heading = `${who} needs you on its first ticket`;
     detail = 'It paused and is waiting for your input.';
   } else if (FAILED.has(key)) {
     phase = 'failed';
-    heading = `${who} could not finish its first task`;
-    detail = 'Open the task to see what happened and try again.';
+    heading = `${who} could not finish its first ticket`;
+    detail = 'Open the ticket to see what happened and try again.';
   } else if (!WORKING.has(key)) {
     // An unknown state is shown as the neutral working one, never trusted.
     phase = 'working';
@@ -96,7 +96,7 @@ export function firstTaskBannerView({
     heading,
     detail,
     href: safeHref,
-    linkLabel: phase === 'working' ? 'Watch the task' : 'Open the task',
+    linkLabel: phase === 'working' ? 'Watch the run' : 'Open the ticket',
     action: null,
     note: ''
   };
@@ -224,15 +224,15 @@ function recipeBannerView(
         heading: `Assessing ${project}…`,
         detail:
           'The model is reading what Ori gathered from the project. Nothing in it is being run or changed.',
-        links: taskLink('Watch the task')
+        links: taskLink('Watch the run')
       };
     case 'waiting':
       return {
         ...base,
         phase: 'needs-you',
         heading: `The assessment of ${project} is paused`,
-        detail: said || 'Open the task to see what it needs.',
-        links: [...repair(true), ...taskLink('Open the task')]
+        detail: said || 'Open the ticket to see what it needs.',
+        links: [...repair(true), ...taskLink('Open the ticket')]
       };
     case 'finished': {
       if (dismissed) return { visible: false };
@@ -248,14 +248,14 @@ function recipeBannerView(
         // The suggestion is text the model wrote: it is shown as text, and
         // following it only opens the Plans page with it in the box.
         detail: next
-          ? `It suggests one next task: ${nextRequest}`
+          ? `It suggests one next ticket: ${nextRequest}`
           : 'Open it to read what was found.',
         links: [
           ...(reportHref
             ? [{ id: 'report', label: 'Open the assessment', href: reportHref, primary: true }]
             : []),
           ...(next
-            ? [{ id: 'next', label: 'Plan the suggested task', href: nextRoute, primary: false }]
+            ? [{ id: 'next', label: 'Plan the suggested ticket', href: nextRoute, primary: false }]
             : [])
         ],
         dismiss: true
@@ -273,7 +273,7 @@ function recipeBannerView(
         action: retry
           ? { id: 'retry-first-look', label: busy ? 'Starting…' : 'Try again', starting: busy }
           : null,
-        links: [...repair(!retry), ...taskLink('Open the task')]
+        links: [...repair(!retry), ...taskLink('Open the ticket')]
       };
     }
   }
@@ -297,7 +297,7 @@ export function assessmentBannerView(look, options = {}) {
   if (look.optional === true && ['seeded', 'failed'].includes(look.state)) {
     view.heading =
       look.state === 'seeded'
-        ? `Optional project task: ${String(look.description || 'Project summary')}`
+        ? `Optional project ticket: ${String(look.description || 'Project summary')}`
         : view.heading;
     view.detail = `${view.detail} ${folderTaskDisclosure(look)}`;
     if (look.state === 'seeded') view.phase = 'available';

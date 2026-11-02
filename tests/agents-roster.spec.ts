@@ -1884,7 +1884,7 @@ test.describe('Agents collection controls', () => {
     await page.waitForTimeout(150);
     await expect(menu).toBeVisible();
 
-    // Open, Open full page, Give a task…, Favorite, Set role, Assign, Delete.
+    // Open, Open full page, Give work…, Favorite, Set role, Assign, Delete.
     await expect(menu.locator('[data-menu-action]')).toHaveCount(7);
     await expect(menu.locator('[data-menu-action="open"]')).toBeFocused();
   });
@@ -2789,7 +2789,7 @@ test.describe('Agents first screen, faces, and blank slates', () => {
 
       await card(page, placed).locator('.roster-card__open').click();
       await expect(page.locator('#stageName')).toHaveText(placed);
-      await expect(next).toContainText('current tasks and results');
+      await expect(next).toContainText('current tickets and runs');
       if (slug) {
         await expect(next.locator('a')).toHaveAttribute(
           'href',

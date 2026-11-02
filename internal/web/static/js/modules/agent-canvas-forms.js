@@ -56,7 +56,7 @@ export class AgentCanvasForms {
 
   async submitCreateTaskForm() {
     if (!this.createTaskDescription || this.createTaskDescription.trim() === '') {
-      alert('Please enter a task description');
+      alert('Please enter a ticket description');
       return;
     }
 
@@ -80,25 +80,14 @@ export class AgentCanvasForms {
     }
 
     try {
-      const response = await fetch('/api/orchestration/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Failed to create task');
-      }
-
-      await response.json();
+      await window.WorkspaceHubTickets.api.createStep(this.canvas.workspaceId, requestBody);
 
       this.hideCreateTaskForm();
       await this.canvas.init();
-      alert(`✅ Task created successfully!`);
+      alert(`✅ Ticket created.`);
     } catch (error) {
-      console.error('❌ Error creating task:', error);
-      alert('Failed to create task: ' + error.message);
+      console.error('❌ Error creating ticket:', error);
+      alert('Could not create the ticket: ' + error.message);
     }
   }
 
@@ -138,7 +127,7 @@ export class AgentCanvasForms {
     // Title and close button
     ctx.fillStyle = '#1f2937';
     ctx.font = 'bold 22px system-ui';
-    ctx.fillText('Create New Task', formX + padding, currentY + 20);
+    ctx.fillText('Create New Ticket', formX + padding, currentY + 20);
 
     const closeBtnSize = 30;
     const closeBtnX = formX + formWidth - padding - closeBtnSize;
@@ -162,7 +151,7 @@ export class AgentCanvasForms {
     // Note
     ctx.fillStyle = '#6b7280';
     ctx.font = '12px system-ui';
-    const noteText = 'Note: Please use the dashboard below to create tasks with more options.';
+    const noteText = 'Note: Please use the dashboard below to create tickets with more options.';
     const noteLines = this.canvas.wrapText(noteText, formWidth - padding * 2);
     noteLines.forEach((line, i) => {
       ctx.fillText(line, formX + padding, currentY + i * 16);
@@ -172,13 +161,13 @@ export class AgentCanvasForms {
     // Section title
     ctx.fillStyle = '#1f2937';
     ctx.font = 'bold 14px system-ui';
-    ctx.fillText('Quick Task (Unassigned)', formX + padding, currentY);
+    ctx.fillText('Quick Ticket (Unassigned)', formX + padding, currentY);
     currentY += 25;
 
     ctx.fillStyle = '#6b7280';
     ctx.font = '12px system-ui';
     ctx.fillText(
-      'Creates a task without assigning to a specific agent.',
+      'Creates a ticket without assigning to a specific agent.',
       formX + padding,
       currentY
     );
@@ -187,7 +176,7 @@ export class AgentCanvasForms {
     // Description field label
     ctx.fillStyle = '#4b5563';
     ctx.font = 'bold 12px system-ui';
-    ctx.fillText('Task Description:', formX + padding, currentY);
+    ctx.fillText('Ticket Description:', formX + padding, currentY);
     currentY += 20;
 
     // Description field
@@ -210,8 +199,8 @@ export class AgentCanvasForms {
       ctx.fillStyle = '#9ca3af';
       ctx.font = 'italic 12px system-ui';
       const placeholderText = this.createTaskDescriptionFocused
-        ? 'Type your task description... (Press Enter when done)'
-        : 'Click here to enter task description...';
+        ? 'Type your ticket description... (Press Enter when done)'
+        : 'Click here to enter ticket description...';
       ctx.fillText(placeholderText, formX + padding + 10, currentY + 20);
     } else {
       ctx.fillStyle = '#1f2937';

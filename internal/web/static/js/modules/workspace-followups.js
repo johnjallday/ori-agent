@@ -9,6 +9,7 @@
 // of which surface invokes them.
 
 import { followUpView } from './personal-hq-onboarding.js';
+import { renderRelatedTicket, startMakeTicket } from './follow-up-ticket.js';
 
 // managementView maps a raw follow-up list to the panel's view-model: bounded
 // card views and whether the panel should show at all.
@@ -69,6 +70,8 @@ export function renderManagementCard(doc, view, act) {
     card.appendChild(detail);
   }
 
+  if (view.relatedTicket) card.appendChild(renderRelatedTicket(doc, view.relatedTicket));
+
   const actions = doc.createElement('div');
   actions.className = 'hq-followup-actions';
 
@@ -77,7 +80,7 @@ export function renderManagementCard(doc, view, act) {
     b.type = 'button';
     b.className = `modern-btn ${primary ? 'modern-btn-primary' : 'modern-btn-secondary'} modern-btn-sm`;
     b.textContent = text;
-    b.addEventListener('click', () => act(kind, view));
+    b.addEventListener('click', () => act(kind, view, { card, trigger: b }));
     return b;
   };
 
@@ -88,6 +91,7 @@ export function renderManagementCard(doc, view, act) {
     );
   } else {
     actions.append(button('Done', true, 'complete'), button('Snooze 1 day', false, 'snooze'));
+    if (!view.relatedTicket) actions.append(button('Make a ticket', false, 'ticket'));
   }
   card.appendChild(actions);
   return card;
@@ -172,7 +176,15 @@ export async function wireWorkspaceFollowUps({
     } catch (_) {
       return; // leave the panel as-is on a transient failure
     }
-    const act = async (kind, view) => {
+    const act = async (kind, view, place) => {
+      if (kind === 'ticket') {
+        await startMakeTicket(doc, place.card, place.trigger, view.id, {
+          fetchImpl,
+          onChanged: load,
+          root: mount
+        });
+        return;
+      }
       const action = followUpActionFor(kind);
       if (!action) return;
       const body = { id: view.id };

@@ -6,7 +6,8 @@ globalThis.window = {};
 globalThis.document = { getElementById: () => null };
 const { WorkspaceDetailPage } = await import('./workspace-detail.js');
 const { WorkspaceTaskPage, getStatusClass } = await import('./workspace-task.js');
-const { resolveTaskPresentation } = await import('./task-presentation.js');
+const { resolveTaskPresentation, resolveTicketStatePill, resolveRunSignal } =
+  await import('./task-presentation.js');
 
 function makePages() {
   return {
@@ -184,32 +185,34 @@ test('realtime input and step-pause events keep the execution modal in sync', ()
   }
 });
 
-test('the task hero renders the canonical label and CSS bucket', () => {
+test('the page hero shows the ticket state, never a legacy status (PRD 760 FR-4)', () => {
   const { taskPage } = makePages();
   taskPage.elements.status = { dataset: {} };
   taskPage.syncTaskTagsWidget = () => {};
   taskPage.renderLiveBadge = () => {};
-  const task = { id: 'task-fixture', status: 'skipped' };
-  taskPage.task = task;
+  taskPage.task = { id: 'task-fixture', status: 'failed', ticket_state: 'in_progress' };
   taskPage.renderHero(taskPage.getTaskStatusPresentation());
-  assert.equal(taskPage.elements.status.textContent, 'Skipped');
-  assert.equal(taskPage.elements.status.dataset.state, 'cancelled');
+  assert.equal(taskPage.elements.status.textContent, 'In Progress');
+  assert.equal(taskPage.elements.status.dataset.state, 'in_progress');
 });
 
 test('task rows render canonical labels, including safe unknown-state text', () => {
   const { detail } = makePages();
   detail.escapeHtml = value => String(value);
-  for (const { task, className } of fixtures) {
+  for (const { task } of fixtures) {
     const html = detail.renderTaskItem({ ...task, id: 'task-fixture', name: 'Fixture' });
+    const pill = resolveTicketStatePill(task);
+    const signal = resolveRunSignal(task);
     assert.ok(
       html.includes(
-        `<span class="workspace-detail-task-status ${className}">${resolveTaskPresentation(task).label}</span>`
+        `<span class="workspace-detail-task-status ${pill.className}">${signal ? `${pill.label} · ${signal}` : pill.label}</span>`
       )
     );
   }
   const unknown = '<img src=x onerror=alert(1)>';
   const html = detail.renderTaskItem({ id: 'task-fixture', status: unknown });
-  assert.match(html, /workspace-detail-task-status unknown">Unknown<\/span>/);
+  // An unknown status is not a state: the row reads as the server reads it.
+  assert.match(html, /workspace-detail-task-status pending">Ready<\/span>/);
   assert.ok(!html.includes(unknown));
 });
 

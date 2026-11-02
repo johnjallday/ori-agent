@@ -161,7 +161,7 @@ test('the refusal message names the resource, the price, and how to earn more', 
   assert.equal(
     priceLine.insufficientMessage({ resource: 'craft', required: 25, balance: 12 }),
     'Not enough Craft. Building a Farm costs 25 Craft; you have 12. ' +
-      'Send messages or finish tasks by hand to earn more.'
+      'Send messages or finish tickets by hand to earn more.'
   );
   assert.equal(
     priceLine.insufficientMessage({ resource: 'harvest', required: 50, balance: 26 }),

@@ -120,7 +120,7 @@ for (const state of ['loading', 'unavailable']) {
   test(`${state} tasks cannot hide usable file review`, () => {
     const result = guidance([], consoleState({ pendingCount: 2 }), state);
     assert.equal(result.kind, 'review');
-    assert.match(result.qualifications.join(' '), new RegExp(`Tasks are ${state}`));
+    assert.match(result.qualifications.join(' '), new RegExp(`Tickets are ${state}`));
   });
   test(`${state} file status cannot hide a task action or assert capability absence`, () => {
     const console = consoleState({ status: { state, stale: true } });

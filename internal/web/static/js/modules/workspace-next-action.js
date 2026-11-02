@@ -3,7 +3,9 @@ import {
   FILTER,
   resolveTaskPresentation,
   sortTasksForDrawer,
-  taskMatchesFilter
+  taskMatchesFilter,
+  resolveTicketStatePill,
+  resolveRunSignal
 } from './task-presentation.js';
 
 /** @typedef {'loading'|'ready'|'unavailable'|'not_applicable'} SourceState */
@@ -26,7 +28,7 @@ function completionAt(value) {
 }
 
 function taskTitle(task) {
-  return String(task.description || task.name || task.title || 'Untitled task');
+  return String(task.description || task.name || task.title || 'Untitled ticket');
 }
 
 function resultOrder(a, b) {
@@ -80,10 +82,10 @@ export function resolveWorkspaceNextAction(input) {
   const qualify = (name, source) => {
     if (!source || ['ready', 'not_applicable'].includes(source.state)) return;
     qualifications.push(
-      `${name} ${name === 'Tasks' ? 'are' : 'is'} ${source.state === 'unavailable' ? 'unavailable' : 'loading'}.${source.stale ? ' Last known information may be out of date.' : ''}`
+      `${name} ${name === 'Tickets' ? 'are' : 'is'} ${source.state === 'unavailable' ? 'unavailable' : 'loading'}.${source.stale ? ' Last known information may be out of date.' : ''}`
     );
   };
-  qualify('Tasks', { state: taskState });
+  qualify('Tickets', { state: taskState });
   qualify('File review status', janitor?.status || { state: 'loading' });
   if (known) {
     qualify('File review', janitor.batch);
@@ -113,7 +115,8 @@ export function resolveWorkspaceNextAction(input) {
     return finish({
       kind: 'task',
       title: taskTitle(task),
-      description: presentation.label,
+      // The ticket's state, or how its latest run went; never a legacy status.
+      description: resolveRunSignal(task) || resolveTicketStatePill(task).label,
       tone: presentation.tone,
       action:
         action && task.id
@@ -122,7 +125,7 @@ export function resolveWorkspaceNextAction(input) {
               kind: action.id,
               id: String(task.id),
               key: `task:${action.id}:${task.id}`,
-              label: action.label
+              label: 'Open ticket'
             }
           : null
     });
@@ -252,8 +255,8 @@ export function resolveWorkspaceNextAction(input) {
   return finish({
     kind: 'idle',
     title: 'No open work',
-    description: 'Give your team a task to start something new.',
+    description: 'Give your team something to do.',
     tone: 'neutral',
-    action: { owner: 'workspace', kind: 'create', id: '', key: 'create', label: 'Give Task' }
+    action: { owner: 'workspace', kind: 'create', id: '', key: 'create', label: 'Give work' }
   });
 }

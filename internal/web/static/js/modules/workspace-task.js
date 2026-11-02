@@ -13,7 +13,9 @@ import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 import {
   getStatusClass,
   getDisplayStatus,
-  resolveTaskStatusPresentation
+  resolveTaskStatusPresentation,
+  resolveTicketStatePill,
+  resolveRunSignal
 } from './task-presentation.js';
 import { renderRelatedPlan } from './workspace-related-plan.js';
 import { createTaskPageDataLoader } from './workspace-task-data-loader.js';
@@ -435,7 +437,7 @@ function deriveAssistWorkflowStepFromText(...texts) {
       return {
         stepType: 'ask_form',
         title: 'Answer the questions',
-        summary: 'Work through each question below, then continue the task.',
+        summary: 'Work through each question below, then continue the run.',
         freeTextAllowed: true,
         fields
       };
@@ -472,7 +474,7 @@ function deriveAssistWorkflowStepFromText(...texts) {
   return {
     stepType: 'ask_form',
     title: 'Answer the questions',
-    summary: 'Work through each question below, then continue the task.',
+    summary: 'Work through each question below, then continue the run.',
     freeTextAllowed: true,
     fields
   };
@@ -786,7 +788,7 @@ function buildResultWorkflowDraft(
       detailParts.push(`Section: ${action.section}`);
     }
     if (index === 0 && sourceTaskId) {
-      detailParts.push(`Use input task ${sourceTaskId} as the starting context.`);
+      detailParts.push(`Use input ticket ${sourceTaskId} as the starting context.`);
     }
 
     const inputTaskIds = [];
@@ -804,7 +806,7 @@ function buildResultWorkflowDraft(
     };
   });
 
-  const normalizedTaskLabel = trimResultWorkflowLabel(taskLabel, 120) || 'this task';
+  const normalizedTaskLabel = trimResultWorkflowLabel(taskLabel, 120) || 'this ticket';
   const detailsParts = [
     `Draft generated from the latest result for "${normalizedTaskLabel}".`,
     'Review the generated steps, assignments, and dependencies before saving.'
@@ -1193,7 +1195,7 @@ export class WorkspaceTaskPage {
       this.toggleFollowupDetails()
     );
     this.elements.copyIdBtn?.addEventListener('click', () =>
-      this.copyToClipboard(this.taskId, 'Task ID copied')
+      this.copyToClipboard(this.taskId, 'Ticket ID copied')
     );
     this.elements.copyLinkBtn?.addEventListener('click', () => {
       this.copyToClipboard(window.location.href, 'Link copied');
@@ -1402,7 +1404,7 @@ export class WorkspaceTaskPage {
       if (!this.isDataRequestCurrent(request)) return;
       this.invalidateDataRequest();
       console.error('Failed to load workspace task page:', error);
-      this.setAlert(error?.message || 'Failed to load this task page.');
+      this.setAlert(error?.message || 'Failed to load this ticket.');
       this.setState('empty');
     }
   }
@@ -1513,7 +1515,7 @@ export class WorkspaceTaskPage {
             ? `Processing ${calls} tool call${calls === 1 ? '' : 's'}`
             : 'Processing model response';
         }
-        if (phase === 'starting') return 'Analyzing task';
+        if (phase === 'starting') return 'Analyzing the work';
         return 'Thinking';
       }
       case 'task.tool_call': {
@@ -1700,7 +1702,7 @@ export class WorkspaceTaskPage {
     input.className = 'workspace-task-page-title-input';
     input.rows = 1;
     input.value = currentValue;
-    input.setAttribute('aria-label', 'Edit task title');
+    input.setAttribute('aria-label', 'Edit ticket title');
 
     const editActions = document.createElement('div');
     editActions.className = 'workspace-task-page-title-edit-actions';
@@ -1738,16 +1740,16 @@ export class WorkspaceTaskPage {
       }
 
       if (!nextValue) {
-        this.notify('error', 'Task title cannot be empty.');
+        this.notify('error', 'Ticket title cannot be empty.');
         return;
       }
 
       try {
         await this.updateTaskFields({ description: nextValue });
-        this.notify('success', 'Task title updated');
+        this.notify('success', 'Ticket title updated');
       } catch (error) {
         console.error('Failed to update task title:', error);
-        this.notify('error', error?.message || 'Failed to update task title');
+        this.notify('error', error?.message || 'Failed to update ticket title');
       }
     };
 
@@ -1802,8 +1804,8 @@ export class WorkspaceTaskPage {
     textarea.rows = 4;
     textarea.value = currentValue;
     textarea.placeholder =
-      'Add source preferences, constraints, context, or anything the agent should know before running this task.';
-    textarea.setAttribute('aria-label', 'Edit additional task details');
+      'Add source preferences, constraints, context, or anything the agent should know before running this ticket.';
+    textarea.setAttribute('aria-label', 'Edit additional ticket details');
 
     const editActions = document.createElement('div');
     editActions.className = 'workspace-task-page-title-edit-actions';
@@ -1899,7 +1901,7 @@ export class WorkspaceTaskPage {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(this.parseResponseError(text, 'Failed to update task'));
+      throw new Error(this.parseResponseError(text, 'Failed to update ticket'));
     }
 
     const payload = await response.json();
@@ -2168,12 +2170,12 @@ export class WorkspaceTaskPage {
     if (this._followupSubmitting) return;
     const desc = String(this.elements.followupDescription?.value || '').trim();
     if (!desc) {
-      this.setFollowupError('Describe what the follow-up task should do.');
+      this.setFollowupError('Describe what the follow-up ticket should do.');
       this.elements.followupDescription?.focus();
       return;
     }
     if (!this.task?.id) {
-      this.setFollowupError('Source task is not loaded yet — try again in a moment.');
+      this.setFollowupError('Source ticket is not loaded yet — try again in a moment.');
       return;
     }
     this.setFollowupError('');
@@ -2203,14 +2205,14 @@ export class WorkspaceTaskPage {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(this.parseResponseError(text, 'Failed to create follow-up task.'));
+        throw new Error(this.parseResponseError(text, 'Failed to create follow-up ticket.'));
       }
       const payload = await response.json();
       const created = payload?.task || (payload?.id ? payload : null);
       const newTaskId = String(created?.id || '').trim();
 
       this.toggleFollowupPanel(false);
-      this.notify('success', 'Follow-up task created');
+      this.notify('success', 'Follow-up ticket created');
 
       if (newTaskId) {
         // Send the user straight to the new task page so they can run /
@@ -2220,7 +2222,7 @@ export class WorkspaceTaskPage {
       }
     } catch (error) {
       console.error('Failed to create follow-up task:', error);
-      this.setFollowupError(error?.message || 'Failed to create follow-up task.');
+      this.setFollowupError(error?.message || 'Failed to create follow-up ticket.');
     } finally {
       this._followupSubmitting = false;
       if (submitBtn) submitBtn.disabled = false;
@@ -2240,7 +2242,7 @@ export class WorkspaceTaskPage {
   }
 
   getTaskDisplayLabel(task = this.task) {
-    return String(task?.description || task?.name || 'Untitled Task').trim() || 'Untitled Task';
+    return String(task?.description || task?.name || 'Untitled Ticket').trim() || 'Untitled Ticket';
   }
 
   escapeHtml(value) {
@@ -2370,7 +2372,7 @@ export class WorkspaceTaskPage {
         .trim()
         .toLowerCase(),
       reason: String(
-        humanLoop?.reason || 'This task needs your input before it can continue.'
+        humanLoop?.reason || 'This run needs your input before it can continue.'
       ).trim(),
       question: String(humanLoop?.question || '').trim(),
       response: String(humanLoop?.agent_response || '').trim(),
@@ -2847,19 +2849,31 @@ export class WorkspaceTaskPage {
     if (this.elements.title) {
       this.elements.title.textContent = taskTitle;
     }
-    document.title = `${taskTitle} - Ori Agent`;
+    // The page is the ticket's Runs (PRD 760 FR-24); /runs/{id} is one Run.
+    document.title = `${taskTitle} · Runs - Ori Agent`;
     if (this.elements.subtitle) {
       this.elements.subtitle.textContent = detailsSummary || 'No additional details provided.';
     }
     if (this.elements.breadcrumbTitle) {
-      this.elements.breadcrumbTitle.textContent = summarizeText(taskTitle, 40) || 'Task';
+      this.elements.breadcrumbTitle.textContent = summarizeText(taskTitle, 40)
+        ? `${summarizeText(taskTitle, 40)} · Runs`
+        : 'Runs';
     }
     if (this.elements.idValue) {
       this.elements.idValue.textContent = String(this.task?.id || this.taskId || '').trim();
     }
     if (this.elements.status) {
-      this.elements.status.textContent = statusInfo.label;
-      this.elements.status.dataset.state = statusInfo.className;
+      // The pill is the ticket's own state; how the latest run went is a separate
+      // signal beside it, never a state (PRD 760 FR-4).
+      const pill = resolveTicketStatePill(this.task);
+      this.elements.status.textContent = pill.label;
+      this.elements.status.dataset.state = pill.className;
+    }
+    const runSignal = document.getElementById('workspace-task-run-signal');
+    if (runSignal) {
+      const signal = resolveRunSignal(this.task);
+      runSignal.textContent = signal;
+      runSignal.hidden = !signal;
     }
     if (statusInfo.className !== 'in_progress') {
       // Drop stale activity when the task transitions out of in_progress so a
@@ -3221,13 +3235,13 @@ export class WorkspaceTaskPage {
 
     if (!isBlocked || (detailsValue && !blockedDetailsRedundant)) {
       items.push({
-        title: isBlocked ? 'Original Brief' : 'Task Details',
-        value: detailsValue || 'No extra task details were provided.',
+        title: isBlocked ? 'Original Brief' : 'Ticket Details',
+        value: detailsValue || 'No extra ticket details were provided.',
         full: true,
         editable: true,
         isBrief: true,
         disclosure: isBlocked,
-        disclosureHint: 'Hidden while this task is waiting for input.'
+        disclosureHint: 'Hidden while this run is waiting for input.'
       });
     }
 
@@ -3392,7 +3406,7 @@ export class WorkspaceTaskPage {
       !window.taskModalController ||
       typeof window.taskModalController.openForEdit !== 'function'
     ) {
-      this.notify('error', 'Task editor is not available on this page.');
+      this.notify('error', 'Ticket editor is not available on this page.');
       return;
     }
 
@@ -3403,7 +3417,7 @@ export class WorkspaceTaskPage {
       window.requestAnimationFrame(() => this.focusTaskModalAutoSave());
     } catch (error) {
       console.error('Failed to open task storage editor:', error);
-      this.notify('error', error?.message || 'Failed to open task editor.');
+      this.notify('error', error?.message || 'Failed to open ticket editor.');
     }
   }
 
@@ -3412,7 +3426,7 @@ export class WorkspaceTaskPage {
       !window.taskModalController ||
       typeof window.taskModalController.openForEdit !== 'function'
     ) {
-      this.notify('error', 'Task editor is not available on this page.');
+      this.notify('error', 'Ticket editor is not available on this page.');
       return;
     }
 
@@ -3423,7 +3437,7 @@ export class WorkspaceTaskPage {
       window.requestAnimationFrame(() => this.focusTaskModalReferenceURL());
     } catch (error) {
       console.error('Failed to open task reference URL editor:', error);
-      this.notify('error', error?.message || 'Failed to open task editor.');
+      this.notify('error', error?.message || 'Failed to open ticket editor.');
     }
   }
 
@@ -3533,7 +3547,7 @@ export class WorkspaceTaskPage {
 
       try {
         await this.updateTaskFields({ details: nextValue });
-        this.notify('success', 'Task details updated');
+        this.notify('success', 'Ticket details updated');
       } catch (error) {
         this.notify('error', error?.message || 'Failed to update details');
       }
@@ -3576,7 +3590,7 @@ export class WorkspaceTaskPage {
 
     if (parentTask) {
       groups.push({
-        title: 'Parent Task',
+        title: 'Parent Ticket',
         arrow: '↑',
         direction: 'up',
         tasks: [parentTask]
@@ -3746,7 +3760,7 @@ export class WorkspaceTaskPage {
 
     return `
       <div class="workspace-task-relgraph-wrap">
-        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Task dependency graph" class="workspace-task-relgraph">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ticket dependency graph" class="workspace-task-relgraph">
           ${parts.join('')}
         </svg>
         ${truncatedNote}
@@ -4039,7 +4053,7 @@ export class WorkspaceTaskPage {
             <span class="workspace-task-workflow-step-agent">
               <span class="workspace-task-workflow-step-agent-name">${this.escapeHtml(isAssigned ? agentName : 'Manual')}</span>
             </span>
-            ${childCount > 0 ? `<span class="workspace-task-workflow-step-count">${childCount} subtask${childCount === 1 ? '' : 's'}</span>` : ''}
+            ${childCount > 0 ? `<span class="workspace-task-workflow-step-count">${childCount} subticket${childCount === 1 ? '' : 's'}</span>` : ''}
           </div>
           ${resultBlock}
           ${childMarkup}
@@ -4242,7 +4256,7 @@ export class WorkspaceTaskPage {
       if (!this.isDataRequestCurrent(request)) return;
       this.invalidateDataRequest();
       console.error('Failed to refresh task data:', error);
-      if (!this.task) this.setAlert(error?.message || 'Failed to load this task page.');
+      if (!this.task) this.setAlert(error?.message || 'Failed to load this ticket.');
       this.setState(this.task ? 'content' : 'empty');
     }
   }
@@ -4486,29 +4500,8 @@ export class WorkspaceTaskPage {
         </div>
       </div>`;
 
-    const contractColumns = this.getResultContractColumns();
-
-    // Bottom CTA on the artifact card is just a small link routing to the
-    // Automation card, which owns the storage on/off toggle and column
-    // designer. The label adapts so the user knows what they'll see when
-    // they get there.
-    let bottomLinkLabel;
-    if (!appendCtx.configured) {
-      bottomLinkLabel = 'Set up CSV storage in Automation →';
-    } else if (contractColumns.length > 0) {
-      bottomLinkLabel = 'Edit output columns in Automation →';
-    } else {
-      bottomLinkLabel = 'Design columns from this result →';
-    }
-    const bottomCtaHtml = `
-      <div class="workspace-task-result-artifact-design-link">
-        <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
-          ${this.escapeHtml(bottomLinkLabel)}
-        </button>
-      </div>`;
-
     return `
-      <section class="workspace-task-result-artifact" aria-label="CSV-ready task result">
+      <section class="workspace-task-result-artifact" aria-label="CSV-ready run result">
         ${chipHtml}
         <div class="workspace-task-result-artifact-header">
           <div>
@@ -4531,7 +4524,7 @@ export class WorkspaceTaskPage {
             ${appendButton}
           </div>
         </div>
-        ${bottomCtaHtml}
+        
         ${chooserHtml}
         <div class="workspace-task-result-artifact-meta">
           <span>${this.escapeHtml(sourceLabel)}</span>
@@ -4633,6 +4626,34 @@ export class WorkspaceTaskPage {
   //   1. Saved contract + not editing -> "Columns: ... (Edit)" badge.
   //   2. No contract + not editing  -> assistant-first column suggestion CTA.
   //   3. Editing                    -> reviewable draft columns with manual escape hatches.
+  // A saved draft that has not been approved can be thrown away (PRD 760 FR-20).
+  renderOutputSpecDraftNotice() {
+    if (!this.getTaskResultStorageTask()?.draft_output_spec) return '';
+    return `
+      <div class="workspace-task-result-contract-draft">
+        <span>There is a draft that is not in use yet.</span>
+        <button type="button" class="workspace-task-page-text-button" data-action="discard-output-spec-draft">Discard draft</button>
+      </div>`;
+  }
+
+  async discardOutputSpecDraft() {
+    const owner = this.getTaskResultStorageTask();
+    const ownerId = String(owner?.id || '').trim();
+    if (!ownerId) return;
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}/output-spec/discard`,
+        { method: 'POST' }
+      );
+      if (!response.ok) throw new Error(`Discard failed (HTTP ${response.status})`);
+      owner.draft_output_spec = null;
+      this.notify('success', 'Draft discarded.');
+    } catch (error) {
+      this.notify('error', error?.message || 'Could not discard the draft.');
+    }
+    this.refreshResultRender();
+  }
+
   renderResultContractBlock() {
     const editing = Array.isArray(this.resultContractDraft);
     const columns = this.getResultContractColumns();
@@ -4937,6 +4958,9 @@ export class WorkspaceTaskPage {
   bindAutomationColumnsActions(root = this.elements.automationColumns) {
     if (!root) return;
     root
+      .querySelector('[data-action="discard-output-spec-draft"]')
+      ?.addEventListener('click', () => void this.discardOutputSpecDraft());
+    root
       .querySelector('[data-action="edit-result-contract"]')
       ?.addEventListener('click', () => this.startResultContractEdit());
     root
@@ -5180,13 +5204,13 @@ export class WorkspaceTaskPage {
     const scheduleName = String(owner?.schedule_name || this.task?.schedule_name || '').trim();
 
     const instruction =
-      'Reads the latest result below and proposes the structured fields it contains (3–8) that this task can produce every run. You review and edit them before saving. Run info (run_id, executed_at, status, duration_ms) is added automatically.';
+      'Reads the latest result below and proposes the structured fields it contains (3–8) that this ticket can produce every run. You review and edit them before saving. Run info (run_id, executed_at, status, duration_ms) is added automatically.';
 
     // The latest result is the primary basis for the suggestion, so show it
     // first; task/details/schedule are supporting context.
     const sampleBlock = sample
       ? block('Latest result (basis for fields)', sample)
-      : `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Latest result (basis for fields)</span><span>None captured yet — the assistant will fall back to the task title and details.</span></div>`;
+      : `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Latest result (basis for fields)</span><span>None captured yet — the assistant will fall back to the ticket title and details.</span></div>`;
 
     return `
       <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
@@ -5195,7 +5219,7 @@ export class WorkspaceTaskPage {
           <p class="workspace-task-suggestion-instruction">${this.escapeHtml(instruction)}</p>
           ${sampleBlock}
           <div class="workspace-task-suggestion-context-label">Supporting context</div>
-          ${line('Task', title)}
+          ${line('Ticket', title)}
           ${line('Details', details)}
           ${scheduleEnabled ? line('Schedule', scheduleName || 'enabled') : ''}
           ${recent.length ? line('Earlier runs sampled', String(recent.length)) : ''}
@@ -5349,11 +5373,14 @@ export class WorkspaceTaskPage {
       <label class="workspace-task-automation-storage-toggle">
         <input type="checkbox" data-action="toggle-csv-storage"${ctx.configured ? ' checked' : ''}${busy ? ' disabled' : ''} />
         <span>
-          <strong>Save each run of this task to a dataset</strong>
+          <strong>Save each run of this ticket to a dataset</strong>
           <span class="workspace-task-automation-storage-help">Turns on Append mode so every run is saved as a record in a shared JSONL file (export to CSV anytime).</span>
         </span>
       </label>`;
-    container.innerHTML = toggleHtml + (ctx.configured ? this.renderResultContractBlock() : '');
+    container.innerHTML =
+      toggleHtml +
+      this.renderOutputSpecDraftNotice() +
+      (ctx.configured ? this.renderResultContractBlock() : '');
     this.bindAutomationColumnsActions();
     container
       .querySelector('[data-action="toggle-csv-storage"]')
@@ -5766,7 +5793,7 @@ export class WorkspaceTaskPage {
           type: this.inferResultContractColumnType(name, rows),
           required:
             rows.length > 0 ? rows.every(row => String(row?.[name] ?? '').trim() !== '') : true,
-          description: 'Column from the latest task result'
+          description: 'Column from the latest run result'
         }));
     }
 
@@ -5873,7 +5900,14 @@ export class WorkspaceTaskPage {
       });
       const text = await response.text();
       if (!response.ok) {
-        throw new Error(text || `Suggestion failed (HTTP ${response.status})`);
+        let message = '';
+        try {
+          message = String(JSON.parse(text)?.message || '');
+        } catch {
+          // A plain-text error is already readable.
+          message = text;
+        }
+        throw new Error(message || `Suggestion failed (HTTP ${response.status})`);
       }
       const parsed = text ? JSON.parse(text) : {};
       // Capture the verbatim prompt the backend echoed back so the preview can
@@ -6102,7 +6136,7 @@ export class WorkspaceTaskPage {
       existingSpec.schema = {
         ...(existingSpec.schema || {}),
         name: existingSpec.schema?.name || 'task_result',
-        description: existingSpec.schema?.description || 'One normalized task result row.',
+        description: existingSpec.schema?.description || 'One normalized run result row.',
         strict: existingSpec.schema?.strict !== false,
         fields
       };
@@ -6118,7 +6152,7 @@ export class WorkspaceTaskPage {
       source: existingSpec?.source || 'manual',
       schema: {
         name: 'task_result',
-        description: 'One normalized task result row.',
+        description: 'One normalized run result row.',
         strict: true,
         fields
       },
@@ -6345,7 +6379,7 @@ export class WorkspaceTaskPage {
 
   buildResultArtifactNoteTitle(artifact) {
     const taskTitle = this.getTaskDisplayLabel();
-    const base = `${artifact?.title || 'CSV'} - ${taskTitle || 'Task Result'}`;
+    const base = `${artifact?.title || 'CSV'} - ${taskTitle || 'Run Result'}`;
     const cleaned = base.replace(/\s+/g, ' ').trim();
     return cleaned.length > 96 ? `${cleaned.slice(0, 93).trim()}...` : cleaned;
   }
@@ -6360,9 +6394,9 @@ export class WorkspaceTaskPage {
     return [
       `# ${title}`,
       '',
-      `Saved from Ori task artifact on ${savedAt}.`,
+      `Saved from Ori run artifact on ${savedAt}.`,
       '',
-      `- Source task: [${taskTitle}](${sourceHref})`,
+      `- Source ticket: [${taskTitle}](${sourceHref})`,
       `- Artifact source: ${sourceLabel}`,
       `- Rows: ${artifact?.rows?.length || 0}`,
       `- Columns: ${artifact?.columns?.length || 0}`,
@@ -6472,7 +6506,7 @@ export class WorkspaceTaskPage {
     button.classList.toggle('is-pending', isPending);
     button.classList.toggle('has-follow-up', Boolean(createdTaskId));
     button.dataset.tooltip = isPending
-      ? 'Creating research task...'
+      ? 'Creating research ticket...'
       : createdTaskId
         ? 'Open research follow-up'
         : 'Draft research follow-up';
@@ -6591,7 +6625,7 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-result-section-menu-title">${this.escapeHtml(summarizeText(title, 72))}</div>
       <button type="button" class="workspace-task-result-section-menu-item" data-action="research-result-section" role="menuitem">
         <i class="bi bi-search" aria-hidden="true"></i>
-        <span>Draft research task</span>
+        <span>Draft research ticket</span>
       </button>
       <button type="button" class="workspace-task-result-section-menu-item" data-action="copy-result-section" role="menuitem">
         <i class="bi bi-clipboard" aria-hidden="true"></i>
@@ -6642,11 +6676,11 @@ export class WorkspaceTaskPage {
   buildResultResearchDetails(sectionTitle) {
     const sourceTitle = this.getTaskDisplayLabel();
     return [
-      `Follow-up research created from completed task: ${sourceTitle}`,
+      `Follow-up research created from completed ticket: ${sourceTitle}`,
       `Selected result section: ${sectionTitle}`,
-      `Source task: ${this.task?.id || this.taskId}`,
+      `Source ticket: ${this.task?.id || this.taskId}`,
       '',
-      'Use the linked task result as context, but focus the answer on this selected section.',
+      'Use the linked run result as context, but focus the answer on this selected section.',
       'Research it more deeply, add practical criteria and tradeoffs, and include citations when web research is available.'
     ].join('\n');
   }
@@ -6671,7 +6705,7 @@ export class WorkspaceTaskPage {
     if (!this.elements.resultResearchAgentSelect) return;
 
     const normalizedSelected = String(selectedAgent || '').trim();
-    const options = ['<option value="">Unassigned manual task</option>'];
+    const options = ['<option value="">Unassigned manual ticket</option>'];
     const names = this.getAssignableAgentNames(normalizedSelected);
     if (
       normalizedSelected &&
@@ -6758,7 +6792,7 @@ export class WorkspaceTaskPage {
 
   validateResultResearchDraft(draft) {
     if (!draft || typeof draft !== 'object') return 'Research draft is unavailable.';
-    if (!String(draft.title || '').trim()) return 'Task title is required.';
+    if (!String(draft.title || '').trim()) return 'Ticket title is required.';
     if (!String(draft.details || '').trim()) return 'Instructions are required.';
     if (!String(draft.sectionText || '').trim()) return 'Selected section text is required.';
     if (draft.runNow && !String(draft.agent || '').trim())
@@ -6809,12 +6843,12 @@ export class WorkspaceTaskPage {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(data?.error || data?.message || 'Failed to create research task');
+      throw new Error(data?.error || data?.message || 'Failed to create research ticket');
     }
 
     const createdTask = data.task || data;
     if (!createdTask?.id) {
-      throw new Error('Research task was created without an id');
+      throw new Error('Research ticket was created without an id');
     }
 
     if (!draft.runNow) {
@@ -6828,7 +6862,7 @@ export class WorkspaceTaskPage {
     });
     if (!executeResponse.ok) {
       const text = await executeResponse.text();
-      throw new Error(text || 'Research task was created but could not be started');
+      throw new Error(text || 'Research ticket was created but could not be started');
     }
 
     return createdTask;
@@ -7079,21 +7113,6 @@ export class WorkspaceTaskPage {
           </summary>
           ${this.renderResultArtifact(artifact)}
         </details>
-      `);
-    }
-    // Entry point to structure a plain-text result into CSV columns. The
-    // artifact card carries its own "Design columns" link, so only offer this
-    // when there's a result, no tabular artifact, and no columns yet.
-    if (result && !artifact && this.getResultContractColumns().length === 0) {
-      const ctaLabel = this.getAppendCSVContext().configured
-        ? 'Define the structured output →'
-        : 'Make this task return structured output →';
-      blocks.push(`
-        <div class="workspace-task-output-design-cta">
-          <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
-            <i class="bi bi-table" aria-hidden="true"></i> ${this.escapeHtml(ctaLabel)}
-          </button>
-        </div>
       `);
     }
     if (error) {
@@ -7362,7 +7381,7 @@ export class WorkspaceTaskPage {
     const runContractVersion = String(validation?.contract_version || '').trim();
     const contractMismatchWarning =
       currentContractVersion && runContractVersion && currentContractVersion !== runContractVersion
-        ? `<div class="workspace-task-review-warning">This run used contract ${this.escapeHtml(runContractVersion)}. The task now uses ${this.escapeHtml(currentContractVersion)}, so re-running may be cleaner than approving the old output.</div>`
+        ? `<div class="workspace-task-review-warning">This run used contract ${this.escapeHtml(runContractVersion)}. The ticket now uses ${this.escapeHtml(currentContractVersion)}, so re-running may be cleaner than approving the old output.</div>`
         : '';
     const headerMismatch = errors.find(
       error => String(error?.code || '') === 'csv_header_mismatch'
@@ -7421,7 +7440,7 @@ export class WorkspaceTaskPage {
             <button type="button" class="modern-btn modern-btn-primary" data-review-action="approve_append">Save row</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-review-action="copy">Copy row</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-review-action="retry_normalization">Retry parsing</button>
-            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="rerun">Re-run Task</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="rerun">Re-run</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-review-action="dismiss">Dismiss</button>
           </div>
         </div>
@@ -7537,13 +7556,13 @@ export class WorkspaceTaskPage {
         );
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(text || 'Failed to re-run task');
+          throw new Error(text || 'Failed to re-run');
         }
-        this.notify('success', 'Task re-run started');
+        this.notify('success', 'Re-run started');
         await this.loadData();
       } catch (error) {
         console.error('Failed to re-run task:', error);
-        this.notify('error', error?.message || 'Failed to re-run task');
+        this.notify('error', error?.message || 'Failed to re-run');
       }
       return;
     }
@@ -7749,7 +7768,7 @@ export class WorkspaceTaskPage {
           ? 'Preparing...'
           : this.resultPromotionSubmitting
             ? 'Creating...'
-            : 'Create Workflow Task';
+            : 'Create Workflow Ticket';
       }
       this.elements.outputPromoteBtn.hidden = !canPromote;
       this.elements.outputPromoteBtn.disabled =
@@ -7829,13 +7848,13 @@ export class WorkspaceTaskPage {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(
-          payload?.error || payload?.message || 'This result is not a task list yet.'
+          payload?.error || payload?.message || 'This result is not a ticket list yet.'
         );
       }
 
       const taskList = payload?.task_list;
       if (!taskList || this.countTaskListItems(taskList) < 1) {
-        throw new Error('This result does not include subtasks to create.');
+        throw new Error('This result does not include subtickets to create.');
       }
 
       this.resultPromotionDraft = this.cloneTaskList(taskList);
@@ -7843,7 +7862,7 @@ export class WorkspaceTaskPage {
       this.openResultPromotionModal();
     } catch (error) {
       console.error('Failed to preview result promotion:', error);
-      this.notify('error', error?.message || 'Failed to prepare workflow task');
+      this.notify('error', error?.message || 'Failed to prepare workflow ticket');
     } finally {
       this.resultPromotionPending = false;
       this.updateResultActionButtons(this.getCurrentResultText(), true);
@@ -7883,9 +7902,9 @@ export class WorkspaceTaskPage {
 
     const itemCount = this.countTaskListItems(taskList);
     this.elements.resultPromoteTitleInput.value = String(
-      taskList.parent_title || this.getTaskDisplayLabel() || 'Workflow task'
+      taskList.parent_title || this.getTaskDisplayLabel() || 'Workflow ticket'
     ).trim();
-    this.elements.resultPromoteMeta.textContent = `${itemCount} subtask${itemCount === 1 ? '' : 's'}`;
+    this.elements.resultPromoteMeta.textContent = `${itemCount} subticket${itemCount === 1 ? '' : 's'}`;
 
     const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
     this.elements.resultPromoteGroups.innerHTML = groups
@@ -7941,15 +7960,15 @@ export class WorkspaceTaskPage {
   }
 
   validateResultPromotionDraft(taskList) {
-    if (!taskList || typeof taskList !== 'object') return 'Task list preview is unavailable.';
-    if (!String(taskList.parent_title || '').trim()) return 'Parent task title is required.';
-    if (this.countTaskListItems(taskList) < 1) return 'At least one subtask is required.';
+    if (!taskList || typeof taskList !== 'object') return 'Ticket list preview is unavailable.';
+    if (!String(taskList.parent_title || '').trim()) return 'Parent ticket title is required.';
+    if (this.countTaskListItems(taskList) < 1) return 'At least one subticket is required.';
 
     const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
     for (const group of groups) {
       const items = Array.isArray(group?.items) ? group.items : [];
       for (const item of items) {
-        if (!String(item?.title || '').trim()) return 'Every subtask needs a title.';
+        if (!String(item?.title || '').trim()) return 'Every subticket needs a title.';
       }
     }
 
@@ -7979,13 +7998,13 @@ export class WorkspaceTaskPage {
       );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.error || payload?.message || 'Failed to create workflow task');
+        throw new Error(payload?.error || payload?.message || 'Failed to create workflow ticket');
       }
 
       const subtaskCount = this.countTaskListItems(taskList);
       this.notify(
         'success',
-        `Created workflow task with ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`
+        `Created workflow ticket with ${subtaskCount} subticket${subtaskCount === 1 ? '' : 's'}`
       );
 
       if (this.elements.resultPromoteModal && typeof bootstrap !== 'undefined') {
@@ -8001,7 +8020,7 @@ export class WorkspaceTaskPage {
       await this.refreshAfterStepChange();
     } catch (error) {
       console.error('Failed to promote task result:', error);
-      this.notify('error', error?.message || 'Failed to create workflow task');
+      this.notify('error', error?.message || 'Failed to create workflow ticket');
     } finally {
       this.setResultPromotionSubmitState(false);
     }
@@ -8050,13 +8069,13 @@ export class WorkspaceTaskPage {
       .find(Boolean);
 
     const fallback = this.getTaskDisplayLabel();
-    const cleaned = String(heading || fallback || 'Task Result')
+    const cleaned = String(heading || fallback || 'Run Result')
       .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
       .replace(/[*_`#>]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
-    if (!cleaned) return 'Task Result';
+    if (!cleaned) return 'Run Result';
     return cleaned.length > 96 ? `${cleaned.slice(0, 93).trim()}...` : cleaned;
   }
 
@@ -8073,9 +8092,9 @@ export class WorkspaceTaskPage {
     const lines = [
       `# ${title}`,
       '',
-      `Saved from Ori task result on ${savedAt}.`,
+      `Saved from Ori run result on ${savedAt}.`,
       '',
-      `- Source task: [${taskTitle}](${sourceHref})`,
+      `- Source ticket: [${taskTitle}](${sourceHref})`,
       `- Status: ${status}`
     ];
 
@@ -8320,18 +8339,18 @@ export class WorkspaceTaskPage {
   async createWorkflowDraftFromResult() {
     if (this.workflowDraftPending) return;
     if (!this.task?.id) {
-      this.notify('error', 'Task is not loaded yet.');
+      this.notify('error', 'Ticket is not loaded yet.');
       return;
     }
 
     const resultText = normalizeResultText(this.task?.result).trim();
     if (!resultText) {
-      this.notify('warning', 'No task result is available to turn into steps.');
+      this.notify('warning', 'No run result is available to turn into steps.');
       return;
     }
 
     if (this.getOrderedSteps().length > 0) {
-      this.notify('warning', 'This task already has steps.');
+      this.notify('warning', 'This ticket already has steps.');
       return;
     }
 
@@ -8385,7 +8404,7 @@ export class WorkspaceTaskPage {
       const createdCount = subtaskPayloads.length;
       this.notify(
         'success',
-        `Added ${createdCount} step${createdCount === 1 ? '' : 's'} to this task.`
+        `Added ${createdCount} step${createdCount === 1 ? '' : 's'} to this ticket.`
       );
       await this.refreshAfterStepChange();
     } catch (error) {
@@ -8469,11 +8488,11 @@ export class WorkspaceTaskPage {
     if (this.elements.scheduleModalHeading) {
       this.elements.scheduleModalHeading.textContent = hasSchedule
         ? 'Edit Repeat Schedule'
-        : 'Repeat Task';
+        : 'Repeat this ticket';
     }
     if (this.elements.scheduleModalMeta) {
       const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
-      this.elements.scheduleModalMeta.textContent = `Runs "${taskLabel}" again on a schedule. The task keeps its history and latest output updates after each run.`;
+      this.elements.scheduleModalMeta.textContent = `Runs "${taskLabel}" again on a schedule. The ticket keeps its history and latest output updates after each run.`;
     }
     if (this.elements.scheduleEnabledInput) {
       this.elements.scheduleEnabledInput.checked = hasSchedule
@@ -8544,7 +8563,7 @@ export class WorkspaceTaskPage {
     if (this.elements.scheduleWakePermission) {
       this.elements.scheduleWakePermission.textContent = this.elements.scheduleWakeMacInput?.checked
         ? 'Mac wake scheduling also needs to be enabled in Settings -> Device Capabilities.'
-        : 'This task will only run while Ori is awake, or according to the selected sleep handling policy after Ori wakes.';
+        : 'This ticket will only run while Ori is awake, or according to the selected sleep handling policy after Ori wakes.';
     }
 
     this.updateSchedulePreview();
@@ -8561,7 +8580,7 @@ export class WorkspaceTaskPage {
         ? ` Ori will ask macOS to wake this Mac ${payload.wake_lead_minutes} minutes before the run.`
         : '';
       this.elements.schedulePreview.textContent = payload.schedule_enabled
-        ? `This existing task will run ${summary}. ${sleepText}.${wakeText}`.trim()
+        ? `This existing ticket will run ${summary}. ${sleepText}.${wakeText}`.trim()
         : `This schedule is paused. Ori will keep "${summary}" saved, but it will not run again until re-enabled.`;
     } catch (_error) {
       this.elements.schedulePreview.textContent =
@@ -8587,7 +8606,7 @@ export class WorkspaceTaskPage {
 
     const assignee = String(this.task?.to || '').trim();
     if (enabled && validate && (!assignee || assignee === 'unassigned')) {
-      throw new Error('Assign this task to an agent before enabling a schedule.');
+      throw new Error('Assign this ticket to an agent before enabling a schedule.');
     }
 
     const requireTime = () => {
@@ -8635,7 +8654,7 @@ export class WorkspaceTaskPage {
       case 'once': {
         const runAt = String(this.elements.scheduleOnceInput?.value || '').trim();
         if (validate && !runAt) {
-          throw new Error('Choose when this task should run.');
+          throw new Error('Choose when this ticket should run.');
         }
         schedule.run_at = runAt;
         break;
@@ -8706,7 +8725,7 @@ export class WorkspaceTaskPage {
 
   async removeSchedule() {
     if (this.scheduleSubmitting || !this.task?.schedule) return;
-    if (!window.confirm('Remove this recurring schedule from the task?')) return;
+    if (!window.confirm('Remove this recurring schedule from the ticket?')) return;
 
     this.scheduleSubmitting = true;
     const removeBtn = this.elements.scheduleRemoveBtn;
@@ -8911,31 +8930,8 @@ export class WorkspaceTaskPage {
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const executionCount = Number(this.task?.execution_count) || 0;
     const failureCount = Number(this.task?.failure_count) || 0;
-    // The card is now "Automation & output", not just Schedule, so an output
-    // contract, configured storage destination, or a declared output shape is
-    // enough to surface it even when the task has never run on a cadence.
-    const storageOwner = this.getTaskResultStorageTask();
-    const hasContract =
-      Array.isArray(storageOwner?.output_contract?.columns) &&
-      storageOwner.output_contract.columns.length > 0;
-    const hasStorage = Boolean(storageOwner?.result_storage?.enabled);
-    const editingColumns = Array.isArray(this.resultContractDraft);
-    const hasStructuredOutput = this.hasStructuredOutputShape();
-
-    if (
-      !hasSchedule &&
-      history.length === 0 &&
-      executionCount === 0 &&
-      !hasContract &&
-      !hasStorage &&
-      !editingColumns &&
-      !hasStructuredOutput
-    ) {
-      this.elements.scheduleCard.hidden = true;
-      this.elements.schedule.innerHTML = '';
-      this.renderAutomationSections();
-      return;
-    }
+    // Always shown: it holds Advanced, the one home of output specs and contracts,
+    // which has to be reachable before a ticket has ever run (PRD 760 FR-20).
 
     this.elements.scheduleCard.hidden = false;
 
@@ -8945,7 +8941,7 @@ export class WorkspaceTaskPage {
     // only reveals the default folder; for those the buried per-destination
     // control in Advanced > storage remains the right entry point.
     if (this.elements.scheduleOpenFolderBtn) {
-      const storage = storageOwner?.result_storage || null;
+      const storage = this.getTaskResultStorageTask()?.result_storage || null;
       const usesDefaultOutputDir =
         Boolean(storage?.enabled) &&
         !String(storage.store_node_id || '').trim() &&
@@ -9266,7 +9262,7 @@ export class WorkspaceTaskPage {
     this.elements.blockedContextCard.hidden = false;
     if (this.elements.blockedReason) {
       this.elements.blockedReason.textContent =
-        this.currentBlockedTask?.reason || 'This task is waiting for your input.';
+        this.currentBlockedTask?.reason || 'This run is waiting for your input.';
     }
 
     if (this.elements.blockedRequestWrap) {
@@ -9307,9 +9303,9 @@ export class WorkspaceTaskPage {
           workflowStep?.summary ||
             this.currentBlockedTask?.response ||
             this.currentBlockedTask?.reason ||
-            'The task is paused waiting on your input.',
+            'The run is paused waiting on your input.',
           190
-        ) || 'The task is paused waiting on your input.';
+        ) || 'The run is paused waiting on your input.';
     }
     if (this.elements.assistNeeds) {
       this.elements.assistNeeds.textContent = this.getAssistNeedsSummary(workflowStep);
@@ -9371,7 +9367,7 @@ export class WorkspaceTaskPage {
 
   getAssistNeedsSummary(workflowStep) {
     if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing') {
-      return 'Pick a runnable agent for this task before you retry execution.';
+      return 'Pick a runnable agent for this ticket before you retry execution.';
     }
     if (
       workflowStep?.stepType === 'ask_form' &&
@@ -9400,20 +9396,20 @@ export class WorkspaceTaskPage {
 
   getAssistNextSummary(workflowStep) {
     if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing') {
-      return 'Use the reassignment control to switch this task to an available agent.';
+      return 'Use the reassignment control to switch this ticket to an available agent.';
     }
     if (workflowStep?.stepType === 'ask_form') {
       return 'Continue sends your answers and any extra guidance back to the assigned agent.';
     }
     if (workflowStep?.stepType === 'ask_choice') {
       return workflowStep.freeTextAllowed === false
-        ? 'Pick the path, then continue the task.'
-        : 'Pick the best path, optionally add guidance, then continue the task.';
+        ? 'Pick the path, then continue the run.'
+        : 'Pick the best path, optionally add guidance, then continue the run.';
     }
     if (this.currentBlockedTask?.repair) {
       return `Use ${this.currentBlockedTask.repair.label}; Retry stays unavailable until a fresh preflight passes.`;
     }
-    return 'Retry, continue with guidance, switch agents, or mark the task failed.';
+    return 'Retry, continue with guidance, switch agents, or mark the run failed.';
   }
 
   getAssistPrimaryActionLabel(workflowStep) {
@@ -9427,7 +9423,7 @@ export class WorkspaceTaskPage {
     if (this.currentBlockedTask?.question) {
       return 'Send Guidance';
     }
-    return 'Continue Task';
+    return 'Continue Run';
   }
 
   getAssistMessagePlaceholder(workflowStep) {
@@ -9581,7 +9577,7 @@ export class WorkspaceTaskPage {
     } else {
       this.elements.assistFormFields.innerHTML = `
         <div class="workspace-task-assist-deck">
-          <div class="workspace-task-assist-deck-rail" aria-label="Blocked task questions">
+          <div class="workspace-task-assist-deck-rail" aria-label="Blocked run questions">
             ${fields
               .map((field, index) => {
                 const fieldValue = String(selectedValues[field.id] || '').trim();
@@ -10108,12 +10104,12 @@ export class WorkspaceTaskPage {
       );
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to delete task');
+        throw new Error(text || 'Failed to delete ticket');
       }
       window.location.href = workspaceRootURL(this.workspaceSlug);
     } catch (error) {
       console.error('Failed to delete task:', error);
-      this.notify('error', error?.message || 'Failed to delete task');
+      this.notify('error', error?.message || 'Failed to delete ticket');
     }
   }
 
@@ -10124,7 +10120,7 @@ export class WorkspaceTaskPage {
     const isRerun = status === 'completed' || status === 'failed';
     const label = isRerun ? 'Re-run' : 'Run';
 
-    if (isRerun && !confirm(`${label} this task? Previous results will be replaced.`)) return;
+    if (isRerun && !confirm(`${label} this ticket? Previous results will be replaced.`)) return;
 
     // Inline assign-and-run for unassigned tasks. Without this the user
     // would see the Run button do nothing meaningful (or a generic
@@ -10135,12 +10131,12 @@ export class WorkspaceTaskPage {
     if (!currentAgent || currentAgent === 'unassigned') {
       const agents = this.getAssignableAgentOptions();
       if (agents.length === 0) {
-        this.notify('error', 'No agents in this workspace yet — add one before running tasks.');
+        this.notify('error', 'No agents in this workspace yet — add one before running tickets.');
         return;
       }
       const picked = await showCanvasAgentPicker({
         title: 'Assign an agent',
-        message: `This task is unassigned. Pick an agent to run "${this.getTaskDisplayLabel()}".`,
+        message: `This ticket is unassigned. Pick an agent to run "${this.getTaskDisplayLabel()}".`,
         agents
       });
       if (!picked) return;
@@ -10160,13 +10156,13 @@ export class WorkspaceTaskPage {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to execute task');
+        throw new Error(text || 'Failed to start the run');
       }
-      this.notify('success', `Task ${label.toLowerCase()} started`);
+      this.notify('success', `${label} started`);
       await this.loadData();
     } catch (error) {
       console.error('Failed to execute task:', error);
-      this.notify('error', error?.message || 'Failed to execute task');
+      this.notify('error', error?.message || 'Failed to start the run');
     }
   }
 
@@ -10224,7 +10220,7 @@ export class WorkspaceTaskPage {
       .toLowerCase();
     if (status === 'in_progress') {
       const proceed = window.confirm(
-        'This task is currently running. Marking it complete now will override the live execution and may discard any work the agent is mid-way through. Continue?'
+        'This run is still in progress. Marking it complete now will override the live execution and may discard any work the agent is mid-way through. Continue?'
       );
       if (!proceed) return;
     }
@@ -10235,13 +10231,13 @@ export class WorkspaceTaskPage {
       );
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(this.parseResponseError(text, 'Failed to complete task'));
+        throw new Error(this.parseResponseError(text, 'Failed to complete ticket'));
       }
-      this.notify('success', 'Task marked as complete');
+      this.notify('success', 'Ticket marked as complete');
       await this.loadData();
     } catch (error) {
       console.error('Failed to complete task:', error);
-      this.notify('error', error?.message || 'Failed to complete task');
+      this.notify('error', error?.message || 'Failed to complete ticket');
     }
   }
 
@@ -10347,10 +10343,10 @@ export class WorkspaceTaskPage {
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to update task');
+        throw new Error(text || 'Failed to update ticket');
       }
 
-      this.notify('success', 'Task updated');
+      this.notify('success', 'Ticket updated');
       // No explicit close: the inline respond card hides itself on the next
       // render (renderBlockedState) once loadData shows the task is unblocked.
       if (this.elements.assistMessage) {
@@ -10359,7 +10355,7 @@ export class WorkspaceTaskPage {
       await this.loadData();
     } catch (error) {
       console.error('Failed to submit task assistance:', error);
-      this.notify('error', error?.message || 'Failed to update task');
+      this.notify('error', error?.message || 'Failed to update ticket');
     } finally {
       this.setAssistButtonsDisabled(false);
       this.updateAssistSwitchButtonState();

@@ -157,7 +157,7 @@ test('a workspace with a Commander opens as its entry agent and sends to it', as
   await expect(page.locator('#personalAssistantCheckIn')).toHaveText('Commander · Product Launch');
   await expect(page.locator('#personalAssistantInput')).toHaveAttribute(
     'placeholder',
-    'Ask Mira about this workspace… (/task creates a task)'
+    'Ask Mira about this workspace… (/task creates a ticket)'
   );
   await expect(page.locator('#personalAssistantChips')).toBeHidden();
   await expect(page.locator('#personalAssistantEntrySessionTitle')).toHaveText('New conversation');

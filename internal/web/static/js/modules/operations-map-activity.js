@@ -448,7 +448,7 @@ export class OperationsMapActivity {
         if (unit.blocked && unit.taskId) {
           // The one bubble that is a way in: it opens the question (FR27).
           bubble.setAttribute('data-cmd-activity-open-task', unit.taskId);
-          bubble.setAttribute('title', 'Open this task');
+          bubble.setAttribute('title', 'Open this ticket');
         }
         bubble.textContent = unit.line;
         if (existing && existing.parentNode) existing.parentNode.replaceChild(bubble, existing);

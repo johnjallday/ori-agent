@@ -145,7 +145,7 @@ test('Open result is offered only when the task shows this run result', () => {
   });
   assert.equal(
     gone.text,
-    'Engineer finished “Bounce the stems”. Its result is no longer kept on the task.'
+    'Engineer finished “Bounce the stems”. Its result is no longer kept on the ticket.'
   );
   assert.ok(!gone.actions.some(action => action.id === 'open_result'));
 });
@@ -157,12 +157,12 @@ test('a later run is never shown as this request result', () => {
   });
   assert.equal(
     rerun.text,
-    "Engineer finished “Bounce the stems”. The task has run again since, so what it shows now is a later run's result. This request's result is in the task's run history."
+    "Engineer finished “Bounce the stems”. The ticket has run again since, so what it shows now is a later run's result. This request's result is in the ticket's run history."
   );
   assert.ok(!rerun.actions.some(action => action.id === 'open_result'));
   assert.deepEqual(rerun.link, {
     href: '/workspaces/album-1?panel=tasks&task=task-9',
-    label: 'Open the task'
+    label: 'Open the ticket'
   });
 
   // While a rerun is in progress the drawer does not say this request is "working".
@@ -178,7 +178,7 @@ test('a later run is never shown as this request result', () => {
   const continued = viewOf(started({ run: 'stopped', result: 'none', later_runs: 1 }), {
     taskPresentation: { state: 'completed' }
   });
-  assert.match(continued.text, /stopped and asked for input\. It was continued from the task/);
+  assert.match(continued.text, /stopped and asked for input\. It was continued from the ticket/);
   const trimmed = viewOf(started({ run: 'unknown', result: 'gone', later_runs: 4 }), {
     taskPresentation: { state: 'completed' }
   });
@@ -193,7 +193,7 @@ test('an interrupted run and a silent connection are said as they are', () => {
   });
   assert.equal(
     interrupted.text,
-    'The run of “Bounce the stems” was interrupted before it finished, and nothing was started again. Run it from the task when you are ready.'
+    'The run of “Bounce the stems” was interrupted before it finished, and nothing was started again. Run it from the ticket when you are ready.'
   );
   assert.equal(interrupted.tone, 'attention');
   assert.ok(!interrupted.actions.some(action => action.id === 'start'), 'no restart from here');
@@ -201,7 +201,7 @@ test('an interrupted run and a silent connection are said as they are', () => {
   const rerunAfter = viewOf(started({ run: 'interrupted', result: 'none', later_runs: 1 }), {
     taskPresentation: { state: 'completed' }
   });
-  assert.match(rerunAfter.text, /was interrupted before it finished\. The task has run again/);
+  assert.match(rerunAfter.text, /was interrupted before it finished\. The ticket has run again/);
   assert.ok(!rerunAfter.actions.some(action => action.id === 'open_result'));
 
   // Not hearing from the task is not the task finishing.
@@ -278,11 +278,11 @@ test('the recap lists recorded facts by where each came from', () => {
     [
       ['Recorded by Ori', 'A draft was prepared for Engineer.'],
       ['Seen in this tab', 'Album 1 was opened.'],
-      ['Seen in this tab', 'The draft was shown in the task form.'],
-      ['Recorded by Ori', 'You saved the form, and the task was created.'],
+      ['Seen in this tab', 'The draft was shown in the ticket form.'],
+      ['Recorded by Ori', 'You saved the form, and the ticket was created.'],
       ['Recorded by Ori', 'You pressed Start, and it was accepted.'],
-      ['From the task', 'The task reported that it had started.'],
-      ['From the task', 'It finished.']
+      ['From the ticket', 'The run reported that it had started.'],
+      ['From the ticket', 'It finished.']
     ]
   );
   // A view step is never a write, and an accepted Start is never a finish.
@@ -307,7 +307,7 @@ test('the recap says only what was recorded, including refusals and reruns', () 
     refused.items.map(item => item.text),
     [
       'A draft was prepared for Engineer.',
-      'You saved the form, and the task was created.',
+      'You saved the form, and the ticket was created.',
       'A Start was refused. Ori is being reset, so nothing can start right now.'
     ]
   );
@@ -317,7 +317,7 @@ test('the recap says only what was recorded, including refusals and reruns', () 
   const rerun = operationRecap({
     snapshot: started({ run: 'succeeded', result: 'history', later_runs: 2 })
   });
-  assert.equal(rerun.items.at(-1).text, 'It finished. The task has run 2 times more since.');
+  assert.equal(rerun.items.at(-1).text, 'It finished. The ticket has run 2 times more since.');
   const interrupted = operationRecap({ snapshot: started({ run: 'interrupted', result: 'none' }) });
   assert.equal(interrupted.items.at(-1).text, 'It was interrupted before it finished.');
 
@@ -541,8 +541,11 @@ test('after a reload the drawer says typed edits are gone instead of silently re
   assert.equal(view.tone, 'attention');
   assert.deepEqual(view.actions[0], { id: 'open_draft', label: 'Open draft again', primary: true });
   // With the form showing, or away from the workspace, the ordinary line stands.
-  assert.match(operationView({ ...state, formOpen: true }).text, /Review it in the task form/);
-  assert.match(operationView({ ...state, onWorkspace: false }).text, /Review it in the task form/);
+  assert.match(operationView({ ...state, formOpen: true }).text, /Review it in the ticket form/);
+  assert.match(
+    operationView({ ...state, onWorkspace: false }).text,
+    /Review it in the ticket form/
+  );
 
   // Opening the draft again is the user's choice, and ends the notice.
   await client.openDraft();

@@ -267,6 +267,8 @@ var validTicketSources = map[string]struct{}{
 	TicketSourceMigration:           {},
 	TicketSourceGoalSuggestion:      {},
 	TicketSourceFirstLookSuggestion: {},
+	TicketSourceFollowUp:            {},
+	TicketSourceNoteItem:            {},
 }
 
 // NormalizeTicketSource validates provenance, defaulting empty to manual.
@@ -682,6 +684,12 @@ type Ticket struct {
 	// deliberately leave these empty.
 	Parent     *TicketSummary  `json:"parent,omitempty"`
 	Subtickets []TicketSummary `json:"subtickets,omitempty"`
+	// LatestResult is what the latest run wrote. Detail reads only, like the
+	// hierarchy above: a result can be long, and the board shows cards (PRD 760
+	// FR-19).
+	LatestResult string `json:"latest_result,omitempty"`
+	// SourceNote says what became of the line a note-made ticket came from.
+	SourceNote string `json:"source_note,omitempty"`
 
 	// Archived reports that this terminal Ticket has aged past the 14-day
 	// recent window (FR-143). It is a presentation flag derived at read time,
@@ -694,11 +702,8 @@ type Ticket struct {
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-
-	// LegacyStatus exposes the compatibility projection for diagnostics and
-	// for adapters that still speak the old vocabulary. It is never lifecycle
-	// authority (FR-7, FR-97).
-	LegacyStatus TaskStatus `json:"legacy_status,omitempty"`
+	// The legacy status projection stays internal: no reader of the Ticket wire
+	// form used it (PRD 760 FR-38).
 }
 
 // TicketSummary is the compact reference used for parent/subticket links and
@@ -792,6 +797,7 @@ func NewTicket(task *Task, owningWorkspaceID, owningWorkspaceName string, owning
 		ScheduleEnabled:         task.ScheduleEnabled,
 		AwaitingExecutionIntent: task.AwaitingExecutionIntent,
 		CurrentRunID:            task.CurrentRunID,
+		SourceNote:              ticketSourceNote(task),
 		NeedsAttention:          task.NeedsAttention(),
 		StartedAt:               task.StartedAt,
 		CompletedAt:             task.CompletedAt,
@@ -800,6 +806,5 @@ func NewTicket(task *Task, owningWorkspaceID, owningWorkspaceName string, owning
 		Version:                 task.TicketVersion,
 		CreatedAt:               task.CreatedAt,
 		UpdatedAt:               task.TicketUpdatedAt(),
-		LegacyStatus:            task.Status,
 	}
 }

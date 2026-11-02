@@ -91,7 +91,7 @@ test('wt demo: the whole journey for a non-entry agent, with a second tab open a
     body: page.locator('#workspace-detail-task-result-body')
   };
   const here = drawer(page);
-  const startButton = here.actions.getByRole('button', { name: 'Start task' });
+  const startButton = here.actions.getByRole('button', { name: 'Start ticket' });
   const openResult = here.actions.getByRole('button', { name: 'Open result' });
 
   // --- 1. Open the workspace and select the agent.
@@ -114,7 +114,7 @@ test('wt demo: the whole journey for a non-entry agent, with a second tab open a
   expect(prepared.operation).toMatchObject({ kind: 'task', status: 'prepared' });
   const operationId = prepared.operation.id;
   await expect(form.root).toBeVisible({ timeout: 30_000 });
-  await expect(form.heading).toHaveText('Review task for Engineer');
+  await expect(form.heading).toHaveText('Review ticket for Engineer');
   await expect(form.agent.locator('option:checked')).toHaveText('Engineer');
   expect(await tasks()).toHaveLength(0);
   await shot('02-editable-review.png');
@@ -226,7 +226,7 @@ test('wt demo: the whole journey for a non-entry agent, with a second tab open a
     }
   );
   await expect(openResult).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Open the task' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open the ticket' })).toBeVisible();
   const failed = (await readOperation(request, failing.operation.id, firstTab.tab)).body.operation;
   expect(failed.status).toBe('started');
   expect(failed.outcome.result).toBe('none');

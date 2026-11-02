@@ -2294,8 +2294,8 @@
       kind: linkable.length === 1 && !partial ? 'one' : 'choose',
       members: linkable,
       copy: partial
-        ? 'Some workspace destinations are unavailable. Choose a known workspace to inspect its tasks.'
-        : 'Open a workspace to see this agent’s current tasks and results, or give it work.'
+        ? 'Some workspace destinations are unavailable. Choose a known workspace to inspect its tickets.'
+        : 'Open a workspace to see this agent’s current tickets and runs, or give it work.'
     };
   }
 
@@ -3909,7 +3909,7 @@
       menuDivider(),
       // The page's one verb about work: a task for this agent, where it works.
       {
-        label: 'Give a task…',
+        label: 'Give work…',
         action: 'give-task',
         disabled: vm.builtIn || vm.workspaceOwned || vm.unreadable
       },
@@ -4117,7 +4117,7 @@
         openBulkDelete();
         return;
       default:
-        // A workspace picked in Give a task…'s chooser.
+        // A workspace picked in Give work…'s chooser.
         if (action.indexOf(GIVE_TASK_IN) === 0) {
           var api = window.OriAgentGiveTask;
           var href = api ? api.newTaskHref(action.slice(GIVE_TASK_IN.length), name) : '';
@@ -4128,7 +4128,7 @@
 
   var GIVE_TASK_IN = 'give-task-in:';
 
-  // giveTask is Give a task… (agents-hire-with-a-brief FR18): the agent's one
+  // giveTask is Give work… (agents-hire-with-a-brief FR18): the agent's one
   // workspace opens with its task form and this agent chosen; with several,
   // the workspaces are offered in the card's own menu first; with none, the
   // Hire card opens for this agent's role, since work happens in a workspace.
@@ -4146,7 +4146,7 @@
       if (!card) return;
       var rect = card.getBoundingClientRect();
       openCardMenu(card, { x: rect.left + 12, y: rect.top + rect.height - 8 }, null, {
-        label: 'Give ' + name + ' a task in',
+        label: 'Give ' + name + ' a ticket in',
         items: target.workspaces.map(function (ws) {
           return { label: ws.name, action: GIVE_TASK_IN + ws.slug };
         })

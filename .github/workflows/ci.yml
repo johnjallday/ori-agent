@@ -130,6 +130,10 @@ jobs:
       - name: Run frontend module tests
         run: npm run test:modules
 
+      # "Task" stays out of what people read: work is a ticket, an attempt a run.
+      - name: Check user-facing task copy
+        run: npm run check:task-copy
+
       # Rasterizes the 27 character SVGs and proves they stay transparent and
       # map-ready. Deterministic and offline: sharp is already a devDependency,
       # and one process checks every asset.

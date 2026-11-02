@@ -208,6 +208,12 @@ type LookItem struct {
 	// ActedDismissed), "" while untouched; ActedAt is when.
 	ActedAs string     `json:"acted_as,omitempty"`
 	ActedAt *time.Time `json:"acted_at,omitempty"`
+	// TicketWorkspace names the workspace this line would become a ticket in. It is
+	// set on the view of a look, read fresh, and never saved.
+	TicketWorkspace string `json:"ticket_workspace,omitempty"`
+	// Ticketed says that workspace already holds this line's ticket, so the look
+	// neither suggests nor adds it again. Also read fresh, never saved.
+	Ticketed bool `json:"ticketed,omitempty"`
 }
 
 // Item returns the look's item with this id, for changing in place.
@@ -279,6 +285,8 @@ type Receipt struct {
 	LookID    string    `json:"look_id,omitempty"`
 	Created   int       `json:"created,omitempty"`
 	Skipped   int       `json:"skipped,omitempty"`
+	// Tickets counts tickets made from project notes, by workspace name.
+	Tickets map[string]int `json:"tickets,omitempty"`
 	// Note is the Inbox path a capture wrote, so a replay links the same note.
 	Note string `json:"note,omitempty"`
 	// Item is the open item a triage acted on, so the id cannot be reused for

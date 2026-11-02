@@ -82,7 +82,7 @@ test('wt demo: Ori prepares an editable task draft and creates nothing until the
 
   await page.waitForURL(url => url.pathname === albumPath);
   await expect(form.root).toBeVisible({ timeout: 20_000 });
-  await expect(form.heading).toHaveText('Review task for Engineer');
+  await expect(form.heading).toHaveText('Review ticket for Engineer');
   await expect(form.title).toHaveValue('Bounce the stems');
   await expect(form.brief).toHaveValue(ask);
   // The proposed agent is the one shown: the non-entry Engineer, not the entry agent.

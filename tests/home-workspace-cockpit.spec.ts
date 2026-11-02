@@ -56,7 +56,7 @@ test('next-action counts keep workspace tasks separate and disclose injected ref
   await expect(chip).toContainText('1+');
   await page.getByRole('button', { name: 'Show Updates', exact: true }).click();
   const link = page.locator('#cockpitTodayAttention a.cockpit-today-link');
-  await expect(link).toContainText('2 tasks needing attention');
+  await expect(link).toContainText('2 tickets needing attention');
   await expect(link).toHaveAttribute('href', '/workspaces/attention-owner?panel=tasks');
   // Action Center left the top bar; Needs attention is Home's way in (nav-collapse FR8).
   await expect(page.locator('#cockpitTodayAttention a.cockpit-today-see-all')).toHaveAttribute(

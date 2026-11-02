@@ -23,7 +23,7 @@ const CONFIRM_LABELS = {
 const APPLYING = { install: 'Installing', update: 'Updating', enable: 'Enabling' };
 const APP_WIDE =
   'Ori plugins are app-wide. Once installed they serve every future music folder, not only this one.';
-const NOTHING_CREATED = 'No workspace, Home, agent or model task was created.';
+const NOTHING_CREATED = 'No workspace, Home, agent or model run was created.';
 
 export function pluginSetupPlan(rows, kind = '') {
   const steps = (Array.isArray(rows) ? rows : [])
@@ -399,7 +399,7 @@ export function createPluginSetupWizard({
               : 'Disclosure unavailable. Do not confirm an undisclosed installation.'
           ),
         line(
-          'This changes only this Ori plugin. No workspace, Home, agent or model task is created or started.',
+          'This changes only this Ori plugin. No workspace, Home, agent or model run is created or started.',
           'plugin-setup-wizard__muted'
         )
       );

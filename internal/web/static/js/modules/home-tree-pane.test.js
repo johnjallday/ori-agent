@@ -99,7 +99,7 @@ const FLAT = [
     folder_slug: 'night-drive',
     description: 'The first single.',
     agent_count: 2,
-    open_task_count: 3,
+    ticket_counts: { ready: 3, backlog: 5, done: 2 },
     needs_attention_count: 1,
     active: false
   },
@@ -1301,7 +1301,7 @@ test('a workspace overview shows status, counts, next run, tags and its buttons'
   assert.equal(view.lead, 'The first single.');
   assert.deepEqual(view.stats, [
     { value: '2', label: 'Agents' },
-    { value: '3', label: 'Open tasks' },
+    { value: '3 ready', label: 'Tickets', line: true },
     { value: '1', label: 'Need attention' }
   ]);
   assert.deepEqual(view.fields, [{ label: 'Next run', value: 'No schedule' }]);
@@ -1466,7 +1466,7 @@ test('a group overview totals its workspaces from the same figures the rail uses
   const view = paneView(tab('g1', { kind: 'group', workspaceId: 'g1' }), { flattened: FLAT });
   assert.deepEqual(view.stats, [
     { value: '1', label: 'Workspaces' },
-    { value: '3', label: 'Open tasks' },
+    { value: '3 ready', label: 'Tickets', line: true },
     { value: '1', label: 'Need attention' }
   ]);
   // No sections loaded and none non-empty: only the children are listed.
@@ -1499,7 +1499,8 @@ test('overview buttons are links where they navigate and buttons where they act'
   );
   assert.match(html, /data-pane-action="reveal-section" data-pane-target="notes"/);
   assert.match(html, /class="cockpit-pane-chip is-warn">Needs attention</);
-  assert.match(html, /class="cockpit-pane-stat-value">3</);
+  assert.match(html, /class="cockpit-pane-stat-value is-line">3 ready</);
+  assert.match(html, /class="cockpit-pane-stat-value">2</, 'a one-number stat keeps its size');
 });
 
 // ---------------------------------------------------------------------------

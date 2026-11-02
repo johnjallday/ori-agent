@@ -668,7 +668,7 @@ export class WorkspaceSurfaceHost {
       typeof task.details !== 'string' ||
       !Array.isArray(task.required_capabilities)
     ) {
-      return this._bridgeError('task_unavailable', 'The workspace task could not be created.');
+      return this._bridgeError('task_unavailable', 'The workspace ticket could not be created.');
     }
     const workspace = page.workspace || {};
     const assignee =
@@ -679,13 +679,13 @@ export class WorkspaceSurfaceHost {
       successToast: false
     });
     if (!created?.id) {
-      return this._bridgeError('task_create_failed', 'The workspace task could not be created.');
+      return this._bridgeError('task_create_failed', 'The workspace ticket could not be created.');
     }
     if (task.auto_start) {
       if (typeof page.executeTask !== 'function') {
         return this._bridgeError(
           'task_start_failed',
-          'The workspace task was created but could not be started.'
+          'The workspace ticket was created but could not be started.'
         );
       }
       await page.executeTask(created.id, { skipConfirm: true, skipModal: true });

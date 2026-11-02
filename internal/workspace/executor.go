@@ -478,6 +478,12 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 			if ws.Tasks[i].Status != TaskStatusAssigned {
 				continue
 			}
+			// A ticket that arrived at Ready waits for someone to start it. Moving
+			// an agent's ticket back to Ready projects legacy assigned, and that is
+			// not a request to run it (ticket PRD FR-24).
+			if ws.Tasks[i].AwaitingExecutionIntent {
+				continue
+			}
 			// A task under a host recipe runs when the user starts it and at no
 			// other time. Being assigned (to another agent, or again after its
 			// ticket was reopened) is not a start.
@@ -713,6 +719,15 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 					t.Result = result
 					ApplyTaskResultMetadata(t, result)
 					RecordTaskExecution(t, "success", result, startedAt, completedAt.Sub(startedAt))
+					// A ticket a firing moved to In Progress goes to Review now, unless it
+					// recurs (FR-41). Other records are left as they are: this moves only
+					// a stored In Progress state.
+					t.ApplyRunOutcome(TicketRunResult{
+						Outcome: TicketRunSucceeded,
+						RunID:   t.CurrentRunID,
+						Actor:   TicketActorRun,
+						At:      completedAt,
+					})
 				}
 
 				if te.eventBus != nil {

@@ -11,14 +11,14 @@ export async function executeTask(canvas, task) {
   if (task.to === 'unassigned') {
     if (!canvas.agents || canvas.agents.length === 0) {
       canvas.showNotification(
-        'No agents in this workspace yet — add an agent before running tasks.',
+        'No agents in this workspace yet — add an agent before running tickets.',
         'error'
       );
       return;
     }
     const selectedAgent = await showCanvasAgentPicker({
       title: 'Assign an agent',
-      message: `This task is unassigned. Pick an agent to run "${task.description || task.id}".`,
+      message: `This ticket is unassigned. Pick an agent to run "${task.description || task.id}".`,
       agents: canvas.agents
     });
     if (!selectedAgent) return;
@@ -40,9 +40,9 @@ export async function rerunTask(canvas, task) {
     console.error('Invalid task:', task);
     return;
   }
-  const label = task.description || 'this task';
+  const label = task.description || 'this ticket';
   const confirmed = await showCanvasConfirm({
-    title: task.status === 'failed' ? 'Rerun failed task?' : 'Rerun task?',
+    title: task.status === 'failed' ? 'Rerun failed ticket?' : 'Rerun ticket?',
     message:
       task.status === 'failed'
         ? `"${label}" will execute again from scratch.`
@@ -61,7 +61,7 @@ export async function rerunTask(canvas, task) {
   await apiPost('/api/orchestration/tasks/execute', { task_id: task.id });
   task.status = 'in_progress';
   canvas.draw();
-  canvas.showNotification(`Task "${task.description || task.id}" is being rerun`, 'success');
+  canvas.showNotification(`Ticket "${task.description || task.id}" is being rerun`, 'success');
   setTimeout(() => canvas.init(), 1000);
 }
 
@@ -73,7 +73,7 @@ export async function assignTaskToCombiner(canvas, combiner) {
   // Check if source task is already in combiner's inputs
   const currentInputs = combiner.input_task_ids || [];
   if (currentInputs.includes(sourceTask.id)) {
-    canvas.showNotification('This task is already an input to the combiner', 'warning');
+    canvas.showNotification('This ticket is already an input to the combiner', 'warning');
     canvas.assignmentMode = false;
     canvas.assignmentSourceTask = null;
     canvas.canvas.style.cursor = 'grab';
@@ -133,7 +133,7 @@ export async function linkTaskResult(canvas, sourceTaskId, targetTaskId) {
 
   const targetTask = canvas.tasks.find(t => t.id === targetTaskId);
   if (!targetTask) {
-    canvas.showNotification('Target task not found', 'error');
+    canvas.showNotification('Target ticket not found', 'error');
     return;
   }
 
@@ -141,7 +141,7 @@ export async function linkTaskResult(canvas, sourceTaskId, targetTaskId) {
     ? [...targetTask.input_task_ids]
     : [];
   if (currentInputs.includes(sourceTaskId)) {
-    canvas.showNotification('This task is already connected as an input', 'info');
+    canvas.showNotification('This ticket is already connected as an input', 'info');
     return;
   }
 
@@ -155,9 +155,9 @@ export async function linkTaskResult(canvas, sourceTaskId, targetTaskId) {
 
     targetTask.input_task_ids = newInputs;
     canvas.draw();
-    canvas.showNotification('Linked task result to target task', 'success');
+    canvas.showNotification('Linked result to target ticket', 'success');
   } catch (error) {
     console.error('Failed to link task result:', error);
-    canvas.showNotification('Failed to link tasks: ' + error.message, 'error');
+    canvas.showNotification('Failed to link tickets: ' + error.message, 'error');
   }
 }

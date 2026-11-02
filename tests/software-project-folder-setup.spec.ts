@@ -1037,7 +1037,7 @@ test.describe('after the server was restarted', () => {
         .locator('#personalAssistantFolderTaskActions')
         .locator('button, a')
         .allInnerTexts()
-    ).toEqual(['Open the assessment', 'Plan the suggested task']);
+    ).toEqual(['Open the assessment', 'Plan the suggested ticket']);
     const result = page.locator('#personalAssistantFolderFirstLookResult');
     await expect(result).toContainText('Widget is a small service that counts widgets');
     await expect(result).toContainText('Add a health check endpoint to the service.');
@@ -1067,7 +1067,7 @@ test.describe('after the server was restarted', () => {
     await expect(open).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(
-      card(page).getByRole('link', { name: 'Plan the suggested task', exact: true })
+      card(page).getByRole('link', { name: 'Plan the suggested ticket', exact: true })
     ).toBeFocused();
     await page.setViewportSize({ width: 1280, height: 720 });
 
@@ -1113,7 +1113,7 @@ test.describe('after the server was restarted', () => {
     );
     expect(await banner.locator('button, a').allInnerTexts()).toEqual([
       'Open the assessment',
-      'Plan the suggested task',
+      'Plan the suggested ticket',
       'Dismiss'
     ]);
     await expect(
@@ -1128,7 +1128,7 @@ test.describe('after the server was restarted', () => {
     await page.setViewportSize({ width: 1280, height: 720 });
 
     // The suggestion is placed in the Plans page's box and nothing is sent.
-    await banner.getByRole('link', { name: 'Plan the suggested task', exact: true }).click();
+    await banner.getByRole('link', { name: 'Plan the suggested ticket', exact: true }).click();
     const box = page.locator('#plan-create-request');
     await expect(box).toBeVisible({ timeout: 30_000 });
     await expect(box).toHaveValue(

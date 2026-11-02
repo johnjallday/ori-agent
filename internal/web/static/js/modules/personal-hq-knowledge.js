@@ -182,12 +182,12 @@ function workspaceSourceChip(attribution) {
   if (!attribution.task) {
     chip.append(' · from chat');
   } else if (attribution.taskHref) {
-    chip.append(' · from task ');
+    chip.append(' · from ticket ');
     const task = element('a', '', attribution.task);
     task.href = attribution.taskHref;
     chip.append(task);
   } else {
-    chip.append(` · from task ${attribution.task}`);
+    chip.append(` · from ticket ${attribution.task}`);
   }
   chip.append(` · ${reviewDate(attribution.observedAt)}`);
   return chip;

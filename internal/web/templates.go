@@ -90,7 +90,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/layout/head.tmpl",
 		"templates/layout/scripts-dx-utils.tmpl",
 		"templates/layout/theme-init.tmpl",
-		"templates/components/workspace-hub.tmpl",
 		"templates/components/ask-ori-activity.tmpl",
 		"templates/components/personal-assistant-today.tmpl",
 		"templates/components/personal-assistant-folder.tmpl",
@@ -143,7 +142,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/review.tmpl",
 		"templates/pages/skills.tmpl",
 		"templates/pages/templates.tmpl",
-		"templates/pages/workspaces.tmpl",
 		"templates/pages/note.tmpl",
 		"templates/pages/action-center.tmpl",
 	}
@@ -192,7 +190,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["review"] = tmpl
 	tr.templates["skills"] = tmpl
 	tr.templates["templates"] = tmpl
-	tr.templates["workspaces"] = tmpl
 	tr.templates["note-page"] = tmpl
 	tr.templates["action-center"] = tmpl
 	logger.Info("Successfully loaded templates from embedded filesystem", logger.Fields{})

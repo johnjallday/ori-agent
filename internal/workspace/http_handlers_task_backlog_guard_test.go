@@ -33,22 +33,6 @@ func newBacklogGuardTestWorkspace(t *testing.T, store Store) *Workspace {
 	return ws
 }
 
-func TestHTTPHandler_ExecuteTaskManually_RejectsBacklogTask(t *testing.T) {
-	store := NewInMemoryStore()
-	handler := NewHTTPHandler(store, nil, nil)
-	ws := newBacklogGuardTestWorkspace(t, store)
-
-	req := httptest.NewRequest(http.MethodPost,
-		"/api/workspaces/"+ws.ID+"/tasks/backlog-task-1/execute", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ExecuteTaskManually(rec, withTaskPath(req))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (Backlog task must not execute); body=%s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestHTTPHandler_UpdateTask_RejectsAssigningBacklogTask(t *testing.T) {
 	store := NewInMemoryStore()
 	handler := NewHTTPHandler(store, nil, nil)

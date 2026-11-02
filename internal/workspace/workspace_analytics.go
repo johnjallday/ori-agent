@@ -45,6 +45,10 @@ type MapSummaryFields struct {
 	// from OpenTaskCount, which remains Ready-and-later only — Backlog is
 	// never "open" work (FR7).
 	BacklogCount int
+	// TicketCounts is the canonical per-state ticket count (PRD 760 FR-6). It
+	// is the number the product shows; OpenTaskCount above is the older
+	// legacy-status projection and is no longer read by the browser.
+	TicketCounts TicketCounts
 	MCPCount     int
 	SkillCount   int
 	OpsMode      string
@@ -75,6 +79,7 @@ func ComputeMapSummaryFields(w *Workspace) MapSummaryFields {
 	}
 
 	for _, t := range w.Tasks {
+		fields.TicketCounts.Add(t.CanonicalState())
 		switch TaskAttentionState(t) {
 		case "backlog":
 			fields.BacklogCount++

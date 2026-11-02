@@ -194,7 +194,7 @@ test('a finished run shows the receipt and the Open link in the pop-up', () => {
   assert.equal(view.receiptRows.length, 1);
 });
 
-test('a finished group run says what it did and promises no first task', () => {
+test('a finished group run says what it did and promises no first ticket', () => {
   const view = setupModalView({
     status: 'resolved',
     folder: 'Albums',
@@ -217,8 +217,8 @@ test('a finished group run says what it did and promises no first task', () => {
   assert.equal(view.openLabel, 'Open Albums');
   assert.equal(view.receiptRows.length, 2);
   assert.match(view.status, /Each workspace is linked to its own folder/);
-  assert.match(view.status, /no task was created/);
-  assert.doesNotMatch(view.status, /first task/);
+  assert.match(view.status, /no ticket was created/);
+  assert.doesNotMatch(view.status, /first ticket/);
 });
 
 test('a settled offer has dropped its run but the pop-up still ends on the receipt', () => {
@@ -874,7 +874,6 @@ test('the folder turn and work controller mount once on every drawer host', () =
   assert.equal((head.match(/src="\/js\/modules\/dashboard.js"/g) || []).length, 1);
   for (const page of [
     '../layout/base.tmpl',
-    '../pages/workspaces.tmpl',
     '../pages/workspace-detail.tmpl',
     '../pages/workspace-task.tmpl',
     '../pages/workspace-canvas.tmpl'
@@ -2031,7 +2030,7 @@ test('a first look that cannot start says why and drops the button', () => {
 test('every refusal has its sentence, and an already-going start has none', () => {
   assert.equal(
     firstLookStartMessage('unassigned', 'Thesis'),
-    'The first task has no agent yet. Open Thesis to assign one.'
+    'The first ticket has no agent yet. Open Thesis to assign one.'
   );
   assert.equal(
     firstLookStartMessage('local_activation_required', 'Thesis'),
@@ -2072,7 +2071,7 @@ test('a running, waiting, failed and finished look each read as the server says'
     { state: 'finished', ticket_route: '/workspaces/thesis?ticket=t-1' },
     ctx
   );
-  assert.equal(legacy.actions[0].label, 'Open task');
+  assert.equal(legacy.actions[0].label, 'Open ticket');
   assert.equal(legacy.actions[0].href, '/workspaces/thesis?ticket=t-1');
   for (const report_route of [
     '//evil.example',

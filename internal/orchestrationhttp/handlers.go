@@ -191,6 +191,7 @@ func (h *Handler) initializeSubHandlers() {
 	h.backlogHandler = NewBacklogHandler(backlogService)
 	h.backlogHandler.SetFileSynchronizer(backlogFileSync)
 	h.ticketHandler = NewTicketHandler(newTicketService(h.workspaceStore, h.eventBus))
+	h.ticketHandler.SetStarter(h.startTicketByPerson)
 
 	// Optional sub-handlers (created if dependencies are available)
 	if h.orchestrator != nil {
@@ -257,6 +258,7 @@ func (h *Handler) SetEventBus(eb *workspace.EventBus) {
 	h.backlogHandler = NewBacklogHandler(backlogService)
 	h.backlogHandler.SetFileSynchronizer(legacyBacklogFileSync)
 	h.ticketHandler = NewTicketHandler(newTicketService(h.workspaceStore, eb))
+	h.ticketHandler.SetStarter(h.startTicketByPerson)
 	h.initializeTemplateHandlerLegacy()
 	h.initializeStreamingHandlerLegacy()
 	h.initializeTaskHandlerLegacy()
@@ -499,6 +501,15 @@ func (h *Handler) StartTaskAsync(workspaceID, taskID string) error {
 	return h.taskHandlerSub.StartTaskAsync(workspaceID, taskID)
 }
 
+// startTicketByPerson is the ticket API's starter: a create request's start
+// intent is a person's explicit act.
+func (h *Handler) startTicketByPerson(workspaceID, ticketID string) error {
+	if h == nil || h.taskHandlerSub == nil {
+		return fmt.Errorf("task execution not available")
+	}
+	return h.taskHandlerSub.StartTaskByPerson(workspaceID, ticketID)
+}
+
 // StopTaskToReady stops a task's run and puts the task back to Ready (see
 // TaskHandler.StopTaskToReady).
 func (h *Handler) StopTaskToReady(ctx context.Context, workspaceID, taskID string) error {
@@ -533,12 +544,6 @@ func (h *Handler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.ScheduledTaskHandler(w, r)
 }
 
-// BulkDeleteTasksHandler handles bulk deletion of tasks
-// Delegates to TaskHandler for modular organization
-func (h *Handler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Request) {
-	h.taskHandlerSub.BulkDeleteTasksHandler(w, r)
-}
-
 // BacklogListHandler handles GET (list) and POST (create) on
 // /api/orchestration/backlog. Delegates to BacklogHandler.
 func (h *Handler) BacklogListHandler(w http.ResponseWriter, r *http.Request) {
@@ -565,6 +570,12 @@ func (h *Handler) TicketCollectionHandler(w http.ResponseWriter, r *http.Request
 // /api/workspaces/{studio_id}/tickets/{ticket_id}.
 func (h *Handler) TicketItemHandler(w http.ResponseWriter, r *http.Request) {
 	h.ticketHandler.TicketItemHandler(w, r)
+}
+
+// TicketStartHandler handles POST
+// /api/workspaces/{studioID}/tickets/{ticketID}/start.
+func (h *Handler) TicketStartHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketStartHandler(w, r)
 }
 
 // TicketTransitionHandler handles POST

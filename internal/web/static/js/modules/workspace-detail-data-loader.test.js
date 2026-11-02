@@ -11,7 +11,7 @@ const request = { workspaceId: 'workspace/uuid with + spaces' };
 const tasksURL = '/api/orchestration/tasks?workspace_id=workspace%2Fuuid%20with%20%2B%20spaces';
 const backlogURL = '/api/orchestration/backlog?workspace_id=workspace%2Fuuid+with+%2B+spaces';
 const resources = [
-  { method: 'loadTasks', url: tasksURL, message: 'Failed to load tasks' },
+  { method: 'loadTasks', url: tasksURL, message: 'Failed to load tickets' },
   { method: 'loadBacklog', url: backlogURL, message: 'Failed to load backlog' }
 ];
 

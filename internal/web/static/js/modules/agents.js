@@ -1561,7 +1561,7 @@ async function applyPendingAgentCreationFollowUp(agentName) {
         EventBus.emit('task:updated', { workspaceId: flow.workspaceId, taskId: flow.taskId });
       }
     } catch (error) {
-      summary.failures.push(`task assignment: ${error.message || 'failed'}`);
+      summary.failures.push(`ticket assignment: ${error.message || 'failed'}`);
     }
   }
 
@@ -1579,7 +1579,7 @@ function describeAgentCreationFollowUp(summary) {
     );
   }
   if (summary.taskAssigned) {
-    parts.push('assigned to the task');
+    parts.push('assigned to the ticket');
   }
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0];

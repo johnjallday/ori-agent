@@ -289,9 +289,9 @@ test('saving the first goal starts a run whose suggestions reach the Backlog dra
   await expect(suggested.first().locator('.ws-cmd-drawer-row-suggested')).toHaveText('Suggested');
 
   // The card that started it reports the run's counts, and they stay.
-  await expect(status).toHaveText('Run complete — 3 tasks suggested · 2 findings.');
+  await expect(status).toHaveText('Run complete — 3 tickets suggested · 2 findings.');
   await page.waitForTimeout(3_000);
-  await expect(status).toHaveText('Run complete — 3 tasks suggested · 2 findings.');
+  await expect(status).toHaveText('Run complete — 3 tickets suggested · 2 findings.');
   await expect(page.locator('#workspace-command-mission-run')).toBeEnabled();
   await drawerTab.close();
 
@@ -378,7 +378,7 @@ test('Action Center shows the suggestion summary and each finding with its evide
   page
 }) => {
   await page.goto(`/action-center?workspace=${workspaceId}`);
-  await expect(page.getByText('3 suggested tasks in Goal E2E Desk')).toBeVisible();
+  await expect(page.getByText('3 suggested tickets in Goal E2E Desk')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open Backlog' }).first()).toHaveAttribute(
     'href',
     new RegExp(`/workspaces/${workspaceSlug}\\?panel=backlog`)
@@ -419,7 +419,7 @@ test('a goal run assesses the workspace and the Goal card shows the latest asses
   await page.goto(`/workspaces/${workspaceSlug}`);
   await page.locator('#workspace-command-mission-run').click();
   const status = page.locator('#workspace-command-mission-action-status');
-  await expect(status).toHaveText('Run complete — 1 task suggested · 0 findings.', {
+  await expect(status).toHaveText('Run complete — 1 ticket suggested · 0 findings.', {
     timeout: 60_000
   });
   const assessment = page.locator('.ws-cmd-goal-assessment');
@@ -799,7 +799,7 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 async function captureGoalState(page: Page, path: string) {
-  await expect(page.getByText('Loading workspace tasks…', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Loading tickets…', { exact: true })).toHaveCount(0);
   await page.evaluate(async () => {
     await document.fonts.ready;
     window.scrollTo(0, 0);

@@ -93,54 +93,46 @@ test('persisted attention tasks project once and open their real owner', async (
     await page.goto('/');
     await page.getByRole('button', { name: 'Show Updates', exact: true }).click();
     const owner = page.locator('#cockpitTodayAttention a').filter({ hasText: folder.name });
-    await expect(owner).toContainText('2 tasks needing attention');
+    await expect(owner).toContainText('2 tickets needing attention');
     await page.screenshot({ path: testInfo.outputPath('home-real-attention.png') });
     await owner.focus();
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(new RegExp(`/workspaces/${folder.folder_slug}\\?panel=tasks`));
-    await expect(page.locator('.ws-cmd-drawer')).toBeVisible();
-    await expect(page.locator('.ws-cmd-drawer')).toContainText('Choose the launch outline');
+    // Home's link still says panel=tasks; it lands on the board (PRD 760 FR-33).
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${folder.folder_slug}`));
+    await expect(page.locator('#hubTicketsList')).toContainText('Choose the launch outline');
     await page.screenshot({ path: testInfo.outputPath('workspace-real-attention.png') });
-    await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
+    await page.locator('[data-cmd-view-mode="details"]').click();
     const work = page.getByRole('region', { name: 'Next action', exact: true });
     await expect(work).toContainText('Choose the launch outline');
-    await expect(work).toContainText('Latest result');
+    await expect(work.getByRole('button', { name: 'All tickets', exact: true })).toBeVisible();
     await page.waitForTimeout(500);
     await page.screenshot({ path: testInfo.outputPath('workspace-work-first.png') });
-    await work.getByRole('button', { name: 'Respond', exact: true }).focus();
+    // FR-32: a Next action about a ticket opens that ticket on the board.
+    await work.getByRole('button', { name: 'Open ticket', exact: true }).focus();
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(/\/task\/[^?]+\?return=/);
-    // Exercise the existing non-provider response: stop this synthetic task.
+    await expect(page).toHaveURL(/[?&]ticket=/);
+    await expect(page.locator('#hubTicketDetail')).toBeVisible();
+    await expect(page.locator('#hubTicketDetailTitle')).toContainText('Choose the launch outline');
+    const ticketId = new URL(page.url()).searchParams.get('ticket');
+    // The Runs page: a ticket shows its state, and a failed run is a separate signal.
+    await page.goto(`/workspaces/${folder.folder_slug}/task/${ticketId}`);
+    await expect(page).toHaveTitle(/Choose the launch outline · Runs/);
     await page.getByRole('button', { name: 'Mark as Failed', exact: true }).click();
-    await expect(page.locator('#workspace-task-status')).toHaveText('Failed');
-    await page.locator('#workspace-task-backlink').click();
-    await expect(page).toHaveURL(/panel=tasks/);
-    await expect(page.locator('.ws-cmd-drawer')).toContainText('Failed');
+    await expect(page.locator('#workspace-task-status')).toHaveText('In Progress');
+    await expect(page.locator('#workspace-task-run-signal')).toHaveText('Latest run failed');
     await page.screenshot({ path: testInfo.outputPath('workspace-real-failed.png') });
-    await page.goBack();
-    await expect(page).toHaveURL(/\/task\/[^?]+\?return=/);
-    await page.goForward();
-    await expect(page.locator('.ws-cmd-drawer-preview')).toContainText('Choose the launch outline');
-    await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
-    await work.getByRole('button', { name: 'View Result', exact: true }).click();
-    const result = page.locator('#workspace-detail-task-result-modal');
-    await expect(result).toContainText('Launch checklist ready.');
-    await page.waitForTimeout(350);
-    await page.screenshot({ path: testInfo.outputPath('workspace-real-result.png') });
-    await result.locator('[data-bs-dismiss="modal"]').first().click();
-    await expect(result).toBeHidden();
-    await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
+    await page.goto(`/workspaces/${folder.folder_slug}`);
+    await page.locator('[data-cmd-view-mode="details"]').click();
+    await expect(work).toBeVisible();
     await page.route('**/api/orchestration/tasks?workspace_id=*', route =>
       route.fulfill({ status: 503, body: 'Injected read failure' })
     );
     await page.evaluate(() => (window as any).workspaceDetail.loadTasks());
-    await expect(work).toContainText('Tasks couldn’t be loaded');
+    await expect(work).toContainText('Some workspace information is unavailable');
     await expect(work).not.toContainText('No open work');
     await page.unroute('**/api/orchestration/tasks?workspace_id=*');
-    await work.getByRole('button', { name: 'Retry tasks' }).click();
-    await expect(
-      work.getByRole('button', { name: 'Review connection', exact: true })
-    ).toBeVisible();
+    await work.getByRole('button', { name: 'Retry workspace status' }).click();
+    await expect(work.getByRole('button', { name: 'Open ticket', exact: true })).toBeVisible();
   } finally {
     await page.request.delete(`/api/workspaces/${folder.id}`);
   }

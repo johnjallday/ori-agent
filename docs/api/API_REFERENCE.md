@@ -21,6 +21,7 @@ http://localhost:8765/api
 - [Chat API](#chat-api)
 - [Updates API](#updates-api)
 - [Tags API](#tags-api)
+- [Tickets API](#tickets-api)
 - [Anchored Workspaces](#anchored-workspaces)
 - [Workspace Groups](#workspace-groups)
 - [Workspace Build Sessions API](#workspace-build-sessions-api)
@@ -1565,6 +1566,88 @@ POST /api/tags/delete
 ```
 
 Both mutations return per-source affected counts; an unknown tag is a no-op `200` with zero counts. `400` for missing fields, an over-long `to`, or `from == to`.
+
+## Tickets API
+
+A ticket is work a workspace owns. Its routes name the owning workspace in the path.
+
+### Create a ticket
+
+`POST /api/workspaces/{id}/tickets`
+
+| Field | Meaning |
+| --- | --- |
+| `state` | Required. `backlog` or `ready`. |
+| `title` | Required. One line. |
+| `description`, `due_date`, `tags`, `priority`, `reference_url` | Optional. |
+| `source`, `source_id` | Optional provenance. `source` defaults to `manual`. |
+| `assignee` | Optional agent in this workspace. Refused on `backlog`. |
+| `start` | Optional. Starts one run once the ticket exists. Needs `ready` and an `assignee`. |
+| `idempotency_key` | Optional. A repeated request returns the same ticket. |
+
+The rules Give work follows:
+
+- With nobody chosen, send `backlog`.
+- With an agent, send `ready`. The ticket waits: naming an agent does not start it.
+- With `start`, the ticket is created `ready` and one run begins.
+
+Responses:
+
+- `201` with the ticket, or `200` with the existing ticket when `idempotency_key` repeats. A repeat
+  whose ticket has moved on still returns it. The same key with a different title is `409`.
+- With `start`, the ticket carries `start: { "started": bool, "error": "..." }`. A refused start is
+  not a failed create: the ticket stays `ready`, `error` says why, and repeating the request with the
+  same key tries again without creating a second ticket or a second run. The run begins
+  asynchronously, so `state` can still read `ready` in a response where `started` is true.
+- `400` with `details.field` for what the rules forbid: `assignee` for a start with nobody or an
+  agent outside the workspace, `state` for an assignee or a start on `backlog`.
+
+### Counts
+
+`GET /api/workspaces/{id}/tickets` returns `counts`, the workspace's own tickets by state, ignoring
+filters, `limit` and roll-up: `{ "backlog", "ready", "in_progress", "review", "done", "cancelled" }`.
+`GET /api/orchestration/workspace?id={id}` and the workspace lists carry the same object as
+`ticket_counts`. The product's count line reads Review, In Progress and Ready from it.
+
+### Start this
+
+`POST /api/workspaces/{id}/tickets/{ticketID}/start` with `{ "assignee": "<agent>" }`.
+
+Moves a `backlog` ticket to `ready` through the recorded transition, names the agent, and starts
+one run. `assignee` may be empty when the ticket already has someone.
+
+- `200` with the ticket and `start: { "started": bool, "error": "..." }`, as for create. A repeat
+  within 30 seconds answers `started` without starting again, because the run begins asynchronously.
+- `400` with `details.field`: `assignee` when nobody is named (the client asks who), or an agent
+  outside the workspace; `state` for a ticket past `ready`.
+
+### Where a ticket came from
+
+The ticket carries `source` and `source_id`. Two sources link to other records:
+
+- `followup`: made from a follow-up; `source_id` is the follow-up's ID.
+- `note_item`: made from an open line in a project's notes; `source_id` is the line's ID. When that
+  line is later ticked, marked DONE or removed, the ticket keeps its state and carries
+  `source_note` saying so. Ori never edits the note.
+
+### Follow-ups and tickets
+
+- `POST /api/personal-hq/followups/ticket` with `{ "id", "workspace_id" }` makes a `backlog` ticket
+  from a follow-up and links it. `workspace_id` defaults to the follow-up's own workspace; for one
+  held in Personal HQ it is required, and leaving it out is `400` with `details.field:
+  workspace_id`. A workspace that does not exist, is not active or is someone else's is `404`.
+  `201` with `{ followup, ticket, created: true }`; a repeat is `200` with the same ticket and
+  `created: false`.
+- `GET /api/personal-hq/followups/item?id=` returns one follow-up.
+- Follow-up lists carry `related_ticket: { id, workspace_id, display_number, state, state_label,
+  href }` with the ticket's current state, and `href` to open the follow-up. Closing either side
+  leaves the other open.
+
+### Retired
+
+`DELETE /api/orchestration/tasks/bulk` and `POST /api/workspaces/{id}/tasks/{taskID}/execute` had
+no remaining caller and were removed.
+Any other method or path under `/api/workspaces/{id}/tasks` that is not listed here is `404`.
 
 ## Anchored Workspaces
 

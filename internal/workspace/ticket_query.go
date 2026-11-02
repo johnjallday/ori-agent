@@ -563,6 +563,12 @@ type TicketPage struct {
 	Tickets   []Ticket `json:"tickets"`
 	Total     int      `json:"total"`
 	Truncated bool     `json:"truncated"`
+	// Counts is the requested workspace's own tickets by canonical state. It
+	// ignores every filter, the limit and any roll-up, so it is the same number
+	// the workspace summary carries as ticket_counts (PRD 760 FR-6, FR-11): a
+	// client that just created or moved a ticket can ask for one row and
+	// refresh its count line from the answer.
+	Counts TicketCounts `json:"counts"`
 	// PartialOwners lists descendant workspaces that could not be read during
 	// a roll-up. The result is still returned — one unreadable child must not
 	// break a parent's list — but the caller has to be able to say so rather

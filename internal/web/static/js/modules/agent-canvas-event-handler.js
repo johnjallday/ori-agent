@@ -34,7 +34,7 @@ export class AgentCanvasEventHandler {
       onTaskEvent: (type, data) => {
         const evt = { type, data };
         this.handleTaskEvent(evt);
-        const taskDesc = data.data?.description || 'Task';
+        const taskDesc = data.data?.description || 'Ticket';
         if (type === 'task.completed') {
           this.parent.notifications.showNotification(`✓ ${taskDesc} completed`, 'success');
         } else if (type === 'task.failed') {
@@ -43,7 +43,7 @@ export class AgentCanvasEventHandler {
         } else if (type === 'task.started') {
           this.parent.notifications.showNotification(`${taskDesc} started`, 'info');
         } else if (type === 'task.created') {
-          this.parent.notifications.showNotification('Task created', 'info');
+          this.parent.notifications.showNotification('Ticket created', 'info');
         }
         this.parent.timeline.addTimelineEvent(evt);
       },
@@ -51,7 +51,7 @@ export class AgentCanvasEventHandler {
         this.parent.notifications.addExecutionLog(
           data.data.task_id,
           'thinking',
-          data.data.message || 'Analyzing task...'
+          data.data.message || 'Analyzing ticket...'
         );
         this.parent.timeline.addTimelineEvent({ type: 'task.thinking', data });
       },
@@ -84,7 +84,7 @@ export class AgentCanvasEventHandler {
         this.parent.notifications.addExecutionLog(
           data.data.task_id,
           'progress',
-          data.data.message || 'Task progress update'
+          data.data.message || 'Run progress update'
         );
         this.parent.timeline.addTimelineEvent({ type: 'task.progress', data });
       },
@@ -352,7 +352,7 @@ export class AgentCanvasEventHandler {
       task.next_run = scheduledTask.next_run;
 
       this.parent.notifications?.showNotification?.(
-        `Scheduled task triggered: ${task.description?.substring(0, 30) || 'Task'}`,
+        `Scheduled ticket triggered: ${task.description?.substring(0, 30) || 'Ticket'}`,
         'info'
       );
     } else if (eventData.type === 'scheduled_task.failed') {

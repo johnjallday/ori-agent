@@ -421,7 +421,7 @@ class TaskModalController {
     ];
     if (!ended.includes(code)) return message || 'Nothing was saved. Try again.';
     this.assistantOperation = null;
-    return `${message || "The assistant's request has ended. Nothing was saved."} Save again to create this as your own task.`;
+    return `${message || "The assistant's request has ended. Nothing was saved."} Save again to create this as your own ticket.`;
   }
 
   /**
@@ -642,11 +642,11 @@ class TaskModalController {
         if (this.editingTaskId) {
           if (autoCreateSection) autoCreateSection.style.display = 'none';
           if (autoEditSection) autoEditSection.style.display = 'block';
-          if (saveButtonText) saveButtonText.textContent = 'Update Task';
+          if (saveButtonText) saveButtonText.textContent = 'Update Ticket';
         } else {
           if (autoCreateSection) autoCreateSection.style.display = 'block';
           if (autoEditSection) autoEditSection.style.display = 'none';
-          if (saveButtonText) saveButtonText.textContent = 'Create Task';
+          if (saveButtonText) saveButtonText.textContent = 'Create Ticket';
         }
       } else {
         // LLM not available - show warning
@@ -669,7 +669,7 @@ class TaskModalController {
       if (autoSection) autoSection.style.display = 'none';
       if (llmWarning) llmWarning.style.display = 'none';
       if (saveButtonText)
-        saveButtonText.textContent = this.editingTaskId ? 'Save Task' : 'Save Task';
+        saveButtonText.textContent = this.editingTaskId ? 'Save Ticket' : 'Save Ticket';
     }
   }
 
@@ -938,7 +938,7 @@ class TaskModalController {
     const modal = document.getElementById('taskModal');
     if (!modal) {
       console.error('Task modal markup is missing from the page.');
-      this.showToast('Task editor is unavailable on this page.', 'error');
+      this.showToast('Ticket editor is unavailable on this page.', 'error');
       return;
     }
 
@@ -947,7 +947,7 @@ class TaskModalController {
     if (modalTitle) {
       modalTitle.textContent =
         String(createOptions.modalTitle || '').trim() ||
-        (draftSubtasks.length > 0 ? 'Review Workflow Draft' : 'Create Task');
+        (draftSubtasks.length > 0 ? 'Review Workflow Draft' : 'Create Ticket');
     }
 
     // Show workspace badge or selector based on whether workspaceId is provided
@@ -1068,14 +1068,14 @@ class TaskModalController {
     const modal = document.getElementById('taskModal');
     if (!modal) {
       console.error('Task modal markup is missing from the page.');
-      this.showToast('Task editor is unavailable on this page.', 'error');
+      this.showToast('Ticket editor is unavailable on this page.', 'error');
       return;
     }
 
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
     if (modalTitle) {
-      modalTitle.textContent = 'Task Details';
+      modalTitle.textContent = 'Ticket Details';
     }
 
     // Show workspace badge
@@ -1110,7 +1110,7 @@ class TaskModalController {
     if (isSubtask) {
       this.setSubtaskSectionDisabled(
         true,
-        'This task is already part of a workflow. Subtasks can only be added to top-level tasks.'
+        'This ticket is already part of a workflow. Subtickets can only be added to top-level tickets.'
       );
     }
 
@@ -1182,7 +1182,7 @@ class TaskModalController {
     const metaEl = document.getElementById('taskAutoEditCurrentMeta');
 
     if (titleEl) {
-      titleEl.textContent = task.description || 'Untitled Task';
+      titleEl.textContent = task.description || 'Untitled Ticket';
     }
 
     if (detailsEl) {
@@ -1224,7 +1224,7 @@ class TaskModalController {
         this.showToast('Please wait for the current save to finish.', 'info');
         return false;
       }
-      if (this.hasUnsavedChanges() && !window.confirm('Discard unsaved task changes?')) {
+      if (this.hasUnsavedChanges() && !window.confirm('Discard unsaved ticket changes?')) {
         return false;
       }
     }
@@ -1551,8 +1551,8 @@ class TaskModalController {
     }
     if (elements.mcpRequirementBody) {
       elements.mcpRequirementBody.textContent = requirement.bindingId
-        ? `Workspace binding ${requirement.bindingId} points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the task.`
-        : `The workspace points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the task.`;
+        ? `Workspace binding ${requirement.bindingId} points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the run.`
+        : `The workspace points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the run.`;
     }
     if (elements.mcpRequirementStatus) {
       elements.mcpRequirementStatus.textContent = '';
@@ -1671,7 +1671,7 @@ class TaskModalController {
       );
       if (alreadyConfigured) {
         this.setMCPRequirementStatus(
-          `${serverName} is already in My Servers. Retry the task when ready.`
+          `${serverName} is already in My Servers. Retry the run when ready.`
         );
         if (button) button.textContent = 'Connector available';
         this.showToast(`${serverName} is already available`, 'info');
@@ -1701,7 +1701,7 @@ class TaskModalController {
       }
 
       this.setMCPRequirementStatus(
-        `${serverName} has been added to My Servers. Retry the task to use it.`
+        `${serverName} has been added to My Servers. Retry the run to use it.`
       );
       if (button) button.textContent = 'Connector added';
       this.showToast(`${serverName} connector added`, 'success');
@@ -1732,7 +1732,7 @@ class TaskModalController {
       cancelled: 'Cancelled',
       timeout: 'Timed Out'
     };
-    return labels[normalized] || normalized || 'Task';
+    return labels[normalized] || normalized || 'Unknown';
   }
 
   resolveTaskResultData(task) {
@@ -1907,12 +1907,12 @@ class TaskModalController {
 
     elements.nextSteps.style.display = 'block';
     elements.nextStepsCopy.textContent =
-      'Choose the next step to create and run a follow-up task linked to this result.';
+      'Choose the next step to create and run a follow-up ticket linked to this result.';
     elements.nextStepsActions.innerHTML = this.currentResultNextSteps
       .map(step => {
         const buttonLabel = this.currentResultFollowUpPending
-          ? 'Creating follow-up task...'
-          : 'Create follow-up task';
+          ? 'Creating follow-up ticket...'
+          : 'Create follow-up ticket';
         return `
         <button type="button"
                 class="task-modal-btn task-modal-btn-secondary"
@@ -1944,7 +1944,7 @@ class TaskModalController {
 
   buildFollowUpTitle(task, step) {
     const baseTitle =
-      String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
+      String(task?.description || task?.name || 'Follow-up ticket').trim() || 'Follow-up ticket';
     const stepLabel = this.cleanResultNextStepText(step?.label || '');
     if (!stepLabel) return baseTitle;
     const combined = `${baseTitle} - ${stepLabel}`;
@@ -1954,19 +1954,19 @@ class TaskModalController {
   buildFollowUpDetails(task, sourceTaskId, step) {
     const parts = [];
     const baseTitle = String(
-      task?.description || task?.name || task?.id || 'Completed task'
+      task?.description || task?.name || task?.id || 'Completed ticket'
     ).trim();
     const stepLabel = this.cleanResultNextStepText(step?.label || '');
     const stepNumber = String(step?.number || '').trim();
-    parts.push(`Follow-up created from completed task: ${baseTitle}`);
+    parts.push(`Follow-up created from a completed run: ${baseTitle}`);
     if (stepLabel) {
       parts.push(`Selected next step: ${stepNumber ? `${stepNumber}. ` : ''}${stepLabel}`);
     }
     if (sourceTaskId) {
-      parts.push(`Linked input task: ${sourceTaskId}`);
+      parts.push(`Linked input ticket: ${sourceTaskId}`);
     }
     parts.push(
-      'Use the linked task result as the starting context and continue the work from there.'
+      'Use the linked run result as the starting context and continue the work from there.'
     );
     return parts.join('\n');
   }
@@ -1979,13 +1979,13 @@ class TaskModalController {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || 'Failed to create follow-up task');
+      throw new Error(text || 'Failed to create follow-up ticket');
     }
 
     const data = await response.json();
     const createdTask = data.task || data;
     if (!createdTask?.id) {
-      throw new Error('Follow-up task was created without an id');
+      throw new Error('Follow-up ticket was created without an id');
     }
 
     if (typeof this.onSaveCallback === 'function') {
@@ -2004,7 +2004,7 @@ class TaskModalController {
     });
     if (!executeResponse.ok) {
       const text = await executeResponse.text();
-      throw new Error(text || 'Failed to start follow-up task');
+      throw new Error(text || 'Failed to start follow-up ticket');
     }
 
     return createdTask;
@@ -2035,11 +2035,11 @@ class TaskModalController {
       };
 
       await this.createAndRunFollowUpTask(payload);
-      this.showToast('Follow-up task created', 'success');
+      this.showToast('Follow-up ticket created', 'success');
       this.close({ force: true });
     } catch (error) {
       console.error('Failed to continue from task modal result:', error);
-      this.showToast(error.message || 'Failed to continue task', 'error');
+      this.showToast(error.message || 'Failed to continue the work', 'error');
     } finally {
       this.currentResultFollowUpPending = false;
       if (this.currentTask) {
@@ -2102,20 +2102,20 @@ class TaskModalController {
     const normalized = raw.replace(/\s+/g, ' ').trim();
 
     if (/request timed out|deadline exceeded/i.test(normalized)) {
-      return 'Auto parsing timed out before the assistant returned a task plan. No task was created.';
+      return 'Auto parsing timed out before the assistant returned a plan. No ticket was created.';
     }
     if (/request was canceled|context canceled/i.test(normalized)) {
-      return 'Auto parsing was canceled before the assistant returned a task plan. No task was created.';
+      return 'Auto parsing was canceled before the assistant returned a plan. No ticket was created.';
     }
     if (/(?:system|default) model not configured/i.test(normalized)) {
-      return 'Auto mode needs a configured Default model before it can create a task.';
+      return 'Auto mode needs a configured Default model before it can create a ticket.';
     }
     if (!normalized) {
-      return 'No task was created. Try again or switch to Manual.';
+      return 'No ticket was created. Try again or switch to Manual.';
     }
 
     const detail = normalized.length > 220 ? `${normalized.slice(0, 217)}...` : normalized;
-    return `No task was created. ${detail}`;
+    return `No ticket was created. ${detail}`;
   }
 
   showAutoParseError(error) {
@@ -2140,7 +2140,7 @@ class TaskModalController {
     const descriptionEl = document.getElementById('taskAutoDescription');
 
     if (errorBox) errorBox.hidden = true;
-    if (messageEl) messageEl.textContent = 'No task was created. Try again or switch to Manual.';
+    if (messageEl) messageEl.textContent = 'No ticket was created. Try again or switch to Manual.';
     if (descriptionEl) {
       if (typeof descriptionEl.removeAttribute === 'function') {
         descriptionEl.removeAttribute('aria-invalid');
@@ -2239,7 +2239,7 @@ class TaskModalController {
 
       const titleEl = document.createElement('div');
       titleEl.className = 'task-modal-auto-confirm-step-title';
-      titleEl.textContent = String(step?.title || step?.description || `Task ${index + 1}`).trim();
+      titleEl.textContent = String(step?.title || step?.description || `Step ${index + 1}`).trim();
 
       const agent = String(step?.agent_name || '').trim();
       const agentEl = document.createElement('div');
@@ -2278,14 +2278,14 @@ class TaskModalController {
     const assignmentState = options.assignmentState || (assignment ? 'assigned' : 'unassigned');
 
     if (elements.eyebrow)
-      elements.eyebrow.textContent = String(options.eyebrow || 'Auto Parsed Task');
-    if (elements.title) elements.title.textContent = String(options.title || 'Create this task?');
+      elements.eyebrow.textContent = String(options.eyebrow || 'Auto Parsed Ticket');
+    if (elements.title) elements.title.textContent = String(options.title || 'Create this ticket?');
     if (elements.message)
       elements.message.textContent = String(
-        options.message || 'Review the task parsed from your request before it is created.'
+        options.message || 'Review the ticket parsed from your request before it is created.'
       );
     if (elements.parsedTitle)
-      elements.parsedTitle.textContent = String(options.parsedTitle || 'New Task');
+      elements.parsedTitle.textContent = String(options.parsedTitle || 'New Ticket');
     if (elements.assignment) {
       elements.assignment.textContent = assignmentLabel;
       elements.assignment.dataset.state = assignmentState;
@@ -2299,7 +2299,7 @@ class TaskModalController {
     );
 
     if (elements.createButton)
-      elements.createButton.textContent = String(options.confirmLabel || 'Create Task');
+      elements.createButton.textContent = String(options.confirmLabel || 'Create Ticket');
     if (elements.cancelButton)
       elements.cancelButton.textContent = String(options.cancelLabel || 'Cancel');
     elements.container.hidden = false;
@@ -2321,8 +2321,8 @@ class TaskModalController {
   ) {
     const isWorkflow = workflowSteps.length > 0;
     const assignee = String(isWorkflow ? '' : parsed?.agent_name || '').trim();
-    const title = isWorkflow ? 'Create this workflow?' : 'Create this task?';
-    const confirmLabel = isWorkflow ? 'Create Workflow' : 'Create Task';
+    const title = isWorkflow ? 'Create this workflow?' : 'Create this ticket?';
+    const confirmLabel = isWorkflow ? 'Create Workflow' : 'Create Ticket';
     const scheduleSummary = this.summarizeAutoParsedSchedule(scheduleData);
     const storageSummary = this.summarizeAutoParsedStorage(resultStorageData);
     const details = [];
@@ -2333,7 +2333,7 @@ class TaskModalController {
     if (parsedDetails) details.push(parsedDetails);
     if (isWorkflow) {
       workflowSteps.forEach((step, index) => {
-        const stepTitle = String(step?.title || step?.description || `Task ${index + 1}`).trim();
+        const stepTitle = String(step?.title || step?.description || `Step ${index + 1}`).trim();
         const stepAssignee = String(step?.agent_name || '').trim();
         details.push(
           `Step ${index + 1}: ${stepTitle}${stepAssignee ? ` | Assigned to ${stepAssignee}` : ' | Unassigned'}`
@@ -2345,7 +2345,7 @@ class TaskModalController {
     if (scheduleSummary) details.push(`Schedule: ${scheduleSummary}`);
     if (storageSummary) details.push(storageSummary);
 
-    const metaItems = ['Auto Parse', isWorkflow ? `${workflowSteps.length} steps` : 'Task'];
+    const metaItems = ['Auto Parse', isWorkflow ? `${workflowSteps.length} steps` : 'Ticket'];
     if (isWorkflow) {
       const assignedStepCount = workflowSteps.filter(step =>
         String(step?.agent_name || '').trim()
@@ -2361,14 +2361,14 @@ class TaskModalController {
       ? workflowSteps.filter(step => String(step?.agent_name || '').trim()).length
       : 0;
     const inlineConfirm = this.showAutoParseConfirmDialog({
-      eyebrow: 'Auto Parsed Task',
+      eyebrow: 'Auto Parsed Ticket',
       title,
       message: isWorkflow
         ? 'Review the workflow parsed from your request before it is created.'
-        : 'Review the task parsed from your request before it is created.',
+        : 'Review the ticket parsed from your request before it is created.',
       confirmLabel,
       cancelLabel: 'Cancel',
-      parsedTitle: parsedTitle || (isWorkflow ? 'New Workflow' : 'New Task'),
+      parsedTitle: parsedTitle || (isWorkflow ? 'New Workflow' : 'New Ticket'),
       assignment: isWorkflow
         ? `${assignedStepCount}/${workflowSteps.length} steps assigned`
         : assignee,
@@ -2391,11 +2391,11 @@ class TaskModalController {
       typeof window.WorkspaceHubModals.showExecutionConfirm === 'function'
     ) {
       return window.WorkspaceHubModals.showExecutionConfirm({
-        eyebrow: 'Auto Parsed Task',
+        eyebrow: 'Auto Parsed Ticket',
         title,
         message: isWorkflow
           ? 'Review the workflow parsed from your request before it is created.'
-          : 'Review the task parsed from your request before it is created.',
+          : 'Review the ticket parsed from your request before it is created.',
         confirmLabel,
         cancelLabel: 'Cancel',
         metaItems,
@@ -2407,7 +2407,7 @@ class TaskModalController {
       title,
       isWorkflow
         ? 'Review the workflow parsed from your request before it is created.'
-        : 'Review the task parsed from your request before it is created.',
+        : 'Review the ticket parsed from your request before it is created.',
       ...details
     ]
       .filter(Boolean)
@@ -2456,13 +2456,13 @@ class TaskModalController {
     const tags = this.taskTagsWidget ? this.taskTagsWidget.getTags() : [];
 
     if (!description) {
-      this.showToast('Task title is required', 'error');
+      this.showToast('Ticket title is required', 'error');
       descriptionInput?.focus();
       return;
     }
 
     if (!this.workspaceId) {
-      this.showToast('Please select a workspace for this task', 'error');
+      this.showToast('Please select a workspace for this ticket', 'error');
       // Show the workspace selector if it's hidden
       this.showWorkspaceSelector();
       return;
@@ -2477,7 +2477,7 @@ class TaskModalController {
 
     const { subtasks, invalidInput } = this.collectSubtasks();
     if (invalidInput) {
-      this.showToast('Subtask title is required', 'error');
+      this.showToast('Subticket title is required', 'error');
       invalidInput.focus();
       return;
     }
@@ -2486,7 +2486,7 @@ class TaskModalController {
       this.currentTask?.parent_task_id && String(this.currentTask.parent_task_id).trim() !== ''
     );
     if (!canManageSubtasks && subtasks.length > 0) {
-      this.showToast('Subtasks can only be added to top-level tasks', 'error');
+      this.showToast('Subtickets can only be added to top-level tickets', 'error');
       return;
     }
 
@@ -2532,7 +2532,7 @@ class TaskModalController {
         const refused = await this._economyRefusal(response);
         if (refused) throw refused;
         if (!response.ok) {
-          throw await this._parseTaskApiError(response, 'Failed to create task');
+          throw await this._parseTaskApiError(response, 'Failed to create ticket');
         }
 
         const createdPayload = await response.json();
@@ -2571,7 +2571,7 @@ class TaskModalController {
         if (refused) throw refused;
         if (!response.ok) {
           const errText = await response.text();
-          throw new Error(errText || 'Failed to update task');
+          throw new Error(errText || 'Failed to update ticket');
         }
       };
 
@@ -2585,7 +2585,7 @@ class TaskModalController {
         );
         if (!response.ok) {
           const errText = await response.text();
-          throw new Error(errText || 'Failed to delete subtask');
+          throw new Error(errText || 'Failed to delete subticket');
         }
       };
 
@@ -2599,7 +2599,7 @@ class TaskModalController {
         const firstSubtask = subtasks[0];
         if (!firstSubtask?.to || firstSubtask.to === 'unassigned') {
           this.showToast(
-            'Assign an agent to the first subtask before enabling a schedule',
+            'Assign an agent to the first subticket before enabling a schedule',
             'error'
           );
           return;
@@ -2626,7 +2626,7 @@ class TaskModalController {
 
           await this._safeAttachUploads(this.editingTaskId);
 
-          this.showToast('Task updated', 'success');
+          this.showToast('Ticket updated', 'success');
         } else if (isWorkflow) {
           await updateTask(this.editingTaskId, {
             description,
@@ -2709,7 +2709,7 @@ class TaskModalController {
           // Upload files to existing task
           await this._safeAttachUploads(this.editingTaskId);
 
-          this.showToast('Task updated', 'success');
+          this.showToast('Ticket updated', 'success');
         }
       } else if (subtasks.length > 0) {
         // Atomic workflow create. Pre-generate UUIDs for parent + every
@@ -2798,7 +2798,7 @@ class TaskModalController {
 
         eventName = 'task:created';
         eventPayload = { task: createdTask };
-        this.showToast('Task created', 'success');
+        this.showToast('Ticket created', 'success');
       }
 
       // What the save cost, said plainly (city-economy FR46). Announced from the
@@ -2834,7 +2834,7 @@ class TaskModalController {
         const summary = issues[0]?.message || error.message || 'Workflow has invalid dependencies';
         this.showToast(summary, 'error');
       } else {
-        this.showToast(error.message || 'Failed to save task', 'error');
+        this.showToast(error.message || 'Failed to save ticket', 'error');
       }
     } finally {
       this.isSaving = false;
@@ -2846,7 +2846,7 @@ class TaskModalController {
         saveButton.disabled = this.economySaveBlocked;
         saveButton.classList.remove('is-saving');
       }
-      if (saveText) saveText.textContent = originalText || 'Save Task';
+      if (saveText) saveText.textContent = originalText || 'Save Ticket';
     }
   }
 
@@ -2903,8 +2903,8 @@ class TaskModalController {
     const firstMessage = failures[0]?.message || '';
     const summary =
       counts > 0
-        ? `${counts} attachment${counts === 1 ? '' : 's'} failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`
-        : `Some attachments failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`;
+        ? `${counts} attachment${counts === 1 ? '' : 's'} failed to upload — ticket saved without them.${firstMessage ? ` ${firstMessage}` : ''}`
+        : `Some attachments failed to upload — ticket saved without them.${firstMessage ? ` ${firstMessage}` : ''}`;
     this.showToast(summary, 'warning');
     this._uploadFailures = [];
   }
@@ -3020,13 +3020,13 @@ class TaskModalController {
     let parseSucceeded = false;
 
     if (!description) {
-      this.showToast('Please describe the task you want to create', 'error');
+      this.showToast('Please describe the ticket you want to create', 'error');
       autoDescriptionInput?.focus();
       return;
     }
 
     if (!this.workspaceId) {
-      this.showToast('Please select a workspace for this task', 'error');
+      this.showToast('Please select a workspace for this ticket', 'error');
       // Show the workspace selector if it's hidden
       this.showWorkspaceSelector();
       return;
@@ -3035,7 +3035,7 @@ class TaskModalController {
     this.clearAutoParseError();
     this.showProgress('parse', {
       headline: 'Parsing request',
-      message: 'Analyzing your task description.'
+      message: 'Analyzing your ticket description.'
     });
 
     // Show loading state
@@ -3063,7 +3063,7 @@ class TaskModalController {
 
       if (!parseResponse.ok) {
         const errText = await parseResponse.text();
-        throw new Error(errText || 'Failed to parse task description');
+        throw new Error(errText || 'Failed to parse ticket description');
       }
 
       const parsed = await parseResponse.json();
@@ -3081,8 +3081,8 @@ class TaskModalController {
       }
 
       this.updateProgress('prepare', {
-        headline: 'Planning tasks',
-        message: 'Preparing the task details.'
+        headline: 'Planning tickets',
+        message: 'Preparing the ticket details.'
       });
 
       // Build schedule data from parsed response
@@ -3134,11 +3134,11 @@ class TaskModalController {
           resultStorageData
         );
         if (!confirmed) {
-          this.showToast('Task creation cancelled', 'info');
+          this.showToast('Ticket creation cancelled', 'info');
           return;
         }
         this.showProgress('apply', {
-          headline: 'Creating tasks',
+          headline: 'Creating tickets',
           message: 'Saving the workflow to your workspace.'
         });
         const parentTitle = parsed.title || workflowSteps[0]?.title || 'New Workflow';
@@ -3160,7 +3160,7 @@ class TaskModalController {
 
         if (!parentResponse.ok) {
           const errText = await parentResponse.text();
-          throw new Error(errText || 'Failed to create parent task');
+          throw new Error(errText || 'Failed to create parent ticket');
         }
 
         const parentPayload = await parentResponse.json();
@@ -3168,7 +3168,7 @@ class TaskModalController {
         const parentTaskId = parentTask?.id;
 
         if (!parentTaskId) {
-          throw new Error('Parent task created but ID is missing');
+          throw new Error('Parent ticket created but ID is missing');
         }
 
         const stepIdToTaskId = new Map();
@@ -3177,7 +3177,7 @@ class TaskModalController {
         for (let i = 0; i < workflowSteps.length; i++) {
           const step = workflowSteps[i] || {};
           const stepId = step.id || `step-${i + 1}`;
-          const stepTitle = step.title || step.description || parsed.title || `Task ${i + 1}`;
+          const stepTitle = step.title || step.description || parsed.title || `Step ${i + 1}`;
           const stepDetails = step.details || '';
           const stepPriority = Number.isInteger(step.priority)
             ? step.priority
@@ -3221,7 +3221,7 @@ class TaskModalController {
 
           if (!createResponse.ok) {
             const errText = await createResponse.text();
-            throw new Error(errText || 'Failed to create task');
+            throw new Error(errText || 'Failed to create ticket');
           }
 
           const createdPayload = await createResponse.json();
@@ -3239,7 +3239,7 @@ class TaskModalController {
         this.pendingFiles = [];
         this.pendingFilePaths = [];
 
-        this.showToast(workflowSteps.length > 1 ? 'Workflow created' : 'Task created', 'success');
+        this.showToast(workflowSteps.length > 1 ? 'Workflow created' : 'Ticket created', 'success');
         await this.finalizeSuccessfulSave('task:created');
         return;
       }
@@ -3260,13 +3260,13 @@ class TaskModalController {
         resultStorageData
       );
       if (!confirmed) {
-        this.showToast('Task creation cancelled', 'info');
+        this.showToast('Ticket creation cancelled', 'info');
         return;
       }
 
       this.showProgress('apply', {
-        headline: 'Creating task',
-        message: 'Saving the task to your workspace.'
+        headline: 'Creating ticket',
+        message: 'Saving the ticket to your workspace.'
       });
 
       // Create the task
@@ -3289,7 +3289,7 @@ class TaskModalController {
 
       if (!createResponse.ok) {
         const errText = await createResponse.text();
-        throw new Error(errText || 'Failed to create task');
+        throw new Error(errText || 'Failed to create ticket');
       }
 
       // Upload files to newly created task
@@ -3302,16 +3302,16 @@ class TaskModalController {
       this.pendingFiles = [];
       this.pendingFilePaths = [];
 
-      this.showToast('Task created', 'success');
+      this.showToast('Ticket created', 'success');
       await this.finalizeSuccessfulSave('task:created', { task: createdTask });
     } catch (error) {
       console.error('Failed to save task in auto mode:', error);
       if (!parseSucceeded) {
         this.showAutoParseError(error);
         autoDescriptionInput?.focus();
-        this.showToast('Auto parsing did not work. No task was created.', 'error');
+        this.showToast('Auto parsing did not work. No ticket was created.', 'error');
       } else {
-        this.showToast(error.message || 'Failed to create task', 'error');
+        this.showToast(error.message || 'Failed to create ticket', 'error');
       }
     } finally {
       this.isSaving = false;
@@ -3321,7 +3321,7 @@ class TaskModalController {
         saveButton.disabled = false;
         saveButton.classList.remove('is-saving');
       }
-      if (saveText) saveText.textContent = originalText || 'Create Task';
+      if (saveText) saveText.textContent = originalText || 'Create Ticket';
     }
   }
 
@@ -3333,13 +3333,13 @@ class TaskModalController {
     const modificationDescription = autoEditDescriptionInput?.value?.trim();
 
     if (!modificationDescription) {
-      this.showToast('Please describe how you want to modify the task', 'error');
+      this.showToast('Please describe how you want to modify the ticket', 'error');
       autoEditDescriptionInput?.focus();
       return;
     }
 
     if (!this.currentTask || !this.editingTaskId) {
-      this.showToast('No task selected for editing', 'error');
+      this.showToast('No ticket selected for editing', 'error');
       return;
     }
 
@@ -3439,7 +3439,7 @@ class TaskModalController {
       }
 
       this.updateProgress('apply', {
-        headline: 'Updating task',
+        headline: 'Updating ticket',
         message: 'Saving your changes.'
       });
 
@@ -3461,7 +3461,7 @@ class TaskModalController {
 
       if (!updateResponse.ok) {
         const errText = await updateResponse.text();
-        throw new Error(errText || 'Failed to update task');
+        throw new Error(errText || 'Failed to update ticket');
       }
 
       // Upload files if any
@@ -3472,11 +3472,11 @@ class TaskModalController {
       this.pendingFiles = [];
       this.pendingFilePaths = [];
 
-      this.showToast('Task updated', 'success');
+      this.showToast('Ticket updated', 'success');
       await this.finalizeSuccessfulSave('task:updated');
     } catch (error) {
       console.error('Failed to update task in auto mode:', error);
-      this.showToast(error.message || 'Failed to update task', 'error');
+      this.showToast(error.message || 'Failed to update ticket', 'error');
     } finally {
       this.isSaving = false;
       this.hideProgress();
@@ -3485,7 +3485,7 @@ class TaskModalController {
         saveButton.disabled = false;
         saveButton.classList.remove('is-saving');
       }
-      if (saveText) saveText.textContent = originalText || 'Update Task';
+      if (saveText) saveText.textContent = originalText || 'Update Ticket';
     }
   }
 
@@ -4381,7 +4381,7 @@ class TaskModalController {
     if (!draft.title && !draft.details) {
       this.populateOutputContractRows(this.suggestOutputContractColumns(), 'manual');
       this.setOutputContractStatus(
-        'Add a task title or details to improve the contract suggestion.'
+        'Add a ticket title or details to improve the contract suggestion.'
       );
       return;
     }
@@ -4782,7 +4782,7 @@ class TaskModalController {
         `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
       );
       if (!response.ok) {
-        throw new Error('Failed to load tasks');
+        throw new Error('Failed to load tickets');
       }
       const data = await response.json();
       this.workspaceTasks = data.tasks || [];
@@ -4799,7 +4799,7 @@ class TaskModalController {
    */
   formatTaskOptionLabel(task) {
     if (!task) return '';
-    const title = task.description || task.name || task.id || 'Untitled Task';
+    const title = task.description || task.name || task.id || 'Untitled Ticket';
     const idSuffix = task.id ? task.id.slice(0, 6) : '';
     return idSuffix ? `${title} (${idSuffix})` : title;
   }
@@ -5094,11 +5094,11 @@ class TaskModalController {
       if (availableSteps.length > 0)
         groups.push({ label: 'Workflow steps', items: availableSteps });
       if (externalOptions.length > 0)
-        groups.push({ label: 'Workspace tasks', items: externalOptions });
+        groups.push({ label: 'Workspace tickets', items: externalOptions });
 
       if (groups.length === 0) {
         container.innerHTML =
-          '<div class="task-modal-input-empty">No input tasks available — add another step or another task to the workspace.</div>';
+          '<div class="task-modal-input-empty">No input tickets available — add another step or another ticket to the workspace.</div>';
         container.dataset.selectedInputs = JSON.stringify([]);
         this.updateSubtaskInputsBadge(card, 0);
         return;
@@ -5293,7 +5293,7 @@ class TaskModalController {
     const hasSubtasks = list && list.children.length > 0;
     hint.textContent = hasSubtasks
       ? 'Schedules run the first step. Auto-save stores the final step.'
-      : 'Add steps to turn this task into a workflow.';
+      : 'Add steps to turn this ticket into a workflow.';
   }
 
   /**
@@ -5337,7 +5337,7 @@ class TaskModalController {
     const inputCount = Number.isFinite(data.inputCount) ? data.inputCount : 0;
     if (inputCount > 0) {
       inputsBadge.textContent = `Inputs: ${inputCount}`;
-      inputsBadge.title = `Uses results from ${inputCount} task${inputCount === 1 ? '' : 's'}`;
+      inputsBadge.title = `Uses results from ${inputCount} ticket${inputCount === 1 ? '' : 's'}`;
     } else {
       inputsBadge.style.display = 'none';
     }
@@ -5349,7 +5349,7 @@ class TaskModalController {
     removeBtn.type = 'button';
     removeBtn.className = 'task-modal-subtask-remove';
     removeBtn.setAttribute('data-action', 'remove-subtask');
-    removeBtn.setAttribute('title', 'Remove subtask');
+    removeBtn.setAttribute('title', 'Remove subticket');
     removeBtn.innerHTML = `
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
         <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -5433,12 +5433,12 @@ class TaskModalController {
     inputsField.className = 'task-modal-field';
     const inputsLabel = document.createElement('label');
     inputsLabel.className = 'task-modal-label';
-    inputsLabel.textContent = 'Input Tasks';
+    inputsLabel.textContent = 'Input Tickets';
     const inputsContainer = document.createElement('div');
     inputsContainer.id = `${rowId}-inputs`;
     inputsContainer.className = 'task-modal-input-chips task-modal-subtask-inputs';
     inputsContainer.setAttribute('role', 'group');
-    inputsContainer.setAttribute('aria-label', 'Subtask input tasks');
+    inputsContainer.setAttribute('aria-label', 'Subticket input tickets');
     inputsContainer.dataset.selectedInputs = JSON.stringify(data.inputTaskIds || []);
     inputsField.appendChild(inputsLabel);
     inputsField.appendChild(inputsContainer);
@@ -5446,7 +5446,7 @@ class TaskModalController {
     const inputsHint = document.createElement('div');
     inputsHint.className = 'task-modal-subtask-inputs-hint';
     inputsHint.textContent =
-      'Click a step or task to feed its result into this step. Reference values with {input1}, {input2}, {previous}, or {result} in the title.';
+      'Click a step or ticket to feed its result into this step. Reference values with {input1}, {input2}, {previous}, or {result} in the title.';
     inputsField.appendChild(inputsHint);
 
     inputsContainer.addEventListener('change', () => {

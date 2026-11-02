@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { TicketCounts } from './ticket-count-line.js';
 
 const source = readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8');
 const buildingArtSource = readFileSync(
@@ -20,7 +21,9 @@ const cockpitCSS = readFileSync(
 
 // Load the IIFE in a sandbox and grab the exposed pure layout function.
 function loadComputeLayout() {
-  const window = {};
+  // The ES module that mounts the map imports ticket-count-line.js first,
+  // which registers window.OriTicketCounts; a sandbox does the same.
+  const window = { OriTicketCounts: TicketCounts };
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
   vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
@@ -30,7 +33,7 @@ function loadComputeLayout() {
 
 // Load the IIFE and grab the full exposed API (used for meta-rendering tests).
 function loadOriWorkspaceMap() {
-  const window = {};
+  const window = { OriTicketCounts: TicketCounts };
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
   vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
@@ -1760,17 +1763,31 @@ test('content bounds grow around placed content with a viewport of margin (FR-10
   assert.ok(far.world.maxY >= far.bounds.maxY + viewport.height);
 });
 
-test('computeStats sums enriched agent/task counts and counts groups', () => {
+test('computeStats sums agents and the server ticket counts and counts groups', () => {
   const { computeStats } = loadOriWorkspaceMap();
   const stats = computeStats([
-    { id: 'a', agent_count: 2, open_task_count: 1 },
-    { id: 'b', kind: 'group', agent_count: 1, open_task_count: 0 },
+    { id: 'a', agent_count: 2, ticket_counts: { ready: 1, review: 2, done: 7 } },
+    { id: 'b', kind: 'group', agent_count: 1, ticket_counts: { in_progress: 3 } },
     { id: 'c' } // missing fields degrade to 0, not NaN
   ]);
   assert.equal(stats.workspaces, 3);
   assert.equal(stats.agents, 3);
-  assert.equal(stats.openTasks, 1);
   assert.equal(stats.groups, 1);
+  assert.equal(stats.work.review, 2);
+  assert.equal(stats.work.in_progress, 3);
+  assert.equal(stats.work.ready, 1);
+  assert.equal(stats.work.done, 7);
+  assert.equal(
+    stats.openTasks,
+    undefined,
+    'the browser no longer carries a legacy open-task total'
+  );
+});
+
+test('computeStats leaves the work count unknown when no workspace reported one', () => {
+  const { computeStats } = loadOriWorkspaceMap();
+  const stats = computeStats([{ id: 'a', agent_count: 1, open_task_count: 5 }, { id: 'b' }]);
+  assert.equal(stats.work, null, 'open_task_count is not read, so nothing reported');
 });
 
 test('hqSiteView exposes a missing, skipped, or broken Personal HQ site without treating a valid HQ as missing', () => {
@@ -1954,21 +1971,44 @@ test('no ordinary create pad is allocated among the real and reserved sites (#36
   assert.equal(layout.bounds.maxY, Math.max(...sites.map(s => s.y)) + cellH);
 });
 
-test('tileHTML meta line reflects enriched agent/task counts with correct pluralization', () => {
+test('tileHTML meta line reflects the agents and the server ticket counts', () => {
   const { tileHTML } = loadOriWorkspaceMap();
   const plural = tileHTML({
-    ws: { id: 'a', name: 'Deep Sea Research', agent_count: 2, open_task_count: 3 },
+    ws: {
+      id: 'a',
+      name: 'Deep Sea Research',
+      agent_count: 2,
+      ticket_counts: { ready: 3, in_progress: 2, review: 1, backlog: 9 }
+    },
     col: 0,
     row: 0
   });
-  assert.match(plural, /ws-map-tile-meta">2 agents · 3 tasks</);
+  assert.match(plural, /ws-map-tile-meta">2 agents · 1 in review · 2 in progress · 3 ready</);
 
   const singular = tileHTML({
-    ws: { id: 'b', name: 'Solo', agent_count: 1, open_task_count: 1 },
+    ws: { id: 'b', name: 'Solo', agent_count: 1, ticket_counts: { ready: 1 } },
     col: 0,
     row: 0
   });
-  assert.match(singular, /ws-map-tile-meta">1 agent · 1 task</);
+  assert.match(singular, /ws-map-tile-meta">1 agent · 1 ready</);
+
+  const empty = tileHTML({
+    ws: { id: 'c', name: 'Quiet', agent_count: 1, ticket_counts: { backlog: 4, done: 2 } },
+    col: 0,
+    row: 0
+  });
+  assert.match(empty, /ws-map-tile-meta">1 agent · No open work</);
+});
+
+test('tileHTML never reads open_task_count and leaves unreported counts out', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const html = tileHTML({
+    ws: { id: 'd', name: 'Legacy', agent_count: 2, open_task_count: 5 },
+    col: 0,
+    row: 0
+  });
+  assert.match(html, /ws-map-tile-meta">2 agents</);
+  assert.doesNotMatch(html, /5 tasks|open task/);
 });
 
 test('tileHTML uses built-in blueprint provenance for a specialized building', () => {
@@ -2142,7 +2182,7 @@ test('overviewBodyHTML renders generated pocket residents for the Commander and 
     ops_mode: 'guided',
     entry_agent_name: 'Research Lead',
     agents: ['Research Lead', 'Source Scout'],
-    open_task_count: 2,
+    ticket_counts: { review: 1, ready: 1 },
     mcp_count: 1,
     skill_count: 3
   });
@@ -2196,7 +2236,10 @@ test('overviewBodyHTML renders generated pocket residents for the Commander and 
     'the name deterministically selects the same palette color'
   );
 
-  assert.match(html, /2 open</);
+  assert.match(
+    html,
+    /ws-map-ov-k">Tickets<\/span><span class="ws-map-ov-v">1 in review · 1 ready</
+  );
   assert.match(html, /ws-map-ov-k">Tools · MCP<\/span><span class="ws-map-ov-v">1</);
   assert.match(html, /ws-map-ov-k">Skills<\/span><span class="ws-map-ov-v">3</);
 });
@@ -2387,7 +2430,7 @@ test('overviewBodyHTML renders the select-a-workspace placeholder when nothing i
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   assert.match(
     overviewBodyHTML(null),
-    /Select a workspace to see its agents, tasks, tools, and skills\./
+    /Select a workspace to see its agents, tickets, tools, and skills\./
   );
 });
 
@@ -2595,8 +2638,9 @@ test('the selection bar is hidden at zero and counts what is checked', () => {
 // workspace's own Setup Wizard, never a second copy of its state.
 
 function loadMapWithSetup(workspaceId, status) {
-  const window = {};
-  vm.runInNewContext(source, { window, document: {} }, { filename: 'workspace-map.js' });
+  const window = { OriTicketCounts: TicketCounts };
+  const sandbox = { window, document: {} };
+  vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   window.OriWorkspaceMap._setSetupStatusForTest(workspaceId, status);
   return window.OriWorkspaceMap;
 }
@@ -9392,7 +9436,7 @@ test('right-clicking a tile opens the menu and suppresses the browser menu', asy
   assert.deepEqual(harness.menu.labels(), [
     'Open workspace',
     'Open → Backlog',
-    'Give a task…',
+    'Give work…',
     'Add to selection',
     'Delete workspace'
   ]);
@@ -10056,7 +10100,7 @@ test('the legacy launcher mode behaves exactly like the cockpit', async () => {
   assert.deepEqual(harness.menu.labels(), [
     'Open workspace',
     'Open → Backlog',
-    'Give a task…',
+    'Give work…',
     'Add to selection',
     'Delete workspace'
   ]);
@@ -11655,6 +11699,7 @@ async function activityHarness({
     URLSearchParams,
     console: { error() {}, warn() {}, log() {} }
   };
+  window.OriTicketCounts = TicketCounts;
   vm.runInNewContext(bubbleLinesSource, sandbox, { filename: 'activity-bubble-lines.js' });
   vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   const map = window.OriWorkspaceMap;
@@ -11759,7 +11804,7 @@ test('activity: a started run lights the tile, and its finish darkens it and say
   assert.equal(bubbleLine(tile), 'On it.');
   assert.equal(flagText(tile), 'Working');
   assert.equal(ledWorking(tile), true);
-  assert.match(tile.getAttribute('aria-label'), /Alpha, 0 agents · 0 tasks, Working, Theo/);
+  assert.match(tile.getAttribute('aria-label'), /Alpha, 0 agents, Working, Theo/);
   assert.equal(overlayOf(h.tile('ws-2')), null, 'the neighbour stays dark');
 
   h.advance(3000);
@@ -12433,7 +12478,7 @@ test('give a task: offered on a Home building and a group, never on a group page
   const staffed = { id: 'ws-1', name: 'Lab', entry_agent_name: 'Theo' };
 
   const tile = giveTaskItem(map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: staffed }));
-  assert.equal(tile.label, 'Give a task…');
+  assert.equal(tile.label, 'Give work…');
   assert.ok(!tile.disabled, 'a building with a Commander can take a task');
 
   const group = giveTaskItem(
@@ -12446,17 +12491,16 @@ test('give a task: offered on a Home building and a group, never on a group page
   assert.ok(group && !group.disabled, 'a group building offers it too');
 
   const scoped = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: staffed, scoped: true });
-  assert.equal(giveTaskItem(scoped), null, 'a group page keeps its own New Quest composer');
+  assert.equal(giveTaskItem(scoped), null, 'a group page has its own Give work button');
 });
 
-test('give a task: disabled with a reason when there is no Commander or the map is read-only', () => {
+test('give work: disabled only while the map is read-only', () => {
   const map = loadOriWorkspaceMap();
   map._setLayoutForTest({ positions: {} }, 'ready');
   const unstaffed = giveTaskItem(
     map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1', entry_agent_name: ' ' } })
   );
-  assert.equal(unstaffed.disabled, true);
-  assert.equal(unstaffed.hint, 'Needs a Commander');
+  assert.ok(!unstaffed.disabled, 'with nobody to do it, the work goes to the Backlog');
 
   map._setLayoutForTest({ positions: {} }, 'unavailable');
   const readOnly = giveTaskItem(
@@ -12468,133 +12512,17 @@ test('give a task: disabled with a reason when there is no Commander or the map 
   );
   assert.equal(readOnly.disabled, true);
   assert.equal(readOnly.hint, 'The map is read-only right now');
-
-  const html = map.contextMenuHTML([unstaffed]);
-  assert.match(html, /aria-disabled="true"/);
-  assert.match(html, /<span class="ws-map-menu-hint">Needs a Commander<\/span>/);
+  assert.match(map.contextMenuHTML([readOnly]), /aria-disabled="true"/);
 });
 
-// The composer renders into a host on document.body. This host reads back the
-// few things the composer's markup carries, the way the menu host does.
-function composerDocument(env) {
-  const doc = env.document;
-  doc.activeElement = null;
-  const decode = value =>
-    String(value)
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&amp;/g, '&');
-  const control = name => {
-    const own = {};
-    const el = {
-      name,
-      disabled: false,
-      value: '',
-      text: '',
-      style: {},
-      addEventListener: (type, fn) => (own[type] = own[type] || []).push(fn),
-      removeEventListener: (type, fn) => {
-        own[type] = (own[type] || []).filter(entry => entry !== fn);
-      },
-      listenerCount: type => (own[type] || []).length,
-      fire: (type, event = {}) =>
-        (own[type] || []).slice().forEach(fn => fn({ preventDefault() {}, ...event })),
-      focus() {
-        doc.activeElement = el;
-      }
-    };
-    return el;
-  };
-  const parse = html => {
-    const input = control('input');
-    input.disabled = /data-composer-input[^>]*disabled/.test(html);
-    input.value = decode((html.match(/data-composer-input[^>]*>([\s\S]*?)<\/textarea>/) || [])[1]);
-    const start = control('start');
-    start.disabled = /data-composer-start disabled/.test(html);
-    start.text = decode((html.match(/data-composer-start[^>]*>([^<]*)</) || [])[1]);
-    const create = control('create');
-    create.disabled = /data-composer-create disabled/.test(html);
-    const cancel = control('cancel');
-    const composer = control('composer');
-    composer.title = decode((html.match(/id="wsMapComposerTitle">([^<]*)</) || [])[1]);
-    composer.error = decode((html.match(/role="alert">([^<]*)</) || [])[1] || '');
-    composer.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0 });
-    composer.querySelector = sel =>
-      sel.includes('data-composer-input')
-        ? input
-        : sel.includes('data-composer-start')
-          ? start
-          : sel.includes('data-composer-create')
-            ? create
-            : sel.includes('data-composer-cancel')
-              ? cancel
-              : null;
-    composer.querySelectorAll = () => [input, start, create, cancel];
-    return { composer, input, start, create, cancel };
-  };
-  let host = null;
-  doc.body = {
-    children: [],
-    appendChild(child) {
-      this.children.push(child);
-      child.isConnected = true;
-      return child;
-    }
-  };
-  doc.createElement = () => {
-    let html = '';
-    let parts = null;
-    host = {
-      className: '',
-      attrs: {},
-      setAttribute(name, value) {
-        this.attrs[name] = String(value);
-      },
-      get innerHTML() {
-        return html;
-      },
-      set innerHTML(value) {
-        html = value;
-        parts = value ? parse(value) : null;
-      },
-      parts: () => parts,
-      querySelector: sel =>
-        !parts
-          ? null
-          : sel.includes('data-ws-map-composer')
-            ? parts.composer
-            : parts.composer.querySelector(sel)
-    };
-    return host;
-  };
-  return {
-    open: () => !!(host && host.parts()),
-    parts: () => (host ? host.parts() : null)
-  };
-}
-
-async function giveTaskHarness({ workspaces } = {}) {
+async function giveWorkHarness() {
   const env = menuEnvironment();
-  const composer = composerDocument(env);
+  env.document.body = { appendChild() {} };
   const feed = makeFakeActivityFeed();
   const toasts = [];
-  const calls = [];
-  const quick = {
-    createResult: () => ({ id: 't-new', to: 'Theo' }),
-    startResult: () => true,
-    async createTask(workspaceId, description) {
-      calls.push(['create', workspaceId, description]);
-      return quick.createResult();
-    },
-    async startTask(taskId) {
-      calls.push(['start', taskId]);
-      return quick.startResult();
-    }
-  };
+  const opened = [];
   env.window.OriMapActivityFeed = feed;
-  env.window.OriQuickTask = quick;
+  env.window.OriGiveWork = { open: options => opened.push(options) };
   env.window.Toast = {
     info: (message, options) => toasts.push({ kind: 'info', message, options }),
     success: (message, options) => toasts.push({ kind: 'success', message, options })
@@ -12629,8 +12557,14 @@ async function giveTaskHarness({ workspaces } = {}) {
   const map = env.window.OriWorkspaceMap;
   const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
   map.mount(harness.container, {
-    workspaces: workspaces || [
-      { id: 'ws-1', folder_slug: 'lab', name: 'Research Lab', entry_agent_name: 'Theo' },
+    workspaces: [
+      {
+        id: 'ws-1',
+        folder_slug: 'lab',
+        name: 'Research Lab',
+        entry_agent_name: 'Theo',
+        agents: ['Theo', 'Ada']
+      },
       { id: 'ws-2', folder_slug: 'beta', name: 'Beta' }
     ],
     hideChrome: true,
@@ -12639,15 +12573,11 @@ async function giveTaskHarness({ workspaces } = {}) {
   });
   await flush();
   return {
-    map,
     env,
     harness,
-    composer,
     feed,
-    quick,
-    calls,
     toasts,
-    live: () => harness.container.querySelector('[data-map-live]').textContent,
+    opened,
     advance(ms) {
       now += ms;
       timers
@@ -12661,14 +12591,8 @@ async function giveTaskHarness({ workspaces } = {}) {
   };
 }
 
-function giveTaskFromMenu(h, id = 'ws-1') {
-  const origin = {
-    getAttribute: () => id,
-    focused: 0,
-    focus() {
-      this.focused += 1;
-    }
-  };
+function giveWorkFromMenu(h, id = 'ws-1') {
+  const origin = { getAttribute: () => id, focus() {} };
   h.harness.fire(
     'contextmenu',
     rightClick(sel => (sel.includes('data-ws-id') && !sel.includes('data-hq-site') ? origin : null))
@@ -12678,78 +12602,31 @@ function giveTaskFromMenu(h, id = 'ws-1') {
   return origin;
 }
 
-test('give a task: the menu opens a composer at the building with its input focused', async () => {
-  const h = await giveTaskHarness();
-  giveTaskFromMenu(h);
-  assert.equal(h.harness.menu.isOpen(), false, 'the menu made way for the composer');
-  assert.ok(h.composer.open());
-  const parts = h.composer.parts();
-  assert.equal(parts.composer.title, 'Give Research Lab a task');
-  assert.equal(h.env.document.activeElement, parts.input, 'typing can start at once');
-  assert.equal(parts.start.text, 'Create & Start');
-  assert.equal(h.live(), 'Give Research Lab a task');
+test('give work: the menu opens the one flow with the Commander chosen', async () => {
+  const h = await giveWorkHarness();
+  const origin = giveWorkFromMenu(h);
+  assert.equal(h.harness.menu.isOpen(), false, 'the menu made way for the dialog');
+  assert.equal(h.opened.length, 1);
+  const options = h.opened[0];
+  assert.equal(options.workspaceId, 'ws-1');
+  assert.equal(options.workspaceName, 'Research Lab');
+  assert.equal(options.assignee, 'Theo');
+  assert.deepEqual(Array.from(options.agents), ['Theo', 'Ada']);
+  assert.equal(options.trigger, origin, 'focus returns to the building');
 });
 
-test('give a task: a disabled item opens nothing', async () => {
-  const h = await giveTaskHarness();
-  giveTaskFromMenu(h, 'ws-2');
-  assert.equal(h.composer.open(), false);
-  assert.ok(h.harness.menu.isOpen(), 'a disabled item does not even close the menu');
+test('give work: a building with no Commander opens with nobody chosen', async () => {
+  const h = await giveWorkHarness();
+  giveWorkFromMenu(h, 'ws-2');
+  assert.equal(h.opened[0].assignee, '');
 });
 
-test('give a task: Create & Start creates, starts, closes, and never lights the building itself', async () => {
-  const h = await giveTaskHarness();
-  const origin = giveTaskFromMenu(h);
-  const focusBefore = origin.focused;
-  h.composer.parts().input.value = '  Compare the launch notes ';
-  h.composer.parts().start.fire('click');
-  assert.equal(h.composer.parts().start.disabled, true, 'no second submit while sending');
-  assert.equal(h.composer.parts().start.text, 'Working…');
-  await flushDeep();
+test('give work: a started ticket that never lights the building says so', async () => {
+  const h = await giveWorkHarness();
+  giveWorkFromMenu(h);
+  h.opened[0].onSaved({ id: 't-new', start: { started: true } });
 
-  assert.deepEqual(
-    h.calls.map(call => Array.from(call)),
-    [
-      ['create', 'ws-1', 'Compare the launch notes'],
-      ['start', 't-new']
-    ]
-  );
-  assert.equal(h.composer.open(), false, 'the composer closed');
-  assert.equal(origin.focused, focusBefore + 1, 'focus went back to the building');
-  assert.match(h.live(), /Task created in Research Lab\. It will light up when it starts\./);
-  assert.equal(h.toasts.length, 0, 'nothing claims it started');
-});
-
-test('give a task: a real started event within five seconds ends the watch quietly', async () => {
-  const h = await giveTaskHarness();
-  giveTaskFromMenu(h);
-  h.composer.parts().input.value = 'Compare the launch notes';
-  h.composer.parts().start.fire('click');
-  await flushDeep();
-
-  h.advance(3000);
-  h.feed.change(
-    'ws-1',
-    activityView('ws-1', [runningActivity({ task_id: 't-new' })], {
-      phase: 'started',
-      kind: 'task',
-      task_id: 't-new',
-      workspace_id: 'ws-1',
-      agent_name: 'Theo'
-    })
-  );
-  h.advance(5000);
-  assert.equal(h.toasts.length, 0);
-});
-
-test('give a task: no started event within five seconds says so, with a link to the task', async () => {
-  const h = await giveTaskHarness();
-  giveTaskFromMenu(h);
-  h.composer.parts().input.value = 'Compare the launch notes';
-  h.composer.parts().start.fire('click');
-  await flushDeep();
-
-  // Another task's event is not this task starting.
+  // Another ticket's event is not this ticket starting.
   h.feed.change(
     'ws-1',
     activityView('ws-1', [runningActivity({ task_id: 'other' })], {
@@ -12763,99 +12640,34 @@ test('give a task: no started event within five seconds says so, with a link to 
   assert.equal(h.toasts.length, 0, 'not before five seconds');
   h.advance(1);
   assert.equal(h.toasts.length, 1);
-  const toast = h.toasts[0];
-  assert.equal(toast.kind, 'info');
-  assert.equal(toast.message, 'Task created. It has not started yet.');
-  assert.equal(toast.options.action.label, 'Open task');
-  assert.ok(toast.options.duration >= 10000, 'it stays long enough to reach the link');
-  toast.options.action.onClick();
+  assert.equal(h.toasts[0].kind, 'info');
+  assert.ok(h.toasts[0].options.duration >= 10000, 'it stays long enough to reach the link');
+  h.toasts[0].options.action.onClick();
   assert.equal(h.env.window.location.href, '/workspaces/lab?panel=tasks&task=t-new');
 });
 
-test('give a task: Create only creates, and leaving the map drops a pending watch', async () => {
-  const h = await giveTaskHarness();
-  giveTaskFromMenu(h);
-  h.composer.parts().input.value = 'Draft the agenda';
-  h.composer.parts().create.fire('click');
-  await flushDeep();
-  assert.deepEqual(
-    h.calls.map(call => Array.from(call)),
-    [['create', 'ws-1', 'Draft the agenda']]
+test('give work: a real started event ends the watch quietly', async () => {
+  const h = await giveWorkHarness();
+  giveWorkFromMenu(h);
+  h.opened[0].onSaved({ id: 't-new', start: { started: true } });
+  h.feed.change(
+    'ws-1',
+    activityView('ws-1', [runningActivity({ task_id: 't-new' })], {
+      phase: 'started',
+      kind: 'task',
+      task_id: 't-new',
+      workspace_id: 'ws-1'
+    })
   );
-  assert.equal(h.composer.open(), false);
-  assert.equal(h.toasts[0].kind, 'success');
-  assert.equal(h.toasts[0].message, 'Task created for Theo');
   h.advance(10000);
-  assert.equal(h.toasts.length, 1, 'a task that was never started is not watched');
-
-  giveTaskFromMenu(h);
-  h.composer.parts().input.value = 'Compare the launch notes';
-  h.composer.parts().start.fire('click');
-  await flushDeep();
-  h.map.unmount(h.harness.container);
-  h.advance(10000);
-  assert.equal(h.toasts.length, 1, 'without its stream the map cannot know, so it says nothing');
+  assert.equal(h.toasts.length, 0);
 });
 
-test('give a task: an empty task and a refused create keep the composer open with the reason', async () => {
-  const h = await giveTaskHarness();
-  giveTaskFromMenu(h);
-  h.composer.parts().input.value = '   ';
-  h.composer.parts().start.fire('click');
-  await flushDeep();
-  assert.equal(h.calls.length, 0, 'the server is not asked');
-  assert.equal(h.composer.parts().composer.error, 'Describe the task first.');
-
-  h.quick.createResult = () => {
-    throw new Error('Not enough Craft.');
-  };
-  h.composer.parts().input.value = 'Build a Farm';
-  h.composer.parts().start.fire('click');
-  await flushDeep();
-  const parts = h.composer.parts();
-  assert.equal(parts.composer.error, 'Not enough Craft.');
-  assert.equal(parts.input.value, 'Build a Farm', 'what the user typed survives');
-  assert.equal(parts.start.disabled, false, 'and they can try again');
-  assert.equal(h.calls.filter(call => call[0] === 'start').length, 0);
-});
-
-test('give a task: a start the server refuses says the task exists and does not offer it twice', async () => {
-  const h = await giveTaskHarness();
-  giveTaskFromMenu(h);
-  h.quick.startResult = () => {
-    throw new Error('Task is already in progress');
-  };
-  h.composer.parts().input.value = 'Compare the launch notes';
-  h.composer.parts().start.fire('click');
-  await flushDeep();
-  const parts = h.composer.parts();
-  assert.equal(
-    parts.composer.error,
-    'The task was created but did not start: Task is already in progress'
-  );
-  assert.equal(parts.input.value, '', 'the draft is cleared so it is not created again');
+test('give work: a ticket that was not started, or was refused, is not watched', async () => {
+  const h = await giveWorkHarness();
+  giveWorkFromMenu(h);
+  h.opened[0].onSaved({ id: 't-quiet' });
+  h.opened[0].onSaved({ id: 't-refused', start: { started: false, error: 'paused' } });
   h.advance(10000);
-  assert.equal(h.toasts.length, 0, 'a start that failed is not also reported as not started');
-});
-
-test('give a task: Esc closes and returns focus, and Tab stays inside the composer', async () => {
-  const h = await giveTaskHarness();
-  const origin = giveTaskFromMenu(h);
-  const parts = h.composer.parts();
-  const doc = h.env.document;
-
-  doc.activeElement = parts.cancel;
-  let prevented = false;
-  parts.composer.fire('keydown', { key: 'Tab', preventDefault: () => (prevented = true) });
-  assert.equal(doc.activeElement, parts.input, 'Tab from the last control wraps to the first');
-  assert.ok(prevented);
-
-  parts.composer.fire('keydown', { key: 'Tab', shiftKey: true });
-  assert.equal(doc.activeElement, parts.cancel, 'Shift+Tab from the first wraps to the last');
-
-  const before = origin.focused;
-  parts.composer.fire('keydown', { key: 'Escape' });
-  assert.equal(h.composer.open(), false);
-  assert.equal(origin.focused, before + 1);
-  assert.equal(parts.composer.listenerCount('keydown'), 0, 'its listeners went with it');
+  assert.equal(h.toasts.length, 0);
 });

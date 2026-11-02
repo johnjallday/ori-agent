@@ -118,9 +118,18 @@ type SecondBrainDeps struct {
 	// folder made inside it is checked like any other.
 	DefaultParent func() string
 	FollowUps     secondbrain.FollowUps
-	Looker        secondbrain.Looker
-	Now           func() time.Time
-	NewID         func() string
+	// ProjectTickets routes a project's open lines to its workspace. Nil means
+	// everything stays a follow-up.
+	ProjectTickets SecondBrainProjectTickets
+	Looker         secondbrain.Looker
+	Now            func() time.Time
+	NewID          func() string
+}
+
+// SecondBrainProjectTickets also records on a ticket that its line is done or gone.
+type SecondBrainProjectTickets interface {
+	secondbrain.ProjectTickets
+	MarkNoteLinesClosed(ctx context.Context, itemIDs []string) error
 }
 
 // SecondBrainService connects the user's notes to the HQ and looks at them.
@@ -415,6 +424,8 @@ type SecondBrainAcceptView struct {
 	LookID  string `json:"look_id"`
 	Created int    `json:"created"`
 	Skipped int    `json:"skipped"`
+	// Tickets counts tickets made from project notes, by workspace name.
+	Tickets map[string]int `json:"tickets,omitempty"`
 }
 
 // SecondBrainConnectInput names the folder by a detected vault or a selection
@@ -1095,7 +1106,7 @@ func (s *SecondBrainService) AcceptFollowUps(ctx context.Context, userID, lookID
 		return SecondBrainAcceptView{}, err
 	}
 	if receipt, replayed, err := doc.Replay(input.RequestID, secondBrainActionFollowUps); err != nil || replayed {
-		return SecondBrainAcceptView{LookID: receipt.LookID, Created: receipt.Created, Skipped: receipt.Skipped}, err
+		return SecondBrainAcceptView{LookID: receipt.LookID, Created: receipt.Created, Tickets: receipt.Tickets, Skipped: receipt.Skipped}, err
 	}
 	connected := doc.Connected()
 	if connected == nil {
@@ -1112,13 +1123,14 @@ func (s *SecondBrainService) AcceptFollowUps(ctx context.Context, userID, lookID
 	if err != nil {
 		return SecondBrainAcceptView{}, err
 	}
-	created, skipped, err := secondbrain.Accept(ctx, s.deps.FollowUps, secondbrain.Acceptance{
+	accepted, err := secondbrain.AcceptRouted(ctx, s.deps.FollowUps, secondbrain.Acceptance{
 		UserID: userID, WorkspaceID: binding.HQWorkspaceID, Source: *connected, Items: items,
+		Tickets: s.projectTickets(),
 	})
 	if err != nil {
 		return SecondBrainAcceptView{}, err
 	}
-	skipped += alreadyHandled
+	created, skipped := accepted.FollowUps, accepted.Skipped+alreadyHandled
 	if _, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 		if _, replayed, err := doc.Replay(input.RequestID, secondBrainActionFollowUps); err != nil || replayed {
 			return err
@@ -1134,13 +1146,13 @@ func (s *SecondBrainService) AcceptFollowUps(ctx context.Context, userID, lookID
 			}
 		}
 		doc.Remember(secondbrain.Receipt{
-			RequestID: input.RequestID, Action: secondBrainActionFollowUps, At: s.deps.Now(), LookID: lookID, Created: created, Skipped: skipped,
+			RequestID: input.RequestID, Action: secondBrainActionFollowUps, At: s.deps.Now(), LookID: lookID, Created: created, Tickets: accepted.Tickets, Skipped: skipped,
 		})
 		return nil
 	}); err != nil {
 		return SecondBrainAcceptView{}, err
 	}
-	return SecondBrainAcceptView{LookID: lookID, Created: created, Skipped: skipped}, nil
+	return SecondBrainAcceptView{LookID: lookID, Created: created, Tickets: accepted.Tickets, Skipped: skipped}, nil
 }
 
 // chosenItems picks the items to add. The suggested set skips items the user has
@@ -1238,7 +1250,8 @@ func (s *SecondBrainService) ActOnItem(ctx context.Context, userID, lookID, item
 			return SecondBrainLookView{}, err
 		}
 		if _, _, err := secondbrain.Accept(ctx, s.deps.FollowUps, secondbrain.Acceptance{
-			UserID: userID, WorkspaceID: binding.HQWorkspaceID, Source: *connected, Items: []secondbrain.LookItem{*item},
+			Tickets: s.projectTickets(),
+			UserID:  userID, WorkspaceID: binding.HQWorkspaceID, Source: *connected, Items: []secondbrain.LookItem{*item},
 		}); err != nil {
 			return SecondBrainLookView{}, err
 		}
@@ -1246,6 +1259,12 @@ func (s *SecondBrainService) ActOnItem(ctx context.Context, userID, lookID, item
 		if closer, ok := s.deps.FollowUps.(secondbrain.FollowUpCloser); ok {
 			if _, err := secondbrain.CompleteDone(ctx, closer, userID, itemID); err != nil {
 				return SecondBrainLookView{}, err
+			}
+		}
+		// A ticket keeps its state; it only says the line is done (PRD 760 FR-29).
+		if tickets := s.deps.ProjectTickets; tickets != nil {
+			if err := tickets.MarkNoteLinesClosed(ctx, []string{itemID}); err != nil {
+				logger.Warn("A ticket could not note its finished line", logger.Fields{"error": err.Error()})
 			}
 		}
 	}
@@ -1439,6 +1458,12 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 				logger.Warn("Follow-ups done in the notes could not be closed", logger.Fields{"look_id": lookID, "error": err.Error()})
 			}
 		}
+		// Done takes a person's acceptance, so a ticket only notes it (PRD 760 FR-29).
+		if tickets := s.deps.ProjectTickets; tickets != nil && run.Look.State == secondbrain.LookFinished {
+			if err := tickets.MarkNoteLinesClosed(ctx, run.Gone); err != nil {
+				logger.Warn("Tickets could not note their finished lines", logger.Fields{"look_id": lookID, "error": err.Error()})
+			}
+		}
 	}()
 }
 
@@ -1446,6 +1471,41 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 // running was cut off by a restart; it reads as failed so the look never
 // hangs (FR27).
 func (s *SecondBrainService) lookView(userID string, connected *secondbrain.Source) SecondBrainLookView {
+	return s.withDestinations(connected, s.plainLookView(userID, connected))
+}
+
+// projectTickets is the routing for an acceptance. A typed nil would pass as set,
+// so an absent one is a plain nil interface.
+func (s *SecondBrainService) projectTickets() secondbrain.ProjectTickets {
+	if s.deps.ProjectTickets == nil {
+		return nil
+	}
+	return s.deps.ProjectTickets
+}
+
+// withDestinations names, on a copy of the items, the workspace each line would
+// become a ticket in. The look itself writes nothing (FR-28).
+func (s *SecondBrainService) withDestinations(connected *secondbrain.Source, view SecondBrainLookView) SecondBrainLookView {
+	tickets := s.projectTickets()
+	if tickets == nil || view.Result == nil || connected == nil {
+		return view
+	}
+	result := *view.Result
+	result.Items = append([]secondbrain.LookItem(nil), result.Items...)
+	for i := range result.Items {
+		if workspaceID, name, ok := secondbrain.ItemDestination(tickets, connected.Path, result.Items[i]); ok {
+			result.Items[i].TicketWorkspace = name
+			if tickets.HasNoteTicket(workspaceID, result.Items[i].ID) {
+				result.Items[i].Ticketed = true
+				result.Items[i].Suggested = false
+			}
+		}
+	}
+	view.Result = &result
+	return view
+}
+
+func (s *SecondBrainService) plainLookView(userID string, connected *secondbrain.Source) SecondBrainLookView {
 	if current := connected.Current; current != nil {
 		if current.State == secondbrain.LookRunning && !s.isRunning(userID, current.ID) {
 			stopped := *current

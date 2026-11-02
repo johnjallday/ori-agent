@@ -40,6 +40,12 @@ func TestAddWorkspaceMapFields(t *testing.T) {
 	summary := map[string]any{}
 	addWorkspaceMapFields(ws, summary)
 
+	// ticket_counts is the canonical per-state count (PRD 760 FR-6).
+	wantCounts := workspace.TicketCounts{Ready: 1, InProgress: 1, Done: 1}
+	if got, ok := summary["ticket_counts"].(workspace.TicketCounts); !ok || got != wantCounts {
+		t.Errorf("summary[ticket_counts] = %+v, want %+v", summary["ticket_counts"], wantCounts)
+	}
+
 	cases := map[string]any{
 		"entry_agent_name": "Research Lead",
 		"kind":             "group",
@@ -133,6 +139,43 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 	tags, ok := response["tags"].([]any)
 	if !ok || len(tags) != 2 || tags[0] != "music" || tags[1] != "reaper" {
 		t.Fatalf("expected workspace tags in response, got %#v", response["tags"])
+	}
+}
+
+// TestHandleGetWorkspaceIncludesTicketCounts covers the single-workspace
+// response the workspace page loads: it carries the canonical per-state count
+// beside the tasks, so the header never derives its own number (PRD 760 FR-6).
+func TestHandleGetWorkspaceIncludesTicketCounts(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Counted"})
+	ws.ID = "counted-1"
+	ws.Tasks = []workspace.Task{
+		{ID: "a", TicketState: workspace.TicketStateReview, Status: workspace.TaskStatusCompleted},
+		{ID: "b", TicketState: workspace.TicketStateReady, Status: workspace.TaskStatusPending},
+		{ID: "c", TicketState: workspace.TicketStateReady, Status: workspace.TaskStatusPending},
+		{ID: "d", TicketState: workspace.TicketStateBacklog, Status: workspace.TaskStatusBacklog},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save workspace: %v", err)
+	}
+
+	handler := NewWorkspaceHandler(nil, store, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/orchestration/workspace?id=counted-1", nil)
+	w := httptest.NewRecorder()
+	handler.WorkspaceHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response struct {
+		TicketCounts workspace.TicketCounts `json:"ticket_counts"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := workspace.TicketCounts{Backlog: 1, Ready: 2, Review: 1}
+	if response.TicketCounts != want {
+		t.Errorf("ticket_counts = %+v, want %+v", response.TicketCounts, want)
 	}
 }
 

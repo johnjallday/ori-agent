@@ -628,9 +628,9 @@ func (b *MissionBridge) fileUnreadableAnswerFinding(workspaceID, runID string, p
 // tasks: it keeps suggestions visible across workspaces and links to the
 // workspace's Backlog drawer, where the tickets themselves live (FR22).
 func suggestionSummaryRow(ws *workspace.Workspace, record workspace.MissionRunRecord) workspace.Opportunity {
-	noun := "tasks"
+	noun := "tickets"
 	if record.TasksCreated == 1 {
-		noun = "task"
+		noun = "ticket"
 	}
 	name := strings.TrimSpace(ws.Name)
 	if name == "" {
@@ -653,11 +653,11 @@ func suggestionSummaryRow(ws *workspace.Workspace, record workspace.MissionRunRe
 		SourceLabel:       "Open Backlog",
 		SourceURL:         link,
 		Title:             fmt.Sprintf("%d suggested %s in %s", record.TasksCreated, noun, name),
-		Summary:           "A goal run added suggested tasks to this workspace's Backlog. Promote the ones you want; the rest can stay or go.",
+		Summary:           "A goal run added suggested tickets to this workspace's Backlog. Promote the ones you want; the rest can stay or go.",
 		Evidence:          strings.Join(titles, "\n"),
 		Priority:          "low",
 		Confidence:        "high",
-		RecommendedAction: "Open the Backlog to review the suggested tasks.",
+		RecommendedAction: "Open the Backlog to review the suggested tickets.",
 		CreatedAt:         record.FinishedAt,
 	}
 }

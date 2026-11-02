@@ -190,7 +190,7 @@
       }
       if (elements.parentDeleteBody) {
         elements.parentDeleteBody.textContent =
-          options.message || 'This workflow has subtasks. What would you like to do?';
+          options.message || 'This workflow has subtickets. What would you like to do?';
       }
 
       if (elements.parentDeleteModal && window.bootstrap) {

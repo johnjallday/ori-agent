@@ -433,7 +433,7 @@ function tplStarterTaskRow(task) {
   top.className = 'd-flex gap-2 align-items-center mb-2';
   const desc = document.createElement('input');
   desc.className = 'modern-input flex-grow-1';
-  desc.placeholder = 'Task description';
+  desc.placeholder = 'Ticket description';
   desc.dataset.k = 'description';
   desc.value = task && task.description ? task.description : '';
   top.appendChild(desc);
@@ -456,7 +456,7 @@ function tplStarterTaskRow(task) {
     });
   });
   setupWrap.appendChild(setup);
-  setupWrap.appendChild(document.createTextNode('Setup task'));
+  setupWrap.appendChild(document.createTextNode('Setup ticket'));
   top.appendChild(setupWrap);
 
   const removeBtn = document.createElement('button');
@@ -475,7 +475,7 @@ function tplStarterTaskRow(task) {
   details.style.cssText =
     'background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical;';
   details.placeholder =
-    'Details for the agent (Markdown). For a setup task, consider headings:\n## Created defaults\n## Questions to ask\n## Validation\n## How to apply changes';
+    'Details for the agent (Markdown). For a setup ticket, consider headings:\n## Created defaults\n## Questions to ask\n## Validation\n## How to apply changes';
   details.value = task && task.details ? task.details : '';
   row.appendChild(details);
 

@@ -1,8 +1,10 @@
 # Workspace next action
 
 Ordinary workspaces show the same **Next action** in Map and Details. The Map,
-stations, agent controls, Memory, and **All Tasks** remain available. Group maps,
-Personal HQ, Tickets, and dashboards keep their existing journeys.
+stations, agent controls, Memory, and the ticket board remain available. Group maps,
+Personal HQ and dashboards keep their existing journeys. A next action about work
+opens the ticket; see [One work-item model](architecture/work-item-model.md) for
+what a ticket and a run are.
 
 ## How recommendations are chosen
 

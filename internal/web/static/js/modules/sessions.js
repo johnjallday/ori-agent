@@ -1138,11 +1138,11 @@ const sessionManager = {
       if (counts.pending > 0) {
         badge.textContent = counts.pending;
         badge.classList.remove('complete');
-        badge.title = `${counts.pending} pending task${counts.pending > 1 ? 's' : ''}`;
+        badge.title = `${counts.pending} pending ticket${counts.pending > 1 ? 's' : ''}`;
       } else {
         badge.textContent = '✓';
         badge.classList.add('complete');
-        badge.title = `All ${counts.completed} tasks complete`;
+        badge.title = `All ${counts.completed} tickets complete`;
       }
     });
   },
@@ -1542,9 +1542,9 @@ const sessionManager = {
               <svg class="folder-tasks-header-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,17H7V7H17V17M9,9V15H15V9H9Z"/>
               </svg>
-              <span class="folder-tasks-header-text">Tasks</span>
+              <span class="folder-tasks-header-text">Tickets</span>
               <span class="folder-tasks-count">${taskCount}</span>
-              <button class="folder-tasks-add-btn" data-workspace-id="${folder.id}" title="Add task">
+              <button class="folder-tasks-add-btn" data-workspace-id="${folder.id}" title="Add ticket">
                 <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
                   <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                 </svg>
@@ -5193,11 +5193,11 @@ const sessionManager = {
       template?.has_skeleton === true && !this.usesExistingProject()
         ? 'Scaffold its project files.'
         : '',
-      tasks ? `Save applicable blueprint starter tasks for later (${tasks} declared).` : '',
+      tasks ? `Save applicable blueprint starter tickets for later (${tasks} declared).` : '',
       window.ProjectTemplateCard?.shouldOpenAfterCreate?.()
         ? 'Request that the selected project opens after creation.'
         : '',
-      'No scan or task is started by placement.'
+      'No scan or run is started by placement.'
     ]
       .filter(Boolean)
       .join(' ');
@@ -5765,10 +5765,10 @@ const sessionManager = {
     );
     review.message = review.result
       ? [
-          `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No task or scan was started by placement.`,
+          `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No run or scan was started by placement.`,
           review.owner === 'grouped' ? this.groupedCreationResultLine(result, review.result) : '',
           Number(result.seeded_starter_tasks) > 0
-            ? `${result.seeded_starter_tasks} starter tasks saved for later.`
+            ? `${result.seeded_starter_tasks} starter tickets saved for later.`
             : '',
           typeof result.project_warning === 'string' ? result.project_warning : '',
           review.resourceObservationWarning,
@@ -5870,7 +5870,7 @@ const sessionManager = {
         confirmLabel: 'Create & staff Home here',
         pendingLabel: 'Preparing reviewed Home…',
         instruction:
-          'Click open ground or press Enter to create this Home and staff its reviewed roles. No project, task, runtime access or application opening. Escape returns to review.',
+          'Click open ground or press Enter to create this Home and staff its reviewed roles. No project, ticket, runtime access or application opening. Escape returns to review.',
         pendingInstruction: 'Observing the original Home operation. This frame is locked.',
         announcement: 'Home reviewed. Choose its Group frame; existing workspaces stay unchanged.'
       }
@@ -6088,7 +6088,7 @@ const sessionManager = {
                 confirmLabel: 'Create & prepare workspace here',
                 pendingLabel: 'Preparing reviewed workspace…',
                 instruction:
-                  'Click open ground or press Enter to create and prepare this software workspace. Its first task waits for you to start it. Escape returns to review.',
+                  'Click open ground or press Enter to create and prepare this software workspace. Its first ticket waits for you to start it. Escape returns to review.',
                 pendingInstruction: 'Observing the original setup. This position is locked.',
                 announcement:
                   'Software setup reviewed. Click open ground or press Enter to create and prepare; no assessment starts.'
@@ -13419,7 +13419,7 @@ const sessionManager = {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || 'Failed to create setup task');
+      throw new Error(text || 'Failed to create setup ticket');
     }
   },
 
@@ -20108,12 +20108,12 @@ const sessionManager = {
             `${bootstrapApplyResult.addedPlugins} plugin${bootstrapApplyResult.addedPlugins === 1 ? '' : 's'} added`
           );
         if (askOriSeedResult.tasksCreated > 0)
-          summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
+          summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant ticket`);
         if (askOriSeedResult.notesCreated > 0)
           summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
         if (seededStarterTasks > 0)
           summaryParts.push(
-            `${seededStarterTasks} starter task${seededStarterTasks === 1 ? '' : 's'} added`
+            `${seededStarterTasks} starter ticket${seededStarterTasks === 1 ? '' : 's'} added`
           );
         const hiredRoles = Array.isArray(assistantHireResult?.roster)
           ? assistantHireResult.roster.length
@@ -24010,7 +24010,7 @@ const sessionManager = {
 
       const workspaceId = activeSession.folder_id;
       const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
-      if (!response.ok) throw new Error('Failed to load tasks');
+      if (!response.ok) throw new Error('Failed to load tickets');
 
       const data = await response.json();
       this.workspaceTasks = data.tasks || [];
@@ -24041,7 +24041,7 @@ const sessionManager = {
   async loadWorkspaceTasks(workspaceId) {
     try {
       const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
-      if (!response.ok) throw new Error('Failed to load workspace tasks');
+      if (!response.ok) throw new Error('Failed to load workspace tickets');
       const data = await response.json();
       this.tasksByWorkspace.set(workspaceId, data.tasks || []);
       return data.tasks || [];
@@ -24066,7 +24066,7 @@ const sessionManager = {
   async loadWorkspaceScheduledTasks(workspaceId) {
     try {
       const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
-      if (!response.ok) throw new Error('Failed to load workspace tasks');
+      if (!response.ok) throw new Error('Failed to load workspace tickets');
       const data = await response.json();
       const allTasks = data.tasks || [];
       // Filter tasks that have schedules - normalize to consistent format
@@ -24109,7 +24109,7 @@ const sessionManager = {
   // Add task to workspace from sidebar using orchestration API
   async addWorkspaceTask(workspaceId) {
     // Prompt for task description
-    const description = prompt('Enter task description:');
+    const description = prompt('Enter ticket description:');
     if (!description || !description.trim()) return;
 
     try {
@@ -24123,12 +24123,12 @@ const sessionManager = {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to create task');
+      if (!response.ok) throw new Error('Failed to create ticket');
 
       // Reload workspace tasks
       await this.loadWorkspaceTasks(workspaceId);
       this.renderFolderTree();
-      this.showToast('Task created', 'success');
+      this.showToast('Ticket created', 'success');
 
       // Also reload session tasks if active session is in this workspace
       const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
@@ -24137,7 +24137,7 @@ const sessionManager = {
       }
     } catch (error) {
       console.error('Failed to create task:', error);
-      this.showToast('Failed to create task', 'error');
+      this.showToast('Failed to create ticket', 'error');
     }
   },
 
@@ -24154,13 +24154,13 @@ const sessionManager = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ task_id: taskId, status: 'pending' })
         });
-        if (!response.ok) throw new Error('Failed to update task');
+        if (!response.ok) throw new Error('Failed to update ticket');
       } else {
         // Complete using the complete endpoint
         const response = await fetch(`/api/orchestration/tasks/${taskId}/complete`, {
           method: 'POST'
         });
-        if (!response.ok) throw new Error('Failed to complete task');
+        if (!response.ok) throw new Error('Failed to complete ticket');
       }
 
       // Reload tasks - use workspace ID if no active session
@@ -24179,26 +24179,26 @@ const sessionManager = {
       }
     } catch (error) {
       console.error('Failed to toggle task:', error);
-      this.showToast('Failed to update task', 'error');
+      this.showToast('Failed to update ticket', 'error');
     }
   },
 
   // Delete task using orchestration API
   async deleteTask(taskId) {
-    if (!confirm('Delete this task?')) return;
+    if (!confirm('Delete this ticket?')) return;
 
     try {
       const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
         method: 'DELETE'
       });
 
-      if (!response.ok) throw new Error('Failed to delete task');
+      if (!response.ok) throw new Error('Failed to delete ticket');
 
       await this.loadSessionTasks();
-      this.showToast('Task deleted', 'success');
+      this.showToast('Ticket deleted', 'success');
     } catch (error) {
       console.error('Failed to delete task:', error);
-      this.showToast('Failed to delete task', 'error');
+      this.showToast('Failed to delete ticket', 'error');
     }
   },
 
@@ -24342,7 +24342,7 @@ const sessionManager = {
     try {
       // Load tasks directly from workspace using orchestration API
       const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
-      if (!response.ok) throw new Error('Failed to load workspace tasks');
+      if (!response.ok) throw new Error('Failed to load workspace tickets');
 
       const data = await response.json();
       this.workspaceTasks = data.tasks || [];
@@ -24355,7 +24355,7 @@ const sessionManager = {
       this.openMainTaskPanel();
     } catch (error) {
       console.error('Failed to open workspace tasks:', error);
-      this.showToast('Failed to open workspace tasks', 'error');
+      this.showToast('Failed to open workspace tickets', 'error');
     }
   },
 
@@ -24373,7 +24373,7 @@ const sessionManager = {
       this.showScheduledTasksModal(scheduledTasks, workspaceId);
     } catch (error) {
       console.error('Failed to open scheduled tasks:', error);
-      this.showToast('Failed to load scheduled tasks', 'error');
+      this.showToast('Failed to load scheduled tickets', 'error');
     }
   },
 
@@ -24591,7 +24591,7 @@ const sessionManager = {
         })
       });
 
-      if (!response.ok) throw new Error(`Failed to ${action} task schedule`);
+      if (!response.ok) throw new Error(`Failed to ${action} ticket schedule`);
 
       // Reload and refresh
       if (this.currentScheduledTaskWorkspaceId) {
@@ -24604,14 +24604,14 @@ const sessionManager = {
 
       this.showToast(`Schedule ${enable ? 'enabled' : 'disabled'}`, 'success');
     } catch (error) {
-      console.error(`Failed to ${action} task schedule:`, error);
+      console.error(`Failed to ${action} ticket schedule:`, error);
       this.showToast(`Failed to ${action} schedule`, 'error');
     }
   },
 
   // Trigger scheduled task manually (execute the task now)
   async triggerScheduledTask(taskId) {
-    if (!confirm('Execute this scheduled task now?')) return;
+    if (!confirm('Execute this scheduled ticket now?')) return;
 
     try {
       const response = await fetch('/api/orchestration/tasks/execute', {
@@ -24620,10 +24620,10 @@ const sessionManager = {
         body: JSON.stringify({ task_id: taskId })
       });
 
-      if (!response.ok) throw new Error('Failed to trigger scheduled task');
+      if (!response.ok) throw new Error('Failed to trigger scheduled ticket');
 
       const data = await response.json();
-      this.showToast(`Task triggered! ID: ${data.task_id?.substring(0, 8)}...`, 'success');
+      this.showToast(`Run started! ID: ${data.task_id?.substring(0, 8)}...`, 'success');
     } catch (error) {
       console.error('Failed to trigger scheduled task:', error);
       this.showToast('Failed to trigger schedule', 'error');
@@ -24634,7 +24634,7 @@ const sessionManager = {
   async deleteScheduledTask(taskId) {
     if (
       !confirm(
-        'Are you sure you want to delete this schedule? The task itself will remain but will no longer run on a schedule.'
+        'Are you sure you want to delete this schedule? The ticket itself will remain but will no longer run on a schedule.'
       )
     )
       return;
@@ -24783,7 +24783,7 @@ const sessionManager = {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to create task');
+      if (!response.ok) throw new Error('Failed to create ticket');
 
       input.value = '';
 
@@ -24796,10 +24796,10 @@ const sessionManager = {
       }
 
       this.renderMainTaskPanel();
-      this.showToast('Task created', 'success');
+      this.showToast('Ticket created', 'success');
     } catch (error) {
       console.error('Failed to create task:', error);
-      this.showToast('Failed to create task', 'error');
+      this.showToast('Failed to create ticket', 'error');
     }
   },
 
@@ -24864,17 +24864,17 @@ const sessionManager = {
             <span>${createdAt}</span>
           </div>
         </div>
-        <button class="main-task-edit" title="Edit task">
+        <button class="main-task-edit" title="Edit ticket">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
           </svg>
         </button>
-        <button class="main-task-execute" title="Execute task">
+        <button class="main-task-execute" title="Execute ticket">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
           </svg>
         </button>
-        <button class="main-task-delete" title="Delete task">
+        <button class="main-task-delete" title="Delete ticket">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
@@ -24910,14 +24910,14 @@ const sessionManager = {
 
   // Delete task from main panel (with confirmation) using orchestration API
   async deleteMainTask(taskId) {
-    if (!confirm('Delete this task?')) return;
+    if (!confirm('Delete this ticket?')) return;
 
     try {
       const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
         method: 'DELETE'
       });
 
-      if (!response.ok) throw new Error('Failed to delete task');
+      if (!response.ok) throw new Error('Failed to delete ticket');
 
       // Reload tasks - use workspace ID if no active session
       if (this.activeSessionId) {
@@ -24933,10 +24933,10 @@ const sessionManager = {
         }
       }
       this.renderMainTaskPanel();
-      this.showToast('Task deleted', 'success');
+      this.showToast('Ticket deleted', 'success');
     } catch (error) {
       console.error('Failed to delete task:', error);
-      this.showToast('Failed to delete task', 'error');
+      this.showToast('Failed to delete ticket', 'error');
     }
   },
 
@@ -24971,7 +24971,7 @@ const sessionManager = {
       await this.loadSessionTasks();
     } catch (error) {
       console.error('Failed to execute task:', error);
-      this.showToast('Failed to execute task', 'error');
+      this.showToast('Failed to execute ticket', 'error');
     }
   },
 
@@ -25016,7 +25016,18 @@ const sessionManager = {
           window.taskModalController.openForEdit(task, reloadTasks);
         }
       } else {
-        // Creating new task
+        // Creating new work: the one flow, where the page has it (PRD 760 FR-15).
+        if (window.OriGiveWork && typeof window.OriGiveWork.open === 'function') {
+          window.OriGiveWork.open({
+            workspaceId,
+            what: prefillTitle,
+            agents: window.workspaceDetail?.workspace?.agents || [],
+            workspaceName: window.workspaceDetail?.workspace?.name || '',
+            trigger: document.activeElement,
+            onSaved: reloadTasks
+          });
+          return;
+        }
         window.taskModalController.openForCreate(workspaceId, prefillTitle, reloadTasks);
       }
       return;
@@ -25029,7 +25040,7 @@ const sessionManager = {
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
     if (modalTitle) {
-      modalTitle.textContent = taskId ? 'Edit Task' : 'Add Task';
+      modalTitle.textContent = taskId ? 'Edit Ticket' : 'Add Ticket';
     }
 
     // Get form elements
@@ -25256,7 +25267,7 @@ const sessionManager = {
     if (modalTitle) {
       const folder = this.folders.find(f => f.id === workspaceId);
       const workspaceName = folder ? folder.name : 'Workspace';
-      modalTitle.textContent = `Add Task to ${workspaceName}`;
+      modalTitle.textContent = `Add Ticket to ${workspaceName}`;
     }
 
     // Clear form
@@ -25286,7 +25297,7 @@ const sessionManager = {
     const details = detailsInput?.value?.trim() || '';
 
     if (!description) {
-      this.showToast('Task title is required', 'error');
+      this.showToast('Ticket title is required', 'error');
       descriptionInput?.focus();
       return;
     }
@@ -25321,8 +25332,8 @@ const sessionManager = {
           })
         });
 
-        if (!response.ok) throw new Error('Failed to update task');
-        this.showToast('Task updated', 'success');
+        if (!response.ok) throw new Error('Failed to update ticket');
+        this.showToast('Ticket updated', 'success');
       } else {
         // Create new task via orchestration API (simple task - no agent)
         const response = await fetch('/api/orchestration/tasks', {
@@ -25337,8 +25348,8 @@ const sessionManager = {
           })
         });
 
-        if (!response.ok) throw new Error('Failed to create task');
-        this.showToast('Task created', 'success');
+        if (!response.ok) throw new Error('Failed to create ticket');
+        this.showToast('Ticket created', 'success');
       }
 
       this.closeTaskModal();
@@ -25353,7 +25364,7 @@ const sessionManager = {
       }
     } catch (error) {
       console.error('Failed to save task:', error);
-      this.showToast('Failed to save task', 'error');
+      this.showToast('Failed to save ticket', 'error');
     }
   },
 

@@ -52,11 +52,11 @@
                   </svg>
                   Attachment
                 </button>
-                <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddTaskModal()" title="Add Task">
+                <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddTaskModal()" title="Add Ticket">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                   </svg>
-                  Task
+                  Ticket
                 </button>
                 <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddStoreNodeModal()" title="Add Store Node">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
@@ -105,7 +105,7 @@
                     Workflow View: <strong id="workflow-view-name"></strong>
                   </span>
                   <button onclick="exitWorkflowView()" class="btn btn-sm" style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 4px 10px; border-radius: 4px;">
-                    View All Tasks
+                    View All Tickets
                   </button>
                 </div>
 
@@ -164,7 +164,7 @@
               <!-- Task Details -->
               <div class="modern-card p-3 mb-3" id="task-details-panel" style="display: none;">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                  <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Task Details</h6>
+                  <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Ticket Details</h6>
                   <button class="btn btn-sm btn-link p-0" onclick="hideTaskDetails()" style="color: var(--text-secondary);">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -172,14 +172,14 @@
                   </button>
                 </div>
                 <div id="task-details-content" style="font-size: 0.875rem;">
-                  Click a task to see details
+                  Click a ticket to see details
                 </div>
                 <div id="task-actions" class="mt-3" style="display: none;">
                   <button id="execute-task-btn" class="btn btn-sm btn-primary w-100 mb-2" onclick="executeCurrentTask()" style="display: none;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                       <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
                     </svg>
-                    Execute Task
+                    Run Ticket
                   </button>
                   <div class="d-flex gap-2 mb-2">
                     <button class="btn btn-sm btn-secondary flex-fill" onclick="editCurrentTask()">
@@ -664,6 +664,9 @@
   <!-- Real-time workspace modules -->
   <script defer src="/js/modules/workspace-realtime.js"></script>
   <script defer src="/js/modules/message-timeline.js"></script>
+  <!-- Connected steps and Give work go through the ticket client. -->
+  <script defer src="/js/modules/workspace-hub-tickets.js"></script>
+  <script type="module" src="/js/modules/give-work.js"></script>
   <script type="module" src="/js/modules/agent-canvas.js?v=1733603000"></script>
   <!-- Workspace management -->
   <link rel="stylesheet" href="/css/workspace.css">
@@ -819,7 +822,7 @@
 
       const task = (state.tasks || []).find(t => t.id === taskId);
       if (!task) {
-        alert(`Task not found on canvas: ${taskId}`);
+        alert(`Ticket not found on canvas: ${taskId}`);
         return;
       }
 

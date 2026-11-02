@@ -118,7 +118,7 @@ test('the draft is handed to the real form in manual mode and verified there', a
     prefillDetails: 'Export stems for mastering.',
     draftAssignmentValue: 'node:Engineer-node-1',
     draftAssignmentLabel: 'Engineer',
-    modalTitle: 'Review task for Engineer',
+    modalTitle: 'Review ticket for Engineer',
     // The form's own save names the operation and its draft revision.
     assistantOperation: { id: 'op-task', revision: 1 }
   });
@@ -354,7 +354,7 @@ test('a draft is never called a task, and each step is said only once observed',
   );
   assert.equal(
     operationView({ snapshot: withForm('acknowledged', 'pending'), phase: PHASE.RUNNING }).text,
-    'Opened Album 1. Opening the task form…'
+    'Opened Album 1. Opening the ticket form…'
   );
   const shown = operationView({
     snapshot: withForm('acknowledged', 'acknowledged'),
@@ -363,7 +363,7 @@ test('a draft is never called a task, and each step is said only once observed',
   });
   assert.equal(
     shown.text,
-    'Draft for Engineer: “Bounce the stems”. Review it in the task form. Nothing is created until you save it.'
+    'Draft for Engineer: “Bounce the stems”. Review it in the ticket form. Nothing is created until you save it.'
   );
   assert.deepEqual(shown.actions, [
     { id: 'open_draft', label: 'Open draft again' },
@@ -378,7 +378,7 @@ test('a draft is never called a task, and each step is said only once observed',
   assert.deepEqual(away.actions, [{ id: 'dismiss', label: 'Dismiss' }]);
   assert.deepEqual(away.link, { href: '/workspaces/album-1', label: 'Open Album 1 yourself' });
   for (const view of [shown, away])
-    assert.doesNotMatch(view.text, /task (was|is|has been) (created|assigned|started)/i);
+    assert.doesNotMatch(view.text, /(task|ticket) (was|is|has been) (created|assigned|started)/i);
 });
 
 test('Watch off keeps an explicit Open draft; unsaved work asks before replacing', () => {
@@ -416,13 +416,13 @@ test('Watch off keeps an explicit Open draft; unsaved work asks before replacing
 test('a form that could not take the draft, an ended draft and local notes are said plainly', () => {
   const failed = operationView({
     snapshot: withForm('acknowledged', 'unavailable', {
-      reason: 'Engineer cannot be assigned in the task form.'
+      reason: 'Engineer cannot be assigned in the ticket form.'
     }),
     phase: PHASE.SETTLED
   });
   assert.equal(
     failed.text,
-    'Ori could not open the task form. Engineer cannot be assigned in the task form.'
+    'Ori could not open the ticket form. Engineer cannot be assigned in the ticket form.'
   );
   assert.equal(failed.tone, 'attention');
 
@@ -446,14 +446,14 @@ test('a form that could not take the draft, an ended draft and local notes are s
     snapshot: withForm('acknowledged', 'acknowledged'),
     phase: PHASE.SETTLED,
     onWorkspace: true,
-    note: 'The task form is open with your changes. Nothing was replaced.'
+    note: 'The ticket form is open with your changes. Nothing was replaced.'
   });
-  assert.equal(kept.text, 'The task form is open with your changes. Nothing was replaced.');
+  assert.equal(kept.text, 'The ticket form is open with your changes. Nothing was replaced.');
   assert.equal(kept.actions.length, 2);
   // After a save there is no operation left, only the remark.
   assert.equal(
-    operationView({ note: 'Task saved from the draft. It is in the workspace now.' }).text,
-    'Task saved from the draft. It is in the workspace now.'
+    operationView({ note: 'Ticket saved from the draft. It is in the workspace now.' }).text,
+    'Ticket saved from the draft. It is in the workspace now.'
   );
   // A long title is shortened in the status line, never in the form.
   const long = operationView({

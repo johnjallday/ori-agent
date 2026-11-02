@@ -1,4 +1,4 @@
-// "Give a task…" on an Agents roster card (agents-hire-with-a-brief FR18):
+// "Give work…" on an Agents roster card (agents-hire-with-a-brief FR18):
 // where giving this agent a task takes the user. An agent in one workspace
 // goes there with the task form open and the agent chosen; an agent in several
 // first picks the workspace; an agent in none is offered the Hire card for its
@@ -23,7 +23,7 @@
     return `/workspaces/${encodeURIComponent(workspace)}?${NEW_TASK_FOR_PARAM}=${encodeURIComponent(agent)}`;
   }
 
-  // giveTaskTarget decides what Give a task… does for an agent and its
+  // giveTaskTarget decides what Give work… does for an agent and its
   // workspace refs ({name, slug}).
   function giveTaskTarget(agentName, workspaces) {
     const places = (Array.isArray(workspaces) ? workspaces : [])
