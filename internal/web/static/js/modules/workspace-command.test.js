@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { wireWorkspaceFollowUps } from './workspace-followups.js';
 
@@ -317,6 +317,95 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.doesNotMatch(
     container.innerHTML,
     /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/
+  );
+});
+
+// --- Non-HQ Details snapshot (PRD 766 FR1) ------------------------------------
+// The HQ gets its own Details branch; every other workspace must render the
+// markup it rendered before. This pins the whole Details write for an ordinary
+// workspace. When a change here is deliberate, regenerate the file with
+// UPDATE_SNAPSHOTS=1 and review its diff like code.
+
+const DETAILS_SNAPSHOT = new URL(
+  '../../../../../tests/fixtures/workspace-command-details.snapshot.html',
+  import.meta.url
+);
+
+function ordinaryDetailsMarkup() {
+  const container = {
+    hidden: false,
+    innerHTML: '',
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container,
+    detailedView: { hidden: false },
+    toggleBtn: makeToggleButton(),
+    active: true,
+    viewMode: 'details',
+    page: {
+      workspaceId: 'workspace-1',
+      workspace: {
+        id: 'workspace-1',
+        name: 'Demo Workspace',
+        description: 'A focused production workspace for launch planning and execution.',
+        tags: ['launch', 'ops'],
+        workspace_settings: { workflow: { mode: 'guided' } },
+        mcp_bindings: [],
+        skill_bindings: []
+      },
+      tasks: [{ status: 'pending' }],
+      files: [{ name: 'brief.md', path: 'brief.md' }],
+      notes: [{ id: 'n1', title: 'Launch checklist', content: 'Ship it' }],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      buildAgentGroups: () => [
+        {
+          name: 'Atlas',
+          isWorkspaceAgent: true,
+          isUnassigned: false,
+          tasks: [{ id: 'task-1', description: 'Draft plan', status: 'pending' }]
+        },
+        { name: 'Builder', isWorkspaceAgent: true, isUnassigned: false, tasks: [] }
+      ],
+      isWorkspaceEntryAgent: name => name === 'Atlas',
+      getAgentAvatarPresentation: name => ({ initials: name.slice(0, 2), style: '' }),
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
+      getAgentProfile: () => ({}),
+      getAgentModelPresentation: () => ({ empty: false, model: 'gpt-test' }),
+      getAgentSkillSummary: () => ({ count: 0 })
+    },
+    persist() {}
+  });
+  commandView.render();
+  return container.innerHTML;
+}
+
+test('an ordinary workspace renders the Details markup it always has (FR1)', () => {
+  const markup = ordinaryDetailsMarkup();
+  // Rendering is deterministic for the same state; a second render must agree.
+  assert.equal(ordinaryDetailsMarkup(), markup);
+  assert.doesNotMatch(markup, /ws-cmd-layout is-hq/);
+  if (process.env.UPDATE_SNAPSHOTS === '1') {
+    writeFileSync(DETAILS_SNAPSHOT, markup);
+    return;
+  }
+  const expected = readFileSync(DETAILS_SNAPSHOT, 'utf8');
+  if (markup === expected) return;
+  // Name the first difference rather than dumping two 40 KB strings.
+  let at = 0;
+  while (at < markup.length && markup[at] === expected[at]) at += 1;
+  assert.fail(
+    'non-HQ Details markup changed at offset ' +
+      at +
+      '\n  expected: …' +
+      expected.slice(Math.max(0, at - 80), at + 120) +
+      '\n  actual:   …' +
+      markup.slice(Math.max(0, at - 80), at + 120) +
+      '\nRun UPDATE_SNAPSHOTS=1 only if the change is deliberate.'
   );
 });
 
@@ -1283,6 +1372,8 @@ test('systems shared surface mounts config without cloning persistence logic', (
   assert.deepEqual(calls, [
     // No follow-ups host in this layout, so the panel stays home.
     ['restore', 'followups'],
+    // Nor an HQ Notes host: that panel stays home too (PRD 766).
+    ['restore', 'hq-notes'],
     ['restore', 'tools'],
     ['restore', 'capabilities'],
     ['mount', 'config', '#workspace-detail-settings-panel'],
@@ -8584,7 +8675,10 @@ function makeTreeDoc() {
     matches(selector) {
       if (selector.startsWith('#')) return this.id === selector.slice(1);
       if (selector.startsWith('.')) return this.className.split(/\s+/).includes(selector.slice(1));
-      if (selector.startsWith('[')) return this.hasAttribute(selector.slice(1, -1));
+      if (selector.startsWith('[')) {
+        const [, name, value] = selector.slice(1, -1).match(/^([^=]+)(?:="([^"]*)")?$/) || [];
+        return value === undefined ? this.hasAttribute(name) : this.getAttribute(name) === value;
+      }
       return false;
     }
     querySelectorAll(selector) {
@@ -8801,6 +8895,267 @@ test('follow-ups: a deep-linked card rendered while parked is scrolled into view
     assert.equal(card.scrolledWith, null);
     assert.equal(doc.activeElement, card);
   });
+});
+
+// --- HQ Details hosts (PRD 766 FR3/FR4) ---------------------------------------
+// The HQ's Notes panel is a live node in the main column. A background
+// render() must relocate it, never rebuild it: the node, a draft typed in it and
+// the focused control all survive. The stat modal's Daily Brief and Memory
+// panels already survive the same way; this pins that on the HQ branch.
+
+const HQ_PANELS_KEEP = new Set([
+  ...FOLLOW_UPS_KEEP,
+  'renderHQDetails',
+  'renderHQNotesHost',
+  'hqNotesHost',
+  'notesInlineNode',
+  'parkHQPanels',
+  'syncHQPanels',
+  'settleInlineNotes',
+  'inlineNotesHTML',
+  'paintInlineNotes',
+  'bindInlineNotes',
+  'focusInlineNotesPanel',
+  'notesPanelOpen',
+  'notesModalOpen',
+  'notesState',
+  'notesPanel',
+  'paintNotesPanel',
+  'openNotesPanel',
+  'mountDailyBriefPanel'
+]);
+
+// A folder Ori set up: its panel opens on the Inbox tab, which has the capture box.
+const CONNECTED_VAULT = {
+  status: 'connected',
+  source: { name: 'Second Brain', origin: 'created_by_ori' }
+};
+
+function hqPanelsPage({ secondBrain = CONNECTED_VAULT } = {}) {
+  const doc = makeTreeDoc();
+  const container = doc.createElement('div');
+  container.id = 'workspaceCommandView';
+  container.onHTML = html => {
+    for (const [attr, value] of [
+      ['data-cmd-followups-host', ''],
+      ['data-cmd-hq-host', 'notes']
+    ]) {
+      if (!html.includes(attr)) continue;
+      const host = doc.createElement('div');
+      host.setAttribute(attr, value);
+      container.appendChild(host);
+    }
+  };
+  const sharedHosts = doc.createElement('div');
+  sharedHosts.id = 'workspace-detail-shared-hosts';
+  sharedHosts.hidden = true;
+  const followups = doc.createElement('div');
+  followups.id = 'workspaceFollowupMount';
+  const notes = doc.createElement('section');
+  notes.id = 'hqNotesPanelMount';
+  notes.hidden = true;
+  const config = doc.createElement('div');
+  config.id = 'workspace-detail-settings-panel';
+  doc.body.append(container, sharedHosts);
+  sharedHosts.append(followups, notes, config);
+
+  // Each paint of the Notes panel builds a capture box, so a repaint is visible
+  // as a new input node.
+  let paints = 0;
+  notes.onHTML = html => {
+    paints += 1;
+    notes.lastHTML = html;
+    if (!html.includes('data-notes-capture')) return;
+    const input = doc.createElement('input');
+    input.setAttribute('data-notes-capture', '');
+    input.value = '';
+    notes.appendChild(input);
+  };
+
+  const commandView = new WorkspaceCommandView(null);
+  for (const name of Object.getOwnPropertyNames(WorkspaceCommandView.prototype)) {
+    if (HQ_PANELS_KEEP.has(name)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(WorkspaceCommandView.prototype, name);
+    if (typeof descriptor.value === 'function') commandView[name] = () => '';
+  }
+  const loads = [];
+  Object.assign(commandView, {
+    container,
+    active: true,
+    viewMode: 'details',
+    page: { workspace: { id: 'hq-1', designation: 'personal_hq' } },
+    sharedSurfaceAnchors: {},
+    isPersonalHQ: () => true,
+    watchtowerWorkspaceID: () => 'hq-1',
+    // The panel's look/inbox read: answer at once with a ready, empty panel.
+    loadNotesPanel() {
+      loads.push(1);
+      const panel = this.notesPanel();
+      panel.status = 'ready';
+      panel.look = { state: 'none' };
+      panel.inbox = { notes: [], total: 0 };
+      panel.tab = 'inbox';
+      this.paintNotesPanel(panel);
+    },
+    _notes: { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain }
+  });
+  const capture = () => notes.querySelector('[data-notes-capture]');
+  return {
+    doc,
+    container,
+    sharedHosts,
+    notes,
+    config,
+    commandView,
+    capture,
+    loads,
+    paints: () => paints
+  };
+}
+
+test('HQ Details: the Notes panel is mounted in its host, second only to nothing yet', () => {
+  const page = hqPanelsPage();
+  const { doc, container, commandView, notes } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    const host = container.querySelector('[data-cmd-hq-host="notes"]');
+    assert.ok(host, 'the HQ layout has a Notes host');
+    assert.equal(notes.parentNode, host);
+    assert.equal(notes.hidden, false);
+    assert.equal(commandView.notesInlineNode(), notes);
+    assert.equal(commandView.notesPanelOpen(), true, 'the inline panel counts as open');
+    assert.equal(page.loads.length, 1, 'a connected folder starts the panel read once');
+    assert.match(notes.lastHTML, /Notes/);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: a render() while typing in Notes keeps the node, the draft and the focus (FR4)', () => {
+  const page = hqPanelsPage();
+  const { doc, commandView, notes, capture } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    const input = capture();
+    assert.ok(input, 'the ready panel has a capture box');
+    input.focus();
+    input.value = 'Call the venue';
+    input.selectionStart = input.selectionEnd = 4;
+    let caret = null;
+    input.setSelectionRange = (start, end) => {
+      caret = [start, end];
+    };
+    const paintsBefore = page.paints();
+
+    commandView.render();
+    commandView.render();
+
+    assert.equal(page.paints(), paintsBefore, 'a background render never repaints the panel');
+    assert.equal(capture(), input, 'the same capture box');
+    assert.equal(input.value, 'Call the venue', 'the draft is untouched');
+    assert.equal(doc.activeElement, input, 'focus comes back to the capture box');
+    assert.deepEqual(caret, [4, 4], 'with the caret where it was');
+    assert.equal(page.loads.length, 1, 'and the panel is not read again');
+
+    // A mode switch parks it at home; coming back puts the same node back.
+    commandView.setCommandViewMode('tickets', { focus: false });
+    assert.equal(notes.parentNode, page.sharedHosts, 'parked at home outside Details');
+    assert.equal(commandView.notesInlineNode(), null);
+    commandView.setCommandViewMode('details', { focus: false });
+    assert.equal(capture(), input);
+    assert.equal(input.value, 'Call the venue');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: the Notes panel repaints when the connection changes, not otherwise', () => {
+  const page = hqPanelsPage({ secondBrain: { status: 'none' } });
+  const { doc, commandView, notes } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    assert.match(notes.lastHTML, /Connect notes…/, 'nothing connected: the connect state');
+    assert.match(notes.lastHTML, /data-cmd-modal-action="notes-connection"/);
+    assert.equal(page.loads.length, 0, 'nothing to read');
+    const before = page.paints();
+    commandView.render();
+    assert.equal(page.paints(), before);
+
+    // A forced re-read passes through loading without a flash.
+    commandView._notes.status = 'loading';
+    commandView.render();
+    assert.equal(page.paints(), before);
+
+    commandView._notes = { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain: CONNECTED_VAULT };
+    commandView.render();
+    assert.equal(page.loads.length, 1, 'connecting starts the read');
+    assert.doesNotMatch(notes.lastHTML, /Connect notes…/);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: opening the Notes station goes to the inline panel, not a dialog', () => {
+  const page = hqPanelsPage();
+  const { doc, commandView, capture } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    let modalOpened = false;
+    commandView.openStatModal = () => {
+      modalOpened = true;
+    };
+    commandView.openNotesPanel(null);
+    assert.equal(modalOpened, false);
+    assert.equal(doc.activeElement, capture());
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: the Daily Brief and Memory panels survive a re-render in the stat modal', () => {
+  const page = hqPanelsPage();
+  const { doc, container, config, commandView } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    const modal = doc.createElement('div');
+    const panel = doc.createElement('div');
+    panel.className = 'ws-cmd-modal-panel';
+    modal.appendChild(panel);
+    const briefRoot = doc.createElement('div');
+    commandView.statModalEl = modal;
+    commandView.ensureDailyBriefPanel = () => ({ root: briefRoot });
+    // The modal's repaint, reduced to the two live surfaces it attaches.
+    commandView.renderStatModalBody = function () {
+      if (this.statModalSection === 'daily-brief') this.mountDailyBriefPanel(panel);
+      if (this.statModalSection === 'memory')
+        this.mountSharedSurface('config', '#workspace-detail-settings-panel', panel);
+    };
+
+    commandView.statModalSection = 'daily-brief';
+    commandView.render();
+    assert.equal(modal.parentNode, container, 'the modal is re-attached after the write');
+    assert.equal(briefRoot.parentNode, panel, 'with the brief root inside');
+    commandView.render();
+    assert.equal(briefRoot.parentNode, panel, 'the same brief root after a second render');
+
+    commandView.statModalSection = 'memory';
+    commandView.render();
+    assert.equal(config.parentNode, panel, 'Memory shows the config surface');
+    commandView.render();
+    assert.equal(config.parentNode, panel, 'still the same node after a re-render');
+    assert.equal(doc.body.querySelectorAll('#workspace-detail-settings-panel').length, 1);
+  } finally {
+    globalThis.document = originalDocument;
+  }
 });
 
 // --- notes-station-panel ------------------------------------------------------

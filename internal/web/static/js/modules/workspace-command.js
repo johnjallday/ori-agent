@@ -100,6 +100,7 @@ import {
   buildWorkspaceURL
 } from './workspace-url-state.js';
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
+import { HQ_LABELS } from './hq-labels.js';
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -2604,23 +2605,25 @@ export class WorkspaceCommandView {
         ? ''
         : this.viewMode === 'map'
           ? this.renderOperationsMap() + this.renderFollowUpsHost()
-          : '<div class="ws-cmd-layout">' +
-            '<main class="ws-cmd-main">' +
-            this.renderWorkFirst() +
-            this.renderWorkspaceAdmin() +
-            this.renderUnstaffedBanner() +
-            this.renderMissionPanel() +
-            this.renderFollowUpsHost() +
-            '<section class="ws-cmd-garrison">' +
-            this.renderGarrison() +
-            '</section>' +
-            '</main>' +
-            '<aside class="ws-cmd-rail' +
-            (this.railPointerFocus ? ' is-pointer' : '') +
-            '">' +
-            this.renderRail() +
-            '</aside>' +
-            '</div>';
+          : this.isPersonalHQ()
+            ? this.renderHQDetails()
+            : '<div class="ws-cmd-layout">' +
+              '<main class="ws-cmd-main">' +
+              this.renderWorkFirst() +
+              this.renderWorkspaceAdmin() +
+              this.renderUnstaffedBanner() +
+              this.renderMissionPanel() +
+              this.renderFollowUpsHost() +
+              '<section class="ws-cmd-garrison">' +
+              this.renderGarrison() +
+              '</section>' +
+              '</main>' +
+              '<aside class="ws-cmd-rail' +
+              (this.railPointerFocus ? ' is-pointer' : '') +
+              '">' +
+              this.renderRail() +
+              '</aside>' +
+              '</div>';
 
     if (this.container.classList) {
       this.container.classList.toggle('is-settled', this.detailsViewSettled());
@@ -2628,8 +2631,9 @@ export class WorkspaceCommandView {
 
     // The follow-ups panel may be mounted inside this container; take it home
     // before the rebuild so it is never detached (syncSharedSurfaces mounts it
-    // again below).
+    // again below). The HQ's Notes panel is parked the same way.
     this.parkFollowUpsSurface();
+    this.parkHQPanels();
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +
       body +
@@ -7727,13 +7731,22 @@ export class WorkspaceCommandView {
   }
 
   openNotesPanel(trigger) {
+    // On the HQ's Details page the panel is already on screen, second in the
+    // main column: go to it rather than opening a second copy in a dialog.
+    if (this.focusInlineNotesPanel()) return;
     clearTimeout(this._notesPanelPoll);
     this._notesPanel = { status: 'loading' };
     this.openStatModal(NOTES_STATION, this.stationOpener(NOTES_STATION, trigger));
     this.loadNotesPanel();
   }
 
+  // The panel is open when it is in the stat modal or mounted in the HQ
+  // Details main column; either one is painted, polled and refreshed.
   notesPanelOpen() {
+    return this.notesModalOpen() || Boolean(this.notesInlineNode());
+  }
+
+  notesModalOpen() {
     return (
       this.statModalSection === NOTES_STATION &&
       Boolean(this.statModalEl) &&
@@ -7743,6 +7756,11 @@ export class WorkspaceCommandView {
 
   paintNotesPanel(panel) {
     if (panel !== this._notesPanel || !this.notesPanelOpen()) return;
+    const inline = this.notesModalOpen() ? null : this.notesInlineNode();
+    if (inline) {
+      this.paintInlineNotes(inline);
+      return;
+    }
     // A repaint rebuilds the panel's controls: focus stays in the dialog, and in
     // the capture box when that is where the user was typing.
     this.captureStatModalFocus();
@@ -7765,11 +7783,14 @@ export class WorkspaceCommandView {
   setNotesTab(key) {
     const panel = this.notesPanel();
     panel.tab = key;
-    this.renderStatModalBody();
-    if (!this.statModalEl) return;
-    const body = this.statModalEl.querySelector('.ws-notes-body');
+    const inline = this.notesModalOpen() ? null : this.notesInlineNode();
+    if (inline) this.paintInlineNotes(inline);
+    else this.renderStatModalBody();
+    const root = inline || this.statModalEl;
+    if (!root) return;
+    const body = root.querySelector('.ws-notes-body');
     if (body) body.scrollTop = 0;
-    const tab = this.statModalEl.querySelector('[data-notes-tab][aria-selected="true"]');
+    const tab = root.querySelector('[data-notes-tab][aria-selected="true"]');
     if (tab && typeof tab.focus === 'function') tab.focus();
   }
 
@@ -13292,6 +13313,7 @@ export class WorkspaceCommandView {
     this.restoreSharedSurface('members');
     this.restoreSharedSurface('board');
     this.parkFollowUpsSurface();
+    this.parkHQPanels();
   }
 
   // ── Follow-ups panel (#workspaceFollowupMount) ──────────────────────────
@@ -13349,6 +13371,278 @@ export class WorkspaceCommandView {
     // view now that it has a place; the module does this once (FR4).
     const api = typeof window !== 'undefined' ? window.WorkspaceFollowUps : null;
     if (rendered && api && typeof api.refocus === 'function') api.refocus();
+  }
+
+  // ── Personal HQ Details (PRD 766) ──────────────────────────────────────
+  // The HQ's Details mode is station-first: the header, then a main column of
+  // panels (Needs you, Notes, Follow-ups, stations) and a regrouped rail. It
+  // never draws the agent deck, the work-first strip or the admin block. Every
+  // other workspace keeps the composition in render().
+  //
+  // Stateful panels are live nodes placed into hosts after the innerHTML write
+  // and parked at #workspace-detail-shared-hosts before the next one, the way
+  // follow-ups are, so a background refresh never rebuilds them.
+
+  renderHQDetails() {
+    return (
+      '<div class="ws-cmd-layout is-hq">' +
+      '<main class="ws-cmd-main ws-hq-main">' +
+      this.renderHQNotesHost() +
+      this.renderFollowUpsHost() +
+      '</main>' +
+      '<aside class="ws-cmd-rail' +
+      (this.railPointerFocus ? ' is-pointer' : '') +
+      '">' +
+      this.renderRail() +
+      '</aside>' +
+      '</div>'
+    );
+  }
+
+  renderHQNotesHost() {
+    return '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>';
+  }
+
+  hqNotesHost() {
+    return this.active && this.container && typeof this.container.querySelector === 'function'
+      ? this.container.querySelector('[data-cmd-hq-host="notes"]')
+      : null;
+  }
+
+  // The Notes panel's live node while it sits in its HQ host, else null.
+  notesInlineNode() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors['hq-notes'];
+    const host = record && record.node && record.node.parentNode;
+    if (!this.active || !host || typeof host.getAttribute !== 'function') return null;
+    return host.getAttribute('data-cmd-hq-host') === 'notes' ? record.node : null;
+  }
+
+  // Before a rebuild or a mode switch: remember a focused control (and a caret
+  // in the capture box), then put the panel home so the write cannot detach it.
+  parkHQPanels() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors['hq-notes'];
+    if (!record || !record.node) return;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (
+      active &&
+      active !== record.node &&
+      typeof record.node.contains === 'function' &&
+      record.node.contains(active)
+    ) {
+      this.hqNotesFocus = {
+        el: active,
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+      };
+    }
+    this.restoreSharedSurface('hq-notes');
+  }
+
+  syncHQPanels() {
+    const focus = this.hqNotesFocus || null;
+    this.hqNotesFocus = null;
+    const host = this.hqNotesHost();
+    if (!host) {
+      this.restoreSharedSurface('hq-notes');
+      this._hqNotesMounted = false;
+      return;
+    }
+    const node = this.mountSharedSurface('hq-notes', '#hqNotesPanelMount', host);
+    if (!node) return;
+    const returning = this._hqNotesMounted === false;
+    this._hqNotesMounted = true;
+    this.bindInlineNotes(node);
+    this.settleInlineNotes(node);
+    // Back from another mode: a look that ran meanwhile is read again in place.
+    if (returning) void this.refreshOpenNotesPanel();
+    if (focus && focus.el && typeof focus.el.focus === 'function' && node.contains(focus.el)) {
+      focus.el.focus({ preventScroll: true });
+      if (focus.start !== null && typeof focus.el.setSelectionRange === 'function') {
+        try {
+          focus.el.setSelectionRange(focus.start, focus.end);
+        } catch {
+          /* not a text control */
+        }
+      }
+    }
+  }
+
+  // Paints the panel only when what it shows changed shape: the first mount,
+  // or the connection arriving, failing or changing folder. A re-render with
+  // nothing new leaves the node exactly as the user left it. A connected
+  // folder starts the panel's own look/inbox read, as opening it did.
+  settleInlineNotes(node) {
+    const state = this.notesState();
+    if (state.status === 'idle') this.requestNotesData();
+    // A forced re-read passes through 'loading'; keep showing what was there.
+    if (state.status === 'loading' && this._hqNotesSignature) return;
+    const secondBrain = state.secondBrain;
+    const available = state.status === 'ready' && notesPanelAvailable(secondBrain);
+    const signature = [
+      state.hqWorkspaceID,
+      state.status,
+      secondBrain?.status || '',
+      secondBrain?.source?.name || ''
+    ].join('|');
+    if (signature === this._hqNotesSignature && this._hqNotesPaintedNode === node) return;
+    this._hqNotesSignature = signature;
+    this._hqNotesPaintedNode = node;
+    if (available) {
+      clearTimeout(this._notesPanelPoll);
+      this._notesPanel = { status: 'loading' };
+    }
+    this.paintInlineNotes(node);
+    if (available) void this.loadNotesPanel();
+  }
+
+  inlineNotesHTML() {
+    const state = this.notesState();
+    const head =
+      '<header class="ws-cmd-modal-head"><h3 class="ws-cmd-modal-title">' +
+      escapeHtml(HQ_LABELS.notes) +
+      '</h3></header>';
+    const body = inner => '<div class="ws-cmd-modal-body ws-notes-body">' + inner + '</div>';
+    if (state.status === 'error') {
+      return (
+        head +
+        body(
+          '<p class="ws-notes-problem" role="alert">Ori could not read your notes connection.</p>'
+        )
+      );
+    }
+    if (state.status !== 'ready') {
+      return head + body('<p class="ws-notes-empty">Checking your notes…</p>');
+    }
+    const secondBrain = state.secondBrain;
+    if (!notesPanelAvailable(secondBrain)) {
+      // Nothing connected (or the folder is gone): the connection's card in the
+      // drawer is where that is fixed, as the station's own button does (#765).
+      const badge = notesBadge(secondBrain);
+      return (
+        head +
+        body(
+          '<p class="ws-notes-empty">' +
+            escapeHtml(badge.value + ' · ' + badge.description) +
+            '</p>' +
+            '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">' +
+            (secondBrain?.source?.name ? 'Connection…' : 'Connect notes…') +
+            '</button>'
+        )
+      );
+    }
+    return notesPanelHTML({ secondBrain, panel: this.notesPanel() });
+  }
+
+  // Repaints the inline panel, keeping its scroll position and the focused
+  // control: the capture box with its caret, or the same button by action.
+  paintInlineNotes(node) {
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    let focus = null;
+    if (active && active !== node && typeof node.contains === 'function' && node.contains(active)) {
+      focus = {
+        capture: Boolean(active.hasAttribute?.('data-notes-capture')),
+        action: active.getAttribute?.('data-cmd-modal-action') || '',
+        id: active.getAttribute?.('data-cmd-id') || '',
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+      };
+    }
+    const scroll = node.querySelector?.('.ws-notes-body')?.scrollTop || 0;
+    node.innerHTML = this.inlineNotesHTML();
+    node.hidden = false;
+    if (scroll) {
+      const body = node.querySelector?.('.ws-notes-body');
+      if (body) body.scrollTop = scroll;
+    }
+    if (!focus) return;
+    let target = null;
+    if (focus.capture) target = node.querySelector?.('[data-notes-capture]');
+    else if (focus.action && typeof node.querySelectorAll === 'function') {
+      target = Array.from(node.querySelectorAll('[data-cmd-modal-action]')).find(
+        el =>
+          el.getAttribute('data-cmd-modal-action') === focus.action &&
+          (el.getAttribute('data-cmd-id') || '') === focus.id
+      );
+    }
+    if (!target || target.disabled || typeof target.focus !== 'function') return;
+    target.focus({ preventScroll: true });
+    if (focus.capture && focus.start !== null && typeof target.setSelectionRange === 'function') {
+      try {
+        target.setSelectionRange(focus.start, focus.end);
+      } catch {
+        /* not a text control */
+      }
+    }
+  }
+
+  // The modal's listeners, on the inline node, bound once per node. Close has
+  // no meaning in the main column, and the connection button opens the drawer
+  // without a dialog to close first.
+  bindInlineNotes(node) {
+    if (!node || this._hqNotesBoundNode === node || typeof node.addEventListener !== 'function')
+      return;
+    this._hqNotesBoundNode = node;
+    node.addEventListener('click', event => {
+      const btn = event.target?.closest?.('[data-cmd-modal-action]');
+      if (!btn) return;
+      const action = String(btn.getAttribute('data-cmd-modal-action') || '');
+      if (action === 'notes-connection') {
+        this.openNotesStation(btn);
+        return;
+      }
+      if (action.startsWith('notes-')) {
+        this.handleNotesPanelAction(action, btn.getAttribute('data-cmd-id'));
+      }
+    });
+    node.addEventListener('input', event => {
+      if (event.target?.matches?.('[data-notes-capture]')) {
+        this.notesPanel().captureDraft = event.target.value;
+      }
+    });
+    node.addEventListener(
+      'toggle',
+      event => {
+        if (event.target?.matches?.('.ws-notes-handled')) {
+          this.notesPanel().handledOpen = event.target.open;
+        }
+      },
+      true
+    );
+    node.addEventListener('keydown', event => {
+      const target = event.target;
+      if (event.key === 'Enter' && target?.matches?.('[data-notes-capture]')) {
+        event.preventDefault();
+        void this.captureFromNotesPanel();
+        return;
+      }
+      if (
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+        target?.matches?.('[data-notes-tab]')
+      ) {
+        event.preventDefault();
+        const tabs = notesTabs(this.notesPanelSections(this.notesPanel()));
+        this.setNotesTab(
+          nextNotesTab(
+            tabs,
+            target.getAttribute('data-cmd-id'),
+            event.key === 'ArrowRight' ? 1 : -1
+          )
+        );
+      }
+    });
+  }
+
+  // Brings the inline panel into view and focus; false when it is not mounted.
+  focusInlineNotesPanel() {
+    const node = this.notesInlineNode();
+    if (!node) return false;
+    if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'start' });
+    const target =
+      node.querySelector?.('[data-notes-tab][aria-selected="true"]') ||
+      node.querySelector?.('[data-notes-capture]') ||
+      node.querySelector?.('[data-cmd-modal-action]');
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    return true;
   }
 
   showConfigTab(tab) {
@@ -13445,6 +13739,7 @@ export class WorkspaceCommandView {
 
   syncSharedSurfaces() {
     this.syncFollowUpsSurface();
+    this.syncHQPanels();
     this.syncSystemsSurface();
     this.syncDetachmentSurface();
   }

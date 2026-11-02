@@ -13,6 +13,8 @@ vendor/
 
 # Generated files
 plugin_registry_cache.json
+# Byte-exact render snapshots (regenerated with UPDATE_SNAPSHOTS=1)
+tests/fixtures/*.snapshot.html
 local_plugin_registry.json
 
 # Binary and data files

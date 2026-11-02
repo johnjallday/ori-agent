@@ -268,6 +268,13 @@
                Details and below the map shell in Map, and returns it here in
                Tickets and Dashboard, so it is never above the header. -->
           <div id="workspaceFollowupMount" class="workspace-followup-mount" hidden></div>
+          <!-- Personal HQ Notes panel: live DOM workspace-command.js paints with
+               notes-station.js and shows second in the HQ Details main column.
+               It lives here at rest so a re-render relocates it rather than
+               rebuilding it, keeping a typed capture and the chosen tab (PRD 766
+               FR3/FR4). Daily Brief and Memory keep their stat-modal panels,
+               which already survive a re-render. -->
+          <section id="hqNotesPanelMount" class="ws-hq-notes" aria-label="Notes" hidden></section>
           <section class="modern-card workspace-detail-tools-card mb-4" id="workspace-detail-tools-card" aria-labelledby="workspace-detail-tools-title">
             <div class="workspace-detail-tools-head">
               <div>
