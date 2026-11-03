@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { wireWorkspaceFollowUps } from './workspace-followups.js';
+import { tacticalTermsIn } from './hq-labels.js';
 
 // The constructor only reads the DOM (getElementById) and returns early from
 // setup() when there's no container — a null-returning stub is enough to build
@@ -287,7 +288,8 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /<div class="ws-l">Tickets<\/div>/);
   assert.doesNotMatch(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Notes</);
+  // "Workspace notes" on every workspace (PRD 766 FR25).
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Workspace notes</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-sessions">Sessions</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-folders">Linked Folders</);
@@ -317,6 +319,95 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.doesNotMatch(
     container.innerHTML,
     /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/
+  );
+});
+
+// --- Non-HQ Details snapshot (PRD 766 FR1) ------------------------------------
+// The HQ gets its own Details branch; every other workspace must render the
+// markup it rendered before. This pins the whole Details write for an ordinary
+// workspace. When a change here is deliberate, regenerate the file with
+// UPDATE_SNAPSHOTS=1 and review its diff like code.
+
+const DETAILS_SNAPSHOT = new URL(
+  '../../../../../tests/fixtures/workspace-command-details.snapshot.html',
+  import.meta.url
+);
+
+function ordinaryDetailsMarkup() {
+  const container = {
+    hidden: false,
+    innerHTML: '',
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container,
+    detailedView: { hidden: false },
+    toggleBtn: makeToggleButton(),
+    active: true,
+    viewMode: 'details',
+    page: {
+      workspaceId: 'workspace-1',
+      workspace: {
+        id: 'workspace-1',
+        name: 'Demo Workspace',
+        description: 'A focused production workspace for launch planning and execution.',
+        tags: ['launch', 'ops'],
+        workspace_settings: { workflow: { mode: 'guided' } },
+        mcp_bindings: [],
+        skill_bindings: []
+      },
+      tasks: [{ status: 'pending' }],
+      files: [{ name: 'brief.md', path: 'brief.md' }],
+      notes: [{ id: 'n1', title: 'Launch checklist', content: 'Ship it' }],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      buildAgentGroups: () => [
+        {
+          name: 'Atlas',
+          isWorkspaceAgent: true,
+          isUnassigned: false,
+          tasks: [{ id: 'task-1', description: 'Draft plan', status: 'pending' }]
+        },
+        { name: 'Builder', isWorkspaceAgent: true, isUnassigned: false, tasks: [] }
+      ],
+      isWorkspaceEntryAgent: name => name === 'Atlas',
+      getAgentAvatarPresentation: name => ({ initials: name.slice(0, 2), style: '' }),
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
+      getAgentProfile: () => ({}),
+      getAgentModelPresentation: () => ({ empty: false, model: 'gpt-test' }),
+      getAgentSkillSummary: () => ({ count: 0 })
+    },
+    persist() {}
+  });
+  commandView.render();
+  return container.innerHTML;
+}
+
+test('an ordinary workspace renders the Details markup it always has (FR1)', () => {
+  const markup = ordinaryDetailsMarkup();
+  // Rendering is deterministic for the same state; a second render must agree.
+  assert.equal(ordinaryDetailsMarkup(), markup);
+  assert.doesNotMatch(markup, /ws-cmd-layout is-hq/);
+  if (process.env.UPDATE_SNAPSHOTS === '1') {
+    writeFileSync(DETAILS_SNAPSHOT, markup);
+    return;
+  }
+  const expected = readFileSync(DETAILS_SNAPSHOT, 'utf8');
+  if (markup === expected) return;
+  // Name the first difference rather than dumping two 40 KB strings.
+  let at = 0;
+  while (at < markup.length && markup[at] === expected[at]) at += 1;
+  assert.fail(
+    'non-HQ Details markup changed at offset ' +
+      at +
+      '\n  expected: …' +
+      expected.slice(Math.max(0, at - 80), at + 120) +
+      '\n  actual:   …' +
+      markup.slice(Math.max(0, at - 80), at + 120) +
+      '\nRun UPDATE_SNAPSHOTS=1 only if the change is deliberate.'
   );
 });
 
@@ -1283,6 +1374,9 @@ test('systems shared surface mounts config without cloning persistence logic', (
   assert.deepEqual(calls, [
     // No follow-ups host in this layout, so the panel stays home.
     ['restore', 'followups'],
+    // Nor the HQ's inbox or Notes hosts: those panels stay home too (PRD 766).
+    ['restore', 'hq-needs-you'],
+    ['restore', 'hq-notes'],
     ['restore', 'tools'],
     ['restore', 'capabilities'],
     ['mount', 'config', '#workspace-detail-settings-panel'],
@@ -2147,12 +2241,26 @@ test('presentRailSections lists the rows renderRail draws, in order, with the sa
       ]
     );
 
+    // The HQ's Details rail (PRD 766 FR20): content rows, then Setup's own
+    // accordion rows; Team, Tools, Goal and Portability are not accordion rows.
     const hq = makeRailView({ ...content, workspace: { id: 'hq-1', designation: 'personal_hq' } });
-    assert.deepEqual(hq.presentRailSections(), drawn(hq.renderRail()));
+    assert.deepEqual(hq.presentRailSections(), drawn(hq.renderHQRail()));
     assert.deepEqual(
       hq.presentRailSections().map(section => section.key),
-      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems', 'stations']
+      [
+        'notes',
+        'sessions',
+        'files',
+        'backlog',
+        'folders',
+        'hq-capabilities',
+        'hq-triggers',
+        'schedules'
+      ]
     );
+    // Map keeps the workspace's ordinary rows.
+    hq.viewMode = 'map';
+    assert.ok(hq.presentRailSections().some(section => section.key === 'stations'));
   } finally {
     globalThis.window = originalWindow;
   }
@@ -2482,14 +2590,15 @@ test('a workspace’s own project folder does not make Linked Folders the defaul
   });
 });
 
-test('an HQ with no content opens Stations; a workspace with nothing opens nothing', () => {
+test('an HQ with no content opens no section (its stations are the grid); nor does an empty workspace', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {};
   try {
     withRailStorage({}, () => {
       const hq = makeRailView({ workspace: { id: 'hq-1', designation: 'personal_hq' } });
       hq.settleRailSection();
-      assert.equal(hq.activeRailSection, 'stations');
+      // PRD 766 FR22: the Stations row is gone from the HQ; Team is always open.
+      assert.equal(hq.activeRailSection, '');
 
       const plain = makeRailView({});
       plain.settleRailSection();
@@ -8584,7 +8693,10 @@ function makeTreeDoc() {
     matches(selector) {
       if (selector.startsWith('#')) return this.id === selector.slice(1);
       if (selector.startsWith('.')) return this.className.split(/\s+/).includes(selector.slice(1));
-      if (selector.startsWith('[')) return this.hasAttribute(selector.slice(1, -1));
+      if (selector.startsWith('[')) {
+        const [, name, value] = selector.slice(1, -1).match(/^([^=]+)(?:="([^"]*)")?$/) || [];
+        return value === undefined ? this.hasAttribute(name) : this.getAttribute(name) === value;
+      }
       return false;
     }
     querySelectorAll(selector) {
@@ -8801,6 +8913,889 @@ test('follow-ups: a deep-linked card rendered while parked is scrolled into view
     assert.equal(card.scrolledWith, null);
     assert.equal(doc.activeElement, card);
   });
+});
+
+// --- HQ Details hosts (PRD 766 FR3/FR4) ---------------------------------------
+// The HQ's Notes panel is a live node in the main column. A background
+// render() must relocate it, never rebuild it: the node, a draft typed in it and
+// the focused control all survive. The stat modal's Daily Brief and Memory
+// panels already survive the same way; this pins that on the HQ branch.
+
+const HQ_PANELS_KEEP = new Set([
+  ...FOLLOW_UPS_KEEP,
+  'renderHQDetails',
+  'renderHQNotesHost',
+  'hqNotesHost',
+  'notesInlineNode',
+  'parkHQPanels',
+  'syncHQPanels',
+  'settleInlineNotes',
+  'inlineNotesHTML',
+  'paintInlineNotes',
+  'bindInlineNotes',
+  'focusInlineNotesPanel',
+  'inlineNotesMetaHTML',
+  'paintInlineNotesMeta',
+  'notesPanelOpen',
+  'notesModalOpen',
+  'notesState',
+  'notesPanel',
+  'paintNotesPanel',
+  'openNotesPanel',
+  'mountDailyBriefPanel'
+]);
+
+// A folder Ori set up: its panel opens on the Inbox tab, which has the capture box.
+const CONNECTED_VAULT = {
+  status: 'connected',
+  source: { name: 'Second Brain', origin: 'created_by_ori' }
+};
+
+function hqPanelsPage({ secondBrain = CONNECTED_VAULT } = {}) {
+  const doc = makeTreeDoc();
+  const container = doc.createElement('div');
+  container.id = 'workspaceCommandView';
+  container.onHTML = html => {
+    for (const [attr, value] of [
+      ['data-cmd-followups-host', ''],
+      ['data-cmd-hq-host', 'notes']
+    ]) {
+      if (!html.includes(attr)) continue;
+      const host = doc.createElement('div');
+      host.setAttribute(attr, value);
+      container.appendChild(host);
+    }
+  };
+  const sharedHosts = doc.createElement('div');
+  sharedHosts.id = 'workspace-detail-shared-hosts';
+  sharedHosts.hidden = true;
+  const followups = doc.createElement('div');
+  followups.id = 'workspaceFollowupMount';
+  const notes = doc.createElement('section');
+  notes.id = 'hqNotesPanelMount';
+  notes.hidden = true;
+  const config = doc.createElement('div');
+  config.id = 'workspace-detail-settings-panel';
+  doc.body.append(container, sharedHosts);
+  sharedHosts.append(followups, notes, config);
+
+  // Each paint of the Notes panel builds a capture box, so a repaint is visible
+  // as a new input node.
+  let paints = 0;
+  notes.onHTML = html => {
+    paints += 1;
+    notes.lastHTML = html;
+    if (!html.includes('data-notes-capture')) return;
+    const input = doc.createElement('input');
+    input.setAttribute('data-notes-capture', '');
+    input.value = '';
+    notes.appendChild(input);
+  };
+
+  const commandView = new WorkspaceCommandView(null);
+  for (const name of Object.getOwnPropertyNames(WorkspaceCommandView.prototype)) {
+    if (HQ_PANELS_KEEP.has(name)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(WorkspaceCommandView.prototype, name);
+    if (typeof descriptor.value === 'function') commandView[name] = () => '';
+  }
+  const loads = [];
+  Object.assign(commandView, {
+    container,
+    active: true,
+    viewMode: 'details',
+    page: { workspace: { id: 'hq-1', designation: 'personal_hq' } },
+    sharedSurfaceAnchors: {},
+    isPersonalHQ: () => true,
+    watchtowerWorkspaceID: () => 'hq-1',
+    // The panel's look/inbox read: answer at once with a ready, empty panel.
+    loadNotesPanel() {
+      loads.push(1);
+      const panel = this.notesPanel();
+      panel.status = 'ready';
+      panel.look = { state: 'none' };
+      panel.inbox = { notes: [], total: 0 };
+      panel.tab = 'inbox';
+      this.paintNotesPanel(panel);
+    },
+    _notes: { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain }
+  });
+  const capture = () => notes.querySelector('[data-notes-capture]');
+  return {
+    doc,
+    container,
+    sharedHosts,
+    notes,
+    config,
+    commandView,
+    capture,
+    loads,
+    paints: () => paints
+  };
+}
+
+test('HQ Details: the Notes panel is mounted in its host, second only to nothing yet', () => {
+  const page = hqPanelsPage();
+  const { doc, container, commandView, notes } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    const host = container.querySelector('[data-cmd-hq-host="notes"]');
+    assert.ok(host, 'the HQ layout has a Notes host');
+    assert.equal(notes.parentNode, host);
+    assert.equal(notes.hidden, false);
+    assert.equal(commandView.notesInlineNode(), notes);
+    assert.equal(commandView.notesPanelOpen(), true, 'the inline panel counts as open');
+    assert.equal(page.loads.length, 1, 'a connected folder starts the panel read once');
+    assert.match(notes.lastHTML, /Notes/);
+    // Under the panel's header: the folder's name and the station's own badge.
+    assert.match(
+      notes.lastHTML,
+      /<\/header><p class="ws-hq-notes-meta" data-cmd-hq-notes-meta><span class="ws-hq-notes-vault">Second Brain<\/span><span class="ws-hq-notes-badge" title="set up by Ori">Second Brain<\/span><\/p>/
+    );
+    // The panel's own close button is still in its markup (CSS hides it inline).
+    assert.match(notes.lastHTML, /data-cmd-modal-action="close"/);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: a render() while typing in Notes keeps the node, the draft and the focus (FR4)', () => {
+  const page = hqPanelsPage();
+  const { doc, commandView, notes, capture } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    const input = capture();
+    assert.ok(input, 'the ready panel has a capture box');
+    input.focus();
+    input.value = 'Call the venue';
+    input.selectionStart = input.selectionEnd = 4;
+    let caret = null;
+    input.setSelectionRange = (start, end) => {
+      caret = [start, end];
+    };
+    const paintsBefore = page.paints();
+
+    commandView.render();
+    commandView.render();
+
+    assert.equal(page.paints(), paintsBefore, 'a background render never repaints the panel');
+    assert.equal(capture(), input, 'the same capture box');
+    assert.equal(input.value, 'Call the venue', 'the draft is untouched');
+    assert.equal(doc.activeElement, input, 'focus comes back to the capture box');
+    assert.deepEqual(caret, [4, 4], 'with the caret where it was');
+    assert.equal(page.loads.length, 1, 'and the panel is not read again');
+
+    // A mode switch parks it at home; coming back puts the same node back.
+    commandView.setCommandViewMode('tickets', { focus: false });
+    assert.equal(notes.parentNode, page.sharedHosts, 'parked at home outside Details');
+    assert.equal(commandView.notesInlineNode(), null);
+    commandView.setCommandViewMode('details', { focus: false });
+    assert.equal(capture(), input);
+    assert.equal(input.value, 'Call the venue');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: the Notes panel repaints when the connection changes, not otherwise', () => {
+  const page = hqPanelsPage({ secondBrain: { status: 'none' } });
+  const { doc, commandView, notes } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    assert.match(notes.lastHTML, /Connect notes…/, 'nothing connected: the connect state');
+    assert.match(notes.lastHTML, /data-cmd-modal-action="notes-connection"/);
+    assert.equal(page.loads.length, 0, 'nothing to read');
+    const before = page.paints();
+    commandView.render();
+    assert.equal(page.paints(), before);
+
+    // A forced re-read passes through loading without a flash.
+    commandView._notes.status = 'loading';
+    commandView.render();
+    assert.equal(page.paints(), before);
+
+    commandView._notes = { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain: CONNECTED_VAULT };
+    commandView.render();
+    assert.equal(page.loads.length, 1, 'connecting starts the read');
+    assert.doesNotMatch(notes.lastHTML, /Connect notes…/);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: opening the Notes station goes to the inline panel, not a dialog', () => {
+  const page = hqPanelsPage();
+  const { doc, commandView, capture } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    let modalOpened = false;
+    commandView.openStatModal = () => {
+      modalOpened = true;
+    };
+    commandView.openNotesPanel(null);
+    assert.equal(modalOpened, false);
+    assert.equal(doc.activeElement, capture());
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: the Daily Brief and Memory panels survive a re-render in the stat modal', () => {
+  const page = hqPanelsPage();
+  const { doc, container, config, commandView } = page;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    const modal = doc.createElement('div');
+    const panel = doc.createElement('div');
+    panel.className = 'ws-cmd-modal-panel';
+    modal.appendChild(panel);
+    const briefRoot = doc.createElement('div');
+    commandView.statModalEl = modal;
+    commandView.ensureDailyBriefPanel = () => ({ root: briefRoot });
+    // The modal's repaint, reduced to the two live surfaces it attaches.
+    commandView.renderStatModalBody = function () {
+      if (this.statModalSection === 'daily-brief') this.mountDailyBriefPanel(panel);
+      if (this.statModalSection === 'memory')
+        this.mountSharedSurface('config', '#workspace-detail-settings-panel', panel);
+    };
+
+    commandView.statModalSection = 'daily-brief';
+    commandView.render();
+    assert.equal(modal.parentNode, container, 'the modal is re-attached after the write');
+    assert.equal(briefRoot.parentNode, panel, 'with the brief root inside');
+    commandView.render();
+    assert.equal(briefRoot.parentNode, panel, 'the same brief root after a second render');
+
+    commandView.statModalSection = 'memory';
+    commandView.render();
+    assert.equal(config.parentNode, panel, 'Memory shows the config surface');
+    commandView.render();
+    assert.equal(config.parentNode, panel, 'still the same node after a re-render');
+    assert.equal(doc.body.querySelectorAll('#workspace-detail-settings-panel').length, 1);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+// --- HQ Details header and attention strip (PRD 766 FR5–FR13) -----------------
+
+// The whole HQ Details write, through the real render(), for the same state as
+// the ordinary snapshot but designated the Personal HQ.
+function hqDetailsMarkup({
+  document: doc = { getElementById: () => null },
+  window: win = {}
+} = {}) {
+  const originals = {
+    document: globalThis.document,
+    window: globalThis.window,
+    fetch: globalThis.fetch
+  };
+  globalThis.document = doc;
+  globalThis.window = win;
+  // No network in a unit test: the station reads degrade instead.
+  globalThis.fetch = undefined;
+  const container = {
+    hidden: false,
+    innerHTML: '',
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container,
+    detailedView: { hidden: false },
+    toggleBtn: makeToggleButton(),
+    active: true,
+    viewMode: 'details',
+    page: {
+      workspaceId: 'hq-1',
+      workspace: {
+        id: 'hq-1',
+        name: 'My HQ',
+        description: 'Where my day starts.',
+        designation: 'personal_hq',
+        tags: ['home'],
+        workspace_settings: { workflow: { mode: 'guided' } },
+        ticket_counts: { review: 1, in_progress: 2, ready: 3, done: 4 },
+        mcp_bindings: [],
+        skill_bindings: []
+      },
+      tasks: [],
+      files: [],
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      buildAgentGroups: () => [
+        { name: 'Builder', isWorkspaceAgent: true, isUnassigned: false, tasks: [] },
+        { name: 'Atlas', isWorkspaceAgent: true, isUnassigned: false, tasks: [] }
+      ],
+      isWorkspaceEntryAgent: name => name === 'Atlas',
+      getAgentAvatarPresentation: name => ({ initials: name.slice(0, 2), style: '' }),
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
+      getAgentProfile: () => ({}),
+      getAgentModelPresentation: () => ({ empty: false, model: 'gpt-test' }),
+      getAgentSkillSummary: () => ({ count: 0 })
+    },
+    persist() {}
+  });
+  try {
+    commandView.render();
+  } finally {
+    globalThis.document = originals.document;
+    globalThis.window = originals.window;
+    globalThis.fetch = originals.fetch;
+  }
+  return { html: container.innerHTML, commandView };
+}
+
+test('HQ Details: the header comes first, with the HQ chips, facts line and edit controls (FR5, FR9)', () => {
+  const { html } = hqDetailsMarkup({
+    window: {
+      workspaceMission: { getSummary: () => ({ mission: 'Keep my week on track' }) },
+      WorkspaceContinuityStatus: {
+        view: { state: 'ready', label: 'Ready to move as of 11/3/2026, 9:00:00 AM' }
+      }
+    }
+  });
+  assert.ok(html.startsWith('<header class="ws-cmd-topbar ws-hq-header"'), 'header is first');
+  assert.match(html, /<h2 id="ws-hq-title">My HQ<\/h2>/);
+  assert.match(html, /<span class="ws-hq-chip is-hq">Your HQ<\/span>/);
+  assert.match(html, /<span class="ws-hq-chip">Workflow · Guided<\/span>/);
+  assert.match(html, /Where my day starts\./);
+  assert.match(html, /data-cmd-edit-identity="name"/);
+  assert.match(html, /data-cmd-edit-identity="description"/);
+  assert.match(html, /data-cmd-hq-goal-edit aria-label="Edit goal"/);
+  const facts = html.match(/<p class="ws-hq-facts" data-cmd-hq-facts>(.*?)<\/p>/)[1];
+  assert.match(facts, /Lead<\/span> <span class="ws-hq-fact-value">Atlas</);
+  assert.match(facts, /Goal<\/span> <span class="ws-hq-fact-value">Keep my week on track</);
+  assert.match(facts, /Portability<\/span> <span class="ws-hq-fact-value">Ready to move</);
+  // No timestamp in the header (FR5), and no continuity chip mount there.
+  assert.doesNotMatch(html.split('</header>')[0], /as of|data-cmd-continuity-mount/);
+  // The agent-first composition is gone from the HQ (FR2).
+  assert.doesNotMatch(html, /ws-cmd-garrison|ws-cmd-work-first|data-cmd-admin|ws-cmd-mission"/);
+});
+
+test('HQ Details: the view switch keeps four views and folds the rest into More views (FR6)', () => {
+  const { html } = hqDetailsMarkup();
+  const nav = html.match(/<div class="ws-cmd-nav">(.*?)<\/div><div class="ws-cmd-title/)[1];
+  for (const label of ['Details', 'Map', 'Tickets', 'Plans']) {
+    assert.match(nav, new RegExp('>' + label + '</(button|a)>'), label);
+  }
+  assert.match(
+    nav,
+    /data-cmd-hq-more-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="ws-hq-more-menu">More views</
+  );
+  const menu = nav.match(/<div class="ws-hq-menu"[^>]*>(.*?)<\/div>/);
+  assert.match(menu[0], /role="menu"/);
+  assert.match(menu[0], / hidden>/, 'closed until opened');
+  assert.deepEqual(
+    [...menu[1].matchAll(/role="menuitem"[^>]*>([^<]+)</g)].map(match => match[1]),
+    ['Canvas', 'Diagnostics', 'Orchestration Skills']
+  );
+  // Nowhere else on the nav row.
+  assert.equal(nav.split('>Canvas<').length, 2);
+});
+
+test('HQ Details: four tiles read existing counts and lead to their panels (FR7)', () => {
+  const { html } = hqDetailsMarkup();
+  const tiles = html.match(
+    /<div class="ws-cmd-readout ws-hq-tiles"[^>]*>(.*?)<\/div><\/header>/
+  )[1];
+  assert.deepEqual(
+    [...tiles.matchAll(/<div class="ws-l">([^<]+)<\/div>/g)].map(match => match[1]),
+    ['Needs you', 'Follow-ups', 'Open tickets', 'Team']
+  );
+  assert.match(tiles, /data-cmd-hq-jump="needs-you"[^>]*><div class="ws-v">0</);
+  // Follow-ups unknown until the panel has counted them.
+  assert.match(tiles, /data-cmd-hq-jump="followups"[^>]*><div class="ws-v">—</);
+  // Open tickets = review + in progress + ready, the server's own counts.
+  assert.match(tiles, /data-cmd-section="tickets"[^>]*><div class="ws-v">6</);
+  assert.match(tiles, /data-cmd-hq-jump="team"[^>]*><div class="ws-v">2</);
+});
+
+test('HQ Details: no lines means no strip; the no-model goal reason is one line (FR8, FR10)', () => {
+  const quiet = hqDetailsMarkup().html;
+  assert.match(
+    quiet,
+    /<section class="ws-hq-attention" data-cmd-hq-attention [^>]* hidden><\/section>/
+  );
+
+  const { html, commandView } = hqDetailsMarkup({
+    window: {
+      workspaceMission: {
+        getSummary: () => ({ mission: '' }),
+        getState: () => ({ needs_attention: 'Set up a model to get suggestions.' })
+      }
+    }
+  });
+  const strip = html.match(/<section class="ws-hq-attention"[^>]*>(.*?)<\/section>/);
+  assert.doesNotMatch(strip[0], / hidden>/);
+  assert.match(
+    strip[1],
+    /<h3 class="ws-hq-attention-title" id="ws-hq-attention-title">Needs your attention<\/h3>/
+  );
+  assert.match(strip[1], /<span class="ws-hq-chip is-setup">Setup<\/span>/);
+  assert.match(strip[1], /Set up a model to get suggestions\./);
+  assert.match(strip[1], /data-cmd-hq-attention-action="setup:goal#0">Set up a model</);
+  assert.equal(commandView._hqAttentionLines.length, 1);
+  // The strip sits right under the header, before the main column.
+  assert.ok(html.indexOf('</header>') < html.indexOf('ws-hq-attention'));
+  assert.ok(html.indexOf('ws-hq-attention') < html.indexOf('ws-cmd-layout is-hq'));
+});
+
+function fakeMount({ text, buttons = [], hidden = false }) {
+  const controls = buttons.map(label => ({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    textContent: label,
+    hidden: false,
+    disabled: false,
+    childNodes: [],
+    clicks: 0,
+    closest: () => null,
+    click() {
+      this.clicks += 1;
+    }
+  }));
+  return {
+    nodeType: 1,
+    tagName: 'DIV',
+    hidden,
+    childNodes: [{ nodeType: 3, nodeValue: text }, ...controls],
+    querySelectorAll: () => controls,
+    controls
+  };
+}
+
+test('HQ Details: the hidden setup mounts become strip lines whose actions click the mount (FR11, FR13)', () => {
+  const wizard = fakeMount({ text: 'Setup · 2 of 4 steps done', buttons: ['Continue setup'] });
+  const email = fakeMount({ text: 'Connect your inbox', buttons: ['Connect', 'Later', 'Help'] });
+  const janitorLike = fakeMount({ text: 'Hidden one', hidden: true });
+  const mounts = {
+    setupWizardBanner: wizard,
+    workspaceEmailConnectMount: email,
+    workspaceGroupRequirementStatus: janitorLike
+  };
+  const doc = { getElementById: id => mounts[id] || null };
+  const { html, commandView } = hqDetailsMarkup({ document: doc });
+  assert.deepEqual(
+    commandView._hqAttentionLines.map(entry => [entry.key, entry.category, entry.sentence]),
+    [
+      ['setup:wizard', 'Setup', 'Setup · 2 of 4 steps done'],
+      ['setup:email', 'Email', 'Connect your inbox']
+    ]
+  );
+  // At most two actions per line.
+  assert.match(html, /data-cmd-hq-attention-action="setup:email#1">Later</);
+  assert.doesNotMatch(html, />Help</);
+
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.runHQAttentionAction('setup:email#1');
+    commandView.runHQAttentionAction('setup:wizard#0');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+  assert.equal(email.controls[1].clicks, 1, 'the mount’s own Later button ran');
+  assert.equal(wizard.controls[0].clicks, 1, 'and the wizard’s Continue setup');
+});
+
+test('HQ Details: more than three lines collapse behind "and N more" (FR12)', () => {
+  const tasks = [
+    { id: 't1', status: 'waiting_for_choice', description: 'Approve the plan', to: 'Atlas' }
+  ];
+  const mounts = {
+    setupWizardBanner: fakeMount({ text: 'Finish setup', buttons: ['Continue'] }),
+    blueprintIntakePending: fakeMount({ text: '2 changes', buttons: ['Review changes'] }),
+    workspaceFirstTaskBanner: fakeMount({ text: 'Atlas is reading the folder' })
+  };
+  const doc = { getElementById: id => mounts[id] || null };
+  const { html, commandView } = hqDetailsMarkup({ document: doc });
+  assert.equal(commandView._hqAttentionLines.length, 3);
+  assert.doesNotMatch(html, /and \d+ more/);
+
+  commandView.page.tasks = tasks;
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    const inner = commandView.hqAttentionInnerHTML();
+    assert.equal(commandView._hqAttentionLines.length, 4);
+    assert.match(inner, /data-cmd-hq-attention-more aria-expanded="false">and 1 more</);
+    assert.equal((inner.match(/class="ws-hq-attention-line"/g) || []).length, 3);
+    assert.match(inner, /Atlas \(Lead\) is waiting on you: Approve the plan\./);
+    commandView.hqAttentionExpanded = true;
+    const open = commandView.hqAttentionInnerHTML();
+    assert.equal((open.match(/class="ws-hq-attention-line"/g) || []).length, 4);
+    assert.doesNotMatch(open, /and 1 more/);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details main column: Needs you, Notes, Follow-ups, then the stations grid (FR14–FR18)', () => {
+  const { html } = hqDetailsMarkup();
+  const main = html.match(/<main class="ws-cmd-main ws-hq-main">(.*)<\/main>/)[1];
+  const at = marker => main.indexOf(marker);
+  assert.ok(main.startsWith('<section class="ws-hq-panel ws-hq-needs"'), 'Needs you is first');
+  assert.ok(at('data-cmd-hq-needs') < at('data-cmd-hq-host="notes"'));
+  assert.ok(at('data-cmd-hq-host="notes"') < at('data-cmd-followups-host'));
+  assert.ok(at('data-cmd-followups-host') < at('ws-hq-stations'));
+  // No agent deck on the HQ (FR18).
+  assert.doesNotMatch(html, /ws-cmd-garrison|data-cmd-agent-tab|ws-cmd-roster/);
+});
+
+test('HQ Details: the stations grid shows every station but Notes as a card with a state word (FR17)', () => {
+  const { html } = hqDetailsMarkup();
+  const grid = html.match(/<ul class="ws-hq-station-grid">(.*?)<\/ul>/)[1];
+  const cards = [...grid.matchAll(/data-cmd-hq-card="([^"]+)"/g)].map(match => match[1]);
+  for (const key of ['watchtower', 'email', 'calendar-ops', 'daily-brief']) {
+    assert.ok(cards.includes(key), key);
+  }
+  assert.ok(!cards.includes('second-brain'), 'Notes is its own panel');
+  for (const card of grid.split('</li>').filter(Boolean)) {
+    assert.match(
+      card,
+      /<span class="ws-hq-station-state">(Ready|Needs you|Running|Checking|Not set up|Error)<\/span>/
+    );
+    assert.match(card, /<button type="button" class="ws-hq-station /, 'the whole card is a button');
+    assert.match(card, /<span class="ws-hq-station-action" aria-hidden="true">[^<]+<\/span>/);
+  }
+});
+
+test('HQ Details: the grid orders Needs you first and Not set up last, dashed', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.mapStationRegistry = () => [
+    { key: 'email', label: 'Email', state: () => ({ value: 'Set up Email Ops' }) },
+    {
+      key: 'watchtower',
+      label: 'Watchtower',
+      state: () => ({ value: 'All clear', tone: 'clear' })
+    },
+    {
+      key: 'calendar-ops',
+      label: 'Calendar Ops',
+      state: () => ({ value: '2 conflicts', description: 'tomorrow', tone: 'attention' })
+    },
+    { key: 'second-brain', label: 'Notes', state: () => ({ value: '3 open', tone: 'clear' }) }
+  ];
+  const grid = commandView.hqStationsGridHTML();
+  assert.deepEqual(
+    [...grid.matchAll(/data-cmd-hq-card="([^"]+)"/g)].map(match => match[1]),
+    ['calendar-ops', 'watchtower', 'email']
+  );
+  assert.match(grid, /class="ws-hq-station is-not-set-up is-unset" data-cmd-hq-card="email"/);
+  assert.match(grid, /aria-label="Email: Not set up\. Set up Email Ops\. Set up"/);
+
+  // The station asking for the user is a Needs you row whose action is the
+  // station's own (FR14).
+  const ran = [];
+  commandView.runHQStationAction = (key, trigger) => ran.push([key, trigger]);
+  commandView.notesState = () => ({ secondBrain: null });
+  const needs = commandView.hqNeedsYouInnerHTML();
+  assert.match(needs, /<span class="ws-hq-chip is-calendar">Calendar<\/span>/);
+  assert.match(needs, /Calendar Ops: 2 conflicts · Tomorrow/);
+  assert.match(needs, /<span class="ws-hq-panel-count">1<\/span>/);
+  commandView.runHQNeedsYouAction('station:calendar-ops', 'btn');
+  assert.deepEqual(ran, [['calendar-ops', 'btn']]);
+
+  commandView.mapStationRegistry = () => [];
+  assert.match(
+    commandView.hqNeedsYouInnerHTML(),
+    /<p class="ws-hq-empty">Nothing needs you right now\.<\/p>/
+  );
+});
+
+test('HQ Details: a focused station card keeps focus through a re-render', () => {
+  const page = hqPanelsPage();
+  const { doc, container, commandView } = page;
+  const originalOnHTML = container.onHTML;
+  container.onHTML = html => {
+    originalOnHTML(html);
+    const fresh = doc.createElement('button');
+    fresh.setAttribute('data-cmd-hq-card', 'watchtower');
+    container.appendChild(fresh);
+  };
+  for (const name of ['rememberHQFocus', 'restoreHQFocus', 'syncHQNeedsYouSurface']) {
+    commandView[name] = WorkspaceCommandView.prototype[name];
+  }
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    const first = container.querySelector('[data-cmd-hq-card="watchtower"]');
+    first.focus();
+    commandView.render();
+    const second = container.querySelector('[data-cmd-hq-card="watchtower"]');
+    assert.notEqual(second, first, 'the card was rebuilt');
+    assert.equal(doc.activeElement, second, 'and focus moved to its replacement');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details says no tactical word, in text or aria-labels (FR23)', () => {
+  const { html } = hqDetailsMarkup({
+    window: {
+      workspaceMission: { getSummary: () => ({ mission: 'Keep my week on track' }) }
+    }
+  });
+  assert.deepEqual(tacticalTermsIn(html), []);
+  // The ordinary Details still speaks its own vocabulary; only the HQ changed.
+  assert.notDeepEqual(tacticalTermsIn(ordinaryDetailsMarkup()), []);
+});
+
+test('HQ Details rail: Team first and open, the lead marked, Give work for each agent (FR19)', () => {
+  const { html } = hqDetailsMarkup();
+  const rail = html.match(/<aside class="ws-cmd-rail ws-hq-rail">(.*)<\/aside>/)[1];
+  assert.ok(rail.startsWith('<section class="ws-hq-team"'), 'Team is first');
+  assert.match(
+    rail,
+    /<h3 class="ws-hq-rail-group-title" id="ws-hq-team-title">Team <span class="ws-hq-panel-count">2<\/span><\/h3>/
+  );
+  const rows = [...rail.matchAll(/<li class="ws-hq-team-row([^"]*)">(.*?)<\/li>/g)];
+  assert.deepEqual(
+    rows.map(row => [row[1].trim(), row[2].match(/class="ws-hq-team-name"[^>]*>([^<]+)</)[1]]),
+    [
+      ['is-lead', 'Atlas'],
+      ['', 'Builder']
+    ],
+    'the lead first'
+  );
+  assert.match(rows[0][2], /<span class="ws-hq-chip is-lead">Lead<\/span>/);
+  assert.doesNotMatch(rows[1][2], /is-lead/);
+  assert.match(rows[0][2], /data-cmd-add-task="Atlas" aria-label="Give work to Atlas">Give work</);
+  assert.match(rows[1][2], /data-cmd-add-task="Builder"/);
+  // Team is not a toggle: it has no accordion button.
+  assert.doesNotMatch(rail, /data-cmd-manage-section="team"/);
+});
+
+test('HQ Details rail: content rows, then Setup, and no Stations or Systems row (FR20, FR22)', () => {
+  const { html } = hqDetailsMarkup();
+  const rail = html.match(/<aside class="ws-cmd-rail ws-hq-rail">(.*)<\/aside>/)[1];
+  const names = [
+    ...rail.matchAll(
+      /<span class="ws-cmd-panel-name"[^>]*>([^<]+)<\/span>|<span class="ws-hq-link-label">([^<]+)<\/span>/g
+    )
+  ].map(match => match[1] || match[2]);
+  assert.deepEqual(names, [
+    'Workspace notes',
+    'Sessions',
+    'Files',
+    'Backlog',
+    'Linked folders',
+    'Tools',
+    'Capabilities',
+    'Triggers and automation',
+    'Schedules',
+    'Goal',
+    'Portability'
+  ]);
+  assert.ok(rail.indexOf('Backlog') < rail.indexOf('id="ws-hq-setup-title">Setup<'));
+  assert.doesNotMatch(rail, /data-cmd-manage-section="(stations|systems)"/);
+  // Portability's row holds the chip's mount, which carries the full status.
+  assert.match(rail, /ws-hq-portability[\s\S]*data-cmd-continuity-mount/);
+  assert.match(rail, /data-cmd-hq-rail="tools"/);
+  assert.match(rail, /data-cmd-hq-rail="goal"/);
+});
+
+test('HQ Details: Capabilities and Triggers rows open the Systems surface on their tab', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.activeSystemTab = 'capabilities';
+  for (const [section, tab] of [
+    ['hq-triggers', 'triggers'],
+    ['hq-capabilities', 'capabilities'],
+    ['systems', 'capabilities'],
+    ['notes', null],
+    ['', null]
+  ]) {
+    commandView.activeRailSection = section;
+    assert.equal(commandView.systemsRailTab(), tab, section);
+  }
+});
+
+test('HQ Details: closing a station panel returns focus to its card, even one rebuilt meanwhile', () => {
+  const doc = makeTreeDoc();
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  const fresh = doc.createElement('button');
+  fresh.className = 'ws-hq-station';
+  fresh.setAttribute('data-cmd-hq-card', 'memory');
+  container.appendChild(fresh);
+  const gone = doc.createElement('button');
+  gone.className = 'ws-hq-station';
+  gone.setAttribute('data-cmd-hq-card', 'memory');
+  gone.isConnected = false;
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.container = container;
+  assert.equal(commandView.resolveStatModalTrigger(gone), fresh);
+  // A trigger still in the page is itself.
+  fresh.isConnected = true;
+  assert.equal(commandView.resolveStatModalTrigger(fresh), fresh);
+});
+
+test('HQ Details: follow-ups made elsewhere show at once; the last one gone hides the panel', () => {
+  const doc = makeTreeDoc();
+  const host = doc.createElement('div');
+  host.setAttribute('data-cmd-followups-host', '');
+  const mount = doc.createElement('div');
+  mount.hidden = true;
+  host.appendChild(mount);
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.sharedSurfaceAnchors = { followups: { node: mount } };
+  const panel = doc.createElement('section');
+  panel.className = 'workspace-followups';
+  mount.appendChild(panel);
+  commandView.settleFollowUpsVisibility();
+  assert.equal(mount.hidden, false);
+  panel.detach();
+  commandView.settleFollowUpsVisibility();
+  assert.equal(mount.hidden, true);
+  // At home (another mode), nothing is decided here.
+  const home = doc.createElement('div');
+  home.appendChild(mount);
+  mount.appendChild(panel);
+  commandView.settleFollowUpsVisibility();
+  assert.equal(mount.hidden, true);
+});
+
+test('HQ Details: Notes changes reload the follow-ups panel below', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  let reloads = 0;
+  globalThis.window = { WorkspaceFollowUps: { reload: async () => (reloads += 1) } };
+  globalThis.document = { dispatchEvent() {} };
+  try {
+    WorkspaceCommandView.prototype.notesChanged.call(Object.create(WorkspaceCommandView.prototype));
+    await Promise.resolve();
+    assert.equal(reloads, 1);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: the Team tile scrolls Team clear of the fixed top bar, however tall', () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const scrolls = [];
+  let focused = null;
+  const control = { focus: () => (focused = 'give') };
+  const team = {
+    getBoundingClientRect: () => ({ top: 900 }),
+    querySelector: () => control
+  };
+  globalThis.window = { scrollY: 400, scrollTo: options => scrolls.push(options) };
+  globalThis.document = {
+    // A phone: the navigation wraps and the bar is 169 px tall.
+    querySelector: selector =>
+      selector === 'nav.navbar' ? { getBoundingClientRect: () => ({ bottom: 169 }) } : null
+  };
+  try {
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    commandView.container = {
+      querySelector: selector => (selector === '.ws-hq-team' ? team : null)
+    };
+    commandView.runHQJump('team');
+    assert.deepEqual(scrolls, [{ top: 400 + 900 - 169 - 12 }]);
+    assert.equal(focused, 'give');
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: opening a Setup row keeps it where it was on screen', () => {
+  const originalWindow = globalThis.window;
+  const scrolled = [];
+  globalThis.window = { scrollBy: (x, y) => scrolled.push([x, y]) };
+  try {
+    withRailStorage({}, () => {
+      // Before the render the Triggers row is at 413; after it, with the
+      // Capabilities body above it closed, it would be at 84.
+      let top = 413;
+      const toggle = { getBoundingClientRect: () => ({ top }) };
+      const commandView = makeRailView(
+        { workspace: { id: 'hq-1', designation: 'personal_hq' } },
+        {
+          activeRailSection: 'hq-capabilities',
+          container: {
+            querySelector: selector =>
+              selector === '.ws-cmd-rail [data-cmd-manage-section="hq-triggers"]' ? toggle : null
+          },
+          render() {
+            top = 84;
+          }
+        }
+      );
+      commandView.toggleRailManager('hq-triggers');
+      assert.equal(commandView.activeRailSection, 'hq-triggers');
+      assert.deepEqual(scrolled, [[0, -329]], 'scrolled back by what the row moved');
+
+      // An ordinary workspace keeps the rail's own behaviour.
+      scrolled.length = 0;
+      commandView.page.workspace = { id: 'ws-1' };
+      top = 413;
+      commandView.toggleRailManager('notes');
+      assert.deepEqual(scrolled, []);
+    });
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('HQ Details: a ticket change repaints Open tickets as a number, not the Tickets phrase', () => {
+  const { commandView } = hqDetailsMarkup();
+  const value = { textContent: '6' };
+  const attrs = {};
+  const tile = {
+    querySelector: selector => (selector === '.ws-v' ? value : null),
+    setAttribute: (name, text) => {
+      attrs[name] = text;
+    }
+  };
+  commandView.container = {
+    querySelector: selector => (selector === '[data-cmd-section="tickets"]' ? tile : null)
+  };
+  commandView.page.workspace.ticket_counts = { review: 0, in_progress: 1, ready: 2, done: 9 };
+  commandView.paintWorkTile();
+  assert.equal(value.textContent, '3');
+  assert.equal(attrs['aria-label'], 'Open tickets: 3');
+});
+
+test('HQ Details marks the page so the top mounts hide, and only in Details (FR13)', () => {
+  const body = { dataset: { hqDetails: '1' } };
+  const doc = { getElementById: () => null, body };
+  const { commandView } = hqDetailsMarkup({ document: doc });
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.publishWorkspaceViewMode();
+    assert.equal(body.dataset.hqDetails, '1');
+    commandView.viewMode = 'map';
+    commandView.publishWorkspaceViewMode();
+    assert.equal(body.dataset.hqDetails, undefined, 'Map keeps its mounts');
+    commandView.viewMode = 'details';
+    commandView.page.workspace.designation = '';
+    commandView.publishWorkspaceViewMode();
+    assert.equal(body.dataset.hqDetails, undefined, 'not an HQ after all');
+    // Before the workspace has loaded, the server's mark stands.
+    body.dataset.hqDetails = '1';
+    commandView.page.workspace = {};
+    commandView.publishWorkspaceViewMode();
+    assert.equal(body.dataset.hqDetails, '1');
+  } finally {
+    globalThis.document = originalDocument;
+  }
 });
 
 // --- notes-station-panel ------------------------------------------------------

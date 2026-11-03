@@ -16,12 +16,15 @@ for (const theme of ['light', 'dark']) {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 390, height: 844 });
+    // Both themes run at once; the theme keeps their names apart when they
+    // start in the same millisecond (the create then collided and failed).
+    const stamp = `${theme} ${Date.now()}`;
     const response = await page.request.post('/api/workspaces', {
-      data: { name: `Work-first accessibility ${Date.now()}` }
+      data: { name: `Work-first accessibility ${stamp}` }
     });
-    expect(response.ok()).toBeTruthy();
+    expect(response.ok(), await response.text()).toBeTruthy();
     const { folder } = await response.json();
-    const agentName = `Work-first Manager ${Date.now()}`;
+    const agentName = `Work-first Manager ${stamp}`;
     expect(
       (
         await page.request.post('/api/agents', { data: { name: agentName, type: 'orchestration' } })
@@ -126,6 +129,199 @@ for (const theme of ['light', 'dark']) {
       await page.request.delete(`/api/workspaces/${folder.id}`);
     }
   });
+  // PRD 766 FR29: the Personal HQ's Details page, header first and station-first.
+  test(`Personal HQ Details: header first, attention strip, main column and rail (${theme})`, async ({
+    page
+  }, testInfo) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // The theme is in the names: both themes run at once and can share a stamp.
+    const stamp = `${theme} ${Date.now()}`;
+    const response = await page.request.post('/api/workspaces', {
+      data: { name: `HQ layout ${stamp}`, blank: true }
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const { folder } = await response.json();
+    const agentName = `HQ Lead ${stamp}`;
+    expect(
+      (await page.request.post('/api/agents', { data: { name: agentName, type: 'general' } })).ok()
+    ).toBeTruthy();
+    expect(
+      (
+        await page.request.post(`/api/workspaces/${folder.id}/agents`, {
+          data: { agent_name: agentName }
+        })
+      ).ok()
+    ).toBeTruthy();
+    try {
+      await page.goto(`/workspaces/${folder.folder_slug}`);
+      await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();
+      await page.waitForFunction(() => Boolean(window.workspaceDetail?.workspace?.id));
+      // Display fixture only, as above: the canonical HQ designation on this
+      // workspace, without building an HQ. The goal's own status line is
+      // silenced so the strip starts empty, and every top mount is given
+      // content so "nothing above the header" is tested with all of them full.
+      await page.evaluate(() => {
+        if (window.workspaceMission) window.workspaceMission.getState = () => ({});
+        for (const id of [
+          'workspaceGroupRequirementStatus',
+          'workspaceEmailConnectMount',
+          'workspaceNeedsYouMount',
+          'workspaceBriefHistoryMount',
+          'fileJanitorMount',
+          'backupRecoveryMount',
+          'githubProposalsMount',
+          'blueprintIntakePending'
+        ]) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.hidden = false;
+          el.textContent = 'Fixture mount ' + id;
+        }
+        window.workspaceDetail.workspace.designation = 'personal_hq';
+        window.workspaceCommand.setCommandViewMode('details', { focus: false });
+      });
+      const header = page.locator('.ws-hq-header');
+      await expect(header).toBeVisible();
+      await expect(page.locator('body')).toHaveAttribute('data-hq-details', '1');
+
+      const strip = page.locator('[data-cmd-hq-attention]');
+      // The fixture mounts other than the setup ones say nothing in the strip;
+      // the setup mounts would, so start with them hidden again.
+      await page.evaluate(() => {
+        for (const id of [
+          'workspaceGroupRequirementStatus',
+          'workspaceEmailConnectMount',
+          'blueprintIntakePending'
+        ]) {
+          document.getElementById(id).hidden = true;
+        }
+        window.workspaceCommand.render();
+      });
+      await expect(strip).toBeHidden();
+      // A first-task banner is a setup line: the strip appears under the header.
+      await page.evaluate(() => {
+        const banner = document.getElementById('workspaceFirstTaskBanner');
+        banner.textContent = 'Your lead is reading the folder you added.';
+        banner.hidden = false;
+      });
+      await expect(strip).toBeVisible();
+      await expect(strip).toContainText('Needs your attention');
+      await expect(strip).toContainText('Your lead is reading the folder you added.');
+
+      for (const width of [375, 768, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        const layout = await page.evaluate(() => {
+          const box = el => el.getBoundingClientRect();
+          const header = document.querySelector('.ws-hq-header');
+          const content = document.querySelector('.main-content .container-fluid');
+          // Every element before the command view in the content column takes
+          // no room: nothing renders above the header.
+          const above = [];
+          for (const child of content.children) {
+            if (child.id === 'workspaceCommandView') break;
+            if (child.tagName === 'SCRIPT' || child.tagName === 'STYLE') continue;
+            // The screen-reader live region is meant to be there, unseen.
+            if (child.classList.contains('visually-hidden')) continue;
+            if (box(child).height > 0) above.push(child.id || child.className);
+          }
+          const order = [
+            '[data-cmd-hq-needs]',
+            '[data-cmd-hq-host="notes"]',
+            '[data-cmd-followups-host]',
+            '.ws-hq-stations',
+            '.ws-hq-rail'
+          ].map(selector => document.querySelector(selector));
+          const inOrder = order
+            .filter(Boolean)
+            .every(
+              (node, index, nodes) =>
+                index === 0 ||
+                Boolean(
+                  nodes[index - 1].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING
+                )
+            );
+          const commandFirst = document.querySelector('#workspaceCommandView').firstElementChild;
+          const stripNode = document.querySelector('[data-cmd-hq-attention]');
+          return {
+            above,
+            headerTop: box(header).top,
+            headerIsFirst: commandFirst === header,
+            stripAfterHeader: Boolean(
+              header.compareDocumentPosition(stripNode) & Node.DOCUMENT_POSITION_FOLLOWING
+            ),
+            stripBeforeMain: Boolean(
+              stripNode.compareDocumentPosition(order[0]) & Node.DOCUMENT_POSITION_FOLLOWING
+            ),
+            inOrder,
+            present: order.map(Boolean),
+            overflow: document.documentElement.scrollWidth > innerWidth + 1
+          };
+        });
+        expect(layout.above, `nothing above the header at ${width}`).toEqual([]);
+        expect(layout.headerIsFirst).toBe(true);
+        expect(layout.headerTop).toBeLessThan(900);
+        expect(layout.stripAfterHeader && layout.stripBeforeMain).toBe(true);
+        expect(layout.present[0], 'Needs you').toBe(true);
+        expect(layout.present[1], 'Notes host').toBe(true);
+        expect(layout.present[2], 'Follow-ups host').toBe(true);
+        expect(layout.present[4], 'rail').toBe(true);
+        expect(layout.inOrder, `main column then rail, in order, at ${width}`).toBe(true);
+        expect(layout.overflow, `no horizontal scroll at ${width}`).toBe(false);
+        await page.screenshot({
+          path: testInfo.outputPath(`hq-details-${width}-${theme}.png`),
+          fullPage: true,
+          animations: 'disabled'
+        });
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+
+      // Team is the rail's first group and is open: its rows are visible
+      // without any toggle, and it has none.
+      const team = page.locator('.ws-hq-team');
+      await expect(team).toBeVisible();
+      await expect(team.getByRole('heading', { name: /^Team/ })).toBeVisible();
+      await expect(team.getByRole('button', { name: `Give work to ${agentName}` })).toBeVisible();
+      await expect(page.locator('[data-cmd-manage-section="team"]')).toHaveCount(0);
+      await expect(page.locator('[data-cmd-manage-section="stations"]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /^Workspace notes/ })).toBeVisible();
+
+      // More views is a keyboard menu that closes on Escape (FR6).
+      const more = page.getByRole('button', { name: 'More views' });
+      await expect(more).toHaveAttribute('aria-haspopup', 'menu');
+      await more.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menuitem', { name: 'Canvas' })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu', { name: 'More views' })).toBeHidden();
+      await expect(more).toBeFocused();
+
+      // Plain names only, in what is shown and in what is announced (FR23).
+      const words = await page.evaluate(() => {
+        const root = document.querySelector('#workspaceCommandView');
+        const labels = [...root.querySelectorAll('[aria-label]')].map(el =>
+          el.getAttribute('aria-label')
+        );
+        return [root.innerText, ...labels].join('\n');
+      });
+      for (const term of ['Outpost', 'Commander', 'Garrison', 'Quest Board', 'Loadout', 'Keeper']) {
+        expect(words, term).not.toContain(term);
+      }
+
+      await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+      const scan = await page.evaluate(async () => {
+        const result = await window.axe.run('#workspaceCommandView', {
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+        });
+        return result.violations;
+      });
+      expect(scan, JSON.stringify(scan, null, 2)).toEqual([]);
+    } finally {
+      await page.request.delete(`/api/workspaces/${folder.id}`);
+    }
+  });
+
   test(`workspace detail accessibility (${theme})`, async ({ page }) => {
     const baseUrl =
       process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';

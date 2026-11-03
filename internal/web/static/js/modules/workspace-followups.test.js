@@ -602,6 +602,36 @@ test('wireWorkspaceFollowUps focuses an exact owner-local deep link without muta
   assert.deepEqual(posted, []);
 });
 
+test('wireWorkspaceFollowUps: reload() reads again in place, counts on the mount and announces it (PRD 766)', async () => {
+  const doc = fakeDoc();
+  const events = [];
+  doc.dispatchEvent = event => events.push([event.type, event.detail]);
+  const mount = doc.createElement('div');
+  let followups = [];
+  const controller = await wireWorkspaceFollowUps({
+    doc,
+    workspaceId: 'hq-1',
+    mount,
+    storage: fakeStorage(),
+    now: () => NOW,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ followups }) }),
+    postImpl: async () => {}
+  });
+  assert.equal(mount.dataset.followupCount, '0');
+  assert.deepEqual(events, [['ori:followups-changed', { count: 0 }]]);
+  assert.equal(findAll(mount, byClass('hq-followup-card')).length, 0);
+
+  // The Notes panel added two follow-ups elsewhere.
+  followups = [
+    { id: 'f1', title: 'Master track 7', category: 'i_owe', status: 'active' },
+    { id: 'f2', title: 'Ask Marco', category: 'needs_decision', status: 'active' }
+  ];
+  await controller.reload();
+  assert.equal(mount.dataset.followupCount, '2');
+  assert.deepEqual(events.at(-1), ['ori:followups-changed', { count: 2 }]);
+  assert.ok(findAll(mount, byClass('workspace-followups')).length > 0, 'the panel now renders');
+});
+
 test('wireWorkspaceFollowUps: a remembered choice wins over the default, and a toggle is remembered', async () => {
   const doc = fakeDoc();
   const payload = {

@@ -69,13 +69,25 @@ test('Systems is never the default, whatever its count', () => {
   );
 });
 
-test('an HQ with no content opens Stations; one with content opens the content', () => {
+test('the HQ never opens Stations: the grid replaced that row (PRD 766 FR22)', () => {
   const emptyHQ = sections({}, [{ key: 'stations', count: 4 }]);
-  assert.equal(resolveRailSection({ sections: emptyHQ, isHQ: true }), 'stations');
+  assert.equal(resolveRailSection({ sections: emptyHQ, isHQ: true }), '');
+  // Not even when it was the remembered section before this change.
+  assert.equal(resolveRailSection({ saved: 'stations', sections: emptyHQ, isHQ: true }), '');
   const busyHQ = sections({ notes: 1 }, [{ key: 'stations', count: 4 }]);
   assert.equal(resolveRailSection({ sections: busyHQ, isHQ: true }), 'notes');
   // A workspace that merely has stations is not the HQ: nothing opens.
   assert.equal(resolveRailSection({ sections: emptyHQ, isHQ: false }), '');
+});
+
+test('the HQ keeps Team out of the accordion: it is never the one open section (FR21)', () => {
+  const hq = sections({ files: 2 }, [{ key: 'team', count: 3, after: 'backlog' }]);
+  // Team is always open on its own; the accordion still opens one other row.
+  assert.equal(resolveRailSection({ sections: hq, isHQ: true }), 'files');
+  assert.equal(resolveRailSection({ saved: 'team', sections: hq, isHQ: true }), 'files');
+  assert.equal(resolveRailSection({ saved: 'sessions', sections: hq, isHQ: true }), 'sessions');
+  // Elsewhere a section called "team" is an ordinary remembered row.
+  assert.equal(resolveRailSection({ saved: 'team', sections: hq }), 'team');
 });
 
 test('nothing saved and nothing to show opens nothing', () => {

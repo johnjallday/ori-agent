@@ -9,8 +9,8 @@
 
 // The sections that hold the user's own content, in rail order. Systems is
 // deliberately not one: its count is its tabs, and opening it widens the
-// layout, so it is never opened on the user's behalf. Stations is the HQ
-// fallback below, not content.
+// layout, so it is never opened on the user's behalf. Stations is not
+// content either, and the HQ no longer has that row.
 const CONTENT_SECTIONS = [
   'backlog',
   'notes',
@@ -36,7 +36,13 @@ const CONTENT_SECTIONS = [
  * @returns {string} a section key, or '' for nothing open
  */
 export function resolveRailSection({ saved = null, sections = [], isHQ = false } = {}) {
-  const present = Array.isArray(sections) ? sections : [];
+  // The Personal HQ's Details rail (PRD 766 FR21, FR22): Team is always open
+  // and is not one of the accordion's sections, and there is no Stations row
+  // (the stations grid replaced it), so neither is ever chosen here, even when
+  // remembered from before.
+  const present = (Array.isArray(sections) ? sections : []).filter(
+    section => !isHQ || !HQ_OUTSIDE_ACCORDION.includes(section.key)
+  );
   const has = key => present.some(section => section.key === key);
 
   if (saved === '') return '';
@@ -49,9 +55,10 @@ export function resolveRailSection({ saved = null, sections = [], isHQ = false }
   );
   if (firstWithContent) return firstWithContent.key;
 
-  if (isHQ && has('stations')) return 'stations';
   return '';
 }
+
+const HQ_OUTSIDE_ACCORDION = ['team', 'stations'];
 
 export function railSectionStorageKey(workspaceId) {
   return 'ori:command-rail-section:' + String(workspaceId || '').trim();

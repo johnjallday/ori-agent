@@ -75,6 +75,7 @@ import {
   isCreatedByOri,
   nextNotesTab,
   notesBadge,
+  notesNudge,
   notesPanelAvailable,
   notesPanelHTML,
   notesSections,
@@ -100,6 +101,34 @@ import {
   buildWorkspaceURL
 } from './workspace-url-state.js';
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
+import { HQ_LABELS, portabilityWord } from './hq-labels.js';
+import { capAttentionLines, hqAttentionLines, hqNeedsYouRows } from './hq-attention.js';
+import { hqStationCards, stationsNeedingYou } from './hq-stations-grid.js';
+import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
+
+// The feature mounts the HQ's Details page hides above its header, read for
+// the attention strip in its setup order (PRD 766 FR11.2, FR13). Each keeps
+// running; the strip shows what it says and clicks its own buttons.
+const HQ_SETUP_MOUNTS = [
+  { key: 'wizard', id: 'setupWizardBanner' },
+  { key: 'intake', id: 'blueprintIntakePending' },
+  { key: 'group', id: 'workspaceGroupRequirementStatus' },
+  { key: 'email', id: 'workspaceEmailConnectMount', category: 'Email' },
+  { key: 'first-task', id: 'workspaceFirstTaskBanner' }
+];
+// The HQ controls whose focus a re-render carries to their replacement.
+const HQ_FOCUS_ATTRS = [
+  'data-cmd-hq-card',
+  'data-cmd-hq-needs-action',
+  'data-cmd-hq-needs-all',
+  'data-cmd-hq-attention-action',
+  'data-cmd-hq-attention-more',
+  'data-cmd-hq-jump',
+  'data-cmd-hq-more-toggle',
+  'data-cmd-hq-goal-edit',
+  'data-cmd-hq-rail',
+  'data-cmd-add-task'
+];
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -853,6 +882,14 @@ export class WorkspaceCommandView {
     if (!dataset) return;
     const previous = dataset.workspaceViewMode || '';
     dataset.workspaceViewMode = mode;
+    // The HQ's Details page hides the feature mounts above the Command view
+    // (PRD 766 FR13). The server marks a known HQ before the first paint; once
+    // the workspace has loaded, this keeps the mark right for the view mode.
+    if (this.page && this.page.workspace && this.page.workspace.id) {
+      const hqDetails = this.isPersonalHQ() && mode === 'details';
+      if (hqDetails) dataset.hqDetails = '1';
+      else delete dataset.hqDetails;
+    }
     if (previous === mode || typeof document.dispatchEvent !== 'function') return;
     if (typeof CustomEvent !== 'function') return;
     document.dispatchEvent(
@@ -1922,6 +1959,14 @@ export class WorkspaceCommandView {
     if (!this.container || typeof this.container.querySelector !== 'function') return;
     const tile = this.container.querySelector('[data-cmd-section="tickets"]');
     if (!tile) return;
+    // The HQ's header shows the same counts as one number, "Open tickets".
+    if (this.viewMode === 'details' && this.isPersonalHQ()) {
+      const fresh = this.hqTilesValues().tickets;
+      const hqValue = tile.querySelector('.ws-v');
+      if (hqValue) hqValue.textContent = String(fresh.value);
+      tile.setAttribute('aria-label', fresh.aria);
+      return;
+    }
     const counts = this.currentTicketCounts();
     const line = TicketCounts.format(counts) || '—';
     const spoken = TicketCounts.describe(counts);
@@ -2604,23 +2649,25 @@ export class WorkspaceCommandView {
         ? ''
         : this.viewMode === 'map'
           ? this.renderOperationsMap() + this.renderFollowUpsHost()
-          : '<div class="ws-cmd-layout">' +
-            '<main class="ws-cmd-main">' +
-            this.renderWorkFirst() +
-            this.renderWorkspaceAdmin() +
-            this.renderUnstaffedBanner() +
-            this.renderMissionPanel() +
-            this.renderFollowUpsHost() +
-            '<section class="ws-cmd-garrison">' +
-            this.renderGarrison() +
-            '</section>' +
-            '</main>' +
-            '<aside class="ws-cmd-rail' +
-            (this.railPointerFocus ? ' is-pointer' : '') +
-            '">' +
-            this.renderRail() +
-            '</aside>' +
-            '</div>';
+          : this.isPersonalHQ()
+            ? this.renderHQDetails()
+            : '<div class="ws-cmd-layout">' +
+              '<main class="ws-cmd-main">' +
+              this.renderWorkFirst() +
+              this.renderWorkspaceAdmin() +
+              this.renderUnstaffedBanner() +
+              this.renderMissionPanel() +
+              this.renderFollowUpsHost() +
+              '<section class="ws-cmd-garrison">' +
+              this.renderGarrison() +
+              '</section>' +
+              '</main>' +
+              '<aside class="ws-cmd-rail' +
+              (this.railPointerFocus ? ' is-pointer' : '') +
+              '">' +
+              this.renderRail() +
+              '</aside>' +
+              '</div>';
 
     if (this.container.classList) {
       this.container.classList.toggle('is-settled', this.detailsViewSettled());
@@ -2628,10 +2675,14 @@ export class WorkspaceCommandView {
 
     // The follow-ups panel may be mounted inside this container; take it home
     // before the rebuild so it is never detached (syncSharedSurfaces mounts it
-    // again below).
+    // again below). The HQ's Notes panel is parked the same way.
     this.parkFollowUpsSurface();
+    this.parkHQPanels();
+    const hqDetails = this.viewMode === 'details' && this.isPersonalHQ();
     this.container.innerHTML =
-      this.commandBarHTML(ws, name, mode, stats) +
+      (hqDetails
+        ? this.hqCommandBarHTML(ws, name, mode, stats)
+        : this.commandBarHTML(ws, name, mode, stats)) +
       body +
       this.loadoutAddModalHTML(this.loadoutAddAgent);
 
@@ -2653,6 +2704,7 @@ export class WorkspaceCommandView {
     this.bindBuildSummary();
     this.bindReadout();
     this.bindMissionPanel();
+    if (hqDetails) this.bindHQDetails();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
       this.paintMapActivity();
@@ -3104,14 +3156,19 @@ export class WorkspaceCommandView {
   // key, so focus still returns to where the user was.
   resolveStatModalTrigger(trigger) {
     if (!trigger || trigger.isConnected !== false) return trigger;
-    const key =
-      typeof trigger.getAttribute === 'function' ? trigger.getAttribute('data-cmd-hq-station') : '';
+    // A building on the map or rail, or a card in the HQ's stations grid
+    // (PRD 766), rebuilt by a render while its panel was open.
+    const attr =
+      typeof trigger.hasAttribute === 'function' && trigger.hasAttribute('data-cmd-hq-card')
+        ? 'data-cmd-hq-card'
+        : 'data-cmd-hq-station';
+    const key = typeof trigger.getAttribute === 'function' ? trigger.getAttribute(attr) : '';
     if (!key || !this.container || typeof this.container.querySelectorAll !== 'function') {
       return null;
     }
     const kind = trigger.classList ? trigger.classList[0] : '';
-    const matches = Array.from(this.container.querySelectorAll('[data-cmd-hq-station]')).filter(
-      el => el.getAttribute('data-cmd-hq-station') === key
+    const matches = Array.from(this.container.querySelectorAll('[' + attr + ']')).filter(
+      el => el.getAttribute(attr) === key
     );
     return matches.find(el => el.classList && el.classList[0] === kind) || matches[0] || null;
   }
@@ -4111,12 +4168,32 @@ export class WorkspaceCommandView {
   toggleRailManager(sectionKey, { remember = false } = {}) {
     const section = String(sectionKey || '').trim();
     if (!section) return;
+    // On the HQ, opening a Setup row closes the one above it, whose body can be
+    // tall: keep the clicked row where it was on screen rather than letting
+    // the page jump under the pointer (PRD 766 demo 4.9).
+    const anchor =
+      this.viewMode === 'details' && this.isPersonalHQ() ? this.railRowTop(section) : null;
     this.activeRailSection = this.activeRailSection === section ? '' : section;
     this.railSectionSettled = true;
     if (remember) {
       writeRailSection(this.railStorage(), this.workspaceId(), this.activeRailSection);
     }
     this.render();
+    if (anchor === null) return;
+    const moved = this.railRowTop(section);
+    if (moved !== null && moved !== anchor && typeof window !== 'undefined') {
+      window.scrollBy?.(0, moved - anchor);
+    }
+  }
+
+  // A rail row's toggle, its top in the viewport; null when it is not drawn.
+  railRowTop(section) {
+    const quoted = String(section || '').replace(/["\\]/g, '\\$&');
+    const toggle = this.container?.querySelector?.(
+      '.ws-cmd-rail [data-cmd-manage-section="' + quoted + '"]'
+    );
+    if (!toggle || typeof toggle.getBoundingClientRect !== 'function') return null;
+    return toggle.getBoundingClientRect().top;
   }
 
   railStorage() {
@@ -4133,6 +4210,20 @@ export class WorkspaceCommandView {
   presentRailSections() {
     const page = this.page || {};
     const count = list => (Array.isArray(list) ? list.length : 0);
+    // The HQ's Details rail has its own rows (PRD 766 FR20): Team sits
+    // outside them, and there is no Stations or Systems row.
+    if (this.viewMode === 'details' && this.isPersonalHQ()) {
+      return [
+        { key: 'notes', count: count(page.notes) },
+        { key: 'sessions', count: count(page.sessions) },
+        { key: 'files', count: this.fileRowData().length },
+        { key: 'backlog', count: this.backlogItems().length },
+        { key: 'folders', count: this.folderRowData().length },
+        { key: 'hq-capabilities', count: 0 },
+        { key: 'hq-triggers', count: 0 },
+        { key: 'schedules', count: count(page.schedules) }
+      ];
+    }
     const sections = [
       { key: 'backlog', count: this.backlogItems().length },
       { key: 'notes', count: count(page.notes) },
@@ -7727,13 +7818,22 @@ export class WorkspaceCommandView {
   }
 
   openNotesPanel(trigger) {
+    // On the HQ's Details page the panel is already on screen, second in the
+    // main column: go to it rather than opening a second copy in a dialog.
+    if (this.focusInlineNotesPanel()) return;
     clearTimeout(this._notesPanelPoll);
     this._notesPanel = { status: 'loading' };
     this.openStatModal(NOTES_STATION, this.stationOpener(NOTES_STATION, trigger));
     this.loadNotesPanel();
   }
 
+  // The panel is open when it is in the stat modal or mounted in the HQ
+  // Details main column; either one is painted, polled and refreshed.
   notesPanelOpen() {
+    return this.notesModalOpen() || Boolean(this.notesInlineNode());
+  }
+
+  notesModalOpen() {
     return (
       this.statModalSection === NOTES_STATION &&
       Boolean(this.statModalEl) &&
@@ -7743,6 +7843,11 @@ export class WorkspaceCommandView {
 
   paintNotesPanel(panel) {
     if (panel !== this._notesPanel || !this.notesPanelOpen()) return;
+    const inline = this.notesModalOpen() ? null : this.notesInlineNode();
+    if (inline) {
+      this.paintInlineNotes(inline);
+      return;
+    }
     // A repaint rebuilds the panel's controls: focus stays in the dialog, and in
     // the capture box when that is where the user was typing.
     this.captureStatModalFocus();
@@ -7765,11 +7870,14 @@ export class WorkspaceCommandView {
   setNotesTab(key) {
     const panel = this.notesPanel();
     panel.tab = key;
-    this.renderStatModalBody();
-    if (!this.statModalEl) return;
-    const body = this.statModalEl.querySelector('.ws-notes-body');
+    const inline = this.notesModalOpen() ? null : this.notesInlineNode();
+    if (inline) this.paintInlineNotes(inline);
+    else this.renderStatModalBody();
+    const root = inline || this.statModalEl;
+    if (!root) return;
+    const body = root.querySelector('.ws-notes-body');
     if (body) body.scrollTop = 0;
-    const tab = this.statModalEl.querySelector('[data-notes-tab][aria-selected="true"]');
+    const tab = root.querySelector('[data-notes-tab][aria-selected="true"]');
     if (tab && typeof tab.focus === 'function') tab.focus();
   }
 
@@ -7848,6 +7956,12 @@ export class WorkspaceCommandView {
   // Another surface may be showing this connection: the drawer's own copy and
   // the badge both read it again.
   notesChanged() {
+    // Triage and "Add as follow-ups" make follow-ups: the panel below shows
+    // them at once rather than after a reload (PRD 766).
+    const followUps = typeof window !== 'undefined' ? window.WorkspaceFollowUps : null;
+    if (followUps && typeof followUps.reload === 'function') {
+      Promise.resolve(followUps.reload()).catch(() => {});
+    }
     const notes = typeof window !== 'undefined' ? window.PersonalAssistantSecondBrain : null;
     if (notes && typeof notes.changed === 'function') {
       void notes.changed();
@@ -13123,7 +13237,9 @@ export class WorkspaceCommandView {
     const all = Array.isArray(page.notes) ? page.notes : [];
     return this.railPanelHTML({
       key: 'notes',
-      title: 'Notes',
+      // "Workspace notes" on every workspace (PRD 766 FR25): the HQ's Notes
+      // panel is the user's own notes folder, so this row says whose notes.
+      title: HQ_LABELS.workspaceNotes,
       count: all.length,
       className: 'ws-cmd-notes-panel',
       add: { label: 'New note' },
@@ -13208,11 +13324,11 @@ export class WorkspaceCommandView {
     });
   }
 
-  renderFoldersPanel() {
+  renderFoldersPanel({ title = 'Linked Folders' } = {}) {
     const dirs = this.folderRowData();
     return this.railPanelHTML({
       key: 'folders',
-      title: 'Linked Folders',
+      title,
       count: dirs.length,
       add: { label: 'Link folder' },
       verb: { label: 'Link Folder' },
@@ -13292,6 +13408,7 @@ export class WorkspaceCommandView {
     this.restoreSharedSurface('members');
     this.restoreSharedSurface('board');
     this.parkFollowUpsSurface();
+    this.parkHQPanels();
   }
 
   // ── Follow-ups panel (#workspaceFollowupMount) ──────────────────────────
@@ -13349,6 +13466,1434 @@ export class WorkspaceCommandView {
     // view now that it has a place; the module does this once (FR4).
     const api = typeof window !== 'undefined' ? window.WorkspaceFollowUps : null;
     if (rendered && api && typeof api.refocus === 'function') api.refocus();
+  }
+
+  // ── Personal HQ Details (PRD 766) ──────────────────────────────────────
+  // The HQ's Details mode is station-first: the header, then a main column of
+  // panels (Needs you, Notes, Follow-ups, stations) and a regrouped rail. It
+  // never draws the agent deck, the work-first strip or the admin block. Every
+  // other workspace keeps the composition in render().
+  //
+  // Stateful panels are live nodes placed into hosts after the innerHTML write
+  // and parked at #workspace-detail-shared-hosts before the next one, the way
+  // follow-ups are, so a background refresh never rebuilds them.
+
+  renderHQDetails() {
+    return (
+      this.hqAttentionHTML() +
+      this.renderHQGitHubHost() +
+      '<div class="ws-cmd-layout is-hq">' +
+      '<main class="ws-cmd-main ws-hq-main">' +
+      this.hqNeedsYouHTML() +
+      this.renderHQNotesHost() +
+      this.renderFollowUpsHost() +
+      this.hqStationsGridHTML() +
+      '</main>' +
+      '<aside class="ws-cmd-rail ws-hq-rail' +
+      (this.railPointerFocus ? ' is-pointer' : '') +
+      '">' +
+      this.renderHQRail() +
+      '</aside>' +
+      '</div>'
+    );
+  }
+
+  // ── HQ rail (FR19–FR22) ──
+  // Team first and always open; then the content rows; then Setup. The rows
+  // are the ordinary rail rows (same renderers, same accordion), so opening
+  // one never waits on more than its own list.
+
+  renderHQRail() {
+    return (
+      this.hqTeamHTML() +
+      '<div class="ws-hq-rail-group" role="group" aria-label="Workspace">' +
+      this.renderNotesPanel() +
+      this.renderSessionsPanel() +
+      this.renderFilesPanel() +
+      this.renderBacklogPanel() +
+      '</div>' +
+      '<div class="ws-hq-rail-group ws-hq-setup" role="group" aria-labelledby="ws-hq-setup-title">' +
+      '<h3 class="ws-hq-rail-group-title" id="ws-hq-setup-title">' +
+      escapeHtml(HQ_LABELS.setup) +
+      '</h3>' +
+      this.renderFoldersPanel({ title: HQ_LABELS.linkedFolders }) +
+      this.hqRailLinkRow({
+        key: 'tools',
+        label: HQ_LABELS.tools,
+        count: this.computeStats().tools,
+        aria: 'Open tools: MCP, skills, plugins, and find tools'
+      }) +
+      this.hqSystemsRowHTML('hq-capabilities', HQ_LABELS.capabilities, 'capabilities') +
+      this.hqSystemsRowHTML('hq-triggers', HQ_LABELS.triggers, 'triggers') +
+      this.renderSchedulesPanel() +
+      this.hqRailLinkRow({
+        key: 'goal',
+        label: HQ_LABELS.goal,
+        detail: String(this.missionSummary().mission || '').trim() || 'Not set',
+        aria: 'Open the goal'
+      }) +
+      // The full portability status, timestamp and all, is this row's chip:
+      // workspace-continuity-status.js places it in the mount (FR5, FR20).
+      '<section class="ws-cmd-panel ws-hq-link-row ws-hq-portability">' +
+      '<div class="ws-cmd-panel-head is-toggle-only">' +
+      '<h4 class="ws-cmd-panel-title"><span class="ws-hq-link-label">' +
+      escapeHtml(HQ_LABELS.portability) +
+      '</span></h4>' +
+      '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
+      '</div>' +
+      '</section>' +
+      '</div>'
+    );
+  }
+
+  hqTeamHTML() {
+    const page = this.page || {};
+    let groups = [];
+    try {
+      groups = typeof page.buildAgentGroups === 'function' ? page.buildAgentGroups() || [] : [];
+    } catch (_error) {
+      groups = [];
+    }
+    const agents = groups
+      .filter(group => group && !group.isUnassigned && String(group.name || '').trim())
+      .map(group => this.agentViewModel(group))
+      .filter(Boolean)
+      .sort((a, b) => (a.entry === b.entry ? 0 : a.entry ? -1 : 1));
+    const rows = agents
+      .map(
+        agent =>
+          '<li class="ws-hq-team-row' +
+          (agent.entry ? ' is-lead' : '') +
+          '">' +
+          this.agentCharacterHTML(agent, 'roster') +
+          '<span class="ws-hq-team-copy">' +
+          '<button type="button" class="ws-hq-team-name" data-cmd-hq-rail="agents" aria-label="' +
+          escapeHtml('Open ' + agent.name) +
+          '">' +
+          escapeHtml(agent.name) +
+          '</button>' +
+          '<span class="ws-hq-team-role">' +
+          (agent.entry
+            ? '<span class="ws-hq-chip is-lead">' + escapeHtml(HQ_LABELS.lead) + '</span> '
+            : '') +
+          escapeHtml(agent.role?.label || 'Agent') +
+          '</span>' +
+          '</span>' +
+          '<span class="ws-hq-team-status">' +
+          escapeHtml(agent.status?.label || 'Idle') +
+          '</span>' +
+          '<button type="button" class="ws-cmd-agent-action" data-cmd-add-task="' +
+          escapeHtml(agent.encodedName) +
+          '" aria-label="' +
+          escapeHtml(HQ_LABELS.giveTask + ' to ' + agent.name) +
+          '">' +
+          escapeHtml(HQ_LABELS.giveTask) +
+          '</button>' +
+          '</li>'
+      )
+      .join('');
+    return (
+      '<section class="ws-hq-team" aria-labelledby="ws-hq-team-title">' +
+      '<h3 class="ws-hq-rail-group-title" id="ws-hq-team-title">' +
+      escapeHtml(HQ_LABELS.team) +
+      ' <span class="ws-hq-panel-count">' +
+      agents.length +
+      '</span></h3>' +
+      (rows
+        ? '<ul class="ws-hq-team-list">' + rows + '</ul>'
+        : '<p class="ws-hq-empty">' +
+          escapeHtml(EMPTY_ROSTER_HEADING + ' ' + EMPTY_ROSTER_LINE) +
+          '</p>' +
+          '<button type="button" class="ws-cmd-agent-action" data-cmd-hq-rail="agents">Hire</button>') +
+      '</section>'
+    );
+  }
+
+  // A Setup row that opens somewhere else (a modal, the goal) rather than
+  // expanding in the rail.
+  hqRailLinkRow({ key, label, count, detail, aria }) {
+    return (
+      '<section class="ws-cmd-panel ws-hq-link-row">' +
+      '<div class="ws-cmd-panel-head is-toggle-only">' +
+      '<h4 class="ws-cmd-panel-title">' +
+      '<button type="button" class="ws-cmd-panel-toggle" data-cmd-hq-rail="' +
+      escapeHtml(key) +
+      '" aria-label="' +
+      escapeHtml(aria || label) +
+      '">' +
+      '<span class="ws-cmd-panel-name">' +
+      escapeHtml(label) +
+      '</span>' +
+      (count === undefined
+        ? ''
+        : '<span class="ws-cmd-panel-count">' + escapeHtml(String(count)) + '</span>') +
+      (detail ? '<span class="ws-hq-link-detail">' + escapeHtml(detail) + '</span>' : '') +
+      '</button>' +
+      '</h4>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  // Capabilities and Triggers are the two Systems tabs, each its own Setup
+  // row here; both mount the same Systems surface (syncSystemsSurface).
+  hqSystemsRowHTML(key, title, tab) {
+    return this.railPanelHTML({
+      key,
+      title,
+      count: 0,
+      // Not ws-cmd-systems-panel: that class widens the rail when open, and an
+      // HQ Setup row must leave the column widths alone (FR20).
+      className: 'ws-hq-setup-panel',
+      bodyClassName: 'ws-cmd-systems-body',
+      body: () =>
+        '<div class="ws-cmd-system-host" data-cmd-system-host>' +
+        '<div class="ws-cmd-rail-empty">Loading ' +
+        escapeHtml(this.systemTab(tab).label) +
+        '...</div>' +
+        '</div>'
+    });
+  }
+
+  // Which Systems tab the rail shows open: the Systems row's own tab, or the
+  // tab an HQ Setup row stands for. Null when no Systems surface is open.
+  systemsRailTab() {
+    switch (this.activeRailSection) {
+      case 'systems':
+        return this.activeSystemTab;
+      case 'hq-triggers':
+        return 'triggers';
+      case 'hq-capabilities':
+        return 'capabilities';
+      default:
+        return null;
+    }
+  }
+
+  runHQRailAction(key, trigger) {
+    if (key === 'tools') {
+      this.openStatModal('tools', trigger);
+      return;
+    }
+    if (key === 'agents') {
+      this.openStatModal('agents', trigger);
+      return;
+    }
+    if (key === 'goal') {
+      const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+      if (mission && typeof mission.openGoalModal === 'function') mission.openGoalModal();
+    }
+  }
+
+  renderHQNotesHost() {
+    return '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>';
+  }
+
+  // ── HQ header (FR5–FR9) ──
+  // Name, "Your HQ" and the workflow chip, the description, and one line of
+  // facts: the lead, the goal and a portability word with no timestamp. The
+  // name, description and goal edit exactly as they do in Map mode. The view
+  // switch keeps Details / Map / Tickets / Plans; the rarer destinations sit
+  // behind "More views".
+
+  hqCommandBarHTML(ws, name, mode, stats) {
+    const description = String((ws && ws.description) || '').trim();
+    const isLongDescription = Array.from(description).length > 150;
+    const descriptionClass =
+      'ws-cmd-description' +
+      (!description ? ' is-empty' : '') +
+      (isLongDescription && !this.identityExpanded ? ' is-collapsed' : '');
+    return (
+      '<header class="ws-cmd-topbar ws-hq-header" aria-labelledby="ws-hq-title">' +
+      '<div class="ws-cmd-nav">' +
+      '<a class="ws-cmd-nav-btn" data-cmd-nav-home href="/" aria-label="Back to the workspace map on Home">Home</a>' +
+      this.parentGroupLinkHTML() +
+      this.projectOpenActionHTML() +
+      this.commandViewSwitchHTML() +
+      this.hqMoreViewsHTML() +
+      '</div>' +
+      '<div class="ws-cmd-title ws-hq-title">' +
+      '<div class="ws-cmd-title-row">' +
+      '<h2 id="ws-hq-title">' +
+      escapeHtml(name) +
+      '</h2>' +
+      '<span class="ws-hq-chip is-hq">' +
+      escapeHtml(HQ_LABELS.yourHQ) +
+      '</span>' +
+      (mode ? '<span class="ws-hq-chip">Workflow · ' + escapeHtml(mode) + '</span>' : '') +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
+      '</div>' +
+      '<div class="ws-cmd-description-row">' +
+      '<p class="' +
+      descriptionClass +
+      '">' +
+      escapeHtml(description || 'No description') +
+      '</p>' +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>' +
+      (isLongDescription
+        ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
+          (this.identityExpanded ? 'true' : 'false') +
+          '">' +
+          (this.identityExpanded ? 'Less' : 'More') +
+          '</button>'
+        : '') +
+      '</div>' +
+      '<p class="ws-hq-facts" data-cmd-hq-facts>' +
+      this.hqFactsHTML() +
+      '</p>' +
+      this.identityEditorHTML(name, description) +
+      '</div>' +
+      '<div class="ws-cmd-readout ws-hq-tiles" role="group" aria-label="At a glance">' +
+      this.hqTilesHTML(stats) +
+      '</div>' +
+      '</header>'
+    );
+  }
+
+  // The lead holds the entry-agent slot; first in the team either way.
+  hqTeam() {
+    const page = this.page || {};
+    let groups = [];
+    try {
+      groups = typeof page.buildAgentGroups === 'function' ? page.buildAgentGroups() || [] : [];
+    } catch (_error) {
+      groups = [];
+    }
+    return groups
+      .filter(group => group && !group.isUnassigned && String(group.name || '').trim())
+      .map(group => ({
+        name: String(group.name),
+        isLead: this.isEntryAgentGroup(group),
+        tasks: Array.isArray(group.tasks) ? group.tasks : []
+      }))
+      .sort((a, b) => (a.isLead === b.isLead ? 0 : a.isLead ? -1 : 1));
+  }
+
+  hqFactsHTML() {
+    const lead = this.hqTeam().find(agent => agent.isLead);
+    const mission = this.missionSummary();
+    const goal = String(mission.mission || '').trim();
+    const goalLoaded = typeof mission.mission === 'string';
+    const portability = portabilityWord(
+      typeof window !== 'undefined' ? window.WorkspaceContinuityStatus?.view : null
+    );
+    const fact = (label, value, extra = '') =>
+      '<span class="ws-hq-fact"><span class="ws-hq-fact-label">' +
+      escapeHtml(label) +
+      '</span> ' +
+      '<span class="ws-hq-fact-value">' +
+      escapeHtml(value) +
+      '</span>' +
+      extra +
+      '</span>';
+    return (
+      fact(HQ_LABELS.lead, lead ? lead.name : 'No lead yet') +
+      fact(
+        HQ_LABELS.goal,
+        goal || (goalLoaded ? 'Not set' : '…'),
+        '<button type="button" class="ws-cmd-mini-btn" data-cmd-hq-goal-edit aria-label="' +
+          (goal ? 'Edit goal' : 'Set goal') +
+          '">' +
+          (goal ? 'Edit' : 'Set') +
+          '</button>'
+      ) +
+      (portability ? fact(HQ_LABELS.portability, portability) : '')
+    );
+  }
+
+  hqFollowUpsCount() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function')
+      return null;
+    const mount = document.getElementById('workspaceFollowupMount');
+    const raw = mount && mount.dataset ? mount.dataset.followupCount : undefined;
+    return raw === undefined || raw === '' ? null : Number(raw) || 0;
+  }
+
+  // How many things want the user. Until the Needs you panel exists this is
+  // the attention strip's line count.
+  // What the Needs you tile counts: the Needs you panel's rows (FR7, FR14).
+  hqNeedsYouCount() {
+    return this.hqNeedsYou().total;
+  }
+
+  // ── Main column: Needs you and the stations grid (FR14, FR17) ──
+
+  // Every station the HQ has, as a card, in grid order. Each station's own
+  // state() decides its words; Notes is its own panel and is left out.
+  hqCards() {
+    return hqStationCards(
+      this.mapStationRegistry().map(entry => {
+        let state = {};
+        try {
+          state = (typeof entry.state === 'function' && entry.state()) || {};
+        } catch (_error) {
+          state = { value: 'Unavailable', tone: 'degraded' };
+        }
+        return { key: entry.key, label: entry.label, state };
+      })
+    );
+  }
+
+  // The rows the inbox's own Needs you list shows (not its FYI or ignorable
+  // groups), read from its live mount above the header.
+  hqMailRows() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return [];
+    const mount = document.getElementById('workspaceNeedsYouMount');
+    if (!mount || mount.hidden || typeof mount.querySelectorAll !== 'function') return [];
+    return Array.from(mount.querySelectorAll('.needs-you__row'))
+      .filter(row => !(typeof row.closest === 'function' && row.closest('.needs-you__group')))
+      .map((row, index) => {
+        const text = selector =>
+          String(row.querySelector?.(selector)?.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const action = row.querySelector?.(
+          '.needs-you__actions button, .needs-you__actions a[href]'
+        );
+        return {
+          index,
+          from: text('.needs-you__from'),
+          subject: text('.needs-you__subject'),
+          why: text('.needs-you__why'),
+          action: String(action?.textContent || '').trim() || 'Open'
+        };
+      });
+  }
+
+  hqNeedsYou({ all = false } = {}) {
+    return hqNeedsYouRows({
+      mail: this.hqMailRows(),
+      stations: stationsNeedingYou(this.hqCards()),
+      notes: notesNudge(this.notesState().secondBrain),
+      ...(all ? { limit: Infinity } : {})
+    });
+  }
+
+  hqNeedsYouHTML() {
+    return (
+      '<section class="ws-hq-panel ws-hq-needs" data-cmd-hq-needs aria-labelledby="ws-hq-needs-title">' +
+      this.hqNeedsYouInnerHTML() +
+      '</section>' +
+      // After "Show all", the inbox's own full list (its FYI and ignorable
+      // groups too) sits right under the panel.
+      (this.hqNeedsYouExpanded && this.hqMailRows().length
+        ? '<div class="ws-hq-panel-host" data-cmd-hq-host="needs-you"></div>'
+        : '')
+    );
+  }
+
+  hqNeedsYouInnerHTML() {
+    const needs = this.hqNeedsYou({ all: this.hqNeedsYouExpanded === true });
+    const rows = needs.rows;
+    this._hqNeedsYouRows = rows;
+    const head =
+      '<header class="ws-hq-panel-head">' +
+      '<h3 class="ws-hq-panel-title" id="ws-hq-needs-title">' +
+      escapeHtml(HQ_LABELS.needsYou) +
+      '</h3>' +
+      '<span class="ws-hq-panel-count">' +
+      needs.total +
+      '</span>' +
+      (needs.more && !this.hqNeedsYouExpanded
+        ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-hq-needs-all>' +
+          escapeHtml(HQ_LABELS.showAll) +
+          ' (' +
+          needs.total +
+          ')</button>'
+        : '') +
+      '</header>';
+    if (!rows.length) {
+      return head + '<p class="ws-hq-empty">' + escapeHtml(HQ_LABELS.nothingNeedsYou) + '</p>';
+    }
+    return (
+      head +
+      '<ul class="ws-hq-needs-list">' +
+      rows
+        .map(
+          row =>
+            '<li class="ws-hq-needs-row">' +
+            '<span class="ws-hq-chip is-' +
+            escapeHtml(String(row.category).toLowerCase()) +
+            '">' +
+            escapeHtml(row.category) +
+            '</span>' +
+            '<span class="ws-hq-needs-text">' +
+            escapeHtml(row.sentence) +
+            '</span>' +
+            (row.actions[0]
+              ? '<button type="button" class="ws-cmd-agent-action" data-cmd-hq-needs-action="' +
+                escapeHtml(row.key) +
+                '">' +
+                escapeHtml(row.actions[0].label) +
+                '</button>'
+              : '') +
+            '</li>'
+        )
+        .join('') +
+      '</ul>'
+    );
+  }
+
+  runHQNeedsYouAction(key, trigger) {
+    const row = (this._hqNeedsYouRows || []).find(item => item.key === key);
+    const action = row && row.actions[0];
+    if (!action) return;
+    if (action.kind === 'station') {
+      this.runHQStationAction(action.key, trigger);
+      return;
+    }
+    if (action.kind === 'notes') {
+      this.focusInlineNotesPanel();
+      if (this.notesPanel().status === 'ready') void this.lookAgainFromNotesPanel();
+      return;
+    }
+    if (action.kind === 'mail') {
+      const mount =
+        typeof document !== 'undefined' ? document.getElementById('workspaceNeedsYouMount') : null;
+      const rows = mount
+        ? Array.from(mount.querySelectorAll('.needs-you__row')).filter(
+            item => !(typeof item.closest === 'function' && item.closest('.needs-you__group'))
+          )
+        : [];
+      const control = rows[action.index]?.querySelector?.(
+        '.needs-you__actions button, .needs-you__actions a[href]'
+      );
+      control?.click?.();
+    }
+  }
+
+  // The inbox's own Needs you surface, under the panel after "Show all".
+  syncHQNeedsYouSurface() {
+    const host = this.container?.querySelector?.('[data-cmd-hq-host="needs-you"]');
+    if (!host) {
+      this.restoreSharedSurface('hq-needs-you');
+      return;
+    }
+    this.mountSharedSurface('hq-needs-you', '#workspaceNeedsYouMount', host);
+  }
+
+  hqStationsGridHTML() {
+    const cards = this.hqCards();
+    if (!cards.length) return '';
+    return (
+      '<section class="ws-hq-panel ws-hq-stations" aria-labelledby="ws-hq-stations-title">' +
+      '<header class="ws-hq-panel-head">' +
+      '<h3 class="ws-hq-panel-title" id="ws-hq-stations-title">' +
+      escapeHtml(HQ_LABELS.stations) +
+      '</h3>' +
+      '<span class="ws-hq-panel-count">' +
+      cards.length +
+      '</span>' +
+      '</header>' +
+      '<ul class="ws-hq-station-grid">' +
+      cards
+        .map(card => {
+          const stateClass = card.stateWord.toLowerCase().replace(/\s+/g, '-');
+          return (
+            '<li class="ws-hq-station-cell">' +
+            '<button type="button" class="ws-hq-station is-' +
+            escapeHtml(stateClass) +
+            (card.configured ? '' : ' is-unset') +
+            '" data-cmd-hq-card="' +
+            escapeHtml(card.key) +
+            '" aria-label="' +
+            escapeHtml(
+              [card.label + ': ' + card.stateWord, ...card.summary, card.action].join('. ')
+            ) +
+            '">' +
+            '<span class="ws-hq-station-head">' +
+            '<span class="ws-hq-station-name">' +
+            escapeHtml(card.label) +
+            '</span>' +
+            '<span class="ws-hq-station-state">' +
+            escapeHtml(card.stateWord) +
+            '</span>' +
+            '</span>' +
+            card.summary
+              .map(line => '<span class="ws-hq-station-summary">' + escapeHtml(line) + '</span>')
+              .join('') +
+            '<span class="ws-hq-station-action" aria-hidden="true">' +
+            escapeHtml(card.action) +
+            '</span>' +
+            '</button>' +
+            '</li>'
+          );
+        })
+        .join('') +
+      '</ul>' +
+      '</section>'
+    );
+  }
+
+  hqTilesHTML(stats) {
+    const jump = (value, label, key, aria) =>
+      '<button type="button" class="ws-cmd-stat" data-cmd-hq-jump="' +
+      escapeHtml(key) +
+      '" aria-label="' +
+      escapeHtml(aria) +
+      '"><div class="ws-v">' +
+      escapeHtml(value) +
+      '</div><div class="ws-l">' +
+      escapeHtml(label) +
+      '</div></button>';
+    const needs = this.hqNeedsYouCount();
+    const followUps = this.hqFollowUpsCount();
+    const counts = this.currentTicketCounts();
+    const open = TicketCounts.isKnown(counts) ? TicketCounts.openCount(counts) : null;
+    const team = Number(stats && stats.agents) || 0;
+    return (
+      jump(needs, HQ_LABELS.needsYou, 'needs-you', HQ_LABELS.needsYou + ': ' + needs) +
+      jump(
+        followUps === null ? '—' : followUps,
+        HQ_LABELS.followUps,
+        'followups',
+        HQ_LABELS.followUps + (followUps === null ? '' : ': ' + followUps)
+      ) +
+      this.statBoxHTML(
+        open === null ? '—' : open,
+        HQ_LABELS.openTasks,
+        'tickets',
+        HQ_LABELS.openTasks + (open === null ? '' : ': ' + open)
+      ) +
+      jump(team, HQ_LABELS.team, 'team', HQ_LABELS.team + ': ' + team)
+    );
+  }
+
+  hqMoreViewsHTML() {
+    const open = this.hqMoreViewsOpen === true;
+    const item = (href, label) =>
+      '<a role="menuitem" class="ws-hq-menu-item" href="' +
+      escapeHtml(href) +
+      '">' +
+      escapeHtml(label) +
+      '</a>';
+    return (
+      '<div class="ws-hq-more" data-cmd-hq-more>' +
+      '<button type="button" class="ws-cmd-view-btn ws-hq-more-btn" data-cmd-hq-more-toggle ' +
+      'aria-haspopup="menu" aria-expanded="' +
+      (open ? 'true' : 'false') +
+      '" aria-controls="ws-hq-more-menu">' +
+      escapeHtml(HQ_LABELS.moreViews) +
+      '</button>' +
+      '<div class="ws-hq-menu" id="ws-hq-more-menu" role="menu" aria-label="' +
+      escapeHtml(HQ_LABELS.moreViews) +
+      '"' +
+      (open ? '' : ' hidden') +
+      '>' +
+      item(this.workspaceRoute('/canvas'), 'Canvas') +
+      item(this.workspaceRoute('/diagnostics'), 'Diagnostics') +
+      item(this.workflowHref(), 'Orchestration Skills') +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  // ── Attention strip (FR10–FR13) ──
+
+  // Plain values for hqAttentionLines, read from what the page already has.
+  hqAttentionState() {
+    const page = this.page || {};
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    const waiting = tasks
+      .filter(task => sharedIsNeedsInputTask(task))
+      .map(task => {
+        const agent = String(task.to || task.agent_name || task.assigned_to || '').trim();
+        return {
+          agent,
+          isLead: Boolean(
+            agent &&
+            typeof page.isWorkspaceEntryAgent === 'function' &&
+            page.isWorkspaceEntryAgent(agent)
+          ),
+          title: String(task.description || task.name || task.title || '').trim(),
+          taskId: String(task.id || '')
+        };
+      });
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    let goalState = null;
+    try {
+      goalState = mission && typeof mission.getState === 'function' ? mission.getState() : null;
+    } catch (_error) {
+      goalState = null;
+    }
+    const briefData = this.dailyBriefStationData();
+    const brief = briefData.status === 'ready' ? dailyBriefStatus(briefData) : null;
+    return {
+      waiting,
+      setup: this.hqMountSignals(),
+      goal: { reason: String((goalState && goalState.needs_attention) || '').trim() },
+      brief:
+        brief && brief.kind === 'ready'
+          ? { readyToday: brief.today === true, time: brief.time }
+          : null,
+      github: this.hqGitHubSignal()
+    };
+  }
+
+  hqAttentionAll() {
+    return hqAttentionLines(this.hqAttentionState());
+  }
+
+  // The visible controls of a top mount, in document order.
+  hqMountControls(el) {
+    if (!el || typeof el.querySelectorAll !== 'function') return [];
+    return Array.from(el.querySelectorAll('button, a[href]')).filter(
+      control =>
+        !control.hidden &&
+        !control.disabled &&
+        String(control.textContent || '').trim() &&
+        !(typeof control.closest === 'function' && control.closest('[hidden]'))
+    );
+  }
+
+  // What a mount says, without its buttons' words.
+  hqMountText(node, controls) {
+    if (!node) return '';
+    if (node.nodeType === 3) return node.nodeValue || '';
+    if (node.nodeType !== 1 || node.hidden || controls.includes(node)) return '';
+    const tag = String(node.tagName || '').toLowerCase();
+    if (tag === 'style' || tag === 'script' || tag === 'dialog') return '';
+    return Array.from(node.childNodes || [])
+      .map(child => this.hqMountText(child, controls))
+      .join(' ');
+  }
+
+  hqMountSignals() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return [];
+    return HQ_SETUP_MOUNTS.map(source => {
+      const el = document.getElementById(source.id);
+      if (!el || el.hidden) return null;
+      const controls = this.hqMountControls(el);
+      return {
+        key: source.key,
+        category: source.category || 'Setup',
+        sentence: this.hqMountText(el, controls),
+        actions: controls.map((control, index) => ({
+          label: String(control.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim(),
+          kind: 'mount',
+          key: source.key,
+          index
+        }))
+      };
+    }).filter(Boolean);
+  }
+
+  hqGitHubSignal() {
+    if (typeof window === 'undefined' || !window.GitHubProposalsPanel) return null;
+    const mount =
+      typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('githubProposalsMount')
+        : null;
+    if (!mount || mount.hidden || typeof mount.querySelectorAll !== 'function') {
+      return { installed: true, count: 0 };
+    }
+    const pending = Array.from(mount.querySelectorAll('.ghp-proposal')).filter(
+      card => !(card.classList && card.classList.contains('ghp-applied'))
+    );
+    return { installed: true, count: pending.length };
+  }
+
+  // Hidden entirely when there is nothing to say (FR10).
+  hqAttentionHTML() {
+    const inner = this.hqAttentionInnerHTML();
+    return (
+      '<section class="ws-hq-attention" data-cmd-hq-attention aria-labelledby="ws-hq-attention-title"' +
+      (inner ? '' : ' hidden') +
+      '>' +
+      inner +
+      '</section>'
+    );
+  }
+
+  hqAttentionInnerHTML() {
+    const lines = this.hqAttentionAll();
+    this._hqAttentionLines = lines;
+    if (!lines.length) return '';
+    const { shown, hidden } = capAttentionLines(lines, { expanded: this.hqAttentionExpanded });
+    return (
+      '<h3 class="ws-hq-attention-title" id="ws-hq-attention-title">' +
+      escapeHtml(HQ_LABELS.needsYourAttention) +
+      '</h3>' +
+      '<ul class="ws-hq-attention-list">' +
+      shown
+        .map(
+          entry =>
+            '<li class="ws-hq-attention-line">' +
+            '<span class="ws-hq-chip is-' +
+            escapeHtml(entry.category.toLowerCase()) +
+            '">' +
+            escapeHtml(entry.category) +
+            '</span>' +
+            '<span class="ws-hq-attention-text">' +
+            escapeHtml(entry.sentence) +
+            '</span>' +
+            '<span class="ws-hq-attention-actions">' +
+            entry.actions
+              .map(
+                (action, index) =>
+                  '<button type="button" class="ws-cmd-agent-action' +
+                  (index === 0 ? ' is-primary' : '') +
+                  '" data-cmd-hq-attention-action="' +
+                  escapeHtml(entry.key + '#' + index) +
+                  '">' +
+                  escapeHtml(action.label) +
+                  '</button>'
+              )
+              .join('') +
+            '</span>' +
+            '</li>'
+        )
+        .join('') +
+      '</ul>' +
+      (hidden
+        ? '<button type="button" class="ws-hq-attention-more" data-cmd-hq-attention-more aria-expanded="false">and ' +
+          hidden +
+          ' more</button>'
+        : '')
+    );
+  }
+
+  // Repaints the parts of the HQ header and strip that other modules change
+  // (setup mounts, the goal, follow-ups, portability) without a full render,
+  // so nothing else on the page moves. Focus stays on the same action.
+  paintHQLive() {
+    if (!this.active || this.viewMode !== 'details' || !this.isPersonalHQ()) return;
+    const root = this.container;
+    if (!root || typeof root.querySelector !== 'function') return;
+    const strip = root.querySelector('[data-cmd-hq-attention]');
+    if (strip) {
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      const focusKey =
+        active && strip.contains?.(active)
+          ? active.getAttribute?.('data-cmd-hq-attention-action') ||
+            (active.hasAttribute?.('data-cmd-hq-attention-more') ? 'more' : '')
+          : '';
+      const html = this.hqAttentionInnerHTML();
+      if (strip.innerHTML !== html) {
+        strip.innerHTML = html;
+        if (focusKey) {
+          const target =
+            focusKey === 'more'
+              ? strip.querySelector('[data-cmd-hq-attention-more]')
+              : Array.from(strip.querySelectorAll('[data-cmd-hq-attention-action]')).find(
+                  el => el.getAttribute('data-cmd-hq-attention-action') === focusKey
+                );
+          target?.focus?.({ preventScroll: true });
+        }
+      }
+      strip.hidden = !this._hqAttentionLines.length;
+    }
+    const needsPanel = root.querySelector('[data-cmd-hq-needs]');
+    if (needsPanel) {
+      const html = this.hqNeedsYouInnerHTML();
+      if (needsPanel.innerHTML !== html) {
+        this.rememberHQFocus();
+        needsPanel.innerHTML = html;
+        this.restoreHQFocus();
+      }
+    }
+    const facts = root.querySelector('[data-cmd-hq-facts]');
+    if (facts) {
+      const html = this.hqFactsHTML();
+      const focused = typeof document !== 'undefined' ? document.activeElement : null;
+      // Never rebuild the line under a focused Edit goal button.
+      if (facts.innerHTML !== html && !(focused && facts.contains?.(focused))) {
+        facts.innerHTML = html;
+      }
+    }
+    const tiles = root.querySelector('.ws-hq-tiles');
+    if (tiles && typeof tiles.querySelectorAll === 'function') {
+      const fresh = this.hqTilesValues();
+      tiles.querySelectorAll('.ws-cmd-stat').forEach(tile => {
+        const key = tile.getAttribute('data-cmd-hq-jump') || tile.getAttribute('data-cmd-section');
+        if (!(key in fresh)) return;
+        const value = tile.querySelector('.ws-v');
+        if (value && value.textContent !== String(fresh[key].value)) {
+          value.textContent = String(fresh[key].value);
+        }
+        tile.setAttribute('aria-label', fresh[key].aria);
+      });
+    }
+  }
+
+  hqTilesValues() {
+    const needs = this.hqNeedsYouCount();
+    const followUps = this.hqFollowUpsCount();
+    const counts = this.currentTicketCounts();
+    const open = TicketCounts.isKnown(counts) ? TicketCounts.openCount(counts) : null;
+    return {
+      'needs-you': { value: needs, aria: HQ_LABELS.needsYou + ': ' + needs },
+      followups: {
+        value: followUps === null ? '—' : followUps,
+        aria: HQ_LABELS.followUps + (followUps === null ? '' : ': ' + followUps)
+      },
+      tickets: {
+        value: open === null ? '—' : open,
+        aria: HQ_LABELS.openTasks + (open === null ? '' : ': ' + open)
+      }
+    };
+  }
+
+  scheduleHQLivePaint() {
+    if (this._hqLivePaintTimer) return;
+    this._hqLivePaintTimer = setTimeout(() => {
+      this._hqLivePaintTimer = null;
+      this.paintHQLive();
+    }, 60);
+  }
+
+  // Once per page: the events and mount changes that feed the header live.
+  watchHQSources() {
+    if (this._hqSourcesWatched || typeof document === 'undefined') return;
+    if (typeof document.addEventListener !== 'function') return;
+    this._hqSourcesWatched = true;
+    const repaint = () => this.scheduleHQLivePaint();
+    document.addEventListener('ori:followups-changed', () => this.settleFollowUpsVisibility());
+    [
+      'ori:workspace-goal-state',
+      'ori:followups-changed',
+      'ori:workspace-continuity-changed',
+      'ori:email-setup-connected'
+    ].forEach(type => document.addEventListener(type, repaint));
+    const mounts =
+      typeof document.getElementById === 'function'
+        ? document.getElementById('workspaceTopMounts')
+        : null;
+    if (mounts && typeof MutationObserver === 'function') {
+      new MutationObserver(repaint).observe(mounts, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['hidden', 'disabled']
+      });
+    }
+  }
+
+  // The follow-ups panel reloaded in place (another surface made follow-ups):
+  // whether its host shows it is decided again without moving the node, so
+  // the first follow-ups appear at once and the last one gone hides it.
+  settleFollowUpsVisibility() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors.followups;
+    const node = record && record.node;
+    const host = node && node.parentNode;
+    if (!host || typeof host.hasAttribute !== 'function') return;
+    if (!host.hasAttribute('data-cmd-followups-host')) return;
+    node.hidden = !(
+      typeof node.querySelector === 'function' && node.querySelector('.workspace-followups')
+    );
+  }
+
+  // GitHub proposals live in their own mount, hidden above the header on the
+  // HQ; "Review" brings that live panel under the strip until it is empty.
+  renderHQGitHubHost() {
+    return this.hqGitHubShown
+      ? '<div class="ws-hq-panel-host ws-hq-github-host" data-cmd-hq-host="github"></div>'
+      : '';
+  }
+
+  runHQAttentionAction(key, trigger) {
+    const [lineKey, indexText] = String(key || '').split('#');
+    const entry = (this._hqAttentionLines || []).find(item => item.key === lineKey);
+    const action = entry && entry.actions[Number(indexText)];
+    if (!action) return;
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    switch (action.kind) {
+      case 'ticket':
+        this.runWorkAction('open', action.id, trigger);
+        return;
+      case 'tickets-waiting':
+        this.setCommandViewMode('tickets', { focus: false });
+        return;
+      case 'mount': {
+        const source = HQ_SETUP_MOUNTS.find(item => item.key === action.key);
+        const el = source && document.getElementById(source.id);
+        const control = this.hqMountControls(el)[action.index];
+        if (control && typeof control.click === 'function') control.click();
+        return;
+      }
+      case 'model':
+        if (typeof window !== 'undefined' && window.location)
+          window.location.assign(MODEL_SETTINGS_URL);
+        return;
+      case 'goal':
+        if (mission && typeof mission.openGoalModal === 'function') mission.openGoalModal();
+        return;
+      case 'brief':
+        this.openDailyBriefPanel(trigger);
+        return;
+      case 'github':
+        this.hqGitHubShown = true;
+        this.render();
+        this.container?.querySelector?.('[data-cmd-hq-host="github"]')?.scrollIntoView?.({
+          block: 'nearest'
+        });
+        return;
+      default:
+    }
+  }
+
+  setHQMoreViewsOpen(open, { focus = '' } = {}) {
+    this.hqMoreViewsOpen = open;
+    const root = this.container?.querySelector?.('[data-cmd-hq-more]');
+    if (!root) return;
+    const toggle = root.querySelector('[data-cmd-hq-more-toggle]');
+    const menu = root.querySelector('[role="menu"]');
+    if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (menu) menu.hidden = !open;
+    if (focus === 'first') menu?.querySelector('[role="menuitem"]')?.focus?.();
+    if (focus === 'toggle') toggle?.focus?.();
+  }
+
+  bindHQDetails() {
+    this.watchHQSources();
+    const root = this.container;
+    if (!root || typeof root.querySelector !== 'function') return;
+    const header = root.querySelector('.ws-hq-header');
+    header?.addEventListener?.('click', event => {
+      const goal = event.target.closest?.('[data-cmd-hq-goal-edit]');
+      if (goal) {
+        const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+        if (mission && typeof mission.openGoalModal === 'function') mission.openGoalModal();
+        return;
+      }
+      const toggle = event.target.closest?.('[data-cmd-hq-more-toggle]');
+      if (toggle) {
+        this.setHQMoreViewsOpen(!this.hqMoreViewsOpen, {
+          focus: this.hqMoreViewsOpen ? '' : 'first'
+        });
+        return;
+      }
+      const jump = event.target.closest?.('[data-cmd-hq-jump]');
+      if (jump) this.runHQJump(jump.getAttribute('data-cmd-hq-jump'), jump);
+    });
+    const more = root.querySelector('[data-cmd-hq-more]');
+    more?.addEventListener?.('keydown', event => {
+      const items = Array.from(more.querySelectorAll('[role="menuitem"]'));
+      if (event.key === 'Escape' && this.hqMoreViewsOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setHQMoreViewsOpen(false, { focus: 'toggle' });
+        return;
+      }
+      if (event.key === 'ArrowDown' && event.target.matches?.('[data-cmd-hq-more-toggle]')) {
+        event.preventDefault();
+        this.setHQMoreViewsOpen(true, { focus: 'first' });
+        return;
+      }
+      const at = items.indexOf(event.target);
+      if (at < 0) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        items[(at + step + items.length) % items.length].focus();
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        items[event.key === 'Home' ? 0 : items.length - 1].focus();
+      } else if (event.key === 'Tab') {
+        this.setHQMoreViewsOpen(false);
+      }
+    });
+    more?.addEventListener?.('focusout', event => {
+      if (this.hqMoreViewsOpen && event.relatedTarget && !more.contains(event.relatedTarget)) {
+        this.setHQMoreViewsOpen(false);
+      }
+    });
+    const rail = root.querySelector('.ws-hq-rail');
+    rail?.addEventListener?.('click', event => {
+      const give = event.target.closest?.('[data-cmd-add-task]');
+      if (give) {
+        const page = this.page || {};
+        if (typeof page.showAddTaskModalForAgent === 'function') {
+          page.showAddTaskModalForAgent(give.getAttribute('data-cmd-add-task'));
+        }
+        return;
+      }
+      const link = event.target.closest?.('[data-cmd-hq-rail]');
+      if (link) this.runHQRailAction(link.getAttribute('data-cmd-hq-rail'), link);
+    });
+    const main = root.querySelector('.ws-hq-main');
+    main?.addEventListener?.('click', event => {
+      const card = event.target.closest?.('[data-cmd-hq-card]');
+      if (card) {
+        this.runHQStationAction(card.getAttribute('data-cmd-hq-card'), card);
+        return;
+      }
+      const needs = event.target.closest?.('[data-cmd-hq-needs-action]');
+      if (needs) {
+        this.runHQNeedsYouAction(needs.getAttribute('data-cmd-hq-needs-action'), needs);
+        return;
+      }
+      if (event.target.closest?.('[data-cmd-hq-needs-all]')) {
+        this.hqNeedsYouExpanded = true;
+        this.render();
+        this.container
+          ?.querySelector?.('[data-cmd-hq-needs] [data-cmd-hq-needs-action]')
+          ?.focus?.({ preventScroll: true });
+      }
+    });
+    const strip = root.querySelector('[data-cmd-hq-attention]');
+    if (strip) {
+      strip.addEventListener('click', event => {
+        const btn = event.target.closest?.('[data-cmd-hq-attention-action]');
+        if (btn) {
+          this.runHQAttentionAction(btn.getAttribute('data-cmd-hq-attention-action'), btn);
+          return;
+        }
+        if (event.target.closest?.('[data-cmd-hq-attention-more]')) {
+          this.hqAttentionExpanded = true;
+          this.paintHQLive();
+          strip.querySelectorAll?.('[data-cmd-hq-attention-action]')[3]?.focus?.();
+        }
+      });
+    }
+    this.syncHQGitHubSurface();
+  }
+
+  // Where a header tile leads: the panel or rail row behind its number.
+  runHQJump(key) {
+    const selector =
+      key === 'team'
+        ? '.ws-hq-team'
+        : key === 'followups'
+          ? '[data-cmd-followups-host]'
+          : '[data-cmd-hq-needs]';
+    const target = this.container?.querySelector?.(selector);
+    if (!target) return;
+    // Stop below the fixed top bar, measured now: it is much taller on a
+    // phone, where its navigation wraps (demo 4.9).
+    const navbar = typeof document !== 'undefined' ? document.querySelector?.('nav.navbar') : null;
+    const clear = Math.max(0, Number(navbar?.getBoundingClientRect?.().bottom) || 0) + 12;
+    const top = target.getBoundingClientRect?.().top;
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.scrollTo === 'function' &&
+      Number.isFinite(top)
+    ) {
+      window.scrollTo({ top: Math.max(0, (window.scrollY || 0) + top - clear) });
+    } else {
+      target.scrollIntoView?.({ block: 'start' });
+    }
+    const control = target.querySelector?.('button, a[href], [tabindex="0"]');
+    control?.focus?.({ preventScroll: true });
+  }
+
+  syncHQGitHubSurface() {
+    const host = this.container?.querySelector?.('[data-cmd-hq-host="github"]');
+    if (!host) {
+      this.restoreSharedSurface('hq-github');
+      return;
+    }
+    const node = this.mountSharedSurface('hq-github', '#githubProposalsMount', host);
+    // Nothing left to review: the host goes away on the next render.
+    if (!node || !this.hqGitHubSignal()?.count) this.hqGitHubShown = false;
+  }
+
+  hqNotesHost() {
+    return this.active && this.container && typeof this.container.querySelector === 'function'
+      ? this.container.querySelector('[data-cmd-hq-host="notes"]')
+      : null;
+  }
+
+  // The Notes panel's live node while it sits in its HQ host, else null.
+  notesInlineNode() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors['hq-notes'];
+    const host = record && record.node && record.node.parentNode;
+    if (!this.active || !host || typeof host.getAttribute !== 'function') return null;
+    return host.getAttribute('data-cmd-hq-host') === 'notes' ? record.node : null;
+  }
+
+  // Before a rebuild or a mode switch: remember a focused control (and a caret
+  // in the capture box), then put the panel home so the write cannot detach it.
+  parkHQPanels() {
+    this.rememberHQFocus();
+    this.restoreSharedSurface('hq-github');
+    this.restoreSharedSurface('hq-needs-you');
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors['hq-notes'];
+    if (!record || !record.node) return;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (
+      active &&
+      active !== record.node &&
+      typeof record.node.contains === 'function' &&
+      record.node.contains(active)
+    ) {
+      this.hqNotesFocus = {
+        el: active,
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+      };
+    }
+    this.restoreSharedSurface('hq-notes');
+  }
+
+  // The HQ's string-rendered controls (tiles, strip and Needs you actions,
+  // station cards, More views) are rebuilt by every render: focus follows the
+  // control to its replacement, found by the same attribute and value.
+  rememberHQFocus() {
+    this.hqControlFocus = null;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (!active || typeof active.getAttribute !== 'function') return;
+    if (!this.container || typeof this.container.contains !== 'function') return;
+    if (!this.container.contains(active)) return;
+    const attr = HQ_FOCUS_ATTRS.find(name => active.hasAttribute?.(name));
+    if (attr) this.hqControlFocus = { attr, value: active.getAttribute(attr) || '' };
+  }
+
+  restoreHQFocus() {
+    const focus = this.hqControlFocus;
+    this.hqControlFocus = null;
+    if (!focus || !this.container || typeof this.container.querySelectorAll !== 'function') return;
+    const target = Array.from(this.container.querySelectorAll('[' + focus.attr + ']')).find(
+      el => (el.getAttribute(focus.attr) || '') === focus.value
+    );
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+  }
+
+  syncHQPanels() {
+    this.restoreHQFocus();
+    this.syncHQNeedsYouSurface();
+    const focus = this.hqNotesFocus || null;
+    this.hqNotesFocus = null;
+    const host = this.hqNotesHost();
+    if (!host) {
+      this.restoreSharedSurface('hq-notes');
+      this._hqNotesMounted = false;
+      return;
+    }
+    const node = this.mountSharedSurface('hq-notes', '#hqNotesPanelMount', host);
+    if (!node) return;
+    const returning = this._hqNotesMounted === false;
+    this._hqNotesMounted = true;
+    this.bindInlineNotes(node);
+    this.settleInlineNotes(node);
+    // Back from another mode: a look that ran meanwhile is read again in place.
+    if (returning) void this.refreshOpenNotesPanel();
+    if (focus && focus.el && typeof focus.el.focus === 'function' && node.contains(focus.el)) {
+      focus.el.focus({ preventScroll: true });
+      if (focus.start !== null && typeof focus.el.setSelectionRange === 'function') {
+        try {
+          focus.el.setSelectionRange(focus.start, focus.end);
+        } catch {
+          /* not a text control */
+        }
+      }
+    }
+  }
+
+  // Paints the panel only when what it shows changed shape: the first mount,
+  // or the connection arriving, failing or changing folder. A re-render with
+  // nothing new leaves the node exactly as the user left it. A connected
+  // folder starts the panel's own look/inbox read, as opening it did.
+  settleInlineNotes(node) {
+    const state = this.notesState();
+    if (state.status === 'idle') this.requestNotesData();
+    // A forced re-read passes through 'loading'; keep showing what was there.
+    if (state.status === 'loading' && this._hqNotesSignature) return;
+    const secondBrain = state.secondBrain;
+    const available = state.status === 'ready' && notesPanelAvailable(secondBrain);
+    const signature = [
+      state.hqWorkspaceID,
+      state.status,
+      secondBrain?.status || '',
+      secondBrain?.source?.name || ''
+    ].join('|');
+    if (signature === this._hqNotesSignature && this._hqNotesPaintedNode === node) {
+      // Same connection: only its badge line may have moved (a nudge, a count).
+      this.paintInlineNotesMeta(node);
+      return;
+    }
+    this._hqNotesSignature = signature;
+    this._hqNotesPaintedNode = node;
+    if (available) {
+      clearTimeout(this._notesPanelPoll);
+      this._notesPanel = { status: 'loading' };
+    }
+    this.paintInlineNotes(node);
+    if (available) void this.loadNotesPanel();
+  }
+
+  inlineNotesHTML() {
+    const state = this.notesState();
+    const head =
+      '<header class="ws-cmd-modal-head"><h3 class="ws-cmd-modal-title">' +
+      escapeHtml(HQ_LABELS.notes) +
+      '</h3></header>';
+    const body = inner => '<div class="ws-cmd-modal-body ws-notes-body">' + inner + '</div>';
+    if (state.status === 'error') {
+      return (
+        head +
+        body(
+          '<p class="ws-notes-problem" role="alert">Ori could not read your notes connection.</p>'
+        )
+      );
+    }
+    if (state.status !== 'ready') {
+      return head + body('<p class="ws-notes-empty">Checking your notes…</p>');
+    }
+    const secondBrain = state.secondBrain;
+    if (!notesPanelAvailable(secondBrain)) {
+      // Nothing connected (or the folder is gone): the connection's card in the
+      // drawer is where that is fixed, as the station's own button does (#765).
+      const badge = notesBadge(secondBrain);
+      return (
+        head +
+        body(
+          '<p class="ws-notes-empty">' +
+            escapeHtml(badge.value + ' · ' + badge.description) +
+            '</p>' +
+            '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">' +
+            (secondBrain?.source?.name ? 'Connection…' : 'Connect notes…') +
+            '</button>'
+        )
+      );
+    }
+    // The station panel's own markup, with the folder's name and badge under
+    // its header (FR15): the same badge the station shows, stale tone and all.
+    return notesPanelHTML({ secondBrain, panel: this.notesPanel() }).replace(
+      '</header>',
+      '</header><p class="ws-hq-notes-meta" data-cmd-hq-notes-meta>' +
+        this.inlineNotesMetaHTML() +
+        '</p>'
+    );
+  }
+
+  inlineNotesMetaHTML() {
+    const secondBrain = this.notesState().secondBrain;
+    const badge = notesBadge(secondBrain);
+    return (
+      '<span class="ws-hq-notes-vault">' +
+      escapeHtml(String(secondBrain?.source?.name || '')) +
+      '</span>' +
+      '<span class="ws-hq-notes-badge' +
+      (badge.tone === 'attention' ? ' is-attention' : '') +
+      '" title="' +
+      escapeHtml(badge.description || '') +
+      '">' +
+      escapeHtml(badge.value) +
+      '</span>'
+    );
+  }
+
+  paintInlineNotesMeta(node) {
+    const meta = node?.querySelector?.('[data-cmd-hq-notes-meta]');
+    if (!meta) return;
+    const html = this.inlineNotesMetaHTML();
+    if (meta.innerHTML !== html) meta.innerHTML = html;
+  }
+
+  // Repaints the inline panel, keeping its scroll position and the focused
+  // control: the capture box with its caret, or the same button by action.
+  paintInlineNotes(node) {
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    let focus = null;
+    if (active && active !== node && typeof node.contains === 'function' && node.contains(active)) {
+      focus = {
+        capture: Boolean(active.hasAttribute?.('data-notes-capture')),
+        action: active.getAttribute?.('data-cmd-modal-action') || '',
+        id: active.getAttribute?.('data-cmd-id') || '',
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+      };
+    }
+    const scroll = node.querySelector?.('.ws-notes-body')?.scrollTop || 0;
+    node.innerHTML = this.inlineNotesHTML();
+    node.hidden = false;
+    if (scroll) {
+      const body = node.querySelector?.('.ws-notes-body');
+      if (body) body.scrollTop = scroll;
+    }
+    if (!focus) return;
+    let target = null;
+    if (focus.capture) target = node.querySelector?.('[data-notes-capture]');
+    else if (focus.action && typeof node.querySelectorAll === 'function') {
+      target = Array.from(node.querySelectorAll('[data-cmd-modal-action]')).find(
+        el =>
+          el.getAttribute('data-cmd-modal-action') === focus.action &&
+          (el.getAttribute('data-cmd-id') || '') === focus.id
+      );
+    }
+    if (!target || target.disabled || typeof target.focus !== 'function') return;
+    target.focus({ preventScroll: true });
+    if (focus.capture && focus.start !== null && typeof target.setSelectionRange === 'function') {
+      try {
+        target.setSelectionRange(focus.start, focus.end);
+      } catch {
+        /* not a text control */
+      }
+    }
+  }
+
+  // The modal's listeners, on the inline node, bound once per node. Close has
+  // no meaning in the main column, and the connection button opens the drawer
+  // without a dialog to close first.
+  bindInlineNotes(node) {
+    if (!node || this._hqNotesBoundNode === node || typeof node.addEventListener !== 'function')
+      return;
+    this._hqNotesBoundNode = node;
+    node.addEventListener('click', event => {
+      const btn = event.target?.closest?.('[data-cmd-modal-action]');
+      if (!btn) return;
+      const action = String(btn.getAttribute('data-cmd-modal-action') || '');
+      if (action === 'notes-connection') {
+        this.openNotesStation(btn);
+        return;
+      }
+      if (action.startsWith('notes-')) {
+        this.handleNotesPanelAction(action, btn.getAttribute('data-cmd-id'));
+      }
+    });
+    node.addEventListener('input', event => {
+      if (event.target?.matches?.('[data-notes-capture]')) {
+        this.notesPanel().captureDraft = event.target.value;
+      }
+    });
+    node.addEventListener(
+      'toggle',
+      event => {
+        if (event.target?.matches?.('.ws-notes-handled')) {
+          this.notesPanel().handledOpen = event.target.open;
+        }
+      },
+      true
+    );
+    node.addEventListener('keydown', event => {
+      const target = event.target;
+      if (event.key === 'Enter' && target?.matches?.('[data-notes-capture]')) {
+        event.preventDefault();
+        void this.captureFromNotesPanel();
+        return;
+      }
+      if (
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+        target?.matches?.('[data-notes-tab]')
+      ) {
+        event.preventDefault();
+        const tabs = notesTabs(this.notesPanelSections(this.notesPanel()));
+        this.setNotesTab(
+          nextNotesTab(
+            tabs,
+            target.getAttribute('data-cmd-id'),
+            event.key === 'ArrowRight' ? 1 : -1
+          )
+        );
+      }
+    });
+  }
+
+  // Brings the inline panel into view and focus; false when it is not mounted.
+  focusInlineNotesPanel() {
+    const node = this.notesInlineNode();
+    if (!node) return false;
+    if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'start' });
+    const target =
+      node.querySelector?.('[data-notes-tab][aria-selected="true"]') ||
+      node.querySelector?.('[data-notes-capture]') ||
+      node.querySelector?.('[data-cmd-modal-action]');
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    return true;
   }
 
   showConfigTab(tab) {
@@ -13445,6 +14990,7 @@ export class WorkspaceCommandView {
 
   syncSharedSurfaces() {
     this.syncFollowUpsSurface();
+    this.syncHQPanels();
     this.syncSystemsSurface();
     this.syncDetachmentSurface();
   }
@@ -13458,13 +15004,14 @@ export class WorkspaceCommandView {
     if (modalHoldsSurface) return;
 
     const host = this.container && this.container.querySelector('[data-cmd-system-host]');
-    if (!this.active || this.activeRailSection !== 'systems' || !host) {
+    const railTab = this.systemsRailTab();
+    if (!this.active || !railTab || !host) {
       this.restoreSharedSurface('config');
       this.restoreSharedSurface('tools');
       return;
     }
 
-    const tab = this.systemTab(this.activeSystemTab);
+    const tab = this.systemTab(railTab);
     if (tab.host === 'capabilities') {
       this.restoreSharedSurface('config');
       this.restoreSharedSurface('tools');
