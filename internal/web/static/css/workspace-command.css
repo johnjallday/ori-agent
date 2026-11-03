@@ -10206,6 +10206,15 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-cmd-flow-links {
     display: none;
   }
+  /* No lines to line up with here, so a node may grow and its detail wrap. */
+  .ws-cmd-flow-node {
+    height: auto;
+    min-height: var(--flow-node-h);
+  }
+  .ws-cmd-flow-node-sub {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .ws-cmd-flow-lead-slot {
     min-height: 0;
   }
