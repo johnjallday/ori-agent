@@ -75,6 +75,7 @@ import {
   isCreatedByOri,
   nextNotesTab,
   notesBadge,
+  notesNudge,
   notesPanelAvailable,
   notesPanelHTML,
   notesSections,
@@ -101,7 +102,8 @@ import {
 } from './workspace-url-state.js';
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
-import { capAttentionLines, hqAttentionLines } from './hq-attention.js';
+import { capAttentionLines, hqAttentionLines, hqNeedsYouRows } from './hq-attention.js';
+import { hqStationCards, stationsNeedingYou } from './hq-stations-grid.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 
 // The feature mounts the HQ's Details page hides above its header, read for
@@ -113,6 +115,17 @@ const HQ_SETUP_MOUNTS = [
   { key: 'group', id: 'workspaceGroupRequirementStatus' },
   { key: 'email', id: 'workspaceEmailConnectMount', category: 'Email' },
   { key: 'first-task', id: 'workspaceFirstTaskBanner' }
+];
+// The HQ controls whose focus a re-render carries to their replacement.
+const HQ_FOCUS_ATTRS = [
+  'data-cmd-hq-card',
+  'data-cmd-hq-needs-action',
+  'data-cmd-hq-needs-all',
+  'data-cmd-hq-attention-action',
+  'data-cmd-hq-attention-more',
+  'data-cmd-hq-jump',
+  'data-cmd-hq-more-toggle',
+  'data-cmd-hq-goal-edit'
 ];
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
@@ -1944,6 +1957,14 @@ export class WorkspaceCommandView {
     if (!this.container || typeof this.container.querySelector !== 'function') return;
     const tile = this.container.querySelector('[data-cmd-section="tickets"]');
     if (!tile) return;
+    // The HQ's header shows the same counts as one number, "Open tasks".
+    if (this.viewMode === 'details' && this.isPersonalHQ()) {
+      const fresh = this.hqTilesValues().tickets;
+      const hqValue = tile.querySelector('.ws-v');
+      if (hqValue) hqValue.textContent = String(fresh.value);
+      tile.setAttribute('aria-label', fresh.aria);
+      return;
+    }
     const counts = this.currentTicketCounts();
     const line = TicketCounts.format(counts) || '—';
     const spoken = TicketCounts.describe(counts);
@@ -13414,8 +13435,10 @@ export class WorkspaceCommandView {
       this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
+      this.hqNeedsYouHTML() +
       this.renderHQNotesHost() +
       this.renderFollowUpsHost() +
+      this.hqStationsGridHTML() +
       '</main>' +
       '<aside class="ws-cmd-rail' +
       (this.railPointerFocus ? ' is-pointer' : '') +
@@ -13552,8 +13575,218 @@ export class WorkspaceCommandView {
 
   // How many things want the user. Until the Needs you panel exists this is
   // the attention strip's line count.
+  // What the Needs you tile counts: the Needs you panel's rows (FR7, FR14).
   hqNeedsYouCount() {
-    return this.hqAttentionAll().length;
+    return this.hqNeedsYou().total;
+  }
+
+  // ── Main column: Needs you and the stations grid (FR14, FR17) ──
+
+  // Every station the HQ has, as a card, in grid order. Each station's own
+  // state() decides its words; Notes is its own panel and is left out.
+  hqCards() {
+    return hqStationCards(
+      this.mapStationRegistry().map(entry => {
+        let state = {};
+        try {
+          state = (typeof entry.state === 'function' && entry.state()) || {};
+        } catch (_error) {
+          state = { value: 'Unavailable', tone: 'degraded' };
+        }
+        return { key: entry.key, label: entry.label, state };
+      })
+    );
+  }
+
+  // The rows the inbox's own Needs you list shows (not its FYI or ignorable
+  // groups), read from its live mount above the header.
+  hqMailRows() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return [];
+    const mount = document.getElementById('workspaceNeedsYouMount');
+    if (!mount || mount.hidden || typeof mount.querySelectorAll !== 'function') return [];
+    return Array.from(mount.querySelectorAll('.needs-you__row'))
+      .filter(row => !(typeof row.closest === 'function' && row.closest('.needs-you__group')))
+      .map((row, index) => {
+        const text = selector =>
+          String(row.querySelector?.(selector)?.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const action = row.querySelector?.(
+          '.needs-you__actions button, .needs-you__actions a[href]'
+        );
+        return {
+          index,
+          from: text('.needs-you__from'),
+          subject: text('.needs-you__subject'),
+          why: text('.needs-you__why'),
+          action: String(action?.textContent || '').trim() || 'Open'
+        };
+      });
+  }
+
+  hqNeedsYou({ all = false } = {}) {
+    return hqNeedsYouRows({
+      mail: this.hqMailRows(),
+      stations: stationsNeedingYou(this.hqCards()),
+      notes: notesNudge(this.notesState().secondBrain),
+      ...(all ? { limit: Infinity } : {})
+    });
+  }
+
+  hqNeedsYouHTML() {
+    return (
+      '<section class="ws-hq-panel ws-hq-needs" data-cmd-hq-needs aria-labelledby="ws-hq-needs-title">' +
+      this.hqNeedsYouInnerHTML() +
+      '</section>' +
+      // After "Show all", the inbox's own full list (its FYI and ignorable
+      // groups too) sits right under the panel.
+      (this.hqNeedsYouExpanded && this.hqMailRows().length
+        ? '<div class="ws-hq-panel-host" data-cmd-hq-host="needs-you"></div>'
+        : '')
+    );
+  }
+
+  hqNeedsYouInnerHTML() {
+    const needs = this.hqNeedsYou({ all: this.hqNeedsYouExpanded === true });
+    const rows = needs.rows;
+    this._hqNeedsYouRows = rows;
+    const head =
+      '<header class="ws-hq-panel-head">' +
+      '<h3 class="ws-hq-panel-title" id="ws-hq-needs-title">' +
+      escapeHtml(HQ_LABELS.needsYou) +
+      '</h3>' +
+      '<span class="ws-hq-panel-count">' +
+      needs.total +
+      '</span>' +
+      (needs.more && !this.hqNeedsYouExpanded
+        ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-hq-needs-all>' +
+          escapeHtml(HQ_LABELS.showAll) +
+          ' (' +
+          needs.total +
+          ')</button>'
+        : '') +
+      '</header>';
+    if (!rows.length) {
+      return head + '<p class="ws-hq-empty">' + escapeHtml(HQ_LABELS.nothingNeedsYou) + '</p>';
+    }
+    return (
+      head +
+      '<ul class="ws-hq-needs-list">' +
+      rows
+        .map(
+          row =>
+            '<li class="ws-hq-needs-row">' +
+            '<span class="ws-hq-chip is-' +
+            escapeHtml(String(row.category).toLowerCase()) +
+            '">' +
+            escapeHtml(row.category) +
+            '</span>' +
+            '<span class="ws-hq-needs-text">' +
+            escapeHtml(row.sentence) +
+            '</span>' +
+            (row.actions[0]
+              ? '<button type="button" class="ws-cmd-agent-action" data-cmd-hq-needs-action="' +
+                escapeHtml(row.key) +
+                '">' +
+                escapeHtml(row.actions[0].label) +
+                '</button>'
+              : '') +
+            '</li>'
+        )
+        .join('') +
+      '</ul>'
+    );
+  }
+
+  runHQNeedsYouAction(key, trigger) {
+    const row = (this._hqNeedsYouRows || []).find(item => item.key === key);
+    const action = row && row.actions[0];
+    if (!action) return;
+    if (action.kind === 'station') {
+      this.runHQStationAction(action.key, trigger);
+      return;
+    }
+    if (action.kind === 'notes') {
+      this.focusInlineNotesPanel();
+      if (this.notesPanel().status === 'ready') void this.lookAgainFromNotesPanel();
+      return;
+    }
+    if (action.kind === 'mail') {
+      const mount =
+        typeof document !== 'undefined' ? document.getElementById('workspaceNeedsYouMount') : null;
+      const rows = mount
+        ? Array.from(mount.querySelectorAll('.needs-you__row')).filter(
+            item => !(typeof item.closest === 'function' && item.closest('.needs-you__group'))
+          )
+        : [];
+      const control = rows[action.index]?.querySelector?.(
+        '.needs-you__actions button, .needs-you__actions a[href]'
+      );
+      control?.click?.();
+    }
+  }
+
+  // The inbox's own Needs you surface, under the panel after "Show all".
+  syncHQNeedsYouSurface() {
+    const host = this.container?.querySelector?.('[data-cmd-hq-host="needs-you"]');
+    if (!host) {
+      this.restoreSharedSurface('hq-needs-you');
+      return;
+    }
+    this.mountSharedSurface('hq-needs-you', '#workspaceNeedsYouMount', host);
+  }
+
+  hqStationsGridHTML() {
+    const cards = this.hqCards();
+    if (!cards.length) return '';
+    return (
+      '<section class="ws-hq-panel ws-hq-stations" aria-labelledby="ws-hq-stations-title">' +
+      '<header class="ws-hq-panel-head">' +
+      '<h3 class="ws-hq-panel-title" id="ws-hq-stations-title">' +
+      escapeHtml(HQ_LABELS.stations) +
+      '</h3>' +
+      '<span class="ws-hq-panel-count">' +
+      cards.length +
+      '</span>' +
+      '</header>' +
+      '<ul class="ws-hq-station-grid">' +
+      cards
+        .map(card => {
+          const stateClass = card.stateWord.toLowerCase().replace(/\s+/g, '-');
+          return (
+            '<li class="ws-hq-station-cell">' +
+            '<button type="button" class="ws-hq-station is-' +
+            escapeHtml(stateClass) +
+            (card.configured ? '' : ' is-unset') +
+            '" data-cmd-hq-card="' +
+            escapeHtml(card.key) +
+            '" aria-label="' +
+            escapeHtml(
+              [card.label + ': ' + card.stateWord, ...card.summary, card.action].join('. ')
+            ) +
+            '">' +
+            '<span class="ws-hq-station-head">' +
+            '<span class="ws-hq-station-name">' +
+            escapeHtml(card.label) +
+            '</span>' +
+            '<span class="ws-hq-station-state">' +
+            escapeHtml(card.stateWord) +
+            '</span>' +
+            '</span>' +
+            card.summary
+              .map(line => '<span class="ws-hq-station-summary">' + escapeHtml(line) + '</span>')
+              .join('') +
+            '<span class="ws-hq-station-action" aria-hidden="true">' +
+            escapeHtml(card.action) +
+            '</span>' +
+            '</button>' +
+            '</li>'
+          );
+        })
+        .join('') +
+      '</ul>' +
+      '</section>'
+    );
   }
 
   hqTilesHTML(stats) {
@@ -13816,6 +14049,15 @@ export class WorkspaceCommandView {
       }
       strip.hidden = !this._hqAttentionLines.length;
     }
+    const needsPanel = root.querySelector('[data-cmd-hq-needs]');
+    if (needsPanel) {
+      const html = this.hqNeedsYouInnerHTML();
+      if (needsPanel.innerHTML !== html) {
+        this.rememberHQFocus();
+        needsPanel.innerHTML = html;
+        this.restoreHQFocus();
+      }
+    }
     const facts = root.querySelector('[data-cmd-hq-facts]');
     if (facts) {
       const html = this.hqFactsHTML();
@@ -14008,6 +14250,26 @@ export class WorkspaceCommandView {
         this.setHQMoreViewsOpen(false);
       }
     });
+    const main = root.querySelector('.ws-hq-main');
+    main?.addEventListener?.('click', event => {
+      const card = event.target.closest?.('[data-cmd-hq-card]');
+      if (card) {
+        this.runHQStationAction(card.getAttribute('data-cmd-hq-card'), card);
+        return;
+      }
+      const needs = event.target.closest?.('[data-cmd-hq-needs-action]');
+      if (needs) {
+        this.runHQNeedsYouAction(needs.getAttribute('data-cmd-hq-needs-action'), needs);
+        return;
+      }
+      if (event.target.closest?.('[data-cmd-hq-needs-all]')) {
+        this.hqNeedsYouExpanded = true;
+        this.render();
+        this.container
+          ?.querySelector?.('[data-cmd-hq-needs] [data-cmd-hq-needs-action]')
+          ?.focus?.({ preventScroll: true });
+      }
+    });
     const strip = root.querySelector('[data-cmd-hq-attention]');
     if (strip) {
       strip.addEventListener('click', event => {
@@ -14068,6 +14330,9 @@ export class WorkspaceCommandView {
   // Before a rebuild or a mode switch: remember a focused control (and a caret
   // in the capture box), then put the panel home so the write cannot detach it.
   parkHQPanels() {
+    this.rememberHQFocus();
+    this.restoreSharedSurface('hq-github');
+    this.restoreSharedSurface('hq-needs-you');
     const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors['hq-notes'];
     if (!record || !record.node) return;
     const active = typeof document !== 'undefined' ? document.activeElement : null;
@@ -14084,10 +14349,34 @@ export class WorkspaceCommandView {
       };
     }
     this.restoreSharedSurface('hq-notes');
-    this.restoreSharedSurface('hq-github');
+  }
+
+  // The HQ's string-rendered controls (tiles, strip and Needs you actions,
+  // station cards, More views) are rebuilt by every render: focus follows the
+  // control to its replacement, found by the same attribute and value.
+  rememberHQFocus() {
+    this.hqControlFocus = null;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (!active || typeof active.getAttribute !== 'function') return;
+    if (!this.container || typeof this.container.contains !== 'function') return;
+    if (!this.container.contains(active)) return;
+    const attr = HQ_FOCUS_ATTRS.find(name => active.hasAttribute?.(name));
+    if (attr) this.hqControlFocus = { attr, value: active.getAttribute(attr) || '' };
+  }
+
+  restoreHQFocus() {
+    const focus = this.hqControlFocus;
+    this.hqControlFocus = null;
+    if (!focus || !this.container || typeof this.container.querySelectorAll !== 'function') return;
+    const target = Array.from(this.container.querySelectorAll('[' + focus.attr + ']')).find(
+      el => (el.getAttribute(focus.attr) || '') === focus.value
+    );
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
   }
 
   syncHQPanels() {
+    this.restoreHQFocus();
+    this.syncHQNeedsYouSurface();
     const focus = this.hqNotesFocus || null;
     this.hqNotesFocus = null;
     const host = this.hqNotesHost();
@@ -14133,7 +14422,11 @@ export class WorkspaceCommandView {
       secondBrain?.status || '',
       secondBrain?.source?.name || ''
     ].join('|');
-    if (signature === this._hqNotesSignature && this._hqNotesPaintedNode === node) return;
+    if (signature === this._hqNotesSignature && this._hqNotesPaintedNode === node) {
+      // Same connection: only its badge line may have moved (a nudge, a count).
+      this.paintInlineNotesMeta(node);
+      return;
+    }
     this._hqNotesSignature = signature;
     this._hqNotesPaintedNode = node;
     if (available) {
@@ -14179,7 +14472,38 @@ export class WorkspaceCommandView {
         )
       );
     }
-    return notesPanelHTML({ secondBrain, panel: this.notesPanel() });
+    // The station panel's own markup, with the folder's name and badge under
+    // its header (FR15): the same badge the station shows, stale tone and all.
+    return notesPanelHTML({ secondBrain, panel: this.notesPanel() }).replace(
+      '</header>',
+      '</header><p class="ws-hq-notes-meta" data-cmd-hq-notes-meta>' +
+        this.inlineNotesMetaHTML() +
+        '</p>'
+    );
+  }
+
+  inlineNotesMetaHTML() {
+    const secondBrain = this.notesState().secondBrain;
+    const badge = notesBadge(secondBrain);
+    return (
+      '<span class="ws-hq-notes-vault">' +
+      escapeHtml(String(secondBrain?.source?.name || '')) +
+      '</span>' +
+      '<span class="ws-hq-notes-badge' +
+      (badge.tone === 'attention' ? ' is-attention' : '') +
+      '" title="' +
+      escapeHtml(badge.description || '') +
+      '">' +
+      escapeHtml(badge.value) +
+      '</span>'
+    );
+  }
+
+  paintInlineNotesMeta(node) {
+    const meta = node?.querySelector?.('[data-cmd-hq-notes-meta]');
+    if (!meta) return;
+    const html = this.inlineNotesMetaHTML();
+    if (meta.innerHTML !== html) meta.innerHTML = html;
   }
 
   // Repaints the inline panel, keeping its scroll position and the focused

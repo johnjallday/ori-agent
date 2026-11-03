@@ -1372,7 +1372,8 @@ test('systems shared surface mounts config without cloning persistence logic', (
   assert.deepEqual(calls, [
     // No follow-ups host in this layout, so the panel stays home.
     ['restore', 'followups'],
-    // Nor an HQ Notes host: that panel stays home too (PRD 766).
+    // Nor the HQ's inbox or Notes hosts: those panels stay home too (PRD 766).
+    ['restore', 'hq-needs-you'],
     ['restore', 'hq-notes'],
     ['restore', 'tools'],
     ['restore', 'capabilities'],
@@ -8916,6 +8917,8 @@ const HQ_PANELS_KEEP = new Set([
   'paintInlineNotes',
   'bindInlineNotes',
   'focusInlineNotesPanel',
+  'inlineNotesMetaHTML',
+  'paintInlineNotesMeta',
   'notesPanelOpen',
   'notesModalOpen',
   'notesState',
@@ -9028,6 +9031,13 @@ test('HQ Details: the Notes panel is mounted in its host, second only to nothing
     assert.equal(commandView.notesPanelOpen(), true, 'the inline panel counts as open');
     assert.equal(page.loads.length, 1, 'a connected folder starts the panel read once');
     assert.match(notes.lastHTML, /Notes/);
+    // Under the panel's header: the folder's name and the station's own badge.
+    assert.match(
+      notes.lastHTML,
+      /<\/header><p class="ws-hq-notes-meta" data-cmd-hq-notes-meta><span class="ws-hq-notes-vault">Second Brain<\/span><span class="ws-hq-notes-badge" title="set up by Ori">Second Brain<\/span><\/p>/
+    );
+    // The panel's own close button is still in its markup (CSS hides it inline).
+    assert.match(notes.lastHTML, /data-cmd-modal-action="close"/);
   } finally {
     globalThis.document = originalDocument;
   }
@@ -9413,6 +9423,126 @@ test('HQ Details: more than three lines collapse behind "and N more" (FR12)', ()
   } finally {
     globalThis.document = originalDocument;
   }
+});
+
+test('HQ Details main column: Needs you, Notes, Follow-ups, then the stations grid (FR14–FR18)', () => {
+  const { html } = hqDetailsMarkup();
+  const main = html.match(/<main class="ws-cmd-main ws-hq-main">(.*)<\/main>/)[1];
+  const at = marker => main.indexOf(marker);
+  assert.ok(main.startsWith('<section class="ws-hq-panel ws-hq-needs"'), 'Needs you is first');
+  assert.ok(at('data-cmd-hq-needs') < at('data-cmd-hq-host="notes"'));
+  assert.ok(at('data-cmd-hq-host="notes"') < at('data-cmd-followups-host'));
+  assert.ok(at('data-cmd-followups-host') < at('ws-hq-stations'));
+  // No agent deck on the HQ (FR18).
+  assert.doesNotMatch(html, /ws-cmd-garrison|data-cmd-agent-tab|ws-cmd-roster/);
+});
+
+test('HQ Details: the stations grid shows every station but Notes as a card with a state word (FR17)', () => {
+  const { html } = hqDetailsMarkup();
+  const grid = html.match(/<ul class="ws-hq-station-grid">(.*?)<\/ul>/)[1];
+  const cards = [...grid.matchAll(/data-cmd-hq-card="([^"]+)"/g)].map(match => match[1]);
+  for (const key of ['watchtower', 'email', 'calendar-ops', 'daily-brief']) {
+    assert.ok(cards.includes(key), key);
+  }
+  assert.ok(!cards.includes('second-brain'), 'Notes is its own panel');
+  for (const card of grid.split('</li>').filter(Boolean)) {
+    assert.match(
+      card,
+      /<span class="ws-hq-station-state">(Ready|Needs you|Running|Checking|Not set up|Error)<\/span>/
+    );
+    assert.match(card, /<button type="button" class="ws-hq-station /, 'the whole card is a button');
+    assert.match(card, /<span class="ws-hq-station-action" aria-hidden="true">[^<]+<\/span>/);
+  }
+});
+
+test('HQ Details: the grid orders Needs you first and Not set up last, dashed', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.mapStationRegistry = () => [
+    { key: 'email', label: 'Email', state: () => ({ value: 'Set up Email Ops' }) },
+    {
+      key: 'watchtower',
+      label: 'Watchtower',
+      state: () => ({ value: 'All clear', tone: 'clear' })
+    },
+    {
+      key: 'calendar-ops',
+      label: 'Calendar Ops',
+      state: () => ({ value: '2 conflicts', description: 'tomorrow', tone: 'attention' })
+    },
+    { key: 'second-brain', label: 'Notes', state: () => ({ value: '3 open', tone: 'clear' }) }
+  ];
+  const grid = commandView.hqStationsGridHTML();
+  assert.deepEqual(
+    [...grid.matchAll(/data-cmd-hq-card="([^"]+)"/g)].map(match => match[1]),
+    ['calendar-ops', 'watchtower', 'email']
+  );
+  assert.match(grid, /class="ws-hq-station is-not-set-up is-unset" data-cmd-hq-card="email"/);
+  assert.match(grid, /aria-label="Email: Not set up\. Set up Email Ops\. Set up"/);
+
+  // The station asking for the user is a Needs you row whose action is the
+  // station's own (FR14).
+  const ran = [];
+  commandView.runHQStationAction = (key, trigger) => ran.push([key, trigger]);
+  commandView.notesState = () => ({ secondBrain: null });
+  const needs = commandView.hqNeedsYouInnerHTML();
+  assert.match(needs, /<span class="ws-hq-chip is-calendar">Calendar<\/span>/);
+  assert.match(needs, /Calendar Ops: 2 conflicts · Tomorrow/);
+  assert.match(needs, /<span class="ws-hq-panel-count">1<\/span>/);
+  commandView.runHQNeedsYouAction('station:calendar-ops', 'btn');
+  assert.deepEqual(ran, [['calendar-ops', 'btn']]);
+
+  commandView.mapStationRegistry = () => [];
+  assert.match(
+    commandView.hqNeedsYouInnerHTML(),
+    /<p class="ws-hq-empty">Nothing needs you right now\.<\/p>/
+  );
+});
+
+test('HQ Details: a focused station card keeps focus through a re-render', () => {
+  const page = hqPanelsPage();
+  const { doc, container, commandView } = page;
+  const originalOnHTML = container.onHTML;
+  container.onHTML = html => {
+    originalOnHTML(html);
+    const fresh = doc.createElement('button');
+    fresh.setAttribute('data-cmd-hq-card', 'watchtower');
+    container.appendChild(fresh);
+  };
+  for (const name of ['rememberHQFocus', 'restoreHQFocus', 'syncHQNeedsYouSurface']) {
+    commandView[name] = WorkspaceCommandView.prototype[name];
+  }
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    const first = container.querySelector('[data-cmd-hq-card="watchtower"]');
+    first.focus();
+    commandView.render();
+    const second = container.querySelector('[data-cmd-hq-card="watchtower"]');
+    assert.notEqual(second, first, 'the card was rebuilt');
+    assert.equal(doc.activeElement, second, 'and focus moved to its replacement');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: a ticket change repaints Open tasks as a number, not the Tickets phrase', () => {
+  const { commandView } = hqDetailsMarkup();
+  const value = { textContent: '6' };
+  const attrs = {};
+  const tile = {
+    querySelector: selector => (selector === '.ws-v' ? value : null),
+    setAttribute: (name, text) => {
+      attrs[name] = text;
+    }
+  };
+  commandView.container = {
+    querySelector: selector => (selector === '[data-cmd-section="tickets"]' ? tile : null)
+  };
+  commandView.page.workspace.ticket_counts = { review: 0, in_progress: 1, ready: 2, done: 9 };
+  commandView.paintWorkTile();
+  assert.equal(value.textContent, '3');
+  assert.equal(attrs['aria-label'], 'Open tasks: 3');
 });
 
 test('HQ Details marks the page so the top mounts hide, and only in Details (FR13)', () => {

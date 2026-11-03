@@ -9505,6 +9505,170 @@ button.ws-cmd-rpg-class-card:focus-visible {
   overflow-y: auto;
 }
 
+/* Main-column panels: Needs you and Stations share the Notes panel's chrome. */
+.ws-hq-panel {
+  padding: 12px 14px 14px;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+}
+.ws-hq-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.ws-hq-panel-title {
+  margin: 0;
+  color: var(--ws-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+.ws-hq-panel-count {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ws-hq-panel-head .ws-cmd-mini-btn {
+  margin-left: auto;
+}
+.ws-hq-empty {
+  margin: 0;
+  color: var(--ws-ink-dim);
+  font-size: 13.5px;
+}
+.ws-hq-needs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-hq-needs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-hq-needs-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.ws-hq-needs-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  color: var(--ws-ink);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.ws-hq-notes-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 0 14px 8px;
+  color: var(--ws-ink-dim);
+  font-size: 12.5px;
+}
+.ws-hq-notes-badge.is-attention {
+  color: var(--ws-keeper);
+}
+
+/* Stations grid: two columns by default, three when the column is wide, one
+   on a phone (auto-fit with a minimum card width, FR27). */
+.ws-hq-station-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-hq-station-cell {
+  display: flex;
+  min-width: 0;
+}
+.ws-hq-station {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.ws-hq-station:hover {
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-hq-station:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-hq-station-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-hq-station-name {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ws-hq-station-state {
+  flex: 0 0 auto;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-hq-station.is-needs-you .ws-hq-station-state {
+  color: var(--ws-keeper);
+}
+.ws-hq-station.is-ready .ws-hq-station-state,
+.ws-hq-station.is-running .ws-hq-station-state {
+  color: var(--ws-faction);
+}
+/* Red is kept for an Error, and only on a station card. */
+.ws-hq-station.is-error .ws-hq-station-state {
+  color: var(--ws-alert);
+}
+.ws-hq-station-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  color: var(--ws-ink-dim);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.ws-hq-station-action {
+  margin-top: auto;
+  padding-top: 4px;
+  color: var(--ws-faction);
+  font-size: 12.5px;
+}
+/* Not set up: dashed, quieter, last — a fresh HQ does not look broken. */
+.ws-hq-station.is-unset {
+  border-style: dashed;
+  background: transparent;
+}
+.ws-hq-station.is-unset .ws-hq-station-name,
+.ws-hq-station.is-unset .ws-hq-station-summary {
+  color: var(--ws-ink-dim);
+}
+
 @media (max-width: 640px) {
   .ws-hq-tiles {
     display: grid;

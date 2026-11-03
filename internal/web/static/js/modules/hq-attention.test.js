@@ -213,6 +213,10 @@ test('Needs you shows five rows and counts the rest; nothing is no rows', () => 
   assert.equal(result.more, 2);
   assert.deepEqual(hqNeedsYouRows(), { rows: [], total: 0, more: 0 });
   assert.deepEqual(hqNeedsYouRows({ notes: { stale: false, cameDue: 0 } }).rows, []);
+  // "Show all" lifts the cap.
+  const all = hqNeedsYouRows({ mail, limit: Infinity });
+  assert.equal(all.rows.length, 7);
+  assert.equal(all.more, 0);
 });
 
 test('a long sentence is cut at a word', () => {

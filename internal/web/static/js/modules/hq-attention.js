@@ -165,9 +165,15 @@ const STATION_CHIPS = {
  * @param {{key:string,label:string,summary:string[],action:string}[]} [input.stations]
  *   cards that need the user, from hq-stations-grid.js
  * @param {{stale:boolean,days:number,cameDue:number}|null} [input.notes] notesNudge()
+ * @param {number} [input.limit] rows shown (five; Infinity for "Show all")
  * @returns {{rows: object[], total: number, more: number}}
  */
-export function hqNeedsYouRows({ mail = [], stations = [], notes = null } = {}) {
+export function hqNeedsYouRows({
+  mail = [],
+  stations = [],
+  notes = null,
+  limit = NEEDS_YOU_LIMIT
+} = {}) {
   const rows = [];
   for (const item of Array.isArray(mail) ? mail : []) {
     const subject = String(item.subject || '').trim() || '(no subject)';
@@ -203,8 +209,8 @@ export function hqNeedsYouRows({ mail = [], stations = [], notes = null } = {}) 
     if (row) rows.push(row);
   }
   return {
-    rows: rows.slice(0, NEEDS_YOU_LIMIT),
+    rows: rows.slice(0, limit),
     total: rows.length,
-    more: Math.max(0, rows.length - NEEDS_YOU_LIMIT)
+    more: Math.max(0, rows.length - limit)
   };
 }
