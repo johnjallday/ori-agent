@@ -13,6 +13,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -554,6 +555,26 @@ func (h *Handler) restoreWorkspace(w http.ResponseWriter, r *http.Request, id st
 		if owner := h.registeredWorkspaceSlugOwner(ctx, candidate.FolderSlug, candidate.ID); owner != "" {
 			writeWorkspaceCreateSlugConflict(w, candidate.Name, h.globalWorkspaceSlugConflict(ctx, candidate.FolderSlug, candidate.ID, filepath.Dir(originalPath)))
 			return
+		}
+	}
+	// A trashed workspace owns no folders, so one of its project folders may
+	// have been set up again meanwhile. Never restore a second owner.
+	if owners := h.attachFolderOwnerStore(); owners != nil {
+		for _, candidate := range restoreCandidates {
+			trashed, getErr := owners.Get(candidate.ID)
+			if getErr != nil || trashed == nil {
+				continue
+			}
+			owner, ownerErr := projectconnection.FindRestoreFolderConflict(owners, trashed)
+			if ownerErr != nil {
+				logger.Error("Failed to check restored workspace folders", logger.Fields{"id": candidate.ID, "error": ownerErr})
+				_ = orihttp.RespondServiceUnavailable(w, "Folder ownership could not be checked. Try the restore again.")
+				return
+			}
+			if owner != nil {
+				_ = orihttp.RespondConflict(w, fmt.Sprintf("%q cannot be restored: its project folder now belongs to the workspace %q.", candidate.Name, owner.Name))
+				return
+			}
 		}
 	}
 
