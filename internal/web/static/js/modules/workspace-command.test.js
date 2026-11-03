@@ -9312,12 +9312,12 @@ test('HQ Details: four tiles read existing counts and lead to their panels (FR7)
   )[1];
   assert.deepEqual(
     [...tiles.matchAll(/<div class="ws-l">([^<]+)<\/div>/g)].map(match => match[1]),
-    ['Needs you', 'Follow-ups', 'Open tasks', 'Team']
+    ['Needs you', 'Follow-ups', 'Open tickets', 'Team']
   );
   assert.match(tiles, /data-cmd-hq-jump="needs-you"[^>]*><div class="ws-v">0</);
   // Follow-ups unknown until the panel has counted them.
   assert.match(tiles, /data-cmd-hq-jump="followups"[^>]*><div class="ws-v">—</);
-  // Open tasks = review + in progress + ready, the server's own counts.
+  // Open tickets = review + in progress + ready, the server's own counts.
   assert.match(tiles, /data-cmd-section="tickets"[^>]*><div class="ws-v">6</);
   assert.match(tiles, /data-cmd-hq-jump="team"[^>]*><div class="ws-v">2</);
 });
@@ -9554,7 +9554,7 @@ test('HQ Details says no tactical word, in text or aria-labels (FR23)', () => {
   assert.notDeepEqual(tacticalTermsIn(ordinaryDetailsMarkup()), []);
 });
 
-test('HQ Details rail: Team first and open, the lead marked, Give task for each agent (FR19)', () => {
+test('HQ Details rail: Team first and open, the lead marked, Give work for each agent (FR19)', () => {
   const { html } = hqDetailsMarkup();
   const rail = html.match(/<aside class="ws-cmd-rail ws-hq-rail">(.*)<\/aside>/)[1];
   assert.ok(rail.startsWith('<section class="ws-hq-team"'), 'Team is first');
@@ -9573,7 +9573,7 @@ test('HQ Details rail: Team first and open, the lead marked, Give task for each 
   );
   assert.match(rows[0][2], /<span class="ws-hq-chip is-lead">Lead<\/span>/);
   assert.doesNotMatch(rows[1][2], /is-lead/);
-  assert.match(rows[0][2], /data-cmd-add-task="Atlas" aria-label="Give task to Atlas">Give task</);
+  assert.match(rows[0][2], /data-cmd-add-task="Atlas" aria-label="Give work to Atlas">Give work</);
   assert.match(rows[1][2], /data-cmd-add-task="Builder"/);
   // Team is not a toggle: it has no accordion button.
   assert.doesNotMatch(rail, /data-cmd-manage-section="team"/);
@@ -9753,7 +9753,7 @@ test('HQ Details: opening a Setup row keeps it where it was on screen', () => {
   }
 });
 
-test('HQ Details: a ticket change repaints Open tasks as a number, not the Tickets phrase', () => {
+test('HQ Details: a ticket change repaints Open tickets as a number, not the Tickets phrase', () => {
   const { commandView } = hqDetailsMarkup();
   const value = { textContent: '6' };
   const attrs = {};
@@ -9769,7 +9769,7 @@ test('HQ Details: a ticket change repaints Open tasks as a number, not the Ticke
   commandView.page.workspace.ticket_counts = { review: 0, in_progress: 1, ready: 2, done: 9 };
   commandView.paintWorkTile();
   assert.equal(value.textContent, '3');
-  assert.equal(attrs['aria-label'], 'Open tasks: 3');
+  assert.equal(attrs['aria-label'], 'Open tickets: 3');
 });
 
 test('HQ Details marks the page so the top mounts hide, and only in Details (FR13)', () => {

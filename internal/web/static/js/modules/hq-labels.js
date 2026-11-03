@@ -14,11 +14,14 @@ export const HQ_LABELS = Object.freeze({
   // People
   lead: 'Lead',
   team: 'Team',
-  giveTask: 'Give task',
+  // The product calls work a ticket, never a task (PRD 760 FR-3), and the
+  // agent's action is the existing "Give work" flow; the keys keep the PRD's
+  // working names.
+  giveTask: 'Give work',
 
   // Work
-  tasks: 'Tasks',
-  openTasks: 'Open tasks',
+  tasks: 'Tickets',
+  openTasks: 'Open tickets',
   backlog: 'Backlog',
   workspaceNotes: 'Workspace notes',
   sessions: 'Sessions',

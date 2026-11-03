@@ -1959,7 +1959,7 @@ export class WorkspaceCommandView {
     if (!this.container || typeof this.container.querySelector !== 'function') return;
     const tile = this.container.querySelector('[data-cmd-section="tickets"]');
     if (!tile) return;
-    // The HQ's header shows the same counts as one number, "Open tasks".
+    // The HQ's header shows the same counts as one number, "Open tickets".
     if (this.viewMode === 'details' && this.isPersonalHQ()) {
       const fresh = this.hqTilesValues().tickets;
       const hqValue = tile.querySelector('.ws-v');

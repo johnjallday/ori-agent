@@ -12,7 +12,9 @@ test('the map carries every plain name the HQ page needs', () => {
   const expected = {
     lead: 'Lead',
     team: 'Team',
-    tasks: 'Tasks',
+    tasks: 'Tickets',
+    openTasks: 'Open tickets',
+    giveTask: 'Give work',
     backlog: 'Backlog',
     workspaceNotes: 'Workspace notes',
     sessions: 'Sessions',

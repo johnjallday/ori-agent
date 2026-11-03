@@ -16,12 +16,15 @@ for (const theme of ['light', 'dark']) {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 390, height: 844 });
+    // Both themes run at once; the theme keeps their names apart when they
+    // start in the same millisecond (the create then collided and failed).
+    const stamp = `${theme} ${Date.now()}`;
     const response = await page.request.post('/api/workspaces', {
-      data: { name: `Work-first accessibility ${Date.now()}` }
+      data: { name: `Work-first accessibility ${stamp}` }
     });
-    expect(response.ok()).toBeTruthy();
+    expect(response.ok(), await response.text()).toBeTruthy();
     const { folder } = await response.json();
-    const agentName = `Work-first Manager ${Date.now()}`;
+    const agentName = `Work-first Manager ${stamp}`;
     expect(
       (
         await page.request.post('/api/agents', { data: { name: agentName, type: 'orchestration' } })
@@ -279,7 +282,7 @@ for (const theme of ['light', 'dark']) {
       const team = page.locator('.ws-hq-team');
       await expect(team).toBeVisible();
       await expect(team.getByRole('heading', { name: /^Team/ })).toBeVisible();
-      await expect(team.getByRole('button', { name: `Give task to ${agentName}` })).toBeVisible();
+      await expect(team.getByRole('button', { name: `Give work to ${agentName}` })).toBeVisible();
       await expect(page.locator('[data-cmd-manage-section="team"]')).toHaveCount(0);
       await expect(page.locator('[data-cmd-manage-section="stations"]')).toHaveCount(0);
       await expect(page.getByRole('button', { name: /^Workspace notes/ })).toBeVisible();
