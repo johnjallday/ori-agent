@@ -6,7 +6,8 @@ import {
   sourceHomePlacementResult,
   sourceHomeObservationResult,
   sourceHomeReviewPlan,
-  folderHomeMapTarget
+  folderHomeMapTarget,
+  folderLandingRoute
 } from './personal-assistant-folder.js';
 import {
   workspaceCreationReviewHTML,
@@ -38,6 +39,10 @@ function controller() {
     state,
     effects,
     DIGEST_ENDPOINT: '/digest',
+    // Outside the evaluated slice: the real landing choice, and the library
+    // summary read faked as "nothing to set up" unless a test says otherwise.
+    folderLandingRoute,
+    libraryToSetUp: async () => context.toSetUpForTest || 0,
     console,
     document: {
       querySelector: () => ({ getClientRects: () => [1] }),
@@ -375,6 +380,21 @@ test('verified Show navigation closes the drawer instead of restoring it over th
   assert.equal(c.context.window.location.href, '/?view=map&show_on_map=home');
   assert.equal(c.effects.setup, 1);
   assert.equal(c.effects.position, 0);
+});
+
+test('Show of a Home with projects waiting also opens the setup sheet; Move never does (folder-to-map-handoff FR-1)', async () => {
+  const c = controller();
+  await c.startOneCardSetup({});
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
+  c.context.window.location = { href: '' };
+  c.context.window.PersonalAssistantPanel.close = () => {};
+  c.context.toSetUpForTest = 5;
+  await c.navigateFolderHomeMap('home', 'show');
+  assert.equal(c.context.window.location.href, '/?view=map&show_on_map=home&setup_projects=1');
+  c.context.window.location = { href: '' };
+  await c.navigateFolderHomeMap('home', 'move');
+  assert.equal(c.context.window.location.href, '/?view=map&move=home');
 });
 
 async function failedPosition() {

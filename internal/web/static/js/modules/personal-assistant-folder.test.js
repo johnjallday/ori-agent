@@ -25,6 +25,8 @@ import {
   portfolioProviderAction,
   profileReceiptLine,
   setupResultView as setupModalView,
+  folderLandingRoute,
+  homeWaitingNote,
   finishedRunWorkspace,
   arrangedStructure,
   conversationFolderOfferView,
@@ -392,6 +394,45 @@ test('a step that did not finish still says so on the last screen', () => {
     ['done', 'done', 'done']
   );
   assert.equal(clean.count, '3 of 3 steps finished');
+});
+
+test('a finished Home setup lands on the map with the setup sheet when projects wait (folder-to-map-handoff FR-1, FR-2)', () => {
+  const library = '/workspaces/music-home/assistant#projectLibraryPanel';
+  assert.equal(
+    folderLandingRoute('home-1', library, 5),
+    '/?view=map&show_on_map=home-1&setup_projects=1'
+  );
+  assert.equal(folderLandingRoute('home-1', library, 0), library, 'nothing to set up: the library');
+  assert.equal(folderLandingRoute('home-1', library, '5'), library, 'a count is a number');
+  assert.equal(folderLandingRoute('', library, 5), library);
+  assert.equal(
+    folderLandingRoute('home 1/../x', library, 5),
+    library,
+    'a hostile id keeps the fallback'
+  );
+  assert.equal(folderLandingRoute('x'.repeat(161), library, 5), library);
+
+  const plain = setupModalView(homeRunOffer());
+  assert.equal(plain.openLabel, 'Open Music Production Home');
+  assert.equal(plain.route, library);
+  const waiting = setupModalView(homeRunOffer(), { toSetUp: 5, songs: songRows(3), total: 3 });
+  assert.equal(waiting.title, 'Music Production Home is ready');
+  assert.equal(waiting.openLabel, 'Put 5 on the map');
+  assert.equal(waiting.route, '/?view=map&show_on_map=home-1&setup_projects=1');
+  assert.equal(waiting.libraryRoute, library);
+  assert.match(waiting.status, /^5 projects to set up\./);
+  assert.equal(waiting.songs, undefined, 'the song shortcuts wait until the projects are placed');
+  assert.equal(waiting.status, homeWaitingNote('Music Production Home', 5));
+  assert.equal(homeWaitingNote('X', 0), '');
+  assert.equal(homeWaitingNote('X', '2'), '');
+  assert.match(homeWaitingNote('', 1), /^1 project to set up\. .* in your Home;/);
+  assert.doesNotMatch(homeWaitingNote('X', 3), /ready/i);
+  const none = setupModalView(homeRunOffer(), { toSetUp: 0, songs: songRows(3), total: 3 });
+  assert.equal(
+    none.title,
+    'Pick a song to start with',
+    'nothing to set up: the song shortcuts as before'
+  );
 });
 
 test('the Home receipt names the Home by the workspace ID in the outcome', () => {
