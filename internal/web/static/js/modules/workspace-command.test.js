@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { wireWorkspaceFollowUps } from './workspace-followups.js';
+import { tacticalTermsIn } from './hq-labels.js';
 
 // The constructor only reads the DOM (getElementById) and returns early from
 // setup() when there's no container — a null-returning stub is enough to build
@@ -287,7 +288,8 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /<div class="ws-l">Tickets<\/div>/);
   assert.doesNotMatch(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Notes</);
+  // "Workspace notes" on every workspace (PRD 766 FR25).
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Workspace notes</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-sessions">Sessions</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-folders">Linked Folders</);
@@ -2239,12 +2241,26 @@ test('presentRailSections lists the rows renderRail draws, in order, with the sa
       ]
     );
 
+    // The HQ's Details rail (PRD 766 FR20): content rows, then Setup's own
+    // accordion rows; Team, Tools, Goal and Portability are not accordion rows.
     const hq = makeRailView({ ...content, workspace: { id: 'hq-1', designation: 'personal_hq' } });
-    assert.deepEqual(hq.presentRailSections(), drawn(hq.renderRail()));
+    assert.deepEqual(hq.presentRailSections(), drawn(hq.renderHQRail()));
     assert.deepEqual(
       hq.presentRailSections().map(section => section.key),
-      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems', 'stations']
+      [
+        'notes',
+        'sessions',
+        'files',
+        'backlog',
+        'folders',
+        'hq-capabilities',
+        'hq-triggers',
+        'schedules'
+      ]
     );
+    // Map keeps the workspace's ordinary rows.
+    hq.viewMode = 'map';
+    assert.ok(hq.presentRailSections().some(section => section.key === 'stations'));
   } finally {
     globalThis.window = originalWindow;
   }
@@ -2574,14 +2590,15 @@ test('a workspace’s own project folder does not make Linked Folders the defaul
   });
 });
 
-test('an HQ with no content opens Stations; a workspace with nothing opens nothing', () => {
+test('an HQ with no content opens no section (its stations are the grid); nor does an empty workspace', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {};
   try {
     withRailStorage({}, () => {
       const hq = makeRailView({ workspace: { id: 'hq-1', designation: 'personal_hq' } });
       hq.settleRailSection();
-      assert.equal(hq.activeRailSection, 'stations');
+      // PRD 766 FR22: the Stations row is gone from the HQ; Team is always open.
+      assert.equal(hq.activeRailSection, '');
 
       const plain = makeRailView({});
       plain.settleRailSection();
@@ -9523,6 +9540,216 @@ test('HQ Details: a focused station card keeps focus through a re-render', () =>
     assert.equal(doc.activeElement, second, 'and focus moved to its replacement');
   } finally {
     globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details says no tactical word, in text or aria-labels (FR23)', () => {
+  const { html } = hqDetailsMarkup({
+    window: {
+      workspaceMission: { getSummary: () => ({ mission: 'Keep my week on track' }) }
+    }
+  });
+  assert.deepEqual(tacticalTermsIn(html), []);
+  // The ordinary Details still speaks its own vocabulary; only the HQ changed.
+  assert.notDeepEqual(tacticalTermsIn(ordinaryDetailsMarkup()), []);
+});
+
+test('HQ Details rail: Team first and open, the lead marked, Give task for each agent (FR19)', () => {
+  const { html } = hqDetailsMarkup();
+  const rail = html.match(/<aside class="ws-cmd-rail ws-hq-rail">(.*)<\/aside>/)[1];
+  assert.ok(rail.startsWith('<section class="ws-hq-team"'), 'Team is first');
+  assert.match(
+    rail,
+    /<h3 class="ws-hq-rail-group-title" id="ws-hq-team-title">Team <span class="ws-hq-panel-count">2<\/span><\/h3>/
+  );
+  const rows = [...rail.matchAll(/<li class="ws-hq-team-row([^"]*)">(.*?)<\/li>/g)];
+  assert.deepEqual(
+    rows.map(row => [row[1].trim(), row[2].match(/class="ws-hq-team-name"[^>]*>([^<]+)</)[1]]),
+    [
+      ['is-lead', 'Atlas'],
+      ['', 'Builder']
+    ],
+    'the lead first'
+  );
+  assert.match(rows[0][2], /<span class="ws-hq-chip is-lead">Lead<\/span>/);
+  assert.doesNotMatch(rows[1][2], /is-lead/);
+  assert.match(rows[0][2], /data-cmd-add-task="Atlas" aria-label="Give task to Atlas">Give task</);
+  assert.match(rows[1][2], /data-cmd-add-task="Builder"/);
+  // Team is not a toggle: it has no accordion button.
+  assert.doesNotMatch(rail, /data-cmd-manage-section="team"/);
+});
+
+test('HQ Details rail: content rows, then Setup, and no Stations or Systems row (FR20, FR22)', () => {
+  const { html } = hqDetailsMarkup();
+  const rail = html.match(/<aside class="ws-cmd-rail ws-hq-rail">(.*)<\/aside>/)[1];
+  const names = [
+    ...rail.matchAll(
+      /<span class="ws-cmd-panel-name"[^>]*>([^<]+)<\/span>|<span class="ws-hq-link-label">([^<]+)<\/span>/g
+    )
+  ].map(match => match[1] || match[2]);
+  assert.deepEqual(names, [
+    'Workspace notes',
+    'Sessions',
+    'Files',
+    'Backlog',
+    'Linked folders',
+    'Tools',
+    'Capabilities',
+    'Triggers and automation',
+    'Schedules',
+    'Goal',
+    'Portability'
+  ]);
+  assert.ok(rail.indexOf('Backlog') < rail.indexOf('id="ws-hq-setup-title">Setup<'));
+  assert.doesNotMatch(rail, /data-cmd-manage-section="(stations|systems)"/);
+  // Portability's row holds the chip's mount, which carries the full status.
+  assert.match(rail, /ws-hq-portability[\s\S]*data-cmd-continuity-mount/);
+  assert.match(rail, /data-cmd-hq-rail="tools"/);
+  assert.match(rail, /data-cmd-hq-rail="goal"/);
+});
+
+test('HQ Details: Capabilities and Triggers rows open the Systems surface on their tab', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.activeSystemTab = 'capabilities';
+  for (const [section, tab] of [
+    ['hq-triggers', 'triggers'],
+    ['hq-capabilities', 'capabilities'],
+    ['systems', 'capabilities'],
+    ['notes', null],
+    ['', null]
+  ]) {
+    commandView.activeRailSection = section;
+    assert.equal(commandView.systemsRailTab(), tab, section);
+  }
+});
+
+test('HQ Details: closing a station panel returns focus to its card, even one rebuilt meanwhile', () => {
+  const doc = makeTreeDoc();
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  const fresh = doc.createElement('button');
+  fresh.className = 'ws-hq-station';
+  fresh.setAttribute('data-cmd-hq-card', 'memory');
+  container.appendChild(fresh);
+  const gone = doc.createElement('button');
+  gone.className = 'ws-hq-station';
+  gone.setAttribute('data-cmd-hq-card', 'memory');
+  gone.isConnected = false;
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.container = container;
+  assert.equal(commandView.resolveStatModalTrigger(gone), fresh);
+  // A trigger still in the page is itself.
+  fresh.isConnected = true;
+  assert.equal(commandView.resolveStatModalTrigger(fresh), fresh);
+});
+
+test('HQ Details: follow-ups made elsewhere show at once; the last one gone hides the panel', () => {
+  const doc = makeTreeDoc();
+  const host = doc.createElement('div');
+  host.setAttribute('data-cmd-followups-host', '');
+  const mount = doc.createElement('div');
+  mount.hidden = true;
+  host.appendChild(mount);
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.sharedSurfaceAnchors = { followups: { node: mount } };
+  const panel = doc.createElement('section');
+  panel.className = 'workspace-followups';
+  mount.appendChild(panel);
+  commandView.settleFollowUpsVisibility();
+  assert.equal(mount.hidden, false);
+  panel.detach();
+  commandView.settleFollowUpsVisibility();
+  assert.equal(mount.hidden, true);
+  // At home (another mode), nothing is decided here.
+  const home = doc.createElement('div');
+  home.appendChild(mount);
+  mount.appendChild(panel);
+  commandView.settleFollowUpsVisibility();
+  assert.equal(mount.hidden, true);
+});
+
+test('HQ Details: Notes changes reload the follow-ups panel below', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  let reloads = 0;
+  globalThis.window = { WorkspaceFollowUps: { reload: async () => (reloads += 1) } };
+  globalThis.document = { dispatchEvent() {} };
+  try {
+    WorkspaceCommandView.prototype.notesChanged.call(Object.create(WorkspaceCommandView.prototype));
+    await Promise.resolve();
+    assert.equal(reloads, 1);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: the Team tile scrolls Team clear of the fixed top bar, however tall', () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const scrolls = [];
+  let focused = null;
+  const control = { focus: () => (focused = 'give') };
+  const team = {
+    getBoundingClientRect: () => ({ top: 900 }),
+    querySelector: () => control
+  };
+  globalThis.window = { scrollY: 400, scrollTo: options => scrolls.push(options) };
+  globalThis.document = {
+    // A phone: the navigation wraps and the bar is 169 px tall.
+    querySelector: selector =>
+      selector === 'nav.navbar' ? { getBoundingClientRect: () => ({ bottom: 169 }) } : null
+  };
+  try {
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    commandView.container = {
+      querySelector: selector => (selector === '.ws-hq-team' ? team : null)
+    };
+    commandView.runHQJump('team');
+    assert.deepEqual(scrolls, [{ top: 400 + 900 - 169 - 12 }]);
+    assert.equal(focused, 'give');
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
+});
+
+test('HQ Details: opening a Setup row keeps it where it was on screen', () => {
+  const originalWindow = globalThis.window;
+  const scrolled = [];
+  globalThis.window = { scrollBy: (x, y) => scrolled.push([x, y]) };
+  try {
+    withRailStorage({}, () => {
+      // Before the render the Triggers row is at 413; after it, with the
+      // Capabilities body above it closed, it would be at 84.
+      let top = 413;
+      const toggle = { getBoundingClientRect: () => ({ top }) };
+      const commandView = makeRailView(
+        { workspace: { id: 'hq-1', designation: 'personal_hq' } },
+        {
+          activeRailSection: 'hq-capabilities',
+          container: {
+            querySelector: selector =>
+              selector === '.ws-cmd-rail [data-cmd-manage-section="hq-triggers"]' ? toggle : null
+          },
+          render() {
+            top = 84;
+          }
+        }
+      );
+      commandView.toggleRailManager('hq-triggers');
+      assert.equal(commandView.activeRailSection, 'hq-triggers');
+      assert.deepEqual(scrolled, [[0, -329]], 'scrolled back by what the row moved');
+
+      // An ordinary workspace keeps the rail's own behaviour.
+      scrolled.length = 0;
+      commandView.page.workspace = { id: 'ws-1' };
+      top = 413;
+      commandView.toggleRailManager('notes');
+      assert.deepEqual(scrolled, []);
+    });
+  } finally {
+    globalThis.window = originalWindow;
   }
 });
 

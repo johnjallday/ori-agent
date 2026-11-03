@@ -125,7 +125,9 @@ const HQ_FOCUS_ATTRS = [
   'data-cmd-hq-attention-more',
   'data-cmd-hq-jump',
   'data-cmd-hq-more-toggle',
-  'data-cmd-hq-goal-edit'
+  'data-cmd-hq-goal-edit',
+  'data-cmd-hq-rail',
+  'data-cmd-add-task'
 ];
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
@@ -3154,14 +3156,19 @@ export class WorkspaceCommandView {
   // key, so focus still returns to where the user was.
   resolveStatModalTrigger(trigger) {
     if (!trigger || trigger.isConnected !== false) return trigger;
-    const key =
-      typeof trigger.getAttribute === 'function' ? trigger.getAttribute('data-cmd-hq-station') : '';
+    // A building on the map or rail, or a card in the HQ's stations grid
+    // (PRD 766), rebuilt by a render while its panel was open.
+    const attr =
+      typeof trigger.hasAttribute === 'function' && trigger.hasAttribute('data-cmd-hq-card')
+        ? 'data-cmd-hq-card'
+        : 'data-cmd-hq-station';
+    const key = typeof trigger.getAttribute === 'function' ? trigger.getAttribute(attr) : '';
     if (!key || !this.container || typeof this.container.querySelectorAll !== 'function') {
       return null;
     }
     const kind = trigger.classList ? trigger.classList[0] : '';
-    const matches = Array.from(this.container.querySelectorAll('[data-cmd-hq-station]')).filter(
-      el => el.getAttribute('data-cmd-hq-station') === key
+    const matches = Array.from(this.container.querySelectorAll('[' + attr + ']')).filter(
+      el => el.getAttribute(attr) === key
     );
     return matches.find(el => el.classList && el.classList[0] === kind) || matches[0] || null;
   }
@@ -4161,12 +4168,32 @@ export class WorkspaceCommandView {
   toggleRailManager(sectionKey, { remember = false } = {}) {
     const section = String(sectionKey || '').trim();
     if (!section) return;
+    // On the HQ, opening a Setup row closes the one above it, whose body can be
+    // tall: keep the clicked row where it was on screen rather than letting
+    // the page jump under the pointer (PRD 766 demo 4.9).
+    const anchor =
+      this.viewMode === 'details' && this.isPersonalHQ() ? this.railRowTop(section) : null;
     this.activeRailSection = this.activeRailSection === section ? '' : section;
     this.railSectionSettled = true;
     if (remember) {
       writeRailSection(this.railStorage(), this.workspaceId(), this.activeRailSection);
     }
     this.render();
+    if (anchor === null) return;
+    const moved = this.railRowTop(section);
+    if (moved !== null && moved !== anchor && typeof window !== 'undefined') {
+      window.scrollBy?.(0, moved - anchor);
+    }
+  }
+
+  // A rail row's toggle, its top in the viewport; null when it is not drawn.
+  railRowTop(section) {
+    const quoted = String(section || '').replace(/["\\]/g, '\\$&');
+    const toggle = this.container?.querySelector?.(
+      '.ws-cmd-rail [data-cmd-manage-section="' + quoted + '"]'
+    );
+    if (!toggle || typeof toggle.getBoundingClientRect !== 'function') return null;
+    return toggle.getBoundingClientRect().top;
   }
 
   railStorage() {
@@ -4183,6 +4210,20 @@ export class WorkspaceCommandView {
   presentRailSections() {
     const page = this.page || {};
     const count = list => (Array.isArray(list) ? list.length : 0);
+    // The HQ's Details rail has its own rows (PRD 766 FR20): Team sits
+    // outside them, and there is no Stations or Systems row.
+    if (this.viewMode === 'details' && this.isPersonalHQ()) {
+      return [
+        { key: 'notes', count: count(page.notes) },
+        { key: 'sessions', count: count(page.sessions) },
+        { key: 'files', count: this.fileRowData().length },
+        { key: 'backlog', count: this.backlogItems().length },
+        { key: 'folders', count: this.folderRowData().length },
+        { key: 'hq-capabilities', count: 0 },
+        { key: 'hq-triggers', count: 0 },
+        { key: 'schedules', count: count(page.schedules) }
+      ];
+    }
     const sections = [
       { key: 'backlog', count: this.backlogItems().length },
       { key: 'notes', count: count(page.notes) },
@@ -7915,6 +7956,12 @@ export class WorkspaceCommandView {
   // Another surface may be showing this connection: the drawer's own copy and
   // the badge both read it again.
   notesChanged() {
+    // Triage and "Add as follow-ups" make follow-ups: the panel below shows
+    // them at once rather than after a reload (PRD 766).
+    const followUps = typeof window !== 'undefined' ? window.WorkspaceFollowUps : null;
+    if (followUps && typeof followUps.reload === 'function') {
+      Promise.resolve(followUps.reload()).catch(() => {});
+    }
     const notes = typeof window !== 'undefined' ? window.PersonalAssistantSecondBrain : null;
     if (notes && typeof notes.changed === 'function') {
       void notes.changed();
@@ -13190,7 +13237,9 @@ export class WorkspaceCommandView {
     const all = Array.isArray(page.notes) ? page.notes : [];
     return this.railPanelHTML({
       key: 'notes',
-      title: 'Notes',
+      // "Workspace notes" on every workspace (PRD 766 FR25): the HQ's Notes
+      // panel is the user's own notes folder, so this row says whose notes.
+      title: HQ_LABELS.workspaceNotes,
       count: all.length,
       className: 'ws-cmd-notes-panel',
       add: { label: 'New note' },
@@ -13275,11 +13324,11 @@ export class WorkspaceCommandView {
     });
   }
 
-  renderFoldersPanel() {
+  renderFoldersPanel({ title = 'Linked Folders' } = {}) {
     const dirs = this.folderRowData();
     return this.railPanelHTML({
       key: 'folders',
-      title: 'Linked Folders',
+      title,
       count: dirs.length,
       add: { label: 'Link folder' },
       verb: { label: 'Link Folder' },
@@ -13440,13 +13489,200 @@ export class WorkspaceCommandView {
       this.renderFollowUpsHost() +
       this.hqStationsGridHTML() +
       '</main>' +
-      '<aside class="ws-cmd-rail' +
+      '<aside class="ws-cmd-rail ws-hq-rail' +
       (this.railPointerFocus ? ' is-pointer' : '') +
       '">' +
-      this.renderRail() +
+      this.renderHQRail() +
       '</aside>' +
       '</div>'
     );
+  }
+
+  // ── HQ rail (FR19–FR22) ──
+  // Team first and always open; then the content rows; then Setup. The rows
+  // are the ordinary rail rows (same renderers, same accordion), so opening
+  // one never waits on more than its own list.
+
+  renderHQRail() {
+    return (
+      this.hqTeamHTML() +
+      '<div class="ws-hq-rail-group" role="group" aria-label="Workspace">' +
+      this.renderNotesPanel() +
+      this.renderSessionsPanel() +
+      this.renderFilesPanel() +
+      this.renderBacklogPanel() +
+      '</div>' +
+      '<div class="ws-hq-rail-group ws-hq-setup" role="group" aria-labelledby="ws-hq-setup-title">' +
+      '<h3 class="ws-hq-rail-group-title" id="ws-hq-setup-title">' +
+      escapeHtml(HQ_LABELS.setup) +
+      '</h3>' +
+      this.renderFoldersPanel({ title: HQ_LABELS.linkedFolders }) +
+      this.hqRailLinkRow({
+        key: 'tools',
+        label: HQ_LABELS.tools,
+        count: this.computeStats().tools,
+        aria: 'Open tools: MCP, skills, plugins, and find tools'
+      }) +
+      this.hqSystemsRowHTML('hq-capabilities', HQ_LABELS.capabilities, 'capabilities') +
+      this.hqSystemsRowHTML('hq-triggers', HQ_LABELS.triggers, 'triggers') +
+      this.renderSchedulesPanel() +
+      this.hqRailLinkRow({
+        key: 'goal',
+        label: HQ_LABELS.goal,
+        detail: String(this.missionSummary().mission || '').trim() || 'Not set',
+        aria: 'Open the goal'
+      }) +
+      // The full portability status, timestamp and all, is this row's chip:
+      // workspace-continuity-status.js places it in the mount (FR5, FR20).
+      '<section class="ws-cmd-panel ws-hq-link-row ws-hq-portability">' +
+      '<div class="ws-cmd-panel-head is-toggle-only">' +
+      '<h4 class="ws-cmd-panel-title"><span class="ws-hq-link-label">' +
+      escapeHtml(HQ_LABELS.portability) +
+      '</span></h4>' +
+      '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
+      '</div>' +
+      '</section>' +
+      '</div>'
+    );
+  }
+
+  hqTeamHTML() {
+    const page = this.page || {};
+    let groups = [];
+    try {
+      groups = typeof page.buildAgentGroups === 'function' ? page.buildAgentGroups() || [] : [];
+    } catch (_error) {
+      groups = [];
+    }
+    const agents = groups
+      .filter(group => group && !group.isUnassigned && String(group.name || '').trim())
+      .map(group => this.agentViewModel(group))
+      .filter(Boolean)
+      .sort((a, b) => (a.entry === b.entry ? 0 : a.entry ? -1 : 1));
+    const rows = agents
+      .map(
+        agent =>
+          '<li class="ws-hq-team-row' +
+          (agent.entry ? ' is-lead' : '') +
+          '">' +
+          this.agentCharacterHTML(agent, 'roster') +
+          '<span class="ws-hq-team-copy">' +
+          '<button type="button" class="ws-hq-team-name" data-cmd-hq-rail="agents" aria-label="' +
+          escapeHtml('Open ' + agent.name) +
+          '">' +
+          escapeHtml(agent.name) +
+          '</button>' +
+          '<span class="ws-hq-team-role">' +
+          (agent.entry
+            ? '<span class="ws-hq-chip is-lead">' + escapeHtml(HQ_LABELS.lead) + '</span> '
+            : '') +
+          escapeHtml(agent.role?.label || 'Agent') +
+          '</span>' +
+          '</span>' +
+          '<span class="ws-hq-team-status">' +
+          escapeHtml(agent.status?.label || 'Idle') +
+          '</span>' +
+          '<button type="button" class="ws-cmd-agent-action" data-cmd-add-task="' +
+          escapeHtml(agent.encodedName) +
+          '" aria-label="' +
+          escapeHtml(HQ_LABELS.giveTask + ' to ' + agent.name) +
+          '">' +
+          escapeHtml(HQ_LABELS.giveTask) +
+          '</button>' +
+          '</li>'
+      )
+      .join('');
+    return (
+      '<section class="ws-hq-team" aria-labelledby="ws-hq-team-title">' +
+      '<h3 class="ws-hq-rail-group-title" id="ws-hq-team-title">' +
+      escapeHtml(HQ_LABELS.team) +
+      ' <span class="ws-hq-panel-count">' +
+      agents.length +
+      '</span></h3>' +
+      (rows
+        ? '<ul class="ws-hq-team-list">' + rows + '</ul>'
+        : '<p class="ws-hq-empty">' +
+          escapeHtml(EMPTY_ROSTER_HEADING + ' ' + EMPTY_ROSTER_LINE) +
+          '</p>' +
+          '<button type="button" class="ws-cmd-agent-action" data-cmd-hq-rail="agents">Hire</button>') +
+      '</section>'
+    );
+  }
+
+  // A Setup row that opens somewhere else (a modal, the goal) rather than
+  // expanding in the rail.
+  hqRailLinkRow({ key, label, count, detail, aria }) {
+    return (
+      '<section class="ws-cmd-panel ws-hq-link-row">' +
+      '<div class="ws-cmd-panel-head is-toggle-only">' +
+      '<h4 class="ws-cmd-panel-title">' +
+      '<button type="button" class="ws-cmd-panel-toggle" data-cmd-hq-rail="' +
+      escapeHtml(key) +
+      '" aria-label="' +
+      escapeHtml(aria || label) +
+      '">' +
+      '<span class="ws-cmd-panel-name">' +
+      escapeHtml(label) +
+      '</span>' +
+      (count === undefined
+        ? ''
+        : '<span class="ws-cmd-panel-count">' + escapeHtml(String(count)) + '</span>') +
+      (detail ? '<span class="ws-hq-link-detail">' + escapeHtml(detail) + '</span>' : '') +
+      '</button>' +
+      '</h4>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  // Capabilities and Triggers are the two Systems tabs, each its own Setup
+  // row here; both mount the same Systems surface (syncSystemsSurface).
+  hqSystemsRowHTML(key, title, tab) {
+    return this.railPanelHTML({
+      key,
+      title,
+      count: 0,
+      // Not ws-cmd-systems-panel: that class widens the rail when open, and an
+      // HQ Setup row must leave the column widths alone (FR20).
+      className: 'ws-hq-setup-panel',
+      bodyClassName: 'ws-cmd-systems-body',
+      body: () =>
+        '<div class="ws-cmd-system-host" data-cmd-system-host>' +
+        '<div class="ws-cmd-rail-empty">Loading ' +
+        escapeHtml(this.systemTab(tab).label) +
+        '...</div>' +
+        '</div>'
+    });
+  }
+
+  // Which Systems tab the rail shows open: the Systems row's own tab, or the
+  // tab an HQ Setup row stands for. Null when no Systems surface is open.
+  systemsRailTab() {
+    switch (this.activeRailSection) {
+      case 'systems':
+        return this.activeSystemTab;
+      case 'hq-triggers':
+        return 'triggers';
+      case 'hq-capabilities':
+        return 'capabilities';
+      default:
+        return null;
+    }
+  }
+
+  runHQRailAction(key, trigger) {
+    if (key === 'tools') {
+      this.openStatModal('tools', trigger);
+      return;
+    }
+    if (key === 'agents') {
+      this.openStatModal('agents', trigger);
+      return;
+    }
+    if (key === 'goal') {
+      const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+      if (mission && typeof mission.openGoalModal === 'function') mission.openGoalModal();
+    }
   }
 
   renderHQNotesHost() {
@@ -14114,6 +14350,7 @@ export class WorkspaceCommandView {
     if (typeof document.addEventListener !== 'function') return;
     this._hqSourcesWatched = true;
     const repaint = () => this.scheduleHQLivePaint();
+    document.addEventListener('ori:followups-changed', () => this.settleFollowUpsVisibility());
     [
       'ori:workspace-goal-state',
       'ori:followups-changed',
@@ -14133,6 +14370,20 @@ export class WorkspaceCommandView {
         attributeFilter: ['hidden', 'disabled']
       });
     }
+  }
+
+  // The follow-ups panel reloaded in place (another surface made follow-ups):
+  // whether its host shows it is decided again without moving the node, so
+  // the first follow-ups appear at once and the last one gone hides it.
+  settleFollowUpsVisibility() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors.followups;
+    const node = record && record.node;
+    const host = node && node.parentNode;
+    if (!host || typeof host.hasAttribute !== 'function') return;
+    if (!host.hasAttribute('data-cmd-followups-host')) return;
+    node.hidden = !(
+      typeof node.querySelector === 'function' && node.querySelector('.workspace-followups')
+    );
   }
 
   // GitHub proposals live in their own mount, hidden above the header on the
@@ -14250,6 +14501,19 @@ export class WorkspaceCommandView {
         this.setHQMoreViewsOpen(false);
       }
     });
+    const rail = root.querySelector('.ws-hq-rail');
+    rail?.addEventListener?.('click', event => {
+      const give = event.target.closest?.('[data-cmd-add-task]');
+      if (give) {
+        const page = this.page || {};
+        if (typeof page.showAddTaskModalForAgent === 'function') {
+          page.showAddTaskModalForAgent(give.getAttribute('data-cmd-add-task'));
+        }
+        return;
+      }
+      const link = event.target.closest?.('[data-cmd-hq-rail]');
+      if (link) this.runHQRailAction(link.getAttribute('data-cmd-hq-rail'), link);
+    });
     const main = root.querySelector('.ws-hq-main');
     main?.addEventListener?.('click', event => {
       const card = event.target.closest?.('[data-cmd-hq-card]');
@@ -14289,15 +14553,29 @@ export class WorkspaceCommandView {
   }
 
   // Where a header tile leads: the panel or rail row behind its number.
-  runHQJump(key, trigger) {
-    if (key === 'team') {
-      this.openStatModal('agents', trigger);
-      return;
-    }
-    const selector = key === 'followups' ? '[data-cmd-followups-host]' : '[data-cmd-hq-attention]';
+  runHQJump(key) {
+    const selector =
+      key === 'team'
+        ? '.ws-hq-team'
+        : key === 'followups'
+          ? '[data-cmd-followups-host]'
+          : '[data-cmd-hq-needs]';
     const target = this.container?.querySelector?.(selector);
     if (!target) return;
-    target.scrollIntoView?.({ block: 'start' });
+    // Stop below the fixed top bar, measured now: it is much taller on a
+    // phone, where its navigation wraps (demo 4.9).
+    const navbar = typeof document !== 'undefined' ? document.querySelector?.('nav.navbar') : null;
+    const clear = Math.max(0, Number(navbar?.getBoundingClientRect?.().bottom) || 0) + 12;
+    const top = target.getBoundingClientRect?.().top;
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.scrollTo === 'function' &&
+      Number.isFinite(top)
+    ) {
+      window.scrollTo({ top: Math.max(0, (window.scrollY || 0) + top - clear) });
+    } else {
+      target.scrollIntoView?.({ block: 'start' });
+    }
     const control = target.querySelector?.('button, a[href], [tabindex="0"]');
     control?.focus?.({ preventScroll: true });
   }
@@ -14726,13 +15004,14 @@ export class WorkspaceCommandView {
     if (modalHoldsSurface) return;
 
     const host = this.container && this.container.querySelector('[data-cmd-system-host]');
-    if (!this.active || this.activeRailSection !== 'systems' || !host) {
+    const railTab = this.systemsRailTab();
+    if (!this.active || !railTab || !host) {
       this.restoreSharedSurface('config');
       this.restoreSharedSurface('tools');
       return;
     }
 
-    const tab = this.systemTab(this.activeSystemTab);
+    const tab = this.systemTab(railTab);
     if (tab.host === 'capabilities') {
       this.restoreSharedSurface('config');
       this.restoreSharedSurface('tools');

@@ -537,7 +537,7 @@ export async function wireWorkspaceFollowUps({
   storage = defaultStorage(),
   now = () => new Date()
 }) {
-  const controller = { refocus: () => false };
+  const controller = { refocus: () => false, reload: async () => {} };
   if (!mount || !workspaceId) return controller;
   const focusID = followUpIDFromSearch(locationSearch);
   const state = { filter: 'all', open: null };
@@ -624,6 +624,10 @@ export async function wireWorkspaceFollowUps({
       );
     }
   };
+  // Another surface made follow-ups (the HQ's Notes panel adding its open
+  // items): read them again in place, keeping the panel's open state, filter
+  // and focus (PRD 766, demo 3.9).
+  controller.reload = load;
   await load();
   return controller;
 }
@@ -668,7 +672,8 @@ export async function wireWorkspaceFollowUps({
     // deep-linked card is scrolled into view in its new place (FR4).
     window.WorkspaceFollowUps = {
       ready,
-      refocus: () => ready.then(controller => controller.refocus())
+      refocus: () => ready.then(controller => controller.refocus()),
+      reload: () => ready.then(controller => controller.reload())
     };
   }
 })();

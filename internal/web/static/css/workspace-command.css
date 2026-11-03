@@ -9351,7 +9351,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
   min-width: 0;
 }
 .ws-hq-fact-label {
-  color: var(--ws-ink-faint);
+  color: var(--ws-ink-dim);
 }
 .ws-hq-fact-value {
   color: var(--ws-ink);
@@ -9406,18 +9406,20 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 
 /* The attention strip: calm, neutral, one accent per category chip. */
+/* HQ surfaces sit on --ws-panel-2, the station panels' own surface, so their
+   amber and orange text keeps 4.5:1 in the light theme too. */
 .ws-hq-attention {
   margin: 0 0 18px;
   padding: 12px 14px;
   border: 1px solid var(--ws-line);
-  background: var(--ws-panel);
+  background: var(--ws-panel-2);
 }
 .ws-hq-attention[hidden] {
   display: none;
 }
 .ws-hq-attention-title {
   margin: 0 0 8px;
-  color: var(--ws-ink-faint);
+  color: var(--ws-ink-dim);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 1px;
@@ -9452,6 +9454,12 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-hq-chip.is-lead {
   border-color: var(--ws-input);
   color: var(--ws-input);
+}
+/* The light shell does not redefine --ws-input (only the map does); use the
+   map's light value so the Lead chip keeps its contrast (axe, PRD 766 FR29). */
+[data-bs-theme="light"] .ws-cmd .ws-hq-chip.is-lead {
+  border-color: #a8511d;
+  color: #a8511d;
 }
 .ws-hq-chip.is-setup {
   border-color: var(--ws-idle);
@@ -9492,7 +9500,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-hq-notes {
   display: block;
   border: 1px solid var(--ws-line);
-  background: var(--ws-panel);
+  background: var(--ws-panel-2);
 }
 .ws-hq-notes[hidden] {
   display: none;
@@ -9501,15 +9509,31 @@ button.ws-cmd-rpg-class-card:focus-visible {
   display: none;
 }
 .ws-hq-notes .ws-notes-body {
-  max-height: 420px;
+  max-height: 520px;
   overflow-y: auto;
+}
+/* Its heading reads like the other main-column panels', not a dialog's. */
+.ws-hq-notes .ws-cmd-modal-head {
+  padding: 12px 14px 6px;
+  border-bottom: 0;
+}
+.ws-hq-notes .ws-cmd-modal-title {
+  color: var(--ws-ink);
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.ws-hq-notes-meta {
+  padding-top: 0;
 }
 
 /* Main-column panels: Needs you and Stations share the Notes panel's chrome. */
 .ws-hq-panel {
   padding: 12px 14px 14px;
   border: 1px solid var(--ws-line);
-  background: var(--ws-panel);
+  background: var(--ws-panel-2);
 }
 .ws-hq-panel-head {
   display: flex;
@@ -9519,12 +9543,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 .ws-hq-panel-title {
   margin: 0;
+  font-family: var(--font-display, Georgia, serif);
   color: var(--ws-ink);
   font-size: 15px;
   font-weight: 600;
 }
 .ws-hq-panel-count {
-  color: var(--ws-ink-faint);
+  color: var(--ws-ink-dim);
   font-family: var(--ws-font-mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -9667,6 +9692,188 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-hq-station.is-unset .ws-hq-station-name,
 .ws-hq-station.is-unset .ws-hq-station-summary {
   color: var(--ws-ink-dim);
+}
+
+/* The HQ rail: Team first and always open, then the content rows, then Setup. */
+.ws-hq-team,
+.ws-hq-rail-group {
+  margin-bottom: 14px;
+}
+.ws-hq-team {
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel-2);
+}
+.ws-hq-rail-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--ws-ink);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.ws-hq-team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-hq-team-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "face copy action"
+    "face status action";
+  align-items: center;
+  column-gap: 10px;
+}
+.ws-hq-team-row > .ws-cmd-character {
+  grid-area: face;
+  width: 36px;
+  height: 36px;
+}
+.ws-hq-team-copy {
+  grid-area: copy;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ws-hq-team-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ws-ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.ws-hq-team-name:hover {
+  text-decoration: underline;
+}
+.ws-hq-team-name:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-hq-team-role,
+.ws-hq-team-status {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-hq-team-status {
+  grid-area: status;
+}
+.ws-hq-team-row > .ws-cmd-agent-action {
+  grid-area: action;
+}
+.ws-hq-link-row .ws-cmd-panel-toggle {
+  width: 100%;
+}
+.ws-hq-link-label {
+  display: inline-block;
+  padding: 0 12px;
+}
+/* A row's name keeps its width; the detail beside it ("Keep my week on
+   track") is what gives way, cut with an ellipsis. */
+.ws-hq-link-row .ws-cmd-panel-name {
+  flex: 0 0 auto;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.ws-hq-link-detail {
+  flex: 1 1 auto;
+  text-align: right;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-hq-portability .ws-cmd-panel-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-hq-portability .ws-cmd-panel-head {
+  flex-wrap: wrap;
+}
+.ws-hq-portability .ws-cmd-continuity-mount {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 8px 6px 12px;
+}
+/* The full status ("Ready to move as of …") wraps inside the rail rather than
+   pushing past it. */
+.ws-hq-portability .workspace-continuity-chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+/* A tile jumps to these: they stop below the fixed top bar, which is taller on
+   a phone, instead of landing under it. */
+.ws-hq-team,
+.ws-hq-needs,
+.ws-cmd-layout.is-hq .ws-cmd-followups-host {
+  scroll-margin-top: calc(var(--ori-navbar-bottom, 84px) + 12px);
+}
+/* Opening a Setup row never changes the column widths (FR20): its rows do not
+   carry the class that widens the rail, and a wide Systems surface scrolls in
+   the rail instead. */
+.ws-hq-rail {
+  min-width: 0;
+}
+.ws-hq-rail .ws-cmd-systems-body {
+  overflow-x: auto;
+}
+
+/* Below the rail breakpoint the layout is one column in source order: header,
+   strip, Needs you, Notes, Follow-ups, stations, then the rail (FR26). */
+@media (max-width: 900px) {
+  .ws-cmd-layout.is-hq {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-hq-header .ws-cmd-nav {
+    flex-wrap: wrap;
+  }
+  /* The narrow rail is a grid of tabs; on the HQ each group is its own grid,
+     stacked: Team, the content rows, then Setup, each the full width. */
+  .ws-cmd-rail.ws-hq-rail {
+    display: flex;
+    flex-direction: column;
+  }
+  .ws-hq-rail-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px;
+  }
+  .ws-hq-rail-group > .ws-hq-rail-group-title,
+  .ws-hq-rail-group .ws-hq-link-row .ws-cmd-panel-head {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 640px) {
+  .ws-hq-rail-group {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  }
+  .ws-hq-team-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "face copy"
+      "face status"
+      "face action";
+    row-gap: 4px;
+  }
+  .ws-hq-team-row > .ws-cmd-agent-action {
+    justify-self: start;
+  }
 }
 
 @media (max-width: 640px) {
