@@ -2775,9 +2775,29 @@ export class WorkspaceDetailPage {
     return false;
   }
 
+  // What the health cards call the entry-agent slot. The Personal HQ says
+  // "lead" everywhere (PRD 767 FR18); other workspaces keep "Commander".
+  entrySlotWords() {
+    if (this.workspace?.designation === 'personal_hq') {
+      return {
+        name: 'lead',
+        title: 'Lead',
+        seedName: 'Workspace Lead',
+        acting: 'an agent without the lead role'
+      };
+    }
+    return {
+      name: 'Commander',
+      title: 'Commander',
+      seedName: 'Workspace Commander',
+      acting: 'an Acting Commander'
+    };
+  }
+
   collectWorkspaceHealthIssues() {
     const issues = [];
     const references = this.getWorkspaceHealthAgentReferences();
+    const slot = this.entrySlotWords();
 
     if (!this.hasWorkspaceEntryAgentReference()) {
       const defaults = this.buildWorkspaceEntryAgentDefaults();
@@ -2785,13 +2805,12 @@ export class WorkspaceDetailPage {
       issues.push({
         category: 'agent',
         severity: 'error',
-        title: 'Commander is missing',
-        description:
-          'This workspace has no Commander assigned. Create one so chats, routing, and ticket orchestration have a default manager.',
+        title: `${slot.title} is missing`,
+        description: `This workspace has no ${slot.name} assigned. Create one so chats, routing, and ticket orchestration have a default manager.`,
         action: 'entry_agent',
-        actionLabel: 'Create Commander',
-        agentName: defaults.seedName || 'Workspace Commander',
-        meta: [workspaceName, 'No Commander']
+        actionLabel: `Create ${slot.name}`,
+        agentName: defaults.seedName || slot.seedName,
+        meta: [workspaceName, `No ${slot.name}`]
       });
     }
 
@@ -2815,12 +2834,11 @@ export class WorkspaceDetailPage {
         issues.push({
           category: 'agent',
           severity: 'warning',
-          title: 'This team has no dedicated Commander',
-          description:
-            "None of this workspace's agents has the Commander role — the slot is held by an Acting Commander. Assign the Commander role to one of them so dispatch work routes to the right specialist.",
+          title: `This team has no dedicated ${slot.name}`,
+          description: `None of this workspace's agents has the ${slot.name} role — the slot is held by ${slot.acting}. Assign the ${slot.name} role to one of them so dispatch work routes to the right specialist.`,
           action: 'assign_commander',
-          actionLabel: 'Assign a Commander',
-          meta: [workspaceName, `${references.length} agents`, 'No Commander role assigned']
+          actionLabel: `Assign a ${slot.name}`,
+          meta: [workspaceName, `${references.length} agents`, `No ${slot.name} role assigned`]
         });
       }
     }
@@ -2849,14 +2867,14 @@ export class WorkspaceDetailPage {
         issues.push({
           category: 'agent',
           severity: 'error',
-          title: reference.isEntryAgent ? 'Commander is missing' : 'Workspace agent is missing',
+          title: reference.isEntryAgent ? `${slot.title} is missing` : 'Workspace agent is missing',
           description: reference.isEntryAgent
-            ? `"${reference.name}" is still assigned as the workspace Commander, but the runnable agent definition no longer exists.`
+            ? `"${reference.name}" is still assigned as the workspace ${slot.name}, but the runnable agent definition no longer exists.`
             : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
           action: reference.isEntryAgent ? 'entry_agent' : 'agent',
-          actionLabel: reference.isEntryAgent ? 'Create Commander' : 'Recreate Agent',
+          actionLabel: reference.isEntryAgent ? `Create ${slot.name}` : 'Recreate Agent',
           agentName: reference.name,
-          meta: [reference.name, reference.isEntryAgent ? 'Commander' : 'Workspace member']
+          meta: [reference.name, reference.isEntryAgent ? slot.title : 'Workspace member']
         });
       });
     }
@@ -3985,7 +4003,7 @@ export class WorkspaceDetailPage {
     if (this.isWorkspaceEntryAgent(normalizedName)) {
       const href = this.buildWorkspaceAgentRecoveryURL(normalizedName);
       if (href) {
-        const title = `Create Commander ${normalizedName}`;
+        const title = `Create ${this.entrySlotWords().name} ${normalizedName}`;
         return {
           kind: 'missing-entry',
           href,
@@ -4255,7 +4273,12 @@ export class WorkspaceDetailPage {
     // is orchestrator, "Acting Commander" otherwise. Display only.
     const profile = this.getAgentProfile(agentName);
     const role = profile && profile.role ? String(profile.role).trim().toLowerCase() : '';
-    const label = role === 'orchestrator' ? 'Commander' : 'Acting Commander';
+    const label =
+      this.workspace?.designation === 'personal_hq'
+        ? this.entrySlotWords().title
+        : role === 'orchestrator'
+          ? 'Commander'
+          : 'Acting Commander';
     return '<span class="workspace-detail-agent-role-badge">' + label + '</span>';
   }
 
@@ -6077,7 +6100,7 @@ export class WorkspaceDetailPage {
       ? workspaceName.toLowerCase().endsWith(' manager')
         ? workspaceName
         : workspaceName + ' Manager'
-      : 'Workspace Commander';
+      : this.entrySlotWords().seedName;
     const agentName = String(options?.seedName || '').trim() || fallbackAgentName;
     const systemPrompt =
       `You are the workspace manager for "${workspaceName || 'this workspace'}". ` +
@@ -6472,16 +6495,17 @@ export class WorkspaceDetailPage {
     // An offer, not a gate: the workspace stays usable without a Commander, so
     // "Not now" (or closing) is always available. Declining is remembered for
     // this browser session, so the offer returns next session, not next load.
+    const slot = this.entrySlotWords();
     const hire = await this.showTaskConfirmDialog({
       eyebrow: 'Workspace setup',
-      title: 'Hire a Commander for this workspace?',
-      message: `${workspaceName || 'This workspace'} routes chats and tickets through its Commander. The first agent you hire here takes that seat.`,
-      confirmLabel: 'Hire a Commander',
+      title: `Hire a ${slot.name} for this workspace?`,
+      message: `${workspaceName || 'This workspace'} routes chats and tickets through its ${slot.name}. The first agent you hire here takes that seat.`,
+      confirmLabel: `Hire a ${slot.name}`,
       cancelLabel: 'Not now',
       mandatory: false,
       metaItems: [workspaceName || 'This workspace', entryAgentDefaults.seedName],
       details: [
-        'The Commander receives chats and dispatches tickets.',
+        `The ${slot.name} receives chats and dispatches tickets.`,
         'You can rename or replace it later.',
         'Nothing is created until you finish the form.'
       ]
@@ -7770,7 +7794,9 @@ export class WorkspaceDetailPage {
     if (!normalizedAgentName || !normalizedKey) return;
 
     if (this.isWorkspaceEntryAgent(normalizedAgentName)) {
-      window.alert(`"${normalizedAgentName}" is the workspace Commander and can't be removed.`);
+      window.alert(
+        `"${normalizedAgentName}" is the workspace ${this.entrySlotWords().name} and can't be removed.`
+      );
       return;
     }
 

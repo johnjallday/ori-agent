@@ -367,9 +367,11 @@ for (const theme of ['light', 'dark']) {
       });
       expect(violations, label + ' ' + JSON.stringify(violations, null, 2)).toEqual([]);
     };
+    // The whole command view: the header, the map and any open window or
+    // modal it hosts, not only the map region.
     const tacticalWords = () =>
       page.evaluate(() => {
-        const root = document.querySelector('.ws-cmd-map-shell');
+        const root = document.querySelector('#workspaceCommandView');
         const labels = [...root.querySelectorAll('[aria-label], [title]')].map(
           el => (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')
         );
@@ -404,6 +406,15 @@ for (const theme of ['light', 'dark']) {
       for (const term of ['Outpost', 'Commander', 'Garrison', 'Quest Board', 'Loadout', 'Keeper']) {
         expect(await tacticalWords(), term).not.toContain(term);
       }
+      // The lead card's Agents window speaks plainly too.
+      await operationsMap.locator('.ws-cmd-flow-lead').click();
+      await expect(page.locator('.ws-cmd-modal:not([hidden])')).toBeVisible();
+      await expect(page.locator('.ws-cmd-modal .ws-cmd-mchip.is-keeper')).toHaveText('★ Lead');
+      for (const term of ['Outpost', 'Commander', 'Garrison', 'Quest Board', 'Loadout', 'Keeper']) {
+        expect(await tacticalWords(), 'Agents window: ' + term).not.toContain(term);
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.ws-cmd-modal:not([hidden])')).toHaveCount(0);
 
       // At 1280 every node is visible without scrolling the map (success metric).
       await page.setViewportSize({ width: 1280, height: 900 });

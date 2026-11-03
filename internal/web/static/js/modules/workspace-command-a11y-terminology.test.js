@@ -178,6 +178,41 @@ test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
   }
 });
 
+test('terminology: off the map, the HQ says Your HQ and Lead (eyebrow, Agents window, roster)', () => {
+  const words = workspace => {
+    const view = hqMapView();
+    view.page.workspace = workspace;
+    view.page.getAgentProfile = () => ({ role: 'orchestrator' });
+    const bar = view.commandBarHTML(workspace, workspace.name, 'Guided', view.computeStats());
+    const agents = view.agentRowsHTML();
+    const roster = view.rosterItemHTML({
+      key: 'atlas',
+      name: 'Atlas',
+      encodedName: 'Atlas',
+      entry: true,
+      tone: 'idle',
+      status: { label: 'Idle' },
+      profile: { role: 'orchestrator' },
+      role: { label: 'Lead' }
+    });
+    return { bar, agents, roster };
+  };
+
+  const hq = words({ id: 'hq', name: 'Personal HQ', designation: 'personal_hq' });
+  assert.match(hq.bar, />Your HQ</);
+  assert.doesNotMatch(hq.bar, /Outpost/);
+  assert.match(hq.agents, /★ Lead</);
+  assert.match(hq.agents, /title="Lead — can&#39;t be removed"|title="Lead — can't be removed"/);
+  assert.match(hq.roster, /title="Lead">Lead</);
+  for (const html of Object.values(hq)) assert.deepEqual(tacticalTermsIn(wordsOf(html)), []);
+
+  // An ordinary workspace keeps its words.
+  const plain = words({ id: 'w', name: 'Studio' });
+  assert.match(plain.bar, /Outpost · Command/);
+  assert.match(plain.agents, /★ Commander</);
+  assert.match(plain.roster, />CMD</);
+});
+
 test('terminology: an ordinary workspace map keeps its own words', () => {
   const view = makeView({
     selectedAgentKey: '',

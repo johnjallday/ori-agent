@@ -1813,7 +1813,13 @@ export class WorkspaceCommandView {
   commandBarHTML(ws, name, mode, stats) {
     const description = String((ws && ws.description) || '').trim();
     const isGroup = this.isGroupWorkspace();
-    const kicker = isGroup ? 'Detachment · Command' : 'Outpost · Command';
+    // The HQ speaks plainly everywhere (PRD 767 FR18); other workspaces keep
+    // their tactical eyebrow.
+    const kicker = isGroup
+      ? 'Detachment · Command'
+      : this.isPersonalHQ()
+        ? HQ_LABELS.yourHQ
+        : 'Outpost · Command';
     const groupBadge = isGroup
       ? '<span class="ws-cmd-group-badge" title="Group workspace">Group</span>'
       : '';
@@ -4609,8 +4615,10 @@ export class WorkspaceCommandView {
   // entry-agent slot shows as "Commander" when its role is orchestrator, or
   // "Acting Commander" otherwise (e.g. a solo Specialist holding the slot).
   // Display only — entry-agent mechanics, storage keys (entry_agent_name),
-  // and coordinator resolution are unchanged.
+  // and coordinator resolution are unchanged. The Personal HQ calls the slot
+  // "Lead" wherever it is shown: map, Agents window, badges (PRD 767 FR18).
   commanderLabel(role) {
+    if (this.isPersonalHQ()) return HQ_LABELS.lead;
     return String(role || '')
       .trim()
       .toLowerCase() === 'orchestrator'
@@ -4774,7 +4782,9 @@ export class WorkspaceCommandView {
     const entry = agent.entry
       ? '<span class="ws-cmd-roster-entry" title="' +
         escapeHtml(this.commanderLabel(agent.profile && agent.profile.role)) +
-        '">CMD</span>'
+        '">' +
+        (this.isPersonalHQ() ? escapeHtml(HQ_LABELS.lead) : 'CMD') +
+        '</span>'
       : '';
     return (
       '<button type="button" class="ws-cmd-roster-item' +
@@ -9538,11 +9548,8 @@ export class WorkspaceCommandView {
     const selected = agent.key === this.selectedAgentKey;
     const destination = agent.destination || 'hub';
     const statusLabel = agent.status?.label || 'Idle';
-    // The HQ map says "Lead" (PRD 767 FR18); other maps keep their wording.
     const commanderLbl = agent.entry
-      ? this.isPersonalHQ()
-        ? HQ_LABELS.lead
-        : this.commanderLabel(agent.profile && agent.profile.role)
+      ? this.commanderLabel(agent.profile && agent.profile.role)
       : '';
     // Station title (design consideration): pair role with the workspace it's
     // stationed in, e.g. "Commander · Production" — this is how
