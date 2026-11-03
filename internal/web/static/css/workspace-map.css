@@ -1382,6 +1382,42 @@
 /* An empty group's own page says what the ground is for. Screen space, not the
    world layer, so the copy reads at any zoom; inert, so a right-click through
    it still reaches the ground it describes. */
+/* A Home's empty lot with projects on the shelf: the count and one Set up
+   button that opens the library setup sheet (folder-to-map-handoff FR-6). */
+.ws-map-scoped-empty-count {
+  display: block;
+  margin-bottom: 10px;
+}
+.ws-map-scoped-empty-count b {
+  color: rgb(var(--ws-district-accent, 70, 211, 154));
+}
+.ws-map-scoped-setup {
+  /* The empty note itself lets the map be dragged through it; its one
+     control takes the click. */
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgb(var(--ws-district-accent, 70, 211, 154));
+  border-radius: 6px;
+  background: rgba(var(--ws-district-accent, 70, 211, 154), 0.18);
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ws-map-scoped-setup:hover {
+  background: rgba(var(--ws-district-accent, 70, 211, 154), 0.3);
+}
+.ws-map-scoped-setup:focus-visible {
+  outline: 2px solid rgb(var(--ws-district-accent, 70, 211, 154));
+  outline-offset: 2px;
+}
+.ws-map-scoped-empty.is-lot {
+  flex-direction: column;
+}
 .ws-map-scoped-empty {
   position: absolute;
   left: 50%;
@@ -3885,6 +3921,15 @@
    light and dark, with the district's default accent for the frame. */
 .ws-map-library-sheet {
   --ws-sheet-accent: 70, 211, 154;
+  /* Off the map (a Home's Details page) nothing copies the map's palette in,
+     so the sheet wears the page's own theme. On the map, copyMapTokens()
+     sets these inline, which wins over this rule. */
+  --ws-panel: var(--bg-primary, #16181d);
+  --ws-panel-2: var(--bg-secondary, #1a1d23);
+  --ws-line: var(--border-color, #262931);
+  --ws-line-bright: var(--border-color, #363a45);
+  --ws-ink: var(--text-primary, #d6d9de);
+  --ws-ink-dim: var(--text-secondary, #8b909a);
   position: fixed;
   z-index: 10000;
   box-sizing: border-box;

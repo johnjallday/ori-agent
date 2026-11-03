@@ -12731,6 +12731,41 @@ test('district menu offers "Set up N projects…" only when the badge counts som
   map.libraryBadges.setSnapshot(null);
 });
 
+test('a Home with projects on its shelf says so on its empty lot instead of "build a workspace" (folder-to-map-handoff FR-6)', () => {
+  const map = loadOriWorkspaceMap();
+  map.setLibraryEmptyState(null);
+  assert.match(
+    map.scopedEmptyHTML('home', ' is-lot', ' style="left:1px"'),
+    /^<p class="ws-map-scoped-empty is-lot" role="status" style="left:1px">No members yet\. Build a workspace here or add an existing one\.<\/p>$/
+  );
+  map.setLibraryEmptyState({ shelf: 6, toSetUp: 5 });
+  const html = map.scopedEmptyHTML('home "x"', '', '');
+  assert.match(html, /6 projects on the shelf · <b>5<\/b> to set up/);
+  assert.match(
+    html,
+    /<button type="button" class="ws-map-scoped-setup" data-setup-projects="home &quot;x&quot;">Set up projects…<\/button>/
+  );
+  assert.doesNotMatch(html, /ready/i);
+  map.setLibraryEmptyState({ shelf: 1, toSetUp: 1 });
+  assert.match(map.scopedEmptyHTML('h', '', ''), /1 project on the shelf · <b>1<\/b> to set up/);
+  map.setLibraryEmptyState({ shelf: 2, toSetUp: 5 });
+  assert.match(
+    map.scopedEmptyHTML('h', '', ''),
+    /5 projects on the shelf/,
+    'a shelf smaller than the count is the count'
+  );
+  for (const bad of [
+    { shelf: 6, toSetUp: 0 },
+    { shelf: 6, toSetUp: '5' },
+    { toSetUp: 1.5 },
+    'x',
+    null
+  ]) {
+    map.setLibraryEmptyState(bad);
+    assert.match(map.scopedEmptyHTML('h', '', ''), /No members yet/, JSON.stringify(bad));
+  }
+});
+
 test('placedBounds frames only the drawn tiles that were just set up (map-library-setup FR-17)', () => {
   const map = loadOriWorkspaceMap();
   const nodes = [
