@@ -278,6 +278,52 @@ func TestAttachExistingRefusesAFolderImportFolderAlreadyAdopted(t *testing.T) {
 	}
 }
 
+// A trashed or missing workspace is invisible everywhere else, so it must not
+// keep its folders: the library would otherwise refuse setup with an owner the
+// person cannot find. Restoring it must then refuse if the folder was taken.
+func TestFindFolderOwnerIgnoresTrashedAndRestoreRefusesTakenFolder(t *testing.T) {
+	_, store, _ := connectionService(t)
+	external := t.TempDir()
+	trashed := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Old Album"})
+	trashed.SharedData = map[string]any{"folder_import": map[string]any{"enabled": true, "path": external}}
+	if err := store.Save(trashed); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []workspace.WorkspaceStatus{workspace.StatusTrashed, workspace.StatusMissing} {
+		trashed.Status = status
+		if err := store.Save(trashed); err != nil {
+			t.Fatal(err)
+		}
+		if owner, err := FindFolderOwner(store, external, ""); err != nil || owner != nil {
+			t.Fatalf("%s workspace still owns the folder: %#v err=%v", status, owner, err)
+		}
+	}
+	trashed.Status = workspace.StatusTrashed
+	if err := store.Save(trashed); err != nil {
+		t.Fatal(err)
+	}
+	if owner, err := FindRestoreFolderConflict(store, trashed); err != nil || owner != nil {
+		t.Fatalf("free folder blocks restore: %#v err=%v", owner, err)
+	}
+
+	again := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "New Album"})
+	again.SharedData = map[string]any{"folder_import": map[string]any{"enabled": true, "path": external}}
+	if err := store.Save(again); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := FindRestoreFolderConflict(store, trashed)
+	if err != nil || owner == nil || owner.WorkspaceID != again.ID {
+		t.Fatalf("restore conflict = %#v err=%v, want %s", owner, err, again.ID)
+	}
+
+	if err := os.Remove(external); err != nil {
+		t.Fatal(err)
+	}
+	if owner, err := FindRestoreFolderConflict(store, trashed); err != nil || owner != nil {
+		t.Fatalf("a vanished folder blocks restore: %#v err=%v", owner, err)
+	}
+}
+
 func TestAttachExistingRejectsSymlinkCandidateAndUntrustedToken(t *testing.T) {
 	service, _, _ := connectionService(t)
 	external := t.TempDir()

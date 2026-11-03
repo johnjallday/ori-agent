@@ -129,12 +129,15 @@ type FolderOwnerStore interface {
 // workspace it adopted from an existing folder.
 const folderImportKey = "folder_import"
 
-// FindFolderOwner reports the workspace, other than ignoreWorkspaceID, that
-// selected already belongs to: a folder attached as a workspace's project
+// FindFolderOwner reports the live workspace, other than ignoreWorkspaceID,
+// that selected already belongs to: a folder attached as a workspace's project
 // (through the guided journey or the create modal), or a workspace's own
-// folder, which is what Import Folder adopts. It returns nil when no workspace
-// owns it, and an error when ownership cannot be verified, which callers must
-// treat as a refusal rather than as "free".
+// folder, which is what Import Folder adopts. A workspace in the Trash, or one
+// whose folder is missing, owns nothing: it is invisible everywhere else, so a
+// refusal naming it would be a dead end. Restoring it re-checks its folders
+// (FindRestoreFolderConflict). It returns nil when no workspace owns it, and an
+// error when ownership cannot be verified, which callers must treat as a
+// refusal rather than as "free".
 func FindFolderOwner(store FolderOwnerStore, selected, ignoreWorkspaceID string) (*FolderOwner, error) {
 	if store == nil {
 		return nil, ErrUnavailable
@@ -147,44 +150,90 @@ func FindFolderOwner(store FolderOwnerStore, selected, ignoreWorkspaceID string)
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	sameFolder := func(path string) bool {
-		if strings.TrimSpace(path) == "" {
-			return false
-		}
-		info, statErr := os.Stat(path) // #nosec G304 -- a path Ori itself recorded for a workspace; only compared, never read
-		return statErr == nil && os.SameFile(selectedInfo, info)
-	}
 	for _, id := range ids {
 		if id == ignoreWorkspaceID {
 			continue
 		}
 		candidate, getErr := store.Get(id)
-		if getErr != nil || candidate == nil || candidate.ID == ignoreWorkspaceID {
+		if getErr != nil || candidate == nil || candidate.ID == ignoreWorkspaceID || !ownsFolders(candidate) {
 			continue
 		}
-		owner := &FolderOwner{WorkspaceID: candidate.ID, Name: candidate.Name, Slug: candidate.FolderSlug}
-		if anchorID := candidate.AnchorDirectoryReferenceID(); anchorID != "" {
-			if reference, referenceErr := candidate.GetDirectoryReference(anchorID); referenceErr == nil && reference != nil && sameFolder(reference.Path) {
-				return owner, nil
+		for _, path := range claimedFolders(store, candidate, true) {
+			if sameFolder(selectedInfo, path) {
+				return &FolderOwner{WorkspaceID: candidate.ID, Name: candidate.Name, Slug: candidate.FolderSlug}, nil
 			}
 		}
-		if locator, locatorErr := workspace.GetProjectEntryLocator(candidate.SharedData); locatorErr == nil &&
-			locator != nil && locator.Kind == workspace.ProjectEntryDirectoryReference {
-			if reference, referenceErr := candidate.GetDirectoryReference(locator.DirectoryReferenceID); referenceErr == nil &&
-				reference != nil && sameFolder(reference.Path) {
-				return owner, nil
-			}
+	}
+	return nil, nil
+}
+
+// FindRestoreFolderConflict reports the live workspace that took one of a
+// trashed workspace's project folders while it was in the Trash, so a restore
+// can refuse instead of bringing back a second owner. The trashed workspace's
+// own sidecar folder is not checked here; its slug check covers that. A
+// recorded folder that no longer exists cannot be contested and is skipped.
+func FindRestoreFolderConflict(store FolderOwnerStore, trashed *workspace.Workspace) (*FolderOwner, error) {
+	if store == nil {
+		return nil, ErrUnavailable
+	}
+	if trashed == nil {
+		return nil, nil
+	}
+	for _, path := range claimedFolders(store, trashed, false) {
+		if _, statErr := os.Stat(path); statErr != nil { // #nosec G304 -- a path Ori itself recorded for a workspace; only stat'ed
+			continue
 		}
-		if imported, ok := candidate.SharedData[folderImportKey].(map[string]any); ok {
-			if path, _ := imported["path"].(string); sameFolder(path) {
-				return owner, nil
-			}
+		owner, err := FindFolderOwner(store, path, trashed.ID)
+		if err != nil {
+			return nil, err
 		}
-		if folder, folderErr := store.GetFolderPath(candidate.ID); folderErr == nil && sameFolder(folder) {
+		if owner != nil {
 			return owner, nil
 		}
 	}
 	return nil, nil
+}
+
+// ownsFolders is whether a workspace's recorded folders count as taken.
+func ownsFolders(ws *workspace.Workspace) bool {
+	return ws.Status != workspace.StatusTrashed && ws.Status != workspace.StatusMissing
+}
+
+// claimedFolders lists the folders a workspace claims: its anchor, its typed
+// project-entry folder, the folder Import Folder adopted, and (when ownFolder)
+// its own workspace folder.
+func claimedFolders(store FolderOwnerStore, ws *workspace.Workspace, ownFolder bool) []string {
+	var paths []string
+	if anchorID := ws.AnchorDirectoryReferenceID(); anchorID != "" {
+		if reference, err := ws.GetDirectoryReference(anchorID); err == nil && reference != nil {
+			paths = append(paths, reference.Path)
+		}
+	}
+	if locator, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil &&
+		locator != nil && locator.Kind == workspace.ProjectEntryDirectoryReference {
+		if reference, referenceErr := ws.GetDirectoryReference(locator.DirectoryReferenceID); referenceErr == nil && reference != nil {
+			paths = append(paths, reference.Path)
+		}
+	}
+	if imported, ok := ws.SharedData[folderImportKey].(map[string]any); ok {
+		if path, _ := imported["path"].(string); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	if ownFolder {
+		if folder, err := store.GetFolderPath(ws.ID); err == nil {
+			paths = append(paths, folder)
+		}
+	}
+	return paths
+}
+
+func sameFolder(selected os.FileInfo, path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path) // #nosec G304 -- a path Ori itself recorded for a workspace; only compared, never read
+	return err == nil && os.SameFile(selected, info)
 }
 
 // LockAttachCommit serializes every attach that records a folder, from its
