@@ -12,6 +12,7 @@ import {
   songFactsLabel,
   songLineText
 } from './library-open.js';
+import { runSetup } from './library-setup.js';
 import { setupQuestURL } from './setup-quest-links.js';
 import { folderPickCopy } from './folder-pick-copy.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
@@ -2125,42 +2126,21 @@ export class ProjectLibraryPanel {
         this.status('Nothing was connected.');
         return;
       }
-      const done = [];
-      let failure = '';
-      for (const item of ready) {
-        try {
-          const detail = await this.request(item.path);
-          if (detail.row.connection !== 'connected') {
-            const eligibility = await this.request(`${item.path}/activation`);
-            const files = eligibility.project_files || [];
-            if (
-              eligibility.state !== 'review_available' ||
-              files.length !== 1 ||
-              files[0] !== item.file
-            ) {
-              throw new Error('it changed after you confirmed, so it was not connected');
-            }
-            const review = await this.post(`${item.path}/activation/review`, {
-              workspace_name: detail.row.name.slice(0, 128),
-              project_file: item.file,
-              if_revision: detail.revision
-            });
-            if (review.project_file !== item.file) {
-              throw new Error('its reviewed file differs from the one you confirmed');
-            }
-            await this.post(`${item.path}/activation/commit`, {
-              review_token: review.token,
-              idempotency_key: operationKey('batch-activation'),
-              confirm: true
-            });
-          }
-          done.push(item.name);
-          this.selectedProjects.delete(item.id);
-        } catch (error) {
-          failure = `${item.name}: ${error.message || 'could not be connected'}`;
-          break;
+      // The per-song review-then-commit loop is the one the map's setup sheet
+      // runs too (library-setup.js): same checks, same stop on first failure.
+      const result = await runSetup({
+        client: {
+          request: path => this.request(path),
+          post: (path, body) => this.post(path, body)
+        },
+        items: ready,
+        operationKey,
+        onProgress: (item, status) => {
+          if (status === 'done') this.selectedProjects.delete(item.id);
         }
-      }
+      });
+      const done = result.done.map(item => item.name);
+      const failure = result.failed ? `${result.failed.name}: ${result.failed.message}` : '';
       await this.refresh();
       this.status(
         [
