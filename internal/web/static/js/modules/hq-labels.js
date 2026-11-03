@@ -47,6 +47,27 @@ export const HQ_LABELS = Object.freeze({
   capabilities: 'Capabilities',
   triggers: 'Triggers and automation',
 
+  // The Map (PRD 767): the Flow arrangement's lanes and nodes, the
+  // arrangement switch, and the belt's plain names.
+  mapArrangement: 'Map arrangement',
+  flow: 'Flow',
+  free: 'Free',
+  whatOriReads: 'What Ori reads',
+  yourLeadAgent: 'Your lead agent',
+  whatNeedsYou: 'What needs you',
+  email: 'Email',
+  calendar: 'Calendar',
+  memory: 'Memory',
+  otherWorkspaces: 'Other workspaces',
+  todaysBrief: "Today's brief",
+  waitingOnYou: 'Waiting on you',
+  specialists: 'Specialists',
+  noSpecialists: 'No specialists yet',
+  workspaceGoal: 'Workspace goal',
+  inventory: 'Inventory',
+  // "New task" in the PRD; work is a ticket on the HQ page.
+  newTask: 'New ticket',
+
   // Station state words
   notSetUp: 'Not set up',
   ready: 'Ready',

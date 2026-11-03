@@ -322,6 +322,224 @@ for (const theme of ['light', 'dark']) {
     }
   });
 
+  // PRD 767: the Personal HQ's Map opens in Flow; Free is the old field.
+  test(`Personal HQ Map: Flow lanes, Free field and the remembered arrangement (${theme})`, async ({
+    page
+  }, testInfo) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const stamp = `${theme} ${Date.now()}`;
+    const response = await page.request.post('/api/workspaces', {
+      data: { name: `HQ map ${stamp}`, blank: true }
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const { folder } = await response.json();
+    const agentName = `HQ Map Lead ${stamp}`;
+    expect(
+      (await page.request.post('/api/agents', { data: { name: agentName, type: 'general' } })).ok()
+    ).toBeTruthy();
+    expect(
+      (
+        await page.request.post(`/api/workspaces/${folder.id}/agents`, {
+          data: { agent_name: agentName }
+        })
+      ).ok()
+    ).toBeTruthy();
+    // Display fixture only, as above: the HQ designation without building an
+    // HQ. It is set again after a reload, which the server never stored.
+    const openHQMap = async () => {
+      await page.goto(`/workspaces/${folder.folder_slug}`);
+      await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();
+      await page.waitForFunction(() => Boolean(window.workspaceDetail?.workspace?.id));
+      await page.evaluate(() => {
+        window.workspaceDetail.workspace.designation = 'personal_hq';
+        window.workspaceCommand.setCommandViewMode('map', { focus: false });
+        window.workspaceCommand.render();
+      });
+    };
+    const scanMap = async label => {
+      const violations = await page.evaluate(async () => {
+        const result = await window.axe.run('.ws-cmd-map-shell', {
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+        });
+        return result.violations;
+      });
+      expect(violations, label + ' ' + JSON.stringify(violations, null, 2)).toEqual([]);
+    };
+    // The whole command view: the header, the map and any open window or
+    // modal it hosts, not only the map region.
+    const tacticalWords = () =>
+      page.evaluate(() => {
+        const root = document.querySelector('#workspaceCommandView');
+        const labels = [...root.querySelectorAll('[aria-label], [title]')].map(
+          el => (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')
+        );
+        return [root.innerText, ...labels].join('\n');
+      });
+    try {
+      await openHQMap();
+      const operationsMap = page.getByRole('region', { name: 'Workspace operations map' });
+      await expect(page.locator('.ws-cmd-map-shell.is-hq.is-flow')).toBeVisible();
+      const arrangement = page.getByRole('group', { name: 'Map arrangement' });
+      await expect(arrangement.getByRole('button', { name: 'Flow' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+
+      // Three labelled lanes, in order, and no belt in Flow (FR5, FR15).
+      const lanes = operationsMap.locator('section.ws-cmd-flow-lane');
+      await expect(lanes).toHaveCount(3);
+      const laneNames = await lanes.evaluateAll(nodes =>
+        nodes.map(node => document.getElementById(node.getAttribute('aria-labelledby')).textContent)
+      );
+      expect(laneNames).toEqual(['What Ori reads', 'Your lead agent', 'What needs you']);
+      await expect(operationsMap.locator('.ws-cmd-map-belt')).toHaveCount(0);
+      await expect(operationsMap.locator('[style*="--station-x"]')).toHaveCount(0);
+      for (const name of ['Memory', 'Needs you', 'Follow-ups', "Today's brief", 'Tickets']) {
+        await expect(
+          operationsMap.getByRole('button', { name: new RegExp('^' + name) })
+        ).toBeVisible();
+      }
+      await expect(operationsMap.locator('.ws-cmd-flow-lead')).toContainText(agentName);
+      await expect(operationsMap.locator('.ws-cmd-flow-lead')).toContainText('Lead');
+      for (const term of ['Outpost', 'Commander', 'Garrison', 'Quest Board', 'Loadout', 'Keeper']) {
+        expect(await tacticalWords(), term).not.toContain(term);
+      }
+      // The lead card's Agents window speaks plainly too.
+      await operationsMap.locator('.ws-cmd-flow-lead').click();
+      await expect(page.locator('.ws-cmd-modal:not([hidden])')).toBeVisible();
+      await expect(page.locator('.ws-cmd-modal .ws-cmd-mchip.is-keeper')).toHaveText('★ Lead');
+      for (const term of ['Outpost', 'Commander', 'Garrison', 'Quest Board', 'Loadout', 'Keeper']) {
+        expect(await tacticalWords(), 'Agents window: ' + term).not.toContain(term);
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.ws-cmd-modal:not([hidden])')).toHaveCount(0);
+
+      // At 1280 every node is visible without scrolling the map (success metric).
+      await page.setViewportSize({ width: 1280, height: 900 });
+      const nodesFit = await page.evaluate(() => {
+        const shell = document.querySelector('.ws-cmd-opmap').getBoundingClientRect();
+        return [...document.querySelectorAll('.ws-cmd-flow-node, .ws-cmd-flow-lead')].every(
+          node => {
+            const box = node.getBoundingClientRect();
+            return box.left >= shell.left && box.right <= shell.right && box.bottom <= shell.bottom;
+          }
+        );
+      });
+      expect(nodesFit).toBe(true);
+
+      // A node opens its panel with the map still there behind it, and
+      // closing hands focus back to the node (FR14).
+      const memory = operationsMap.getByRole('button', { name: /^Memory/ });
+      await memory.click();
+      await expect(page.locator('.ws-cmd-modal:not([hidden])')).toBeVisible();
+      await expect(page.locator('.ws-cmd-opmap')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.ws-cmd-modal:not([hidden])')).toHaveCount(0);
+      await expect(operationsMap.getByRole('button', { name: /^Memory/ })).toBeFocused();
+      const needsYou = operationsMap.getByRole('button', { name: /^Needs you/ });
+      await needsYou.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('dialog', { name: 'Needs you' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'Needs you' })).toHaveCount(0);
+      await expect(operationsMap.getByRole('button', { name: /^Needs you/ })).toBeFocused();
+
+      await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+      for (const width of [1440, 768, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        const layout = await page.evaluate(() => ({
+          overflow: document.documentElement.scrollWidth > innerWidth + 1,
+          linksShown: [...document.querySelectorAll('.ws-cmd-flow-links')].some(
+            node => getComputedStyle(node).display !== 'none'
+          )
+        }));
+        expect(layout.overflow, `no horizontal scroll at ${width}`).toBe(false);
+        // Below the rail breakpoint the lanes stack with no lines (FR19).
+        expect(layout.linksShown, `connectors at ${width}`).toBe(width > 900);
+        await scanMap(`flow ${width}`);
+        await page.screenshot({
+          path: testInfo.outputPath(`hq-map-flow-${width}-${theme}.png`),
+          fullPage: true,
+          animations: 'disabled'
+        });
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+
+      // Free: the field, its buildings and the belt with plain names (FR18).
+      await arrangement.getByRole('button', { name: 'Free' }).click();
+      await expect(page.locator('.ws-cmd-map-shell.is-hq:not(.is-flow)')).toBeVisible();
+      await expect(operationsMap.locator('.ws-cmd-map-belt')).toBeVisible();
+      await expect(operationsMap.locator('.ws-cmd-map-hq-station').first()).toBeFocused();
+      for (const label of ['Workspace goal', 'Tickets', 'Backlog', 'Inventory', 'Stations']) {
+        await expect(
+          operationsMap.locator(`.ws-cmd-map-belt-btn[aria-label="${label}"]`)
+        ).toHaveCount(1);
+      }
+      for (const term of ['Outpost', 'Commander', 'Garrison', 'Quest Board', 'Loadout', 'Keeper']) {
+        expect(await tacticalWords(), term).not.toContain(term);
+      }
+      const freeGeometry = await page.evaluate(() => {
+        const rects = selector =>
+          [...document.querySelectorAll('.ws-cmd-map-shell ' + selector)].map(node => {
+            const rect = node.getBoundingClientRect();
+            return {
+              label: node.getAttribute('aria-label') || node.textContent.trim(),
+              left: rect.left,
+              right: rect.right,
+              top: rect.top,
+              bottom: rect.bottom
+            };
+          });
+        return {
+          agents: rects('.ws-cmd-map-agent'),
+          stations: rects('.ws-cmd-map-hq-station'),
+          switches: rects('.ws-cmd-map-arrangement'),
+          fixed: rects('.ws-cmd-map-quest-fab, .ws-cmd-map-belt')
+        };
+      });
+      const overlaps = (a, b) =>
+        a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      for (const agent of freeGeometry.agents) {
+        for (const station of freeGeometry.stations) {
+          expect(overlaps(agent, station), `${agent.label} overlaps ${station.label}`).toBeFalsy();
+        }
+      }
+      // The switch covers nothing on the field (demo 1.8, defect B).
+      for (const control of freeGeometry.switches) {
+        for (const other of [
+          ...freeGeometry.agents,
+          ...freeGeometry.stations,
+          ...freeGeometry.fixed
+        ]) {
+          expect(overlaps(control, other), `switch overlaps ${other.label}`).toBeFalsy();
+        }
+      }
+      await scanMap('free 1440');
+      await page.screenshot({
+        path: testInfo.outputPath(`hq-map-free-1440-${theme}.png`),
+        fullPage: true,
+        animations: 'disabled'
+      });
+
+      // The choice survives a reload (FR3), and Flow comes back on request.
+      await openHQMap();
+      await expect(page.locator('.ws-cmd-map-shell.is-hq:not(.is-flow)')).toBeVisible();
+      await expect(
+        page.getByRole('group', { name: 'Map arrangement' }).getByRole('button', { name: 'Free' })
+      ).toHaveAttribute('aria-pressed', 'true');
+      await page
+        .getByRole('group', { name: 'Map arrangement' })
+        .getByRole('button', { name: 'Flow' })
+        .click();
+      await expect(page.locator('.ws-cmd-map-shell.is-flow')).toBeVisible();
+      await expect(page.locator('.ws-cmd-flow-node').first()).toBeFocused();
+    } finally {
+      await page.request.delete(`/api/workspaces/${folder.id}`);
+    }
+  });
+
   test(`workspace detail accessibility (${theme})`, async ({ page }) => {
     const baseUrl =
       process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';

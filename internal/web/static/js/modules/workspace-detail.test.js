@@ -335,6 +335,46 @@ test('referenced agent with no global definition and no snapshot is a missing er
   assert.equal(issues[0].title, 'Commander is missing');
 });
 
+test('on the Personal HQ the health cards call the slot the lead (PRD 767 FR18)', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    name: 'Personal HQ',
+    designation: 'personal_hq',
+    entry_agent_name: 'Atlas',
+    agents: ['Atlas', 'Beta', 'Gamma'],
+    agent_instances: [{ name: 'Atlas', entry_point: true }, { name: 'Beta' }, { name: 'Gamma' }],
+    shared_data: {}
+  };
+  page.agentIndex = new Map([
+    ['beta', { role: 'analyzer' }],
+    ['gamma', { role: 'specialist' }]
+  ]);
+  page.workspaceAgentSnapshots = new Set(['beta', 'gamma']);
+  page.files = [];
+
+  const issues = page.collectWorkspaceHealthIssues();
+  const missing = issues.find(issue => issue.action === 'entry_agent');
+  assert.equal(missing.title, 'Lead is missing');
+  assert.equal(missing.actionLabel, 'Create lead');
+  assert.match(missing.description, /assigned as the workspace lead/);
+  assert.equal(
+    page.renderWorkspaceAgentRoleBadge('Atlas'),
+    '<span class="workspace-detail-agent-role-badge">Lead</span>'
+  );
+  for (const issue of issues) {
+    assert.doesNotMatch(JSON.stringify(issue), /Commander/, issue.title);
+  }
+  assert.deepEqual(page.entrySlotWords(), {
+    name: 'lead',
+    title: 'Lead',
+    seedName: 'Workspace Lead',
+    acting: 'an agent without the lead role'
+  });
+
+  page.workspace.designation = '';
+  assert.equal(page.entrySlotWords().name, 'Commander');
+});
+
 test('3+ agents with no orchestrator role surfaces a non-blocking Commander nudge (FR23)', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   page.workspace = {

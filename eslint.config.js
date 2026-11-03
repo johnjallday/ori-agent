@@ -146,6 +146,7 @@ export default defineConfig([
       'internal/web/static/js/modules/hq-labels.js',
       'internal/web/static/js/modules/hq-attention.js',
       'internal/web/static/js/modules/hq-stations-grid.js',
+      'internal/web/static/js/modules/hq-map-flow.js',
       'internal/web/static/js/modules/quick-task.js',
       'internal/web/static/js/modules/note-ai-assist.js',
       'internal/web/static/js/modules/note-backlinks.js',
