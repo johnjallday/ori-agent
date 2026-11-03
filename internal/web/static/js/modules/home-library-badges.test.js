@@ -21,11 +21,15 @@ function summary(overrides = {}) {
   };
 }
 
-test('badge text names only the nonzero parts in a fixed order', () => {
-  assert.equal(libraryBadgeView(summary(), 'Music Home').text, '6 new · 5 ready');
+test('badge text names only the nonzero parts in a fixed order, never "new" or "ready"', () => {
+  assert.equal(libraryBadgeView(summary(), 'Music Home').text, '5 to set up');
   assert.equal(
     libraryBadgeView(summary({ ready_proposals: 2 }), 'Music Home').text,
-    '6 new · 5 ready · 2 to review'
+    '5 to set up · 2 to review'
+  );
+  assert.equal(
+    libraryBadgeView(summary({ digest: { new: 0, activatable: 1 } }), 'Music Home').label,
+    'Music Home library: 1 project to set up. Open the suggestions shelf.'
   );
   assert.equal(
     libraryBadgeView(
@@ -38,7 +42,7 @@ test('badge text names only the nonzero parts in a fixed order', () => {
   assert.equal(view.route, ROUTE);
   assert.equal(
     view.label,
-    'Music Home library: 6 new projects, 5 ready to set up, 1 suggestion to review. Open the suggestions shelf.'
+    'Music Home library: 5 projects to set up, 1 suggestion to review. Open the suggestions shelf.'
   );
 });
 
@@ -93,7 +97,7 @@ test('loader reuses its answer inside thirty seconds unless forced, and never po
   });
   const first = await loader.load([HOME]);
   assert.deepEqual(Object.keys(first), ['home-1']);
-  assert.equal(first['home-1'].text, '6 new · 5 ready');
+  assert.equal(first['home-1'].text, '5 to set up');
   assert.deepEqual(requests, ['/api/workspaces/home-1/assistant-program/library/summary']);
   clock += LIBRARY_BADGE_MIN_REFRESH_MS - 1;
   await loader.load([HOME]);

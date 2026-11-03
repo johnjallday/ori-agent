@@ -1335,8 +1335,8 @@ test('a Home library badge is a separate navigation button with an escaped, shel
   );
   map.libraryBadges.setSnapshot({
     home: {
-      text: '6 new · 5 ready',
-      label: 'Music Home library: <b>6</b> new. Open the suggestions shelf.',
+      text: '5 to set up',
+      label: 'Music Home library: <b>5</b> projects to set up. Open the suggestions shelf.',
       route: '/workspaces/music-home/assistant#projectLibraryProposals'
     },
     other: {
@@ -1349,10 +1349,10 @@ test('a Home library badge is a separate navigation button with an escaped, shel
   const html = map.districtHTML({ ...base, ws: home }, '');
   assert.match(
     html,
-    /<\/button><span class="ws-map-district-notice"><button type="button" class="ws-map-district-library-badge" data-library-badge="home" data-library-route="\/workspaces\/music-home\/assistant#projectLibraryProposals" aria-label="Music Home library: &lt;b&gt;6&lt;\/b&gt; new\. Open the suggestions shelf\."/,
+    /<\/button><span class="ws-map-district-notice"><button type="button" class="ws-map-district-library-badge" data-library-badge="home" data-library-route="\/workspaces\/music-home\/assistant#projectLibraryProposals" aria-label="Music Home library: &lt;b&gt;5&lt;\/b&gt; projects to set up\. Open the suggestions shelf\."/,
     'the badge follows the district tag as a sibling, never inside it'
   );
-  assert.match(html, />6 new · 5 ready<\/button><\/span>/);
+  assert.match(html, />5 to set up<\/button><\/span>/);
   assert.match(html, /class="ws-map-district-header has-library-badge"/);
   assert.match(
     map.districtHTML({ ...base, ws: { id: 'plain', name: 'Plain' } }, ''),
