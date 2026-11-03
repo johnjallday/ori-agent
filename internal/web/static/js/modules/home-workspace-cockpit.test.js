@@ -27,6 +27,8 @@ import {
   parseViewFromQuery,
   moveDeepLinkTarget,
   showMapDeepLinkTarget,
+  setupProjectsDeepLink,
+  setupSheetShouldOpen,
   searchForView,
   readCount,
   formatCount,
@@ -157,6 +159,38 @@ test('Show on map deep links name a district independently from explicit Move', 
   assert.equal(showMapDeepLinkTarget('?show_on_map=home'), 'home');
   assert.equal(showMapDeepLinkTarget('?move=home'), '');
   assert.equal(moveDeepLinkTarget('?show_on_map=home'), '');
+  // A folder setup's landing link also asks for the project setup sheet
+  // (folder-to-map-handoff FR-1); only the literal 1 counts.
+  assert.equal(setupProjectsDeepLink('?show_on_map=home&setup_projects=1'), true);
+  assert.equal(setupProjectsDeepLink('?show_on_map=home&setup_projects=true'), false);
+  assert.equal(setupProjectsDeepLink('?show_on_map=home'), false);
+  assert.equal(setupProjectsDeepLink(''), false);
+  const base = {
+    requested: true,
+    homeFound: true,
+    readOnly: false,
+    badgesLoaded: true,
+    toSetUp: 5
+  };
+  assert.equal(setupSheetShouldOpen(base), true);
+  assert.equal(
+    setupSheetShouldOpen({ ...base, toSetUp: 0 }),
+    false,
+    'a stale link with nothing left to set up opens no empty sheet'
+  );
+  assert.equal(setupSheetShouldOpen({ ...base, toSetUp: undefined }), false);
+  assert.equal(setupSheetShouldOpen({ ...base, requested: false }), false);
+  assert.equal(setupSheetShouldOpen({ ...base, homeFound: false }), false);
+  assert.equal(
+    setupSheetShouldOpen({ ...base, readOnly: true }),
+    false,
+    'a read-only map never opens it'
+  );
+  assert.equal(
+    setupSheetShouldOpen({ ...base, badgesLoaded: false }),
+    false,
+    'wait for the badge read'
+  );
 });
 
 test('moveDeepLinkTarget: a folder setup’s Move link names the workspace to move', () => {

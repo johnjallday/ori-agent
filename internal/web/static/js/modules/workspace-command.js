@@ -38,6 +38,7 @@ import {
 } from './group-template-status.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
+import { openLibrarySheet } from './map-library-sheet.js';
 import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
@@ -597,6 +598,9 @@ export class WorkspaceCommandView {
       if (this.groupTemplateStatusToken !== token || this.workspaceId() !== workspaceId)
         return null;
       this.groupTemplateStatus = status;
+      // A managed Home's library may have projects to set up; the empty lot
+      // says so (folder-to-map-handoff FR-6, FR-9).
+      void this.loadLibraryEmptyState();
       if (this.roleCreateForm && this.roleCreateTemplateNote) {
         const note = document.querySelector(
           '#agentCreateFormHost [data-agent-create-note="systemPrompt"]'
@@ -13252,8 +13256,89 @@ export class WorkspaceCommandView {
       // Who stands on the ground is structure too: a hired or removed agent, or
       // a new Commander, needs a place to stand.
       '::' +
-      units.map(unit => unit.id + (unit.commander ? '*' : '')).join('|')
+      units.map(unit => unit.id + (unit.commander ? '*' : '')).join('|') +
+      // The empty lot's library count is drawn by the mount, so a changed
+      // count is a reason to re-mount too.
+      '::' +
+      JSON.stringify(this.libraryEmptyState || null)
     );
+  }
+
+  /**
+   * Read how many projects this Home's last scan found and how many are not
+   * on the map yet (folder-to-map-handoff FR-6, FR-9). Only a managed Home
+   * is asked; anything else, or an unreadable summary, draws the plain lot.
+   * Re-mounts the scoped map when the answer changed.
+   */
+  async loadLibraryEmptyState() {
+    const workspaceId = this.workspaceId();
+    const status = this.groupTemplateStatus;
+    let next = null;
+    if (workspaceId && status && status.kind === 'managed_home') {
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(workspaceId)}/assistant-program/library/summary`,
+          { headers: { Accept: 'application/json' }, cache: 'no-store' }
+        );
+        if (response.ok) {
+          const summary = await response.json();
+          const digest = summary && summary.digest;
+          const toSetUp = digest && !digest.setup_note ? Number(digest.activatable) : 0;
+          if (Number.isInteger(toSetUp) && toSetUp > 0) {
+            next = { shelf: Number(digest.projects) || toSetUp, toSetUp };
+          }
+        }
+      } catch (err) {
+        next = null;
+      }
+    }
+    if (this.workspaceId() !== workspaceId) return;
+    if (JSON.stringify(next) === JSON.stringify(this.libraryEmptyState || null)) return;
+    this.libraryEmptyState = next;
+    if (this.active) this.syncDetachmentMap();
+  }
+
+  /**
+   * The empty lot's "Set up projects…" opens the library setup sheet beside
+   * it, the same sheet the Home map's badge opens (folder-to-map-handoff
+   * FR-6). After a run the members reload, the lot gives way to the new
+   * tiles, and the camera frames them.
+   */
+  openLibrarySetupSheet(element) {
+    const homeID = this.workspaceId();
+    if (!homeID) return false;
+    const host = this.ensureDetachmentHost();
+    const slug = this.workspaceSlug();
+    const sheet = openLibrarySheet({
+      homeID,
+      homeName: String(this.page?.workspace?.name || '').trim() || 'this Home',
+      anchor: element || null,
+      beside: element || null,
+      tokensFrom: (host && (host.querySelector('.ws-map') || host)) || null,
+      shelfRoute: slug
+        ? `/workspaces/${encodeURIComponent(slug)}/assistant#projectLibraryProposals`
+        : '',
+      onDone: ({ workspaceIds }) => void this.landSetUpProjects(workspaceIds)
+    });
+    return Boolean(sheet);
+  }
+
+  async landSetUpProjects(workspaceIds) {
+    const ids = (Array.isArray(workspaceIds) ? workspaceIds : []).filter(Boolean);
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (page && page.membersPanel && typeof page.membersPanel.syncWorkspace === 'function') {
+      try {
+        await page.membersPanel.syncWorkspace(page.workspace, { force: true });
+      } catch (err) {
+        /* the map below still re-syncs from whatever the panel holds */
+      }
+    }
+    await this.loadLibraryEmptyState();
+    this.syncDetachmentMap();
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    if (ids.length && map && typeof map.framePlaced === 'function') {
+      map.framePlaced(ids, this.workspaceId());
+    }
   }
 
   /**
@@ -13370,6 +13455,10 @@ export class WorkspaceCommandView {
       selectedId,
       units,
       scopeGroupId: this.workspaceId(),
+      // A Home with projects on its shelf says so on its empty lot
+      // (folder-to-map-handoff FR-6).
+      libraryEmptyState: this.libraryEmptyState || null,
+      onSetupProjects: (groupId, { element } = {}) => this.openLibrarySetupSheet(element),
       // The combined surface's overlays cover the top band and the left
       // column; the district opens framed in what they leave clear.
       frameInsets: this.detachmentFrameInsets(),

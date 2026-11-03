@@ -851,7 +851,10 @@ function inboxConfirmView(offer, base, subject) {
 
 // setupResultView reduces saved runs/receipts, including bounded Home project
 // shortcuts. It owns no modal, lifecycle, polling or confirmation.
-export function setupResultView(offer, { songs = [], total = 0, now = new Date() } = {}) {
+export function setupResultView(
+  offer,
+  { songs = [], total = 0, now = new Date(), toSetUp = 0 } = {}
+) {
   if (!offer) return { visible: false };
   const receipt = folderReceiptView(offer);
   // A settled offer may carry only its receipt. Without either a saved run
@@ -901,6 +904,19 @@ export function setupResultView(offer, { songs = [], total = 0, now = new Date()
       openLabel: receipt.openLabel,
       actions: []
     };
+    // Projects the scan found and nobody has set up yet: the one next step is
+    // putting them on the map, so that is the primary action and the song
+    // shortcuts wait (folder-to-map-handoff FR-1, FR-5).
+    const waiting = receipt.home ? Number(toSetUp) : 0;
+    if (Number.isInteger(waiting) && waiting > 0) {
+      return {
+        ...done,
+        status: homeWaitingNote(receipt.homeName, waiting),
+        route: folderLandingRoute(receipt.homeID, receipt.route, waiting),
+        libraryRoute: receipt.route,
+        openLabel: `Put ${waiting} on the map`
+      };
+    }
     const picks = receipt.home ? recentSongs(songs) : [];
     if (!picks.length) return done;
     const library = plural(Math.max(Number(total) || 0, picks.length), 'song');
@@ -2256,6 +2272,28 @@ function groupReceiptView(offer) {
   };
 }
 
+// Where a finished Home setup sends the person (folder-to-map-handoff FR-1,
+// FR-2): the Home map with the district in view and the project setup sheet
+// open when the scan found projects to set up, else the route the receipt
+// already had (the Home's library panel). Pure. The Home id is the server's
+// workspace id; anything that does not look like one keeps the fallback.
+export function folderLandingRoute(homeID, fallbackRoute, toSetUp) {
+  const id = String(homeID || '').trim();
+  const count = typeof toSetUp === 'number' ? toSetUp : NaN;
+  const safe = id.length > 0 && id.length <= 160 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id);
+  if (!safe || !Number.isInteger(count) || count <= 0) return String(fallbackRoute || '');
+  return `/?view=map&show_on_map=${encodeURIComponent(id)}&setup_projects=1`;
+}
+
+// The one line a finished Home setup says while projects wait to be put on
+// the map (folder-to-map-handoff FR-5). '' when nothing waits. Pure.
+export function homeWaitingNote(homeName, toSetUp) {
+  const count = typeof toSetUp === 'number' && Number.isInteger(toSetUp) ? toSetUp : 0;
+  if (count < 1) return '';
+  const name = String(homeName || '').trim() || 'your Home';
+  return `${plural(count, 'project')} to set up. Put them on the map and each becomes its own workspace in ${name}; nothing in the folder changes.`;
+}
+
 export function folderReceiptView(offer, options = {}) {
   if (offer?.status === 'resolved' && ['home', 'group'].includes(offer?.outcome?.kind)) {
     const gone = workspaceGoneView(offer);
@@ -3173,6 +3211,7 @@ const runSongs = {
   status: '', // '' | 'loading' | 'ready' | 'failed'
   rows: [],
   total: 0,
+  toSetUp: 0, // projects the last scan found that are not on the map yet
   opening: '', // the song being opened; every Open waits for it
   message: '', // what the status line says while opening or choosing a file
   error: '',
@@ -3205,6 +3244,8 @@ async function loadRecentSongs(offerID, homeID) {
     if (!page || !Array.isArray(page.rows)) throw new Error('no library page');
     runSongs.rows = recentSongs(page.rows);
     runSongs.total = Number(page.total) || 0;
+    runSongs.toSetUp = await libraryToSetUp(homeID);
+    if (runSongs.offerID !== offerID) return;
     runSongs.status = 'ready';
   } catch (_) {
     // The list is a shortcut; without it the done screen is the one it always was.
@@ -3376,6 +3417,27 @@ function revealRunSurface() {
   window.PersonalAssistantTranscript?.revealControl?.(card, true);
 }
 
+// How many projects a Home's last scan found that are not on the map yet,
+// from the library summary (which already counts projects set up since the
+// scan as connected). 0 when the summary cannot be read: the done screen then
+// stays the one it always was.
+async function libraryToSetUp(homeID) {
+  try {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(homeID)}/assistant-program/library/summary`,
+      { headers: { Accept: 'application/json' }, cache: 'no-store' }
+    );
+    if (!response.ok) return 0;
+    const summary = await readJSON(response);
+    const digest = summary?.digest;
+    if (!digest || digest.setup_note) return 0;
+    const count = Number(digest.activatable);
+    return Number.isInteger(count) && count > 0 ? count : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
 function renderHomeSongs() {
   const songs = document.getElementById('personalAssistantFolderSongs');
   const note = document.getElementById('personalAssistantFolderSongsNote');
@@ -3393,14 +3455,38 @@ function renderHomeSongs() {
   const listed = runSongs.offerID === offerID && runSongs.status === 'ready';
   const view = setupResultView(
     state.offer,
-    listed ? { songs: runSongs.rows, total: runSongs.total } : {}
+    listed ? { songs: runSongs.rows, total: runSongs.total, toSetUp: runSongs.toSetUp } : {}
   );
   renderRunSongs({ songs }, view);
   // Reuse the canonical Home link instead of adding a duplicate library CTA.
+  // With projects to set up it becomes the map landing (the receipt drew it
+  // with the library route before the summary was read).
   const browse = [...(elements()?.actions?.querySelectorAll('a') || [])].find(
-    link => link.getAttribute('href') === view.route
+    link =>
+      link.getAttribute('href') === view.route ||
+      (view.libraryRoute && link.getAttribute('href') === view.libraryRoute)
   );
-  if (browse) browse.textContent = view.openLabel;
+  if (browse) {
+    browse.textContent = view.openLabel;
+    if (view.route) browse.href = view.route;
+    // The map landing must not reopen this drawer over the district it frames;
+    // the drawer persists its open state across the page change.
+    if (view.libraryRoute && !browse.dataset.closesDrawer) {
+      browse.dataset.closesDrawer = '1';
+      browse.addEventListener('click', () =>
+        window.PersonalAssistantPanel?.close?.({ restoreFocus: false })
+      );
+    }
+  }
+  // The note above the actions was drawn before the summary was read.
+  if (runSongs.toSetUp > 0 && runSongs.offerID === offerID) {
+    const offerNote = elements()?.offerNote;
+    const line = homeWaitingNote(receipt.homeName, runSongs.toSetUp);
+    if (offerNote && line && offerNote.textContent !== line) {
+      offerNote.replaceChildren(line);
+      offerNote.hidden = false;
+    }
+  }
   setText(
     note,
     runSongs.error || runSongs.message || (view.songs?.length ? 'Projects saved most recently' : '')
@@ -4228,6 +4314,11 @@ function renderOffer(place) {
         state.restoreMessage ||
         (receipt.gone ? receipt.gone.message : '') ||
         lookNote ||
+        // Projects the scan found wait for the map: that is the next step,
+        // said where the result is read (folder-to-map-handoff FR-5).
+        (receipt.home && runSongs.offerID === String(state.offer?.id || '')
+          ? homeWaitingNote(receipt.homeName, runSongs.toSetUp)
+          : '') ||
         (view.setup
           ? view.setup.statusLine
           : view.decided && !receipt.visible
@@ -4794,7 +4885,19 @@ async function navigateFolderHomeMap(homeID, action) {
     // Persist the drawer as closed, so navigation does not restore it over the
     // district (especially on narrow screens) that the user asked to reveal.
     window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
-    window.location.href = `/?view=map&${action === 'move' ? 'move' : 'show_on_map'}=${encodeURIComponent(homeID)}`;
+    // Show (not Move) of a Home with projects waiting also opens the setup
+    // sheet: a run that stopped on a later step still lands on the next thing
+    // to do (folder-to-map-handoff FR-1).
+    const waiting = action === 'move' ? 0 : await libraryToSetUp(homeID);
+    if (!current()) return;
+    window.location.href =
+      action === 'move'
+        ? `/?view=map&move=${encodeURIComponent(homeID)}`
+        : folderLandingRoute(
+            homeID,
+            `/?view=map&show_on_map=${encodeURIComponent(homeID)}`,
+            waiting
+          );
   } catch (error) {
     if (current()) {
       showError(error.message);
@@ -5151,7 +5254,14 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
   }
   if (action === 'open' && review.result?.id) {
     if (review.home && review.homeRoute?.startsWith('/workspaces/')) {
-      window.location.href = review.homeRoute;
+      // With projects to set up, finish on the map with the setup sheet open
+      // rather than on the library panel (folder-to-map-handoff FR-1).
+      const waiting = await libraryToSetUp(review.result.id);
+      if (!sourceReviewCurrent(review)) return;
+      const landing = folderLandingRoute(review.result.id, review.homeRoute, waiting);
+      if (landing !== review.homeRoute)
+        window.PersonalAssistantPanel?.close?.({ restoreFocus: false });
+      window.location.href = landing;
       return;
     }
     // Workspace pages are routed by slug; resolve it rather than use the ID.

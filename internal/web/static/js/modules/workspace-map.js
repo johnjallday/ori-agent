@@ -730,6 +730,58 @@
     });
   }
 
+  // What a scoped (group page) map says on its empty lot when the group is a
+  // Home whose library has projects to set up (folder-to-map-handoff FR-6):
+  // { shelf, toSetUp }. The host reads the library summary; the map only
+  // draws it, and the button hands the group back to the host.
+  var libraryEmptyState = null;
+
+  function setLibraryEmptyState(state) {
+    libraryEmptyState = null;
+    if (!state || typeof state !== 'object') return;
+    var shelf = state.shelf;
+    var toSetUp = state.toSetUp;
+    if (
+      typeof toSetUp !== 'number' ||
+      !isFinite(toSetUp) ||
+      toSetUp < 1 ||
+      Math.floor(toSetUp) !== toSetUp
+    )
+      return;
+    libraryEmptyState = {
+      shelf: typeof shelf === 'number' && isFinite(shelf) && shelf >= toSetUp ? shelf : toSetUp,
+      toSetUp: toSetUp
+    };
+  }
+
+  // The empty-lot copy: the library count and a Set up button when the Home
+  // has projects waiting, else the build copy. Exported for tests.
+  function scopedEmptyHTML(groupId, extraClass, styleAttr) {
+    var open =
+      '<p class="ws-map-scoped-empty' +
+      (extraClass || '') +
+      '" role="status"' +
+      (styleAttr || '') +
+      '>';
+    if (!libraryEmptyState) {
+      return open + 'No members yet. Build a workspace here or add an existing one.</p>';
+    }
+    var shelf = libraryEmptyState.shelf;
+    var count = libraryEmptyState.toSetUp;
+    return (
+      open +
+      '<span class="ws-map-scoped-empty-count">' +
+      shelf +
+      (shelf === 1 ? ' project' : ' projects') +
+      ' on the shelf · <b>' +
+      count +
+      '</b> to set up</span>' +
+      '<button type="button" class="ws-map-scoped-setup" data-setup-projects="' +
+      escapeHtml(groupId) +
+      '">Set up projects…</button></p>'
+    );
+  }
+
   // A sibling of the district tag, never nested in it: a control inside a
   // control is invalid, and selecting a group is a different intention. It
   // gets its own line above the header row (see .ws-map-district-notice), so
@@ -3016,15 +3068,19 @@
       // top of them. The note marks the group's empty lot instead, beside its
       // Commander, where the first building will go.
       parts.push(
-        '<p class="ws-map-scoped-empty is-lot" role="status" style="left:' +
-          vacantLot.x +
-          'px;top:' +
-          vacantLot.y +
-          'px;width:' +
-          vacantLot.width +
-          'px;height:' +
-          vacantLot.height +
-          'px">No members yet. Build a workspace here or add an existing one.</p>'
+        scopedEmptyHTML(
+          scopeGroupId,
+          ' is-lot',
+          ' style="left:' +
+            vacantLot.x +
+            'px;top:' +
+            vacantLot.y +
+            'px;width:' +
+            vacantLot.width +
+            'px;height:' +
+            vacantLot.height +
+            'px"'
+        )
       );
     }
     layout.units.forEach(function (record, index) {
@@ -3059,7 +3115,7 @@
         // stays readable at any zoom; the host's toolbar carries Build and Add
         // existing (group-map-build FR-27).
         (scopeGroupId && !layout.nodes.length && !vacantLot
-          ? '<p class="ws-map-scoped-empty" role="status">No members yet. Build a workspace here or add an existing one.</p>'
+          ? scopedEmptyHTML(scopeGroupId, '', '')
           : '') +
         placementControlsHTML() +
         // The resize overlay lives OUTSIDE the world layer on purpose. Inside
@@ -5491,6 +5547,21 @@
   }
 
   function bindTiles(container, workspaces, options) {
+    // The empty lot's Set up button hands the group back to the host, which
+    // owns the library setup sheet (folder-to-map-handoff FR-6).
+    Array.prototype.forEach.call(
+      container.querySelectorAll('[data-setup-projects]'),
+      function (button) {
+        button.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (options && typeof options.onSetupProjects === 'function')
+            options.onSetupProjects(button.getAttribute('data-setup-projects') || '', {
+              element: button
+            });
+        });
+      }
+    );
     var selectables = container.querySelectorAll(
       '.ws-map-tile[data-ws-id], .ws-map-district-tag[data-ws-id]'
     );
@@ -11012,6 +11083,7 @@
     // Read before districtHTML runs, like the economy. A host that passes
     // none draws no library badge.
     setLibraryBadges(state && state.libraryBadges);
+    setLibraryEmptyState(state && state.libraryEmptyState);
     var allWorkspaces = (state && state.workspaces) || [];
     // Scoped mode is decided before anything reads the workspace list, so
     // stats, layout, bindings, and selection all see only the group.
@@ -11319,6 +11391,8 @@
     framePlaced: framePlaced,
     placedBounds: placedBounds,
     districtMenuItems: districtMenuItems,
+    scopedEmptyHTML: scopedEmptyHTML,
+    setLibraryEmptyState: setLibraryEmptyState,
     // The City Economy's read-only view of a tile. The Map never fetches or
     // writes any of this: the host hands it a snapshot on mount and these draw
     // from it (city-economy FR35, FR36). Exported so the badge and pile can be

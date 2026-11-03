@@ -14,6 +14,8 @@
  * @module workspace-detail-members
  */
 
+import { openLibrarySheet } from './map-library-sheet.js';
+
 // --- Pure helpers (exported for unit testing) ----------------------------------
 
 export function escapeHtml(value) {
@@ -206,6 +208,37 @@ export function extractFileItems(attachments) {
 
 // --- Panel controller -----------------------------------------------------------
 
+/**
+ * The member list's empty block (folder-to-map-handoff FR-7). A Home whose
+ * library has projects to set up says how many and offers the setup sheet;
+ * anything else keeps the plain copy. `library` is { shelf, toSetUp } or null.
+ * Pure.
+ */
+export function membersEmptyHTML(library) {
+  const toSetUp = library && Number.isInteger(library.toSetUp) ? library.toSetUp : 0;
+  if (toSetUp < 1) {
+    return '<div class="group-detail-empty">No members yet. Add an existing workspace or create a new one.</div>';
+  }
+  const shelf =
+    Number.isInteger(library.shelf) && library.shelf >= toSetUp ? library.shelf : toSetUp;
+  return (
+    '<div class="group-detail-empty group-detail-empty-library">' +
+    `<span>${shelf} ${shelf === 1 ? 'project' : 'projects'} on the shelf · <b>${toSetUp}</b> to set up</span>` +
+    '<button type="button" class="modern-btn modern-btn-secondary" data-members-setup-projects>Set up projects…</button>' +
+    '</div>'
+  );
+}
+
+/** The { shelf, toSetUp } a library summary implies, or null. Pure. */
+export function libraryEmptyStateFromSummary(summary) {
+  const digest = summary && summary.digest;
+  if (!digest || digest.setup_note) return null;
+  const toSetUp = Number(digest.activatable);
+  if (!Number.isInteger(toSetUp) || toSetUp < 1) return null;
+  const shelf = Number(digest.projects);
+  return { shelf: Number.isInteger(shelf) && shelf >= toSetUp ? shelf : toSetUp, toSetUp };
+}
+
 export class WorkspaceMembersPanel {
   constructor(workspaceId) {
     this.workspaceId = workspaceId;
@@ -223,6 +256,38 @@ export class WorkspaceMembersPanel {
     this.taskLoadFailures = 0;
     this.taskFilters = { status: 'default', member: 'all', dateRange: 'any' };
     this.colorPopoverOpen = false;
+    this.library = null; // { shelf, toSetUp } for a managed Home with projects waiting
+  }
+
+  // A managed Home's library summary, read with the tree (folder-to-map-handoff
+  // FR-7, FR-9). Never polls; anything unreadable is null and the plain copy.
+  async loadLibrary(signal) {
+    if (this.group?.group_template?.kind !== 'managed_home') return null;
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/assistant-program/library/summary`,
+        { headers: { Accept: 'application/json' }, cache: 'no-store', signal }
+      );
+      if (!res.ok) return null;
+      return libraryEmptyStateFromSummary(await res.json());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  openLibrarySheet(trigger) {
+    const slug = String(this.group?.folder_slug || '').trim();
+    openLibrarySheet({
+      homeID: this.workspaceId,
+      homeName: String(this.group?.name || '').trim() || 'this Home',
+      anchor: trigger || null,
+      beside: trigger || null,
+      shelfRoute: slug
+        ? `/workspaces/${encodeURIComponent(slug)}/assistant#projectLibraryProposals`
+        : '',
+      // The new workspaces become rows; the count goes when nothing is left.
+      onDone: () => void this.reload()
+    });
   }
 
   destroy() {
@@ -326,6 +391,9 @@ export class WorkspaceMembersPanel {
         this.group = null;
         return;
       }
+      const library = directMembers(this.group).length ? null : await this.loadLibrary(signal);
+      if (!isCurrent()) return;
+      this.library = library;
       this.renderMembers();
       this.applyHeaderIdentity();
       if (this.rollupsLoaded) {
@@ -420,8 +488,10 @@ export class WorkspaceMembersPanel {
 
     const members = directMembers(this.group);
     if (members.length === 0) {
-      container.innerHTML =
-        '<div class="group-detail-empty">No members yet. Add an existing workspace or create a new one.</div>';
+      container.innerHTML = membersEmptyHTML(this.library);
+      container
+        .querySelector('[data-members-setup-projects]')
+        ?.addEventListener('click', event => this.openLibrarySheet(event.currentTarget));
       return;
     }
 

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   WorkspaceMembersPanel,
+  membersEmptyHTML,
+  libraryEmptyStateFromSummary,
   escapeHtml,
   normalizeWorkspaceKind,
   isGroupNode,
@@ -283,4 +285,30 @@ test('the plus button opens the shared wizard with this group locked as the pare
   } finally {
     globalThis.window = originalWindow;
   }
+});
+
+test('an empty Home member list offers the setup sheet when projects wait (folder-to-map-handoff FR-7)', () => {
+  assert.match(membersEmptyHTML(null), /No members yet\. Add an existing workspace/);
+  assert.match(membersEmptyHTML({ shelf: 6, toSetUp: 0 }), /No members yet/);
+  const html = membersEmptyHTML({ shelf: 6, toSetUp: 5 });
+  assert.match(html, /6 projects on the shelf · <b>5<\/b> to set up/);
+  assert.match(html, /data-members-setup-projects>Set up projects…<\/button>/);
+  assert.doesNotMatch(html, /ready/i);
+  assert.match(membersEmptyHTML({ shelf: 1, toSetUp: 1 }), /1 project on the shelf/);
+  assert.match(membersEmptyHTML({ shelf: 2, toSetUp: 5 }), /5 projects on the shelf/);
+
+  assert.deepEqual(libraryEmptyStateFromSummary({ digest: { projects: 6, activatable: 5 } }), {
+    shelf: 6,
+    toSetUp: 5
+  });
+  assert.equal(libraryEmptyStateFromSummary({ digest: { projects: 6, activatable: 0 } }), null);
+  assert.equal(
+    libraryEmptyStateFromSummary({
+      digest: { projects: 6, activatable: 5, setup_note: 'project_provider_unavailable' }
+    }),
+    null,
+    'a setup note means nothing can be set up here'
+  );
+  assert.equal(libraryEmptyStateFromSummary({ digest: null }), null);
+  assert.equal(libraryEmptyStateFromSummary(null), null);
 });
