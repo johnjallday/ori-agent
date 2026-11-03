@@ -12671,3 +12671,86 @@ test('give work: a ticket that was not started, or was refused, is not watched',
   h.advance(10000);
   assert.equal(h.toasts.length, 0);
 });
+
+test('district menu offers "Set up N projects…" only when the badge counts some (map-library-setup FR-2, FR-5)', () => {
+  const map = loadOriWorkspaceMap();
+  const home = { id: 'home', kind: 'group', name: 'Music Home' };
+  // The map runs in its own vm realm: compare by value, never by prototype.
+  const byValue = value => JSON.parse(JSON.stringify(value));
+  const labels = () =>
+    byValue(
+      map
+        .districtMenuItems(home, false)
+        .filter(item => item && item.action === 'setup-projects')
+        .map(item => [item.label, !!item.disabled])
+    );
+  assert.deepEqual(labels(), [], 'no badge, no item');
+  map.libraryBadges.setSnapshot({
+    home: {
+      text: '5 to set up',
+      label: 'x',
+      route: '/workspaces/music-home/assistant#projectLibraryProposals',
+      count: 5
+    }
+  });
+  // The layout is not ready in this harness, so the map counts as read-only:
+  // the item is listed but disabled, exactly what FR-5 asks for.
+  assert.deepEqual(labels(), [['Set up 5 projects…', true]]);
+  map.libraryBadges.setSnapshot({
+    home: {
+      text: '1 to set up',
+      label: 'x',
+      route: '/workspaces/m/assistant#projectLibraryProposals',
+      count: 1
+    }
+  });
+  assert.deepEqual(labels(), [['Set up 1 project…', true]]);
+  map.libraryBadges.setSnapshot({
+    home: {
+      text: '2 to review',
+      label: 'x',
+      route: '/workspaces/m/assistant#projectLibraryProposals',
+      count: 0
+    }
+  });
+  assert.deepEqual(labels(), [], 'suggestions to review alone do not offer setup');
+  map.libraryBadges.setSnapshot({
+    home: {
+      text: 'x',
+      label: 'x',
+      route: '/workspaces/m/assistant#projectLibraryProposals',
+      count: '7'
+    }
+  });
+  assert.deepEqual(labels(), [], 'a non-integer count is ignored');
+  assert.deepEqual(
+    byValue(map.districtMenuItems(home, true)),
+    [],
+    'a scoped group page draws no district menu'
+  );
+  map.libraryBadges.setSnapshot(null);
+});
+
+test('placedBounds frames only the drawn tiles that were just set up (map-library-setup FR-17)', () => {
+  const map = loadOriWorkspaceMap();
+  const nodes = [
+    { id: 'a', x: 0, y: 0 },
+    { id: 'b', x: 352, y: 170 },
+    { id: 'c', x: 9000, y: 9000 }
+  ];
+  // The map runs in its own vm realm, so compare by value, not by prototype.
+  assert.deepEqual(JSON.parse(JSON.stringify(map.placedBounds(nodes, ['a', 'b', 'missing']))), {
+    minX: 0,
+    minY: 0,
+    maxX: 352 + 176,
+    maxY: 170 + 170
+  });
+  assert.equal(map.placedBounds(nodes, ['missing']), null, 'nothing drawn: nothing to frame');
+  assert.equal(map.placedBounds(nodes, []), null);
+  assert.equal(map.placedBounds(null, ['a']), null);
+  assert.equal(
+    map.framePlaced(['a']),
+    0,
+    'without a mounted map nothing moves and nothing is marked'
+  );
+});

@@ -720,7 +720,13 @@
         !LIBRARY_SHELF_ROUTE.test(badge.route)
       )
         return;
-      libraryBadges[id] = { text: badge.text, label: badge.label, route: badge.route };
+      libraryBadges[id] = {
+        text: badge.text,
+        label: badge.label,
+        route: badge.route,
+        // Projects the setup sheet could set up; the district menu says so.
+        count: Number.isInteger(badge.count) && badge.count > 0 ? badge.count : 0
+      };
     });
   }
 
@@ -4679,9 +4685,20 @@
     var items = [
       { label: 'Open group', action: 'open' },
       giveTaskMenuItem(ws),
-      { label: 'Build', action: 'build', disabled: readOnly },
-      menuDivider()
+      { label: 'Build', action: 'build', disabled: readOnly }
     ];
+    // A Home whose library has projects to set up offers the setup sheet here
+    // as well as on its badge (map-library-setup FR-2). Hidden at zero so the
+    // menu never carries a dead entry; disabled on a read-only map (FR-5).
+    var badge = libraryBadges[groupId];
+    if (badge && badge.count > 0) {
+      items.push({
+        label: 'Set up ' + badge.count + (badge.count === 1 ? ' project…' : ' projects…'),
+        action: 'setup-projects',
+        disabled: readOnly
+      });
+    }
+    items.push(menuDivider());
     items.push({
       label: collapsed ? 'Expand group' : 'Collapse group',
       action: collapsed ? 'expand-group' : 'collapse-group',
@@ -5124,6 +5141,13 @@
         break;
       case 'give-task':
         openGiveWorkFromMap(context);
+        break;
+      // The Home's library setup sheet is the host's (map-library-setup FR-2):
+      // the map hands over the group and the menu's own anchor element.
+      case 'setup-projects':
+        announce(container, 'Setting up projects for ' + name);
+        if (options && typeof options.onSetupProjects === 'function')
+          options.onSetupProjects(id, { element: context.element || null });
         break;
       // District layout actions (#346 FR-146). They run the same controller the
       // direct handles and the Home rail run, so all three surfaces validate,
@@ -10425,6 +10449,88 @@
     return true;
   }
 
+  // placedBounds is the world box around the drawn nodes with these ids, or
+  // null when none of them is drawn. Pure, and exported for tests
+  // (map-library-setup FR-17).
+  function placedBounds(nodes, ids) {
+    var wanted = {};
+    (Array.isArray(ids) ? ids : []).forEach(function (id) {
+      if (id) wanted[String(id)] = true;
+    });
+    var bounds = null;
+    (Array.isArray(nodes) ? nodes : []).forEach(function (node) {
+      if (!node || !wanted[node.id]) return;
+      var box = {
+        minX: node.x,
+        minY: node.y,
+        maxX: node.x + (typeof node.width === 'number' ? node.width : CELL_W),
+        maxY: node.y + (typeof node.height === 'number' ? node.height : CELL_H)
+      };
+      bounds = bounds
+        ? {
+            minX: Math.min(bounds.minX, box.minX),
+            minY: Math.min(bounds.minY, box.minY),
+            maxX: Math.max(bounds.maxX, box.maxX),
+            maxY: Math.max(bounds.maxY, box.maxY)
+          }
+        : box;
+    });
+    return bounds;
+  }
+
+  var PLACED_HIGHLIGHT_MS = 2600;
+
+  /**
+   * Look at workspaces that were just put on the map (map-library-setup
+   * FR-17): frame all of them without zooming in past 1:1, and mark their tiles
+   * `is-just-placed` for a moment so they can be found. Nothing is selected
+   * and nothing is saved. Returns how many of the ids were drawn.
+   */
+  function framePlaced(workspaceIds, groupId) {
+    var container = lastMount && lastMount.container;
+    if (!container || !lastWorldLayout || placementSession || moveState) return 0;
+    var bounds = placedBounds(lastWorldLayout.nodes, workspaceIds);
+    if (!bounds) return 0;
+    // Keep the district's name, badge and controls in the frame too: the new
+    // tiles sit inside it, and cropping its header leaves no way to tell which
+    // Home they joined (FR-17).
+    var district = groupId ? renderedDistrict(groupId) : null;
+    if (district) {
+      var chrome = COMPACT_HOME_HEADER_CLEARANCE + LIBRARY_BADGE_CLEARANCE;
+      bounds = {
+        minX: Math.min(bounds.minX, district.x),
+        minY: Math.min(bounds.minY, district.y - chrome),
+        maxX: Math.max(bounds.maxX, district.x + district.width),
+        maxY: Math.max(bounds.maxY, district.y + district.height)
+      };
+    }
+    var framed = fitBounds(
+      bounds,
+      viewportSize(container.querySelector('[data-ws-map-viewport]')),
+      48
+    );
+    framed.zoom = Math.min(1, framed.zoom);
+    setCamera(framed, container, { persist: false });
+    var count = 0;
+    (Array.isArray(workspaceIds) ? workspaceIds : []).forEach(function (id) {
+      var tile = container.querySelector('.ws-map-tile[data-ws-id="' + cssEscape(id) + '"]');
+      if (!tile) return;
+      count++;
+      tile.classList.add('is-just-placed');
+      setTimeout(function () {
+        tile.classList.remove('is-just-placed');
+      }, PLACED_HIGHLIGHT_MS);
+    });
+    return count;
+  }
+
+  function cssEscape(value) {
+    var text = String(value || '');
+    if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function')
+      return CSS.escape(text);
+    return text.replace(/["\\]/g, '\\$&');
+  }
+
   // beginMove reuses the same building/district keyboard transaction as the
   // map's own controls. Entry/cancel never save a point or change membership.
   function beginMove(workspaceId, options) {
@@ -11208,6 +11314,11 @@
     // Arrow keys move it and Enter saves; Escape or leaving writes nothing.
     beginMove: beginMove,
     reveal: reveal,
+    // Frame workspaces that were just put on the map and mark their tiles for
+    // a moment (map-library-setup FR-17). placedBounds is its pure half.
+    framePlaced: framePlaced,
+    placedBounds: placedBounds,
+    districtMenuItems: districtMenuItems,
     // The City Economy's read-only view of a tile. The Map never fetches or
     // writes any of this: the host hands it a snapshot on mount and these draw
     // from it (city-economy FR35, FR36). Exported so the badge and pile can be
