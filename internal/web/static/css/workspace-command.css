@@ -9512,6 +9512,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   max-height: 520px;
   overflow-y: auto;
 }
+/* In the main column on a phone a row's actions take more than one line
+   rather than running past the panel ("Open in Obsidian", demo 5.5). */
+.ws-hq-notes .ws-notes-item-actions {
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
+}
 /* Its heading reads like the other main-column panels', not a dialog's. */
 .ws-hq-notes .ws-cmd-modal-head {
   padding: 12px 14px 6px;
