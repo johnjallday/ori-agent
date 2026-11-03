@@ -104,6 +104,12 @@ import { readRailSection, resolveRailSection, writeRailSection } from './workspa
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
 import { capAttentionLines, hqAttentionLines, hqNeedsYouRows } from './hq-attention.js';
 import { hqStationCards, stationsNeedingYou } from './hq-stations-grid.js';
+import {
+  briefScopeHasOthers,
+  flowModel,
+  readMapArrangement,
+  writeMapArrangement
+} from './hq-map-flow.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 
 // The feature mounts the HQ's Details page hides above its header, read for
@@ -290,6 +296,13 @@ export class WorkspaceCommandView {
       this._urlBootState && this._urlBootState.mode,
       this.readCommandViewModePreference()
     );
+    // The HQ Map's arrangement, Flow or Free (PRD 767 FR3). Remembered per
+    // workspace, so it is read once the workspace is known
+    // (currentMapArrangement), the way the rail section is.
+    this.mapArrangement = '';
+    this.mapArrangementFor = '';
+    // The Flow node whose map window is open, to take focus back on close.
+    this.flowOpener = '';
     this.activeRailSection = '';
     // Which section to open is chosen when Details is first shown and again
     // on every return to it from another mode (see settleRailSection).
@@ -3156,11 +3169,14 @@ export class WorkspaceCommandView {
   // key, so focus still returns to where the user was.
   resolveStatModalTrigger(trigger) {
     if (!trigger || trigger.isConnected !== false) return trigger;
-    // A building on the map or rail, or a card in the HQ's stations grid
-    // (PRD 766), rebuilt by a render while its panel was open.
-    const attr =
-      typeof trigger.hasAttribute === 'function' && trigger.hasAttribute('data-cmd-hq-card')
-        ? 'data-cmd-hq-card'
+    // A building on the map or rail, a card in the HQ's stations grid
+    // (PRD 766) or a Flow map node (PRD 767), rebuilt by a render while its
+    // panel was open.
+    const has = name => typeof trigger.hasAttribute === 'function' && trigger.hasAttribute(name);
+    const attr = has('data-cmd-hq-card')
+      ? 'data-cmd-hq-card'
+      : has('data-cmd-flow-node')
+        ? 'data-cmd-flow-node'
         : 'data-cmd-hq-station';
     const key = typeof trigger.getAttribute === 'function' ? trigger.getAttribute(attr) : '';
     if (!key || !this.container || typeof this.container.querySelectorAll !== 'function') {
@@ -5992,6 +6008,16 @@ export class WorkspaceCommandView {
     // every reference to them elsewhere keeps working. 'backlog' carries
     // "Backlog" in its own accessible name/title (not just "Quest Board") so
     // the tool-belt button never obscures the real Backlog lifecycle (FR50).
+    // The HQ map uses the plain names (PRD 767 FR18).
+    if (this.isPersonalHQ()) {
+      return [
+        { key: 'objective', label: HQ_LABELS.workspaceGoal, icon: 'bi-bullseye' },
+        { key: 'objectives', label: HQ_LABELS.tasks, icon: 'bi-list-check' },
+        { key: 'backlog', label: HQ_LABELS.backlog, icon: 'bi-journal-bookmark' },
+        { key: 'inventory', label: HQ_LABELS.inventory, icon: 'bi-box-seam' },
+        { key: 'stations', label: HQ_LABELS.stations, icon: 'bi-cpu' }
+      ];
+    }
     return [
       { key: 'objective', label: 'Workspace Goal', icon: 'bi-bullseye' },
       { key: 'objectives', label: 'Tickets', icon: 'bi-list-check' },
@@ -6097,6 +6123,7 @@ export class WorkspaceCommandView {
     const count = items.length;
     const shown = items.slice(0, 4);
     const sync = this.backlogSync();
+    const hq = this.isPersonalHQ();
     let rows;
     if (page.backlogLoading && !count) {
       rows =
@@ -6137,11 +6164,13 @@ export class WorkspaceCommandView {
         .join('');
     } else {
       rows =
-        '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest Board clear</strong><span>Nothing saved for later. Add an idea without committing it.</span></div>';
+        '<div class="ws-cmd-map-empty is-quest-empty"><strong>' +
+        (hq ? 'Backlog clear' : 'Quest Board clear') +
+        '</strong><span>Nothing saved for later. Add an idea without committing it.</span></div>';
     }
     return (
       '<div class="ws-cmd-map-window-section is-backlog">' +
-      this.mapZoneHeaderHTML('Backlog', 'Quest Board', count) +
+      this.mapZoneHeaderHTML('Backlog', hq ? 'Saved for later' : 'Quest Board', count) +
       this.backlogSyncBadgeHTML(sync) +
       '<div class="ws-cmd-map-task-list">' +
       rows +
@@ -9509,8 +9538,11 @@ export class WorkspaceCommandView {
     const selected = agent.key === this.selectedAgentKey;
     const destination = agent.destination || 'hub';
     const statusLabel = agent.status?.label || 'Idle';
+    // The HQ map says "Lead" (PRD 767 FR18); other maps keep their wording.
     const commanderLbl = agent.entry
-      ? this.commanderLabel(agent.profile && agent.profile.role)
+      ? this.isPersonalHQ()
+        ? HQ_LABELS.lead
+        : this.commanderLabel(agent.profile && agent.profile.role)
       : '';
     // Station title (design consideration): pair role with the workspace it's
     // stationed in, e.g. "Commander · Production" — this is how
@@ -9600,13 +9632,21 @@ export class WorkspaceCommandView {
 
   // The repair card that stands in the Commander's place when there is none.
   renderMapCommandRepair() {
+    // The HQ map names the slot "lead" (PRD 767 FR18).
+    const role = this.isPersonalHQ() ? HQ_LABELS.lead.toLowerCase() : 'Commander';
     return (
       '<div class="ws-cmd-map-command-repair">' +
-      '<strong>No Commander</strong>' +
-      '<span>Chats, routing, and ticket orchestration need a Commander.</span>' +
+      '<strong>No ' +
+      escapeHtml(role) +
+      '</strong>' +
+      '<span>Chats, routing, and ticket orchestration need a ' +
+      escapeHtml(role) +
+      '.</span>' +
       '<button type="button" class="ws-cmd-agent-action' +
       this.secondaryActionClass() +
-      '" data-cmd-add-agent>Hire a Commander</button>' +
+      '" data-cmd-add-agent>Hire a ' +
+      escapeHtml(role) +
+      '</button>' +
       '</div>'
     );
   }
@@ -11575,7 +11615,9 @@ export class WorkspaceCommandView {
       this.mapWindowOptions().find(item => item.key === key) ||
       (key === 'inspector'
         ? { key: 'inspector', label: 'Unit Sheet', icon: 'bi-person-vcard' }
-        : null);
+        : key === 'needs-you' && this.isHQFlowMap()
+          ? { key: 'needs-you', label: HQ_LABELS.needsYou, icon: 'bi-bell' }
+          : null);
     if (!option) return '';
     const body = {
       objective: () => this.renderMapMissionPanel(),
@@ -11583,7 +11625,13 @@ export class WorkspaceCommandView {
       backlog: () => this.renderMapBacklogPanel(),
       inventory: () => this.renderMapInventory(),
       stations: () => this.renderMapStationsPanel(),
-      inspector: () => this.renderMapInspector(selectedAgent)
+      inspector: () => this.renderMapInspector(selectedAgent),
+      // The Flow map's Needs you node opens the HQ's own Needs you panel
+      // (PRD 767 FR14): the Details renderer, in the map's window frame.
+      'needs-you': () =>
+        '<section class="ws-hq-panel ws-hq-needs" data-cmd-hq-needs>' +
+        this.hqNeedsYouInnerHTML() +
+        '</section>'
     }[key];
     if (!body) return '';
     return (
@@ -11609,21 +11657,337 @@ export class WorkspaceCommandView {
   renderOperationsMap() {
     const { agents, selected } = this.mapAgentViewModels();
     if (this.isGroupWorkspace()) return this.renderGroupOperationsMap(agents, selected);
+    return this.renderWorkFirst() + this.renderOperationsMapShell(agents, selected);
+  }
+
+  // The map region and what floats over it. The HQ shows it in one of two
+  // arrangements (PRD 767): Flow, three lanes from the sources through the
+  // lead to what needs the user, or Free, the draggable field. Every other
+  // workspace has only the field.
+  renderOperationsMapShell(agents, selected) {
+    const hq = this.isPersonalHQ();
+    const flow = this.isHQFlowMap();
     // is-hq scopes the citadel gold accent to the Stations panel (FR15) —
     // no whole-frame tint, layout/density unchanged.
     return (
-      this.renderWorkFirst() +
       '<div class="ws-cmd-map-shell' +
-      (this.isPersonalHQ() ? ' is-hq' : '') +
+      (hq ? ' is-hq' : '') +
+      (flow ? ' is-flow' : '') +
       '">' +
       '<div class="ws-cmd-opmap" role="region" aria-label="Workspace operations map">' +
-      this.renderMapAgentsZone(agents) +
-      this.renderMapToolTray() +
+      (hq ? this.mapArrangementRowHTML(flow) : '') +
+      (flow
+        ? this.renderHQFlow(agents)
+        : this.renderMapAgentsZone(agents) + this.renderMapToolTray()) +
       '</div>' +
       this.mapGiveWorkHTML() +
       this.renderMapWindow(selected) +
       '</div>'
     );
+  }
+
+  // ── HQ Map arrangement: Flow or Free (PRD 767) ──
+
+  mapArrangementSlug() {
+    return this.workspaceSlug() || this.workspaceId();
+  }
+
+  // The remembered arrangement for this workspace, read again whenever the
+  // workspace changes under the same view.
+  currentMapArrangement() {
+    const slug = this.mapArrangementSlug();
+    if (!this.mapArrangement || this.mapArrangementFor !== slug) {
+      this.mapArrangement = readMapArrangement(this.railStorage(), slug);
+      this.mapArrangementFor = slug;
+    }
+    return this.mapArrangement;
+  }
+
+  // Flow is the HQ's map unless the user chose Free; a group is never Flow.
+  isHQFlowMap() {
+    return (
+      this.isPersonalHQ() && !this.isGroupWorkspace() && this.currentMapArrangement() !== 'free'
+    );
+  }
+
+  mapArrangementRowHTML(flow) {
+    const option = (value, label) =>
+      '<button type="button" class="ws-cmd-map-arrangement-btn" data-cmd-map-arrangement="' +
+      value +
+      '" aria-pressed="' +
+      ((value === 'flow') === flow ? 'true' : 'false') +
+      '">' +
+      escapeHtml(label) +
+      '</button>';
+    return (
+      '<div class="ws-cmd-map-arrangement">' +
+      '<div class="ws-cmd-map-seg" role="group" aria-label="' +
+      escapeHtml(HQ_LABELS.mapArrangement) +
+      '">' +
+      option('flow', HQ_LABELS.flow) +
+      option('free', HQ_LABELS.free) +
+      '</div></div>'
+    );
+  }
+
+  // Switches the HQ Map's arrangement, remembers it, and redraws the map
+  // region alone: the header, the strip and the view switch stay as they are
+  // (FR2, FR4). Focus lands on the first node (Flow) or building (Free).
+  setMapArrangement(value) {
+    if (!this.isPersonalHQ() || this.isGroupWorkspace()) return;
+    const next = value === 'free' ? 'free' : 'flow';
+    const slug = this.mapArrangementSlug();
+    this.mapArrangement = next;
+    this.mapArrangementFor = slug;
+    writeMapArrangement(this.railStorage(), slug, next);
+    const shell =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('.ws-cmd-map-shell')
+        : null;
+    if (shell && 'outerHTML' in shell) {
+      const { agents, selected } = this.mapAgentViewModels();
+      shell.outerHTML = this.renderOperationsMapShell(agents, selected);
+      this.bindOperationsMap();
+      this.paintMapActivity();
+    } else {
+      this.render();
+    }
+    // querySelector with a selector list answers in document order, so each
+    // choice is asked for in turn: the switch itself only when nothing else is.
+    const find = selector => this.container?.querySelector?.(selector) || null;
+    const target =
+      next === 'flow'
+        ? find('.ws-cmd-flow-node') || find('.ws-cmd-flow-lead')
+        : find('.ws-cmd-map-hq-station') || find('[data-cmd-map-arrangement="free"]');
+    target?.focus?.({ preventScroll: true });
+  }
+
+  // What the Flow lanes read: every station's own state, the counts the
+  // Details header shows, the team and what the lead waits on.
+  hqFlowModel(agents) {
+    const stations = this.mapStationRegistry().map(entry => {
+      let state = {};
+      try {
+        state = (typeof entry.state === 'function' && entry.state()) || {};
+      } catch (_error) {
+        state = { value: 'Unavailable', tone: 'degraded' };
+      }
+      return { key: entry.key, label: entry.label, state };
+    });
+    const needs = this.hqNeedsYou({ all: true });
+    const counts = this.currentTicketCounts();
+    const known = TicketCounts.isKnown(counts);
+    const leadWaiting = this.hqWaitingItems().find(item => item.isLead);
+    const brief = this.dailyBriefStationData();
+    return flowModel({
+      stations,
+      counts: {
+        needsYou: needs.total,
+        needsYouFrom: needs.rows.map(row => row.category),
+        followUps: this.hqFollowUpsCount(),
+        openTickets: known ? TicketCounts.openCount(counts) : null,
+        ticketLine: known ? TicketCounts.format(counts) : ''
+      },
+      agents: (Array.isArray(agents) ? agents : []).map(agent => ({
+        name: agent.name,
+        encodedName: agent.encodedName,
+        entry: Boolean(agent.entry),
+        status: agent.status?.label || ''
+      })),
+      waiting: leadWaiting ? leadWaiting.title || 'a ticket needs your answer' : '',
+      briefScopeHasOthers: briefScopeHasOthers(brief && brief.config, this.workspaceId())
+    });
+  }
+
+  flowNodeHTML(node) {
+    const attribute = node.station
+      ? node.key === 'brief'
+        ? 'data-cmd-flow-node="brief"'
+        : 'data-cmd-hq-station="' + escapeHtml(node.station) + '"'
+      : 'data-cmd-flow-node="' + escapeHtml(node.key) + '"';
+    return (
+      '<li class="ws-cmd-flow-cell">' +
+      '<button type="button" class="ws-cmd-flow-node is-' +
+      escapeHtml(node.tone) +
+      (node.dashed ? ' is-dashed' : '') +
+      '" ' +
+      attribute +
+      ' aria-label="' +
+      escapeHtml(node.accessibleName) +
+      '">' +
+      '<span class="ws-cmd-flow-node-head">' +
+      '<span class="ws-cmd-flow-node-name">' +
+      escapeHtml(node.label) +
+      '</span>' +
+      (node.stateWord
+        ? '<span class="ws-cmd-flow-node-state">' + escapeHtml(node.stateWord) + '</span>'
+        : '') +
+      '</span>' +
+      (node.subtitle
+        ? '<span class="ws-cmd-flow-node-sub">' + escapeHtml(node.subtitle) + '</span>'
+        : '') +
+      '</button></li>'
+    );
+  }
+
+  flowLeadHTML(lead, agents) {
+    if (!lead) {
+      return (
+        '<button type="button" class="ws-cmd-flow-lead is-empty" data-cmd-flow-node="lead" aria-label="' +
+        escapeHtml('No lead yet. ' + EMPTY_ROSTER_LINE) +
+        '">' +
+        '<span class="ws-cmd-flow-lead-name">No lead yet</span>' +
+        '<span class="ws-cmd-flow-node-sub">' +
+        escapeHtml(EMPTY_ROSTER_LINE) +
+        '</span></button>'
+      );
+    }
+    const agent = (agents || []).find(item => item.entry) || null;
+    return (
+      '<button type="button" class="ws-cmd-flow-lead' +
+      (lead.waiting ? ' is-waiting' : '') +
+      '" data-cmd-flow-node="lead" aria-label="' +
+      escapeHtml(lead.accessibleName) +
+      '">' +
+      '<span class="ws-cmd-flow-lead-head">' +
+      this.agentCharacterHTML(agent, 'roster') +
+      '<span class="ws-cmd-flow-lead-id">' +
+      '<span class="ws-cmd-flow-lead-name">' +
+      escapeHtml(lead.name) +
+      ' <span class="ws-hq-chip is-lead">' +
+      escapeHtml(HQ_LABELS.lead) +
+      '</span></span>' +
+      '<span class="ws-cmd-flow-node-sub">' +
+      escapeHtml(lead.status) +
+      '</span>' +
+      '</span></span>' +
+      (lead.waiting
+        ? '<span class="ws-cmd-flow-lead-waiting"><span class="ws-cmd-flow-node-state">' +
+          escapeHtml(HQ_LABELS.waitingOnYou) +
+          '</span> ' +
+          escapeHtml(lead.waiting) +
+          '</span>'
+        : '') +
+      '<span class="ws-cmd-flow-node-sub">' +
+      escapeHtml(lead.specialistsLine) +
+      '</span>' +
+      '</button>'
+    );
+  }
+
+  // Decorative connectors (FR11, FR12): a stub per node, one spine, arrows.
+  // Their geometry is CSS from the fixed node height, so nothing is measured.
+  flowLinksHTML(direction, nodes) {
+    const count = nodes.length;
+    const stubs = nodes
+      .map(
+        (node, index) =>
+          '<span class="ws-cmd-flow-stub' +
+          (node.dashed ? ' is-dashed' : '') +
+          '" style="--flow-row:' +
+          index +
+          '"></span>'
+      )
+      .join('');
+    return (
+      '<div class="ws-cmd-flow-links is-' +
+      direction +
+      '" aria-hidden="true" style="--flow-links:' +
+      count +
+      '">' +
+      stubs +
+      (count ? '<span class="ws-cmd-flow-spine"></span>' : '') +
+      '<span class="ws-cmd-flow-trunk"></span>' +
+      '</div>'
+    );
+  }
+
+  renderHQFlow(agents) {
+    const model = this.hqFlowModel(agents);
+    const lane = (key, title, body) =>
+      '<section class="ws-cmd-flow-lane is-' +
+      key +
+      '" aria-labelledby="ws-cmd-flow-' +
+      key +
+      '-title">' +
+      '<h3 class="ws-cmd-flow-lane-title" id="ws-cmd-flow-' +
+      key +
+      '-title">' +
+      escapeHtml(title) +
+      '</h3>' +
+      body +
+      '</section>';
+    const list = nodes =>
+      '<ul class="ws-cmd-flow-nodes">' +
+      nodes.map(node => this.flowNodeHTML(node)).join('') +
+      '</ul>';
+    return (
+      '<div class="ws-cmd-flow" data-cmd-flow style="--flow-rows:' +
+      Math.max(model.sources.length, model.needs.length, 1) +
+      '">' +
+      lane('sources', HQ_LABELS.whatOriReads, list(model.sources)) +
+      this.flowLinksHTML('in', model.sources) +
+      lane(
+        'lead',
+        HQ_LABELS.yourLeadAgent,
+        '<div class="ws-cmd-flow-lead-slot">' + this.flowLeadHTML(model.lead, agents) + '</div>'
+      ) +
+      this.flowLinksHTML('out', model.needs) +
+      lane('needs', HQ_LABELS.whatNeedsYou, list(model.needs)) +
+      '</div>'
+    );
+  }
+
+  // A right-lane node or the lead opens the surface the Details page already
+  // has for it, over the map (FR14). Source nodes go through
+  // runHQStationAction like the Free buildings. Stat modals hand focus back
+  // to their trigger themselves; the Needs you window does it through
+  // restoreFlowOpenerFocus.
+  runFlowNode(key, trigger) {
+    switch (key) {
+      case 'needs-you':
+        this.flowOpener = 'needs-you';
+        this.activeMapWindow = 'needs-you';
+        this.render();
+        this.container
+          ?.querySelector?.(
+            '.ws-cmd-map-window [data-cmd-hq-needs-action], .ws-cmd-map-window-close'
+          )
+          ?.focus?.({ preventScroll: true });
+        return;
+      case 'follow-ups': {
+        // The follow-ups panel sits right under the map in Map mode. With
+        // nothing in it the panel is hidden, so say so rather than do nothing.
+        const host = this.container?.querySelector?.('[data-cmd-followups-host]');
+        const panel = host?.querySelector?.('.workspace-followups');
+        if (!panel && this.hqFollowUpsCount() === 0) {
+          if (typeof window !== 'undefined' && window.Toast?.info) {
+            window.Toast.info('Nothing to follow up right now.');
+          }
+          return;
+        }
+        this.runHQJump('followups');
+        return;
+      }
+      case 'brief':
+        this.openDailyBriefPanel(trigger);
+        return;
+      case 'tasks':
+        this.openStatModal('tasks', trigger);
+        return;
+      case 'lead':
+        this.openStatModal('agents', trigger);
+        return;
+      default:
+    }
+  }
+
+  // After a map window a Flow node opened has closed, focus goes back to it.
+  restoreFlowOpenerFocus(root) {
+    const key = this.flowOpener;
+    if (!key || this.activeMapWindow || typeof root?.querySelector !== 'function') return;
+    this.flowOpener = '';
+    root.querySelector('[data-cmd-flow-node="' + key + '"]')?.focus?.({ preventScroll: true });
   }
 
   /**
@@ -11716,9 +12080,36 @@ export class WorkspaceCommandView {
     // The Detachment map lives in real DOM this view owns, so it is re-attached
     // rather than re-rendered (group-map-build FR-5).
     this.syncDetachmentMap();
-    this.bindStationDrag(root);
+    // Flow has no positions to drag (PRD 767 FR16).
+    const flow = Boolean(root.classList && root.classList.contains('is-flow'));
+    if (!flow) this.bindStationDrag(root);
+    if (flow) this.restoreFlowOpenerFocus(root);
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const arrangement = event.target.closest('[data-cmd-map-arrangement]');
+      if (arrangement) {
+        const value = arrangement.getAttribute('data-cmd-map-arrangement');
+        if (value !== this.currentMapArrangement()) this.setMapArrangement(value);
+        return;
+      }
+      const flowNode = event.target.closest('[data-cmd-flow-node]');
+      if (flowNode) {
+        this.runFlowNode(flowNode.getAttribute('data-cmd-flow-node'), flowNode);
+        return;
+      }
+      const needsAction = event.target.closest('[data-cmd-hq-needs-action]');
+      if (needsAction) {
+        this.runHQNeedsYouAction(needsAction.getAttribute('data-cmd-hq-needs-action'), needsAction);
+        return;
+      }
+      if (event.target.closest('[data-cmd-hq-needs-all]')) {
+        this.hqNeedsYouExpanded = true;
+        this.render();
+        this.container
+          ?.querySelector?.('.ws-cmd-map-window [data-cmd-hq-needs-action]')
+          ?.focus?.({ preventScroll: true });
+        return;
+      }
       const detachmentBuild = event.target.closest('[data-cmd-detachment-build]');
       if (detachmentBuild) {
         this.openDetachmentBuild(detachmentBuild);
@@ -14092,23 +14483,7 @@ export class WorkspaceCommandView {
 
   // Plain values for hqAttentionLines, read from what the page already has.
   hqAttentionState() {
-    const page = this.page || {};
-    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    const waiting = tasks
-      .filter(task => sharedIsNeedsInputTask(task))
-      .map(task => {
-        const agent = String(task.to || task.agent_name || task.assigned_to || '').trim();
-        return {
-          agent,
-          isLead: Boolean(
-            agent &&
-            typeof page.isWorkspaceEntryAgent === 'function' &&
-            page.isWorkspaceEntryAgent(agent)
-          ),
-          title: String(task.description || task.name || task.title || '').trim(),
-          taskId: String(task.id || '')
-        };
-      });
+    const waiting = this.hqWaitingItems();
     const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
     let goalState = null;
     try {
@@ -14128,6 +14503,28 @@ export class WorkspaceCommandView {
           : null,
       github: this.hqGitHubSignal()
     };
+  }
+
+  // The tickets waiting on the user's answer, and whose they are: the strip's
+  // Lead line and the Flow map's lead card read the same list.
+  hqWaitingItems() {
+    const page = this.page || {};
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    return tasks
+      .filter(task => sharedIsNeedsInputTask(task))
+      .map(task => {
+        const agent = String(task.to || task.agent_name || task.assigned_to || '').trim();
+        return {
+          agent,
+          isLead: Boolean(
+            agent &&
+            typeof page.isWorkspaceEntryAgent === 'function' &&
+            page.isWorkspaceEntryAgent(agent)
+          ),
+          title: String(task.description || task.name || task.title || '').trim(),
+          taskId: String(task.id || '')
+        };
+      });
   }
 
   hqAttentionAll() {

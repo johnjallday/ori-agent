@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
+import { tacticalTermsIn } from './hq-labels.js';
 
 globalThis.document = { getElementById: () => null };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -93,6 +94,108 @@ test('terminology: Accept Quest always spells out Promote to Ready in its access
     /aria-label="Accept Quest — Promote Ship it to Ready"/,
     'accessible name spells out the real action'
   );
+});
+
+// ---------- HQ map plain names (PRD 767 FR17, FR18) ----------
+
+function hqMapView(over = {}) {
+  return makeView({
+    selectedAgentKey: '',
+    page: {
+      workspaceId: 'hq',
+      workspace: { id: 'hq', name: 'Personal HQ', designation: 'personal_hq' },
+      tasks: [],
+      backlogItems: [],
+      backlogSync: null,
+      buildAgentGroups: () => [
+        { name: 'Atlas', isWorkspaceAgent: true, isUnassigned: false, tasks: [] },
+        { name: 'Bo', isWorkspaceAgent: true, isUnassigned: false, tasks: [] }
+      ],
+      isWorkspaceEntryAgent: name => name === 'Atlas',
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' })
+    },
+    ...over
+  });
+}
+
+// Every visible word and every accessible name in a piece of markup.
+function wordsOf(html) {
+  const attributes = [...html.matchAll(/(?:aria-label|title)="([^"]*)"/g)].map(m => m[1]);
+  return attributes.join(' | ') + ' | ' + html.replace(/<[^>]+>/g, ' ');
+}
+
+test('terminology: the HQ map belt reads Workspace goal, Tickets, Backlog, Inventory, Stations', () => {
+  const view = hqMapView();
+  assert.deepEqual(
+    view.mapWindowOptions().map(option => [option.key, option.label]),
+    [
+      ['objective', 'Workspace goal'],
+      ['objectives', 'Tickets'],
+      ['backlog', 'Backlog'],
+      ['inventory', 'Inventory'],
+      ['stations', 'Stations']
+    ]
+  );
+  view.mapArrangement = 'free';
+  view.mapArrangementFor = 'hq';
+  const belt = view.renderMapToolTray();
+  for (const label of ['Workspace goal', 'Tickets', 'Backlog', 'Inventory', 'Stations']) {
+    assert.match(belt, new RegExp('aria-label="' + label + '"'));
+    assert.match(belt, new RegExp('title="' + label + '"'));
+  }
+});
+
+test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
+  const view = hqMapView();
+  const flow = view.renderOperationsMap();
+  assert.match(flow, /is-flow/);
+  view.mapArrangement = 'free';
+  view.mapArrangementFor = 'hq';
+  const free = view.renderOperationsMap();
+  assert.match(free, /ws-cmd-map-belt/);
+  // The lead unit says Lead.
+  assert.match(free, /aria-label="Select Atlas, Lead · Personal HQ\. /);
+  const windows = ['objective', 'objectives', 'backlog', 'inventory', 'stations'].map(key => {
+    view.activeMapWindow = key;
+    return view.renderOperationsMap();
+  });
+  view.activeMapWindow = '';
+  // Without a lead, the repair card asks for a lead.
+  const leaderless = hqMapView();
+  leaderless.page.isWorkspaceEntryAgent = () => false;
+  leaderless.mapArrangement = 'free';
+  leaderless.mapArrangementFor = 'hq';
+  const repair = leaderless.renderOperationsMap();
+  assert.match(repair, /No lead/);
+  assert.match(repair, />Hire a lead</);
+  for (const [name, html] of [
+    ['flow', flow],
+    ['free', free],
+    ['repair', repair],
+    ...windows.map((html, i) => ['window ' + i, html])
+  ]) {
+    assert.deepEqual(tacticalTermsIn(wordsOf(html)), [], name);
+  }
+});
+
+test('terminology: an ordinary workspace map keeps its own words', () => {
+  const view = makeView({
+    selectedAgentKey: '',
+    page: {
+      workspace: { id: 'w', name: 'Studio' },
+      tasks: [],
+      buildAgentGroups: () => [
+        { name: 'Atlas', isWorkspaceAgent: true, isUnassigned: false, tasks: [] }
+      ],
+      isWorkspaceEntryAgent: name => name === 'Atlas',
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' })
+    }
+  });
+  const html = view.renderOperationsMap();
+  assert.match(html, /aria-label="Backlog · Quest Board"/);
+  assert.match(html, /aria-label="Workspace Goal"/);
+  assert.match(html, /Acting Commander/);
+  assert.doesNotMatch(html, /ws-cmd-map-arrangement|is-flow/);
 });
 
 test('Escape prioritizes the Backlog drawer over the Tasks drawer (only one drawer is ever open, but Escape must still close it first)', () => {

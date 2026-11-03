@@ -411,6 +411,333 @@ test('an ordinary workspace renders the Details markup it always has (FR1)', () 
   );
 });
 
+// --- Map snapshots (PRD 767 FR1) ----------------------------------------------
+// Flow is the HQ Map's new default; an ordinary workspace's Map and the HQ Map
+// in Free must render what they rendered before. The HQ's Free map gains only
+// the "Map arrangement" control row (FR2), which is cut before comparing.
+// Regenerate with UPDATE_SNAPSHOTS=1 only for a deliberate change.
+
+const MAP_SNAPSHOTS = {
+  plain: new URL(
+    '../../../../../tests/fixtures/workspace-command-map.snapshot.html',
+    import.meta.url
+  ),
+  hqFree: new URL(
+    '../../../../../tests/fixtures/workspace-command-map-hq-free.snapshot.html',
+    import.meta.url
+  )
+};
+
+function mapMarkup({ hq = false } = {}) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    selectedAgentKey: '',
+    activeMapWindow: '',
+    mapInventorySection: '',
+    activeSystemTab: 'memory',
+    viewMode: 'map',
+    mapArrangement: 'free',
+    mapArrangementFor: 'workspace-1',
+    page: {
+      workspaceId: 'workspace-1',
+      workspace: {
+        id: 'workspace-1',
+        slug: 'demo',
+        name: 'Demo Workspace',
+        ...(hq ? { designation: 'personal_hq' } : {}),
+        mcp_bindings: [],
+        skill_bindings: []
+      },
+      tasks: [{ id: 'task-1', to: 'Atlas', description: 'Draft plan', status: 'pending' }],
+      notes: [{ id: 'n1', title: 'Launch checklist', content: 'Ship it' }],
+      buildAgentGroups: () => [
+        {
+          name: 'Atlas',
+          isWorkspaceAgent: true,
+          isUnassigned: false,
+          tasks: [{ id: 'task-1', description: 'Draft plan', status: 'pending' }]
+        },
+        { name: 'Builder', isWorkspaceAgent: true, isUnassigned: false, tasks: [] }
+      ],
+      isWorkspaceEntryAgent: name => name === 'Atlas',
+      getAgentAvatarPresentation: name => ({ initials: name.slice(0, 2), style: '' }),
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
+      getAgentProfile: () => ({}),
+      getAgentModelPresentation: () => ({ empty: false, model: 'gpt-test' }),
+      getAgentSkillSummary: () => ({ count: 0 })
+    }
+  });
+  return commandView.renderOperationsMap();
+}
+
+// The HQ's arrangement control row, cut out so the rest can be compared.
+function withoutArrangementRow(markup) {
+  return markup.replace(/<div class="ws-cmd-map-arrangement"[\s\S]*?<\/div><\/div>/, '');
+}
+
+function assertSnapshot(name, markup) {
+  const file = MAP_SNAPSHOTS[name];
+  if (process.env.UPDATE_SNAPSHOTS === '1') {
+    writeFileSync(file, markup);
+    return;
+  }
+  const expected = readFileSync(file, 'utf8');
+  if (markup === expected) return;
+  let at = 0;
+  while (at < markup.length && markup[at] === expected[at]) at += 1;
+  assert.fail(
+    name +
+      ' map markup changed at offset ' +
+      at +
+      '\n  expected: …' +
+      expected.slice(Math.max(0, at - 80), at + 120) +
+      '\n  actual:   …' +
+      markup.slice(Math.max(0, at - 80), at + 120) +
+      '\nRun UPDATE_SNAPSHOTS=1 only if the change is deliberate.'
+  );
+}
+
+test('an ordinary workspace renders the Map markup it always has (767 FR1)', () => {
+  const markup = mapMarkup();
+  assert.equal(mapMarkup(), markup);
+  assert.doesNotMatch(markup, /ws-cmd-map-arrangement|is-flow/);
+  assertSnapshot('plain', markup);
+});
+
+test('the HQ Map in Free renders the markup it always has, plus the switch (767 FR1)', () => {
+  const markup = mapMarkup({ hq: true });
+  assert.equal(mapMarkup({ hq: true }), markup);
+  assert.doesNotMatch(markup, /is-flow/);
+  assert.match(markup, /ws-cmd-map-hq-station/);
+  assertSnapshot('hqFree', withoutArrangementRow(markup));
+});
+
+test('the HQ Map opens in Flow with three labelled lanes and the switch (767 FR2, FR5)', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(view, {
+    selectedAgentKey: '',
+    activeMapWindow: '',
+    page: { workspace: { id: 'hq-1', designation: 'personal_hq' }, tasks: [] }
+  });
+  const html = view.renderOperationsMap();
+  assert.match(html, /class="ws-cmd-map-shell is-hq is-flow"/);
+  assert.match(html, /role="region" aria-label="Workspace operations map"/);
+  assert.match(html, /role="group" aria-label="Map arrangement"/);
+  assert.match(html, /data-cmd-map-arrangement="flow" aria-pressed="true">Flow</);
+  assert.match(html, /data-cmd-map-arrangement="free" aria-pressed="false">Free</);
+  const lanes = [
+    ...html.matchAll(/<section class="ws-cmd-flow-lane[^"]*" aria-labelledby="([^"]+)"/g)
+  ];
+  assert.deepEqual(
+    lanes.map(match => match[1]),
+    ['ws-cmd-flow-sources-title', 'ws-cmd-flow-lead-title', 'ws-cmd-flow-needs-title']
+  );
+  assert.match(html, />What Ori reads</);
+  assert.match(html, />Your lead agent</);
+  assert.match(html, />What needs you</);
+  // FR15, FR16: no belt, no positioned buildings, nothing to drag.
+  assert.doesNotMatch(html, /ws-cmd-map-belt/);
+  assert.doesNotMatch(html, /--station-x|--station-y|ws-cmd-map-hq-station|data-station-drag/);
+  // FR4: Give work is the same in both arrangements.
+  assert.match(html, /data-cmd-map-give-work/);
+  assert.deepEqual(tacticalTermsIn(html), []);
+});
+
+test('a group HQ is never Flow, and an ordinary workspace has no switch', () => {
+  const group = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(group, {
+    page: { workspace: { id: 'g', kind: 'group', designation: 'personal_hq' }, tasks: [] }
+  });
+  assert.equal(group.isHQFlowMap(), false);
+  const plain = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(plain, { page: { workspace: { id: 'p' }, tasks: [] } });
+  assert.equal(plain.isHQFlowMap(), false);
+  plain.setMapArrangement('flow');
+  assert.equal(plain.mapArrangement, undefined);
+});
+
+test('switching the arrangement remembers it and redraws the map alone (767 FR2, FR3)', () => {
+  const stored = {};
+  const originalStorage = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: key => (key in stored ? stored[key] : null),
+    setItem: (key, value) => {
+      stored[key] = value;
+    },
+    removeItem() {}
+  };
+  try {
+    const focused = [];
+    const shell = { outerHTML: '<div class="ws-cmd-map-shell is-hq is-flow"></div>' };
+    const view = Object.create(WorkspaceCommandView.prototype);
+    let rendered = 0;
+    let bound = 0;
+    Object.assign(view, {
+      selectedAgentKey: '',
+      activeMapWindow: '',
+      page: { workspaceId: 'hq', workspace: { id: 'hq', designation: 'personal_hq' }, tasks: [] },
+      render() {
+        rendered += 1;
+      },
+      bindOperationsMap() {
+        bound += 1;
+      },
+      paintMapActivity() {},
+      container: {
+        querySelector: selector =>
+          selector === '.ws-cmd-map-shell' ? shell : { focus: () => focused.push(selector) }
+      }
+    });
+    assert.equal(view.currentMapArrangement(), 'flow');
+    view.setMapArrangement('free');
+    assert.equal(stored['oriWorkspaceMapArrangement:hq'], 'free');
+    assert.equal(view.currentMapArrangement(), 'free');
+    assert.match(shell.outerHTML, /class="ws-cmd-map-shell is-hq"/);
+    assert.match(shell.outerHTML, /ws-cmd-map-hq-station/);
+    assert.match(shell.outerHTML, /ws-cmd-map-belt/);
+    assert.equal(rendered, 0, 'the page is not re-rendered');
+    assert.equal(bound, 1);
+    assert.match(focused[0], /ws-cmd-map-hq-station/);
+
+    // A fresh view on the same workspace reads Free back (the reload).
+    const reloaded = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(reloaded, { page: view.page });
+    assert.equal(reloaded.currentMapArrangement(), 'free');
+
+    view.setMapArrangement('flow');
+    assert.equal(stored['oriWorkspaceMapArrangement:hq'], 'flow');
+    assert.match(shell.outerHTML, /is-flow/);
+    assert.match(focused[1], /ws-cmd-flow-node/);
+  } finally {
+    globalThis.localStorage = originalStorage;
+  }
+});
+
+test('Flow nodes open the surfaces Details already has (767 FR14)', () => {
+  const calls = [];
+  const view = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(view, {
+    page: { workspace: { id: 'hq', designation: 'personal_hq' }, tasks: [] },
+    activeMapWindow: '',
+    container: { querySelector: () => null },
+    render: () => calls.push(['render', view.activeMapWindow]),
+    runHQJump: key => calls.push(['jump', key]),
+    openDailyBriefPanel: trigger => calls.push(['brief', trigger]),
+    openStatModal: (section, trigger) => calls.push(['modal', section, trigger])
+  });
+  const trigger = { id: 'node' };
+  view.runFlowNode('needs-you', trigger);
+  view.runFlowNode('follow-ups', trigger);
+  view.runFlowNode('brief', trigger);
+  view.runFlowNode('tasks', trigger);
+  view.runFlowNode('lead', trigger);
+  view.runFlowNode('nope', trigger);
+  assert.deepEqual(calls, [
+    ['render', 'needs-you'],
+    ['jump', 'followups'],
+    ['brief', trigger],
+    ['modal', 'tasks', trigger],
+    ['modal', 'agents', trigger]
+  ]);
+  assert.equal(view.flowOpener, 'needs-you');
+});
+
+test('Follow-ups with nothing to chase says so instead of scrolling to nothing', () => {
+  const originalWindow = globalThis.window;
+  const toasts = [];
+  globalThis.window = { Toast: { info: message => toasts.push(message) } };
+  try {
+    const jumps = [];
+    const view = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(view, {
+      container: { querySelector: () => null },
+      hqFollowUpsCount: () => 0,
+      runHQJump: key => jumps.push(key)
+    });
+    view.runFlowNode('follow-ups', null);
+    assert.deepEqual(toasts, ['Nothing to follow up right now.']);
+    assert.deepEqual(jumps, []);
+    view.hqFollowUpsCount = () => 2;
+    view.runFlowNode('follow-ups', null);
+    assert.deepEqual(jumps, ['followups']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Needs you window shows the HQ panel and hands focus back on close', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(view, {
+    selectedAgentKey: '',
+    activeMapWindow: 'needs-you',
+    page: { workspace: { id: 'hq', designation: 'personal_hq' }, tasks: [] }
+  });
+  const html = view.renderOperationsMap();
+  assert.match(html, /class="ws-cmd-map-window ws-cmd-map-window-needs-you" role="dialog"/);
+  assert.match(html, /aria-label="Needs you"/);
+  assert.match(html, /data-cmd-hq-needs/);
+  assert.match(html, /Nothing needs you right now\./);
+
+  // Not on an ordinary workspace, which has no such window.
+  const plain = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(plain, {
+    activeMapWindow: 'needs-you',
+    page: { workspace: { id: 'p' }, tasks: [] }
+  });
+  assert.equal(plain.renderMapWindow(null), '');
+
+  const focused = [];
+  const root = {
+    querySelector: selector => ({ focus: () => focused.push(selector) })
+  };
+  view.flowOpener = 'needs-you';
+  view.restoreFlowOpenerFocus(root);
+  assert.deepEqual(focused, [], 'still open: focus stays in the window');
+  view.activeMapWindow = '';
+  view.restoreFlowOpenerFocus(root);
+  assert.deepEqual(focused, ['[data-cmd-flow-node="needs-you"]']);
+  assert.equal(view.flowOpener, '');
+});
+
+test('a Flow node rebuilt while its panel was open still gets focus back', () => {
+  const fresh = {
+    getAttribute: name => (name === 'data-cmd-flow-node' ? 'tasks' : null),
+    classList: ['ws-cmd-flow-node']
+  };
+  const view = Object.create(WorkspaceCommandView.prototype);
+  view.container = {
+    querySelectorAll: selector => (selector === '[data-cmd-flow-node]' ? [fresh] : [])
+  };
+  const stale = {
+    isConnected: false,
+    hasAttribute: name => name === 'data-cmd-flow-node',
+    getAttribute: name => (name === 'data-cmd-flow-node' ? 'tasks' : null),
+    classList: ['ws-cmd-flow-node']
+  };
+  assert.equal(view.resolveStatModalTrigger(stale), fresh);
+});
+
+test('Flow binds no station drag; Free still does (767 FR16)', () => {
+  for (const flow of [true, false]) {
+    const root = {
+      classList: { contains: name => flow && name === 'is-flow' },
+      addEventListener() {}
+    };
+    const view = Object.create(WorkspaceCommandView.prototype);
+    let dragBound = 0;
+    Object.assign(view, {
+      page: { workspace: { id: 'hq', designation: 'personal_hq' } },
+      container: { querySelector: selector => (selector === '.ws-cmd-map-shell' ? root : null) },
+      syncDetachmentMap() {},
+      bindStationDrag() {
+        dragBound += 1;
+      }
+    });
+    view.bindOperationsMap();
+    assert.equal(dragBound, flow ? 0 : 1, flow ? 'Flow' : 'Free');
+  }
+});
+
 test('command subtitle includes mission automation state when mission state is loaded', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {
@@ -6152,9 +6479,17 @@ test('renderOperationsMap adds is-hq to the map shell only for the designated HQ
       buildAgentGroups: () => []
     }
   });
+  // The HQ Map opens in Flow (PRD 767): stations are lane nodes, not buildings.
+  const flowHTML = commandView.renderOperationsMap();
+  assert.match(flowHTML, /ws-cmd-map-shell is-hq is-flow/);
+  assert.match(flowHTML, /class="ws-cmd-flow-node[^"]*" data-cmd-hq-station="email"/);
+  assert.doesNotMatch(flowHTML, /ws-cmd-map-hq-station/);
+
+  // In Free, the station structure renders on the map world surface (FR6).
+  commandView.mapArrangement = 'free';
+  commandView.mapArrangementFor = 'ws-1';
   const hqHTML = commandView.renderOperationsMap();
-  assert.match(hqHTML, /ws-cmd-map-shell is-hq/);
-  // The station structure renders on the map world surface for the HQ (FR6).
+  assert.match(hqHTML, /ws-cmd-map-shell is-hq"/);
   assert.match(hqHTML, /ws-cmd-map-hq-station/);
   assert.match(hqHTML, /data-cmd-hq-station="email"/);
 

@@ -9897,3 +9897,319 @@ button.ws-cmd-rpg-class-card:focus-visible {
     left: 0;
   }
 }
+
+/* ---------- HQ Map: the Flow arrangement (PRD 767) ----------
+   Three lanes, left to right: what Ori reads, the lead, what needs you.
+   Everything here is scoped to .ws-cmd-map-shell.is-flow (or the HQ's
+   arrangement switch), so the Free map and every other workspace are
+   untouched. Connectors are drawn from the fixed node height and gap below, so
+   no script measures anything (FR12). */
+.ws-cmd-map-shell.is-hq {
+  --flow-node-h: 76px;
+  --flow-gap: 12px;
+  --flow-head: 34px;
+  --flow-pitch: calc(var(--flow-node-h) + var(--flow-gap));
+  --flow-link: var(--ws-ink-faint);
+}
+
+/* The arrangement switch: in Free it sits under Give work at the top left (the
+   belt holds the top right, and the lead unit stands at the field's centre);
+   in Flow it takes the belt's place at the top right. */
+.ws-cmd-map-arrangement {
+  position: absolute;
+  top: 72px;
+  left: 18px;
+  z-index: 5;
+}
+.ws-cmd-map-shell.is-flow .ws-cmd-map-arrangement {
+  top: 18px;
+  left: auto;
+  right: 18px;
+}
+.ws-cmd-map-seg {
+  display: inline-flex;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-panel-2);
+}
+.ws-cmd-map-arrangement-btn {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ws-cmd-map-arrangement-btn + .ws-cmd-map-arrangement-btn {
+  border-left: 1px solid var(--ws-line-bright);
+}
+.ws-cmd-map-arrangement-btn[aria-pressed="true"] {
+  background: var(--ws-faction-deep);
+  color: var(--ws-ink);
+  font-weight: 600;
+}
+.ws-cmd-map-arrangement-btn:hover {
+  color: var(--ws-faction);
+}
+.ws-cmd-map-arrangement-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -2px;
+}
+
+.ws-cmd-map-shell.is-flow .ws-cmd-opmap {
+  min-height: 0;
+}
+.ws-cmd-flow {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) 56px minmax(0, 1.1fr)
+    56px minmax(0, 1fr);
+  align-items: start;
+  padding: 76px 28px 28px;
+}
+.ws-cmd-flow-lane {
+  min-width: 0;
+}
+.ws-cmd-flow-lane-title {
+  height: calc(var(--flow-head) - 12px);
+  margin: 0 0 12px;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: calc(var(--flow-head) - 12px);
+  text-transform: uppercase;
+}
+.ws-cmd-flow-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--flow-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-cmd-flow-cell {
+  display: flex;
+  min-width: 0;
+}
+.ws-cmd-flow-node,
+.ws-cmd-flow-lead {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-panel-2);
+  color: var(--ws-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.ws-cmd-flow-node {
+  height: var(--flow-node-h);
+}
+.ws-cmd-flow-node:hover,
+.ws-cmd-flow-lead:hover {
+  border-color: var(--ws-faction);
+}
+.ws-cmd-flow-node:focus-visible,
+.ws-cmd-flow-lead:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-flow-node-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.ws-cmd-flow-node-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-flow-node-state {
+  flex: 0 0 auto;
+  color: var(--ws-ink-dim);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ws-cmd-flow-node.is-attention .ws-cmd-flow-node-state,
+.ws-cmd-flow-lead-waiting .ws-cmd-flow-node-state {
+  color: var(--ws-keeper);
+}
+.ws-cmd-flow-node.is-attention {
+  border-color: var(--ws-keeper);
+}
+.ws-cmd-flow-node.is-ready .ws-cmd-flow-node-state {
+  color: var(--ws-faction);
+}
+/* Red is kept for an Error state word. */
+.ws-cmd-flow-node.is-error .ws-cmd-flow-node-state {
+  color: var(--ws-alert);
+}
+.ws-cmd-flow-node-sub {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ws-ink-dim);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Not set up: dashed and quieter, so a fresh HQ does not look broken. */
+.ws-cmd-flow-node.is-dashed {
+  border-style: dashed;
+}
+.ws-cmd-flow-node.is-dashed .ws-cmd-flow-node-name {
+  color: var(--ws-ink-dim);
+}
+
+/* The lead sits centred on the tallest lane, so the one arrow in and the one
+   line out meet it at its middle (FR13). */
+.ws-cmd-flow-lead-slot {
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--flow-rows, 4) * var(--flow-pitch) - var(--flow-gap));
+}
+.ws-cmd-flow-lead {
+  gap: 10px;
+  min-height: 150px;
+  padding: 16px 18px;
+}
+.ws-cmd-flow-lead-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ws-cmd-flow-lead-head .ws-cmd-character {
+  flex: 0 0 auto;
+}
+.ws-cmd-flow-lead-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ws-cmd-flow-lead-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.ws-cmd-flow-lead-waiting {
+  padding: 8px 10px;
+  border: 1px solid var(--ws-keeper);
+  background: var(--ws-panel-2);
+  color: var(--ws-ink);
+  font-size: 13px;
+}
+.ws-cmd-flow-lead .ws-cmd-flow-node-sub {
+  white-space: normal;
+}
+
+/* Connectors: a stub per node, one spine, and arrowheads; all decorative. */
+.ws-cmd-flow-links {
+  --flow-center: calc(
+    var(--flow-head) + (var(--flow-rows, 4) * var(--flow-pitch) - var(--flow-gap)) / 2
+  );
+  --flow-first: calc(var(--flow-head) + var(--flow-node-h) / 2);
+  --flow-last: calc(
+    var(--flow-head) + (var(--flow-links, 1) - 1) * var(--flow-pitch) + var(--flow-node-h) / 2
+  );
+  position: relative;
+  align-self: stretch;
+  min-height: calc(var(--flow-head) + var(--flow-rows, 4) * var(--flow-pitch));
+}
+.ws-cmd-flow-stub,
+.ws-cmd-flow-spine,
+.ws-cmd-flow-trunk {
+  position: absolute;
+  background: var(--flow-link);
+}
+.ws-cmd-flow-stub {
+  top: calc(
+    var(--flow-head) + var(--flow-row, 0) * var(--flow-pitch) + var(--flow-node-h) / 2 - 1px
+  );
+  width: 50%;
+  height: 2px;
+}
+.ws-cmd-flow-stub.is-dashed {
+  height: 0;
+  border-top: 2px dashed var(--flow-link);
+  background: none;
+}
+.ws-cmd-flow-spine {
+  top: calc(min(var(--flow-first), var(--flow-center)) - 1px);
+  left: calc(50% - 1px);
+  width: 2px;
+  height: calc(
+    max(var(--flow-last), var(--flow-center)) - min(var(--flow-first), var(--flow-center)) + 2px
+  );
+}
+.ws-cmd-flow-trunk {
+  top: calc(var(--flow-center) - 1px);
+  width: 50%;
+  height: 2px;
+}
+.ws-cmd-flow-links.is-in .ws-cmd-flow-stub {
+  left: 0;
+}
+.ws-cmd-flow-links.is-in .ws-cmd-flow-trunk {
+  left: 50%;
+  width: calc(50% - 9px);
+}
+.ws-cmd-flow-links.is-out .ws-cmd-flow-trunk {
+  left: 0;
+}
+.ws-cmd-flow-links.is-out .ws-cmd-flow-stub {
+  left: 50%;
+  width: calc(50% - 9px);
+}
+/* Arrowheads: into the lead, and into each node on the right. */
+.ws-cmd-flow-links.is-in .ws-cmd-flow-trunk::after,
+.ws-cmd-flow-links.is-out .ws-cmd-flow-stub::after {
+  content: "";
+  position: absolute;
+  top: -5px;
+  right: -9px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 9px solid var(--flow-link);
+}
+.ws-cmd-flow-links.is-out .ws-cmd-flow-stub.is-dashed::after {
+  top: -7px;
+}
+
+/* Phone and narrow tablets: three short lists with their headings, in order,
+   and no lines (FR19). */
+@media (max-width: 900px) {
+  .ws-cmd-flow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    padding: 72px 16px 20px;
+  }
+  .ws-cmd-flow-links {
+    display: none;
+  }
+  .ws-cmd-flow-lead-slot {
+    min-height: 0;
+  }
+  .ws-cmd-flow-lead {
+    min-height: 0;
+  }
+}
