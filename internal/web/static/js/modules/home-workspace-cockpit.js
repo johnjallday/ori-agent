@@ -366,6 +366,28 @@ export function showMapDeepLinkTarget(search) {
 }
 
 /**
+ * Whether a `?show_on_map=<home>&setup_projects=1` link also asks Home to open
+ * that Home's project setup sheet once the district is in view
+ * (folder-to-map-handoff FR-1). Only the literal `1` counts.
+ */
+export function setupProjectsDeepLink(search) {
+  return String(new URLSearchParams(String(search || '')).get('setup_projects') || '') === '1';
+}
+
+/**
+ * Whether the sheet asked for by a deep link may open now. Pure: the link must
+ * ask for it, the Home must be on the map, the map must not be read-only, and
+ * the badge must have been read, and it must count something to set up. A
+ * stale link (everything already on the map) frames the district and opens
+ * nothing: an empty "Put 0 on the map" sheet is not a next step.
+ */
+export function setupSheetShouldOpen({ requested, homeFound, readOnly, badgesLoaded, toSetUp }) {
+  return Boolean(
+    requested && homeFound && !readOnly && badgesLoaded && Number.isInteger(toSetUp) && toSetUp > 0
+  );
+}
+
+/**
  * Build the search string for a view change.
  *
  * Tree is explicit (`view=tree`); Map is the default and therefore REMOVES the
@@ -5285,10 +5307,43 @@ import {
       window.setTimeout(consumeMoveDeepLink, 200);
       return;
     }
+    const wantsSetup = !moveID && started && setupProjectsDeepLink(window.location.search);
     const url = new URL(window.location.href);
     url.searchParams.delete('move');
     url.searchParams.delete('show_on_map');
+    url.searchParams.delete('setup_projects');
     window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+    if (wantsSetup) consumeSetupProjectsDeepLink(id);
+  }
+
+  // A folder setup that found projects lands here with the district in view
+  // and asks for the setup sheet (folder-to-map-handoff FR-1, FR-3). The badge
+  // is read after the workspace list, so wait for it: anchored to the badge
+  // when there is one, else to the district frame. The parameter is already
+  // gone from the address, so a reload never reopens the sheet.
+  let setupDeepLinkRetries = 0;
+  function consumeSetupProjectsDeepLink(homeId) {
+    const home = findWorkspace(state.flattened, homeId);
+    const district = mapDistrictView(homeId);
+    if (
+      !setupSheetShouldOpen({
+        requested: true,
+        homeFound: Boolean(home),
+        readOnly: Boolean(district && district.readOnly),
+        badgesLoaded: libraryBadgesLoaded,
+        toSetUp: Number(state.libraryBadges?.[homeId]?.count) || 0
+      })
+    ) {
+      if (home && !libraryBadgesLoaded && setupDeepLinkRetries++ < 25) {
+        window.setTimeout(() => consumeSetupProjectsDeepLink(homeId), 200);
+      }
+      return;
+    }
+    const badge = els.map?.querySelector?.(`[data-library-badge="${CSS.escape(homeId)}"]`);
+    const frame = els.map?.querySelector?.(
+      `.ws-map-district[data-group-id="${CSS.escape(homeId)}"]`
+    );
+    openLibrarySetupSheet(homeId, { anchor: badge || frame || null });
   }
 
   applyView(state.view, { pushUrl: false });
