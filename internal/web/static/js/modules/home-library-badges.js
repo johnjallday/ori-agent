@@ -66,7 +66,10 @@ export function libraryBadgeView(summary, homeName = 'Home') {
   return {
     text: text.join(' · '),
     label: `${name} library: ${spoken.join(', ')}. Open the suggestions shelf.`,
-    route
+    route,
+    // How many projects the map's setup sheet could set up: the district menu
+    // offers "Set up N projects…" from this (map-library-setup FR-2).
+    count: ready
   };
 }
 

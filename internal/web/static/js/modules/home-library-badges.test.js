@@ -40,6 +40,11 @@ test('badge text names only the nonzero parts in a fixed order, never "new" or "
   );
   const view = libraryBadgeView(summary({ ready_proposals: 1 }), 'Music Home');
   assert.equal(view.route, ROUTE);
+  assert.equal(view.count, 5, 'the district menu counts what the sheet can set up');
+  assert.equal(
+    libraryBadgeView(summary({ ready_proposals: 1, digest: { new: 0, activatable: 0 } })).count,
+    0
+  );
   assert.equal(
     view.label,
     'Music Home library: 5 projects to set up, 1 suggestion to review. Open the suggestions shelf.'

@@ -5,6 +5,7 @@ import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // workspace-map.js reaches the same count line before it renders a tile.
 import { TicketCounts } from './ticket-count-line.js';
 import { createLibraryBadgeLoader, libraryShelfRoute } from './home-library-badges.js';
+import { openLibrarySheet } from './map-library-sheet.js';
 import { workspacePageURL } from './workspace-routes.js';
 import {
   MEET_ASSISTANT_AGENTS_ROUTE,
@@ -2224,6 +2225,14 @@ import {
       // Delete and group. The map owns no mutation of its own — it hands the
       // ids back here, and these run the very same workspace-bulk-actions.js
       // code Tree runs, so the two views cannot diverge.
+      // The district menu's "Set up N projects…" opens the same sheet the
+      // badge opens (map-library-setup FR-2); a map that cannot is left alone.
+      onSetupProjects: (groupId, { element } = {}) => {
+        if (!openLibrarySetupSheet(groupId, { anchor: element })) {
+          const route = libraryShelfRoute(state.libraryBadges?.[groupId]?.route);
+          if (route) window.location.assign(route);
+        }
+      },
       onDeleteWorkspace: id => void deleteWorkspaceAction(id, bulkContext()),
       onDeleteWorkspaces: ids => void deleteWorkspacesAction(ids, bulkContext()),
       onGroupWorkspaces: ids => void groupFromMap(ids),
@@ -4665,6 +4674,62 @@ import {
    */
   const libraryBadgeLoader = createLibraryBadgeLoader();
   let libraryBadgesLoaded = false;
+  /**
+   * Open the library setup sheet for one Home beside its badge or menu button
+   * (map-library-setup FR-1, FR-2). Returns false when the sheet must not open:
+   * a read-only map, or a Home the cockpit cannot find. The caller then falls
+   * back to the suggestions shelf, which is what the badge always did.
+   */
+  function openLibrarySetupSheet(groupId, { anchor = null, route = '' } = {}) {
+    const id = String(groupId || '');
+    if (!id) return false;
+    const district = mapDistrictView(id);
+    if (district && district.readOnly) return false;
+    const home = findWorkspace(state.flattened, id);
+    if (!home) return false;
+    const shelfRoute =
+      libraryShelfRoute(route) || libraryShelfRoute(state.libraryBadges?.[id]?.route);
+    const sheet = openLibrarySheet({
+      homeID: id,
+      homeName: String(home.name || '').trim() || 'this Home',
+      anchor,
+      // Beside the district, not over its header; wearing the map's palette.
+      beside:
+        (anchor && anchor.closest && anchor.closest('.ws-map-district')) ||
+        els.map.querySelector(`.ws-map-district[data-group-id="${CSS.escape(id)}"]`) ||
+        anchor,
+      tokensFrom: els.map.querySelector('.ws-map') || els.map,
+      shelfRoute,
+      onDone: ({ workspaceIds }) => void landSetUpProjects(id, workspaceIds)
+    });
+    return !!sheet;
+  }
+
+  /**
+   * After the sheet set up at least one project: show the new workspaces in
+   * the Home's district and refresh the badge so a count now at 0 disappears
+   * (FR-16, FR-18).
+   */
+  async function landSetUpProjects(groupId, workspaceIds) {
+    const ids = (Array.isArray(workspaceIds) ? workspaceIds : []).filter(Boolean);
+    await refreshQuietly();
+    const map = window.OriWorkspaceMap;
+    // A collapsed district hides its tiles; open it before looking (FR-17,
+    // open question 3). The district controller persists the change itself.
+    const district = mapDistrictView(groupId);
+    if (district && district.collapsed && map?.districtActions?.setCollapsed) {
+      try {
+        await map.districtActions.setCollapsed(groupId, false);
+      } catch (err) {
+        console.warn('home-workspace-cockpit: could not expand the district', err);
+      }
+    }
+    // The badge refresh re-mounts the map when the count changed, which would
+    // drop the tiles' "just placed" mark, so the frame and mark come last.
+    await refreshLibraryBadges({ force: true });
+    if (ids.length && typeof map?.framePlaced === 'function') map.framePlaced(ids, groupId);
+  }
+
   async function refreshLibraryBadges({ force = false } = {}) {
     if (!canHydrateWorkspaceData()) return;
     let next;
@@ -4907,8 +4972,11 @@ import {
       },
       true
     );
-    // A Home's library badge only navigates to its suggestions shelf. It is a
-    // sibling of the district tag, so it never selects or opens the group.
+    // A Home's library badge opens the setup sheet beside the district
+    // (map-library-setup FR-1). It is a sibling of the district tag, so it never
+    // selects or opens the group. When the sheet cannot open (read-only map, no
+    // Home found) it navigates to the suggestions shelf as it always did (FR-4,
+    // FR-5).
     els.map.addEventListener('click', event => {
       const badge = event.target?.closest?.('[data-library-badge]');
       if (!badge) return;
@@ -4916,7 +4984,11 @@ import {
       if (!route) return;
       event.preventDefault();
       event.stopPropagation();
-      window.location.assign(route);
+      const opened = openLibrarySetupSheet(badge.getAttribute('data-library-badge'), {
+        anchor: badge,
+        route
+      });
+      if (!opened) window.location.assign(route);
     });
     els.map.addEventListener('click', event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;

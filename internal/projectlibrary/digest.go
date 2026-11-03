@@ -231,7 +231,7 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 	}
 	summary := LibrarySummary{Initialized: true, Revision: doc.Revision}
 	if doc.Digest != nil && digestRootActive(doc, state, doc.Digest.RootID) {
-		current := *doc.Digest
+		current := digestWithLinks(doc, *doc.Digest)
 		summary.Digest = &current
 		if run, ok := findProposalRun(doc, current.ScanID); ok {
 			presented := s.presentRun(run)
@@ -244,6 +244,33 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 		}
 	}
 	return summary, nil
+}
+
+// digestWithLinks presents a stored digest against the Home's current links. A
+// project set up since the scan is connected now, not activatable, so the map
+// badge and the dashboard digest say what is left to do rather than what the
+// scan saw (map-library-setup FR-18). The stored digest is never changed; a
+// digest with no new links comes back as it is.
+func digestWithLinks(doc Document, digest LibraryDigest) LibraryDigest {
+	connected := 0
+	for _, entry := range doc.Entries {
+		if entry.Link == nil {
+			continue
+		}
+		current := observationFor(entry, digest.RootID)
+		if current == nil || current.ScanID != digest.ScanID {
+			continue
+		}
+		connected++
+	}
+	delta := connected - digest.Connected
+	if delta <= 0 {
+		return digest
+	}
+	digest.Connected = connected
+	digest.Activatable = max(0, digest.Activatable-delta)
+	digest.NeedsFileChoice = min(digest.NeedsFileChoice, digest.Activatable)
+	return digest
 }
 
 func digestRootActive(doc Document, state *workspace.AssistantProgramState, rootID string) bool {
