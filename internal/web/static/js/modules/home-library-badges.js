@@ -39,25 +39,24 @@ function count(value) {
  * The badge for one Home summary, or null when there is nothing to act on.
  *
  * Shown only when entries are ready for a setup review or suggestions are
- * ready for review (FR 11); "new" alone is not a reason to interrupt.
+ * ready for review (FR 11); "new" alone is not a reason to interrupt, so the
+ * badge never mentions it. The text says what each count asks for ("to set
+ * up", "to review"), never "ready": the workspace tile a few pixels below
+ * says "1 ready" about tickets, and one word for two things reads as a
+ * contradiction.
  */
 export function libraryBadgeView(summary, homeName = 'Home') {
   if (!summary || typeof summary !== 'object') return null;
   const digest = summary.digest && typeof summary.digest === 'object' ? summary.digest : null;
-  const fresh = digest ? count(digest.new) : 0;
   const ready = digest && !digest.setup_note ? count(digest.activatable) : 0;
   const review = count(summary.ready_proposals);
   const route = libraryShelfRoute(summary.route);
   if ((ready === 0 && review === 0) || !route) return null;
   const text = [];
   const spoken = [];
-  if (fresh) {
-    text.push(`${fresh} new`);
-    spoken.push(`${fresh} new ${fresh === 1 ? 'project' : 'projects'}`);
-  }
   if (ready) {
-    text.push(`${ready} ready`);
-    spoken.push(`${ready} ready to set up`);
+    text.push(`${ready} to set up`);
+    spoken.push(`${ready} ${ready === 1 ? 'project' : 'projects'} to set up`);
   }
   if (review) {
     text.push(`${review} to review`);
