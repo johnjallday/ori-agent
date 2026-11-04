@@ -96,13 +96,16 @@ async function openDrawer(page: Page) {
 const card = (page: Page) => page.locator('#personalAssistantSecondBrain');
 const action = (page: Page, id: string) => card(page).locator(`[data-second-brain-action="${id}"]`);
 
-// startSetup takes the ask's Set one up for me to the confirmation step with
+// startSetup takes the ask's Set up my notes, skips the project question, to the confirmation step with
 // the sandbox's Documents as the parent.
 async function startSetup(page: Page, request: APIRequestContext) {
   await disconnect(request);
   await resetGettingStarted(request);
   await openDrawer(page);
   await action(page, 'setup').click();
+  // The project question comes first (Issue 776 FR5); these cases skip it.
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await action(page, 'skip').click();
   await action(page, 'elsewhere').click();
   await expect(card(page)).toContainText('Where should I set up your notes?');
   await card(page).getByLabel('or paste a folder path').fill(documents);
@@ -141,6 +144,9 @@ test('set one up in one click: the Workspace Directory, no picker, and Somewhere
   expect(place.setup_default?.path.endsWith('/Second Brain')).toBe(true);
   await openDrawer(page);
   await action(page, 'setup').click();
+  // The project question comes first (Issue 776 FR5); these cases skip it.
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await action(page, 'skip').click();
   await expect(card(page)).toContainText(
     `Set up your notes in ${place.setup_default?.parent_name}?`
   );
@@ -173,6 +179,9 @@ test('a default place that is already taken says so and asks where, changing not
   writeFileSync(join(taken, 'mine.md'), 'mine');
   await openDrawer(page);
   await action(page, 'setup').click();
+  // The project question comes first (Issue 776 FR5); these cases skip it.
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await action(page, 'skip').click();
   await action(page, 'create').click();
   await expect(card(page)).toContainText('already has something in it');
   await expect(card(page)).toContainText('Where should I set up your notes?');
@@ -226,6 +235,74 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
     followUps
   );
   expect(look.result.items.some((item: { suggested?: boolean }) => item.suggested)).toBe(false);
+});
+
+test('the project question comes first and the folder opens with that note', async ({
+  page,
+  request
+}) => {
+  await disconnect(request);
+  await resetGettingStarted(request);
+  await openDrawer(page);
+  await action(page, 'setup').click();
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await expect(action(page, 'save')).toHaveText('Next');
+  await expect(action(page, 'skip')).toHaveText('Skip');
+  const answer = `Finishing the spring tour plan ${stamp}`;
+  await card(page).locator('[data-project-answer]').fill(answer);
+  await action(page, 'save').click();
+  await expect(card(page)).toContainText("I'll call it Spring Tour Plan. OK?");
+  const project = `Tour ${stamp}`;
+  await card(page).locator('[data-project-name]').fill(project);
+  await action(page, 'confirm').click();
+
+  // The place card says what it starts with, computed from the preview.
+  const seeds = [
+    followUps ? `${followUps} follow-up${followUps === 1 ? '' : 's'}` : '',
+    people ? `${people} ${people === 1 ? 'person' : 'people'}` : ''
+  ].filter(Boolean);
+  const seedLine = seeds.length
+    ? `It starts with your project note, ${seeds.join(' and ')}.`
+    : 'It starts with your project note.';
+  await expect(card(page)).toContainText(seedLine);
+  await expect(card(page)).not.toContainText('open follow-ups and the people I already know');
+
+  // Back returns to the question with the answer kept.
+  await action(page, 'back').click();
+  await expect(card(page).locator('[data-project-answer]')).toHaveValue(answer);
+  await action(page, 'save').click();
+  await card(page).locator('[data-project-name]').fill(project);
+  await action(page, 'confirm').click();
+
+  await action(page, 'elsewhere').click();
+  await card(page).getByLabel('or paste a folder path').fill(documents);
+  await card(page).getByRole('button', { name: 'Use this path' }).click();
+  const name = `First Note Brain ${stamp}`;
+  await nameField(page).fill(name);
+  await action(page, 'create').click();
+
+  const headline = seeds.length
+    ? `Your notes are set up: your project note, ${followUps} follow-ups in Inbox, ${people} people.`
+    : `Your notes are set up. I wrote your first note: ${project}.`;
+  await expect(card(page).locator('.pa-specialist-offer__headline')).toHaveText(headline, {
+    timeout: 75_000
+  });
+  const note = readFileSync(join(documents, name, 'Projects', project, 'README.md'), 'utf8');
+  expect(note).toMatch(/^---\nori: project\nori_hash: [0-9a-f]+\n---\n/);
+  expect(note).toContain(`# ${project}\n\n${answer}\n`);
+  const current = (await secondBrain(request)) as SecondBrain & {
+    fill_in?: { project_ask?: string };
+  };
+  expect(current.fill_in?.project_ask).toBe('answered');
+  expect(current.written_by_ori?.count).toBeGreaterThanOrEqual(1);
+  // The answer is also the reviewed fact the user typed.
+  const knowledge = await (await request.get('/api/personal-assistant/knowledge')).json();
+  expect(
+    (knowledge.items || []).some(
+      (item: { text?: string; state?: string }) => item.text === answer && item.state === 'approved'
+    )
+  ).toBe(true);
+  await disconnect(request);
 });
 
 test('a target that already has content is refused with one sentence and nothing changes', async ({

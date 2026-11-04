@@ -306,6 +306,36 @@ type secondBrainCreateRequest struct {
 	SelectionToken string `json:"selection_token"`
 	Name           string `json:"name"`
 	RequestID      string `json:"request_id"`
+	// Project is the setup turn's project answer, a closed object of its own:
+	// name (one folder name) and answer (Issue 776 FR6). Absent means skipped.
+	Project json.RawMessage `json:"project"`
+}
+
+type secondBrainCreateProject struct {
+	Name   string `json:"name"`
+	Answer string `json:"answer"`
+}
+
+// decodeCreateProject reads the optional project object, refusing any field
+// but name and answer, so no path can ride along inside it.
+func decodeCreateProject(raw json.RawMessage) (*personalassistant.SecondBrainCreateProject, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, true
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, false
+	}
+	for key := range fields {
+		if key != "name" && key != "answer" {
+			return nil, false
+		}
+	}
+	var project secondBrainCreateProject
+	if err := json.Unmarshal(raw, &project); err != nil {
+		return nil, false
+	}
+	return &personalassistant.SecondBrainCreateProject{Name: strings.TrimSpace(project.Name), Answer: project.Answer}, true
 }
 
 // CreateSecondBrain sets up a second brain inside the picked parent or the
@@ -319,12 +349,18 @@ func (h *Handler) CreateSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req secondBrainCreateRequest
-	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "selection_token", "name", "request_id") {
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "selection_token", "name", "request_id", "project") {
+		return
+	}
+	project, ok := decodeCreateProject(req.Project)
+	if !ok {
+		orihttp.BadRequest(w, "project takes only a name and an answer")
 		return
 	}
 	req.SelectionToken = strings.TrimSpace(req.SelectionToken)
 	view, err := h.secondBrain.Create(r.Context(), userID, personalassistant.SecondBrainCreateInput{
 		SelectionToken: req.SelectionToken, Name: strings.TrimSpace(req.Name), RequestID: strings.TrimSpace(req.RequestID),
+		Project: project,
 	})
 	if err != nil {
 		writeSecondBrainError(w, err)
@@ -570,7 +606,7 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, personalassistant.ErrSecondBrainNotConnected):
 		orihttp.Conflict(w, "No notes folder is connected")
 	case errors.Is(err, secondbrain.ErrNotOwned):
-		orihttp.Conflict(w, "Ori only writes notes to a second brain it set up")
+		orihttp.Conflict(w, "Ori only writes notes to a notes folder it set up")
 	case errors.Is(err, secondbrain.ErrCaptureSecretLike):
 		orihttp.BadRequest(w, "That looks like a secret, so Ori did not save it")
 	case errors.Is(err, secondbrain.ErrCaptureInvalid):
@@ -585,11 +621,11 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, personalassistant.ErrSecondBrainItemNotFound):
 		orihttp.NotFound(w, "That item is no longer here")
 	case errors.Is(err, personalassistant.ErrSecondBrainNoInbox):
-		orihttp.NotFound(w, "Only a second brain Ori set up has an Inbox here")
+		orihttp.NotFound(w, "Only notes Ori set up have an Inbox here")
 	case errors.Is(err, personalassistant.ErrSecondBrainProjectName):
 		orihttp.BadRequest(w, "Choose a simple project name, without slashes.")
 	case errors.Is(err, personalassistant.ErrSecondBrainFillInNotAllowed):
-		orihttp.Conflict(w, "Let Ori keep project notes in your second brain first")
+		orihttp.Conflict(w, "Let Ori keep project notes in your notes folder first")
 	case errors.Is(err, personalassistant.ErrSecondBrainSeededItem):
 		orihttp.Conflict(w, "That item came from a follow-up you already have")
 	case errors.Is(err, personalassistant.ErrValidation):

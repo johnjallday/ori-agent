@@ -40,6 +40,9 @@ import {
   secondBrainQuestRequested,
   secondBrainSetupConfirmView,
   secondBrainSetupDefaultView,
+  secondBrainSetupSeedLine,
+  SETUP_PROJECT_QUESTION,
+  EMPTY_SETUP_HEADLINE,
   secondBrainSetupWhereView,
   secondBrainWrittenLine,
   sinceLabel,
@@ -178,9 +181,59 @@ test('the one-click setup says where it goes and offers somewhere else', () => {
     view.lines[0],
     "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
   );
+  // Back returns to the project question (Issue 776 FR5).
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Set it up', 'Somewhere else…', 'Not now']
+    ['Set it up', 'Somewhere else…', 'Back', 'Not now']
+  );
+  // The old promise is gone: with nothing known, it starts empty.
+  assert.equal(view.lines[1], "It starts empty; I'll fill it as I learn.");
+  assert.ok(!view.lines.join(' ').includes('open follow-ups and the people I already know'));
+});
+
+test('the place card says what the folder starts with, from the preview and the project', () => {
+  assert.equal(secondBrainSetupSeedLine(null, true), 'It starts with your project note.');
+  assert.equal(
+    secondBrainSetupSeedLine({ follow_ups: 3, people: 2 }, true),
+    'It starts with your project note, 3 follow-ups and 2 people.'
+  );
+  assert.equal(
+    secondBrainSetupSeedLine({ follow_ups: 1, people: 1 }, true),
+    'It starts with your project note, 1 follow-up and 1 person.'
+  );
+  assert.equal(
+    secondBrainSetupSeedLine({ follow_ups: 0, people: 0 }),
+    "It starts empty; I'll fill it as I learn."
+  );
+  assert.equal(secondBrainSetupSeedLine({ follow_ups: 2 }), 'It starts with 2 follow-ups.');
+  const view = secondBrainSetupDefaultView(
+    { parent_name: 'Ori Workspaces' },
+    { preview: { follow_ups: 3, people: 2 }, hasProject: true }
+  );
+  assert.equal(view.lines[1], 'It starts with your project note, 3 follow-ups and 2 people.');
+  const confirm = secondBrainSetupConfirmView({ name: 'Documents' }, 'Notes', { hasProject: true });
+  assert.equal(confirm.lines[1], 'It starts with your project note.');
+  assert.equal(SETUP_PROJECT_QUESTION, "What's the main thing you're working on right now?");
+});
+
+test('a reload still offers a folder under the empty setup headline', () => {
+  assert.equal(
+    EMPTY_SETUP_HEADLINE,
+    "Your notes are set up. They're empty until I learn something about you."
+  );
+  assert.equal(secondBrainFolderOfferShows({ headline: EMPTY_SETUP_HEADLINE }), true);
+  assert.equal(
+    secondBrainFolderOfferShows({
+      headline: 'Your notes are set up. I wrote your first note: Launch.'
+    }),
+    false
+  );
+  assert.equal(
+    secondBrainFolderOfferShows({
+      headline:
+        "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it."
+    }),
+    true
   );
 });
 

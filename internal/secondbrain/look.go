@@ -91,15 +91,17 @@ func (l Looker) RunSetup(ctx context.Context, source Source, lookID, requestID s
 type SetupCounts struct {
 	FollowUps int
 	People    int
+	// Project names the project note the setup wrote, or "".
+	Project string
 }
 
-// EmptySetupHeadline is what a fresh second brain says when nothing was seeded:
-// it is empty because Ori does not know the user yet, and the offer under it
-// is the first thing to show it (FR13).
-const EmptySetupHeadline = "Your notes are empty because I don't know you yet. Show me a folder and I'll start filling it."
+// EmptySetupHeadline is what a fresh second brain says when nothing was
+// written: it is empty until Ori learns something (Issue 776 FR8).
+const EmptySetupHeadline = "Your notes are set up. They're empty until I learn something about you."
 
-// SetupHeadline reports a fresh second brain honestly (FR10): what was seeded,
-// or that it is empty and why when nothing was.
+// SetupHeadline reports a fresh second brain honestly (FR10, Issue 776 FR8):
+// the project note by name when it is the only note, what was seeded, or that
+// it is empty when nothing was.
 func SetupHeadline(counts SetupCounts) string {
 	var parts []string
 	if counts.FollowUps > 0 {
@@ -107,6 +109,12 @@ func SetupHeadline(counts SetupCounts) string {
 	}
 	if counts.People > 0 {
 		parts = append(parts, plural(counts.People, "person", "people"))
+	}
+	if counts.Project != "" {
+		if len(parts) == 0 {
+			return "Your notes are set up. I wrote your first note: " + counts.Project + "."
+		}
+		parts = append([]string{"your project note"}, parts...)
 	}
 	if len(parts) == 0 {
 		return EmptySetupHeadline

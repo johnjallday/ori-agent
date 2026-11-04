@@ -63,6 +63,10 @@ func addFillInTargets(t *testing.T, tree writerTree) {
 	writeNote(t, tree.vault, "People/Mine.md", "# Someone the user wrote about\n")
 	writeNote(t, tree.vault, "Projects/README.md", "# Projects\n")
 	writeNote(t, tree.vault, "Projects/Album/README.md", "# The user's project\n")
+	// The setup's first note (Issue 776 FR6), intact and edited by the user.
+	seeded := RenderNote(NoteKindProject, ProjectAnswerNote("Seeded", "What I said at setup", "4 Nov 2026"))
+	writeNote(t, tree.vault, "Projects/Seeded/README.md", string(seeded))
+	writeNote(t, tree.vault, "Projects/Edited/README.md", string(seeded)+"A line the user added\n")
 	if err := os.Symlink(filepath.Join(tree.outside, "secret.md"), filepath.Join(tree.vault, "People", "linked-note.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -109,28 +113,30 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 		"nothing":                       {"", ErrOutsideOwnedFolders},
 
 		// The fill-in's targets hold the same line.
-		"a person the user wrote":      {"People/Mine.md", ErrUserModified},
-		"a project the user wrote":     {"Projects/Album/README.md", ErrUserModified},
-		"People's own README":          {"People/README.md", ErrOutsideOwnedFolders},
-		"People's README in lower":     {"People/readme.md", ErrOutsideOwnedFolders},
-		"a link in People":             {"People/linked-note.md", ErrOutsideOwnedFolders},
-		"nested in People":             {"People/sub/new.md", ErrOutsideOwnedFolders},
-		"hidden in People":             {"People/.hidden.md", ErrOutsideOwnedFolders},
-		"not Markdown in People":       {"People/run.sh", ErrOutsideOwnedFolders},
-		"a different case of People":   {"people/new.md", ErrOutsideOwnedFolders},
-		"Projects' own README":         {"Projects/README.md", ErrOutsideOwnedFolders},
-		"another note in a project":    {"Projects/Album/notes.md", ErrOutsideOwnedFolders},
-		"nested in a project":          {"Projects/Album/sub/README.md", ErrOutsideOwnedFolders},
-		"a hidden project":             {"Projects/.hidden/README.md", ErrOutsideOwnedFolders},
-		"a project linked out":         {"Projects/Linked Out/README.md", ErrOutsideOwnedFolders},
-		"a project linked across":      {"Projects/Linked In/README.md", ErrOutsideOwnedFolders},
-		"climbing out of a project":    {"Projects/../../outside/README.md", ErrOutsideOwnedFolders},
-		"another root note":            {"Other.md", ErrOutsideOwnedFolders},
-		"the facts note in lower case": {"what ori knows about you.md", ErrOutsideOwnedFolders},
-		"the facts note in a folder":   {"Inbox/../" + FactsNoteRel, ErrOutsideOwnedFolders},
-		"Areas":                        {"Areas/new.md", ErrOutsideOwnedFolders},
-		"Resources":                    {"Resources/new.md", ErrOutsideOwnedFolders},
-		"Archive":                      {"Archive/new.md", ErrOutsideOwnedFolders},
+		"a person the user wrote":       {"People/Mine.md", ErrUserModified},
+		"a project the user wrote":      {"Projects/Album/README.md", ErrUserModified},
+		"a setup project note edited":   {"Projects/Edited/README.md", ErrUserModified},
+		"beside the setup project note": {"Projects/Seeded/other.md", ErrOutsideOwnedFolders},
+		"People's own README":           {"People/README.md", ErrOutsideOwnedFolders},
+		"People's README in lower":      {"People/readme.md", ErrOutsideOwnedFolders},
+		"a link in People":              {"People/linked-note.md", ErrOutsideOwnedFolders},
+		"nested in People":              {"People/sub/new.md", ErrOutsideOwnedFolders},
+		"hidden in People":              {"People/.hidden.md", ErrOutsideOwnedFolders},
+		"not Markdown in People":        {"People/run.sh", ErrOutsideOwnedFolders},
+		"a different case of People":    {"people/new.md", ErrOutsideOwnedFolders},
+		"Projects' own README":          {"Projects/README.md", ErrOutsideOwnedFolders},
+		"another note in a project":     {"Projects/Album/notes.md", ErrOutsideOwnedFolders},
+		"nested in a project":           {"Projects/Album/sub/README.md", ErrOutsideOwnedFolders},
+		"a hidden project":              {"Projects/.hidden/README.md", ErrOutsideOwnedFolders},
+		"a project linked out":          {"Projects/Linked Out/README.md", ErrOutsideOwnedFolders},
+		"a project linked across":       {"Projects/Linked In/README.md", ErrOutsideOwnedFolders},
+		"climbing out of a project":     {"Projects/../../outside/README.md", ErrOutsideOwnedFolders},
+		"another root note":             {"Other.md", ErrOutsideOwnedFolders},
+		"the facts note in lower case":  {"what ori knows about you.md", ErrOutsideOwnedFolders},
+		"the facts note in a folder":    {"Inbox/../" + FactsNoteRel, ErrOutsideOwnedFolders},
+		"Areas":                         {"Areas/new.md", ErrOutsideOwnedFolders},
+		"Resources":                     {"Resources/new.md", ErrOutsideOwnedFolders},
+		"Archive":                       {"Archive/new.md", ErrOutsideOwnedFolders},
 	}
 	for name, tc := range refusals {
 		t.Run(name, func(t *testing.T) {
@@ -181,6 +187,7 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 	allowed(t, "People/Dana Lee.md", true)
 	allowed(t, "Projects/Launch/README.md", false)
 	allowed(t, "Projects/Launch/README.md", true)
+	allowed(t, "Projects/Seeded/README.md", true)
 	allowed(t, FactsNoteRel, false)
 	allowed(t, FactsNoteRel, true)
 

@@ -335,6 +335,40 @@ func TestSecondBrainCreate_TakesATokenAndANameNeverAPath(t *testing.T) {
 	}
 }
 
+// The setup's project answer rides along as a closed object of its own (Issue
+// 776 FR6): a name and an answer, nothing else, and a bad name is the
+// service's 400.
+func TestSecondBrainCreate_TakesAProjectAsANameAndAnAnswerOnly(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	body := `{"request_id":"s-1","project":{"name":" Launch ","answer":"Finishing the launch plan"}}`
+	response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/create", body, "")
+	if response.Code != http.StatusOK || fake.create.Project == nil ||
+		fake.create.Project.Name != "Launch" || fake.create.Project.Answer != "Finishing the launch plan" {
+		t.Fatalf("create = %d, input %+v", response.Code, fake.create)
+	}
+	fake = &fakeSecondBrain{}
+	if response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/create", `{"request_id":"s-1","project":null}`, ""); response.Code != http.StatusOK || fake.create.Project != nil {
+		t.Fatalf("a null project = %d, input %+v", response.Code, fake.create)
+	}
+	for _, body := range []string{
+		`{"request_id":"s-1","project":{"name":"Launch","answer":"x","path":"/Users/sam"}}`,
+		`{"request_id":"s-1","project":{"name":"Launch","answer":"x","rel":"Projects/Launch/README.md"}}`,
+		`{"request_id":"s-1","project":"Launch"}`,
+		`{"request_id":"s-1","project":{"name":3,"answer":"x"}}`,
+	} {
+		fake := &fakeSecondBrain{}
+		response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/create", body, "")
+		if response.Code != http.StatusBadRequest || len(fake.calls) != 0 {
+			t.Errorf("create %s = %d (calls %v), want 400 before the service", body, response.Code, fake.calls)
+		}
+	}
+	fake = &fakeSecondBrain{err: personalassistant.ErrSecondBrainProjectName}
+	response = secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/create", `{"request_id":"s-1","project":{"name":"../x","answer":"x"}}`, "")
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "simple project name") {
+		t.Fatalf("a bad project name = %d %s", response.Code, response.Body.String())
+	}
+}
+
 // No token asks for the default place; the service decides whether there is one.
 func TestSecondBrainCreate_WithoutATokenAsksTheServiceForTheDefaultPlace(t *testing.T) {
 	for _, body := range []string{`{"request_id":"s-1"}`, `{"selection_token":"  ","request_id":"s-1"}`} {
@@ -434,7 +468,7 @@ func TestSecondBrainErrors_SayOneSentenceEach(t *testing.T) {
 		{personalassistant.ErrSecondBrainUnknownVault, http.StatusNotFound, "Obsidian's list"},
 		{personalassistant.ErrSecondBrainNotConnected, http.StatusConflict, "No notes folder"},
 		{personalassistant.ErrSecondBrainAlreadyConnected, http.StatusConflict, "Disconnect it before"},
-		{secondbrain.ErrNotOwned, http.StatusConflict, "only writes notes to a second brain it set up"},
+		{secondbrain.ErrNotOwned, http.StatusConflict, "only writes notes to a notes folder it set up"},
 		{secondbrain.ErrCaptureSecretLike, http.StatusBadRequest, "looks like a secret"},
 		{secondbrain.ErrCaptureInvalid, http.StatusBadRequest, "1 to 4,000 characters"},
 		{secondbrain.ErrUserModified, http.StatusConflict, "could not write that note"},

@@ -23,6 +23,7 @@ export const JS_ROOTS = ['internal/web/static/js/modules'];
 export const GO_ROOTS = [
   'internal/progression',
   'internal/personalassistant',
+  'internal/personalassistanthttp',
   'internal/secondbrain'
 ];
 

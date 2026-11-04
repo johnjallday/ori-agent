@@ -167,6 +167,101 @@ func TestSecondBrainCreate_AnEmptySeedIsReportedHonestly(t *testing.T) {
 	}
 }
 
+func TestSecondBrainCreate_WritesTheProjectAsTheFirstNoteAndNamesIt(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	var wrote []map[string]int
+	h.service.OnWritten(func(_ context.Context, _ string, kinds map[string]int) { wrote = append(wrote, kinds) })
+	h.tokens["documents"] = h.documents()
+	view, err := h.service.Create(ctx, "local", SecondBrainCreateInput{
+		SelectionToken: "documents", Name: "My Brain", RequestID: "create-1",
+		Project: &SecondBrainCreateProject{Name: "Launch", Answer: "  Finishing the launch plan\n by Friday "},
+	})
+	h.service.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := filepath.Join(view.Source.Path, "Projects", "Launch", "README.md")
+	data, err := os.ReadFile(note) // #nosec G304 -- the test's own temp tree
+	if err != nil || !strings.Contains(string(data), "\nFinishing the launch plan by Friday\n") {
+		t.Fatalf("project note = %q, %v", data, err)
+	}
+	look, err := h.service.Look(ctx, "local")
+	if err != nil || look.Result.Headline != "Your notes are set up. I wrote your first note: Launch." {
+		t.Fatalf("look = %+v, %v", look, err)
+	}
+	status, err := h.service.Status(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.FillIn == nil || status.FillIn.ProjectAsk != secondbrain.ProjectAnswered {
+		t.Fatalf("fill_in = %+v", status.FillIn)
+	}
+	if status.WrittenByOri == nil || status.WrittenByOri.ByKind[secondbrain.NoteKindProject] != 1 {
+		t.Fatalf("written_by_ori = %+v", status.WrittenByOri)
+	}
+	if status.SetupPreview != nil {
+		t.Fatalf("a connected status carries a setup preview: %+v", status.SetupPreview)
+	}
+	if len(wrote) != 1 || wrote[0][secondbrain.NoteKindProject] != 1 {
+		t.Fatalf("wrote = %v", wrote)
+	}
+}
+
+func TestSecondBrainCreate_WithoutAProjectRecordsTheQuestionSkipped(t *testing.T) {
+	h := newSecondBrainHarness(t)
+	if _, err := h.create(t, "My Brain"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := h.service.Status(context.Background(), "local")
+	if err != nil || status.FillIn == nil || status.FillIn.ProjectAsk != secondbrain.ProjectSkipped {
+		t.Fatalf("fill_in = %+v, %v", status.FillIn, err)
+	}
+}
+
+func TestSecondBrainCreate_ABadProjectIsRefusedBeforeAnythingIsMade(t *testing.T) {
+	h := newSecondBrainHarness(t)
+	h.tokens["documents"] = h.documents()
+	before := snapshotTree(t, h.documents())
+	long := strings.Repeat("a", SecondBrainProjectAnswerMax+1)
+	for name, tc := range map[string]struct {
+		project SecondBrainCreateProject
+		want    error
+	}{
+		"a path":       {SecondBrainCreateProject{Name: "../Out", Answer: "x"}, ErrSecondBrainProjectName},
+		"a slash":      {SecondBrainCreateProject{Name: "a/b", Answer: "x"}, ErrSecondBrainProjectName},
+		"empty answer": {SecondBrainCreateProject{Name: "Launch", Answer: " "}, ErrValidation},
+		"too long":     {SecondBrainCreateProject{Name: "Launch", Answer: long}, ErrValidation},
+		"a secret":     {SecondBrainCreateProject{Name: "Launch", Answer: "ghp_abcdefghijklmnop"}, ErrValidation},
+	} {
+		t.Run(name, func(t *testing.T) {
+			project := tc.project
+			_, err := h.service.Create(context.Background(), "local", SecondBrainCreateInput{
+				SelectionToken: "documents", Name: "My Brain", RequestID: "create-" + strings.ReplaceAll(name, " ", "-"), Project: &project,
+			})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if after := snapshotTree(t, h.documents()); after != before {
+				t.Fatalf("a refused project changed the tree.\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
+	}
+}
+
+func TestSecondBrainStatus_PreviewsWhatASetupWouldSeed(t *testing.T) {
+	h := newSecondBrainHarness(t)
+	status, err := h.service.Status(context.Background(), "local")
+	if err != nil || status.SetupPreview == nil || *status.SetupPreview != (SecondBrainSetupPreview{}) {
+		t.Fatalf("nothing held previews %+v, %v", status.SetupPreview, err)
+	}
+	h.service.SetSeeds(seedsFor(3, 2))
+	status, err = h.service.Status(context.Background(), "local")
+	if err != nil || status.SetupPreview == nil || status.SetupPreview.FollowUps != 3 || status.SetupPreview.People != 2 || status.SetupPreview.Project {
+		t.Fatalf("preview = %+v, %v", status.SetupPreview, err)
+	}
+}
+
 func TestSecondBrainCreate_AReplayReturnsTheFirstCallAndMakesNothingMore(t *testing.T) {
 	h := newSecondBrainHarness(t)
 	first, err := h.create(t, "My Brain")
