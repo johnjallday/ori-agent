@@ -48,6 +48,8 @@ set -euo pipefail
 # "pinned action/image" comment). scripts/ci-local.test.sh keeps them equal.
 GOSEC_VERSION="2.29.0"
 
+CI_LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Paths whose change means the README scenes may photograph something new.
 CI_LOCAL_README_PATHS=(
   'internal/web/'
@@ -378,8 +380,11 @@ ci_local_run_gate() {
         echo "no Go files changed"
         return 0
       fi
-      local unformatted
-      unformatted="$(gofmt -l "${go_files[@]}" 2>&1 || true)"
+      # CI formats with the Go that go.mod pins; a newer local gofmt aligns
+      # some literals differently and would pass what CI rejects.
+      local unformatted gofmt_bin
+      gofmt_bin="$("$CI_LOCAL_SCRIPT_DIR/go-toolchain-gofmt.sh")"
+      unformatted="$("$gofmt_bin" -l "${go_files[@]}" 2>&1 || true)"
       if [[ -n "$unformatted" ]]; then
         echo "gofmt would change:"
         printf '  %s\n' $unformatted
