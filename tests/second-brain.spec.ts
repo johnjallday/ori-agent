@@ -86,7 +86,7 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
   await openDrawer(page);
   await expect(card(page)).toBeVisible();
   await expect(card(page)).toContainText(
-    'Do you keep a second brain? I found your Obsidian vault "Second Brain".'
+    'Want me to keep notes for you? I found your Obsidian vault "Second Brain".'
   );
   // The ask is the conversation's first message, and the folder hand-over is
   // not shown beside it.
@@ -99,7 +99,7 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
 
   await action(page, 'later').click();
   await expect(card(page)).toContainText(
-    "Okay. Connect your notes from Home whenever you're ready."
+    "Okay. The Notes building on your HQ map sets this up whenever you're ready."
   );
   await expect(card(page).locator('button')).toHaveCount(0);
   expect((await secondBrain(request)).ask.state).toBe('deferred');
@@ -108,7 +108,7 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
   await expect(card(page)).toBeHidden();
 });
 
-test("the ask offers Set one up for me instead of I don't keep notes", async ({
+test("the ask offers Set up my notes instead of I don't keep notes", async ({
   page,
   request
 }) => {
@@ -116,12 +116,12 @@ test("the ask offers Set one up for me instead of I don't keep notes", async ({
   await openDrawer(page);
   await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
     'Read Second Brain',
+    'Set up my notes',
     'Another folder…',
-    'Set one up for me',
     'Not now'
   ]);
   await expect(action(page, 'none')).toHaveCount(0);
-  await expect(card(page)).toContainText('I can set one up for you.');
+  await expect(card(page)).toContainText('or set up a folder of my own.');
   // A decline already on record still declines the ask and skips the mission.
   const response = await request.post(`${ENDPOINT}/ask`, {
     data: { decision: 'none', request_id: `spec-decline-${Date.now()}` }
@@ -151,11 +151,11 @@ test('with nothing detected the ask points at a folder, and the chooser takes a 
   });
   await openDrawer(page);
   await expect(card(page)).toContainText(
-    'Do you keep a second brain? Point me at it, or I can set one up for you.'
+    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
   );
   await expect(card(page).locator('button')).toHaveText([
-    'Choose folder…',
-    'Set one up for me',
+    'Set up my notes',
+    'I have a notes folder…',
     'Not now'
   ]);
 
@@ -168,7 +168,7 @@ test('with nothing detected the ask points at a folder, and the chooser takes a 
   await action(page, 'back').click();
   await expect(card(page)).toContainText('Where do you keep your notes?');
   await action(page, 'back').click();
-  await expect(card(page)).toContainText('Do you keep a second brain');
+  await expect(card(page)).toContainText('Want me to keep notes for you?');
 });
 
 test('read the vault: consent, one headline, add the open items once, and Look again waits', async ({

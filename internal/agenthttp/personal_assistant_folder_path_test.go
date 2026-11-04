@@ -78,7 +78,7 @@ func lastStored(store *researchHostStore, role string) string {
 }
 
 // An Obsidian vault written in the chat also gets an unbound selection for the
-// card's Connect as my second brain (second-brain FR10), beside the token its
+// card's Connect as my notes (second-brain FR10), beside the token its
 // explore or link already has. Any other folder gets none.
 func TestFolderPath_AnObsidianVaultAlsoOffersTheSecondBrain(t *testing.T) {
 	f, store, paths := newFolderPathFixture(t)

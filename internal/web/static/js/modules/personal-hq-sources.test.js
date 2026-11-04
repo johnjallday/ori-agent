@@ -13,7 +13,7 @@ test('the Notes row names the connected folder, a missing one, or none', () => {
     status: 'connected',
     source: { name: 'Second Brain', kind: 'obsidian' }
   });
-  assert.match(connected.summary, /^Second brain: Second Brain \(Obsidian\)\./);
+  assert.match(connected.summary, /^Notes: Second Brain \(Obsidian\)\./);
   assert.equal(connected.disconnect, true);
   assert.equal(connected.action, null);
 
@@ -35,7 +35,7 @@ test('the Notes row names the connected folder, a missing one, or none', () => {
     status: 'connected',
     source: { name: 'My Brain', kind: 'obsidian', origin: 'created_by_ori' }
   });
-  assert.match(created.summary, /^Second brain: My Brain \(set up by Ori\)\./);
+  assert.match(created.summary, /^Notes: My Brain \(set up by Ori\)\./);
   assert.doesNotMatch(created.summary, /Read-only/);
   assert.match(created.summary, /Disconnecting leaves the folder/);
   assert.equal(created.disconnect, true);

@@ -108,7 +108,7 @@ export function renderFolderProposal(
     const connect = doc.createElement('button');
     connect.type = 'button';
     connect.dataset.folderProposalAction = 'second-brain';
-    connect.textContent = 'Connect as my second brain';
+    connect.textContent = 'Connect as my notes';
     connect.addEventListener('click', async () => {
       if (connect.disabled) return;
       if (!isCurrent()) {

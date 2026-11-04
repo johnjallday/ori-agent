@@ -60,6 +60,7 @@ import { stationFromSearch } from './workspace-station-link.js';
 import { groupReviewedKnowledge } from './personal-hq-knowledge.js';
 import {
   MEMORY_STATION,
+  memoryOneLiner,
   memoryStationState as memoryBadgeState,
   memoryStationSummary,
   readMemoryStationBaseline,
@@ -3740,6 +3741,11 @@ export class WorkspaceCommandView {
         '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
         '</div>' +
         '</header>' +
+        (section === MEMORY_STATION
+          ? '<p class="ws-panel-one-liner" data-memory-one-liner>' +
+            escapeHtml(memoryOneLiner({ personalHQ: this.isPersonalHQ() })) +
+            '</p>'
+          : '') +
         '<div class="ws-cmd-modal-body ws-cmd-modal-config-body">' +
         '<div class="ws-cmd-config-host" data-cmd-config-host>' +
         '<div class="ws-cmd-modal-empty">Loading ' +
@@ -11418,7 +11424,7 @@ export class WorkspaceCommandView {
     const groups = [
       {
         key: 'notes',
-        label: 'Notes',
+        label: this.isPersonalHQ() ? 'Workspace notes' : 'Notes',
         icon: 'bi-journal-text',
         count: Array.isArray(page.notes) ? page.notes.length : 0,
         action: 'New Note',

@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  NOTES_ONE_LINER_CONNECTED,
+  NOTES_ONE_LINER_CREATED,
+  notesOneLiner,
   firstNonEmptySection,
   itemActions,
   lookAgeLine,
@@ -241,6 +244,32 @@ test('the panel escapes what notes say and links only to Obsidian', () => {
   assert.ok(!people.includes('<b>Dana'));
   assert.ok(people.includes('href="obsidian://open?vault=a&amp;file=b"'));
   assert.ok(people.includes('2 mentions'));
+});
+
+test('the panel says what the folder is under its title, by origin', () => {
+  assert.equal(
+    NOTES_ONE_LINER_CREATED,
+    "Ori's notes about you, in a folder you own. Ori writes, you edit, and Ori never reads your own notes back."
+  );
+  assert.equal(
+    NOTES_ONE_LINER_CONNECTED,
+    'Your notes, read-only. Ori keeps the open items it found, never your notes.'
+  );
+  assert.equal(notesOneLiner(created()), NOTES_ONE_LINER_CREATED);
+  assert.equal(notesOneLiner(vault()), NOTES_ONE_LINER_CONNECTED);
+  assert.equal(notesOneLiner({ status: 'not_connected' }), '');
+
+  const html = notesPanelHTML({
+    secondBrain: created(),
+    now: NOW,
+    panel: { status: 'loading' }
+  });
+  assert.ok(
+    html.includes(
+      '</header><p class="ws-panel-one-liner" data-notes-one-liner>Ori&#39;s notes about you, in a folder you own.'
+    ),
+    html
+  );
 });
 
 test('People & Projects offers Make a workspace', () => {

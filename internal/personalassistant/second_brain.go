@@ -36,7 +36,7 @@ var (
 	ErrSecondBrainSeededItem = errors.New("personal assistant: that item already came from a follow-up")
 	// ErrSecondBrainNoInbox says the connected folder is not one Ori set up, so
 	// the panel has no Inbox for it.
-	ErrSecondBrainNoInbox = errors.New("personal assistant: only a second brain Ori set up has an Inbox here")
+	ErrSecondBrainNoInbox = errors.New("personal assistant: only notes Ori set up have an Inbox here")
 
 	errSecondBrainLookSuperseded = errors.New("personal assistant: look superseded")
 )

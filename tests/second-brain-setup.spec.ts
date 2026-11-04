@@ -104,7 +104,7 @@ async function startSetup(page: Page, request: APIRequestContext) {
   await openDrawer(page);
   await action(page, 'setup').click();
   await action(page, 'elsewhere').click();
-  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  await expect(card(page)).toContainText('Where should I set up your notes?');
   await card(page).getByLabel('or paste a folder path').fill(documents);
   await card(page).getByRole('button', { name: 'Use this path' }).click();
   await expect(card(page)).toContainText('Set up "Second Brain" in Documents?');
@@ -120,11 +120,11 @@ test('the ask offers to set one up when no vault is found', async ({ page, reque
   await resetGettingStarted(request);
   await openDrawer(page);
   await expect(card(page)).toContainText(
-    'Do you keep a second brain? Point me at it, or I can set one up for you.'
+    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
   );
   await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
-    'Choose folder…',
-    'Set one up for me',
+    'Set up my notes',
+    'I have a notes folder…',
     'Not now'
   ]);
 });
@@ -142,11 +142,11 @@ test('set one up in one click: the Workspace Directory, no picker, and Somewhere
   await openDrawer(page);
   await action(page, 'setup').click();
   await expect(card(page)).toContainText(
-    `Set up your second brain in ${place.setup_default?.parent_name}?`
+    `Set up your notes in ${place.setup_default?.parent_name}?`
   );
   await expect(card(page)).toContainText(place.setup_default?.path as string);
   await action(page, 'elsewhere').click();
-  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  await expect(card(page)).toContainText('Where should I set up your notes?');
   await card(page).getByRole('button', { name: 'Back' }).click();
   await action(page, 'create').click();
   // The server records the canonical path (on macOS /var is /private/var).
@@ -175,7 +175,7 @@ test('a default place that is already taken says so and asks where, changing not
   await action(page, 'setup').click();
   await action(page, 'create').click();
   await expect(card(page)).toContainText('already has something in it');
-  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  await expect(card(page)).toContainText('Where should I set up your notes?');
   expect(readdirSync(taken)).toEqual(['mine.md']);
   expect((await secondBrain(request)).status).toBe('not_connected');
   renameSync(taken, `${taken} taken ${stamp}`);
@@ -192,7 +192,7 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
 
   // The first look reports the seed: exactly what the sandbox holds.
   await expect(card(page).locator('.pa-specialist-offer__headline')).toHaveText(
-    `Your second brain is set up: ${followUps} follow-ups in Inbox, ${people} people.`,
+    `Your notes are set up: ${followUps} follow-ups in Inbox, ${people} people.`,
     { timeout: 75_000 }
   );
   // The seeded items are the user's follow-ups already: nothing to add.

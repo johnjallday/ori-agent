@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MEMORY_ONE_LINER,
   MEMORY_STATION,
+  memoryOneLiner,
   memoryNewSinceBaseline,
   memoryStationSeenKey,
   memoryStationState,
@@ -238,4 +240,13 @@ test('the Personal HQ badge says global memory and ranks "to review" between ove
     '3 entries',
     'an ordinary workspace never shows a review count'
   );
+});
+
+test('the Memory one-liner says what agents are shown, and in the HQ where the notes are', () => {
+  assert.equal(
+    MEMORY_ONE_LINER,
+    'What agents in this workspace are shown. Your notes folder is separate: see Notes.'
+  );
+  assert.equal(memoryOneLiner({ personalHQ: true }), MEMORY_ONE_LINER);
+  assert.equal(memoryOneLiner(), 'What agents in this workspace are shown.');
 });

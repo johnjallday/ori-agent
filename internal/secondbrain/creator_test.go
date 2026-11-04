@@ -318,10 +318,10 @@ func TestCreate_SeedingIsBounded(t *testing.T) {
 
 func TestSetupHeadline_ReportsWhatWasSeededAndIsHonestWhenNothingWas(t *testing.T) {
 	for counts, want := range map[SetupCounts]string{
-		{FollowUps: 3, People: 2}: "Your second brain is set up: 3 follow-ups in Inbox, 2 people.",
-		{FollowUps: 1, People: 1}: "Your second brain is set up: 1 follow-up in Inbox, 1 person.",
-		{FollowUps: 4}:            "Your second brain is set up: 4 follow-ups in Inbox.",
-		{People: 5}:               "Your second brain is set up: 5 people.",
+		{FollowUps: 3, People: 2}: "Your notes are set up: 3 follow-ups in Inbox, 2 people.",
+		{FollowUps: 1, People: 1}: "Your notes are set up: 1 follow-up in Inbox, 1 person.",
+		{FollowUps: 4}:            "Your notes are set up: 4 follow-ups in Inbox.",
+		{People: 5}:               "Your notes are set up: 5 people.",
 		{}:                        EmptySetupHeadline,
 	} {
 		if got := SetupHeadline(counts); got != want {
@@ -348,7 +348,7 @@ func TestRunSetup_ReportsTheSeedAndNeverSuggestsSeededItems(t *testing.T) {
 	run := fixedLooker().RunSetup(ctx, source, "look-1", "create-1", setup)
 	look := run.Look
 	if look.State != LookFinished || look.HeadlineBy != HeadlineByRules ||
-		look.Headline != "Your second brain is set up: 2 follow-ups in Inbox, 1 person." {
+		look.Headline != "Your notes are set up: 2 follow-ups in Inbox, 1 person." {
 		t.Fatalf("look = %+v", look)
 	}
 	var seeded, suggested []LookItem

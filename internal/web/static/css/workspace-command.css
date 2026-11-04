@@ -5996,6 +5996,15 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-notes-capture .ws-notes-bulk {
   align-self: stretch;
 }
+/* A station panel's one sentence under its title (Notes, Memory). */
+.ws-panel-one-liner {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ws-line);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ws-ink-dim);
+}
 .ws-notes-receipt {
   margin: 0;
   font-size: 12px;

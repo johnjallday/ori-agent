@@ -33,6 +33,9 @@ export function secondBrainAvailable(personalAssistant) {
   return String(personalAssistant?.state || '').trim() === 'active';
 }
 
+// The one label for setting up a folder Ori writes, wherever it is offered.
+export const SET_UP_NOTES_LABEL = 'Set up my notes';
+
 // secondBrainAskView decides whether the assistant opens with the ask and what
 // it says (FR5–FR7). It is shown once: only while nothing is connected and the
 // ask has never been shown, answered or tombstoned.
@@ -42,27 +45,26 @@ export function secondBrainAskView(secondBrain, available) {
     secondBrain?.status === 'not_connected' &&
     secondBrain?.ask?.state === 'pending';
   const vault = Array.isArray(secondBrain?.detected) ? secondBrain.detected[0] : null;
-  // "I don't keep notes" is no longer offered: Set one up for me takes its
-  // place. A decline already on record (decision "none") is unaffected.
-  const setUp = { id: 'setup', label: 'Set one up for me', style: 'outline' };
+  // The ask leads with the job (FR2): what Ori will write, and that the folder
+  // is the user's. A decline already on record (decision "none") is unaffected.
   if (vault?.id && vault?.name) {
     return {
       show,
-      line: `Do you keep a second brain? I found your Obsidian vault "${vault.name}". Let me read it, or I can set one up for you.`,
+      line: `Want me to keep notes for you? I found your Obsidian vault "${vault.name}". I can read it, or set up a folder of my own.`,
       actions: [
         { id: 'read', label: `Read ${vault.name}`, style: 'primary', vaultId: vault.id },
+        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'outline' },
         { id: 'choose', label: 'Another folder…', style: 'outline' },
-        setUp,
         { id: 'later', label: 'Not now', style: 'link' }
       ]
     };
   }
   return {
     show,
-    line: 'Do you keep a second brain? Point me at it, or I can set one up for you.',
+    line: "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own.",
     actions: [
-      { id: 'choose', label: 'Choose folder…', style: 'primary' },
-      setUp,
+      { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
+      { id: 'choose', label: 'I have a notes folder…', style: 'outline' },
       { id: 'later', label: 'Not now', style: 'link' }
     ]
   };
@@ -72,7 +74,7 @@ export function secondBrainAskView(secondBrain, available) {
 // projects and the facts note up to date (FR10). It belongs under Needs you only
 // while there is something to write that the answer would let through.
 export const FILL_IN_LINE =
-  'I can also keep People, a note per project and what I know about you up to date in your second brain. Yours are never touched.';
+  'I can also keep People, a note per project and what I know about you up to date in your notes folder. Notes you wrote are never touched.';
 
 export function secondBrainFillInView(secondBrain) {
   const show =
@@ -189,7 +191,7 @@ export function projectNameFromAnswer(answer) {
 // the user approves is the wording shown here, word for word.
 export const SETUP_LEARNING_ENDPOINT = '/api/personal-assistant/setup-learning';
 export const SETUP_LEARNING_HEADING =
-  'Here is what I learned from your folder. Approve what is right and it goes into your second brain.';
+  'Here is what I learned from your folder. Approve what is right and it goes into your notes.';
 
 export function setupLearningView(payload) {
   const raw = Array.isArray(payload?.learning?.items) ? payload.learning.items : [];
@@ -221,8 +223,8 @@ export function setupLearningClosing(written) {
   const count = Math.max(0, Number(written) || 0);
   if (count === 0) return 'Nothing new was written to your notes.';
   return count === 1
-    ? '1 note was written in your second brain.'
-    : `${count} notes were written in your second brain.`;
+    ? '1 note was written to your notes folder.'
+    : `${count} notes were written to your notes folder.`;
 }
 
 export const DEFAULT_SECOND_BRAIN_NAME = 'Second Brain';
@@ -258,7 +260,7 @@ const SECOND_BRAIN_SETUP_LINES = [
 // to choose another.
 export function secondBrainSetupDefaultView(place) {
   return {
-    title: `Set up your second brain in ${String(place?.parent_name || 'your workspaces')}?`,
+    title: `Set up your notes in ${String(place?.parent_name || 'your workspaces')}?`,
     path: String(place?.path || ''),
     lines: SECOND_BRAIN_SETUP_LINES,
     actions: [
@@ -274,7 +276,7 @@ export function secondBrainSetupDefaultView(place) {
 // connecting a folder (FR4).
 export function secondBrainSetupWhereView({ pickerOff = '', message = '' } = {}) {
   return {
-    title: 'Where should I set up your second brain?',
+    title: 'Where should I set up your notes?',
     note: 'Pick the folder it goes in.',
     pickLabel: 'Choose where…',
     pickerOff: String(pickerOff || ''),
@@ -316,7 +318,7 @@ export function secondBrainOpenLink(secondBrain) {
 export function secondBrainAnsweredLine(decision) {
   return decision === 'none'
     ? "Got it. I won't ask about notes again."
-    : "Okay. Connect your notes from Home whenever you're ready.";
+    : "Okay. The Notes building on your HQ map sets this up whenever you're ready.";
 }
 
 // secondBrainChooserView lists the detected vaults (name and the folder they
@@ -334,8 +336,9 @@ export function secondBrainChooserView(secondBrain, { pickerOff = '', message = 
   return {
     title: vaults.length ? 'Which notes should I read?' : 'Where do you keep your notes?',
     vaults,
-    pickLabel: 'Pick another folder…',
-    setUp: { id: 'setup', label: 'Set one up for me', style: 'outline' },
+    // "another" only when a vault is listed above it (FR21).
+    pickLabel: vaults.length ? 'Pick another folder…' : 'Pick a folder…',
+    setUp: { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'outline' },
     pickerOff: String(pickerOff || ''),
     message: String(message || '')
   };
@@ -514,12 +517,12 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
   if (!source?.name || secondBrain?.status === 'not_connected') {
     return {
       state: 'not_connected',
-      title: 'Your notes are not connected.',
+      title: 'Your notes are not set up.',
       detail:
-        'Point Ori at an Obsidian vault or a folder of Markdown and it tells you what is open, or let it set one up for you.',
+        'Ori can keep notes for you in plain Markdown you own, or read an Obsidian vault or Markdown folder you already have.',
       actions: [
-        { id: 'choose', label: 'Choose folder…', style: 'primary' },
-        { id: 'setup', label: 'Set one up for me', style: 'outline' }
+        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
+        { id: 'choose', label: 'I have a notes folder…', style: 'outline' }
       ]
     };
   }
@@ -1607,7 +1610,7 @@ function renderSetup(body) {
   }
   if (!setupPathEntry) {
     setupPathEntry = createFolderPathEntry({
-      title: 'Choose where to set up your second brain',
+      title: 'Choose where to set up your notes',
       placeholder: '~/Documents',
       onSelect: selection =>
         chooseParent({
@@ -2008,7 +2011,7 @@ async function pickFolder(purpose = 'connect') {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
-        title: setup ? 'Choose where to set up your second brain' : 'Choose your notes folder'
+        title: setup ? 'Choose where to set up your notes' : 'Choose your notes folder'
       })
     });
     const result = (await readJSON(response)) || {};

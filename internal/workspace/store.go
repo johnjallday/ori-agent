@@ -896,7 +896,7 @@ func workspaceReservesSlug(ws *Workspace) bool {
 var reservedTopLevelSlugs = map[string]string{
 	"agents":       `"Agents" is reserved for your agents folder. Choose another name.`,
 	"skills":       `"Skills" is reserved for your skills folder. Choose another name.`,
-	"second-brain": `"Second Brain" is reserved for your second brain. Choose another name.`,
+	"second-brain": `"Second Brain" is reserved for your notes folder. Choose another name.`,
 }
 
 // ReservedSlugError refuses a top-level workspace folder that would take one

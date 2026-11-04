@@ -85,8 +85,9 @@ test('the connection card says connected, missing, or not set up', () => {
   assert.equal(none.state, 'not_connected');
   assert.deepEqual(
     none.actions.map(action => action.label),
-    ['Choose folder…', 'Set one up for me']
+    ['Set up my notes', 'I have a notes folder…']
   );
+  assert.equal(none.title, 'Your notes are not set up.');
 });
 
 test('since labels read like a person says them', () => {
@@ -131,11 +132,11 @@ test('with a detected vault the ask names it and offers read, set up, or not now
   assert.equal(view.show, true);
   assert.equal(
     view.line,
-    'Do you keep a second brain? I found your Obsidian vault "Second Brain". Let me read it, or I can set one up for you.'
+    'Want me to keep notes for you? I found your Obsidian vault "Second Brain". I can read it, or set up a folder of my own.'
   );
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Read Second Brain', 'Another folder…', 'Set one up for me', 'Not now']
+    ['Read Second Brain', 'Set up my notes', 'Another folder…', 'Not now']
   );
   assert.equal(view.actions[0].vaultId, 'v_1');
 });
@@ -144,15 +145,16 @@ test('with nothing detected the ask points at a folder or offers to set one up',
   const view = secondBrainAskView({ ...detected, detected: [] }, true);
   assert.equal(
     view.line,
-    'Do you keep a second brain? Point me at it, or I can set one up for you.'
+    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
   );
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Choose folder…', 'Set one up for me', 'Not now']
+    ['Set up my notes', 'I have a notes folder…', 'Not now']
   );
+  assert.equal(view.actions[0].style, 'primary');
   assert.deepEqual(
     view.actions.map(action => action.id),
-    ['choose', 'setup', 'later']
+    ['setup', 'choose', 'later']
   );
 });
 
@@ -170,7 +172,7 @@ test('the one-click setup says where it goes and offers somewhere else', () => {
     parent_name: 'Ori Workspaces',
     path: '/Users/sam/Ori Workspaces/Second Brain'
   });
-  assert.equal(view.title, 'Set up your second brain in Ori Workspaces?');
+  assert.equal(view.title, 'Set up your notes in Ori Workspaces?');
   assert.equal(view.path, '/Users/sam/Ori Workspaces/Second Brain');
   assert.equal(
     view.lines[0],
@@ -187,7 +189,7 @@ test('setting one up asks where first, then names the folder and what Ori will w
     pickerOff: 'The dialog is off.',
     message: 'Pick again.'
   });
-  assert.equal(where.title, 'Where should I set up your second brain?');
+  assert.equal(where.title, 'Where should I set up your notes?');
   assert.equal(where.pickLabel, 'Choose where…');
   assert.equal(where.pickerOff, 'The dialog is off.');
   assert.equal(where.message, 'Pick again.');
@@ -355,7 +357,10 @@ test('the ask is shown once, while nothing is connected', () => {
 
 test('a decline ends the turn with one line', () => {
   assert.equal(secondBrainAnsweredLine('none'), "Got it. I won't ask about notes again.");
-  assert.match(secondBrainAnsweredLine('later'), /whenever you're ready/);
+  assert.equal(
+    secondBrainAnsweredLine('later'),
+    "Okay. The Notes building on your HQ map sets this up whenever you're ready."
+  );
 });
 
 test('the chooser names vaults by name and folder, the path only as detail', () => {
@@ -370,12 +375,14 @@ test('the chooser names vaults by name and folder, the path only as detail', () 
     }
   ]);
   assert.equal(view.pickLabel, 'Pick another folder…');
-  assert.equal(view.setUp.label, 'Set one up for me');
+  assert.equal(view.setUp.label, 'Set up my notes');
   const empty = secondBrainChooserView(
     { detected: [] },
     { pickerOff: 'The folder dialog is off.', message: 'No Markdown notes found in Empty.' }
   );
   assert.equal(empty.title, 'Where do you keep your notes?');
+  // No vault is listed, so there is no "another" (FR21).
+  assert.equal(empty.pickLabel, 'Pick a folder…');
   assert.equal(empty.pickerOff, 'The folder dialog is off.');
   assert.equal(empty.message, 'No Markdown notes found in Empty.');
 });
@@ -604,7 +611,7 @@ test('the consent card shows only for a second brain Ori set up with something h
   assert.equal(view.show, true);
   assert.equal(
     view.line,
-    'I can also keep People, a note per project and what I know about you up to date in your second brain. Yours are never touched.'
+    'I can also keep People, a note per project and what I know about you up to date in your notes folder. Notes you wrote are never touched.'
   );
   assert.equal(view.line, FILL_IN_LINE);
   assert.deepEqual(
@@ -644,7 +651,7 @@ test('the first look offers the folders the server approved, Downloads first, an
     { id: 'documents', label: 'Documents' }
   ];
   const counted = secondBrainFolderOffer(
-    'Your second brain is set up: 3 follow-ups in Inbox, 2 people.',
+    'Your notes are set up: 3 follow-ups in Inbox, 2 people.',
     approved
   );
   assert.equal(counted.line, FOLDER_OFFER_LINE);
@@ -672,7 +679,7 @@ test('the first look offers the folders the server approved, Downloads first, an
   }
 
   const empty = secondBrainFolderOffer(
-    "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.",
+    "Your notes are empty because I don't know you yet. Show me a folder and I'll start filling it.",
     approved
   );
   assert.equal(empty.line, '');
@@ -682,8 +689,8 @@ test('the first look offers the folders the server approved, Downloads first, an
 
 test('the folder offer survives a reload when the result itself asks for a folder, and ends when one is chosen', () => {
   const asking =
-    "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.";
-  const counted = 'Your second brain is set up: 3 follow-ups in Inbox, 2 people.';
+    "Your notes are empty because I don't know you yet. Show me a folder and I'll start filling it.";
+  const counted = 'Your notes are set up: 3 follow-ups in Inbox, 2 people.';
   assert.equal(secondBrainFolderOfferShows({ justSetUp: true, headline: counted }), true);
   assert.equal(secondBrainFolderOfferShows({ justSetUp: false, headline: asking }), true);
   // A counted headline after a reload asks nothing, and a look that is not a setup never offers.
@@ -762,8 +769,8 @@ test('the card closes by counting the notes that were written', () => {
   assert.equal(setupLearningClosing(0), 'Nothing new was written to your notes.');
   assert.equal(setupLearningClosing(-3), 'Nothing new was written to your notes.');
   assert.equal(setupLearningClosing('x'), 'Nothing new was written to your notes.');
-  assert.equal(setupLearningClosing(1), '1 note was written in your second brain.');
-  assert.equal(setupLearningClosing(4), '4 notes were written in your second brain.');
+  assert.equal(setupLearningClosing(1), '1 note was written to your notes folder.');
+  assert.equal(setupLearningClosing(4), '4 notes were written to your notes folder.');
 });
 
 test('each answer carries one retry key and the Profile page action, and dismissing posts only an id', () => {

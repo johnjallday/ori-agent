@@ -75,7 +75,7 @@ type HomeFolderProposal struct {
 	WorkspaceID    string `json:"workspace_id,omitempty"`
 	WorkspaceName  string `json:"workspace_name,omitempty"`
 	// SecondBrainToken is a second, unbound selection of the same folder, held
-	// only for an Obsidian vault, for the card's Connect as my second brain.
+	// only for an Obsidian vault, for the card's Connect as my notes.
 	// It names the folder to the second-brain connect the way the other token
 	// names it to explore or link.
 	SecondBrainToken string `json:"second_brain_token,omitempty"`

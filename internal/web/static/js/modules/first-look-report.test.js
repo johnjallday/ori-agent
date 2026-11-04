@@ -421,7 +421,7 @@ test('a Check protection that cannot open says so on the card and re-enables it'
 
 test('a batch report that learned something offers Review what Ori learned, as navigation that posts nothing', async () => {
   const learned =
-    'I learned 2 things from this folder; approve them and they go into your second brain.';
+    'I learned 2 things from this folder; approve them and they go into your notes.';
   const item = batchReport({
     detail: learned,
     actions: ['review_batch', 'review_learned', 'not_now']

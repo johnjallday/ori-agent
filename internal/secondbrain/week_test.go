@@ -12,23 +12,23 @@ func TestWeekSentence_CountsInTheOrderTheUserKnowsThem(t *testing.T) {
 	}{
 		"the PRD's example": {
 			WeekCounts{Facts: 4, People: 2, Projects: 1, Captures: 5},
-			"This week your second brain gained 4 facts, 2 people, 1 project and 5 captures.",
+			"This week your notes gained 4 facts, 2 people, 1 project and 5 captures.",
 		},
 		"one of one kind": {
 			WeekCounts{Captures: 1},
-			"This week your second brain gained 1 capture.",
+			"This week your notes gained 1 capture.",
 		},
 		"singular everywhere": {
 			WeekCounts{Facts: 1, People: 1, Projects: 1, FollowUps: 1, Captures: 1, Journals: 1},
-			"This week your second brain gained 1 fact, 1 person, 1 project, 1 follow-up, 1 capture and 1 journal entry.",
+			"This week your notes gained 1 fact, 1 person, 1 project, 1 follow-up, 1 capture and 1 journal entry.",
 		},
 		"plural journal": {
 			WeekCounts{Journals: 3, FollowUps: 2},
-			"This week your second brain gained 2 follow-ups and 3 journal entries.",
+			"This week your notes gained 2 follow-ups and 3 journal entries.",
 		},
 		"a quiet week is said plainly": {
 			WeekCounts{},
-			"Your second brain had a quiet week: nothing new was added.",
+			"Your notes had a quiet week: nothing new was added.",
 		},
 	} {
 		if got := WeekSentence(tc.counts); got != tc.want {

@@ -101,7 +101,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		lockedUntil           string
 	}{
 		{MeetAssistantQuestID, "Meet your assistant", MeetAssistantActionURL, "Start", false, ""},
-		{SecondBrainQuestID, "Connect your second brain", SecondBrainActionURL, "Start", true, BuildHQQuestID},
+		{SecondBrainQuestID, "Set up your notes", SecondBrainActionURL, "Start", true, BuildHQQuestID},
 		{ShowFolderQuestID, "Show your assistant a folder", ShowFolderActionURL, "Start", true, BuildHQQuestID},
 		// The static action is the no-folder fallback; Resolve replaces it once
 		// a folder workspace has a first look.
@@ -130,8 +130,8 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	if why := graph.Quests[0].Why; why != "Your assistant is the one agent that owns your ongoing work. Make them yours." {
 		t.Fatalf("Meet your assistant why = %q", why)
 	}
-	if why := graph.Quests[2].Why; why != "Point Ori at your notes and it tells you what's open." {
-		t.Fatalf("Connect your second brain why = %q", why)
+	if why := graph.Quests[2].Why; why != "Ori keeps what it learns, people, projects and your journal, in plain Markdown you own." {
+		t.Fatalf("Set up your notes why = %q", why)
 	}
 	if why := graph.Quests[3].Why; why != "Point Ori at a folder and it will tell you what it can do with it." {
 		t.Fatalf("Show your assistant a folder why = %q", why)
@@ -948,9 +948,9 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 		FolderFirstLookQuestID + ":true:Show your assistant a folder first",
 		ConnectSourceQuestID + ":true:Starter first",
 		FirstBriefQuestID + ":true:Starter first",
-		CaptureFirstNoteQuestID + ":true:Connect your second brain first",
-		SaveFirstJournalQuestID + ":true:Connect your second brain first",
-		GiveProjectQuestID + ":true:Connect your second brain first",
+		CaptureFirstNoteQuestID + ":true:Set up your notes first",
+		SaveFirstJournalQuestID + ":true:Set up your notes first",
+		GiveProjectQuestID + ":true:Set up your notes first",
 	}
 	if got := missionLocks(e); strings.Join(got, " ") != strings.Join(wantLocked, " ") {
 		t.Fatalf("before the hire = %v, want %v", got, wantLocked)

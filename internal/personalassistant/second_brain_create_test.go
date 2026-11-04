@@ -126,12 +126,12 @@ func TestSecondBrainCreate_SetsUpConnectsAndReportsTheSeed(t *testing.T) {
 	if len(learned) != 1 || !learned[0].CreatedByOri() {
 		t.Fatalf("OnConnected saw %+v", learned)
 	}
-	if got := SecondBrainKnowledgeProposal(learned[0]).Text; got != "You keep your second brain in a folder Ori set up called My Brain." {
+	if got := SecondBrainKnowledgeProposal(learned[0]).Text; got != "You keep your notes in a folder Ori set up called My Brain." {
 		t.Fatalf("learned fact = %q", got)
 	}
 
 	look, err := h.service.Look(ctx, "local")
-	if err != nil || look.State != secondbrain.LookFinished || look.Result.Headline != "Your second brain is set up: 2 follow-ups in Inbox, 1 person." {
+	if err != nil || look.State != secondbrain.LookFinished || look.Result.Headline != "Your notes are set up: 2 follow-ups in Inbox, 1 person." {
 		t.Fatalf("look = %+v, %v", look, err)
 	}
 	for _, rel := range []string{"README.md", ".obsidian/app.json", "Inbox/call-the-distributor.md", "Inbox/renew-the-lease.md", "People/Dana Lee.md", "Daily/README.md"} {

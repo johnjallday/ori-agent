@@ -190,14 +190,14 @@ test.describe('the first week, in a second brain Ori set up', () => {
     const headline = card(page).locator('.pa-specialist-offer__headline');
     if (followUps + people === 0) {
       await expect(headline).toHaveText(
-        "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.",
+        "Your notes are empty because I don't know you yet. Show me a folder and I'll start filling it.",
         { timeout: 75_000 }
       );
     } else {
       // What the sandbox seeded, or more: an earlier run's approved people are
       // part of what Ori knows by now.
       await expect(headline).toHaveText(
-        /^Your second brain is set up: \d+ follow-ups? in Inbox, \d+ (?:people|person)\.$/,
+        /^Your notes are set up: \d+ follow-ups? in Inbox, \d+ (?:people|person)\.$/,
         { timeout: 75_000 }
       );
       const counts = (await headline.innerText()).match(/set up: (\d+) .* Inbox, (\d+) /);
@@ -354,7 +354,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
     await openDrawer(page);
     await waitForCard(
       page,
-      'I can also keep People, a note per project and what I know about you up to date in your second brain.'
+      'I can also keep People, a note per project and what I know about you up to date in your notes folder.'
     );
     await expect(card(page)).toContainText('Yours are never touched.');
     await card(page).getByRole('button', { name: 'Let Ori write there' }).click();
@@ -376,7 +376,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
     execFileSync(resolve('scripts/second-brain-age.sh'), [sandbox, '8']);
     const [recap] = (await rows()).filter(row => row.kind === 'second_brain_week');
     expect(recap?.title).toMatch(
-      /^This week your second brain gained .+\.$|^Your second brain had a quiet week/
+      /^This week your notes gained .+\.$|^Your notes had a quiet week/
     );
     expect(recap.actions).toEqual(['dismiss']);
     expect(recap.route).toContain('station=second-brain');

@@ -52,7 +52,7 @@ func (c WeekCounts) Total() int {
 	return c.Facts + c.People + c.Projects + c.FollowUps + c.Captures + c.Journals
 }
 
-// WeekSentence is the recap row: "This week your second brain gained 4 facts,
+// WeekSentence is the recap row: "This week your notes gained 4 facts,
 // 2 people, 1 project and 5 captures." A week with nothing says so.
 func WeekSentence(counts WeekCounts) string {
 	var parts []string
@@ -76,10 +76,10 @@ func WeekSentence(counts WeekCounts) string {
 	}
 	switch len(parts) {
 	case 0:
-		return "Your second brain had a quiet week: nothing new was added."
+		return "Your notes had a quiet week: nothing new was added."
 	case 1:
-		return "This week your second brain gained " + parts[0] + "."
+		return "This week your notes gained " + parts[0] + "."
 	default:
-		return "This week your second brain gained " + strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1] + "."
+		return "This week your notes gained " + strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1] + "."
 	}
 }

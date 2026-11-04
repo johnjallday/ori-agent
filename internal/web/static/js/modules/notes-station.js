@@ -212,6 +212,18 @@ export const LOOK_STILL_READING_LINE = 'Still reading. Check back in a moment.';
 // NOTES_PRIVACY_LINE sits under the look: what Ori keeps of the notes.
 export const NOTES_PRIVACY_LINE = 'Ori keeps the folder path and these lines, never your notes.';
 
+// The panel's one-liner under its title (Issue 776 FR3): what the folder is and
+// who writes there, by origin, and how it differs from Memory.
+export const NOTES_ONE_LINER_CREATED =
+  "Ori's notes about you, in a folder you own. Ori writes, you edit, and Ori never reads your own notes back.";
+export const NOTES_ONE_LINER_CONNECTED =
+  'Your notes, read-only. Ori keeps the open items it found, never your notes.';
+
+export function notesOneLiner(secondBrain) {
+  if (!secondBrain?.source?.name || secondBrain?.status === 'not_connected') return '';
+  return isCreatedByOri(secondBrain) ? NOTES_ONE_LINER_CREATED : NOTES_ONE_LINER_CONNECTED;
+}
+
 // MAX_ITEMS_SHOWN is how many open items the panel lists before Show all.
 export const MAX_ITEMS_SHOWN = 30;
 
@@ -709,6 +721,13 @@ function tabsHTML(tabs, active) {
 
 // notesPanelHTML is the whole panel. `panel` is what workspace-command.js holds
 // about it: look, inbox, status, message, and the capture box's state.
+function oneLinerHTML(secondBrain) {
+  const line = notesOneLiner(secondBrain);
+  return line
+    ? '<p class="ws-panel-one-liner" data-notes-one-liner>' + escapeHtml(line) + '</p>'
+    : '';
+}
+
 export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {}) {
   const look = panel.look || null;
   const sections = notesSections({ secondBrain, look, inbox: panel.inbox });
@@ -756,6 +775,7 @@ export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {
     '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">Connection…</button>' +
     '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close Notes">×</button>' +
     '</div></header>' +
+    oneLinerHTML(secondBrain) +
     (ready ? tabsHTML(tabs, active) : '') +
     '<div class="ws-cmd-modal-body ws-notes-body">' +
     notice +

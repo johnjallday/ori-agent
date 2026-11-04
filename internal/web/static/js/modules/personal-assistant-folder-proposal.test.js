@@ -137,7 +137,7 @@ test('one press confirms with the held selection and leaves the card as a receip
   );
 });
 
-test('an Obsidian vault also offers Connect as my second brain, with its own selection', async () => {
+test('an Obsidian vault also offers Connect as my notes, with its own selection', async () => {
   const vault = { ...explore, folder_name: 'Second Brain', second_brain_token: 'tok-brain' };
   assert.equal(folderProposalView(vault).secondBrainToken, 'tok-brain');
   assert.equal(folderProposalView(explore).secondBrainToken, '');
@@ -150,7 +150,7 @@ test('an Obsidian vault also offers Connect as my second brain, with its own sel
   const actions = card.find('personal-assistant-folder-proposal__actions');
   assert.deepEqual(
     actions.children.map(button => button.textContent),
-    ['Explore folder', 'Connect as my second brain']
+    ['Explore folder', 'Connect as my notes']
   );
   await actions.children[1].listeners.click();
   assert.deepEqual(calls, [['second-brain', 'tok-brain']]);

@@ -208,7 +208,7 @@ test('the first-week recap keeps its route to the Notes station and only a Dismi
       {
         id: 'second-brain-week-20261108',
         kind: 'second_brain_week',
-        title: 'This week your second brain gained 4 facts, 2 people, 1 project and 5 captures.',
+        title: 'This week your notes gained 4 facts, 2 people, 1 project and 5 captures.',
         route: '/workspaces/personal-hq?station=second-brain',
         actions: ['dismiss', 'delete_everything']
       },

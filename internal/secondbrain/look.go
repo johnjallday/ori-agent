@@ -96,7 +96,7 @@ type SetupCounts struct {
 // EmptySetupHeadline is what a fresh second brain says when nothing was seeded:
 // it is empty because Ori does not know the user yet, and the offer under it
 // is the first thing to show it (FR13).
-const EmptySetupHeadline = "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it."
+const EmptySetupHeadline = "Your notes are empty because I don't know you yet. Show me a folder and I'll start filling it."
 
 // SetupHeadline reports a fresh second brain honestly (FR10): what was seeded,
 // or that it is empty and why when nothing was.
@@ -111,7 +111,7 @@ func SetupHeadline(counts SetupCounts) string {
 	if len(parts) == 0 {
 		return EmptySetupHeadline
 	}
-	return "Your second brain is set up: " + strings.Join(parts, ", ") + "."
+	return "Your notes are set up: " + strings.Join(parts, ", ") + "."
 }
 
 func (l Looker) run(ctx context.Context, source Source, previous *Look, lookID, requestID string, setup *SetupCounts) LookRun {
