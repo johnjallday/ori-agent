@@ -165,6 +165,34 @@ func TestSecondBrainCreate_AnEmptySeedIsReportedHonestly(t *testing.T) {
 	if err != nil || look.Result.Headline != secondbrain.EmptySetupHeadline {
 		t.Fatalf("look = %+v, %v", look, err)
 	}
+	// Nothing to decide: the look is acted at finish and never waits (Issue 776 FR10).
+	status, err := h.service.Status(context.Background(), "local")
+	if err != nil || status.LastLook == nil || !status.LastLook.Acted {
+		t.Fatalf("last look = %+v, %v", status.LastLook, err)
+	}
+}
+
+func TestSecondBrainCreate_ASeededOnlyLookIsActedAtFinish(t *testing.T) {
+	h := newSecondBrainHarness(t)
+	h.service.SetSeeds(seedsFor(2, 1))
+	if _, err := h.create(t, "Seeded Brain"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := h.service.Status(context.Background(), "local")
+	if err != nil || status.LastLook == nil || !status.LastLook.Acted || status.LastLook.OpenItems != 2 {
+		t.Fatalf("last look = %+v, %v", status.LastLook, err)
+	}
+	// Today then shows no result row, only the Done line.
+	today := &TodayService{secondBrain: h.service}
+	_, needs, done := today.secondBrainItems(context.Background(), "local", "personal-hq", true, *h.clock)
+	for _, item := range needs {
+		if item.Kind == "second_brain_result" {
+			t.Fatalf("a look with nothing to decide waits under Needs you: %+v", item)
+		}
+	}
+	if len(done) == 0 || done[0].Title != "Looked at Seeded Brain · 2 open items" {
+		t.Fatalf("done = %+v", done)
+	}
 }
 
 func TestSecondBrainCreate_WritesTheProjectAsTheFirstNoteAndNamesIt(t *testing.T) {

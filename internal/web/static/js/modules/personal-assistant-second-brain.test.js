@@ -22,6 +22,7 @@ import {
   SETUP_LEARNING_HEADING,
   secondBrainAnsweredLine,
   secondBrainAskView,
+  secondBrainAskPinned,
   secondBrainAvailable,
   secondBrainCaptureProblem,
   secondBrainCaptureReceipt,
@@ -399,13 +400,59 @@ test('seeded items are shown but never checked', () => {
   );
 });
 
-test('the ask is shown once, while nothing is connected', () => {
+test('shown is not answered: the ask stays until it is, while nothing is connected', () => {
   assert.equal(secondBrainAskView(detected, false).show, false);
-  for (const state of ['shown', 'deferred', 'declined']) {
+  for (const state of ['pending', 'shown']) {
+    assert.equal(secondBrainAskView({ ...detected, ask: { state } }, true).show, true, state);
+  }
+  for (const state of ['deferred', 'declined']) {
     assert.equal(secondBrainAskView({ ...detected, ask: { state } }, true).show, false, state);
   }
   assert.equal(secondBrainAskView({ ...detected, status: 'connected' }, true).show, false);
   assert.equal(secondBrainAskView(null, true).show, false);
+});
+
+test('the first showing is the first message; later loads pin it under Needs you', () => {
+  assert.equal(secondBrainAskPinned({ ask: { state: 'pending' } }), false);
+  assert.equal(secondBrainAskPinned({ ask: { state: 'shown' } }), true);
+  assert.equal(secondBrainAskPinned({ ask: { state: 'shown' } }, { shownHere: true }), false);
+  assert.equal(secondBrainAskPinned({ ask: { state: 'deferred', offer_again: true } }), true);
+  assert.equal(
+    secondBrainPlacement({ available: true, phase: 'ask', pinned: true }),
+    'needs',
+    'a pinned ask is a Needs you card'
+  );
+});
+
+test("a week after Not now the ask comes back with Don't ask again", () => {
+  const later = { ...detected, detected: [], ask: { state: 'deferred', offer_again: false } };
+  assert.equal(secondBrainAskView(later, true).show, false, 'inside the week');
+  const due = { ...later, ask: { state: 'deferred', offer_again: true } };
+  const view = secondBrainAskView(due, true);
+  assert.equal(view.show, true);
+  assert.equal(view.reoffer, true);
+  assert.equal(
+    view.line,
+    "Still want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
+  );
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label]),
+    [
+      ['setup', 'Set up my notes'],
+      ['choose', 'I have a notes folder…'],
+      ['later', 'Not now'],
+      ['none', "Don't ask again"]
+    ]
+  );
+  const withVault = secondBrainAskView({ ...detected, ask: due.ask }, true);
+  assert.match(
+    withVault.line,
+    /^Still want me to keep notes for you\? I found your Obsidian vault/
+  );
+  assert.equal(withVault.actions.at(-1).id, 'none');
+  // The first ask never offers Don't ask again.
+  assert.ok(!secondBrainAskView(detected, true).actions.some(action => action.id === 'none'));
+  assert.equal(secondBrainAskView({ ...due, ask: { state: 'declined' } }, true).show, false);
 });
 
 test('a decline ends the turn with one line', () => {

@@ -11,6 +11,30 @@ import (
 
 var storeNow = time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 
+// The re-offer counts local calendar days (Issue 776 FR13): late on day 0 to
+// early on day 7 is seven days, though under 7×24 hours; day 6 at any hour is not.
+func TestAskOfferAgain_CountsLocalCalendarDays(t *testing.T) {
+	zone := time.FixedZone("test", 9*3600)
+	previous := time.Local
+	time.Local = zone
+	t.Cleanup(func() { time.Local = previous })
+	late := time.Date(2026, 11, 4, 23, 30, 0, 0, zone)
+	ask := Ask{PromptedAt: &late, Decision: DecisionLater, DecidedAt: &late}
+	for at, want := range map[time.Time]bool{
+		time.Date(2026, 11, 10, 23, 59, 0, 0, zone): false,
+		time.Date(2026, 11, 11, 0, 5, 0, 0, zone):   true,
+		time.Date(2026, 11, 20, 12, 0, 0, 0, zone):  true,
+	} {
+		if got := ask.OfferAgain(at); got != want {
+			t.Errorf("OfferAgain(%s) = %t, want %t", at, got, want)
+		}
+	}
+	declined := Ask{Decision: DecisionNone, DecidedAt: &late}
+	if declined.OfferAgain(time.Date(2026, 12, 1, 0, 0, 0, 0, zone)) {
+		t.Error("Don't ask again was offered again")
+	}
+}
+
 func testSource(path string) Source {
 	return Source{ID: SourceID(path), Kind: KindObsidian, Name: filepath.Base(path), Path: path, ConnectedAt: storeNow, RequestID: "connect-1"}
 }
@@ -134,11 +158,19 @@ func TestRecord_AskStates(t *testing.T) {
 	if got := record.Ask.State(); got != AskDeferred {
 		t.Fatalf("after Not now = %s", got)
 	}
-	if record.Ask.OfferAgain(storeNow.Add(AskAgainAfter - time.Minute)) {
-		t.Fatal("Not now offered again inside the week")
+	if record.Ask.OfferAgain(storeNow.AddDate(0, 0, 6)) {
+		t.Fatal("Not now offered again on day 6")
 	}
-	if !record.Ask.OfferAgain(storeNow.Add(AskAgainAfter)) {
-		t.Fatal("Not now not offered again after the week")
+	if !record.Ask.OfferAgain(storeNow.AddDate(0, 0, 7)) {
+		t.Fatal("Not now not offered again on day 7")
+	}
+	// Not now on the re-offer waits another seven days.
+	reoffered := storeNow.AddDate(0, 0, 7)
+	if err := record.Decide(DecisionLater, "ask-again-1", reoffered); err != nil {
+		t.Fatal(err)
+	}
+	if record.Ask.OfferAgain(reoffered.AddDate(0, 0, 6)) || !record.Ask.OfferAgain(reoffered.AddDate(0, 0, 7)) {
+		t.Fatal("a second Not now did not wait another week")
 	}
 
 	if err := record.Decide(DecisionNone, "ask-2", storeNow); err != nil {

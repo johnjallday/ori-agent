@@ -36,38 +36,58 @@ export function secondBrainAvailable(personalAssistant) {
 // The one label for setting up a folder Ori writes, wherever it is offered.
 export const SET_UP_NOTES_LABEL = 'Set up my notes';
 
-// secondBrainAskView decides whether the assistant opens with the ask and what
-// it says (FR5–FR7). It is shown once: only while nothing is connected and the
-// ask has never been shown, answered or tombstoned.
+// secondBrainAskView decides whether the assistant shows the ask and what it
+// says. Shown is not answered (Issue 776 FR11): it stays while nothing is
+// connected and the ask is pending or shown. Seven days after Not now the server
+// sets offer_again and it comes back as "Still want me…", with Don't ask again
+// as the way out (FR13). A decline on record (decision "none") ends it.
 export function secondBrainAskView(secondBrain, available) {
+  const askState = secondBrain?.ask?.state;
+  const reoffer = askState === 'deferred' && secondBrain?.ask?.offer_again === true;
   const show =
     available === true &&
     secondBrain?.status === 'not_connected' &&
-    secondBrain?.ask?.state === 'pending';
+    (askState === 'pending' || askState === 'shown' || reoffer);
+  const opening = reoffer
+    ? 'Still want me to keep notes for you?'
+    : 'Want me to keep notes for you?';
+  const end = reoffer ? [{ id: 'none', label: "Don't ask again", style: 'link' }] : [];
   const vault = Array.isArray(secondBrain?.detected) ? secondBrain.detected[0] : null;
   // The ask leads with the job (FR2): what Ori will write, and that the folder
-  // is the user's. A decline already on record (decision "none") is unaffected.
+  // is the user's.
   if (vault?.id && vault?.name) {
     return {
       show,
-      line: `Want me to keep notes for you? I found your Obsidian vault "${vault.name}". I can read it, or set up a folder of my own.`,
+      reoffer,
+      line: `${opening} I found your Obsidian vault "${vault.name}". I can read it, or set up a folder of my own.`,
       actions: [
         { id: 'read', label: `Read ${vault.name}`, style: 'primary', vaultId: vault.id },
         { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'outline' },
         { id: 'choose', label: 'Another folder…', style: 'outline' },
-        { id: 'later', label: 'Not now', style: 'link' }
+        { id: 'later', label: 'Not now', style: 'link' },
+        ...end
       ]
     };
   }
   return {
     show,
-    line: "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own.",
+    reoffer,
+    line: `${opening} I'll write what I learn, people, projects and your journal, into plain Markdown you own.`,
     actions: [
       { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
       { id: 'choose', label: 'I have a notes folder…', style: 'outline' },
-      { id: 'later', label: 'Not now', style: 'link' }
+      { id: 'later', label: 'Not now', style: 'link' },
+      ...end
     ]
   };
+}
+
+// secondBrainAskPinned: the ask is the conversation's first message the first
+// time it is shown, or while this page already showed it there; every later
+// load, and the re-offer, place it under Needs you (FR11, FR13).
+export function secondBrainAskPinned(secondBrain, { shownHere = false } = {}) {
+  if (shownHere) return false;
+  return secondBrain?.ask?.state !== 'pending';
 }
 
 // What the consent card says to a second brain Ori set up before it kept People,
@@ -751,7 +771,10 @@ const state = {
   // its first message.
   latest: false,
   // What a setup would seed now, read when the setup turn starts (FR7).
-  setupPreview: null
+  setupPreview: null,
+  // The ask was the conversation's first message on this page, so it stays
+  // there rather than moving under Needs you on a status refresh (FR11).
+  askShownHere: false
 };
 
 let pathEntry = null;
@@ -2290,6 +2313,8 @@ async function decide(decision) {
   state.secondBrain = payload.second_brain || state.secondBrain;
   state.decision = decision;
   setPhase('answered');
+  // Today drops its ask row at once rather than on the next load.
+  announce();
 }
 
 function onAskAction(action) {
@@ -2500,9 +2525,11 @@ async function load() {
     state.secondBrain = payload.second_brain || null;
     const ask = secondBrainAskView(state.secondBrain, state.available);
     if (ask.show && state.phase === 'idle') {
-      // The assistant speaks first: the ask is the conversation's first message.
+      // The assistant speaks first: the ask is the conversation's first message
+      // the first time; later it waits under Needs you until it is answered.
       state.phase = 'ask';
-      state.pinned = false;
+      state.pinned = secondBrainAskPinned(state.secondBrain, { shownHere: state.askShownHere });
+      if (!state.pinned) state.askShownHere = true;
       render();
       markPromptedWhenSeen();
       return;
@@ -2630,6 +2657,25 @@ function init() {
     openLearned,
     // The project question, on request (the drawer asks it by itself in order).
     openProject: showProjectAskIfDue,
+    // Today's ask row and the mission card (/?quest=second-brain): the ask while
+    // it is unanswered or offered again (Issue 776 FR12), otherwise the
+    // connection's own card.
+    openAsk: async () => {
+      await refresh();
+      if (!secondBrainAskView(state.secondBrain, state.available).show) {
+        await window.PersonalAssistantSecondBrain.openManage();
+        return;
+      }
+      state.pinned = false;
+      state.latest = true;
+      state.message = '';
+      state.answer = '';
+      state.history = [];
+      showError('');
+      state.askShownHere = true;
+      setPhase('ask');
+      markPromptedWhenSeen();
+    },
     // The Notes station and the Profile open the connection's own card:
     // connected, missing, or not set up (which is the chooser).
     openManage: async () => {
@@ -2689,7 +2735,7 @@ function startQuestArrival() {
     if (done || !panel || typeof panel.open !== 'function') return;
     if (!panel.open(document.getElementById('personalAssistantLauncher'), { focus: false })) return;
     done = true;
-    void window.PersonalAssistantSecondBrain.openManage();
+    void window.PersonalAssistantSecondBrain.openAsk();
   };
   attempt();
   if (done) return;

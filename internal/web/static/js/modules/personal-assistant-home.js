@@ -745,7 +745,11 @@ function renderCompactRows(list, rows, skipCards = false) {
     // inert row that looks like a competing action.
     if (
       skipCards &&
-      (row.kind === 'folder_offer' || row.kind === 'hq_setup' || row.kind === 'second_brain_result')
+      (row.kind === 'folder_offer' ||
+        row.kind === 'hq_setup' ||
+        row.kind === 'second_brain_result' ||
+        // The notes ask is its own card in this drawer (Issue 776 FR12).
+        row.kind === 'second_brain_ask')
     )
       return;
     const li = document.createElement('li');

@@ -363,6 +363,25 @@ func TestCreate_RefusesAProjectThatCannotBeANote(t *testing.T) {
 	}
 }
 
+func TestNothingToDecide_OnlyWhenEveryItemIsSettled(t *testing.T) {
+	at := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		items []LookItem
+		want  bool
+	}{
+		"no items":            {nil, true},
+		"seeded":              {[]LookItem{{ID: "a", Seeded: true}}, true},
+		"already a follow-up": {[]LookItem{{ID: "a", Accepted: true}}, true},
+		"already a ticket":    {[]LookItem{{ID: "a", Ticketed: true}}, true},
+		"triaged":             {[]LookItem{{ID: "a", ActedAs: ActedDismissed, ActedAt: &at}}, true},
+		"one open line":       {[]LookItem{{ID: "a", Seeded: true}, {ID: "b"}}, false},
+	} {
+		if got := NothingToDecide(tc.items); got != tc.want {
+			t.Errorf("%s: NothingToDecide = %t, want %t", name, got, tc.want)
+		}
+	}
+}
+
 func TestCountSeeds_CountsWhatCreateWouldWrite(t *testing.T) {
 	seeds := Seeds{
 		FollowUps: []SeedFollowUp{{Title: "Call Dana"}, {Title: "  "}, {Title: "token ghp_abcdefghijklmnop"}},

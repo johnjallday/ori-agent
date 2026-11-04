@@ -216,7 +216,7 @@ func TestSecondBrainWeek_TheRowReachesTodayInDoneWithADismiss(t *testing.T) {
 	h.service.Wait()
 	*h.clock = h.clock.Add(8 * 24 * time.Hour)
 	today := &TodayService{secondBrain: h.service}
-	_, _, done := today.secondBrainItems(ctx, "local", "personal-hq", *h.clock)
+	_, _, done := today.secondBrainItems(ctx, "local", "personal-hq", true, *h.clock)
 	var row *TodayItem
 	for index := range done {
 		if done[index].Kind == "second_brain_week" {

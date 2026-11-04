@@ -96,7 +96,7 @@ for stage in "${stages[@]}"; do
 	vault)
 		start "$port" "$stage" ./scripts/second-brain-demo.sh "$port" || { failed+=("$stage"); continue; }
 		ready="$(./scripts/wait-demo-ready.sh "$logdir/$stage.log" 400)" || { failed+=("$stage"); continue; }
-		PLAYWRIGHT_BASE_URL="http://localhost:$port" SECOND_BRAIN_VAULT="$(field VAULT "$ready")" \
+		PLAYWRIGHT_BASE_URL="http://localhost:$port" SECOND_BRAIN_VAULT="$(field VAULT "$ready")" SECOND_BRAIN_SANDBOX="$(field SANDBOX "$ready")" \
 			npx playwright test tests/second-brain.spec.ts --project=chromium --workers=1 || failed+=("$stage")
 		;;
 	setup | first-week)

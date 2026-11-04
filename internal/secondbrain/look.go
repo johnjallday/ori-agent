@@ -95,6 +95,19 @@ type SetupCounts struct {
 	Project string
 }
 
+// NothingToDecide reports whether a finished look leaves the user nothing to
+// add: every item is seeded, already a follow-up or a ticket, or triaged. Such
+// a look is acted on the moment it finishes, so it never waits under Needs you
+// (Issue 776 FR10). Accepted and Ticketed are read fresh by the caller.
+func NothingToDecide(items []LookItem) bool {
+	for _, item := range items {
+		if !item.Seeded && !item.Accepted && !item.Ticketed && item.ActedAs == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // EmptySetupHeadline is what a fresh second brain says when nothing was
 // written: it is empty until Ori learns something (Issue 776 FR8).
 const EmptySetupHeadline = "Your notes are set up. They're empty until I learn something about you."

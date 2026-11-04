@@ -1522,6 +1522,9 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 		if note := run.HeadlineNote; note != "" && note != "no model" && note != "no open items" && note != "setup" {
 			logger.Info("A look kept the rules-only headline", logger.Fields{"look_id": lookID, "reason": note})
 		}
+		// Which lines are already a follow-up or a ticket, read fresh, so a look
+		// with nothing left to add is acted at finish (Issue 776 FR10).
+		settled := s.settledItems(ctx, userID, source, run.Look)
 		_, err := s.store.Mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 			connected := doc.Connected()
 			if connected == nil || connected.ID != source.ID || connected.Current == nil || connected.Current.ID != lookID {
@@ -1531,6 +1534,10 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 			if look.State == secondbrain.LookFinished {
 				// A triage that landed while this look ran is kept too.
 				look.CarryMarks(connected.LastLook)
+				if look.ActedAt == nil && nothingToDecide(look.Items, settled) {
+					at := s.deps.Now().UTC()
+					look.ActedAt = &at
+				}
 				connected.LastLook, connected.Current = &look, nil
 			} else {
 				connected.Current = &look
@@ -1557,6 +1564,34 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 			}
 		}
 	}()
+}
+
+// settledItems names the finished look's lines that are already a follow-up
+// or a ticket, read the way the look's view reads them.
+func (s *SecondBrainService) settledItems(ctx context.Context, userID string, source secondbrain.Source, look secondbrain.Look) map[string]bool {
+	if look.State != secondbrain.LookFinished || len(look.Items) == 0 {
+		return nil
+	}
+	copied := look
+	view := s.withAccepted(ctx, userID, s.withDestinations(&source, SecondBrainLookView{State: look.State, Result: &copied}))
+	settled := map[string]bool{}
+	if view.Result != nil {
+		for _, item := range view.Result.Items {
+			if item.Accepted || item.Ticketed {
+				settled[item.ID] = true
+			}
+		}
+	}
+	return settled
+}
+
+// nothingToDecide applies the fresh marks to the saved items and asks the look.
+func nothingToDecide(items []secondbrain.LookItem, settled map[string]bool) bool {
+	marked := append([]secondbrain.LookItem(nil), items...)
+	for i := range marked {
+		marked[i].Accepted = settled[marked[i].ID]
+	}
+	return secondbrain.NothingToDecide(marked)
 }
 
 // lookView reports a source's look. A running look this process is not

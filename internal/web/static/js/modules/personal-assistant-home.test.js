@@ -225,6 +225,23 @@ test('the first-week recap keeps its route to the Notes station and only a Dismi
   assert.equal(other.actions, undefined, 'only the recap has a Dismiss');
 });
 
+test('the notes ask row keeps its route to the ask', () => {
+  const [ask] = todaySectionItems({
+    items: [
+      {
+        id: 'second-brain-ask',
+        kind: 'second_brain_ask',
+        title: 'Want Ori to keep notes for you?',
+        route: '/?quest=second-brain'
+      }
+    ]
+  });
+  assert.equal(ask.kind, 'second_brain_ask');
+  assert.equal(ask.title, 'Want Ori to keep notes for you?');
+  assert.equal(ask.route, '/?quest=second-brain');
+  assert.equal(ask.actions, undefined, 'the row has no controls of its own');
+});
+
 test('Dismiss on the recap posts a request id and reports only success', async () => {
   const calls = [];
   const ok = await dismissSecondBrainWeek(async (url, init) => {
