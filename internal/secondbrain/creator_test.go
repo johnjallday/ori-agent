@@ -407,17 +407,21 @@ func TestCountSeeds_CountsWhatCreateWouldWrite(t *testing.T) {
 }
 
 func TestSetupHeadline_ReportsWhatWasSeededAndIsHonestWhenNothingWas(t *testing.T) {
-	for counts, want := range map[SetupCounts]string{
-		{FollowUps: 3, People: 2}: "Your notes are set up: 3 follow-ups in Inbox, 2 people.",
-		{FollowUps: 1, People: 1}: "Your notes are set up: 1 follow-up in Inbox, 1 person.",
-		{FollowUps: 4}:            "Your notes are set up: 4 follow-ups in Inbox.",
-		{People: 5}:               "Your notes are set up: 5 people.",
-		{Project: "Launch"}:       "Your notes are set up. I wrote your first note: Launch.",
-		{Project: "Launch", FollowUps: 3, People: 2}: "Your notes are set up: your project note, 3 follow-ups in Inbox, 2 people.",
-		{}: "Your notes are set up. They're empty until I learn something about you.",
+	// A slice, not a keyed map: gofmt 1.26 and 1.27 align a map's keys differently.
+	for _, tc := range []struct {
+		counts SetupCounts
+		want   string
+	}{
+		{SetupCounts{FollowUps: 3, People: 2}, "Your notes are set up: 3 follow-ups in Inbox, 2 people."},
+		{SetupCounts{FollowUps: 1, People: 1}, "Your notes are set up: 1 follow-up in Inbox, 1 person."},
+		{SetupCounts{FollowUps: 4}, "Your notes are set up: 4 follow-ups in Inbox."},
+		{SetupCounts{People: 5}, "Your notes are set up: 5 people."},
+		{SetupCounts{Project: "Launch"}, "Your notes are set up. I wrote your first note: Launch."},
+		{SetupCounts{Project: "Launch", FollowUps: 3, People: 2}, "Your notes are set up: your project note, 3 follow-ups in Inbox, 2 people."},
+		{SetupCounts{}, "Your notes are set up. They're empty until I learn something about you."},
 	} {
-		if got := SetupHeadline(counts); got != want {
-			t.Errorf("SetupHeadline(%+v) = %q, want %q", counts, got, want)
+		if got := SetupHeadline(tc.counts); got != tc.want {
+			t.Errorf("SetupHeadline(%+v) = %q, want %q", tc.counts, got, tc.want)
 		}
 	}
 }
