@@ -181,7 +181,7 @@ test('wt demo: notes and tasks are read, cited, re-read when they change, and ne
   await page.keyboard.press('Enter');
   await expect(sources).toHaveAttribute('open', '');
   const noteLink = sources.getByRole('link', { name: 'Note: Release notes', exact: true });
-  const taskLink = sources.getByRole('link', { name: /^Task: .*Master the single$/ });
+  const taskLink = sources.getByRole('link', { name: /^Ticket: .*Master the single$/ });
   await expect(noteLink).toHaveAttribute('href', noteSource.href);
   await expect(taskLink).toHaveAttribute('href', taskSource.href);
   await expect(sources).toContainText('Album-1 sources fixture · read in full');

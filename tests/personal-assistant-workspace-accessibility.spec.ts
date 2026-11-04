@@ -204,7 +204,7 @@ test('wt demo: the workspace-aware drawer works from the keyboard, announces con
   });
   expect(focusRing, 'a focused source link shows a focus indicator').toBe(true);
   await page.keyboard.press('Tab');
-  await expect(sources.getByRole('link', { name: /^Task: .*Master the single$/ })).toBeFocused();
+  await expect(sources.getByRole('link', { name: /^Ticket: .*Master the single$/ })).toBeFocused();
   // Coverage is said in words, not by color or an icon alone.
   await expect(sources).toContainText('read in full');
   await sources.scrollIntoViewIfNeeded();

@@ -40,7 +40,9 @@ package-focused filenames such as `agent_store.go`. Run `make vet` and
 Runtime config files such as `settings.json` and `agents.json` use snake_case.
 Name tests after observable behavior, e.g. `TestProviderIntegration_WithRetries`.
 UI calls this a **workspace**, while many backend query parameters are
-`studio_id`; use the backend's parameter name in API calls.
+`studio_id`; use the backend's parameter name in API calls. A unit of work is a
+**ticket** in visible copy, never a task or quest; see
+[docs/ui/work-vocabulary.md](docs/ui/work-vocabulary.md).
 
 ## Commit & Pull Request Guidelines
 

@@ -2082,7 +2082,7 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(stage.locator('.ws-map-av-label')).toHaveText('Research Analyst');
     await expect(stage).toContainText('Working');
 
-    await page.getByRole('tab', { name: 'Tasks' }).click();
+    await page.getByRole('tab', { name: 'Tickets' }).click();
     await expect(page.locator('.ws-cmd-agent-tabpanel.is-active')).toContainText('Choose source');
 
     await page.getByRole('tab', { name: 'Toolbox' }).click();
@@ -2293,12 +2293,12 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(inspector).toContainText('Needs input');
     await expect(inspector).toContainText('Role');
     await expect(inspector).toContainText('Toolbox');
-    await expect(inspector).toContainText('Current Quest');
+    await expect(inspector).toContainText('Current ticket');
     await expect(inspector).toContainText('Command Menu');
-    await expect(inspector).toContainText('Resolve Quest');
+    await expect(inspector).toContainText('Resolve');
     await expect(inspector).toContainText('Start Session');
     await expect(inspector).toContainText('Open the Workshop');
-    await expect(inspector).toContainText('Quests');
+    await expect(inspector).toContainText('Tickets');
     await expect(inspector).toContainText('Skills');
     const inspectorGeometry = await inspector.evaluate(node => {
       const rect = node.getBoundingClientRect();
