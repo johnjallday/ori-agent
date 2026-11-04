@@ -85,6 +85,12 @@ func addFillInTargets(t *testing.T, tree writerTree) {
 func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *testing.T) {
 	tree := newWriterTree(t)
 	addFillInTargets(t, tree)
+	// Notes written before Issue 776 carry the 64-hex marker: still Ori's when
+	// intact, the user's once edited (FR18).
+	longBody := []byte("an older capture\n")
+	long := "---\nori: capture\nori_hash: " + bodyHash(longBody) + "\n---\n" + string(longBody)
+	writeNote(t, tree.vault, "Inbox/ori-long.md", long)
+	writeNote(t, tree.vault, "Inbox/ori-long-edited.md", long+"the user's line\n")
 	writer := newWriterFor(t, tree.vault)
 	body := []byte("new text\n")
 
@@ -94,6 +100,7 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 	}{
 		"a user's note":                 {"Inbox/mine.md", ErrUserModified},
 		"an Ori note the user edited":   {"Daily/2026-10-30.md", ErrUserModified},
+		"an older Ori note edited":      {"Inbox/ori-long-edited.md", ErrUserModified},
 		"a link pointing out":           {"Inbox/linked-note.md", ErrOutsideOwnedFolders},
 		"a link pointing inside":        {"Inbox/linked-inside.md", ErrOutsideOwnedFolders},
 		"through a linked folder":       {"Inbox/linked-folder/new.md", ErrOutsideOwnedFolders},
@@ -183,6 +190,7 @@ func TestWrite_StaysInsideOwnedFoldersNeverFollowsALinkNeverTouchesUserNotes(t *
 	allowed(t, "Inbox/new.md", false)
 	allowed(t, "Daily/2026-10-31.md", false)
 	allowed(t, "Inbox/ori-note.md", true)
+	allowed(t, "Inbox/ori-long.md", true)
 	allowed(t, "People/Dana Lee.md", false)
 	allowed(t, "People/Dana Lee.md", true)
 	allowed(t, "Projects/Launch/README.md", false)

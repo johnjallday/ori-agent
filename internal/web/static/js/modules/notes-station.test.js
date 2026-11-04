@@ -5,6 +5,9 @@ import {
   NOTES_ONE_LINER_CONNECTED,
   NOTES_ONE_LINER_CREATED,
   notesOneLiner,
+  mergePeople,
+  personMeta,
+  previewHTML,
   firstNonEmptySection,
   itemActions,
   lookAgeLine,
@@ -269,6 +272,117 @@ test('the panel says what the folder is under its title, by origin', () => {
       '</header><p class="ws-panel-one-liner" data-notes-one-liner>Ori&#39;s notes about you, in a folder you own.'
     ),
     html
+  );
+});
+
+test('Open shows only on notes Ori wrote, and expands them inline as text', () => {
+  const inbox = {
+    notes: [
+      { name: 'ori.md', kind: 'capture', title: 'Call Dana', owned_by_ori: true },
+      { name: 'mine.md', kind: 'user', title: 'My own note', owned_by_ori: false }
+    ],
+    total: 2
+  };
+  const secondBrain = created({
+    today_note: { date: '2026-11-04', state: 'ori', link: 'obsidian://open?path=%2Fx' },
+    projects: [
+      { name: 'Launch', rel: 'Projects/Launch', path: '/x', ori_note: true },
+      { name: 'Album', rel: 'Projects/Album', path: '/y' }
+    ]
+  });
+  const html = tab =>
+    notesPanelHTML({
+      secondBrain,
+      now: NOW,
+      panel: { status: 'ready', tab, inbox, look: { state: 'none' } }
+    });
+  const inboxView = html('inbox');
+  assert.ok(inboxView.includes('data-cmd-modal-action="notes-preview" data-cmd-id="inbox:ori.md"'));
+  assert.ok(!inboxView.includes('data-cmd-id="inbox:mine.md"'), "the user's note has no Open");
+  assert.ok(inboxView.includes('data-cmd-id="daily:2026-11-04.md"'), "today's note when Ori's");
+  const more = html('more');
+  assert.ok(more.includes('data-cmd-id="project:Launch"'));
+  assert.ok(!more.includes('data-cmd-id="project:Album"'), "the user's project has no Open");
+
+  const opened = notesPanelHTML({
+    secondBrain,
+    now: NOW,
+    panel: {
+      status: 'ready',
+      tab: 'inbox',
+      inbox,
+      look: { state: 'none' },
+      preview: {
+        key: 'inbox:ori.md',
+        status: 'ready',
+        note: {
+          name: 'ori.md',
+          title: 'Call Dana',
+          body: '# Call Dana\n\n<b>about</b> the *tour*\n',
+          truncated: true,
+          link: 'obsidian://open?path=%2Fx%2FInbox%2Fori.md'
+        }
+      }
+    }
+  });
+  assert.ok(opened.includes('<p class="ws-notes-preview-text"># Call Dana</p>'));
+  assert.ok(opened.includes('&lt;b&gt;about&lt;/b&gt; the *tour*'), 'escaped, never rendered');
+  assert.ok(opened.includes('Showing the start of this note.'));
+  assert.ok(opened.includes('data-cmd-modal-action="notes-open-folder"'));
+  assert.ok(opened.includes('aria-expanded="true"'));
+  const refused = previewHTML(
+    {
+      key: 'project:Launch',
+      status: 'error',
+      message: 'That note is yours; open it in your editor.'
+    },
+    'project:Launch'
+  );
+  assert.ok(refused.includes('role="alert">That note is yours; open it in your editor.</p>'));
+  assert.equal(previewHTML({ key: 'other' }, 'project:Launch'), '');
+});
+
+test('the header has Open folder for any connected folder', () => {
+  for (const secondBrain of [created(), vault()]) {
+    const html = notesPanelHTML({ secondBrain, now: NOW, panel: { status: 'loading' } });
+    assert.ok(html.includes('data-cmd-modal-action="notes-open-folder">Open folder</button>'));
+  }
+  const none = notesPanelHTML({ secondBrain: { status: 'not_connected' }, panel: {} });
+  assert.ok(!none.includes('notes-open-folder'));
+});
+
+test('People merges the look with the People notes on disk', () => {
+  const merged = mergePeople(
+    [{ name: 'Dana Lee', mentions: 3, link: '' }],
+    [
+      { name: 'dana lee', kind: 'seed', link: 'obsidian://open?path=%2Fd' },
+      { name: 'Sam Ortiz', kind: 'person', link: 'obsidian://open?path=%2Fs' }
+    ]
+  );
+  assert.deepEqual(
+    merged.map(person => [person.name, personMeta(person)]),
+    [
+      ['Dana Lee', '3 mentions'],
+      ['Sam Ortiz', 'A note in People']
+    ]
+  );
+  assert.equal(merged[0].link, 'obsidian://open?path=%2Fd');
+  const sections = notesSections({
+    secondBrain: created(),
+    look: { state: 'none' },
+    inbox: { notes: [], total: 0 },
+    people: { people: [{ name: 'Sam Ortiz', kind: 'seed' }] }
+  });
+  assert.equal(sections.find(section => section.key === 'people').count, 1);
+  const empty = notesSections({ secondBrain: created(), look: { state: 'none' }, inbox: null });
+  assert.equal(
+    empty.find(section => section.key === 'people').empty,
+    'No people in your notes yet. Approve a person on your Profile and Ori writes one.'
+  );
+  const connected = notesSections({ secondBrain: vault(), look: { state: 'none' } });
+  assert.equal(
+    connected.find(section => section.key === 'people').empty,
+    'No people found in your notes yet.'
   );
 });
 

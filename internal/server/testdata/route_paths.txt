@@ -140,6 +140,9 @@
 /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/items/00000000-0000-0000-0000-000000000002
 /api/personal-assistant/second-brain/inbox
 /api/personal-assistant/second-brain/nudge/dismiss
+/api/personal-assistant/second-brain/open-folder
+/api/personal-assistant/second-brain/people
+/api/personal-assistant/second-brain/preview/project/Launch
 /api/personal-assistant/second-brain/prompted
 /api/personal-assistant/specialist
 /api/personal-assistant/setup/file-janitor

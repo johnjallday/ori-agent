@@ -28,6 +28,8 @@ type fakeSecondBrain struct {
 	weekID  string
 	nudgeID string
 	item    [4]string // look id, item id, action, request id
+	openID  string
+	preview [2]string // kind, name
 	accept  personalassistant.SecondBrainAcceptInput
 	lookID  string
 	version int64
@@ -122,6 +124,20 @@ func (f *fakeSecondBrain) Inbox(context.Context, string) (personalassistant.Seco
 	return personalassistant.SecondBrainInboxView{Notes: []personalassistant.SecondBrainInboxNote{{Name: "a.md", Kind: "capture", Title: "A", OwnedByOri: true}}, Total: 1}, f.record("inbox")
 }
 
+func (f *fakeSecondBrain) OpenFolder(_ context.Context, _ string, requestID string) error {
+	f.openID = requestID
+	return f.record("open_folder")
+}
+
+func (f *fakeSecondBrain) Preview(_ context.Context, _ string, kind, name string) (personalassistant.SecondBrainPreviewView, error) {
+	f.preview = [2]string{kind, name}
+	return personalassistant.SecondBrainPreviewView{Name: name, Kind: kind, Title: "Launch", Body: "Finishing the plan\n"}, f.record("preview")
+}
+
+func (f *fakeSecondBrain) People(context.Context, string) (personalassistant.SecondBrainPeopleView, error) {
+	return personalassistant.SecondBrainPeopleView{People: []personalassistant.SecondBrainPersonView{{Name: "Dana Lee", Kind: "person"}}}, f.record("people")
+}
+
 func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	h := NewHandler(nil, userprofile.LocalUserProvider{})
 	h.SetSecondBrain(fake, connectionshttp.NewOriginGuard().Check)
@@ -143,6 +159,9 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("POST "+base+"/look/{lookID}/follow-ups", h.AcceptSecondBrainFollowUps)
 	mux.HandleFunc("POST "+base+"/look/{lookID}/dismiss", h.DismissSecondBrainLook)
 	mux.HandleFunc("POST "+base+"/look/{lookID}/items/{itemID}", h.ActOnSecondBrainItem)
+	mux.HandleFunc("POST "+base+"/open-folder", h.OpenSecondBrainFolder)
+	mux.HandleFunc("GET "+base+"/preview/{kind}/{name}", h.GetSecondBrainPreview)
+	mux.HandleFunc("GET "+base+"/people", h.GetSecondBrainPeople)
 	mux.HandleFunc("GET "+base+"/inbox", h.GetSecondBrainInbox)
 	mux.HandleFunc("POST "+base+"/disconnect", h.DisconnectSecondBrain)
 	return mux
@@ -157,6 +176,62 @@ func secondBrainRequest(handler http.Handler, method, path, body, origin string)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder
+}
+
+// A preview names one note: a kind and one component. Anything else is a 400
+// before the service, so nothing is read (Issue 776 FR16).
+func TestSecondBrainPreview_RefusesAnythingButOneNoteBeforeTheService(t *testing.T) {
+	for _, path := range []string{
+		"/preview/people/Dana%20Lee.md",
+		"/preview/facts/x.md",
+		"/preview/inbox/..%2Fsecret.md",
+		"/preview/inbox/sub%2Fnote.md",
+		"/preview/inbox/.hidden.md",
+		"/preview/inbox/script.sh",
+		"/preview/inbox/README.md",
+		"/preview/project/..",
+		"/preview/project/a%5Cb",
+		"/preview/inbox/note.md?path=/etc",
+	} {
+		fake := &fakeSecondBrain{}
+		response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodGet, path, "", "")
+		// The mux itself redirects a ".." segment; either way nothing is read.
+		refused := response.Code == http.StatusBadRequest ||
+			(strings.HasSuffix(path, "/..") && response.Code == http.StatusTemporaryRedirect)
+		if !refused || len(fake.calls) != 0 {
+			t.Errorf("GET %s = %d (calls %v), want 400 before the service", path, response.Code, fake.calls)
+		}
+	}
+	fake := &fakeSecondBrain{}
+	response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodGet, "/preview/inbox/20261104-0900-note.md", "", "")
+	if response.Code != http.StatusOK || fake.preview != [2]string{"inbox", "20261104-0900-note.md"} ||
+		response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Body.String(), `"body":"Finishing the plan\n"`) {
+		t.Fatalf("preview = %d %s (%v)", response.Code, response.Body.String(), fake.preview)
+	}
+	yours := &fakeSecondBrain{err: personalassistant.ErrSecondBrainNoteIsYours}
+	response = secondBrainRequest(newSecondBrainHandler(yours), http.MethodGet, "/preview/project/Album", "", "")
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "That note is yours; open it in your editor.") {
+		t.Fatalf("a user's note = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSecondBrainOpenFolder_TakesOnlyARequestID(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/open-folder", `{"request_id":" o-1 "}`, "")
+	if response.Code != http.StatusOK || fake.openID != "o-1" {
+		t.Fatalf("open = %d, id %q", response.Code, fake.openID)
+	}
+	for _, body := range []string{`{"request_id":"o-1","path":"/Users/sam"}`, `{"request_id":"o-1","folder":"Inbox"}`, `{}`, `[]`} {
+		fake := &fakeSecondBrain{}
+		response := secondBrainRequest(newSecondBrainHandler(fake), http.MethodPost, "/open-folder", body, "")
+		if body == `{}` {
+			// The service refuses an empty id; the shape itself is closed.
+			continue
+		}
+		if response.Code != http.StatusBadRequest || len(fake.calls) != 0 {
+			t.Errorf("open %s = %d (calls %v)", body, response.Code, fake.calls)
+		}
+	}
 }
 
 func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) {
@@ -180,6 +255,9 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 		{http.MethodPost, "/look/look-1/dismiss", `{"request_id":"x-1"}`},
 		{http.MethodPost, "/look/look-1/items/item-1", `{"action":"done","request_id":"i-1"}`},
 		{http.MethodGet, "/inbox", ""},
+		{http.MethodPost, "/open-folder", `{"request_id":"o-1"}`},
+		{http.MethodGet, "/preview/project/Launch", ""},
+		{http.MethodGet, "/people", ""},
 		{http.MethodPost, "/disconnect", `{"request_id":"d-1","if_version":1}`},
 	} {
 		if got := secondBrainRequest(handler, route.method, route.path, route.body, "https://evil.example").Code; got != http.StatusForbidden {
@@ -189,8 +267,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 			t.Errorf("%s %s from Ori's page = %d, want 200", route.method, route.path, got)
 		}
 	}
-	if len(fake.calls) != 18 {
-		t.Fatalf("calls = %v, want only the eighteen local requests", fake.calls)
+	if len(fake.calls) != 21 {
+		t.Fatalf("calls = %v, want only the twenty-one local requests", fake.calls)
 	}
 
 	rebound := httptest.NewRequest(http.MethodGet, "http://attacker.example/api/personal-assistant/second-brain", nil)

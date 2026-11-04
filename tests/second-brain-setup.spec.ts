@@ -226,7 +226,7 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
   expect(peopleNotes).toHaveLength(people);
   expect(peopleNotes).toContain('Dana Lee.md');
   const seeded = readFileSync(join(brain, 'Inbox', inbox[0]), 'utf8');
-  expect(seeded).toMatch(/^---\nori: seed\nori_hash: [0-9a-f]{64}\n---\n/);
+  expect(seeded).toMatch(/^---\nori: seed\nori_hash: [0-9a-f]{16}\n---\n/);
   expect(seeded).toContain('- [ ] ');
 
   // The look says the same, and marks the items as seeded.
@@ -294,6 +294,21 @@ test('the project question comes first and the folder opens with that note', asy
     fill_in?: { project_ask?: string };
   };
   expect(current.fill_in?.project_ask).toBe('answered');
+  // The note opens inside Ori, byte for byte after the marker (Issue 776 FR16).
+  const opened = await request.get(`${ENDPOINT}/preview/project/${encodeURIComponent(project)}`);
+  expect(opened.ok(), await opened.text()).toBeTruthy();
+  const preview = (await opened.json()).preview;
+  expect(preview.body).toBe(note.slice(note.indexOf('\n---\n') + 5));
+  expect(preview.truncated).toBe(false);
+  // The card offers it: Open {project}, Open folder and Open in Obsidian.
+  await card(page)
+    .getByRole('button', { name: `Open ${project}` })
+    .click();
+  await expect(card(page).locator('.pa-second-brain__preview')).toContainText(answer);
+  const folder = await request.post(`${ENDPOINT}/open-folder`, {
+    data: { request_id: `spec-open-${Date.now()}` }
+  });
+  expect(folder.ok(), await folder.text()).toBeTruthy();
   expect(current.written_by_ori?.count).toBeGreaterThanOrEqual(1);
   // The answer is also the reviewed fact the user typed.
   const knowledge = await (await request.get('/api/personal-assistant/knowledge')).json();
@@ -376,7 +391,7 @@ test('saving a Journal copies it to Daily, refreshes it, and leaves an edited no
 
   expect((await save('# End of day\n\nShipped the mix.')).daily_note).toBe('mirrored');
   const first = readFileSync(daily, 'utf8');
-  expect(first).toMatch(/^---\nori: journal\nori_hash: [0-9a-f]{64}\n---\n# End of day/);
+  expect(first).toMatch(/^---\nori: journal\nori_hash: [0-9a-f]{16}\n---\n# End of day/);
   expect(first).toContain('Shipped the mix.');
   expect(await writtenCount(request)).toBe(before + 1);
 
@@ -436,7 +451,7 @@ test('the connection card shows what Ori wrote and takes a note into Inbox', asy
   expect(notes).toHaveLength(2);
   const note = readFileSync(join(brain, 'Inbox', notes.sort()[0]), 'utf8');
   expect(note).toMatch(
-    /^---\nori: capture\nori_hash: [0-9a-f]{64}\n---\nSpec note one\n\nCaptured by Ori on \d{4}-\d{2}-\d{2}\./
+    /^---\nori: capture\nori_hash: [0-9a-f]{16}\n---\nSpec note one\n\nCaptured by Ori on \d{4}-\d{2}-\d{2}\./
   );
 });
 

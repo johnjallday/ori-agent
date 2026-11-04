@@ -29,7 +29,7 @@ const (
 	// the user reads what Ori will write before it writes.
 	OwnedFoldersSentence = "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
 
-	obsidianAppJSON = "{\n  \"alwaysUpdateLinks\": false,\n  \"promptDelete\": true\n}\n"
+	obsidianAppJSON = "{\n  \"alwaysUpdateLinks\": false,\n  \"promptDelete\": true,\n  \"propertiesInDocument\": \"hidden\"\n}\n"
 )
 
 var (

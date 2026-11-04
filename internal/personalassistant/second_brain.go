@@ -147,7 +147,14 @@ type SecondBrainService struct {
 	// createMu serialises setups, so two requests with the same id cannot
 	// both try to make the folder.
 	createMu sync.Mutex
-	seeds    SecondBrainSeeds
+
+	// Open folder (Issue 776 FR15): the opener, and the request ids it has
+	// already opened, so a replay opens nothing again.
+	doorsMu        sync.Mutex
+	openFolder     folderOpener
+	openedRequests map[string]bool
+	openedOrder    []string
+	seeds          SecondBrainSeeds
 	// captureMu serialises captures, so two in one minute number their names
 	// instead of racing for one.
 	captureMu sync.Mutex
@@ -368,6 +375,9 @@ type SecondBrainProjectView struct {
 	Name string `json:"name"`
 	Rel  string `json:"rel"`
 	Path string `json:"path"`
+	// OriNote says the project's README opens with Ori's marker, so the panel
+	// offers Open (Issue 776 FR16).
+	OriNote bool `json:"ori_note,omitempty"`
 }
 
 // SecondBrainWrittenView is the "Written by Ori" count.
@@ -571,9 +581,14 @@ func projectViews(root string) []SecondBrainProjectView {
 	if err != nil {
 		return nil
 	}
+	names := make([]string, 0, len(projects))
+	for _, project := range projects {
+		names = append(names, project.Name)
+	}
+	byOri := secondbrain.ProjectNotesByOri(root, names)
 	views := make([]SecondBrainProjectView, 0, len(projects))
 	for _, project := range projects {
-		views = append(views, SecondBrainProjectView{Name: project.Name, Rel: project.Rel, Path: project.Path})
+		views = append(views, SecondBrainProjectView{Name: project.Name, Rel: project.Rel, Path: project.Path, OriNote: byOri[project.Name]})
 	}
 	return views
 }

@@ -552,6 +552,23 @@ body.home-command-page .home-command-bridge * {
   overflow-wrap: anywhere;
 }
 
+/* A note Ori wrote, opened inline as plain paragraphs (Issue 776 FR16). */
+.pa-second-brain__doors {
+  align-items: center;
+}
+.pa-second-brain__preview {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--border-color, rgba(127, 127, 127, 0.35));
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.pa-second-brain__preview-text {
+  margin: 0 0 0.5rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
 .pa-second-brain__path {
   margin: 0 0 0.25rem;
 }

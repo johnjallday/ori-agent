@@ -636,6 +636,7 @@ export function secondBrainProjectsView(secondBrain) {
     .filter(project => project?.name && !/[\\/]/.test(project.name))
     .map(project => ({
       name: String(project.name),
+      oriNote: project.ori_note === true,
       action: {
         id: 'workspace',
         label: 'Make a workspace',
@@ -644,6 +645,67 @@ export function secondBrainProjectsView(secondBrain) {
       }
     }));
 }
+
+// Doors without Obsidian (Issue 776 FR15, FR16). A preview names one note by
+// kind and one component; the server checks both again before reading.
+export const PREVIEW_KINDS = ['inbox', 'daily', 'project'];
+
+export function secondBrainPreviewPath(kind, name) {
+  const text = String(name || '');
+  if (!PREVIEW_KINDS.includes(kind) || !text || /[/\\]/.test(text) || text.startsWith('.')) {
+    return '';
+  }
+  return `${SECOND_BRAIN_ENDPOINT}/preview/${kind}/${encodeURIComponent(text)}`;
+}
+
+// previewParagraphs splits a note's text into plain paragraphs at blank lines.
+// The text is shown as text, never rendered as Markdown or HTML.
+export function previewParagraphs(body) {
+  return String(body || '')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n[ \t]*\n/)
+    .map(paragraph => paragraph.replace(/^\n+|\n+$/g, ''))
+    .filter(paragraph => paragraph.trim());
+}
+
+// fetchSecondBrainPreview reads one note Ori wrote. A refusal carries the
+// server's sentence ("That note is yours; open it in your editor.").
+export async function fetchSecondBrainPreview(kind, name, fetchImpl = fetch) {
+  const path = secondBrainPreviewPath(kind, name);
+  if (!path) return { ok: false, message: 'That note cannot be opened here.' };
+  try {
+    const response = await fetchImpl(path, { headers: { Accept: 'application/json' } });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.preview) {
+      return {
+        ok: false,
+        message: secondBrainError(payload, 'That note did not open. Try again.')
+      };
+    }
+    return { ok: true, preview: payload.preview };
+  } catch (_) {
+    return { ok: false, message: 'That note did not open. Try again.' };
+  }
+}
+
+// openSecondBrainFolder asks the server to open the connected folder in the
+// file manager. It reads nothing.
+export async function openSecondBrainFolder(fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(`${SECOND_BRAIN_ENDPOINT}/open-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ request_id: newRequestID('openfolder') })
+    });
+    if (response.ok) return { ok: true, message: '' };
+    const payload = await response.json().catch(() => null);
+    return { ok: false, message: secondBrainError(payload, 'The folder did not open. Try again.') };
+  } catch (_) {
+    return { ok: false, message: 'The folder did not open. Try again.' };
+  }
+}
+
+export const OPEN_FOLDER_LABEL = 'Open folder';
 
 // secondBrainProjectLink opens Create Workspace on a project, by its name: the
 // page looks the folder up itself, so a link never carries a path.
@@ -774,7 +836,10 @@ const state = {
   setupPreview: null,
   // The ask was the conversation's first message on this page, so it stays
   // there rather than moving under Needs you on a status refresh (FR11).
-  askShownHere: false
+  askShownHere: false,
+  // The note opened inline ("kind:name"), and a sentence from Open folder.
+  preview: { key: '', status: '', note: null, message: '' },
+  doorMessage: ''
 };
 
 let pathEntry = null;
@@ -1519,6 +1584,97 @@ function renderAnswered(body) {
   body.append(node('p', 'pa-specialist-offer__headline', line));
 }
 
+// renderDoors is the line of ways into the folder (Issue 776 FR15, FR16): Open
+// on the setup's project note, Open folder for any connected folder, and Open in
+// Obsidian for a folder Ori set up. The note opens inline, below the line.
+function renderDoors(body, { project = '' } = {}) {
+  const connected =
+    Boolean(state.secondBrain?.source?.name) && state.secondBrain?.status === 'connected';
+  const openLink = secondBrainOpenLink(state.secondBrain);
+  if (!connected && !openLink) return;
+  const line = node('div', 'pa-specialist-offer__actions pa-second-brain__doors');
+  if (project) {
+    const key = `project:${project}`;
+    const open = button(
+      {
+        id: 'preview',
+        label: state.preview.key === key ? 'Close' : `Open ${project}`,
+        style: 'outline'
+      },
+      () => void togglePreview('project', project)
+    );
+    open.setAttribute('aria-expanded', state.preview.key === key ? 'true' : 'false');
+    line.append(open);
+  }
+  if (connected) {
+    line.append(
+      button({ id: 'open-folder', label: OPEN_FOLDER_LABEL, style: 'outline' }, openFolder)
+    );
+  }
+  if (openLink) {
+    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
+    open.href = openLink;
+    open.title = 'Open this folder as a vault in Obsidian';
+    line.append(open);
+  }
+  body.append(line);
+  if (state.doorMessage) {
+    const note = node('p', 'pa-folder__note', state.doorMessage);
+    note.setAttribute('role', 'status');
+    body.append(note);
+  }
+  renderPreview(body);
+}
+
+// renderPreview shows the opened note as plain paragraphs (text nodes only),
+// with Open folder and Open in Obsidian beside it, or the server's sentence.
+function renderPreview(body) {
+  const preview = state.preview;
+  if (!preview.key) return;
+  const box = node('div', 'pa-second-brain__preview');
+  box.dataset.secondBrainPreview = preview.key;
+  if (preview.status === 'loading') {
+    box.append(node('p', 'pa-folder__note', 'Opening…'));
+  } else if (preview.status === 'error') {
+    const line = node('p', 'pa-folder__note', preview.message);
+    line.setAttribute('role', 'alert');
+    box.append(line);
+  } else if (preview.note) {
+    for (const paragraph of previewParagraphs(preview.note.body)) {
+      box.append(node('p', 'pa-second-brain__preview-text', paragraph));
+    }
+    if (preview.note.truncated) {
+      box.append(node('p', 'pa-folder__note', 'Showing the start of this note.'));
+    }
+    // Open folder and Open in Obsidian sit in the doors row just above.
+  }
+  body.append(box);
+}
+
+async function togglePreview(kind, name) {
+  const key = `${kind}:${name}`;
+  if (state.preview.key === key) {
+    state.preview = { key: '', status: '', note: null, message: '' };
+    render();
+    return;
+  }
+  state.preview = { key, status: 'loading', note: null, message: '' };
+  render();
+  const result = await fetchSecondBrainPreview(kind, name);
+  if (state.preview.key !== key) return;
+  state.preview = result.ok
+    ? { key, status: 'ready', note: result.preview, message: '' }
+    : { key, status: 'error', note: null, message: result.message };
+  render();
+}
+
+async function openFolder() {
+  state.doorMessage = '';
+  const result = await openSecondBrainFolder();
+  state.doorMessage = result.ok ? '' : result.message;
+  render();
+}
+
 function renderManage(body) {
   const view = secondBrainManageView(state.secondBrain);
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
@@ -1527,15 +1683,7 @@ function renderManage(body) {
     body.append(node('p', 'pa-second-brain__path', state.secondBrain.source.path));
   }
   if (view.written) body.append(node('p', 'pa-folder__note', view.written));
-  const openLink = secondBrainOpenLink(state.secondBrain);
-  if (openLink) {
-    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
-    open.href = openLink;
-    open.title = 'Open this folder as a vault in Obsidian';
-    const line = node('p', 'pa-folder__note');
-    line.append(open);
-    body.append(line);
-  }
+  renderDoors(body);
   if (view.capture) renderCapture(body);
   renderProjects(body);
   body.append(
@@ -1981,15 +2129,10 @@ function renderLook(body) {
   if (view.alsoNoticed)
     body.append(node('p', 'pa-folder__note pa-second-brain__noticed', view.alsoNoticed));
   if (state.receipt) body.append(node('p', 'pa-folder__first-look', state.receipt));
-  const openLink = secondBrainOpenLink(state.secondBrain);
-  if (openLink) {
-    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
-    open.href = openLink;
-    open.title = 'Open this folder as a vault in Obsidian';
-    const line = node('p', 'pa-folder__note');
-    line.append(open);
-    body.append(line);
-  }
+  // Right after a setup that wrote the project note, it opens here (FR8, FR16).
+  renderDoors(body, {
+    project: state.offerFolder && state.setup?.project?.name ? state.setup.project.name : ''
+  });
   if (
     secondBrainFolderOfferShows({
       justSetUp: state.offerFolder,

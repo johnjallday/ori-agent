@@ -248,7 +248,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
 
     const readme = join(brain, 'Projects', project, 'README.md');
     const written = readFileSync(readme, 'utf8');
-    expect(written).toMatch(/^---\nori: project\nori_hash: [0-9a-f]{64}\n---\n/);
+    expect(written).toMatch(/^---\nori: project\nori_hash: [0-9a-f]{16}\n---\n/);
     expect(written).toContain(`# ${project}\n\nFinishing the Launch album\n`);
     expect(readdirSync(join(brain, 'Projects', project))).toEqual(['README.md']);
     const current = await secondBrain(request);
@@ -302,7 +302,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
     const danaNote = join(brain, 'People', `${first}.md`);
     await waitFor(danaNote);
     expect(readFileSync(danaNote, 'utf8')).toMatch(
-      /^---\nori: person\nori_hash: [0-9a-f]{64}\n---\n/
+      /^---\nori: person\nori_hash: [0-9a-f]{16}\n---\n/
     );
 
     // The user takes the note over by editing it; a later sync never touches it.

@@ -130,6 +130,9 @@ DELETE /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-0000000
 DELETE /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/follow-ups => not-found
 DELETE /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/items/00000000-0000-0000-0000-000000000002 => not-found
 DELETE /api/personal-assistant/second-brain/nudge/dismiss         => not-found
+DELETE /api/personal-assistant/second-brain/open-folder           => not-found
+DELETE /api/personal-assistant/second-brain/people                => not-found
+DELETE /api/personal-assistant/second-brain/preview/project/Launch => not-found
 DELETE /api/personal-assistant/second-brain/prompted              => not-found
 DELETE /api/personal-assistant/setup-journey                      => not-found
 DELETE /api/personal-assistant/setup-journey/children             => not-found
@@ -566,6 +569,9 @@ GET    /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-0000000
 GET    /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/follow-ups => not-found
 GET    /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/items/00000000-0000-0000-0000-000000000002 => not-found
 GET    /api/personal-assistant/second-brain/nudge/dismiss         => not-found
+GET    /api/personal-assistant/second-brain/open-folder           => not-found
+GET    /api/personal-assistant/second-brain/people                => handled
+GET    /api/personal-assistant/second-brain/preview/project/Launch => handled
 GET    /api/personal-assistant/second-brain/prompted              => not-found
 GET    /api/personal-assistant/setup-journey                      => handled
 GET    /api/personal-assistant/setup-journey/children             => not-found
@@ -1002,6 +1008,9 @@ PATCH  /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-0000000
 PATCH  /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/follow-ups => not-found
 PATCH  /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/items/00000000-0000-0000-0000-000000000002 => not-found
 PATCH  /api/personal-assistant/second-brain/nudge/dismiss         => not-found
+PATCH  /api/personal-assistant/second-brain/open-folder           => not-found
+PATCH  /api/personal-assistant/second-brain/people                => not-found
+PATCH  /api/personal-assistant/second-brain/preview/project/Launch => not-found
 PATCH  /api/personal-assistant/second-brain/prompted              => not-found
 PATCH  /api/personal-assistant/setup-journey                      => not-found
 PATCH  /api/personal-assistant/setup-journey/children             => not-found
@@ -1438,6 +1447,9 @@ POST   /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-0000000
 POST   /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/follow-ups => handled
 POST   /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/items/00000000-0000-0000-0000-000000000002 => handled
 POST   /api/personal-assistant/second-brain/nudge/dismiss         => handled
+POST   /api/personal-assistant/second-brain/open-folder           => handled
+POST   /api/personal-assistant/second-brain/people                => not-found
+POST   /api/personal-assistant/second-brain/preview/project/Launch => not-found
 POST   /api/personal-assistant/second-brain/prompted              => handled
 POST   /api/personal-assistant/setup-journey                      => not-found
 POST   /api/personal-assistant/setup-journey/children             => handled
@@ -1874,6 +1886,9 @@ PUT    /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-0000000
 PUT    /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/follow-ups => not-found
 PUT    /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/items/00000000-0000-0000-0000-000000000002 => not-found
 PUT    /api/personal-assistant/second-brain/nudge/dismiss         => not-found
+PUT    /api/personal-assistant/second-brain/open-folder           => not-found
+PUT    /api/personal-assistant/second-brain/people                => not-found
+PUT    /api/personal-assistant/second-brain/preview/project/Launch => not-found
 PUT    /api/personal-assistant/second-brain/prompted              => not-found
 PUT    /api/personal-assistant/setup-journey                      => not-found
 PUT    /api/personal-assistant/setup-journey/children             => not-found

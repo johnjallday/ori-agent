@@ -23,6 +23,11 @@ import {
   secondBrainAnsweredLine,
   secondBrainAskView,
   secondBrainAskPinned,
+  secondBrainPreviewPath,
+  previewParagraphs,
+  fetchSecondBrainPreview,
+  openSecondBrainFolder,
+  OPEN_FOLDER_LABEL,
   secondBrainAvailable,
   secondBrainCaptureProblem,
   secondBrainCaptureReceipt,
@@ -453,6 +458,64 @@ test("a week after Not now the ask comes back with Don't ask again", () => {
   // The first ask never offers Don't ask again.
   assert.ok(!secondBrainAskView(detected, true).actions.some(action => action.id === 'none'));
   assert.equal(secondBrainAskView({ ...due, ask: { state: 'declined' } }, true).show, false);
+});
+
+test('a preview names one note by kind and one component, never a path', () => {
+  assert.equal(
+    secondBrainPreviewPath('project', 'Spring Tour'),
+    '/api/personal-assistant/second-brain/preview/project/Spring%20Tour'
+  );
+  assert.equal(
+    secondBrainPreviewPath('inbox', '20261104-0900-note.md'),
+    '/api/personal-assistant/second-brain/preview/inbox/20261104-0900-note.md'
+  );
+  for (const [kind, name] of [
+    ['people', 'Dana.md'],
+    ['inbox', '../x.md'],
+    ['inbox', 'a/b.md'],
+    ['inbox', 'a\\b.md'],
+    ['daily', '.hidden.md'],
+    ['inbox', '']
+  ]) {
+    assert.equal(secondBrainPreviewPath(kind, name), '', `${kind} ${name}`);
+  }
+});
+
+test('a previewed note is plain paragraphs split at blank lines', () => {
+  assert.deepEqual(previewParagraphs('# Title\n\nFirst line\nsecond line\n\n\n- [ ] a task\n'), [
+    '# Title',
+    'First line\nsecond line',
+    '- [ ] a task'
+  ]);
+  assert.deepEqual(previewParagraphs('one\r\n\r\ntwo'), ['one', 'two']);
+  assert.deepEqual(previewParagraphs(''), []);
+});
+
+test('preview and Open folder report the server sentence on refusal', async () => {
+  const yours = await fetchSecondBrainPreview('project', 'Album', async () => ({
+    ok: false,
+    json: async () => ({ error: 'That note is yours; open it in your editor.' })
+  }));
+  assert.deepEqual(yours, { ok: false, message: 'That note is yours; open it in your editor.' });
+  const shown = await fetchSecondBrainPreview('project', 'Launch', async url => {
+    assert.equal(url, '/api/personal-assistant/second-brain/preview/project/Launch');
+    return { ok: true, json: async () => ({ preview: { body: 'x' } }) };
+  });
+  assert.deepEqual(shown, { ok: true, preview: { body: 'x' } });
+  assert.equal(
+    (await fetchSecondBrainPreview('people', 'x.md', async () => assert.fail())).ok,
+    false
+  );
+
+  const calls = [];
+  const opened = await openSecondBrainFolder(async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true };
+  });
+  assert.equal(opened.ok, true);
+  assert.equal(calls[0].url, '/api/personal-assistant/second-brain/open-folder');
+  assert.deepEqual(Object.keys(JSON.parse(calls[0].init.body)), ['request_id']);
+  assert.equal(OPEN_FOLDER_LABEL, 'Open folder');
 });
 
 test('a decline ends the turn with one line', () => {
