@@ -56,15 +56,19 @@ test('terminology: Map window labels are presentation-only Mission/Tickets, keys
   assert.equal(objectives.key, 'objectives');
 });
 
-test('terminology: the Map Backlog tool-belt entry names Backlog even though its window is presented as Quest Board (FR50, 53, 57)', () => {
+test('terminology: the Map Backlog tool-belt entry is named Backlog (FR50, 53, 57; one-vocabulary FR4)', () => {
   const view = Object.create(WorkspaceCommandView.prototype);
   const options = view.mapWindowOptions();
   const backlog = options.find(o => o.key === 'backlog');
   assert.ok(backlog, 'a dedicated Backlog map window option exists');
-  assert.match(backlog.label, /Backlog/, 'accessible name/title never says only "Quest Board"');
+  assert.equal(
+    backlog.label,
+    'Backlog',
+    'accessible name/title is the Backlog state, never a quest'
+  );
 });
 
-test('terminology: the Quest Board window body carries "Backlog" as supporting copy alongside the Quest Board title (FR50)', () => {
+test('terminology: the Backlog window reads Backlog over Saved for later in every branch (FR50; one-vocabulary FR5)', () => {
   const view = makeView({
     page: {
       backlogItems: [],
@@ -74,11 +78,12 @@ test('terminology: the Quest Board window body carries "Backlog" as supporting c
     }
   });
   const html = view.renderMapBacklogPanel();
-  assert.match(html, /Quest Board/, 'presentation title is Quest Board');
+  assert.match(html, /<strong>Saved for later<\/strong>/, 'title says what the state means');
   assert.match(html, /<span>Backlog<\/span>/, 'kicker names the real Backlog lifecycle');
+  assert.doesNotMatch(html, /Quest/);
 });
 
-test('terminology: Accept Quest always spells out Promote to Ready in its accessible name (FR9, 31, 53)', () => {
+test('terminology: Start always spells out moving the ticket into work in its accessible name (FR9, 31, 53)', () => {
   const view = makeView({
     page: {
       backlogItems: [{ task: { id: 'b1', description: 'Ship it' } }],
@@ -88,10 +93,10 @@ test('terminology: Accept Quest always spells out Promote to Ready in its access
     }
   });
   const html = view.renderMapBacklogPanel();
-  assert.match(html, />Accept Quest</, 'visible label may use the Quest metaphor');
+  assert.match(html, /<span>Start<\/span>/, 'visible label is Start');
   assert.match(
     html,
-    /aria-label="Accept Quest — Promote Ship it to Ready"/,
+    /aria-label="Start — move Ship it into work"/,
     'accessible name spells out the real action'
   );
 });
@@ -227,7 +232,7 @@ test('terminology: an ordinary workspace map keeps its own words', () => {
     }
   });
   const html = view.renderOperationsMap();
-  assert.match(html, /aria-label="Backlog · Quest Board"/);
+  assert.match(html, /aria-label="Backlog"/);
   assert.match(html, /aria-label="Workspace Goal"/);
   assert.match(html, /Acting Commander/);
   assert.doesNotMatch(html, /ws-cmd-map-arrangement|is-flow/);

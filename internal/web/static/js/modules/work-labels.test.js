@@ -156,13 +156,14 @@ test('guard: the non-HQ Backlog window reads Backlog / Saved for later with Star
   const view = makeView({
     backlogItems: [
       backlogItem('a', 'Draft the release notes', 'backlog'),
-      backlogItem('b', 'Pick a cover image', 'needs_input')
+      backlogItem('b', 'Pick a cover image', 'waiting_for_choice')
     ]
   });
   const html = view.renderMapBacklogPanel();
   assertNoRetiredTerms('Backlog window', html);
-  assert.match(html, /<strong>Backlog<\/strong>/);
-  assert.match(html, /Saved for later/);
+  // The zone header: "Backlog" kicker over the "Saved for later" title, the
+  // same header the HQ branch already showed.
+  assert.match(html, /<span>Backlog<\/span><strong>Saved for later<\/strong>/);
   assert.match(html, /aria-label="Start — move Draft the release notes into work"/);
   assert.match(html, /<span>Start<\/span>/);
 });
@@ -177,7 +178,7 @@ test('guard: the Map Tickets window and its empty state never say quest or objec
   const view = makeView();
   view.openMapTasks = () => [
     { id: 't1', description: 'Mix the chorus', status: 'pending' },
-    { id: 't2', description: 'Answer the label', status: 'needs_input' }
+    { id: 't2', description: 'Answer the label', status: 'waiting_for_choice' }
   ];
   assertNoRetiredTerms('Map Tickets window', view.renderMapTasksPanel());
   view.openMapTasks = () => [];
@@ -186,12 +187,20 @@ test('guard: the Map Tickets window and its empty state never say quest or objec
 
 test('guard: ticket row action words are Resolve / Track / Open', () => {
   const view = makeView();
-  const labels = ['needs_input', 'blocked', 'running', 'failed', 'cancelled', 'unknown'].map(
-    status => view.mapTaskCommandLabel({ id: 'x', status })
-  );
+  const labels = [
+    'waiting_for_choice',
+    'blocked',
+    'in_progress',
+    'failed',
+    'cancelled',
+    'unknown'
+  ].map(status => view.mapTaskCommandLabel({ id: 'x', status }));
   for (const label of labels) assert.deepEqual(retiredWorkTermsIn(label), [], label);
-  assert.equal(view.mapTaskCommandLabel({ id: 'x', status: 'needs_input' }), WORK_LABELS.resolve);
-  assert.equal(view.mapTaskCommandLabel({ id: 'x', status: 'running' }), WORK_LABELS.track);
+  assert.equal(
+    view.mapTaskCommandLabel({ id: 'x', status: 'waiting_for_choice' }),
+    WORK_LABELS.resolve
+  );
+  assert.equal(view.mapTaskCommandLabel({ id: 'x', status: 'in_progress' }), WORK_LABELS.track);
 });
 
 function fixtureAgent(task) {
@@ -224,7 +233,7 @@ test('guard: the agent sheet and its command menu say ticket, Start and Assign a
   for (const task of [
     null,
     { id: 'p1', description: 'Queued idea', status: 'pending' },
-    { id: 'n1', description: 'Needs an answer', status: 'needs_input' }
+    { id: 'n1', description: 'Needs an answer', status: 'waiting_for_choice' }
   ]) {
     const view = makeView();
     stubAgentSheet(view);
