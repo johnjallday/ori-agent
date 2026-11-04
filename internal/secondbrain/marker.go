@@ -32,7 +32,13 @@ const (
 	markerClose = "---\n"
 )
 
-var markerPattern = regexp.MustCompile(`\Aori: (` + strings.Join(noteKinds, "|") + `)\nori_hash: ([0-9a-f]{64})\n\z`)
+// The marker's hash is the first 16 hex characters of the body's SHA-256, the
+// length the fill-in ledger uses (Issue 776 FR18). Notes written before that
+// carry all 64 and are still read as Ori's.
+var markerPattern = regexp.MustCompile(`\Aori: (` + strings.Join(noteKinds, "|") + `)\nori_hash: ([0-9a-f]{64}|[0-9a-f]{16})\n\z`)
+
+// markerHashLength is how much of the body hash a new note carries.
+const markerHashLength = 16
 
 // NoteMark is what a note's first lines say about who wrote it.
 type NoteMark struct {
@@ -70,7 +76,7 @@ func ReadMark(content []byte) NoteMark {
 	if !ok {
 		return markInFrontmatter(front)
 	}
-	if hash != bodyHash(body) {
+	if hash != bodyHash(body)[:len(hash)] {
 		return NoteMark{Kind: kind, UserModified: true}
 	}
 	return NoteMark{Kind: kind, OwnedByOri: true, Hash: hash}
@@ -126,7 +132,7 @@ func RenderNote(kind string, body []byte) []byte {
 	out.WriteString("ori: ")
 	out.WriteString(kind)
 	out.WriteString("\nori_hash: ")
-	out.WriteString(bodyHash(body))
+	out.WriteString(bodyHash(body)[:markerHashLength])
 	out.WriteString("\n")
 	out.WriteString(markerClose)
 	out.Write(body)

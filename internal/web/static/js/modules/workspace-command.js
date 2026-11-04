@@ -60,6 +60,7 @@ import { stationFromSearch } from './workspace-station-link.js';
 import { groupReviewedKnowledge } from './personal-hq-knowledge.js';
 import {
   MEMORY_STATION,
+  memoryOneLiner,
   memoryStationState as memoryBadgeState,
   memoryStationSummary,
   readMemoryStationBaseline,
@@ -87,8 +88,10 @@ import {
   LOOK_POLL_LIMIT,
   LOOK_POLL_MS,
   SECOND_BRAIN_ENDPOINT,
+  fetchSecondBrainPreview,
   followUpReceiptLine,
   newRequestID,
+  openSecondBrainFolder,
   secondBrainCaptureProblem,
   secondBrainCaptureReceipt,
   secondBrainError
@@ -3740,6 +3743,11 @@ export class WorkspaceCommandView {
         '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
         '</div>' +
         '</header>' +
+        (section === MEMORY_STATION
+          ? '<p class="ws-panel-one-liner" data-memory-one-liner>' +
+            escapeHtml(memoryOneLiner({ personalHQ: this.isPersonalHQ() })) +
+            '</p>'
+          : '') +
         '<div class="ws-cmd-modal-body ws-cmd-modal-config-body">' +
         '<div class="ws-cmd-config-host" data-cmd-config-host>' +
         '<div class="ws-cmd-modal-empty">Loading ' +
@@ -7905,7 +7913,9 @@ export class WorkspaceCommandView {
     return notesSections({
       secondBrain: this.notesState().secondBrain,
       look: panel.look,
-      inbox: panel.inbox
+      inbox: panel.inbox,
+      people: panel.people,
+      missions: panel.missions
     });
   }
 
@@ -7928,12 +7938,20 @@ export class WorkspaceCommandView {
     const panel = this.notesPanel();
     const created = isCreatedByOri(this.notesState().secondBrain);
     try {
-      const [look, inbox] = await Promise.all([
+      const [look, inbox, people, progression] = await Promise.all([
         this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look'),
-        created ? this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true) : null
+        created ? this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true) : null,
+        // People on disk, by file name (Issue 776 FR22); a failure lists none.
+        created
+          ? this.stationJSON(SECOND_BRAIN_ENDPOINT + '/people', true).catch(() => null)
+          : null,
+        // The missions behind the empty Inbox's check marks (Issue 776 FR19).
+        created ? this.stationJSON('/api/progression', true).catch(() => null) : null
       ]);
       panel.look = (look && look.look) || { state: 'none' };
       if (created) panel.inbox = (inbox && inbox.inbox) || { notes: [], total: 0 };
+      if (created) panel.people = (people && people.people) || { people: [] };
+      if (created) panel.missions = (progression && progression.missions) || [];
       panel.tab = defaultNotesTab(this.notesPanelSections(panel));
       panel.status = 'ready';
     } catch {
@@ -8062,8 +8080,50 @@ export class WorkspaceCommandView {
       void this.addSuggestedFromNotesPanel();
       return;
     }
+    if (action === 'notes-preview') {
+      void this.previewFromNotesPanel(id);
+      return;
+    }
+    if (action === 'notes-open-folder') {
+      void this.openFolderFromNotesPanel();
+      return;
+    }
+    if (action === 'notes-focus-capture') {
+      const root = this.notesModalOpen() ? this.statModalEl : this.notesInlineNode();
+      root?.querySelector?.('[data-notes-capture]')?.focus?.();
+      return;
+    }
     const item = action.startsWith('notes-item-') ? action.slice('notes-item-'.length) : '';
     if (NOTES_ITEM_ACTIONS.includes(item)) void this.triageFromNotesPanel(item, id);
+  }
+
+  // Open on a row expands the note Ori wrote inline; Open again closes it
+  // (Issue 776 FR16). The text is read on request and kept only in the panel.
+  async previewFromNotesPanel(key) {
+    const panel = this.notesPanel();
+    const text = String(key || '');
+    const at = text.indexOf(':');
+    if (at <= 0) return;
+    if (panel.preview?.key === text) {
+      panel.preview = null;
+      this.paintNotesPanel(panel);
+      return;
+    }
+    panel.preview = { key: text, status: 'loading', note: null, message: '' };
+    this.paintNotesPanel(panel);
+    const result = await fetchSecondBrainPreview(text.slice(0, at), text.slice(at + 1));
+    if (panel.preview?.key !== text) return;
+    panel.preview = result.ok
+      ? { key: text, status: 'ready', note: result.preview, message: '' }
+      : { key: text, status: 'error', note: null, message: result.message };
+    this.paintNotesPanel(panel);
+  }
+
+  async openFolderFromNotesPanel() {
+    const panel = this.notesPanel();
+    const result = await openSecondBrainFolder();
+    panel.message = result.ok ? '' : result.message;
+    this.paintNotesPanel(panel);
   }
 
   async triageFromNotesPanel(action, itemID) {
@@ -8155,8 +8215,13 @@ export class WorkspaceCommandView {
       const payload = await this.notesPost('/capture', { text });
       panel.captureDraft = '';
       panel.captureReceipt = secondBrainCaptureReceipt(payload && payload.capture);
-      const inbox = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true);
+      const [inbox, progression] = await Promise.all([
+        this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true),
+        // A capture ticks the checklist's first row.
+        this.stationJSON('/api/progression', true).catch(() => null)
+      ]);
       panel.inbox = (inbox && inbox.inbox) || panel.inbox;
+      if (progression && Array.isArray(progression.missions)) panel.missions = progression.missions;
       clearTimeout(this._notesPanelReceiptTimer);
       this._notesPanelReceiptTimer = setTimeout(() => {
         panel.captureReceipt = '';
@@ -11418,7 +11483,7 @@ export class WorkspaceCommandView {
     const groups = [
       {
         key: 'notes',
-        label: 'Notes',
+        label: this.isPersonalHQ() ? 'Workspace notes' : 'Notes',
         icon: 'bi-journal-text',
         count: Array.isArray(page.notes) ? page.notes.length : 0,
         action: 'New Note',

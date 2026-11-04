@@ -140,7 +140,7 @@ func TestReservedTopLevelSlugMessageNamesTheFolder(t *testing.T) {
 	cases := map[string]string{
 		"Agents":       `"Agents" is reserved for your agents folder. Choose another name.`,
 		" skills ":     `"Skills" is reserved for your skills folder. Choose another name.`,
-		"Second Brain": `"Second Brain" is reserved for your second brain. Choose another name.`,
+		"Second Brain": `"Second Brain" is reserved for your notes folder. Choose another name.`,
 		"Skillset":     "",
 		"":             "",
 	}

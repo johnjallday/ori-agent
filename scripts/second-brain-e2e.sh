@@ -6,13 +6,15 @@
 # Usage:
 #   ./scripts/second-brain-e2e.sh [stage ...]
 #
-# Stages (all of them when none is named):
+# Stages (the first four when none is named):
 #   vault        tests/second-brain.spec.ts         ./scripts/second-brain-demo.sh
 #   setup        tests/second-brain-setup.spec.ts   ./scripts/second-brain-demo.sh --create
 #   first-week   tests/second-brain-first-week.spec.ts, the cases for a second
 #                brain Ori set up                    ./scripts/second-brain-demo.sh --create
 #   downloads    tests/second-brain-first-week.spec.ts, the Downloads case
 #                                                    ./scripts/demo-inbox-folder.sh --recurring-names
+#   panel        tests/notes-station-panel.spec.ts  ./scripts/second-brain-demo.sh (opt-in;
+#                SECOND_BRAIN_E2E_GREP narrows it to matching case titles)
 #
 # Each stage gets a fresh sandbox (the specs leave state behind, and a second
 # run on the same sandbox is not what they are for). Ports start at
@@ -37,9 +39,9 @@ if [[ ${#stages[@]} -eq 0 ]]; then
 fi
 for stage in "${stages[@]}"; do
 	case "$stage" in
-	vault | setup | first-week | downloads) ;;
+	vault | setup | first-week | downloads | panel) ;;
 	*)
-		echo "unknown stage: $stage (vault, setup, first-week, downloads)" >&2
+		echo "unknown stage: $stage (vault, setup, first-week, downloads, panel)" >&2
 		exit 2
 		;;
 	esac
@@ -96,7 +98,7 @@ for stage in "${stages[@]}"; do
 	vault)
 		start "$port" "$stage" ./scripts/second-brain-demo.sh "$port" || { failed+=("$stage"); continue; }
 		ready="$(./scripts/wait-demo-ready.sh "$logdir/$stage.log" 400)" || { failed+=("$stage"); continue; }
-		PLAYWRIGHT_BASE_URL="http://localhost:$port" SECOND_BRAIN_VAULT="$(field VAULT "$ready")" \
+		PLAYWRIGHT_BASE_URL="http://localhost:$port" SECOND_BRAIN_VAULT="$(field VAULT "$ready")" SECOND_BRAIN_SANDBOX="$(field SANDBOX "$ready")" \
 			npx playwright test tests/second-brain.spec.ts --project=chromium --workers=1 || failed+=("$stage")
 		;;
 	setup | first-week)
@@ -112,6 +114,15 @@ for stage in "${stages[@]}"; do
 			SECOND_BRAIN_DOCUMENTS="$(field DOCUMENTS "$ready")" SECOND_BRAIN_FOLLOW_UPS="$(field FOLLOW_UPS "$ready")" \
 			SECOND_BRAIN_PEOPLE="$(field PEOPLE "$ready")" \
 			npx playwright test "$spec" --grep "$only" --project=chromium --workers=1 || failed+=("$stage")
+		;;
+	panel)
+		# The HQ Notes panel on a connected vault. Its Look again case holds only
+		# within 10 minutes of the sandbox's look.
+		start "$port" "$stage" ./scripts/second-brain-demo.sh "$port" || { failed+=("$stage"); continue; }
+		ready="$(./scripts/wait-demo-ready.sh "$logdir/$stage.log" 400)" || { failed+=("$stage"); continue; }
+		PLAYWRIGHT_BASE_URL="http://localhost:$port" SECOND_BRAIN_VAULT="$(field VAULT "$ready")" \
+			npx playwright test tests/notes-station-panel.spec.ts --grep "${SECOND_BRAIN_E2E_GREP:-.}" \
+			--project=chromium --workers=1 || failed+=("$stage")
 		;;
 	downloads)
 		start "$port" "$stage" ./scripts/demo-inbox-folder.sh --port "$port" --recurring-names || { failed+=("$stage"); continue; }

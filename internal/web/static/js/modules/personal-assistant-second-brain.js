@@ -33,46 +33,68 @@ export function secondBrainAvailable(personalAssistant) {
   return String(personalAssistant?.state || '').trim() === 'active';
 }
 
-// secondBrainAskView decides whether the assistant opens with the ask and what
-// it says (FR5–FR7). It is shown once: only while nothing is connected and the
-// ask has never been shown, answered or tombstoned.
+// The one label for setting up a folder Ori writes, wherever it is offered.
+export const SET_UP_NOTES_LABEL = 'Set up my notes';
+
+// secondBrainAskView decides whether the assistant shows the ask and what it
+// says. Shown is not answered (Issue 776 FR11): it stays while nothing is
+// connected and the ask is pending or shown. Seven days after Not now the server
+// sets offer_again and it comes back as "Still want me…", with Don't ask again
+// as the way out (FR13). A decline on record (decision "none") ends it.
 export function secondBrainAskView(secondBrain, available) {
+  const askState = secondBrain?.ask?.state;
+  const reoffer = askState === 'deferred' && secondBrain?.ask?.offer_again === true;
   const show =
     available === true &&
     secondBrain?.status === 'not_connected' &&
-    secondBrain?.ask?.state === 'pending';
+    (askState === 'pending' || askState === 'shown' || reoffer);
+  const opening = reoffer
+    ? 'Still want me to keep notes for you?'
+    : 'Want me to keep notes for you?';
+  const end = reoffer ? [{ id: 'none', label: "Don't ask again", style: 'link' }] : [];
   const vault = Array.isArray(secondBrain?.detected) ? secondBrain.detected[0] : null;
-  // "I don't keep notes" is no longer offered: Set one up for me takes its
-  // place. A decline already on record (decision "none") is unaffected.
-  const setUp = { id: 'setup', label: 'Set one up for me', style: 'outline' };
+  // The ask leads with the job (FR2): what Ori will write, and that the folder
+  // is the user's.
   if (vault?.id && vault?.name) {
     return {
       show,
-      line: `Do you keep a second brain? I found your Obsidian vault "${vault.name}". Let me read it, or I can set one up for you.`,
+      reoffer,
+      line: `${opening} I found your Obsidian vault "${vault.name}". I can read it, or set up a folder of my own.`,
       actions: [
         { id: 'read', label: `Read ${vault.name}`, style: 'primary', vaultId: vault.id },
+        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'outline' },
         { id: 'choose', label: 'Another folder…', style: 'outline' },
-        setUp,
-        { id: 'later', label: 'Not now', style: 'link' }
+        { id: 'later', label: 'Not now', style: 'link' },
+        ...end
       ]
     };
   }
   return {
     show,
-    line: 'Do you keep a second brain? Point me at it, or I can set one up for you.',
+    reoffer,
+    line: `${opening} I'll write what I learn, people, projects and your journal, into plain Markdown you own.`,
     actions: [
-      { id: 'choose', label: 'Choose folder…', style: 'primary' },
-      setUp,
-      { id: 'later', label: 'Not now', style: 'link' }
+      { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
+      { id: 'choose', label: 'I have a notes folder…', style: 'outline' },
+      { id: 'later', label: 'Not now', style: 'link' },
+      ...end
     ]
   };
+}
+
+// secondBrainAskPinned: the ask is the conversation's first message the first
+// time it is shown, or while this page already showed it there; every later
+// load, and the re-offer, place it under Needs you (FR11, FR13).
+export function secondBrainAskPinned(secondBrain, { shownHere = false } = {}) {
+  if (shownHere) return false;
+  return secondBrain?.ask?.state !== 'pending';
 }
 
 // What the consent card says to a second brain Ori set up before it kept People,
 // projects and the facts note up to date (FR10). It belongs under Needs you only
 // while there is something to write that the answer would let through.
 export const FILL_IN_LINE =
-  'I can also keep People, a note per project and what I know about you up to date in your second brain. Yours are never touched.';
+  'I can also keep People, a note per project and what I know about you up to date in your notes folder. Notes you wrote are never touched.';
 
 export function secondBrainFillInView(secondBrain) {
   const show =
@@ -97,9 +119,51 @@ export function secondBrainFillInAnsweredLine(decision) {
 }
 
 // The first look at a new second brain offers the first thing to show Ori
-// (FR13, FR14). The server's headline carries the sentence when the brain is
-// empty; under a headline that counts seeded notes the offer says it itself.
-export const FOLDER_OFFER_LINE = "Show me a folder and I'll start filling it.";
+// (FR13, FR14), under the checklist. It says what showing a folder does
+// (Issue 776 FR9): nothing is read until the user sends.
+export const FOLDER_OFFER_LINE =
+  "Show me a folder and I'll sort it with you. Names that keep coming up become People notes.";
+// What a chip puts in the composer, and the line under the chips once it has.
+export function folderOfferPrefill(label) {
+  return `Show me my ${String(label || 'folder').trim()} folder`;
+}
+export const FOLDER_OFFER_SEND_LINE = "Press send and I'll take a look.";
+
+// The first week's three things to do, under the first headline and as the
+// empty Inbox of a folder Ori set up (Issue 776 FR19). Done comes from the
+// missions; ids, tiers and order of the missions are theirs.
+export const FIRST_WEEK_CHECKLIST = [
+  { id: 'capture', mission: 'pa-capture-first-note', label: 'Capture a note' },
+  {
+    id: 'journal',
+    mission: 'pa-save-first-journal',
+    label: "Write today's Journal",
+    href: '/?journal=1'
+  },
+  { id: 'project', mission: 'pa-give-project', label: 'Tell Ori your project' }
+];
+
+// secondBrainChecklistView: the rows for a folder Ori set up, each with its
+// check mark. Tell Ori your project shows while the question is unanswered or
+// was skipped.
+export function secondBrainChecklistView(secondBrain, missions) {
+  const created =
+    secondBrain?.status === 'connected' && secondBrain?.source?.origin === 'created_by_ori';
+  if (!created) return { show: false, rows: [] };
+  const done = new Set(
+    (Array.isArray(missions) ? missions : [])
+      .filter(mission => mission?.status === 'completed')
+      .map(mission => mission.id)
+  );
+  // A project note on record (the mission done) ends the row too: the reply to
+  // a setup carries no fill_in, so the answer alone cannot be relied on.
+  const projectAsk = secondBrain?.fill_in?.project_ask || '';
+  const rows = FIRST_WEEK_CHECKLIST.filter(
+    row =>
+      row.id !== 'project' || ((!projectAsk || projectAsk === 'skipped') && !done.has(row.mission))
+  ).map(row => ({ ...row, done: done.has(row.mission) }));
+  return { show: true, rows };
+}
 // The usual folders, Downloads first. Which of them the offer shows is the
 // server's list (the one the Add folder sheet uses), so it never offers a folder
 // that is not there; this order only sorts it.
@@ -118,7 +182,13 @@ export function secondBrainFolderOffer(headline, available = null) {
     .map(chip => ({ id: chip.id, label: String(chip.label || chip.id) }))
     .sort((a, b) => rank(a.id) - rank(b.id));
   return {
-    line: String(headline || '').includes(FOLDER_OFFER_LINE) ? '' : FOLDER_OFFER_LINE,
+    // A headline that already asks for a folder (one on record from before
+    // Issue 776) is not repeated.
+    line:
+      String(headline || '').includes(FOLDER_OFFER_LINE) ||
+      String(headline || '').includes(LEGACY_FOLDER_OFFER_LINE)
+        ? ''
+        : FOLDER_OFFER_LINE,
     chips,
     choose: { id: 'choose', label: 'Choose a folder…' }
   };
@@ -129,8 +199,21 @@ export function secondBrainFolderOffer(headline, available = null) {
 // folder, so a reload does not take it away. Choosing a folder ends it.
 export function secondBrainFolderOfferShows({ justSetUp, headline, dismissed } = {}) {
   if (dismissed === true) return false;
-  return justSetUp === true || String(headline || '').includes(FOLDER_OFFER_LINE);
+  const text = String(headline || '');
+  return (
+    justSetUp === true ||
+    text === EMPTY_SETUP_HEADLINE ||
+    text.includes(FOLDER_OFFER_LINE) ||
+    text.includes(LEGACY_FOLDER_OFFER_LINE)
+  );
 }
+
+// The server's headline for a setup that wrote nothing (Issue 776 FR8); its
+// first look is where the offer belongs, on a reload too.
+export const EMPTY_SETUP_HEADLINE =
+  "Your notes are set up. They're empty until I learn something about you.";
+// What empty setups said before Issue 776; a look on record still says it.
+const LEGACY_FOLDER_OFFER_LINE = "Show me a folder and I'll start filling it.";
 
 // The drawer's one project question (first-week FR20 to FR23): the interview's
 // first question, asked once, with the folder suggestion when there is one. The
@@ -189,7 +272,7 @@ export function projectNameFromAnswer(answer) {
 // the user approves is the wording shown here, word for word.
 export const SETUP_LEARNING_ENDPOINT = '/api/personal-assistant/setup-learning';
 export const SETUP_LEARNING_HEADING =
-  'Here is what I learned from your folder. Approve what is right and it goes into your second brain.';
+  'Here is what I learned from your folder. Approve what is right and it goes into your notes.';
 
 export function setupLearningView(payload) {
   const raw = Array.isArray(payload?.learning?.items) ? payload.learning.items : [];
@@ -221,8 +304,8 @@ export function setupLearningClosing(written) {
   const count = Math.max(0, Number(written) || 0);
   if (count === 0) return 'Nothing new was written to your notes.';
   return count === 1
-    ? '1 note was written in your second brain.'
-    : `${count} notes were written in your second brain.`;
+    ? '1 note was written to your notes folder.'
+    : `${count} notes were written to your notes folder.`;
 }
 
 export const DEFAULT_SECOND_BRAIN_NAME = 'Second Brain';
@@ -247,23 +330,49 @@ export function secondBrainFolderNameProblem(name) {
   return '';
 }
 
+// The setup turn's first step (Issue 776 FR5): the project question, so the
+// folder already holds the user's own words when it opens.
+export const SETUP_PROJECT_QUESTION = "What's the main thing you're working on right now?";
+
+// secondBrainSetupSeedLine says what the new folder starts with, from the
+// server's setup_preview and whether the user named a project (FR7). It never
+// promises a note the setup will not write.
+export function secondBrainSetupSeedLine(preview, hasProject = false) {
+  const followUps = Math.max(0, Number(preview?.follow_ups) || 0);
+  const people = Math.max(0, Number(preview?.people) || 0);
+  const seeds = [];
+  if (followUps) seeds.push(followUps === 1 ? '1 follow-up' : `${followUps} follow-ups`);
+  if (people) seeds.push(people === 1 ? '1 person' : `${people} people`);
+  const list = seeds.join(' and ');
+  if (hasProject) {
+    return list
+      ? `It starts with your project note, ${list}.`
+      : 'It starts with your project note.';
+  }
+  return list ? `It starts with ${list}.` : "It starts empty; I'll fill it as I learn.";
+}
+
 // What Ori says it will write, before it writes anything.
-const SECOND_BRAIN_SETUP_LINES = [
-  "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours.",
-  'It starts with your open follow-ups and the people I already know. Plain Markdown that opens in Obsidian or any editor, and stays yours if you stop using Ori.'
-];
+export function secondBrainSetupLines(preview, hasProject = false) {
+  return [
+    "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours.",
+    secondBrainSetupSeedLine(preview, hasProject),
+    'Plain Markdown that opens in Obsidian or any editor, and stays yours if you stop using Ori.'
+  ];
+}
 
 // secondBrainSetupDefaultView is the one-click setup: the place is already
 // decided, so there is nothing to pick or name, and Somewhere else is the way
-// to choose another.
-export function secondBrainSetupDefaultView(place) {
+// to choose another. Back returns to the project question with the answer kept.
+export function secondBrainSetupDefaultView(place, { preview = null, hasProject = false } = {}) {
   return {
-    title: `Set up your second brain in ${String(place?.parent_name || 'your workspaces')}?`,
+    title: `Set up your notes in ${String(place?.parent_name || 'your workspaces')}?`,
     path: String(place?.path || ''),
-    lines: SECOND_BRAIN_SETUP_LINES,
+    lines: secondBrainSetupLines(preview, hasProject),
     actions: [
       { id: 'create', label: 'Set it up', style: 'primary' },
       { id: 'elsewhere', label: 'Somewhere else…', style: 'outline' },
+      { id: 'back', label: 'Back', style: 'link' },
       { id: 'later', label: 'Not now', style: 'link' }
     ]
   };
@@ -274,7 +383,7 @@ export function secondBrainSetupDefaultView(place) {
 // connecting a folder (FR4).
 export function secondBrainSetupWhereView({ pickerOff = '', message = '' } = {}) {
   return {
-    title: 'Where should I set up your second brain?',
+    title: 'Where should I set up your notes?',
     note: 'Pick the folder it goes in.',
     pickLabel: 'Choose where…',
     pickerOff: String(pickerOff || ''),
@@ -284,7 +393,11 @@ export function secondBrainSetupWhereView({ pickerOff = '', message = '' } = {})
 
 // secondBrainSetupConfirmView is the second step: the name, and one sentence
 // saying what Ori will write, before it writes anything (FR4, design).
-export function secondBrainSetupConfirmView(parent, name, { message = '' } = {}) {
+export function secondBrainSetupConfirmView(
+  parent,
+  name,
+  { message = '', preview = null, hasProject = false } = {}
+) {
   const folder = String(parent?.name || 'that folder');
   const named = String(name ?? DEFAULT_SECOND_BRAIN_NAME).trim() || DEFAULT_SECOND_BRAIN_NAME;
   return {
@@ -292,7 +405,7 @@ export function secondBrainSetupConfirmView(parent, name, { message = '' } = {})
     path: String(parent?.path || ''),
     nameLabel: 'Folder name',
     name: String(name ?? DEFAULT_SECOND_BRAIN_NAME),
-    lines: SECOND_BRAIN_SETUP_LINES,
+    lines: secondBrainSetupLines(preview, hasProject),
     message: String(message || ''),
     actions: [
       { id: 'create', label: 'Set it up', style: 'primary' },
@@ -316,7 +429,7 @@ export function secondBrainOpenLink(secondBrain) {
 export function secondBrainAnsweredLine(decision) {
   return decision === 'none'
     ? "Got it. I won't ask about notes again."
-    : "Okay. Connect your notes from Home whenever you're ready.";
+    : "Okay. The Notes building on your HQ map sets this up whenever you're ready.";
 }
 
 // secondBrainChooserView lists the detected vaults (name and the folder they
@@ -334,8 +447,9 @@ export function secondBrainChooserView(secondBrain, { pickerOff = '', message = 
   return {
     title: vaults.length ? 'Which notes should I read?' : 'Where do you keep your notes?',
     vaults,
-    pickLabel: 'Pick another folder…',
-    setUp: { id: 'setup', label: 'Set one up for me', style: 'outline' },
+    // "another" only when a vault is listed above it (FR21).
+    pickLabel: vaults.length ? 'Pick another folder…' : 'Pick a folder…',
+    setUp: { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'outline' },
     pickerOff: String(pickerOff || ''),
     message: String(message || '')
   };
@@ -514,12 +628,12 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
   if (!source?.name || secondBrain?.status === 'not_connected') {
     return {
       state: 'not_connected',
-      title: 'Your notes are not connected.',
+      title: 'Your notes are not set up.',
       detail:
-        'Point Ori at an Obsidian vault or a folder of Markdown and it tells you what is open, or let it set one up for you.',
+        'Ori can keep notes for you in plain Markdown you own, or read an Obsidian vault or Markdown folder you already have.',
       actions: [
-        { id: 'choose', label: 'Choose folder…', style: 'primary' },
-        { id: 'setup', label: 'Set one up for me', style: 'outline' }
+        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
+        { id: 'choose', label: 'I have a notes folder…', style: 'outline' }
       ]
     };
   }
@@ -570,6 +684,7 @@ export function secondBrainProjectsView(secondBrain) {
     .filter(project => project?.name && !/[\\/]/.test(project.name))
     .map(project => ({
       name: String(project.name),
+      oriNote: project.ori_note === true,
       action: {
         id: 'workspace',
         label: 'Make a workspace',
@@ -578,6 +693,67 @@ export function secondBrainProjectsView(secondBrain) {
       }
     }));
 }
+
+// Doors without Obsidian (Issue 776 FR15, FR16). A preview names one note by
+// kind and one component; the server checks both again before reading.
+export const PREVIEW_KINDS = ['inbox', 'daily', 'project'];
+
+export function secondBrainPreviewPath(kind, name) {
+  const text = String(name || '');
+  if (!PREVIEW_KINDS.includes(kind) || !text || /[/\\]/.test(text) || text.startsWith('.')) {
+    return '';
+  }
+  return `${SECOND_BRAIN_ENDPOINT}/preview/${kind}/${encodeURIComponent(text)}`;
+}
+
+// previewParagraphs splits a note's text into plain paragraphs at blank lines.
+// The text is shown as text, never rendered as Markdown or HTML.
+export function previewParagraphs(body) {
+  return String(body || '')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n[ \t]*\n/)
+    .map(paragraph => paragraph.replace(/^\n+|\n+$/g, ''))
+    .filter(paragraph => paragraph.trim());
+}
+
+// fetchSecondBrainPreview reads one note Ori wrote. A refusal carries the
+// server's sentence ("That note is yours; open it in your editor.").
+export async function fetchSecondBrainPreview(kind, name, fetchImpl = fetch) {
+  const path = secondBrainPreviewPath(kind, name);
+  if (!path) return { ok: false, message: 'That note cannot be opened here.' };
+  try {
+    const response = await fetchImpl(path, { headers: { Accept: 'application/json' } });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.preview) {
+      return {
+        ok: false,
+        message: secondBrainError(payload, 'That note did not open. Try again.')
+      };
+    }
+    return { ok: true, preview: payload.preview };
+  } catch (_) {
+    return { ok: false, message: 'That note did not open. Try again.' };
+  }
+}
+
+// openSecondBrainFolder asks the server to open the connected folder in the
+// file manager. It reads nothing.
+export async function openSecondBrainFolder(fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(`${SECOND_BRAIN_ENDPOINT}/open-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ request_id: newRequestID('openfolder') })
+    });
+    if (response.ok) return { ok: true, message: '' };
+    const payload = await response.json().catch(() => null);
+    return { ok: false, message: secondBrainError(payload, 'The folder did not open. Try again.') };
+  } catch (_) {
+    return { ok: false, message: 'The folder did not open. Try again.' };
+  }
+}
+
+export const OPEN_FOLDER_LABEL = 'Open folder';
 
 // secondBrainProjectLink opens Create Workspace on a project, by its name: the
 // page looks the folder up itself, so a link never carries a path.
@@ -605,6 +781,16 @@ export function secondBrainCaptureReceipt(capture) {
 }
 
 // secondBrainQuestRequested says the mission card sent the user here.
+// secondBrainProjectQuestRequested: Give Ori a project's action URL
+// (/?quest=second-brain-project) opens the drawer on the project question.
+export function secondBrainProjectQuestRequested(search) {
+  try {
+    return new URLSearchParams(search || '').get('quest') === 'second-brain-project';
+  } catch (_) {
+    return false;
+  }
+}
+
 export function secondBrainQuestRequested(search) {
   try {
     return new URLSearchParams(search || '').get('quest') === 'second-brain';
@@ -670,9 +856,18 @@ const state = {
   },
   panelRoute: '',
   chosen: null, // { detectedId | selectionToken, name, path }
-  // Setting one up: the parent the user picked ({ selectionToken, name, path})
-  // once there is one, the folder name typed for it, and a refusal to show.
-  setup: { parent: null, name: DEFAULT_SECOND_BRAIN_NAME, message: '', requestId: '' },
+  // Setting one up: the step (the project question, then the place), the
+  // project the user named ({ name, answer }, null when skipped), the parent the
+  // user picked ({ selectionToken, name, path}) once there is one, the folder
+  // name typed for it, and a refusal to show.
+  setup: {
+    step: 'project',
+    project: null,
+    parent: null,
+    name: DEFAULT_SECOND_BRAIN_NAME,
+    message: '',
+    requestId: ''
+  },
   // The capture box on a second brain Ori set up.
   capture: { text: '', requestId: '', message: '', link: '' },
   look: null,
@@ -694,7 +889,19 @@ const state = {
   history: [],
   // latest places the card as the conversation's latest reply instead of
   // its first message.
-  latest: false
+  latest: false,
+  // What a setup would seed now, read when the setup turn starts (FR7).
+  setupPreview: null,
+  // The ask was the conversation's first message on this page, so it stays
+  // there rather than moving under Needs you on a status refresh (FR11).
+  askShownHere: false,
+  // The note opened inline ("kind:name"), and a sentence from Open folder.
+  preview: { key: '', status: '', note: null, message: '' },
+  doorMessage: '',
+  // The missions behind the checklist, null until read; the folder a chip put
+  // in the composer (FR9, FR19).
+  missions: null,
+  offerPrefilled: ''
 };
 
 let pathEntry = null;
@@ -827,12 +1034,95 @@ function renderFolderOffer(body, headline) {
   row.dataset.secondBrainFolderOffer = '';
   offer.chips.forEach(chip =>
     row.append(
-      button({ ...chip, label: chip.label, style: 'outline' }, () => void showFolder(chip.id))
+      button(
+        { ...chip, label: chip.label, style: 'outline' },
+        () => void showFolder(chip.id, chip.label)
+      )
     )
   );
   row.append(button({ ...offer.choose, style: 'link' }, () => void showFolder('')));
   body.append(row);
+  // The chip attached the folder and filled in the message; nothing is read
+  // until the user sends it (FR9).
+  if (state.offerPrefilled) {
+    const line = node('p', 'pa-folder__note', FOLDER_OFFER_SEND_LINE);
+    line.setAttribute('role', 'status');
+    body.append(line);
+  }
   if (state.folderChips === null) void loadFolderChips();
+}
+
+// renderChecklist is the first week's three rows under the first headline,
+// with the capture box the first row focuses (Issue 776 FR19).
+function renderChecklist(body) {
+  // A setup that just wrote the project note answered the question, whatever
+  // the reply to /create carried.
+  const secondBrain =
+    state.offerFolder && state.setup?.project
+      ? {
+          ...state.secondBrain,
+          fill_in: { ...(state.secondBrain?.fill_in || {}), project_ask: 'answered' }
+        }
+      : state.secondBrain;
+  const view = secondBrainChecklistView(secondBrain, state.missions);
+  if (!view.show) return;
+  if (state.missions === null) void loadMissions();
+  const list = node('ul', 'pa-second-brain__checklist');
+  list.dataset.secondBrainChecklist = '';
+  for (const row of view.rows) {
+    const item = node('li', row.done ? 'is-done' : '');
+    item.dataset.checklistRow = row.id;
+    const mark = node('span', 'pa-second-brain__check', row.done ? '✓' : '○');
+    mark.setAttribute('aria-hidden', 'true');
+    item.append(mark);
+    let control;
+    if (row.href) {
+      control = node('a', 'pa-second-brain__open', row.label);
+      control.href = row.href;
+    } else {
+      control = button({ id: `checklist-${row.id}`, label: row.label, style: 'link' }, () => {
+        if (row.id === 'capture') focusCapture();
+        else void askProjectNow();
+      });
+    }
+    if (row.done) control.setAttribute('aria-label', `${row.label}, done`);
+    item.append(control);
+    list.append(item);
+  }
+  body.append(list);
+  renderCapture(body);
+}
+
+function focusCapture() {
+  const box = document.querySelector('#personalAssistantSecondBrain [data-second-brain-capture]');
+  box?.focus?.();
+}
+
+// askProjectNow asks the project question in the conversation, also after a
+// skip: the checklist row and the Give Ori a project mission ask it on request.
+async function askProjectNow() {
+  state.latest = true;
+  if (await openProjectAsk()) {
+    state.pinned = false;
+    render();
+  }
+}
+
+// loadMissions reads the missions behind the checklist's check marks.
+let missionsLoading = false;
+async function loadMissions() {
+  if (missionsLoading) return;
+  missionsLoading = true;
+  try {
+    const response = await fetch('/api/progression', { headers: { Accept: 'application/json' } });
+    const payload = response.ok ? await response.json().catch(() => null) : null;
+    state.missions = Array.isArray(payload?.missions) ? payload.missions : [];
+  } catch (_) {
+    state.missions = [];
+  } finally {
+    missionsLoading = false;
+  }
+  render();
 }
 
 // loadFolderChips asks the server which usual folders exist, the way the Add
@@ -859,11 +1149,18 @@ async function loadFolderChips() {
 // next message exactly as Add folder does. Nothing is read until the user sends.
 // The offer stays until a folder is actually attached, so a chip that could not
 // be chosen leaves the others to try.
-async function showFolder(chip) {
+async function showFolder(chip, label = '') {
   const context = window.PersonalAssistantFolderContext;
   if (chip && typeof context?.selectChip === 'function') {
     if ((await context.selectChip(chip)) === true) {
-      state.offerDismissed = true;
+      // The message waits in the composer: sending it is what starts the look.
+      const input = document.getElementById('personalAssistantInput');
+      if (input) {
+        input.value = folderOfferPrefill(label || chip);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+      }
+      state.offerPrefilled = label || chip;
       render();
     }
     return;
@@ -1227,9 +1524,11 @@ function continueProject() {
     return;
   }
   project.message = '';
+  const setup = project.mode === 'setup';
   if (projectFromUsingSuggestion() && !secondBrainFolderNameProblem(project.suggestion.folder)) {
     project.name = project.suggestion.folder;
-    void saveProject();
+    if (setup) confirmSetupProject();
+    else void saveProject();
     return;
   }
   project.name = project.name || projectNameFromAnswer(answer);
@@ -1345,6 +1644,9 @@ function renderProject(body) {
     );
     return;
   }
+  // In the setup turn the same question is step 1: Next and Skip, and nothing is
+  // written until the folder is created with it (Issue 776 FR5, FR6).
+  const setup = project.mode === 'setup';
   if (project.status === 'name') {
     body.append(node('p', 'pa-specialist-offer__headline', `I'll call it ${project.name}. OK?`));
     const input = node('input', 'form-control form-control-sm');
@@ -1362,12 +1664,14 @@ function renderProject(body) {
     body.append(
       actionRow(
         [
-          { id: 'confirm', label: 'Save', style: 'primary' },
+          { id: 'confirm', label: setup ? 'Next' : 'Save', style: 'primary' },
           { id: 'back', label: 'Back', style: 'link' }
         ],
         action => {
-          if (action.id === 'confirm') void saveProject();
-          else {
+          if (action.id === 'confirm') {
+            if (setup) confirmSetupProject();
+            else void saveProject();
+          } else {
             project.status = 'ask';
             project.message = '';
             render();
@@ -1405,11 +1709,12 @@ function renderProject(body) {
   body.append(
     actionRow(
       [
-        { id: 'save', label: 'Save', style: 'primary' },
+        { id: 'save', label: setup ? 'Next' : 'Save', style: 'primary' },
         { id: 'skip', label: 'Skip', style: 'link' }
       ],
       action => {
         if (action.id === 'save') continueProject();
+        else if (setup) skipSetupProject();
         else void skipProject();
       }
     )
@@ -1431,6 +1736,97 @@ function renderAnswered(body) {
   body.append(node('p', 'pa-specialist-offer__headline', line));
 }
 
+// renderDoors is the line of ways into the folder (Issue 776 FR15, FR16): Open
+// on the setup's project note, Open folder for any connected folder, and Open in
+// Obsidian for a folder Ori set up. The note opens inline, below the line.
+function renderDoors(body, { project = '' } = {}) {
+  const connected =
+    Boolean(state.secondBrain?.source?.name) && state.secondBrain?.status === 'connected';
+  const openLink = secondBrainOpenLink(state.secondBrain);
+  if (!connected && !openLink) return;
+  const line = node('div', 'pa-specialist-offer__actions pa-second-brain__doors');
+  if (project) {
+    const key = `project:${project}`;
+    const open = button(
+      {
+        id: 'preview',
+        label: state.preview.key === key ? 'Close' : `Open ${project}`,
+        style: 'outline'
+      },
+      () => void togglePreview('project', project)
+    );
+    open.setAttribute('aria-expanded', state.preview.key === key ? 'true' : 'false');
+    line.append(open);
+  }
+  if (connected) {
+    line.append(
+      button({ id: 'open-folder', label: OPEN_FOLDER_LABEL, style: 'outline' }, openFolder)
+    );
+  }
+  if (openLink) {
+    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
+    open.href = openLink;
+    open.title = 'Open this folder as a vault in Obsidian';
+    line.append(open);
+  }
+  body.append(line);
+  if (state.doorMessage) {
+    const note = node('p', 'pa-folder__note', state.doorMessage);
+    note.setAttribute('role', 'status');
+    body.append(note);
+  }
+  renderPreview(body);
+}
+
+// renderPreview shows the opened note as plain paragraphs (text nodes only),
+// with Open folder and Open in Obsidian beside it, or the server's sentence.
+function renderPreview(body) {
+  const preview = state.preview;
+  if (!preview.key) return;
+  const box = node('div', 'pa-second-brain__preview');
+  box.dataset.secondBrainPreview = preview.key;
+  if (preview.status === 'loading') {
+    box.append(node('p', 'pa-folder__note', 'Opening…'));
+  } else if (preview.status === 'error') {
+    const line = node('p', 'pa-folder__note', preview.message);
+    line.setAttribute('role', 'alert');
+    box.append(line);
+  } else if (preview.note) {
+    for (const paragraph of previewParagraphs(preview.note.body)) {
+      box.append(node('p', 'pa-second-brain__preview-text', paragraph));
+    }
+    if (preview.note.truncated) {
+      box.append(node('p', 'pa-folder__note', 'Showing the start of this note.'));
+    }
+    // Open folder and Open in Obsidian sit in the doors row just above.
+  }
+  body.append(box);
+}
+
+async function togglePreview(kind, name) {
+  const key = `${kind}:${name}`;
+  if (state.preview.key === key) {
+    state.preview = { key: '', status: '', note: null, message: '' };
+    render();
+    return;
+  }
+  state.preview = { key, status: 'loading', note: null, message: '' };
+  render();
+  const result = await fetchSecondBrainPreview(kind, name);
+  if (state.preview.key !== key) return;
+  state.preview = result.ok
+    ? { key, status: 'ready', note: result.preview, message: '' }
+    : { key, status: 'error', note: null, message: result.message };
+  render();
+}
+
+async function openFolder() {
+  state.doorMessage = '';
+  const result = await openSecondBrainFolder();
+  state.doorMessage = result.ok ? '' : result.message;
+  render();
+}
+
 function renderManage(body) {
   const view = secondBrainManageView(state.secondBrain);
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
@@ -1439,15 +1835,7 @@ function renderManage(body) {
     body.append(node('p', 'pa-second-brain__path', state.secondBrain.source.path));
   }
   if (view.written) body.append(node('p', 'pa-folder__note', view.written));
-  const openLink = secondBrainOpenLink(state.secondBrain);
-  if (openLink) {
-    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
-    open.href = openLink;
-    open.title = 'Open this folder as a vault in Obsidian';
-    const line = node('p', 'pa-folder__note');
-    line.append(open);
-    body.append(line);
-  }
+  renderDoors(body);
   if (view.capture) renderCapture(body);
   renderProjects(body);
   body.append(
@@ -1561,6 +1949,8 @@ async function capture() {
       : ''
   };
   await refresh();
+  // A capture ticks the checklist's first row.
+  await loadMissions();
   render();
   announce();
 }
@@ -1571,17 +1961,124 @@ function startSetup() {
   // One request id for the whole attempt: a retry after a lost answer replays
   // the first call on the server instead of making a second folder.
   state.setup = {
+    step: 'project',
+    project: null,
     parent: null,
     name: DEFAULT_SECOND_BRAIN_NAME,
     message: '',
     requestId: newRequestID('create'),
     useDefault: Boolean(state.secondBrain?.setup_default)
   };
+  // The project question comes first (Issue 776 FR5). It is asked at once; the
+  // interview's version and folder suggestion arrive when the read answers.
+  state.project = {
+    mode: 'setup',
+    status: 'ask',
+    prompt: SETUP_PROJECT_QUESTION,
+    hint: '',
+    stateVersion: 0,
+    suggestion: null,
+    answer: '',
+    name: '',
+    keys: {},
+    note: null,
+    message: ''
+  };
+  state.setupPreview = state.secondBrain?.setup_preview || null;
   showError('');
   go('setup');
+  void loadSetupInterview();
+  void loadSetupPreview();
+}
+
+// loadSetupPreview reads what a setup would seed now (FR7). Only the status read
+// carries it, and the copy the drawer holds may have come from another answer.
+async function loadSetupPreview() {
+  const { ok, payload } = await request('').catch(() => ({ ok: false, payload: {} }));
+  const preview = ok ? payload.second_brain?.setup_preview : null;
+  if (!preview) return;
+  state.setupPreview = preview;
+  if (state.phase === 'setup' && state.setup.step === 'place') render();
+}
+
+// loadSetupInterview reads the interview's state version (the explicit-fact
+// save needs it) and the folder suggestion for the setup's project question.
+async function loadSetupInterview() {
+  const project = state.project;
+  const { ok, payload } = await fetchJSON(INTERVIEW_ENDPOINT).catch(() => ({ ok: false }));
+  if (!ok || state.project !== project) return;
+  const question = (payload.questions || []).find(item => item.id === PROJECT_QUESTION_ID);
+  if (Number(payload.state_version) >= 1) project.stateVersion = Number(payload.state_version);
+  let visible = false;
+  if (question?.hint && question.hint !== project.hint) {
+    project.hint = String(question.hint);
+    visible = true;
+  }
+  if (payload.suggestion?.text) {
+    project.suggestion = {
+      text: String(payload.suggestion.text),
+      folder: String(payload.suggestion.folder || '')
+    };
+    visible = true;
+  }
+  // Only a hint or a suggestion changes what the step shows. A repaint while the
+  // user types keeps the text (it is in project.answer), the focus and the caret.
+  if (
+    visible &&
+    state.phase === 'setup' &&
+    state.setup.step === 'project' &&
+    project.status === 'ask'
+  ) {
+    const typing = document.activeElement?.matches?.('[data-project-answer]');
+    const caret = typing ? document.activeElement.selectionStart : null;
+    render();
+    if (typing) {
+      const area = document.querySelector('#personalAssistantSecondBrain [data-project-answer]');
+      area?.focus?.();
+      if (area && caret != null) area.setSelectionRange(caret, caret);
+    }
+  }
+}
+
+// confirmSetupProject keeps the named project for the creation and moves to
+// the place card. Nothing is written yet.
+function confirmSetupProject() {
+  const project = state.project;
+  const name = String(project.name).trim();
+  const problem = secondBrainFolderNameProblem(name);
+  if (problem) {
+    project.message = problem;
+    render();
+    return;
+  }
+  project.message = '';
+  state.setup.project = { name, answer: project.answer.trim() };
+  state.setup.step = 'place';
+  render();
+}
+
+// skipSetupProject sets up without a project note; the creation records the
+// question as skipped, so the drawer never asks it again.
+function skipSetupProject() {
+  state.project.message = '';
+  state.setup.project = null;
+  state.setup.step = 'place';
+  render();
+}
+
+// backToSetupProject returns from the place card to the question, answer kept.
+function backToSetupProject() {
+  state.setup.step = 'project';
+  state.setup.message = '';
+  state.project.status = 'ask';
+  render();
 }
 
 function renderSetup(body) {
+  if (state.setup.step === 'project') {
+    renderProject(body);
+    return;
+  }
   if (state.setup.parent) {
     renderSetupConfirm(body);
     return;
@@ -1607,7 +2104,7 @@ function renderSetup(body) {
   }
   if (!setupPathEntry) {
     setupPathEntry = createFolderPathEntry({
-      title: 'Choose where to set up your second brain',
+      title: 'Choose where to set up your notes',
       placeholder: '~/Documents',
       onSelect: selection =>
         chooseParent({
@@ -1626,19 +2123,28 @@ function renderSetup(body) {
         state.setup.useDefault = true;
         state.setup.message = '';
         render();
-      } else back();
+      } else backToSetupProject();
     })
   );
 }
 
+function setupPreviewOptions() {
+  const preview = state.setupPreview || state.secondBrain?.setup_preview || null;
+  return {
+    preview,
+    hasProject: Boolean(state.setup.project) || preview?.project === true
+  };
+}
+
 function renderSetupDefault(body) {
-  const view = secondBrainSetupDefaultView(state.secondBrain.setup_default);
+  const view = secondBrainSetupDefaultView(state.secondBrain.setup_default, setupPreviewOptions());
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
   if (view.path) body.append(node('p', 'pa-second-brain__path', view.path));
   const list = node('ul', 'pa-folder__receipt pa-second-brain__consent');
   list.dataset.layout = 'list';
   view.lines.forEach(line => list.append(node('li', '', line)));
   body.append(list);
+  if (state.setup.message) body.append(node('p', 'pa-folder__note is-error', state.setup.message));
   body.append(
     actionRow(view.actions, action => {
       if (action.id === 'create') void createSecondBrain();
@@ -1646,14 +2152,16 @@ function renderSetupDefault(body) {
         state.setup.useDefault = false;
         state.setup.message = '';
         render();
-      } else void decide('later');
+      } else if (action.id === 'back') backToSetupProject();
+      else void decide('later');
     })
   );
 }
 
 function renderSetupConfirm(body) {
   const view = secondBrainSetupConfirmView(state.setup.parent, state.setup.name, {
-    message: state.setup.message
+    message: state.setup.message,
+    ...setupPreviewOptions()
   });
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
   if (view.path) body.append(node('p', 'pa-second-brain__path', view.path));
@@ -1794,14 +2302,13 @@ function renderLook(body) {
   if (view.alsoNoticed)
     body.append(node('p', 'pa-folder__note pa-second-brain__noticed', view.alsoNoticed));
   if (state.receipt) body.append(node('p', 'pa-folder__first-look', state.receipt));
-  const openLink = secondBrainOpenLink(state.secondBrain);
-  if (openLink) {
-    const open = node('a', 'pa-second-brain__open', 'Open in Obsidian');
-    open.href = openLink;
-    open.title = 'Open this folder as a vault in Obsidian';
-    const line = node('p', 'pa-folder__note');
-    line.append(open);
-    body.append(line);
+  // Right after a setup that wrote the project note, it opens here (FR8, FR16).
+  renderDoors(body, {
+    project: state.offerFolder && state.setup?.project?.name ? state.setup.project.name : ''
+  });
+  // The first look of a folder Ori set up: the checklist, then the offer (FR19).
+  if (state.offerFolder || String(view.headline || '').startsWith('Your notes are set up')) {
+    renderChecklist(body);
   }
   if (
     secondBrainFolderOfferShows({
@@ -2008,7 +2515,7 @@ async function pickFolder(purpose = 'connect') {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
-        title: setup ? 'Choose where to set up your second brain' : 'Choose your notes folder'
+        title: setup ? 'Choose where to set up your notes' : 'Choose your notes folder'
       })
     });
     const result = (await readJSON(response)) || {};
@@ -2057,13 +2564,31 @@ async function createSecondBrain() {
   state.setup.message = '';
   showError('');
   render();
-  const { ok, payload } = await request('/create', {
-    method: 'POST',
-    body: parent
-      ? { selection_token: parent.selectionToken, name, request_id: state.setup.requestId }
-      : { request_id: state.setup.requestId }
-  }).catch(() => ({ ok: false, payload: {} }));
+  // The answer is the reviewed fact the user typed, saved before the folder is
+  // made, as the drawer's question does (Issue 776 FR6). One retry key: a retry
+  // after a lost answer is the same save, and an exact duplicate is held.
+  const project = state.setup.project;
+  if (project && state.project.stateVersion >= 1) {
+    state.project.keys.fact = state.project.keys.fact || newRequestID('projfact');
+    const fact = await saveProjectFact(state.project).catch(() => ({ ok: false, payload: {} }));
+    if (!fact.ok) {
+      state.busy = false;
+      state.setup.message = secondBrainError(fact.payload, 'That did not save. Try again.');
+      render();
+      return;
+    }
+    state.project.factSaved = true;
+  }
+  const body = parent
+    ? { selection_token: parent.selectionToken, name, request_id: state.setup.requestId }
+    : { request_id: state.setup.requestId };
+  if (project) body.project = { name: project.name, answer: project.answer };
+  const { ok, payload } = await request('/create', { method: 'POST', body }).catch(() => ({
+    ok: false,
+    payload: {}
+  }));
   state.busy = false;
+  if (state.project.factSaved) tellKnowledgeChanged();
   if (!ok) {
     if (payload.needs_pick) state.setup.parent = null;
     if (payload.needs_pick || payload.repair === 'choose_folder') {
@@ -2108,6 +2633,8 @@ async function decide(decision) {
   state.secondBrain = payload.second_brain || state.secondBrain;
   state.decision = decision;
   setPhase('answered');
+  // Today drops its ask row at once rather than on the next load.
+  announce();
 }
 
 function onAskAction(action) {
@@ -2318,9 +2845,11 @@ async function load() {
     state.secondBrain = payload.second_brain || null;
     const ask = secondBrainAskView(state.secondBrain, state.available);
     if (ask.show && state.phase === 'idle') {
-      // The assistant speaks first: the ask is the conversation's first message.
+      // The assistant speaks first: the ask is the conversation's first message
+      // the first time; later it waits under Needs you until it is answered.
       state.phase = 'ask';
-      state.pinned = false;
+      state.pinned = secondBrainAskPinned(state.secondBrain, { shownHere: state.askShownHere });
+      if (!state.pinned) state.askShownHere = true;
       render();
       markPromptedWhenSeen();
       return;
@@ -2447,7 +2976,32 @@ function init() {
     // user's approved filing taught Ori, answered in place.
     openLearned,
     // The project question, on request (the drawer asks it by itself in order).
-    openProject: showProjectAskIfDue,
+    // The project question on request: the checklist row and the Give Ori a
+    // project mission (/?quest=second-brain-project, Issue 776 FR20).
+    openProject: async () => {
+      if (!state.secondBrain) await load();
+      state.history = [];
+      await askProjectNow();
+    },
+    // Today's ask row and the mission card (/?quest=second-brain): the ask while
+    // it is unanswered or offered again (Issue 776 FR12), otherwise the
+    // connection's own card.
+    openAsk: async () => {
+      await refresh();
+      if (!secondBrainAskView(state.secondBrain, state.available).show) {
+        await window.PersonalAssistantSecondBrain.openManage();
+        return;
+      }
+      state.pinned = false;
+      state.latest = true;
+      state.message = '';
+      state.answer = '';
+      state.history = [];
+      showError('');
+      state.askShownHere = true;
+      setPhase('ask');
+      markPromptedWhenSeen();
+    },
     // The Notes station and the Profile open the connection's own card:
     // connected, missing, or not set up (which is the chooser).
     openManage: async () => {
@@ -2487,13 +3041,14 @@ function init() {
       if (state.pinned) setPhase(state.phase, { focus: false });
     }
   };
-  if (secondBrainQuestRequested(window.location.search)) startQuestArrival();
+  if (secondBrainProjectQuestRequested(window.location.search)) startQuestArrival('project');
+  else if (secondBrainQuestRequested(window.location.search)) startQuestArrival();
 }
 
 // startQuestArrival is the mission card's Start (/?quest=second-brain): open
 // the drawer on the chooser once the panel knows the assistant, then scrub
 // the query so a reload does not open it again.
-function startQuestArrival() {
+function startQuestArrival(target = 'ask') {
   try {
     const url = new URL(window.location.href);
     url.searchParams.delete('quest');
@@ -2507,7 +3062,8 @@ function startQuestArrival() {
     if (done || !panel || typeof panel.open !== 'function') return;
     if (!panel.open(document.getElementById('personalAssistantLauncher'), { focus: false })) return;
     done = true;
-    void window.PersonalAssistantSecondBrain.openManage();
+    if (target === 'project') void window.PersonalAssistantSecondBrain.openProject();
+    else void window.PersonalAssistantSecondBrain.openAsk();
   };
   attempt();
   if (done) return;

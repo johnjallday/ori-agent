@@ -36,6 +36,9 @@ type SecondBrainService interface {
 	SkipProject(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DismissWeek(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DismissNudge(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
+	OpenFolder(ctx context.Context, userID, requestID string) error
+	Preview(ctx context.Context, userID, kind, name string) (personalassistant.SecondBrainPreviewView, error)
+	People(ctx context.Context, userID string) (personalassistant.SecondBrainPeopleView, error)
 }
 
 // SetSecondBrain adds the second-brain boundary. origin refuses a request that
@@ -306,6 +309,36 @@ type secondBrainCreateRequest struct {
 	SelectionToken string `json:"selection_token"`
 	Name           string `json:"name"`
 	RequestID      string `json:"request_id"`
+	// Project is the setup turn's project answer, a closed object of its own:
+	// name (one folder name) and answer (Issue 776 FR6). Absent means skipped.
+	Project json.RawMessage `json:"project"`
+}
+
+type secondBrainCreateProject struct {
+	Name   string `json:"name"`
+	Answer string `json:"answer"`
+}
+
+// decodeCreateProject reads the optional project object, refusing any field
+// but name and answer, so no path can ride along inside it.
+func decodeCreateProject(raw json.RawMessage) (*personalassistant.SecondBrainCreateProject, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, true
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, false
+	}
+	for key := range fields {
+		if key != "name" && key != "answer" {
+			return nil, false
+		}
+	}
+	var project secondBrainCreateProject
+	if err := json.Unmarshal(raw, &project); err != nil {
+		return nil, false
+	}
+	return &personalassistant.SecondBrainCreateProject{Name: strings.TrimSpace(project.Name), Answer: project.Answer}, true
 }
 
 // CreateSecondBrain sets up a second brain inside the picked parent or the
@@ -319,12 +352,18 @@ func (h *Handler) CreateSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req secondBrainCreateRequest
-	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "selection_token", "name", "request_id") {
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "selection_token", "name", "request_id", "project") {
+		return
+	}
+	project, ok := decodeCreateProject(req.Project)
+	if !ok {
+		orihttp.BadRequest(w, "project takes only a name and an answer")
 		return
 	}
 	req.SelectionToken = strings.TrimSpace(req.SelectionToken)
 	view, err := h.secondBrain.Create(r.Context(), userID, personalassistant.SecondBrainCreateInput{
 		SelectionToken: req.SelectionToken, Name: strings.TrimSpace(req.Name), RequestID: strings.TrimSpace(req.RequestID),
+		Project: project,
 	})
 	if err != nil {
 		writeSecondBrainError(w, err)
@@ -519,6 +558,73 @@ func (h *Handler) GetSecondBrainInbox(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"inbox": view})
 }
 
+type secondBrainOpenFolderRequest struct {
+	RequestID string `json:"request_id"`
+}
+
+// OpenSecondBrainFolder opens the connected notes folder in the file manager
+// (Issue 776 FR15). The body names nothing but the request: the folder is the
+// one connected.
+func (h *Handler) OpenSecondBrainFolder(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req secondBrainOpenFolderRequest
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "request_id") {
+		return
+	}
+	if err := h.secondBrain.OpenFolder(r.Context(), userID, strings.TrimSpace(req.RequestID)); err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"opened": true})
+}
+
+// GetSecondBrainPreview shows one note Ori wrote, inline (FR16). kind and name
+// are checked before anything is read: name is one component, never a path.
+func (h *Handler) GetSecondBrainPreview(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	kind, name := r.PathValue("kind"), r.PathValue("name")
+	if _, err := secondbrain.PreviewRel(kind, name); err != nil || r.URL.RawQuery != "" {
+		orihttp.BadRequest(w, "Name one note: inbox, daily or project, and one file or folder name")
+		return
+	}
+	view, err := h.secondBrain.Preview(r.Context(), userID, kind, name)
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	orihttp.Success(w, map[string]any{"preview": view})
+}
+
+// GetSecondBrainPeople lists People/*.md in a folder Ori set up (FR22).
+func (h *Handler) GetSecondBrainPeople(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	view, err := h.secondBrain.People(r.Context(), userID)
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"people": view})
+}
+
 type secondBrainDisconnectRequest struct {
 	RequestID string `json:"request_id"`
 	IfVersion *int64 `json:"if_version"`
@@ -570,7 +676,7 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, personalassistant.ErrSecondBrainNotConnected):
 		orihttp.Conflict(w, "No notes folder is connected")
 	case errors.Is(err, secondbrain.ErrNotOwned):
-		orihttp.Conflict(w, "Ori only writes notes to a second brain it set up")
+		orihttp.Conflict(w, "Ori only writes notes to a notes folder it set up")
 	case errors.Is(err, secondbrain.ErrCaptureSecretLike):
 		orihttp.BadRequest(w, "That looks like a secret, so Ori did not save it")
 	case errors.Is(err, secondbrain.ErrCaptureInvalid):
@@ -584,12 +690,16 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "That look is no longer here")
 	case errors.Is(err, personalassistant.ErrSecondBrainItemNotFound):
 		orihttp.NotFound(w, "That item is no longer here")
+	case errors.Is(err, personalassistant.ErrSecondBrainNoteIsYours):
+		orihttp.Forbidden(w, "That note is yours; open it in your editor.")
+	case errors.Is(err, personalassistant.ErrSecondBrainNoteNotFound):
+		orihttp.NotFound(w, "That note is no longer there")
 	case errors.Is(err, personalassistant.ErrSecondBrainNoInbox):
-		orihttp.NotFound(w, "Only a second brain Ori set up has an Inbox here")
+		orihttp.NotFound(w, "Only notes Ori set up have an Inbox here")
 	case errors.Is(err, personalassistant.ErrSecondBrainProjectName):
 		orihttp.BadRequest(w, "Choose a simple project name, without slashes.")
 	case errors.Is(err, personalassistant.ErrSecondBrainFillInNotAllowed):
-		orihttp.Conflict(w, "Let Ori keep project notes in your second brain first")
+		orihttp.Conflict(w, "Let Ori keep project notes in your notes folder first")
 	case errors.Is(err, personalassistant.ErrSecondBrainSeededItem):
 		orihttp.Conflict(w, "That item came from a follow-up you already have")
 	case errors.Is(err, personalassistant.ErrValidation):

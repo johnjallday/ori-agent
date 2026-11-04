@@ -17,7 +17,7 @@ import (
 var (
 	// ErrSecondBrainFillInNotAllowed refuses a project note in a second brain
 	// whose owner has not yet let Ori write there (the consent card's answer).
-	ErrSecondBrainFillInNotAllowed = errors.New("personal assistant: the second brain does not yet let Ori keep project notes")
+	ErrSecondBrainFillInNotAllowed = errors.New("personal assistant: your notes do not yet let Ori keep project notes")
 	// ErrSecondBrainProjectName refuses a name that is not one plain folder name.
 	ErrSecondBrainProjectName = errors.New("personal assistant: that is not a project name")
 )

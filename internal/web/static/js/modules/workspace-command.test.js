@@ -6447,6 +6447,31 @@ test('mapInventoryGroups never includes an email entry (station is its only home
   }
 });
 
+test('the HQ calls its workspace notes "Workspace notes"; other workspaces keep "Notes"', () => {
+  const hq = makeHQCommandView();
+  const hqNotes = hq.mapInventoryGroups().find(group => group.key === 'notes');
+  assert.equal(hqNotes.label, 'Workspace notes');
+
+  const plain = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(plain, { page: { workspace: {}, notes: [] } });
+  const plainNotes = plain.mapInventoryGroups().find(group => group.key === 'notes');
+  assert.equal(plainNotes.label, 'Notes');
+});
+
+test('the Memory panel says what it is under its title, pointing at Notes only in the HQ', () => {
+  const hq = makeHQCommandView();
+  const html = hq.statModalHTML('memory');
+  assert.ok(
+    html.includes(
+      '</header><p class="ws-panel-one-liner" data-memory-one-liner>What agents in this workspace are shown. Your notes folder is separate: see Notes.</p>'
+    ),
+    html
+  );
+  hq.page.workspace = {};
+  const plain = hq.statModalHTML('memory');
+  assert.ok(plain.includes('>What agents in this workspace are shown.</p>'), plain);
+});
+
 test('openRailItem no longer special-cases an "email" section', () => {
   const originalWindow = globalThis.window;
   const opened = [];

@@ -42,9 +42,9 @@ func firstBatchLearnedSentence(learned int) string {
 		return ""
 	}
 	if learned == 1 {
-		return "I learned 1 thing from this folder; approve it and it goes into your second brain."
+		return "I learned 1 thing from this folder; approve it and it goes into your notes."
 	}
-	return fmt.Sprintf("I learned %d things from this folder; approve them and they go into your second brain.", learned)
+	return fmt.Sprintf("I learned %d things from this folder; approve them and they go into your notes.", learned)
 }
 
 // withLearnedSentence gives a Ready first-batch report the line above and the

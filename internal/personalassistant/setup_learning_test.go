@@ -11,8 +11,8 @@ func TestFirstBatchLearnedSentence_SaysHowManyAndWhereTheyGo(t *testing.T) {
 	for learned, want := range map[int]string{
 		0:  "",
 		-1: "",
-		1:  "I learned 1 thing from this folder; approve it and it goes into your second brain.",
-		3:  "I learned 3 things from this folder; approve them and they go into your second brain.",
+		1:  "I learned 1 thing from this folder; approve it and it goes into your notes.",
+		3:  "I learned 3 things from this folder; approve them and they go into your notes.",
 	} {
 		if got := firstBatchLearnedSentence(learned); got != want {
 			t.Errorf("firstBatchLearnedSentence(%d) = %q, want %q", learned, got, want)
@@ -29,7 +29,7 @@ func TestWithLearnedSentence_OnlyAReadyBatchGainsTheLineAndTheAction(t *testing.
 	in := []TodayItem{ready, protected, empty, failed, other}
 
 	out := withLearnedSentence(in, 2)
-	sentence := "I learned 2 things from this folder; approve them and they go into your second brain."
+	sentence := "I learned 2 things from this folder; approve them and they go into your notes."
 	if out[0].Detail != sentence || strings.Join(out[0].Actions, ",") != "review_batch,review_learned,not_now" {
 		t.Errorf("ready = %+v", out[0])
 	}

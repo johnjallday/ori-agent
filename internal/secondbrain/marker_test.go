@@ -27,6 +27,34 @@ func TestReadMark_RendersAndReadsBackEachKind(t *testing.T) {
 	}
 }
 
+// New notes carry a 16-hex hash; notes written before Issue 776 carry 64 and
+// are still Ori's. Any other length, or an edit under either, is the user's.
+func TestReadMark_TheShortMarkerIsWrittenAndBothLengthsAreRead(t *testing.T) {
+	body := []byte("# A note\n\nthe entry\n")
+	short := string(RenderNote(NoteKindCapture, body))
+	if want := "---\nori: capture\nori_hash: " + bodyHash(body)[:16] + "\n---\n"; !strings.HasPrefix(short, want) {
+		t.Fatalf("new note =\n%s\nwant prefix\n%s", short, want)
+	}
+	long := "---\nori: capture\nori_hash: " + bodyHash(body) + "\n---\n" + string(body)
+	for name, tc := range map[string]struct {
+		content string
+		owned   bool
+		hash    string
+	}{
+		"short":          {short, true, bodyHash(body)[:16]},
+		"long":           {long, true, bodyHash(body)},
+		"short, edited":  {short + "more\n", false, ""},
+		"long, edited":   {long + "more\n", false, ""},
+		"another length": {strings.Replace(long, bodyHash(body), bodyHash(body)[:32], 1), false, ""},
+		"short, wrong":   {strings.Replace(short, bodyHash(body)[:16], "0000000000000000", 1), false, ""},
+	} {
+		mark := ReadMark([]byte(tc.content))
+		if mark.OwnedByOri != tc.owned || mark.Hash != tc.hash || mark.Kind == "" && tc.owned {
+			t.Errorf("%s: mark = %+v", name, mark)
+		}
+	}
+}
+
 func TestReadMark_AnythingOriCannotProveItWroteIsTheUsers(t *testing.T) {
 	intact := string(RenderNote(NoteKindJournal, []byte("the entry\n")))
 	frontEnd := strings.LastIndex(intact, "---\n")

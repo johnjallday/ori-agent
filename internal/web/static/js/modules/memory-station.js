@@ -8,6 +8,16 @@
 
 export const MEMORY_STATION = 'memory';
 
+// The Memory panel's one-liner under its title (Issue 776 FR3). The pointer to
+// Notes only makes sense where the Notes station is, the Personal HQ.
+export const MEMORY_ONE_LINER_BASE = 'What agents in this workspace are shown.';
+export const MEMORY_ONE_LINER =
+  MEMORY_ONE_LINER_BASE + ' Your notes folder is separate: see Notes.';
+
+export function memoryOneLiner({ personalHQ = false } = {}) {
+  return personalHQ ? MEMORY_ONE_LINER : MEMORY_ONE_LINER_BASE;
+}
+
 const SEEN_KEY_PREFIX = 'ori:memory-station-seen:';
 
 export function plural(count, one, many) {

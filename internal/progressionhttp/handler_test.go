@@ -104,7 +104,7 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 		case progression.FolderFirstLookQuestID:
 			wantReason = "Show your assistant a folder first"
 		case progression.CaptureFirstNoteQuestID, progression.SaveFirstJournalQuestID, progression.GiveProjectQuestID:
-			wantReason = "Connect your second brain first"
+			wantReason = "Set up your notes first"
 		}
 		if i > 0 && mission["locked_reason"] != wantReason {
 			t.Fatalf("missions[%d].locked_reason = %v, want %q", i, mission["locked_reason"], wantReason)

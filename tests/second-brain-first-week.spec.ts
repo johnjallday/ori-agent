@@ -182,6 +182,8 @@ test.describe('the first week, in a second brain Ori set up', () => {
     await expect.poll(async () => (await secondBrain(request)).ask.state).toBe('pending');
     await openDrawer(page);
     await action(page, 'setup').click();
+    // The project question comes first (Issue 776); this case skips it.
+    await action(page, 'skip').click();
     await action(page, 'elsewhere').click();
     await card(page).getByLabel('or paste a folder path').fill(documents);
     await card(page).getByRole('button', { name: 'Use this path' }).click();
@@ -190,14 +192,14 @@ test.describe('the first week, in a second brain Ori set up', () => {
     const headline = card(page).locator('.pa-specialist-offer__headline');
     if (followUps + people === 0) {
       await expect(headline).toHaveText(
-        "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.",
+        "Your notes are set up. They're empty until I learn something about you.",
         { timeout: 75_000 }
       );
     } else {
       // What the sandbox seeded, or more: an earlier run's approved people are
       // part of what Ori knows by now.
       await expect(headline).toHaveText(
-        /^Your second brain is set up: \d+ follow-ups? in Inbox, \d+ (?:people|person)\.$/,
+        /^Your notes are set up: \d+ follow-ups? in Inbox, \d+ (?:people|person)\.$/,
         { timeout: 75_000 }
       );
       const counts = (await headline.innerText()).match(/set up: (\d+) .* Inbox, (\d+) /);
@@ -214,6 +216,32 @@ test.describe('the first week, in a second brain Ori set up', () => {
       ['Downloads', 'Music', 'Documents', 'Desktop'].includes(text)
     );
     if (usual.includes('Downloads')) expect(usual[0]).toBe('Downloads');
+
+    // Under the headline: the first week's three rows, the capture box, then the
+    // offer, which says what showing a folder does (Issue 776 FR9, FR19).
+    await expect(card(page).locator('[data-second-brain-checklist] li')).toHaveText([
+      /Capture a note/,
+      /Write today's Journal/,
+      /Tell Ori your project/
+    ]);
+    await expect(card(page).locator('[data-second-brain-capture]')).toBeVisible();
+    await expect(card(page)).toContainText(
+      "Show me a folder and I'll sort it with you. Names that keep coming up become People notes."
+    );
+    // A chip attaches the folder and fills in the message; nothing is sent.
+    if (usual.length) {
+      let sent = false;
+      page.on('request', request => {
+        if (request.method() === 'POST' && /\/api\/home-assistant\/(chat|ask)/.test(request.url()))
+          sent = true;
+      });
+      await card(page).getByRole('button', { name: usual[0], exact: true }).click();
+      await expect(page.locator('#personalAssistantInput')).toHaveValue(
+        `Show me my ${usual[0]} folder`
+      );
+      await expect(card(page)).toContainText("Press send and I'll take a look.");
+      expect(sent).toBe(false);
+    }
   });
 
   test('the project question writes the answer as a note, refuses a bad name, and opens Create Workspace without making one', async ({
@@ -222,7 +250,12 @@ test.describe('the first week, in a second brain Ori set up', () => {
   }) => {
     const brain = await setUpViaApi(request, `Project Brain ${stamp}`);
     expect((await secondBrain(request)).fill_in?.state).toBe('allowed');
-    await openDrawer(page);
+    // A setup without a project records the question as skipped, so the drawer
+    // asks it on request: the Give Ori a project mission's own URL (Issue 776 FR20).
+    expect((await secondBrain(request)).fill_in?.project_ask).toBe('skipped');
+    await page.goto('/?quest=second-brain-project');
+    // The arrival opens the drawer itself; openDrawer would load Home again.
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible({ timeout: 20_000 });
     await waitForProjectQuestion(page);
 
     await card(page).locator('textarea[data-project-answer]').fill('Finishing the Launch album');
@@ -248,7 +281,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
 
     const readme = join(brain, 'Projects', project, 'README.md');
     const written = readFileSync(readme, 'utf8');
-    expect(written).toMatch(/^---\nori: project\nori_hash: [0-9a-f]{64}\n---\n/);
+    expect(written).toMatch(/^---\nori: project\nori_hash: [0-9a-f]{16}\n---\n/);
     expect(written).toContain(`# ${project}\n\nFinishing the Launch album\n`);
     expect(readdirSync(join(brain, 'Projects', project))).toEqual(['README.md']);
     const current = await secondBrain(request);
@@ -278,7 +311,9 @@ test.describe('the first week, in a second brain Ori set up', () => {
     request
   }) => {
     await setUpViaApi(request, `Skip Brain ${stamp}`);
-    await openDrawer(page);
+    await page.goto('/?quest=second-brain-project');
+    // The arrival opens the drawer itself; openDrawer would load Home again.
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible({ timeout: 20_000 });
     await waitForProjectQuestion(page);
     await card(page).getByRole('button', { name: 'Skip', exact: true }).click();
     await expect
@@ -302,7 +337,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
     const danaNote = join(brain, 'People', `${first}.md`);
     await waitFor(danaNote);
     expect(readFileSync(danaNote, 'utf8')).toMatch(
-      /^---\nori: person\nori_hash: [0-9a-f]{64}\n---\n/
+      /^---\nori: person\nori_hash: [0-9a-f]{16}\n---\n/
     );
 
     // The user takes the note over by editing it; a later sync never touches it.
@@ -354,9 +389,9 @@ test.describe('the first week, in a second brain Ori set up', () => {
     await openDrawer(page);
     await waitForCard(
       page,
-      'I can also keep People, a note per project and what I know about you up to date in your second brain.'
+      'I can also keep People, a note per project and what I know about you up to date in your notes folder.'
     );
-    await expect(card(page)).toContainText('Yours are never touched.');
+    await expect(card(page)).toContainText('Notes you wrote are never touched.');
     await card(page).getByRole('button', { name: 'Let Ori write there' }).click();
     await waitFor(join(brain, 'People', `${person}.md`));
     const current = await secondBrain(request);
@@ -375,9 +410,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
 
     execFileSync(resolve('scripts/second-brain-age.sh'), [sandbox, '8']);
     const [recap] = (await rows()).filter(row => row.kind === 'second_brain_week');
-    expect(recap?.title).toMatch(
-      /^This week your second brain gained .+\.$|^Your second brain had a quiet week/
-    );
+    expect(recap?.title).toMatch(/^This week your notes gained .+\.$|^Your notes had a quiet week/);
     expect(recap.actions).toEqual(['dismiss']);
     expect(recap.route).toContain('station=second-brain');
 

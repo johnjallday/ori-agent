@@ -412,10 +412,28 @@ func (a Ask) State() string {
 	}
 }
 
-// OfferAgain reports whether a deferred ask may be offered again under Needs
-// you (FR8).
+// OfferAgain reports whether a deferred ask may be offered again (FR8): from
+// the seventh local calendar day after "Not now" (Issue 776 FR13). "Not now" on
+// the re-offer moves DecidedAt, so it waits another seven days; "Don't ask
+// again" records DecisionNone and ends it.
 func (a Ask) OfferAgain(now time.Time) bool {
-	return a.State() == AskDeferred && a.DecidedAt != nil && now.Sub(*a.DecidedAt) >= AskAgainAfter
+	if a.State() != AskDeferred || a.DecidedAt == nil {
+		return false
+	}
+	return localDaysBetween(*a.DecidedAt, now) >= AskAgainDays
+}
+
+// AskAgainDays is how many local days "Not now" waits.
+const AskAgainDays = 7
+
+// localDaysBetween counts calendar days from one moment to another in the
+// machine's zone, so "seven days" means the same date next week.
+func localDaysBetween(from, to time.Time) int {
+	start := from.In(time.Local)
+	end := to.In(time.Local)
+	startDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	endDay := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	return int(endDay.Sub(startDay).Hours() / 24)
 }
 
 // ActionNudgeDismiss is the receipt action of the stale-notes nudge's "Not now".

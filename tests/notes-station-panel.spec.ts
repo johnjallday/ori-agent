@@ -230,6 +230,38 @@ test('a line filed as a follow-up greys into handled, and adding the suggested s
   await page.screenshot({ path: join(EVIDENCE, 'spec-filed-1440-light.png') });
 });
 
+// A connected vault (Issue 776): the panel says what it is under its title, Open
+// folder opens the folder (the sandbox logs "Skipped desktop launch"), and no
+// note of the user's is ever previewed.
+test('a connected vault: one-liner, Open folder, and no preview of the user notes', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // HQ Details shows the panel in its main column (#766), the modal elsewhere:
+  // the case reads whichever copy is on screen.
+  await openHQ(page, '?station=second-brain');
+  const notes = page
+    .locator(':is(.ws-cmd-modal-panel.is-station, [data-cmd-hq-host="notes"])')
+    .filter({
+      has: page.locator('[data-notes-one-liner]')
+    })
+    .first();
+  await expect(notes.locator('[data-notes-one-liner]')).toHaveText(
+    'Your notes, read-only. Ori keeps the open items it found, never your notes.'
+  );
+  await expect(notes.locator('[data-cmd-modal-action="notes-preview"]')).toHaveCount(0);
+  const opened = page.waitForResponse(
+    response =>
+      response.url().endsWith(`${BRAIN}/open-folder`) && response.request().method() === 'POST'
+  );
+  await notes.locator('[data-cmd-modal-action="notes-open-folder"]').click();
+  expect((await opened).status()).toBe(200);
+  const preview = await request.get(`${BRAIN}/preview/inbox/anything.md`);
+  expect(preview.status()).toBe(403);
+  expect(await preview.text()).toContain('That note is yours; open it in your editor.');
+});
+
 test('Look again inside the rate limit names the wait', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openHQ(page, '?station=second-brain');

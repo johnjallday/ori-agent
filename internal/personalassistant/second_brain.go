@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -36,7 +37,7 @@ var (
 	ErrSecondBrainSeededItem = errors.New("personal assistant: that item already came from a follow-up")
 	// ErrSecondBrainNoInbox says the connected folder is not one Ori set up, so
 	// the panel has no Inbox for it.
-	ErrSecondBrainNoInbox = errors.New("personal assistant: only a second brain Ori set up has an Inbox here")
+	ErrSecondBrainNoInbox = errors.New("personal assistant: only notes Ori set up have an Inbox here")
 
 	errSecondBrainLookSuperseded = errors.New("personal assistant: look superseded")
 )
@@ -146,7 +147,14 @@ type SecondBrainService struct {
 	// createMu serialises setups, so two requests with the same id cannot
 	// both try to make the folder.
 	createMu sync.Mutex
-	seeds    SecondBrainSeeds
+
+	// Open folder (Issue 776 FR15): the opener, and the request ids it has
+	// already opened, so a replay opens nothing again.
+	doorsMu        sync.Mutex
+	openFolder     folderOpener
+	openedRequests map[string]bool
+	openedOrder    []string
+	seeds          SecondBrainSeeds
 	// captureMu serialises captures, so two in one minute number their names
 	// instead of racing for one.
 	captureMu sync.Mutex
@@ -274,14 +282,18 @@ type SecondBrainView struct {
 	Source   *SecondBrainSourceView  `json:"source,omitempty"`
 	LastLook *SecondBrainLookSummary `json:"last_look,omitempty"`
 	Ask      SecondBrainAskView      `json:"ask"`
-	// WrittenByOri counts what Ori has put in Inbox and Daily; only a status
-	// read of a second brain Ori set up carries it (FR16).
+	// WrittenByOri counts the notes that carry Ori's marker: Inbox, Daily,
+	// People, the facts note and each project's README (Issue 776 FR23); only
+	// a status read of a second brain Ori set up carries it (FR16).
 	WrittenByOri *SecondBrainWrittenView `json:"written_by_ori,omitempty"`
 	// FillIn says how keeping the notes filled in stands (FR8), for the same reads.
 	FillIn *SecondBrainFillInView `json:"fill_in,omitempty"`
 	// SetupDefault is where Set one up for me puts the folder without asking;
 	// absent while a folder is connected or no default is available.
 	SetupDefault *SecondBrainSetupDefault `json:"setup_default,omitempty"`
+	// SetupPreview counts what a setup would seed now; a status read with
+	// nothing connected carries it (Issue 776 FR7).
+	SetupPreview *SecondBrainSetupPreview `json:"setup_preview,omitempty"`
 	// Projects lists the folders under Projects, so one can be offered as a
 	// workspace when the user asks (FR18); a second brain Ori set up only.
 	Projects []SecondBrainProjectView `json:"projects,omitempty"`
@@ -345,6 +357,17 @@ type SecondBrainSetupDefault struct {
 	Path       string `json:"path"`
 }
 
+// SecondBrainSetupPreview is what a setup would write right now, so the place
+// card says it before anything is written (Issue 776 FR7). Project is true when
+// the project question was already answered; an answer the drawer holds but
+// has not sent is the drawer's to add.
+type SecondBrainSetupPreview struct {
+	FollowUps int  `json:"follow_ups"`
+	People    int  `json:"people"`
+	Facts     bool `json:"facts"`
+	Project   bool `json:"project"`
+}
+
 // SecondBrainProjectView is one folder under Projects. Path is the folder the
 // Create Workspace form takes as its work folder; it is built from the
 // connected folder, never read from a note.
@@ -352,6 +375,9 @@ type SecondBrainProjectView struct {
 	Name string `json:"name"`
 	Rel  string `json:"rel"`
 	Path string `json:"path"`
+	// OriNote says the project's README opens with Ori's marker, so the panel
+	// offers Open (Issue 776 FR16).
+	OriNote bool `json:"ori_note,omitempty"`
 }
 
 // SecondBrainWrittenView is the "Written by Ori" count.
@@ -464,6 +490,12 @@ func (s *SecondBrainService) Status(ctx context.Context, userID string) (SecondB
 		return SecondBrainView{}, err
 	}
 	view := s.view(doc)
+	if view.Status == SecondBrainNotConnected {
+		counts := secondbrain.CountSeeds(s.readSeeds(ctx, userID))
+		view.SetupPreview = &SecondBrainSetupPreview{
+			FollowUps: counts.FollowUps, People: counts.People, Facts: counts.Facts,
+		}
+	}
 	if connected := doc.Connected(); connected != nil && connected.CreatedByOri() && view.Status == SecondBrainConnected {
 		if written, err := secondbrain.CountWritten(connected.Path); err == nil {
 			view.WrittenByOri = &SecondBrainWrittenView{Count: written.Count, ByKind: written.ByKind, LastAt: written.LastAt}
@@ -549,9 +581,14 @@ func projectViews(root string) []SecondBrainProjectView {
 	if err != nil {
 		return nil
 	}
+	names := make([]string, 0, len(projects))
+	for _, project := range projects {
+		names = append(names, project.Name)
+	}
+	byOri := secondbrain.ProjectNotesByOri(root, names)
 	views := make([]SecondBrainProjectView, 0, len(projects))
 	for _, project := range projects {
-		views = append(views, SecondBrainProjectView{Name: project.Name, Rel: project.Rel, Path: project.Path})
+		views = append(views, SecondBrainProjectView{Name: project.Name, Rel: project.Rel, Path: project.Path, OriNote: byOri[project.Name]})
 	}
 	return views
 }
@@ -702,6 +739,40 @@ type SecondBrainCreateInput struct {
 	SelectionToken string
 	Name           string
 	RequestID      string
+	// Project is the setup turn's answer to "What's the main thing you're
+	// working on?", written as the folder's first note; nil when skipped
+	// (Issue 776 FR6).
+	Project *SecondBrainCreateProject
+}
+
+// SecondBrainCreateProject is one project note for a new folder: a folder name
+// by the /project rules and the user's own words.
+type SecondBrainCreateProject struct {
+	Name   string
+	Answer string
+}
+
+// SecondBrainProjectAnswerMax bounds the project answer, as the drawer's
+// textarea does (PROJECT_ANSWER_MAX).
+const SecondBrainProjectAnswerMax = 500
+
+// checkCreateProject validates the project before anything is read or made.
+func checkCreateProject(project *SecondBrainCreateProject) (*secondbrain.SeedProject, error) {
+	if project == nil {
+		return nil, nil
+	}
+	name := strings.TrimSpace(project.Name)
+	if _, ok := secondbrain.ProjectNoteRel(name); !ok {
+		return nil, ErrSecondBrainProjectName
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(project.Answer)) > SecondBrainProjectAnswerMax {
+		return nil, ErrValidation
+	}
+	answer, ok := secondbrain.ProjectAnswerLine(project.Answer)
+	if !ok {
+		return nil, ErrValidation
+	}
+	return &secondbrain.SeedProject{Name: name, Answer: answer}, nil
 }
 
 // Create sets up a second brain (FR4–FR11): it makes the folder inside the
@@ -719,6 +790,10 @@ func (s *SecondBrainService) Create(ctx context.Context, userID string, input Se
 	}
 	if !secondbrain.ValidFolderName(name) {
 		return SecondBrainView{}, &SecondBrainFolderError{Message: "Choose a simple folder name, without slashes."}
+	}
+	project, err := checkCreateProject(input.Project)
+	if err != nil {
+		return SecondBrainView{}, err
 	}
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
@@ -752,7 +827,10 @@ func (s *SecondBrainService) Create(ctx context.Context, userID string, input Se
 		parent = checked.Path
 	}
 
-	creation, err := s.createFolder(ctx, userID, parent, name)
+	if project != nil {
+		project.Date = s.deps.Now().Format("2 Jan 2006")
+	}
+	creation, err := s.createFolder(ctx, userID, parent, name, project)
 	if err != nil {
 		return SecondBrainView{}, err
 	}
@@ -787,6 +865,13 @@ func (s *SecondBrainService) Create(ctx context.Context, userID string, input Se
 		// one needs no card (FR10).
 		consented := s.deps.Now().UTC()
 		connected.FillIn = &secondbrain.FillIn{Consent: secondbrain.ConsentAllowed, ConsentAt: &consented, ConsentRequestID: input.RequestID}
+		// The setup turn asked the project question first: answered or skipped,
+		// the drawer never asks it again (Issue 776 FR6).
+		connected.FillIn.ProjectAsk, connected.FillIn.ProjectAskAt = secondbrain.ProjectSkipped, &consented
+		if creation.Project != "" {
+			connected.FillIn.ProjectAsk = secondbrain.ProjectAnswered
+			connected.FillIn.AddToReport(map[string]int{secondbrain.NoteKindProject: 1}, s.deps.Now())
+		}
 		doc.Remember(secondbrain.Receipt{
 			RequestID: input.RequestID, Action: secondBrainActionCreate, At: s.deps.Now(), LookID: lookID,
 			Created: creation.FollowUps, Skipped: creation.People,
@@ -797,10 +882,13 @@ func (s *SecondBrainService) Create(ctx context.Context, userID string, input Se
 		creation.Undo()
 		return SecondBrainView{}, err
 	}
-	setup := secondbrain.SetupCounts{FollowUps: creation.FollowUps, People: creation.People}
+	setup := secondbrain.SetupCounts{FollowUps: creation.FollowUps, People: creation.People, Project: creation.Project}
 	s.startLook(userID, *doc.Connected(), nil, started.ID, input.RequestID, &setup)
 	for _, fn := range s.onConnected {
 		fn(ctx, userID, *doc.Connected())
+	}
+	if creation.Project != "" {
+		s.wrote(ctx, userID, map[string]int{secondbrain.NoteKindProject: 1})
 	}
 	view := s.view(doc)
 	view.LookID = lookID
@@ -946,19 +1034,26 @@ func isoDay(text string) bool {
 	return err == nil
 }
 
+// readSeeds gathers what Ori already holds for a setup to copy in. An
+// unreadable follow-up list must not stop the user's folder; the first look
+// then reports the seed honestly as empty.
+func (s *SecondBrainService) readSeeds(ctx context.Context, userID string) secondbrain.Seeds {
+	if s.seeds == nil {
+		return secondbrain.Seeds{}
+	}
+	seeds, err := s.seeds(ctx, userID)
+	if err != nil {
+		logger.Warn("Second-brain seeds could not be read", logger.Fields{"error": err.Error()})
+		return secondbrain.Seeds{}
+	}
+	return seeds
+}
+
 // createFolder gathers the seeds and makes the folder, turning each refusal
 // into one sentence the user can act on (FR5, FR11).
-func (s *SecondBrainService) createFolder(ctx context.Context, userID, parent, name string) (secondbrain.Creation, error) {
-	var seeds secondbrain.Seeds
-	if s.seeds != nil {
-		var err error
-		if seeds, err = s.seeds(ctx, userID); err != nil {
-			// An unreadable follow-up list must not stop the user's folder;
-			// the first look then reports the seed honestly as empty.
-			logger.Warn("Second-brain seeds could not be read", logger.Fields{"error": err.Error()})
-			seeds = secondbrain.Seeds{}
-		}
-	}
+func (s *SecondBrainService) createFolder(ctx context.Context, userID, parent, name string, project *secondbrain.SeedProject) (secondbrain.Creation, error) {
+	seeds := s.readSeeds(ctx, userID)
+	seeds.Project = project
 	creation, err := secondbrain.Creator{}.Create(parent, name, seeds)
 	switch {
 	case err == nil:
@@ -1442,6 +1537,9 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 		if note := run.HeadlineNote; note != "" && note != "no model" && note != "no open items" && note != "setup" {
 			logger.Info("A look kept the rules-only headline", logger.Fields{"look_id": lookID, "reason": note})
 		}
+		// Which lines are already a follow-up or a ticket, read fresh, so a look
+		// with nothing left to add is acted at finish (Issue 776 FR10).
+		settled := s.settledItems(ctx, userID, source, run.Look)
 		_, err := s.store.Mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 			connected := doc.Connected()
 			if connected == nil || connected.ID != source.ID || connected.Current == nil || connected.Current.ID != lookID {
@@ -1451,6 +1549,10 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 			if look.State == secondbrain.LookFinished {
 				// A triage that landed while this look ran is kept too.
 				look.CarryMarks(connected.LastLook)
+				if look.ActedAt == nil && nothingToDecide(look.Items, settled) {
+					at := s.deps.Now().UTC()
+					look.ActedAt = &at
+				}
 				connected.LastLook, connected.Current = &look, nil
 			} else {
 				connected.Current = &look
@@ -1477,6 +1579,34 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 			}
 		}
 	}()
+}
+
+// settledItems names the finished look's lines that are already a follow-up
+// or a ticket, read the way the look's view reads them.
+func (s *SecondBrainService) settledItems(ctx context.Context, userID string, source secondbrain.Source, look secondbrain.Look) map[string]bool {
+	if look.State != secondbrain.LookFinished || len(look.Items) == 0 {
+		return nil
+	}
+	copied := look
+	view := s.withAccepted(ctx, userID, s.withDestinations(&source, SecondBrainLookView{State: look.State, Result: &copied}))
+	settled := map[string]bool{}
+	if view.Result != nil {
+		for _, item := range view.Result.Items {
+			if item.Accepted || item.Ticketed {
+				settled[item.ID] = true
+			}
+		}
+	}
+	return settled
+}
+
+// nothingToDecide applies the fresh marks to the saved items and asks the look.
+func nothingToDecide(items []secondbrain.LookItem, settled map[string]bool) bool {
+	marked := append([]secondbrain.LookItem(nil), items...)
+	for i := range marked {
+		marked[i].Accepted = settled[marked[i].ID]
+	}
+	return secondbrain.NothingToDecide(marked)
 }
 
 // lookView reports a source's look. A running look this process is not

@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
+
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
 // Connect your second brain, in the browser, against the sandbox that
@@ -13,6 +16,8 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 // last because it connects the vault. Re-running disconnects first.
 
 const vault = process.env.SECOND_BRAIN_VAULT || '';
+// The sandbox from the READY line, so a case can age the ask (second-brain-age.sh --ask).
+const sandbox = process.env.SECOND_BRAIN_SANDBOX || '';
 
 test.describe.configure({ mode: 'serial' });
 test.skip(
@@ -86,7 +91,7 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
   await openDrawer(page);
   await expect(card(page)).toBeVisible();
   await expect(card(page)).toContainText(
-    'Do you keep a second brain? I found your Obsidian vault "Second Brain".'
+    'Want me to keep notes for you? I found your Obsidian vault "Second Brain".'
   );
   // The ask is the conversation's first message, and the folder hand-over is
   // not shown beside it.
@@ -99,7 +104,7 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
 
   await action(page, 'later').click();
   await expect(card(page)).toContainText(
-    "Okay. Connect your notes from Home whenever you're ready."
+    "Okay. The Notes building on your HQ map sets this up whenever you're ready."
   );
   await expect(card(page).locator('button')).toHaveCount(0);
   expect((await secondBrain(request)).ask.state).toBe('deferred');
@@ -108,20 +113,92 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
   await expect(card(page)).toBeHidden();
 });
 
-test("the ask offers Set one up for me instead of I don't keep notes", async ({
+// A pinned card sits under Needs you, which the drawer folds behind its strip.
+async function unfoldNeedsYou(page: Page) {
+  const strip = page.locator('#personalAssistantTodayStripToggle');
+  await expect(strip).toBeVisible();
+  if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
+}
+
+async function todayNeeds(request: APIRequestContext) {
+  const today = (await (await request.get('/api/personal-assistant/today')).json()).today;
+  const needs = today?.needs_you?.items || [];
+  return needs as { kind: string; title: string; route?: string }[];
+}
+
+test('shown is not answered: after a reload the ask waits under Needs you and on Today', async ({
   page,
   request
 }) => {
   await resetGettingStarted(request);
   await openDrawer(page);
+  await expect(page.locator('#personalAssistantThread > :first-child')).toHaveId(
+    'personalAssistantSecondBrain'
+  );
+  await expect.poll(async () => (await secondBrain(request)).ask.state).toBe('shown');
+
+  await page.reload();
+  await openDrawer(page);
+  // The same card, now a pinned Needs you card with the same actions.
+  await expect(
+    page.locator('#personalAssistantNeedsYouCards #personalAssistantSecondBrain')
+  ).toHaveCount(1);
+  await expect(card(page)).toContainText('Want me to keep notes for you?');
+  await expect(action(page, 'setup')).toHaveCount(1);
+  await expect(action(page, 'later')).toHaveCount(1);
+  await expect
+    .poll(async () => (await todayNeeds(request)).find(row => row.kind === 'second_brain_ask'))
+    .toMatchObject({ title: 'Want Ori to keep notes for you?', route: '/?quest=second-brain' });
+});
+
+test("Not now comes back on day 7 with Don't ask again, which ends it", async ({
+  page,
+  request
+}) => {
+  test.skip(!sandbox, 'Needs SECOND_BRAIN_SANDBOX to age the ask.');
+  await resetGettingStarted(request);
+  const response = await request.post(`${ENDPOINT}/ask`, {
+    data: { decision: 'later', request_id: `spec-later-${Date.now()}` }
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  await openDrawer(page);
+  await expect(card(page)).toBeHidden();
+  expect((await todayNeeds(request)).some(row => row.kind === 'second_brain_ask')).toBe(false);
+
+  execFileSync(resolve('scripts/second-brain-age.sh'), ['--ask', sandbox, '7']);
+  await page.reload();
+  await openDrawer(page);
+  await unfoldNeedsYou(page);
+  await expect(card(page)).toContainText('Still want me to keep notes for you?');
+  await expect(action(page, 'none')).toHaveText("Don't ask again");
+  await expect
+    .poll(
+      async () => (await todayNeeds(request)).find(row => row.kind === 'second_brain_ask')?.title
+    )
+    .toBe('Still want Ori to keep notes for you?');
+
+  await action(page, 'none').click();
+  await expect(card(page)).toContainText("Got it. I won't ask about notes again.");
+  expect((await secondBrain(request)).ask.state).toBe('declined');
+  const progression = await (await request.get('/api/progression')).json();
+  const mission = progression.missions.find(
+    (entry: { id: string }) => entry.id === 'pa-second-brain'
+  );
+  expect(mission?.status).toBe('skipped');
+  expect((await todayNeeds(request)).some(row => row.kind === 'second_brain_ask')).toBe(false);
+});
+
+test("the ask offers Set up my notes instead of I don't keep notes", async ({ page, request }) => {
+  await resetGettingStarted(request);
+  await openDrawer(page);
   await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
     'Read Second Brain',
+    'Set up my notes',
     'Another folder…',
-    'Set one up for me',
     'Not now'
   ]);
   await expect(action(page, 'none')).toHaveCount(0);
-  await expect(card(page)).toContainText('I can set one up for you.');
+  await expect(card(page)).toContainText('or set up a folder of my own.');
   // A decline already on record still declines the ask and skips the mission.
   const response = await request.post(`${ENDPOINT}/ask`, {
     data: { decision: 'none', request_id: `spec-decline-${Date.now()}` }
@@ -151,11 +228,11 @@ test('with nothing detected the ask points at a folder, and the chooser takes a 
   });
   await openDrawer(page);
   await expect(card(page)).toContainText(
-    'Do you keep a second brain? Point me at it, or I can set one up for you.'
+    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
   );
   await expect(card(page).locator('button')).toHaveText([
-    'Choose folder…',
-    'Set one up for me',
+    'Set up my notes',
+    'I have a notes folder…',
     'Not now'
   ]);
 
@@ -168,7 +245,7 @@ test('with nothing detected the ask points at a folder, and the chooser takes a 
   await action(page, 'back').click();
   await expect(card(page)).toContainText('Where do you keep your notes?');
   await action(page, 'back').click();
-  await expect(card(page)).toContainText('Do you keep a second brain');
+  await expect(card(page)).toContainText('Want me to keep notes for you?');
 });
 
 test('read the vault: consent, one headline, add the open items once, and Look again waits', async ({

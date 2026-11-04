@@ -22,6 +22,17 @@ import {
   SETUP_LEARNING_HEADING,
   secondBrainAnsweredLine,
   secondBrainAskView,
+  secondBrainAskPinned,
+  secondBrainChecklistView,
+  FIRST_WEEK_CHECKLIST,
+  folderOfferPrefill,
+  FOLDER_OFFER_SEND_LINE,
+  secondBrainProjectQuestRequested,
+  secondBrainPreviewPath,
+  previewParagraphs,
+  fetchSecondBrainPreview,
+  openSecondBrainFolder,
+  OPEN_FOLDER_LABEL,
   secondBrainAvailable,
   secondBrainCaptureProblem,
   secondBrainCaptureReceipt,
@@ -40,6 +51,9 @@ import {
   secondBrainQuestRequested,
   secondBrainSetupConfirmView,
   secondBrainSetupDefaultView,
+  secondBrainSetupSeedLine,
+  SETUP_PROJECT_QUESTION,
+  EMPTY_SETUP_HEADLINE,
   secondBrainSetupWhereView,
   secondBrainWrittenLine,
   sinceLabel,
@@ -85,8 +99,9 @@ test('the connection card says connected, missing, or not set up', () => {
   assert.equal(none.state, 'not_connected');
   assert.deepEqual(
     none.actions.map(action => action.label),
-    ['Choose folder…', 'Set one up for me']
+    ['Set up my notes', 'I have a notes folder…']
   );
+  assert.equal(none.title, 'Your notes are not set up.');
 });
 
 test('since labels read like a person says them', () => {
@@ -131,11 +146,11 @@ test('with a detected vault the ask names it and offers read, set up, or not now
   assert.equal(view.show, true);
   assert.equal(
     view.line,
-    'Do you keep a second brain? I found your Obsidian vault "Second Brain". Let me read it, or I can set one up for you.'
+    'Want me to keep notes for you? I found your Obsidian vault "Second Brain". I can read it, or set up a folder of my own.'
   );
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Read Second Brain', 'Another folder…', 'Set one up for me', 'Not now']
+    ['Read Second Brain', 'Set up my notes', 'Another folder…', 'Not now']
   );
   assert.equal(view.actions[0].vaultId, 'v_1');
 });
@@ -144,15 +159,16 @@ test('with nothing detected the ask points at a folder or offers to set one up',
   const view = secondBrainAskView({ ...detected, detected: [] }, true);
   assert.equal(
     view.line,
-    'Do you keep a second brain? Point me at it, or I can set one up for you.'
+    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
   );
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Choose folder…', 'Set one up for me', 'Not now']
+    ['Set up my notes', 'I have a notes folder…', 'Not now']
   );
+  assert.equal(view.actions[0].style, 'primary');
   assert.deepEqual(
     view.actions.map(action => action.id),
-    ['choose', 'setup', 'later']
+    ['setup', 'choose', 'later']
   );
 });
 
@@ -170,15 +186,65 @@ test('the one-click setup says where it goes and offers somewhere else', () => {
     parent_name: 'Ori Workspaces',
     path: '/Users/sam/Ori Workspaces/Second Brain'
   });
-  assert.equal(view.title, 'Set up your second brain in Ori Workspaces?');
+  assert.equal(view.title, 'Set up your notes in Ori Workspaces?');
   assert.equal(view.path, '/Users/sam/Ori Workspaces/Second Brain');
   assert.equal(
     view.lines[0],
     "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
   );
+  // Back returns to the project question (Issue 776 FR5).
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Set it up', 'Somewhere else…', 'Not now']
+    ['Set it up', 'Somewhere else…', 'Back', 'Not now']
+  );
+  // The old promise is gone: with nothing known, it starts empty.
+  assert.equal(view.lines[1], "It starts empty; I'll fill it as I learn.");
+  assert.ok(!view.lines.join(' ').includes('open follow-ups and the people I already know'));
+});
+
+test('the place card says what the folder starts with, from the preview and the project', () => {
+  assert.equal(secondBrainSetupSeedLine(null, true), 'It starts with your project note.');
+  assert.equal(
+    secondBrainSetupSeedLine({ follow_ups: 3, people: 2 }, true),
+    'It starts with your project note, 3 follow-ups and 2 people.'
+  );
+  assert.equal(
+    secondBrainSetupSeedLine({ follow_ups: 1, people: 1 }, true),
+    'It starts with your project note, 1 follow-up and 1 person.'
+  );
+  assert.equal(
+    secondBrainSetupSeedLine({ follow_ups: 0, people: 0 }),
+    "It starts empty; I'll fill it as I learn."
+  );
+  assert.equal(secondBrainSetupSeedLine({ follow_ups: 2 }), 'It starts with 2 follow-ups.');
+  const view = secondBrainSetupDefaultView(
+    { parent_name: 'Ori Workspaces' },
+    { preview: { follow_ups: 3, people: 2 }, hasProject: true }
+  );
+  assert.equal(view.lines[1], 'It starts with your project note, 3 follow-ups and 2 people.');
+  const confirm = secondBrainSetupConfirmView({ name: 'Documents' }, 'Notes', { hasProject: true });
+  assert.equal(confirm.lines[1], 'It starts with your project note.');
+  assert.equal(SETUP_PROJECT_QUESTION, "What's the main thing you're working on right now?");
+});
+
+test('a reload still offers a folder under the empty setup headline', () => {
+  assert.equal(
+    EMPTY_SETUP_HEADLINE,
+    "Your notes are set up. They're empty until I learn something about you."
+  );
+  assert.equal(secondBrainFolderOfferShows({ headline: EMPTY_SETUP_HEADLINE }), true);
+  assert.equal(
+    secondBrainFolderOfferShows({
+      headline: 'Your notes are set up. I wrote your first note: Launch.'
+    }),
+    false
+  );
+  assert.equal(
+    secondBrainFolderOfferShows({
+      headline:
+        "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it."
+    }),
+    true
   );
 });
 
@@ -187,7 +253,7 @@ test('setting one up asks where first, then names the folder and what Ori will w
     pickerOff: 'The dialog is off.',
     message: 'Pick again.'
   });
-  assert.equal(where.title, 'Where should I set up your second brain?');
+  assert.equal(where.title, 'Where should I set up your notes?');
   assert.equal(where.pickLabel, 'Choose where…');
   assert.equal(where.pickerOff, 'The dialog is off.');
   assert.equal(where.message, 'Pick again.');
@@ -344,18 +410,184 @@ test('seeded items are shown but never checked', () => {
   );
 });
 
-test('the ask is shown once, while nothing is connected', () => {
+test('shown is not answered: the ask stays until it is, while nothing is connected', () => {
   assert.equal(secondBrainAskView(detected, false).show, false);
-  for (const state of ['shown', 'deferred', 'declined']) {
+  for (const state of ['pending', 'shown']) {
+    assert.equal(secondBrainAskView({ ...detected, ask: { state } }, true).show, true, state);
+  }
+  for (const state of ['deferred', 'declined']) {
     assert.equal(secondBrainAskView({ ...detected, ask: { state } }, true).show, false, state);
   }
   assert.equal(secondBrainAskView({ ...detected, status: 'connected' }, true).show, false);
   assert.equal(secondBrainAskView(null, true).show, false);
 });
 
+test('the first showing is the first message; later loads pin it under Needs you', () => {
+  assert.equal(secondBrainAskPinned({ ask: { state: 'pending' } }), false);
+  assert.equal(secondBrainAskPinned({ ask: { state: 'shown' } }), true);
+  assert.equal(secondBrainAskPinned({ ask: { state: 'shown' } }, { shownHere: true }), false);
+  assert.equal(secondBrainAskPinned({ ask: { state: 'deferred', offer_again: true } }), true);
+  assert.equal(
+    secondBrainPlacement({ available: true, phase: 'ask', pinned: true }),
+    'needs',
+    'a pinned ask is a Needs you card'
+  );
+});
+
+test("a week after Not now the ask comes back with Don't ask again", () => {
+  const later = { ...detected, detected: [], ask: { state: 'deferred', offer_again: false } };
+  assert.equal(secondBrainAskView(later, true).show, false, 'inside the week');
+  const due = { ...later, ask: { state: 'deferred', offer_again: true } };
+  const view = secondBrainAskView(due, true);
+  assert.equal(view.show, true);
+  assert.equal(view.reoffer, true);
+  assert.equal(
+    view.line,
+    "Still want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
+  );
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label]),
+    [
+      ['setup', 'Set up my notes'],
+      ['choose', 'I have a notes folder…'],
+      ['later', 'Not now'],
+      ['none', "Don't ask again"]
+    ]
+  );
+  const withVault = secondBrainAskView({ ...detected, ask: due.ask }, true);
+  assert.match(
+    withVault.line,
+    /^Still want me to keep notes for you\? I found your Obsidian vault/
+  );
+  assert.equal(withVault.actions.at(-1).id, 'none');
+  // The first ask never offers Don't ask again.
+  assert.ok(!secondBrainAskView(detected, true).actions.some(action => action.id === 'none'));
+  assert.equal(secondBrainAskView({ ...due, ask: { state: 'declined' } }, true).show, false);
+});
+
+test('a preview names one note by kind and one component, never a path', () => {
+  assert.equal(
+    secondBrainPreviewPath('project', 'Spring Tour'),
+    '/api/personal-assistant/second-brain/preview/project/Spring%20Tour'
+  );
+  assert.equal(
+    secondBrainPreviewPath('inbox', '20261104-0900-note.md'),
+    '/api/personal-assistant/second-brain/preview/inbox/20261104-0900-note.md'
+  );
+  for (const [kind, name] of [
+    ['people', 'Dana.md'],
+    ['inbox', '../x.md'],
+    ['inbox', 'a/b.md'],
+    ['inbox', 'a\\b.md'],
+    ['daily', '.hidden.md'],
+    ['inbox', '']
+  ]) {
+    assert.equal(secondBrainPreviewPath(kind, name), '', `${kind} ${name}`);
+  }
+});
+
+test('a previewed note is plain paragraphs split at blank lines', () => {
+  assert.deepEqual(previewParagraphs('# Title\n\nFirst line\nsecond line\n\n\n- [ ] a task\n'), [
+    '# Title',
+    'First line\nsecond line',
+    '- [ ] a task'
+  ]);
+  assert.deepEqual(previewParagraphs('one\r\n\r\ntwo'), ['one', 'two']);
+  assert.deepEqual(previewParagraphs(''), []);
+});
+
+test('preview and Open folder report the server sentence on refusal', async () => {
+  const yours = await fetchSecondBrainPreview('project', 'Album', async () => ({
+    ok: false,
+    json: async () => ({ error: 'That note is yours; open it in your editor.' })
+  }));
+  assert.deepEqual(yours, { ok: false, message: 'That note is yours; open it in your editor.' });
+  const shown = await fetchSecondBrainPreview('project', 'Launch', async url => {
+    assert.equal(url, '/api/personal-assistant/second-brain/preview/project/Launch');
+    return { ok: true, json: async () => ({ preview: { body: 'x' } }) };
+  });
+  assert.deepEqual(shown, { ok: true, preview: { body: 'x' } });
+  assert.equal(
+    (await fetchSecondBrainPreview('people', 'x.md', async () => assert.fail())).ok,
+    false
+  );
+
+  const calls = [];
+  const opened = await openSecondBrainFolder(async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true };
+  });
+  assert.equal(opened.ok, true);
+  assert.equal(calls[0].url, '/api/personal-assistant/second-brain/open-folder');
+  assert.deepEqual(Object.keys(JSON.parse(calls[0].init.body)), ['request_id']);
+  assert.equal(OPEN_FOLDER_LABEL, 'Open folder');
+});
+
+test('the first-week checklist ticks from the missions and asks the project only while unanswered', () => {
+  const created = {
+    status: 'connected',
+    source: { name: 'Second Brain', origin: 'created_by_ori' },
+    fill_in: { state: 'allowed' }
+  };
+  const view = secondBrainChecklistView(created, [
+    { id: 'pa-capture-first-note', status: 'completed' },
+    { id: 'pa-save-first-journal', status: 'available' }
+  ]);
+  assert.equal(view.show, true);
+  assert.deepEqual(
+    view.rows.map(row => [row.id, row.label, row.done]),
+    [
+      ['capture', 'Capture a note', true],
+      ['journal', "Write today's Journal", false],
+      ['project', 'Tell Ori your project', false]
+    ]
+  );
+  assert.equal(view.rows[1].href, '/?journal=1');
+  const skipped = secondBrainChecklistView({ ...created, fill_in: { project_ask: 'skipped' } }, []);
+  assert.ok(skipped.rows.some(row => row.id === 'project'));
+  const answered = secondBrainChecklistView(
+    { ...created, fill_in: { project_ask: 'answered' } },
+    []
+  );
+  assert.deepEqual(
+    answered.rows.map(row => row.id),
+    ['capture', 'journal']
+  );
+  // A project note on record ends the row even when the reply carried no fill_in
+  // (the reply to /create does not).
+  const written = secondBrainChecklistView({ ...created, fill_in: undefined }, [
+    { id: 'pa-give-project', status: 'completed' }
+  ]);
+  assert.ok(!written.rows.some(row => row.id === 'project'));
+  const vault = { ...created, source: { name: 'Vault', origin: 'connected' } };
+  assert.equal(secondBrainChecklistView(vault, []).show, false);
+  assert.deepEqual(
+    FIRST_WEEK_CHECKLIST.map(row => row.mission),
+    ['pa-capture-first-note', 'pa-save-first-journal', 'pa-give-project']
+  );
+});
+
+test('the folder offer says what it does and waits for send', () => {
+  assert.equal(
+    FOLDER_OFFER_LINE,
+    "Show me a folder and I'll sort it with you. Names that keep coming up become People notes."
+  );
+  assert.equal(folderOfferPrefill('Downloads'), 'Show me my Downloads folder');
+  assert.equal(FOLDER_OFFER_SEND_LINE, "Press send and I'll take a look.");
+});
+
+test('Give Ori a project arrives on the project question', () => {
+  assert.equal(secondBrainProjectQuestRequested('?quest=second-brain-project'), true);
+  assert.equal(secondBrainProjectQuestRequested('?quest=second-brain'), false);
+  assert.equal(secondBrainQuestRequested('?quest=second-brain-project'), false);
+});
+
 test('a decline ends the turn with one line', () => {
   assert.equal(secondBrainAnsweredLine('none'), "Got it. I won't ask about notes again.");
-  assert.match(secondBrainAnsweredLine('later'), /whenever you're ready/);
+  assert.equal(
+    secondBrainAnsweredLine('later'),
+    "Okay. The Notes building on your HQ map sets this up whenever you're ready."
+  );
 });
 
 test('the chooser names vaults by name and folder, the path only as detail', () => {
@@ -370,12 +602,14 @@ test('the chooser names vaults by name and folder, the path only as detail', () 
     }
   ]);
   assert.equal(view.pickLabel, 'Pick another folder…');
-  assert.equal(view.setUp.label, 'Set one up for me');
+  assert.equal(view.setUp.label, 'Set up my notes');
   const empty = secondBrainChooserView(
     { detected: [] },
     { pickerOff: 'The folder dialog is off.', message: 'No Markdown notes found in Empty.' }
   );
   assert.equal(empty.title, 'Where do you keep your notes?');
+  // No vault is listed, so there is no "another" (FR21).
+  assert.equal(empty.pickLabel, 'Pick a folder…');
   assert.equal(empty.pickerOff, 'The folder dialog is off.');
   assert.equal(empty.message, 'No Markdown notes found in Empty.');
 });
@@ -604,7 +838,7 @@ test('the consent card shows only for a second brain Ori set up with something h
   assert.equal(view.show, true);
   assert.equal(
     view.line,
-    'I can also keep People, a note per project and what I know about you up to date in your second brain. Yours are never touched.'
+    'I can also keep People, a note per project and what I know about you up to date in your notes folder. Notes you wrote are never touched.'
   );
   assert.equal(view.line, FILL_IN_LINE);
   assert.deepEqual(
@@ -644,7 +878,7 @@ test('the first look offers the folders the server approved, Downloads first, an
     { id: 'documents', label: 'Documents' }
   ];
   const counted = secondBrainFolderOffer(
-    'Your second brain is set up: 3 follow-ups in Inbox, 2 people.',
+    'Your notes are set up: 3 follow-ups in Inbox, 2 people.',
     approved
   );
   assert.equal(counted.line, FOLDER_OFFER_LINE);
@@ -672,7 +906,7 @@ test('the first look offers the folders the server approved, Downloads first, an
   }
 
   const empty = secondBrainFolderOffer(
-    "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.",
+    "Your notes are empty because I don't know you yet. Show me a folder and I'll start filling it.",
     approved
   );
   assert.equal(empty.line, '');
@@ -682,8 +916,8 @@ test('the first look offers the folders the server approved, Downloads first, an
 
 test('the folder offer survives a reload when the result itself asks for a folder, and ends when one is chosen', () => {
   const asking =
-    "Your second brain is empty because I don't know you yet. Show me a folder and I'll start filling it.";
-  const counted = 'Your second brain is set up: 3 follow-ups in Inbox, 2 people.';
+    "Your notes are empty because I don't know you yet. Show me a folder and I'll start filling it.";
+  const counted = 'Your notes are set up: 3 follow-ups in Inbox, 2 people.';
   assert.equal(secondBrainFolderOfferShows({ justSetUp: true, headline: counted }), true);
   assert.equal(secondBrainFolderOfferShows({ justSetUp: false, headline: asking }), true);
   // A counted headline after a reload asks nothing, and a look that is not a setup never offers.
@@ -762,8 +996,8 @@ test('the card closes by counting the notes that were written', () => {
   assert.equal(setupLearningClosing(0), 'Nothing new was written to your notes.');
   assert.equal(setupLearningClosing(-3), 'Nothing new was written to your notes.');
   assert.equal(setupLearningClosing('x'), 'Nothing new was written to your notes.');
-  assert.equal(setupLearningClosing(1), '1 note was written in your second brain.');
-  assert.equal(setupLearningClosing(4), '4 notes were written in your second brain.');
+  assert.equal(setupLearningClosing(1), '1 note was written to your notes folder.');
+  assert.equal(setupLearningClosing(4), '4 notes were written to your notes folder.');
 });
 
 test('each answer carries one retry key and the Profile page action, and dismissing posts only an id', () => {

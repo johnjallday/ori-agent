@@ -134,6 +134,7 @@ func TestCreate_RollsBackOnlyWhatItMade(t *testing.T) {
 	seeds := Seeds{
 		FollowUps: []SeedFollowUp{{Title: "one"}, {Title: "two"}},
 		People:    []SeedPerson{{Name: "Sam"}},
+		Project:   &SeedProject{Name: "Launch", Answer: "Finishing the launch plan", Date: "4 Nov 2026"},
 	}
 	failing := func(at string) Creator {
 		return Creator{beforeWrite: func(rel string) error {
@@ -143,7 +144,7 @@ func TestCreate_RollsBackOnlyWhatItMade(t *testing.T) {
 			return nil
 		}}
 	}
-	for _, at := range []string{".obsidian", "Daily/README.md", "README.md", "Inbox/two.md", "People/Sam.md"} {
+	for _, at := range []string{".obsidian", "Daily/README.md", "README.md", "Inbox/two.md", "People/Sam.md", "Projects/Launch", "Projects/Launch/README.md"} {
 		t.Run("the target it made is removed, failing at "+at, func(t *testing.T) {
 			parent := canonicalTemp(t)
 			writeNote(t, parent, "Beside.md", "not part of it")
@@ -316,16 +317,111 @@ func TestCreate_SeedingIsBounded(t *testing.T) {
 	}
 }
 
-func TestSetupHeadline_ReportsWhatWasSeededAndIsHonestWhenNothingWas(t *testing.T) {
-	for counts, want := range map[SetupCounts]string{
-		{FollowUps: 3, People: 2}: "Your second brain is set up: 3 follow-ups in Inbox, 2 people.",
-		{FollowUps: 1, People: 1}: "Your second brain is set up: 1 follow-up in Inbox, 1 person.",
-		{FollowUps: 4}:            "Your second brain is set up: 4 follow-ups in Inbox.",
-		{People: 5}:               "Your second brain is set up: 5 people.",
-		{}:                        EmptySetupHeadline,
+func TestCreate_WritesTheProjectAsTheFirstNote(t *testing.T) {
+	parent := canonicalTemp(t)
+	creation, err := Creator{}.Create(parent, "Notes", Seeds{
+		Project: &SeedProject{Name: "Launch", Answer: "Finishing the launch\nplan", Date: "4 Nov 2026"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creation.Project != "Launch" || creation.FollowUps != 0 || creation.People != 0 {
+		t.Fatalf("creation = %+v", creation)
+	}
+	got := readTestFile(t, parent, "Notes", "Projects", "Launch", "README.md")
+	want := string(RenderNote(NoteKindProject, ProjectAnswerNote("Launch", "Finishing the launch plan", "4 Nov 2026")))
+	if got != want {
+		t.Fatalf("project note =\n%s\nwant\n%s", got, want)
+	}
+	if mark := ReadMark([]byte(got)); !mark.OwnedByOri || mark.Kind != NoteKindProject {
+		t.Fatalf("mark = %+v", mark)
+	}
+	// Undo takes the project note and its folder with everything else.
+	creation.Undo()
+	if _, err := os.Stat(creation.Path); !os.IsNotExist(err) {
+		t.Fatalf("the folder outlived Undo: %v", err)
+	}
+}
+
+func TestCreate_RefusesAProjectThatCannotBeANote(t *testing.T) {
+	for name, project := range map[string]*SeedProject{
+		"a path":       {Name: "../Out", Answer: "x"},
+		"hidden":       {Name: ".Launch", Answer: "x"},
+		"empty answer": {Name: "Launch", Answer: "   "},
+		"a secret":     {Name: "Launch", Answer: "my token is ghp_abcdefghijklmnop"},
 	} {
-		if got := SetupHeadline(counts); got != want {
-			t.Errorf("SetupHeadline(%+v) = %q, want %q", counts, got, want)
+		t.Run(name, func(t *testing.T) {
+			parent := canonicalTemp(t)
+			before := withoutPath(snapshot(t, parent), ".")
+			if _, err := (Creator{}).Create(parent, "Notes", Seeds{Project: project}); !errors.Is(err, ErrInvalidProjectSeed) {
+				t.Fatalf("err = %v, want ErrInvalidProjectSeed", err)
+			}
+			if after := withoutPath(snapshot(t, parent), "."); after != before {
+				t.Fatalf("a refused project left something.\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
+	}
+}
+
+func TestNothingToDecide_OnlyWhenEveryItemIsSettled(t *testing.T) {
+	at := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		items []LookItem
+		want  bool
+	}{
+		"no items":            {nil, true},
+		"seeded":              {[]LookItem{{ID: "a", Seeded: true}}, true},
+		"already a follow-up": {[]LookItem{{ID: "a", Accepted: true}}, true},
+		"already a ticket":    {[]LookItem{{ID: "a", Ticketed: true}}, true},
+		"triaged":             {[]LookItem{{ID: "a", ActedAs: ActedDismissed, ActedAt: &at}}, true},
+		"one open line":       {[]LookItem{{ID: "a", Seeded: true}, {ID: "b"}}, false},
+	} {
+		if got := NothingToDecide(tc.items); got != tc.want {
+			t.Errorf("%s: NothingToDecide = %t, want %t", name, got, tc.want)
+		}
+	}
+}
+
+func TestCountSeeds_CountsWhatCreateWouldWrite(t *testing.T) {
+	seeds := Seeds{
+		FollowUps: []SeedFollowUp{{Title: "Call Dana"}, {Title: "  "}, {Title: "token ghp_abcdefghijklmnop"}},
+		People:    []SeedPerson{{Name: "Dana Lee"}, {Name: ""}},
+	}
+	counts := CountSeeds(seeds)
+	creation, err := Creator{}.Create(canonicalTemp(t), "Notes", seeds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.FollowUps != creation.FollowUps || counts.People != creation.People || counts.Facts != creation.Facts {
+		t.Fatalf("counts = %+v, creation = %+v", counts, creation)
+	}
+	for index := range MaxSeedPeople + 3 {
+		seeds.People = append(seeds.People, SeedPerson{Name: fmt.Sprintf("Person %d", index)})
+	}
+	if got := CountSeeds(seeds).People; got != MaxSeedPeople {
+		t.Fatalf("people = %d, want the cap %d", got, MaxSeedPeople)
+	}
+	if got := CountSeeds(Seeds{}); got != (SeedCounts{}) {
+		t.Fatalf("nothing held counts %+v", got)
+	}
+}
+
+func TestSetupHeadline_ReportsWhatWasSeededAndIsHonestWhenNothingWas(t *testing.T) {
+	// A slice, not a keyed map: gofmt 1.26 and 1.27 align a map's keys differently.
+	for _, tc := range []struct {
+		counts SetupCounts
+		want   string
+	}{
+		{SetupCounts{FollowUps: 3, People: 2}, "Your notes are set up: 3 follow-ups in Inbox, 2 people."},
+		{SetupCounts{FollowUps: 1, People: 1}, "Your notes are set up: 1 follow-up in Inbox, 1 person."},
+		{SetupCounts{FollowUps: 4}, "Your notes are set up: 4 follow-ups in Inbox."},
+		{SetupCounts{People: 5}, "Your notes are set up: 5 people."},
+		{SetupCounts{Project: "Launch"}, "Your notes are set up. I wrote your first note: Launch."},
+		{SetupCounts{Project: "Launch", FollowUps: 3, People: 2}, "Your notes are set up: your project note, 3 follow-ups in Inbox, 2 people."},
+		{SetupCounts{}, "Your notes are set up. They're empty until I learn something about you."},
+	} {
+		if got := SetupHeadline(tc.counts); got != tc.want {
+			t.Errorf("SetupHeadline(%+v) = %q, want %q", tc.counts, got, tc.want)
 		}
 	}
 }
@@ -348,7 +444,7 @@ func TestRunSetup_ReportsTheSeedAndNeverSuggestsSeededItems(t *testing.T) {
 	run := fixedLooker().RunSetup(ctx, source, "look-1", "create-1", setup)
 	look := run.Look
 	if look.State != LookFinished || look.HeadlineBy != HeadlineByRules ||
-		look.Headline != "Your second brain is set up: 2 follow-ups in Inbox, 1 person." {
+		look.Headline != "Your notes are set up: 2 follow-ups in Inbox, 1 person." {
 		t.Fatalf("look = %+v", look)
 	}
 	var seeded, suggested []LookItem

@@ -44,7 +44,7 @@ func TestSecondBrainWeek_CountsTheGainsOnceSevenDaysAfterSetup(t *testing.T) {
 
 	*h.clock = h.clock.Add(3 * 24 * time.Hour)
 	report, found := h.service.WeekReport(ctx, "local")
-	want := "This week your second brain gained 1 fact, 1 person, 1 project and 2 captures."
+	want := "This week your notes gained 1 fact, 1 person, 1 project and 2 captures."
 	if !found || report.Sentence != want || report.ID == "" {
 		t.Fatalf("report = %+v, %v; want %q", report, found, want)
 	}
@@ -184,7 +184,7 @@ func TestSecondBrainWeek_ANothingWeekIsSaidPlainly(t *testing.T) {
 	h.service.Wait()
 	*h.clock = h.clock.Add(8 * 24 * time.Hour)
 	report, found := h.service.WeekReport(ctx, "local")
-	if !found || report.Sentence != "Your second brain had a quiet week: nothing new was added." {
+	if !found || report.Sentence != "Your notes had a quiet week: nothing new was added." {
 		t.Fatalf("report = %+v, %v", report, found)
 	}
 }
@@ -216,7 +216,7 @@ func TestSecondBrainWeek_TheRowReachesTodayInDoneWithADismiss(t *testing.T) {
 	h.service.Wait()
 	*h.clock = h.clock.Add(8 * 24 * time.Hour)
 	today := &TodayService{secondBrain: h.service}
-	_, _, done := today.secondBrainItems(ctx, "local", "personal-hq", *h.clock)
+	_, _, done := today.secondBrainItems(ctx, "local", "personal-hq", true, *h.clock)
 	var row *TodayItem
 	for index := range done {
 		if done[index].Kind == "second_brain_week" {

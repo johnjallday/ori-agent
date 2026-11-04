@@ -96,15 +96,18 @@ async function openDrawer(page: Page) {
 const card = (page: Page) => page.locator('#personalAssistantSecondBrain');
 const action = (page: Page, id: string) => card(page).locator(`[data-second-brain-action="${id}"]`);
 
-// startSetup takes the ask's Set one up for me to the confirmation step with
+// startSetup takes the ask's Set up my notes, skips the project question, to the confirmation step with
 // the sandbox's Documents as the parent.
 async function startSetup(page: Page, request: APIRequestContext) {
   await disconnect(request);
   await resetGettingStarted(request);
   await openDrawer(page);
   await action(page, 'setup').click();
+  // The project question comes first (Issue 776 FR5); these cases skip it.
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await action(page, 'skip').click();
   await action(page, 'elsewhere').click();
-  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  await expect(card(page)).toContainText('Where should I set up your notes?');
   await card(page).getByLabel('or paste a folder path').fill(documents);
   await card(page).getByRole('button', { name: 'Use this path' }).click();
   await expect(card(page)).toContainText('Set up "Second Brain" in Documents?');
@@ -120,11 +123,11 @@ test('the ask offers to set one up when no vault is found', async ({ page, reque
   await resetGettingStarted(request);
   await openDrawer(page);
   await expect(card(page)).toContainText(
-    'Do you keep a second brain? Point me at it, or I can set one up for you.'
+    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
   );
   await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
-    'Choose folder…',
-    'Set one up for me',
+    'Set up my notes',
+    'I have a notes folder…',
     'Not now'
   ]);
 });
@@ -141,12 +144,15 @@ test('set one up in one click: the Workspace Directory, no picker, and Somewhere
   expect(place.setup_default?.path.endsWith('/Second Brain')).toBe(true);
   await openDrawer(page);
   await action(page, 'setup').click();
+  // The project question comes first (Issue 776 FR5); these cases skip it.
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await action(page, 'skip').click();
   await expect(card(page)).toContainText(
-    `Set up your second brain in ${place.setup_default?.parent_name}?`
+    `Set up your notes in ${place.setup_default?.parent_name}?`
   );
   await expect(card(page)).toContainText(place.setup_default?.path as string);
   await action(page, 'elsewhere').click();
-  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  await expect(card(page)).toContainText('Where should I set up your notes?');
   await card(page).getByRole('button', { name: 'Back' }).click();
   await action(page, 'create').click();
   // The server records the canonical path (on macOS /var is /private/var).
@@ -173,9 +179,12 @@ test('a default place that is already taken says so and asks where, changing not
   writeFileSync(join(taken, 'mine.md'), 'mine');
   await openDrawer(page);
   await action(page, 'setup').click();
+  // The project question comes first (Issue 776 FR5); these cases skip it.
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await action(page, 'skip').click();
   await action(page, 'create').click();
   await expect(card(page)).toContainText('already has something in it');
-  await expect(card(page)).toContainText('Where should I set up your second brain?');
+  await expect(card(page)).toContainText('Where should I set up your notes?');
   expect(readdirSync(taken)).toEqual(['mine.md']);
   expect((await secondBrain(request)).status).toBe('not_connected');
   renameSync(taken, `${taken} taken ${stamp}`);
@@ -192,7 +201,7 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
 
   // The first look reports the seed: exactly what the sandbox holds.
   await expect(card(page).locator('.pa-specialist-offer__headline')).toHaveText(
-    `Your second brain is set up: ${followUps} follow-ups in Inbox, ${people} people.`,
+    `Your notes are set up: ${followUps} follow-ups in Inbox, ${people} people.`,
     { timeout: 75_000 }
   );
   // The seeded items are the user's follow-ups already: nothing to add.
@@ -217,7 +226,7 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
   expect(peopleNotes).toHaveLength(people);
   expect(peopleNotes).toContain('Dana Lee.md');
   const seeded = readFileSync(join(brain, 'Inbox', inbox[0]), 'utf8');
-  expect(seeded).toMatch(/^---\nori: seed\nori_hash: [0-9a-f]{64}\n---\n/);
+  expect(seeded).toMatch(/^---\nori: seed\nori_hash: [0-9a-f]{16}\n---\n/);
   expect(seeded).toContain('- [ ] ');
 
   // The look says the same, and marks the items as seeded.
@@ -226,6 +235,89 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
     followUps
   );
   expect(look.result.items.some((item: { suggested?: boolean }) => item.suggested)).toBe(false);
+});
+
+test('the project question comes first and the folder opens with that note', async ({
+  page,
+  request
+}) => {
+  await disconnect(request);
+  await resetGettingStarted(request);
+  await openDrawer(page);
+  await action(page, 'setup').click();
+  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  await expect(action(page, 'save')).toHaveText('Next');
+  await expect(action(page, 'skip')).toHaveText('Skip');
+  const answer = `Finishing the spring tour plan ${stamp}`;
+  await card(page).locator('[data-project-answer]').fill(answer);
+  await action(page, 'save').click();
+  await expect(card(page)).toContainText("I'll call it Spring Tour Plan. OK?");
+  const project = `Tour ${stamp}`;
+  await card(page).locator('[data-project-name]').fill(project);
+  await action(page, 'confirm').click();
+
+  // The place card says what it starts with, computed from the preview.
+  const seeds = [
+    followUps ? `${followUps} follow-up${followUps === 1 ? '' : 's'}` : '',
+    people ? `${people} ${people === 1 ? 'person' : 'people'}` : ''
+  ].filter(Boolean);
+  const seedLine = seeds.length
+    ? `It starts with your project note, ${seeds.join(' and ')}.`
+    : 'It starts with your project note.';
+  await expect(card(page)).toContainText(seedLine);
+  await expect(card(page)).not.toContainText('open follow-ups and the people I already know');
+
+  // Back returns to the question with the answer kept.
+  await action(page, 'back').click();
+  await expect(card(page).locator('[data-project-answer]')).toHaveValue(answer);
+  await action(page, 'save').click();
+  await card(page).locator('[data-project-name]').fill(project);
+  await action(page, 'confirm').click();
+
+  await action(page, 'elsewhere').click();
+  await card(page).getByLabel('or paste a folder path').fill(documents);
+  await card(page).getByRole('button', { name: 'Use this path' }).click();
+  const name = `First Note Brain ${stamp}`;
+  await nameField(page).fill(name);
+  await action(page, 'create').click();
+
+  const headline = seeds.length
+    ? `Your notes are set up: your project note, ${followUps} follow-ups in Inbox, ${people} people.`
+    : `Your notes are set up. I wrote your first note: ${project}.`;
+  await expect(card(page).locator('.pa-specialist-offer__headline')).toHaveText(headline, {
+    timeout: 75_000
+  });
+  const note = readFileSync(join(documents, name, 'Projects', project, 'README.md'), 'utf8');
+  expect(note).toMatch(/^---\nori: project\nori_hash: [0-9a-f]+\n---\n/);
+  expect(note).toContain(`# ${project}\n\n${answer}\n`);
+  const current = (await secondBrain(request)) as SecondBrain & {
+    fill_in?: { project_ask?: string };
+  };
+  expect(current.fill_in?.project_ask).toBe('answered');
+  // The note opens inside Ori, byte for byte after the marker (Issue 776 FR16).
+  const opened = await request.get(`${ENDPOINT}/preview/project/${encodeURIComponent(project)}`);
+  expect(opened.ok(), await opened.text()).toBeTruthy();
+  const preview = (await opened.json()).preview;
+  expect(preview.body).toBe(note.slice(note.indexOf('\n---\n') + 5));
+  expect(preview.truncated).toBe(false);
+  // The card offers it: Open {project}, Open folder and Open in Obsidian.
+  await card(page)
+    .getByRole('button', { name: `Open ${project}` })
+    .click();
+  await expect(card(page).locator('.pa-second-brain__preview')).toContainText(answer);
+  const folder = await request.post(`${ENDPOINT}/open-folder`, {
+    data: { request_id: `spec-open-${Date.now()}` }
+  });
+  expect(folder.ok(), await folder.text()).toBeTruthy();
+  expect(current.written_by_ori?.count).toBeGreaterThanOrEqual(1);
+  // The answer is also the reviewed fact the user typed.
+  const knowledge = await (await request.get('/api/personal-assistant/knowledge')).json();
+  expect(
+    (knowledge.items || []).some(
+      (item: { text?: string; state?: string }) => item.text === answer && item.state === 'approved'
+    )
+  ).toBe(true);
+  await disconnect(request);
 });
 
 test('a target that already has content is refused with one sentence and nothing changes', async ({
@@ -299,7 +391,7 @@ test('saving a Journal copies it to Daily, refreshes it, and leaves an edited no
 
   expect((await save('# End of day\n\nShipped the mix.')).daily_note).toBe('mirrored');
   const first = readFileSync(daily, 'utf8');
-  expect(first).toMatch(/^---\nori: journal\nori_hash: [0-9a-f]{64}\n---\n# End of day/);
+  expect(first).toMatch(/^---\nori: journal\nori_hash: [0-9a-f]{16}\n---\n# End of day/);
   expect(first).toContain('Shipped the mix.');
   expect(await writtenCount(request)).toBe(before + 1);
 
@@ -359,7 +451,7 @@ test('the connection card shows what Ori wrote and takes a note into Inbox', asy
   expect(notes).toHaveLength(2);
   const note = readFileSync(join(brain, 'Inbox', notes.sort()[0]), 'utf8');
   expect(note).toMatch(
-    /^---\nori: capture\nori_hash: [0-9a-f]{64}\n---\nSpec note one\n\nCaptured by Ori on \d{4}-\d{2}-\d{2}\./
+    /^---\nori: capture\nori_hash: [0-9a-f]{16}\n---\nSpec note one\n\nCaptured by Ori on \d{4}-\d{2}-\d{2}\./
   );
 });
 

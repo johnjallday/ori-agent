@@ -134,6 +134,10 @@ jobs:
       - name: Check user-facing task copy
         run: npm run check:task-copy
 
+      # "Second brain" stays out of what people read: the folder is their notes.
+      - name: Check user-facing notes copy
+        run: npm run check:notes-copy
+
       # Rasterizes the 27 character SVGs and proves they stay transparent and
       # map-ready. Deterministic and offline: sharp is already a devDependency,
       # and one process checks every asset.

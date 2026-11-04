@@ -17,12 +17,18 @@ const todaySecondBrainDoneWindow = 7 * 24 * time.Hour
 // decision (the drawer card renders it there itself), and Done for a week. A
 // notes folder that cannot be read leaves Today as it was; the Notes slot says
 // so instead. The result row leads to the HQ map with the Notes panel open.
-func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug string, now time.Time) (working, needs, done []TodayItem) {
+func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug string, askable bool, now time.Time) (working, needs, done []TodayItem) {
 	if s.secondBrain == nil {
 		return nil, nil, nil
 	}
 	view, err := s.secondBrain.Status(ctx, userID)
-	if err != nil || view.Source == nil {
+	if err != nil {
+		return nil, nil, nil
+	}
+	if item, ok := secondBrainAskItem(view, askable); ok {
+		return nil, []TodayItem{item}, nil
+	}
+	if view.Source == nil {
 		return nil, nil, nil
 	}
 	name := view.Source.Name
@@ -67,6 +73,27 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 		}
 	}
 	return working, needs, done
+}
+
+// SecondBrainAskRoute opens the drawer on the ask while it is unanswered.
+const SecondBrainAskRoute = "/?quest=second-brain"
+
+// secondBrainAskItem is the Needs you row for an unanswered ask (Issue 776
+// FR12): while nothing is connected and the ask is pending or shown, or again
+// seven days after Not now. A paused assistant asks nothing.
+func secondBrainAskItem(view SecondBrainView, askable bool) (TodayItem, bool) {
+	if !askable || view.Status != SecondBrainNotConnected {
+		return TodayItem{}, false
+	}
+	switch {
+	case view.Ask.State == secondbrain.AskPending || view.Ask.State == secondbrain.AskShown:
+		return TodayItem{ID: "second-brain-ask", Kind: "second_brain_ask",
+			Title: "Want Ori to keep notes for you?", Route: SecondBrainAskRoute}, true
+	case view.Ask.OfferAgain:
+		return TodayItem{ID: "second-brain-ask", Kind: "second_brain_ask",
+			Title: "Still want Ori to keep notes for you?", Route: SecondBrainAskRoute}, true
+	}
+	return TodayItem{}, false
 }
 
 // secondBrainNudgeReader is the part of the service that says the notes deserve

@@ -53,9 +53,10 @@ func TestCountWritten_CountsEveryPlaceOriKeepsNotesByKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Plus the tree's capture and its edited journal, which still carry the marker.
-	want := map[string]int{NoteKindPerson: 1, NoteKindSeed: 1, NoteKindProject: 1, NoteKindFollowUp: 1, NoteKindFacts: 1, NoteKindCapture: 1, NoteKindJournal: 1}
-	if written.Count != 7 || fmt.Sprint(written.ByKind) != fmt.Sprint(want) {
+	// Plus the tree's capture and its edited journal, and the two setup project
+	// notes (one edited), which still carry the marker.
+	want := map[string]int{NoteKindPerson: 1, NoteKindSeed: 1, NoteKindProject: 3, NoteKindFollowUp: 1, NoteKindFacts: 1, NoteKindCapture: 1, NoteKindJournal: 1}
+	if written.Count != 9 || fmt.Sprint(written.ByKind) != fmt.Sprint(want) {
 		t.Fatalf("written = %+v", written)
 	}
 }

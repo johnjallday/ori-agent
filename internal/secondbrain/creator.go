@@ -29,7 +29,7 @@ const (
 	// the user reads what Ori will write before it writes.
 	OwnedFoldersSentence = "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
 
-	obsidianAppJSON = "{\n  \"alwaysUpdateLinks\": false,\n  \"promptDelete\": true\n}\n"
+	obsidianAppJSON = "{\n  \"alwaysUpdateLinks\": false,\n  \"promptDelete\": true,\n  \"propertiesInDocument\": \"hidden\"\n}\n"
 )
 
 var (
@@ -38,6 +38,10 @@ var (
 	ErrTargetNotEmpty = errors.New("secondbrain: that folder already has something in it")
 	// ErrInvalidFolderName refuses a name that is not one plain folder name.
 	ErrInvalidFolderName = errors.New("secondbrain: that is not a folder name")
+	// ErrInvalidProjectSeed refuses a project the setup cannot write as a note:
+	// a name that is not one folder name, or an answer that is empty or looks
+	// like a secret (Issue 776 FR6).
+	ErrInvalidProjectSeed = errors.New("secondbrain: that project cannot be a note")
 )
 
 // createdLayout is the top-level structure with each folder's README (FR6).
@@ -75,6 +79,50 @@ type Seeds struct {
 	Facts            []HeldFact
 	WorkingAgreement string
 	People           []SeedPerson
+	// Project is the project the user named in the setup turn, written as the
+	// folder's first note; nil when they skipped the question (Issue 776 FR6).
+	Project *SeedProject
+}
+
+// SeedProject is the answer to the setup's project question: the folder name
+// the user confirmed and their own words, with the day they said them.
+type SeedProject struct {
+	Name   string
+	Answer string
+	// Date is how the note's "How Ori knows this" line names the day.
+	Date string
+}
+
+// SeedCounts is what a Create would write from these seeds right now, after
+// the same filters and caps, so a card can say it before anything is written
+// (Issue 776 FR7).
+type SeedCounts struct {
+	FollowUps int
+	People    int
+	Facts     bool
+}
+
+// CountSeeds counts what Create would seed, writing nothing.
+func CountSeeds(seeds Seeds) SeedCounts {
+	var counts SeedCounts
+	for _, seed := range seeds.FollowUps {
+		if counts.FollowUps == MaxSeedFollowUps {
+			break
+		}
+		if _, ok := followUpNote(seed); ok {
+			counts.FollowUps++
+		}
+	}
+	for _, seed := range seeds.People {
+		if counts.People == MaxSeedPeople {
+			break
+		}
+		if _, ok := personNote(seed); ok {
+			counts.People++
+		}
+	}
+	counts.Facts = !factsNote(Holdings{Facts: seeds.Facts, WorkingAgreement: seeds.WorkingAgreement}).OnlyIfTracked
+	return counts
 }
 
 // Creation is what one Create made.
@@ -87,6 +135,8 @@ type Creation struct {
 	People    int
 	// Facts says the facts note was written.
 	Facts bool
+	// Project names the project note written, or "" when there was none.
+	Project string
 
 	parent     string
 	name       string
@@ -251,7 +301,34 @@ func (r *creatorRun) populate(seeds Seeds) (Creation, error) {
 	if err != nil {
 		return Creation{}, err
 	}
-	return Creation{FollowUps: followUps, People: people, Facts: hasFacts}, nil
+	project, err := r.seedProject(seeds.Project)
+	if err != nil {
+		return Creation{}, err
+	}
+	return Creation{FollowUps: followUps, People: people, Facts: hasFacts, Project: project}, nil
+}
+
+// seedProject writes Projects/<name>/README.md with the project question's
+// renderer, inside this run, so a failure anywhere removes it with the rest.
+func (r *creatorRun) seedProject(seed *SeedProject) (string, error) {
+	if seed == nil {
+		return "", nil
+	}
+	rel, ok := ProjectNoteRel(seed.Name)
+	if !ok {
+		return "", ErrInvalidProjectSeed
+	}
+	answer, ok := ProjectAnswerLine(seed.Answer)
+	if !ok {
+		return "", ErrInvalidProjectSeed
+	}
+	if err := r.mkdir(FolderProjects + "/" + seed.Name); err != nil {
+		return "", err
+	}
+	if err := r.write(rel, RenderNote(NoteKindProject, ProjectAnswerNote(seed.Name, answer, seed.Date))); err != nil {
+		return "", err
+	}
+	return seed.Name, nil
 }
 
 func (r *creatorRun) seedFollowUps(seeds []SeedFollowUp) (int, error) {

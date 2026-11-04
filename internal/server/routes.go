@@ -1344,6 +1344,11 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST "+secondBrain+"/look/{lookID}/dismiss", s.Handlers.PersonalAssistant.DismissSecondBrainLook)
 		mux.HandleFunc("POST "+secondBrain+"/look/{lookID}/items/{itemID}", s.Handlers.PersonalAssistant.ActOnSecondBrainItem)
 		mux.HandleFunc("GET "+secondBrain+"/inbox", s.Handlers.PersonalAssistant.GetSecondBrainInbox)
+		// Doors that are not Obsidian (Issue 776): open the folder, preview a note
+		// Ori wrote, list People. A preview names one note by kind and one component.
+		mux.HandleFunc("POST "+secondBrain+"/open-folder", s.Handlers.PersonalAssistant.OpenSecondBrainFolder)
+		mux.HandleFunc("GET "+secondBrain+"/preview/{kind}/{name}", s.Handlers.PersonalAssistant.GetSecondBrainPreview)
+		mux.HandleFunc("GET "+secondBrain+"/people", s.Handlers.PersonalAssistant.GetSecondBrainPeople)
 		mux.HandleFunc("POST "+secondBrain+"/disconnect", s.Handlers.PersonalAssistant.DisconnectSecondBrain)
 		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
 		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)

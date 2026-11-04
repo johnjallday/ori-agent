@@ -5996,6 +5996,74 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-notes-capture .ws-notes-bulk {
   align-self: stretch;
 }
+/* The empty Inbox's first-week checklist (Issue 776 FR19). */
+.ws-notes-checklist {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.ws-notes-checklist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.ws-notes-checklist-row .ws-notes-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.ws-notes-checklist-row.is-done .ws-notes-link {
+  text-decoration: line-through;
+  color: var(--ws-ink-dim);
+}
+.ws-notes-check {
+  width: 1.1em;
+  text-align: center;
+  color: var(--ws-ink-faint);
+}
+.ws-notes-checklist-row.is-done .ws-notes-check {
+  color: var(--ws-faction);
+}
+/* A note Ori wrote, opened inline as plain paragraphs (Issue 776 FR16). */
+.ws-notes-item:has(.ws-notes-preview) {
+  flex-wrap: wrap;
+}
+.ws-notes-preview {
+  flex-basis: 100%;
+  margin: 6px 0 2px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+.ws-notes-preview-text {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ws-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ws-notes-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+/* A station panel's one sentence under its title (Notes, Memory). */
+.ws-panel-one-liner {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ws-line);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ws-ink-dim);
+}
 .ws-notes-receipt {
   margin: 0;
   font-size: 12px;

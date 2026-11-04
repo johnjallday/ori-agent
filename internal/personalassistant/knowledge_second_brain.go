@@ -24,7 +24,7 @@ func SecondBrainFactText(kind, name string) string {
 
 // SecondBrainSetUpFactText is the fact for a folder Ori set up (FR9).
 func SecondBrainSetUpFactText(name string) string {
-	return "You keep your second brain in a folder Ori set up called " + name + "."
+	return "You keep your notes in a folder Ori set up called " + name + "."
 }
 
 // SecondBrainKnowledgeProposal is the one proposal a connected source makes.

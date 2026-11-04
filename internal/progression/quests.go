@@ -72,6 +72,10 @@ func SecondBrainFirstWeekQuestIDs() []string {
 // SecondBrainActionURL opens Home with the assistant's second-brain chooser.
 const SecondBrainActionURL = "/?quest=second-brain"
 
+// SecondBrainProjectActionURL opens the drawer on the project question (Issue 776
+// FR20), so Give Ori a project asks it instead of showing the connection card.
+const SecondBrainProjectActionURL = "/?quest=second-brain-project"
+
 // MeetAssistantActionURL starts Ori's deterministic Mission 01 walkthrough from
 // its first step, on Home: Ori points at the Agents nav entry and the user
 // clicks it, then the Agents page walks them through the New Agent panel's
@@ -385,8 +389,8 @@ func PersonalAssistantGraph() Graph {
 			LockedUntil:  BuildHQQuestID,
 			LockedReason: "Build your HQ first",
 			LockedAction: &LockedAction{Kind: LockedActionHQCard, Label: "Build My HQ"},
-			Title:        "Connect your second brain",
-			Why:          "Point Ori at your notes and it tells you what's open.",
+			Title:        "Set up your notes",
+			Why:          "Ori keeps what it learns, people, projects and your journal, in plain Markdown you own.",
 			ActionURL:    SecondBrainActionURL,
 			ActionLabel:  "Start",
 			// Live, a connect completes it and "I don't keep notes" skips it,
@@ -478,7 +482,7 @@ func PersonalAssistantGraph() Graph {
 			// server, so it never keeps the tier open.
 			ID: CaptureFirstNoteQuestID, Tier: 2, Featured: true, Order: 7, Optional: true,
 			LockedUntil:  SecondBrainQuestID,
-			LockedReason: "Connect your second brain first",
+			LockedReason: "Set up your notes first",
 			Title:        "Capture your first note",
 			Why:          "Tell your assistant something to remember and it lands in your Inbox, a note you can open in Obsidian.",
 			ActionURL:    SecondBrainActionURL,
@@ -488,9 +492,9 @@ func PersonalAssistantGraph() Graph {
 		{
 			ID: SaveFirstJournalQuestID, Tier: 2, Featured: true, Order: 8, Optional: true,
 			LockedUntil:  SecondBrainQuestID,
-			LockedReason: "Connect your second brain first",
+			LockedReason: "Set up your notes first",
 			Title:        "Save your first Journal",
-			Why:          "A saved Journal is copied to today's note in your second brain.",
+			Why:          "A saved Journal is copied to today's note in your notes folder.",
 			ActionURL:    FirstBriefFallbackURL,
 			ActionLabel:  "Open Today",
 			Satisfied:    func(s Snapshot) bool { return s.SecondBrainJournaled },
@@ -498,11 +502,11 @@ func PersonalAssistantGraph() Graph {
 		{
 			ID: GiveProjectQuestID, Tier: 2, Featured: true, Order: 9, Optional: true,
 			LockedUntil:  SecondBrainQuestID,
-			LockedReason: "Connect your second brain first",
+			LockedReason: "Set up your notes first",
 			Title:        "Give Ori a project",
 			Why:          "A workspace, or the project you tell Ori about, becomes a note in Projects that you can turn into a workspace.",
-			ActionURL:    SecondBrainActionURL,
-			ActionLabel:  "Open my notes",
+			ActionURL:    SecondBrainProjectActionURL,
+			ActionLabel:  "Tell Ori your project",
 			Satisfied:    func(s Snapshot) bool { return s.SecondBrainProject },
 		},
 		// Retired objectives sit on tier 3 or later, so they never affect which

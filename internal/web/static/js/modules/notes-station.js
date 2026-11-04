@@ -5,6 +5,9 @@
 // and clicks.
 
 import {
+  OPEN_FOLDER_LABEL,
+  previewParagraphs,
+  secondBrainChecklistView,
   secondBrainProjectsView,
   secondBrainProjectLink,
   sinceLabel
@@ -212,6 +215,18 @@ export const LOOK_STILL_READING_LINE = 'Still reading. Check back in a moment.';
 // NOTES_PRIVACY_LINE sits under the look: what Ori keeps of the notes.
 export const NOTES_PRIVACY_LINE = 'Ori keeps the folder path and these lines, never your notes.';
 
+// The panel's one-liner under its title (Issue 776 FR3): what the folder is and
+// who writes there, by origin, and how it differs from Memory.
+export const NOTES_ONE_LINER_CREATED =
+  "Ori's notes about you, in a folder you own. Ori writes, you edit, and Ori never reads your own notes back.";
+export const NOTES_ONE_LINER_CONNECTED =
+  'Your notes, read-only. Ori keeps the open items it found, never your notes.';
+
+export function notesOneLiner(secondBrain) {
+  if (!secondBrain?.source?.name || secondBrain?.status === 'not_connected') return '';
+  return isCreatedByOri(secondBrain) ? NOTES_ONE_LINER_CREATED : NOTES_ONE_LINER_CONNECTED;
+}
+
 // MAX_ITEMS_SHOWN is how many open items the panel lists before Show all.
 export const MAX_ITEMS_SHOWN = 30;
 
@@ -276,7 +291,45 @@ function noteLabel(note) {
 // notesSections is the panel's fixed order. Each section says how many things it
 // holds; one with nothing shows its one line. Inbox, Today, Capture and Projects
 // exist only for a folder Ori set up.
-export function notesSections({ secondBrain, look, inbox } = {}) {
+// The People tab's empty line for a folder Ori set up (Issue 776 FR22): People
+// fill from the Profile, not from a look.
+export const NOTES_PEOPLE_EMPTY_CREATED =
+  'No people in your notes yet. Approve a person on your Profile and Ori writes one.';
+
+// mergePeople joins the look's people (with their mentions) and the People
+// notes on disk (by file name), one row per name, the look's first.
+export function mergePeople(lookPeople, listed) {
+  const rows = [];
+  const byName = new Map();
+  for (const person of Array.isArray(lookPeople) ? lookPeople : []) {
+    const name = String(person?.name || '').trim();
+    if (!name || byName.has(name.toLowerCase())) continue;
+    const row = { ...person, name };
+    byName.set(name.toLowerCase(), row);
+    rows.push(row);
+  }
+  for (const person of Array.isArray(listed) ? listed : []) {
+    const name = String(person?.name || '').trim();
+    if (!name) continue;
+    const known = byName.get(name.toLowerCase());
+    if (known) {
+      known.note = true;
+      if (!known.link && person.link) known.link = person.link;
+      continue;
+    }
+    const row = { name, link: person.link || '', note: true, kind: String(person.kind || '') };
+    byName.set(name.toLowerCase(), row);
+    rows.push(row);
+  }
+  return rows;
+}
+
+// previewKey names the note a row opens inline.
+export function previewKey(kind, name) {
+  return `${kind}:${name}`;
+}
+
+export function notesSections({ secondBrain, look, inbox, people: listedPeople, missions } = {}) {
   const created = isCreatedByOri(secondBrain);
   const result = look?.result || null;
   const groups = openLoopGroups(result?.items, result?.stale);
@@ -292,7 +345,9 @@ export function notesSections({ secondBrain, look, inbox } = {}) {
       notes: Array.isArray(inbox?.notes) ? inbox.notes : [],
       partial: inbox?.partial === true,
       loading: !inbox,
-      empty: 'Nothing in Inbox yet.'
+      empty: 'Nothing in Inbox yet.',
+      // An empty Inbox shows the first week's three things to do (Issue 776 FR19).
+      checklist: secondBrainChecklistView(secondBrain, missions || [])
     });
     const today = secondBrain?.today_note || null;
     sections.push({
@@ -312,13 +367,14 @@ export function notesSections({ secondBrain, look, inbox } = {}) {
     empty:
       look?.state === 'running' ? 'Reading your notes…' : 'Nothing open in your notes right now.'
   });
-  const people = Array.isArray(result?.people) ? result.people.slice(0, MAX_PEOPLE_SHOWN) : [];
+  const lookPeople = Array.isArray(result?.people) ? result.people.slice(0, MAX_PEOPLE_SHOWN) : [];
+  const people = created ? mergePeople(lookPeople, listedPeople?.people) : lookPeople;
   sections.push({
     key: 'people',
     title: 'People',
     count: people.length,
     people,
-    empty: 'No people found in your notes yet.'
+    empty: created ? NOTES_PEOPLE_EMPTY_CREATED : 'No people found in your notes yet.'
   });
   if (created) {
     const projects = secondBrainProjectsView(secondBrain);
@@ -503,10 +559,100 @@ function loopsHTML(section, panel, now) {
   return html;
 }
 
-function inboxHTML(section, now) {
+// openButtonHTML is a row's Open: it expands the note Ori wrote inline. Rows of
+// the user's own notes get none (Issue 776 FR16).
+function openButtonHTML(kind, name, label, panel) {
+  const key = previewKey(kind, name);
+  const open = panel?.preview?.key === key;
+  return (
+    '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-preview" data-cmd-id="' +
+    escapeHtml(key) +
+    '" aria-expanded="' +
+    (open ? 'true' : 'false') +
+    '" aria-label="' +
+    escapeHtml((open ? 'Close ' : 'Open ') + label) +
+    '">' +
+    (open ? 'Close' : 'Open') +
+    '</button>'
+  );
+}
+
+// previewHTML is the opened note as plain paragraphs (escaped text, never
+// Markdown), with Open folder and Open in Obsidian beside it, or the server's
+// sentence when it refused.
+export function previewHTML(preview, key) {
+  if (!preview || preview.key !== key) return '';
+  let inner = '';
+  if (preview.status === 'loading') inner = '<p class="ws-notes-muted">Opening…</p>';
+  else if (preview.status === 'error')
+    inner = '<p class="ws-notes-problem" role="alert">' + escapeHtml(preview.message) + '</p>';
+  else if (preview.note) {
+    inner =
+      previewParagraphs(preview.note.body)
+        .map(paragraph => '<p class="ws-notes-preview-text">' + escapeHtml(paragraph) + '</p>')
+        .join('') +
+      (preview.note.truncated
+        ? '<p class="ws-notes-muted">Showing the start of this note.</p>'
+        : '') +
+      '<div class="ws-notes-preview-actions"><button type="button" class="ws-notes-action" data-cmd-modal-action="notes-open-folder">' +
+      escapeHtml(OPEN_FOLDER_LABEL) +
+      '</button>' +
+      obsidianAnchor(preview.note.link, preview.note.title || preview.note.name) +
+      '</div>';
+  }
+  return (
+    '<div class="ws-notes-preview" data-notes-preview="' + escapeHtml(key) + '">' + inner + '</div>'
+  );
+}
+
+// checklistHTML is the empty Inbox of a folder Ori set up: the first week's
+// three rows with their check marks. Capture focuses the box above; the project
+// question opens in the assistant's drawer.
+export function checklistHTML(checklist) {
+  if (!checklist?.show || !checklist.rows.length) return '';
+  const rows = checklist.rows
+    .map(row => {
+      const label =
+        escapeHtml(row.label) + (row.done ? '<span class="visually-hidden">, done</span>' : '');
+      const control =
+        row.id === 'capture'
+          ? '<button type="button" class="ws-notes-link" data-cmd-modal-action="notes-focus-capture">' +
+            label +
+            '</button>'
+          : '<a class="ws-notes-link" href="' +
+            escapeHtml(row.href || '/?quest=second-brain-project') +
+            '">' +
+            label +
+            '</a>';
+      return (
+        '<li class="ws-notes-checklist-row' +
+        (row.done ? ' is-done' : '') +
+        '" data-checklist-row="' +
+        escapeHtml(row.id) +
+        '"><span class="ws-notes-check" aria-hidden="true">' +
+        (row.done ? '✓' : '○') +
+        '</span>' +
+        control +
+        '</li>'
+      );
+    })
+    .join('');
+  return (
+    '<p class="ws-notes-line">Three things to try this week:</p><ul class="ws-notes-checklist" data-notes-checklist>' +
+    rows +
+    '</ul>'
+  );
+}
+
+function inboxHTML(section, now, panel) {
   if (section.loading) return '<p class="ws-notes-empty">Reading Inbox…</p>';
   if (!section.notes.length)
-    return '<p class="ws-notes-empty">' + escapeHtml(section.empty) + '</p>';
+    return (
+      '<p class="ws-notes-empty">' +
+      escapeHtml(section.empty) +
+      '</p>' +
+      checklistHTML(section.checklist)
+    );
   const rows = section.notes
     .map(
       note =>
@@ -517,8 +663,13 @@ function inboxHTML(section, now) {
         '</span> · ' +
         escapeHtml(sinceLabel(note.modified, now)) +
         '</span></div><div class="ws-notes-item-actions is-always">' +
+        (note.owned_by_ori === true
+          ? openButtonHTML('inbox', note.name, note.title || note.name, panel)
+          : '') +
         obsidianAnchor(note.link, note.title || note.name) +
-        '</div></li>'
+        '</div>' +
+        previewHTML(panel?.preview, previewKey('inbox', note.name)) +
+        '</li>'
     )
     .join('');
   const partial = section.partial
@@ -531,7 +682,7 @@ function inboxHTML(section, now) {
   return '<ul class="ws-notes-list">' + rows + '</ul>' + partial;
 }
 
-function todayHTML(section) {
+function todayHTML(section, panel) {
   const today = section.today;
   if (!today) return '<p class="ws-notes-empty">Today\'s note is not available.</p>';
   if (today.state === 'none') {
@@ -541,13 +692,24 @@ function todayHTML(section) {
     );
   }
   const line = today.state === 'ori' ? "Today's note is saved." : "Today's note is yours.";
+  // Only today's note as Ori wrote it opens inline.
+  const name = today.state === 'ori' && today.date ? `${today.date}.md` : '';
   return (
     '<p class="ws-notes-line">' +
     escapeHtml(line) +
     ' ' +
+    (name ? openButtonHTML('daily', name, "today's note", panel) + ' ' : '') +
     obsidianAnchor(today.link, "today's note") +
-    '</p>'
+    '</p>' +
+    (name ? previewHTML(panel?.preview, previewKey('daily', name)) : '')
   );
+}
+
+// personMeta: how many times a look found the name, or that there is a note.
+export function personMeta(person) {
+  const mentions = Number(person?.mentions) || 0;
+  if (mentions) return plural(mentions, 'mention', 'mentions');
+  return person?.note ? 'A note in People' : plural(0, 'mention', 'mentions');
 }
 
 function peopleHTML(section) {
@@ -561,7 +723,7 @@ function peopleHTML(section) {
           '<li class="ws-notes-item"><div class="ws-notes-item-main"><span class="ws-notes-item-text">' +
           escapeHtml(person.name) +
           '</span><span class="ws-notes-item-meta">' +
-          escapeHtml(plural(Number(person.mentions) || 0, 'mention', 'mentions')) +
+          escapeHtml(personMeta(person)) +
           '</span></div><div class="ws-notes-item-actions is-always">' +
           obsidianAnchor(person.link, person.name) +
           '</div></li>'
@@ -571,7 +733,7 @@ function peopleHTML(section) {
   );
 }
 
-function projectsHTML(section) {
+function projectsHTML(section, panel) {
   if (!section.projects.length)
     return '<p class="ws-notes-empty">' + escapeHtml(section.empty) + '</p>';
   return (
@@ -581,13 +743,19 @@ function projectsHTML(section) {
         project =>
           '<li class="ws-notes-item"><div class="ws-notes-item-main"><span class="ws-notes-item-text">' +
           escapeHtml(project.name) +
-          '</span></div><div class="ws-notes-item-actions is-always"><a class="ws-notes-action" href="' +
+          '</span></div><div class="ws-notes-item-actions is-always">' +
+          (project.oriNote ? openButtonHTML('project', project.name, project.name, panel) : '') +
+          '<a class="ws-notes-action" href="' +
           escapeHtml(secondBrainProjectLink(project.name)) +
           '" aria-label="' +
           escapeHtml(project.action.ariaLabel) +
           '">' +
           escapeHtml(project.action.label) +
-          '</a></div></li>'
+          '</a></div>' +
+          (project.oriNote
+            ? previewHTML(panel?.preview, previewKey('project', project.name))
+            : '') +
+          '</li>'
       )
       .join('') +
     '</ul>'
@@ -664,15 +832,15 @@ function sectionBodyHTML(section, panel, now) {
     case 'capture':
       return captureHTML(panel);
     case 'inbox':
-      return inboxHTML(section, now);
+      return inboxHTML(section, now, panel);
     case 'today':
-      return todayHTML(section);
+      return todayHTML(section, panel);
     case 'loops':
       return loopsHTML(section, panel, now);
     case 'people':
       return peopleHTML(section);
     case 'projects':
-      return projectsHTML(section);
+      return projectsHTML(section, panel);
     default:
       return '';
   }
@@ -709,9 +877,22 @@ function tabsHTML(tabs, active) {
 
 // notesPanelHTML is the whole panel. `panel` is what workspace-command.js holds
 // about it: look, inbox, status, message, and the capture box's state.
+function oneLinerHTML(secondBrain) {
+  const line = notesOneLiner(secondBrain);
+  return line
+    ? '<p class="ws-panel-one-liner" data-notes-one-liner>' + escapeHtml(line) + '</p>'
+    : '';
+}
+
 export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {}) {
   const look = panel.look || null;
-  const sections = notesSections({ secondBrain, look, inbox: panel.inbox });
+  const sections = notesSections({
+    secondBrain,
+    look,
+    inbox: panel.inbox,
+    people: panel.people,
+    missions: panel.missions
+  });
   const tabs = notesTabs(sections);
   const active = activeNotesTab(tabs, panel.tab);
   const ready = panel.status === 'ready';
@@ -753,9 +934,15 @@ export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {
     '<span class="ws-cmd-modal-count">' +
     escapeHtml(panel.status === 'ready' ? notesPanelCount(sections) : '—') +
     '</span><div class="ws-cmd-modal-head-actions">' +
+    (secondBrain?.source?.name && secondBrain?.status === 'connected'
+      ? '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-open-folder">' +
+        escapeHtml(OPEN_FOLDER_LABEL) +
+        '</button>'
+      : '') +
     '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">Connection…</button>' +
     '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close Notes">×</button>' +
     '</div></header>' +
+    oneLinerHTML(secondBrain) +
     (ready ? tabsHTML(tabs, active) : '') +
     '<div class="ws-cmd-modal-body ws-notes-body">' +
     notice +

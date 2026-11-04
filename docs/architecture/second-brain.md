@@ -125,22 +125,41 @@ never stored.
 
 ## The ask
 
-The ask is the assistant's first message in the drawer after the relationship
-becomes active (and once for an install whose HQ is already active), while
-nothing is connected and the ask has never been shown. Its receipt
-(`POST …/prompted`) is recorded only once the drawer is open while the ask
-shows. It replaces the folder hand-over: while the second-brain record can be
-read, the folder digest never offers its first prompt, so a declined ask is
-never followed by it. The ask offers Connect (or Choose a folder), **Set one up
-for me** (see below) and "Not now", which defers (Needs you offers it again after
-7 days). "I don't keep notes" is no longer offered; the `none` decision stays in
-the schema, so an install that already answered it keeps its declined ask and
-skipped mission, and sees no new prompt. Reset Getting Started clears the ask
+The user-facing name is **Notes** (Issue 776); "Second Brain" survives only as
+the default folder name and in that folder's own README, and
+`scripts/check-notes-copy.mjs` (run by `make test-js` and CI) fails on "second
+brain" anywhere else a person reads it.
+
+The ask leads with the job: "Want me to keep notes for you? I'll write what I
+learn, people, projects and your journal, into plain Markdown you own." with
+**Set up my notes**, **I have a notes folder…** and **Not now**; with a detected
+vault it names it ("I found your Obsidian vault "{name}". I can read it, or set up
+a folder of my own.") and offers **Read {name}**, **Set up my notes**,
+**Another folder…** and **Not now**.
+
+Shown is not answered. The ask shows while nothing is connected and its state is
+`pending` or `shown`: the first time it is the conversation's first message after
+the relationship becomes active, and on every later load it waits as a pinned
+Needs you card with the same actions. Today carries a Needs you row,
+`second_brain_ask` ("Want Ori to keep notes for you?", route
+`/?quest=second-brain`), for an active relationship; inside the drawer the card
+is that row. `/?quest=second-brain` opens the ask while it is unanswered and the
+chooser or the connection card otherwise. Its receipt (`POST …/prompted`) still
+records the first showing only, once the drawer is open while the ask shows.
+
+**Not now** replies "Okay. The Notes building on your HQ map sets this up whenever
+you're ready." and defers. From the seventh local calendar day after it
+(`Ask.OfferAgain`, `AskAgainDays`), the status carries `offer_again` and the card
+and the Today row come back as "Still want me to keep notes for you?" with the
+same actions plus **Don't ask again**, which records decision `none` (declined,
+mission skipped). Not now on the re-offer defers another seven days. The ask
+replaces the folder hand-over: while the second-brain record can be read, the
+folder digest never offers its first prompt. Reset Getting Started clears the ask
 and the missions, never the connection.
 
 A folder path written in the chat that holds `.obsidian` also offers
-**Connect as my second brain** on its folder card, with its own unbound
-selection token.
+**Connect as my notes** on its folder card, with its own unbound selection
+token.
 
 ## Follow-ups
 
@@ -156,7 +175,8 @@ DONE or gone is completed with "Done in your notes." The notes are never edited.
 
 Connecting proposes and approves one `how_you_work` fact under source kind
 `second_brain` ("You keep your notes in Obsidian, in the vault "{name}"." or "…
-in a Markdown folder called {name}."). Its authority revalidates that the
+in a Markdown folder called {name}."; for a folder Ori set up, "You keep your
+notes in a folder Ori set up called {name}."). Its authority revalidates that the
 folder is still the one connected, still exists, and still holds `.obsidian` or
 Markdown notes. Disconnecting sends the fact back to review.
 
@@ -170,11 +190,11 @@ write idempotent.
 
 | Method and route | Body | Result |
 |---|---|---|
-| `GET` | none | `{status: not_connected\|connected\|missing, detected[{id,name,parent,path}], source?, last_look?, ask{state, offer_again}, nudge?{stale, days, came_due}, version}` |
+| `GET` | none | `{status: not_connected\|connected\|missing, detected[{id,name,parent,path}], source?, last_look?, ask{state, offer_again}, nudge?{stale, days, came_due}, setup_preview?{follow_ups, people, facts, project}, version}`; `setup_preview` (nothing connected) counts what a setup would seed now |
 | `POST /prompted` | `{request_id}` | status |
 | `POST /ask` | `{decision: later\|none, request_id}` | status |
 | `POST /connect` | `{detected_id}` or `{selection_token}`, `request_id`, optional `replace` | status and `look_id` |
-| `POST /create` | `{selection_token, name, request_id}`: the token names the parent, `name` one folder name; `{request_id}` alone uses the default place | status and `look_id`; sets up a second brain (see below) |
+| `POST /create` | `{selection_token, name, request_id}`: the token names the parent, `name` one folder name; `{request_id}` alone uses the default place; optional `project {name, answer}` (a closed object: `name` by the `/project` rule, `answer` ≤ 500 characters, folded to one line, refused if empty or secret-like) | status and `look_id`; sets up a folder (see below), writing the project note inside the same creation |
 | `POST /capture` | `{text, request_id}` | `capture` `{note, name, link?}`; one new Inbox note, second brain Ori set up only |
 | `POST /fill-in` | `{decision: allow\|later, request_id}` | status; the consent card's answer, second brain Ori set up only (see "Filling in after setup") |
 | `POST /project` | `{name, answer, request_id}`: `name` one folder name (no slash, not hidden), `answer` the user's own words, folded to one line and refused if empty or secret-like | `{project: {name, rel, link?}}`; writes `Projects/<name>/README.md` and records the question as answered ("The first week") |
@@ -186,6 +206,10 @@ write idempotent.
 | `POST /look/{lookID}/follow-ups` | `{items: "suggested"}` or `{items: [id…]}`, `request_id` | `{created, skipped}` |
 | `POST /look/{lookID}/dismiss` | `{request_id}` | takes a result off Needs you |
 | `POST /disconnect` | `{request_id, if_version}` | status |
+| `POST /open-folder` | `{request_id}` | `{opened: true}`; opens the connected folder in the file manager (see "Opening the folder") |
+| `GET /preview/{kind}/{name}` | none; `kind` is `inbox`, `daily` or `project`, `name` one component | `{preview: {name, kind, title, body, truncated, link?}}`; 403 "That note is yours; open it in your editor." for a note Ori cannot prove it wrote |
+| `GET /people` | none | `{people: {people[{name, kind, link?}], partial?}}`; `People/*.md` of a folder Ori set up |
+| `GET /inbox` | none | `{inbox: {notes[{name, kind, title, modified, link?, owned_by_ori}], total, partial}}` |
 
 ## A second brain Ori set up
 
@@ -258,18 +282,55 @@ nobody seeds nothing. Seeded follow-ups and people carry `ori: seed`; the facts
 note carries `ori: facts` and is rendered exactly as the fill-in would render it,
 so the first sync adopts it and says nothing.
 
-The first look is rules-only and reports the seed ("Your second brain is set up:
-N follow-ups in Inbox, M people."), or, when nothing was seeded, says it is empty
-because Ori does not know the user yet and offers to be shown a folder. Under
-either headline the card offers Downloads, Music, Documents and Desktop and
-**Choose a folder…**; a chip attaches that folder to the assistant composer
-exactly as the Add folder chooser does, and nothing is read until the user sends.
+**The project question comes first** (Issue 776). **Set up my notes** (from the
+ask, the chooser, the connection card) opens one card in two steps: "What's the
+main thing you're working on right now?" (the textarea, the folder suggestion
+when the interview has one, **Next**, **Skip**, then the existing "I'll call it
+{name}. OK?" step), and then the place card (**Set it up**, **Somewhere else…**,
+**Back**, which returns to the question with the answer kept, **Not now**). Before
+`/create`, the drawer saves the answer as the reviewed fact the user typed
+(`POST /api/personal-assistant/knowledge/explicit`, an exact duplicate counting as
+already held), then sends `project {name, answer}`. The creation writes
+`Projects/<name>/README.md` with the project question's renderer inside the same
+`creatorRun`, so a failure removes it with everything else, and records
+`fill_in.project_ask: answered`; a creation without `project` records `skipped`,
+so the drawer never asks it by itself again (the checklist row and the Give Ori a
+project mission still can).
+
+The place card's second line is computed from the status read's `setup_preview`
+(the counts `secondbrain.CountSeeds` gives for what Ori holds now, through the
+creator's own filters and caps) and whether a project was named: "It starts with
+your project note." / "It starts with your project note, 3 follow-ups and 2
+people." / "It starts empty; I'll fill it as I learn." Nothing on it promises
+what the setup will not write.
+
+The first look is rules-only and its headline names what was written: "Your notes
+are set up. I wrote your first note: {name}." for the project note alone; "Your
+notes are set up: your project note, N follow-ups in Inbox, M people." with seeds
+too; "Your notes are set up: N follow-ups in Inbox, M people." without a project;
+"Your notes are set up. They're empty until I learn something about you." for
+nothing. Under it: **Open {name}** (the preview, below) right after a setup that
+wrote the note, **Open folder**, **Open in Obsidian**, then the first-week
+checklist and the capture box ("The Notes panel"), then the folder offer: "Show me
+a folder and I'll sort it with you. Names that keep coming up become People
+notes." with Downloads, Music, Documents and Desktop when the machine has them,
+and **Choose a folder…**. A chip attaches that folder to the composer exactly as
+the Add folder chooser does, pre-fills "Show me my {folder} folder", focuses it,
+and says "Press send and I'll take a look." Nothing is read until the user sends
+(any message sent with the folder attached starts the folder turn).
+
+A look that finishes with nothing to add — every item seeded, already a follow-up
+or a ticket, or triaged (`secondbrain.NothingToDecide`, the fresh marks read
+before the record write) — is acted at finish (`LastLook.ActedAt`), for both
+origins, so Today shows no "What's open in {name}" row and the drawer pins no
+result card; the "Looked at {name} · N open items" Done row is unchanged.
+
 Items in seeded `Inbox/` notes, and in `follow_up` notes (below), are marked
 `seeded`: they are never suggested and never added as follow-ups, because the
-user already has them. The
-learned fact reads "You keep your second brain in a folder Ori set up called
-{name}." Only one notes folder is connected at a time, so setting one up while
-one is connected is a conflict, not a replace.
+user already has them. Only one notes folder is connected at a time, so setting
+one up while one is connected is a conflict, not a replace. New setups write
+`.obsidian/app.json` with `"propertiesInDocument": "hidden"`, so Obsidian shows
+the marker out of sight; existing setups are not touched.
 
 ### What Ori writes, and when
 
@@ -374,7 +435,7 @@ sentence says so. A setup from before has no answer (`fill_in.state: pending`).
 Until it is allowed the sync writes only `Inbox/` and `Daily/`; what it holds back
 is remembered (`withheld`), and only then Needs you shows one card: "I can also
 keep People, a note per project and what I know about you up to date in your
-second brain. Yours are never touched." with **Let Ori write there** and **Not
+notes folder. Notes you wrote are never touched." with **Let Ori write there** and **Not
 now** (offered again after 7 days, as the ask is). `POST …/fill-in {decision:
 allow|later, request_id}` is closed-body, origin-guarded and idempotent; allowing
 starts a sync. An existing setup's own READMEs are never rewritten, since Ori
@@ -421,13 +482,13 @@ The assistant drawer shows one second-brain card at a time: the consent card (fo
 a setup from before), then the project question.
 
 1. **A folder to learn from.** A setup that seeded nothing says so, once ("Your
-   second brain is empty because I don't know you yet. Show me a folder and I'll
-   start filling it.") and offers the folders the server's own `/choices` list
+   notes are set up. They're empty until I learn something about you.", with the
+   offer under the first-week checklist since Issue 776) and offers the folders the server's own `/choices` list
    names, so a folder this machine does not have is never offered. The offer
    stays until a first look succeeds, through a reload or a failed attempt. Three
    Tier 2 missions follow from what Ori writes (**Capture your first note**,
    **Save your first Journal**, **Give Ori a project**); they are optional, locked
-   behind **Connect your second brain**, and skipped, never failed, for a user who
+   behind **Set up your notes** ("Set up your notes first"), and skipped, never failed, for a user who
    declined the ask or connected a vault Ori does not write to.
 2. **Downloads teaches Ori.** After the user approves files for filing, the
    `approved_files` producer reads the File Janitor action journal's file *names*
@@ -443,7 +504,7 @@ a setup from before), then the project question.
    day. Their evidence is `<workspaceId>:<actionId>`, the count follows the
    journal as more files are filed, and a rejected one is not proposed again. The
    first-batch report gains "I learned N things from this folder; approve them
-   and they go into your second brain." with **Review what Ori learned**, which
+   and they go into your notes." with **Review what Ori learned**, which
    opens a card listing these and the Janitor's filing preferences
    (`GET /api/personal-assistant/setup-learning`; `POST …/setup-learning/dismiss
    {request_id}` turns the rest away for good). Approving or rejecting is the
@@ -451,7 +512,11 @@ a setup from before), then the project question.
    {version, request_id}`: nothing is a fact until the user says so. An approved
    person then reaches the notes the ordinary way, as `People/<Name>.md`, through
    the sync.
-3. **The current project.** Once the card slot is free (nothing else is waiting
+3. **The current project.** Since Issue 776 a new setup asks this first, in the
+   setup turn, and records it answered or skipped ("Setting one up"); the drawer
+   asks it again only on request (the checklist's **Tell Ori your project** and
+   the **Give Ori a project** mission, `/?quest=second-brain-project`). For a setup
+   from before, once the card slot is free (nothing else is waiting
    for an answer) in a second brain Ori set up and may write project notes, with no
    project under `Projects/` yet and the question neither answered nor skipped,
    the drawer asks "What's the main thing you're working on right now?" (the
@@ -472,7 +537,7 @@ a setup from before), then the project question.
    stays on the Profile page. Answering writes only where the setup allows project
    notes, and never over a README the user already has.
 4. **The week.** Seven local days after `connected_at`, Today's Done section shows
-   one row, kind `second_brain_week`: "This week your second brain gained 4 facts,
+   one row, kind `second_brain_week`: "This week your notes gained 4 facts,
    2 people, 1 project and 5 captures.", linking to the Notes station, with
    **Dismiss**. The counts are the ledger's notes by kind (people, projects,
    follow-ups), the written-by-Ori listing's captures and journal entries, and the
@@ -492,9 +557,13 @@ Every note Ori writes opens with exactly this frontmatter:
 ```yaml
 ---
 ori: journal   # or capture, seed, facts, person, project, follow_up
-ori_hash: <sha256 of everything after the closing fence>
+ori_hash: <first 16 hex characters of the sha256 of everything after the closing fence>
 ---
 ```
+
+Notes written before Issue 776 carry all 64 hex characters; both lengths are
+read (and are what the fill-in ledger's 16-hex hashes compare against), and every
+new note and every replace writes the short form.
 
 `secondbrain.ReadMark` reports a note as `owned_by_ori` only when that block is
 the whole frontmatter and the hash matches the body. Anything else is
@@ -538,7 +607,53 @@ and mtime snapshot before and after.
 Disconnecting removes the record exactly as for any source, and with it the
 permission to write. The folder and everything in it stay on disk.
 
+## Opening the folder
+
+Two doors that are not Obsidian (Issue 776), for either origin unless noted:
+
+- **Open folder** (`POST …/open-folder {request_id}`) opens the connected folder in
+  the OS file manager through `platform.OpenFolder`; under `ORI_NO_DESKTOP_OPEN` it
+  launches nothing and logs "Skipped desktop launch". A request id seen in the
+  last 64 opens nothing again. Opening a folder reads nothing. It sits on the
+  first-look card, the connection card and the Notes panel header.
+- **Open** (`GET …/preview/{kind}/{name}`) shows a note Ori wrote, inline, as plain
+  paragraphs (text, never Markdown): an Inbox note, today's Daily note, or a
+  project's README, in a folder Ori set up. `name` is one component checked with
+  the folder-name rule (no slash, no backslash, not hidden, Markdown for Inbox and
+  Daily); anything else, another kind or a query string is 400 before any read.
+  The note is opened through the pinned root, every folder step and the file
+  no-follow, read up to 256 KB so the marker can prove the whole note, and shown
+  only when `ReadMark` says `owned_by_ori` and its kind fits the folder; at most
+  4 KB of its text is returned (`truncated`), with `Cache-Control: no-store`. A
+  user's note, an edited one, or anything in a connected vault is 403 "That note
+  is yours; open it in your editor." The panel offers Open only on Inbox rows
+  whose listing says `owned_by_ori`, on Today's note when it is Ori's, and on
+  project rows whose README opens with Ori's marker (`ori_note`, a 160-byte peek).
+
+`TestPreview_ShowsOnlyOrisOwnNotesFollowsNoLinkAndChangesNothing` proves the
+preview against links in every position and a byte, mode and mtime snapshot;
+`TestSecondBrainOpenFolder_OpensOncePerRequestAndHonoursTheSwitch` proves the
+switch.
+
 ## The Notes panel
+
+The panel opens with one sentence under its title: for a folder Ori set up, "Ori's
+notes about you, in a folder you own. Ori writes, you edit, and Ori never reads
+your own notes back."; for a connected vault, "Your notes, read-only. Ori keeps
+the open items it found, never your notes." The Memory panel says "What agents in
+this workspace are shown." and, in the Personal HQ, "Your notes folder is
+separate: see Notes." The HQ's inventory calls its workspace notes **Workspace
+notes**; the station stays **Notes**.
+
+For a folder Ori set up, an empty Inbox shows the first week's checklist, the same
+three rows as under the first headline: **Capture a note** (focuses the capture
+box), **Write today's Journal** (`/?journal=1`) and **Tell Ori your project**
+(`/?quest=second-brain-project`, only while the question is unanswered or was
+skipped), each ticked from `/api/progression` (`pa-capture-first-note`,
+`pa-save-first-journal`, `pa-give-project`). The People tab merges the look's
+people with `GET …/people` (file names, the marker's kind, at most 100, nothing
+read beyond the marker); its empty line is "No people in your notes yet. Approve a
+person on your Profile and Ori writes one."
 
 The Notes building on the HQ map opens a panel when a folder is connected
 (`?station=second-brain` opens it too, which is where Today's "What's open in
@@ -629,6 +744,10 @@ Never, for any source:
 - Following a link, or opening or writing a file outside the folder.
 - Editing, deleting or renaming a note the user wrote or changed.
 - Storing note contents, or sending more than the extracted signals to a model.
+  Showing a note's text in the UI is allowed only for a note whose marker proves
+  Ori wrote it, at most 4 KB, on request, never stored, never sent to a model
+  (the preview, "Opening the folder"). There is still no reader outside
+  `internal/secondbrain`.
 - Giving a project agent, the Journal agent, the Daily Brief or an MCP server a
   way to read the notes.
 - Giving the assistant's chat a tool that reads the notes.

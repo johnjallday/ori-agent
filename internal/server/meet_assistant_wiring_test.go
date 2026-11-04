@@ -84,7 +84,7 @@ func TestMeetAssistant_RealBuilderCompletesTheMissionFromTheHireOnce(t *testing.
 		case progression.CaptureFirstNoteQuestID, progression.SaveFirstJournalQuestID, progression.GiveProjectQuestID:
 			// The first-week missions are about the notes, so they wait for the
 			// second brain, not for the hire.
-			if !mission.Locked || mission.LockedReason != "Connect your second brain first" {
+			if !mission.Locked || mission.LockedReason != "Set up your notes first" {
 				t.Fatalf("%s must wait for the second brain: %+v", mission.ID, mission)
 			}
 			continue
