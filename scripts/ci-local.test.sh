@@ -166,4 +166,21 @@ unit_result="$(ORI_CI_LOCAL_LOCK_DIR="$unit_sandbox/missing" run_unit_gate)" || 
 grep -q 'unit tests run without the machine-wide lock' <<<"$unit_result" || fail "a missing lock directory was not reported" "$unit_result"
 [[ -e "$UNIT_RAN" ]] || fail "the unit gate did not run without a lock directory"
 
-printf 'ci-local pins gosec to CI, selects the README gate, plans in CI order, uses the full canonical unit runner, and queues unit runs behind one machine-wide lock\n'
+# The gofmt gate formats with the Go that go.mod pins, not the gofmt on PATH.
+# A newer local gofmt aligns some literals differently and passes what CI's
+# rejects. The helper's gofmt must belong to the toolchain go.mod names.
+gofmt_bin="$("$repo_root/scripts/go-toolchain-gofmt.sh" 2>/dev/null)"
+[[ -x "$gofmt_bin" ]] || fail "go-toolchain-gofmt.sh did not print an executable gofmt" "$gofmt_bin"
+pinned_version="$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2; exit }' "$repo_root/go.mod")"
+[[ -n "$pinned_version" ]] || pinned_version="$(awk '$1 == "go" { print $2; exit }' "$repo_root/go.mod")"
+gofmt_goroot="$(dirname "$(dirname "$gofmt_bin")")"
+if [[ "$gofmt_bin" != "$(command -v gofmt)" ]]; then
+  # A toolchain download dir is named ...-go<version>.<os>-<arch>; a local
+  # install reports its version in VERSION. Either must name the pin.
+  [[ "$gofmt_goroot" == *"go${pinned_version}."* || "$(head -n1 "$gofmt_goroot/VERSION" 2>/dev/null)" == "go${pinned_version}" ]] ||
+    fail "the gofmt helper did not pick go ${pinned_version}" "$gofmt_bin"
+fi
+grep -q 'go-toolchain-gofmt.sh' "$repo_root/scripts/ci-local.sh" || fail "the ci-local gofmt gate does not use the pinned toolchain's gofmt"
+grep -q 'go-toolchain-gofmt.sh' "$repo_root/scripts/pre-release-check.sh" || fail "pre-release-check does not use the pinned toolchain's gofmt"
+
+printf 'ci-local pins gosec to CI, selects the README gate, plans in CI order, uses the full canonical unit runner, queues unit runs behind one machine-wide lock, and formats with the Go that go.mod pins\n'
