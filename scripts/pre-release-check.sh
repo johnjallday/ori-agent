@@ -269,14 +269,17 @@ fi
 print_header "2. CODE QUALITY CHECKS"
 
 # Format check
-run_check "Format Check (gofmt)" "test -z \"\$(gofmt -l . 2>&1 | grep -v '^vendor/' | head -20)\"" || {
+# Use the gofmt of the Go that go.mod pins, as CI does; a newer local gofmt
+# can align literals differently and pass what CI rejects.
+GOFMT_BIN="$(./scripts/go-toolchain-gofmt.sh)"
+run_check "Format Check (gofmt)" "test -z \"\$('$GOFMT_BIN' -l . 2>&1 | grep -v '^vendor/' | head -20)\"" || {
   echo ""
   echo "Files needing formatting:"
-  gofmt -l . 2>&1 | grep -v '^vendor/' | head -10
+  "$GOFMT_BIN" -l . 2>&1 | grep -v '^vendor/' | head -10
   echo ""
   if [ "$AUTO_FIX" = true ]; then
     echo "Auto-fixing with gofmt..."
-    gofmt -w .
+    "$GOFMT_BIN" -w .
     echo -e "${GREEN}✅ Format issues fixed${NC}"
     NEW_FAILED=()
     for item in "${FAILED_CHECKS[@]}"; do
