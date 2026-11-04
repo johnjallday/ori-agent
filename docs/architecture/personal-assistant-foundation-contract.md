@@ -509,7 +509,7 @@ shows it a folder, Mission 03 is what it found. **Daily loop** is Missions 04
 and 05 plus the three second-brain first-week missions (06 to 08, below), listed
 locked ("Starter first") beneath Starter and open once every Starter mission is
 resolved, completed or skipped. Starter also holds the
-unnumbered, optional **Connect your second brain** between Mission 01 and
+unnumbered, optional **Set up your notes** between Mission 01 and
 Mission 02 (see [Connect your second brain](#connect-your-second-brain)). All
 nine are featured, the others are optional, and each ends with Ori visibly
 doing something.
@@ -535,14 +535,14 @@ place, and a `t1-plan-first-day` completion counts as evidence for Mission 04.
 | Order | ID | Card | Completes when |
 | --- | --- | --- | --- |
 | 01 | `pa-meet-assistant` | Meet your assistant, `/?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
-| — | `pa-second-brain` | Connect your second brain, `/?quest=second-brain`, which opens the drawer on the second-brain chooser; names a detected vault ("Found: Second Brain"). **Locked until the HQ is built**, like Mission 02 | a notes folder connected to the HQ (`SecondBrainService.OnConnected`); "I don't keep notes" skips it; an existing connection grandfathers it |
+| — | `pa-second-brain` | Set up your notes ("Ori keeps what it learns, people, projects and your journal, in plain Markdown you own."), `/?quest=second-brain`, which opens the drawer on the ask while it is unanswered, otherwise the chooser or the connection card; names a detected vault ("Found: Second Brain"). **Locked until the HQ is built**, like Mission 02 | a notes folder connected to the HQ (`SecondBrainService.OnConnected`); Don't ask again (decision `none`) skips it; an existing connection grandfathers it |
 | 02 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`, which opens the one-card chooser; while an offer is pending, the offer itself renders on the card with its own buttons. **Locked until the HQ is built** ("Build your HQ first", action **Build My HQ**) | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
 | 03 | `pa-folder-first-look` | See what your assistant found; locked until Mission 02 is **completed**. Its card follows the latest folder workspace's first look (below) | a folder first task finishing with a non-empty result, observed from `task.completed` (`folderFirstTaskFinished`), wherever it was started |
 | 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
 | 05 | `pa-first-brief` | Read your first Daily Brief, **Open Daily Brief** → `/workspaces/<hq-slug>?station=daily-brief` (`/?panel=today` while no Personal HQ slug is known); while open and with no model configured, adds "Add a model in Settings to generate one." | the Daily Brief panel in My HQ first shows a brief for a hired assistant (`POST /api/personal-hq/brief/seen`, sent by the panel). Home preparing the brief in the background, or Today being read, does not complete it |
-| 06 | `pa-capture-first-note` | Capture your first note, **Capture a note** → `/?quest=second-brain` (the connection card's capture box). Optional; **locked until Connect your second brain** ("Connect your second brain first") | a `capture` note written to a second brain Ori set up (`SecondBrainService.OnWritten`); an existing install is grandfathered from the notes on disk |
+| 06 | `pa-capture-first-note` | Capture your first note, **Capture a note** → `/?quest=second-brain` (the connection card's capture box). Optional; **locked until Set up your notes** ("Set up your notes first") | a `capture` note written to a second brain Ori set up (`SecondBrainService.OnWritten`); an existing install is grandfathered from the notes on disk |
 | 07 | `pa-save-first-journal` | Save your first Journal, **Open Today** → `/?panel=today`. Optional; locked like 06 | a saved Journal copied to `Daily/<date>.md` (`DailyMirrored`); an existing `journal` note grandfathers it |
-| 08 | `pa-give-project` | Give Ori a project, **Open my notes** → `/?quest=second-brain`. Optional; locked like 06 | a `project` note exists, written by the sync for a workspace or for the project the user told the assistant about; an existing one grandfathers it |
+| 08 | `pa-give-project` | Give Ori a project, **Tell Ori your project** → `/?quest=second-brain-project`, which opens the drawer on the project question. Optional; locked like 06 | a `project` note exists, written by the sync for a workspace or for the project the user told the assistant about; an existing one grandfathers it |
 
 Missions 06 to 08 complete from what Ori wrote, observed on the server, never from
 a browser claim. They are skipped for a user who declined the second brain and for
@@ -891,14 +891,19 @@ connected **read-only to the Personal HQ** as a source only the assistant's look
 service reads. There is no project workspace, no agent access, and no chat tool
 over them.
 
-- **The ask.** The assistant's first message after HQ is active, once per
-  relationship while nothing is connected: "Do you keep a second brain? I found
-  your Obsidian vault "{name}"…" with **Read {name}**, **Another folder…**,
-  **Not now** and **I don't keep notes**, or the nothing-detected form with
-  **Choose folder…**. The `POST /api/personal-assistant/second-brain/prompted`
-  receipt is recorded once the drawer is open while the ask shows. Not now is
-  offered again after a week; I don't keep notes skips the mission. Reset
-  Getting Started clears the ask and the missions, never the connection.
+- **One name.** People read **Notes**; "Second Brain" is only the default folder
+  name and that folder's README (`scripts/check-notes-copy.mjs` guards it).
+- **The ask.** The assistant's first message after HQ is active, while nothing is
+  connected: "Want me to keep notes for you? I'll write what I learn, people,
+  projects and your journal, into plain Markdown you own." with **Set up my
+  notes**, **I have a notes folder…** and **Not now** (with a detected vault:
+  **Read {name}**, **Set up my notes**, **Another folder…**, **Not now**). Shown
+  is not answered: until the user decides it waits as a pinned Needs you card and
+  a Today row (`second_brain_ask`). The `POST /api/personal-assistant/second-brain/prompted`
+  receipt still records the first showing. Not now comes back seven local days
+  later as "Still want me to keep notes for you?" with **Don't ask again**, which
+  declines and skips the mission. Reset Getting Started clears the ask and the
+  missions, never the connection.
 - **Consent first.** Before anything is read a card names the folder, says it is
   read-only, what is read, what leaves the machine (short excerpts to the named
   Default model, or "counts only" with none), and what Ori keeps (the path and the
@@ -915,10 +920,16 @@ over them.
   Disconnect; the `second_brain` fact "You keep your notes in…", sent back to
   review on Disconnect. A folder Ori can no longer find reads "Can't find
   {name}" with Choose again, with no dialog.
-- **A second brain Ori set up** (#750, #757, #759). **Set one up for me** makes a
+- **A second brain Ori set up** (#750, #757, #759, #776). **Set up my notes** asks
+  "What's the main thing you're working on right now?" first, then makes a
   Markdown folder in the Workspace Directory (`<root>/Second Brain`, beside the
-  workspaces and `Agents/`) and seeds it once with the user's open follow-ups,
-  approved facts and known people. After that Ori keeps it filled in: an approved
+  workspaces and `Agents/`) whose first note is that project
+  (`Projects/<name>/README.md`, inside the same creation), and seeds it once with
+  the user's open follow-ups, approved facts and known people; the place card says
+  what it will start with from `setup_preview`, and the first headline names the
+  note ("I wrote your first note: {name}."). **Open folder** and an inline preview
+  of the notes Ori wrote (at most 4 KB, on request, never stored) open it without
+  Obsidian, and new notes carry a 16-hex marker with Obsidian Properties hidden. After that Ori keeps it filled in: an approved
   fact or person, a confirmed or completed follow-up, a new workspace or a changed
   goal, and a saved Journal each become a note Ori marks as its own, in `Inbox/`,
   `Daily/`, `People/`, `Projects/<name>/README.md` and
