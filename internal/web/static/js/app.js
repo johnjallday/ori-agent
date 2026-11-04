@@ -2379,7 +2379,7 @@ async function displayTaskList(sessionId) {
     }
 
     // Build task list message
-    let message = `**Session Tickets** (${data.counts?.pending || 0} pending, ${data.counts?.completed || 0} completed)\n\n`;
+    let message = `**Tickets** (${data.counts?.pending || 0} pending, ${data.counts?.completed || 0} completed)\n\n`;
 
     // Sort: pending first
     const sortedTasks = [...tasks].sort((a, b) => {
@@ -2394,7 +2394,7 @@ async function displayTaskList(sessionId) {
       message += `${checkbox} ${strikethrough}${task.description}${strikethrough}\n`;
     });
 
-    message += '\n_Use `/task <description>` to add a task_';
+    message += '\n_Use `/task <description>` to add a ticket_';
 
     addMessageToChat(message, false, false);
   } catch (error) {
