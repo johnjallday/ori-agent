@@ -1295,6 +1295,29 @@ test('a refused or unverifiable inbox handoff has no ordinary-create fallback', 
   }
 });
 
+test('a build_conflict refusal keeps the draft it names for the card to offer', async () => {
+  const manager = loadSessionManager();
+  const build = { id: 'other', name: 'Garage Sync', cancellable: true };
+  manager.workspaceBuildApi = () => ({
+    fromInbox: async () => ({
+      ok: false,
+      status: 409,
+      body: {
+        code: 'build_conflict',
+        message: 'Another workspace draft is still unfinished.',
+        details: { build_id: 'other', build }
+      }
+    })
+  });
+  manager.showAddWorkspaceModal = () => assert.fail('conflicting draft opened');
+  await assert.rejects(manager.openInboxWorkspacePlacement({ offer_id: 'offer' }), error => {
+    assert.equal(error.code, 'build_conflict');
+    assert.deepEqual(error.details, { build_id: 'other', build });
+    assert.equal(error.message, 'Another workspace draft is still unfinished.');
+    return true;
+  });
+});
+
 test('both inbox entries open review without automatically activating map placement', async () => {
   for (const mode of ['map', 'suggested']) {
     const host = { parentElement: {} };

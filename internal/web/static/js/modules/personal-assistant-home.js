@@ -13,10 +13,12 @@ import {
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
 import { isFirstLookReportKind, mountFirstLookReports } from './first-look-report.js';
 import { reportRevealKey, takeNeedsReveal } from './personal-assistant-needs-reveal.js';
+import { resumeWorkspaceBuild } from './workspace-build-resume.js';
 
-// The drawer's shared link check lives with the drawer; it is re-exported here
-// for the callers and tests that have always read it from Home.
-export { safeTodayRoute };
+// The drawer's shared link check lives with the drawer, and build resume with
+// its own module; both are re-exported here for the callers and tests that
+// have always read them from Home.
+export { safeTodayRoute, resumeWorkspaceBuild };
 
 const TODAY_ENDPOINT = '/api/personal-assistant/today';
 
@@ -252,19 +254,6 @@ export function secondBrainRefresher(refresh, wait = 300, timers = globalThis) {
       void refresh();
     }, wait);
   };
-}
-
-// Resume opens the Create Workspace dialog in build mode on the open build.
-// A page without the dialog goes Home, which has it.
-export function resumeWorkspaceBuild(win = window) {
-  const manager = win.sessionManager;
-  if (manager?.showAddWorkspaceModal && win.document?.getElementById?.('addFolderModal')) {
-    win.PersonalAssistantPanel?.close?.({ restoreFocus: false });
-    manager.showAddWorkspaceModal({ entryPoint: 'personal_assistant_ask', buildResume: true });
-    return 'opened';
-  }
-  win.location.href = '/?build=resume';
-  return 'navigated';
 }
 
 // A blocker is navigation only: read/display its exact Home-owned card, then

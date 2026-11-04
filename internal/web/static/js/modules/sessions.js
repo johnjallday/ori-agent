@@ -14159,13 +14159,18 @@ const sessionManager = {
     // An unrelated editor may have opened (and even closed) during the read.
     // The saved handoff remains recoverable, but must not take over that UI.
     if (!current() || this.workspaceCreatorGeneration !== generation) return null;
-    if (!result.ok)
-      throw new Error(
+    if (!result.ok) {
+      const refusal = new Error(
         result.body?.error?.message ||
           result.body?.message ||
           (typeof result.body?.error === 'string' ? result.body.error : '') ||
           'The draft could not be opened. Reopen the current source review; do not create another workspace.'
       );
+      // A build_conflict names the draft holding the slot; the card offers it.
+      refusal.code = String(result.body?.code || result.body?.error?.code || '');
+      refusal.details = result.body?.details || result.body?.error?.details || null;
+      throw refusal;
+    }
     const session = result.body?.session;
     if (
       !session?.id ||

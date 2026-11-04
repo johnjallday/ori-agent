@@ -27,8 +27,11 @@ func respondPlacementError(w http.ResponseWriter, err error) {
 		code = placement.Code
 		switch code {
 		case "build_conflict":
-			message = "Another workspace draft is open or preparing. Finish or explicitly cancel it first; neither draft was overwritten."
+			message = "Another workspace draft is still unfinished. Open it or cancel it first; nothing here was created."
 			details = map[string]any{"build_id": placement.BuildID}
+			if placement.Conflict != nil {
+				details["build"] = placement.Conflict
+			}
 		case "selection_expired":
 			message = "The selected folder is no longer held. Pick it again; nothing was created."
 		case "handoff_incomplete":
