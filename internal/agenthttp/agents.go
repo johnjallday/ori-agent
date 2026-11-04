@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
@@ -517,9 +516,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get existing agent
-	agent, ok := h.State.GetAgent(agentName)
-	if !ok || agent == nil {
+	// Existence only: every read of the definition below is of the store's
+	// protected copy, never this live record.
+	if existing, ok := h.State.GetAgent(agentName); !ok || existing == nil {
 		orihttp.NotFound(w, "Agent not found")
 		return
 	}
@@ -532,28 +531,8 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// Parse update request
 	var req struct {
-		// Core fields
-		Name            *string  `json:"name,omitempty"`
-		Role            *string  `json:"role,omitempty"`
-		Model           *string  `json:"model,omitempty"`
-		Temperature     *float64 `json:"temperature,omitempty"`
-		LLMProvider     *string  `json:"llm_provider,omitempty"`
-		ReasoningEffort *string  `json:"reasoning_effort,omitempty"`
-		MaxTokens       *int     `json:"max_output_tokens,omitempty"`
-		SystemPrompt    *string  `json:"system_prompt,omitempty"`
-		AllowWebSearch  *bool    `json:"allow_web_search,omitempty"`
-		// Metadata
-		Description    *string                    `json:"description,omitempty"`
-		Tags           *[]string                  `json:"tags,omitempty"`
-		Favorite       *bool                      `json:"favorite,omitempty"`
-		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
-		// ExpertMode lifts stage-based skill slot caps for this agent (PRD FR13).
-		// Metadata-only; does not touch model/prompt/skills.
-		ExpertMode *bool `json:"expert_mode,omitempty"`
-		// Appearance selects the agent's visual source. Presentation only: it
-		// never changes role, model, tools, skills, permissions, routing, or
-		// execution (FR-17).
-		Appearance *appearanceRequest `json:"appearance,omitempty"`
+		Name *string `json:"name,omitempty"`
+		agentUpdateFields
 		// ExpectedVersion is the optimistic-concurrency token the client received
 		// from GET /api/agents/{name}. When present and no longer matching the
 		// stored agent, the update is rejected as stale (PRD FR13). Omitted =
@@ -568,21 +547,6 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if !parseAgentRequest(w, r, &req) {
 		return
-	}
-
-	// Stale-edit guard (PRD FR13): if the caller sent the version it loaded and the
-	// stored definition has since changed, reject before mutating so a concurrent
-	// edit is not silently clobbered. Checked against the current stored agent.
-	if req.ExpectedVersion != nil {
-		current := agentConfigVersion(agent)
-		if *req.ExpectedVersion != current {
-			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
-				"error":           "stale_agent_edit",
-				"message":         fmt.Sprintf("%q was changed since you loaded it. Reload the latest version and reapply your edit.", agentName),
-				"current_version": current,
-			})
-			return
-		}
 	}
 
 	// Workspace membership drives the shared-edit / rename guards (PRD FR9/FR10).
@@ -614,87 +578,10 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Initialize metadata if nil
-	if agent.Metadata == nil {
-		agent.Metadata = &types.AgentMetadata{}
-	}
-
-	// Update core fields if provided (partial update)
-	if req.Role != nil {
-		agent.Role = types.AgentRole(*req.Role)
-	}
-	if req.Model != nil {
-		agent.Settings.Model = *req.Model
-	}
-	if req.Temperature != nil {
-		agent.Settings.Temperature = *req.Temperature
-	}
-	if req.LLMProvider != nil {
-		agent.Settings.Provider = *req.LLMProvider
-	}
-	if req.ReasoningEffort != nil {
-		reasoningEffort, err := normalizeAgentReasoningEffort(agent.Settings.Provider, agent.Settings.Model, *req.ReasoningEffort)
-		if err != nil {
-			orihttp.BadRequest(w, err.Error())
-			return
-		}
-		agent.Settings.ReasoningEffort = reasoningEffort
-	}
-	if req.MaxTokens != nil {
-		agent.Settings.MaxOutputTokens = *req.MaxTokens
-	}
-	if req.SystemPrompt != nil {
-		agent.Settings.SystemPrompt = *req.SystemPrompt
-	}
-	if req.AllowWebSearch != nil {
-		allow := *req.AllowWebSearch
-		agent.Settings.AllowWebSearch = &allow
-	}
-	// A provider or model change can leave a stored level the new pair does not
-	// accept (for example "max" moving from Claude Code to Codex); drop it
-	// rather than keep a setting the runtime would ignore or reject.
-	agent.Settings.ReasoningEffort = types.NormalizeReasoningEffortFor(
-		agent.Settings.Provider, agent.Settings.Model, agent.Settings.ReasoningEffort)
-
-	// Update metadata fields if provided (partial update)
-	if req.Description != nil {
-		agent.Metadata.Description = *req.Description
-	}
-	if req.Tags != nil {
-		agent.Metadata.Tags = *req.Tags
-	}
-	if req.Favorite != nil {
-		agent.Metadata.Favorite = *req.Favorite
-	}
-	if req.RoutingProfile != nil {
-		agent.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
-	}
-	if req.ExpertMode != nil {
-		expert := *req.ExpertMode
-		agent.Metadata.ExpertMode = &expert
-	}
-	// Validated against a clone and adopted only on success, so a request that
-	// sets a valid colour and then names an unknown character changes neither —
-	// the stored appearance is never left half-applied (FR-58).
-	if !req.Appearance.isEmpty() {
-		nextAppearance, err := applyAppearanceRequest(agent.Appearance, req.Appearance)
-		if err != nil {
-			orihttp.BadRequest(w, err.Error())
-			return
-		}
-		agent.Appearance = nextAppearance
-	}
-	agent.EnsureAppearance()
-
-	newName := agentName
-
-	// Update timestamp if statistics exist
-	if agent.Statistics != nil {
-		agent.Statistics.UpdatedAt = time.Now()
-	}
-
-	// Save updated agent (handle rename if needed)
-	if req.Name != nil && *req.Name != "" && *req.Name != agentName {
+	// Every rename refusal is decided before anything is written, so a refused
+	// rename never leaves the request's other fields half-saved.
+	wantsRename := req.Name != nil && *req.Name != "" && *req.Name != agentName
+	if wantsRename {
 		if isSystemAssistantAgent(agentName) || isSystemAssistantAgent(*req.Name) {
 			orihttp.BadRequest(w, "system assistant cannot be renamed")
 			return
@@ -732,28 +619,54 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if _, exists := h.State.GetAgent(*req.Name); exists {
-			orihttp.Conflict(w, "Agent with that name already exists")
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error":   "agent_name_taken",
+				"code":    "agent_name_taken",
+				"message": "Agent with that name already exists",
+			})
 			return
 		}
+	}
 
-		// Save the edit under the current name first. That write is where the
-		// store notices a definition changed on disk; renaming a stale copy
-		// would carry it to the new name and delete the edited file.
-		if err := h.State.SetAgent(agentName, agent); err != nil {
-			logger.Error("Failed to save agent before rename", logger.Fields{"agent": agentName, "error": err})
-			WriteAgentStoreError(w, "Failed to update agent", err)
-			return
+	// The edit is applied to a private copy inside the store's protected
+	// operation: the version check, every validation, and the durable write all
+	// see the same authoritative record, and a refusal at any step changes
+	// nothing anyone else can read (agent-reliable-editing A1/A2).
+	committed, err := store.MutateDefinition(h.State, agentName, func(draft *agent.Agent) error {
+		// Stale-edit guard (PRD FR13): the version the caller loaded must still be
+		// the stored one. Omitted = no check (back-compat for older callers).
+		if req.ExpectedVersion != nil {
+			if current := agentConfigVersion(draft); *req.ExpectedVersion != current {
+				return &staleAgentEditError{current: current}
+			}
 		}
+		return applyAgentUpdate(draft, &req.agentUpdateFields)
+	})
+	if err != nil {
+		writeAgentMutationError(w, agentName, err)
+		return
+	}
+	committedVersion := agentConfigVersion(committed)
+
+	newName := agentName
+	if wantsRename {
+		// The edit above was saved under the current name first. That write is
+		// where the store notices a definition changed on disk; renaming a stale
+		// copy would carry it to the new name and delete the edited file.
+		var renameErr error
 		if renamer, ok := h.State.(store.AgentRenamer); ok {
 			// Moving the folder keeps every sidecar file (skills, MCP state).
-			if err := renamer.RenameAgent(agentName, *req.Name); err != nil {
-				logger.Error("Failed to rename agent", logger.Fields{"from": agentName, "to": *req.Name, "error": err})
-				WriteAgentStoreError(w, "Failed to update agent", err)
-				return
-			}
-		} else if err := h.State.SetAgent(*req.Name, agent); err != nil {
-			logger.Error("Failed to save renamed agent", logger.Fields{"agent": *req.Name, "error": err})
-			WriteAgentStoreError(w, "Failed to update agent", err)
+			renameErr = renamer.RenameAgent(agentName, *req.Name)
+		} else if live, ok := h.State.GetAgent(agentName); ok && live != nil {
+			renameErr = h.State.SetAgent(*req.Name, live)
+		} else {
+			renameErr = fmt.Errorf("%w: %s", store.ErrAgentNotFound, agentName)
+		}
+		if renameErr != nil {
+			// The other fields are already saved. Say so, rather than answering
+			// as if the whole request had been refused.
+			logger.Error("Failed to rename agent", logger.Fields{"from": agentName, "to": *req.Name, "error": renameErr})
+			writeRenameFailed(w, agentName, *req.Name, committed, committedVersion, renameErr)
 			return
 		}
 		// Carry the saved Agent Map coordinate BEFORE the old record is deleted
@@ -776,12 +689,6 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		newName = *req.Name
-	} else {
-		if err := h.State.SetAgent(agentName, agent); err != nil {
-			logger.Error("Failed to update agent metadata", logger.Fields{"agent": agentName, "error": err})
-			WriteAgentStoreError(w, "Failed to update agent", err)
-			return
-		}
 	}
 
 	// A model or prompt edit reaches the workspaces whose copy Ori keeps in step
@@ -798,7 +705,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	var systemModel *systemModelMirror
 	if newName == agentName && (req.Model != nil || req.LLMProvider != nil || req.ReasoningEffort != nil) &&
 		h.isSystemModelAgent(r.Context(), agentName) {
-		systemModel = h.mirrorSystemModel(agent)
+		systemModel = h.mirrorSystemModel(committed)
 	}
 
 	logger.Info("Agent metadata updated", logger.Fields{"agent": newName})
@@ -851,11 +758,24 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// The complete canonical appearance comes back on every update, so an editor
 	// can adopt the confirmed state — including the server-assigned catalog
 	// version — instead of trusting its own staged copy (FR-41/FR-59).
+	//
+	// version and agent are this request's receipt: the definition exactly as
+	// this request committed it, not a later read. When a follow-up step (the
+	// Default model alignment) has since changed the record again, the newer
+	// token is reported separately as current_version, so an editor never
+	// mistakes someone else's write for its own.
 	response := map[string]any{
 		"success":    true,
 		"name":       newName,
 		"message":    "Agent updated successfully",
-		"appearance": appearanceForAgent(agent),
+		"appearance": appearanceForAgent(committed),
+		"version":    committedVersion,
+		"agent":      definitionReceipt(newName, committed),
+	}
+	if live, ok := h.State.GetAgent(newName); ok && live != nil {
+		if current := agentConfigVersion(live); current != committedVersion {
+			response["current_version"] = current
+		}
 	}
 	if carried != nil {
 		response["carried"] = carried

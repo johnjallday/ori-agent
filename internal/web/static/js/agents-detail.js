@@ -1,6 +1,8 @@
 // Agent Detail Page JavaScript
 
 let currentAgent = null;
+// Per-section saved baselines, versions and drafts (modules/agent-edit-session.js).
+let editSession = null;
 let workspaceEditor = null;
 let agentName = '';
 let isEditingConfig = false;
@@ -698,6 +700,7 @@ async function loadAgentDetails() {
   try {
     showLoading(true);
     currentAgent = await fetchAgentDetail();
+    editSession = window.AgentEditSession?.createSession(currentAgent) || null;
     renderAgentDetails();
   } catch (error) {
     console.error('Error loading agent details:', error);
@@ -718,6 +721,10 @@ async function loadAgentDetails() {
 async function refreshAgentDetails() {
   try {
     currentAgent = await fetchAgentDetail();
+    // Reconcile open drafts with the confirmed values before repainting: a
+    // section whose fields did not move keeps its draft on the newer version;
+    // one whose fields did becomes a conflict that keeps the draft.
+    lastReconciliation = editSession ? editSession.observe(currentAgent) : {};
     renderAgentDetails();
     return true;
   } catch (error) {
@@ -850,12 +857,32 @@ function renderAgentDetails() {
   const grid = document.getElementById('contentGrid');
   if (grid) grid.style.display = 'grid';
 
-  // Keep edit form in sync with latest data
-  populateProfileForm();
-  populateConfigForm();
-  setConfigEditMode(isEditingConfig);
-  populatePromptForm();
-  setPromptEditMode(isEditingPrompt);
+  // A refresh repaints what is displayed; it never reinitializes an open
+  // editor. A section being edited keeps its inputs, except fields the
+  // session rebased onto newer confirmed values.
+  if (!isProfileEditorOpen()) populateProfileForm();
+  else if (lastReconciliation.profile === 'rebased') paintProfileFields(sectionValues('profile'));
+  if (!isEditingConfig) populateConfigForm();
+  else if (lastReconciliation.configuration === 'rebased')
+    populateConfigForm(sectionValues('configuration'));
+  showConfigEditMode(isEditingConfig);
+  if (!isEditingPrompt) populatePromptForm();
+  showPromptEditMode(isEditingPrompt);
+  lastReconciliation = {};
+}
+
+// What reconciliation decided on the most recent confirmed read.
+let lastReconciliation = {};
+
+// The values a section's inputs should show: the draft when there is one,
+// otherwise the saved baseline.
+function sectionValues(section) {
+  if (!editSession) return null;
+  return editSession.draft(section) || editSession.baseline(section);
+}
+
+function isProfileEditorOpen() {
+  return Boolean(document.getElementById('profileEditModal')?.classList.contains('show'));
 }
 
 // The hero goes through the shared renderer, so this page shows the same active
@@ -1083,33 +1110,50 @@ function openProfileEditor() {
 
 function populateProfileForm() {
   if (!currentAgent) return;
+  profileAvatarImage = currentAgent.appearance?.uploaded?.image || null;
+  paintProfileFields(sectionValues('profile') || profileValuesFromAgent());
+  mountProfileAppearanceEditor();
+  setProfileStatus('');
+  setProfileSavingState(false);
+}
 
-  const metadata = currentAgent.metadata || {};
+function profileValuesFromAgent() {
+  const metadata = currentAgent?.metadata || {};
+  return {
+    name: currentAgent?.name || '',
+    description: metadata.description || '',
+    tags: Array.isArray(metadata.tags) ? metadata.tags : [],
+    favorite: Boolean(metadata.favorite)
+  };
+}
+
+// paintProfileFields writes profile values into the modal's inputs.
+function paintProfileFields(values) {
   const nameInput = document.getElementById('profileAgentNameInput');
   const descriptionInput = document.getElementById('profileDescriptionInput');
   const favoriteToggle = document.getElementById('profileFavoriteToggle');
 
-  profileSelectedTags = Array.isArray(metadata.tags) ? metadata.tags.slice() : [];
-  profileAvatarImage = currentAgent.appearance?.uploaded?.image || null;
-
+  profileSelectedTags = Array.isArray(values.tags) ? values.tags.slice() : [];
   if (nameInput) {
-    nameInput.value = currentAgent.name || '';
+    nameInput.value = values.name || '';
     nameInput.disabled =
-      String(currentAgent.name || '')
+      String(currentAgent?.name || '')
         .trim()
         .toLowerCase() === 'ori';
   }
-  if (descriptionInput) {
-    descriptionInput.value = metadata.description || '';
-  }
-  if (favoriteToggle) {
-    favoriteToggle.checked = Boolean(metadata.favorite);
-  }
-
+  if (descriptionInput) descriptionInput.value = values.description || '';
+  if (favoriteToggle) favoriteToggle.checked = Boolean(values.favorite);
   renderProfileTags();
-  mountProfileAppearanceEditor();
-  setProfileStatus('');
-  setProfileSavingState(false);
+}
+
+// readProfileFields is the modal's current input, exactly as typed.
+function readProfileFields() {
+  return {
+    name: document.getElementById('profileAgentNameInput')?.value ?? '',
+    description: document.getElementById('profileDescriptionInput')?.value ?? '',
+    tags: profileSelectedTags.slice(),
+    favorite: Boolean(document.getElementById('profileFavoriteToggle')?.checked)
+  };
 }
 
 function renderProfileTags() {
@@ -1151,77 +1195,145 @@ function removeProfileTag(tag) {
 }
 
 async function saveProfileChanges() {
-  if (!currentAgent) return;
+  if (!currentAgent || !editSession) return;
+  // Appearance is deliberately absent: the shared editor saves each change on
+  // its own the moment it happens, so sending it here too would give one
+  // setting two write paths that could disagree (FR-41).
+  editSession.setDraft('profile', readProfileFields());
 
-  const nameInput = document.getElementById('profileAgentNameInput');
-  const descriptionInput = document.getElementById('profileDescriptionInput');
-  const favoriteToggle = document.getElementById('profileFavoriteToggle');
-  const newName = String(nameInput?.value || '').trim();
+  setProfileSavingState(true);
+  const outcome = await saveSection('profile', setProfileStatus, 'profile');
+  setProfileSavingState(false);
+  if (!outcome) return;
 
-  if (!newName) {
-    setProfileStatus('Name is required.', 'error');
-    nameInput?.focus();
+  if (outcome.kind === 'rename_failed') {
+    const message = outcome.message || 'Your other changes were saved, but the name was not.';
+    setProfileStatus(`${message} The new name is still in the form.`, 'error');
     return;
   }
+  if (outcome.kind !== 'saved') return;
 
-  const payload = {
-    name: newName,
-    description: String(descriptionInput?.value || '').trim(),
-    // Appearance is deliberately absent: the shared editor saves each change on
-    // its own the moment it happens, so sending it here too would give one
-    // setting two write paths that could disagree (FR-41).
-    tags: profileSelectedTags,
-    favorite: Boolean(favoriteToggle?.checked)
-  };
-
-  try {
-    setProfileSavingState(true);
-    setProfileStatus('Saving profile...');
-
-    const { response, cancelled, reloaded } = await saveAgentPatch(agentName, payload);
-    if (cancelled) {
-      setProfileStatus('Change cancelled — shared agent not modified.');
-      return;
-    }
-    if (reloaded) {
-      populateProfileForm();
-      setProfileStatus(await readResponseError(response, 'Failed to save profile'), 'error');
-      return;
-    }
-
-    if (!response.ok) {
-      throw new Error(await readResponseError(response, 'Failed to save profile'));
-    }
-
-    const data = await response.json().catch(() => ({}));
-    const updatedName = data.name || newName || agentName;
-    const nameChanged = updatedName !== agentName;
+  const updatedName = outcome.receipt.name || agentName;
+  if (updatedName !== agentName) {
     agentName = updatedName;
-
-    if (nameChanged) {
-      window.history.replaceState({}, '', `/agents/${encodeURIComponent(updatedName)}`);
-      const skillsPageLink = document.getElementById('openSkillsPageLink');
-      if (skillsPageLink) {
-        skillsPageLink.href = `/skills?agent=${encodeURIComponent(updatedName)}`;
-      }
-    }
-
-    await refreshAgentDetails();
-    setProfileStatus('Profile updated successfully.', 'success');
-
+    window.history.replaceState({}, '', `/agents/${encodeURIComponent(updatedName)}`);
+    const skillsPageLink = document.getElementById('openSkillsPageLink');
+    if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(updatedName)}`;
+  }
+  setProfileStatus('Profile saved.', 'success');
+  if (!editSession.isDirty('profile')) {
     const modalElement = document.getElementById('profileEditModal');
     const modal =
       modalElement && typeof bootstrap !== 'undefined'
         ? bootstrap.Modal.getInstance(modalElement)
         : null;
     modal?.hide();
-    showToast('Agent profile updated.', 'success');
-  } catch (error) {
-    console.error('Failed to save profile:', error);
-    setProfileStatus(error.message || 'Failed to save profile', 'error');
-  } finally {
-    setProfileSavingState(false);
+    showToast('Agent profile saved.', 'success');
   }
+}
+
+// saveSection saves one section's draft through the edit session and reports
+// the outcome in that section's status line. It returns the classified
+// outcome, or null when nothing was sent.
+//
+// A refusal, conflict, or lost answer never touches the draft. A confirmed
+// save adopts the server's receipt — the values this request committed — and
+// reconciles the other sections against it instead of refetching over input.
+async function saveSection(section, setStatus, label) {
+  let payload;
+  try {
+    payload = editSession.beginSubmit(section);
+  } catch (error) {
+    setStatus(error.message, 'error');
+    return null;
+  }
+  setStatus(`Saving ${label}…`);
+  const outcome = await window.AgentEditSession.submitPatch({
+    fetchImpl: (url, init) => fetch(url, init),
+    name: agentName,
+    payload,
+    confirmShared: confirmSharedEdit
+  });
+  editSession.finishSubmit(section, outcome);
+
+  switch (outcome.kind) {
+    case 'saved':
+      adoptReceipt(outcome.receipt);
+      return outcome;
+    case 'declined':
+      setStatus('Change cancelled — shared agent not modified. Your changes are still here.');
+      return outcome;
+    case 'stale':
+    case 'changed_on_disk': {
+      const reason =
+        outcome.kind === 'stale'
+          ? 'Someone else saved this agent after you opened it.'
+          : 'This agent was changed on disk outside Ori.';
+      const reloaded = await refreshAgentDetails();
+      if (!reloaded) {
+        setStatus(
+          `${reason} Your changes are still here, but the latest values could not be loaded. Try saving again later.`,
+          'error'
+        );
+      } else if (editSession.state(section) === 'conflict') {
+        setStatus(
+          `${reason} They changed what you are editing. Your changes are still here and were not saved. Review the latest values before saving again.`,
+          'error'
+        );
+      } else {
+        setStatus(
+          `${reason} Nothing you edited was changed there. Your changes are still here — save again to apply them.`,
+          'error'
+        );
+      }
+      return outcome;
+    }
+    case 'rename_failed':
+      if (outcome.body?.agent) adoptReceipt(outcome.body);
+      return outcome;
+    case 'unconfirmed':
+      setStatus(
+        'The save could not be confirmed — the connection may have dropped after it was sent. Your changes are kept. Reload the page to check what was saved before saving again.',
+        'error'
+      );
+      return outcome;
+    default:
+      setStatus(
+        `${outcome.message || `Your ${label} could not be saved.`} Your changes are still here.`,
+        'error'
+      );
+      return outcome;
+  }
+}
+
+// adoptReceipt puts the values a save committed on the page, then reconciles
+// every section with them.
+function adoptReceipt(receipt) {
+  const saved = receipt?.agent;
+  if (!saved || !currentAgent) return;
+  currentAgent = {
+    ...currentAgent,
+    ...saved,
+    metadata: { ...(currentAgent.metadata || {}), ...(saved.metadata || {}) },
+    version: receipt.version || saved.version
+  };
+  lastReconciliation = editSession.observe(currentAgent, receipt.version);
+  renderAgentDetails();
+}
+
+// confirmSharedEdit asks before changing a definition several workspaces
+// share (PRD FR9), naming every affected workspace.
+async function confirmSharedEdit(info) {
+  const names = Array.isArray(info.workspaces)
+    ? info.workspaces.map(w => w && w.name).filter(Boolean)
+    : [];
+  const count = Number(info.workspace_count || names.length || 0);
+  const list = names.length ? `\n\n• ${names.join('\n• ')}` : '';
+  const name = currentAgent?.name || agentName;
+  return window.confirm(
+    `"${name}" is attached to ${count} workspace${count === 1 ? '' : 's'}. ` +
+      `This change affects all of them:${list}\n\nApply the change everywhere?`
+  );
 }
 
 // A 409 with this code means the agent's definition file was edited outside Ori
@@ -1229,69 +1341,11 @@ async function saveProfileChanges() {
 // refetches the agent and shows what is on disk instead of the user's stale copy.
 const AGENT_CHANGED_ON_DISK = 'agent_changed_on_disk';
 
-async function isAgentChangedOnDisk(response) {
-  if (response.status !== 409) return false;
-  const info = await response
-    .clone()
-    .json()
-    .catch(() => ({}));
-  return info?.code === AGENT_CHANGED_ON_DISK;
-}
-
-// saveAgentPatch PATCHes an agent definition and transparently handles the
-// shared-edit confirmation gate (PRD FR9). On a 409 asking for confirmation it
-// shows a blast-radius warning naming every affected workspace and, if the user
-// confirms, retries with confirm_shared_edit=true. Rename/delete blocks (also
-// 409, different error codes) fall through as a normal non-ok response for the
-// caller's error handling. A 409 for an edit made on disk refetches the agent
-// first and reports reloaded: true, so the caller can repopulate its form.
-// Returns { response, cancelled, reloaded }.
-async function saveAgentPatch(name, payload) {
-  const doPatch = body =>
-    fetch(`/api/agents/${encodeURIComponent(name)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
-  let response = await doPatch(payload);
-  if (response.status === 409) {
-    const info = await response
-      .clone()
-      .json()
-      .catch(() => ({}));
-    if (info && info.error === 'shared_agent_edit_requires_confirmation') {
-      const names = Array.isArray(info.workspaces)
-        ? info.workspaces.map(w => w && w.name).filter(Boolean)
-        : [];
-      const count = Number(info.workspace_count || names.length || 0);
-      const list = names.length ? `\n\n• ${names.join('\n• ')}` : '';
-      const proceed = window.confirm(
-        `"${name}" is attached to ${count} workspace${count === 1 ? '' : 's'}. ` +
-          `This change affects all of them:${list}\n\nApply the change everywhere?`
-      );
-      if (!proceed) {
-        return { response, cancelled: true, reloaded: false };
-      }
-      response = await doPatch({ ...payload, confirm_shared_edit: true });
-    }
-  }
-  if (await isAgentChangedOnDisk(response)) {
-    await refreshAgentDetails();
-    return { response, cancelled: false, reloaded: true };
-  }
-  return { response, cancelled: false, reloaded: false };
-}
-
 // "Also updated in 2 workspaces. Song B keeps its own changes." — where a saved
 // model or prompt edit went among the workspace copies Ori keeps in step with
 // this agent, or '' when it reached none.
-async function carriedEditNote(response) {
-  const data = await response
-    .clone()
-    .json()
-    .catch(() => ({}));
-  return window.AgentOrigin ? window.AgentOrigin.carriedEditLabel(data && data.carried) : '';
+function carriedEditNote(receipt) {
+  return window.AgentOrigin ? window.AgentOrigin.carriedEditLabel(receipt && receipt.carried) : '';
 }
 
 function setProfileSavingState(isSaving) {
@@ -1332,7 +1386,8 @@ async function readResponseError(response, fallback) {
   }
 }
 
-function setConfigEditMode(enabled) {
+// showConfigEditMode only shows or hides the editor; it never touches inputs.
+function showConfigEditMode(enabled) {
   const display = document.getElementById('configDisplay');
   const form = document.getElementById('configEditForm');
   const editBtn = document.getElementById('editConfigBtn');
@@ -1348,35 +1403,50 @@ function setConfigEditMode(enabled) {
   if (editBtn) {
     editBtn.textContent = enabled ? 'Cancel' : 'Edit';
   }
+}
 
+// setConfigEditMode opens the editor on the section's draft (or its saved
+// values), or closes it.
+function setConfigEditMode(enabled) {
+  showConfigEditMode(enabled);
   if (enabled) {
-    populateConfigForm();
+    populateConfigForm(sectionValues('configuration'));
     setConfigStatus('');
   }
 }
 
 function toggleConfigEditMode() {
   if (isEditingConfig) {
+    editSession?.discard('configuration');
     setConfigEditMode(false);
     setConfigStatus('');
-    populateConfigForm(); // reset any unsaved edits
+    populateConfigForm();
   } else {
     setConfigEditMode(true);
   }
 }
 
-function populateConfigForm() {
+// populateConfigForm paints configuration values into the editor; with no
+// argument it paints the saved values.
+function populateConfigForm(values) {
   if (!currentAgent) return;
+  const v = values || {
+    role: currentAgent.role,
+    model: currentAgent.model,
+    temperature: currentAgent.temperature,
+    max_output_tokens: currentAgent.max_output_tokens,
+    reasoning_effort: currentAgent.reasoning_effort
+  };
   const modelSelect = document.getElementById('editModel');
   const providerFilter = document.getElementById('editProviderFilter');
   const tempInput = document.getElementById('editTemperature');
   const maxTokensInput = document.getElementById('editMaxTokens');
   const roleSelect = document.getElementById('editRole');
 
-  if (roleSelect) roleSelect.value = currentAgent.role || 'general';
-  editReasoningPreference = currentAgent.reasoning_effort || '';
-  if (tempInput) tempInput.value = currentAgent.temperature ?? '';
-  if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
+  if (roleSelect) roleSelect.value = v.role || 'general';
+  editReasoningPreference = v.reasoning_effort || '';
+  if (tempInput) tempInput.value = v.temperature ?? '';
+  if (maxTokensInput) maxTokensInput.value = v.max_output_tokens || '';
 
   // Reset provider filter and populate models
   if (providerFilter) providerFilter.value = '';
@@ -1384,13 +1454,12 @@ function populateConfigForm() {
   const systemModelHint = document.getElementById('editSystemModelHint');
   if (systemModelHint) systemModelHint.hidden = !currentAgent.system_model_linked;
 
-  // Populate the model dropdown and select current model
+  // Populate the model dropdown and select the model
   populateEditModelOptions();
 
-  // Select the current model if available
-  if (modelSelect && currentAgent.model) {
+  if (modelSelect && v.model) {
     for (let i = 0; i < modelSelect.options.length; i++) {
-      if (modelSelect.options[i].value === currentAgent.model) {
+      if (modelSelect.options[i].value === v.model) {
         modelSelect.selectedIndex = i;
         break;
       }
@@ -1400,91 +1469,46 @@ function populateConfigForm() {
   updateEditReasoningVisibility();
 }
 
-async function saveConfigChanges() {
-  if (!currentAgent) return;
-
+// readConfigFields is the configuration editor's current input. Provider,
+// model and reasoning come as one coupled choice.
+function readConfigFields() {
   const modelSelect = document.getElementById('editModel');
   const model = modelSelect?.value || '';
-  const tempRaw = document.getElementById('editTemperature')?.value;
-  const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
-  const role = document.getElementById('editRole')?.value || 'general';
+  const selectedOption = modelSelect?.options[modelSelect.selectedIndex];
+  const provider = selectedOption?.getAttribute('data-provider') || '';
   const reasoningEffort = document.getElementById('editReasoningEffort')?.value || '';
+  return {
+    role: document.getElementById('editRole')?.value || 'general',
+    model,
+    llm_provider: provider || currentAgent?.provider || '',
+    temperature: document.getElementById('editTemperature')?.value ?? '',
+    max_output_tokens: document.getElementById('editMaxTokens')?.value ?? '',
+    // An empty level clears a saved one (Claude Code's default sends no flag).
+    reasoning_effort: supportsReasoning(provider, model)
+      ? window.OriReasoningEffort.normalize(provider, model, reasoningEffort)
+      : ''
+  };
+}
 
-  if (!model) {
+async function saveConfigChanges() {
+  if (!currentAgent || !editSession) return;
+  const fields = readConfigFields();
+  if (!fields.model) {
     setConfigStatus('Model is required to save configuration.', 'error');
     return;
   }
+  editSession.setDraft('configuration', fields);
 
-  // Get provider from the selected model's data attribute
-  const selectedOption = modelSelect?.options[modelSelect.selectedIndex];
-  const provider = selectedOption?.getAttribute('data-provider') || '';
+  setConfigSavingState(true);
+  const outcome = await saveSection('configuration', setConfigStatus, 'configuration');
+  setConfigSavingState(false);
+  if (outcome?.kind !== 'saved') return;
 
-  const payload = {
-    model,
-    role
-  };
-
-  const temp = parseFloat(tempRaw);
-  if (!Number.isNaN(temp)) {
-    payload.temperature = temp;
-  }
-
-  const maxTokens = parseInt(maxTokensRaw, 10);
-  if (!Number.isNaN(maxTokens)) {
-    payload.max_output_tokens = maxTokens;
-  }
-
-  if (provider) {
-    payload.llm_provider = provider;
-  }
-  if (supportsReasoning(provider, model)) {
-    // An empty level clears a saved one (Claude Code's default sends no flag).
-    payload.reasoning_effort = window.OriReasoningEffort.normalize(
-      provider,
-      model,
-      reasoningEffort
-    );
-  }
-
-  try {
-    setConfigSavingState(true);
-    setConfigStatus('Saving changes...');
-
-    const { response, cancelled, reloaded } = await saveAgentPatch(agentName, payload);
-    if (cancelled) {
-      setConfigStatus('Change cancelled — shared agent not modified.');
-      return;
-    }
-    if (reloaded) {
-      populateConfigForm();
-      setConfigStatus(await readResponseError(response, 'Failed to save changes'), 'error');
-      return;
-    }
-
-    if (!response.ok) {
-      throw new Error(await readResponseError(response, 'Failed to save changes'));
-    }
-
-    const carried = await carriedEditNote(response);
-    const saved = await response
-      .clone()
-      .json()
-      .catch(() => ({}));
-    const profileReloaded = await refreshAgentDetails();
-    const status = await systemModelSaveStatus(saved && saved.system_model);
-    if (!profileReloaded) {
-      status.message += ' The saved profile could not be reloaded. Reopen the editor to verify it.';
-      status.type = 'error';
-    }
-    setConfigStatus(status.message, status.type);
-    setConfigEditMode(false);
-    if (carried) showToast(carried, 'success');
-  } catch (error) {
-    console.error('Failed to save configuration:', error);
-    setConfigStatus(error.message || 'Failed to save configuration', 'error');
-  } finally {
-    setConfigSavingState(false);
-  }
+  const status = await systemModelSaveStatus(outcome.receipt.system_model);
+  setConfigStatus(status.message, status.type);
+  if (!editSession.isDirty('configuration')) setConfigEditMode(false);
+  const carried = carriedEditNote(outcome.receipt);
+  if (carried) showToast(carried, 'success');
 }
 
 function setConfigSavingState(isSaving) {
@@ -1544,7 +1568,8 @@ function setConfigStatus(message, type = 'info') {
   }
 }
 
-function setPromptEditMode(enabled) {
+// showPromptEditMode only shows or hides the editor; it never touches input.
+function showPromptEditMode(enabled) {
   const display = document.getElementById('promptDisplay');
   const form = document.getElementById('promptEditForm');
   const editBtn = document.getElementById('editPromptBtn');
@@ -1560,66 +1585,50 @@ function setPromptEditMode(enabled) {
   if (editBtn) {
     editBtn.textContent = enabled ? 'Cancel' : 'Edit';
   }
+}
 
+// setPromptEditMode opens the editor on the draft (or the saved prompt), or
+// closes it.
+function setPromptEditMode(enabled) {
+  showPromptEditMode(enabled);
   if (enabled) {
-    populatePromptForm();
+    populatePromptForm(sectionValues('prompt'));
     setPromptStatus('');
   }
 }
 
 function togglePromptEditMode() {
   if (isEditingPrompt) {
+    editSession?.discard('prompt');
     setPromptEditMode(false);
     setPromptStatus('');
-    populatePromptForm(); // reset unsaved edits
+    populatePromptForm();
   } else {
     setPromptEditMode(true);
   }
 }
 
-function populatePromptForm() {
+function populatePromptForm(values) {
   if (!currentAgent) return;
   const promptInput = document.getElementById('editSystemPrompt');
-  if (promptInput) promptInput.value = currentAgent.system_prompt || '';
+  if (promptInput) promptInput.value = (values || currentAgent).system_prompt || '';
 }
 
 async function savePromptChanges() {
-  if (!currentAgent) return;
-  const promptInput = document.getElementById('editSystemPrompt');
-  const systemPrompt = promptInput ? promptInput.value.trim() : '';
+  if (!currentAgent || !editSession) return;
+  editSession.setDraft('prompt', {
+    system_prompt: document.getElementById('editSystemPrompt')?.value ?? ''
+  });
 
-  try {
-    setPromptSavingState(true);
-    setPromptStatus('Saving system prompt...');
+  setPromptSavingState(true);
+  const outcome = await saveSection('prompt', setPromptStatus, 'system prompt');
+  setPromptSavingState(false);
+  if (outcome?.kind !== 'saved') return;
 
-    const { response, cancelled, reloaded } = await saveAgentPatch(agentName, {
-      system_prompt: systemPrompt
-    });
-    if (cancelled) {
-      setPromptStatus('Change cancelled — shared agent not modified.');
-      return;
-    }
-    if (reloaded) {
-      populatePromptForm();
-      setPromptStatus(await readResponseError(response, 'Failed to save system prompt'), 'error');
-      return;
-    }
-
-    if (!response.ok) {
-      throw new Error(await readResponseError(response, 'Failed to save system prompt'));
-    }
-
-    const carried = await carriedEditNote(response);
-    await refreshAgentDetails();
-    setPromptStatus('System prompt updated successfully.', 'success');
-    setPromptEditMode(false);
-    if (carried) showToast(carried, 'success');
-  } catch (error) {
-    console.error('Failed to save system prompt:', error);
-    setPromptStatus(error.message || 'Failed to save system prompt', 'error');
-  } finally {
-    setPromptSavingState(false);
-  }
+  setPromptStatus('System prompt saved.', 'success');
+  if (!editSession.isDirty('prompt')) setPromptEditMode(false);
+  const carried = carriedEditNote(outcome.receipt);
+  if (carried) showToast(carried, 'success');
 }
 
 function setPromptSavingState(isSaving) {

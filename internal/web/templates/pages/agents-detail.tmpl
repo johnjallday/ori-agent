@@ -713,8 +713,9 @@
                       </select>
                     </div>
                   </div>
-                  <div id="configEditStatus" class="small mt-3" style="color: var(--text-secondary);"></div>
                 </div>
+                <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
+                <div id="configEditStatus" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
                 </div>
 
                 <!-- System Prompt Section. The id is the deep-link target for
@@ -740,9 +741,11 @@
                 <div id="promptDisplay" style="padding: 16px; background: var(--bg-secondary); border-radius: 8px; font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;">Loading...</div>
 
                 <div id="promptEditForm" style="display: none;">
+                  <label for="editSystemPrompt" class="visually-hidden">System prompt</label>
                   <textarea id="editSystemPrompt" class="form-control" rows="10" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6;"></textarea>
-                  <div id="promptEditStatus" class="small mt-2" style="color: var(--text-secondary);"></div>
                 </div>
+                <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
+                <div id="promptEditStatus" role="status" aria-live="polite" class="small mt-2" style="color: var(--text-secondary);"></div>
                 </div>
               </div>
             </div>
@@ -972,6 +975,7 @@
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/agent-origin.js"></script>
   <script defer src="/js/modules/agent-workspace-editor.js"></script>
+  <script defer src="/js/modules/agent-edit-session.js"></script>
   <script defer src="/js/agents-detail.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>
