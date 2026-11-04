@@ -146,6 +146,7 @@ export default defineConfig([
       'internal/web/static/js/modules/operations-map-activity.js',
       'internal/web/static/js/modules/notes-station.js',
       'internal/web/static/js/modules/hq-labels.js',
+      'internal/web/static/js/modules/work-labels.js',
       'internal/web/static/js/modules/hq-attention.js',
       'internal/web/static/js/modules/hq-stations-grid.js',
       'internal/web/static/js/modules/hq-map-flow.js',

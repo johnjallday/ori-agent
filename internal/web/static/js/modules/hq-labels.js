@@ -7,8 +7,11 @@
  * keeping the HQ words in one map means that vocabulary can later be offered
  * back as an optional skin without hunting through the renderer.
  *
- * Pure: no DOM, no imports.
+ * Pure: no DOM. The work words come from work-labels.js, the one vocabulary
+ * every branch of the Command view shares.
  */
+
+import { WORK_LABELS } from './work-labels.js';
 
 export const HQ_LABELS = Object.freeze({
   // People
@@ -17,12 +20,12 @@ export const HQ_LABELS = Object.freeze({
   // The product calls work a ticket, never a task (PRD 760 FR-3), and the
   // agent's action is the existing "Give work" flow; the keys keep the PRD's
   // working names.
-  giveTask: 'Give work',
+  giveTask: WORK_LABELS.giveWork,
 
   // Work
-  tasks: 'Tickets',
-  openTasks: 'Open tickets',
-  backlog: 'Backlog',
+  tasks: WORK_LABELS.tickets,
+  openTasks: WORK_LABELS.openTickets,
+  backlog: WORK_LABELS.backlog,
   workspaceNotes: 'Workspace notes',
   sessions: 'Sessions',
   files: 'Files',
@@ -66,7 +69,7 @@ export const HQ_LABELS = Object.freeze({
   workspaceGoal: 'Workspace goal',
   inventory: 'Inventory',
   // "New task" in the PRD; work is a ticket on the HQ page.
-  newTask: 'New ticket',
+  newTask: WORK_LABELS.newTicket,
 
   // Station state words
   notSetUp: 'Not set up',
