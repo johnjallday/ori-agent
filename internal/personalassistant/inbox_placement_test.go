@@ -109,6 +109,41 @@ func TestInboxPlacementHandoff_RefusesBeforeSeedForInvalidSources(t *testing.T) 
 	}
 }
 
+// A card offered "cancel that draft" must be able to place afterwards, so a
+// selection that lapsed is reported before another open draft's conflict.
+func TestInboxPlacementHandoff_LapsedSelectionIsReportedBeforeAnotherDraft(t *testing.T) {
+	for _, lapsed := range []bool{false, true} {
+		service, builds, input, seed := inboxPlacementFixture(t)
+		ctx := context.Background()
+		now := service.digest.now()
+		if _, err := builds.Mutate(ctx, "local", func(doc *WorkspaceBuildDocument) error {
+			doc.Add(WorkspaceBuildSession{ID: "other", Status: WorkspaceBuildOpen, Version: 3, CreatedAt: now, UpdatedAt: now, EntryPoint: "home_cockpit_create", Draft: BuildDraft{Name: "Garage Sync"}})
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if lapsed {
+			expired := now.Add(foldercontext.SelectionTTL)
+			service.digest.deps.Now = func() time.Time { return expired }
+		}
+		_, err := service.HandoffInbox(ctx, "local", input, builds, seed)
+		var refusal *InboxPlacementError
+		if !errors.As(err, &refusal) {
+			t.Fatalf("lapsed=%v: %v", lapsed, err)
+		}
+		if lapsed {
+			if refusal.Code != "selection_expired" || refusal.Conflict != nil {
+				t.Fatalf("lapsed selection reported as %+v", refusal)
+			}
+			continue
+		}
+		want := BuildConflictSummary{ID: "other", Name: "Garage Sync", Status: "open", EntryPoint: "home_cockpit_create", Version: 3, UpdatedAt: now, Cancellable: true}
+		if refusal.Code != "build_conflict" || refusal.Conflict == nil || *refusal.Conflict != want {
+			t.Fatalf("live selection conflict: %+v %+v", refusal, refusal.Conflict)
+		}
+	}
+}
+
 type failedPlacementWrite struct{ InboxPlacementBuildStore }
 
 func (f failedPlacementWrite) Mutate(ctx context.Context, owner string, mutate func(*WorkspaceBuildDocument) error) (WorkspaceBuildDocument, error) {

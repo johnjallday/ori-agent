@@ -46,6 +46,7 @@ import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import { setupQuestActionURL } from './setup-quest-links.js';
 import { createFolderPrerequisites, renderFolderPrerequisites } from './folder-prerequisites.js';
 import { createPluginSetupWizard } from './plugin-setup-wizard.js';
+import { resumeWorkspaceBuild } from './workspace-build-resume.js';
 import {
   declinedLine,
   proposalView,
@@ -2985,7 +2986,11 @@ const state = {
   // A Restore of a receipt's deleted workspace still in flight, and what the
   // last one was told when the workspace did not come back.
   restoreBusy: false,
-  restoreMessage: ''
+  restoreMessage: '',
+  // A placement refused because another draft holds the one slot: which
+  // offer, how it was placed, and the draft it yielded to
+  // (inboxPlacementConflict). Cleared once that offer places or cancels it.
+  buildConflict: null
 };
 
 const prerequisites = createFolderPrerequisites({
@@ -3685,6 +3690,61 @@ export function conversationFolderOfferView(offer, options = {}) {
   return { ...view, actions };
 }
 
+// inboxPlacementConflict reads a refused placement's build_conflict into the
+// card's choice, or null for any other refusal. Pure.
+export function inboxPlacementConflict(error, offer, mode) {
+  const build = error?.code === 'build_conflict' ? error.details?.build : null;
+  if (!build?.id || !offer?.id) return null;
+  return {
+    offerId: String(offer.id),
+    conversationId: String(offer.conversation_id || ''),
+    mode: mode === 'map' ? 'map' : 'suggested',
+    build: {
+      id: String(build.id),
+      name: String(build.name || '').trim(),
+      version: Number(build.version) || 0,
+      fromFolder: build.from_folder === true,
+      cancellable: build.cancellable === true
+    }
+  };
+}
+
+// buildConflictView turns a card whose placement was refused because another
+// draft holds the one slot into that choice: open the other draft, or cancel
+// it and set this folder up. Cancel is offered only for a draft with nothing
+// accepted or running; a draft another folder review handed off is reopened
+// from that review, not from the dialog. Keep chatting stays. Pure.
+export function buildConflictView(view, conflict, offer) {
+  if (!conflict || !view || conflict.offerId !== String(offer?.id || '')) return view;
+  if (!(view.actions || []).some(action => action.placement)) return view;
+  const { build } = conflict;
+  const subject = String(offer?.subject?.name || offer?.folder || '').trim() || 'this folder';
+  const named = build.name ? `“${build.name}”` : 'An unnamed workspace draft';
+  // A handed-off draft may be this same folder, reviewed in another conversation.
+  const origin = build.fromFolder ? ' from another setup review' : '';
+  const summary = !build.cancellable
+    ? `${named} is being set up right now${origin}. Ori sets up one workspace at a time; set up ${subject} once it finishes.`
+    : `${named} is still an unfinished workspace draft${origin}. Ori sets up one workspace at a time.`;
+  // Opening loses nothing, so it leads; cancelling discards that draft.
+  const actions = [];
+  if (!build.fromFolder)
+    actions.push({
+      id: 'conflict-open',
+      label: 'Open that draft',
+      style: 'primary',
+      conflictOpen: true
+    });
+  if (build.cancellable)
+    actions.push({
+      id: 'conflict-cancel',
+      label: `Cancel it and set up ${subject}`,
+      style: actions.length ? 'outline' : 'primary',
+      conflictCancel: true
+    });
+  actions.push(...(view.actions || []).filter(action => !action.placement && action.closeReview));
+  return { ...view, actions, conflictSummary: summary };
+}
+
 // briefFor is the brief the user typed on an offer's hire card, or null when
 // they left the field as the plan wrote it.
 function briefFor(offer) {
@@ -3830,11 +3890,15 @@ function renderOffer(place) {
     (structureAdjust.offerId !== state.offer?.id || state.offer?.status !== 'pending')
   )
     closeStructureAdjust(false);
-  const view = conversationFolderOfferView(state.offer, {
-    confirm: state.confirm,
-    softwareAdjusting:
-      Boolean(state.softwareAdjusting) && state.softwareAdjusting === state.offer?.id
-  });
+  const view = buildConflictView(
+    conversationFolderOfferView(state.offer, {
+      confirm: state.confirm,
+      softwareAdjusting:
+        Boolean(state.softwareAdjusting) && state.softwareAdjusting === state.offer?.id
+    }),
+    state.buildConflict,
+    state.offer
+  );
   const receipt = folderReceiptView(state.offer, {
     busy: state.firstLookBusy,
     message: state.firstLookMessage
@@ -3980,7 +4044,8 @@ function renderOffer(place) {
   pluginSetupWizard.sync();
   setText(
     document.getElementById('personalAssistantFolderActionSummary'),
-    view.plan && !view.setup && !receipt.visible ? confirmationSummary(view.plan) : ''
+    view.conflictSummary ||
+      (view.plan && !view.setup && !receipt.visible ? confirmationSummary(view.plan) : '')
   );
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {
@@ -4516,6 +4581,16 @@ function runAction(action) {
     void window.PersonalAssistantFolderSetup?.closeReview?.(state.offer);
     return;
   }
+  if (action.conflictOpen) {
+    // Opening the other draft changes nothing here; this card keeps its
+    // choice for when the person comes back.
+    resumeWorkspaceBuild();
+    return;
+  }
+  if (action.conflictCancel) {
+    void cancelConflictingBuild();
+    return;
+  }
   if (action.swapCandidate) {
     // The other hire of a folder that holds a project beside loose files: its
     // own review takes this one's place, and nothing is created.
@@ -4785,6 +4860,7 @@ async function startInboxPlacement(mode) {
     );
   };
   state.busy = true;
+  state.buildConflict = null;
   showError('');
   render();
   try {
@@ -4818,14 +4894,71 @@ async function startInboxPlacement(mode) {
       }
     });
   } catch (error) {
-    if (sourceCurrent())
-      showError(
-        error.message || 'This workspace draft could not be opened. Nothing was confirmed.'
-      );
+    if (sourceCurrent()) {
+      // Another draft holds the slot: the card offers it instead of a refusal.
+      state.buildConflict = inboxPlacementConflict(error, offer, mode);
+      if (!state.buildConflict)
+        showError(
+          error.message || 'This workspace draft could not be opened. Nothing was confirmed.'
+        );
+    }
   } finally {
     state.busy = false;
     render();
   }
+}
+
+// cancelConflictingBuild is the card's explicit "Cancel it and set up …":
+// it cancels exactly the draft the refusal named, at the version it named,
+// then asks for this folder's placement again the way it was first asked.
+// The server still decides; a draft that changed or started since is not
+// cancelled, and the next placement press reads the current one.
+async function cancelConflictingBuild() {
+  const conflict = state.buildConflict;
+  const offer = state.offer;
+  const api = window.sessionManager?.workspaceBuildApi?.();
+  if (!conflict?.build.cancellable || conflict.offerId !== offer?.id || state.busy || !api) return;
+  state.busy = true;
+  showError('');
+  render();
+  let result;
+  try {
+    result = await api.abandon(conflict.build.id, { version: conflict.build.version });
+  } catch (_) {
+    result = null;
+  }
+  state.busy = false;
+  if (state.buildConflict !== conflict || state.offer?.id !== offer.id) {
+    render();
+    return;
+  }
+  state.buildConflict = null;
+  // Already gone counts: nothing holds the slot any more.
+  if (result?.ok || result?.status === 404) {
+    // Cancelling a draft owned by this same conversation moves its folder
+    // revision, so the placement is asked again only from a fresh read of
+    // the conversation, and only while this card is still its pending review.
+    const conversation = window.PersonalAssistantConversation;
+    const loaded = conversation?.resume
+      ? await conversation.resume(conflict.conversationId, {
+          reviewOfferId: conflict.offerId,
+          silent: true
+        })
+      : false;
+    if (loaded && state.offer?.id === conflict.offerId) {
+      await startInboxPlacement(conflict.mode);
+      return;
+    }
+    showError(
+      `${conflict.build.name ? `“${conflict.build.name}”` : 'The other draft'} was cancelled. Reopen this folder’s review to set it up; nothing here was created.`
+    );
+    render();
+    return;
+  }
+  showError(
+    `${conflict.build.name ? `“${conflict.build.name}”` : 'That draft'} changed or could not be cancelled, so it was kept. Nothing here was created.`
+  );
+  render();
 }
 
 // An inert shared surface around this source controller, not a source-to-build

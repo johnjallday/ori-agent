@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildConflictView,
   folderOfferView,
   conversationFolderOfferView,
+  inboxPlacementConflict,
   inboxPlacementRequest
 } from './personal-assistant-folder.js';
 
@@ -139,4 +141,111 @@ test('historical, loading, replaced and foreign conversation callbacks cannot re
     ),
     null
   );
+});
+
+const refusal = build =>
+  Object.assign(new Error('Another workspace draft is still unfinished.'), {
+    code: 'build_conflict',
+    details: { build_id: build.id, build }
+  });
+
+test('only a build_conflict naming its draft becomes the card’s choice', () => {
+  const conflict = inboxPlacementConflict(
+    refusal({
+      id: 'other',
+      name: ' Garage Sync ',
+      version: 4,
+      from_folder: false,
+      cancellable: true
+    }),
+    offer(),
+    'map'
+  );
+  assert.deepEqual(conflict, {
+    offerId: 'source',
+    conversationId: 'chat',
+    mode: 'map',
+    build: { id: 'other', name: 'Garage Sync', version: 4, fromFolder: false, cancellable: true }
+  });
+  // Any other refusal, or one without the draft, stays an error line.
+  assert.equal(inboxPlacementConflict(new Error('stale'), offer(), 'map'), null);
+  assert.equal(
+    inboxPlacementConflict(
+      Object.assign(new Error('x'), { code: 'build_conflict', details: { build_id: 'other' } }),
+      offer(),
+      'map'
+    ),
+    null
+  );
+  assert.equal(
+    inboxPlacementConflict(
+      Object.assign(new Error('x'), { code: 'source_changed', details: { build: { id: 'b' } } }),
+      offer(),
+      'map'
+    ),
+    null
+  );
+});
+
+const conflictFor = build =>
+  inboxPlacementConflict(
+    refusal({ id: 'other', version: 1, from_folder: false, cancellable: true, ...build }),
+    offer(),
+    'suggested'
+  );
+
+test('a cancellable draft offers Open first and Cancel second, replacing the refused placement', () => {
+  const view = buildConflictView(
+    conversationFolderOfferView(offer()),
+    conflictFor({ name: 'Garage Sync' }),
+    offer()
+  );
+  assert.deepEqual(
+    view.actions.map(action => [action.label, action.style]),
+    [
+      ['Open that draft', 'primary'],
+      ['Cancel it and set up Music', 'outline'],
+      ['Keep chatting', 'link']
+    ]
+  );
+  assert.ok(!view.actions.some(action => action.placement));
+  assert.match(view.conflictSummary, /“Garage Sync” is still an unfinished workspace draft\./);
+});
+
+test('a draft being set up is never offered for cancellation', () => {
+  const view = buildConflictView(
+    conversationFolderOfferView(offer()),
+    conflictFor({ name: 'Garage Sync', cancellable: false }),
+    offer()
+  );
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['conflict-open', 'keep-chatting']
+  );
+  assert.match(view.conflictSummary, /is being set up right now.*once it finishes/);
+});
+
+test('another folder’s handed-off draft is not reopened from the dialog', () => {
+  const view = buildConflictView(
+    conversationFolderOfferView(offer()),
+    conflictFor({ name: '', from_folder: true }),
+    offer()
+  );
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.style]),
+    [
+      ['conflict-cancel', 'primary'],
+      ['keep-chatting', 'link']
+    ]
+  );
+  assert.match(view.conflictSummary, /^An unnamed workspace draft .*from another setup review/);
+});
+
+test('a conflict belongs to its own offer and to a card still offering placement', () => {
+  const view = conversationFolderOfferView(offer());
+  const conflict = conflictFor({ name: 'Garage Sync' });
+  assert.equal(buildConflictView(view, conflict, { ...offer(), id: 'different' }), view);
+  assert.equal(buildConflictView(view, null, offer()), view);
+  const decided = { ...view, actions: view.actions.filter(action => !action.placement) };
+  assert.equal(buildConflictView(decided, conflict, offer()), decided);
 });

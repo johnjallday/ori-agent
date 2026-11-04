@@ -52,6 +52,40 @@ type InboxPlacementResult struct {
 type InboxPlacementError struct {
 	Code    string
 	BuildID string
+	// Conflict names the open build a build_conflict refusal yields to, so the
+	// card can offer it instead of only refusing. Nil for every other code.
+	Conflict *BuildConflictSummary
+}
+
+// BuildConflictSummary is what a refused placement may show about the build
+// that holds the one open draft slot: enough to name it and to offer its two
+// ways out, never its transcript or attachments.
+type BuildConflictSummary struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	EntryPoint string    `json:"entry_point"`
+	Version    int64     `json:"version"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	// FromFolder is a draft another folder review handed off; it is reopened
+	// from that review, not from the Create Workspace dialog.
+	FromFolder bool `json:"from_folder"`
+	// Cancellable is an open draft with nothing accepted or running: an
+	// explicit cancel ends it without creating anything.
+	Cancellable bool `json:"cancellable"`
+}
+
+func buildConflictSummary(open WorkspaceBuildSession) *BuildConflictSummary {
+	return &BuildConflictSummary{
+		ID:          open.ID,
+		Name:        open.Draft.Name,
+		Status:      string(open.Status),
+		EntryPoint:  open.EntryPoint,
+		Version:     open.Version,
+		UpdatedAt:   open.UpdatedAt,
+		FromFolder:  open.PlacementSource != nil,
+		Cancellable: open.Status == WorkspaceBuildOpen && open.Preparation == nil && open.Setup == nil,
+	}
 }
 
 func (e *InboxPlacementError) Error() string { return "inbox placement: " + e.Code }
@@ -198,17 +232,21 @@ func (s *FolderObservationService) HandoffInbox(ctx context.Context, userID stri
 			// evidence that its accepted operation never created resources.
 			return placementError("handoff_incomplete")
 		}
-		if open := doc.Open(); open != nil {
-			return &InboxPlacementError{Code: "build_conflict", BuildID: open.ID}
-		}
 		if draft == nil {
 			// A new build copies the original observation, not just this
 			// review's directory authority. A reconstructed hold has no scan
 			// evidence to transfer and must fail before preparing the seed.
+			// Checked before another draft's conflict (a read, no effects): a
+			// card offered "cancel that draft" must be able to place afterwards.
 			held, _, holdErr := s.resolveHeld(ctx, review.Target, review.ObservationID)
 			if holdErr != nil || held.reheld != nil {
 				return placementError("selection_expired")
 			}
+		}
+		if open := doc.Open(); open != nil {
+			return &InboxPlacementError{Code: "build_conflict", BuildID: open.ID, Conflict: buildConflictSummary(*open)}
+		}
+		if draft == nil {
 			path, available := s.reviewSource(offer)
 			if !available {
 				return placementError("selection_expired")

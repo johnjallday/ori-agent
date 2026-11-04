@@ -271,12 +271,26 @@ func TestInboxPlacementHandoff_DetachBlocksMaterialWritesButOwnerCanCancel(t *te
 	}
 }
 
+// conflictBuild reads the blocking build a build_conflict refusal names.
+func conflictBuild(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	details, _ := body["details"].(map[string]any)
+	if details == nil || details["build_id"] == nil {
+		t.Fatalf("conflict without details: %v", body)
+	}
+	build, _ := details["build"].(map[string]any)
+	if build == nil || build["id"] != details["build_id"] {
+		t.Fatalf("conflict without its build: %v", body)
+	}
+	return build
+}
+
 func TestInboxPlacementHandoff_ConflictingBuildAndStaleSourceHaveNoEffects(t *testing.T) {
 	f := newDraftServerFixture(t)
 	input, root := stageInboxPlacement(t, f)
 	now := time.Now().UTC()
 	_, err := f.builder.workspaceBuildStore.Mutate(context.Background(), "local", func(doc *personalassistant.WorkspaceBuildDocument) error {
-		doc.Add(personalassistant.WorkspaceBuildSession{ID: "unrelated", Status: personalassistant.WorkspaceBuildOpen, Version: 1, CreatedAt: now, UpdatedAt: now, EntryPoint: "home_cockpit_create"})
+		doc.Add(personalassistant.WorkspaceBuildSession{ID: "unrelated", Status: personalassistant.WorkspaceBuildOpen, Version: 1, CreatedAt: now, UpdatedAt: now, EntryPoint: "home_cockpit_create", Draft: personalassistant.BuildDraft{Name: "Garage Sync"}})
 		return nil
 	})
 	if err != nil {
@@ -285,6 +299,12 @@ func TestInboxPlacementHandoff_ConflictingBuildAndStaleSourceHaveNoEffects(t *te
 	status, conflict := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/from-inbox", input)
 	if status != http.StatusConflict || conflict["code"] != "build_conflict" {
 		t.Fatalf("conflict: %d %v", status, conflict)
+	}
+	// The refusal names the draft that holds the slot, so the card can offer
+	// to open or cancel it rather than only refuse.
+	blocking := conflictBuild(t, conflict)
+	if blocking["id"] != "unrelated" || blocking["name"] != "Garage Sync" || blocking["status"] != "open" || blocking["entry_point"] != "home_cockpit_create" || blocking["from_folder"] != false || blocking["cancellable"] != true || blocking["version"] != float64(1) {
+		t.Fatalf("open conflict summary: %v", blocking)
 	}
 	offer, err := f.builder.personalAssistantFolderDigest.StoredOffer(context.Background(), "local", input["offer_id"].(string))
 	if err != nil || offer.PlacementHandoff != nil || offer.Status != personalassistant.FolderOfferPending {
@@ -299,8 +319,13 @@ func TestInboxPlacementHandoff_ConflictingBuildAndStaleSourceHaveNoEffects(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status, body := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/from-inbox", input); status != http.StatusConflict || body["code"] != "build_conflict" {
+	status, body := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/from-inbox", input)
+	if status != http.StatusConflict || body["code"] != "build_conflict" {
 		t.Fatalf("preparing build overwritten: %d %v", status, body)
+	}
+	// A running setup is never offered for cancellation from another card.
+	if blocking := conflictBuild(t, body); blocking["status"] != "preparing" || blocking["cancellable"] != false {
+		t.Fatalf("preparing conflict summary: %v", blocking)
 	}
 	input["source_revision"] = "stale"
 	if status, body := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/from-inbox", input); status != http.StatusConflict {
