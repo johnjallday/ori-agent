@@ -569,9 +569,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     skillsPageLink.href = `/skills?agent=${encodeURIComponent(agentName)}`;
   }
 
+  leaveGuard.register('definition', () => Boolean(editSession?.atRisk().length));
+  window.addEventListener('beforeunload', leaveGuard.onBeforeUnload);
   workspaceEditor = window.AgentWorkspaceEditor?.mount({
     root: document.getElementById('agentWorkspacesSection'),
     readAgent: fetchAgentDetail,
+    leaveGuard,
     onSaved: membership => {
       if (currentAgent) Object.assign(currentAgent, membership);
     }
@@ -624,13 +627,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     );
   }
 
+  // Returning to the tab reads the latest confirmed values even while editing:
+  // reconciliation keeps every draft and flags a section whose fields moved.
+  // Only a save in flight defers the read (its answer is about to arrive).
   const refreshOnReturn = () => {
     if (document.hidden) return;
-    if (!isEditingConfig && !isEditingPrompt && !document.querySelector('.modal.show')) {
-      void refreshAgentDetails();
-    } else {
+    if (editSession?.pending()) {
       refreshAgentConversationModel();
+      return;
     }
+    void refreshAgentDetails().then(() => {
+      for (const section of ['profile', 'configuration', 'prompt']) {
+        if (editSession?.state(section) === 'conflict') {
+          statusSetter(section)(
+            'This agent was changed elsewhere while you were editing. Your changes are still here and were not saved. Review the latest values before saving.',
+            'error'
+          );
+        }
+      }
+    });
   };
   window.addEventListener('focus', refreshOnReturn);
   document.addEventListener('visibilitychange', refreshOnReturn);
@@ -718,9 +733,23 @@ async function loadAgentDetails() {
   }
 }
 
+// Ordering for reads. Every read takes a ticket; a save that adopts its
+// receipt moves confirmedEpoch. A read answers only if it is still the newest
+// read, nothing was confirmed while it was in flight, and the agent was not
+// renamed meanwhile — otherwise an older answer could repaint newer state.
+let readTicket = 0;
+let confirmedEpoch = 0;
+
 async function refreshAgentDetails() {
+  const ticket = ++readTicket;
+  const epoch = confirmedEpoch;
+  const requestedName = agentName;
   try {
-    currentAgent = await fetchAgentDetail();
+    const latest = await fetchAgentDetail();
+    if (ticket !== readTicket || epoch !== confirmedEpoch || requestedName !== agentName) {
+      return true; // superseded: a newer read or receipt owns the page
+    }
+    currentAgent = latest;
     // Reconcile open drafts with the confirmed values before repainting: a
     // section whose fields did not move keeps its draft on the newer version;
     // one whose fields did becomes a conflict that keeps the draft.
@@ -729,12 +758,22 @@ async function refreshAgentDetails() {
     return true;
   } catch (error) {
     console.error('Error refreshing agent details:', error);
+    if (ticket !== readTicket || requestedName !== agentName) return false;
     if (isAgentNotFoundError(error)) {
+      if (editSession?.atRisk().length) {
+        // Keep the page and its drafts; the agent may have been renamed elsewhere.
+        setConfigStatus(
+          'This agent could not be found any more. Your unsaved changes are kept on this page.',
+          'error'
+        );
+        return false;
+      }
       currentAgent = null;
       await showMissingAgentState(error.message || 'Agent not found');
-      return;
+      return false;
     }
     setConfigStatus(error.message || 'Failed to refresh agent details', 'error');
+    return false;
   }
 }
 
@@ -860,15 +899,19 @@ function renderAgentDetails() {
   // A refresh repaints what is displayed; it never reinitializes an open
   // editor. A section being edited keeps its inputs, except fields the
   // session rebased onto newer confirmed values.
+  // A clean open editor whose saved values changed ("refreshed") is repainted
+  // too, or its stale inputs would be sent as changes on the next keystroke.
+  const repaint = section => ['rebased', 'refreshed'].includes(lastReconciliation[section]);
   if (!isProfileEditorOpen()) populateProfileForm();
-  else if (lastReconciliation.profile === 'rebased') paintProfileFields(sectionValues('profile'));
+  else if (repaint('profile')) paintProfileFields(sectionValues('profile'));
   if (!isEditingConfig) populateConfigForm();
-  else if (lastReconciliation.configuration === 'rebased')
-    populateConfigForm(sectionValues('configuration'));
+  else if (repaint('configuration')) populateConfigForm(sectionValues('configuration'));
   showConfigEditMode(isEditingConfig);
   if (!isEditingPrompt) populatePromptForm();
+  else if (repaint('prompt')) populatePromptForm(sectionValues('prompt'));
   showPromptEditMode(isEditingPrompt);
   lastReconciliation = {};
+  updateEditIndicators();
 }
 
 // What reconciliation decided on the most recent confirmed read.
@@ -883,6 +926,176 @@ function sectionValues(section) {
 
 function isProfileEditorOpen() {
   return Boolean(document.getElementById('profileEditModal')?.classList.contains('show'));
+}
+
+// One leave warning for the whole page. Each editor registers what it would
+// lose; membership joins through its optional seam instead of warning twice.
+// The browser's own wording is all a page may show, so it never claims that a
+// save already sent will be cancelled by staying or leaving.
+const leaveGuard = {
+  checks: new Map(),
+  register(name, atRisk) {
+    this.checks.set(name, atRisk);
+  },
+  atRisk() {
+    return [...this.checks.values()].some(check => {
+      try {
+        return Boolean(check());
+      } catch {
+        return false;
+      }
+    });
+  },
+  onBeforeUnload(event) {
+    if (!leaveGuard.atRisk()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  }
+};
+
+const SECTION_UI = {
+  profile: { badge: 'profileEditBadge', save: 'profileSaveBtn', confirm: 'profileDiscardConfirm' },
+  configuration: {
+    badge: 'configEditBadge',
+    save: 'saveConfigBtn',
+    confirm: 'configDiscardConfirm',
+    fields: 'configEditForm'
+  },
+  prompt: {
+    badge: 'promptEditBadge',
+    save: 'savePromptBtn',
+    confirm: 'promptDiscardConfirm',
+    fields: 'promptEditForm'
+  }
+};
+
+const BADGE_TEXT = {
+  dirty: 'Unsaved changes',
+  pending: 'Saving…',
+  stale: 'Checking latest…',
+  conflict: 'Changed elsewhere — review',
+  unconfirmed: 'Save not confirmed',
+  error: 'Not saved'
+};
+
+function statusSetter(section) {
+  return { profile: setProfileStatus, configuration: setConfigStatus, prompt: setPromptStatus }[
+    section
+  ];
+}
+
+// sectionDisplayState is what a section's badge says: its session state, or
+// "dirty" for an ordinary draft.
+function sectionDisplayState(section) {
+  if (!editSession) return '';
+  const state = editSession.state(section);
+  if (state === 'pending' || state === 'stale' || state === 'conflict' || state === 'unconfirmed')
+    return state;
+  if (editSession.isDirty(section)) return state === 'error' ? 'error' : 'dirty';
+  return '';
+}
+
+// updateEditIndicators repaints every section's badge and Save button. While
+// one definition write is in flight no other section can start one; inputs of
+// the section being saved are frozen so the submitted snapshot is exactly what
+// was on screen. Other sections stay editable.
+function updateEditIndicators() {
+  if (!editSession) return;
+  const pending = editSession.pending();
+  for (const [section, ui] of Object.entries(SECTION_UI)) {
+    const state = sectionDisplayState(section);
+    const badge = document.getElementById(ui.badge);
+    if (badge) {
+      badge.hidden = !state;
+      badge.dataset.state = state;
+      badge.textContent = BADGE_TEXT[state] || '';
+    }
+    const save = document.getElementById(ui.save);
+    if (save && pending !== section) {
+      save.disabled =
+        Boolean(pending) ||
+        !editSession.isDirty(section) ||
+        editSession.state(section) === 'unconfirmed';
+    }
+    const frozen = pending === section;
+    const scope =
+      section === 'profile'
+        ? document.querySelector('#profileEditModal .modal-body')
+        : document.getElementById(ui.fields);
+    scope?.querySelectorAll('input, textarea, select').forEach(input => {
+      if (input.closest('#profileAppearanceHost')) return;
+      if (frozen) {
+        if (!input.disabled) input.dataset.frozenBySave = '1';
+        input.disabled = true;
+      } else if (input.dataset.frozenBySave) {
+        delete input.dataset.frozenBySave;
+        input.disabled = false;
+      }
+    });
+  }
+}
+
+const DRAFT_READERS = {
+  profile: () => readProfileFields(),
+  configuration: () => readConfigFields(),
+  prompt: () => ({ system_prompt: document.getElementById('editSystemPrompt')?.value ?? '' })
+};
+
+// syncDraft records what the user typed, so a section knows it is dirty
+// before Save is pressed.
+function syncDraft(section) {
+  if (!editSession || editSession.pending() === section) return;
+  editSession.setDraft(section, DRAFT_READERS[section]());
+  hideDiscardConfirm(section);
+  updateEditIndicators();
+}
+
+// The inline "keep editing / discard" confirmation for one section.
+function showDiscardConfirm(section, onDiscard) {
+  const bar = document.getElementById(SECTION_UI[section].confirm);
+  if (!bar) return;
+  const returnFocus = document.activeElement;
+  bar.hidden = false;
+  const keep = bar.querySelector('[data-discard-keep]');
+  const discard = bar.querySelector('[data-discard-confirm]');
+  keep.onclick = () => {
+    bar.hidden = true;
+    (returnFocus && document.contains(returnFocus) ? returnFocus : keep)?.focus?.();
+  };
+  discard.onclick = () => {
+    bar.hidden = true;
+    onDiscard();
+  };
+  keep.focus();
+}
+
+function hideDiscardConfirm(section) {
+  const bar = document.getElementById(SECTION_UI[section].confirm);
+  if (bar) bar.hidden = true;
+}
+
+// requestCloseSection closes an inline editor, asking first when it holds
+// unsaved changes. A section with a save in flight is not closed: the request
+// may already have reached the server.
+function requestCloseSection(section, close) {
+  if (editSession?.pending() === section) {
+    statusSetter(section)(
+      'Still saving. The request may already have reached the server — wait for the result.',
+      'error'
+    );
+    return;
+  }
+  if (editSession?.isDirty(section) || editSession?.state(section) === 'unconfirmed') {
+    showDiscardConfirm(section, () => {
+      editSession.discard(section);
+      close();
+      updateEditIndicators();
+    });
+    return;
+  }
+  editSession?.discard(section);
+  close();
+  updateEditIndicators();
 }
 
 // The hero goes through the shared renderer, so this page shows the same active
@@ -1029,6 +1242,63 @@ function setupProfileEditor() {
   modalElement?.addEventListener('shown.bs.modal', () => {
     document.getElementById('profileAgentNameInput')?.focus();
   });
+
+  // Draft tracking: each editor records input as it happens.
+  for (const id of ['profileAgentNameInput', 'profileDescriptionInput']) {
+    document.getElementById(id)?.addEventListener('input', () => syncDraft('profile'));
+  }
+  document
+    .getElementById('profileFavoriteToggle')
+    ?.addEventListener('change', () => syncDraft('profile'));
+  const configForm = document.getElementById('configEditForm');
+  configForm?.addEventListener('input', () => syncDraft('configuration'));
+  configForm?.addEventListener('change', () => syncDraft('configuration'));
+  document.getElementById('editSystemPrompt')?.addEventListener('input', () => syncDraft('prompt'));
+
+  // Every way of dismissing the modal (Cancel, ×, backdrop, Escape) arrives
+  // here. A dirty profile asks first; a save in flight keeps the modal open.
+  modalElement?.addEventListener('hide.bs.modal', event => {
+    if (allowProfileHide) {
+      allowProfileHide = false;
+      return;
+    }
+    if (editSession?.pending() === 'profile') {
+      event.preventDefault();
+      setProfileStatus(
+        'Still saving. The request may already have reached the server — wait for the result.',
+        'error'
+      );
+      return;
+    }
+    if (editSession?.isDirty('profile')) {
+      event.preventDefault();
+      showDiscardConfirm('profile', () => {
+        editSession.discard('profile');
+        paintProfileFields(profileValuesFromAgent());
+        updateEditIndicators();
+        closeProfileModal();
+      });
+    }
+  });
+  modalElement?.addEventListener('hidden.bs.modal', () => {
+    hideDiscardConfirm('profile');
+    const edit = document.getElementById('editProfileButton');
+    if (edit && !edit.hidden) edit.focus();
+  });
+}
+
+// Set for one hide that the page itself requested after a save or a discard.
+let allowProfileHide = false;
+
+function closeProfileModal() {
+  const modalElement = document.getElementById('profileEditModal');
+  const modal =
+    modalElement && typeof bootstrap !== 'undefined'
+      ? bootstrap.Modal.getInstance(modalElement)
+      : null;
+  if (!modal) return;
+  allowProfileHide = true;
+  modal.hide();
 }
 
 // The profile modal mounts the same shared editor as every other host, so this
@@ -1187,11 +1457,13 @@ function addProfileTag(tag) {
   if (!normalized || profileSelectedTags.includes(normalized)) return;
   profileSelectedTags.push(normalized);
   renderProfileTags();
+  syncDraft('profile');
 }
 
 function removeProfileTag(tag) {
   profileSelectedTags = profileSelectedTags.filter(item => item !== tag);
   renderProfileTags();
+  syncDraft('profile');
 }
 
 async function saveProfileChanges() {
@@ -1222,12 +1494,7 @@ async function saveProfileChanges() {
   }
   setProfileStatus('Profile saved.', 'success');
   if (!editSession.isDirty('profile')) {
-    const modalElement = document.getElementById('profileEditModal');
-    const modal =
-      modalElement && typeof bootstrap !== 'undefined'
-        ? bootstrap.Modal.getInstance(modalElement)
-        : null;
-    modal?.hide();
+    closeProfileModal();
     showToast('Agent profile saved.', 'success');
   }
 }
@@ -1247,6 +1514,8 @@ async function saveSection(section, setStatus, label) {
     setStatus(error.message, 'error');
     return null;
   }
+  hideDiscardConfirm(section);
+  updateEditIndicators();
   setStatus(`Saving ${label}…`);
   const outcome = await window.AgentEditSession.submitPatch({
     fetchImpl: (url, init) => fetch(url, init),
@@ -1255,6 +1524,7 @@ async function saveSection(section, setStatus, label) {
     confirmShared: confirmSharedEdit
   });
   editSession.finishSubmit(section, outcome);
+  updateEditIndicators();
 
   switch (outcome.kind) {
     case 'saved':
@@ -1311,6 +1581,7 @@ async function saveSection(section, setStatus, label) {
 function adoptReceipt(receipt) {
   const saved = receipt?.agent;
   if (!saved || !currentAgent) return;
+  confirmedEpoch += 1;
   currentAgent = {
     ...currentAgent,
     ...saved,
@@ -1356,6 +1627,7 @@ function setProfileSavingState(isSaving) {
   saveButton.innerHTML = isSaving
     ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...'
     : 'Save Profile';
+  if (!isSaving) updateEditIndicators();
 }
 
 function setProfileStatus(message, type = 'info') {
@@ -1417,12 +1689,15 @@ function setConfigEditMode(enabled) {
 
 function toggleConfigEditMode() {
   if (isEditingConfig) {
-    editSession?.discard('configuration');
-    setConfigEditMode(false);
-    setConfigStatus('');
-    populateConfigForm();
+    requestCloseSection('configuration', () => {
+      setConfigEditMode(false);
+      setConfigStatus('');
+      populateConfigForm();
+      document.getElementById('editConfigBtn')?.focus();
+    });
   } else {
     setConfigEditMode(true);
+    updateEditIndicators();
   }
 }
 
@@ -1477,10 +1752,16 @@ function readConfigFields() {
   const selectedOption = modelSelect?.options[modelSelect.selectedIndex];
   const provider = selectedOption?.getAttribute('data-provider') || '';
   const reasoningEffort = document.getElementById('editReasoningEffort')?.value || '';
+  // The provider follows the model choice. Keeping the saved model keeps the
+  // saved provider, so an option's own provider label (e.g. "openai" for a
+  // record saved without one) is not mistaken for a change.
+  const keptModel = model === (currentAgent?.model || '');
   return {
     role: document.getElementById('editRole')?.value || 'general',
     model,
-    llm_provider: provider || currentAgent?.provider || '',
+    llm_provider: keptModel
+      ? currentAgent?.provider || ''
+      : provider || currentAgent?.provider || '',
     temperature: document.getElementById('editTemperature')?.value ?? '',
     max_output_tokens: document.getElementById('editMaxTokens')?.value ?? '',
     // An empty level clears a saved one (Claude Code's default sends no flag).
@@ -1526,6 +1807,7 @@ function setConfigSavingState(isSaving) {
   if (editBtn) {
     editBtn.disabled = isSaving;
   }
+  if (!isSaving) updateEditIndicators();
 }
 
 function refreshAgentConversationModel() {
@@ -1599,12 +1881,15 @@ function setPromptEditMode(enabled) {
 
 function togglePromptEditMode() {
   if (isEditingPrompt) {
-    editSession?.discard('prompt');
-    setPromptEditMode(false);
-    setPromptStatus('');
-    populatePromptForm();
+    requestCloseSection('prompt', () => {
+      setPromptEditMode(false);
+      setPromptStatus('');
+      populatePromptForm();
+      document.getElementById('editPromptBtn')?.focus();
+    });
   } else {
     setPromptEditMode(true);
+    updateEditIndicators();
   }
 }
 
@@ -1646,6 +1931,7 @@ function setPromptSavingState(isSaving) {
   if (editBtn) {
     editBtn.disabled = isSaving;
   }
+  if (!isSaving) updateEditIndicators();
 }
 
 function setPromptStatus(message, type = 'info') {
@@ -2274,6 +2560,11 @@ function renderSkillSlotUsage() {
 async function setAgentExpertMode(enabled) {
   const name = currentAgent?.name || agentName;
   if (!name) return false;
+  // One definition write at a time from this page.
+  if (editSession?.pending()) {
+    showToast?.('Wait for the current save to finish, then try again.', 'error');
+    return false;
+  }
   try {
     const response = await fetch(`/api/agents/${encodeURIComponent(name)}`, {
       method: 'PATCH',

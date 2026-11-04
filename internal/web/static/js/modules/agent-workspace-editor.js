@@ -77,7 +77,10 @@
     return next;
   }
 
-  function mount({ root, readAgent, onSaved = () => {} }) {
+  // leaveGuard is optional: a host page that protects other drafts passes
+  // { register(name, atRisk) } so one leave warning covers everything. Without
+  // it the editor protects itself, as before.
+  function mount({ root, readAgent, onSaved = () => {}, leaveGuard = null }) {
     if (!root) return null;
     const list = root.querySelector('[data-workspace-list]');
     const status = root.querySelector('[data-workspace-status]');
@@ -262,12 +265,16 @@
     reload.addEventListener('click', () => {
       void load();
     });
-    window.addEventListener('beforeunload', event => {
-      if (!dirty() && !busy) return;
-      event.preventDefault();
-      event.returnValue = '';
-    });
+    const atRisk = () => dirty() || busy;
+    if (leaveGuard) leaveGuard.register('membership', atRisk);
+    else
+      window.addEventListener('beforeunload', event => {
+        if (!atRisk()) return;
+        event.preventDefault();
+        event.returnValue = '';
+      });
     return {
+      atRisk,
       setAgent(value) {
         const first = !agent || agent.name !== value?.name;
         agent = value;

@@ -202,6 +202,13 @@
       isDirty,
       anyDirty: () => SECTIONS.some(isDirty),
       pending: () => pendingSection,
+      // Sections whose work would be lost by leaving the page: unsaved
+      // changes, a save in flight, or a save whose outcome is unknown.
+      atRisk: () =>
+        SECTIONS.filter(
+          section =>
+            isDirty(section) || section === pendingSection || get(section).state === 'unconfirmed'
+        ),
       changedFields: section => {
         const s = get(section);
         return s.draft ? changedFields(section, s.baseline, s.draft) : [];

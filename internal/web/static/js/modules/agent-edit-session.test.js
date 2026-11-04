@@ -288,3 +288,78 @@ test('a non-overlapping outside change rebases the untouched field into the draf
     expected_version: 'v2'
   });
 });
+
+const receiptFor = (values, version) => ({
+  kind: 'saved',
+  version,
+  receipt: { version, agent: agent({ ...values, version }) }
+});
+
+test('exact unsaved text and tags are kept as typed', () => {
+  const s = api.createSession(agent());
+  s.setDraft('prompt', { system_prompt: '  Leading and trailing  \n' });
+  s.setDraft('profile', { tags: ['  spaced  ', 'b'] });
+  assert.equal(s.draft('prompt').system_prompt, '  Leading and trailing  \n');
+  assert.deepEqual(plain(s.draft('profile').tags), ['  spaced  ', 'b']);
+  // Another section saving reconciles without rewriting what was typed.
+  s.observe(agent({ version: 'v2', temperature: 0.2 }));
+  assert.equal(s.draft('prompt').system_prompt, '  Leading and trailing  \n');
+  assert.deepEqual(plain(s.draft('profile').tags), ['  spaced  ', 'b']);
+});
+
+test('configuration and prompt drafts save in either order without resetting each other', () => {
+  for (const order of [
+    ['configuration', 'prompt'],
+    ['prompt', 'configuration']
+  ]) {
+    const s = api.createSession(agent());
+    s.setDraft('configuration', { temperature: 0.3 });
+    s.setDraft('prompt', { system_prompt: 'New prompt' });
+    let saved = {};
+    let version = 1;
+    for (const section of order) {
+      const payload = s.beginSubmit(section);
+      assert.equal(payload.expected_version, `v${version}`, `${order} ${section}`);
+      const fields = section === 'prompt' ? { system_prompt: 'New prompt' } : { temperature: 0.3 };
+      saved = { ...saved, ...fields };
+      version += 1;
+      s.finishSubmit(section, receiptFor(saved, `v${version}`));
+      s.observe(agent({ ...saved, version: `v${version}` }));
+      const other = order.find(name => name !== section);
+      if (section === order[0]) assert.equal(s.isDirty(other), true, `${other} kept`);
+    }
+    assert.deepEqual(plain(s.atRisk()), []);
+  }
+});
+
+test('the token changing because another section saved does not clear or conflict a draft', () => {
+  const s = api.createSession(agent());
+  s.setDraft('prompt', { system_prompt: 'Draft' });
+  s.setDraft('configuration', { temperature: 0.1 });
+  s.beginSubmit('configuration');
+  // While configuration is in flight, its own section is skipped.
+  assert.equal(s.observe(agent({ version: 'v1b' })).configuration, undefined);
+  s.finishSubmit('configuration', receiptFor({ temperature: 0.1 }, 'v2'));
+  assert.equal(s.observe(agent({ temperature: 0.1, version: 'v2' })).prompt, 'unchanged');
+  assert.equal(s.state('prompt'), 'dirty');
+  assert.equal(s.version('prompt'), 'v2');
+  assert.equal(s.version('configuration'), 'v2');
+});
+
+test('atRisk names dirty, saving, and unconfirmed sections', () => {
+  const s = api.createSession(agent());
+  assert.deepEqual(plain(s.atRisk()), []);
+  s.setDraft('profile', { description: 'x' });
+  s.setDraft('prompt', { system_prompt: 'y' });
+  s.beginSubmit('prompt');
+  assert.deepEqual(plain(s.atRisk()).sort(), ['profile', 'prompt']);
+  s.finishSubmit('prompt', { kind: 'unconfirmed' });
+  s.discard('profile');
+  assert.deepEqual(plain(s.atRisk()), ['prompt']);
+  // Typing the saved value back is not a change.
+  const t = api.createSession(agent());
+  t.setDraft('prompt', { system_prompt: 'Changed' });
+  t.setDraft('prompt', { system_prompt: 'Be brief.' });
+  assert.equal(t.isDirty('prompt'), false);
+  assert.throws(() => t.discard('nope'), /Unknown section/);
+});

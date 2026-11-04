@@ -270,3 +270,372 @@ test.describe('save contract', () => {
     }
   });
 });
+
+async function editTemperature(page: Page, value: string) {
+  if (!(await page.locator('#editTemperature').isVisible())) {
+    await page.locator('#editConfigBtn').click();
+  }
+  await page.locator('#editTemperature').fill(value);
+}
+
+// Counts beforeunload prompts and answers each one with `stay` or leave.
+function leavePrompts(page: Page, answer: 'stay' | 'leave') {
+  const seen: string[] = [];
+  page.on('dialog', dialog => {
+    if (dialog.type() !== 'beforeunload') return;
+    seen.push(dialog.type());
+    void (answer === 'stay' ? dialog.dismiss() : dialog.accept());
+  });
+  return seen;
+}
+
+test.describe('draft isolation', () => {
+  for (const order of [
+    ['configuration', 'prompt'],
+    ['prompt', 'configuration']
+  ]) {
+    test(`configuration and prompt drafts survive each other's save (${order.join(' then ')})`, async ({
+      page,
+      request
+    }) => {
+      const name = await createAgent(request);
+      try {
+        await openAgent(page, name);
+        const sent = recordPatches(page);
+        await editTemperature(page, '0.4');
+        await editPrompt(page, 'Prompt draft');
+        await expect(page.locator('#configEditBadge')).toHaveText('Unsaved changes');
+        await expect(page.locator('#promptEditBadge')).toHaveText('Unsaved changes');
+
+        const save = {
+          configuration: async () => {
+            await page.locator('#saveConfigBtn').click();
+            await expect(page.locator('#configEditStatus')).toContainText(/updated|Default model/);
+          },
+          prompt: async () => {
+            await page.locator('#savePromptBtn').click();
+            await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+          }
+        };
+        await save[order[0]]();
+        // The other section's input is untouched by the first save.
+        if (order[0] === 'configuration')
+          await expect(page.locator('#editSystemPrompt')).toHaveValue('Prompt draft');
+        else await expect(page.locator('#editTemperature')).toHaveValue('0.4');
+        await save[order[1]]();
+
+        const stored = await detail(request, name);
+        expect(stored.system_prompt).toBe('Prompt draft');
+        expect(stored.temperature).toBe(0.4);
+        expect(sent).toHaveLength(2);
+        const bySection = (key: string) => sent.find(body => key in body);
+        expect(Object.keys(bySection('system_prompt')).sort()).toEqual([
+          'expected_version',
+          'system_prompt'
+        ]);
+        expect(Object.keys(bySection('temperature')).sort()).toEqual([
+          'expected_version',
+          'temperature'
+        ]);
+        await expect(page.locator('#configEditBadge')).toBeHidden();
+        await expect(page.locator('#promptEditBadge')).toBeHidden();
+      } finally {
+        await removeAgent(request, name);
+      }
+    });
+  }
+
+  test('saving the profile keeps an open prompt draft', async ({ page, request }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await editPrompt(page, 'Unsaved prompt');
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileDescriptionInput').fill('Saved description');
+      await page.locator('#profileSaveBtn').click();
+      await expect(page.locator('#profileEditModal')).toBeHidden();
+      await expect(page.locator('#agentDescription')).toHaveText('Saved description');
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Unsaved prompt');
+      await expect(page.locator('#promptEditBadge')).toHaveText('Unsaved changes');
+      expect((await detail(request, name)).system_prompt).toBe('Original prompt.');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('an invalid profile save leaves other drafts alone', async ({ page, request }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await editTemperature(page, '0.9');
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileAgentNameInput').fill('bad/name');
+      await page.locator('#profileSaveBtn').click();
+      await expect(page.locator('#profileEditStatus')).toContainText('invalid characters');
+      await expect(page.locator('#editTemperature')).toHaveValue('0.9');
+      await expect(page.locator('#configEditBadge')).toHaveText('Unsaved changes');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('an older read arriving after a save cannot repaint the saved value', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      let release: () => void = () => {};
+      const held = new Promise<void>(resolve => (release = resolve));
+      let holding = true;
+      await page.route(`**/api/agents/${encodeURIComponent(name)}/detail`, async route => {
+        if (!holding) return route.continue();
+        holding = false;
+        const stale = await route.fetch(); // the values before the save
+        const body = await stale.text();
+        await held;
+        await route.fulfill({ status: 200, contentType: 'application/json', body });
+      });
+      // A focus read starts and is held with the pre-save values.
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await editPrompt(page, 'Saved while the read was held');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+      release();
+      await page.waitForTimeout(300);
+      await expect(page.locator('#promptDisplay')).toHaveText('Saved while the read was held');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('returning to the tab after an outside edit keeps the draft and flags the conflict', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await editPrompt(page, 'My draft');
+      const other = await request.patch(`/api/agents/${encodeURIComponent(name)}`, {
+        data: { system_prompt: 'Changed elsewhere' }
+      });
+      expect(other.ok()).toBeTruthy();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(page.locator('#promptEditBadge')).toHaveText('Changed elsewhere — review');
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('My draft');
+      await expect(page.locator('#promptEditStatus')).toContainText('changed elsewhere');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('double-clicking Save sends one request', async ({ page, request }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const sent = recordPatches(page);
+      await page.route(`**/api/agents/${encodeURIComponent(name)}`, async route => {
+        await new Promise(resolve => setTimeout(resolve, 400)); // a slow answer
+        await route.continue();
+      });
+      await editPrompt(page, 'Once');
+      await page.locator('#savePromptBtn').dblclick();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+      expect(sent).toHaveLength(1);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('while one section saves, the others stay editable but cannot start a save', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      let release: () => void = () => {};
+      const held = new Promise<void>(resolve => (release = resolve));
+      await page.route(`**/api/agents/${encodeURIComponent(name)}`, async route => {
+        await held;
+        await route.continue();
+      });
+      await editTemperature(page, '0.2');
+      await editPrompt(page, 'Typing during a save');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditBadge')).toHaveText('Saving…');
+      await expect(page.locator('#editSystemPrompt')).toBeDisabled();
+      await expect(page.locator('#saveConfigBtn')).toBeDisabled();
+      await page.locator('#editTemperature').fill('0.25');
+      release();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+      await expect(page.locator('#editTemperature')).toHaveValue('0.25');
+      await expect(page.locator('#saveConfigBtn')).toBeEnabled();
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  for (const how of ['Cancel', 'close button', 'Escape', 'backdrop']) {
+    test(`dismissing a dirty profile by ${how} asks first and discards only the profile`, async ({
+      page,
+      request
+    }) => {
+      const name = await createAgent(request);
+      try {
+        await openAgent(page, name);
+        await editPrompt(page, 'Prompt stays');
+        await page.locator('#editProfileButton').click();
+        await expect(page.locator('#profileEditModal')).toBeVisible();
+        await page.locator('#profileDescriptionInput').fill('Throw me away');
+        const dismiss = async () => {
+          if (how === 'Cancel')
+            await page.locator('#profileEditModal .modal-footer [data-bs-dismiss="modal"]').click();
+          else if (how === 'close button')
+            await page.locator('#profileEditModal .btn-close').click();
+          else if (how === 'Escape') await page.keyboard.press('Escape');
+          else await page.mouse.click(5, 5);
+        };
+        await dismiss();
+        const confirm = page.locator('#profileDiscardConfirm');
+        await expect(confirm).toBeVisible();
+        await expect(page.locator('#profileEditModal')).toBeVisible();
+        await expect(confirm.locator('[data-discard-keep]')).toBeFocused();
+
+        await confirm.locator('[data-discard-keep]').click();
+        await expect(confirm).toBeHidden();
+        await expect(page.locator('#profileDescriptionInput')).toHaveValue('Throw me away');
+
+        await dismiss();
+        await confirm.locator('[data-discard-confirm]').click();
+        await expect(page.locator('#profileEditModal')).toBeHidden();
+        await expect(page.locator('#editProfileButton')).toBeFocused();
+        await expect(page.locator('#editSystemPrompt')).toHaveValue('Prompt stays');
+        await page.locator('#editProfileButton').click();
+        await expect(page.locator('#profileDescriptionInput')).toHaveValue('Original');
+      } finally {
+        await removeAgent(request, name);
+      }
+    });
+  }
+
+  test('at phone width the page never scrolls sideways, even with edit badges shown', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await openAgent(page, name);
+      const overflow = () =>
+        page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(await overflow()).toBeLessThanOrEqual(0);
+      await editTemperature(page, '0.3');
+      await editPrompt(page, 'Narrow draft');
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileDescriptionInput').fill('Narrow profile');
+      await expect(page.locator('#profileEditBadge')).toBeVisible();
+      expect(await overflow()).toBeLessThanOrEqual(0);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a clean profile closes without asking', async ({ page, request }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await page.locator('#editProfileButton').click();
+      await expect(page.locator('#profileEditModal')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#profileEditModal')).toBeHidden();
+      await expect(page.locator('#profileDiscardConfirm')).toBeHidden();
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('Cancel on a dirty prompt asks first and keeps the configuration draft', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await editTemperature(page, '0.6');
+      await editPrompt(page, 'Discard me');
+      await page.locator('#editPromptBtn').click(); // "Cancel"
+      const confirm = page.locator('#promptDiscardConfirm');
+      await expect(confirm).toBeVisible();
+      await confirm.locator('[data-discard-keep]').click();
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Discard me');
+      await expect(page.locator('#editPromptBtn')).toBeFocused();
+
+      await page.locator('#editPromptBtn').click();
+      await confirm.locator('[data-discard-confirm]').click();
+      await expect(page.locator('#editSystemPrompt')).toBeHidden();
+      await expect(page.locator('#promptDisplay')).toHaveText('Original prompt.');
+      await expect(page.locator('#editPromptBtn')).toBeFocused();
+      await expect(page.locator('#editTemperature')).toHaveValue('0.6');
+      await expect(page.locator('#configEditBadge')).toHaveText('Unsaved changes');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('leaving with unsaved work warns once, staying keeps it, and a clean page leaves freely', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    const ws = await request.post('/api/workspaces', { data: { name: `${name} WS` } });
+    expect(ws.ok(), await ws.text()).toBeTruthy();
+    const folder = (await ws.json()).folder;
+    try {
+      await page.goto(`/agents/${encodeURIComponent(name)}?tab=workspaces`);
+      await expect(page.locator('[data-workspace-status]')).toContainText('Membership loaded');
+      // Membership and profile both dirty: still exactly one warning.
+      await page.locator(`[data-workspace-id="${folder.id}"]`).check();
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileDescriptionInput').fill('Dirty profile');
+      await page.locator('#profileSaveBtn').focus();
+      const prompts = leavePrompts(page, 'stay');
+      await page.evaluate(() => {
+        window.location.href = '/agents';
+      });
+      await expect.poll(() => prompts.length).toBe(1);
+      await page.waitForTimeout(300);
+      expect(prompts).toHaveLength(1);
+      expect(new URL(page.url()).pathname).toBe(`/agents/${encodeURIComponent(name)}`);
+      await expect(page.locator('#profileDescriptionInput')).toHaveValue('Dirty profile');
+      await expect(page.locator(`[data-workspace-id="${folder.id}"]`)).toBeChecked();
+    } finally {
+      await request.delete(`/api/workspaces/${folder.id}?confirm=true&delete_sessions=true`);
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a saved rename updates the address without a leave warning', async ({ page, request }) => {
+    const name = await createAgent(request);
+    const renamed = `${name} Renamed`;
+    try {
+      await openAgent(page, name);
+      const prompts = leavePrompts(page, 'leave');
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileAgentNameInput').fill(renamed);
+      await page.locator('#profileSaveBtn').click();
+      await expect(page.locator('#profileEditModal')).toBeHidden();
+      await expect(page).toHaveURL(new RegExp(`/agents/${encodeURIComponent(renamed)}$`));
+      await expect(page.locator('#agentName')).toHaveText(renamed);
+      await page.locator('#editPromptBtn').click();
+      await page.reload();
+      await expect(page.locator('#agentName')).toHaveText(renamed);
+      expect(prompts).toHaveLength(0);
+    } finally {
+      await removeAgent(request, renamed);
+      await removeAgent(request, name);
+    }
+  });
+});
