@@ -552,6 +552,32 @@ body.home-command-page .home-command-bridge * {
   overflow-wrap: anywhere;
 }
 
+/* The first week's three rows under the first headline (Issue 776 FR19). */
+.pa-second-brain__checklist {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.pa-second-brain__checklist li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-second-brain__checklist li.is-done .btn,
+.pa-second-brain__checklist li.is-done a {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+.pa-second-brain__check {
+  width: 1.1em;
+  text-align: center;
+  color: var(--hc-muted, inherit);
+}
+.pa-second-brain__checklist li.is-done .pa-second-brain__check {
+  color: var(--bs-success, #2e7d32);
+}
 /* A note Ori wrote, opened inline as plain paragraphs (Issue 776 FR16). */
 .pa-second-brain__doors {
   align-items: center;

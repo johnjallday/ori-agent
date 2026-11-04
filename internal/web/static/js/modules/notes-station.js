@@ -7,6 +7,7 @@
 import {
   OPEN_FOLDER_LABEL,
   previewParagraphs,
+  secondBrainChecklistView,
   secondBrainProjectsView,
   secondBrainProjectLink,
   sinceLabel
@@ -328,7 +329,7 @@ export function previewKey(kind, name) {
   return `${kind}:${name}`;
 }
 
-export function notesSections({ secondBrain, look, inbox, people: listedPeople } = {}) {
+export function notesSections({ secondBrain, look, inbox, people: listedPeople, missions } = {}) {
   const created = isCreatedByOri(secondBrain);
   const result = look?.result || null;
   const groups = openLoopGroups(result?.items, result?.stale);
@@ -344,7 +345,9 @@ export function notesSections({ secondBrain, look, inbox, people: listedPeople }
       notes: Array.isArray(inbox?.notes) ? inbox.notes : [],
       partial: inbox?.partial === true,
       loading: !inbox,
-      empty: 'Nothing in Inbox yet.'
+      empty: 'Nothing in Inbox yet.',
+      // An empty Inbox shows the first week's three things to do (Issue 776 FR19).
+      checklist: secondBrainChecklistView(secondBrain, missions || [])
     });
     const today = secondBrain?.today_note || null;
     sections.push({
@@ -602,10 +605,54 @@ export function previewHTML(preview, key) {
   );
 }
 
+// checklistHTML is the empty Inbox of a folder Ori set up: the first week's
+// three rows with their check marks. Capture focuses the box above; the project
+// question opens in the assistant's drawer.
+export function checklistHTML(checklist) {
+  if (!checklist?.show || !checklist.rows.length) return '';
+  const rows = checklist.rows
+    .map(row => {
+      const label =
+        escapeHtml(row.label) + (row.done ? '<span class="visually-hidden">, done</span>' : '');
+      const control =
+        row.id === 'capture'
+          ? '<button type="button" class="ws-notes-link" data-cmd-modal-action="notes-focus-capture">' +
+            label +
+            '</button>'
+          : '<a class="ws-notes-link" href="' +
+            escapeHtml(row.href || '/?quest=second-brain-project') +
+            '">' +
+            label +
+            '</a>';
+      return (
+        '<li class="ws-notes-checklist-row' +
+        (row.done ? ' is-done' : '') +
+        '" data-checklist-row="' +
+        escapeHtml(row.id) +
+        '"><span class="ws-notes-check" aria-hidden="true">' +
+        (row.done ? '✓' : '○') +
+        '</span>' +
+        control +
+        '</li>'
+      );
+    })
+    .join('');
+  return (
+    '<p class="ws-notes-line">Three things to try this week:</p><ul class="ws-notes-checklist" data-notes-checklist>' +
+    rows +
+    '</ul>'
+  );
+}
+
 function inboxHTML(section, now, panel) {
   if (section.loading) return '<p class="ws-notes-empty">Reading Inbox…</p>';
   if (!section.notes.length)
-    return '<p class="ws-notes-empty">' + escapeHtml(section.empty) + '</p>';
+    return (
+      '<p class="ws-notes-empty">' +
+      escapeHtml(section.empty) +
+      '</p>' +
+      checklistHTML(section.checklist)
+    );
   const rows = section.notes
     .map(
       note =>
@@ -839,7 +886,13 @@ function oneLinerHTML(secondBrain) {
 
 export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {}) {
   const look = panel.look || null;
-  const sections = notesSections({ secondBrain, look, inbox: panel.inbox, people: panel.people });
+  const sections = notesSections({
+    secondBrain,
+    look,
+    inbox: panel.inbox,
+    people: panel.people,
+    missions: panel.missions
+  });
   const tabs = notesTabs(sections);
   const active = activeNotesTab(tabs, panel.tab);
   const ready = panel.status === 'ready';

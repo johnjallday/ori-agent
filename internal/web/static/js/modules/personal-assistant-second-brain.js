@@ -119,9 +119,51 @@ export function secondBrainFillInAnsweredLine(decision) {
 }
 
 // The first look at a new second brain offers the first thing to show Ori
-// (FR13, FR14). The server's headline carries the sentence when the brain is
-// empty; under a headline that counts seeded notes the offer says it itself.
-export const FOLDER_OFFER_LINE = "Show me a folder and I'll start filling it.";
+// (FR13, FR14), under the checklist. It says what showing a folder does
+// (Issue 776 FR9): nothing is read until the user sends.
+export const FOLDER_OFFER_LINE =
+  "Show me a folder and I'll sort it with you. Names that keep coming up become People notes.";
+// What a chip puts in the composer, and the line under the chips once it has.
+export function folderOfferPrefill(label) {
+  return `Show me my ${String(label || 'folder').trim()} folder`;
+}
+export const FOLDER_OFFER_SEND_LINE = "Press send and I'll take a look.";
+
+// The first week's three things to do, under the first headline and as the
+// empty Inbox of a folder Ori set up (Issue 776 FR19). Done comes from the
+// missions; ids, tiers and order of the missions are theirs.
+export const FIRST_WEEK_CHECKLIST = [
+  { id: 'capture', mission: 'pa-capture-first-note', label: 'Capture a note' },
+  {
+    id: 'journal',
+    mission: 'pa-save-first-journal',
+    label: "Write today's Journal",
+    href: '/?journal=1'
+  },
+  { id: 'project', mission: 'pa-give-project', label: 'Tell Ori your project' }
+];
+
+// secondBrainChecklistView: the rows for a folder Ori set up, each with its
+// check mark. Tell Ori your project shows while the question is unanswered or
+// was skipped.
+export function secondBrainChecklistView(secondBrain, missions) {
+  const created =
+    secondBrain?.status === 'connected' && secondBrain?.source?.origin === 'created_by_ori';
+  if (!created) return { show: false, rows: [] };
+  const done = new Set(
+    (Array.isArray(missions) ? missions : [])
+      .filter(mission => mission?.status === 'completed')
+      .map(mission => mission.id)
+  );
+  // A project note on record (the mission done) ends the row too: the reply to
+  // a setup carries no fill_in, so the answer alone cannot be relied on.
+  const projectAsk = secondBrain?.fill_in?.project_ask || '';
+  const rows = FIRST_WEEK_CHECKLIST.filter(
+    row =>
+      row.id !== 'project' || ((!projectAsk || projectAsk === 'skipped') && !done.has(row.mission))
+  ).map(row => ({ ...row, done: done.has(row.mission) }));
+  return { show: true, rows };
+}
 // The usual folders, Downloads first. Which of them the offer shows is the
 // server's list (the one the Add folder sheet uses), so it never offers a folder
 // that is not there; this order only sorts it.
@@ -140,7 +182,13 @@ export function secondBrainFolderOffer(headline, available = null) {
     .map(chip => ({ id: chip.id, label: String(chip.label || chip.id) }))
     .sort((a, b) => rank(a.id) - rank(b.id));
   return {
-    line: String(headline || '').includes(FOLDER_OFFER_LINE) ? '' : FOLDER_OFFER_LINE,
+    // A headline that already asks for a folder (one on record from before
+    // Issue 776) is not repeated.
+    line:
+      String(headline || '').includes(FOLDER_OFFER_LINE) ||
+      String(headline || '').includes(LEGACY_FOLDER_OFFER_LINE)
+        ? ''
+        : FOLDER_OFFER_LINE,
     chips,
     choose: { id: 'choose', label: 'Choose a folder…' }
   };
@@ -733,6 +781,16 @@ export function secondBrainCaptureReceipt(capture) {
 }
 
 // secondBrainQuestRequested says the mission card sent the user here.
+// secondBrainProjectQuestRequested: Give Ori a project's action URL
+// (/?quest=second-brain-project) opens the drawer on the project question.
+export function secondBrainProjectQuestRequested(search) {
+  try {
+    return new URLSearchParams(search || '').get('quest') === 'second-brain-project';
+  } catch (_) {
+    return false;
+  }
+}
+
 export function secondBrainQuestRequested(search) {
   try {
     return new URLSearchParams(search || '').get('quest') === 'second-brain';
@@ -839,7 +897,11 @@ const state = {
   askShownHere: false,
   // The note opened inline ("kind:name"), and a sentence from Open folder.
   preview: { key: '', status: '', note: null, message: '' },
-  doorMessage: ''
+  doorMessage: '',
+  // The missions behind the checklist, null until read; the folder a chip put
+  // in the composer (FR9, FR19).
+  missions: null,
+  offerPrefilled: ''
 };
 
 let pathEntry = null;
@@ -972,12 +1034,95 @@ function renderFolderOffer(body, headline) {
   row.dataset.secondBrainFolderOffer = '';
   offer.chips.forEach(chip =>
     row.append(
-      button({ ...chip, label: chip.label, style: 'outline' }, () => void showFolder(chip.id))
+      button(
+        { ...chip, label: chip.label, style: 'outline' },
+        () => void showFolder(chip.id, chip.label)
+      )
     )
   );
   row.append(button({ ...offer.choose, style: 'link' }, () => void showFolder('')));
   body.append(row);
+  // The chip attached the folder and filled in the message; nothing is read
+  // until the user sends it (FR9).
+  if (state.offerPrefilled) {
+    const line = node('p', 'pa-folder__note', FOLDER_OFFER_SEND_LINE);
+    line.setAttribute('role', 'status');
+    body.append(line);
+  }
   if (state.folderChips === null) void loadFolderChips();
+}
+
+// renderChecklist is the first week's three rows under the first headline,
+// with the capture box the first row focuses (Issue 776 FR19).
+function renderChecklist(body) {
+  // A setup that just wrote the project note answered the question, whatever
+  // the reply to /create carried.
+  const secondBrain =
+    state.offerFolder && state.setup?.project
+      ? {
+          ...state.secondBrain,
+          fill_in: { ...(state.secondBrain?.fill_in || {}), project_ask: 'answered' }
+        }
+      : state.secondBrain;
+  const view = secondBrainChecklistView(secondBrain, state.missions);
+  if (!view.show) return;
+  if (state.missions === null) void loadMissions();
+  const list = node('ul', 'pa-second-brain__checklist');
+  list.dataset.secondBrainChecklist = '';
+  for (const row of view.rows) {
+    const item = node('li', row.done ? 'is-done' : '');
+    item.dataset.checklistRow = row.id;
+    const mark = node('span', 'pa-second-brain__check', row.done ? '✓' : '○');
+    mark.setAttribute('aria-hidden', 'true');
+    item.append(mark);
+    let control;
+    if (row.href) {
+      control = node('a', 'pa-second-brain__open', row.label);
+      control.href = row.href;
+    } else {
+      control = button({ id: `checklist-${row.id}`, label: row.label, style: 'link' }, () => {
+        if (row.id === 'capture') focusCapture();
+        else void askProjectNow();
+      });
+    }
+    if (row.done) control.setAttribute('aria-label', `${row.label}, done`);
+    item.append(control);
+    list.append(item);
+  }
+  body.append(list);
+  renderCapture(body);
+}
+
+function focusCapture() {
+  const box = document.querySelector('#personalAssistantSecondBrain [data-second-brain-capture]');
+  box?.focus?.();
+}
+
+// askProjectNow asks the project question in the conversation, also after a
+// skip: the checklist row and the Give Ori a project mission ask it on request.
+async function askProjectNow() {
+  state.latest = true;
+  if (await openProjectAsk()) {
+    state.pinned = false;
+    render();
+  }
+}
+
+// loadMissions reads the missions behind the checklist's check marks.
+let missionsLoading = false;
+async function loadMissions() {
+  if (missionsLoading) return;
+  missionsLoading = true;
+  try {
+    const response = await fetch('/api/progression', { headers: { Accept: 'application/json' } });
+    const payload = response.ok ? await response.json().catch(() => null) : null;
+    state.missions = Array.isArray(payload?.missions) ? payload.missions : [];
+  } catch (_) {
+    state.missions = [];
+  } finally {
+    missionsLoading = false;
+  }
+  render();
 }
 
 // loadFolderChips asks the server which usual folders exist, the way the Add
@@ -1004,11 +1149,18 @@ async function loadFolderChips() {
 // next message exactly as Add folder does. Nothing is read until the user sends.
 // The offer stays until a folder is actually attached, so a chip that could not
 // be chosen leaves the others to try.
-async function showFolder(chip) {
+async function showFolder(chip, label = '') {
   const context = window.PersonalAssistantFolderContext;
   if (chip && typeof context?.selectChip === 'function') {
     if ((await context.selectChip(chip)) === true) {
-      state.offerDismissed = true;
+      // The message waits in the composer: sending it is what starts the look.
+      const input = document.getElementById('personalAssistantInput');
+      if (input) {
+        input.value = folderOfferPrefill(label || chip);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+      }
+      state.offerPrefilled = label || chip;
       render();
     }
     return;
@@ -1797,6 +1949,8 @@ async function capture() {
       : ''
   };
   await refresh();
+  // A capture ticks the checklist's first row.
+  await loadMissions();
   render();
   announce();
 }
@@ -1855,15 +2009,34 @@ async function loadSetupInterview() {
   if (!ok || state.project !== project) return;
   const question = (payload.questions || []).find(item => item.id === PROJECT_QUESTION_ID);
   if (Number(payload.state_version) >= 1) project.stateVersion = Number(payload.state_version);
-  if (question?.hint) project.hint = String(question.hint);
+  let visible = false;
+  if (question?.hint && question.hint !== project.hint) {
+    project.hint = String(question.hint);
+    visible = true;
+  }
   if (payload.suggestion?.text) {
     project.suggestion = {
       text: String(payload.suggestion.text),
       folder: String(payload.suggestion.folder || '')
     };
+    visible = true;
   }
-  if (state.phase === 'setup' && state.setup.step === 'project' && project.status === 'ask') {
+  // Only a hint or a suggestion changes what the step shows. A repaint while the
+  // user types keeps the text (it is in project.answer), the focus and the caret.
+  if (
+    visible &&
+    state.phase === 'setup' &&
+    state.setup.step === 'project' &&
+    project.status === 'ask'
+  ) {
+    const typing = document.activeElement?.matches?.('[data-project-answer]');
+    const caret = typing ? document.activeElement.selectionStart : null;
     render();
+    if (typing) {
+      const area = document.querySelector('#personalAssistantSecondBrain [data-project-answer]');
+      area?.focus?.();
+      if (area && caret != null) area.setSelectionRange(caret, caret);
+    }
   }
 }
 
@@ -2133,6 +2306,10 @@ function renderLook(body) {
   renderDoors(body, {
     project: state.offerFolder && state.setup?.project?.name ? state.setup.project.name : ''
   });
+  // The first look of a folder Ori set up: the checklist, then the offer (FR19).
+  if (state.offerFolder || String(view.headline || '').startsWith('Your notes are set up')) {
+    renderChecklist(body);
+  }
   if (
     secondBrainFolderOfferShows({
       justSetUp: state.offerFolder,
@@ -2799,7 +2976,13 @@ function init() {
     // user's approved filing taught Ori, answered in place.
     openLearned,
     // The project question, on request (the drawer asks it by itself in order).
-    openProject: showProjectAskIfDue,
+    // The project question on request: the checklist row and the Give Ori a
+    // project mission (/?quest=second-brain-project, Issue 776 FR20).
+    openProject: async () => {
+      if (!state.secondBrain) await load();
+      state.history = [];
+      await askProjectNow();
+    },
     // Today's ask row and the mission card (/?quest=second-brain): the ask while
     // it is unanswered or offered again (Issue 776 FR12), otherwise the
     // connection's own card.
@@ -2858,13 +3041,14 @@ function init() {
       if (state.pinned) setPhase(state.phase, { focus: false });
     }
   };
-  if (secondBrainQuestRequested(window.location.search)) startQuestArrival();
+  if (secondBrainProjectQuestRequested(window.location.search)) startQuestArrival('project');
+  else if (secondBrainQuestRequested(window.location.search)) startQuestArrival();
 }
 
 // startQuestArrival is the mission card's Start (/?quest=second-brain): open
 // the drawer on the chooser once the panel knows the assistant, then scrub
 // the query so a reload does not open it again.
-function startQuestArrival() {
+function startQuestArrival(target = 'ask') {
   try {
     const url = new URL(window.location.href);
     url.searchParams.delete('quest');
@@ -2878,7 +3062,8 @@ function startQuestArrival() {
     if (done || !panel || typeof panel.open !== 'function') return;
     if (!panel.open(document.getElementById('personalAssistantLauncher'), { focus: false })) return;
     done = true;
-    void window.PersonalAssistantSecondBrain.openAsk();
+    if (target === 'project') void window.PersonalAssistantSecondBrain.openProject();
+    else void window.PersonalAssistantSecondBrain.openAsk();
   };
   attempt();
   if (done) return;

@@ -8,6 +8,7 @@ import {
   mergePeople,
   personMeta,
   previewHTML,
+  checklistHTML,
   firstNonEmptySection,
   itemActions,
   lookAgeLine,
@@ -340,6 +341,34 @@ test('Open shows only on notes Ori wrote, and expands them inline as text', () =
   );
   assert.ok(refused.includes('role="alert">That note is yours; open it in your editor.</p>'));
   assert.equal(previewHTML({ key: 'other' }, 'project:Launch'), '');
+});
+
+test('an empty Inbox of a folder Ori set up shows the first-week checklist', () => {
+  const html = notesPanelHTML({
+    secondBrain: created({ fill_in: { project_ask: 'skipped' } }),
+    now: NOW,
+    panel: {
+      status: 'ready',
+      tab: 'inbox',
+      inbox: { notes: [], total: 0 },
+      look: { state: 'none' },
+      missions: [{ id: 'pa-save-first-journal', status: 'completed' }]
+    }
+  });
+  assert.ok(html.includes('data-notes-checklist'));
+  assert.ok(html.includes('data-cmd-modal-action="notes-focus-capture">Capture a note</button>'));
+  assert.ok(
+    html.includes(
+      '<li class="ws-notes-checklist-row is-done" data-checklist-row="journal"><span class="ws-notes-check" aria-hidden="true">✓</span><a class="ws-notes-link" href="/?journal=1">'
+    )
+  );
+  assert.ok(html.includes('href="/?quest=second-brain-project">Tell Ori your project'));
+  const answered = checklistHTML({
+    show: true,
+    rows: [{ id: 'capture', label: 'Capture a note', done: false }]
+  });
+  assert.ok(!answered.includes('Tell Ori your project'));
+  assert.equal(checklistHTML({ show: false, rows: [] }), '');
 });
 
 test('the header has Open folder for any connected folder', () => {

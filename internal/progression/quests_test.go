@@ -934,6 +934,25 @@ func missionLocks(e *Engine) []string {
 	return got
 }
 
+// Give Ori a project asks the project question, by its own URL; the other two
+// first-week missions keep theirs (Issue 776 FR20).
+func TestPersonalAssistantGraph_GiveOriAProjectOpensTheQuestion(t *testing.T) {
+	byID := map[string]Quest{}
+	for _, quest := range PersonalAssistantGraph().Quests {
+		byID[quest.ID] = quest
+	}
+	give := byID[GiveProjectQuestID]
+	if give.ActionLabel != "Tell Ori your project" || give.ActionURL != "/?quest=second-brain-project" {
+		t.Fatalf("give a project = %q %q", give.ActionLabel, give.ActionURL)
+	}
+	if byID[CaptureFirstNoteQuestID].ActionURL != SecondBrainActionURL || byID[SaveFirstJournalQuestID].ActionURL != FirstBriefFallbackURL {
+		t.Fatalf("other first-week URLs changed: %q %q", byID[CaptureFirstNoteQuestID].ActionURL, byID[SaveFirstJournalQuestID].ActionURL)
+	}
+	if setUp := byID[SecondBrainQuestID]; setUp.Title != "Set up your notes" {
+		t.Fatalf("pa-second-brain title = %q", setUp.Title)
+	}
+}
+
 func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
 

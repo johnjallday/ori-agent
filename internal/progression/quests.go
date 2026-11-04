@@ -72,6 +72,10 @@ func SecondBrainFirstWeekQuestIDs() []string {
 // SecondBrainActionURL opens Home with the assistant's second-brain chooser.
 const SecondBrainActionURL = "/?quest=second-brain"
 
+// SecondBrainProjectActionURL opens the drawer on the project question (Issue 776
+// FR20), so Give Ori a project asks it instead of showing the connection card.
+const SecondBrainProjectActionURL = "/?quest=second-brain-project"
+
 // MeetAssistantActionURL starts Ori's deterministic Mission 01 walkthrough from
 // its first step, on Home: Ori points at the Agents nav entry and the user
 // clicks it, then the Agents page walks them through the New Agent panel's
@@ -501,8 +505,8 @@ func PersonalAssistantGraph() Graph {
 			LockedReason: "Set up your notes first",
 			Title:        "Give Ori a project",
 			Why:          "A workspace, or the project you tell Ori about, becomes a note in Projects that you can turn into a workspace.",
-			ActionURL:    SecondBrainActionURL,
-			ActionLabel:  "Open my notes",
+			ActionURL:    SecondBrainProjectActionURL,
+			ActionLabel:  "Tell Ori your project",
 			Satisfied:    func(s Snapshot) bool { return s.SecondBrainProject },
 		},
 		// Retired objectives sit on tier 3 or later, so they never affect which

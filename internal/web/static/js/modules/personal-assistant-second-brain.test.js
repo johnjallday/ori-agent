@@ -23,6 +23,11 @@ import {
   secondBrainAnsweredLine,
   secondBrainAskView,
   secondBrainAskPinned,
+  secondBrainChecklistView,
+  FIRST_WEEK_CHECKLIST,
+  folderOfferPrefill,
+  FOLDER_OFFER_SEND_LINE,
+  secondBrainProjectQuestRequested,
   secondBrainPreviewPath,
   previewParagraphs,
   fetchSecondBrainPreview,
@@ -516,6 +521,65 @@ test('preview and Open folder report the server sentence on refusal', async () =
   assert.equal(calls[0].url, '/api/personal-assistant/second-brain/open-folder');
   assert.deepEqual(Object.keys(JSON.parse(calls[0].init.body)), ['request_id']);
   assert.equal(OPEN_FOLDER_LABEL, 'Open folder');
+});
+
+test('the first-week checklist ticks from the missions and asks the project only while unanswered', () => {
+  const created = {
+    status: 'connected',
+    source: { name: 'Second Brain', origin: 'created_by_ori' },
+    fill_in: { state: 'allowed' }
+  };
+  const view = secondBrainChecklistView(created, [
+    { id: 'pa-capture-first-note', status: 'completed' },
+    { id: 'pa-save-first-journal', status: 'available' }
+  ]);
+  assert.equal(view.show, true);
+  assert.deepEqual(
+    view.rows.map(row => [row.id, row.label, row.done]),
+    [
+      ['capture', 'Capture a note', true],
+      ['journal', "Write today's Journal", false],
+      ['project', 'Tell Ori your project', false]
+    ]
+  );
+  assert.equal(view.rows[1].href, '/?journal=1');
+  const skipped = secondBrainChecklistView({ ...created, fill_in: { project_ask: 'skipped' } }, []);
+  assert.ok(skipped.rows.some(row => row.id === 'project'));
+  const answered = secondBrainChecklistView(
+    { ...created, fill_in: { project_ask: 'answered' } },
+    []
+  );
+  assert.deepEqual(
+    answered.rows.map(row => row.id),
+    ['capture', 'journal']
+  );
+  // A project note on record ends the row even when the reply carried no fill_in
+  // (the reply to /create does not).
+  const written = secondBrainChecklistView({ ...created, fill_in: undefined }, [
+    { id: 'pa-give-project', status: 'completed' }
+  ]);
+  assert.ok(!written.rows.some(row => row.id === 'project'));
+  const vault = { ...created, source: { name: 'Vault', origin: 'connected' } };
+  assert.equal(secondBrainChecklistView(vault, []).show, false);
+  assert.deepEqual(
+    FIRST_WEEK_CHECKLIST.map(row => row.mission),
+    ['pa-capture-first-note', 'pa-save-first-journal', 'pa-give-project']
+  );
+});
+
+test('the folder offer says what it does and waits for send', () => {
+  assert.equal(
+    FOLDER_OFFER_LINE,
+    "Show me a folder and I'll sort it with you. Names that keep coming up become People notes."
+  );
+  assert.equal(folderOfferPrefill('Downloads'), 'Show me my Downloads folder');
+  assert.equal(FOLDER_OFFER_SEND_LINE, "Press send and I'll take a look.");
+});
+
+test('Give Ori a project arrives on the project question', () => {
+  assert.equal(secondBrainProjectQuestRequested('?quest=second-brain-project'), true);
+  assert.equal(secondBrainProjectQuestRequested('?quest=second-brain'), false);
+  assert.equal(secondBrainQuestRequested('?quest=second-brain-project'), false);
 });
 
 test('a decline ends the turn with one line', () => {
