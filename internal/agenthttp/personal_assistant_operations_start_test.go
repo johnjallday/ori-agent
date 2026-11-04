@@ -148,9 +148,9 @@ func TestOperationErrorCode_TaskRefusalsHaveStableCategories(t *testing.T) {
 	}{
 		{&assistantops.Refusal{Kind: assistantops.ErrStartRefused, Reason: "The task is in the backlog."}, http.StatusConflict, "operation_start_refused", "The task is in the backlog."},
 		{&assistantops.Refusal{Kind: assistantops.ErrAssignee, Reason: "Mixer is not in this workspace any more."}, http.StatusConflict, "operation_assignee", "Mixer is not in this workspace any more."},
-		{fmt.Errorf("%w: internal", assistantops.ErrStartRefused), http.StatusConflict, "operation_start_refused", "Ori could not start the task right now."},
-		{fmt.Errorf("%w: Ghost", assistantops.ErrAssignee), http.StatusConflict, "operation_assignee", "The task's agent is not in this workspace. Reassign the task, then start it."},
-		{fmt.Errorf("%w: task-1", assistantops.ErrTaskMissing), http.StatusGone, "operation_invalidated", "The task no longer exists."},
+		{fmt.Errorf("%w: internal", assistantops.ErrStartRefused), http.StatusConflict, "operation_start_refused", "Ori could not start the ticket right now."},
+		{fmt.Errorf("%w: Ghost", assistantops.ErrAssignee), http.StatusConflict, "operation_assignee", "The ticket's agent is not in this workspace. Reassign the ticket, then start it."},
+		{fmt.Errorf("%w: task-1", assistantops.ErrTaskMissing), http.StatusGone, "operation_invalidated", "The ticket no longer exists."},
 	}
 	for _, tc := range cases {
 		status, code, message := operationErrorCode(tc.err)

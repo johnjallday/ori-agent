@@ -172,7 +172,7 @@ func (h *LLMTaskHandler) resolveRecipeProvider(agentName string, task Task, reci
 		return recipeProvider{}, &TaskBlockedError{
 			ReasonCode: RecipeAssistantMissing,
 			Reason:     "The assistant this assessment is assigned to is not available." + nothingSent,
-			Question:   "Assign the task to an assistant in this workspace, then try again.",
+			Question:   "Assign the ticket to an assistant in this workspace, then try again.",
 		}
 	}
 	model := strings.TrimSpace(ag.Settings.Model)
@@ -368,7 +368,7 @@ func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, ta
 	current := recipeExecutor(task, agentName, chosen)
 	reviewed, _ := task.Context[TaskContextReviewedExecutor].(string)
 	if (recipe == FirstTaskRecipeFolderSummary || reviewed != "") && reviewed != current.Digest {
-		return "", &TaskBlockedError{ReasonCode: "execution_changed", Reason: "Review the current task executor, model and permitted file scope before starting this summary. Nothing was read or sent to a model."}
+		return "", &TaskBlockedError{ReasonCode: "execution_changed", Reason: "Review the current ticket executor, model and permitted file scope before starting this summary. Nothing was read or sent to a model."}
 	}
 	runner := h.recipes[recipe]
 	window := llm.ResolveModelContextWindow(chosen.provider, chosen.model)

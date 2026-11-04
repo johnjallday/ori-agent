@@ -115,13 +115,13 @@ func (h *LLMTaskHandler) buildMissingAssignedAgentBlockedError(agentName string,
 
 	reason := fmt.Sprintf("Assigned agent %s is no longer available.", normalizedAgentName)
 	question := fmt.Sprintf(
-		"This task is assigned to %s, but that agent no longer exists. Switch to another agent or recreate it, then retry.",
+		"This ticket is assigned to %s, but that agent no longer exists. Switch to another agent or recreate it, then retry.",
 		normalizedAgentName,
 	)
 	if isWorkspaceAgent {
 		reason = fmt.Sprintf("Assigned workspace agent %s is no longer available.", normalizedAgentName)
 		question = fmt.Sprintf(
-			"This task still points at workspace agent %s, but that agent no longer exists as a runnable definition. Switch to another agent or recreate it, then retry.",
+			"This ticket still points at workspace agent %s, but that agent no longer exists as a runnable definition. Switch to another agent or recreate it, then retry.",
 			normalizedAgentName,
 		)
 	}

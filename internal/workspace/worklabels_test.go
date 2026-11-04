@@ -16,6 +16,10 @@ func TestWorkLabels_DisplayStringSitesNeverSayTask(t *testing.T) {
 	questCopy := regexp.MustCompile(`(?m)^\s*(Title|Why):\s*"[^"]*\b[Tt]asks?\b[^"]*"`)
 	defaultGroupTitle := regexp.MustCompile(`(Title:|title =)\s*"Tasks"`)
 	jsonCopy := regexp.MustCompile(`"(title|description|button|label|why)":\s*"[^"]*\b[Tt]asks?\b[^"]*"`)
+	// Notification and execution-trace titles/messages, and the questions,
+	// reasons and summaries a blocked ticket shows a person.
+	titleCopy := regexp.MustCompile(`(?m)^\s*(title|message|entry\.Title)\s*=\s*(fmt\.Sprintf\()?"[^"]*\b[Tt]asks?\b[^"]*"`)
+	blockedCopy := regexp.MustCompile(`(?m)\b(Question|Reason|Summary):\s*(fmt\.Sprintf\()?"[^"]*\b[Tt]asks?\b[^"]*"`)
 
 	sites := []struct {
 		file      string
@@ -25,6 +29,15 @@ func TestWorkLabels_DisplayStringSitesNeverSayTask(t *testing.T) {
 		{"task_result_types.go", []*regexp.Regexp{defaultGroupTitle}},
 		{"../orchestrationhttp/task_result_promote.go", []*regexp.Regexp{defaultGroupTitle}},
 		{"../hostquests/email-ops-setup.json", []*regexp.Regexp{jsonCopy}},
+		{"notifications.go", []*regexp.Regexp{titleCopy}},
+		{"task_execution_trace.go", []*regexp.Regexp{titleCopy}},
+		{"task_handler.go", []*regexp.Regexp{blockedCopy}},
+		{"task_offline_fallback.go", []*regexp.Regexp{blockedCopy}},
+		{"task_assessment.go", []*regexp.Regexp{blockedCopy}},
+		{"../orchestrationhttp/task_response_analysis.go", []*regexp.Regexp{blockedCopy}},
+		{"../orchestrationhttp/task_execution.go", []*regexp.Regexp{blockedCopy}},
+		{"../orchestrationhttp/task_operation.go", []*regexp.Regexp{blockedCopy}},
+		{"../assistantops/task.go", []*regexp.Regexp{blockedCopy}},
 	}
 	for _, site := range sites {
 		t.Run(filepath.Base(site.file), func(t *testing.T) {

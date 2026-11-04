@@ -1643,7 +1643,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "needs_user_confirmation")
 			return "", &workspace.TaskBlockedError{
 				ReasonCode: "needs_user_confirmation",
-				Reason:     fmt.Sprintf("Task still needs confirmation after %d autonomous attempts", maxAttempts),
+				Reason:     fmt.Sprintf("Ticket still needs confirmation after %d autonomous attempts", maxAttempts),
 				Question:   extractClarificationQuestion(result),
 				SuggestedActions: []string{
 					"continue_with_instruction",
@@ -1731,8 +1731,8 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 				recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "structured_output_invalid")
 				return "", &workspace.TaskBlockedError{
 					ReasonCode: "structured_output_invalid",
-					Reason:     fmt.Sprintf("Task did not return valid structured output after %d attempts", maxAttempts),
-					Question:   "The task result did not match the required JSON schema. Should I retry, revise the schema, or continue with your guidance?",
+					Reason:     fmt.Sprintf("Ticket did not return valid structured output after %d attempts", maxAttempts),
+					Question:   "The ticket result did not match the required JSON schema. Should I retry, revise the schema, or continue with your guidance?",
 					SuggestedActions: []string{
 						"continue_with_instruction",
 						"retry",
@@ -1764,8 +1764,8 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 	recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "retry_exhausted")
 	return "", &workspace.TaskBlockedError{
 		ReasonCode: "retry_exhausted",
-		Reason:     fmt.Sprintf("Task failed after %d attempts", maxAttempts),
-		Question:   "I could not complete this task autonomously. Should I retry, switch agents, or continue with your guidance?",
+		Reason:     fmt.Sprintf("Ticket failed after %d attempts", maxAttempts),
+		Question:   "I could not complete this ticket autonomously. Should I retry, switch agents, or continue with your guidance?",
 		SuggestedActions: []string{
 			"continue_with_instruction",
 			"retry",

@@ -354,7 +354,7 @@ func (h *HomeAssistantAskHandler) detectTaskMutationRequest(prompt string) *Home
 	return &HomeActionConfirmation{
 		ActionID:   "create-task",
 		ActionType: HomeActionCreateTask,
-		Summary:    fmt.Sprintf("Create a task in %q: %q?", wsName, desc),
+		Summary:    fmt.Sprintf("Create a ticket in %q: %q?", wsName, desc),
 		Arguments:  map[string]any{"workspace_id": wsID, "description": desc},
 	}
 }
@@ -410,7 +410,7 @@ func (h *HomeAssistantAskHandler) buildStartTaskConfirmation(store workspace.Sto
 	return &HomeActionConfirmation{
 		ActionID:   "start-task",
 		ActionType: HomeActionStartTask,
-		Summary:    fmt.Sprintf("Start the task %q in %q?", truncateTaskLabel(target.Description, 80), wsName),
+		Summary:    fmt.Sprintf("Start the ticket %q in %q?", truncateTaskLabel(target.Description, 80), wsName),
 		Arguments:  map[string]any{"workspace_id": wsID, "task_id": target.ID},
 	}
 }

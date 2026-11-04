@@ -272,13 +272,14 @@ func shouldPromoteTaskListWithGroupTasks(taskList *workspace.TaskListResult) boo
 
 func isGenericTaskListGroupTitle(title string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(title))
-	return normalized == "" || normalized == "tasks" || normalized == "task list"
+	return normalized == "" || normalized == "tasks" || normalized == "task list" ||
+		normalized == strings.ToLower(workspace.LabelResultGroupTitle) || normalized == "ticket list"
 }
 
 func formatPromotedGroupTaskTitle(title string, index int) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		title = "Tasks"
+		title = workspace.LabelResultGroupTitle
 	}
 	if index <= 0 {
 		return title

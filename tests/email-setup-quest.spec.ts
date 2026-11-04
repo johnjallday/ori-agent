@@ -114,7 +114,7 @@ function journeyFixture(state: QuestState) {
       kind: 'summary',
       title: 'Email Ops is ready',
       description:
-        'Your mailbox is linked and Ori can read and search it. Triaging the inbox is a separate task you start when you are ready.',
+        'Your mailbox is linked and Ori can read and search it. Triaging the inbox is a separate ticket you start when you are ready.',
       status: ready ? 'complete' : 'pending',
       actions: ready
         ? [

@@ -270,7 +270,7 @@ func (l *DelegationLoop) executeSubtask(ctx context.Context, workspaceID, taskID
 // Phase 5 layers pause-to-ask on top of this same signal.
 func (l *DelegationLoop) capHit(reason string, failed Task, trigger DelegationTrigger) error {
 	question := fmt.Sprintf(
-		"The coordinator could not resolve %q after adapting (%s). Review and retry, adjust the task, or assign it manually.",
+		"The coordinator could not resolve %q after adapting (%s). Review and retry, adjust the ticket, or assign it manually.",
 		strings.TrimSpace(failed.Description), strings.TrimSpace(trigger.Reason),
 	)
 	return &TaskBlockedError{
@@ -287,7 +287,7 @@ func (l *DelegationLoop) needsInputBlock(adapt CoordinatorAdaptResult, failed Ta
 	question := strings.TrimSpace(adapt.Question)
 	if question == "" {
 		question = fmt.Sprintf(
-			"The coordinator needs your input to continue %q. Provide guidance, or assign the task manually.",
+			"The coordinator needs your input to continue %q. Provide guidance, or assign the ticket manually.",
 			strings.TrimSpace(failed.Description),
 		)
 	}

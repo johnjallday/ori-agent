@@ -100,7 +100,7 @@ function fixtureJourney(stage) {
         ...(ready ? {} : { actions: [{ id: "review_mailbox_link", label: "Review mailbox link", effect: "review" }] })
       }),
       step("summary", "summary", "Email Ops is ready", ready ? "complete" : "pending", {
-        description: "Your mailbox is linked and Ori can read and search it. Triaging the inbox is a separate task you start when you are ready.",
+        description: "Your mailbox is linked and Ori can read and search it. Triaging the inbox is a separate ticket you start when you are ready.",
         ...(ready ? { actions: [{ id: "open_workspace", label: "Open Email Ops", effect: "navigation" }, { id: "open_model_settings", label: "Set up a model", effect: "navigation" }] } : {})
       })
     ]

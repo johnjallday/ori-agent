@@ -27,14 +27,16 @@ func normalizedDigest(t *testing.T, declaration specialist.SetupJourney) string 
 
 // FR 5: changing the compiled shapes must not change how an existing host
 // declaration normalizes. The digest was recorded from the build before this
-// feature added the integration_install and project_setup shapes.
+// feature added the integration_install and project_setup shapes, and
+// re-recorded when the summary step's copy said "ticket" instead of "task"
+// (one-vocabulary): a copy change, not a shape change.
 func TestExistingDeclarationsNormalizeByteIdentically(t *testing.T) {
 	declarations := map[string]specialist.SetupJourney{}
 	for _, quest := range hostquests.All() {
 		declarations["host:"+quest.ID] = quest
 	}
 	want := map[string]string{
-		"host:email_ops_setup": "29e433af71b15096943c4c9af211b3db61c519221328ec0594f28c5b094e6542",
+		"host:email_ops_setup": "c6b713cf80c1797ef3a854f1f2ccadf8553559ecb4c27b70bcc8a7496d48c9f3",
 	}
 	for name, declaration := range declarations {
 		got := normalizedDigest(t, declaration)

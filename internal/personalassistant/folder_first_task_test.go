@@ -214,7 +214,7 @@ func TestFolderFirstTaskExcerpt_OneLineWithinTheLimit(t *testing.T) {
 func TestFolderFirstTaskMessage_OneSentencePerReason(t *testing.T) {
 	want := map[string]string{
 		FolderFirstTaskReasonSetupOpen:       "Open Thesis to finish its setup first.",
-		FolderFirstTaskReasonUnassigned:      "The first task has no agent yet. Open Thesis to assign one.",
+		FolderFirstTaskReasonUnassigned:      "The first ticket has no agent yet. Open Thesis to assign one.",
 		FolderFirstTaskReasonNoModel:         "Add a model in Settings to run the first look.",
 		FolderFirstTaskReasonLocalActivation: "Open Thesis and activate it on this computer.",
 		FolderFirstTaskReasonNeedsInput:      "The first look is waiting for your answer. Open Thesis to continue.",

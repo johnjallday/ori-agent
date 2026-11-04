@@ -210,7 +210,7 @@ func (o operationTaskHost) Task(_ context.Context, workspaceID, taskID string) (
 func (o operationTaskHost) Start(ctx context.Context, workspaceID, taskID string) error {
 	th := o.handler.taskHandlerSub
 	if th == nil {
-		return &assistantops.StartRefusal{Reason: "Task execution is not available on this server."}
+		return &assistantops.StartRefusal{Reason: "Ticket execution is not available on this server."}
 	}
 	return th.StartReviewedTask(ctx, workspaceID, taskID)
 }
@@ -297,7 +297,7 @@ func (th *TaskHandler) unmarkOperationRun(workspaceID, taskID string) {
 // refusal is an *assistantops.StartRefusal worded for the user.
 func (th *TaskHandler) StartReviewedTask(ctx context.Context, workspaceID, taskID string) error {
 	if th == nil || th.taskHandler == nil {
-		return &assistantops.StartRefusal{Reason: "Task execution is not available on this server."}
+		return &assistantops.StartRefusal{Reason: "Ticket execution is not available on this server."}
 	}
 	release, err := th.admissionGate.Enter()
 	if err != nil {
@@ -306,7 +306,7 @@ func (th *TaskHandler) StartReviewedTask(ctx context.Context, workspaceID, taskI
 	defer release()
 	if err := workspace.RequireWorkspaceExecution(ctx, th.workspaceStore, workspaceID, false); err != nil {
 		if errors.Is(err, workspace.ErrWorkspaceExecutionInactive) {
-			return &assistantops.StartRefusal{Reason: "This workspace is not set up to run tasks on this computer yet."}
+			return &assistantops.StartRefusal{Reason: "This workspace is not set up to run tickets on this computer yet."}
 		}
 		return err
 	}
@@ -319,18 +319,18 @@ func (th *TaskHandler) StartReviewedTask(ctx context.Context, workspaceID, taskI
 		return fmt.Errorf("%w: %s", assistantops.ErrTaskMissing, taskID)
 	}
 	if err := workspace.RequireTaskNotBacklog(task, "cannot start task"); err != nil {
-		return &assistantops.StartRefusal{Reason: "The task is in the backlog. Move it out of the backlog before starting it."}
+		return &assistantops.StartRefusal{Reason: "The ticket is in the backlog. Move it out of the backlog before starting it."}
 	}
 	state := operationTaskState(task)
 	switch {
 	case state.Ran:
-		return &assistantops.StartRefusal{Reason: "The task has already run. Run it again from the task itself."}
+		return &assistantops.StartRefusal{Reason: "The ticket has already run. Run it again from the ticket itself."}
 	case !state.Startable:
-		return &assistantops.StartRefusal{Reason: "The task is " + strings.ReplaceAll(state.Status, "_", " ") + " and cannot be started."}
+		return &assistantops.StartRefusal{Reason: "The ticket is " + strings.ReplaceAll(state.Status, "_", " ") + " and cannot be started."}
 	case state.AgentName == "" || strings.EqualFold(state.AgentName, "unassigned"):
-		return &assistantops.StartRefusal{Reason: "Assign the task to an agent before starting it."}
+		return &assistantops.StartRefusal{Reason: "Assign the ticket to an agent before starting it."}
 	case len(ws.GetSubtasks(task.ID)) > 0:
-		return &assistantops.StartRefusal{Reason: "This task has steps of its own. Start it from the task."}
+		return &assistantops.StartRefusal{Reason: "This ticket has steps of its own. Start it from the ticket."}
 	}
 	if task.ExecutionMode == "" {
 		task.ExecutionMode = workspace.TaskExecutionModeAuto

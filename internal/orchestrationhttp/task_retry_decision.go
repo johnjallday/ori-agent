@@ -127,7 +127,7 @@ func decideRetry(
 
 	// A cancellation is the caller's decision, not a failure to recover from.
 	if category == llm.CategoryCanceled {
-		return retryVerdict{ReasonCode: reasonExecutionFailed, Reason: "The task was canceled.", Category: category}
+		return retryVerdict{ReasonCode: reasonExecutionFailed, Reason: "The ticket was canceled.", Category: category}
 	}
 
 	// Question 2 first: even a genuinely transient error must not be replayed if

@@ -302,7 +302,7 @@ func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws
 		_ = orihttp.RespondInternalError(w, "Failed to delete group")
 		return
 	} else if blocker != "" {
-		_ = orihttp.RespondConflict(w, fmt.Sprintf("Stop the running task in %q before deleting this group.", blocker))
+		_ = orihttp.RespondConflict(w, fmt.Sprintf("Stop the running ticket in %q before deleting this group.", blocker))
 		return
 	}
 

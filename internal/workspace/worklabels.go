@@ -20,4 +20,7 @@ const (
 	// LabelResultGroupTitle names the default group of items parsed from a
 	// run's result when the result has no headed sections.
 	LabelResultGroupTitle = LabelTickets
+	// LabelResultParentTitle is the default title of the parent ticket made
+	// when a run's result is turned into a workflow and has no usable heading.
+	LabelResultParentTitle = "Create workflow from ticket result"
 )

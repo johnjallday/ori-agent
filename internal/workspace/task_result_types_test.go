@@ -53,10 +53,10 @@ func TestParseTaskListResultMarkdown_FlatChecklist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseTaskListResultMarkdown: %v", err)
 	}
-	if taskList.ParentTitle != "Create workflow from task result" {
+	if taskList.ParentTitle != LabelResultParentTitle {
 		t.Fatalf("expected fallback parent title, got %q", taskList.ParentTitle)
 	}
-	if len(taskList.Groups) != 1 || taskList.Groups[0].Title != "Tasks" {
+	if len(taskList.Groups) != 1 || taskList.Groups[0].Title != LabelResultGroupTitle {
 		t.Fatalf("expected fallback group, got %#v", taskList.Groups)
 	}
 }
@@ -140,7 +140,7 @@ func TestTaskListResultFromTask_ReparsesRawResultBeforeStructuredCache(t *testin
 			ParentTitle: "Brand Kit → Task List: johnj",
 			Groups: []TaskListResultGroup{
 				{
-					Title: "Tasks",
+					Title: LabelResultGroupTitle,
 					Items: []TaskListResultItem{
 						{Title: "Stale flat task"},
 					},

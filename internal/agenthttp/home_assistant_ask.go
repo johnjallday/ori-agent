@@ -527,7 +527,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	}
 
 	if prompt == "" {
-		question := "What would you like to know about your workspaces, tasks, or activity?"
+		question := "What would you like to know about your workspaces, tickets, or activity?"
 		if identity != nil {
 			question = "What would you like help with today?"
 		}
@@ -1111,7 +1111,7 @@ func (h *HomeAssistantAskHandler) modelUnavailableResponse(ctx context.Context, 
 func describeSnapshotBriefly(s HomeSnapshot) string {
 	parts := []string{
 		fmt.Sprintf("%d workspace(s)", s.Meta.WorkspaceCount),
-		fmt.Sprintf("%d task(s) active %s", s.Meta.TaskCount, s.Meta.WindowLabel),
+		fmt.Sprintf("%d ticket(s) active %s", s.Meta.TaskCount, s.Meta.WindowLabel),
 	}
 	if s.Meta.OpportunityCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d open opportunity(ies)", s.Meta.OpportunityCount))
@@ -1170,15 +1170,15 @@ func (h *HomeAssistantAskHandler) executeConfirmedAction(ctx context.Context, in
 		wsID := firstNonEmpty(action.WorkspaceID, actionArgString(args, "workspace_id"))
 		desc := actionArgString(args, "description")
 		if wsID == "" || desc == "" {
-			return HomeAssistantAskResponse{Response: "I need a workspace and a description to create a task.", Intent: intent}
+			return HomeAssistantAskResponse{Response: "I need a workspace and a description to create a ticket.", Intent: intent}
 		}
 		id, href, err := h.Mutator.CreateTask(ctx, wsID, desc)
 		if err != nil {
-			return HomeAssistantAskResponse{Response: "I couldn't create the task: " + err.Error(), Intent: intent}
+			return HomeAssistantAskResponse{Response: "I couldn't create the ticket: " + err.Error(), Intent: intent}
 		}
 		h.recordMutation(ctx, intent, HomeActionCreateTask)
 		return HomeAssistantAskResponse{
-			Response: "Created the task.",
+			Response: "Created the ticket.",
 			Intent:   intent,
 			Actions:  []HomeAction{{ID: "open-created-task", Type: HomeActionOpenWorkspace, Label: "Open workspace", Href: href, WorkspaceID: wsID, TaskID: id}},
 		}
@@ -1202,15 +1202,15 @@ func (h *HomeAssistantAskHandler) executeConfirmedAction(ctx context.Context, in
 		wsID := firstNonEmpty(action.WorkspaceID, actionArgString(args, "workspace_id"))
 		taskID := firstNonEmpty(action.TaskID, actionArgString(args, "task_id"))
 		if wsID == "" || taskID == "" {
-			return HomeAssistantAskResponse{Response: "I need a workspace and task to start.", Intent: intent}
+			return HomeAssistantAskResponse{Response: "I need a workspace and a ticket to start.", Intent: intent}
 		}
 		href, err := h.Mutator.StartTask(ctx, wsID, taskID)
 		if err != nil {
-			return HomeAssistantAskResponse{Response: "I couldn't start the task: " + err.Error(), Intent: intent}
+			return HomeAssistantAskResponse{Response: "I couldn't start the ticket: " + err.Error(), Intent: intent}
 		}
 		h.recordMutation(ctx, intent, HomeActionStartTask)
 		return HomeAssistantAskResponse{
-			Response: "Started the task.",
+			Response: "Started the ticket.",
 			Intent:   intent,
 			Actions:  []HomeAction{{ID: "open-started-task", Type: HomeActionOpenWorkspace, Label: "Open workspace", Href: href, WorkspaceID: wsID, TaskID: taskID}},
 		}

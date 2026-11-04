@@ -31,19 +31,19 @@ func classifyContextError(err error) string {
 
 	// Check for context errors
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "task timed out - the operation took too long to complete. Consider breaking the task into smaller parts or increasing the timeout."
+		return "the run timed out - the operation took too long to complete. Consider breaking the ticket into smaller parts or increasing the timeout."
 	}
 	if errors.Is(err, context.Canceled) {
-		return "task was canceled - this may happen if the server was restarted or the task was manually stopped."
+		return "the run was canceled - this may happen if the server was restarted or the ticket was manually stopped."
 	}
 
 	// Check for wrapped context errors in the error chain
 	errStr := err.Error()
 	if strings.Contains(errStr, "context deadline exceeded") {
-		return "task timed out - the operation took too long to complete. Consider breaking the task into smaller parts or increasing the timeout."
+		return "the run timed out - the operation took too long to complete. Consider breaking the ticket into smaller parts or increasing the timeout."
 	}
 	if strings.Contains(errStr, "context canceled") {
-		return "task was canceled - this may happen if the server was restarted or the task was manually stopped."
+		return "the run was canceled - this may happen if the server was restarted or the ticket was manually stopped."
 	}
 
 	return ""
@@ -296,7 +296,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	if h.eventBus != nil {
 		event := NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
 			"phase":   "starting",
-			"message": "Agent is analyzing the task...",
+			"message": "Agent is analyzing the ticket...",
 		})
 		h.eventBus.Publish(event)
 	}
@@ -323,7 +323,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	if taskRequiresBrowserAutomation(task) && !h.agentSupportsBrowserAutomation(ag) {
 		return "", &TaskBlockedError{
 			ReasonCode: "capability_mismatch",
-			Reason:     fmt.Sprintf("%s cannot execute browser actions for this task", agentName),
+			Reason:     fmt.Sprintf("%s cannot execute browser actions for this ticket", agentName),
 			Question:   "Switch to an agent with browser capability and retry?",
 			SuggestedActions: []string{
 				"switch_agent_retry",
@@ -644,7 +644,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 					return "", &TaskBlockedError{
 						ReasonCode: "runtime_execution_scope_unavailable",
 						Reason:     "The runtime capability grant could not be applied safely.",
-						Question:   "Review runtime setup before retrying this task.",
+						Question:   "Review runtime setup before retrying this ticket.",
 						Repair: &TaskRepairAction{
 							Code: "review_runtime_setup", Label: "Review runtime setup",
 							URL: h.runtimeSetupURL(task.WorkspaceID),
@@ -797,7 +797,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 					}
 					return "", buildToolOnlyBlockedError(lastToolSummary)
 				}
-				return "Task completed (no output)", nil
+				return "Ticket completed (no output)", nil
 			}
 
 			if responseLooksLikeRawToolResults(resp.Content) {
@@ -820,7 +820,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			if taskRequiresBrowserAutomation(task) && looksLikeBrowserCapabilityRefusal(resp.Content) {
 				return "", &TaskBlockedError{
 					ReasonCode: "capability_refusal",
-					Reason:     fmt.Sprintf("%s responded with a capability refusal for a browser task", agentName),
+					Reason:     fmt.Sprintf("%s responded with a capability refusal for a browser ticket", agentName),
 					Question:   "Would you like to switch agents, add guidance, or retry?",
 					SuggestedActions: []string{
 						"switch_agent_retry",
@@ -967,11 +967,11 @@ func buildToolOnlyBlockedError(rawResponse string) *TaskBlockedError {
 	trimmed := strings.TrimSpace(rawResponse)
 	reasonCode := "tool_only_result"
 	reason := "The agent returned raw tool output instead of a final answer."
-	question := "Retry this task and require the agent to synthesize the tool result into an answer?"
+	question := "Retry this ticket and require the agent to synthesize the tool result into an answer?"
 	if toolSummaryLooksLikeEmptyWebSearch(trimmed) {
 		reasonCode = "empty_web_search_results"
 		reason = "The web search returned no results and the agent did not broaden the search or synthesize an answer."
-		question = "Retry this task with a broader search across public sources?"
+		question = "Retry this ticket with a broader search across public sources?"
 	}
 
 	return &TaskBlockedError{
@@ -1120,14 +1120,14 @@ func (h *LLMTaskHandler) buildContextOverflowError(task Task, window int, sectio
 		"context_window": window,
 		"sections":       sectionList,
 	})
-	reason := fmt.Sprintf("The task prompt exceeds the model's %d-token context window even after trimming.", window)
+	reason := fmt.Sprintf("The ticket prompt exceeds the model's %d-token context window even after trimming.", window)
 	if sectionList != "" {
 		reason = fmt.Sprintf("%s Largest sections: %s.", reason, sectionList)
 	}
 	return &TaskBlockedError{
 		ReasonCode:       "context_overflow",
 		Reason:           reason,
-		Question:         "The task is too large for this model's context window. Reduce attachments/inputs, assign a larger-context model, or switch agents?",
+		Question:         "The ticket is too large for this model's context window. Reduce attachments/inputs, assign a larger-context model, or switch agents?",
 		SuggestedActions: []string{"switch_agent_retry", "retry", "mark_failed"},
 	}
 }
