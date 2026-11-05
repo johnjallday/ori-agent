@@ -1804,7 +1804,12 @@ async function saveProfileChanges() {
   if (updatedName !== agentName) {
     agentName = updatedName;
     membershipRenamed = true;
-    window.history.replaceState({}, '', `/agents/${encodeURIComponent(updatedName)}`);
+    // Keep the query (viewing context, ?tab=) and hash: only the name moved.
+    window.history.replaceState(
+      {},
+      '',
+      `/agents/${encodeURIComponent(updatedName)}${window.location.search}${window.location.hash}`
+    );
     const skillsPageLink = document.getElementById('openSkillsPageLink');
     if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(updatedName)}`;
   }
@@ -2141,7 +2146,11 @@ async function verifyUnconfirmed(section) {
 function adoptRenamedIdentity(name) {
   membershipRenamed = true;
   agentName = name;
-  window.history.replaceState({}, '', `/agents/${encodeURIComponent(name)}`);
+  window.history.replaceState(
+    {},
+    '',
+    `/agents/${encodeURIComponent(name)}${window.location.search}${window.location.hash}`
+  );
   const skillsPageLink = document.getElementById('openSkillsPageLink');
   if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(name)}`;
 }

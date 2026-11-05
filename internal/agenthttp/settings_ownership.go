@@ -33,7 +33,7 @@ func (h *DashboardHandler) SetCopyTrackingReader(reader CopyTrackingReader) {
 
 // SetSkillInventory wires the skill-collection read used to report whether a
 // selected skill's source still offers it. Without one, that is unknown.
-func (h *DashboardHandler) SetSkillInventory(list func(agentName string) ([]string, error)) {
+func (h *DashboardHandler) SetSkillInventory(list func(agentName string) (map[string]bool, error)) {
 	h.skillInventory = list
 }
 
@@ -97,6 +97,11 @@ func (h *DashboardHandler) GetSettingsOwnership(w http.ResponseWriter, r *http.R
 		orihttp.BadRequest(w, "Invalid workspace or instance")
 		return
 	}
+	include := query.Get("include")
+	if include != "" && include != "impact" {
+		orihttp.BadRequest(w, "Unknown include")
+		return
+	}
 
 	src := workspace.SettingsOwnershipSources{
 		Workspaces: h.workspaceStore,
@@ -108,7 +113,7 @@ func (h *DashboardHandler) GetSettingsOwnership(w http.ResponseWriter, r *http.R
 	}
 	src.SkillInventory = h.skillInventory
 	out, err := workspace.ProjectSettingsOwnership(src, workspace.SettingsOwnershipRequest{
-		Agent: name, WorkspaceID: workspaceID, InstanceID: instanceID,
+		Agent: name, WorkspaceID: workspaceID, InstanceID: instanceID, IncludeImpact: include == "impact",
 	})
 	if errors.Is(err, workspace.ErrSettingsOwnershipAgentNotFound) {
 		orihttp.NotFound(w, "Agent not found")

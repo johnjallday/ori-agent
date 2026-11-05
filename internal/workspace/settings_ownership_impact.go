@@ -20,6 +20,8 @@ const (
 	ImpactCustomized   = "customized"    // changed in its workspace: library edits stop here
 	ImpactIndependent  = "independent"   // untracked own copy: library edits never reach it
 	ImpactUnknown      = "unknown"
+	// ImpactNotLoaded: the impact was not requested (see IncludeImpact).
+	ImpactNotLoaded = "not_loaded"
 )
 
 // ImpactCarriedFields is the field family an edit carries into tracked copies

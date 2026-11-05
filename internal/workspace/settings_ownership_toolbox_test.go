@@ -70,7 +70,7 @@ func toolboxWorkspace(t *testing.T, f *ownershipFixture) {
 	}
 }
 
-func toolboxProject(t *testing.T, f *ownershipFixture, instance string, inventory func(string) ([]string, error)) SettingsOwnership {
+func toolboxProject(t *testing.T, f *ownershipFixture, instance string, inventory func(string) (map[string]bool, error)) SettingsOwnership {
 	t.Helper()
 	src := f.sources()
 	src.SkillInventory = inventory
@@ -81,8 +81,20 @@ func toolboxProject(t *testing.T, f *ownershipFixture, instance string, inventor
 	return out
 }
 
-func inventoryOf(names ...string) func(string) ([]string, error) {
-	return func(string) ([]string, error) { return names, nil }
+// inventoryOf lists enabled skills; a name prefixed with "-" is present but
+// disabled.
+func inventoryOf(names ...string) func(string) (map[string]bool, error) {
+	return func(string) (map[string]bool, error) {
+		out := map[string]bool{}
+		for _, name := range names {
+			if trimmed, disabled := strings.CutPrefix(name, "-"); disabled {
+				out[trimmed] = false
+			} else {
+				out[name] = true
+			}
+		}
+		return out, nil
+	}
 }
 
 func skillByID(t *testing.T, skills []OwnershipToolboxSkill, id string) OwnershipToolboxSkill {
@@ -121,13 +133,19 @@ func TestSettingsOwnershipDirectToolboxStates(t *testing.T) {
 		skillByID(t, out.DirectToolbox.Skills, "lost").Availability != OwnershipMissing {
 		t.Fatalf("availability = %+v", out.DirectToolbox.Skills)
 	}
+	// A selected skill that is in the collection but turned off does not run.
+	src.SkillInventory = inventoryOf("-Summarize")
+	off, _ := ProjectSettingsOwnership(src, SettingsOwnershipRequest{Agent: "Writer"})
+	if skillByID(t, off.DirectToolbox.Skills, "summarize").Availability != OwnershipDisabled {
+		t.Fatalf("disabled skill = %+v", off.DirectToolbox.Skills)
+	}
 	// The collection is not the selection: "Other" is collected, not selected.
 	if len(out.DirectToolbox.Skills) != 2 {
 		t.Fatalf("collection leaked into the selection: %+v", out.DirectToolbox.Skills)
 	}
 
 	// A failed inventory read is unknown, never available or missing.
-	src.SkillInventory = func(string) ([]string, error) { return nil, errors.New("disk") }
+	src.SkillInventory = func(string) (map[string]bool, error) { return nil, errors.New("disk") }
 	out, _ = ProjectSettingsOwnership(src, SettingsOwnershipRequest{Agent: "Writer"})
 	if out.DirectToolbox.Inventory != "unavailable" || skillByID(t, out.DirectToolbox.Skills, "summarize").Availability != OwnershipUnknown {
 		t.Fatalf("failed inventory = %+v", out.DirectToolbox)
@@ -203,7 +221,7 @@ func TestSettingsOwnershipWorkspaceToolboxPinsAndRestrictions(t *testing.T) {
 		t.Fatalf("ambiguous = %+v", amb.WorkspaceToolbox)
 	}
 	// Learned-skill availability is unknown when the collection cannot be read.
-	unknown := toolboxProject(t, f, "i-v1", func(string) ([]string, error) { return nil, errors.New("x") })
+	unknown := toolboxProject(t, f, "i-v1", func(string) (map[string]bool, error) { return nil, errors.New("x") })
 	if skillByID(t, unknown.WorkspaceToolbox.Skills, "summarize").Availability != OwnershipUnknown || unknown.WorkspaceToolbox.Inventory != "unavailable" {
 		t.Fatalf("unknown inventory = %+v", unknown.WorkspaceToolbox)
 	}
@@ -226,7 +244,7 @@ func TestSettingsOwnershipToolboxReadsWriteNothing(t *testing.T) {
 	}{before.ToolboxAssignments, before.Toolboxes})
 	inventoryCalls := 0
 	for _, inst := range []string{"", "i-v1", "i-v2", "i-none", "i-broken", "i-empty", "nope"} {
-		_ = toolboxProject(t, f, inst, func(string) ([]string, error) { inventoryCalls++; return nil, nil })
+		_ = toolboxProject(t, f, inst, func(string) (map[string]bool, error) { inventoryCalls++; return nil, nil })
 	}
 	after, _ := f.store.Get("ws-tools")
 	afterJSON, _ := json.Marshal(struct {
@@ -247,7 +265,10 @@ func TestSettingsOwnershipToolboxReadsWriteNothing(t *testing.T) {
 
 func TestSettingsOwnershipLibraryImpactFollowsTrackingNotValues(t *testing.T) {
 	f := newOwnershipFixture(t)
-	out := project(t, f, SettingsOwnershipRequest{Agent: "Writer"})
+	if lazy := project(t, f, SettingsOwnershipRequest{Agent: "Writer"}); lazy.Impact.State != ImpactNotLoaded || len(lazy.Impact.Copies) != 0 {
+		t.Fatalf("impact computed without being asked: %+v", lazy.Impact)
+	}
+	out := project(t, f, SettingsOwnershipRequest{Agent: "Writer", IncludeImpact: true})
 	got := map[string]string{}
 	for _, c := range out.Impact.Copies {
 		got[c.WorkspaceID] = c.Effect

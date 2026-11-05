@@ -428,10 +428,12 @@ test.describe('slice 4', () => {
       owners(page).getByRole('link', { name: 'Configuration on this page' })
     ).toHaveAttribute('href', '#agentConfigurationSection');
     const impact = section(page).locator('[data-ownership-impact]');
+    // It reads every workspace's copy, so it loads only when opened.
+    await impact.getByText('What a library change reaches').click();
     await expect(impact).toContainText('What a library change reaches');
     await expect(impact).toContainText(`Independent copy: library changes don't reach it: `);
     await expect(impact).toContainText(f.custom.name);
-    await expect(impact).toContainText(`Reads the library profile directly`);
+    await expect(impact).toContainText(`No copy yet, reads the library profile directly`);
     await expect(impact).toContainText(f.direct.name);
     await expect(impact).toContainText('role and description are not');
     await expect(impact).toContainText('API keys');

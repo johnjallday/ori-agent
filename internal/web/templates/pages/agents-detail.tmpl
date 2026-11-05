@@ -46,9 +46,9 @@
     /* Where settings come from: read-only inspection of one chosen context. */
     /* Muted text in this section meets WCAG AA (4.5:1) in both themes; the
        shared --text-secondary token is about 4.2:1 on the dark card. */
-    :root { --settings-ownership-muted: var(--text-secondary); }
-    .dark-mode, [data-bs-theme="dark"] { --settings-ownership-muted: #a8a8ad; }
-    @media (prefers-color-scheme: dark) { :root:not(.light-mode):not([data-bs-theme="light"]) { --settings-ownership-muted: #a8a8ad; } }
+    :root { --settings-ownership-muted: var(--text-secondary); --settings-ownership-focus: var(--primary-color); }
+    .dark-mode, [data-bs-theme="dark"] { --settings-ownership-muted: #a8a8ad; --settings-ownership-focus: #6ee7b7; }
+    @media (prefers-color-scheme: dark) { :root:not(.light-mode):not([data-bs-theme="light"]) { --settings-ownership-muted: #a8a8ad; --settings-ownership-focus: #6ee7b7; } }
     .settings-ownership { scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px); background: var(--bg-secondary); color: var(--text-primary); }
     .settings-ownership[hidden] { display: none !important; }
     /* In-page "Where to change it" targets land below the fixed navbar. */
@@ -58,7 +58,7 @@
     .settings-ownership .settings-ownership-picker { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 12px 0; }
     .settings-ownership label { font-weight: 600; color: var(--text-primary); }
     .settings-ownership select { min-width: min(100%, 18rem); max-width: 100%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); }
-    .settings-ownership :is(select, button, h2):focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+    .settings-ownership :is(select, button, h2):focus-visible { outline: 2px solid var(--settings-ownership-focus); outline-offset: 3px; }
     .settings-ownership .settings-ownership-heading { font-size: 16px; font-weight: 600; margin: 8px 0; color: var(--text-primary); overflow-wrap: anywhere; }
     .settings-ownership .settings-ownership-source { color: var(--text-primary); margin: 4px 0; }
     .settings-ownership-fields { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr) max-content; gap: 0 16px; margin: 12px 0; }
@@ -77,7 +77,7 @@
     .settings-ownership-prompt { border-top: 1px solid var(--border-color); margin-top: 12px; padding-top: 4px; }
     .settings-ownership-text { margin: 8px 0; }
     .settings-ownership-text summary { cursor: pointer; font-weight: 600; color: var(--text-primary); }
-    .settings-ownership-text summary:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+    .settings-ownership-text summary:focus-visible { outline: 2px solid var(--settings-ownership-focus); outline-offset: 3px; }
     .settings-ownership-text pre { margin: 6px 0 0; padding: 10px 12px; max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 13px; }
     .settings-ownership-text pre.is-empty { color: var(--settings-ownership-muted); font-style: italic; }
     .settings-ownership-layers { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: 4px 16px; margin: 4px 0 8px; }
@@ -94,7 +94,7 @@
     .settings-ownership-list li[data-availability="missing"] .settings-ownership-item-meta,
     .settings-ownership-list li[data-availability="switched_off"] .settings-ownership-item-meta { color: var(--agent-edit-danger); }
     .settings-ownership a { color: var(--text-primary); text-decoration: underline; }
-    .settings-ownership a:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+    .settings-ownership a:focus-visible { outline: 2px solid var(--settings-ownership-focus); outline-offset: 3px; }
     @media (max-width: 575px) {
       .settings-ownership-fields { grid-template-columns: minmax(0, 1fr); }
       .settings-ownership-row dd { border-top: 0; padding-top: 0; }
@@ -677,7 +677,7 @@
               <label for="settingsOwnershipContext">Viewing</label>
               <select id="settingsOwnershipContext" data-ownership-context disabled></select>
             </div>
-            <p data-ownership-unsaved class="small settings-ownership-unsaved" hidden></p>
+            <p data-ownership-unsaved class="small settings-ownership-unsaved" role="status" aria-live="polite" hidden></p>
             <p data-ownership-status role="status" aria-live="polite" class="small mb-0"></p>
             <div data-ownership-body></div>
           </section>

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -97,6 +98,52 @@ func TestCopyTrackingNeverInfersTrackingFromEqualValues(t *testing.T) {
 	state, err = service.CopyTracking("Mix Helper", "song-a", other, other)
 	if err != nil || state != CopyUntracked {
 		t.Fatalf("unrecorded agent = %s %v, want untracked", state, err)
+	}
+}
+
+// End to end: the real projection with the real tracking reader reports
+// in-step, pending and customized copies and the matching library impact,
+// and writes nothing.
+func TestSettingsOwnershipWithRealCopyTracking(t *testing.T) {
+	st, _, roster := sharedFixture(t)
+	mine := copyOf(t, st, "song-b")
+	mine.Settings.SystemPrompt = "Only for song B."
+	if err := st.SaveWorkspaceAgent("song-b", "REAPER Assistant", mine); err != nil {
+		t.Fatal(err)
+	}
+	roster["REAPER Assistant"].Settings.Model = "terra" // no carry has run yet
+	spy := writeSpy{Store: st, t: t}
+	service := New(spy, roster)
+	src := workspace.SettingsOwnershipSources{
+		Workspaces: spy,
+		Library: func(name string) store.LibraryRecord {
+			ag, ok := roster.GetAgent(name)
+			if !ok {
+				return store.LibraryRecord{State: store.LibraryAbsent}
+			}
+			return store.LibraryRecord{Definition: ag, State: store.LibraryPresent, Owner: store.LibraryOwnerLibrary}
+		},
+		Tracking: service.CopyTracking,
+	}
+	for song, want := range map[string]string{"song-a": CopyPending, "song-b": CopyCustomized, "song-c": CopyPending} {
+		out, err := workspace.ProjectSettingsOwnership(src, workspace.SettingsOwnershipRequest{Agent: "REAPER Assistant", WorkspaceID: song})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Tracking.State != want {
+			t.Errorf("%s tracking = %s, want %s", song, out.Tracking.State, want)
+		}
+	}
+	lib, err := workspace.ProjectSettingsOwnership(src, workspace.SettingsOwnershipRequest{Agent: "REAPER Assistant", IncludeImpact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects := map[string]string{}
+	for _, c := range lib.Impact.Copies {
+		effects[c.WorkspaceID] = c.Effect
+	}
+	if effects["song-a"] != workspace.ImpactPending || effects["song-b"] != workspace.ImpactCustomized {
+		t.Fatalf("impact = %+v", lib.Impact.Copies)
 	}
 }
 

@@ -187,6 +187,7 @@ func TestSettingsOwnershipHTTPRejectsBadInput(t *testing.T) {
 		{http.MethodGet, writerPath + "?studio_id=../etc", http.StatusBadRequest},
 		{http.MethodGet, writerPath + "?studio_id=" + strings.Repeat("x", 201), http.StatusBadRequest},
 		{http.MethodGet, "/api/agents/Nobody/settings-ownership", http.StatusNotFound},
+		{http.MethodGet, writerPath + "?include=everything", http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		rec, _ := getOwnership(t, h, tc.method, tc.target)
@@ -243,6 +244,22 @@ func TestSettingsOwnershipHTTPCanonicalizesLibraryCase(t *testing.T) {
 	}
 	if ctx := body["context"].(map[string]any); ctx["state"] != "ok" {
 		t.Fatalf("case variant context = %v", ctx)
+	}
+}
+
+// The library impact reads every member workspace's copy, so it runs only
+// when asked for.
+func TestSettingsOwnershipHTTPImpactIsOnRequest(t *testing.T) {
+	h, _, tracking := ownershipHandler(t)
+	_, body := getOwnership(t, h, http.MethodGet, writerPath)
+	if impact := body["impact"].(map[string]any); impact["state"] != "not_loaded" || tracking.calls != 0 {
+		t.Fatalf("impact without include = %v (tracking calls %d)", impact, tracking.calls)
+	}
+	_, body = getOwnership(t, h, http.MethodGet, writerPath+"?include=impact")
+	impact := body["impact"].(map[string]any)
+	copies, _ := impact["copies"].([]any)
+	if impact["state"] != "ok" || len(copies) != 2 || tracking.calls != 1 {
+		t.Fatalf("impact on request = %v (tracking calls %d)", impact, tracking.calls)
 	}
 }
 

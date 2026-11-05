@@ -36,6 +36,7 @@ const (
 	OwnershipSwitchedOff = "switched_off"
 	OwnershipMissing     = "missing"
 	OwnershipUnknown     = "unknown"
+	OwnershipDisabled    = "disabled" // in the agent's skills but turned off, so it does not run
 )
 
 // OwnershipToolboxSkill is one selected skill and whether its source currently
@@ -106,17 +107,32 @@ func skillInventory(src SettingsOwnershipSources, agentName string) (map[string]
 	if src.SkillInventory == nil {
 		return nil, false
 	}
-	names, err := src.SkillInventory(agentName)
+	skills, err := src.SkillInventory(agentName)
 	if err != nil {
 		return nil, false
 	}
-	out := make(map[string]bool, len(names))
-	for _, name := range names {
+	out := make(map[string]bool, len(skills))
+	for name, enabled := range skills {
 		if id := NormalizeToolboxCapabilityID(name); id != "" {
-			out[id] = true
+			out[id] = out[id] || enabled
 		}
 	}
 	return out, true
+}
+
+// learnedAvailability: only an enabled skill runs (direct chat and workspace
+// Toolboxes both resolve enabled skills), so present-but-disabled is not
+// available.
+func learnedAvailability(inventory map[string]bool, capabilityID string) string {
+	enabled, present := inventory[NormalizeToolboxCapabilityID(capabilityID)]
+	switch {
+	case !present:
+		return OwnershipMissing
+	case !enabled:
+		return OwnershipDisabled
+	default:
+		return OwnershipAvailable
+	}
 }
 
 func inventoryLabel(ok bool) string {
@@ -158,10 +174,7 @@ func projectDirectToolbox(src SettingsOwnershipSources, out SettingsOwnership, l
 			Source: ToolboxSourceAgentLearned, Availability: OwnershipUnknown,
 		}
 		if ok {
-			skill.Availability = OwnershipMissing
-			if inventory[NormalizeToolboxCapabilityID(ref.CapabilityID)] {
-				skill.Availability = OwnershipAvailable
-			}
+			skill.Availability = learnedAvailability(inventory, ref.CapabilityID)
 		}
 		direct.Skills = append(direct.Skills, skill)
 	}
@@ -242,10 +255,7 @@ func projectWorkspaceToolbox(src SettingsOwnershipSources, out SettingsOwnership
 				inventoryRead = true
 			}
 			if inventoryOK {
-				skill.Availability = OwnershipMissing
-				if inventory[NormalizeToolboxCapabilityID(ref.CapabilityID)] {
-					skill.Availability = OwnershipAvailable
-				}
+				skill.Availability = learnedAvailability(inventory, ref.CapabilityID)
 			}
 		}
 		view.Skills = append(view.Skills, skill)

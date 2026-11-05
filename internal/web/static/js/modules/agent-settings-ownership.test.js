@@ -799,7 +799,8 @@ test('a workspace that reads the library routes to the library editors and says 
     })
   });
   assert.equal(links[0].href, '#agentConfigurationSection');
-  assert.match(links[0].scope, /every other workspace that does the same/);
+  assert.match(links[0].scope, /any other workspace without a copy/);
+  assert.match(links[0].scope, /until Ori takes a copy for it/);
   assert.deepEqual([...api.ownerLinks(projection({ def: 'degraded' }))], []);
 });
 
@@ -828,4 +829,53 @@ test('impact groups workspaces by tracking, never by equal values', () => {
     api.impactView(workspaceProjection({ impact: { state: 'ok', copies: [] } })).show,
     false
   );
+});
+
+test('a disabled skill reads as turned off, never available', () => {
+  const view = api.toolboxView({
+    ...projection(),
+    direct_toolbox: {
+      state: 'selected',
+      skills: [{ id: 'a', name: 'A', source: 'agent_learned', availability: 'disabled' }]
+    }
+  });
+  assert.equal(view.direct.skills[0].availability, 'Turned off for this agent, so it does not run');
+});
+
+test('the library impact loads only when opened, then once', async () => {
+  const win = makeWindow('');
+  const mod = load(win);
+  const { root, body } = makeRoot();
+  const urls = [];
+  mod.mount({
+    root,
+    agentName: 'Writer',
+    win,
+    fetchImpl: async url => {
+      urls.push(url);
+      if (url.includes('include=impact')) {
+        return jsonResponse({
+          ...projection(),
+          impact: {
+            state: 'ok',
+            copies: [{ workspace_id: 'a', name: 'Studio A', effect: 'independent' }]
+          }
+        });
+      }
+      return jsonResponse({ ...projection(), impact: { state: 'not_loaded', copies: [] } });
+    }
+  });
+  await tick();
+  assert.deepEqual([...urls], ['/api/agents/Writer/settings-ownership'], 'no impact read on load');
+  const details = body.find(n => n.dataset?.ownershipImpact !== undefined);
+  assert.ok(details, 'impact disclosure offered');
+  details.open = true;
+  details.fire('toggle');
+  await tick();
+  await tick();
+  assert.equal(urls.at(-1), '/api/agents/Writer/settings-ownership?include=impact');
+  assert.match(details.textContent, /Studio A/);
+  details.fire('toggle');
+  await tick();
+  assert.equal(urls.filter(u => u.includes('include=impact')).length, 1, 'loaded once');
 });

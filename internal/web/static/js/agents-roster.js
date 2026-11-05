@@ -2738,7 +2738,7 @@
           '</p>'
         : members
             .map(function (ws) {
-              return readonlyWsRow(ws, listItem.role, name);
+              return readonlyWsRow(ws, listItem.role, isCLIAgent(listItem) ? '' : name);
             })
             .join('');
 
@@ -3697,7 +3697,11 @@
     fetchDetail(name)
       .then(function (detail) {
         if (state.selected !== name) return;
-        host.innerHTML = toolboxHTML(vm, detail, name);
+        host.innerHTML = toolboxHTML(
+          vm,
+          detail,
+          isCLIAgent(listItem) || isCLIAgent(detail) ? '' : name
+        );
       })
       .catch(function () {
         if (state.selected !== name) return;
@@ -5410,6 +5414,14 @@
   // The legacy names are still matched so an install that has not yet run the
   // startup rename migration still marks the agent as permanent rather than
   // offering a delete the server will refuse.
+  // CLI agents have no saved definition, so the full page shows no settings
+  // ownership view for them and nothing links to it.
+  function isCLIAgent(agent) {
+    var source = String((agent && agent.source) || '').toLowerCase();
+    var role = String((agent && agent.role) || '').toLowerCase();
+    return source === 'cli' || role === 'cli_agent';
+  }
+
   function isPermanent(agent) {
     if (!agent) return false;
     var source = String(agent.source || '').toLowerCase();

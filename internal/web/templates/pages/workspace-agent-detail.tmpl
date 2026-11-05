@@ -66,7 +66,7 @@
                   <div class="wad-badges" id="wad-badges"></div>
                 </div>
               </div>
-              <p class="wad-note mb-0 mt-2">
+              <p class="wad-note mb-0 mt-2" id="wad-ownership-note" hidden>
                 <a id="wad-ownership-link" href="#" style="color: var(--text-primary); text-decoration: underline;">Where this agent's settings come from</a>
                 — compare this workspace with the library profile and find the right editor.
               </p>
@@ -224,10 +224,23 @@
       const agentName = "{{.Extra.AgentName}}";
       window.currentWorkspaceId = workspaceId;
       window.currentWorkspaceSlug = workspaceSlug;
+      // Offered only for an agent with a library profile that this workspace
+      // really holds: the agent page's own cards describe the library profile,
+      // so a workspace-only agent would show another workspace's copy there.
       const ownership = document.getElementById('wad-ownership-link');
-      if (ownership) {
-        const query = new URLSearchParams({ ctx: 'workspace', studio_id: workspaceId, tab: 'ownership' });
-        ownership.href = `/agents/${encodeURIComponent(agentName)}?${query}`;
+      const ownershipNote = document.getElementById('wad-ownership-note');
+      if (ownership && ownershipNote) {
+        const agentPath = encodeURIComponent(agentName);
+        const check = new URLSearchParams({ studio_id: workspaceId });
+        fetch(`/api/agents/${agentPath}/settings-ownership?${check}`, { headers: { Accept: 'application/json' } })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((view) => {
+            if (!view || view.library?.state !== 'present' || view.context?.state !== 'ok') return;
+            const query = new URLSearchParams({ ctx: 'workspace', studio_id: workspaceId, tab: 'ownership' });
+            ownership.href = `/agents/${encodeURIComponent(view.agent || agentName)}?${query}`;
+            ownershipNote.hidden = false;
+          })
+          .catch(() => {});
       }
       const page = new WorkspaceAgentDetailPage(workspaceId, agentName);
       page.init().then(() => {

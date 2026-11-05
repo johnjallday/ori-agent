@@ -45,7 +45,7 @@ type DashboardHandler struct {
 	// read-only settings-ownership inspection (settings_ownership.go).
 	copyTracking CopyTrackingReader
 	// skillInventory lists an agent's skill collection for the same view.
-	skillInventory func(agentName string) ([]string, error)
+	skillInventory func(agentName string) (map[string]bool, error)
 }
 
 // XPPerLevelReporter is the one thing the dashboard needs from the evolution

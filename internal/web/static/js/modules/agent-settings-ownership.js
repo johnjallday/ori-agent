@@ -47,9 +47,9 @@
     return query ? `?${query}` : '';
   }
 
-  function requestURL(agentName, ctx) {
+  function requestURL(agentName, ctx, { impact = false } = {}) {
     const base = `/api/agents/${encodeURIComponent(agentName)}/settings-ownership`;
-    if (ctx.kind !== 'workspace') return base;
+    if (ctx.kind !== 'workspace') return impact ? `${base}?include=impact` : base;
     const params = new URLSearchParams({ studio_id: ctx.studioId });
     if (ctx.instanceId) params.set('instance_id', ctx.instanceId);
     return `${base}?${params.toString()}`;
@@ -285,6 +285,7 @@
     available: 'Available',
     switched_off: 'Switched off in this workspace',
     missing: 'Not found',
+    disabled: 'Turned off for this agent, so it does not run',
     unknown: 'Availability unknown'
   };
 
@@ -419,7 +420,7 @@
     if (ctx.kind === 'library' || def.source === 'library_fallback') {
       const viaWorkspace = ctx.kind === 'workspace';
       const reach = viaWorkspace
-        ? ' This workspace has no copy of its own, so it reads these from the library profile: the change also reaches every other workspace that does the same.'
+        ? ' This workspace has no copy of its own yet, so it reads these from the library profile, and so does any other workspace without a copy. That lasts until Ori takes a copy for it (for example when Ori next starts).'
         : '';
       out.push({
         family: 'configuration',
@@ -429,7 +430,7 @@
       });
       out.push({
         family: 'profile',
-        label: 'Edit Profile on this page',
+        label: 'Edit Profile button at the top of this page',
         href: '#agentHeader',
         scope: `Saves to the library profile. Workspace copies keep their own role and description.${reach}`
       });
@@ -513,7 +514,10 @@
   }
 
   const IMPACT_GROUPS = [
-    ['reads_library', 'Reads the library profile directly, so every saved change applies'],
+    [
+      'reads_library',
+      'No copy yet, reads the library profile directly (until Ori takes a copy for it)'
+    ],
     ['kept_in_step', 'Kept in step: model and prompt changes are copied here'],
     ['pending', 'Kept in step, waiting for the next model or prompt save'],
     ['customized', 'Customized here: keeps its own settings'],
@@ -525,9 +529,9 @@
   // advisory current evidence; the save itself still checks and confirms.
   function impactView(projection) {
     const impact = projection?.impact || {};
-    if (projection?.context?.kind !== 'library' || !['ok', 'partial'].includes(impact.state)) {
-      return { show: false, groups: [] };
-    }
+    if (projection?.context?.kind !== 'library') return { show: false, lazy: false, groups: [] };
+    if (impact.state === 'not_loaded') return { show: false, lazy: true, groups: [] };
+    if (!['ok', 'partial'].includes(impact.state)) return { show: false, lazy: false, groups: [] };
     const copies = Array.isArray(impact.copies) ? impact.copies : [];
     const groups = IMPACT_GROUPS.map(([effect, label]) => ({
       effect,
@@ -681,13 +685,13 @@
       return [block];
     }
 
-    function renderOwners(projection) {
+    function renderOwners(projection, mine) {
       const links = [
         ...ownerLinks(projection, { systemModelLinked: linked() }),
         ...workspaceOwnerLinks(projection)
       ];
       const impact = impactView(projection);
-      if (!links.length && !impact.show) return [];
+      if (!links.length && !impact.show && !impact.lazy) return [];
       const block = el(doc, 'div', 'settings-ownership-toolbox');
       block.dataset.ownershipOwners = '';
       block.append(el(doc, 'h4', 'settings-ownership-subheading', 'Where to change it'));
@@ -719,47 +723,94 @@
           )
         );
       }
+      if (impact.show || impact.lazy) block.append(renderImpact(projection, impact, mine));
+      return [block];
+    }
+
+    function fillImpact(target, impact) {
+      const nodes = [];
+      if (impact.empty) {
+        nodes.push(el(doc, 'p', 'settings-ownership-note', 'This agent is not in any workspace.'));
+      }
+      const groups = el(doc, 'ul', 'settings-ownership-list');
+      for (const group of impact.groups) {
+        const item = el(doc, 'li', '');
+        item.dataset.impact = group.effect;
+        item.append(el(doc, 'span', 'settings-ownership-item-name', `${group.label}: `));
+        item.append(el(doc, 'span', '', group.names.join(', ')));
+        groups.append(item);
+      }
+      if (impact.groups.length) nodes.push(groups);
+      nodes.push(
+        el(
+          doc,
+          'p',
+          'settings-ownership-note',
+          'Only model, provider, reasoning level, temperature, output limit and base prompt are copied to workspaces Ori keeps in step; role and description are not.'
+        )
+      );
+      if (impact.notCarried) nodes.push(el(doc, 'p', 'settings-ownership-note', impact.notCarried));
+      nodes.push(
+        el(
+          doc,
+          'p',
+          'settings-ownership-excluded',
+          impact.partial
+            ? 'Some workspaces could not be checked. This is a summary of current records, not a promise: saving checks again.'
+            : 'This is a summary of current records, not a promise: saving checks again.'
+        )
+      );
+      target.replaceChildren(...nodes);
+    }
+
+    // The impact reads every workspace's copy, so it loads only when opened.
+    function renderImpact(projection, impact, mine) {
+      const details = el(doc, 'details', 'settings-ownership-text settings-ownership-impact');
+      details.dataset.ownershipImpact = '';
+      const target = el(doc, 'div', '');
+      details.append(el(doc, 'summary', '', 'What a library change reaches'), target);
       if (impact.show) {
-        const wrap = el(doc, 'div', 'settings-ownership-impact');
-        wrap.dataset.ownershipImpact = '';
-        wrap.append(el(doc, 'h5', 'settings-ownership-minor', 'What a library change reaches'));
-        if (impact.empty) {
-          wrap.append(
-            el(doc, 'p', 'settings-ownership-note', 'This agent is not in any workspace.')
+        fillImpact(target, impact);
+        return details;
+      }
+      let loaded = false;
+      const loadImpact = async () => {
+        if (loaded) return;
+        loaded = true;
+        target.replaceChildren(
+          el(doc, 'p', 'settings-ownership-note', "Checking each workspace's copy…")
+        );
+        try {
+          const response = await doFetch(requestURL(name, ctx, { impact: true }), {
+            headers: { Accept: 'application/json' }
+          });
+          if (!response.ok) throw new Error('impact unavailable');
+          const full = await response.json();
+          if (mine !== sequence) return;
+          const view = impactView(full);
+          if (!view.show) throw new Error('impact unavailable');
+          fillImpact(target, view);
+        } catch (_) {
+          if (mine !== sequence) return;
+          loaded = false;
+          const retry = el(doc, 'button', 'modern-btn modern-btn-secondary', 'Try again');
+          retry.type = 'button';
+          retry.addEventListener('click', () => void loadImpact());
+          target.replaceChildren(
+            el(
+              doc,
+              'p',
+              'settings-ownership-message',
+              'What a library change reaches could not be checked.'
+            ),
+            retry
           );
         }
-        const groups = el(doc, 'ul', 'settings-ownership-list');
-        for (const group of impact.groups) {
-          const item = el(doc, 'li', '');
-          item.dataset.impact = group.effect;
-          item.append(el(doc, 'span', 'settings-ownership-item-name', `${group.label}: `));
-          item.append(el(doc, 'span', '', group.names.join(', ')));
-          groups.append(item);
-        }
-        if (impact.groups.length) wrap.append(groups);
-        wrap.append(
-          el(
-            doc,
-            'p',
-            'settings-ownership-note',
-            'Only model, provider, reasoning level, temperature, output limit and base prompt are copied to workspaces Ori keeps in step; role and description are not.'
-          )
-        );
-        if (impact.notCarried)
-          wrap.append(el(doc, 'p', 'settings-ownership-note', impact.notCarried));
-        wrap.append(
-          el(
-            doc,
-            'p',
-            'settings-ownership-excluded',
-            impact.partial
-              ? 'Some workspaces could not be checked. This is a summary of current records, not a promise: saving checks again.'
-              : 'This is a summary of current records, not a promise: saving checks again.'
-          )
-        );
-        block.append(wrap);
-      }
-      return [block];
+      };
+      details.addEventListener('toggle', () => {
+        if (details.open) void loadImpact();
+      });
+      return details;
     }
 
     function renderSkillList(rows) {
@@ -966,7 +1017,7 @@
       nodes.push(conversation);
       nodes.push(...renderPrompt(projection));
       nodes.push(...renderToolboxes(projection));
-      nodes.push(...renderOwners(projection));
+      nodes.push(...renderOwners(projection, mine));
       if (view.excluded) nodes.push(el(doc, 'p', 'settings-ownership-excluded', view.excluded));
       body.replaceChildren(...nodes);
       void renderConversation(projection, mine, conversation);

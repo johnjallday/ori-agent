@@ -79,10 +79,11 @@ type SettingsOwnershipSources struct {
 	// Tracking optionally reports how a workspace copy relates to a consent
 	// tracking record (projectstaffing.Service.CopyTracking). It must not write.
 	Tracking func(agentName, workspaceID string, library, copyAgent *agent.Agent) (string, error)
-	// SkillInventory optionally lists the skill names in an agent's skill
-	// collection (skills.Manager.ListSkills). It must not write. Without it, or
-	// when it fails, skill availability is reported as unknown.
-	SkillInventory func(agentName string) ([]string, error)
+	// SkillInventory optionally maps each skill in an agent's skill collection
+	// to whether it is enabled (skills.Manager.ListSkills). Only enabled skills
+	// run, so a disabled one is reported as turned off. It must not write.
+	// Without it, or when it fails, skill availability is unknown.
+	SkillInventory func(agentName string) (map[string]bool, error)
 }
 
 // SettingsOwnershipRequest names the agent and the viewing context.
@@ -90,6 +91,10 @@ type SettingsOwnershipRequest struct {
 	Agent       string
 	WorkspaceID string
 	InstanceID  string
+	// IncludeImpact asks for the library edit impact. It reads every member
+	// workspace's copy (decrypting native local configuration), so it is only
+	// computed when the reader asks for it.
+	IncludeImpact bool
 }
 
 // SettingsOwnership is the whitelisted projection.
@@ -263,7 +268,12 @@ func ProjectSettingsOwnership(src SettingsOwnershipSources, req SettingsOwnershi
 		out.DirectToolbox = projectDirectToolbox(src, out, library)
 		out.WorkspaceToolbox = OwnershipWorkspaceToolbox{State: OwnershipToolboxNotApplicable, Skills: []OwnershipToolboxSkill{}, Connections: []OwnershipToolboxConnection{}, Core: []string{}}
 		out.Permissions = projectPermissions(nil)
-		out.Impact = projectLibraryImpact(src, out, library, name)
+		out.Impact = OwnershipImpact{State: ImpactNotLoaded, Copies: []OwnershipImpactCopy{}}
+		if req.IncludeImpact {
+			out.Impact = projectLibraryImpact(src, out, library, name)
+		} else if library.State != store.LibraryPresent || out.Context.State != OwnershipStateOK {
+			out.Impact.State = OwnershipToolboxNotApplicable
+		}
 		return out, nil
 	}
 	ws := projectWorkspaceContext(src, &out, library, name, workspaceID, strings.TrimSpace(req.InstanceID))
@@ -378,7 +388,7 @@ func projectWorkspaceContext(src SettingsOwnershipSources, out *SettingsOwnershi
 	case base != nil:
 		source := OwnershipSourceLibraryFallback
 		out.Definition = definitionFrom(base, nil, source, OwnershipStateOK,
-			"This workspace has no saved copy, so it reads the library profile directly.")
+			"This workspace has no saved copy yet, so it reads the library profile directly. That lasts until Ori takes a copy for it (for example when Ori next starts); from then on it keeps its own copy.")
 	case library.State == store.LibraryUnreadable:
 		out.Definition.State = OwnershipStateUnavailable
 		out.Definition.Note = "This workspace has no saved copy and the library profile could not be read."

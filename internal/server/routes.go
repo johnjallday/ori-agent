@@ -250,16 +250,16 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	}
 	if s.Handlers.Skills != nil {
 		if manager := s.Handlers.Skills.Manager(); manager != nil {
-			dashboardHandler.SetSkillInventory(func(agentName string) ([]string, error) {
+			dashboardHandler.SetSkillInventory(func(agentName string) (map[string]bool, error) {
 				collection, err := manager.ListSkills(agentName)
 				if err != nil {
 					return nil, err
 				}
-				names := make([]string, 0, len(collection))
+				enabled := make(map[string]bool, len(collection))
 				for _, skill := range collection {
-					names = append(names, skill.Name)
+					enabled[skill.Name] = enabled[skill.Name] || skill.Enabled
 				}
-				return names, nil
+				return enabled, nil
 			})
 		}
 	}
