@@ -2887,7 +2887,7 @@ test('connect all keeps a connected song connected when its assistant stops, and
   await panel.connectSelected();
   const status = log.statuses.at(-1);
   assert.match(status, /Connected 2 of 3\./, 'the connected song is counted as connected');
-  assert.match(status, /1 have your shared REAPER Assistant\./);
+  assert.match(status, /1 has your shared REAPER Assistant\./);
   assert.match(
     status,
     /Album-2 is connected, but its REAPER Assistant was not added: Set up a model/

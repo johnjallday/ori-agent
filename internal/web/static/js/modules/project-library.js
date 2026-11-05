@@ -2180,7 +2180,9 @@ export class ProjectLibraryPanel {
       this.status(
         [
           `Connected ${connected} of ${ready.length}.`,
-          staffed && done.length ? `${done.length} have your shared ${role}.` : '',
+          staffed && done.length
+            ? `${done.length} ${done.length === 1 ? 'has' : 'have'} your shared ${role}.`
+            : '',
           failure,
           result.failed && result.remaining.length ? 'Songs not reached were left alone.' : '',
           left.length ? `${left.length} need their own review.` : ''

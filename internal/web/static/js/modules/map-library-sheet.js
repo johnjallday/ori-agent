@@ -136,6 +136,11 @@ export function confirmStaffing(plan, count, choice = 'staff') {
   const staff = disclosure.canStaff && choice !== 'placement';
   return {
     ...disclosure,
+    // Choosing placement only must not still say the approval is being used.
+    note:
+      disclosure.canStaff && !staff
+        ? 'No assistant is added now. You can add it later from the Home.'
+        : disclosure.note,
     staff,
     teamDigest: staff ? String(plan?.teamDigest || '') : '',
     placementLine:
@@ -182,7 +187,10 @@ export function summarizeRun(result, staffing, plan) {
   const parts = [];
   if (onMap) parts.push(`${onMap} ${onMap === 1 ? 'project is' : 'projects are'} on the map.`);
   if (staffing && done.length) {
-    parts.push(`${done.length === 1 ? 'It has' : `${done.length} have`} your shared ${role}.`);
+    // "It has" has no subject when only some of the projects got it, so a run
+    // that stopped says how many of how many.
+    const count = onMap > done.length ? `${done.length} of ${onMap}` : String(done.length);
+    parts.push(`${count} ${done.length === 1 ? 'has' : 'have'} your shared ${role}.`);
   }
   if (failed) {
     parts.push(

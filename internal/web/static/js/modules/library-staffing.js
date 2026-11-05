@@ -1,10 +1,11 @@
 // library-staffing.js — a library project's own way to get its Home's shared
 // assistant (library-setup-staffing, group 3).
 //
-// A song put on the map before its Home could staff it has an empty roster and
-// offers "Hire for REAPER Assistant". When its Home already approved sharing
-// one assistant across its projects, this offers that instead, beside the
-// ordinary Hire (which stays: the person may want this song's own agent).
+// A project put on the map before its Home could staff it has an empty roster
+// and offers "Hire for <role>". When its Home already approved sharing one
+// assistant across its projects, this offers that instead, beside the ordinary
+// Hire (which stays: the person may want this project's own agent). Role and
+// agent names come from the server's declarations, never from this file.
 //
 // The status read is inert. Only the explicit button POSTs, and the server
 // resolves Home and catalog row from the workspace itself: the browser names

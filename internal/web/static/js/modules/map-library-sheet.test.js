@@ -109,6 +109,9 @@ test('confirmStaffing discloses the assistant and keeps a placement-only choice'
   assert.match(staff.staffLine, /REAPER Assistant/);
   const placement = confirmStaffing(createPlan, 4, 'placement');
   assert.equal(placement.staff, false);
+  // Choosing placement only no longer claims the approval is being used.
+  assert.doesNotMatch(placement.note, /Uses the sharing/);
+  assert.match(placement.note, /No assistant is added now/);
   assert.equal(placement.teamDigest, '');
   assert.equal(placement.buttonLabel, 'Put on the map');
   // A blocker never stages staffing, whatever the choice says.
@@ -427,7 +430,7 @@ test('summarizeRun never calls a connected but unstaffed project fully set up', 
       staffing,
       createPlan
     ),
-    '2 projects are on the map. It has your shared REAPER Assistant. Album-2 is on the map, but its REAPER Assistant was not added: Set up a model. 2 not reached and left ticked.'
+    '2 projects are on the map. 1 of 2 has your shared REAPER Assistant. Album-2 is on the map, but its REAPER Assistant was not added: Set up a model. 2 not reached and left ticked.'
   );
   assert.equal(
     summarizeRun({ done: [{}], failed: null, remaining: [] }, null, createPlan),
