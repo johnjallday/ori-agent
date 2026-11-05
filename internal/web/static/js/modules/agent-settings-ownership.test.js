@@ -363,7 +363,7 @@ test('switching context pushes history, clears the old values at once and ignore
 test('a failed read shows a retry in place and selects nothing else', async () => {
   const win = makeWindow('?ctx=workspace&studio_id=ws-9');
   const mod = load(win);
-  const { root, body, status } = makeRoot();
+  const { root, body, status, select } = makeRoot();
   let attempt = 0;
   mod.mount({
     root,
@@ -385,6 +385,8 @@ test('a failed read shows a retry in place and selects nothing else', async () =
   });
   await tick();
   assert.equal(status.dataset.state, 'error');
+  assert.equal(select.children[0].textContent, 'Selected workspace');
+  assert.equal(select.value, 'workspace:ws-9');
   assert.match(body.textContent, /could not be loaded/);
   const retry = body.find(n => n.tagName === 'BUTTON');
   assert.ok(retry, 'retry button offered');
@@ -393,4 +395,200 @@ test('a failed read shows a retry in place and selects nothing else', async () =
   assert.equal(attempt, 2);
   assert.match(body.textContent, /Nine/);
   assert.equal(root.getAttribute('aria-busy'), null);
+});
+
+// ---- Group 2: instances, prompt, conversation model, drafts ---------------
+
+const dupItems = [
+  { id: 'i-1', instance_number: 1, role: 'Drafts', entry_point: true },
+  { id: 'i-2', instance_number: 2, role: 'Edits' }
+];
+
+function workspaceProjection(extra = {}) {
+  return {
+    ...projection({ kind: 'workspace', ws: { id: 'ws-d', name: 'Dup' }, source: 'workspace_copy' }),
+    ...extra
+  };
+}
+
+test('several instances are listed with nothing selected; a stale instance is reported', () => {
+  const amb = api.instanceChoice(
+    workspaceProjection({ instances: { state: 'ambiguous', items: dupItems } })
+  );
+  assert.equal(amb.show, true);
+  assert.equal(amb.selected, '');
+  assert.equal(amb.options[0].label, 'Choose an instance');
+  assert.equal(amb.options[1].label, 'Instance 1 · Drafts · workspace entry');
+  assert.match(amb.message, /several instances/);
+
+  const stale = api.instanceChoice(
+    workspaceProjection({ instances: { state: 'not_found', items: dupItems.slice(0, 1) } })
+  );
+  assert.equal(stale.show, true);
+  assert.match(stale.message, /no longer in this workspace/);
+
+  const single = api.instanceChoice(
+    workspaceProjection({
+      instances: { state: 'selected', items: dupItems.slice(0, 1), selected_id: 'i-1' }
+    })
+  );
+  assert.equal(single.show, false);
+
+  const legacy = api.instanceChoice(
+    workspaceProjection({ instances: { state: 'unidentified', items: [{ id: '' }] } })
+  );
+  assert.equal(legacy.show, false);
+  assert.match(legacy.message, /stable instance ID/);
+});
+
+test('prompt view separates base, guidance and the together preview', () => {
+  const view = api.promptView(
+    workspaceProjection({
+      prompt: {
+        state: 'ok',
+        base_source: 'workspace_copy',
+        base: 'Base.',
+        layers: [{ key: 'role', label: 'Role here', value: 'Edits' }],
+        preview: 'Base.\n\n---\nWorkspace-specific guidance…',
+        has_variables: true,
+        note: 'Saved text only.'
+      }
+    })
+  );
+  assert.equal(view.show, true);
+  assert.equal(view.baseSource, "This workspace's own saved copy");
+  assert.equal(view.layers[0].label, 'Role here');
+  assert.match(view.preview, /---/);
+  assert.equal(view.variables, true);
+
+  const needs = api.promptView(
+    workspaceProjection({ prompt: { state: 'needs_instance', base: 'Base.', preview: 'x' } })
+  );
+  assert.equal(needs.needsInstance, true);
+  assert.equal(needs.preview, '', 'never previews guidance for an unchosen instance');
+
+  assert.equal(
+    api.promptView(workspaceProjection({ prompt: { state: 'unavailable' } })).show,
+    false
+  );
+});
+
+test('conversation model is read only for a supported context and never for another recipient', () => {
+  assert.equal(api.conversationRequest(projection()), null, 'a library card is not a reader');
+  const linked = api.conversationRequest(projection(), { systemModelLinked: true });
+  assert.equal(linked.context.kind, undefined);
+  const ws = api.conversationRequest(workspaceProjection());
+  assert.equal(ws.context.kind, 'workspace_entry');
+  assert.equal(ws.context.workspaceId, 'ws-d');
+  assert.equal(ws.context.name, 'Writer');
+  assert.equal(
+    api.conversationRequest(workspaceProjection({ definition: { state: 'degraded' } })),
+    null
+  );
+
+  const describe = s => (s?.state === 'configured' ? `${s.provider} / ${s.model}` : 'unknown');
+  const other = api.conversationView(
+    ws,
+    { state: 'configured', provider: 'openai', model: 'x', recipient: 'Commander' },
+    'm',
+    describe
+  );
+  assert.equal(other.value, 'unknown');
+  const differs = api.conversationView(
+    ws,
+    { state: 'configured', provider: 'openai', model: 'gpt-5', recipient: 'writer' },
+    'gpt-4o-mini',
+    describe
+  );
+  assert.equal(differs.value, 'openai / gpt-5');
+  assert.match(differs.note, /differs from the saved model/);
+  assert.equal(api.conversationView(ws, null, 'm', describe).value, 'unknown');
+});
+
+test('choosing an instance pushes it into the URL and renders that instance only', async () => {
+  const win = makeWindow('?ctx=workspace&studio_id=ws-d');
+  const mod = load(win);
+  const { root, body } = makeRoot();
+  const urls = [];
+  mod.mount({
+    root,
+    agentName: 'Writer',
+    win,
+    modelApi: async () => ({
+      readModelSelection: async () => ({ state: 'unknown' }),
+      modelDescription: () => 'unknown',
+      modelSettingsHref: () => ''
+    }),
+    fetchImpl: async url => {
+      urls.push(url);
+      const selected = url.includes('instance_id=i-2');
+      return jsonResponse(
+        workspaceProjection({
+          instances: selected
+            ? { state: 'selected', items: dupItems, selected_id: 'i-2' }
+            : { state: 'ambiguous', items: dupItems },
+          prompt: selected
+            ? {
+                state: 'ok',
+                base: 'B',
+                base_source: 'workspace_copy',
+                layers: [{ label: 'Role here', value: 'Edits' }],
+                preview: 'B + Edits',
+                note: 'n'
+              }
+            : { state: 'needs_instance', base: 'B', base_source: 'workspace_copy', note: 'n' }
+        })
+      );
+    }
+  });
+  await tick();
+  assert.match(body.textContent, /Choose an instance to see its workspace guidance/);
+  const picker = body.find(n => n.id === 'settingsOwnershipInstance');
+  assert.ok(picker);
+  assert.equal(picker.value, '');
+  picker.value = 'i-2';
+  picker.fire('change');
+  await tick();
+  assert.equal(
+    win.history.pushed.at(-1),
+    '/agents/Writer?ctx=workspace&studio_id=ws-d&instance_id=i-2'
+  );
+  assert.match(urls.at(-1), /instance_id=i-2/);
+  assert.match(body.textContent, /B \+ Edits/);
+  assert.match(body.textContent, /Workspace chat model: unknown/);
+});
+
+test('confirmed versions refresh the view; drafts only show a note', async () => {
+  const win = makeWindow('');
+  const mod = load(win);
+  const { root } = makeRoot();
+  const unsaved = makeNode('p', root.ownerDocument);
+  const base = root.querySelector;
+  root.querySelector = s => (s === '[data-ownership-unsaved]' ? unsaved : base(s));
+  let reads = 0;
+  const view = mod.mount({
+    root,
+    agentName: 'Writer',
+    win,
+    fetchImpl: async () => {
+      reads++;
+      return jsonResponse(projection());
+    }
+  });
+  await tick();
+  view.syncAgent({ name: 'Writer', version: 'v1' });
+  view.syncAgent({ name: 'Writer', version: 'v1' });
+  assert.equal(reads, 1, 'first sync and unchanged versions do not re-read');
+  view.setUnsaved(true);
+  assert.equal(unsaved.hidden, false);
+  assert.match(unsaved.textContent, /not shown here until they are saved/);
+  assert.equal(reads, 1, 'a draft never triggers a read');
+  view.syncAgent({ name: 'Writer', version: 'v2' });
+  await tick();
+  assert.equal(reads, 2, 'a confirmed save re-reads');
+  view.syncAgent({ name: 'Writer Renamed', version: 'v2' });
+  await tick();
+  assert.equal(reads, 3, 'a confirmed rename re-reads');
+  view.setUnsaved(false);
+  assert.equal(unsaved.hidden, true);
 });

@@ -84,13 +84,17 @@
     not_applicable: ''
   };
 
+  const PROMPT_PREVIEW_LIMIT = 160;
+
   function formatValue(field) {
     if (!field || field.empty) {
       return field?.key === 'max_output_tokens' ? 'Not set (provider default)' : 'Not set';
     }
     if (field.key === 'system_prompt') {
       const value = String(field.value ?? '');
-      return value.length > 160 ? `${value.slice(0, 160)}…` : value;
+      return value.length > PROMPT_PREVIEW_LIMIT
+        ? `${value.slice(0, PROMPT_PREVIEW_LIMIT)}… (full text under Saved prompt)`
+        : value;
     }
     return String(field.value);
   }
@@ -116,6 +120,7 @@
         ['not_found', 'not_member'].includes(ctx.state) && text(ctx.message)
           ? `${text(ctx.message)} Choose another place to view from the list above.`
           : text(ctx.message),
+      contextsNote: text(projection?.contexts?.note),
       definitionState: def.state || 'unavailable',
       source: okContext ? SOURCE_LABELS[def.source] || SOURCE_LABELS.unknown : '',
       note: okContext ? text(def.note) : '',
@@ -166,6 +171,114 @@
     return { kind: 'library', studioId: '', instanceId: '' };
   }
 
+  function instanceLabel(item) {
+    const number = Number.isInteger(item.instance_number) && item.instance_number > 0;
+    const parts = [number ? `Instance ${item.instance_number}` : 'Instance'];
+    if (text(item.role)) parts.push(text(item.role));
+    if (item.entry_point) parts.push('workspace entry');
+    return parts.join(' · ');
+  }
+
+  // instanceChoice describes the instance picker. Several instances are never
+  // resolved for the reader: nothing is selected until they choose one.
+  function instanceChoice(projection) {
+    const inst = projection?.instances || {};
+    const items = Array.isArray(inst.items) ? inst.items.filter(item => text(item.id)) : [];
+    const choice = {
+      show: false,
+      options: [],
+      selected: text(inst.selected_id),
+      message: ''
+    };
+    if (projection?.context?.state !== 'ok') return choice;
+    if (inst.state === 'unidentified') {
+      choice.message =
+        'This workspace lists the agent without a stable instance ID, so its workspace guidance cannot be shown separately.';
+      return choice;
+    }
+    if (inst.state === 'not_found') {
+      choice.message =
+        'That instance is no longer in this workspace. Choose one of the current instances.';
+    } else if (inst.state === 'ambiguous') {
+      choice.message =
+        'This agent has several instances here, each with its own workspace guidance. Choose one to see it.';
+    }
+    if (items.length < 2 && inst.state !== 'not_found') return choice;
+    choice.show = true;
+    choice.options = [
+      { value: '', label: 'Choose an instance' },
+      ...items.map(item => ({ value: text(item.id), label: instanceLabel(item) }))
+    ];
+    return choice;
+  }
+
+  // promptView describes the saved-prompt block. Base and workspace guidance
+  // are labelled separately; run-time layers are explicitly excluded.
+  function promptView(projection) {
+    const prompt = projection?.prompt || {};
+    const view = {
+      show: false,
+      baseSource: '',
+      base: '',
+      baseEmpty: true,
+      layers: [],
+      preview: '',
+      needsInstance: false,
+      variables: Boolean(prompt.has_variables),
+      note: text(prompt.note)
+    };
+    if (projection?.context?.state !== 'ok' || !['ok', 'needs_instance'].includes(prompt.state)) {
+      return view;
+    }
+    view.show = true;
+    view.baseSource = SOURCE_LABELS[prompt.base_source] || SOURCE_LABELS.unknown;
+    view.base = String(prompt.base ?? '');
+    view.baseEmpty = text(view.base) === '';
+    view.layers = (Array.isArray(prompt.layers) ? prompt.layers : []).map(layer => ({
+      label: text(layer.label) || text(layer.key),
+      value: String(layer.value ?? '')
+    }));
+    view.needsInstance = prompt.state === 'needs_instance';
+    view.preview = view.needsInstance ? '' : String(prompt.preview ?? '');
+    return view;
+  }
+
+  // conversationRequest names the existing conversation-model reader for a
+  // context, or null when no supported conversation context applies. The
+  // library card itself is never used as a conversation reader.
+  function conversationRequest(projection, { systemModelLinked = false } = {}) {
+    const ctx = projection?.context || {};
+    if (ctx.state !== 'ok' || projection?.definition?.state !== 'ok') return null;
+    if (ctx.kind === 'workspace' && text(ctx.workspace?.id)) {
+      return {
+        label: 'Workspace chat model',
+        context: { kind: 'workspace_entry', workspaceId: ctx.workspace.id, name: projection.agent }
+      };
+    }
+    if (ctx.kind === 'library' && systemModelLinked) {
+      return { label: 'Conversation model (app Default model)', context: {} };
+    }
+    return null;
+  }
+
+  // conversationView labels a selection from the reader. Unknown stays
+  // unknown; a selection for another recipient is never shown as this agent's.
+  function conversationView(request, selection, savedModel, describe) {
+    const recipient = text(selection?.recipient);
+    const forThisAgent =
+      request.context.kind !== 'workspace_entry' ||
+      !recipient ||
+      recipient.toLowerCase() === text(request.context.name).toLowerCase();
+    const value = forThisAgent ? describe(selection) : 'unknown';
+    let note = '';
+    if (forThisAgent && selection?.state === 'configured' && text(savedModel)) {
+      if (text(selection.model) && text(selection.model) !== text(savedModel)) {
+        note = 'This differs from the saved model above: a new conversation here uses this one.';
+      }
+    }
+    return { label: request.label, value, note };
+  }
+
   // ---- Mount ----------------------------------------------------------------
 
   function el(doc, tag, className, content) {
@@ -175,15 +288,24 @@
     return node;
   }
 
-  function mount({ root, agentName, fetchImpl, win }) {
+  function defaultModelApi(w) {
+    return () =>
+      import('/js/modules/personal-assistant-model.js').catch(() => w.PersonalAssistantModel);
+  }
+
+  function mount({ root, agentName, fetchImpl, win, modelApi, systemModelLinked }) {
     if (!root || !agentName) return null;
     const w = win || window;
     const doc = root.ownerDocument || document;
     const select = root.querySelector('[data-ownership-context]');
     const status = root.querySelector('[data-ownership-status]');
     const body = root.querySelector('[data-ownership-body]');
+    const unsaved = root.querySelector('[data-ownership-unsaved]');
     const doFetch = fetchImpl || ((url, init) => w.fetch(url, init));
+    const loadModelApi = modelApi || defaultModelApi(w);
+    const linked = typeof systemModelLinked === 'function' ? systemModelLinked : () => false;
     let name = agentName;
+    let version = null;
     let ctx = parseContext(w.location.search);
     let sequence = 0;
     let controller = null;
@@ -207,12 +329,132 @@
       select.disabled = options.length < 2;
     }
 
-    function renderProjection(projection) {
+    function renderInstancePicker(projection) {
+      const choice = instanceChoice(projection);
+      const nodes = [];
+      if (choice.message) nodes.push(el(doc, 'p', 'settings-ownership-message', choice.message));
+      if (!choice.show) return nodes;
+      const wrap = el(doc, 'div', 'settings-ownership-picker');
+      const label = el(doc, 'label', '', 'Instance');
+      label.setAttribute('for', 'settingsOwnershipInstance');
+      const picker = el(doc, 'select', '');
+      picker.id = 'settingsOwnershipInstance';
+      picker.dataset.ownershipInstance = '';
+      picker.replaceChildren(
+        ...choice.options.map(option => {
+          const node = el(doc, 'option', '', option.label);
+          node.value = option.value;
+          return node;
+        })
+      );
+      picker.value = choice.selected;
+      picker.addEventListener('change', () =>
+        chooseContext({ ...ctx, instanceId: text(picker.value) }, { focus: 'instance' })
+      );
+      wrap.append(label, picker);
+      nodes.push(wrap);
+      return nodes;
+    }
+
+    function renderPrompt(projection) {
+      const view = promptView(projection);
+      if (!view.show) return [];
+      const block = el(doc, 'div', 'settings-ownership-prompt');
+      block.dataset.ownershipPrompt = '';
+      block.append(el(doc, 'h4', 'settings-ownership-subheading', 'Saved prompt'));
+      const source = el(doc, 'p', 'settings-ownership-source');
+      source.append(
+        el(doc, 'strong', '', 'Base prompt from: '),
+        doc.createTextNode(view.baseSource)
+      );
+      block.append(source);
+      const base = el(doc, 'details', 'settings-ownership-text');
+      base.append(
+        el(doc, 'summary', '', view.baseEmpty ? 'Base prompt: not set' : 'Base prompt'),
+        el(doc, 'pre', view.baseEmpty ? 'is-empty' : '', view.baseEmpty ? 'Not set' : view.base)
+      );
+      block.append(base);
+      if (view.variables) {
+        block.append(
+          el(
+            doc,
+            'p',
+            'settings-ownership-note',
+            'The base prompt has {{…}} placeholders that Ori fills in when the agent runs.'
+          )
+        );
+      }
+      if (view.layers.length) {
+        const list = el(doc, 'dl', 'settings-ownership-layers');
+        for (const layer of view.layers) {
+          const row = el(doc, 'div', 'settings-ownership-layer');
+          row.append(el(doc, 'dt', '', layer.label), el(doc, 'dd', '', layer.value));
+          list.append(row);
+        }
+        block.append(
+          el(doc, 'h5', 'settings-ownership-minor', 'Workspace guidance for this instance')
+        );
+        block.append(list);
+      }
+      if (view.needsInstance) {
+        block.append(
+          el(
+            doc,
+            'p',
+            'settings-ownership-message',
+            'Choose an instance to see its workspace guidance layered on this base.'
+          )
+        );
+      } else if (projection?.context?.kind === 'workspace') {
+        const preview = el(doc, 'details', 'settings-ownership-text');
+        preview.append(
+          el(doc, 'summary', '', 'Saved text together'),
+          el(doc, 'pre', '', view.preview || 'Not set')
+        );
+        block.append(preview);
+      }
+      if (view.note) block.append(el(doc, 'p', 'settings-ownership-excluded', view.note));
+      return [block];
+    }
+
+    async function renderConversation(projection, mine, slot) {
+      const request = conversationRequest(projection, { systemModelLinked: linked() });
+      if (!request) return;
+      const saved = (projection.definition.fields || []).find(f => f.key === 'model');
+      const row = el(doc, 'p', 'settings-ownership-conversation');
+      row.dataset.ownershipConversation = '';
+      row.append(el(doc, 'strong', '', `${request.label}: `), doc.createTextNode('checking…'));
+      slot.replaceChildren(row);
+      let api = null;
+      let selection = null;
+      try {
+        api = await loadModelApi();
+        selection = await api.readModelSelection(request.context);
+      } catch (_) {
+        /* Unknown is not a fallback model. */
+      }
+      if (mine !== sequence) return;
+      const describe = api?.modelDescription || (() => 'unknown');
+      const view = conversationView(request, selection, saved?.value, describe);
+      row.replaceChildren(el(doc, 'strong', '', `${view.label}: `), doc.createTextNode(view.value));
+      const href = api?.modelSettingsHref?.(selection) || '';
+      if (href) {
+        const link = el(doc, 'a', 'settings-ownership-link', 'Where to change it');
+        link.href = href;
+        row.append(doc.createTextNode(' '), link);
+      }
+      if (view.note) slot.append(el(doc, 'p', 'settings-ownership-note', view.note));
+    }
+
+    function renderProjection(projection, mine) {
       const view = viewModel(projection);
       const nodes = [el(doc, 'h3', 'settings-ownership-heading', view.heading)];
       if (view.message) nodes.push(el(doc, 'p', 'settings-ownership-message', view.message));
+      if (view.contextsNote) nodes.push(el(doc, 'p', 'settings-ownership-note', view.contextsNote));
+      nodes.push(...renderInstancePicker(projection));
       if (view.source) {
         const source = el(doc, 'p', 'settings-ownership-source');
+        source.dataset.ownershipSource = 'definition';
         source.append(el(doc, 'strong', '', 'Saved in: '), doc.createTextNode(view.source));
         nodes.push(source);
       }
@@ -226,8 +468,7 @@
           const row = el(doc, 'div', 'settings-ownership-row');
           row.dataset.field = field.key;
           row.append(el(doc, 'dt', '', field.label));
-          const value = el(doc, 'dd', field.empty ? 'is-empty' : '', field.value);
-          row.append(value);
+          row.append(el(doc, 'dd', field.empty ? 'is-empty' : '', field.value));
           // Always three cells per row: the grid pairs labels and values by
           // position, so a missing comparison cell would shift every later row.
           const cmp = el(doc, 'dd', 'settings-ownership-comparison', field.comparison);
@@ -237,8 +478,12 @@
         }
         nodes.push(list);
       }
+      const conversation = el(doc, 'div', 'settings-ownership-conversation-slot');
+      nodes.push(conversation);
+      nodes.push(...renderPrompt(projection));
       if (view.excluded) nodes.push(el(doc, 'p', 'settings-ownership-excluded', view.excluded));
       body.replaceChildren(...nodes);
+      void renderConversation(projection, mine, conversation);
     }
 
     function renderFailure(message) {
@@ -248,7 +493,7 @@
       body.replaceChildren(el(doc, 'p', 'settings-ownership-message', message), retry);
     }
 
-    async function load() {
+    async function load({ focus = '' } = {}) {
       const mine = ++sequence;
       const key = contextKey(ctx);
       controller?.abort?.();
@@ -275,25 +520,38 @@
         const projection = await response.json();
         if (mine !== sequence || contextKey(ctx) !== key) return;
         renderOptions(projection);
-        renderProjection(projection);
+        renderProjection(projection, mine);
         setStatus('', 'ready');
+        if (focus === 'instance') body.querySelector?.('[data-ownership-instance]')?.focus?.();
       } catch (error) {
         if (mine !== sequence || error?.name === 'AbortError') return;
         setStatus('', 'error');
+        // A failed first read has no choices yet; still name what was asked for.
+        if (!select.children?.length) {
+          const option = el(
+            doc,
+            'option',
+            '',
+            ctx.kind === 'workspace' ? 'Selected workspace' : 'Library profile'
+          );
+          option.value = ctx.kind === 'workspace' ? `workspace:${ctx.studioId}` : 'library';
+          select.replaceChildren(option);
+          select.value = option.value;
+        }
         renderFailure(error?.message || 'Saved settings could not be loaded.');
       } finally {
         if (mine === sequence) root.removeAttribute('aria-busy');
       }
     }
 
-    function chooseContext(next, { push = true } = {}) {
+    function chooseContext(next, { push = true, focus = '' } = {}) {
       if (contextKey(next) === contextKey(ctx)) return;
       ctx = next;
       if (push) {
         const url = `${w.location.pathname}${writeContext(w.location.search, ctx)}${w.location.hash || ''}`;
         w.history.pushState({ ownershipContext: contextKey(ctx) }, '', url);
       }
-      void load();
+      void load({ focus });
     }
 
     select.addEventListener('change', () => chooseContext(contextFromOption(select.value)));
@@ -305,12 +563,23 @@
     return {
       context: () => ({ ...ctx }),
       reload: () => load(),
-      // A confirmed rename keeps the context and re-reads under the new name.
-      setAgentName(next) {
-        if (next && next !== name) {
-          name = next;
-          void load();
-        }
+      // The page tells the view about each confirmed definition. It re-reads
+      // only when the confirmed name or version moved; a draft never counts.
+      syncAgent({ name: nextName, version: nextVersion } = {}) {
+        const renamed = Boolean(nextName) && nextName !== name;
+        const moved = version !== null && text(nextVersion) !== version;
+        if (nextName) name = nextName;
+        version = text(nextVersion);
+        if (renamed || moved) void load();
+      },
+      // Unsaved edits are not part of any saved record, so they are not shown
+      // here; say so while they exist.
+      setUnsaved(dirty) {
+        if (!unsaved) return;
+        unsaved.hidden = !dirty;
+        unsaved.textContent = dirty
+          ? 'You have unsaved changes on this page. They are not shown here until they are saved.'
+          : '';
       }
     };
   }
@@ -324,6 +593,10 @@
     viewModel,
     contextOptions,
     contextFromOption,
-    formatValue
+    formatValue,
+    instanceChoice,
+    promptView,
+    conversationRequest,
+    conversationView
   };
 })();

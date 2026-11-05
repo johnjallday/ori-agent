@@ -22,7 +22,8 @@
 # Seeded (names are fixed; the spec looks them up through the API):
 #   agent      "Ownership Writer"  model gpt-4o-mini, prompt "Library prompt."
 #   workspace  "Ownership Same"    own copy, equal to the library (untracked)
-#   workspace  "Ownership Custom"  own copy, model changed to gpt-4.1
+#   workspace  "Ownership Custom"  own copy: model gpt-4.1, prompt "Custom workspace
+#                                  prompt.", instance role Reviewer + custom instructions
 #   workspace  "Ownership Direct"  attached later: no copy, reads the library
 #
 # The sandbox path is printed as SANDBOX=<path>; remove it with one rm -rf.
@@ -92,6 +93,8 @@ stop_server
 # Second pass: startup snapshots each referenced agent into its workspace.
 start_server
 post PATCH "/api/workspaces/$custom_id/agents/$agent_path" '{"model":"gpt-4.1","llm_provider":"openai"}' >/dev/null
+post PATCH "/api/workspaces/$custom_id/agents/$agent_path/system-prompt" '{"system_prompt":"Custom workspace prompt."}' >/dev/null
+post PATCH "/api/workspaces/$custom_id/agents/$agent_path/instance-settings" '{"role":"Reviewer","custom_instructions":"Keep notes short."}' >/dev/null
 direct_id="$(post POST /api/workspaces '{"name":"Ownership Direct"}' | jq -r .folder.id)"
 post POST "/api/workspaces/$direct_id/agents" "{\"agent_name\":\"$agent\"}" >/dev/null
 

@@ -77,7 +77,7 @@ test.describe('slice 1', () => {
       await openAgent(page, f.name);
       await expect(section(page)).toContainText('Library profile');
       await expect(row(page, 'model')).toContainText('gpt-4o-mini');
-      await expect(section(page).locator('.settings-ownership-source')).toContainText(
+      await expect(section(page).locator('[data-ownership-source="definition"]')).toContainText(
         'Library profile'
       );
 
@@ -87,7 +87,7 @@ test.describe('slice 1', () => {
       await expect(section(page)).toContainText(`In workspace “${f.custom.name}”`);
       await expect(row(page, 'model')).toContainText('gpt-4.1');
       await expect(row(page, 'model')).toContainText('Differs from library');
-      await expect(section(page).locator('.settings-ownership-source')).toContainText(
+      await expect(section(page).locator('[data-ownership-source="definition"]')).toContainText(
         "This workspace's own saved copy"
       );
       await expect(page).toHaveURL(new RegExp(`studio_id=${f.custom.id}`));
@@ -100,7 +100,7 @@ test.describe('slice 1', () => {
 
       // A workspace without its own copy reads the library: not "inherited".
       await picker.selectOption({ label: `Workspace: ${f.direct.name}` });
-      await expect(section(page).locator('.settings-ownership-source')).toContainText(
+      await expect(section(page).locator('[data-ownership-source="definition"]')).toContainText(
         'read directly'
       );
       await expect(row(page, 'model')).toContainText('gpt-4o-mini');
@@ -114,7 +114,7 @@ test.describe('slice 1', () => {
       await page.goBack();
       await expect(section(page)).toContainText(`In workspace “${f.direct.name}”`);
       await expect(page.getByLabel('Viewing')).toHaveValue(`workspace:${f.direct.id}`);
-      await expect(section(page).locator('.settings-ownership-source')).toContainText(
+      await expect(section(page).locator('[data-ownership-source="definition"]')).toContainText(
         'read directly'
       );
 
@@ -159,5 +159,156 @@ test.describe('slice 1', () => {
     } finally {
       await f.cleanup();
     }
+  });
+});
+
+test.describe('slice 2', () => {
+  test('saved prompt layers and the workspace chat model are shown per context', async ({
+    page,
+    request
+  }) => {
+    const f = await fixture(request);
+    const prompt = () => section(page).locator('[data-ownership-prompt]');
+    await openAgent(page, f.name);
+    await expect(prompt()).toContainText('Base prompt from: Library profile');
+    await prompt().getByText('Base prompt', { exact: true }).click();
+    await expect(prompt().locator('pre').first()).toHaveText('Library prompt.');
+    // A library card is not a conversation reader for an ordinary agent.
+    await expect(section(page).locator('[data-ownership-conversation]')).toHaveCount(0);
+
+    await page.getByLabel('Viewing').selectOption({ label: `Workspace: ${f.custom.name}` });
+    await expect(prompt()).toContainText("Base prompt from: This workspace's own saved copy");
+    await expect(prompt()).toContainText('Role here');
+    await expect(prompt()).toContainText('Reviewer');
+    await prompt().getByText('Saved text together').click();
+    const together = prompt().locator('details').nth(1).locator('pre');
+    await expect(together).toContainText('Custom workspace prompt.');
+    await expect(together).toContainText('Keep notes short.');
+    await expect(together).not.toContainText('Library prompt.');
+    await expect(prompt()).toContainText('not the complete prompt');
+
+    const conversation = section(page).locator('[data-ownership-conversation]');
+    await expect(conversation).toContainText('Workspace chat model:');
+    await expect(conversation).not.toContainText('checking');
+    await expect(conversation).toContainText('gpt-4.1');
+    const link = conversation.getByRole('link', { name: 'Where to change it' });
+    await expect(link).toHaveAttribute(
+      'href',
+      /^\/workspaces\/ownership-custom\?editAgentModel=Ownership\+Writer$/
+    );
+  });
+
+  test('switching context keeps a profile draft and its Save target', async ({ page, request }) => {
+    const f = await fixture(request);
+    const writes: string[] = [];
+    page.on('request', req => {
+      if (req.method() !== 'GET' && req.url().includes('/api/')) writes.push(req.url());
+    });
+    await openAgent(page, f.name);
+    await page.locator('#editConfigBtn').click();
+    await page.locator('#editTemperature').fill('1.3');
+    await expect(section(page).locator('[data-ownership-unsaved]')).toContainText(
+      'not shown here until they are saved'
+    );
+    await page.getByLabel('Viewing').selectOption({ label: `Workspace: ${f.custom.name}` });
+    await expect(row(page, 'model')).toContainText('gpt-4.1');
+    await page.goBack();
+    await expect(row(page, 'model')).toContainText('gpt-4o-mini');
+    // The draft, its editor and the unsaved notice all survive the switches.
+    await expect(page.locator('#editTemperature')).toHaveValue('1.3');
+    await expect(page.locator('#configEditBadge')).toBeVisible();
+    await expect(page.locator('#saveConfigBtn')).toBeEnabled();
+    await expect(section(page).locator('[data-ownership-unsaved]')).toBeVisible();
+    expect(writes).toEqual([]);
+  });
+
+  test('duplicate instances stay unselected until chosen (injected legacy data)', async ({
+    page,
+    request
+  }) => {
+    // Same-named duplicate instances are legacy data: current workspaces
+    // collapse them on read, so this case uses an injected response.
+    const f = await fixture(request);
+    const base = {
+      agent: f.name,
+      library: { state: 'present', owner: 'library' },
+      contexts: { state: 'ok', workspaces: [{ id: 'legacy-ws', name: 'Legacy Studio' }] },
+      context: {
+        kind: 'workspace',
+        state: 'ok',
+        workspace: { id: 'legacy-ws', name: 'Legacy Studio', folder_slug: 'legacy-studio' }
+      },
+      definition: {
+        state: 'ok',
+        source: 'workspace_copy',
+        disabled: false,
+        fields: [
+          { key: 'model', label: 'Model', value: 'gpt-4o-mini', empty: false, comparison: 'same' }
+        ]
+      },
+      tracking: { state: 'untracked' },
+      excluded: 'API keys … are not shown here.'
+    };
+    const items = [
+      {
+        id: 'i-1',
+        name: f.name,
+        instance_number: 1,
+        role: 'Drafts',
+        custom_instructions: 'Draft quickly.'
+      },
+      {
+        id: 'i-2',
+        name: f.name,
+        instance_number: 2,
+        role: 'Edits',
+        custom_instructions: 'Edit carefully.'
+      }
+    ];
+    await page.route('**/settings-ownership*', route => {
+      const chosen = new URL(route.request().url()).searchParams.get('instance_id');
+      const selected = items.find(i => i.id === chosen);
+      route.fulfill({
+        json: {
+          ...base,
+          instances: selected
+            ? { state: 'selected', items, selected_id: selected.id }
+            : { state: 'ambiguous', items },
+          prompt: selected
+            ? {
+                state: 'ok',
+                base_source: 'workspace_copy',
+                base: 'Base.',
+                layers: [
+                  {
+                    key: 'custom_instructions',
+                    label: 'Custom instructions',
+                    value: selected.custom_instructions
+                  }
+                ],
+                preview: `Base.\n\n---\n${selected.custom_instructions}`,
+                note: 'Saved text only.'
+              }
+            : {
+                state: 'needs_instance',
+                base_source: 'workspace_copy',
+                base: 'Base.',
+                note: 'Saved text only.'
+              }
+        }
+      });
+    });
+    await openAgent(page, f.name, '?ctx=workspace&studio_id=legacy-ws');
+    const picker = page.getByLabel('Instance');
+    await expect(picker).toHaveValue('');
+    await expect(section(page)).toContainText('Choose an instance to see its workspace guidance');
+    await expect(section(page)).not.toContainText('Draft quickly.');
+
+    await picker.focus();
+    await picker.selectOption('i-2');
+    await expect(page).toHaveURL(/instance_id=i-2/);
+    await expect(section(page)).toContainText('Edit carefully.');
+    await expect(section(page)).not.toContainText('Draft quickly.');
+    await expect(page.getByLabel('Instance')).toBeFocused();
   });
 });

@@ -63,6 +63,23 @@
     .settings-ownership-comparison { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
     .settings-ownership-comparison[data-comparison="different"] { color: var(--agent-edit-danger); }
     .settings-ownership-excluded { font-size: 12px; }
+    .settings-ownership-unsaved { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary) !important; }
+    .settings-ownership-unsaved[hidden] { display: none !important; }
+    .settings-ownership .settings-ownership-subheading { font-size: 15px; font-weight: 600; margin: 16px 0 6px; color: var(--text-primary); }
+    .settings-ownership .settings-ownership-minor { font-size: 13px; font-weight: 600; margin: 12px 0 4px; color: var(--text-primary); }
+    .settings-ownership-prompt { border-top: 1px solid var(--border-color); margin-top: 12px; padding-top: 4px; }
+    .settings-ownership-text { margin: 8px 0; }
+    .settings-ownership-text summary { cursor: pointer; font-weight: 600; color: var(--text-primary); }
+    .settings-ownership-text summary:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+    .settings-ownership-text pre { margin: 6px 0 0; padding: 10px 12px; max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 13px; }
+    .settings-ownership-text pre.is-empty { color: var(--text-secondary); font-style: italic; }
+    .settings-ownership-layers { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: 4px 16px; margin: 4px 0 8px; }
+    .settings-ownership-layer { display: contents; }
+    .settings-ownership-layer dt { font-weight: 600; color: var(--text-secondary); font-size: 13px; }
+    .settings-ownership-layer dd { margin: 0; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .settings-ownership-conversation { color: var(--text-primary) !important; }
+    .settings-ownership a { color: var(--text-primary); text-decoration: underline; }
+    .settings-ownership a:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
     @media (max-width: 575px) {
       .settings-ownership-fields { grid-template-columns: minmax(0, 1fr); }
       .settings-ownership-row dd { border-top: 0; padding-top: 0; }
@@ -645,6 +662,7 @@
               <label for="settingsOwnershipContext">Viewing</label>
               <select id="settingsOwnershipContext" data-ownership-context disabled></select>
             </div>
+            <p data-ownership-unsaved class="small settings-ownership-unsaved" hidden></p>
             <p data-ownership-status role="status" aria-live="polite" class="small mb-0"></p>
             <div data-ownership-body></div>
           </section>

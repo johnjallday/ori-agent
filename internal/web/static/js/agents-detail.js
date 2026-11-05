@@ -610,8 +610,11 @@ async function initAfterFirstLoad() {
     ownershipView =
       window.AgentSettingsOwnership?.mount({
         root: document.getElementById('settingsOwnershipSection'),
-        agentName: currentAgent.name || agentName
+        agentName: currentAgent.name || agentName,
+        systemModelLinked: () => Boolean(currentAgent?.system_model_linked)
       }) || null;
+    ownershipView?.syncAgent({ name: currentAgent.name, version: currentAgent.version });
+    ownershipView?.setUnsaved(Boolean(editSession?.atRisk().length));
   }
 
   document.getElementById('editProviderFilter')?.addEventListener('change', () => {
@@ -869,7 +872,8 @@ function renderAgentDetails() {
   // After a confirmed rename the membership editor keeps unsaved choices.
   workspaceEditor?.setAgent(currentAgent, { renamed: membershipRenamed });
   membershipRenamed = false;
-  ownershipView?.setAgentName(currentAgent.name);
+  // Re-reads only after a confirmed change (name or version), never a draft.
+  ownershipView?.syncAgent({ name: currentAgent.name, version: currentAgent.version });
 
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
@@ -1097,6 +1101,7 @@ function sectionDisplayState(section) {
 function updateEditIndicators() {
   if (!editSession) return;
   const pending = editSession.pending();
+  ownershipView?.setUnsaved(editSession.atRisk().length > 0);
   // Assistive tech hears which section is busy saving.
   for (const [id, section] of [
     ['agentConfigurationSection', 'configuration'],
