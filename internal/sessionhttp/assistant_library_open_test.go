@@ -151,6 +151,9 @@ func newOpenFixture(t *testing.T) *openFixture {
 		projectStaffing: f.staffs, staffingModelReady: func() bool { return true },
 		libraryOpenerOverride: f.opener,
 	}
+	// The installed blueprint's team matches the songs' pinned team, as it does
+	// whenever eligibility let a song be opened.
+	f.withTeam(openDigest)
 	f.handler.selectFileOnly = func(_ context.Context, songID string) error {
 		f.fileOnly = append(f.fileOnly, songID)
 		return nil
@@ -168,7 +171,7 @@ func newOpenFixture(t *testing.T) *openFixture {
 				source = agentworkspace.RoleSourceCreated
 			}
 			if err := store.Update(songID, func(song *agentworkspace.Workspace) error {
-				song.AgentInstances = append(song.AgentInstances, agentworkspace.AgentInstance{ID: "i-" + songID, Name: fill.Name, RoleSource: source, EntryPoint: true})
+				song.AgentInstances = append(song.AgentInstances, agentworkspace.AgentInstance{ID: "i-" + songID, Name: fill.Name, RoleSource: source, EntryPoint: true, CreatedAt: time.Now().UTC()})
 				link := song.GetAssistantProjectLink()
 				link.ProjectBindings.Bindings = append(link.ProjectBindings.Bindings, agentworkspace.AssistantRoleBinding{RoleID: fill.RoleID, AgentInstanceID: "i-" + songID, AgentName: fill.Name})
 				song.SetAssistantProjectLink(link)
@@ -271,7 +274,8 @@ func TestOpenLibrarySong_SeveralProjectFilesAskWhichOne(t *testing.T) {
 }
 
 // A retry after a half-finished open (the workspace exists, its role is empty)
-// finishes the staffing and never makes a second workspace.
+// finishes the staffing and never makes a second workspace. The failed write is
+// reported as failed, never as the benign "none" (library-setup-staffing).
 func TestOpenLibrarySong_ARetryFinishesAHalfFinishedOpen(t *testing.T) {
 	f := newOpenFixture(t)
 	f.grant(t)
@@ -279,7 +283,7 @@ func TestOpenLibrarySong_ARetryFinishesAHalfFinishedOpen(t *testing.T) {
 	f.handler.assistantWorkspaceRoleStaffer = func(context.Context, string, []RoleStaffingFill) error {
 		return errors.New("crashed before the role was filled")
 	}
-	if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != "none" {
+	if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != staffingFailed {
 		t.Fatalf("half-finished = %d %v", code, payload)
 	}
 	f.handler.assistantWorkspaceRoleStaffer = staffer

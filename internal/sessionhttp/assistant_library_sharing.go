@@ -115,6 +115,8 @@ func (h *Handler) SetAssistantLibrarySharing(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	consents := h.projectStaffing.Consents()
+	unlock := h.lockHomeStaffing(home.ID)
+	defer unlock()
 	if !request.Enabled {
 		if current.State == sharingOn || current.State == sharingStale {
 			if _, err := consents.Revoke(home.ID); err != nil {
@@ -133,6 +135,14 @@ func (h *Handler) SetAssistantLibrarySharing(w http.ResponseWriter, r *http.Requ
 		team, ok := h.projectTeamFor(scope, home)
 		if !ok {
 			respondSharingError(w, errors.New("team unavailable"))
+			return
+		}
+		// Grant exactly the team the person saw, read again inside the turn.
+		if team.Digest != request.TeamDigest {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error": "The assistant changed while you were looking. Review it again.", "reason": "sharing_changed",
+				"sharing": h.librarySharing(scope, home),
+			})
 			return
 		}
 		grant := workspace.ProjectStaffingConsentGrant{
@@ -185,6 +195,8 @@ func (h *Handler) ReAddAssistantLibrarySharing(w http.ResponseWriter, r *http.Re
 		respondSharingError(w, errors.New("team unavailable"))
 		return
 	}
+	unlock := h.lockHomeStaffing(home.ID)
+	defer unlock()
 	consent := home.GetAssistantProgramState().GetProjectStaffingConsent()
 	for _, role := range team.Roles {
 		entry, covered := consent.Role(role.ID)

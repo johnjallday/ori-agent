@@ -173,35 +173,145 @@ function defaultOperationKey(action) {
   return `library-${action}-${globalThis.crypto.randomUUID()}`;
 }
 
+// ---- The Home's shared assistant -------------------------------------------
+//
+// docs/architecture/project-library.md, "Shared assistant on confirmed setup
+// and repair". Setup may also add the Home's one shared assistant to each
+// project it connects, but only under the approval the owner already gave on
+// the Home, only when they confirm it here, and only after that project is
+// connected. A connection never depends on it and a status read never does it.
+
+/** Plans that add the assistant; every other plan is a reason it is not added. */
+export const STAFFING_PLANS = Object.freeze({ CREATE: 'create', JOIN: 'join' });
+
+/** The outcomes a project's assistant can have after setup, for display. */
+const STAFFING_RESULTS = Object.freeze({
+  added: 'assistant added',
+  joined: 'assistant joined',
+  already: 'assistant already there',
+  not_requested: 'no assistant (placement only)'
+});
+
+/** True when the finish left the project's role filled. */
+export function staffingSucceeded(state) {
+  return state === 'added' || state === 'joined' || state === 'already';
+}
+
+/** The short label a result row shows for its assistant outcome. */
+export function staffingResultLabel(staffing) {
+  const state = String(staffing?.state || '');
+  if (Object.hasOwn(STAFFING_RESULTS, state)) return STAFFING_RESULTS[state];
+  if (state === 'unsettled') return 'assistant added, not yet recorded';
+  if (state === 'failed') return 'assistant not added';
+  return state ? 'assistant not added' : '';
+}
+
+/**
+ * The Home's plan for the assistant of projects not yet connected: create
+ * (the first one makes it), join (it exists), or a reason it cannot be added.
+ * Reads only. A failed read is a blocker, never a guess that staffing works.
+ */
+export async function loadStaffingPlan(client) {
+  try {
+    const plan = await client.request('/staffing');
+    return {
+      plan: String(plan?.plan || ''),
+      agentName: String(plan?.agent_name || ''),
+      roleLabel: String(plan?.role_label || ''),
+      message: String(plan?.message || ''),
+      teamDigest: String(plan?.sharing?.team_digest || '')
+    };
+  } catch (error) {
+    return {
+      plan: 'unreadable',
+      agentName: '',
+      roleLabel: '',
+      message: error?.message || 'Whether the assistant can be added could not be read.',
+      teamDigest: ''
+    };
+  }
+}
+
+/**
+ * What the confirmation says about the assistant, from the plan and the number
+ * of selected projects. Pure. canStaff is false when the plan is a blocker; the
+ * choice is then placement only, with the blocker stated.
+ */
+export function staffingDisclosure(plan, count) {
+  const role = plan?.roleLabel || 'assistant';
+  const name = plan?.agentName || role;
+  const n = Number(count) || 0;
+  const each = n === 1 ? 'it' : `each of the ${n}`;
+  if (plan?.plan === STAFFING_PLANS.CREATE && plan.teamDigest) {
+    return {
+      canStaff: true,
+      staffLabel: `Also add the shared ${role}`,
+      staffLine:
+        n === 1
+          ? `Creates your Home's shared ${role} ("${name}") and adds it to this project.`
+          : `Creates your Home's shared ${role} ("${name}") once, for the first project, and adds that same assistant to ${each}.`,
+      placementLabel: 'Only put on the map (no assistant)',
+      note: `Uses the sharing you already approved on this Home. Nothing starts: no ticket runs and no model is called.`
+    };
+  }
+  if (plan?.plan === STAFFING_PLANS.JOIN && plan.teamDigest) {
+    return {
+      canStaff: true,
+      staffLabel: `Also add your shared ${role}`,
+      staffLine: `Adds your Home's existing shared ${role} ("${name}") to ${each}. No new agent is made.`,
+      placementLabel: 'Only put on the map (no assistant)',
+      note: `Uses the sharing you already approved on this Home. Nothing starts: no ticket runs and no model is called.`
+    };
+  }
+  return {
+    canStaff: false,
+    staffLabel: '',
+    staffLine: '',
+    placementLabel: 'Put on the map only',
+    note: `No assistant is added: ${plan?.message || 'the shared assistant is not available here.'}`
+  };
+}
+
 /**
  * Set up the given items, one at a time, in order. Each item is
  * { id, name, file }: the project and the exact file the person confirmed.
  *
  * Per item: re-read the entry; skip it if it connected meanwhile; re-read
  * eligibility and require the confirmed file to still be offered; review with
- * that file; require the review to name it; commit. The first failure stops
- * the loop. Returns { done, failed, remaining } where done items carry the
- * workspace id the server reported.
+ * that file; require the review to name it; commit. With `staffing` (the team
+ * digest the person confirmed), the project is then given the Home's shared
+ * assistant through the staffing-only finish, with a row-stable request id.
+ * The first failure, of the connection or the assistant, stops the loop.
+ *
+ * Returns { done, failed, remaining }. Done items carry the workspace id, and
+ * `staffing` ({ state, agent_name, … }, or { state: 'not_requested' }). A
+ * failed item carries `stage` ('connection' or 'staffing'), its `reason` and,
+ * when it was connected before the assistant failed, its `workspaceId`: a
+ * connected project stays connected.
  *
  * onProgress(item, status, detail) is told 'working', 'done' or 'failed'.
  */
 export async function runSetup({
   client,
   items,
+  staffing = null,
   onProgress = () => {},
   operationKey = defaultOperationKey
 }) {
   const done = [];
   let failed = null;
   const queue = Array.isArray(items) ? items.filter(Boolean) : [];
+  const digest = staffing && typeof staffing.teamDigest === 'string' ? staffing.teamDigest : '';
   let index = 0;
   for (; index < queue.length; index++) {
     const item = queue[index];
     const path = entryPath(item.id);
     onProgress(item, 'working');
+    let workspaceId = '';
+    let stage = 'connection';
     try {
       const detail = await client.request(path);
-      let workspaceId = String(detail?.row?.workspace_id || '');
+      workspaceId = String(detail?.row?.workspace_id || '');
       if (detail?.row?.connection !== 'connected') {
         const eligibility = await client.request(`${path}/activation`);
         const ok =
@@ -224,11 +334,38 @@ export async function runSetup({
         });
         workspaceId = String(committed?.workspace_id || '');
       }
-      const result = { ...item, workspaceId };
+      let staffed = { state: 'not_requested' };
+      if (digest) {
+        stage = 'staffing';
+        // One id per row and run: an explicit retry of this row re-sends it.
+        item.staffingRequestId = item.staffingRequestId || operationKey('staffing');
+        const finished = await client.post(`${path}/staffing`, {
+          request_id: item.staffingRequestId,
+          team_digest: digest
+        });
+        staffed = finished?.staffing || { state: '' };
+        workspaceId = String(finished?.workspace_id || workspaceId);
+        if (!staffingSucceeded(staffed.state)) {
+          const error = new Error('the assistant could not be added');
+          error.reason = staffed.state || 'failed';
+          throw error;
+        }
+      }
+      const result = { ...item, workspaceId, staffing: staffed };
       done.push(result);
       onProgress(item, 'done', result);
     } catch (error) {
-      failed = { ...item, message: error?.message || 'could not be set up' };
+      failed = {
+        ...item,
+        stage,
+        reason: String(error?.reason || ''),
+        workspaceId: stage === 'staffing' ? workspaceId : '',
+        staffing:
+          stage === 'staffing'
+            ? error?.payload?.staffing || { state: String(error?.reason || 'failed') }
+            : null,
+        message: error?.message || 'could not be set up'
+      };
       onProgress(item, 'failed', failed);
       break;
     }

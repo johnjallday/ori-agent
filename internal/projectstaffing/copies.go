@@ -115,22 +115,25 @@ func (s *Service) Carry(agentName string) (CarryReport, error) {
 	target := CopyDigest(shared)
 	var failures []error
 	for _, homeID := range s.homesSharing(agentName) {
-		consent, err := s.consents.Read(homeID)
-		if err != nil || consent == nil {
-			continue
-		}
-		for _, role := range consent.Roles {
-			if role.AgentName != agentName || len(role.Copies) == 0 {
-				continue
+		_ = s.WithHome(homeID, func(*Tx) error {
+			consent, err := s.consents.Read(homeID)
+			if err != nil || consent == nil {
+				return nil
 			}
-			digests, drop, err := s.carryRole(role, shared, target, &report)
-			if err != nil {
-				failures = append(failures, err)
+			for _, role := range consent.Roles {
+				if role.AgentName != agentName || len(role.Copies) == 0 {
+					continue
+				}
+				digests, drop, err := s.carryRole(role, shared, target, &report)
+				if err != nil {
+					failures = append(failures, err)
+				}
+				if err := s.consents.SetCopyDigests(homeID, role.RoleID, agentName, digests, drop); err != nil {
+					failures = append(failures, err)
+				}
 			}
-			if err := s.consents.SetCopyDigests(homeID, role.RoleID, agentName, digests, drop); err != nil {
-				failures = append(failures, err)
-			}
-		}
+			return nil
+		})
 	}
 	sortRefs(report.Updated)
 	sortRefs(report.Customised)

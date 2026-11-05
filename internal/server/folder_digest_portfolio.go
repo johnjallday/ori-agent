@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
@@ -566,8 +567,10 @@ func (s portfolioSharing) Grant(_ context.Context, homeID string) error {
 	for _, role := range team.Roles {
 		grant.RoleIDs = append(grant.RoleIDs, role.ID)
 	}
-	_, err = s.host.builder.projectStaffing.Consents().Grant(homeID, grant)
-	return err
+	return s.host.builder.projectStaffing.WithHome(homeID, func(tx *projectstaffing.Tx) error {
+		_, err := tx.Consents().Grant(homeID, grant)
+		return err
+	})
 }
 
 // portfolioSongDetails records the song-details consent on the Home the run

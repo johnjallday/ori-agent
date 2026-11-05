@@ -4105,6 +4105,46 @@
   font-size: 11px;
   cursor: pointer;
 }
+/* The assistant choice on the confirmation: label on top, what it does below. */
+.ws-map-library-sheet-staffing {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ws-map-library-sheet-staffing .ws-map-library-sheet-choices {
+  display: grid;
+  gap: 6px;
+  padding-left: 0;
+}
+.ws-map-library-sheet-staffing .ws-map-library-sheet-choice {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: start;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+/* The label is the touch target, so the radio itself stays a 16px box: without
+   the minimums reset, the app's small-screen rule for bare inputs (44px each
+   way) turns it into a slab over its own label. */
+.ws-map-library-sheet-staffing .ws-map-library-sheet-choice input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  min-height: 0;
+  margin: 1px 0 0;
+}
+.ws-map-library-sheet-staffing .ws-map-library-sheet-choice .ws-map-library-sheet-hint {
+  grid-column: 2;
+}
+.ws-map-library-sheet-hint {
+  margin: 0;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .ws-map-library-sheet-link,
 .ws-map-library-sheet-shelf {
   font-size: 11px;

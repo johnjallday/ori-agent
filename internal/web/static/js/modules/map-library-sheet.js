@@ -14,10 +14,13 @@ import {
   SETUP_KINDS,
   createLibraryClient,
   loadSetupRows,
+  loadStaffingPlan,
   runSetup,
   setupLabel,
   setupSubtitle,
-  setupTotals
+  setupTotals,
+  staffingDisclosure,
+  staffingResultLabel
 } from './library-setup.js';
 
 export const CONSENT_LINE =
@@ -80,6 +83,70 @@ export function sheetView(rows, { chosen = {}, ticked = new Set(), progress = {}
 /** The confirmation's lines: each ticked project with its exact file (FR-11). */
 export function confirmLines(selected) {
   return (Array.isArray(selected) ? selected : []).map(item => `${item.name} — ${item.file}`);
+}
+
+/**
+ * What confirming does about the assistant, for the confirmation step. Pure.
+ * `choice` is 'staff' or 'placement'; staffing is only ever on when the plan
+ * allows it and the person left it chosen.
+ */
+export function confirmStaffing(plan, count, choice = 'staff') {
+  const disclosure = staffingDisclosure(plan, count);
+  const staff = disclosure.canStaff && choice !== 'placement';
+  return {
+    ...disclosure,
+    staff,
+    teamDigest: staff ? String(plan?.teamDigest || '') : '',
+    placementLine:
+      Number(count) === 1
+        ? 'The project is connected with no assistant.'
+        : 'The projects are connected with no assistant.',
+    buttonLabel: staff ? 'Put on the map and add the assistant' : 'Put on the map'
+  };
+}
+
+/**
+ * The line a row shows once it has run: its connection and, separately, its
+ * assistant. Pure.
+ */
+export function progressLine(progress) {
+  if (!progress) return '';
+  if (progress.status === 'working') return 'Setting up…';
+  if (progress.status === 'done') {
+    const assistant = staffingResultLabel(progress.staffing);
+    return assistant ? `On the map · ${assistant}` : 'On the map';
+  }
+  if (progress.stage === 'staffing') {
+    return `On the map · assistant not added: ${progress.message || 'it could not be added'}`;
+  }
+  return `Failed: ${progress.message || 'could not be set up'}`;
+}
+
+/**
+ * The status line after a run: what was connected, what happened to the
+ * assistant, and where it stopped. Pure.
+ */
+export function summarizeRun(result, staffing, plan) {
+  const done = Array.isArray(result?.done) ? result.done : [];
+  const failed = result?.failed || null;
+  const remaining = Array.isArray(result?.remaining) ? result.remaining : [];
+  const role = plan?.roleLabel || 'assistant';
+  const onMap = done.length + (failed?.workspaceId ? 1 : 0);
+  const parts = [];
+  if (onMap) parts.push(`${onMap} ${onMap === 1 ? 'project is' : 'projects are'} on the map.`);
+  if (staffing && done.length) {
+    parts.push(`${done.length === 1 ? 'It has' : `${done.length} have`} your shared ${role}.`);
+  }
+  if (failed) {
+    parts.push(
+      failed.stage === 'staffing'
+        ? `${failed.name} is on the map, but its ${role} was not added: ${failed.message}`
+        : `Stopped at ${failed.name}: ${failed.message}.`
+    );
+    if (remaining.length) parts.push(`${remaining.length} not reached and left ticked.`);
+  }
+  if (!parts.length) parts.push('Nothing was set up.');
+  return parts.join(' ');
 }
 
 /** The rows ticked by default: single-file projects only (FR-7). */
@@ -193,7 +260,11 @@ export function openLibrarySheet({
     ticked: new Set(),
     progress: {},
     message: '',
-    created: []
+    created: [],
+    // The Home's plan for the assistant, read with the rows (inert), and the
+    // person's choice on the confirmation.
+    staffingPlan: null,
+    staffingChoice: 'staff'
   };
 
   const root = el(doc, 'div', SHEET_CLASS);
@@ -331,18 +402,7 @@ export function openLibrarySheet({
           row.append(choices);
         }
         if (item.progress) {
-          row.append(
-            el(
-              doc,
-              'span',
-              `${SHEET_CLASS}-progress`,
-              item.progress.status === 'working'
-                ? 'Setting up…'
-                : item.progress.status === 'done'
-                  ? 'On the map'
-                  : `Failed: ${item.progress.message || 'could not be set up'}`
-            )
-          );
+          row.append(el(doc, 'span', `${SHEET_CLASS}-progress`, progressLine(item.progress)));
         }
       } else if (item.kind === SETUP_KINDS.CONNECTED) {
         row.append(
@@ -365,6 +425,66 @@ export function openLibrarySheet({
     return list;
   }
 
+  // The assistant part of the confirmation: what it does (or why it cannot),
+  // and a plain choice to only put the projects on the map.
+  function renderStaffingChoice(staffing) {
+    const box = el(doc, 'div', `${SHEET_CLASS}-staffing`);
+    box.setAttribute('data-sheet-staffing', staffing.canStaff ? 'available' : 'unavailable');
+    if (staffing.canStaff) {
+      const group = el(doc, 'div', `${SHEET_CLASS}-choices`);
+      group.setAttribute('role', 'radiogroup');
+      group.setAttribute('aria-label', 'Assistant');
+      const options = [
+        ['staff', staffing.staffLabel, staffing.staffLine],
+        ['placement', staffing.placementLabel, staffing.placementLine]
+      ];
+      for (const [value, label, hint] of options) {
+        const choice = el(doc, 'label', `${SHEET_CLASS}-choice`);
+        const radio = el(doc, 'input');
+        radio.type = 'radio';
+        radio.name = `sheet-staffing-${homeID}`;
+        radio.value = value;
+        radio.checked = (value === 'staff') === staffing.staff;
+        radio.setAttribute('data-sheet-staffing-choice', value);
+        radio.addEventListener('change', () => {
+          state.staffingChoice = value;
+          render();
+          root.querySelector(`[data-sheet-staffing-choice="${value}"]`)?.focus();
+        });
+        const text = el(doc, 'span', null, label);
+        choice.append(radio, text);
+        if (hint) choice.append(el(doc, 'span', `${SHEET_CLASS}-hint`, hint));
+        group.append(choice);
+      }
+      box.append(group);
+    }
+    box.append(el(doc, 'p', `${SHEET_CLASS}-hint`, staffing.note));
+    return box;
+  }
+
+  // Confirmed: re-read the assistant plan first. A plan that changed since the
+  // person looked is shown again instead of being run (and a placement-only
+  // confirmation never gains an assistant just because one became available).
+  async function confirmRun(selected, staffing) {
+    if (staffing.staff) {
+      const fresh = await loadStaffingPlan(api);
+      const again = confirmStaffing(fresh, selected.length, state.staffingChoice);
+      if (
+        !again.staff ||
+        again.teamDigest !== staffing.teamDigest ||
+        fresh.plan !== state.staffingPlan?.plan
+      ) {
+        state.staffingPlan = fresh;
+        status.textContent =
+          'What setup does about the assistant changed. Review it and confirm again.';
+        render();
+        focus();
+        return;
+      }
+    }
+    await run(selected, staffing.staff ? { teamDigest: staffing.teamDigest } : null);
+  }
+
   function render() {
     const view = sheetView(state.rows, state);
     body.replaceChildren();
@@ -381,14 +501,20 @@ export function openLibrarySheet({
         `${SHEET_CLASS}-confirm-intro`,
         `Set up ${view.selected.length} ${
           view.selected.length === 1 ? 'project' : 'projects'
-        }, each as its own workspace in ${homeName}:`
+        }${view.selected.length === 1 ? ' as its own workspace' : ', each as its own workspace'} in ${homeName}:`
       );
       const lines = el(doc, 'ul', `${SHEET_CLASS}-confirm`);
       for (const line of confirmLines(view.selected)) lines.append(el(doc, 'li', null, line));
       body.append(intro, lines);
-      const go = el(doc, 'button', 'modern-btn modern-btn-primary', 'Put on the map');
+      const staffing = confirmStaffing(
+        state.staffingPlan,
+        view.selected.length,
+        state.staffingChoice
+      );
+      body.append(renderStaffingChoice(staffing));
+      const go = el(doc, 'button', 'modern-btn modern-btn-primary', staffing.buttonLabel);
       go.type = 'button';
-      go.addEventListener('click', () => void run(view.selected));
+      go.addEventListener('click', () => void confirmRun(view.selected, staffing));
       const back = el(doc, 'button', 'modern-btn modern-btn-secondary', 'Back');
       back.type = 'button';
       back.addEventListener('click', () => {
@@ -411,6 +537,9 @@ export function openLibrarySheet({
       go.disabled = view.buttonDisabled || state.phase === 'running';
       go.addEventListener('click', () => {
         state.phase = 'confirm';
+        // The last run's status line is about that run, not this confirmation.
+        state.message = '';
+        status.textContent = '';
         render();
         focus();
       });
@@ -432,8 +561,9 @@ export function openLibrarySheet({
     state.phase = 'loading';
     render();
     try {
-      const result = await loadSetupRows(api);
+      const [result, plan] = await Promise.all([loadSetupRows(api), loadStaffingPlan(api)]);
       state.rows = result.rows;
+      state.staffingPlan = plan;
       if (result.readOnly) {
         state.message = 'This Home is read-only; projects can only be viewed here.';
       }
@@ -454,7 +584,7 @@ export function openLibrarySheet({
     render();
   }
 
-  async function run(selected) {
+  async function run(selected, staffing = null) {
     state.phase = 'running';
     state.progress = {};
     status.textContent = '';
@@ -462,26 +592,30 @@ export function openLibrarySheet({
     const result = await runSetup({
       client: api,
       items: selected.map(item => ({ id: item.id, name: item.name, file: item.file })),
+      staffing,
       onProgress: (item, phase, detail) => {
-        state.progress[item.id] = { status: phase, message: detail?.message || '' };
-        render();
+        state.progress[item.id] = {
+          status: phase,
+          stage: detail?.stage || '',
+          staffing: detail?.staffing || null,
+          message: detail?.message || ''
+        };
+        if (current === handle) render();
       }
     });
-    state.created.push(...result.done.map(item => item.workspaceId).filter(Boolean));
+    // A project connected before its assistant failed is on the map: the map
+    // and member lists show it, but it is not reported as fully set up.
+    const connected = result.done.map(item => item.workspaceId);
+    if (result.failed?.workspaceId) connected.push(result.failed.workspaceId);
+    state.created.push(...connected.filter(Boolean));
     for (const item of result.done) state.ticked.delete(item.id);
-    if (result.failed) {
-      state.message = `Stopped at ${result.failed.name}: ${result.failed.message}. ${
-        result.remaining.length ? `${result.remaining.length} not reached and left ticked.` : ''
-      }`.trim();
-    } else {
-      state.message = `${result.done.length} ${
-        result.done.length === 1 ? 'project is' : 'projects are'
-      } on the map.`;
-    }
-    if (result.done.length) onDone({ workspaceIds: state.created.slice() });
+    if (result.failed?.workspaceId) state.ticked.delete(result.failed.id);
+    state.message = summarizeRun(result, staffing, state.staffingPlan);
+    if (state.created.length) onDone({ workspaceIds: state.created.slice() });
+    if (current !== handle) return; // closed while running: nothing more to show
     state.progress = {};
     await load();
-    if (!result.failed) {
+    if (!result.failed && !staffing) {
       const view = sheetView(state.rows, state);
       if (view.selected.length === 0 && result.done.length) close();
     }

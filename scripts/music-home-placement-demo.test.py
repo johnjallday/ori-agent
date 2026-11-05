@@ -74,6 +74,21 @@ while true; do sleep 1; done
         self.assertIn("collection library", calls)
         self.assertEqual(calls.count("seed-song\n"), 5)
 
+    def test_staffing_sets_up_a_consenting_home_before_the_staffing_spec(self):
+        result = self.run_case("staffing")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertEqual(calls.count("seed-song\n"), 5)
+        self.assertIn("Album-1", calls)
+        self.assertEqual(calls.count("e2e.sh\n"), 2)
+        setup, staffing = calls.split("e2e.sh\n")[1:3]
+        self.assertIn("collection automatic setup", setup)
+        self.assertNotIn("LIBRARY_SETUP_STAFFING", setup)
+        self.assertIn("LIBRARY_SETUP_STAFFING=1", staffing)
+        self.assertIn("tests/library-setup-staffing.spec.ts", staffing)
+        self.assertNotIn("MUSIC_HOME_PLACEMENT_FAULT", calls)
+        self.assertIn("URL=http://127.0.0.1:1/v1 KEY=disposable-no-inference", calls)
+
     def test_a11y_case_is_explicit_and_discards_ambient_fault(self):
         self.env["MUSIC_HOME_PLACEMENT_FAULT"] = "occupied"
         self.env["MUSIC_HOME_PLACEMENT_COLLECTION_MAP"] = "1"

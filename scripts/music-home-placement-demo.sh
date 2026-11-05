@@ -2,7 +2,7 @@
 # Real-candidate Music Home placement acceptance, always in a fresh sandbox.
 # Usage: ./scripts/music-home-placement-demo.sh --case CASE --port PORT \
 #   --reaper-source DIR --music-source DIR --music-ref REF
-# CASE: single, pointer, later, collection, collection-map, accept, layout, ack, occupied, partial,
+# CASE: single, pointer, later, collection, collection-map, staffing, accept, layout, ack, occupied, partial,
 #       stale, two-tabs, competing-home, disabled-provider, deleted-home, missing-model,
 #       a11y-light, a11y-dark, a11y-touch, a11y-tree, a11y-zoom, chat, chat-choice, chat-a11y
 # chat: the Home is set up, then Go to lands on its map where the manager's
@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 case "$case_name" in
-single | chat | chat-choice | chat-a11y | pointer | later | collection | collection-map | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
+single | chat | chat-choice | chat-a11y | pointer | later | collection | collection-map | staffing | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
 *) echo "unknown case: $case_name" >&2; exit 2 ;;
 esac
 [[ "$port" =~ ^[0-9]+$ ]] || { echo 'port must be numeric' >&2; exit 2; }
@@ -99,6 +99,18 @@ later)
 	args+=(--env "MUSIC_HOME_PLACEMENT_SECOND_SONG=$sandbox/Documents/Second Song")
 	pattern='single-song|existing Home' ;;
 accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model) args+=(--env "MUSIC_HOME_PLACEMENT_FAULT=$case_name") ;;
+staffing)
+	# library-setup-staffing: a catalog-only Home with standing approval for its
+	# shared assistant (the collection setup records it), then the map sheet's
+	# confirmed setup with the assistant.
+	for name in Album-1 Album-2 Album-3 Album-4 Album-5; do
+		"$root/scripts/smoke.sh" showfolder "http://localhost:$port" seed-song "$sandbox" Desktop "$name"
+	done
+	"$root/scripts/e2e.sh" --port "$port" --env "MUSIC_HOME_PLACEMENT_COLLECTION=$sandbox/Desktop" \
+		tests/music-home-map-placement.spec.ts -- --workers=1 -g 'collection automatic setup' --output "$sandbox/evidence/placement-setup"
+	args=(--port "$port" --env LIBRARY_SETUP_STAFFING=1)
+	spec=tests/library-setup-staffing.spec.ts
+	pattern='staffing' ;;
 collection | collection-map)
 	for name in 'Song One' 'Song Two' 'Song Three' 'Song Four' 'Song Five'; do
 		"$root/scripts/smoke.sh" showfolder "http://localhost:$port" seed-song "$sandbox" Desktop "$name"

@@ -70,7 +70,7 @@ func seedHome(t *testing.T, store workspace.Store) {
 func bindInSong(t *testing.T, store workspace.Store, songID, name string, source string) {
 	t.Helper()
 	if err := store.Update(songID, func(song *workspace.Workspace) error {
-		song.AgentInstances = append(song.AgentInstances, workspace.AgentInstance{ID: "i-" + songID, Name: name, RoleSource: source})
+		song.AgentInstances = append(song.AgentInstances, workspace.AgentInstance{ID: "i-" + songID, Name: name, RoleSource: source, CreatedAt: time.Now().UTC()})
 		link := song.GetAssistantProjectLink()
 		link.ProjectBindings.Bindings = append(link.ProjectBindings.Bindings, workspace.AssistantRoleBinding{RoleID: "reaper-assistant", AgentInstanceID: "i-" + songID, AgentName: name})
 		song.SetAssistantProjectLink(link)

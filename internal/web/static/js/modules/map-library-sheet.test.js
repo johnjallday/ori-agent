@@ -4,10 +4,13 @@ import { readFileSync } from 'node:fs';
 import {
   CONSENT_LINE,
   confirmLines,
+  confirmStaffing,
   defaultTicked,
   openLibrarySheet,
+  progressLine,
   sheetPosition,
-  sheetView
+  sheetView,
+  summarizeRun
 } from './map-library-sheet.js';
 
 const rows = [
@@ -83,6 +86,79 @@ test('the sheet never says "ready"', () => {
   const source = readFileSync(new URL('./map-library-sheet.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source.replace(/\/\/.*$/gm, ''), /'[^']*\bready\b[^']*'/i);
   assert.doesNotMatch(CONSENT_LINE, /ready/i);
+});
+
+const createPlan = {
+  plan: 'create',
+  agentName: 'REAPER Assistant',
+  roleLabel: 'REAPER Assistant',
+  teamDigest: 'a'.repeat(64)
+};
+
+test('confirmStaffing discloses the assistant and keeps a placement-only choice', () => {
+  const staff = confirmStaffing(createPlan, 4, 'staff');
+  assert.equal(staff.staff, true);
+  assert.equal(staff.teamDigest, 'a'.repeat(64));
+  assert.equal(staff.buttonLabel, 'Put on the map and add the assistant');
+  assert.match(staff.staffLine, /REAPER Assistant/);
+  const placement = confirmStaffing(createPlan, 4, 'placement');
+  assert.equal(placement.staff, false);
+  assert.equal(placement.teamDigest, '');
+  assert.equal(placement.buttonLabel, 'Put on the map');
+  // A blocker never stages staffing, whatever the choice says.
+  const blocked = confirmStaffing({ plan: 'needs_model', message: 'Set up a model.' }, 2, 'staff');
+  assert.equal(blocked.staff, false);
+  assert.equal(blocked.canStaff, false);
+  assert.match(blocked.note, /Set up a model/);
+});
+
+test('progressLine keeps the connection and the assistant apart', () => {
+  assert.equal(progressLine({ status: 'working' }), 'Setting up…');
+  assert.equal(
+    progressLine({ status: 'done', staffing: { state: 'added' } }),
+    'On the map · assistant added'
+  );
+  assert.equal(
+    progressLine({ status: 'done', staffing: { state: 'not_requested' } }),
+    'On the map · no assistant (placement only)'
+  );
+  assert.equal(
+    progressLine({ status: 'failed', stage: 'staffing', message: 'Set up a model.' }),
+    'On the map · assistant not added: Set up a model.'
+  );
+  assert.equal(
+    progressLine({ status: 'failed', stage: 'connection', message: 'it changed' }),
+    'Failed: it changed'
+  );
+});
+
+test('summarizeRun never calls a connected but unstaffed project fully set up', () => {
+  const staffing = { teamDigest: 'a'.repeat(64) };
+  assert.equal(
+    summarizeRun({ done: [{}, {}], failed: null, remaining: [] }, staffing, createPlan),
+    '2 projects are on the map. 2 have your shared REAPER Assistant.'
+  );
+  assert.equal(
+    summarizeRun(
+      {
+        done: [{}],
+        failed: {
+          name: 'Album-2',
+          stage: 'staffing',
+          workspaceId: 'ws-2',
+          message: 'Set up a model.'
+        },
+        remaining: [{}, {}]
+      },
+      staffing,
+      createPlan
+    ),
+    '2 projects are on the map. It has your shared REAPER Assistant. Album-2 is on the map, but its REAPER Assistant was not added: Set up a model. 2 not reached and left ticked.'
+  );
+  assert.equal(
+    summarizeRun({ done: [{}], failed: null, remaining: [] }, null, createPlan),
+    '1 project is on the map.'
+  );
 });
 
 test('sheetPosition sits beside the anchor, falls below when there is no room, and stays in view', () => {
