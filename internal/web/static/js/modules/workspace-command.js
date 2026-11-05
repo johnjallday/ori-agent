@@ -39,6 +39,12 @@ import {
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 import { openLibrarySheet } from './map-library-sheet.js';
+import {
+  addSharedAssistant,
+  loadProjectStaffing,
+  projectStaffingOffer,
+  sharedAssistantOfferHTML
+} from './library-staffing.js';
 import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
@@ -708,7 +714,14 @@ export class WorkspaceCommandView {
   // so a role whose agent was deleted on /agents shows as empty again on the
   // next load (FR42).
   ensureRoleRoster() {
-    void this.loadRoleRoster(true).then(() => {
+    void this.loadRoleRoster(true).then(async () => {
+      // A project linked to a Home, with an empty role, may get that Home's
+      // shared assistant instead of a fresh hire (library-setup-staffing). Read
+      // only, and only asked of a workspace the roster says belongs to a Home
+      // (its group_workspace_id is the Home's, not its own): an ordinary
+      // workspace makes no extra request.
+      if (this.linkedProjectWithEmptyRoster()) await this.loadSharedAssistantOffer();
+      else this.sharedAssistantView = null;
       // An empty roster's hire offer names a role from this answer, so it is
       // redrawn; otherwise only the roster itself needs mounting.
       if (this.active && !this.agentGroups().agents.length) this.render();
@@ -3272,6 +3285,11 @@ export class WorkspaceCommandView {
         this.setToolsTab(toolsTab.getAttribute('data-cmd-tools-tab'));
         return;
       }
+      const sharedAssistantBtn = event.target.closest('[data-shared-assistant-add]');
+      if (sharedAssistantBtn) {
+        void this.addSharedAssistantFromOffer(sharedAssistantBtn);
+        return;
+      }
       const btn = event.target.closest('[data-cmd-modal-action]');
       if (!btn) return;
       this.handleStatModalAction(
@@ -3900,7 +3918,9 @@ export class WorkspaceCommandView {
         EMPTY_ROSTER_HEADING +
         ' ' +
         EMPTY_ROSTER_LINE +
-        '</p><button type="button" class="ws-cmd-agent-action is-primary" data-cmd-modal-action="hire" data-cmd-id="' +
+        '</p>' +
+        this.sharedAssistantOfferHTML('ws-cmd-agent-action is-primary') +
+        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-modal-action="hire" data-cmd-id="' +
         escapeHtml(offer.roleId) +
         '">' +
         escapeHtml(offer.label) +
@@ -5760,6 +5780,74 @@ export class WorkspaceCommandView {
     if (page && typeof page.openAddAgentModal === 'function') page.openAddAgentModal();
   }
 
+  // ---------- The Home's shared assistant (library projects) ----------
+
+  // The roster's group_workspace_id names the Home that manages roles this
+  // workspace cannot change itself; a Home's own roster names itself.
+  linkedProjectWithEmptyRoster() {
+    const roster = this.roleRoster;
+    const home = String(roster?.group_workspace_id || '');
+    return !!roster && !(roster.filled_count > 0) && home !== '' && home !== this.workspaceId();
+  }
+
+  async loadSharedAssistantOffer() {
+    const workspaceId = this.workspaceId();
+    const view = await loadProjectStaffing(workspaceId);
+    // A late answer for another workspace is dropped.
+    if (workspaceId !== this.workspaceId()) return;
+    this.sharedAssistantView = view;
+  }
+
+  // The offer's markup, for any empty roster that draws it (this view, the
+  // agents modal and the Details page). Empty when there is nothing to offer.
+  sharedAssistantOfferHTML(buttonClass) {
+    return sharedAssistantOfferHTML(projectStaffingOffer(this.sharedAssistantView), buttonClass);
+  }
+
+  // The explicit action: one POST, then the canonical roster and workspace
+  // are read again. A refusal or an unknown answer shows its reason and the
+  // offer is re-read; nothing is retried on its own.
+  async addSharedAssistantFromOffer(button) {
+    const workspaceId = this.workspaceId();
+    const view = this.sharedAssistantView;
+    if (!workspaceId || !view || this.sharedAssistantBusy) return;
+    this.sharedAssistantBusy = true;
+    const holder = button?.closest?.('[data-shared-assistant-offer]');
+    const status = holder?.querySelector?.('[data-shared-assistant-status]');
+    if (button) button.disabled = true;
+    if (status) status.textContent = 'Adding the assistant…';
+    // One id per workspace until it succeeds: a retry after a lost answer is
+    // the same request.
+    this.sharedAssistantRequestId =
+      this.sharedAssistantRequestFor === workspaceId && this.sharedAssistantRequestId
+        ? this.sharedAssistantRequestId
+        : `library-staffing-${globalThis.crypto.randomUUID()}`;
+    this.sharedAssistantRequestFor = workspaceId;
+    const result = await addSharedAssistant(workspaceId, view, {
+      requestId: this.sharedAssistantRequestId
+    });
+    this.sharedAssistantBusy = false;
+    if (workspaceId !== this.workspaceId()) return;
+    if (result.ok) {
+      this.sharedAssistantRequestId = '';
+      const name = result.staffing?.agent_name || view.role_label || 'The assistant';
+      this.announceRole(`${name} now works here.`);
+      await this.refreshCanonicalRoleState();
+      await this.page?.loadWorkspace?.();
+      this.sharedAssistantView = null;
+      this.render();
+      this.page?.renderAgentGroups?.();
+      return;
+    }
+    await this.loadSharedAssistantOffer();
+    this.render();
+    this.page?.renderAgentGroups?.();
+    const message = result.message || 'The assistant could not be added.';
+    this.announceRole(message);
+    const fresh = this.container?.querySelector?.('[data-shared-assistant-status]');
+    if (fresh) fresh.textContent = message;
+  }
+
   // Keeps data-cmd-add-agent so every existing click path still reaches it;
   // data-cmd-hire-role tells that path which role the offer named.
   emptyRosterHireHTML() {
@@ -5771,6 +5859,7 @@ export class WorkspaceCommandView {
       '<span>' +
       EMPTY_ROSTER_LINE +
       '</span>' +
+      this.sharedAssistantOfferHTML('ws-cmd-agent-action is-primary') +
       '<button type="button" class="ws-cmd-agent-action' +
       this.secondaryActionClass() +
       '" data-cmd-add-agent' +
@@ -12276,6 +12365,11 @@ export class WorkspaceCommandView {
         this.selectAgent(selectBtn.getAttribute('data-cmd-map-select-agent'), { focus: false });
         return;
       }
+      const sharedAssistantBtn = event.target.closest('[data-shared-assistant-add]');
+      if (sharedAssistantBtn) {
+        void this.addSharedAssistantFromOffer(sharedAssistantBtn);
+        return;
+      }
       const addAgentBtn = event.target.closest('[data-cmd-add-agent]');
       if (addAgentBtn) {
         this.requestHire(addAgentBtn.getAttribute('data-cmd-hire-role'));
@@ -12559,6 +12653,11 @@ export class WorkspaceCommandView {
       const settingsBtn = event.target.closest('[data-cmd-manager-settings]');
       if (settingsBtn) {
         this.openStatModal('settings', settingsBtn);
+        return;
+      }
+      const sharedAssistantBtn = event.target.closest('[data-shared-assistant-add]');
+      if (sharedAssistantBtn) {
+        void this.addSharedAssistantFromOffer(sharedAssistantBtn);
         return;
       }
       const addAgentBtn = event.target.closest('[data-cmd-add-agent]');

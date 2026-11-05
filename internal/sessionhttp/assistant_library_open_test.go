@@ -83,6 +83,18 @@ func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, activat
 
 func (f *fakeOpener) Format(projectlibrary.Scope, string) string { return "reaper" }
 
+func (f *fakeOpener) LinkedEntries(_ projectlibrary.Scope, workspaceID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ids []string
+	for id, row := range f.rows {
+		if row.State == "connected" && row.WorkspaceID == workspaceID {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
 func openProvider() *agentworkspace.AssistantProjectProviderOwner {
 	return &agentworkspace.AssistantProjectProviderOwner{
 		PluginID: "reaper-plugin", PluginVersion: "0.9.0", BlueprintID: "reaper-song", BlueprintVersion: 1,
@@ -151,6 +163,9 @@ func newOpenFixture(t *testing.T) *openFixture {
 		projectStaffing: f.staffs, staffingModelReady: func() bool { return true },
 		libraryOpenerOverride: f.opener,
 	}
+	// The installed blueprint's team matches the songs' pinned team, as it does
+	// whenever eligibility let a song be opened.
+	f.withTeam(openDigest)
 	f.handler.selectFileOnly = func(_ context.Context, songID string) error {
 		f.fileOnly = append(f.fileOnly, songID)
 		return nil
@@ -168,7 +183,7 @@ func newOpenFixture(t *testing.T) *openFixture {
 				source = agentworkspace.RoleSourceCreated
 			}
 			if err := store.Update(songID, func(song *agentworkspace.Workspace) error {
-				song.AgentInstances = append(song.AgentInstances, agentworkspace.AgentInstance{ID: "i-" + songID, Name: fill.Name, RoleSource: source, EntryPoint: true})
+				song.AgentInstances = append(song.AgentInstances, agentworkspace.AgentInstance{ID: "i-" + songID, Name: fill.Name, RoleSource: source, EntryPoint: true, CreatedAt: time.Now().UTC()})
 				link := song.GetAssistantProjectLink()
 				link.ProjectBindings.Bindings = append(link.ProjectBindings.Bindings, agentworkspace.AssistantRoleBinding{RoleID: fill.RoleID, AgentInstanceID: "i-" + songID, AgentName: fill.Name})
 				song.SetAssistantProjectLink(link)
@@ -271,7 +286,8 @@ func TestOpenLibrarySong_SeveralProjectFilesAskWhichOne(t *testing.T) {
 }
 
 // A retry after a half-finished open (the workspace exists, its role is empty)
-// finishes the staffing and never makes a second workspace.
+// finishes the staffing and never makes a second workspace. The failed write is
+// reported as failed, never as the benign "none" (library-setup-staffing).
 func TestOpenLibrarySong_ARetryFinishesAHalfFinishedOpen(t *testing.T) {
 	f := newOpenFixture(t)
 	f.grant(t)
@@ -279,7 +295,7 @@ func TestOpenLibrarySong_ARetryFinishesAHalfFinishedOpen(t *testing.T) {
 	f.handler.assistantWorkspaceRoleStaffer = func(context.Context, string, []RoleStaffingFill) error {
 		return errors.New("crashed before the role was filled")
 	}
-	if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != "none" {
+	if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != staffingFailed {
 		t.Fatalf("half-finished = %d %v", code, payload)
 	}
 	f.handler.assistantWorkspaceRoleStaffer = staffer
@@ -476,6 +492,73 @@ func TestOpenPortfolioProject_ReportsTheLinkedFileAndRefusesRetargetingAConnecte
 	result, err = f.handler.OpenPortfolioProject(t.Context(), "local", openHomeID, LibraryOpenInput{EntryID: "two", Key: "single-default"})
 	if err != nil || result.SelectedFile == "" {
 		t.Fatalf("single-file default lost its read-back name: %+v / %v", result, err)
+	}
+}
+
+// library-setup-staffing 1.4: a song that is already connected reports the
+// consent's stops for its empty role, adds no agent and changes no consent.
+func TestOpenLibrarySong_AConnectedSongReportsTheConsentsStopsWithoutStaffing(t *testing.T) {
+	t.Run("stale team", func(t *testing.T) {
+		f := newOpenFixture(t)
+		if _, err := f.staffs.Consents().Grant(openHomeID, agentworkspace.ProjectStaffingConsentGrant{
+			Source: agentworkspace.ProjectStaffingConsentFolderOffer, PluginID: "reaper-plugin", BlueprintID: "reaper-song",
+			TeamDigest: strings.Repeat("c", 64), RoleIDs: []string{"reaper-assistant"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.opener.Activate(t.Context(), projectlibrary.Scope{}, libraryActivation{EntryID: "two", Key: "earlier"}); err != nil {
+			t.Fatal(err)
+		}
+		code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`)
+		if code != http.StatusOK || payload["created"] != false || payload["staffing"] != agentworkspace.ProjectStaffingConsentStale || len(f.staffed) != 0 {
+			t.Fatalf("stale = %d %v staffed=%v", code, payload, f.staffed)
+		}
+	})
+	t.Run("recorded assistant deleted", func(t *testing.T) {
+		f := newOpenFixture(t)
+		f.grant(t)
+		if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != "added" {
+			t.Fatalf("first open = %d %v", code, payload)
+		}
+		f.agents.mu.Lock()
+		delete(f.agents.names, "REAPER Assistant")
+		f.agents.mu.Unlock()
+		if _, err := f.opener.Activate(t.Context(), projectlibrary.Scope{}, libraryActivation{EntryID: "three", Key: "earlier"}); err != nil {
+			t.Fatal(err)
+		}
+		f.staffed = nil
+		code, payload := f.open(t, openHomeID, "three", `{"request_id":"r3"}`)
+		if code != http.StatusOK || payload["staffing"] != agentworkspace.ProjectStaffingAssistantMissing || len(f.staffed) != 0 {
+			t.Fatalf("missing = %d %v staffed=%v", code, payload, f.staffed)
+		}
+		consent, _ := f.staffs.Consents().Read(openHomeID)
+		if consent.Roles[0].AgentName != "REAPER Assistant" || consent.Roles[0].PendingName != "" {
+			t.Fatalf("a missing assistant changed the consent: %+v", consent.Roles[0])
+		}
+	})
+}
+
+// library-setup-staffing 1.4: staffing a song starts none of its tickets. An
+// existing starter stays Pending (the executor runs only Assigned work).
+func TestOpenLibrarySong_StaffingStartsNoTicket(t *testing.T) {
+	f := newOpenFixture(t)
+	f.grant(t)
+	if _, err := f.opener.Activate(t.Context(), projectlibrary.Scope{}, libraryActivation{EntryID: "two", Key: "earlier"}); err != nil {
+		t.Fatal(err)
+	}
+	starter := agentworkspace.Task{ID: "starter-1", WorkspaceID: "song-two", Description: "Plan the arrangement", Priority: 1,
+		Status: agentworkspace.TaskStatusPending, Context: map[string]any{"template_starter_task": true}}
+	if err := f.store.Update("song-two", func(song *agentworkspace.Workspace) error { return song.AddTasks([]agentworkspace.Task{starter}) }); err != nil {
+		t.Fatal(err)
+	}
+	if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != "added" {
+		t.Fatalf("open = %d %v", code, payload)
+	}
+	song, _ := f.store.Get("song-two")
+	for _, task := range song.Tasks {
+		if task.Status != agentworkspace.TaskStatusPending {
+			t.Fatalf("staffing changed a ticket's status: %+v", task)
+		}
 	}
 }
 

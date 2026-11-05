@@ -138,12 +138,15 @@ func TestLibrarySharing_AMissingAssistantIsAddedAgainOnTheNextOpen(t *testing.T)
 	if code != http.StatusOK || sharing["assistant_missing"] == true || sharing["agent_name"] != nil {
 		t.Fatalf("add again = %d %v", code, payload)
 	}
+	// The song opened first still holds its own copy named "REAPER Assistant",
+	// so the replacement takes the next free name rather than one that would
+	// make that old copy look like the new shared assistant.
 	code, payload = f.open(t, openHomeID, "one", `{"request_id":"r1","selected_file":"Song 001.rpp"}`)
-	if code != http.StatusOK || payload["staffing"] != "added" || payload["agent_name"] != "REAPER Assistant" {
+	if code != http.StatusOK || payload["staffing"] != "added" || payload["agent_name"] != "REAPER Assistant 2" {
 		t.Fatalf("the next song = %d %v", code, payload)
 	}
 	consent, _ := f.staffs.Consents().Read(openHomeID)
-	if consent.Roles[0].AgentName != "REAPER Assistant" {
+	if consent.Roles[0].AgentName != "REAPER Assistant 2" {
 		t.Fatalf("the new assistant was not recorded: %+v", consent.Roles[0])
 	}
 	// With nothing missing the action is an answer, not a change.

@@ -10,6 +10,7 @@ package projectstaffing
 import (
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -34,6 +35,9 @@ var (
 	ErrConsentStale = errors.New("projectstaffing: the consent is for an older team")
 	// ErrAssistantMissing means the agent the consent created is gone.
 	ErrAssistantMissing = errors.New("projectstaffing: the shared assistant is missing")
+	// ErrReservationHeld means an agent holds the name a create reserved, but no
+	// project proves the consent created it: the owner decides, nothing is made.
+	ErrReservationHeld = errors.New("projectstaffing: an unrecorded agent holds the reserved name")
 )
 
 // Modes a fill uses, as the staffing input spells them.
@@ -62,6 +66,8 @@ type Service struct {
 	workspaces workspace.Store
 	agents     Agents
 	consents   *workspace.ProjectStaffingConsents
+	// homes holds one *sync.Mutex per Home: see WithHome.
+	homes sync.Map
 }
 
 // New binds the service to the workspace and agent stores.
@@ -142,7 +148,7 @@ func (song Song) FilledRoles() map[string]workspace.AgentInstance {
 // is filled under the Home's consent. With grant set, a Home with no consent, or
 // one switched off, first gets a fresh consent. A create reserves the name it
 // will use before returning, so Settle can recognise it afterwards.
-func (s *Service) Fill(projectID string, roleIDs []string, grant *Grant) ([]Fill, error) {
+func (s *Service) fill(projectID string, roleIDs []string, grant *Grant) ([]Fill, error) {
 	song, err := s.Song(projectID)
 	if err != nil {
 		return nil, err
@@ -157,11 +163,34 @@ func (s *Service) Fill(projectID string, roleIDs []string, grant *Grant) ([]Fill
 			return nil, err
 		}
 	}
+	return s.decide(song, consent, roleIDs, true)
+}
+
+// Plan says how each of roleIDs would be filled under the Home's consent as it
+// stands, exactly as Fill decides, but writes nothing: no grant, no reservation.
+// A create's Name is the name a Fill now would reserve; a later Fill may pick
+// another if one is taken in between. Errors are Fill's.
+func (s *Service) Plan(projectID string, roleIDs []string) ([]Fill, error) {
+	song, err := s.Song(projectID)
+	if err != nil {
+		return nil, err
+	}
+	consent, err := s.consents.Read(song.Home.ID)
+	if err != nil {
+		consent = nil
+	}
+	return s.decide(song, consent, roleIDs, false)
+}
+
+// decide is the per-role decision Fill and Plan share; reserve records a
+// create's name before returning.
+func (s *Service) decide(song Song, consent *workspace.ProjectStaffingConsent, roleIDs []string, reserve bool) ([]Fill, error) {
 	roles := map[string]workspace.AssistantProgramRoleSpec{}
 	for _, role := range song.RequiredRoles() {
 		roles[role.ID] = role
 	}
 	fills := make([]Fill, 0, len(roleIDs))
+	taken := s.nameTaken(song)
 	for _, roleID := range roleIDs {
 		role, declared := roles[roleID]
 		if !declared {
@@ -169,13 +198,22 @@ func (s *Service) Fill(projectID string, roleIDs []string, grant *Grant) ([]Fill
 		}
 		decision := workspace.DecideProjectStaffing(consent, workspace.ProjectStaffingFacts{
 			PluginID: song.Provider.PluginID, BlueprintID: song.Provider.BlueprintID, TeamDigest: song.Provider.ProjectTeamDigest,
-			RoleID: role.ID, RoleLabel: role.Label, AgentExists: s.agentExists, NameTaken: s.nameTaken(song),
+			RoleID: role.ID, RoleLabel: role.Label, AgentExists: s.agentExists, NameTaken: taken,
 		})
 		switch decision.Action {
 		case workspace.ProjectStaffingCreate:
-			if err := s.consents.ReserveAgent(song.Home.ID, song.Provider.PluginID, song.Provider.BlueprintID,
-				song.Provider.ProjectTeamDigest, role.ID, decision.AgentName); err != nil {
-				return nil, err
+			// An agent already holds the name an earlier create reserved and no
+			// project proves the consent made it: never step around it with a
+			// second create (that is how a second shared agent was born).
+			if entry, found := consent.Role(role.ID); found && entry.PendingName != "" &&
+				entry.PendingName != decision.AgentName && s.agentExists(entry.PendingName) {
+				return nil, ErrReservationHeld
+			}
+			if reserve {
+				if err := s.consents.ReserveAgent(song.Home.ID, song.Provider.PluginID, song.Provider.BlueprintID,
+					song.Provider.ProjectTeamDigest, role.ID, decision.AgentName); err != nil {
+					return nil, err
+				}
 			}
 			fills = append(fills, Fill{RoleID: role.ID, Label: role.Label, Name: decision.AgentName, Mode: ModeCreate})
 		case workspace.ProjectStaffingBind:
@@ -211,7 +249,7 @@ func (s *Service) grantFor(song Song, grant Grant) workspace.ProjectStaffingCons
 // consent reserved. Nothing else is ever recorded (D3). It then records the
 // song's copy of the consent's agent, so a later edit can reach it (D10). It is
 // safe to repeat.
-func (s *Service) Settle(projectID string) error {
+func (s *Service) settle(projectID string) error {
 	song, err := s.Song(projectID)
 	if err != nil {
 		return nil
@@ -230,12 +268,92 @@ func (s *Service) Settle(projectID string) error {
 		if !found || instance.RoleSource != workspace.RoleSourceCreated || instance.Name != role.PendingName {
 			continue
 		}
+		// A binding created before the reservation is some earlier agent that
+		// carries the same name, never the reserved create.
+		if role.ReservedAt != nil && instance.CreatedAt.Before(*role.ReservedAt) {
+			continue
+		}
 		if err := s.consents.RecordAgent(song.Home.ID, song.Provider.PluginID, song.Provider.BlueprintID,
 			song.Provider.ProjectTeamDigest, role.RoleID, instance.Name); err != nil {
 			return err
 		}
 	}
 	return s.trackCopies(song)
+}
+
+// Recover finishes a shared create that was bound in some project of the Home
+// but never recorded (a stop between the bind and Settle): every project linked
+// to homeID is settled, which records a pending name only from a created
+// binding of that exact name, the same proof Settle always requires. It does
+// nothing while no role of the consent has a pending name.
+func (s *Service) recoverHome(homeID string) error {
+	if s == nil || s.workspaces == nil {
+		return nil
+	}
+	consent, err := s.consents.Read(homeID)
+	if err != nil || consent == nil {
+		return nil
+	}
+	pending := false
+	for _, role := range consent.Roles {
+		if role.AgentName == "" && role.PendingName != "" {
+			pending = true
+		}
+	}
+	if !pending {
+		return nil
+	}
+	projects, err := s.linkedProjects(homeID)
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if err := s.settle(project.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// linkedProjects are the projects whose link names homeID as their Home.
+func (s *Service) linkedProjects(homeID string) ([]*workspace.Workspace, error) {
+	ids, err := s.workspaces.List()
+	if err != nil {
+		return nil, err
+	}
+	var projects []*workspace.Workspace
+	for _, id := range ids {
+		project, getErr := s.workspaces.Get(id)
+		if getErr != nil || project == nil {
+			continue
+		}
+		if link := project.GetAssistantProjectLink(); link != nil && link.StationWorkspaceID == homeID {
+			projects = append(projects, project)
+		}
+	}
+	return projects, nil
+}
+
+// UnrecordedHolder is the pending name of one of the consent's roles when an
+// agent of that name exists but no project proves the consent created it (a
+// stop after the create and before the bind, or someone else's agent). Such a
+// name is never adopted and never stepped around with a second create: the
+// owner decides. It is "" when there is none.
+func (s *Service) unrecordedHolder(homeID string, roleIDs []string) string {
+	if s == nil {
+		return ""
+	}
+	consent, err := s.consents.Read(homeID)
+	if err != nil || consent == nil {
+		return ""
+	}
+	for _, roleID := range roleIDs {
+		role, found := consent.Role(roleID)
+		if found && role.AgentName == "" && role.PendingName != "" && s.agentExists(role.PendingName) {
+			return role.PendingName
+		}
+	}
+	return ""
 }
 
 // AgentExists says whether the user has an agent of that name.
@@ -264,8 +382,16 @@ func (s *Service) agentExists(name string) bool {
 }
 
 // nameTaken is the create's own collision rule: any agent the user has, or any
-// agent already in the Home or the project.
+// agent already in the Home, the project or another project of the same Home
+// (a per-song agent whose roster entry is gone still names an agent there, and
+// a shared create must never be confused with it later).
 func (s *Service) nameTaken(song Song) func(string) bool {
+	targets := []*workspace.Workspace{song.Home, song.Project}
+	if song.Home != nil && s.workspaces != nil {
+		if siblings, err := s.linkedProjects(song.Home.ID); err == nil {
+			targets = append(targets, siblings...)
+		}
+	}
 	return func(name string) bool {
 		if s.agents != nil {
 			for _, existing := range s.agents.ListAgents() {
@@ -274,7 +400,7 @@ func (s *Service) nameTaken(song Song) func(string) bool {
 				}
 			}
 		}
-		for _, target := range []*workspace.Workspace{song.Home, song.Project} {
+		for _, target := range targets {
 			for _, instance := range target.GetAgentInstances() {
 				if strings.EqualFold(strings.TrimSpace(instance.Name), name) {
 					return true

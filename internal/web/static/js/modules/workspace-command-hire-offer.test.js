@@ -184,3 +184,22 @@ test('filling a role re-reads the workspace so the hired agent replaces the offe
   assert.deepEqual(steps, ['loadWorkspace', 'render']);
   assert.equal(view.firstOpenRole(), null);
 });
+
+// library-setup-staffing: the Home's shared assistant is only asked about for a
+// project that belongs to a Home. An ordinary workspace (no group), a Home (its
+// roster names itself) and a staffed project make no extra request.
+test('only a linked project with an empty roster asks whether its Home can staff it', () => {
+  const { view } = makeView({ roles: [role()] });
+  view.workspaceId = () => 'project-1';
+  const withRoster = extra => {
+    view.roleRoster = { total_count: 1, filled_count: 0, roles: [role()], ...extra };
+    return view.linkedProjectWithEmptyRoster();
+  };
+  assert.equal(withRoster({ group_workspace_id: 'home-1' }), true, 'a linked project, empty');
+  assert.equal(withRoster({}), false, 'an ordinary workspace has no Home');
+  assert.equal(withRoster({ group_workspace_id: '' }), false);
+  assert.equal(withRoster({ group_workspace_id: 'project-1' }), false, 'a Home names itself');
+  assert.equal(withRoster({ group_workspace_id: 'home-1', filled_count: 1 }), false, 'staffed');
+  view.roleRoster = null;
+  assert.equal(view.linkedProjectWithEmptyRoster(), false, 'no roster read yet');
+});

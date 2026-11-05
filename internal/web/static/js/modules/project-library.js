@@ -12,7 +12,7 @@ import {
   songFactsLabel,
   songLineText
 } from './library-open.js';
-import { runSetup } from './library-setup.js';
+import { loadStaffingPlan, runSetup, staffingDisclosure } from './library-setup.js';
 import { setupQuestURL } from './setup-quest-links.js';
 import { folderPickCopy } from './folder-pick-copy.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
@@ -2115,37 +2115,76 @@ export class ProjectLibraryPanel {
         return;
       }
       const roles = [...new Set(ready.flatMap(item => item.roles))];
+      const client = {
+        request: path => this.request(path),
+        post: (path, body) => this.post(path, body)
+      };
+      // What connecting does about the Home's shared assistant: read only, and
+      // said before anything is confirmed (library-setup-staffing).
+      const plan = await loadStaffingPlan(client);
+      const staffing = staffingDisclosure(plan, ready.length);
       const lines = [
         `Connect ${ready.length} songs, each as its own project workspace:`,
         ...ready.map(item => `${item.name} — ${item.file}`),
         `Installed project roles: ${roles.join(', ') || 'none declared'}`,
-        'Each starts File-only. Source files stay where they are and are never changed. Project-role staffing and live access need separate reviews.'
+        'Each starts File-only. Source files stay where they are and are never changed. Live access needs a separate review.'
       ];
+      if (staffing.canStaff) lines.push(staffing.staffLine);
+      lines.push(staffing.note);
       if (left.length) lines.push(`Not included (each needs its own review): ${left.join('; ')}`);
-      if (!(await this.confirm(`Connect ${ready.length} songs?`, lines, 'Connect all', trigger))) {
+      const answer = await this.confirm(
+        `Connect ${ready.length} songs?`,
+        lines,
+        staffing.canStaff ? 'Connect all and add the assistant' : 'Connect all',
+        trigger,
+        staffing.canStaff ? { alternative: 'Connect only' } : {}
+      );
+      if (!answer) {
         this.status('Nothing was connected.');
         return;
+      }
+      let staffed = answer === true && staffing.canStaff ? { teamDigest: plan.teamDigest } : null;
+      if (staffed) {
+        // Confirmed against what was shown: a plan that changed meanwhile is a
+        // new question, never silently the same answer.
+        const fresh = await loadStaffingPlan(client);
+        if (fresh.plan !== plan.plan || fresh.teamDigest !== plan.teamDigest) {
+          this.status(
+            'What connecting does about the assistant changed. Nothing was connected; review it again.'
+          );
+          return;
+        }
+      } else {
+        staffed = null;
       }
       // The per-song review-then-commit loop is the one the map's setup sheet
       // runs too (library-setup.js): same checks, same stop on first failure.
       const result = await runSetup({
-        client: {
-          request: path => this.request(path),
-          post: (path, body) => this.post(path, body)
-        },
+        client,
         items: ready,
+        staffing: staffed,
         operationKey,
-        onProgress: (item, status) => {
-          if (status === 'done') this.selectedProjects.delete(item.id);
+        onProgress: (item, status, detail) => {
+          if (status === 'done' || detail?.workspaceId) this.selectedProjects.delete(item.id);
         }
       });
       const done = result.done.map(item => item.name);
-      const failure = result.failed ? `${result.failed.name}: ${result.failed.message}` : '';
+      const role = plan.roleLabel || 'assistant';
+      const failure = result.failed
+        ? result.failed.stage === 'staffing'
+          ? `${result.failed.name} is connected, but its ${role} was not added: ${result.failed.message}`
+          : `Stopped at ${result.failed.name}: ${result.failed.message}.`
+        : '';
+      const connected = done.length + (result.failed?.workspaceId ? 1 : 0);
       await this.refresh();
       this.status(
         [
-          `Connected ${done.length} of ${ready.length}.`,
-          failure ? `Stopped at ${failure}. Songs not reached were left alone.` : '',
+          `Connected ${connected} of ${ready.length}.`,
+          staffed && done.length
+            ? `${done.length} ${done.length === 1 ? 'has' : 'have'} your shared ${role}.`
+            : '',
+          failure,
+          result.failed && result.remaining.length ? 'Songs not reached were left alone.' : '',
           left.length ? `${left.length} need their own review.` : ''
         ]
           .filter(Boolean)
@@ -2571,7 +2610,9 @@ export class ProjectLibraryPanel {
     });
   }
 
-  confirm(title, lines, action, trigger, { destructive = false } = {}) {
+  // Resolves true for the primary action, false for Cancel and, when an
+  // `alternative` label is given, 'alternative' for that second action.
+  confirm(title, lines, action, trigger, { destructive = false, alternative = '' } = {}) {
     return new Promise(resolve => {
       const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
       const form = node('form');
@@ -2590,11 +2631,22 @@ export class ProjectLibraryPanel {
         action
       );
       accept.type = 'submit';
-      actions.append(cancel, accept);
+      actions.append(cancel);
+      let accepted = false;
+      if (alternative) {
+        const other = node('button', 'modern-btn modern-btn-secondary', alternative);
+        other.type = 'button';
+        other.setAttribute('data-confirm-alternative', '');
+        other.addEventListener('click', () => {
+          accepted = 'alternative';
+          dialog.close();
+        });
+        actions.append(other);
+      }
+      actions.append(accept);
       form.append(heading, list, actions);
       dialog.append(form);
       document.body.append(dialog);
-      let accepted = false;
       cancel.addEventListener('click', () => dialog.close());
       form.addEventListener('submit', () => {
         accepted = true;
