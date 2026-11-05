@@ -3238,10 +3238,33 @@ export class ProjectLibraryPanel {
     const recordedScan = () =>
       (this.state?.roots || []).find(item => item.id === rootID)?.last_scan || null;
     const priorScanID = recordedScan()?.id || '';
-    const review = await this.post(`/roots/${encodeURIComponent(rootID)}/scans/review`, {
-      if_revision: this.state.revision,
-      ...(scopeID ? { scope_id: scopeID } : {})
-    });
+    const askReview = () =>
+      this.post(`/roots/${encodeURIComponent(rootID)}/scans/review`, {
+        if_revision: this.state.revision,
+        ...(scopeID ? { scope_id: scopeID } : {})
+      });
+    // Work that follows a scan (the Manager's turn, the song-facts pass) can
+    // advance the Home revision after the shelf re-read it. Rescan has no page
+    // in between to absorb that, so it reads the current revision first and
+    // asks once more if the review still finds it stale; a review grants
+    // nothing, so asking again is safe.
+    const freshRevision = async () => {
+      const current = await this.request('/roots');
+      if (Number.isSafeInteger(current?.revision)) this.state.revision = current.revision;
+    };
+    let review;
+    if (confirmed) {
+      await freshRevision();
+      try {
+        review = await askReview();
+      } catch (error) {
+        if (error.reason !== 'stale_review') throw error;
+        await freshRevision();
+        review = await askReview();
+      }
+    } else {
+      review = await askReview();
+    }
     if (
       !confirmed &&
       !(await this.confirm(

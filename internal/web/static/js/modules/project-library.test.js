@@ -2677,6 +2677,11 @@ test('Rescan scans every connected root in turn, with no confirmation and no ove
       log.push('refresh');
       panel.state.revision++;
     };
+    // Work after a scan advanced the Home again: Rescan reads it before asking.
+    panel.request = async path => {
+      assert.equal(path, '/roots');
+      return { revision: panel.state.revision + 10 };
+    };
     panel.post = async (path, body) => {
       assert.equal(inFlight, 0, 'a request started while another scan was in flight');
       inFlight++;
@@ -2721,6 +2726,41 @@ test('Rescan scans every connected root in turn, with no confirmation and no ove
   }
 });
 
+test('a second Rescan after background work re-reads the revision and asks once more', async () => {
+  const original = globalThis.document;
+  const dom = freshnessDom();
+  globalThis.document = dom.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      revision: 48,
+      roots: [{ id: 'r' }]
+    };
+    panel.summary = {};
+    panel.status = () => {};
+    panel.refresh = async () => {};
+    // The first read is already stale (the Manager's turn wrote after it).
+    const reads = [49, 50];
+    panel.request = async () => ({ revision: reads.shift() });
+    const reviews = [];
+    panel.post = async (path, body) => {
+      if (path.endsWith('/scans/review')) {
+        reviews.push(body.if_revision);
+        if (body.if_revision !== 50)
+          throw Object.assign(new Error('changed'), { status: 409, reason: 'stale_review' });
+        return { token: 't' };
+      }
+      return { status: 'complete', entries_seen: 1, skipped_links: 0, skipped_other: 0 };
+    };
+    await panel.rescanAll({ id: 'projectLibraryRescan', disabled: false, isConnected: false });
+    assert.deepEqual(reviews, [49, 50], 'one retry with the re-read revision, never a loop');
+  } finally {
+    globalThis.document = original;
+  }
+});
+
 test('a Rescan that fails stops, reports the failure and re-enables the button', async () => {
   const original = globalThis.document;
   const dom = freshnessDom();
@@ -2738,6 +2778,7 @@ test('a Rescan that fails stops, reports the failure and re-enables the button',
     const statuses = [];
     panel.status = message => statuses.push(message);
     panel.refresh = async () => {};
+    panel.request = async () => ({ revision: 1 });
     panel.post = async path => {
       posts.push(path);
       throw Object.assign(new Error('The folder could not be read.'), { status: 409 });
