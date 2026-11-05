@@ -614,15 +614,30 @@ async function initAfterFirstLoad() {
         systemModelLinked: () => Boolean(currentAgent?.system_model_linked),
         // A ?tab=ownership deep link lands again once the section has content:
         // cards above it fill in after the first scroll and push it down.
+        // Cards above keep growing as their own reads finish, so keep landing
+        // on layout changes for a few seconds, until the reader moves.
         onRendered: (() => {
-          let landed = false;
+          let started = false;
           return () => {
-            if (landed) return;
-            landed = true;
+            if (started) return;
+            started = true;
             if (new URLSearchParams(window.location.search).get('tab') !== 'ownership') return;
-            document
-              .getElementById('settingsOwnershipSection')
-              ?.scrollIntoView({ block: 'start', behavior: 'instant' });
+            const section = document.getElementById('settingsOwnershipSection');
+            const land = () => section?.scrollIntoView({ block: 'start', behavior: 'instant' });
+            land();
+            if (typeof ResizeObserver !== 'function') return;
+            const observer = new ResizeObserver(land);
+            const stop = () => {
+              observer.disconnect();
+              for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) {
+                window.removeEventListener(type, stop);
+              }
+            };
+            for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) {
+              window.addEventListener(type, stop, { passive: true });
+            }
+            observer.observe(document.getElementById('content') || document.body);
+            window.setTimeout(stop, 8000);
           };
         })()
       }) || null;
