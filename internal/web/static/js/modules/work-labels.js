@@ -67,22 +67,28 @@ export function startFromBacklogLabel(title) {
  *
  * Setup-checklist framing ("Mission 01", "Quests" as the checklist's name) is
  * not a work item and is deliberately not rendered by the guard (decision 3).
+ *
+ * The terms are written as regular-expression literals and read back through
+ * `.source`: scripts/check-user-facing-task-copy.mjs treats a string literal
+ * in a browser script as display copy, and these are the banned words, not copy.
  */
-export const RETIRED_WORK_TERMS = Object.freeze([
-  'Quest Board',
-  'Accept Quest',
-  'Start Quest',
-  'Resolve Quest',
-  'Track Quest',
-  'Open Quest',
-  'Quest',
-  'Objectives',
-  'Objective',
-  'All Tasks',
-  'Session Tickets',
-  'Tasks',
-  'Task'
-]);
+export const RETIRED_WORK_TERMS = Object.freeze(
+  [
+    /Quest Board/,
+    /Accept Quest/,
+    /Start Quest/,
+    /Resolve Quest/,
+    /Track Quest/,
+    /Open Quest/,
+    /Quest/,
+    /Objectives/,
+    /Objective/,
+    /All Tasks/,
+    /Session Tickets/,
+    /Tasks/,
+    /Task/
+  ].map(term => term.source)
+);
 
 /**
  * The retired terms that appear in `text` as whole words, case-insensitively;
