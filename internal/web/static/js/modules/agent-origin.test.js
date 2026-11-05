@@ -77,6 +77,15 @@ test('a saved edit says which workspace copies it reached and which kept their o
   for (const nothing of [undefined, null, {}, { updated: [], customised: [] }, 'x']) {
     assert.equal(origin.carriedEditLabel(nothing), '');
   }
+  // A failure is reported even when no copy was updated.
+  assert.match(
+    origin.carriedEditLabel({ updated: [], customised: [], error: 'copy write failed' }),
+    /^Some workspace copies could not be updated/
+  );
+  assert.match(
+    origin.carriedEditLabel({ updated: [ref('a', 'Song 1')], customised: [], error: 'x' }),
+    /^Also updated in 1 workspace\. Some workspace copies could not be updated/
+  );
 });
 
 test('a delete of an agent that works in workspaces is refused up front with the count', () => {

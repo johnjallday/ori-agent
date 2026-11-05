@@ -240,7 +240,7 @@
       setDraft(section, values) {
         const s = get(section);
         s.draft = { ...(s.draft || s.baseline), ...values };
-        if (s.state === 'clean' || s.state === 'saved')
+        if (['clean', 'saved', 'matched', 'error'].includes(s.state))
           s.state = isDirty(section) ? 'dirty' : 'clean';
       },
       discard(section) {
@@ -334,6 +334,12 @@
         for (const section of SECTIONS) {
           if (section === pendingSection) continue;
           const s = get(section);
+          // An unconfirmed save is settled only by reconcileUnconfirmed, which
+          // compares the read with what was submitted.
+          if (s.state === 'unconfirmed') {
+            out[section] = 'unconfirmed';
+            continue;
+          }
           const values = valuesFromAgent(section, agentValues);
           if (same(values, s.baseline)) {
             if (v) s.version = v;
@@ -354,6 +360,7 @@
           const moved = Object.keys(values).filter(key => !same(values[key], s.baseline[key]));
           if (moved.some(key => edited.includes(key))) {
             s.latest = values;
+            s.latestVersion = v;
             s.state = 'conflict';
             out[section] = 'conflict';
             continue;
@@ -365,6 +372,85 @@
           out[section] = 'rebased';
         }
         return out;
+      },
+      // conflictFields lists the fields a conflict is about: the ones the
+      // draft changes that were also changed in the latest saved values.
+      conflictFields(section) {
+        const s = get(section);
+        if (!s.latest || !s.draft) return [];
+        const edited = changedFields(section, s.baseline, s.draft);
+        return Object.keys(s.latest).filter(
+          key => edited.includes(key) && !same(s.latest[key], s.baseline[key])
+        );
+      },
+      // useLatest discards the draft and takes the latest saved values.
+      useLatest(section) {
+        const s = get(section);
+        if (!s.latest) throw new Error('There are no newer saved values to use.');
+        s.baseline = s.latest;
+        if (s.latestVersion) s.version = s.latestVersion;
+        s.draft = null;
+        s.latest = null;
+        s.state = 'clean';
+      },
+      // reapply keeps the draft but bases it on the latest saved values and
+      // version. Nothing is sent: the user reviews and saves deliberately, and
+      // the save can still conflict if the agent changes again.
+      reapply(section) {
+        const s = get(section);
+        if (!s.latest) throw new Error('There are no newer saved values to review against.');
+        // Fields the user did not edit take the latest values, so they are not
+        // sent back as stale "changes".
+        const edited = s.draft ? changedFields(section, s.baseline, s.draft) : [];
+        if (s.draft) {
+          for (const key of Object.keys(s.latest)) {
+            if (!edited.includes(key)) s.draft[key] = s.latest[key];
+          }
+        }
+        s.baseline = s.latest;
+        if (s.latestVersion) s.version = s.latestVersion;
+        s.latest = null;
+        s.state = isDirty(section) ? 'dirty' : 'clean';
+        if (s.state === 'clean') s.draft = null;
+      },
+      // reconcileUnconfirmed settles a save whose answer was lost, against an
+      // authoritative read. It never resubmits. Outcomes:
+      //   "matched"   — the saved values now equal what was submitted (which
+      //                 save wrote them is unknown);
+      //   "not_saved" — the submitted fields still hold their old values; the
+      //                 draft stays for the user to save again;
+      //   "conflict"  — they hold something else; the draft stays for review.
+      reconcileUnconfirmed(section, agentValues, version) {
+        const s = get(section);
+        if (s.state !== 'unconfirmed') return 'none';
+        const v = trimmed(version ?? agentValues?.version);
+        const values = valuesFromAgent(section, agentValues);
+        const submitted = normalizeDraft(section, s.baseline, s.submitted || s.draft);
+        const fields = changedFields(section, s.baseline, s.submitted || s.draft);
+        const before = s.baseline;
+        const sent = s.submitted;
+        s.submitted = null;
+        if (fields.every(key => same(values[key], submitted[key]))) {
+          s.baseline = values;
+          if (v) s.version = v;
+          s.latest = null;
+          s.draft = s.draft && sent && !same(s.draft, sent) ? s.draft : null;
+          s.state = s.draft && isDirty(section) ? 'dirty' : 'matched';
+          return 'matched';
+        }
+        if (fields.every(key => same(values[key], before[key]))) {
+          for (const key of Object.keys(values)) {
+            if (!fields.includes(key) && s.draft) s.draft[key] = values[key];
+          }
+          s.baseline = values;
+          if (v) s.version = v;
+          s.state = 'dirty';
+          return 'not_saved';
+        }
+        s.latest = values;
+        s.latestVersion = v;
+        s.state = 'conflict';
+        return 'conflict';
       }
     };
   }

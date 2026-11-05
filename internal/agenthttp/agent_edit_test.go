@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -300,6 +301,38 @@ func TestRenameFailureAfterSaveReportsWhatWasSaved(t *testing.T) {
 	}
 	if after := fetchAgentVersion(t, dash, "Solo"); after != got.Version {
 		t.Fatalf("saved definition reads %q, answer said %q", after, got.Version)
+	}
+}
+
+type failingCarrier struct{}
+
+func (failingCarrier) CarryEdit(string) (CarriedEdit, error) {
+	return CarriedEdit{}, errors.New("copy write failed")
+}
+
+// TestCarryFailureIsReportedEvenWhenNothingWasUpdated: a saved edit whose
+// workspace copies could not be updated says so, instead of looking like an
+// edit that had no copies to update. The definition is still saved.
+func TestCarryFailureIsReportedEvenWhenNothingWasUpdated(t *testing.T) {
+	h, dash := versionTestHandlers(t, "Solo")
+	h.SetEditCarrier(failingCarrier{})
+	version := fetchAgentVersion(t, dash, "Solo")
+	rr := patchAgent(t, h, "Solo", `{"system_prompt":"carried","expected_version":"`+version+`"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Version string       `json:"version"`
+		Carried *CarriedEdit `json:"carried"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Carried == nil || body.Carried.Error == "" {
+		t.Fatalf("carry failure not reported: %s", rr.Body.String())
+	}
+	if body.Version == "" || fetchAgentVersion(t, dash, "Solo") != body.Version {
+		t.Fatal("the definition save must stand regardless of the copies")
 	}
 }
 

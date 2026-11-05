@@ -354,6 +354,7 @@ test.describe('draft isolation', () => {
       await page.locator('#profileDescriptionInput').fill('Saved description');
       await page.locator('#profileSaveBtn').click();
       await expect(page.locator('#profileEditModal')).toBeHidden();
+      await expect(page.locator('#profilePageStatus')).toHaveText('Profile saved.');
       await expect(page.locator('#agentDescription')).toHaveText('Saved description');
       await expect(page.locator('#editSystemPrompt')).toHaveValue('Unsaved prompt');
       await expect(page.locator('#promptEditBadge')).toHaveText('Unsaved changes');
@@ -864,6 +865,357 @@ test.describe('appearance', () => {
       await page.locator('#agentAppearance-color').fill('#333333');
       await expect(page.locator('#agentAppearance-root')).toContainText('Saved.');
       expect((await detail(request, name)).appearance.generated.color).toBe('#333333');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+});
+
+// Routes the next definition PATCH through `handle`, counting every PATCH.
+async function interceptPatch(
+  page: Page,
+  name: string,
+  handle: (route: import('@playwright/test').Route) => Promise<void>
+) {
+  const counter = { patches: 0 };
+  let used = false;
+  await page.route(`**/api/agents/${encodeURIComponent(name)}`, async route => {
+    if (route.request().method() !== 'PATCH') return route.continue();
+    counter.patches += 1;
+    if (used) return route.continue();
+    used = true;
+    await handle(route);
+  });
+  return counter;
+}
+
+test.describe('recovery', () => {
+  test('a failed first load offers Try again in place instead of leaving the page', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      let fail = true;
+      await page.route(`**/api/agents/${encodeURIComponent(name)}/detail`, route =>
+        fail ? route.fulfill({ status: 500, body: 'down' }) : route.continue()
+      );
+      let dialogs = 0;
+      page.on('dialog', dialog => {
+        dialogs += 1;
+        void dialog.dismiss();
+      });
+      await page.goto(`/agents/${encodeURIComponent(name)}`);
+      const retry = page.locator('#agentLoadRetry');
+      await expect(page.locator('#agentLoadFailure')).toContainText('Nothing was changed');
+      await expect(retry).toBeFocused();
+      await page.waitForTimeout(3500); // the old page navigated away after 3s
+      expect(new URL(page.url()).pathname).toBe(`/agents/${encodeURIComponent(name)}`);
+      expect(dialogs).toBe(0);
+      fail = false;
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#agentName')).toHaveText(name);
+      await editPrompt(page, 'After retry');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a conflict shows saved vs mine; keeping mine rebases without saving, and can conflict again', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const sent = recordPatches(page);
+      await editPrompt(page, 'Mine');
+      const elsewhere = (prompt: string) =>
+        request.patch(`/api/agents/${encodeURIComponent(name)}`, {
+          data: { system_prompt: prompt }
+        });
+      expect((await elsewhere('Theirs')).ok()).toBeTruthy();
+
+      await page.locator('#savePromptBtn').click();
+      const review = page.locator('#promptConflictReview');
+      await expect(review).toBeVisible();
+      await expect(review).toContainText('System prompt — saved now');
+      await expect(review).toContainText('Theirs');
+      await expect(review).toContainText('Mine');
+
+      await review.locator('[data-conflict-keep-mine]').click();
+      await expect(review).toBeHidden();
+      await expect(page.locator('#editSystemPrompt')).toBeFocused();
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Mine');
+      await expect(page.locator('#promptEditStatus')).toContainText('Nothing has been saved yet');
+      expect((await detail(request, name)).system_prompt).toBe('Theirs');
+      expect(sent).toHaveLength(1);
+
+      // It changes again before the deliberate save: still no overwrite.
+      expect((await elsewhere('Theirs again')).ok()).toBeTruthy();
+      await page.locator('#savePromptBtn').click();
+      await expect(review).toBeVisible();
+      expect((await detail(request, name)).system_prompt).toBe('Theirs again');
+
+      await review.locator('[data-conflict-keep-mine]').click();
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+      expect((await detail(request, name)).system_prompt).toBe('Mine');
+      expect(sent).toHaveLength(3);
+      expect(new Set(sent.map(body => body.expected_version)).size).toBe(3);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('choosing the saved version discards only that draft', async ({ page, request }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await editTemperature(page, '0.5');
+      await editPrompt(page, 'Mine');
+      await request.patch(`/api/agents/${encodeURIComponent(name)}`, {
+        data: { system_prompt: 'Theirs' }
+      });
+      await page.locator('#savePromptBtn').click();
+      await page.locator('#promptConflictReview [data-conflict-use-saved]').click();
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Theirs');
+      await expect(page.locator('#promptEditBadge')).toBeHidden();
+      await expect(page.locator('#editTemperature')).toHaveValue('0.5');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('an edit on disk is reported with its own message and reviewed the same way (fault-injected code)', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await editPrompt(page, 'Mine');
+      // The real disk refusal is covered against the file store in Go
+      // (TestPatchAfterAnEditOnDiskIsRefusedWithItsOwnCode); here the outside
+      // edit is made through the API and the answer carries the disk code.
+      await request.patch(`/api/agents/${encodeURIComponent(name)}`, {
+        data: { system_prompt: 'Edited in a text editor' }
+      });
+      await interceptPatch(page, name, route =>
+        route.fulfill({
+          status: 409,
+          json: { success: false, code: 'agent_changed_on_disk', message: 'changed on disk' }
+        })
+      );
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('changed on disk outside Ori');
+      await expect(page.locator('#promptConflictReview')).toContainText('Edited in a text editor');
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Mine');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a save that lands but loses its answer is verified, not resent', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const counter = await interceptPatch(page, name, async route => {
+        await route.fetch(); // the server commits
+        await route.abort('failed'); // the browser never hears back
+      });
+      await editPrompt(page, 'Landed');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText(
+        'Ori could not confirm which save wrote them'
+      );
+      expect(counter.patches).toBe(1);
+      expect((await detail(request, name)).system_prompt).toBe('Landed');
+      await expect(page.locator('#promptEditBadge')).toBeHidden();
+      await expect(page.locator('#editSystemPrompt')).toBeHidden();
+      await expect(page.locator('#promptDisplay')).toHaveText('Landed');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a malformed acknowledgment is treated as unconfirmed and verified', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const counter = await interceptPatch(page, name, async route => {
+        const response = await route.fetch();
+        await route.fulfill({ response, body: 'not json' });
+      });
+      await editPrompt(page, 'Garbled');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('now match your changes');
+      expect(counter.patches).toBe(1);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a lost request that never landed keeps the draft for a deliberate save', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const counter = await interceptPatch(page, name, route => route.abort('failed'));
+      await editPrompt(page, 'Never sent');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText(
+        'does not appear to have been saved'
+      );
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Never sent');
+      expect(counter.patches).toBe(1);
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+      expect(counter.patches).toBe(2);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('when verification itself fails, saving pauses until Check again succeeds', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      let detailDown = false;
+      await page.route(`**/api/agents/${encodeURIComponent(name)}/detail`, route =>
+        detailDown ? route.fulfill({ status: 503, body: 'down' }) : route.continue()
+      );
+      const counter = await interceptPatch(page, name, async route => {
+        detailDown = true;
+        await route.fetch();
+        await route.abort('failed');
+      });
+      await editPrompt(page, 'Unverified');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('Saving is paused');
+      await expect(page.locator('#promptEditBadge')).toHaveText('Save not confirmed');
+      await expect(page.locator('#savePromptBtn')).toBeDisabled();
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Unverified');
+      expect(counter.patches).toBe(1);
+
+      detailDown = false;
+      await page.locator('#promptEditStatus button', { hasText: 'Check again' }).click();
+      await expect(page.locator('#promptEditStatus')).toContainText('now match your changes');
+      expect(counter.patches).toBe(1);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a rename whose answer was lost is found under the new name', async ({ page, request }) => {
+    const name = await createAgent(request);
+    const renamed = `${name} Moved`;
+    try {
+      await openAgent(page, name);
+      const counter = await interceptPatch(page, name, async route => {
+        await route.fetch();
+        await route.abort('failed');
+      });
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileAgentNameInput').fill(renamed);
+      await page.locator('#profileSaveBtn').click();
+      await expect(page.locator('#profileEditStatus')).toContainText('now match your changes');
+      await expect(page).toHaveURL(new RegExp(`/agents/${encodeURIComponent(renamed)}$`));
+      await expect(page.locator('#agentName')).toHaveText(renamed);
+      expect(counter.patches).toBe(1);
+    } finally {
+      await removeAgent(request, renamed);
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a rename target taken meanwhile is refused with the draft kept', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    const target = `${name} Target`;
+    try {
+      await openAgent(page, name);
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileAgentNameInput').fill(target);
+      await page.locator('#profileDescriptionInput').fill('Kept');
+      expect(
+        (await request.post('/api/agents', { data: { name: target, model: 'gpt-4o-mini' } })).ok()
+      ).toBeTruthy();
+      await page.locator('#profileSaveBtn').click();
+      await expect(page.locator('#profileEditStatus')).toContainText('already exists');
+      await expect(page.locator('#profileAgentNameInput')).toHaveValue(target);
+      await expect(page.locator('#profileDescriptionInput')).toHaveValue('Kept');
+      expect((await detail(request, name)).metadata.description).toBe('Original');
+    } finally {
+      await removeAgent(request, target);
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a confirmed save whose workspace copies failed says both (fault-injected follow-up)', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await interceptPatch(page, name, async route => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.carried = { updated: [], customised: [], error: 'copy write failed' };
+        await route.fulfill({ response, json });
+      });
+      await editPrompt(page, 'Saved anyway');
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved.');
+      await expect(page.locator('#promptEditStatus')).toContainText(
+        'Some workspace copies could not be updated'
+      );
+      expect((await detail(request, name)).system_prompt).toBe('Saved anyway');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a confirmed save whose Default model update failed says both (fault-injected follow-up)', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await interceptPatch(page, name, async route => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.system_model = {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          mirrored: false,
+          reason: 'provider "openai" is not available on this server'
+        };
+        await route.fulfill({ response, json });
+      });
+      await editTemperature(page, '0.35');
+      await page.locator('#saveConfigBtn').click();
+      await expect(page.locator('#configEditStatus')).toContainText(
+        'Agent saved, but the Default model update was not confirmed.'
+      );
+      expect((await detail(request, name)).temperature).toBe(0.35);
     } finally {
       await removeAgent(request, name);
     }

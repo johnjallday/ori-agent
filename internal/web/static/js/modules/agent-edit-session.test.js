@@ -386,3 +386,104 @@ test('an appearance write shares the one-write slot and an unknown outcome block
   t.resolveExternal();
   assert.equal(t.beginSubmit('prompt').system_prompt, 'Draft');
 });
+
+test('reapplying sends only my edits, never the stale untouched fields', () => {
+  const s = api.createSession(agent());
+  s.setDraft('configuration', { ...plain(s.baseline('configuration')), temperature: 0.2 });
+  s.observe(agent({ version: 'v2', temperature: 0.9, role: 'analyzer', model: 'gpt-5-new' }));
+  s.reapply('configuration');
+  assert.deepEqual(plain(s.beginSubmit('configuration')), {
+    temperature: 0.2,
+    expected_version: 'v2'
+  });
+});
+
+function conflicted() {
+  const s = api.createSession(agent());
+  s.setDraft('configuration', { temperature: 0.2, role: 'researcher' });
+  s.observe(agent({ version: 'v2', temperature: 0.9 }));
+  assert.equal(s.state('configuration'), 'conflict');
+  return s;
+}
+
+test('a conflict names only the overlapping fields and offers use-latest or reapply', () => {
+  const s = conflicted();
+  assert.deepEqual(plain(s.conflictFields('configuration')), ['temperature']);
+  // Still refused against the old version until the user chooses.
+  assert.equal(s.beginSubmit('configuration').expected_version, 'v1');
+  s.finishSubmit('configuration', { kind: 'stale' });
+
+  const latest = conflicted();
+  latest.useLatest('configuration');
+  assert.equal(latest.state('configuration'), 'clean');
+  assert.equal(latest.baseline('configuration').temperature, 0.9);
+  assert.equal(latest.version('configuration'), 'v2');
+  assert.equal(latest.draft('configuration'), null);
+
+  const mine = conflicted();
+  mine.reapply('configuration');
+  assert.equal(mine.state('configuration'), 'dirty');
+  // Reapplied against the latest: only the user's differing fields, new version.
+  assert.deepEqual(plain(mine.beginSubmit('configuration')), {
+    role: 'researcher',
+    temperature: 0.2,
+    expected_version: 'v2'
+  });
+  assert.throws(() => api.createSession(agent()).reapply('prompt'), /no newer saved values/);
+});
+
+function unconfirmedPrompt(text = 'Sent') {
+  const s = api.createSession(agent());
+  s.setDraft('prompt', { system_prompt: text });
+  s.beginSubmit('prompt');
+  s.finishSubmit('prompt', { kind: 'unconfirmed' });
+  return s;
+}
+
+test('an unconfirmed save is reconciled against a read, never resubmitted', () => {
+  // A refresh does not settle it; only the explicit reconciliation does.
+  const s = unconfirmedPrompt();
+  assert.equal(s.observe(agent({ version: 'v2', system_prompt: 'Sent' })).prompt, 'unconfirmed');
+  assert.equal(s.state('prompt'), 'unconfirmed');
+
+  assert.equal(
+    s.reconcileUnconfirmed('prompt', agent({ version: 'v2', system_prompt: 'Sent' })),
+    'matched'
+  );
+  assert.equal(s.state('prompt'), 'matched');
+  assert.equal(s.draft('prompt'), null);
+  assert.equal(s.version('prompt'), 'v2');
+  assert.deepEqual(plain(s.atRisk()), []);
+
+  const lost = unconfirmedPrompt();
+  assert.equal(lost.reconcileUnconfirmed('prompt', agent({ version: 'v1' })), 'not_saved');
+  assert.equal(lost.state('prompt'), 'dirty');
+  assert.equal(lost.draft('prompt').system_prompt, 'Sent');
+  assert.equal(lost.beginSubmit('prompt').expected_version, 'v1');
+
+  const other = unconfirmedPrompt();
+  assert.equal(
+    other.reconcileUnconfirmed('prompt', agent({ version: 'v3', system_prompt: 'Someone else' })),
+    'conflict'
+  );
+  assert.equal(other.latest('prompt').system_prompt, 'Someone else');
+  assert.equal(other.draft('prompt').system_prompt, 'Sent');
+});
+
+test('a rename whose answer was lost matches only when the read shows the new name', () => {
+  const s = api.createSession(agent());
+  s.setDraft('profile', { name: 'Scout Two', description: 'Finds things' });
+  s.beginSubmit('profile');
+  s.finishSubmit('profile', { kind: 'unconfirmed' });
+  assert.equal(s.reconcileUnconfirmed('profile', agent({ version: 'v1' })), 'not_saved');
+  assert.equal(s.draft('profile').name, 'Scout Two');
+
+  const t = api.createSession(agent());
+  t.setDraft('profile', { name: 'Scout Two' });
+  t.beginSubmit('profile');
+  t.finishSubmit('profile', { kind: 'unconfirmed' });
+  assert.equal(
+    t.reconcileUnconfirmed('profile', agent({ name: 'Scout Two', version: 'v2' })),
+    'matched'
+  );
+});

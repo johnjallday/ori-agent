@@ -582,9 +582,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load providers in parallel with agent details
   await Promise.all([loadAvailableProviders(), loadGlobalMCPServers(), loadAgentDetails()]);
 
-  if (!currentAgent) {
-    return;
-  }
+  if (currentAgent) await initAfterFirstLoad();
+});
+
+// initAfterFirstLoad wires everything that needs a loaded agent. It runs once:
+// right after the first load, or after a retry of a failed first load.
+let initializedAfterLoad = false;
+async function initAfterFirstLoad() {
+  if (initializedAfterLoad) return;
+  initializedAfterLoad = true;
 
   document.getElementById('editProviderFilter')?.addEventListener('change', () => {
     window.requestAnimationFrame(updateEditReasoningVisibility);
@@ -639,9 +645,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       for (const section of ['profile', 'configuration', 'prompt']) {
         if (editSession?.state(section) === 'conflict') {
           statusSetter(section)(
-            'This agent was changed elsewhere while you were editing. Your changes are still here and were not saved. Review the latest values before saving.',
+            'This agent was changed elsewhere while you were editing. Your changes are still here and were not saved. Review the latest values below before saving.',
             'error'
           );
+          showConflictReview(section);
         }
       }
     });
@@ -650,7 +657,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('visibilitychange', refreshOnReturn);
   window.EventBus?.on?.('systemModel:changed', refreshAgentConversationModel);
   focusRequestedSection();
-});
+}
 
 // The roster Inspector is a reader; this page is the editor of record. When
 // someone reading a tab there chooses to edit, "Open full page" carries that
@@ -724,13 +731,53 @@ async function loadAgentDetails() {
       await showMissingAgentState(error.message || 'Agent not found');
       return;
     }
-    showError(error.message || 'Failed to load agent details');
-    setTimeout(() => {
-      window.location.href = '/agents';
-    }, 3000);
+    showLoadFailure(error.message || 'Failed to load agent details');
+    return;
   } finally {
-    showLoading(false);
+    if (currentAgent || !document.getElementById('agentLoadFailure')) showLoading(false);
   }
+  hideLoadFailure();
+}
+
+// showLoadFailure keeps the reader on this page with a retry, instead of an
+// alert that navigates away on its own.
+function showLoadFailure(message) {
+  const loading = document.getElementById('loadingState');
+  if (!loading) return;
+  loading.style.display = 'flex';
+  let box = document.getElementById('agentLoadFailure');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'agentLoadFailure';
+    box.className = 'text-center';
+    box.setAttribute('role', 'alert');
+    loading.replaceChildren(box);
+  }
+  box.replaceChildren();
+  const text = document.createElement('p');
+  text.style.color = 'var(--text-primary)';
+  text.textContent = `${message}. Nothing was changed. Check that Ori is running, then try again.`;
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.id = 'agentLoadRetry';
+  retry.className = 'modern-btn modern-btn-primary';
+  retry.textContent = 'Try again';
+  retry.addEventListener('click', async () => {
+    retry.disabled = true;
+    retry.textContent = 'Loading…';
+    await loadAgentDetails();
+    if (currentAgent) await initAfterFirstLoad();
+  });
+  const back = document.createElement('a');
+  back.href = '/agents';
+  back.className = 'modern-btn modern-btn-secondary ms-2';
+  back.textContent = 'Back to Agents';
+  box.append(text, retry, back);
+  retry.focus();
+}
+
+function hideLoadFailure() {
+  document.getElementById('agentLoadFailure')?.remove();
 }
 
 // Ordering for reads. Every read takes a ticket; a save that adopts its
@@ -1003,6 +1050,15 @@ function sectionDisplayState(section) {
 function updateEditIndicators() {
   if (!editSession) return;
   const pending = editSession.pending();
+  // Assistive tech hears which section is busy saving.
+  for (const [id, section] of [
+    ['agentConfigurationSection', 'configuration'],
+    ['promptSection', 'prompt'],
+    ['profileEditModal', 'profile'],
+    ['appearanceSection', 'appearance']
+  ]) {
+    document.getElementById(id)?.setAttribute('aria-busy', String(pending === section));
+  }
   for (const [section, ui] of Object.entries(SECTION_UI)) {
     const state = sectionDisplayState(section);
     const badge = document.getElementById(ui.badge);
@@ -1018,6 +1074,7 @@ function updateEditIndicators() {
         !editSession.isDirty(section) ||
         editSession.state(section) === 'unconfirmed';
     }
+    if (editSession.state(section) !== 'conflict') hideConflictReview(section);
     const frozen = pending === section;
     const scope =
       section === 'profile'
@@ -1408,9 +1465,9 @@ function setAppearanceStatus(message, type = 'info') {
   status.append(document.createTextNode(message));
   status.style.color =
     type === 'error'
-      ? 'var(--danger-color)'
+      ? 'var(--agent-edit-danger)'
       : type === 'success'
-        ? 'var(--success-color, #22c55e)'
+        ? 'var(--agent-edit-success)'
         : 'var(--text-secondary)';
 }
 
@@ -1545,6 +1602,8 @@ function isReadOnlyAgent() {
 
 function openProfileEditor() {
   if (!currentAgent) return;
+  const pageStatus = document.getElementById('profilePageStatus');
+  if (pageStatus) pageStatus.textContent = '';
   populateProfileForm();
   const modalElement = document.getElementById('profileEditModal');
   if (!modalElement || typeof bootstrap === 'undefined') return;
@@ -1664,6 +1723,9 @@ async function saveProfileChanges() {
     if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(updatedName)}`;
   }
   setProfileStatus('Profile saved.', 'success');
+  // The modal may close; the outcome stays on the page where the profile shows.
+  const pageStatus = document.getElementById('profilePageStatus');
+  if (pageStatus) pageStatus.textContent = 'Profile saved.';
   if (!editSession.isDirty('profile')) {
     closeProfileModal();
     showToast('Agent profile saved.', 'success');
@@ -1710,33 +1772,14 @@ async function saveSection(section, setStatus, label) {
         outcome.kind === 'stale'
           ? 'Someone else saved this agent after you opened it.'
           : 'This agent was changed on disk outside Ori.';
-      const reloaded = await refreshAgentDetails();
-      if (!reloaded) {
-        setStatus(
-          `${reason} Your changes are still here, but the latest values could not be loaded. Try saving again later.`,
-          'error'
-        );
-      } else if (editSession.state(section) === 'conflict') {
-        setStatus(
-          `${reason} They changed what you are editing. Your changes are still here and were not saved. Review the latest values before saving again.`,
-          'error'
-        );
-      } else {
-        setStatus(
-          `${reason} Nothing you edited was changed there. Your changes are still here — save again to apply them.`,
-          'error'
-        );
-      }
+      await loadLatestForReview(section, reason);
       return outcome;
     }
     case 'rename_failed':
       if (outcome.body?.agent) adoptReceipt(outcome.body);
       return outcome;
     case 'unconfirmed':
-      setStatus(
-        'The save could not be confirmed — the connection may have dropped after it was sent. Your changes are kept. Reload the page to check what was saved before saving again.',
-        'error'
-      );
+      await verifyUnconfirmed(section);
       return outcome;
     default:
       setStatus(
@@ -1745,6 +1788,254 @@ async function saveSection(section, setStatus, label) {
       );
       return outcome;
   }
+}
+
+// loadLatestForReview reads the latest saved values after a refused save and
+// says what happened. The draft is never touched; a failed read keeps a
+// "Load latest values" action.
+async function loadLatestForReview(section, reason) {
+  const setStatus = statusSetter(section);
+  const reloaded = await refreshAgentDetails();
+  if (!reloaded) {
+    setStatus(
+      `${reason} Your changes are still here, but the latest values could not be loaded.`,
+      'error'
+    );
+    appendStatusAction(section, 'Load latest values', () => loadLatestForReview(section, reason));
+    return;
+  }
+  if (editSession.state(section) === 'conflict') {
+    setStatus(
+      `${reason} They changed what you are editing. Your changes are still here and were not saved. Review the latest values below before saving again.`,
+      'error'
+    );
+    showConflictReview(section);
+    return;
+  }
+  setStatus(
+    `${reason} Nothing you edited was changed there. Your changes are still here — save again to apply them.`,
+    'error'
+  );
+}
+
+// appendStatusAction adds one recovery button to a section's status line.
+function appendStatusAction(section, label, onClick) {
+  const status = document.getElementById(
+    { profile: 'profileEditStatus', configuration: 'configEditStatus', prompt: 'promptEditStatus' }[
+      section
+    ]
+  );
+  if (!status) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'modern-btn modern-btn-secondary btn-sm ms-2';
+  button.textContent = label;
+  button.addEventListener('click', () => {
+    button.disabled = true;
+    void Promise.resolve(onClick()).finally(() => button.remove());
+  });
+  status.append(' ', button);
+}
+
+const FIELD_LABELS = {
+  name: 'Name',
+  description: 'Description',
+  tags: 'Tags',
+  favorite: 'Favorite',
+  role: 'Role',
+  model: 'Model',
+  llm_provider: 'Provider',
+  temperature: 'Temperature',
+  max_output_tokens: 'Max tokens',
+  reasoning_effort: 'Reasoning',
+  system_prompt: 'System prompt'
+};
+
+function formatFieldValue(value) {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '(none)';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  const text = String(value ?? '').trim();
+  if (!text) return '(empty)';
+  return text.length > 400 ? `${text.slice(0, 400)}…` : text;
+}
+
+// showConflictReview lists, for each field changed both here and elsewhere,
+// the value saved now and the user's own, with two explicit choices. Neither
+// choice saves anything; "Keep mine" rebases the draft for a deliberate Save.
+function showConflictReview(section) {
+  const box = document.getElementById(
+    {
+      profile: 'profileConflictReview',
+      configuration: 'configConflictReview',
+      prompt: 'promptConflictReview'
+    }[section]
+  );
+  if (!box || !editSession) return;
+  const latest = editSession.latest(section);
+  const draft = editSession.draft(section);
+  if (!latest || !draft) {
+    box.hidden = true;
+    return;
+  }
+  box.replaceChildren();
+  const title = document.createElement('strong');
+  title.textContent = 'Changed elsewhere';
+  const list = document.createElement('dl');
+  for (const key of editSession.conflictFields(section)) {
+    const label = FIELD_LABELS[key] || key;
+    for (const [term, value] of [
+      [`${label} — saved now`, latest[key]],
+      [`${label} — yours`, draft[key]]
+    ]) {
+      const dt = document.createElement('dt');
+      dt.textContent = term;
+      const dd = document.createElement('dd');
+      dd.textContent = formatFieldValue(value);
+      list.append(dt, dd);
+    }
+  }
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const useSaved = document.createElement('button');
+  useSaved.type = 'button';
+  useSaved.className = 'modern-btn modern-btn-secondary';
+  useSaved.dataset.conflictUseSaved = '';
+  useSaved.textContent = 'Use saved version';
+  const keepMine = document.createElement('button');
+  keepMine.type = 'button';
+  keepMine.className = 'modern-btn modern-btn-secondary';
+  keepMine.dataset.conflictKeepMine = '';
+  keepMine.textContent = 'Keep mine and review';
+  useSaved.addEventListener('click', () => {
+    editSession.useLatest(section);
+    paintSection(section, editSession.baseline(section));
+    box.hidden = true;
+    statusSetter(section)('Showing the saved version. Your unsaved changes were discarded.');
+    updateEditIndicators();
+    focusSection(section);
+  });
+  keepMine.addEventListener('click', () => {
+    editSession.reapply(section);
+    paintSection(section, editSession.draft(section) || editSession.baseline(section));
+    box.hidden = true;
+    statusSetter(section)(
+      'Your changes are kept on top of the latest saved version. Review them, then save. Nothing has been saved yet.'
+    );
+    updateEditIndicators();
+    focusSection(section);
+  });
+  actions.append(useSaved, keepMine);
+  box.append(title, list, actions);
+  box.hidden = false;
+}
+
+function hideConflictReview(section) {
+  const box = document.getElementById(
+    `${section === 'configuration' ? 'config' : section}ConflictReview`
+  );
+  if (box) box.hidden = true;
+}
+
+// paintSection writes values into a section's inputs.
+function paintSection(section, values) {
+  if (section === 'profile') paintProfileFields(values);
+  else if (section === 'configuration') populateConfigForm(values);
+  else populatePromptForm(values);
+}
+
+// focusSection moves focus to a section's first input, for keyboard users
+// after a review choice.
+function focusSection(section) {
+  const id = {
+    profile: 'profileAgentNameInput',
+    configuration: 'editModel',
+    prompt: 'editSystemPrompt'
+  }[section];
+  document.getElementById(id)?.focus();
+}
+
+// fetchAgentDetailNamed reads one agent by name without touching page state.
+async function fetchAgentDetailNamed(name) {
+  const response = await fetch(`/api/agents/${encodeURIComponent(name)}/detail`);
+  if (response.status === 404) throw new Error('Agent not found');
+  if (!response.ok) throw new Error('Failed to load agent details');
+  return response.json();
+}
+
+// verifyUnconfirmed settles a save whose answer never arrived (the
+// connection dropped, the answer was unreadable). It reads what is saved now —
+// by the old name, then by a requested new name if the old one is gone — and
+// compares it with what was sent. It never sends the change again: a read that
+// matches proves the current state, not which request wrote it.
+async function verifyUnconfirmed(section) {
+  const setStatus = statusSetter(section);
+  setStatus('The save could not be confirmed. Checking what is saved now…', 'error');
+  const submitted = editSession.submitted(section) || editSession.draft(section) || {};
+  const requestedName = section === 'profile' ? String(submitted.name || '').trim() : '';
+  let latest = null;
+  let renamedTo = '';
+  try {
+    latest = await fetchAgentDetailNamed(agentName);
+  } catch (error) {
+    if (isAgentNotFoundError(error) && requestedName && requestedName !== agentName) {
+      try {
+        latest = await fetchAgentDetailNamed(requestedName);
+        renamedTo = latest?.name || requestedName;
+      } catch {
+        latest = null;
+      }
+    }
+  }
+  if (!latest) {
+    setStatus(
+      'The save could not be confirmed, and Ori could not read what is saved now. Your changes are kept and were not sent again. Saving is paused until Ori can check.',
+      'error'
+    );
+    appendStatusAction(section, 'Check again', () => verifyUnconfirmed(section));
+    updateEditIndicators();
+    return;
+  }
+  if (renamedTo) adoptRenamedIdentity(renamedTo);
+  confirmedEpoch += 1;
+  readTicket += 1;
+  currentAgent = latest;
+  lastReconciliation = editSession.observe(currentAgent);
+  const result = editSession.reconcileUnconfirmed(section, currentAgent);
+  renderAgentDetails();
+  if (result === 'matched') {
+    // Nothing is left to save, so the inline editor closes; the status line
+    // stays outside it.
+    if (!editSession.isDirty(section)) {
+      if (section === 'configuration') showConfigEditMode(false);
+      if (section === 'prompt') showPromptEditMode(false);
+    }
+    setStatus(
+      'The saved values now match your changes. Ori could not confirm which save wrote them, so nothing was sent again.',
+      'success'
+    );
+  } else if (result === 'not_saved') {
+    paintSection(section, editSession.draft(section) || editSession.baseline(section));
+    setStatus(
+      'Your change does not appear to have been saved. Your changes are still here — save again when ready.',
+      'error'
+    );
+  } else if (result === 'conflict') {
+    setStatus(
+      'The save could not be confirmed, and these fields now hold other values. Your changes are still here. Review them below.',
+      'error'
+    );
+    showConflictReview(section);
+  }
+  updateEditIndicators();
+}
+
+// adoptRenamedIdentity points the page at an agent's new name once a read
+// has shown the rename happened.
+function adoptRenamedIdentity(name) {
+  agentName = name;
+  window.history.replaceState({}, '', `/agents/${encodeURIComponent(name)}`);
+  const skillsPageLink = document.getElementById('openSkillsPageLink');
+  if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(name)}`;
 }
 
 // adoptReceipt puts the values a save committed on the page, then reconciles
@@ -1809,9 +2100,9 @@ function setProfileStatus(message, type = 'info') {
   if (!message) return;
 
   if (type === 'error') {
-    status.style.color = 'var(--danger-color)';
+    status.style.color = 'var(--agent-edit-danger)';
   } else if (type === 'success') {
-    status.style.color = 'var(--success-color, #22c55e)';
+    status.style.color = 'var(--agent-edit-success)';
   } else {
     status.style.color = 'var(--text-secondary)';
   }
@@ -1956,11 +2247,26 @@ async function saveConfigChanges() {
   setConfigSavingState(false);
   if (outcome?.kind !== 'saved') return;
 
+  // The definition save is confirmed; the Default model mirror and the
+  // workspace copies are separate follow-ups, each reported as itself.
   const status = await systemModelSaveStatus(outcome.receipt.system_model);
-  setConfigStatus(status.message, status.type);
+  const followUp = followUpNote(outcome.receipt);
+  setConfigStatus(
+    [status.message, followUp.text].filter(Boolean).join(' '),
+    followUp.failed ? 'error' : status.type
+  );
   if (!editSession.isDirty('configuration')) setConfigEditMode(false);
-  const carried = carriedEditNote(outcome.receipt);
-  if (carried) showToast(carried, 'success');
+  if (followUp.text && !followUp.failed) showToast(followUp.text, 'success');
+}
+
+// followUpNote describes what happened to the workspace copies after a
+// confirmed definition save. A failure is reported next to the save, not
+// dropped, and never makes the save itself look unsaved.
+function followUpNote(receipt) {
+  return {
+    text: carriedEditNote(receipt),
+    failed: Boolean(String(receipt?.carried?.error || '').trim())
+  };
 }
 
 function setConfigSavingState(isSaving) {
@@ -2013,9 +2319,9 @@ function setConfigStatus(message, type = 'info') {
   if (!message) return;
 
   if (type === 'error') {
-    statusEl.style.color = 'var(--danger-color)';
+    statusEl.style.color = 'var(--agent-edit-danger)';
   } else if (type === 'success') {
-    statusEl.style.color = 'var(--success-color, #22c55e)';
+    statusEl.style.color = 'var(--agent-edit-success)';
   } else {
     statusEl.style.color = 'var(--text-secondary)';
   }
@@ -2081,10 +2387,13 @@ async function savePromptChanges() {
   setPromptSavingState(false);
   if (outcome?.kind !== 'saved') return;
 
-  setPromptStatus('System prompt saved.', 'success');
+  const followUp = followUpNote(outcome.receipt);
+  setPromptStatus(
+    ['System prompt saved.', followUp.failed ? followUp.text : ''].filter(Boolean).join(' '),
+    followUp.failed ? 'error' : 'success'
+  );
   if (!editSession.isDirty('prompt')) setPromptEditMode(false);
-  const carried = carriedEditNote(outcome.receipt);
-  if (carried) showToast(carried, 'success');
+  if (followUp.text && !followUp.failed) showToast(followUp.text, 'success');
 }
 
 function setPromptSavingState(isSaving) {
@@ -2112,9 +2421,9 @@ function setPromptStatus(message, type = 'info') {
   if (!message) return;
 
   if (type === 'error') {
-    statusEl.style.color = 'var(--danger-color)';
+    statusEl.style.color = 'var(--agent-edit-danger)';
   } else if (type === 'success') {
-    statusEl.style.color = 'var(--success-color, #22c55e)';
+    statusEl.style.color = 'var(--agent-edit-success)';
   } else {
     statusEl.style.color = 'var(--text-secondary)';
   }

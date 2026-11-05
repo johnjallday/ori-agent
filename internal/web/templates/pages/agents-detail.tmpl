@@ -15,11 +15,22 @@
     /* Per-section edit state ("Unsaved changes", "Saving…", "Changed elsewhere"). */
     .agent-edit-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border-color); color: var(--text-primary); background: var(--bg-secondary); }
     .agent-edit-badge[hidden] { display: none !important; }
-    .agent-edit-badge[data-state="conflict"], .agent-edit-badge[data-state="unconfirmed"], .agent-edit-badge[data-state="error"] { border-color: var(--danger-color); color: var(--danger-color); }
+    .agent-edit-badge[data-state="conflict"], .agent-edit-badge[data-state="unconfirmed"], .agent-edit-badge[data-state="error"] { border-color: var(--agent-edit-danger); color: var(--agent-edit-danger); }
     /* Inline "keep editing / discard" confirmation for a dirty editor. */
     .agent-discard-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); font-size: 14px; }
     .agent-discard-confirm[hidden] { display: none !important; }
     .agent-discard-confirm span { flex: 1 1 200px; }
+    /* Review of a section whose fields were changed elsewhere: saved vs. yours. */
+    .agent-conflict-review { margin-top: 12px; padding: 12px; border: 1px solid var(--danger-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); font-size: 14px; }
+    .agent-conflict-review[hidden] { display: none !important; }
+    .agent-conflict-review dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0; }
+    .agent-conflict-review dt { font-weight: 600; }
+    .agent-conflict-review dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .agent-conflict-review .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    /* Status colours with real contrast: --success-color is too light for text. */
+    :root { --agent-edit-success: #047857; --agent-edit-danger: #b91c1c; }
+    .dark-mode, [data-bs-theme="dark"] { --agent-edit-success: #34d399; --agent-edit-danger: #fca5a5; }
+    @media (prefers-color-scheme: dark) { :root:not(.light-mode):not([data-bs-theme="light"]) { --agent-edit-success: #34d399; --agent-edit-danger: #fca5a5; } }
     .agent-workspaces h2 { font-size: 20px; color: var(--text-primary); }
     .agent-workspaces p { color: var(--text-secondary); }
     .agent-workspaces fieldset { min-width: 0; }
@@ -527,6 +538,7 @@
                 <!-- Where this agent comes from: "Customised in: …" for one of your
                      agents, "From workspace: …" for a workspace's own agent. -->
                 <p id="agentOriginNote" class="agent-description-large text-secondary mt-2 mb-0" hidden></p>
+                <p id="profilePageStatus" role="status" aria-live="polite" class="small mt-2 mb-0" style="color: var(--agent-edit-success);"></p>
               </div>
               <div class="d-flex gap-2 flex-wrap align-items-center">
                 <button id="addToMyAgentsButton" class="modern-btn modern-btn-primary" type="button" hidden>
@@ -751,6 +763,7 @@
                 </div>
                 <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
                 <div id="configEditStatus" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+                <div id="configConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
                 <div id="configDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="configDiscardText" hidden>
                   <span id="configDiscardText">Discard your unsaved configuration changes? Other sections keep theirs.</span>
                   <button type="button" class="modern-btn modern-btn-secondary" data-discard-keep>Keep editing</button>
@@ -787,6 +800,7 @@
                 </div>
                 <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
                 <div id="promptEditStatus" role="status" aria-live="polite" class="small mt-2" style="color: var(--text-secondary);"></div>
+                <div id="promptConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
                 <div id="promptDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="promptDiscardText" hidden>
                   <span id="promptDiscardText">Discard your unsaved system prompt? Other sections keep theirs.</span>
                   <button type="button" class="modern-btn modern-btn-secondary" data-discard-keep>Keep editing</button>
@@ -955,6 +969,7 @@
                 </div>
               </div>
               <div id="profileEditStatus" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+              <div id="profileConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
               <div id="profileDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="profileDiscardText" hidden>
                 <span id="profileDiscardText">Discard your unsaved profile changes? Other sections keep theirs.</span>
                 <button type="button" class="modern-btn modern-btn-secondary" data-discard-keep>Keep editing</button>
