@@ -11,10 +11,11 @@ import (
 // The scan-completed payload is path-free by contract. A new field must be
 // added here deliberately, never a path, folder, file or project name.
 func TestLibraryScanCompleted_PayloadHasOnlyIDsAndCounts(t *testing.T) {
-	allowed := []string{"activatable", "coverage", "home_id", "new", "projects", "root_id",
+	// "moved" (library upkeep) is a count of relinked songs, never a path.
+	allowed := []string{"activatable", "coverage", "home_id", "moved", "new", "projects", "root_id",
 		"scan_id", "unavailable", "unsupported_format", "updated"}
 	payload := LibraryScanCompleted{HomeID: "home", ScanID: "scan", RootID: "root", Coverage: "complete",
-		Projects: 6, New: 6, Activatable: 5, UnsupportedFormat: 1}
+		Projects: 6, New: 5, Activatable: 5, UnsupportedFormat: 1, Moved: 1}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +50,16 @@ func TestLibraryScanCompleted_PayloadHasOnlyIDsAndCounts(t *testing.T) {
 	decoded, ok := LibraryScanCompletedFromEvent(event)
 	if !ok || decoded != payload {
 		t.Fatalf("round trip: %+v %v", decoded, ok)
+	}
+	// An event from before moves were counted has no key and reads as zero; a
+	// malformed count is rejected.
+	delete(event.Data, "moved")
+	if legacy, ok := LibraryScanCompletedFromEvent(event); !ok || legacy.Moved != 0 {
+		t.Fatalf("legacy event: %+v %v", legacy, ok)
+	}
+	event.Data["moved"] = -1
+	if _, ok := LibraryScanCompletedFromEvent(event); ok {
+		t.Fatal("negative moved count accepted")
 	}
 }
 

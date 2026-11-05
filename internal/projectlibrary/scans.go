@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -428,6 +429,7 @@ func (r *Roots) recordScanFinish(scope Scope, started Scan, observed Discovery, 
 	var completed *LibraryDigest
 	var providerUnchanged bool
 	var evidence setupEvidence
+	var outcome reconcileResult
 	_, replay, err := r.library.mutateWithHomePolicy(scope, doc.Revision,
 		operation{key: started.ID + ":finish", action: "scan_finish", digest: encodedDigest},
 		func(state *workspace.AssistantProgramState, home *workspace.Workspace) bool {
@@ -436,6 +438,7 @@ func (r *Roots) recordScanFinish(scope Scope, started Scan, observed Discovery, 
 			return true // Record failure/cancellation even after provider loss.
 		}, func(current *Document) (string, error) {
 			completed = nil
+			outcome = reconcileResult{}
 			var before []Entry
 			var scan *Scan
 			for i := range current.Scans {
@@ -485,13 +488,15 @@ func (r *Roots) recordScanFinish(scope Scope, started Scan, observed Discovery, 
 							if status == "partial" {
 								covered.PartialReason = reason
 							}
-							if reconcileErr := reconcileCandidates(&preparedDoc, started, covered, *source,
-								r.library.workspaces, scope); reconcileErr != nil {
+							reconciled, reconcileErr := reconcileCandidates(&preparedDoc, started, covered, *source,
+								r.library.workspaces, scope)
+							if reconcileErr != nil {
 								status, reason = "failed", "catalog_evidence_invalid_or_limit"
 							} else {
 								before = current.Entries
 								current.Entries = preparedDoc.Entries
 								scan.KnownScopes = prepared.KnownScopes
+								outcome = reconciled
 							}
 						}
 					}
@@ -507,6 +512,7 @@ func (r *Roots) recordScanFinish(scope Scope, started Scan, observed Discovery, 
 				// Written in this same fenced update, so the digest can never
 				// describe results the Home did not also record.
 				digest := buildLibraryDigest(before, current.Entries, *scan, now, status, evidence)
+				digest.RelinkConflicts = min(outcome.RelinkConflicts, maxEntries)
 				current.Digest = &digest
 				completed = &digest
 			}
@@ -515,7 +521,40 @@ func (r *Roots) recordScanFinish(scope Scope, started Scan, observed Discovery, 
 	if err != nil || replay {
 		return finished, nil, err
 	}
+	if completed != nil {
+		r.noteMovedLinkedSongs(scope, outcome.MovedLinked)
+	}
 	return finished, completed, nil
+}
+
+// noteMovedLinkedSongs rechecks each relinked song that is connected to a
+// workspace (FR9). The library entry already follows the folder and keeps its
+// link; the linked workspace is never changed by a scan (FR13), so a workspace
+// that still records the old folder is logged here, and its own folder review
+// handles it. A failed recheck never fails the scan. No paths are logged.
+func (r *Roots) noteMovedLinkedSongs(scope Scope, entryIDs []string) {
+	if len(entryIDs) == 0 {
+		return
+	}
+	doc, state, err := r.library.readSnapshot(scope)
+	if err != nil {
+		logger.Info("Moved linked songs not rechecked", logger.Fields{"home_id": scope.HomeID, "songs": len(entryIDs)})
+		return
+	}
+	for _, id := range entryIDs {
+		for _, entry := range doc.Entries {
+			if entry.ID != id || entry.Link == nil {
+				continue
+			}
+			if _, _, _, _, checkErr := r.library.exactLinkedChild(scope, state, entry.Link.WorkspaceID); checkErr != nil {
+				logger.Info("Moved song's workspace link needs review", logger.Fields{"home_id": scope.HomeID,
+					"entry_id": entry.ID, "workspace_id": entry.Link.WorkspaceID})
+				continue
+			}
+			logger.Info("Moved song keeps its workspace link", logger.Fields{"home_id": scope.HomeID,
+				"entry_id": entry.ID, "workspace_id": entry.Link.WorkspaceID})
+		}
+	}
 }
 
 func appendKnownScopes(scan *Scan, observed Discovery) (skipped bool) {
