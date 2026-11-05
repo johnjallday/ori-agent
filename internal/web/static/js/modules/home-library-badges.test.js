@@ -78,6 +78,50 @@ test('badge hides when nothing is ready, setup is unchecked or the route is not 
   );
 });
 
+test('a library scanned more than a day ago says its age on the badge, still navigation only', () => {
+  const now = Date.parse('2026-11-05T12:00:00Z');
+  const daysAgo = days => new Date(now - days * 86_400_000).toISOString();
+  // Fresh: the badge is exactly what it was.
+  const fresh = libraryBadgeView(
+    summary({ last_complete_scan_at: daysAgo(0.5) }),
+    'Music Home',
+    now
+  );
+  assert.equal(fresh.text, '5 to set up');
+  // Stale, with counts: the age comes first, the counts stay.
+  const stale = libraryBadgeView(summary({ last_complete_scan_at: daysAgo(3) }), 'Music Home', now);
+  assert.equal(stale.text, 'Scanned 3 days ago · 5 to set up');
+  assert.equal(stale.count, 5);
+  assert.equal(stale.route, ROUTE);
+  assert.equal(
+    stale.label,
+    'Music Home library: last scanned 3 days ago, 5 projects to set up. Open the suggestions shelf.'
+  );
+  // Stale with nothing to do still shows the age, so the map tells the truth.
+  const quiet = libraryBadgeView(
+    summary({ last_complete_scan_at: daysAgo(2), digest: { new: 0, activatable: 0 } }),
+    'Music Home',
+    now
+  );
+  assert.equal(quiet.text, 'Scanned 2 days ago');
+  assert.equal(quiet.count, 0, 'the age never offers a setup');
+  // No complete scan, or a bad timestamp: no age, so no badge without counts.
+  for (const at of [undefined, 'not a date', 42])
+    assert.equal(
+      libraryBadgeView(
+        summary({ last_complete_scan_at: at, digest: { new: 0, activatable: 0 } }),
+        'Music Home',
+        now
+      ),
+      null
+    );
+  // The age never invents a route.
+  assert.equal(
+    libraryBadgeView(summary({ last_complete_scan_at: daysAgo(5), route: '/x' }), 'Home', now),
+    null
+  );
+});
+
 test('only managed program Homes are asked for a summary, at most twenty', () => {
   const many = Array.from({ length: 25 }, (_, i) => ({
     id: `home-${i}`,

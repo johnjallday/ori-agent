@@ -10,6 +10,8 @@
 // the tab becomes visible again, and on a back/forward return. Repeated asks
 // inside LIBRARY_BADGE_MIN_REFRESH_MS reuse the last answer.
 
+import { libraryFreshness, scanAgeText } from './library-freshness.js';
+
 export const LIBRARY_BADGE_MIN_REFRESH_MS = 30_000;
 const MAX_HOMES = 20;
 const SHELF_ROUTE = /^\/workspaces\/[^/?#\s]+\/assistant#projectLibraryProposals$/;
@@ -44,16 +46,26 @@ function count(value) {
  * up", "to review"), never "ready": the workspace tile a few pixels below
  * says "1 ready" about tickets, and one word for two things reads as a
  * contradiction.
+ *
+ * A library whose newest complete scan is older than STALE_SCAN_MS also says
+ * how old it is ("Scanned 3 days ago", library-upkeep FR3), with or without
+ * the counts. The badge still only opens the shelf; the Rescan is there.
  */
-export function libraryBadgeView(summary, homeName = 'Home') {
+export function libraryBadgeView(summary, homeName = 'Home', now = Date.now()) {
   if (!summary || typeof summary !== 'object') return null;
   const digest = summary.digest && typeof summary.digest === 'object' ? summary.digest : null;
   const ready = digest && !digest.setup_note ? count(digest.activatable) : 0;
   const review = count(summary.ready_proposals);
   const route = libraryShelfRoute(summary.route);
-  if ((ready === 0 && review === 0) || !route) return null;
+  const freshness = libraryFreshness(summary, now);
+  const age = freshness.stale ? scanAgeText(freshness.age_ms, summary.last_complete_scan_at) : '';
+  if ((ready === 0 && review === 0 && !age) || !route) return null;
   const text = [];
   const spoken = [];
+  if (age) {
+    text.push(`Scanned ${age}`);
+    spoken.push(`last scanned ${age}`);
+  }
   if (ready) {
     text.push(`${ready} to set up`);
     spoken.push(`${ready} ${ready === 1 ? 'project' : 'projects'} to set up`);

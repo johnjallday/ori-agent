@@ -226,7 +226,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   if (reaperSource) {
     expect(summary.digest).toMatchObject({ activatable: 5, unsupported_format: 1 });
     await expect(digestLine).toHaveText(
-      /^Scanned Documents on .+: 6 projects, 6 new, 5 can be set up, 1 unsupported format\.$/
+      /^Documents: 6 projects, 6 new, 5 can be set up, 1 unsupported format\.$/
     );
   } else {
     expect(summary.digest).toMatchObject({
@@ -235,7 +235,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
       setup_note: 'project_provider_unavailable'
     });
     await expect(digestLine).toHaveText(
-      /^Scanned Documents on .+: 6 projects, 6 new, project setup needs a compatible installed integration\.$/
+      /^Documents: 6 projects, 6 new, project setup needs a compatible installed integration\.$/
     );
   }
   // The scan also asked the bound Manager for a bounded review. With no

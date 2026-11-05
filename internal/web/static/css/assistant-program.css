@@ -1284,6 +1284,26 @@
   margin: 0 0 1rem;
   font-family: "Chakra Petch", sans-serif;
 }
+/* How old the library picture is, with the one-click Rescan. Past a day it
+   takes the shelf's amber attention edge; no new colour. */
+.project-library-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin: 0 0 1rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--assistant-line);
+  border-left: 3px solid var(--assistant-line);
+  border-radius: 4px;
+  color: var(--assistant-muted);
+}
+.project-library-freshness.is-stale {
+  border-left-color: var(--assistant-amber);
+  color: var(--assistant-amber-deep);
+  font-weight: 600;
+}
 .project-library-digest {
   margin: -0.5rem 0 1rem;
   font-weight: 600;

@@ -352,6 +352,10 @@ func TestSummary_ReadsPersistedStateOnlyAndDropsDisconnectedDigest(t *testing.T)
 		summary.Revision != before.Revision || summary.ReadyProposals != 0 {
 		t.Fatalf("summary: %+v %v", summary, err)
 	}
+	// The freshness age is the complete scan's finish time.
+	if summary.LastCompleteScanAt == nil || scan.FinishedAt == nil || !summary.LastCompleteScanAt.Equal(*scan.FinishedAt) {
+		t.Fatalf("last complete scan: %v vs %v", summary.LastCompleteScanAt, scan.FinishedAt)
+	}
 	encoded, err := json.Marshal(summary)
 	if err != nil || len(encoded) > 1024 || strings.Contains(string(encoded), tree.root) {
 		t.Fatalf("summary is unbounded or leaks a path: %s", encoded)
@@ -366,8 +370,41 @@ func TestSummary_ReadsPersistedStateOnlyAndDropsDisconnectedDigest(t *testing.T)
 	if _, _, err := r.CommitRevoke(scope, root.ID, review.Token, "summary-revoke"); err != nil {
 		t.Fatal(err)
 	}
-	if summary, err := r.library.Summary(scope); err != nil || summary.Digest != nil {
-		t.Fatalf("disconnected root still advertised its digest: %+v %v", summary, err)
+	if summary, err := r.library.Summary(scope); err != nil || summary.Digest != nil || summary.LastCompleteScanAt != nil {
+		t.Fatalf("disconnected root still advertised its digest or scan age: %+v %v", summary, err)
+	}
+}
+
+// A partial or failed scan never moves the freshness age (FR6); only a newer
+// complete scan does.
+func TestSummary_LastCompleteScanAtIgnoresPartialAndFailedScans(t *testing.T) {
+	r, scope, _, _, root := connectedMusicRoot(t)
+	if summary, err := r.library.Summary(scope); err != nil || summary.LastCompleteScanAt != nil {
+		t.Fatalf("an unscanned Home has a scan age: %+v %v", summary, err)
+	}
+	first := scanRoot(t, r, scope, root.ID, "age-complete")
+	for _, status := range []string{"partial", "failed"} {
+		started := runningScanRecord(t, r, scope, root, "age-"+status)
+		observed, err := r.Discover(context.Background(), scope, root.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reason := ""
+		if status == "partial" {
+			reason = "entry_limit"
+		}
+		if finished, err := r.finishScan(scope, started, observed, status, reason); err != nil || finished.Status != status {
+			t.Fatalf("%s scan: %+v %v", status, finished, err)
+		}
+		summary, err := r.library.Summary(scope)
+		if err != nil || summary.LastCompleteScanAt == nil || !summary.LastCompleteScanAt.Equal(*first.FinishedAt) {
+			t.Fatalf("%s scan moved the age: %v vs %v (%v)", status, summary.LastCompleteScanAt, first.FinishedAt, err)
+		}
+	}
+	second := scanRoot(t, r, scope, root.ID, "age-complete-again")
+	if summary, err := r.library.Summary(scope); err != nil || summary.LastCompleteScanAt == nil ||
+		!summary.LastCompleteScanAt.Equal(*second.FinishedAt) {
+		t.Fatalf("a newer complete scan did not move the age: %+v %v", summary, err)
 	}
 }
 

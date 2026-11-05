@@ -1552,11 +1552,9 @@ const DIGEST = {
 test('scan digest line names the folder, not its path, and lists only nonzero extras', () => {
   const roots = [{ id: 'root-1', path: '/Users/owner/Music Projects' }];
   const text = libraryDigestText(DIGEST, roots);
-  assert.match(
-    text,
-    /^Scanned Music Projects on .*2026: 6 projects, 6 new, 5 can be set up, 1 unsupported format\.$/
-  );
+  assert.equal(text, 'Music Projects: 6 projects, 6 new, 5 can be set up, 1 unsupported format.');
   assert.equal(text.includes('/Users/owner'), false);
+  assert.equal(/2026|Scanned| on /.test(text), false, 'the age is the freshness line’s job');
   const quiet = libraryDigestText(
     { ...DIGEST, projects: 1, new: 0, unsupported_format: 0, activatable: 1 },
     roots
@@ -1605,7 +1603,7 @@ test('scan digest line handles zero, partial, unknown-root and setup-unavailable
     { ...DIGEST, projects: 0, new: 0, activatable: 0, unsupported_format: 0 },
     []
   );
-  assert.match(empty, /^Scanned an approved folder on .*: 0 projects, 0 can be set up\.$/);
+  assert.equal(empty, 'An approved folder: 0 projects, 0 can be set up.');
   const partial = libraryDigestText({ ...DIGEST, coverage: 'partial' }, []);
   assert.match(partial, /Partial scan: folders it did not reach were left unchanged\.$/);
   const noIntegration = libraryDigestText(
@@ -1626,7 +1624,7 @@ test('scan digest line handles zero, partial, unknown-root and setup-unavailable
     { ...DIGEST, projects: -4, new: '9', activatable: 1.5, scanned_at: 'not a date' },
     []
   );
-  assert.match(forged, /on an unknown date: 0 projects, 0 can be set up, 1 unsupported format\./);
+  assert.equal(forged, 'An approved folder: 0 projects, 0 can be set up, 1 unsupported format.');
 });
 
 test('the Manager review line names skips, results and stop reasons without claiming any change', () => {
@@ -1841,7 +1839,7 @@ test('scan digest renders as inert text and shows the shelf even with no suggest
     await panel.renderProposals();
     const line = elements.get('projectLibraryDigest');
     assert.equal(line.hidden, false);
-    assert.match(line.textContent, /^Scanned <img src=x onerror=alert\(1\)> on /);
+    assert.match(line.textContent, /^<img src=x onerror=alert\(1\)>: 6 projects/);
     assert.equal('innerHTML' in line, false, 'the digest is assigned as text, never markup');
     assert.equal(elements.get('projectLibraryProposals').hidden, false);
     const [empty] = elements.get('projectLibraryProposalRows').children;
@@ -2553,6 +2551,215 @@ test('an uncertain scan with nothing recorded is an error, and a refusal is neve
   });
   await assert.rejects(refused.panel.scanRootFlow('root-1', null), /changed/);
   assert.equal(refused.log.keys.length, 1, 'a definite refusal is final');
+});
+
+function freshnessDom() {
+  const classes = new Set();
+  const elements = new Map([
+    [
+      'projectLibraryFreshness',
+      { hidden: true, classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)) } }
+    ],
+    ['projectLibraryFreshnessText', { textContent: '' }],
+    ['projectLibraryRescan', { hidden: false, disabled: false, textContent: 'Rescan' }]
+  ]);
+  return { elements, classes, document: { getElementById: id => elements.get(id) || null } };
+}
+
+test('the freshness line shows the scan age from the summary already read, and nudges past a day', () => {
+  const original = globalThis.document;
+  const dom = freshnessDom();
+  globalThis.document = dom.document;
+  try {
+    const now = Date.parse('2026-11-05T12:00:00Z');
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = { initialized: true, provider_read_only: false, roots: [{ id: 'root-1' }] };
+    panel.summary = { last_complete_scan_at: new Date(now - 3 * 86_400_000).toISOString() };
+    panel.renderFreshness(now);
+    const line = dom.elements.get('projectLibraryFreshness');
+    assert.equal(line.hidden, false);
+    assert.equal(
+      dom.elements.get('projectLibraryFreshnessText').textContent,
+      'Last scanned 3 days ago'
+    );
+    assert.equal(dom.classes.has('is-stale'), true);
+    assert.equal(dom.elements.get('projectLibraryRescan').disabled, false);
+
+    panel.summary = { last_complete_scan_at: new Date(now - 5 * 60_000).toISOString() };
+    panel.renderFreshness(now);
+    assert.equal(
+      dom.elements.get('projectLibraryFreshnessText').textContent,
+      'Last scanned 5 minutes ago'
+    );
+    assert.equal(dom.classes.has('is-stale'), false);
+
+    panel.summary = { last_complete_scan_at: null };
+    panel.renderFreshness(now);
+    assert.equal(dom.elements.get('projectLibraryFreshnessText').textContent, 'Not scanned yet');
+
+    // A read-only Home shows the age but offers no Rescan.
+    panel.state.provider_read_only = true;
+    panel.renderFreshness(now);
+    assert.equal(dom.elements.get('projectLibraryRescan').hidden, true);
+
+    // No connected root, or no summary: no line at all.
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      roots: [{ id: 'r', revoked_at: 'x' }]
+    };
+    panel.renderFreshness(now);
+    assert.equal(line.hidden, true);
+    panel.state.roots = [{ id: 'root-1' }];
+    panel.summary = null;
+    panel.renderFreshness(now);
+    assert.equal(line.hidden, true);
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('the summary read on refresh feeds the freshness line without another request', async () => {
+  const original = globalThis.document;
+  const dom = freshnessDom();
+  const quiet = { hidden: true, textContent: '', children: [], append() {}, replaceChildren() {} };
+  globalThis.document = {
+    getElementById: id => dom.elements.get(id) || (id.startsWith('projectLibrary') ? quiet : null),
+    createElement: () => ({ ...quiet, hidden: false })
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = { initialized: true, provider_read_only: false, roots: [{ id: 'root-1' }] };
+    const requests = [];
+    panel.request = async path => {
+      requests.push(path);
+      if (path === '/summary')
+        return { initialized: true, digest: null, last_complete_scan_at: new Date().toISOString() };
+      return { total: 0, rows: [] };
+    };
+    await panel.renderProposals();
+    assert.deepEqual(requests, ['/summary', '/proposals']);
+    assert.equal(
+      dom.elements.get('projectLibraryFreshnessText').textContent,
+      'Last scanned just now'
+    );
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('Rescan scans every connected root in turn, with no confirmation and no overlap', async () => {
+  const original = globalThis.document;
+  const dom = freshnessDom();
+  globalThis.document = dom.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      revision: 5,
+      roots: [
+        { id: 'root-1', path: '/x/Albums' },
+        { id: 'gone', path: '/x/Old', revoked_at: '2026-01-01T00:00:00Z' },
+        { id: 'root-2', path: '/x/Demos' }
+      ]
+    };
+    panel.summary = { last_complete_scan_at: null };
+    const log = [];
+    const statuses = [];
+    let inFlight = 0;
+    panel.status = message => statuses.push(message);
+    panel.confirm = async () => {
+      throw new Error('Rescan must not ask for confirmation');
+    };
+    panel.refresh = async () => {
+      log.push('refresh');
+      panel.state.revision++;
+    };
+    panel.post = async (path, body) => {
+      assert.equal(inFlight, 0, 'a request started while another scan was in flight');
+      inFlight++;
+      await Promise.resolve();
+      inFlight--;
+      const button = dom.elements.get('projectLibraryRescan');
+      log.push(`${path} ${button.textContent}`);
+      assert.equal(button.disabled, true, 'Rescan stays disabled while scanning');
+      if (path.endsWith('/scans/review')) {
+        assert.equal(
+          body.if_revision,
+          panel.state.revision,
+          'each review uses the current revision'
+        );
+        return { token: `t-${path}` };
+      }
+      assert.equal(body.confirm, true);
+      return {
+        status: path.includes('root-2') ? 'partial' : 'complete',
+        entries_seen: 3,
+        skipped_links: 0,
+        skipped_other: 0
+      };
+    };
+    const trigger = { id: 'projectLibraryRescan', disabled: false, isConnected: false };
+    await panel.rescanAll(trigger);
+    assert.deepEqual(log, [
+      '/roots/root-1/scans/review Scanning 1 of 2…',
+      '/roots/root-1/scans/commit Scanning 1 of 2…',
+      'refresh',
+      '/roots/root-2/scans/review Scanning 2 of 2…',
+      '/roots/root-2/scans/commit Scanning 2 of 2…',
+      'refresh'
+    ]);
+    assert.equal(statuses.at(-1), 'Rescanned 2 folders · 1 complete · 1 did not finish.');
+    const button = dom.elements.get('projectLibraryRescan');
+    assert.equal(button.textContent, 'Rescan');
+    assert.equal(button.disabled, false, 'Rescan is available again after the last scan');
+    assert.equal(panel.busy, false);
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('a Rescan that fails stops, reports the failure and re-enables the button', async () => {
+  const original = globalThis.document;
+  const dom = freshnessDom();
+  globalThis.document = dom.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      revision: 1,
+      roots: [{ id: 'root-1' }, { id: 'root-2' }]
+    };
+    panel.summary = {};
+    const posts = [];
+    const statuses = [];
+    panel.status = message => statuses.push(message);
+    panel.refresh = async () => {};
+    panel.post = async path => {
+      posts.push(path);
+      throw Object.assign(new Error('The folder could not be read.'), { status: 409 });
+    };
+    await panel.rescanAll({ id: 'projectLibraryRescan', disabled: false, isConnected: false });
+    assert.deepEqual(
+      posts,
+      ['/roots/root-1/scans/review'],
+      'root 2 is not started after a failure'
+    );
+    assert.equal(statuses.at(-1), 'The folder could not be read.');
+    assert.equal(dom.elements.get('projectLibraryRescan').disabled, false);
+    assert.equal(dom.elements.get('projectLibraryRescan').textContent, 'Rescan');
+
+    // A read-only Home or no connected root never posts.
+    panel.state.provider_read_only = true;
+    await panel.rescanAll(null);
+    panel.state = { initialized: true, provider_read_only: false, roots: [] };
+    await panel.rescanAll(null);
+    assert.equal(posts.length, 1);
+  } finally {
+    globalThis.document = original;
+  }
 });
 
 function integrationPage({ pathname = '/workspaces/music-home/assistant' } = {}) {

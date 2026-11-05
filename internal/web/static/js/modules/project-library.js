@@ -19,6 +19,9 @@ import { arrangementID, mountArrangementHistory } from './workspace-arrangement.
 import { mountHomeArrangementPlanner } from './home-arrangement.js';
 import { mountCollectionReview } from './home-collection-review.js';
 import { mountHomeCollections } from './home-collections.js';
+import { libraryFreshness } from './library-freshness.js';
+
+export { libraryFreshness, STALE_SCAN_MS } from './library-freshness.js';
 
 // The open helpers moved to library-open.js so the setup pop-up can share them
 // without loading this module on every page; existing importers keep working.
@@ -208,6 +211,13 @@ export function setupNextStep({ state = null, collection = '', carried = false }
   return { stage: 'ready' };
 }
 
+// The roots Rescan covers: connected (not disconnected, not awaiting a new
+// grant) roots on the loaded list, in the server's order.
+export function rescanRoots(state) {
+  const roots = Array.isArray(state?.roots) ? state.roots : [];
+  return roots.filter(root => root && root.id && !root.revoked_at && !root.needs_review);
+}
+
 export function libraryQuery({
   text = '',
   stage = '',
@@ -247,7 +257,8 @@ const DIGEST_SETUP_NOTES = {
 
 // libraryDigestText renders the Home's model-free scan digest. The digest
 // carries only IDs and counts; the folder name comes from the owner-only roots
-// list the shelf already loaded, reduced to its last path segment.
+// list the shelf already loaded, reduced to its last path segment. The scan's
+// age is the freshness line's job, so the sentence never repeats a date.
 export function libraryDigestText(digest, roots = []) {
   if (!digest || typeof digest !== 'object' || !digest.scan_id) return '';
   const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
@@ -256,11 +267,7 @@ export function libraryDigestText(digest, roots = []) {
     String(root?.path || '')
       .split(/[\\/]/)
       .filter(Boolean)
-      .pop() || 'an approved folder';
-  const scanned = new Date(digest.scanned_at);
-  const when = Number.isNaN(scanned.getTime())
-    ? 'an unknown date'
-    : scanned.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      .pop() || 'An approved folder';
   const projects = count(digest.projects);
   const parts = [`${projects} ${projects === 1 ? 'project' : 'projects'}`];
   if (count(digest.new) > 0) parts.push(`${count(digest.new)} new`);
@@ -281,7 +288,7 @@ export function libraryDigestText(digest, roots = []) {
       parts.push(`${count(digest.unsupported_format)} unsupported format`);
   }
   if (count(digest.unavailable) > 0) parts.push(`${count(digest.unavailable)} no longer found`);
-  let text = `Scanned ${name} on ${when}: ${parts.join(', ')}.`;
+  let text = `${name}: ${parts.join(', ')}.`;
   if (digest.coverage === 'partial')
     text += ' Partial scan: folders it did not reach were left unchanged.';
   return text;
@@ -581,6 +588,9 @@ export class ProjectLibraryPanel {
     this.searchInFlight = false;
     this.busy = false;
     this.selectedProjects = new Set();
+    // The last library summary read, and Rescan's progress while it runs.
+    this.summary = null;
+    this.rescanProgress = null;
     this.queue = readActivationQueue(this.workspaceId);
     this.recentQueues = [];
     const fromOffer =
@@ -767,6 +777,9 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMoreRoots')
       ?.addEventListener('click', event => void this.moreRoots(event.currentTarget));
+    document
+      .getElementById('projectLibraryRescan')
+      ?.addEventListener('click', event => void this.rescanAll(event.currentTarget));
     document
       .getElementById('projectSetupNextAction')
       ?.addEventListener('click', event => void this.runSetupNext(event.currentTarget));
@@ -1312,6 +1325,9 @@ export class ProjectLibraryPanel {
     } catch (_) {
       summary = null;
     }
+    // The freshness line rides this same read: no extra request on load.
+    this.summary = summary;
+    this.renderFreshness();
     const digestText = libraryDigestText(summary?.digest, this.state?.roots);
     const digestLine = document.getElementById('projectLibraryDigest');
     if (digestLine) {
@@ -2863,7 +2879,65 @@ export class ProjectLibraryPanel {
     );
   }
 
-  async scanRootFlow(rootID, trigger, scopeID = '') {
+  // Rescan (FR2): the same review and commit pair as "Review scan" for every
+  // connected root in turn, without the confirmation page: a rescan of an
+  // already approved folder reads names only and grants nothing new. Each
+  // commit finishes before the next review starts, so two scans never overlap,
+  // and each review uses the revision the previous scan left.
+  async rescanAll(trigger) {
+    const roots = rescanRoots(this.state);
+    if (this.busy || this.readOnly || !roots.length) return;
+    const outcomes = [];
+    await this.run(trigger, 'Scanning…', async () => {
+      try {
+        for (const [index, root] of roots.entries()) {
+          this.rescanProgress = { index: index + 1, total: roots.length };
+          this.renderFreshness();
+          // The state may have been re-read after the previous scan.
+          if (!rescanRoots(this.state).some(item => item.id === root.id)) continue;
+          outcomes.push(await this.scanRootFlow(root.id, trigger, '', { confirmed: true }));
+        }
+      } finally {
+        this.rescanProgress = null;
+        this.renderFreshness();
+      }
+      if (outcomes.length > 1) {
+        const complete = outcomes.filter(item => item?.status === 'complete').length;
+        this.status(
+          `Rescanned ${outcomes.length} folders · ${complete} complete${
+            complete < outcomes.length ? ` · ${outcomes.length - complete} did not finish` : ''
+          }.`
+        );
+      }
+    });
+    this.renderFreshness(); // busy is released only after run() returns.
+  }
+
+  // The freshness line (FR1, FR3, FR5): how old the newest complete scan is,
+  // from the summary the shelf already read, and the Rescan button.
+  renderFreshness(now = Date.now()) {
+    const line = document.getElementById('projectLibraryFreshness');
+    if (!line) return;
+    const roots = rescanRoots(this.state);
+    line.hidden = !this.summary || this.state?.initialized !== true || !roots.length;
+    if (line.hidden) return;
+    const view = libraryFreshness(this.summary, now);
+    const text = document.getElementById('projectLibraryFreshnessText');
+    if (text) text.textContent = view.text;
+    line.classList.toggle('is-stale', view.stale);
+    const button = document.getElementById('projectLibraryRescan');
+    if (!button) return;
+    button.hidden = this.readOnly;
+    const progress = this.rescanProgress;
+    button.textContent = progress
+      ? progress.total > 1
+        ? `Scanning ${progress.index} of ${progress.total}…`
+        : 'Scanning…'
+      : 'Rescan';
+    button.disabled = this.busy || !!progress;
+  }
+
+  async scanRootFlow(rootID, trigger, scopeID = '', { confirmed = false } = {}) {
     const recordedScan = () =>
       (this.state?.roots || []).find(item => item.id === rootID)?.last_scan || null;
     const priorScanID = recordedScan()?.id || '';
@@ -2872,6 +2946,7 @@ export class ProjectLibraryPanel {
       ...(scopeID ? { scope_id: scopeID } : {})
     });
     if (
+      !confirmed &&
       !(await this.confirm(
         scopeID ? 'Scan this selected folder once?' : 'Scan this discovery folder once?',
         [
@@ -2889,7 +2964,7 @@ export class ProjectLibraryPanel {
     ) {
       await this.refresh(); // The inert review still advances the Home document revision.
       this.status('Scan canceled. The folder was not read.');
-      return;
+      return null;
     }
     const idempotencyKey = operationKey('scan');
     const commit = () =>
@@ -2917,7 +2992,7 @@ export class ProjectLibraryPanel {
           this.status(
             `The reply was lost, but this scan was recorded: ${label(seen.status)} · ${seen.entries_seen} names checked. It was not repeated.`
           );
-          return;
+          return seen;
         }
         throw again;
       }
@@ -2926,6 +3001,7 @@ export class ProjectLibraryPanel {
     this.status(
       `${label(receipt.status)} scan · ${receipt.entries_seen} entries seen · ${receipt.skipped_links + receipt.skipped_other} skipped${receipt.partial_reason ? ` · ${receipt.partial_reason}` : ''}.`
     );
+    return receipt;
   }
 
   async revokeRoot(root, trigger) {

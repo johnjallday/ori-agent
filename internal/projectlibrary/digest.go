@@ -217,6 +217,27 @@ type LibrarySummary struct {
 	// ProposalRun is the Manager review receipt for the digest's scan, if any:
 	// the shelf shows its skipped reason or its source.
 	ProposalRun *ProposalRun `json:"proposal_run,omitempty"`
+	// LastCompleteScanAt is when the newest complete scan of a connected root
+	// finished. The shelf's freshness line and the map badge's age read it; a
+	// partial, failed or cancelled scan never moves it. Nil means no root has
+	// a complete scan yet.
+	LastCompleteScanAt *time.Time `json:"last_complete_scan_at,omitempty"`
+}
+
+// lastCompleteScanAt is the finish time of the newest complete scan whose root
+// is still connected. A scan of a smaller folder counts: it completed.
+func lastCompleteScanAt(doc Document, state *workspace.AssistantProgramState) *time.Time {
+	var newest *time.Time
+	for _, scan := range doc.Scans {
+		if scan.Status != "complete" || scan.FinishedAt == nil || !digestRootActive(doc, state, scan.RootID) {
+			continue
+		}
+		if newest == nil || scan.FinishedAt.After(*newest) {
+			finished := *scan.FinishedAt
+			newest = &finished
+		}
+	}
+	return newest
 }
 
 // Summary returns zeros for an uninitialized Home. A digest whose root was
@@ -229,7 +250,8 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 		}
 		return LibrarySummary{}, err
 	}
-	summary := LibrarySummary{Initialized: true, Revision: doc.Revision}
+	summary := LibrarySummary{Initialized: true, Revision: doc.Revision,
+		LastCompleteScanAt: lastCompleteScanAt(doc, state)}
 	if doc.Digest != nil && digestRootActive(doc, state, doc.Digest.RootID) {
 		current := digestWithLinks(doc, *doc.Digest)
 		summary.Digest = &current
