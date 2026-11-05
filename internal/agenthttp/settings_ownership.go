@@ -31,6 +31,12 @@ func (h *DashboardHandler) SetCopyTrackingReader(reader CopyTrackingReader) {
 	h.copyTracking = reader
 }
 
+// SetSkillInventory wires the skill-collection read used to report whether a
+// selected skill's source still offers it. Without one, that is unknown.
+func (h *DashboardHandler) SetSkillInventory(list func(agentName string) ([]string, error)) {
+	h.skillInventory = list
+}
+
 // IsSettingsOwnershipPath reports whether path is
 // /api/agents/{name}/settings-ownership.
 func IsSettingsOwnershipPath(path string) bool {
@@ -100,6 +106,7 @@ func (h *DashboardHandler) GetSettingsOwnership(w http.ResponseWriter, r *http.R
 	if h.copyTracking != nil {
 		src.Tracking = h.copyTracking.CopyTracking
 	}
+	src.SkillInventory = h.skillInventory
 	out, err := workspace.ProjectSettingsOwnership(src, workspace.SettingsOwnershipRequest{
 		Agent: name, WorkspaceID: workspaceID, InstanceID: instanceID,
 	})

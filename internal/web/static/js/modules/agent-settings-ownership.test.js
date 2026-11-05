@@ -592,3 +592,136 @@ test('confirmed versions refresh the view; drafts only show a note', async () =>
   view.setUnsaved(false);
   assert.equal(unsaved.hidden, true);
 });
+
+// ---- Group 3: Toolboxes and permission ownership ---------------------------
+
+test('Default and workspace Toolboxes stay separate and never claim readiness', () => {
+  const lib = api.toolboxView({
+    ...projection(),
+    direct_toolbox: {
+      state: 'selected',
+      version: 2,
+      inventory: 'unavailable',
+      skills: [{ id: 'a', name: 'A', source: 'agent_learned', availability: 'unknown' }]
+    },
+    workspace_toolbox: { state: 'not_applicable' },
+    permissions: { workspace_native_tools: 'not_applicable', notes: ['A Toolbox only narrows.'] }
+  });
+  assert.equal(lib.direct.summary, 'Selected skills (version 2)');
+  assert.equal(lib.direct.skills[0].availability, 'Availability unknown');
+  assert.equal(lib.direct.inventoryUnknown, true);
+  assert.match(lib.direct.editor, /no editor for the Default Toolbox/);
+  assert.equal(lib.workspace.show, false, 'no workspace Toolbox in the library context');
+  assert.equal(lib.permissions.native, '');
+
+  for (const [state, summary] of [
+    ['empty', /Explicitly empty/],
+    ['legacy', /Not chosen yet/]
+  ]) {
+    assert.match(
+      api.toolboxView({ ...projection(), direct_toolbox: { state } }).direct.summary,
+      summary
+    );
+  }
+
+  const ws = api.toolboxView({
+    ...workspaceProjection(),
+    direct_toolbox: { state: 'not_applicable', note: 'Outside workspaces only.' },
+    workspace_toolbox: {
+      state: 'pinned',
+      toolbox_id: 'tb',
+      toolbox_name: 'Research',
+      pinned_version: 1,
+      current_version: 2,
+      skills: [
+        {
+          id: 'n',
+          name: 'Notes',
+          source: 'workspace_provided',
+          availability: 'switched_off',
+          required: true
+        }
+      ],
+      connections: [
+        {
+          binding_id: 'gh',
+          name: 'GitHub',
+          state: 'available',
+          tools: ['list_issues'],
+          no_longer_allowed: ['create_issue'],
+          repo_scope: 'acme/site'
+        },
+        { binding_id: 'w', name: 'Wide', state: 'available', all_tools: true, tools: [] }
+      ],
+      core: ['Workspace files']
+    },
+    permissions: { workspace_native_tools: 'allowed', notes: ['n'] }
+  });
+  assert.equal(ws.direct.editor, '', 'not-applicable Default Toolbox has no editor line');
+  assert.match(
+    ws.workspace.pin,
+    /“Research”, pinned to version 1 \(the Toolbox is now at version 2/
+  );
+  assert.equal(ws.workspace.skills[0].availability, 'Switched off in this workspace');
+  assert.equal(ws.workspace.connections[0].tools, 'Operations: list_issues');
+  assert.match(ws.workspace.connections[0].noLongerAllowed, /create_issue/);
+  assert.equal(ws.workspace.connections[0].repo, 'Limited to repository acme/site');
+  assert.match(ws.workspace.connections[1].tools, /not pinned/);
+  assert.match(ws.permissions.native, /allowed in this workspace \(each agent must also opt in\)/);
+
+  const broken = api.toolboxView({
+    ...workspaceProjection(),
+    workspace_toolbox: {
+      state: 'broken',
+      toolbox_id: 'tb',
+      pinned_version: 9,
+      note: 'needs repair'
+    }
+  });
+  assert.match(broken.workspace.pin, /version 9 does not resolve/);
+  assert.equal(broken.workspace.connections.length, 0);
+});
+
+test('Toolbox sections render as text, with progressive disclosure', async () => {
+  const win = makeWindow('?ctx=workspace&studio_id=ws-d');
+  const mod = load(win);
+  const { root, body } = makeRoot();
+  mod.mount({
+    root,
+    agentName: 'Writer',
+    win,
+    modelApi: async () => ({
+      readModelSelection: async () => null,
+      modelDescription: () => 'unknown'
+    }),
+    fetchImpl: async () =>
+      jsonResponse({
+        ...workspaceProjection({
+          instances: { state: 'selected', items: dupItems.slice(0, 1), selected_id: 'i-1' }
+        }),
+        direct_toolbox: { state: 'not_applicable', note: 'Outside workspaces only.' },
+        workspace_toolbox: {
+          state: 'pinned',
+          toolbox_name: '<b>Research</b>',
+          pinned_version: 1,
+          current_version: 1,
+          skills: [
+            { id: 'x', name: '<img src=x>', source: 'agent_learned', availability: 'missing' }
+          ],
+          connections: []
+        },
+        permissions: { workspace_native_tools: 'not_allowed', notes: ['A Toolbox only narrows.'] }
+      })
+  });
+  await tick();
+  const direct = body.find(n => n.dataset?.ownershipToolbox === 'direct');
+  const wsBlock = body.find(n => n.dataset?.ownershipToolbox === 'workspace');
+  assert.match(direct.textContent, /Outside workspaces only\./);
+  assert.match(wsBlock.textContent, /“<b>Research<\/b>”, pinned to version 1/);
+  assert.match(wsBlock.textContent, /<img src=x>/);
+  assert.ok(
+    wsBlock.find(n => n.tagName === 'DETAILS'),
+    'long lists are collapsible'
+  );
+  assert.match(body.textContent, /Trusted native tools: not allowed in this workspace\./);
+});

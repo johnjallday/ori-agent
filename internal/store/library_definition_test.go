@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func TestLibraryDefinitionNeverAnswersWithAWorkspaceCopy(t *testing.T) {
@@ -123,6 +124,48 @@ func TestLibraryDefinitionIsRaceFreeAgainstDefinitionMutations(t *testing.T) {
 				return
 			}
 			_ = rec.Definition.Settings.SystemPrompt + rec.Definition.Settings.Model
+		}
+	}()
+	wg.Wait()
+}
+
+// The Default Toolbox editor updates the record in place through UpdateAgent;
+// an inspection read must own its copy of the selection.
+func TestLibraryDefinitionDefaultToolboxIsPrivate(t *testing.T) {
+	c, _, _ := compositeWithWorkspaces(t)
+	if err := c.CreateAgent("Scout", &CreateAgentConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateAgent("Scout", func(ag *agent.Agent) error {
+		ag.InitializeDefaultToolbox()
+		ag.DefaultToolbox.Skills = []types.DefaultToolboxSkillRef{{CapabilityID: "a", DisplayName: "A"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := LibraryDefinition(c, "Scout")
+	live, _ := c.GetAgent("Scout")
+	if rec.Definition.DefaultToolbox == live.DefaultToolbox {
+		t.Fatal("inspection shares the live Default Toolbox pointer")
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			_ = c.UpdateAgent("Scout", func(ag *agent.Agent) error {
+				ag.DefaultToolbox.Skills = append(ag.DefaultToolbox.Skills[:0], types.DefaultToolboxSkillRef{CapabilityID: "b"})
+				ag.DefaultToolbox.Version++
+				return nil
+			})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			if tb := LibraryDefinition(c, "Scout").Definition.DefaultToolbox; tb != nil {
+				_ = len(tb.Skills) + int(tb.Version)
+			}
 		}
 	}()
 	wg.Wait()

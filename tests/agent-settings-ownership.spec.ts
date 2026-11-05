@@ -312,3 +312,75 @@ test.describe('slice 2', () => {
     await expect(page.getByLabel('Instance')).toBeFocused();
   });
 });
+
+test.describe('slice 3', () => {
+  const direct = (page: Page) => section(page).locator('[data-ownership-toolbox="direct"]');
+  const pinned = (page: Page) => section(page).locator('[data-ownership-toolbox="workspace"]');
+
+  test('Default and workspace Toolboxes are separate, without touching the Workshop', async ({
+    page,
+    request
+  }) => {
+    const f = await fixture(request);
+    const toolboxCalls: string[] = [];
+    const writes: string[] = [];
+    page.on('request', req => {
+      const url = req.url();
+      if (/\/toolbox|\/workshop|\/default-toolbox/.test(url)) toolboxCalls.push(url);
+      if (req.method() !== 'GET' && url.includes('/api/')) writes.push(url);
+    });
+
+    await openAgent(page, f.name);
+    await expect(direct(page)).toContainText('Direct chat Default Toolbox');
+    await expect(direct(page)).toContainText('Explicitly empty');
+    await expect(direct(page)).toContainText('no editor for the Default Toolbox');
+    await expect(pinned(page)).toHaveCount(0);
+
+    await page.getByLabel('Viewing').selectOption({ label: `Workspace: ${f.custom.name}` });
+    await expect(pinned(page)).toContainText('pinned to version 1');
+    await expect(direct(page)).toContainText('outside workspaces');
+    await pinned(page)
+      .getByText(/selected connection/)
+      .click();
+    await expect(pinned(page)).toContainText('workspace-files');
+    await expect(pinned(page)).toContainText('Every operation the connection allows');
+    const access = section(page).locator('[data-ownership-permissions]');
+    await expect(access).toContainText('Who controls access');
+    await expect(access).toContainText('does not grant workspace access');
+    await expect(access).toContainText('not allowed in this workspace');
+
+    // Attached after startup: no assignment yet, stated as such.
+    await page.getByLabel('Viewing').selectOption({ label: `Workspace: ${f.direct.name}` });
+    await expect(pinned(page)).toContainText('no Toolbox assignment yet');
+
+    expect(toolboxCalls).toEqual([]);
+    expect(writes).toEqual([]);
+  });
+
+  test('an unreadable skill collection stays unknown (injected inventory failure)', async ({
+    page,
+    request
+  }) => {
+    const f = await fixture(request);
+    await page.route('**/settings-ownership*', async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.direct_toolbox = {
+        state: 'selected',
+        version: 4,
+        inventory: 'unavailable',
+        skills: [
+          { id: 'summarize', name: 'Summarize', source: 'agent_learned', availability: 'unknown' }
+        ]
+      };
+      await route.fulfill({ response, json: body });
+    });
+    await openAgent(page, f.name);
+    await expect(direct(page)).toContainText('Selected skills (version 4)');
+    await direct(page).getByText('1 selected skill').click();
+    await expect(direct(page)).toContainText('Summarize');
+    await expect(direct(page)).toContainText('Availability unknown');
+    await expect(direct(page)).toContainText('could not be read');
+    await expect(direct(page)).not.toContainText(/\bAvailable\b/);
+  });
+});

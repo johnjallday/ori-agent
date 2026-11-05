@@ -279,6 +279,112 @@
     return { label: request.label, value, note };
   }
 
+  // ---- Toolboxes ------------------------------------------------------------
+
+  const AVAILABILITY_LABELS = {
+    available: 'Available',
+    switched_off: 'Switched off in this workspace',
+    missing: 'Not found',
+    unknown: 'Availability unknown'
+  };
+
+  const SKILL_SOURCE_LABELS = {
+    agent_learned: "Agent's skill",
+    workspace_provided: 'Workspace skill',
+    core: 'Provided by Ori'
+  };
+
+  function skillRows(skills) {
+    return (Array.isArray(skills) ? skills : []).map(skill => ({
+      name: text(skill.name) || text(skill.id),
+      source: SKILL_SOURCE_LABELS[skill.source] || '',
+      availability: AVAILABILITY_LABELS[skill.availability] || AVAILABILITY_LABELS.unknown,
+      availabilityCode: text(skill.availability) || 'unknown',
+      required: Boolean(skill.required)
+    }));
+  }
+
+  // toolboxView describes the Default Toolbox (direct chat outside
+  // workspaces) and the selected instance's workspace Toolbox as two separate
+  // sections. Selected never means granted, connected or ready.
+  function toolboxView(projection) {
+    const ok = projection?.context?.state === 'ok';
+    const direct = projection?.direct_toolbox || {};
+    const ws = projection?.workspace_toolbox || {};
+    const directSummary =
+      {
+        selected: `Selected skills${direct.version ? ` (version ${direct.version})` : ''}`,
+        empty: 'Explicitly empty',
+        legacy: 'Not chosen yet',
+        unavailable: 'Unknown',
+        not_applicable: ''
+      }[direct.state] ?? '';
+    let pin = '';
+    if (ws.state === 'pinned' || ws.state === 'empty') {
+      pin = `“${text(ws.toolbox_name) || text(ws.toolbox_id)}”, pinned to version ${ws.pinned_version}`;
+      if (ws.current_version && ws.current_version !== ws.pinned_version) {
+        pin += ` (the Toolbox is now at version ${ws.current_version}; this instance stays on ${ws.pinned_version})`;
+      }
+    } else if (ws.state === 'broken') {
+      pin = `Assignment to “${text(ws.toolbox_id) || 'a Toolbox'}” version ${ws.pinned_version || '?'} does not resolve`;
+    }
+    const native = projection?.permissions?.workspace_native_tools;
+    return {
+      show: ok,
+      direct: {
+        show: ok && direct.state !== undefined,
+        state: text(direct.state),
+        summary: directSummary,
+        note: text(direct.note),
+        skills: skillRows(direct.skills),
+        inventoryUnknown: direct.inventory === 'unavailable',
+        // This slice adds no Default Toolbox editor; never point at an
+        // unrelated skill switch as if it edited this selection.
+        editor:
+          direct.state && direct.state !== 'not_applicable'
+            ? 'There is no editor for the Default Toolbox on this page.'
+            : ''
+      },
+      workspace: {
+        show: ok && projection?.context?.kind === 'workspace',
+        state: text(ws.state),
+        pin,
+        archived: Boolean(ws.archived),
+        note: text(ws.note),
+        skills: skillRows(ws.skills),
+        connections: (Array.isArray(ws.connections) ? ws.connections : []).map(conn => ({
+          name: text(conn.name) || text(conn.binding_id),
+          state: AVAILABILITY_LABELS[conn.state] || AVAILABILITY_LABELS.unknown,
+          stateCode: text(conn.state) || 'unknown',
+          required: Boolean(conn.required),
+          tools: conn.all_tools
+            ? 'Every operation the connection allows (not pinned to a list)'
+            : Array.isArray(conn.tools) && conn.tools.length
+              ? `Operations: ${conn.tools.join(', ')}`
+              : 'No operations selected',
+          noLongerAllowed:
+            Array.isArray(conn.no_longer_allowed) && conn.no_longer_allowed.length
+              ? `No longer allowed by the connection, so not available: ${conn.no_longer_allowed.join(', ')}`
+              : '',
+          repo: text(conn.repo_scope) ? `Limited to repository ${text(conn.repo_scope)}` : ''
+        })),
+        core: Array.isArray(ws.core) ? ws.core.map(text).filter(Boolean) : [],
+        inventoryUnknown: ws.inventory === 'unavailable'
+      },
+      permissions: {
+        native:
+          native === 'allowed'
+            ? 'Trusted native tools: allowed in this workspace (each agent must also opt in).'
+            : native === 'not_allowed'
+              ? 'Trusted native tools: not allowed in this workspace.'
+              : '',
+        notes: Array.isArray(projection?.permissions?.notes)
+          ? projection.permissions.notes.map(text).filter(Boolean)
+          : []
+      }
+    };
+  }
+
   // ---- Mount ----------------------------------------------------------------
 
   function el(doc, tag, className, content) {
@@ -417,6 +523,145 @@
       return [block];
     }
 
+    function renderSkillList(rows) {
+      const list = el(doc, 'ul', 'settings-ownership-list');
+      for (const row of rows) {
+        const item = el(doc, 'li', '');
+        item.dataset.availability = row.availabilityCode;
+        item.append(el(doc, 'span', 'settings-ownership-item-name', row.name));
+        const meta = [row.source, row.required ? 'required' : '', row.availability].filter(Boolean);
+        item.append(el(doc, 'span', 'settings-ownership-item-meta', ` — ${meta.join(' · ')}`));
+        list.append(item);
+      }
+      return list;
+    }
+
+    function collapsible(summary, content) {
+      const details = el(doc, 'details', 'settings-ownership-text');
+      details.append(el(doc, 'summary', '', summary), content);
+      return details;
+    }
+
+    function renderToolboxes(projection) {
+      const view = toolboxView(projection);
+      if (!view.show) return [];
+      const nodes = [];
+      if (view.direct.show && (view.direct.state !== 'not_applicable' || view.direct.note)) {
+        const block = el(doc, 'div', 'settings-ownership-toolbox');
+        block.dataset.ownershipToolbox = 'direct';
+        block.append(el(doc, 'h4', 'settings-ownership-subheading', 'Direct chat Default Toolbox'));
+        if (view.direct.summary)
+          block.append(el(doc, 'p', 'settings-ownership-source', view.direct.summary));
+        if (view.direct.note)
+          block.append(el(doc, 'p', 'settings-ownership-note', view.direct.note));
+        if (view.direct.skills.length) {
+          block.append(
+            collapsible(
+              `${view.direct.skills.length} selected skill${view.direct.skills.length === 1 ? '' : 's'}`,
+              renderSkillList(view.direct.skills)
+            )
+          );
+        }
+        if (view.direct.inventoryUnknown) {
+          block.append(
+            el(
+              doc,
+              'p',
+              'settings-ownership-note',
+              "The agent's skills could not be read, so availability is unknown."
+            )
+          );
+        }
+        if (view.direct.editor)
+          block.append(el(doc, 'p', 'settings-ownership-excluded', view.direct.editor));
+        nodes.push(block);
+      }
+      if (view.workspace.show) {
+        const block = el(doc, 'div', 'settings-ownership-toolbox');
+        block.dataset.ownershipToolbox = 'workspace';
+        block.append(
+          el(doc, 'h4', 'settings-ownership-subheading', 'Workspace Toolbox for this instance')
+        );
+        if (view.workspace.pin) {
+          const pin = el(doc, 'p', 'settings-ownership-source');
+          pin.append(el(doc, 'strong', '', 'Toolbox: '), doc.createTextNode(view.workspace.pin));
+          block.append(pin);
+        }
+        if (view.workspace.archived) {
+          block.append(el(doc, 'p', 'settings-ownership-note', 'This Toolbox is archived.'));
+        }
+        if (view.workspace.note)
+          block.append(el(doc, 'p', 'settings-ownership-note', view.workspace.note));
+        if (view.workspace.skills.length) {
+          block.append(
+            collapsible(
+              `${view.workspace.skills.length} selected skill${view.workspace.skills.length === 1 ? '' : 's'}`,
+              renderSkillList(view.workspace.skills)
+            )
+          );
+        }
+        if (view.workspace.connections.length) {
+          const list = el(doc, 'ul', 'settings-ownership-list');
+          for (const conn of view.workspace.connections) {
+            const item = el(doc, 'li', '');
+            item.dataset.availability = conn.stateCode;
+            item.append(el(doc, 'span', 'settings-ownership-item-name', conn.name));
+            item.append(
+              el(
+                doc,
+                'span',
+                'settings-ownership-item-meta',
+                ` — ${[conn.required ? 'required' : '', conn.state].filter(Boolean).join(' · ')}`
+              )
+            );
+            for (const line of [conn.tools, conn.noLongerAllowed, conn.repo].filter(Boolean)) {
+              item.append(el(doc, 'div', 'settings-ownership-item-detail', line));
+            }
+            list.append(item);
+          }
+          block.append(
+            collapsible(
+              `${view.workspace.connections.length} selected connection${view.workspace.connections.length === 1 ? '' : 's'}`,
+              list
+            )
+          );
+        }
+        if (view.workspace.inventoryUnknown) {
+          block.append(
+            el(
+              doc,
+              'p',
+              'settings-ownership-note',
+              "The agent's skills could not be read, so their availability is unknown."
+            )
+          );
+        }
+        if (view.workspace.core.length) {
+          block.append(
+            el(
+              doc,
+              'p',
+              'settings-ownership-note',
+              `Always provided here: ${view.workspace.core.join('; ')}.`
+            )
+          );
+        }
+        nodes.push(block);
+      }
+      if (view.permissions.notes.length || view.permissions.native) {
+        const block = el(doc, 'div', 'settings-ownership-toolbox');
+        block.dataset.ownershipPermissions = '';
+        block.append(el(doc, 'h4', 'settings-ownership-subheading', 'Who controls access'));
+        if (view.permissions.native)
+          block.append(el(doc, 'p', 'settings-ownership-note', view.permissions.native));
+        const list = el(doc, 'ul', 'settings-ownership-list');
+        for (const note of view.permissions.notes) list.append(el(doc, 'li', '', note));
+        block.append(list);
+        nodes.push(block);
+      }
+      return nodes;
+    }
+
     async function renderConversation(projection, mine, slot) {
       const request = conversationRequest(projection, { systemModelLinked: linked() });
       if (!request) return;
@@ -481,6 +726,7 @@
       const conversation = el(doc, 'div', 'settings-ownership-conversation-slot');
       nodes.push(conversation);
       nodes.push(...renderPrompt(projection));
+      nodes.push(...renderToolboxes(projection));
       if (view.excluded) nodes.push(el(doc, 'p', 'settings-ownership-excluded', view.excluded));
       body.replaceChildren(...nodes);
       void renderConversation(projection, mine, conversation);
@@ -597,6 +843,7 @@
     instanceChoice,
     promptView,
     conversationRequest,
-    conversationView
+    conversationView,
+    toolboxView
   };
 })();

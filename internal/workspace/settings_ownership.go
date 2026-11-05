@@ -79,6 +79,10 @@ type SettingsOwnershipSources struct {
 	// Tracking optionally reports how a workspace copy relates to a consent
 	// tracking record (projectstaffing.Service.CopyTracking). It must not write.
 	Tracking func(agentName, workspaceID string, library, copyAgent *agent.Agent) (string, error)
+	// SkillInventory optionally lists the skill names in an agent's skill
+	// collection (skills.Manager.ListSkills). It must not write. Without it, or
+	// when it fails, skill availability is reported as unknown.
+	SkillInventory func(agentName string) ([]string, error)
 }
 
 // SettingsOwnershipRequest names the agent and the viewing context.
@@ -98,7 +102,16 @@ type SettingsOwnership struct {
 	Tracking   OwnershipTracking          `json:"tracking"`
 	Instances  OwnershipInstanceSelection `json:"instances"`
 	Prompt     OwnershipPrompt            `json:"prompt"`
-	Excluded   string                     `json:"excluded"`
+	// DirectToolbox is the Default Toolbox: skills for direct chat outside
+	// workspaces. WorkspaceToolbox is the selected instance's pinned Toolbox.
+	// They are separate selections and never merged.
+	DirectToolbox    OwnershipDirectToolbox    `json:"direct_toolbox"`
+	WorkspaceToolbox OwnershipWorkspaceToolbox `json:"workspace_toolbox"`
+	Permissions      OwnershipPermissions      `json:"permissions"`
+	// Impact is advisory: what a library edit would reach, from current
+	// tracking evidence. It authorizes nothing; save-time checks decide.
+	Impact   OwnershipImpact `json:"impact"`
+	Excluded string          `json:"excluded"`
 }
 
 // Saved-prompt preview states.
@@ -247,10 +260,21 @@ func ProjectSettingsOwnership(src SettingsOwnershipSources, req SettingsOwnershi
 		}
 		projectLibraryContext(&out, library)
 		out.Prompt = projectPrompt(out)
+		out.DirectToolbox = projectDirectToolbox(src, out, library)
+		out.WorkspaceToolbox = OwnershipWorkspaceToolbox{State: OwnershipToolboxNotApplicable, Skills: []OwnershipToolboxSkill{}, Connections: []OwnershipToolboxConnection{}, Core: []string{}}
+		out.Permissions = projectPermissions(nil)
+		out.Impact = projectLibraryImpact(src, out, library, name)
 		return out, nil
 	}
-	projectWorkspaceContext(src, &out, library, name, workspaceID, strings.TrimSpace(req.InstanceID))
+	ws := projectWorkspaceContext(src, &out, library, name, workspaceID, strings.TrimSpace(req.InstanceID))
 	out.Prompt = projectPrompt(out)
+	out.DirectToolbox = OwnershipDirectToolbox{
+		State: OwnershipToolboxNotApplicable, Skills: []OwnershipToolboxSkill{},
+		Note: "The Default Toolbox applies to direct chat outside workspaces. In a workspace, the instance's pinned workspace Toolbox decides its tools instead.",
+	}
+	out.WorkspaceToolbox = projectWorkspaceToolbox(src, out, ws, name)
+	out.Permissions = projectPermissions(ws)
+	out.Impact = OwnershipImpact{State: OwnershipToolboxNotApplicable, Copies: []OwnershipImpactCopy{}}
 	if library.State == store.LibraryAbsent && len(out.Contexts.Workspaces) == 0 && out.Context.State != OwnershipStateOK {
 		return out, ErrSettingsOwnershipAgentNotFound
 	}
@@ -294,20 +318,20 @@ func projectLibraryContext(out *SettingsOwnership, library store.LibraryRecord) 
 	}
 }
 
-func projectWorkspaceContext(src SettingsOwnershipSources, out *SettingsOwnership, library store.LibraryRecord, name, workspaceID, instanceID string) {
+func projectWorkspaceContext(src SettingsOwnershipSources, out *SettingsOwnership, library store.LibraryRecord, name, workspaceID, instanceID string) *Workspace {
 	out.Context = OwnershipContext{Kind: OwnershipContextWorkspace, State: OwnershipStateOK}
 	out.Instances.State = OwnershipInstanceNone
 	if src.Workspaces == nil {
 		out.Context.State = OwnershipStateUnavailable
 		out.Context.Message = "Workspaces could not be read."
-		return
+		return nil
 	}
 	ws, err := src.Workspaces.Get(workspaceID)
 	if err != nil || ws == nil || ws.Status == StatusTrashed || ws.Status == StatusMissing {
 		out.Context.State = OwnershipStateNotFound
 		out.Context.Message = "That workspace is not available. It may have been removed or moved to the trash."
 		out.Instances.State = OwnershipInstanceNotApplicable
-		return
+		return nil
 	}
 	out.Context.Workspace = &OwnershipWorkspaceRef{ID: ws.ID, Name: ws.Name, FolderSlug: ws.FolderSlug}
 
@@ -324,7 +348,7 @@ func projectWorkspaceContext(src SettingsOwnershipSources, out *SettingsOwnershi
 		out.Context.State = OwnershipStateNotMember
 		out.Context.Message = "This agent is not in that workspace."
 		out.Instances.State = OwnershipInstanceNotApplicable
-		return
+		return nil
 	}
 	out.Instances = selectOwnershipInstance(ws, name, instanceID)
 	if sharedWith != "" {
@@ -333,7 +357,7 @@ func projectWorkspaceContext(src SettingsOwnershipSources, out *SettingsOwnershi
 		out.Definition.Note = "This workspace also has an agent named \"" + sharedWith +
 			"\" whose saved copy uses the same file, so which settings belong to this agent could not be verified."
 		out.Tracking.State = OwnershipTrackingUnknown
-		return
+		return ws
 	}
 	copyAgent, hasCopy, copyErr := src.Workspaces.GetWorkspaceAgent(ws.ID, name)
 
@@ -363,6 +387,7 @@ func projectWorkspaceContext(src SettingsOwnershipSources, out *SettingsOwnershi
 		out.Definition.State = OwnershipStateUnavailable
 		out.Definition.Note = "This workspace has no saved copy of the agent and there is no library profile to read instead."
 	}
+	return ws
 }
 
 // projectPrompt composes the saved-prompt preview from what the projection

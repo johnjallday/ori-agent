@@ -44,10 +44,15 @@
     .agent-workspaces :is(a, button, input, h2, [data-workspace-status]):focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
     .agent-workspaces-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     /* Where settings come from: read-only inspection of one chosen context. */
+    /* Muted text in this section meets WCAG AA (4.5:1) in both themes; the
+       shared --text-secondary token is about 4.2:1 on the dark card. */
+    :root { --settings-ownership-muted: var(--text-secondary); }
+    .dark-mode, [data-bs-theme="dark"] { --settings-ownership-muted: #a8a8ad; }
+    @media (prefers-color-scheme: dark) { :root:not(.light-mode):not([data-bs-theme="light"]) { --settings-ownership-muted: #a8a8ad; } }
     .settings-ownership { scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px); background: var(--bg-secondary); color: var(--text-primary); }
     .settings-ownership[hidden] { display: none !important; }
     .settings-ownership h2 { font-size: 20px; margin: 0; color: var(--text-primary); }
-    .settings-ownership p { color: var(--text-secondary); overflow-wrap: anywhere; }
+    .settings-ownership p { color: var(--settings-ownership-muted); overflow-wrap: anywhere; }
     .settings-ownership .settings-ownership-picker { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 12px 0; }
     .settings-ownership label { font-weight: 600; color: var(--text-primary); }
     .settings-ownership select { min-width: min(100%, 18rem); max-width: 100%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); }
@@ -57,10 +62,10 @@
     .settings-ownership-fields { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr) max-content; gap: 0 16px; margin: 12px 0; }
     .settings-ownership-row { display: contents; }
     .settings-ownership-row > * { padding: 8px 0; border-top: 1px solid var(--border-color); margin: 0; }
-    .settings-ownership-row dt { font-weight: 600; color: var(--text-secondary); font-size: 13px; }
+    .settings-ownership-row dt { font-weight: 600; color: var(--settings-ownership-muted); font-size: 13px; }
     .settings-ownership-row dd { color: var(--text-primary); overflow-wrap: anywhere; white-space: pre-wrap; }
-    .settings-ownership-row dd.is-empty { color: var(--text-secondary); font-style: italic; }
-    .settings-ownership-comparison { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+    .settings-ownership-row dd.is-empty { color: var(--settings-ownership-muted); font-style: italic; }
+    .settings-ownership-comparison { font-size: 12px; font-weight: 600; color: var(--settings-ownership-muted); }
     .settings-ownership-comparison[data-comparison="different"] { color: var(--agent-edit-danger); }
     .settings-ownership-excluded { font-size: 12px; }
     .settings-ownership-unsaved { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary) !important; }
@@ -72,12 +77,20 @@
     .settings-ownership-text summary { cursor: pointer; font-weight: 600; color: var(--text-primary); }
     .settings-ownership-text summary:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
     .settings-ownership-text pre { margin: 6px 0 0; padding: 10px 12px; max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 13px; }
-    .settings-ownership-text pre.is-empty { color: var(--text-secondary); font-style: italic; }
+    .settings-ownership-text pre.is-empty { color: var(--settings-ownership-muted); font-style: italic; }
     .settings-ownership-layers { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: 4px 16px; margin: 4px 0 8px; }
     .settings-ownership-layer { display: contents; }
-    .settings-ownership-layer dt { font-weight: 600; color: var(--text-secondary); font-size: 13px; }
+    .settings-ownership-layer dt { font-weight: 600; color: var(--settings-ownership-muted); font-size: 13px; }
     .settings-ownership-layer dd { margin: 0; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
     .settings-ownership-conversation { color: var(--text-primary) !important; }
+    .settings-ownership-toolbox { border-top: 1px solid var(--border-color); margin-top: 12px; padding-top: 4px; }
+    .settings-ownership-list { list-style: none; padding: 0; margin: 6px 0; }
+    .settings-ownership-list li { padding: 6px 0; border-top: 1px solid var(--border-color); color: var(--text-primary); overflow-wrap: anywhere; }
+    .settings-ownership-list li:first-child { border-top: 0; }
+    .settings-ownership-item-name { font-weight: 600; }
+    .settings-ownership-item-meta, .settings-ownership-item-detail { color: var(--settings-ownership-muted); font-size: 13px; }
+    .settings-ownership-list li[data-availability="missing"] .settings-ownership-item-meta,
+    .settings-ownership-list li[data-availability="switched_off"] .settings-ownership-item-meta { color: var(--agent-edit-danger); }
     .settings-ownership a { color: var(--text-primary); text-decoration: underline; }
     .settings-ownership a:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
     @media (max-width: 575px) {

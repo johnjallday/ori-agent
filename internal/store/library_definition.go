@@ -3,6 +3,7 @@ package store
 import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // Library record states reported by LibraryDefinition.
@@ -56,7 +57,7 @@ func LibraryDefinition(st Store, name string) LibraryRecord {
 	if !ok || ag == nil {
 		return LibraryRecord{State: LibraryAbsent}
 	}
-	return LibraryRecord{Definition: cloneAgentDefinition(ag), State: LibraryPresent, Owner: ownerFor(name)}
+	return LibraryRecord{Definition: inspectionClone(ag), State: LibraryPresent, Owner: ownerFor(name)}
 }
 
 func ownerFor(name string) string {
@@ -85,7 +86,20 @@ func (c *CompositeStore) libraryDefinition(name string) LibraryRecord {
 	if !ok || ag == nil {
 		return LibraryRecord{State: LibraryAbsent}
 	}
-	return LibraryRecord{Definition: cloneAgentDefinition(ag), State: LibraryPresent, Owner: label}
+	return LibraryRecord{Definition: inspectionClone(ag), State: LibraryPresent, Owner: label}
+}
+
+// inspectionClone is cloneAgentDefinition plus a private Default Toolbox:
+// that record is updated in place by its editor, so a reader must not share
+// the pointer with the live agent.
+func inspectionClone(src *agent.Agent) *agent.Agent {
+	out := cloneAgentDefinition(src)
+	if out != nil && src.DefaultToolbox != nil {
+		toolbox := *src.DefaultToolbox
+		toolbox.Skills = append([]types.DefaultToolboxSkillRef(nil), src.DefaultToolbox.Skills...)
+		out.DefaultToolbox = &toolbox
+	}
+	return out
 }
 
 // libraryRecord clones name's definition under the store lock, the same lock
@@ -100,5 +114,5 @@ func (s *fileStore) libraryRecord(name, owner string) LibraryRecord {
 	if !ok || ag == nil {
 		return LibraryRecord{State: LibraryAbsent}
 	}
-	return LibraryRecord{Definition: cloneAgentDefinition(ag), State: LibraryPresent, Owner: owner}
+	return LibraryRecord{Definition: inspectionClone(ag), State: LibraryPresent, Owner: owner}
 }

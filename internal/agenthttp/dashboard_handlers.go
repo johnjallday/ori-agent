@@ -44,6 +44,8 @@ type DashboardHandler struct {
 	// copyTracking reports a workspace copy's tracking state for the
 	// read-only settings-ownership inspection (settings_ownership.go).
 	copyTracking CopyTrackingReader
+	// skillInventory lists an agent's skill collection for the same view.
+	skillInventory func(agentName string) ([]string, error)
 }
 
 // XPPerLevelReporter is the one thing the dashboard needs from the evolution

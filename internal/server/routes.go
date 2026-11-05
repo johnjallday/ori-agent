@@ -248,6 +248,21 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if tracking, ok := s.Storage.AgentEditCarrier.(agenthttp.CopyTrackingReader); ok {
 		dashboardHandler.SetCopyTrackingReader(tracking)
 	}
+	if s.Handlers.Skills != nil {
+		if manager := s.Handlers.Skills.Manager(); manager != nil {
+			dashboardHandler.SetSkillInventory(func(agentName string) ([]string, error) {
+				collection, err := manager.ListSkills(agentName)
+				if err != nil {
+					return nil, err
+				}
+				names := make([]string, 0, len(collection))
+				for _, skill := range collection {
+					names = append(names, skill.Name)
+				}
+				return names, nil
+			})
+		}
+	}
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
