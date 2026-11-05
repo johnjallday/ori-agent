@@ -57,8 +57,169 @@ import {
   secondBrainSetupWhereView,
   secondBrainWrittenLine,
   sinceLabel,
-  suggestedLabel
+  suggestedLabel,
+  secondBrainRecipientPersonal,
+  secondBrainPromptDue,
+  secondBrainModeLine,
+  secondBrainDisconnectView,
+  secondBrainDisconnectedLine,
+  ONE_NOTES_FOLDER_LINE,
+  NOTES_HANDOFF_RETRY
 } from './personal-assistant-second-brain.js';
+
+const moduleSource = readFileSync(
+  new URL('./personal-assistant-second-brain.js', import.meta.url),
+  'utf8'
+);
+function sourceBetween(from, to) {
+  const start = moduleSource.indexOf(from);
+  const end = moduleSource.indexOf(to, start + from.length);
+  assert.ok(start >= 0 && end > start, `${from} … ${to}`);
+  return moduleSource.slice(start, end);
+}
+
+test('the notes card is the assistant’s: hidden while a workspace agent is the recipient', () => {
+  assert.equal(secondBrainRecipientPersonal({ kind: 'personal' }), true);
+  assert.equal(secondBrainRecipientPersonal(null), true, 'no recipient system: only the assistant');
+  assert.equal(secondBrainRecipientPersonal({ kind: 'workspace_entry', name: 'Mira' }), false);
+  assert.equal(
+    secondBrainRecipientPersonal({ kind: 'workspace_entry', pending: true }),
+    false,
+    'still resolving who the drawer talks to is not the assistant yet'
+  );
+  for (const phase of ['ask', 'setup', 'result', 'manage', 'disconnect']) {
+    assert.equal(
+      secondBrainPlacement({ available: true, phase, pinned: false, personal: false }),
+      'none',
+      phase
+    );
+    assert.equal(
+      secondBrainPlacement({ available: true, phase, pinned: false, personal: true }),
+      'thread',
+      phase
+    );
+  }
+  // Callers that never say keep the old behavior.
+  assert.equal(secondBrainPlacement({ available: true, phase: 'ask', pinned: true }), 'needs');
+});
+
+test('the first showing is recorded only when the card is really in front of the user', () => {
+  const seen = { phase: 'ask', placement: 'thread', panelOpen: true, recorded: false };
+  assert.equal(secondBrainPromptDue(seen), true);
+  assert.equal(secondBrainPromptDue({ ...seen, placement: 'needs' }), true);
+  // A manager's drawer, a closed drawer, another step, or already recorded.
+  assert.equal(secondBrainPromptDue({ ...seen, placement: 'none' }), false);
+  assert.equal(secondBrainPromptDue({ ...seen, panelOpen: false }), false);
+  assert.equal(secondBrainPromptDue({ ...seen, phase: 'setup' }), false);
+  assert.equal(secondBrainPromptDue({ ...seen, recorded: true }), false);
+  // It is checked after every render and when the drawer opens, and the old
+  // record-on-open listener is gone.
+  assert.match(sourceBetween('function render() {', 'function baseName('), /maybeRecordPrompt\(\)/);
+  assert.match(moduleSource, /'personal-assistant:opened', \(\) => maybeRecordPrompt\(\)/);
+  assert.doesNotMatch(moduleSource, /markPromptedWhenSeen/);
+  // The record itself posts only /prompted: nothing is deferred or declined.
+  const record = sourceBetween('function maybeRecordPrompt()', '// placeWaitingResult');
+  assert.match(record, /'\/prompted'/);
+  assert.doesNotMatch(record, /'\/ask'|decide\(|\/disconnect/);
+});
+
+test('switching recipient hides and restores the card without answering or taking focus', () => {
+  const body = sourceBetween('function onRecipient(', '// ensurePersonalRecipient');
+  assert.match(body, /state\.focusNext = false/);
+  assert.doesNotMatch(body, /request\(|decide\(|setPhase\(|state\.history|state\.project/);
+  assert.match(moduleSource, /'personal-assistant:recipient', event =>\s+onRecipient\(/);
+});
+
+test('explicit Notes entries go through the panel’s guarded switch, never an unguarded pick', () => {
+  const ensure = sourceBetween('function ensurePersonalRecipient()', '// guarded wraps');
+  assert.match(ensure, /panel\.choosePersonal\(\{ retry: NOTES_HANDOFF_RETRY \}\)/);
+  assert.doesNotMatch(ensure, /\.pick\(/);
+  assert.equal(NOTES_HANDOFF_RETRY, 'Then open Notes again.');
+  for (const opener of [
+    'openChooser',
+    'openSetup',
+    'openLearned',
+    'openProject',
+    'openAsk',
+    'openManage',
+    'openDisconnect'
+  ]) {
+    assert.match(moduleSource, new RegExp(`${opener}: guarded\\(`), opener);
+  }
+  const select = sourceBetween('connectSelection: async', 'openLearned: guarded');
+  assert.match(select, /if \(!ensurePersonalRecipient\(\)\)/);
+  // Refused: the opener returns before touching any Notes state.
+  const guard = sourceBetween('function guarded(open)', 'function init()');
+  assert.match(guard, /if \(!ensurePersonalRecipient\(\)\) return false;\n\s+await open/);
+});
+
+test('each mode says what Ori does with the folder, and that only one can be connected', () => {
+  assert.match(
+    secondBrainModeLine({ source: { origin: 'created_by_ori' } }),
+    /^Ori keeps this folder/
+  );
+  assert.match(secondBrainModeLine({ source: { kind: 'obsidian' } }), /^Read-only: .*never writes/);
+  const connected = secondBrainManageView({
+    status: 'connected',
+    source: { name: 'Vault', kind: 'obsidian' }
+  });
+  assert.match(connected.mode, /^Read-only/);
+  assert.match(connected.oneFolder, new RegExp(`^${ONE_NOTES_FOLDER_LINE}`));
+  // A read-only source never offers capture.
+  assert.equal(connected.capture, false);
+  const chooser = secondBrainChooserView({ detected: [] });
+  assert.match(chooser.note, /never writes to it\. One notes folder/);
+  const consent = secondBrainConsentView({ name: 'Vault' }, { configured: false });
+  assert.ok(consent.lines.includes('Read-only. Nothing is moved, edited, or deleted.'));
+  assert.ok(
+    consent.lines.some(line => /won't save notes, journal entries or project notes/.test(line))
+  );
+  // The full model and keeping disclosure stays.
+  assert.ok(consent.lines.includes('No model is set, so the summary is counts only.'));
+  assert.ok(
+    consent.lines.includes(
+      'Ori keeps the folder path and the list of open items in Personal HQ, not your notes.'
+    )
+  );
+});
+
+test('disconnect is reviewed first, with truthful consequences for each origin', () => {
+  const created = secondBrainDisconnectView({
+    source: { name: 'Second Brain', origin: 'created_by_ori' }
+  });
+  assert.equal(created.title, 'Disconnect Second Brain?');
+  assert.ok(created.lines.includes('The folder and every note in it stay where they are.'));
+  assert.ok(created.lines.includes('Your follow-ups and tickets are kept.'));
+  assert.ok(
+    created.lines.includes('If you connect this folder again later, Ori will only read it.')
+  );
+  const read = secondBrainDisconnectView({ source: { name: 'Vault', kind: 'obsidian' } });
+  assert.ok(read.lines.includes('Nothing in it is moved, edited, or deleted.'));
+  assert.ok(!read.lines.some(line => /writing/.test(line)));
+  for (const view of [created, read]) {
+    assert.match(view.next, /new, empty place; Ori never writes into an existing folder\./);
+    assert.deepEqual(
+      view.actions.map(action => action.id),
+      ['confirm-disconnect', 'cancel']
+    );
+  }
+  assert.equal(
+    secondBrainDisconnectedLine('Vault'),
+    'Disconnected Vault. Ori no longer reads it; the folder and your follow-ups are kept.'
+  );
+  // The card's Disconnect opens the review; only its confirm posts.
+  const manage = sourceBetween('function renderManage(', '// renderDisconnect is');
+  assert.match(manage, /action\.id === 'disconnect'\) go\('disconnect'\)/);
+  assert.doesNotMatch(manage, /disconnect\(\)/);
+  const review = sourceBetween('function renderDisconnect(', '// renderProjects lists');
+  assert.match(review, /'confirm-disconnect'\) void disconnect\(\)/);
+  assert.match(review, /else back\(\)/);
+  // A refused or conflicting disconnect keeps the review and creates nothing;
+  // success lands on the Notes-first choice.
+  const run = sourceBetween('async function disconnect()', 'async function refresh()');
+  assert.doesNotMatch(run, /\/create|startSetup/);
+  assert.match(run, /setPhase\('manage'\)/);
+});
 
 test('the connection card says connected, missing, or not set up', () => {
   const now = Date.parse('2026-10-21T12:00:00Z');
@@ -269,15 +430,15 @@ test('explicit Notes entries land on the Notes-first choice and never answer the
     return source.slice(start, end);
   };
   // openManage on nothing connected draws the choice, never the reader chooser.
-  const manage = between('openManage: async', '// Read the connection without');
+  const manage = between('openManage: guarded(async', "// The Profile's Disconnect");
   assert.doesNotMatch(manage, /setPhase\('chooser'\)/);
   assert.match(manage, /setPhase\('manage'\)/);
   // Opening the choice, setup or the chooser posts nothing to the ask, so a
   // decline or deferral on record stands until the user answers a prompt.
   for (const [from, to] of [
-    ['openManage: async', '// Read the connection without'],
-    ['openSetup: async', '// A folder card in the conversation'],
-    ['openChooser: async', '// Set one up for me, straight'],
+    ['openManage: guarded(async', "// The Profile's Disconnect"],
+    ['openSetup: guarded(async', '// A folder card in the conversation'],
+    ['openChooser: guarded(async', '// Set one up for me, straight'],
     ['function startSetup()', '// loadSetupPreview reads'],
     ['function renderChoice(', 'function renderFillIn(']
   ]) {
@@ -1126,7 +1287,7 @@ test('each answer carries one retry key and the Profile page action, and dismiss
     /if \(!state\.learned\.keys\[keyName\]\) state\.learned\.keys\[keyName\] = newRequestID\('learn'\)/
   );
   assert.match(source, /SETUP_LEARNING_ENDPOINT\}\/dismiss/);
-  assert.match(source, /openLearned,/);
+  assert.match(source, /openLearned: guarded\(openLearned\),/);
 });
 
 test('the project question belongs to a second brain that may keep project notes, once', () => {

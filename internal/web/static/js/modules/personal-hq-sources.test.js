@@ -38,6 +38,8 @@ test('the Notes row names the connected folder, a missing one, or none', () => {
   assert.match(created.summary, /^Notes: My Brain \(set up by Ori\)\./);
   assert.doesNotMatch(created.summary, /Read-only/);
   assert.match(created.summary, /Disconnecting leaves the folder/);
+  assert.match(created.summary, /One notes folder can be connected at a time\./);
+  assert.match(connected.summary, /Read-only.*One notes folder can be connected at a time\./);
   assert.equal(created.disconnect, true);
 
   const none = notesSourceView({ status: 'not_connected' });

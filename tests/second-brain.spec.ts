@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readdirSync, statSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
@@ -328,4 +329,56 @@ test('read the vault: consent, one headline, add the open items once, and Look a
   await action(page, 'again').click();
   await expect(card(page)).toContainText('Ori looked a moment ago. Look again in a few minutes.');
   expect((await secondBrain(request)).status).toBe('connected');
+});
+
+// Every file under a folder, relative, with its size and modification time.
+function snapshot(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else {
+        const info = statSync(full);
+        out.push(`${relative(root, full)}:${info.size}:${info.mtimeMs}`);
+      }
+    }
+  };
+  walk(root);
+  return out.sort();
+}
+
+test('a read-only vault says so, offers no writing, and disconnects only after review', async ({
+  page,
+  request
+}) => {
+  expect((await secondBrain(request)).status).toBe('connected');
+  const before = snapshot(vault);
+  await openDrawer(page);
+  await page.evaluate(() =>
+    (
+      window as unknown as { PersonalAssistantSecondBrain: { openManage: () => Promise<boolean> } }
+    ).PersonalAssistantSecondBrain.openManage()
+  );
+  await expect(card(page)).toContainText('Connected · Second Brain');
+  await expect(card(page)).toContainText(
+    'Read-only: Ori reads this folder for open items and never writes to it.'
+  );
+  await expect(card(page)).toContainText('One notes folder can be connected at a time.');
+  // No capture or other writing controls for a folder Ori only reads.
+  await expect(card(page).locator('[data-second-brain-capture]')).toHaveCount(0);
+  await expect(action(page, 'capture')).toHaveCount(0);
+
+  await action(page, 'disconnect').click();
+  await expect(card(page).getByRole('heading', { name: 'Disconnect Second Brain?' })).toBeVisible();
+  await expect(card(page)).toContainText('Nothing in it is moved, edited, or deleted.');
+  await action(page, 'cancel').click();
+  expect((await secondBrain(request)).status).toBe('connected');
+
+  await action(page, 'disconnect').click();
+  await action(page, 'confirm-disconnect').click();
+  await expect(card(page)).toContainText('Disconnected Second Brain.');
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+  expect((await secondBrain(request)).status).toBe('not_connected');
+  expect(snapshot(vault)).toEqual(before);
 });

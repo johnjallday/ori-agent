@@ -474,6 +474,8 @@ export function secondBrainChooserView(secondBrain, { pickerOff = '', message = 
     }));
   return {
     title: vaults.length ? 'Which notes should I read?' : 'Where do you keep your notes?',
+    // Read-only, said before anything is picked, with the one-folder rule.
+    note: `Ori only reads this folder and never writes to it. ${ONE_NOTES_FOLDER_LINE}`,
     vaults,
     // "another" only when a vault is listed above it (FR21).
     pickLabel: vaults.length ? 'Pick another folder…' : 'Pick a folder…',
@@ -498,6 +500,7 @@ export function secondBrainConsentView(chosen, model, platform = '') {
     path: String(chosen?.path || ''),
     lines: [
       'Read-only. Nothing is moved, edited, or deleted.',
+      "Ori won't save notes, journal entries or project notes here; that needs a folder Ori set up.",
       'Ori reads the Markdown notes in it: up to 300 of the most recent, none over 256 KB.',
       configured
         ? `Short excerpts go to your model, ${model.provider}/${model.model}, to write the summary. Nothing else leaves ${machineName(platform)}.`
@@ -680,12 +683,60 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
   return {
     state: 'connected',
     title: `Connected · ${source.name}`,
+    mode: secondBrainModeLine(secondBrain),
+    oneFolder: `${ONE_NOTES_FOLDER_LINE} To use another, disconnect this one first.`,
     detail: since ? `${kind} · last look ${since}` : `${kind} · not looked at yet`,
     // A folder Ori set up says what Ori wrote in it and takes a quick note.
     written: created ? secondBrainWrittenLine(secondBrain.written_by_ori, now) : '',
     capture: created,
     actions: [{ id: 'again', label: 'Look again', style: 'primary' }, disconnect]
   };
+}
+
+// One notes folder at a time: said wherever a second one could be expected.
+export const ONE_NOTES_FOLDER_LINE = 'One notes folder can be connected at a time.';
+
+// secondBrainModeLine says what Ori does with the connected folder, by origin:
+// a folder Ori set up is one it keeps; any other is only read.
+export function secondBrainModeLine(secondBrain) {
+  if (secondBrain?.source?.origin === 'created_by_ori') {
+    return 'Ori keeps this folder: Inbox, Daily, People and a note per project. Notes you edit are never changed.';
+  }
+  return 'Read-only: Ori reads this folder for open items and never writes to it.';
+}
+
+// secondBrainDisconnectView is the review before Disconnect: what stops, what
+// stays, and what setting up again means. Nothing happens until Disconnect.
+export function secondBrainDisconnectView(secondBrain) {
+  const source = secondBrain?.source || {};
+  const name = String(source.name || 'your notes');
+  const created = source.origin === 'created_by_ori';
+  return {
+    title: `Disconnect ${name}?`,
+    lines: created
+      ? [
+          'Ori stops writing to this folder and reading it.',
+          'The folder and every note in it stay where they are.',
+          'Your follow-ups and tickets are kept.',
+          'If you connect this folder again later, Ori will only read it.'
+        ]
+      : [
+          'Ori stops reading this folder.',
+          'Nothing in it is moved, edited, or deleted.',
+          'Your follow-ups and tickets are kept.'
+        ],
+    next: `${ONE_NOTES_FOLDER_LINE} After this you can set up new notes in a new, empty place; Ori never writes into an existing folder.`,
+    actions: [
+      { id: 'confirm-disconnect', label: 'Disconnect', style: 'outline' },
+      { id: 'cancel', label: 'Keep it connected', style: 'link' }
+    ]
+  };
+}
+
+// secondBrainDisconnectedLine is the receipt above the Notes-first choice once
+// a folder is disconnected.
+export function secondBrainDisconnectedLine(name) {
+  return `Disconnected ${String(name || 'your notes')}. Ori no longer reads it; the folder and your follow-ups are kept.`;
 }
 
 // secondBrainWrittenLine says what Ori has put in the notes it keeps (FR16).
@@ -830,10 +881,31 @@ export function secondBrainError(payload, fallback = 'That did not work. Try aga
 // secondBrainPlacement says where the card shows: in the conversation while
 // the user is in the turn, in Needs you when the page loaded onto a result
 // still waiting for a decision (FR31), otherwise nowhere.
-export function secondBrainPlacement({ available, phase, pinned } = {}) {
-  if (available !== true || !phase || phase === 'idle') return 'none';
+// The card is the Personal Assistant's: while the drawer talks to a
+// workspace's own agent (personal === false) it is not shown at all, and the
+// turn waits, unchanged, for the user to switch back.
+export function secondBrainPlacement({ available, phase, pinned, personal = true } = {}) {
+  if (available !== true || personal === false || !phase || phase === 'idle') return 'none';
   return pinned === true ? 'needs' : 'thread';
 }
+
+// secondBrainRecipientPersonal: the drawer's current recipient is the hired
+// assistant. No recipient system on the page means only the assistant.
+export function secondBrainRecipientPersonal(recipient) {
+  return !recipient || recipient.kind === 'personal';
+}
+
+// secondBrainPromptDue: the ask's first showing is recorded only once the card
+// is really in front of the user: the ask is the step, it has a place (so the
+// assistant is the recipient), and the drawer is open. Hiding it for another
+// recipient, or a closed drawer, records nothing.
+export function secondBrainPromptDue({ phase, placement, panelOpen, recorded } = {}) {
+  return recorded !== true && phase === 'ask' && placement !== 'none' && panelOpen === true;
+}
+
+// What the drawer's status line adds when a Notes entry could not switch it to
+// the assistant: how to come back once the reason has passed.
+export const NOTES_HANDOFF_RETRY = 'Then open Notes again.';
 
 export function newRequestID(prefix = 'sb') {
   const random =
@@ -847,6 +919,8 @@ export function newRequestID(prefix = 'sb') {
 
 const state = {
   available: false,
+  // The drawer talks to the hired assistant (not a workspace's own agent).
+  personal: true,
   secondBrain: null,
   phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed | fillin | learned
   pinned: false,
@@ -995,7 +1069,10 @@ function actionRow(actions, onClick) {
 function go(phase) {
   if (
     state.phase !== phase &&
-    (state.phase === 'ask' || state.phase === 'chooser' || state.phase === 'manage')
+    (state.phase === 'ask' ||
+      state.phase === 'chooser' ||
+      state.phase === 'manage' ||
+      state.phase === 'disconnect')
   )
     state.history.push(state.phase);
   setPhase(phase);
@@ -1881,6 +1958,12 @@ async function openFolder() {
 function renderManage(body) {
   const view = secondBrainManageView(state.secondBrain);
   if (view.state === 'not_connected') {
+    // Right after a disconnect, its receipt sits above the way back to setup.
+    if (state.answer) {
+      const receipt = node('p', 'pa-folder__first-look', state.answer);
+      receipt.setAttribute('role', 'status');
+      body.append(receipt);
+    }
     renderChoice(body, view, onChoiceAction);
     return;
   }
@@ -1889,19 +1972,45 @@ function renderManage(body) {
   if (state.secondBrain?.source?.path) {
     body.append(node('p', 'pa-second-brain__path', state.secondBrain.source.path));
   }
+  if (view.mode) body.append(node('p', 'pa-folder__note pa-second-brain__mode', view.mode));
   if (view.written) body.append(node('p', 'pa-folder__note', view.written));
   renderDoors(body);
   if (view.capture) renderCapture(body);
   renderProjects(body);
+  if (view.oneFolder) body.append(node('p', 'pa-folder__note', view.oneFolder));
   body.append(
     actionRow(view.actions, action => {
       if (action.id === 'again') void lookAgain();
-      else if (action.id === 'disconnect') void disconnect();
+      else if (action.id === 'disconnect') go('disconnect');
       else if (action.id === 'setup') startSetup();
       else {
         state.message = '';
         go('chooser');
       }
+    })
+  );
+}
+
+// renderDisconnect is the review before Disconnect: the consequences for this
+// folder's origin, then Disconnect or Keep it connected. Cancel changes nothing.
+function renderDisconnect(body) {
+  // Disconnected elsewhere meanwhile: there is nothing left to review.
+  if (state.secondBrain?.status === 'not_connected') {
+    state.phase = 'manage';
+    renderManage(body);
+    return;
+  }
+  const view = secondBrainDisconnectView(state.secondBrain);
+  body.append(node('h3', 'pa-specialist-offer__headline pa-second-brain__title', view.title));
+  const list = node('ul', 'pa-folder__receipt pa-second-brain__consent');
+  list.dataset.layout = 'list';
+  view.lines.forEach(line => list.append(node('li', '', line)));
+  body.append(list);
+  body.append(node('p', 'pa-folder__note', view.next));
+  body.append(
+    actionRow(view.actions, action => {
+      if (action.id === 'confirm-disconnect') void disconnect();
+      else back();
     })
   );
 }
@@ -2264,6 +2373,7 @@ function renderChooser(body) {
     message: state.message
   });
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
+  body.append(node('p', 'pa-folder__note pa-second-brain__mode', view.note));
   if (view.message) body.append(node('p', 'pa-folder__note', view.message));
   if (view.vaults.length) {
     const list = node('ul', 'pa-second-brain__vaults');
@@ -2322,7 +2432,7 @@ function renderConsent(body) {
       node(
         'p',
         'pa-folder__note',
-        'Another notes folder is connected. Connecting this one replaces it.'
+        `${ONE_NOTES_FOLDER_LINE} Connecting this one disconnects the current one; its files stay where they are.`
       )
     );
   }
@@ -2489,6 +2599,7 @@ function render() {
     else if (state.phase === 'setup') renderSetup(els.body);
     else if (state.phase === 'consent') renderConsent(els.body);
     else if (state.phase === 'manage') renderManage(els.body);
+    else if (state.phase === 'disconnect') renderDisconnect(els.body);
     else if (state.phase === 'fillin') renderFillIn(els.body);
     else if (state.phase === 'learned') renderLearned(els.body);
     else if (state.phase === 'project') renderProject(els.body);
@@ -2513,6 +2624,7 @@ function render() {
   }
   state.focusNext = false;
   window.PersonalAssistantTranscript?.changed?.();
+  maybeRecordPrompt();
 }
 
 function baseName(path) {
@@ -2844,15 +2956,19 @@ async function disconnect() {
   }).catch(() => ({ ok: false, payload: {} }));
   state.busy = false;
   if (!ok) {
-    showError(secondBrainError(payload));
     // A newer version (another tab) is read again so the next try can land.
+    // The review stays while the folder is still connected; nothing is created.
     await refresh();
+    showError(secondBrainError(payload));
     render();
     return;
   }
   state.secondBrain = payload.second_brain || state.secondBrain;
-  state.answer = `Disconnected ${name}. Ori no longer reads it; your follow-ups are kept.`;
-  setPhase('answered');
+  state.answer = secondBrainDisconnectedLine(name);
+  state.history = [];
+  state.existingOpen = false;
+  // The way back to setup is right there: the Notes-first choice.
+  setPhase('manage');
   announce();
 }
 
@@ -2913,8 +3029,8 @@ async function load() {
       state.phase = 'ask';
       state.pinned = secondBrainAskPinned(state.secondBrain, { shownHere: state.askShownHere });
       if (!state.pinned) state.askShownHere = true;
+      // render records the first showing once the card is really seen.
       render();
-      markPromptedWhenSeen();
       return;
     }
     if (state.phase === 'idle' && state.secondBrain?.status !== 'not_connected') {
@@ -2935,37 +3051,33 @@ async function load() {
   }
 }
 
-// markPromptedWhenSeen records the ask's receipt once the user has the drawer
-// open while the ask is showing, not when a page merely loads with the drawer
-// closed: the ask is shown once, and a closed drawer has shown nothing.
+// maybeRecordPrompt records the ask's receipt once the card is actually in
+// front of the user: the ask is showing, the drawer is open, and the drawer
+// talks to the assistant. A page that loads with the drawer closed, or a drawer
+// talking to a workspace's own agent, has shown nothing. It runs after every
+// render and when the drawer opens, so it records at the first real showing.
 let promptRecorded = false;
-let promptWaiting = false;
-function markPromptedWhenSeen() {
-  if (promptRecorded) return;
-  const record = () => {
-    if (promptRecorded || state.phase !== 'ask') return;
-    promptRecorded = true;
-    void request('/prompted', {
-      method: 'POST',
-      body: { request_id: newRequestID('prompt') }
-    }).then(result => {
+function maybeRecordPrompt() {
+  const els = elements();
+  const due = secondBrainPromptDue({
+    phase: state.phase,
+    placement: els?.root && !els.root.hidden ? secondBrainPlacement(state) : 'none',
+    panelOpen: !document.getElementById('personalAssistantPanel')?.hidden,
+    recorded: promptRecorded
+  });
+  if (!due) return;
+  promptRecorded = true;
+  void request('/prompted', {
+    method: 'POST',
+    body: { request_id: newRequestID('prompt') }
+  }).then(
+    result => {
       if (result.ok && result.payload.second_brain) state.secondBrain = result.payload.second_brain;
       else promptRecorded = false;
-    });
-  };
-  if (!document.getElementById('personalAssistantPanel')?.hidden) {
-    record();
-    return;
-  }
-  if (promptWaiting) return;
-  promptWaiting = true;
-  document.addEventListener(
-    'personal-assistant:opened',
-    () => {
-      promptWaiting = false;
-      record();
     },
-    { once: true }
+    () => {
+      promptRecorded = false;
+    }
   );
 }
 
@@ -2998,37 +3110,79 @@ function onStatus(personalAssistant) {
   if (changed || !state.secondBrain) void load();
 }
 
+// onRecipient follows who the drawer talks to. Switching away hides the card
+// and changes nothing else; switching back shows the same card, in the same
+// step, without taking focus from the composer.
+function onRecipient(recipient) {
+  const personal = secondBrainRecipientPersonal(recipient);
+  if (personal === state.personal) return;
+  state.personal = personal;
+  state.focusNext = false;
+  render();
+}
+
+// ensurePersonalRecipient: an explicit Notes entry needs the drawer to talk to
+// the hired assistant. It asks the panel for the guarded switch the header
+// uses; a refusal (a reply in flight, a review waiting) leaves recipient,
+// review, draft and Notes exactly as they were, and the panel says why.
+function ensurePersonalRecipient() {
+  const recipients = window.PersonalAssistantRecipient;
+  if (secondBrainRecipientPersonal(recipients?.current?.())) return true;
+  const panel = window.PersonalAssistantPanel;
+  if (typeof panel?.choosePersonal !== 'function') return false;
+  if (!panel.choosePersonal({ retry: NOTES_HANDOFF_RETRY })) return false;
+  onRecipient(recipients?.current?.());
+  return state.personal;
+}
+
+// guarded wraps a public opener so it runs only once the drawer is the
+// assistant's.
+function guarded(open) {
+  return async (...args) => {
+    if (!ensurePersonalRecipient()) return false;
+    await open(...args);
+    return true;
+  };
+}
+
 function init() {
   if (!elements()) return;
   document.addEventListener('personal-assistant:status', event =>
     onStatus(event.detail?.personalAssistant)
   );
+  state.personal = secondBrainRecipientPersonal(window.PersonalAssistantRecipient?.current?.());
+  document.addEventListener('personal-assistant:recipient', event =>
+    onRecipient(event.detail?.recipient)
+  );
+  document.addEventListener('personal-assistant:opened', () => maybeRecordPrompt());
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   window.PersonalAssistantSecondBrain = {
     reload: load,
     // The Notes slot and the mission card open the chooser in place.
-    openChooser: async () => {
+    openChooser: guarded(async () => {
       if (!state.secondBrain) await load();
       state.pinned = false;
       state.latest = true;
       state.message = '';
       state.history = [];
       setPhase('chooser');
-    },
+    }),
     // Set one up for me, straight to its first step, as the conversation's
     // latest reply.
-    openSetup: async () => {
+    openSetup: guarded(async () => {
       if (!state.secondBrain) await load();
       state.pinned = false;
       state.latest = true;
       state.history = [];
       startSetup();
-    },
+    }),
     // A folder card in the conversation named an Obsidian vault: show what
     // connecting it means, as the conversation's latest reply (FR10).
     connectSelection: async ({ selectionToken, name, path } = {}) => {
       if (!selectionToken) throw new Error('That folder selection expired. Paste the path again.');
+      if (!ensurePersonalRecipient())
+        throw new Error(`Notes open with your assistant. ${NOTES_HANDOFF_RETRY}`);
       if (!state.secondBrain) await load();
       state.pinned = false;
       state.latest = true;
@@ -3037,19 +3191,19 @@ function init() {
     },
     // The first-batch report's Review what Ori learned: the card of what the
     // user's approved filing taught Ori, answered in place.
-    openLearned,
+    openLearned: guarded(openLearned),
     // The project question, on request (the drawer asks it by itself in order).
     // The project question on request: the checklist row and the Give Ori a
     // project mission (/?quest=second-brain-project, Issue 776 FR20).
-    openProject: async () => {
+    openProject: guarded(async () => {
       if (!state.secondBrain) await load();
       state.history = [];
       await askProjectNow();
-    },
+    }),
     // Today's ask row and the mission card (/?quest=second-brain): the ask while
     // it is unanswered or offered again (Issue 776 FR12), otherwise the
     // connection's own card.
-    openAsk: async () => {
+    openAsk: guarded(async () => {
       await refresh();
       if (!secondBrainAskView(state.secondBrain, state.available).show) {
         await window.PersonalAssistantSecondBrain.openManage();
@@ -3064,11 +3218,10 @@ function init() {
       state.askShownHere = true;
       state.existingOpen = false;
       setPhase('ask');
-      markPromptedWhenSeen();
-    },
+    }),
     // The Notes station and the Profile open the connection's own card:
     // connected, missing, or not set up (the Notes-first choice).
-    openManage: async () => {
+    openManage: guarded(async () => {
       await refresh();
       state.pinned = false;
       state.latest = true;
@@ -3079,7 +3232,25 @@ function init() {
       // Not connected is the Notes-first choice, never straight to the reader.
       state.existingOpen = false;
       setPhase('manage');
-    },
+    }),
+    // The Profile's Disconnect: the same review as the connection card, in the
+    // drawer. Keep it connected returns to the connection card.
+    openDisconnect: guarded(async () => {
+      await refresh();
+      state.pinned = false;
+      state.latest = true;
+      state.message = '';
+      state.answer = '';
+      showError('');
+      if (state.secondBrain?.status === 'not_connected') {
+        state.history = [];
+        state.existingOpen = false;
+        setPhase('manage');
+        return;
+      }
+      state.history = ['manage'];
+      setPhase('disconnect');
+    }),
     // Read the connection without changing what the drawer shows.
     status: refresh,
     // Another surface changed the connection (the Profile's Disconnect): read

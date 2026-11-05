@@ -508,11 +508,45 @@ test('a capture that looks like a secret is refused and nothing is written', asy
   expect(readdirSync(join(brain, 'Inbox')).sort()).toEqual(before);
 });
 
-test('disconnecting leaves the folder and everything in it', async ({ request }) => {
-  const name = `Spec Brain ${stamp}`;
-  const brain = join(documents, name);
+test('disconnecting is reviewed first and leaves the folder and everything in it', async ({
+  page,
+  request
+}) => {
+  // Whatever folder the earlier cases left connected, set up by Ori.
+  const current = await secondBrain(request);
+  expect(current.status).toBe('connected');
+  expect(current.source?.origin).toBe('created_by_ori');
+  const name = current.source!.name;
+  const brain = current.source!.path;
   const before = readdirSync(join(brain, 'Inbox')).sort();
-  await disconnect(request);
+  expect(before.length).toBeGreaterThan(0);
+  await openDrawer(page);
+  await page.evaluate(() =>
+    (
+      window as unknown as { PersonalAssistantSecondBrain: { openManage: () => Promise<boolean> } }
+    ).PersonalAssistantSecondBrain.openManage()
+  );
+  await expect(card(page)).toContainText(`Connected · ${name}`);
+  await expect(card(page)).toContainText('Ori keeps this folder');
+  await expect(card(page)).toContainText('One notes folder can be connected at a time.');
+
+  // Disconnect opens the review; Keep it connected changes nothing.
+  await action(page, 'disconnect').click();
+  await expect(card(page).getByRole('heading', { name: `Disconnect ${name}?` })).toBeVisible();
+  await expect(card(page)).toContainText('The folder and every note in it stay where they are.');
+  await expect(card(page)).toContainText(
+    'If you connect this folder again later, Ori will only read it.'
+  );
+  await action(page, 'cancel').click();
+  await expect(card(page)).toContainText(`Connected · ${name}`);
+  expect((await secondBrain(request)).status).toBe('connected');
+
+  await action(page, 'disconnect').click();
+  await action(page, 'confirm-disconnect').click();
+  await expect(card(page)).toContainText(`Disconnected ${name}.`);
+  // The way back to setup is right there.
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+  await expect(action(page, 'setup')).toBeVisible();
   expect((await secondBrain(request)).status).toBe('not_connected');
   expect(readdirSync(join(brain, 'Inbox')).sort()).toEqual(before);
   expect(existsSync(join(brain, 'README.md'))).toBe(true);

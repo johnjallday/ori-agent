@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  personalHandoffStatus,
   EXPLORE_FOLDER_URL,
   LEGACY_ASSISTANT_HANDOFF_KEY,
   readLegacyAssistantHandoff,
@@ -1357,4 +1358,25 @@ test('a non-interactive menu row is reached but never chosen', () => {
   menu.fire('keydown', { key: 'Escape' });
   button.fire('click');
   assert.equal(doc.activeElement, fresh);
+});
+
+test('a Notes handoff to the assistant uses the guarded switch and says how to retry', () => {
+  assert.equal(
+    personalHandoffStatus(
+      'Wait for Mira to reply before switching. Your message is kept.',
+      'Then open Notes again.'
+    ),
+    'Wait for Mira to reply before switching. Your message is kept. Then open Notes again.'
+  );
+  assert.equal(personalHandoffStatus('Busy.', ''), 'Busy.');
+  const source = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
+  const body = source.slice(
+    source.indexOf('function choosePersonal('),
+    source.indexOf('/** New, with the entry agent selected')
+  );
+  // It goes through chooseRecipient (switch lock, resetConversation, review
+  // close), never the controller's unguarded pick.
+  assert.match(body, /chooseRecipient\(RECIPIENT_PERSONAL\)/);
+  assert.doesNotMatch(body, /\.pick\(/);
+  assert.match(source, /\n {2}choosePersonal,\n/);
 });
