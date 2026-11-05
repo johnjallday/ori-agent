@@ -20,6 +20,16 @@ import { mountHomeArrangementPlanner } from './home-arrangement.js';
 import { mountCollectionReview } from './home-collection-review.js';
 import { mountHomeCollections } from './home-collections.js';
 import { libraryFreshness } from './library-freshness.js';
+import {
+  LibraryBrowserState,
+  ReadEpoch,
+  LIBRARY_FILTERS,
+  readNavigation,
+  saveNavigation,
+  rowException,
+  savedMetadataTime
+} from './project-library-browser.js';
+import { workspacePageURL } from './workspace-routes.js';
 
 export { libraryFreshness, STALE_SCAN_MS } from './library-freshness.js';
 
@@ -696,6 +706,15 @@ export class ProjectLibraryPanel {
     this.cursor = '';
     this.rows = [];
     this.searchGeneration = 0;
+    this.listRead = new ReadEpoch();
+    this.restoreRead = new ReadEpoch();
+    this.browser = new LibraryBrowserState({
+      home: this.workspaceId,
+      request: (...args) => this.request(...args),
+      changed: () => this.renderBrowser()
+    });
+    this.loadedPages = 1;
+    this.browserUser = '';
     this.arrangementHistoryGeneration = 0;
     this.searchInFlight = false;
     this.busy = false;
@@ -921,6 +940,8 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibrarySongDetailsSwitch')
       ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
+    this.initBrowser();
+    await this.restoreBrowserNavigation();
     await this.restoreCollectionContinuation();
     await this.refresh();
     await this.resumeFromIntegration();
@@ -1155,7 +1176,7 @@ export class ProjectLibraryPanel {
       await this.renderProposals();
       await this.renderArrangementHistory();
       await this.renderCollections();
-      await this.search(false);
+      await this.restoreBrowserResults();
       if (!this.readOnly && this.state.picker_available === false && !this.offerID)
         this.status(
           'The native folder picker is unavailable here. You can still review approved folders for another scan; use Ori desktop to add a folder.'
@@ -1196,6 +1217,10 @@ export class ProjectLibraryPanel {
     let heading = null;
     if (hash === '#projectLibraryProposals') {
       const section = document.getElementById('projectLibraryProposals');
+      if (section && !section.hidden) {
+        const management = document.getElementById('projectLibraryManagement');
+        if (management) management.open = true;
+      }
       heading =
         section && !section.hidden
           ? document.getElementById('projectLibraryProposalsTitle')
@@ -1975,13 +2000,21 @@ export class ProjectLibraryPanel {
       );
   }
 
-  async search(more) {
+  async search(more, { restoring = false } = {}) {
     if (more && (this.searchInFlight || !this.cursor)) return;
+    const turn = this.listRead.begin();
     const tbody = document.getElementById('projectLibraryRows');
     if (!more) {
       this.searchGeneration++;
       this.cursor = '';
       this.rows = [];
+      this.loadedPages = 0;
+      if (!restoring) {
+        this.restoreRead.cancel();
+        this.restoringBrowser = false;
+        this.clearSelection();
+        this.browser.clear();
+      }
       tbody.replaceChildren();
     }
     const generation = this.searchGeneration;
@@ -1990,43 +2023,38 @@ export class ProjectLibraryPanel {
       this.searchInFlight = true;
       moreButton.disabled = true;
     }
-    const params = libraryQuery({
-      text: document.getElementById('projectLibrarySearch')?.value || '',
-      stage: document.getElementById('projectLibraryStage')?.value || '',
-      status: document.getElementById('projectLibraryStatusFilter')?.value || '',
-      format: document.getElementById('projectLibraryFormat')?.value || '',
-      rootID: document.getElementById('projectLibraryRoot')?.value || '',
-      connection: document.getElementById('projectLibraryConnection')?.value || '',
-      availability: document.getElementById('projectLibraryAvailability')?.value || '',
-      priority: document.getElementById('projectLibraryPriority')?.value || '',
-      sort: document.getElementById('projectLibrarySort')?.value || 'name',
-      direction: document.getElementById('projectLibraryDirection')?.value || 'asc',
-      cursor: more ? this.cursor : ''
-    });
+    const query = this.browserQuery();
+    const params = libraryQuery({ ...query, cursor: more ? this.cursor : '' });
+    this.renderAppliedFilters(query);
+    this.status('Loading saved projects…');
     try {
-      const page = await this.request(`/projects?${params}`);
-      if (generation !== this.searchGeneration) return; // A newer search owns the visible results.
+      const page = await this.request(`/projects?${params}`, { signal: turn.signal });
+      if (generation !== this.searchGeneration || !turn.current()) return;
+      this.loadedPages++;
       this.rows.push(...(page.rows || []));
       this.cursor = page.next_cursor || '';
       this.renderRows();
       this.renderQueueControls();
       moreButton.hidden = !this.cursor;
+      const empty = document.getElementById('projectLibraryEmpty');
+      if (empty) empty.hidden = page.total !== 0;
+      if (!restoring) this.saveBrowserNavigation();
       document.getElementById('projectLibraryCount').textContent =
         `${this.rows.length} of ${page.total} projects`;
       this.status(
         this.readOnly
           ? 'Saved records are readable; the Home provider is unavailable for new changes.'
           : page.total
-            ? 'Saved observations only. Open a row to inspect its source and notes.'
+            ? 'Select a project to inspect it. Only explicit actions change your library or open a workspace.'
             : 'No projects match. Try another filter or review a folder scan.'
       );
     } catch (error) {
-      if (generation !== this.searchGeneration) return;
+      if (generation !== this.searchGeneration || !turn.current()) return;
       this.cursor = '';
       moreButton.hidden = true;
       this.status(error.message || 'Could not load this page. Refresh the library and retry.');
     } finally {
-      if (more) {
+      if (turn.current()) {
         this.searchInFlight = false;
         moreButton.disabled = false;
       }
@@ -2070,43 +2098,24 @@ export class ProjectLibraryPanel {
         pick.append(checkbox);
       }
       const name = node('td');
-      name.append(node('strong', '', row.name));
+      const inspect = node('button', 'project-library-name', row.name || 'Unnamed project');
+      inspect.type = 'button';
+      inspect.dataset.libraryEntry = row.id;
+      inspect.setAttribute('aria-label', `Inspect ${row.name || 'Unnamed project'}`);
+      inspect.setAttribute('aria-pressed', String(this.browser.selected === row.id));
+      inspect.addEventListener('click', () => void this.details(row.id, inspect));
+      tr.className = this.browser.selected === row.id ? 'is-selected' : '';
+      name.append(inspect);
       const moved = movedNoteNode(row.moved, this.state?.roots);
       if (moved) name.append(moved);
-      name.append(node('small', '', row.next_action || 'No next action saved'));
-      const saved = lastSavedLabel(row.last_saved_at);
-      const facts = songFactsLabel(row.facts);
-      if (saved || facts) name.append(savedLine('project-library-saved', saved, facts));
-      const stage = node('td');
-      stage.append(node('span', '', label(row.stage)), node('small', '', label(row.status)));
-      const connection = node('td', '', label(row.connection));
-      const observed = node('td');
-      observed.append(
-        node('span', '', label(row.last_observed_availability)),
-        node(
-          'small',
-          '',
-          row.last_scanned_at
-            ? `Scanned ${new Date(row.last_scanned_at).toLocaleDateString()}`
-            : 'Not scanned'
-        )
-      );
-      const action = node('td', 'project-library-row-actions');
-      const open = libraryOpenAction(row, this.readOnly);
-      if (open) {
-        const openButton = node('button', 'modern-btn modern-btn-primary', open.label);
-        openButton.type = 'button';
-        openButton.dataset.libraryOpen = row.id;
-        openButton.setAttribute('aria-label', open.ariaLabel);
-        openButton.addEventListener('click', () => void this.openRow(row, openButton, action));
-        action.append(openButton);
-      }
-      const button = node('button', 'modern-btn modern-btn-secondary', 'Details');
-      button.type = 'button';
-      button.setAttribute('aria-label', `Review ${row.name}`);
-      button.addEventListener('click', () => void this.details(row.id, button));
-      action.append(button);
-      tr.append(pick, name, stage, connection, observed, action);
+      if (row.next_action) name.append(node('small', '', row.next_action));
+      const exception = rowException(row);
+      if (exception) name.append(node('small', 'project-library-exception', exception));
+      const stage = node('td', '', row.stage && row.stage !== 'unknown' ? label(row.stage) : '—');
+      if (!row.stage || row.stage === 'unknown') stage.setAttribute('aria-label', 'Stage not set');
+      const saved = node('td', '', lastSavedLabel(row.last_saved_at) || '—');
+      if (!row.last_saved_at) saved.setAttribute('aria-label', 'Project-file save time not known');
+      tr.append(pick, name, stage, saved);
       tbody.append(tr);
     }
   }
@@ -3405,8 +3414,421 @@ export class ProjectLibraryPanel {
     this.status('Back on your song. Its integration status was checked again.');
   }
 
+  browserQuery() {
+    return Object.fromEntries(
+      Object.entries(LIBRARY_FILTERS).map(([field, id]) => [
+        field,
+        document.getElementById(id)?.value || ''
+      ])
+    );
+  }
+
+  browserIntent() {
+    return {
+      query: this.browserQuery(),
+      pages: this.loadedPages,
+      selected: this.browser.selected,
+      tab: this.browser.tab,
+      scroll: document.getElementById('projectLibraryListScroll')?.scrollTop || 0
+    };
+  }
+
+  saveBrowserNavigation() {
+    if (this.restoringBrowser) return;
+    try {
+      saveNavigation(
+        globalThis.sessionStorage,
+        this.browserUser,
+        this.workspaceId,
+        this.browserIntent()
+      );
+    } catch (_) {
+      /* Optional storage. */
+    }
+  }
+
+  async restoreBrowserNavigation() {
+    try {
+      const response = await this.fetchImpl('/api/user/profile', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return;
+      this.browserUser = (await payload(response)).profile?.id || '';
+      this.pendingBrowserIntent = readNavigation(
+        globalThis.sessionStorage,
+        this.browserUser,
+        this.workspaceId
+      );
+    } catch (_) {
+      /* Browsing works without storage or a profile projection. */
+    }
+  }
+
+  async restoreBrowserResults() {
+    const turn = this.restoreRead.begin();
+    const intent = this.pendingBrowserIntent || this.browserIntent();
+    this.pendingBrowserIntent = null;
+    this.restoringBrowser = true;
+    try {
+      for (const [field, value] of Object.entries(intent.query || {})) {
+        const input = document.getElementById(LIBRARY_FILTERS[field]);
+        if (input) input.value = value;
+      }
+      await this.search(false, { restoring: true });
+      if (!turn.current()) return;
+      for (let page = 1; page < Math.min(20, intent.pages || 1) && this.cursor; page++) {
+        await this.search(true, { restoring: true });
+        if (!turn.current()) return;
+      }
+      if (intent.selected && this.rows.some(row => row.id === intent.selected)) {
+        await this.browser.select(intent.selected, intent.tab);
+      } else if (intent.selected) {
+        this.browser.clear();
+        this.status('The selected project is no longer in these results. Select another project.');
+      }
+      if (!turn.current()) return;
+      const list = document.getElementById('projectLibraryListScroll');
+      if (list) list.scrollTop = intent.scroll || 0;
+    } finally {
+      if (turn.current()) {
+        this.restoringBrowser = false;
+        this.saveBrowserNavigation();
+      }
+    }
+  }
+
+  initBrowser() {
+    const tabs = [...document.querySelectorAll('[data-library-tab]')];
+    for (const [index, tab] of tabs.entries()) {
+      tab.addEventListener('click', () => this.browser.changeTab(tab.dataset.libraryTab));
+      tab.addEventListener('keydown', event => {
+        const next = {
+          ArrowRight: (index + 1) % tabs.length,
+          ArrowLeft: (index + tabs.length - 1) % tabs.length,
+          Home: 0,
+          End: tabs.length - 1
+        }[event.key];
+        if (next == null) return;
+        event.preventDefault();
+        tabs[next].focus();
+        this.browser.changeTab(tabs[next].dataset.libraryTab);
+      });
+    }
+    document.getElementById('projectLibraryBack')?.addEventListener('click', () => {
+      this.paneHidden = true;
+      this.browser.tabRead.cancel();
+      document.getElementById('projectLibraryBrowser')?.classList.remove('is-inspecting');
+      const trigger = [...document.querySelectorAll('[data-library-entry]')].find(
+        button => button.dataset.libraryEntry === this.browser.selected
+      );
+      (trigger || document.getElementById('projectLibraryTitle'))?.focus();
+      this.saveBrowserNavigation();
+    });
+    document.getElementById('projectLibraryClear')?.addEventListener('click', () => {
+      for (const [field, id] of Object.entries(LIBRARY_FILTERS)) {
+        if (field === 'sort' || field === 'direction') continue;
+        const input = document.getElementById(id);
+        if (input) input.value = '';
+      }
+      void this.search(false);
+    });
+    document
+      .getElementById('projectLibraryListScroll')
+      ?.addEventListener('scroll', () => this.saveBrowserNavigation(), { passive: true });
+    globalThis.addEventListener?.('pagehide', event => {
+      this.saveBrowserNavigation();
+      this.listRead.cancel();
+      this.restoreRead.cancel();
+      this.browser.detailRead.cancel();
+      this.browser.tabRead.cancel();
+      if (!event.persisted) this.browser.destroy();
+    });
+    globalThis.addEventListener?.('pageshow', event => {
+      if (event.persisted) void this.refresh(); // A BFCache image is not fresh authority.
+    });
+  }
+
+  renderAppliedFilters(query) {
+    const labels = [];
+    for (const [field, id] of Object.entries(LIBRARY_FILTERS)) {
+      if (!query[field] || field === 'sort' || field === 'direction') continue;
+      const input = document.getElementById(id);
+      labels.push(
+        field === 'text'
+          ? `Search: ${query.text}`
+          : input?.selectedOptions?.[0]?.textContent || label(query[field])
+      );
+    }
+    const summary = document.getElementById('projectLibraryApplied');
+    if (summary) summary.textContent = labels.join(' · ');
+    const clear = document.getElementById('projectLibraryClear');
+    if (clear) clear.hidden = labels.length === 0;
+  }
+
   async details(entryID, trigger) {
-    await this.run(trigger, 'Loading this saved project…', async () => {
+    this.restoreRead.cancel();
+    this.restoringBrowser = false;
+    this.paneHidden = false;
+    this.inspectionTrigger = trigger;
+    const pending = this.browser.select(entryID);
+    if (globalThis.matchMedia?.('(max-width: 900px)').matches)
+      document.getElementById('projectLibraryPaneTitle')?.focus();
+    await pending;
+  }
+
+  async renderBrowser() {
+    if (typeof document === 'undefined') return;
+    const content = document.getElementById('projectLibraryTabPanel');
+    if (!content) return;
+    const state = this.browser;
+    const turn = state.tabRead.begin();
+    const title = document.getElementById('projectLibraryPaneTitle');
+    title.textContent =
+      state.detail?.row?.name || (state.selected ? 'Loading project…' : 'Select a project');
+    document
+      .getElementById('projectLibraryBrowser')
+      ?.classList.toggle('is-inspecting', !!state.selected && !this.paneHidden);
+    document.getElementById('projectLibraryBack').hidden = !state.selected;
+    document.getElementById('projectLibraryTabs').hidden = state.status !== 'ready';
+    for (const button of document.querySelectorAll('[data-library-entry]')) {
+      const selected = button.dataset.libraryEntry === state.selected;
+      button.setAttribute('aria-pressed', String(selected));
+      button.closest('tr')?.classList.toggle('is-selected', selected);
+    }
+    for (const tab of document.querySelectorAll('[data-library-tab]')) {
+      const selected = tab.dataset.libraryTab === state.tab;
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected) content.setAttribute('aria-labelledby', tab.id);
+    }
+    content.replaceChildren();
+    content.setAttribute('aria-busy', String(state.status === 'loading'));
+    if (state.status !== 'ready') {
+      const message = node(
+        'p',
+        '',
+        state.status === 'loading'
+          ? 'Loading saved project information…'
+          : state.status === 'error'
+            ? state.error
+            : 'Inspect saved information without opening a workspace or a project application.'
+      );
+      message.setAttribute('role', 'status');
+      content.append(message);
+      if (state.status === 'error') {
+        title.textContent = 'Project unavailable';
+        content.append(
+          this.browserButton('Retry project', () => this.browser.select(state.selected))
+        );
+      }
+      this.saveBrowserNavigation();
+      return;
+    }
+    this.saveBrowserNavigation();
+    try {
+      if (state.tab === 'overview') await this.renderBrowserOverview(state.detail, content, turn);
+      else if (state.tab === 'sessions')
+        await this.renderBrowserSessions(state.detail, content, turn);
+      else
+        content.append(
+          node(
+            'p',
+            '',
+            'Files are not available in this browser yet. Discovery metadata is not permission to read a project folder. Use the explicit workspace or setup options in Overview; selecting this tab connects nothing.'
+          )
+        );
+    } catch (error) {
+      if (!turn.current()) return;
+      content.replaceChildren(
+        node('p', '', error.message || 'This information could not be read.')
+      );
+      content.append(this.browserButton('Retry', () => this.browser.changeTab(state.tab)));
+    } finally {
+      if (turn.current()) content.setAttribute('aria-busy', 'false');
+    }
+  }
+
+  browserButton(text, action) {
+    const button = node('button', 'modern-btn modern-btn-secondary', text);
+    button.type = 'button';
+    button.addEventListener('click', () => void action(button));
+    return button;
+  }
+
+  async renderBrowserOverview(detail, content, turn) {
+    const row = detail.row;
+    const fields = detail.fields || {};
+    const summary = node('dl', 'project-library-overview-facts');
+    for (const [name, value] of [
+      ['Stage', row.stage],
+      ['Status', row.status],
+      ['Connection', row.connection],
+      ['Last observed source', row.last_observed_availability],
+      ['Purpose', fields.purpose],
+      ['Next action', fields.next_action],
+      ['Last saved', lastSavedLabel(row.last_saved_at)],
+      ['Observed project details', songFactsLabel(row.facts)],
+      ['Last scanned', savedMetadataTime(row.last_scanned_at)],
+      ['Saved-note activity', savedMetadataTime(row.sourced_activity_at)]
+    ]) {
+      const shown = value && value !== 'unknown' ? label(value) : '';
+      const description = node('dd', '', shown || '—');
+      if (!shown) description.setAttribute('aria-label', `${name} not known or not set`);
+      summary.append(node('dt', '', name), description);
+    }
+    content.append(summary, node('h4', '', 'Saved source observations'));
+    const sources = node('ul');
+    for (const source of detail.sources || []) {
+      sources.append(
+        node(
+          'li',
+          '',
+          `${source.relative_folder || 'Selected discovery folder'} · ${label(source.format)} · ${label(source.last_observed_availability)}${source.total_alternates ? ` · ${source.total_alternates} observed project-file choices` : ''}`
+        )
+      );
+    }
+    if (!sources.children.length)
+      sources.append(
+        node('li', '', 'Exact linked-project metadata; no discovery source was recorded.')
+      );
+    content.append(sources);
+    if ((detail.total_sources || 0) > (detail.sources || []).length)
+      content.append(
+        node(
+          'p',
+          '',
+          `Showing ${(detail.sources || []).length} of ${detail.total_sources} saved sources.`
+        )
+      );
+    const moved = movedNoteNode(row.moved, this.state?.roots);
+    if (moved) content.append(moved);
+    content.append(
+      node(
+        'p',
+        'project-library-note',
+        'Saved observations are not a current filesystem check. Inspecting this information grants no access and changes nothing.'
+      )
+    );
+    const actions = node('div', 'project-library-pane-actions');
+    content.append(actions);
+    if (row.connection === 'connected' && detail.workspace_id) {
+      const route = await this.workspacePage(detail.workspace_id);
+      if (!turn.current()) return;
+      if (route.route) {
+        const open = node('a', 'modern-btn modern-btn-secondary', 'Open connected workspace');
+        open.href = route.route;
+        open.addEventListener('click', () => this.saveBrowserNavigation());
+        actions.append(open);
+      }
+      if (!this.readOnly)
+        actions.append(
+          this.browserButton('Show project folder', button =>
+            this.showConnectedFolder(row.id, detail.workspace_id, button)
+          )
+        );
+    }
+    if (!this.readOnly) {
+      actions.append(
+        this.browserButton('Check setup options', button => this.setupOptions(row.id, button)),
+        this.browserButton('Edit project notes', button => this.editFields(detail, button))
+      );
+    }
+    if (row.connection === 'catalog_only' && row.last_observed_availability === 'revoked_source') {
+      actions.append(
+        this.browserButton('Review forgetting this Home record', button =>
+          this.forgetRecord(detail, button)
+        )
+      );
+    }
+  }
+
+  async renderBrowserSessions(detail, content, turn) {
+    content.setAttribute('aria-busy', 'true');
+    content.append(node('p', '', 'Loading saved studio sessions…'));
+    const path = `/projects/${encodeURIComponent(detail.row.id)}/sessions`;
+    const sessions = await this.request(path, { signal: turn.signal });
+    if (!turn.current()) return;
+    content.replaceChildren();
+    const section = node('section', 'project-library-session-history');
+    section.append(node('h4', '', 'Studio sessions'));
+    if (!sessions.total)
+      section.append(
+        node(
+          'p',
+          '',
+          'No saved goals yet. Planning a session saves notes, without connecting a project or starting work.'
+        )
+      );
+    const list = node('ul');
+    const append = records => {
+      for (const record of records || []) {
+        const item = node('li');
+        item.append(
+          node('strong', '', record.goal),
+          node(
+            'small',
+            '',
+            `Saved by ${record.author} · ${new Date(record.updated_at).toLocaleDateString()}`
+          ),
+          node(
+            'p',
+            '',
+            record.recap
+              ? `${record.shared_from_project ? 'User-authored linked-project recap' : 'User recap'}: ${record.recap}`
+              : 'No recap saved yet.'
+          )
+        );
+        if (record.next_action)
+          item.append(node('p', '', `Saved session next action: ${record.next_action}`));
+        item.append(
+          this.browserButton('View full session', button =>
+            this.fullStudioSession(detail, record, button)
+          )
+        );
+        if (!record.recap && !this.readOnly)
+          item.append(
+            this.browserButton('Wrap up session', button =>
+              this.sessionForm(detail, record, button)
+            )
+          );
+        list.append(item);
+      }
+    };
+    append(sessions.rows);
+    section.append(list);
+    if (!this.readOnly)
+      section.append(
+        this.browserButton('Plan a session', button => this.sessionForm(detail, null, button))
+      );
+    let offset = sessions.next_offset;
+    if (offset) {
+      const more = this.browserButton('Load older sessions', async button => {
+        button.disabled = true;
+        try {
+          const page = await this.request(
+            `${path}?revision=${sessions.revision}&offset=${offset}`,
+            { signal: turn.signal }
+          );
+          if (!turn.current()) return;
+          append(page.rows);
+          offset = page.next_offset;
+          button.hidden = !offset;
+        } catch (error) {
+          if (turn.current())
+            section.append(
+              node('p', '', error.message || 'Session history changed. Reopen Sessions to refresh.')
+            );
+        } finally {
+          if (turn.current()) button.disabled = false;
+        }
+      });
+      section.append(more);
+    }
+    content.append(section);
+  }
+
+  async setupOptions(entryID, trigger) {
+    await this.run(trigger, 'Checking setup options…', async () => {
       const detail = await this.request(`/projects/${encodeURIComponent(entryID)}`);
       // Eligibility is an inert, fresh installed-provider/source check. A
       // failed eligibility read must not hide saved notes or offer setup.
@@ -3415,53 +3837,13 @@ export class ProjectLibraryPanel {
       ).catch(() => ({
         reason: 'Setup options cannot be checked right now. Saved notes remain available.'
       }));
-      const sessions = await this.request(
-        `/projects/${encodeURIComponent(entryID)}/sessions`
-      ).catch(() => null);
       const dialog = node(
         'dialog',
         'assistant-program-hire-dialog project-library-dialog project-library-detail-dialog'
       );
-      const heading = node('h2', '', detail.row.name);
+      const heading = node('h2', '', `Setup options: ${detail.row.name}`);
       heading.id = operationKey('detail');
       dialog.setAttribute('aria-labelledby', heading.id);
-      const summary = node(
-        'p',
-        '',
-        `${label(detail.row.stage)} · ${label(detail.row.status)} · ${label(detail.row.connection)} · ${label(detail.row.availability || detail.row.last_observed_availability)}`
-      );
-      const sourceList = node('ul');
-      for (const source of detail.sources || []) {
-        const item = node(
-          'li',
-          '',
-          `${source.relative_folder || 'Selected root'} · ${label(source.format)} · ${label(source.last_observed_availability)}${source.total_alternates ? ` · ${source.total_alternates} project-file choices (selection requires a separate review)` : ''}`
-        );
-        // The move note sits under the folder it names.
-        const moved = detail.row?.moved;
-        if (
-          moved &&
-          moved.root_id === source.root_id &&
-          moved.relative_folder === source.relative_folder
-        ) {
-          const note = movedNoteNode(moved, this.state?.roots);
-          if (note) item.append(note);
-        }
-        sourceList.append(item);
-      }
-      if (!sourceList.children.length)
-        sourceList.append(
-          node('li', '', 'An exact existing link is recorded; no folder was scanned.')
-        );
-      const sourceCount =
-        (detail.total_sources || 0) > (detail.sources || []).length
-          ? node(
-              'p',
-              '',
-              `Showing ${(detail.sources || []).length} of ${detail.total_sources} observed sources. Additional source history is not shown here.`
-            )
-          : null;
-      const next = node('p', '', `Next action: ${detail.fields.next_action || 'Not set'}`);
       const setup = node('section', 'project-library-setup-preview');
       setup.append(
         node('h3', '', 'Project setup'),
@@ -3509,80 +3891,6 @@ export class ProjectLibraryPanel {
             `Observed project files: ${activation.project_files.join(', ')}. File selection and project creation require a separate review.`
           )
         );
-      const sessionPanel = node('section', 'project-library-session-history');
-      sessionPanel.append(node('h3', '', 'Studio sessions'));
-      const sessionList = node('ul');
-      if (!sessions)
-        sessionPanel.append(node('p', '', 'Saved session history is unavailable right now.'));
-      else if (!sessions.total)
-        sessionPanel.append(
-          node(
-            'p',
-            '',
-            'No saved goals yet. Plan a session without connecting a project or starting any work.'
-          )
-        );
-      else {
-        const appendSessions = records => {
-          for (const record of records) {
-            const item = node('li');
-            item.append(
-              node('strong', '', record.goal),
-              node(
-                'small',
-                '',
-                `Saved by ${record.author} · ${new Date(record.updated_at).toLocaleDateString()}`
-              ),
-              node(
-                'p',
-                '',
-                record.recap
-                  ? `${record.shared_from_project ? 'User-authored linked-project recap' : 'User recap'}: ${record.recap}`
-                  : 'No recap saved yet.'
-              )
-            );
-            if (record.next_action)
-              item.append(node('p', '', `Saved session next action: ${record.next_action}`));
-            const full = node('button', 'modern-btn modern-btn-secondary', 'View full session');
-            full.type = 'button';
-            full.addEventListener('click', () => {
-              dialog.close();
-              void this.fullStudioSession(detail, record, trigger);
-            });
-            item.append(full);
-            if (!record.recap && !this.readOnly) {
-              const wrap = node('button', 'modern-btn modern-btn-secondary', 'Wrap up session');
-              wrap.type = 'button';
-              wrap.addEventListener('click', () => {
-                dialog.close();
-                this.sessionForm(detail, record, trigger);
-              });
-              item.append(wrap);
-            }
-            sessionList.append(item);
-          }
-        };
-        appendSessions(sessions.rows);
-        sessionPanel.append(sessionList);
-        if (sessions.next_offset) {
-          const more = node('button', 'modern-btn modern-btn-secondary', 'Load older sessions');
-          more.type = 'button';
-          let offset = sessions.next_offset;
-          more.addEventListener(
-            'click',
-            () =>
-              void this.run(more, 'Loading older studio sessions…', async () => {
-                const page = await this.request(
-                  `/projects/${encodeURIComponent(entryID)}/sessions?revision=${sessions.revision}&offset=${offset}`
-                );
-                appendSessions(page.rows);
-                offset = page.next_offset;
-                more.hidden = !offset;
-              })
-          );
-          sessionPanel.append(more);
-        }
-      }
       const actions = node('div', 'assistant-program-dialog-actions');
       const close = node('button', 'modern-btn modern-btn-secondary', 'Close');
       close.type = 'button';
@@ -3659,16 +3967,7 @@ export class ProjectLibraryPanel {
         });
         actions.append(edit);
       }
-      dialog.append(
-        heading,
-        summary,
-        sourceList,
-        ...(sourceCount ? [sourceCount] : []),
-        next,
-        setup,
-        sessionPanel,
-        actions
-      );
+      dialog.append(heading, setup, actions);
       document.body.append(dialog);
       dialog.addEventListener(
         'close',
@@ -3905,7 +4204,7 @@ export class ProjectLibraryPanel {
       const workspace = await payload(response);
       const slug = String(workspace?.folder_slug || '').trim();
       return {
-        route: slug ? `/workspaces/${encodeURIComponent(slug)}` : '',
+        route: slug ? workspacePageURL(slug) : '',
         modeChosen: String(workspace?.runtime_state?.selected_mode_id || '').trim() !== ''
       };
     } catch (_) {

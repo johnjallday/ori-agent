@@ -341,6 +341,29 @@ func TestQuery_DetailBoundsValidManySourceAndEscapedAlternativePayloads(t *testi
 	}
 }
 
+func TestQuery_DetailWorkspaceNavigationRequiresCurrentExactLink(t *testing.T) {
+	library, scope, _ := createBrowserFixture(t, t.TempDir())
+	for entryID, childID := range map[string]string{
+		"browser-000": "browser-child-0", "browser-001": "browser-child-1",
+		"browser-002": "", "browser-003": "",
+	} {
+		detail, err := library.Detail(scope, entryID)
+		if err != nil || detail.WorkspaceID != childID {
+			t.Fatalf("navigation for %s: %+v %v", entryID, detail, err)
+		}
+	}
+	if err := library.workspaces.Update("browser-child-0", func(child *workspace.Workspace) error {
+		child.OwnerUserID = "foreign-owner"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := library.Detail(scope, "browser-000")
+	if err != nil || detail.WorkspaceID != "" || detail.Row.Connection != "needs_review" {
+		t.Fatalf("changed owner leaked a navigation target: %+v %v", detail, err)
+	}
+}
+
 func TestQuery_ExactLinkedOwnerAndNoAbsolutePathProjection(t *testing.T) {
 	file, scope, project := legacyMusicHome(t)
 	s := NewStore(file)
@@ -359,7 +382,7 @@ func TestQuery_ExactLinkedOwnerAndNoAbsolutePathProjection(t *testing.T) {
 	}
 	detail, err := s.Detail(scope, page.Rows[0].ID)
 	if err != nil || detail.Row.ID != page.Rows[0].ID || detail.Fields.Milestones[0].ID != "mix" ||
-		len(detail.Sources) != 0 {
+		len(detail.Sources) != 0 || detail.WorkspaceID != project.ID {
 		t.Fatalf("exact link detail was not bounded: %+v %v", detail, err)
 	}
 	if _, err := s.Detail(scope, "foreign-entry"); !errors.Is(err, ErrConflict) {

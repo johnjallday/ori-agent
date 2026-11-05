@@ -126,6 +126,9 @@ const (
 )
 
 type Detail struct {
+	// WorkspaceID is navigation metadata only, projected after the exact owner,
+	// reciprocal link and mirrors agree. It never authorizes a content read.
+	WorkspaceID      string         `json:"workspace_id,omitempty"`
 	Row              SearchRow      `json:"row"`
 	EntryRevision    int64          `json:"entry_revision"`
 	Fields           Fields         `json:"fields"`
@@ -188,6 +191,9 @@ func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
 		row.Moved = moveNote(entry, newestCompleteScans(doc), roots, inactive, "")
 		result := Detail{Row: row,
 			EntryRevision: entry.Revision, Fields: entry.Fields, Revision: doc.Revision, ProviderReadOnly: !state.PluginAvailable}
+		if row.Connection == "connected" && entry.Link != nil {
+			result.WorkspaceID = entry.Link.WorkspaceID
+		}
 		result.TotalSources = len(entry.Observations)
 		for _, observed := range entry.Observations {
 			availability := observed.Availability

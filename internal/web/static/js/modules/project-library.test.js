@@ -3792,7 +3792,7 @@ test('a read-only Home still lists its recent songs, without Open', () => {
   assert.equal(many.cards.length, 6);
 });
 
-test('each library row shows its save time and song facts on one line', () => {
+test('compact library rows separate last saved from inspection and omit routine facts', () => {
   const previousDocument = globalThis.document;
   const makeElement = tag => ({
     tag,
@@ -3827,18 +3827,14 @@ test('each library row shows its save time and song facts on one line', () => {
       { id: 'undated', name: 'Undated' }
     ];
     panel.renderRows();
-    const lines = tbody.children.map(tr =>
-      tr.children[1].children.find(child => child.className === 'project-library-saved')
-    );
-    assert.match(
-      lines[0].textContent.replaceAll('\xa0', ' '),
-      /^Saved .+ · 14 tracks · 92 BPM, varies · 3:41$/
-    );
-    assert.match(lines[0].textContent, /14\xa0tracks · 92\xa0BPM,\xa0varies/);
-    assert.equal(lines[0].dataset.songFacts, '14 tracks · 92 BPM, varies · 3:41');
-    assert.match(lines[1].textContent, /^Saved [^·]+$/, 'no facts: only "Saved …"');
-    assert.equal(lines[1].dataset.songFacts, undefined);
-    assert.equal(lines[2], undefined, 'no save time and no facts: no line');
+    assert.ok(tbody.children.every(tr => tr.children.length === 4));
+    const saved = tbody.children.map(tr => tr.children[3].textContent);
+    assert.match(saved[0], /^Saved [^·]+$/);
+    assert.match(saved[1], /^Saved [^·]+$/);
+    assert.equal(saved[2], '—', 'unset save time is a quiet accessible dash');
+    assert.equal(tbody.children[0].children[1].children[0].tag, 'button');
+    assert.equal(tbody.children[0].children[1].children[0].dataset.libraryEntry, 'with-facts');
+    assert.equal(tbody.children[0].children[2].textContent, '—');
     assert.doesNotMatch(
       tbody.children.map(tr => tr.children[1].children.map(c => c.textContent).join(' ')).join(' '),
       /\b(progress|complete|ready|unknown)\b/i
