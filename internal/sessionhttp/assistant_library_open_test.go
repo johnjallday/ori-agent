@@ -479,6 +479,73 @@ func TestOpenPortfolioProject_ReportsTheLinkedFileAndRefusesRetargetingAConnecte
 	}
 }
 
+// library-setup-staffing 1.4: a song that is already connected reports the
+// consent's stops for its empty role, adds no agent and changes no consent.
+func TestOpenLibrarySong_AConnectedSongReportsTheConsentsStopsWithoutStaffing(t *testing.T) {
+	t.Run("stale team", func(t *testing.T) {
+		f := newOpenFixture(t)
+		if _, err := f.staffs.Consents().Grant(openHomeID, agentworkspace.ProjectStaffingConsentGrant{
+			Source: agentworkspace.ProjectStaffingConsentFolderOffer, PluginID: "reaper-plugin", BlueprintID: "reaper-song",
+			TeamDigest: strings.Repeat("c", 64), RoleIDs: []string{"reaper-assistant"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.opener.Activate(t.Context(), projectlibrary.Scope{}, libraryActivation{EntryID: "two", Key: "earlier"}); err != nil {
+			t.Fatal(err)
+		}
+		code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`)
+		if code != http.StatusOK || payload["created"] != false || payload["staffing"] != agentworkspace.ProjectStaffingConsentStale || len(f.staffed) != 0 {
+			t.Fatalf("stale = %d %v staffed=%v", code, payload, f.staffed)
+		}
+	})
+	t.Run("recorded assistant deleted", func(t *testing.T) {
+		f := newOpenFixture(t)
+		f.grant(t)
+		if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != "added" {
+			t.Fatalf("first open = %d %v", code, payload)
+		}
+		f.agents.mu.Lock()
+		delete(f.agents.names, "REAPER Assistant")
+		f.agents.mu.Unlock()
+		if _, err := f.opener.Activate(t.Context(), projectlibrary.Scope{}, libraryActivation{EntryID: "three", Key: "earlier"}); err != nil {
+			t.Fatal(err)
+		}
+		f.staffed = nil
+		code, payload := f.open(t, openHomeID, "three", `{"request_id":"r3"}`)
+		if code != http.StatusOK || payload["staffing"] != agentworkspace.ProjectStaffingAssistantMissing || len(f.staffed) != 0 {
+			t.Fatalf("missing = %d %v staffed=%v", code, payload, f.staffed)
+		}
+		consent, _ := f.staffs.Consents().Read(openHomeID)
+		if consent.Roles[0].AgentName != "REAPER Assistant" || consent.Roles[0].PendingName != "" {
+			t.Fatalf("a missing assistant changed the consent: %+v", consent.Roles[0])
+		}
+	})
+}
+
+// library-setup-staffing 1.4: staffing a song starts none of its tickets. An
+// existing starter stays Pending (the executor runs only Assigned work).
+func TestOpenLibrarySong_StaffingStartsNoTicket(t *testing.T) {
+	f := newOpenFixture(t)
+	f.grant(t)
+	if _, err := f.opener.Activate(t.Context(), projectlibrary.Scope{}, libraryActivation{EntryID: "two", Key: "earlier"}); err != nil {
+		t.Fatal(err)
+	}
+	starter := agentworkspace.Task{ID: "starter-1", WorkspaceID: "song-two", Description: "Plan the arrangement", Priority: 1,
+		Status: agentworkspace.TaskStatusPending, Context: map[string]any{"template_starter_task": true}}
+	if err := f.store.Update("song-two", func(song *agentworkspace.Workspace) error { return song.AddTasks([]agentworkspace.Task{starter}) }); err != nil {
+		t.Fatal(err)
+	}
+	if code, payload := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK || payload["staffing"] != "added" {
+		t.Fatalf("open = %d %v", code, payload)
+	}
+	song, _ := f.store.Get("song-two")
+	for _, task := range song.Tasks {
+		if task.Status != agentworkspace.TaskStatusPending {
+			t.Fatalf("staffing changed a ticket's status: %+v", task)
+		}
+	}
+}
+
 // Every stop comes back typed, and none makes a song.
 func TestOpenPortfolioProject_StopsAreTypedAndMakeNothing(t *testing.T) {
 	f := newOpenFixture(t)

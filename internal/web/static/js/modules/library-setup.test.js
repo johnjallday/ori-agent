@@ -200,6 +200,25 @@ test('runSetup reviews and commits each item in order with the confirmed file', 
   });
 });
 
+test('runSetup without staffing only connects: no staffing, Open or role request', async () => {
+  const client = fakeClient({
+    '/projects/e1': { revision: 1, row: { name: 'Album-1', connection: 'new' } },
+    '/projects/e1/activation': one,
+    'POST /projects/e1/activation/review': { token: 't1', project_file: 'Album-1.rpp' },
+    'POST /projects/e1/activation/commit': { workspace_id: 'ws-1' }
+  });
+  const result = await runSetup({
+    client,
+    items: [{ id: 'e1', name: 'Album-1', file: 'Album-1.rpp' }],
+    operationKey: () => 'k'
+  });
+  assert.equal(result.failed, null);
+  assert.deepEqual(
+    client.calls.filter(call => call[0] === 'POST').map(call => call[1]),
+    ['/projects/e1/activation/review', '/projects/e1/activation/commit']
+  );
+});
+
 test('runSetup stops at the first failure, keeps earlier commits and names the rest', async () => {
   const client = fakeClient({
     '/projects/e1': { revision: 1, row: { name: 'Album-1', connection: 'new' } },
