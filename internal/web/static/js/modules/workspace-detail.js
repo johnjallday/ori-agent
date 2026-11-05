@@ -4579,14 +4579,26 @@ export class WorkspaceDetailPage {
           roleId: '',
           label: 'Hire an agent'
         };
+        // A library project may get its Home's shared assistant instead; the
+        // Command view owns that read and the action (library-setup-staffing).
+        const shared =
+          window.workspaceCommand?.sharedAssistantOfferHTML?.(
+            'modern-btn modern-btn-primary modern-btn-sm'
+          ) || '';
         this.elements.agentsList.innerHTML = `
           <div class="workspace-detail-empty">
             <strong>No one works here yet.</strong> Hire someone for this workspace.
+            ${shared}
             <div class="mt-2">
-              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" onclick="window.workspaceDetail?.hireForEmptyRoster('${encodeURIComponent(offer.roleId)}')">${this.escapeHtml(offer.label)}</button>
+              <button type="button" class="modern-btn ${shared ? 'modern-btn-secondary' : 'modern-btn-primary'} modern-btn-sm" onclick="window.workspaceDetail?.hireForEmptyRoster('${encodeURIComponent(offer.roleId)}')">${this.escapeHtml(offer.label)}</button>
             </div>
           </div>
         `;
+        this.elements.agentsList
+          .querySelector?.('[data-shared-assistant-add]')
+          ?.addEventListener('click', event =>
+            window.workspaceCommand?.addSharedAssistantFromOffer?.(event.currentTarget)
+          );
       }
       return;
     }

@@ -92,7 +92,27 @@ func (s *Service) PreviewCreate(in CreatePreview) []CreatedFill {
 //
 // Like Fill it decides and records; the caller staffs through the reviewed
 // seam and then calls Settle.
+// It takes the Home's lock for the decision; Tx.FillCreated runs it inside a
+// caller's turn.
 func (s *Service) FillCreated(projectID string, explicit map[string]bool, grant *Grant, modelReady bool) ([]CreatedFill, error) {
+	var fills []CreatedFill
+	err := s.WithHome(s.homeOf(projectID), func(tx *Tx) error {
+		var err error
+		fills, err = tx.FillCreated(projectID, explicit, grant, modelReady)
+		return err
+	})
+	return fills, err
+}
+
+// FillCreated is Service.FillCreated inside this turn.
+func (tx *Tx) FillCreated(projectID string, explicit map[string]bool, grant *Grant, modelReady bool) ([]CreatedFill, error) {
+	if home := tx.s.homeOf(projectID); home != tx.home {
+		return nil, ErrNotShared
+	}
+	return tx.s.fillCreated(projectID, explicit, grant, modelReady)
+}
+
+func (s *Service) fillCreated(projectID string, explicit map[string]bool, grant *Grant, modelReady bool) ([]CreatedFill, error) {
 	if s == nil || s.workspaces == nil {
 		return nil, ErrNotShared
 	}
@@ -146,7 +166,8 @@ func (s *Service) FillCreated(projectID string, explicit map[string]bool, grant 
 				case errors.Is(sharedErr, errNoModel):
 					continue
 				case !errors.Is(sharedErr, ErrNotShared) && !errors.Is(sharedErr, ErrNoConsent) &&
-					!errors.Is(sharedErr, ErrConsentStale) && !errors.Is(sharedErr, ErrAssistantMissing):
+					!errors.Is(sharedErr, ErrConsentStale) && !errors.Is(sharedErr, ErrAssistantMissing) &&
+					!errors.Is(sharedErr, ErrReservationHeld):
 					return nil, sharedErr
 				}
 			}
@@ -200,7 +221,7 @@ func (s *Service) sharedCreatedFill(projectID string, role workspace.AssistantPr
 			return Fill{}, err
 		}
 	}
-	fills, err := s.Fill(projectID, []string{role.ID}, grant)
+	fills, err := s.fill(projectID, []string{role.ID}, grant)
 	if err != nil {
 		return Fill{}, err
 	}

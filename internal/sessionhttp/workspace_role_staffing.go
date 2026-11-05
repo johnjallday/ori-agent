@@ -272,7 +272,24 @@ func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, i
 		})
 	}
 	warning := ""
-	auto := h.autoRoleFills(workspaceID, explicit, reviewed)
+	staff := func(tx *projectstaffing.Tx) {
+		auto := h.autoRoleFills(tx, workspaceID, explicit, reviewed)
+		warning = h.staffRoleBatches(ctx, tx, workspaceID, fills, auto)
+	}
+	if h.projectStaffing == nil {
+		staff(nil)
+		return warning
+	}
+	// One turn of the Home's staffing lock: decide, staff and record together.
+	_ = h.projectStaffing.WithHome(h.projectStaffing.HomeOf(workspaceID), func(tx *projectstaffing.Tx) error {
+		staff(tx)
+		return nil
+	})
+	return warning
+}
+
+func (h *Handler) staffRoleBatches(ctx context.Context, tx *projectstaffing.Tx, workspaceID string, fills, auto []RoleStaffingFill) string {
+	warning := ""
 	for _, batch := range [][]RoleStaffingFill{fills, auto} {
 		if len(batch) == 0 {
 			continue
@@ -286,10 +303,10 @@ func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, i
 			warning = "some roles could not be staffed; fill them from the workspace roster"
 		}
 	}
-	if len(auto) > 0 {
+	if len(auto) > 0 && tx != nil {
 		// Records the shared agent this create made, so the Home's next project
 		// binds it instead of making another.
-		if err := h.projectStaffing.Settle(workspaceID); err != nil {
+		if err := tx.Settle(workspaceID); err != nil {
 			logger.Warn("The created workspace's shared agent was not recorded",
 				logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
 		}

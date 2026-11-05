@@ -94,12 +94,14 @@ func (h *Handler) planRoleAutoFills(
 // autoRoleFills decides, once the created workspace is linked to its Home, how
 // the required roles the user left empty are filled. The reviewed create is
 // the consent for a project role's shared agent (hire once, assign many).
-func (h *Handler) autoRoleFills(workspaceID string, explicit map[string]bool, grant *projectstaffing.Grant) []RoleStaffingFill {
-	if h == nil || h.projectStaffing == nil || grant == nil {
+// It runs inside the caller's turn of the Home's staffing lock, so the decision,
+// the staffing and the record cannot interleave with another path's.
+func (h *Handler) autoRoleFills(tx *projectstaffing.Tx, workspaceID string, explicit map[string]bool, grant *projectstaffing.Grant) []RoleStaffingFill {
+	if h == nil || h.projectStaffing == nil || grant == nil || tx == nil {
 		return nil
 	}
 	modelReady := h.staffingModelReady != nil && h.staffingModelReady()
-	created, err := h.projectStaffing.FillCreated(workspaceID, explicit, grant, modelReady)
+	created, err := tx.FillCreated(workspaceID, explicit, grant, modelReady)
 	if err != nil {
 		if !errors.Is(err, projectstaffing.ErrNotShared) {
 			logger.Warn("Required roles could not be decided for the created workspace",

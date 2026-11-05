@@ -2722,7 +2722,10 @@ test('a queued song that needs an integration pauses in place while its review o
 
 // A Home with several catalog-only songs, for select-all and connect-all. Each
 // song's detail, eligibility and review are served from `songs`.
-function batchPanel(songs, { confirmed = true, reviewFile = null } = {}) {
+function batchPanel(
+  songs,
+  { confirmed = true, reviewFile = null, plans = null, staffingReply = null } = {}
+) {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
   panel.state = { provider_read_only: false };
   panel.rows = songs.map(song => ({ id: song.id, name: song.name, connection: 'catalog_only' }));
@@ -2739,7 +2742,14 @@ function batchPanel(songs, { confirmed = true, reviewFile = null } = {}) {
     return confirmed;
   };
   const byID = id => songs.find(song => song.id === id);
+  let planReads = 0;
   panel.request = async path => {
+    // The Home's assistant plan (an inert read). Without `plans` it cannot be
+    // read, which the dialog treats as a blocker, never as "staffing works".
+    if (path === '/staffing') {
+      if (!plans) throw new Error('The assistant plan could not be read.');
+      return plans[Math.min(planReads++, plans.length - 1)];
+    }
     const id = decodeURIComponent(path.split('/')[2]);
     const song = byID(id);
     if (path.endsWith('/activation')) return song.eligibility;
@@ -2751,7 +2761,13 @@ function batchPanel(songs, { confirmed = true, reviewFile = null } = {}) {
       const id = decodeURIComponent(path.split('/')[2]);
       return { token: `token-${id}`, project_file: reviewFile || body.project_file };
     }
-    return {};
+    const id = decodeURIComponent(path.split('/')[2]);
+    if (path.endsWith('/staffing')) {
+      const reply = staffingReply ? staffingReply(id, body) : null;
+      if (reply instanceof Error) throw reply;
+      return reply || { workspace_id: `ws-${id}`, staffing: { state: 'joined' } };
+    }
+    return path.endsWith('/commit') ? { workspace_id: `ws-${id}` } : {};
   };
   return { panel, log };
 }
@@ -2777,6 +2793,108 @@ test('select all picks every selectable song shown and clears them on the next p
   );
   panel.toggleSelectAll();
   assert.equal(panel.selectedProjects.size, 0);
+});
+
+const TEAM_DIGEST = 'a'.repeat(64);
+const createPlan = {
+  plan: 'create',
+  agent_name: 'REAPER Assistant',
+  role_label: 'REAPER Assistant',
+  sharing: { state: 'on', team_digest: TEAM_DIGEST }
+};
+
+test('connect all discloses the assistant, then adds it to each song after that song is connected', async () => {
+  const songs = [readySong('a', 'Album-1'), readySong('b', 'Album-2')];
+  const { panel, log } = batchPanel(songs, { plans: [createPlan] });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.equal(log.confirms.length, 1);
+  const lines = log.confirms[0].lines.join('\n');
+  assert.match(lines, /Creates your Home's shared REAPER Assistant/);
+  assert.match(lines, /no ticket runs and no model is called/);
+  assert.equal(log.confirms[0].action, 'Connect all and add the assistant');
+  // The assistant is added only after that song's own commit, in order.
+  assert.deepEqual(
+    log.posts.map(post => post.path.split('/').slice(-2).join('/')),
+    [
+      'activation/review',
+      'activation/commit',
+      'a/staffing',
+      'activation/review',
+      'activation/commit',
+      'b/staffing'
+    ]
+  );
+  const finishes = log.posts.filter(post => post.path.endsWith('/staffing'));
+  assert.equal(finishes.length, 2);
+  assert.equal(finishes[0].body.team_digest, TEAM_DIGEST);
+  assert.notEqual(finishes[0].body.request_id, finishes[1].body.request_id);
+  assert.match(log.statuses.at(-1), /Connected 2 of 2\. 2 have your shared REAPER Assistant\./);
+});
+
+test('connect all with "Connect only" never calls the staffing finish', async () => {
+  const songs = [readySong('a', 'Album-1'), readySong('b', 'Album-2')];
+  const { panel, log } = batchPanel(songs, { plans: [createPlan], confirmed: 'alternative' });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.ok(!log.posts.some(post => post.path.endsWith('/staffing')));
+  assert.equal(log.posts.filter(post => post.path.endsWith('/commit')).length, 2);
+  assert.match(log.statuses.at(-1), /^Connected 2 of 2\.$/);
+});
+
+test('connect all says why no assistant is offered and never offers it when the plan is a blocker or unreadable', async () => {
+  for (const plans of [
+    [{ plan: 'off', message: 'Adding the shared assistant is switched off on this Home.' }],
+    null
+  ]) {
+    const songs = [readySong('a', 'Album-1'), readySong('b', 'Album-2')];
+    const { panel, log } = batchPanel(songs, { plans });
+    panel.selectedProjects = new Set(['a', 'b']);
+    await panel.connectSelected();
+    assert.equal(log.confirms[0].action, 'Connect all', 'only the placement action is offered');
+    assert.match(log.confirms[0].lines.join('\n'), /No assistant is added: /);
+    assert.ok(!log.posts.some(post => post.path.endsWith('/staffing')));
+  }
+});
+
+test('connect all connects nothing when what the assistant does changed after it was shown', async () => {
+  const songs = [readySong('a', 'Album-1'), readySong('b', 'Album-2')];
+  const changed = { ...createPlan, sharing: { state: 'on', team_digest: 'b'.repeat(64) } };
+  const { panel, log } = batchPanel(songs, { plans: [createPlan, changed] });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.deepEqual(log.posts, [], 'nothing was reviewed or committed');
+  assert.match(log.statuses.at(-1), /changed\. Nothing was connected; review it again\./);
+});
+
+test('connect all keeps a connected song connected when its assistant stops, and leaves the rest alone', async () => {
+  const songs = [readySong('a', 'Album-1'), readySong('b', 'Album-2'), readySong('c', 'Album-3')];
+  const { panel, log } = batchPanel(songs, {
+    plans: [createPlan],
+    staffingReply: id =>
+      id === 'b'
+        ? Object.assign(
+            new Error(
+              'Set up a model so the new shared assistant has something to run on, then retry.'
+            ),
+            {
+              reason: 'needs_model'
+            }
+          )
+        : null
+  });
+  panel.selectedProjects = new Set(['a', 'b', 'c']);
+  await panel.connectSelected();
+  const status = log.statuses.at(-1);
+  assert.match(status, /Connected 2 of 3\./, 'the connected song is counted as connected');
+  assert.match(status, /1 has your shared REAPER Assistant\./);
+  assert.match(
+    status,
+    /Album-2 is connected, but its REAPER Assistant was not added: Set up a model/
+  );
+  assert.match(status, /Songs not reached were left alone\./);
+  assert.ok(!log.posts.some(post => post.path.includes('/c/')), 'the third song was not touched');
+  assert.ok(!panel.selectedProjects.has('b'), 'the connected song is no longer selected');
 });
 
 test('connect all confirms once with every exact file, then reviews and commits each song on its own', async () => {

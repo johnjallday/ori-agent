@@ -122,6 +122,7 @@ export default defineConfig([
       'internal/web/static/js/modules/library-open.js',
       'internal/web/static/js/modules/library-setup.js',
       'internal/web/static/js/modules/map-library-sheet.js',
+      'internal/web/static/js/modules/library-staffing.js',
       'internal/web/static/js/modules/project-library.js',
       'internal/web/static/js/modules/workspace-arrangement.js',
       'internal/web/static/js/modules/workspace-arrangement-consent.js',

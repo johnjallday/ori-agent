@@ -13,7 +13,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
-	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -140,6 +139,8 @@ type libraryOpener interface {
 	Activate(ctx context.Context, scope projectlibrary.Scope, activation libraryActivation) (string, error)
 	// Format is the project format the catalog observed for the row.
 	Format(scope projectlibrary.Scope, entryID string) string
+	// LinkedEntries are the catalog rows whose exact link names workspaceID.
+	LinkedEntries(scope projectlibrary.Scope, workspaceID string) ([]string, error)
 }
 
 type reviewedLibraryOpener struct {
@@ -182,6 +183,20 @@ func (o reviewedLibraryOpener) Activate(ctx context.Context, scope projectlibrar
 
 func (o reviewedLibraryOpener) Format(scope projectlibrary.Scope, entryID string) string {
 	return o.h.libraryEntryFormat(scope, entryID)
+}
+
+func (o reviewedLibraryOpener) LinkedEntries(scope projectlibrary.Scope, workspaceID string) ([]string, error) {
+	doc, err := o.h.assistantLibraryStore().Read(scope)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, entry := range doc.Entries {
+		if entry.Link != nil && entry.Link.WorkspaceID == workspaceID {
+			ids = append(ids, entry.ID)
+		}
+	}
+	return ids, nil
 }
 
 // OpenAssistantLibraryProject handles
@@ -336,7 +351,7 @@ func (h *Handler) openLibraryProject(ctx context.Context, scope projectlibrary.S
 			logger.Warn("Opened song: File-only was not recorded", logger.Fields{"workspace_id": result.WorkspaceID, "error": err.Error()})
 		}
 	}
-	result.Staffing, result.AgentName = h.staffOpenedSong(ctx, home, result.WorkspaceID)
+	result.Staffing, result.AgentName = h.staffOpenedSong(ctx, scope, home, result.WorkspaceID)
 	seed := in.SeedFirstTask
 	if seed == nil {
 		seed = h.seedOpenedSongTask
@@ -465,68 +480,13 @@ func (h *Handler) installedProjectTeam(scope projectlibrary.Scope, home *workspa
 }
 
 // staffOpenedSong fills the song's empty required project roles with the
-// Home's shared assistant, through the one staffing seam the workspace role
-// route uses. A song whose roles are already filled (its own per-song agent, or
-// an earlier open) is left as it is (D8).
-func (h *Handler) staffOpenedSong(ctx context.Context, home *workspace.Workspace, songID string) (string, string) {
-	if h.projectStaffing == nil {
-		return openStaffingNone, ""
-	}
-	song, err := h.projectStaffing.Song(songID)
-	if err != nil {
-		return openStaffingNotShare, ""
-	}
-	filled := song.FilledRoles()
-	var missing []string
-	for _, role := range song.RequiredRoles() {
-		if _, done := filled[role.ID]; !done {
-			missing = append(missing, role.ID)
-		}
-	}
-	if len(missing) == 0 {
-		for _, instance := range filled {
-			return openStaffingAlready, instance.Name
-		}
-		return openStaffingAlready, ""
-	}
-	fills, err := h.projectStaffing.Fill(songID, missing, nil)
-	switch {
-	case errors.Is(err, projectstaffing.ErrNoConsent):
-		if consent := home.GetAssistantProgramState().GetProjectStaffingConsent(); consent != nil && consent.RevokedAt != nil {
-			return openStaffingOff, ""
-		}
-		return openStaffingNone, ""
-	case errors.Is(err, projectstaffing.ErrNotShared):
-		return openStaffingNotShare, ""
-	case errors.Is(err, projectstaffing.ErrConsentStale):
-		return workspace.ProjectStaffingConsentStale, ""
-	case errors.Is(err, projectstaffing.ErrAssistantMissing):
-		return workspace.ProjectStaffingAssistantMissing, ""
-	case err != nil:
-		logger.Warn("Opened song: the shared assistant could not be decided", logger.Fields{"workspace_id": songID, "error": err.Error()})
-		return openStaffingNone, ""
-	}
-	if h.assistantWorkspaceRoleStaffer == nil {
-		return openStaffingNone, ""
-	}
-	outcome, name := openStaffingJoined, ""
-	for _, fill := range fills {
-		mode := "create"
-		if fill.Mode == projectstaffing.ModeBind {
-			mode = "assign"
-		} else {
-			outcome = openStaffingAdded
-		}
-		if err := h.assistantWorkspaceRoleStaffer(ctx, songID, []RoleStaffingFill{{RoleID: fill.RoleID, Mode: mode, Name: fill.Name}}); err != nil {
-			logger.Warn("Opened song: the shared assistant could not be added", logger.Fields{"workspace_id": songID, "role_id": fill.RoleID, "error": err.Error()})
-			return openStaffingNone, ""
-		}
-		name = fill.Name
-	}
-	if err := h.projectStaffing.Settle(songID); err != nil {
-		logger.Warn("Opened song: the shared assistant was not recorded", logger.Fields{"workspace_id": songID, "error": err.Error()})
-	}
-	return outcome, name
+// Home's shared assistant through the shared finish (the same per-Home turn,
+// recovery and outcomes as a confirmed library setup). A song whose roles are
+// already filled (its own per-song agent, or an earlier open) is left as it is
+// (D8). A failed write is reported as such, never as "none".
+func (h *Handler) staffOpenedSong(ctx context.Context, scope projectlibrary.Scope, home *workspace.Workspace, songID string) (string, string) {
+	outcome := h.finishSharedStaffing(ctx, scope, home.ID, songID, staffingFinishOptions{})
+	return outcome.State, outcome.AgentName
 }
 
 // seedOpenedSongTask gives the song the same first read-only task a folder's

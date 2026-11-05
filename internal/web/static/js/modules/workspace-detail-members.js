@@ -305,6 +305,7 @@ export class WorkspaceMembersPanel {
       list: document.getElementById('workspace-detail-members-list'),
       error: document.getElementById('workspace-detail-members-error'),
       addBtn: document.getElementById('workspace-detail-add-member-btn'),
+      setupBtn: document.getElementById('workspace-detail-setup-projects-btn'),
       createBtn: document.getElementById('workspace-detail-create-member-btn'),
       picker: document.getElementById('workspace-detail-member-picker'),
       rollups: document.getElementById('workspace-detail-members-rollups'),
@@ -407,6 +408,9 @@ export class WorkspaceMembersPanel {
   }
 
   applyHeaderIdentity() {
+    if (this.els.setupBtn) {
+      this.els.setupBtn.hidden = this.group?.group_template?.kind !== 'managed_home';
+    }
     if (!this.group) return;
     const members = directMembers(this.group);
     if (this.els.memberCount) this.els.memberCount.textContent = String(members.length);
@@ -421,8 +425,13 @@ export class WorkspaceMembersPanel {
     if (this.controlsBound) return;
     this.controlsBound = true;
 
-    const { addBtn, createBtn, swatch } = this.els;
+    const { addBtn, createBtn, swatch, setupBtn } = this.els;
     if (addBtn) addBtn.addEventListener('click', () => this.openAddPicker());
+    // A managed Home's setup sheet, reachable even when nothing is left to
+    // place: it is also where projects already on the map get the Home's
+    // shared assistant (library-setup-staffing).
+    if (setupBtn)
+      setupBtn.addEventListener('click', event => this.openLibrarySheet(event.currentTarget));
     if (createBtn) createBtn.addEventListener('click', () => this.openCreateMember(createBtn));
     if (swatch) swatch.addEventListener('click', () => this.toggleColorPopover());
   }

@@ -90,6 +90,11 @@ type Handler struct {
 	// Home's assistant; staffingModelReady says a new agent would have a model.
 	projectStaffing    *projectstaffing.Service
 	staffingModelReady func() bool
+	// staffingReceipts refuses a finish request_id reused for another song or
+	// approval; staffingProviderOverride replaces the finish's installed
+	// provider check in tests.
+	staffingReceipts         staffingReceipts
+	staffingProviderOverride func(projectlibrary.Scope, *workspace.Workspace, *workspace.Workspace) bool
 	// selectFileOnly records File-only on an opened song's Setup Wizard.
 	selectFileOnly func(context.Context, string) error
 	// libraryOpenerOverride and projectTeamOverride replace the library's

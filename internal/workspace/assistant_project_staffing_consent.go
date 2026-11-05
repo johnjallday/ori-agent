@@ -52,8 +52,13 @@ type ProjectStaffingConsentRole struct {
 	RoleID      string `json:"role_id"`
 	AgentName   string `json:"agent_name,omitempty"`
 	PendingName string `json:"pending_name,omitempty"`
-	Provider    string `json:"provider,omitempty"`
-	Model       string `json:"model,omitempty"`
+	// ReservedAt is when PendingName was reserved. A created binding older than
+	// it cannot be the reserved create (an older per-song agent that happens to
+	// carry the role's label), so it is never recorded. A record from before
+	// this field keeps the name-only proof.
+	ReservedAt *time.Time `json:"reserved_at,omitempty"`
+	Provider   string     `json:"provider,omitempty"`
+	Model      string     `json:"model,omitempty"`
 	// Copies are the projects holding their own copy of AgentName, each with the
 	// digest of that copy as Ori last wrote it. An edit to the agent is carried
 	// to a copy only while the copy still has that digest: a copy the user
@@ -80,6 +85,10 @@ func (c *ProjectStaffingConsent) Clone() *ProjectStaffingConsent {
 	clone.Roles = append([]ProjectStaffingConsentRole(nil), c.Roles...)
 	for i := range clone.Roles {
 		clone.Roles[i].Copies = append([]ProjectStaffingCopy(nil), c.Roles[i].Copies...)
+		if at := c.Roles[i].ReservedAt; at != nil {
+			value := *at
+			clone.Roles[i].ReservedAt = &value
+		}
 	}
 	if c.RevokedAt != nil {
 		value := *c.RevokedAt
@@ -429,10 +438,11 @@ func (c *ProjectStaffingConsents) ReserveAgent(homeID, pluginID, blueprintID, te
 			if next.Roles[i].AgentName != "" {
 				return current, false, ErrProjectStaffingConsentInvalid
 			}
-			if next.Roles[i].PendingName == agentName {
+			if next.Roles[i].PendingName == agentName && next.Roles[i].ReservedAt != nil {
 				return current, false, nil
 			}
-			next.Roles[i].PendingName = agentName
+			now := c.now().UTC()
+			next.Roles[i].PendingName, next.Roles[i].ReservedAt = agentName, &now
 			return next, true, nil
 		}
 		return current, false, ErrProjectStaffingConsentInvalid
@@ -453,7 +463,29 @@ func (c *ProjectStaffingConsents) RecordAgent(homeID, pluginID, blueprintID, tea
 		for i := range next.Roles {
 			role := &next.Roles[i]
 			if role.RoleID == roleID && role.AgentName == "" && role.PendingName != "" && role.PendingName == agentName {
-				role.AgentName, role.PendingName = agentName, ""
+				role.AgentName, role.PendingName, role.ReservedAt = agentName, "", nil
+				return next, true, nil
+			}
+		}
+		return current, false, nil
+	})
+	return err
+}
+
+// ReleaseReservation drops a role's pending name when a create under it was
+// seen to fail because someone else's agent already has that name, so the next
+// create picks the next free name. It writes only while the role has no agent
+// and agentName is still the pending name.
+func (c *ProjectStaffingConsents) ReleaseReservation(homeID, roleID, agentName string) error {
+	_, err := c.update(homeID, func(current *ProjectStaffingConsent) (*ProjectStaffingConsent, bool, error) {
+		if current == nil || agentName == "" {
+			return current, false, nil
+		}
+		next := current.Clone()
+		for i := range next.Roles {
+			role := &next.Roles[i]
+			if role.RoleID == roleID && role.AgentName == "" && role.PendingName == agentName {
+				role.PendingName, role.ReservedAt = "", nil
 				return next, true, nil
 			}
 		}
@@ -479,7 +511,7 @@ func (c *ProjectStaffingConsents) ForgetAgent(homeID, pluginID, blueprintID, rol
 			if role.AgentName != agentName || agentName == "" {
 				return current, false, ErrProjectStaffingConsentInvalid
 			}
-			role.AgentName, role.PendingName, role.Copies = "", "", nil
+			role.AgentName, role.PendingName, role.ReservedAt, role.Copies = "", "", nil, nil
 			return next, true, nil
 		}
 		return current, false, ErrProjectStaffingConsentInvalid
