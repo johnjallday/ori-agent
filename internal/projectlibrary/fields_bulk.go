@@ -87,7 +87,7 @@ func BulkPatchAllowed(p FieldsPatch) bool {
 		return false
 	}
 	return (p.Stage != nil || p.Status != nil || p.Priority != nil || p.ClearPriority) &&
-		!(p.Priority != nil && p.ClearPriority)
+		(p.Priority == nil || !p.ClearPriority)
 }
 
 func bulkFieldsDigest(scope Scope, entries []BulkFieldsEntry, patch FieldsPatch, author string) (string, error) {
