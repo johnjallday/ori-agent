@@ -31,10 +31,34 @@ export PATH="$HOME/go/bin:$PATH"
 
 echo "Building Ori Folder Picker..."
 
-# Check if wails is installed
-if ! command -v wails &> /dev/null; then
-    echo "Wails CLI not found. Installing..."
-    go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# Keep the Wails CLI on the version go.mod pins. Dependabot bumps go.mod, and
+# `wails build` warns ("go.mod is using Wails X but the CLI is Y") when the
+# installed CLI is older. go.mod is the source of truth rather than @latest, so
+# every machine and CI run builds with the same toolchain the code compiles
+# against. Installing only when the CLI was missing left it stuck on whatever
+# version happened to be latest the day it was first installed.
+WAILS_MODULE="github.com/wailsapp/wails/v2"
+wanted_wails_version="$(awk -v module="$WAILS_MODULE" \
+    '$1 == module { print $2; exit }' "$PROJECT_ROOT/go.mod" 2>/dev/null || true)"
+installed_wails_version=""
+if command -v wails &> /dev/null; then
+    installed_wails_version="$(wails version 2>/dev/null |
+        grep -m1 -Eo 'v[0-9]+\.[0-9]+\.[0-9]+[^[:space:]]*' || true)"
+fi
+
+if [[ -z "$installed_wails_version" ]] ||
+    { [[ -n "$wanted_wails_version" ]] && [[ "$installed_wails_version" != "$wanted_wails_version" ]]; }; then
+    install_version="${wanted_wails_version:-latest}"
+    echo "Wails CLI ${installed_wails_version:-not found}; installing ${install_version} (go.mod pin)..."
+    if ! go install "$WAILS_MODULE/cmd/wails@$install_version"; then
+        if [[ -z "$installed_wails_version" ]]; then
+            echo "Could not install the Wails CLI" >&2
+            exit 1
+        fi
+        # An older CLI still builds (with the warning), so a failed update such
+        # as an offline machine must not block worktree creation.
+        echo "Warning: could not update Wails CLI; continuing with ${installed_wails_version}" >&2
+    fi
 fi
 
 cd "$FOLDER_PICKER_DIR"
