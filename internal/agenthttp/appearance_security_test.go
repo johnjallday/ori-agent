@@ -320,7 +320,7 @@ func TestAppearanceRoundTripsThroughJSONForEverySource(t *testing.T) {
 	// All three sources present at once, and the stored filename is the
 	// sanitized one rather than the raw agent name.
 	uploaded, _ := appearance["uploaded"].(map[string]any)
-	if uploaded["image"] != "My_Demo_Agent.png" {
+	if image, _ := uploaded["image"].(string); !isUploadNameFor(image, "My_Demo_Agent", ".png") {
 		t.Errorf("stored filename = %v, want the sanitized name", uploaded["image"])
 	}
 	generated, _ := appearance["generated"].(map[string]any)

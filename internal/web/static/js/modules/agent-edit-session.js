@@ -172,6 +172,8 @@
   function createSession(agent) {
     const sections = {};
     let pendingSection = null;
+    // A non-section write whose outcome is unknown; blocks every write until resolved.
+    let externalUnknown = null;
     const blank = (section, source) => ({
       baseline: valuesFromAgent(section, source),
       version: trimmed(source?.version),
@@ -204,11 +206,33 @@
       pending: () => pendingSection,
       // Sections whose work would be lost by leaving the page: unsaved
       // changes, a save in flight, or a save whose outcome is unknown.
-      atRisk: () =>
-        SECTIONS.filter(
+      atRisk: () => {
+        const out = SECTIONS.filter(
           section =>
             isDirty(section) || section === pendingSection || get(section).state === 'unconfirmed'
-        ),
+        );
+        if (pendingSection && !SECTIONS.includes(pendingSection)) out.push(pendingSection);
+        if (externalUnknown) out.push(externalUnknown);
+        return out;
+      },
+      // A definition write that is not a section's draft (an appearance
+      // change). It takes the same one-write-at-a-time slot.
+      beginExternal(name) {
+        if (pendingSection) throw new Error('Another change is still saving.');
+        if (externalUnknown) {
+          throw new Error('The last change was not confirmed. Check the current values first.');
+        }
+        pendingSection = name;
+      },
+      // outcome "unknown" keeps further writes blocked until resolveExternal.
+      endExternal(name, outcome = 'done') {
+        if (pendingSection === name) pendingSection = null;
+        if (outcome === 'unknown') externalUnknown = name;
+      },
+      externalUnknown: () => externalUnknown,
+      resolveExternal() {
+        externalUnknown = null;
+      },
       changedFields: section => {
         const s = get(section);
         return s.draft ? changedFields(section, s.baseline, s.draft) : [];
@@ -231,6 +255,9 @@
       beginSubmit(section) {
         const s = get(section);
         if (pendingSection) throw new Error('Another change is still saving.');
+        if (externalUnknown) {
+          throw new Error('The last change was not confirmed. Check the current values first.');
+        }
         if (s.state === 'unconfirmed') {
           throw new Error('The last save was not confirmed. Check the current values first.');
         }

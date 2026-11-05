@@ -1,8 +1,9 @@
 package agenthttp
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"os"
 	"strings"
 
@@ -65,17 +66,29 @@ func avatarDirsFor(st store.Store, filename string) []string {
 	return []string{config.DefaultAgentAvatarsDir()}
 }
 
-// uploadFilenameFor is the stored filename for an agent's new image. It comes
-// from the agent's name, and is made distinct when another agent's appearance
-// already names that file — an agent renamed away from this name keeps its
-// filename — so /avatars/<filename> always leads to one agent.
-func uploadFilenameFor(st store.Store, agentName, ext string) string {
-	filename := appearanceUploadFilename(agentName, ext)
-	if owner := avatarOwner(st, filename); owner == "" || strings.EqualFold(owner, agentName) {
-		return filename
+// uploadFilenameFor is a new, unused filename for an agent's next image: the
+// agent's sanitized name plus a random part, e.g. "Scout-1a2b3c4d5e6f.png".
+//
+// Every upload gets its own name. Staging the bytes therefore never touches
+// the image on display, two overlapping uploads can never write the same
+// file, and replacing an image with another of the same format changes the
+// stored filename — and with it the definition version — so an editor holding
+// the old version is refused rather than silently overwriting. Names taken by
+// any agent's appearance are skipped, so /avatars/<filename> leads to one
+// agent. Images stored under older names stay readable.
+func uploadFilenameFor(st store.Store, agentName, ext string) (string, error) {
+	base := strings.TrimSuffix(appearanceUploadFilename(agentName, ext), ext)
+	for range 4 {
+		var random [6]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", err
+		}
+		filename := base + "-" + hex.EncodeToString(random[:]) + ext
+		if avatarOwner(st, filename) == "" {
+			return filename, nil
+		}
 	}
-	sum := sha256.Sum256([]byte(agentName))
-	return strings.TrimSuffix(filename, ext) + "-" + hex.EncodeToString(sum[:4]) + ext
+	return "", errors.New("could not choose an unused image name")
 }
 
 // ReadAvatarFile reads an uploaded image from the first folder that has it.

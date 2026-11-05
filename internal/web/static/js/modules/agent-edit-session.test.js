@@ -363,3 +363,26 @@ test('atRisk names dirty, saving, and unconfirmed sections', () => {
   assert.equal(t.isDirty('prompt'), false);
   assert.throws(() => t.discard('nope'), /Unknown section/);
 });
+
+test('an appearance write shares the one-write slot and an unknown outcome blocks writes', () => {
+  const s = api.createSession(agent());
+  s.setDraft('prompt', { system_prompt: 'Draft' });
+  s.beginExternal('appearance');
+  assert.throws(() => s.beginSubmit('prompt'), /still saving/);
+  assert.deepEqual(plain(s.atRisk()).sort(), ['appearance', 'prompt']);
+  // A receipt from the appearance write advances the prompt draft's version.
+  assert.equal(s.observe(agent({ version: 'v2' })).prompt, 'unchanged');
+  s.endExternal('appearance');
+  assert.equal(s.version('prompt'), 'v2');
+  assert.equal(s.beginSubmit('prompt').expected_version, 'v2');
+
+  const t = api.createSession(agent());
+  t.setDraft('prompt', { system_prompt: 'Draft' });
+  t.beginExternal('appearance');
+  t.endExternal('appearance', 'unknown');
+  assert.throws(() => t.beginSubmit('prompt'), /not confirmed/);
+  assert.throws(() => t.beginExternal('appearance'), /not confirmed/);
+  assert.ok(t.atRisk().includes('appearance'));
+  t.resolveExternal();
+  assert.equal(t.beginSubmit('prompt').system_prompt, 'Draft');
+});

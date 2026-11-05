@@ -114,7 +114,7 @@ func TestUploadActivatesTheImageInOneOperation(t *testing.T) {
 		t.Errorf("stored mode = %q, want uploaded", ag.Appearance.Mode)
 	}
 	stored := ag.Appearance.UploadedImage()
-	if stored != "shooter.png" {
+	if !isUploadNameFor(stored, "shooter", ".png") {
 		t.Errorf("stored filename = %q, want a server-generated name", stored)
 	}
 	if _, err := os.Stat(filepath.Join(dir, AvatarDir, stored)); err != nil {
@@ -152,7 +152,7 @@ func TestUploadIgnoresTheClientFilename(t *testing.T) {
 	}
 
 	ag, _ := ts.store.GetAgent("traverser")
-	if got := ag.Appearance.UploadedImage(); got != "traverser.png" {
+	if got := ag.Appearance.UploadedImage(); !isUploadNameFor(got, "traverser", ".png") {
 		t.Fatalf("stored filename = %q, want the server-generated name", got)
 	}
 }
@@ -216,14 +216,15 @@ func TestReplacingAnImageRemovesOnlyTheSupersededFile(t *testing.T) {
 	}
 
 	ag, _ := ts.store.GetAgent("swapper")
-	if got := ag.Appearance.UploadedImage(); got != "swapper.gif" {
-		t.Fatalf("stored filename = %q, want swapper.gif", got)
+	got := ag.Appearance.UploadedImage()
+	if !isUploadNameFor(got, "swapper", ".gif") {
+		t.Fatalf("stored filename = %q, want a swapper-*.gif name", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, AvatarDir, "swapper.gif")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, AvatarDir, got)); err != nil {
 		t.Errorf("the replacement is missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, AvatarDir, "swapper.png")); !os.IsNotExist(err) {
-		t.Errorf("the superseded file was not cleaned up")
+	if names := imageFiles(t, filepath.Join(dir, AvatarDir)); len(names) != 1 || names[0] != got {
+		t.Errorf("the superseded file was not cleaned up: %v", names)
 	}
 	// No temporary artifact may survive a successful replacement.
 	entries, _ := os.ReadDir(filepath.Join(dir, AvatarDir))

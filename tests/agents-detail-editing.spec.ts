@@ -639,3 +639,233 @@ test.describe('draft isolation', () => {
     }
   });
 });
+
+// A 1x1 PNG: content sniffing decides the type, so it has to be a real image.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64'
+);
+
+async function uploadPNG(page: Page) {
+  await page
+    .locator('#agentAppearance-file')
+    .setInputFiles({ name: 'face.png', mimeType: 'image/png', buffer: PNG });
+}
+
+async function storedImage(request: APIRequestContext, name: string) {
+  return (await detail(request, name)).appearance?.uploaded?.image || '';
+}
+
+// Records appearance writes: method plus the version and confirmation they
+// carried, whatever the transport (JSON, multipart, query).
+function recordAppearanceWrites(page: Page) {
+  const writes: { method: string; version: string; confirmed: boolean }[] = [];
+  page.on('request', (req: Request) => {
+    const url = new URL(req.url());
+    const isUpload = url.pathname.endsWith('/appearance/upload');
+    const isPatch = req.method() === 'PATCH' && url.pathname === '/api/agents';
+    if (!isUpload && !isPatch) return;
+    const body = req.postData() || '';
+    let version = url.searchParams.get('expected_version') || '';
+    let confirmed = url.searchParams.get('confirm_shared_edit') === 'true';
+    if (isPatch) {
+      const json = JSON.parse(body || '{}');
+      version = json.expected_version || '';
+      confirmed = Boolean(json.confirm_shared_edit);
+    } else if (req.method() === 'POST') {
+      version = /name="expected_version"\r\n\r\n([^\r]*)/.exec(body)?.[1] || '';
+      confirmed = /name="confirm_shared_edit"\r\n\r\ntrue/.test(body);
+    }
+    writes.push({ method: req.method(), version, confirmed });
+  });
+  return writes;
+}
+
+async function attachToTwoWorkspaces(request: APIRequestContext, name: string) {
+  const folders: any[] = [];
+  for (const suffix of ['One', 'Two']) {
+    const ws = await request.post('/api/workspaces', { data: { name: `${name} ${suffix}` } });
+    expect(ws.ok(), await ws.text()).toBeTruthy();
+    const folder = (await ws.json()).folder;
+    folders.push(folder);
+    expect(
+      (
+        await request.post(`/api/workspaces/${folder.id}/agents`, { data: { agent_name: name } })
+      ).ok()
+    ).toBeTruthy();
+  }
+  return folders;
+}
+
+test.describe('appearance', () => {
+  test('appearance saves immediately, keeps other drafts, and profile Cancel does not undo it', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const writes = recordAppearanceWrites(page);
+      await editPrompt(page, 'Draft beside appearance');
+      await expect(page.locator('#appearanceSection')).toContainText('Changes save immediately');
+      await page.locator('#agentAppearance-color').fill('#123456');
+      await expect(page.locator('#agentAppearance-root')).toContainText('Saved.');
+      expect((await detail(request, name)).appearance.generated.color).toBe('#123456');
+      expect(writes).toHaveLength(1);
+      expect(writes[0].version).toBeTruthy();
+      await expect(page.locator('#editSystemPrompt')).toHaveValue('Draft beside appearance');
+
+      // The profile modal's Cancel discards only its own fields.
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileDescriptionInput').fill('Not this');
+      await page.locator('#profileEditModal .modal-footer [data-bs-dismiss="modal"]').click();
+      await page.locator('#profileDiscardConfirm [data-discard-confirm]').click();
+      await expect(page.locator('#profileEditModal')).toBeHidden();
+      expect((await detail(request, name)).appearance.generated.color).toBe('#123456');
+
+      // The appearance receipt moved the version; the prompt draft follows it
+      // and saves without a self-inflicted conflict.
+      await page.locator('#savePromptBtn').click();
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+      expect((await detail(request, name)).system_prompt).toBe('Draft beside appearance');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('replacing an image with another of the same format stores a new file and version', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const writes = recordAppearanceWrites(page);
+      await uploadPNG(page);
+      await expect(page.locator('#agentAppearance-root')).toContainText('Image uploaded.');
+      const first = await storedImage(request, name);
+      const firstVersion = (await detail(request, name)).version;
+      await uploadPNG(page);
+      await expect.poll(() => storedImage(request, name)).not.toBe(first);
+      expect((await detail(request, name)).version).not.toBe(firstVersion);
+      expect(writes.map(w => w.method)).toEqual(['POST', 'POST']);
+      expect(writes[1].version).toBe(firstVersion);
+      const old = await page.request.get(`/avatars/${encodeURIComponent(first)}`);
+      expect(old.status()).toBe(404);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a shared agent asks before every appearance write, and declining writes nothing', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    const folders = await attachToTwoWorkspaces(request, name);
+    try {
+      await openAgent(page, name);
+      const writes = recordAppearanceWrites(page);
+      const decline = () => page.once('dialog', dialog => void dialog.dismiss());
+      const accept = () => page.once('dialog', dialog => void dialog.accept());
+
+      decline();
+      await page.locator('#agentAppearance-color').fill('#654321');
+      await expect(page.locator('#agentAppearance-root')).toContainText('Change cancelled');
+      expect((await detail(request, name)).appearance.generated?.color).not.toBe('#654321');
+
+      decline();
+      await uploadPNG(page);
+      await expect(page.locator('#agentAppearance-root')).toContainText('Change cancelled');
+      expect(await storedImage(request, name)).toBe('');
+
+      accept();
+      await uploadPNG(page);
+      await expect(page.locator('#agentAppearance-root')).toContainText('Image uploaded.');
+      const image = await storedImage(request, name);
+      expect(image).toBeTruthy();
+
+      decline();
+      await page.locator('#agentAppearance-upload-remove').click();
+      await expect(page.locator('#agentAppearance-root')).toContainText('Change cancelled');
+      expect(await storedImage(request, name)).toBe(image);
+
+      // Each declined write was a single unconfirmed request; the accepted one
+      // was retried once with the same version and the confirmation.
+      expect(writes.map(w => `${w.method}:${w.confirmed}`)).toEqual([
+        'PATCH:false',
+        'POST:false',
+        'POST:false',
+        'POST:true',
+        'DELETE:false'
+      ]);
+      expect(writes[3].version).toBe(writes[2].version);
+    } finally {
+      for (const folder of folders)
+        await request.delete(`/api/workspaces/${folder.id}?confirm=true&delete_sessions=true`);
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a failed or stale replacement keeps the last confirmed image', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await uploadPNG(page);
+      await expect(page.locator('#agentAppearance-root')).toContainText('Image uploaded.');
+      const kept = await storedImage(request, name);
+
+      // A server failure.
+      await page.route('**/appearance/upload', route =>
+        route.request().method() === 'POST'
+          ? route.fulfill({ status: 500, json: { error: 'Failed to save image' } })
+          : route.continue()
+      );
+      await uploadPNG(page);
+      await expect(page.locator('#agentAppearance-root')).toContainText('Failed to save image');
+      expect(await storedImage(request, name)).toBe(kept);
+      await page.unroute('**/appearance/upload');
+
+      // Another tab changes the agent first: the replacement is refused and the
+      // editor shows the newer saved appearance.
+      const other = await request.patch(`/api/agents/${encodeURIComponent(name)}`, {
+        data: { appearance: { generated: { color: '#0a7f3f' } } }
+      });
+      expect(other.ok(), await other.text()).toBeTruthy();
+      await uploadPNG(page);
+      await expect(page.locator('#agentAppearance-root')).toContainText('changed elsewhere');
+      expect(await storedImage(request, name)).toBe(kept);
+      await expect(page.locator('#agentAppearance-color')).toHaveValue('#0a7f3f');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
+  test('a lost answer is not resent and the page shows what is saved', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      const writes = recordAppearanceWrites(page);
+      await page.route('**/api/agents?name=*', route =>
+        route.request().method() === 'PATCH' ? route.abort('failed') : route.continue()
+      );
+      await page.locator('#agentAppearance-color').fill('#222222');
+      await expect(page.locator('#agentAppearance-root')).toContainText('could not confirm');
+      await expect(page.locator('#appearanceStatus')).toContainText('was not sent again');
+      expect(writes).toHaveLength(1);
+      // Writes are possible again once the current state was read.
+      await page.unroute('**/api/agents?name=*');
+      await page.locator('#agentAppearance-color').fill('#333333');
+      await expect(page.locator('#agentAppearance-root')).toContainText('Saved.');
+      expect((await detail(request, name)).appearance.generated.color).toBe('#333333');
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+});

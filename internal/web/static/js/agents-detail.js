@@ -13,7 +13,6 @@ let currentAgentLoadout = null; // {stage, slot_cap, slots_used, expert_mode} or
 let globalMCPServers = [];
 let globalMCPStats = {};
 let profileSelectedTags = [];
-let profileAvatarImage = null;
 
 // Which models take a reasoning level (Codex, Claude Code) is decided once, in
 // modules/reasoning-effort.js.
@@ -664,7 +663,8 @@ const TAB_SECTIONS = {
   configuration: 'agentConfigurationSection',
   prompt: 'promptSection',
   toolbox: 'capabilitiesSection',
-  workspaces: 'agentWorkspacesSection'
+  workspaces: 'agentWorkspacesSection',
+  appearance: 'appearanceSection'
 };
 
 function focusRequestedSection() {
@@ -784,6 +784,7 @@ function renderAgentDetails() {
   hideMissingAgentState();
 
   renderCurrentAgentAvatar();
+  syncAppearanceEditor();
 
   const nameEl = document.getElementById('agentName');
   if (nameEl) nameEl.textContent = currentAgent.name;
@@ -1301,65 +1302,237 @@ function closeProfileModal() {
   modal.hide();
 }
 
-// The profile modal mounts the same shared editor as every other host, so this
-// page cannot drift back into its own upload-or-initials rule (FR-26/FR-85).
+// Appearance has its own section and saves each choice immediately through
+// the same shared editor every other host uses, so this page cannot drift
+// back into its own upload-or-initials rule (FR-26/FR-85). The profile
+// modal's Save and Cancel never touch it.
 //
-// Appearance saves through its own adapter the moment it changes; the modal's
-// Save button keeps owning only the fields it already owned.
-let profileAppearanceEditor = null;
+// Every appearance write — a JSON change, an upload, a removal — carries the
+// page's confirmed version, asks before changing a shared agent, and takes
+// the page's one-write slot, so it can neither overlap a section save nor
+// silently overwrite someone else's change.
+let appearanceEditor = null;
+let appearanceEditorKey = '';
 
-function mountProfileAppearanceEditor() {
-  const host = document.getElementById('profileAppearanceHost');
+function appearanceReadOnly() {
+  return isReadOnlyAgent() || isWorkspaceOwnedAgent() || Boolean(editSession?.externalUnknown?.());
+}
+
+// syncAppearanceEditor mounts the editor once per agent (and read-only
+// state), and otherwise adopts newer confirmed appearance without remounting.
+function syncAppearanceEditor() {
+  const host = document.getElementById('agentAppearanceHost');
   if (!host || !window.AgentAppearanceEditor || !currentAgent) return;
-  if (profileAppearanceEditor?.destroy) profileAppearanceEditor.destroy();
-
-  const name = currentAgent.name || agentName;
-  const uploadURL = `/api/agents/${encodeURIComponent(name)}/appearance/upload`;
-  const request = (url, init) =>
-    fetch(url, init).then(async response => {
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (data.code === AGENT_CHANGED_ON_DISK) {
-          await refreshAgentDetails();
-        }
-        throw new Error(data.message || data.error || 'That change could not be saved.');
-      }
-      // Adopt the server's canonical object, then repaint the hero so the page
-      // and its editor cannot disagree about the active source (FR-59/FR-66).
-      if (data.appearance) {
-        currentAgent.appearance = data.appearance;
-        profileAvatarImage = data.appearance.uploaded?.image || null;
-        renderCurrentAgentAvatar();
-      }
-      return data.appearance;
-    });
-
-  profileAppearanceEditor = window.AgentAppearanceEditor.create({
+  // Never repaint or remount under a request in flight: the editor settles it
+  // first, and scheduleAppearanceResync catches up afterwards.
+  if (appearanceEditor?.status() === 'saving') return;
+  const readOnly = appearanceReadOnly();
+  const key = `${currentAgent.name}|${readOnly}`;
+  if (appearanceEditor && appearanceEditorKey === key) {
+    const confirmed = JSON.stringify(appearanceEditor.confirmed());
+    const latest = JSON.stringify(currentAgent.appearance || null);
+    if (confirmed !== latest) appearanceEditor.setConfirmed(currentAgent.appearance);
+    return;
+  }
+  appearanceEditor?.destroy?.();
+  appearanceEditorKey = key;
+  watchCharacterCatalog();
+  appearanceEditor = window.AgentAppearanceEditor.create({
     host,
-    idPrefix: 'profileAppearance',
+    idPrefix: 'agentAppearance',
     mode: 'edit',
-    readOnly: isReadOnlyAgent(),
+    readOnly,
     appearance: currentAgent.appearance,
     agent: {
-      name,
+      name: currentAgent.name || agentName,
       source: currentAgent.source || 'user',
       role: currentAgent.role || ''
     },
     adapter: {
       saveAppearance: patch =>
-        request(`/api/agents?name=${encodeURIComponent(name)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ appearance: patch })
+        appearanceWrite(({ version, confirm }) => [
+          `/api/agents?name=${encodeURIComponent(agentName)}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              appearance: patch,
+              expected_version: version,
+              ...(confirm ? { confirm_shared_edit: true } : {})
+            })
+          }
+        ]),
+      uploadImage: file =>
+        appearanceWrite(({ version, confirm }) => {
+          const form = new FormData();
+          form.append('image', file);
+          form.append('expected_version', version);
+          if (confirm) form.append('confirm_shared_edit', 'true');
+          return [appearanceUploadURL(), { method: 'POST', body: form }];
         }),
-      uploadImage: file => {
-        const form = new FormData();
-        form.append('image', file);
-        return request(uploadURL, { method: 'POST', body: form });
-      },
-      removeImage: () => request(uploadURL, { method: 'DELETE' })
+      removeImage: () =>
+        appearanceWrite(({ version, confirm }) => {
+          const query = new URLSearchParams({ expected_version: version });
+          if (confirm) query.set('confirm_shared_edit', 'true');
+          return [`${appearanceUploadURL()}?${query}`, { method: 'DELETE' }];
+        })
     }
   });
+}
+
+// The editor mounts with the page, usually before the character catalog has
+// loaded; it then repaints only its preview, which leaves a saved character
+// unnamed in its source card. Re-render once the catalog lands, unless the
+// user is working inside the editor (a full render would move focus).
+let appearanceCatalogWatch = false;
+function watchCharacterCatalog() {
+  if (appearanceCatalogWatch || typeof window.CharacterCatalog?.onChange !== 'function') return;
+  appearanceCatalogWatch = true;
+  window.CharacterCatalog.onChange(() => {
+    const host = document.getElementById('agentAppearanceHost');
+    if (!appearanceEditor || appearanceEditor.status() === 'saving') return;
+    if (host?.contains(document.activeElement)) return;
+    appearanceEditor.render();
+  });
+}
+
+function appearanceUploadURL() {
+  return `/api/agents/${encodeURIComponent(agentName)}/appearance/upload`;
+}
+
+function setAppearanceStatus(message, type = 'info') {
+  const status = document.getElementById('appearanceStatus');
+  if (!status) return;
+  status.replaceChildren();
+  if (!message) return;
+  status.append(document.createTextNode(message));
+  status.style.color =
+    type === 'error'
+      ? 'var(--danger-color)'
+      : type === 'success'
+        ? 'var(--success-color, #22c55e)'
+        : 'var(--text-secondary)';
+}
+
+// sendAppearanceRequest sends one request and classifies the answer by the
+// server's structured codes. A request that may have reached the server but
+// gave no readable answer is "unconfirmed".
+async function sendAppearanceRequest(url, init) {
+  let response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    return { kind: 'unconfirmed', message: error?.message || '' };
+  }
+  let body = null;
+  let json = true;
+  try {
+    body = await response.json();
+  } catch {
+    json = false;
+  }
+  return window.AgentEditSession.classify(response.status, body, { json });
+}
+
+// appearanceWrite runs one appearance mutation and resolves with the
+// canonical appearance the server committed. It rejects (and the shared
+// editor shows the last confirmed state) on any refusal; it never resends a
+// request whose outcome is unknown.
+async function appearanceWrite(buildRequest) {
+  try {
+    editSession.beginExternal('appearance');
+  } catch (error) {
+    throw new Error(error.message);
+  }
+  updateEditIndicators();
+  setAppearanceStatus('');
+  let ended = false;
+  const end = outcome => {
+    if (ended) return;
+    ended = true;
+    editSession.endExternal('appearance', outcome);
+    updateEditIndicators();
+  };
+  try {
+    const version = currentAgent?.version || '';
+    let outcome = await sendAppearanceRequest(...buildRequest({ version, confirm: false }));
+    if (outcome.kind === 'needs_confirmation') {
+      if (!(await confirmSharedEdit(outcome.body || {}))) {
+        // Declining is not an error: once the editor has restored its last
+        // confirmed state, show the outcome as neutral information.
+        window.setTimeout(
+          () =>
+            appearanceEditor?.setMessage('Change cancelled — shared agent not modified.', 'info'),
+          0
+        );
+        throw new Error('Change cancelled — shared agent not modified.');
+      }
+      outcome = await sendAppearanceRequest(...buildRequest({ version, confirm: true }));
+    }
+    switch (outcome.kind) {
+      case 'saved':
+        end('done');
+        adoptReceipt(outcome.receipt);
+        return outcome.receipt.appearance;
+      case 'stale':
+      case 'changed_on_disk': {
+        end('done');
+        const reloaded = await refreshAgentDetails();
+        scheduleAppearanceResync();
+        throw new Error(
+          reloaded
+            ? 'This agent was changed elsewhere, so that change was not saved. The latest appearance is shown — make your choice again.'
+            : 'This agent was changed elsewhere, so that change was not saved. The latest values could not be loaded; reload the page.'
+        );
+      }
+      case 'unconfirmed':
+        end('unknown');
+        await checkAppearanceAfterUnknown();
+        scheduleAppearanceResync();
+        throw new Error(
+          'Ori could not confirm whether that change was saved. It was not sent again.'
+        );
+      default:
+        throw new Error(outcome.message || 'That change could not be saved.');
+    }
+  } finally {
+    end('done');
+  }
+}
+
+// After a refusal the shared editor restores its own last-confirmed state;
+// once it has, show the page's newer confirmed appearance instead.
+function scheduleAppearanceResync() {
+  window.setTimeout(syncAppearanceEditor, 0);
+}
+
+// checkAppearanceAfterUnknown reads what is saved now. A successful read
+// establishes the current state (not which request wrote it) and unblocks
+// writes; a failed read keeps appearance read-only with a "Check again".
+async function checkAppearanceAfterUnknown() {
+  const reloaded = await refreshAgentDetails();
+  if (reloaded && editSession.externalUnknown()) {
+    editSession.resolveExternal();
+    updateEditIndicators();
+    renderAgentDetails();
+    setAppearanceStatus(
+      'Ori could not confirm whether your last appearance change was saved, so it was not sent again. The appearance shown is what is saved now.',
+      'error'
+    );
+    return true;
+  }
+  setAppearanceStatus(
+    'Ori could not confirm whether your last appearance change was saved, and could not load the current appearance. Changes are paused until it can check. ',
+    'error'
+  );
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.className = 'modern-btn modern-btn-secondary btn-sm';
+  retry.textContent = 'Check again';
+  retry.addEventListener('click', () => void checkAppearanceAfterUnknown());
+  document.getElementById('appearanceStatus')?.append(retry);
+  renderAgentDetails();
+  return false;
 }
 
 // Built-in CLI agents have no editable definition, so they get the editor's
@@ -1380,9 +1553,7 @@ function openProfileEditor() {
 
 function populateProfileForm() {
   if (!currentAgent) return;
-  profileAvatarImage = currentAgent.appearance?.uploaded?.image || null;
   paintProfileFields(sectionValues('profile') || profileValuesFromAgent());
-  mountProfileAppearanceEditor();
   setProfileStatus('');
   setProfileSavingState(false);
 }
