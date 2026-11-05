@@ -245,6 +245,24 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if steps, ok := s.Storage.AgentEditCarrier.(agenthttp.CopyStepReader); ok {
 		dashboardHandler.SetCopyStepReader(steps)
 	}
+	if tracking, ok := s.Storage.AgentEditCarrier.(agenthttp.CopyTrackingReader); ok {
+		dashboardHandler.SetCopyTrackingReader(tracking)
+	}
+	if s.Handlers.Skills != nil {
+		if manager := s.Handlers.Skills.Manager(); manager != nil {
+			dashboardHandler.SetSkillInventory(func(agentName string) (map[string]bool, error) {
+				collection, err := manager.ListSkills(agentName)
+				if err != nil {
+					return nil, err
+				}
+				enabled := make(map[string]bool, len(collection))
+				for _, skill := range collection {
+					enabled[skill.Name] = enabled[skill.Name] || skill.Enabled
+				}
+				return enabled, nil
+			})
+		}
+	}
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
@@ -271,6 +289,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		}
 		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/feed") && r.Method == http.MethodPost {
 			s.Handlers.Evolution.FeedAgent(w, r)
+			return
+		}
+		// Read-only settings ownership inspection. Exact suffix, before the
+		// substring /detail match below.
+		if agenthttp.IsSettingsOwnershipPath(r.URL.Path) {
+			dashboardHandler.GetSettingsOwnership(w, r)
 			return
 		}
 		// Route dashboard detail requests first
