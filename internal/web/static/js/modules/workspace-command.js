@@ -715,10 +715,12 @@ export class WorkspaceCommandView {
   // next load (FR42).
   ensureRoleRoster() {
     void this.loadRoleRoster(true).then(async () => {
-      // A library project with an empty role may get its Home's shared
-      // assistant instead of a fresh hire (library-setup-staffing). Read only.
-      if (this.roleRoster && !(this.roleRoster.filled_count > 0))
-        await this.loadSharedAssistantOffer();
+      // A project linked to a Home, with an empty role, may get that Home's
+      // shared assistant instead of a fresh hire (library-setup-staffing). Read
+      // only, and only asked of a workspace the roster says belongs to a Home
+      // (its group_workspace_id is the Home's, not its own): an ordinary
+      // workspace makes no extra request.
+      if (this.linkedProjectWithEmptyRoster()) await this.loadSharedAssistantOffer();
       else this.sharedAssistantView = null;
       // An empty roster's hire offer names a role from this answer, so it is
       // redrawn; otherwise only the roster itself needs mounting.
@@ -5779,6 +5781,14 @@ export class WorkspaceCommandView {
   }
 
   // ---------- The Home's shared assistant (library projects) ----------
+
+  // The roster's group_workspace_id names the Home that manages roles this
+  // workspace cannot change itself; a Home's own roster names itself.
+  linkedProjectWithEmptyRoster() {
+    const roster = this.roleRoster;
+    const home = String(roster?.group_workspace_id || '');
+    return !!roster && !(roster.filled_count > 0) && home !== '' && home !== this.workspaceId();
+  }
 
   async loadSharedAssistantOffer() {
     const workspaceId = this.workspaceId();
