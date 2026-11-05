@@ -106,6 +106,7 @@ import {
 } from './workspace-url-state.js';
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
+import { WORK_LABELS, startFromBacklogLabel } from './work-labels.js';
 import { capAttentionLines, hqAttentionLines, hqNeedsYouRows } from './hq-attention.js';
 import { hqStationCards, stationsNeedingYou } from './hq-stations-grid.js';
 import {
@@ -335,8 +336,8 @@ export class WorkspaceCommandView {
     this.pendingDetachmentSelectionId = '';
     // Persistent, non-modal Backlog drawer (PRD workspace-backlog FR30, 35-37)
     // — the shared full interaction surface opened from both the Details rail
-    // panel and the Map Quest Board (group 5). Backlog is presented
-    // separately from Tasks: capture stays non-executable until an explicit
+    // panel and the Map Backlog window (group 5). Backlog is presented
+    // separately from Tickets: capture stays non-executable until an explicit
     // Promote to Ready action (FR19, 39).
     this.backlogDrawerOpen = false;
     this.backlogDrawerEl = null;
@@ -349,7 +350,7 @@ export class WorkspaceCommandView {
     this.backlogQuickCaptureSubmitting = false;
     this.backlogPromoteConfirmId = '';
     this.backlogPromoteBusy = false;
-    // Map Quest Board "Accept Quest" (group 5) — id of the item currently
+    // Map Backlog window "Start" (group 5) — id of the item currently
     // being promoted directly from the Map window, separate from the
     // drawer's own confirm/busy state above.
     this.mapAcceptQuestBusyId = '';
@@ -6027,10 +6028,10 @@ export class WorkspaceCommandView {
   mapWindowOptions() {
     // Labels are presentation-only (FR3-5): the underlying panel keys
     // ('objective'/'objectives') are unchanged so activeMapWindow state and
-    // every reference to them elsewhere keeps working. 'backlog' carries
-    // "Backlog" in its own accessible name/title (not just "Quest Board") so
-    // the tool-belt button never obscures the real Backlog lifecycle (FR50).
-    // The HQ map uses the plain names (PRD 767 FR18).
+    // every reference to them elsewhere keeps working. Every branch names
+    // work items with WORK_LABELS (PRD one-vocabulary FR4): the item is a
+    // ticket, and Backlog is where a ticket waits. The HQ map also uses the
+    // plain names for its goal and rooms (PRD 767 FR18).
     if (this.isPersonalHQ()) {
       return [
         { key: 'objective', label: HQ_LABELS.workspaceGoal, icon: 'bi-bullseye' },
@@ -6042,8 +6043,8 @@ export class WorkspaceCommandView {
     }
     return [
       { key: 'objective', label: 'Workspace Goal', icon: 'bi-bullseye' },
-      { key: 'objectives', label: 'Tickets', icon: 'bi-list-check' },
-      { key: 'backlog', label: 'Backlog · Quest Board', icon: 'bi-journal-bookmark' },
+      { key: 'objectives', label: WORK_LABELS.tickets, icon: 'bi-list-check' },
+      { key: 'backlog', label: WORK_LABELS.backlog, icon: 'bi-journal-bookmark' },
       { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
       { key: 'stations', label: 'Stations', icon: 'bi-cpu' }
     ];
@@ -6107,8 +6108,8 @@ export class WorkspaceCommandView {
               '" data-cmd-open-task="' +
               escapeHtml(id) +
               '">' +
-              '<span class="ws-cmd-map-task-marker">Quest ' +
-              escapeHtml(questNumber) +
+              '<span class="ws-cmd-map-task-marker">' +
+              escapeHtml(WORK_LABELS.ticket + ' ' + questNumber) +
               '</span><span class="ws-cmd-map-task-name">' +
               escapeHtml(label) +
               '</span><span class="ws-cmd-map-task-status">' +
@@ -6124,10 +6125,14 @@ export class WorkspaceCommandView {
             return '<div class="ws-cmd-map-task-row-wrap">' + openButton + startButton + '</div>';
           })
           .join('')
-      : '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest log clear</strong><span>No active objectives assigned.</span></div>';
+      : '<div class="ws-cmd-map-empty is-quest-empty"><strong>' +
+        escapeHtml(WORK_LABELS.noOpenTickets) +
+        '</strong><span>' +
+        escapeHtml(WORK_LABELS.nothingAssigned) +
+        '</span></div>';
     return (
       '<div class="ws-cmd-map-window-section is-objectives">' +
-      this.mapZoneHeaderHTML('Tickets', 'Active Tickets', tasks.length) +
+      this.mapZoneHeaderHTML(WORK_LABELS.tickets, WORK_LABELS.activeTickets, tasks.length) +
       '<div class="ws-cmd-map-task-list">' +
       rows +
       '</div>' +
@@ -6136,16 +6141,16 @@ export class WorkspaceCommandView {
     );
   }
 
-  // Map Backlog window — presented as the Quest Board (FR50-57). Reuses the
-  // exact same backlogItems()/backlogSync() state and shared drawer as the
-  // Details panel (group 4): no separate list state, no duplicate records.
+  // Map Backlog window (FR50-57). Reuses the exact same backlogItems()/
+  // backlogSync() state and shared drawer as the Details panel (group 4): no
+  // separate list state, no duplicate records. Every branch, HQ or not, uses
+  // the same words (PRD one-vocabulary FR5).
   renderMapBacklogPanel() {
     const page = this.page || {};
     const items = this.backlogItems();
     const count = items.length;
     const shown = items.slice(0, 4);
     const sync = this.backlogSync();
-    const hq = this.isPersonalHQ();
     let rows;
     if (page.backlogLoading && !count) {
       rows =
@@ -6169,17 +6174,18 @@ export class WorkspaceCommandView {
             '</span><span class="ws-cmd-map-task-name">' +
             escapeHtml(label) +
             '</span></button>';
-          // "Accept Quest" is the presentation label; the accessible name spells
-          // out Promote to Ready so the control never obscures the real action (FR53).
+          // "Start" is the visible label; the accessible name spells out that
+          // the ticket moves into work so the control never obscures the real
+          // action (FR53). The data attribute keeps its historical name.
           const acceptButton =
             '<button type="button" class="ws-cmd-map-task-start" data-cmd-map-accept-quest="' +
             escapeHtml(id) +
-            '" aria-label="Accept Quest — Promote ' +
-            escapeHtml(label) +
-            ' to Ready"' +
+            '" aria-label="' +
+            escapeHtml(startFromBacklogLabel(label)) +
+            '"' +
             (busy ? ' disabled' : '') +
             '><i class="bi bi-check2" aria-hidden="true"></i><span>' +
-            (busy ? 'Accepting…' : 'Accept Quest') +
+            escapeHtml(busy ? WORK_LABELS.starting : WORK_LABELS.start) +
             '</span></button>';
           return '<div class="ws-cmd-map-task-row-wrap">' + openButton + acceptButton + '</div>';
         })
@@ -6187,12 +6193,12 @@ export class WorkspaceCommandView {
     } else {
       rows =
         '<div class="ws-cmd-map-empty is-quest-empty"><strong>' +
-        (hq ? 'Backlog clear' : 'Quest Board clear') +
+        escapeHtml(WORK_LABELS.backlogEmpty) +
         '</strong><span>Nothing saved for later. Add an idea without committing it.</span></div>';
     }
     return (
       '<div class="ws-cmd-map-window-section is-backlog">' +
-      this.mapZoneHeaderHTML('Backlog', hq ? 'Saved for later' : 'Quest Board', count) +
+      this.mapZoneHeaderHTML(WORK_LABELS.backlog, WORK_LABELS.backlogSubtitle, count) +
       this.backlogSyncBadgeHTML(sync) +
       '<div class="ws-cmd-map-task-list">' +
       rows +
@@ -6212,7 +6218,7 @@ export class WorkspaceCommandView {
     const promotedTask = await page.promoteBacklogItem(id, this.backlogItemOwner(id));
     this.mapAcceptQuestBusyId = '';
     // page.promoteBacklogItem() reloads backlog+tasks and calls refresh(),
-    // which repaints the Quest Board and Active Tasks together (FR54).
+    // which repaints the Backlog window and Active tickets together (FR54).
     if (promotedTask) {
       this.activeMapWindow = '';
       this.render();
@@ -6259,8 +6265,8 @@ export class WorkspaceCommandView {
   // compact sync status) plus a persistent non-modal drawer — the same
   // pattern as the Task drawer above — for the full list, editing, ordering,
   // promotion, and sync/conflict controls (FR34-37). The drawer is the single
-  // shared interaction surface opened from both Details and the Map Quest
-  // Board (group 5); there is exactly one drawer instance and one client
+  // shared interaction surface opened from both Details and the Map Backlog
+  // window (group 5); there is exactly one drawer instance and one client
   // record cache (page.backlogItems), never a per-entry-point copy.
 
   backlogItems() {
@@ -6422,8 +6428,8 @@ export class WorkspaceCommandView {
   openLegacyBacklogDrawer(trigger, opts) {
     const options = opts || {};
     this.backlogDrawerTrigger = trigger || null;
-    // Close the Map's Quest Board window so the drawer never opens beneath it
-    // (the same reason the Objectives window closes for other layers).
+    // Close the Map's Backlog window so the drawer never opens beneath it
+    // (the same reason the Tickets window closes for other layers).
     if (this.activeMapWindow) this.activeMapWindow = '';
     this.backlogDrawerOpen = true;
     if (options.selectId) {
@@ -10866,16 +10872,16 @@ export class WorkspaceCommandView {
     const status = String(task?.status || '')
       .trim()
       .toLowerCase();
-    if (this.isBlockedTask(task) || this.isNeedsInputTask(task)) return 'Resolve Quest';
-    if (this.isWorkingTask(task)) return 'Track Quest';
+    if (this.isBlockedTask(task) || this.isNeedsInputTask(task)) return WORK_LABELS.resolve;
+    if (this.isWorkingTask(task)) return WORK_LABELS.track;
     if (this.isQueuedTask(task)) return 'Open Queue';
     if (status === 'completed' || status === 'done') return 'Review Output';
-    return 'Open Quest';
+    return WORK_LABELS.open;
   }
 
-  // Dispatch a pending quest in place. executeTask owns the live-execution
+  // Dispatch a pending ticket in place. executeTask owns the live-execution
   // monitor and already guards against already-running tasks; we add a
-  // deterministic raced-state check so a quest that stopped being pending
+  // deterministic raced-state check so a ticket that stopped being pending
   // (started elsewhere, deleted) reports cleanly and refreshes.
   async startMapQuest(taskId) {
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
@@ -10885,7 +10891,7 @@ export class WorkspaceCommandView {
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
     const task = tasks.find(item => String(item?.id || '') === id);
     if (!task || !this.isQueuedTask(task)) {
-      if (window.Toast) window.Toast.info('That quest is no longer pending.');
+      if (window.Toast) window.Toast.info(WORK_LABELS.noLongerPending);
       if (typeof page.loadTasks === 'function') await page.loadTasks();
       return;
     }
@@ -10893,7 +10899,7 @@ export class WorkspaceCommandView {
       await page.executeTask(id, { skipConfirm: true, skipModal: true });
       this.trackAndShowTray(id);
     } catch (_error) {
-      if (window.Toast) window.Toast.error('Could not start the quest.');
+      if (window.Toast) window.Toast.error(WORK_LABELS.startFailed);
       if (typeof page.loadTasks === 'function') await page.loadTasks();
     }
   }
@@ -11269,7 +11275,7 @@ export class WorkspaceCommandView {
     const taskTone = task ? this.taskTone(task.status) : '';
     const taskDetail = task
       ? this.taskStatusLabel(task.status || agent?.status?.label || 'pending')
-      : 'No quest selected';
+      : 'No ticket selected';
     const session = this.latestAgentSession(agent);
     const sessionId = String(session?.id || '').trim();
     const loadoutDetail =
@@ -11312,10 +11318,10 @@ export class WorkspaceCommandView {
       const urgent = this.isBlockedTask(task) || this.isNeedsInputTask(task);
       const startable = this.isQueuedTask(task);
       if (startable) {
-        // A pending quest can be dispatched in place instead of only opened.
+        // A pending ticket can be dispatched in place instead of only opened.
         actions.push(
           action({
-            label: 'Start Quest',
+            label: WORK_LABELS.start,
             detail: taskDetail,
             icon: 'bi-play-fill',
             className: 'is-primary is-' + taskTone,
@@ -11337,7 +11343,7 @@ export class WorkspaceCommandView {
     actions.push(
       action({
         label: 'Give work',
-        detail: taskId ? 'New assignment' : 'Assign first quest',
+        detail: taskId ? 'New assignment' : WORK_LABELS.assignFirstTicket,
         icon: 'bi-plus-lg',
         className: taskId ? '' : 'is-primary',
         attrs: 'data-cmd-add-task="' + escapeHtml(agent.encodedName) + '"'
@@ -11418,7 +11424,7 @@ export class WorkspaceCommandView {
       ? [questActivityLabel, summary?.whenLabel || ''].filter(Boolean).join(' · ')
       : 'No recorded activity';
     const statCards = [
-      { label: 'Quests', value: openTaskCount },
+      { label: WORK_LABELS.tickets, value: openTaskCount },
       { label: 'Skills', value: Number(agent.skills?.count || 0) },
       { label: 'Tools', value: agent.mcpNames.length },
       { label: 'Units', value: agent.instanceCount }
@@ -11461,7 +11467,9 @@ export class WorkspaceCommandView {
         )
         .join('') +
       '</div>' +
-      '<section class="ws-cmd-rpg-quest-card"><span>Current Quest</span><strong>' +
+      '<section class="ws-cmd-rpg-quest-card"><span>' +
+      escapeHtml(WORK_LABELS.currentTicket) +
+      '</span><strong>' +
       escapeHtml(summary?.taskLabel || 'No ticket in progress') +
       '</strong><p>' +
       escapeHtml(questMeta) +

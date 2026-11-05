@@ -857,7 +857,7 @@ func (s *TodayService) folderReceiptTodayItem(offer FolderOffer, now time.Time) 
 			case "agent":
 				parts = append(parts, "Agent: "+row.Name)
 			case "task":
-				parts = append(parts, "First task: "+row.Name)
+				parts = append(parts, "First ticket: "+row.Name)
 			}
 		}
 		detail = strings.Join(parts, " · ")

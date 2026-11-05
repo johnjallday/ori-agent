@@ -270,7 +270,7 @@ func (s *Service) Start(ctx context.Context, id, tabID string) (*Snapshot, error
 		return s.project(ctx, op, tabID), nil
 	}
 	if !state.Startable {
-		return s.refuse(ctx, op, tabID, ErrStartRefused, "The task is "+taskStatusWords(state.Status)+", so it cannot be started from here. Open the task to decide what to do.")
+		return s.refuse(ctx, op, tabID, ErrStartRefused, "The ticket is "+taskStatusWords(state.Status)+", so it cannot be started from here. Open the ticket to decide what to do.")
 	}
 	// The task's own assignee, as saved and possibly edited since, must still
 	// be one instance in this workspace. A similarly named agent elsewhere or
@@ -282,9 +282,9 @@ func (s *Service) Start(ctx context.Context, id, tabID string) (*Snapshot, error
 		who := strings.TrimSpace(state.AgentName)
 		if who == "" || strings.EqualFold(who, "unassigned") {
 			// Removing an agent leaves its tasks unassigned.
-			return s.refuse(ctx, op, tabID, ErrAssignee, "The task has no agent now. Assign it to an agent in this workspace, then start it.")
+			return s.refuse(ctx, op, tabID, ErrAssignee, "The ticket has no agent now. Assign it to an agent in this workspace, then start it.")
 		}
-		return s.refuse(ctx, op, tabID, ErrAssignee, who+" is not in this workspace any more. Reassign the task, then start it.")
+		return s.refuse(ctx, op, tabID, ErrAssignee, who+" is not in this workspace any more. Reassign the ticket, then start it.")
 	}
 
 	flight := startFlight(op.ID)
@@ -404,7 +404,7 @@ func (s *Service) settle(ctx context.Context, op *Operation) (*Operation, error)
 	}
 	state, err := s.readTask(ctx, op)
 	if errors.Is(err, ErrTaskMissing) {
-		closed, endErr := s.end(ctx, op, StatusInvalidated, "the task no longer exists")
+		closed, endErr := s.end(ctx, op, StatusInvalidated, "the ticket no longer exists")
 		return s.written(ctx, op.ID, closed, endErr)
 	}
 	if err != nil {
@@ -434,7 +434,7 @@ func (s *Service) settle(ctx context.Context, op *Operation) (*Operation, error)
 		case claimed != nil && now.Sub(*claimed) > s.startGrace:
 			op.Status, changed = StatusUnresolved, true
 			appendReceipt(op, Receipt{Kind: ReceiptStartUnresolved, At: now, Ref: op.Task.TaskID,
-				Reason: "The start was accepted, but the task has not begun."})
+				Reason: "The start was accepted, but the ticket has not begun."})
 		}
 	}
 	if !changed {
@@ -496,7 +496,7 @@ func (s *Service) confirmCreated(ctx context.Context, op *Operation, state TaskS
 		// The saved assignee is the reviewed one, including a human's edit.
 		op.Context.AgentName, op.Context.AgentNodeID = name, strings.TrimSpace(state.AgentNodeID)
 	}
-	supersedePending(op, now, "the task was saved")
+	supersedePending(op, now, "the ticket was saved")
 	appendReceipt(op, Receipt{Kind: ReceiptTaskCreated, At: now, Ref: op.Task.TaskID})
 	return s.store.Update(ctx, op, op.Revision)
 }
@@ -545,7 +545,7 @@ func refusalReason(err error) string {
 	if errors.As(err, &refusal) && strings.TrimSpace(refusal.Reason) != "" {
 		return boundedReason(refusal.Reason)
 	}
-	return "Ori could not start the task right now."
+	return "Ori could not start the ticket right now."
 }
 
 // hostError keeps the task host's definitive answer and reduces everything

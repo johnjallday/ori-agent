@@ -2173,7 +2173,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 				_ = orihttp.RespondInternalError(w, "Failed to update workspace")
 				return
 			} else if blocker != "" {
-				_ = orihttp.RespondConflict(w, fmt.Sprintf("Stop the running task in %q before grouping this workspace.", blocker))
+				_ = orihttp.RespondConflict(w, fmt.Sprintf("Stop the running ticket in %q before grouping this workspace.", blocker))
 				return
 			}
 			// Physically move the folder tree when a folder store is available;

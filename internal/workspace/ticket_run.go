@@ -178,7 +178,7 @@ func scheduledFiringRefusal(t *Task) error {
 	}
 	state := t.CanonicalState()
 	if state == TicketStateCancelled {
-		return &TicketValidationError{Field: "state", Message: "cannot schedule task: ticket is Cancelled"}
+		return &TicketValidationError{Field: "state", Message: "cannot schedule a Cancelled ticket"}
 	}
 	switch t.Status {
 	case TaskStatusInProgress, TaskStatusWaitingForChoice:

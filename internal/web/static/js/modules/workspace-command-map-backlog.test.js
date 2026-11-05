@@ -4,7 +4,7 @@ import { WorkspaceCommandView } from './workspace-command.js';
 
 // Same headless-fixture pattern as workspace-command-backlog.test.js: the
 // constructor only touches the DOM via getElementById (stubbed to null), so a
-// bare instance exposes the Quest Board's pure builders without a real document.
+// bare instance exposes the Backlog window's pure builders without a real document.
 globalThis.document = { getElementById: () => null };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 globalThis.window = { Toast: null, location: { search: '' } };
@@ -41,42 +41,42 @@ const sixItems = [
   item('f', 'sixth idea')
 ];
 
-test('mapWindowOptions includes a Backlog entry whose accessible name says Backlog, not only Quest Board (FR50)', () => {
+test('mapWindowOptions includes a Backlog entry whose accessible name is Backlog (FR50)', () => {
   const view = Object.create(WorkspaceCommandView.prototype);
   const options = view.mapWindowOptions();
   const backlog = options.find(o => o.key === 'backlog');
   assert.ok(backlog, 'a backlog tool-belt entry exists');
-  assert.match(backlog.label, /Backlog/, 'accessible name/title mentions Backlog explicitly');
+  assert.equal(backlog.label, 'Backlog', 'accessible name/title is Backlog');
 });
 
 test('renderMapWindow dispatches the backlog key to renderMapBacklogPanel', () => {
   const view = makeView([]);
   view.activeMapWindow = 'backlog';
   const html = view.renderMapWindow(null);
-  assert.match(html, /Quest Board/);
+  assert.match(html, /Saved for later/);
   assert.match(html, /ws-cmd-map-window-backlog/);
 });
 
 test('renderMapBacklogPanel shows the local count and up to 4 ranked items (FR51)', () => {
   const view = makeView(sixItems);
   const html = view.renderMapBacklogPanel();
-  assert.match(html, /Quest Board/);
-  // kicker carries "Backlog" as supporting copy even though the title says Quest Board.
+  assert.match(html, /<strong>Saved for later<\/strong>/);
+  // kicker names the Backlog state the tickets wait in.
   assert.match(html, /<span>Backlog<\/span>/);
   const rowMatches = html.match(/data-cmd-map-open-backlog="/g) || [];
   assert.equal(rowMatches.length, 4, 'no more than 4 ranked items shown (FR51)');
   // No separate Add action here — it's redundant with the drawer's own Add
   // once Open Backlog gets you there, and previously read as a near-duplicate
   // of "Open Backlog" sitting right next to it (user feedback).
-  assert.ok(!html.includes('data-cmd-backlog-add'), 'no Add action in the Quest Board window');
+  assert.ok(!html.includes('data-cmd-backlog-add'), 'no Add action in the Backlog window');
   assert.ok(html.includes('Open Backlog'));
 });
 
 test('renderMapBacklogPanel shows an inviting empty state (FR51)', () => {
   const view = makeView([]);
   const html = view.renderMapBacklogPanel();
-  assert.match(html, /Quest Board clear/);
-  assert.ok(!/no tasks/i.test(html), 'must not imply Tasks is empty');
+  assert.match(html, /Backlog clear/);
+  assert.ok(!/no tickets/i.test(html), 'must not imply Tickets is empty');
 });
 
 test('renderMapBacklogPanel shows loading and error states distinctly (FR51)', () => {
@@ -86,7 +86,7 @@ test('renderMapBacklogPanel shows loading and error states distinctly (FR51)', (
   const failed = makeView([], { backlogLoadFailed: true });
   const html = failed.renderMapBacklogPanel();
   assert.match(html, /is-error/);
-  assert.ok(!html.includes('Quest Board clear'), 'error state must not read as the empty state');
+  assert.ok(!html.includes('Backlog clear'), 'error state must not read as the empty state');
 });
 
 test('renderMapBacklogPanel surfaces the sync warning badge (FR91)', () => {
@@ -95,12 +95,12 @@ test('renderMapBacklogPanel surfaces the sync warning badge (FR91)', () => {
   assert.match(html, /ws-cmd-panel-sync is-warning/);
 });
 
-test('renderMapBacklogPanel rows expose Accept Quest with Promote to Ready spelled out in the accessible name (FR9, 31, 53)', () => {
+test('renderMapBacklogPanel rows expose Start with the move into work spelled out in the accessible name (FR9, 31, 53)', () => {
   const view = makeView([item('a', 'Ship the thing')]);
   const html = view.renderMapBacklogPanel();
   assert.match(html, /data-cmd-map-accept-quest="a"/);
-  assert.match(html, /Accept Quest — Promote Ship the thing to Ready/);
-  assert.match(html, />Accept Quest</, 'visible label reads Accept Quest');
+  assert.match(html, /aria-label="Start — move Ship the thing into work"/);
+  assert.match(html, /<span>Start<\/span>/, 'visible label reads Start');
 });
 
 test('renderMapBacklogPanel items are never draggable or wired as agent/map units (FR39-40, 55)', () => {
@@ -131,7 +131,7 @@ test('runMapAcceptQuest is a no-op with no item id or missing page hook', async 
   assert.equal(view.mapAcceptQuestBusyId, '');
 });
 
-test('runMapAcceptQuest opens the real Task modal on the promoted task and closes the Quest Board window', async () => {
+test('runMapAcceptQuest opens the real Task modal on the promoted task and closes the Backlog window', async () => {
   // promoteBacklogItem resolves with the BacklogItemView shape ({task, owning_workspace_id,
   // owning_workspace_name}), same as every other backlog item in this codebase — not a flat task.
   const promotedTaskFlat = { id: 'a', workspace_id: 'w1', description: 'Ship it' };
@@ -153,7 +153,7 @@ test('runMapAcceptQuest opens the real Task modal on the promoted task and close
     assert.equal(
       view.activeMapWindow,
       '',
-      'Quest Board window closes so the modal is never stacked on top'
+      'Backlog window closes so the modal is never stacked on top'
     );
     assert.equal(openForEditCalls.length, 1);
     assert.deepEqual(
@@ -166,7 +166,7 @@ test('runMapAcceptQuest opens the real Task modal on the promoted task and close
   }
 });
 
-test('opening the shared drawer from the Quest Board closes the Map window first (FR52)', () => {
+test('opening the shared drawer from the Backlog window closes the Map window first (FR52)', () => {
   const view = makeView(sixItems);
   view.activeMapWindow = 'backlog';
   view.openBacklogDrawer({ focus() {} }, { selectId: 'c' });

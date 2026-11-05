@@ -252,7 +252,7 @@ test('wt demo: one reviewed task, one Start, real progress, and a refusal that c
     .length;
   await startButton.click();
   await expect(here.status).toHaveText(
-    'The task for Drummer was not started. The task has no agent now. Assign it to an agent in this workspace, then start it.'
+    'The ticket for Drummer was not started. The ticket has no agent now. Assign it to an agent in this workspace, then start it.'
   );
   await expect(here.actions.getByRole('button', { name: 'Try starting again' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open the ticket' })).toBeVisible();

@@ -587,7 +587,7 @@ func TestStart_RefusalsKeepTheTaskAndSayWhy(t *testing.T) {
 		if !errors.Is(err, ErrStartRefused) || refused.Status != StatusReviewed {
 			t.Fatalf("got %+v %v", refused, err)
 		}
-		if reason := lastReceipt(refused, ReceiptStartRefused).Reason; reason != "Ori could not start the task right now." {
+		if reason := lastReceipt(refused, ReceiptStartRefused).Reason; reason != "Ori could not start the ticket right now." {
 			t.Fatalf("reason leaked: %q", reason)
 		}
 	})
@@ -600,7 +600,7 @@ func TestStart_RefusalsKeepTheTaskAndSayWhy(t *testing.T) {
 		if !errors.Is(err, ErrAssignee) || refused == nil || refused.Status != StatusReviewed || f.tasks.started() != 0 {
 			t.Fatalf("got %+v %v starts=%d", refused, err, f.tasks.started())
 		}
-		if reason := lastReceipt(refused, ReceiptStartRefused).Reason; reason != "Mixer is not in this workspace any more. Reassign the task, then start it." {
+		if reason := lastReceipt(refused, ReceiptStartRefused).Reason; reason != "Mixer is not in this workspace any more. Reassign the ticket, then start it." {
 			t.Fatalf("reason: %q", reason)
 		}
 		// Removing an agent leaves its tasks unassigned: that is said as it is,
@@ -608,7 +608,7 @@ func TestStart_RefusalsKeepTheTaskAndSayWhy(t *testing.T) {
 		f.tasks.change("task-1", func(state *TaskState) { state.AgentName, state.AgentNodeID = "unassigned", "" })
 		unassigned, err := f.service.Start(t.Context(), reviewed.ID, "tab-a")
 		if !errors.Is(err, ErrAssignee) || f.tasks.started() != 0 ||
-			lastReceipt(unassigned, ReceiptStartRefused).Reason != "The task has no agent now. Assign it to an agent in this workspace, then start it." {
+			lastReceipt(unassigned, ReceiptStartRefused).Reason != "The ticket has no agent now. Assign it to an agent in this workspace, then start it." {
 			t.Fatalf("unassigned: %+v %v", unassigned.Receipts, err)
 		}
 		// The user reassigns the task itself; the task's assignee is what is checked.
@@ -761,7 +761,7 @@ func TestStartRecovery_AnUnprovenStartIsNeverRepeatedOnItsOwn(t *testing.T) {
 		}
 		f.clock = f.clock.Add(DefaultStartGrace + time.Second)
 		unresolved := f.read(reviewed.ID)
-		if unresolved.Status != StatusUnresolved || lastReceipt(unresolved, ReceiptStartUnresolved).Reason != "The start was accepted, but the task has not begun." {
+		if unresolved.Status != StatusUnresolved || lastReceipt(unresolved, ReceiptStartUnresolved).Reason != "The start was accepted, but the ticket has not begun." {
 			t.Fatalf("got %+v", unresolved.Receipts)
 		}
 		if f.tasks.started() != 1 {
@@ -791,7 +791,7 @@ func TestTaskDeleted_EndsContinuationAndStartsNothing(t *testing.T) {
 	reviewed := f.reviewed()
 	f.tasks.remove("task-1")
 	gone := f.read(reviewed.ID)
-	if gone.Status != StatusInvalidated || lastReceipt(gone, ReceiptContinuationEnd).Reason != "the task no longer exists" {
+	if gone.Status != StatusInvalidated || lastReceipt(gone, ReceiptContinuationEnd).Reason != "the ticket no longer exists" {
 		t.Fatalf("got %+v", gone)
 	}
 	if _, err := f.service.Start(t.Context(), reviewed.ID, "tab-a"); !errors.Is(err, ErrInvalidated) || f.tasks.started() != 0 {

@@ -4533,9 +4533,9 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.match(agentSheetHTML, /workspace-planning/);
     assert.match(agentSheetHTML, /filesystem/);
     assert.match(agentSheetHTML, /ws-cmd-rpg-stat-grid/);
-    assert.match(agentSheetHTML, /Current Quest/);
+    assert.match(agentSheetHTML, /Current ticket/);
     assert.match(agentSheetHTML, /Command Menu/);
-    assert.match(agentSheetHTML, /Track Quest/);
+    assert.match(agentSheetHTML, /<strong>Track<\/strong>/);
     assert.match(agentSheetHTML, /Continue Session/);
     assert.match(agentSheetHTML, /Open the Workshop/);
     // The user-facing register is Toolbox/Workshop everywhere (FR-168). The
@@ -5178,7 +5178,7 @@ test('objectives panel adds a Start action to pending quest rows only', () => {
   assert.match(html, /data-cmd-open-task="t-running"/);
 });
 
-test('agent command menu offers Start Quest for a pending priority task', () => {
+test('agent command menu offers Start for a pending priority ticket', () => {
   const view = Object.create(WorkspaceCommandView.prototype);
   view.priorityTaskForAgent = () => ({ id: 'q1', status: 'pending', description: 'Draft' });
   view.latestAgentSession = () => null;
@@ -5191,12 +5191,12 @@ test('agent command menu offers Start Quest for a pending priority task', () => 
 
   const html = view.renderMapAgentCommandMenu(agent, null);
 
-  assert.match(html, /Start Quest/);
+  assert.match(html, /<strong>Start<\/strong>/);
   assert.match(html, /data-cmd-map-start-task="q1"/);
   assert.doesNotMatch(html, /data-cmd-open-task="q1"/);
 });
 
-test('agent command menu keeps Track Quest (open) for an in-progress task', () => {
+test('agent command menu keeps Track (open) for an in-progress ticket', () => {
   const view = Object.create(WorkspaceCommandView.prototype);
   view.priorityTaskForAgent = () => ({ id: 'q2', status: 'in_progress', description: 'Run' });
   view.latestAgentSession = () => null;

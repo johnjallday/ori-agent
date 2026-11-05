@@ -527,7 +527,7 @@ func FolderFirstTaskMessage(reason, workspaceName string) string {
 	case FolderFirstTaskReasonSetupOpen:
 		return "Open " + name + " to finish its setup first."
 	case FolderFirstTaskReasonUnassigned:
-		return "The first task has no agent yet. Open " + name + " to assign one."
+		return "The first ticket has no agent yet. Open " + name + " to assign one."
 	case FolderFirstTaskReasonNoModel:
 		return "Add a model in Settings to run the first look."
 	case FolderFirstTaskReasonLocalActivation:

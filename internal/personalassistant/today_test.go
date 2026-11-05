@@ -260,7 +260,7 @@ func TestTodayService_SevenDayFolderSetupReceiptsSurviveReloadAndStayBounded(t *
 	}
 	items := got.Results.Items
 	if len(items) != 3 || items[0].ID != "project" || items[0].Kind != "folder_setup" ||
-		items[0].Title != "Set up Thesis" || !strings.Contains(items[0].Detail, "First task: Summarize drafts") ||
+		items[0].Title != "Set up Thesis" || !strings.Contains(items[0].Detail, "First ticket: Summarize drafts") ||
 		items[0].Route != "/workspaces/thesis" || items[1].Route != "/workspaces/downloads?panel=file-janitor" ||
 		items[2].ID != "result-1" || got.Results.Health.Status != TodaySectionAvailable {
 		t.Fatalf("Today setup receipts = %+v; health = %+v", items, got.Results.Health)

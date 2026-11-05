@@ -4,14 +4,14 @@ import { test, expect } from '@playwright/test';
  * End-to-end coverage for the primary workspace-backlog user flow (PRD
  * workspace-backlog FR19-22, 30-57): capture an idea in the Details Backlog
  * panel, edit and reorder it in the shared drawer, open that SAME drawer from
- * the Map's Quest Board, Promote to Ready, and verify the item leaves every
+ * the Map's Backlog window, Promote to Ready, and verify the item leaves every
  * Backlog projection and appears in Active Tasks — all without a page reload.
  *
  * Self-seeds a workspace + entry agent via the API (so the workspace loads
  * Map-ready with no Commander setup prompt), then drives the real UI.
  */
 test.describe('Workspace Backlog', () => {
-  test('capture → edit/reorder → open from Quest Board → promote → verify Active Tasks', async ({
+  test('capture → edit/reorder → open from the Map Backlog window → promote → verify Active tickets', async ({
     page
   }) => {
     test.setTimeout(45000);
@@ -97,7 +97,7 @@ test.describe('Workspace Backlog', () => {
       await page.locator('[data-cmd-drawer-close]').click();
       await expect(drawer).toBeHidden();
 
-      // --- 4. Open the SAME drawer from the Map's Quest Board (FR36, 52) ---
+      // --- 4. Open the SAME drawer from the Map's Backlog window (FR36, 52) ---
       await page.getByRole('button', { name: /^map$/i }).click();
       await expect(page.locator('#workspaceCommandView .ws-cmd-opmap')).toBeVisible();
       await page.locator('[data-cmd-map-window="backlog"]').click();

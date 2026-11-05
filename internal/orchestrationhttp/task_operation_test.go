@@ -501,8 +501,8 @@ func TestStartReviewedTask_RefusesWhatIsNotAFirstStart(t *testing.T) {
 		"has history":     {func(task *workspace.Task) { workspace.RecordTaskExecution(task, "success", "ok", started, 5) }, "already run"},
 		"cancelled":       {func(task *workspace.Task) { task.Status = workspace.TaskStatusCancelled }, "cancelled"},
 		"backlog":         {func(task *workspace.Task) { task.Status = workspace.TaskStatusBacklog }, "backlog"},
-		"unassigned":      {func(task *workspace.Task) { task.To, task.AssignedNodeID = "", "" }, "Assign the task"},
-		"word unassigned": {func(task *workspace.Task) { task.To = "unassigned" }, "Assign the task"},
+		"unassigned":      {func(task *workspace.Task) { task.To, task.AssignedNodeID = "", "" }, "Assign the ticket"},
+		"word unassigned": {func(task *workspace.Task) { task.To = "unassigned" }, "Assign the ticket"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

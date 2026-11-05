@@ -474,11 +474,11 @@ func operationErrorCode(err error) (int, string, string) {
 	}
 	switch {
 	case errors.Is(err, assistantops.ErrStartRefused):
-		return http.StatusConflict, "operation_start_refused", "Ori could not start the task right now."
+		return http.StatusConflict, "operation_start_refused", "Ori could not start the ticket right now."
 	case errors.Is(err, assistantops.ErrAssignee):
-		return http.StatusConflict, "operation_assignee", "The task's agent is not in this workspace. Reassign the task, then start it."
+		return http.StatusConflict, "operation_assignee", "The ticket's agent is not in this workspace. Reassign the ticket, then start it."
 	case errors.Is(err, assistantops.ErrTaskMissing):
-		return http.StatusGone, "operation_invalidated", "The task no longer exists."
+		return http.StatusGone, "operation_invalidated", "The ticket no longer exists."
 	case errors.Is(err, assistantops.ErrNotFound), errors.Is(err, assistantops.ErrForbidden):
 		return http.StatusNotFound, "operation_not_found", "That operation is not available."
 	case errors.Is(err, assistantops.ErrExpired):

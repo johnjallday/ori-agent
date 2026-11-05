@@ -103,7 +103,7 @@ func buildTaskExecutionTraceEntry(event Event) (TaskExecutionTrace, bool) {
 	switch event.Type {
 	case EventTaskStarted:
 		entry.Status = "started"
-		entry.Title = "Task started"
+		entry.Title = "Ticket started"
 		entry.Summary = taskExecutionTraceDataString(data, "description")
 	case EventTaskProgress:
 		entry.Status = "progress"
@@ -138,15 +138,15 @@ func buildTaskExecutionTraceEntry(event Event) (TaskExecutionTrace, bool) {
 		}
 	case EventTaskCompleted:
 		entry.Status = "completed"
-		entry.Title = "Task completed"
+		entry.Title = "Ticket completed"
 		entry.Summary = taskExecutionTraceDataString(data, "result")
 	case EventTaskFailed:
 		entry.Status = "failed"
-		entry.Title = "Task failed"
+		entry.Title = "Ticket failed"
 		entry.Summary = taskExecutionTraceDataString(data, "error")
 	case EventTaskBlocked:
 		entry.Status = "blocked"
-		entry.Title = "Task paused"
+		entry.Title = "Ticket paused"
 		entry.Summary = firstNonEmptyString(
 			taskExecutionTraceDataString(data, "reason"),
 			taskExecutionTraceDataString(data, "agent_response"),
@@ -154,7 +154,7 @@ func buildTaskExecutionTraceEntry(event Event) (TaskExecutionTrace, bool) {
 		)
 	case EventTaskResumed:
 		entry.Status = "resumed"
-		entry.Title = "Task resumed"
+		entry.Title = "Ticket resumed"
 		entry.Summary = taskExecutionTraceDataString(data, "message")
 	}
 

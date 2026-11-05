@@ -124,8 +124,8 @@ func firstNonEmptyString(values ...string) string {
 func buildToolAccessBlockedError(result string) *workspace.TaskBlockedError {
 	return &workspace.TaskBlockedError{
 		ReasonCode: "tool_access_unavailable",
-		Reason:     "The assigned agent reported that required tools or external access were unavailable for this task.",
-		Question:   "This task could not be completed with the tools currently available. Do you want to provide the missing context, retry after enabling the needed tools, or switch agents?",
+		Reason:     "The assigned agent reported that required tools or external access were unavailable for this ticket.",
+		Question:   "This ticket could not be completed with the tools currently available. Do you want to provide the missing context, retry after enabling the needed tools, or switch agents?",
 		SuggestedActions: []string{
 			"continue_with_instruction",
 			"retry",
@@ -146,8 +146,8 @@ func classifyInvalidTaskCompletionResponse(task workspace.Task, result string) *
 	if taskLooksForFreshPublicInformation(task.Description) && responseLooksLikeTaskStatusSummary(normalized) {
 		return &workspace.TaskBlockedError{
 			ReasonCode: "invalid_status_summary",
-			Reason:     "The agent summarized the task status instead of answering the current public-information request.",
-			Question:   "Retry this task with web search/source fallback, provide another source, or switch agents?",
+			Reason:     "The agent summarized the ticket status instead of answering the current public-information request.",
+			Question:   "Retry this ticket with web search/source fallback, provide another source, or switch agents?",
 			SuggestedActions: []string{
 				"retry",
 				"continue_with_instruction",
@@ -164,7 +164,7 @@ func classifyInvalidTaskCompletionResponse(task workspace.Task, result string) *
 				return &workspace.TaskBlockedError{
 					ReasonCode: "empty_web_search_results",
 					Reason:     "The web search returned no results and the agent did not broaden the search or synthesize an answer.",
-					Question:   "Retry this task with a broader search across public sources?",
+					Question:   "Retry this ticket with a broader search across public sources?",
 					SuggestedActions: []string{
 						"retry",
 						"continue_with_instruction",
@@ -177,7 +177,7 @@ func classifyInvalidTaskCompletionResponse(task workspace.Task, result string) *
 			return &workspace.TaskBlockedError{
 				ReasonCode: "tool_only_result",
 				Reason:     "The agent returned raw tool output instead of a final answer.",
-				Question:   "Retry this task and require the agent to synthesize the tool result into an answer?",
+				Question:   "Retry this ticket and require the agent to synthesize the tool result into an answer?",
 				SuggestedActions: []string{
 					"retry",
 					"continue_with_instruction",
@@ -211,8 +211,8 @@ func classifyInvalidTaskCompletionResponse(task workspace.Task, result string) *
 	if responseLooksLikePlaceholderResult(normalized) {
 		return &workspace.TaskBlockedError{
 			ReasonCode: "placeholder_result",
-			Reason:     "The task returned a placeholder result instead of the requested answer.",
-			Question:   "Retry this task, provide missing source content, or switch agents?",
+			Reason:     "The ticket returned a placeholder result instead of the requested answer.",
+			Question:   "Retry this ticket, provide missing source content, or switch agents?",
 			SuggestedActions: []string{
 				"retry",
 				"continue_with_instruction",
@@ -355,8 +355,8 @@ func classifyFilesystemListingVerificationFailure(task workspace.Task, result st
 
 	return &workspace.TaskBlockedError{
 		ReasonCode: "filesystem_result_unverified",
-		Reason:     "Task returned a filesystem listing answer without successful filesystem verification",
-		Question:   "I need to verify the folder contents with filesystem tools before completing this task. Retry with explicit filesystem verification?",
+		Reason:     "Ticket returned a filesystem listing answer without successful filesystem verification",
+		Question:   "I need to verify the folder contents with filesystem tools before completing this ticket. Retry with explicit filesystem verification?",
 		SuggestedActions: []string{
 			"retry",
 			"switch_agent_retry",
@@ -377,7 +377,7 @@ func classifyFilesystemListingIncompleteResponse(task workspace.Task, result str
 
 	return &workspace.TaskBlockedError{
 		ReasonCode: "filesystem_listing_incomplete",
-		Reason:     "Task did not return the requested filesystem file list",
+		Reason:     "Ticket did not return the requested filesystem file list",
 		Question:   "I need to return the actual file list, not a follow-up offer. Retry and return the verified list directly?",
 		SuggestedActions: []string{
 			"retry",
@@ -590,7 +590,7 @@ func extractQuestionBlockWorkflowStep(result string) *workspace.TaskBlockedWorkf
 	return &workspace.TaskBlockedWorkflowStep{
 		StepType:        "ask_form",
 		Title:           "Provide the missing details",
-		Summary:         "Answer the questions below so the task can continue.",
+		Summary:         "Answer the questions below so the ticket can continue.",
 		Fields:          fields,
 		FreeTextAllowed: true,
 	}
@@ -639,7 +639,7 @@ func extractEnumeratedClarificationWorkflowStep(result string) *workspace.TaskBl
 	return &workspace.TaskBlockedWorkflowStep{
 		StepType:        "ask_choice",
 		Title:           "Choose the next step",
-		Summary:         "Pick one option below to continue this task.",
+		Summary:         "Pick one option below to continue this ticket.",
 		Choices:         choices,
 		FreeTextAllowed: true,
 	}
@@ -667,7 +667,7 @@ func extractInlineClarificationWorkflowStep(result string) *workspace.TaskBlocke
 			return &workspace.TaskBlockedWorkflowStep{
 				StepType: "ask_choice",
 				Title:    "Choose the next step",
-				Summary:  "Pick one option below to continue this task.",
+				Summary:  "Pick one option below to continue this ticket.",
 				Choices: []workspace.TaskBlockedChoice{
 					{
 						ID:     buildBlockedChoiceID("1", first),
@@ -898,7 +898,7 @@ func extractQuestionFormWorkflowStep(result string) *workspace.TaskBlockedWorkfl
 	return &workspace.TaskBlockedWorkflowStep{
 		StepType:        "ask_form",
 		Title:           "Provide the missing details",
-		Summary:         "Answer the questions below so the task can continue.",
+		Summary:         "Answer the questions below so the ticket can continue.",
 		Fields:          fields,
 		FreeTextAllowed: true,
 	}

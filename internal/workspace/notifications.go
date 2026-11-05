@@ -85,20 +85,20 @@ func (ns *NotificationService) eventToNotification(event Event) *Notification {
 
 	switch event.Type {
 	case EventTaskCreated:
-		title = "New Task Assigned"
-		message = fmt.Sprintf("A new task has been created in workspace %s", event.WorkspaceID)
+		title = "New Ticket Assigned"
+		message = fmt.Sprintf("A new ticket has been created in workspace %s", event.WorkspaceID)
 		priority = PriorityMedium
 	case EventTaskCompleted:
-		title = "Task Completed"
-		message = fmt.Sprintf("Task completed successfully in workspace %s", event.WorkspaceID)
+		title = "Ticket Completed"
+		message = fmt.Sprintf("Ticket completed successfully in workspace %s", event.WorkspaceID)
 		priority = PriorityMedium
 	case EventTaskFailed:
-		title = "Task Failed"
-		message = fmt.Sprintf("Task failed in workspace %s", event.WorkspaceID)
+		title = "Ticket Failed"
+		message = fmt.Sprintf("Ticket failed in workspace %s", event.WorkspaceID)
 		priority = PriorityHigh
 	case EventTaskTimeout:
-		title = "Task Timeout"
-		message = fmt.Sprintf("Task exceeded timeout in workspace %s", event.WorkspaceID)
+		title = "Ticket Timeout"
+		message = fmt.Sprintf("Ticket exceeded timeout in workspace %s", event.WorkspaceID)
 		priority = PriorityHigh
 	case EventWorkspaceCreated:
 		title = "Workspace Created"

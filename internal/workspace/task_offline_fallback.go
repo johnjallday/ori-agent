@@ -26,7 +26,7 @@ func (h *LLMTaskHandler) buildOfflineBlockedError(task Task, providerName string
 	return &TaskBlockedError{
 		ReasonCode:       reasonLocalProviderOffline,
 		Reason:           fmt.Sprintf("The local provider %q is unreachable: %v", providerName, cause),
-		Question:         fmt.Sprintf("The local provider %q appears to be offline. Retry, switch to another agent, or mark the task failed?", providerName),
+		Question:         fmt.Sprintf("The local provider %q appears to be offline. Retry, switch to another agent, or mark the ticket failed?", providerName),
 		SuggestedActions: []string{"retry", "switch_agent_retry", "mark_failed"},
 	}
 }
@@ -80,7 +80,7 @@ func (h *LLMTaskHandler) fallbackCloudSpendGate(ag *resolvedTaskAgent, task Task
 	return &TaskBlockedError{
 		ReasonCode:       reasonFallbackNeedsCloudOK,
 		Reason:           fmt.Sprintf("The local provider is offline and the configured fallback %q is a paid cloud provider.", fallbackProvider),
-		Question:         fmt.Sprintf("Allow this task to fall back to the paid cloud provider %q (incurs cost)?", fallbackProvider),
+		Question:         fmt.Sprintf("Allow this ticket to fall back to the paid cloud provider %q (incurs cost)?", fallbackProvider),
 		SuggestedActions: []string{"allow_cloud_fallback_retry", "retry", "mark_failed"},
 	}
 }

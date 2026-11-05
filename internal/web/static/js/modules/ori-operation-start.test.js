@@ -582,7 +582,7 @@ test('an ended request says the task is still there, unless the task itself is g
     snapshot: operation('invalidated', {
       receipts: [
         receipt('task_created'),
-        { kind: 'continuation_ended', ref: 'invalidated', reason: 'the task no longer exists' }
+        { kind: 'continuation_ended', ref: 'invalidated', reason: 'the ticket no longer exists' }
       ]
     }),
     phase: PHASE.ENDED

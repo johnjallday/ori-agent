@@ -137,7 +137,7 @@ func ParseTaskListResultMarkdown(markdown string) (*TaskListResult, error) {
 			continue
 		}
 		if currentGroupIndex < 0 {
-			result.Groups = append(result.Groups, TaskListResultGroup{Title: "Tasks"})
+			result.Groups = append(result.Groups, TaskListResultGroup{Title: LabelResultGroupTitle})
 			currentGroupIndex = len(result.Groups) - 1
 		}
 		result.Groups[currentGroupIndex].Items = append(result.Groups[currentGroupIndex].Items, item)
@@ -145,7 +145,7 @@ func ParseTaskListResultMarkdown(markdown string) (*TaskListResult, error) {
 
 	result.Groups = compactTaskListResultGroups(result.Groups)
 	if strings.TrimSpace(result.ParentTitle) == "" {
-		result.ParentTitle = "Create workflow from task result"
+		result.ParentTitle = LabelResultParentTitle
 	}
 	if CountTaskListResultItems(result) == 0 {
 		return nil, fmt.Errorf("task result does not contain checklist items")
@@ -271,7 +271,7 @@ func inferTaskListParentTitle(lines []string) string {
 		}
 		return cleanParentTaskTitle(heading)
 	}
-	return "Create workflow from task result"
+	return LabelResultParentTitle
 }
 
 func shouldUseTaskResultHeadingAsGroup(heading string) bool {
@@ -310,7 +310,7 @@ func cleanParentTaskTitle(title string) string {
 	title = strings.TrimSpace(strings.TrimPrefix(title, "Task List:"))
 	title = strings.TrimSpace(taskResultNumberPrefix.ReplaceAllString(title, ""))
 	if strings.TrimSpace(title) == "" {
-		return "Create workflow from task result"
+		return LabelResultParentTitle
 	}
 	if !strings.Contains(strings.ToLower(title), "task") {
 		return title
@@ -350,7 +350,7 @@ func compactTaskListResultGroups(groups []TaskListResultGroup) []TaskListResultG
 		}
 		title := strings.TrimSpace(taskResultNumberPrefix.ReplaceAllString(group.Title, ""))
 		if title == "" {
-			title = "Tasks"
+			title = LabelResultGroupTitle
 		}
 		items := make([]TaskListResultItem, 0, len(group.Items))
 		for _, item := range group.Items {

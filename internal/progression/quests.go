@@ -860,8 +860,8 @@ func BuiltinQuests() []Quest {
 		},
 		{
 			ID: "t2-run-task", Tier: 2,
-			Title:     "Run your first task",
-			Why:       "Hand Ori a task and watch it work — this is where the real value starts.",
+			Title:     ws.LabelRunYourFirstTicket,
+			Why:       "Hand Ori a ticket and watch it work — this is where the real value starts.",
 			Match:     onEvent(ws.EventTaskStarted),
 			Satisfied: func(s Snapshot) bool { return s.TasksStarted > 0 },
 		},
@@ -876,14 +876,14 @@ func BuiltinQuests() []Quest {
 		},
 		{
 			ID: "t3-delegate", Tier: 3,
-			Title:     "Delegate a task to an agent",
+			Title:     ws.LabelGiveAnAgentATicket,
 			Why:       "Delegation is where Ori starts saving you real time.",
 			Match:     onEvent(ws.EventTaskAssigned),
 			Satisfied: func(s Snapshot) bool { return s.AgentTasksDone > 0 },
 		},
 		{
 			ID: "t3-agent-task-done", Tier: 3,
-			Title: "See an agent finish a task",
+			Title: "See an agent finish a ticket",
 			Why:   "Close the loop — an agent completing work on its own is the core moment.",
 			Match: func(ev ws.Event) bool {
 				return ev.Type == ws.EventTaskCompleted && dataString(ev, "agent") != ""
@@ -908,8 +908,8 @@ func BuiltinQuests() []Quest {
 		},
 		{
 			ID: "t4-tool-task", Tier: 4,
-			Title: "Run a task that uses a tool",
-			Why:   "Put the new capability to work in an actual task.",
+			Title: "Run a ticket that uses a tool",
+			Why:   "Put the new capability to work in an actual ticket.",
 			Match: onEvent(ws.EventTaskToolCall),
 		},
 
