@@ -1,6 +1,12 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { basename } from 'node:path';
+import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+
+// axe-core comes from jsdelivr like the other a11y specs; AXE_CORE_FILE serves
+// a local copy of the same version where that CDN is unreachable.
+const AXE_URL = 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js';
+const EVIDENCE = 'tasks/evidence-notes-first-onboarding';
 
 // Notes-first onboarding across surfaces (tasks/tasks-notes-first-onboarding.md).
 // The personal notes ask belongs to the Personal Assistant: on a workspace page
@@ -97,6 +103,16 @@ test.beforeAll(async ({ request }) => {
 // cases exercise an otherwise empty conversation.
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
+  const axeFile = process.env.AXE_CORE_FILE || '';
+  if (axeFile && existsSync(axeFile)) {
+    await page.route(AXE_URL, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/javascript',
+        body: readFileSync(axeFile, 'utf8')
+      })
+    );
+  }
   await page.route('**/lead-conversation/open', route =>
     route.fulfill({ json: { changed: false } })
   );
@@ -293,4 +309,240 @@ test('a Notes entry while the manager is replying changes nothing and says how t
   );
   await expect(title(page)).toHaveText('Atlas');
   await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+});
+
+const action = (page: Page, id: string) => card(page).locator(`[data-second-brain-action="${id}"]`);
+
+/** Moves focus with Tab alone until the target has it. */
+async function tabTo(page: Page, target: Locator, max = 25) {
+  for (let i = 0; i < max; i += 1) {
+    if (await target.evaluate(node => node === document.activeElement)) return;
+    await page.keyboard.press('Tab');
+  }
+  await expect(target).toBeFocused();
+}
+
+async function openHome(page: Page, theme = 'light') {
+  await page.emulateMedia({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce' });
+  await page.addInitScript(value => {
+    try {
+      localStorage.setItem('ori-theme', value);
+    } catch (_) {
+      // The page falls back to its default theme.
+    }
+  }, theme);
+  await page.goto('/');
+  await page.waitForFunction(() =>
+    Boolean(
+      (
+        window as unknown as {
+          PersonalAssistantPanel?: { _state?: { personalAssistant?: unknown } };
+        }
+      ).PersonalAssistantPanel?._state?.personalAssistant
+    )
+  );
+  await openDrawer(page);
+}
+
+async function openAsk(page: Page) {
+  await page.evaluate(() =>
+    (
+      window as unknown as { PersonalAssistantSecondBrain: { openAsk: () => Promise<boolean> } }
+    ).PersonalAssistantSecondBrain.openAsk()
+  );
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+}
+
+test('the card appearing by itself never takes focus from the composer', async ({ page }) => {
+  await watch(page);
+  await page.goto(`/workspaces/${commander.slug}?mode=map`);
+  await openDrawer(page);
+  if ((await title(page).textContent())?.trim() !== 'Portfolio Manager')
+    await choose(page, /Portfolio Manager/);
+  await input(page).fill('still typing');
+  await input(page).focus();
+  // The assistant becomes the recipient without a click in the drawer.
+  await page.evaluate(() =>
+    (
+      window as unknown as { PersonalAssistantPanel: { choosePersonal: () => boolean } }
+    ).PersonalAssistantPanel.choosePersonal()
+  );
+  await expect(title(page)).toHaveText('Atlas');
+  await expect(card(page)).toBeVisible();
+  await expect(input(page)).toBeFocused();
+  expect(await input(page).inputValue()).toBe('still typing');
+});
+
+for (const theme of ['light', 'dark']) {
+  for (const width of [1440, 768, 390]) {
+    test(`the Notes-first choice at ${width}px (${theme}) fits, wraps long names, and axe finds no A/AA violations`, async ({
+      page
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      // A long, hostile vault name in the alternative must wrap, not overflow.
+      await page.route('**/api/personal-assistant/second-brain', async route => {
+        const response = await route.fetch();
+        const body = await response.json().catch(() => null);
+        if (!body?.second_brain) return route.fulfill({ response });
+        body.second_brain.detected = [
+          {
+            id: 'v_long',
+            name: '<b>Very</b> long vault name '.repeat(6).trim(),
+            parent: 'Documents',
+            path: '/tmp/never-read'
+          }
+        ];
+        await route.fulfill({ response, json: body });
+      });
+      await openHome(page, theme);
+      await openAsk(page);
+      await card(page).locator('[data-second-brain-existing] > summary').click();
+      await expect(action(page, 'read')).toBeVisible();
+      const fits = await card(page).evaluate(node => ({
+        fits: node.scrollWidth <= node.clientWidth + 1,
+        right: node.getBoundingClientRect().right
+      }));
+      expect(fits.fits).toBeTruthy();
+      expect(fits.right).toBeLessThanOrEqual(width + 1);
+      // The hostile name is text, never markup.
+      await expect(card(page).locator('b')).toHaveCount(0);
+      await page.addScriptTag({ url: AXE_URL });
+      const violations = await page.evaluate(async () =>
+        (
+          await (
+            window as unknown as {
+              axe: {
+                run: (
+                  selector: string,
+                  options: unknown
+                ) => Promise<{ violations: { id: string; nodes: { target: string[] }[] }[] }>;
+              };
+            }
+          ).axe.run('#personalAssistantSecondBrain', {
+            runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+          })
+        ).violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target.join(' ')) }))
+      );
+      expect(violations).toEqual([]);
+      mkdirSync(EVIDENCE, { recursive: true });
+      await card(page).screenshot({ path: join(EVIDENCE, `spec-choice-${width}-${theme}.png`) });
+    });
+  }
+}
+
+test('Notes card styles stay on the Notes card', async ({ page }) => {
+  await openHome(page);
+  // An unrelated specialist offer keeps Bootstrap's own link and outline look.
+  const colors = await page.evaluate(() => {
+    const offer = document.createElement('section');
+    offer.className = 'pa-specialist-offer';
+    offer.innerHTML =
+      '<button class="btn btn-sm btn-link">Other</button><button class="btn btn-sm btn-outline-secondary">Other</button>';
+    document.body.append(offer);
+    const notes = document.querySelector('#personalAssistantSecondBrain');
+    const probe = document.createElement('button');
+    probe.className = 'btn btn-sm btn-link';
+    notes?.append(probe);
+    const read = (el: Element | null | undefined) => (el ? getComputedStyle(el).color : '');
+    const out = {
+      otherLink: read(offer.children[0]),
+      otherOutline: read(offer.children[1]),
+      notesLink: read(probe)
+    };
+    offer.remove();
+    probe.remove();
+    return out;
+  });
+  expect(colors.notesLink).not.toBe(colors.otherLink);
+  expect(colors.otherLink).toBe('rgb(13, 110, 253)');
+});
+
+test('keyboard alone: set up, answer, go back, confirm, open the first note, keep the caret', async ({
+  page,
+  request
+}) => {
+  // The interview's suggestion arrives while the user is typing.
+  let releaseInterview = () => {};
+  const held = new Promise<void>(resolve => {
+    releaseInterview = resolve;
+  });
+  await page.route('**/api/personal-assistant/knowledge/interview', async route => {
+    const response = await route.fetch();
+    const body = await response.json().catch(() => ({}));
+    await held;
+    body.suggestion = { text: 'Album launch', folder: 'Album Launch' };
+    await route.fulfill({ response, json: body });
+  });
+  await openHome(page);
+  await openAsk(page);
+  await expect(action(page, 'setup')).toBeFocused();
+  // Every Notes control, the disclosure included, shows the same ink ring.
+  const summary = card(page).locator('[data-second-brain-existing] > summary');
+  await tabTo(page, summary);
+  const ring = await summary.evaluate(node => {
+    const style = getComputedStyle(node);
+    return { outline: style.outlineColor, width: style.outlineWidth, ink: style.color };
+  });
+  expect(ring.width).toBe('2px');
+  expect(ring.outline).toBe(ring.ink);
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(action(page, 'setup')).toBeFocused();
+  await page.keyboard.press('Enter');
+  // Explicitly entering the question focuses its answer.
+  const answer = card(page).locator('[data-project-answer]');
+  await expect(answer).toBeFocused();
+  await page.keyboard.type('Finishing the spring mix');
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press('ArrowLeft');
+  releaseInterview();
+  await expect(action(page, 'suggestion')).toBeVisible();
+  // The repaint kept the field, its text and its caret.
+  await expect(answer).toBeFocused();
+  await expect(answer).toHaveValue('Finishing the spring mix');
+  const caret = await answer.evaluate(node => (node as HTMLTextAreaElement).selectionStart);
+  expect(caret).toBe('Finishing the spring mix'.length - 3);
+
+  await tabTo(page, action(page, 'save'));
+  await page.keyboard.press('Enter');
+  const name = card(page).locator('[data-project-name]');
+  await expect(name).toBeFocused();
+  // Back returns to the answer, kept.
+  await tabTo(page, action(page, 'back'));
+  await page.keyboard.press('Enter');
+  await expect(answer).toBeFocused();
+  await expect(answer).toHaveValue('Finishing the spring mix');
+  await tabTo(page, action(page, 'save'));
+  await page.keyboard.press('Enter');
+  await expect(name).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('Spring Mix');
+  await tabTo(page, action(page, 'confirm'));
+  await page.keyboard.press('Enter');
+  await expect(card(page).locator('[data-second-brain-stage="place"]')).toBeVisible();
+  await tabTo(page, action(page, 'create'));
+  await page.keyboard.press('Enter');
+
+  const first = card(page).locator('[data-second-brain-first-note]');
+  await expect(first).toContainText('Spring Mix', { timeout: 75_000 });
+  const open = card(page).getByRole('button', { name: 'Open Spring Mix' });
+  await tabTo(page, open, 40);
+  await page.keyboard.press('Enter');
+  await expect(card(page).locator('.pa-second-brain__preview')).toContainText(
+    'Finishing the spring mix'
+  );
+  expect((await secondBrain(request)).status).toBe('connected');
+
+  // Disconnect, reviewed, from the keyboard: the safe way out has focus.
+  await page.evaluate(() =>
+    (
+      window as unknown as { PersonalAssistantSecondBrain: { openManage: () => Promise<boolean> } }
+    ).PersonalAssistantSecondBrain.openManage()
+  );
+  await tabTo(page, action(page, 'disconnect'), 40);
+  await page.keyboard.press('Enter');
+  await expect(action(page, 'cancel')).toBeFocused();
+  await page.keyboard.press('Enter');
+  // Cancel puts focus back on the Disconnect it came from.
+  await expect(action(page, 'disconnect')).toBeFocused();
+  expect((await secondBrain(request)).status).toBe('connected');
 });

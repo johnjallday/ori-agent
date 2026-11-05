@@ -1932,7 +1932,7 @@ function revealFocusedControl() {
     !active ||
     !scroll?.contains(active) ||
     !active.closest(
-      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderOffer, #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderOffer, #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup, #personalAssistantSecondBrain'
     )
   )
     return;

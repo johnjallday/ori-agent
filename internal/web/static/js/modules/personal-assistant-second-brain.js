@@ -943,6 +943,51 @@ export function secondBrainPromptDue({ phase, placement, panelOpen, recorded } =
   return recorded !== true && phase === 'ask' && placement !== 'none' && panelOpen === true;
 }
 
+// secondBrainFocusSelector names where focus belongs when a step opens: the
+// field the step asks for (the project answer, its name, the folder name), the
+// safe way out of a review, otherwise '' for the step's first control.
+export function secondBrainFocusSelector({
+  phase,
+  setupStep = '',
+  projectStatus = '',
+  hasParent = false
+} = {}) {
+  const asking = phase === 'project' || (phase === 'setup' && setupStep === 'project');
+  if (asking && projectStatus === 'ask') return '[data-project-answer]';
+  if (asking && projectStatus === 'name') return '[data-project-name]';
+  if (phase === 'setup' && setupStep === 'place' && hasParent) return '[data-second-brain-name]';
+  if (phase === 'disconnect') return '[data-second-brain-action="cancel"]';
+  return '';
+}
+
+// The fields and controls whose focus (and caret) a repaint keeps: a status
+// read or a hint arriving rebuilds the card, never the user's place in it.
+const KEPT_FOCUS = [
+  'data-project-answer',
+  'data-project-name',
+  'data-second-brain-name',
+  'data-second-brain-capture',
+  'data-second-brain-action'
+];
+
+// secondBrainKeptFocusSelector is the selector that finds the focused element
+// again after a repaint, or '' when it is not one the card can find again.
+export function secondBrainKeptFocusSelector(element) {
+  if (!element?.getAttribute) return '';
+  for (const name of KEPT_FOCUS) {
+    if (!element.hasAttribute?.(name)) continue;
+    const value = element.getAttribute(name);
+    if (name === 'data-second-brain-action') {
+      return /^[a-z0-9-]+$/.test(String(value || '')) ? `[${name}="${value}"]` : '';
+    }
+    return `[${name}]`;
+  }
+  if (element.classList?.contains?.('folder-path-entry__input')) return '.folder-path-entry__input';
+  if (element.tagName === 'SUMMARY' && element.closest?.('[data-second-brain-existing]'))
+    return '[data-second-brain-existing] > summary';
+  return '';
+}
+
 // What the drawer's status line adds when a Notes entry could not switch it to
 // the assistant: how to come back once the reason has passed.
 export const NOTES_HANDOFF_RETRY = 'Then open Notes again.';
@@ -1039,7 +1084,12 @@ const state = {
   missions: null,
   offerPrefilled: '',
   // Whether "Already have notes?" is open on the Notes-first choice.
-  existingOpen: false
+  existingOpen: false,
+  // A control the user was on while it was disabled for a request, to put
+  // them back on once it is enabled again.
+  keptFocus: null,
+  // Where Back or Cancel returns focus, once (the control the step came from).
+  focusReturn: ''
 };
 
 let pathEntry = null;
@@ -2065,7 +2115,11 @@ function renderDisconnect(body) {
   body.append(
     actionRow(view.actions, action => {
       if (action.id === 'confirm-disconnect') void disconnect();
-      else back();
+      else {
+        // Keep it connected returns focus to the Disconnect it came from.
+        state.focusReturn = '[data-second-brain-action="disconnect"]';
+        back();
+      }
     })
   );
 }
@@ -2248,14 +2302,8 @@ async function loadSetupInterview() {
     state.setup.step === 'project' &&
     project.status === 'ask'
   ) {
-    const typing = document.activeElement?.matches?.('[data-project-answer]');
-    const caret = typing ? document.activeElement.selectionStart : null;
+    // render keeps the focused field and its caret across the repaint.
     render();
-    if (typing) {
-      const area = document.querySelector('#personalAssistantSecondBrain [data-project-answer]');
-      area?.focus?.();
-      if (area && caret != null) area.setSelectionRange(caret, caret);
-    }
   }
 }
 
@@ -2650,7 +2698,20 @@ function render() {
   const els = elements();
   if (!els?.body) return;
   const place = secondBrainPlacement(state);
-  const focusWithin = els.root.contains(document.activeElement);
+  const active = document.activeElement;
+  const focusWithin = els.root.contains(active);
+  // Where the user is in the card, so a repaint can put them back, caret and
+  // all. A control disabled while a request runs is remembered until it is back.
+  const keptSelector = focusWithin ? secondBrainKeptFocusSelector(active) : '';
+  const kept = keptSelector
+    ? {
+        selector: keptSelector,
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+      }
+    : focusWithin
+      ? null
+      : state.keptFocus;
   window.PersonalAssistantTranscript?.beforeChange?.();
   const home = place === 'needs' && els.needs ? els.needs : els.thread;
   // The card is moved, never copied, between the conversation and Needs you,
@@ -2684,15 +2745,41 @@ function render() {
     els.status.hidden = !els.status.textContent;
   }
   showError(state.error);
-  // A click moves focus into the new step; a turn that appears by itself never
-  // takes focus from the composer.
-  if (
-    (state.focusNext || focusWithin) &&
-    place !== 'none' &&
-    !document.getElementById('personalAssistantPanel')?.hidden
-  ) {
+  // A click moves focus into the new step, onto the field it asks for; a repaint
+  // keeps the user's place; a turn that appears by itself never takes focus
+  // from the composer.
+  state.keptFocus = null;
+  const open = place !== 'none' && !document.getElementById('personalAssistantPanel')?.hidden;
+  const again = open && !state.focusNext && kept ? els.body.querySelector(kept.selector) : null;
+  if (again) {
+    if (!again.disabled) {
+      again.focus?.({ preventScroll: true });
+      if (kept.start != null && typeof again.setSelectionRange === 'function') {
+        try {
+          again.setSelectionRange(kept.start, kept.end ?? kept.start);
+        } catch (_) {
+          // Not every field takes a selection; focus alone is kept.
+        }
+      }
+    } else {
+      state.keptFocus = kept;
+      els.root.tabIndex = -1;
+      els.root.focus?.({ preventScroll: true });
+    }
+  } else if (open && (state.focusNext || focusWithin)) {
+    const preferred =
+      state.focusReturn ||
+      secondBrainFocusSelector({
+        phase: state.phase,
+        setupStep: state.setup?.step,
+        projectStatus: state.project?.status,
+        hasParent: Boolean(state.setup?.parent)
+      });
+    state.focusReturn = '';
     const target =
-      els.body.querySelector('button:not([disabled]), input:not([disabled]), summary') || els.root;
+      (preferred && els.body.querySelector(`${preferred}:not([disabled])`)) ||
+      els.body.querySelector('button:not([disabled]), input:not([disabled]), summary') ||
+      els.root;
     if (target === els.root) els.root.tabIndex = -1;
     target.focus?.({ preventScroll: true });
   }

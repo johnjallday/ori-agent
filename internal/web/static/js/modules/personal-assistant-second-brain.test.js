@@ -65,10 +65,86 @@ import {
   secondBrainDisconnectedLine,
   ONE_NOTES_FOLDER_LINE,
   NOTES_HANDOFF_RETRY,
+  secondBrainFocusSelector,
+  secondBrainKeptFocusSelector,
   secondBrainSetupStage,
   secondBrainFirstNoteView,
   EMPTY_START_LINE
 } from './personal-assistant-second-brain.js';
+
+test('each step opens on the field it asks for, and a review on its safe way out', () => {
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'setup', setupStep: 'project', projectStatus: 'ask' }),
+    '[data-project-answer]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'project', projectStatus: 'ask' }),
+    '[data-project-answer]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'setup', setupStep: 'project', projectStatus: 'name' }),
+    '[data-project-name]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'setup', setupStep: 'place', hasParent: true }),
+    '[data-second-brain-name]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'disconnect' }),
+    '[data-second-brain-action="cancel"]'
+  );
+  // Everything else: the step's first control.
+  assert.equal(secondBrainFocusSelector({ phase: 'ask' }), '');
+  assert.equal(secondBrainFocusSelector({ phase: 'setup', setupStep: 'place' }), '');
+});
+
+test('a repaint finds the focused field or control again, and only safe selectors', () => {
+  const element = (attrs, extra = {}) => ({
+    hasAttribute: name => Object.hasOwn(attrs, name),
+    getAttribute: name => attrs[name] ?? null,
+    classList: { contains: name => (extra.classes || []).includes(name) },
+    tagName: extra.tagName || 'TEXTAREA',
+    closest: selector => (extra.closest === selector ? {} : null)
+  });
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-project-answer': '' })),
+    '[data-project-answer]'
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-second-brain-capture': '' })),
+    '[data-second-brain-capture]'
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-second-brain-action': 'confirm-disconnect' })),
+    '[data-second-brain-action="confirm-disconnect"]'
+  );
+  // A value that is not a plain action id is never turned into a selector.
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-second-brain-action': 'x"] , body [y' })),
+    ''
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(element({}, { classes: ['folder-path-entry__input'] })),
+    '.folder-path-entry__input'
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(
+      element({}, { tagName: 'SUMMARY', closest: '[data-second-brain-existing]' })
+    ),
+    '[data-second-brain-existing] > summary'
+  );
+  assert.equal(secondBrainKeptFocusSelector(element({})), '');
+  assert.equal(secondBrainKeptFocusSelector(null), '');
+  // render uses both: an explicit step change goes to the step's field; a
+  // repaint (a hint or status arriving) restores the field and its caret.
+  const render = sourceBetween('function render() {', 'function baseName(');
+  assert.match(render, /secondBrainKeptFocusSelector\(active\)/);
+  assert.match(render, /!state\.focusNext && kept/);
+  assert.match(render, /setSelectionRange\(kept\.start, kept\.end \?\? kept\.start\)/);
+  assert.match(render, /secondBrainFocusSelector\(\{/);
+  // A card that appears by itself (no click, focus elsewhere) takes no focus.
+  assert.match(render, /else if \(open && \(state\.focusNext \|\| focusWithin\)\)/);
+});
 
 test('the setup says which of its two steps this is and why the project comes first', () => {
   const first = secondBrainSetupStage('project');
@@ -298,7 +374,9 @@ test('disconnect is reviewed first, with truthful consequences for each origin',
   assert.doesNotMatch(manage, /disconnect\(\)/);
   const review = sourceBetween('function renderDisconnect(', '// renderProjects lists');
   assert.match(review, /'confirm-disconnect'\) void disconnect\(\)/);
-  assert.match(review, /else back\(\)/);
+  // Keep it connected goes back, with focus returned to Disconnect.
+  assert.ok(review.includes(`state.focusReturn = '[data-second-brain-action="disconnect"]';`));
+  assert.match(review, /focusReturn[^\n]*\n\s+back\(\);/);
   // A refused or conflicting disconnect keeps the review and creates nothing;
   // success lands on the Notes-first choice.
   const run = sourceBetween('async function disconnect()', 'async function refresh()');
