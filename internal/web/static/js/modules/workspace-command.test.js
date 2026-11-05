@@ -5396,7 +5396,7 @@ test('the Notes station says whether notes are set up, connected, or missing', (
     };
     assert.deepEqual(notes({ status: 'not_connected' }), {
       value: 'Not set up',
-      description: 'connect or set one up'
+      description: 'set up your notes'
     });
     const setUp = notes({
       status: 'connected',
@@ -9467,7 +9467,7 @@ test('HQ Details: the Notes panel repaints when the connection changes, not othe
   globalThis.document = doc;
   try {
     commandView.render();
-    assert.match(notes.lastHTML, /Connect notes…/, 'nothing connected: the connect state');
+    assert.match(notes.lastHTML, /Set up notes…/, 'nothing connected: the connect state');
     assert.match(notes.lastHTML, /data-cmd-modal-action="notes-connection"/);
     assert.equal(page.loads.length, 0, 'nothing to read');
     const before = page.paints();
@@ -9482,7 +9482,7 @@ test('HQ Details: the Notes panel repaints when the connection changes, not othe
     commandView._notes = { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain: CONNECTED_VAULT };
     commandView.render();
     assert.equal(page.loads.length, 1, 'connecting starts the read');
-    assert.doesNotMatch(notes.lastHTML, /Connect notes…/);
+    assert.doesNotMatch(notes.lastHTML, /Set up notes…/);
   } finally {
     globalThis.document = originalDocument;
   }

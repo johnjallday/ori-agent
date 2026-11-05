@@ -231,13 +231,13 @@ test('the notes ask row keeps its route to the ask', () => {
       {
         id: 'second-brain-ask',
         kind: 'second_brain_ask',
-        title: 'Want Ori to keep notes for you?',
+        title: 'Set up your notes',
         route: '/?quest=second-brain'
       }
     ]
   });
   assert.equal(ask.kind, 'second_brain_ask');
-  assert.equal(ask.title, 'Want Ori to keep notes for you?');
+  assert.equal(ask.title, 'Set up your notes');
   assert.equal(ask.route, '/?quest=second-brain');
   assert.equal(ask.actions, undefined, 'the row has no controls of its own');
 });

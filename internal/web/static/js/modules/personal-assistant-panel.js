@@ -3,6 +3,7 @@ import {
   workspaceContextLabel
 } from './personal-assistant-workspace-context.js';
 import {
+  RECIPIENT_PERSONAL,
   RECIPIENT_WORKSPACE_ENTRY,
   NEW_CONVERSATION_MARK,
   readEntrySession,
@@ -1026,6 +1027,33 @@ function chooseRecipient(kind) {
   return true;
 }
 
+/**
+ * Hands the drawer to the hired assistant for a surface of its own (Notes),
+ * through the same guarded switch as the header menu. Already the assistant:
+ * nothing to do. Refused (a reply in flight, a review waiting, the
+ * conversation loading): nothing changes and the status line says why, plus
+ * `retry`, so the user knows how to come back. Never picks unguarded.
+ */
+export function personalHandoffStatus(lock, retry = '') {
+  const reason = String(lock || '').trim();
+  const again = String(retry || '').trim();
+  return again ? `${reason} ${again}`.trim() : reason;
+}
+
+function choosePersonal({ retry = '' } = {}) {
+  const resolution = recipients()?.resolution?.();
+  if (!resolution || resolution.current?.kind === RECIPIENT_PERSONAL) return true;
+  const personal = (resolution.options || []).find(option => option.kind === RECIPIENT_PERSONAL);
+  if (!personal || personal.disabled || personal.available === false) {
+    setStatus(personalHandoffStatus('The assistant is not available right now.', retry));
+    return false;
+  }
+  if (chooseRecipient(RECIPIENT_PERSONAL)) return true;
+  const lock = switchLock() || switchLockMessage(resolution.current, { busy: true });
+  setStatus(personalHandoffStatus(lock, retry));
+  return false;
+}
+
 /** New, with the entry agent selected: forget this tab's session (FR22). */
 function startNewEntryConversation() {
   const who = identity();
@@ -1904,7 +1932,7 @@ function revealFocusedControl() {
     !active ||
     !scroll?.contains(active) ||
     !active.closest(
-      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderOffer, #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderOffer, #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup, #personalAssistantSecondBrain'
     )
   )
     return;
@@ -2258,6 +2286,8 @@ const api = {
   // The Home manager's offer changed (Not now, the press, a new read): brief
   // mode follows it.
   syncBriefMode: () => renderIdentity(),
+  // Notes asks for the hired assistant through the guarded switch.
+  choosePersonal,
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;

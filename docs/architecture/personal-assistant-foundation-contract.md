@@ -894,14 +894,15 @@ over them.
 - **One name.** People read **Notes**; "Second Brain" is only the default folder
   name and that folder's README (`scripts/check-notes-copy.mjs` guards it).
 - **The ask.** The assistant's first message after HQ is active, while nothing is
-  connected: "Want me to keep notes for you? I'll write what I learn, people,
-  projects and your journal, into plain Markdown you own." with **Set up my
-  notes**, **I have a notes folder…** and **Not now** (with a detected vault:
-  **Read {name}**, **Set up my notes**, **Another folder…**, **Not now**). Shown
+  connected, and only while the drawer talks to the assistant: **Set up your
+  notes** with **Set up my notes** as the one primary action and **Not now**;
+  reading an existing folder is a quieter, read-only **Already have notes?**
+  alternative where a detected vault appears as detail (see
+  `docs/architecture/second-brain.md`, "The ask"). Shown
   is not answered: until the user decides it waits as a pinned Needs you card and
   a Today row (`second_brain_ask`). The `POST /api/personal-assistant/second-brain/prompted`
-  receipt still records the first showing. Not now comes back seven local days
-  later as "Still want me to keep notes for you?" with **Don't ask again**, which
+  receipt records the first showing once the card is actually visible. Not now
+  comes back seven local days later as "Still want to set up your notes?" with **Don't ask again**, which
   declines and skips the mission. Reset Getting Started clears the ask and the
   missions, never the connection.
 - **Consent first.** Before anything is read a card names the folder, says it is

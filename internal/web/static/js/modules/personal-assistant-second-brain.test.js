@@ -57,8 +57,332 @@ import {
   secondBrainSetupWhereView,
   secondBrainWrittenLine,
   sinceLabel,
-  suggestedLabel
+  suggestedLabel,
+  secondBrainRecipientPersonal,
+  secondBrainPromptDue,
+  secondBrainModeLine,
+  secondBrainDisconnectView,
+  secondBrainDisconnectedLine,
+  ONE_NOTES_FOLDER_LINE,
+  NOTES_HANDOFF_RETRY,
+  secondBrainFocusSelector,
+  secondBrainKeptFocusSelector,
+  secondBrainSetupStage,
+  secondBrainFirstNoteView,
+  EMPTY_START_LINE
 } from './personal-assistant-second-brain.js';
+
+test('each step opens on the field it asks for, and a review on its safe way out', () => {
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'setup', setupStep: 'project', projectStatus: 'ask' }),
+    '[data-project-answer]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'project', projectStatus: 'ask' }),
+    '[data-project-answer]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'setup', setupStep: 'project', projectStatus: 'name' }),
+    '[data-project-name]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'setup', setupStep: 'place', hasParent: true }),
+    '[data-second-brain-name]'
+  );
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'disconnect' }),
+    '[data-second-brain-action="cancel"]'
+  );
+  // Everything else: the step's first control.
+  assert.equal(secondBrainFocusSelector({ phase: 'ask' }), '');
+  assert.equal(secondBrainFocusSelector({ phase: 'setup', setupStep: 'place' }), '');
+});
+
+test('a repaint finds the focused field or control again, and only safe selectors', () => {
+  const element = (attrs, extra = {}) => ({
+    hasAttribute: name => Object.hasOwn(attrs, name),
+    getAttribute: name => attrs[name] ?? null,
+    classList: { contains: name => (extra.classes || []).includes(name) },
+    tagName: extra.tagName || 'TEXTAREA',
+    closest: selector => (extra.closest === selector ? {} : null)
+  });
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-project-answer': '' })),
+    '[data-project-answer]'
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-second-brain-capture': '' })),
+    '[data-second-brain-capture]'
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-second-brain-action': 'confirm-disconnect' })),
+    '[data-second-brain-action="confirm-disconnect"]'
+  );
+  // A value that is not a plain action id is never turned into a selector.
+  assert.equal(
+    secondBrainKeptFocusSelector(element({ 'data-second-brain-action': 'x"] , body [y' })),
+    ''
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(element({}, { classes: ['folder-path-entry__input'] })),
+    '.folder-path-entry__input'
+  );
+  assert.equal(
+    secondBrainKeptFocusSelector(
+      element({}, { tagName: 'SUMMARY', closest: '[data-second-brain-existing]' })
+    ),
+    '[data-second-brain-existing] > summary'
+  );
+  assert.equal(secondBrainKeptFocusSelector(element({})), '');
+  assert.equal(secondBrainKeptFocusSelector(null), '');
+  // render uses both: an explicit step change goes to the step's field; a
+  // repaint (a hint or status arriving) restores the field and its caret.
+  const render = sourceBetween('function render() {', 'function baseName(');
+  assert.match(render, /secondBrainKeptFocusSelector\(active\)/);
+  assert.match(render, /!state\.focusNext && kept/);
+  assert.match(render, /setSelectionRange\(kept\.start, kept\.end \?\? kept\.start\)/);
+  assert.match(render, /secondBrainFocusSelector\(\{/);
+  // A card that appears by itself (no click, focus elsewhere) takes no focus.
+  assert.match(render, /else if \(open && \(state\.focusNext \|\| focusWithin\)\)/);
+});
+
+test('the setup says which of its two steps this is and why the project comes first', () => {
+  const first = secondBrainSetupStage('project');
+  assert.equal(first.label, 'Step 1 of 2 · Your first note');
+  assert.match(first.why, /You can skip this\./);
+  const second = secondBrainSetupStage('place');
+  assert.equal(second.label, 'Step 2 of 2 · Where your notes live');
+  assert.equal(second.why, 'Nothing is written until you press Set it up.');
+});
+
+test('the receipt names a first note only when the connection lists it as Ori’s', () => {
+  const created = {
+    status: 'connected',
+    source: { name: 'Second Brain', origin: 'created_by_ori' },
+    projects: [{ name: 'Tour', rel: 'Projects/Tour', ori_note: true }]
+  };
+  const view = secondBrainFirstNoteView(created, 'Tour');
+  assert.deepEqual(view, {
+    label: 'Your first note',
+    name: 'Tour',
+    where: 'Projects/Tour/README.md',
+    line: 'It holds what you told me about it, in your words.'
+  });
+  // Skipped or empty: no project name, no first note.
+  assert.equal(secondBrainFirstNoteView(created, ''), null);
+  assert.equal(secondBrainFirstNoteView(created, null), null);
+  // Not on disk, or a folder the user wrote: never claimed.
+  assert.equal(secondBrainFirstNoteView({ ...created, projects: [] }, 'Tour'), null);
+  assert.equal(
+    secondBrainFirstNoteView({ ...created, projects: [{ name: 'Tour', ori_note: false }] }, 'Tour'),
+    null
+  );
+  // A failed creation (nothing connected) or a read-only source: never.
+  assert.equal(secondBrainFirstNoteView({ ...created, status: 'not_connected' }, 'Tour'), null);
+  assert.equal(
+    secondBrainFirstNoteView({ ...created, source: { name: 'Vault', kind: 'obsidian' } }, 'Tour'),
+    null
+  );
+  assert.match(EMPTY_START_LINE, /goes to your Inbox as its own file/);
+});
+
+test('a refused or failed creation keeps the answers and never shows a receipt', () => {
+  const create = sourceBetween('async function createSecondBrain()', 'async function decide(');
+  // One retry key for the whole attempt: a repeated confirm replays, never makes two.
+  assert.match(create, /request_id: state\.setup\.requestId/);
+  assert.doesNotMatch(create, /newRequestID\('create'\)/);
+  // Every refusal returns before the receipt state is touched.
+  const failure = create.slice(create.indexOf('if (!ok) {'), create.indexOf('state.secondBrain ='));
+  assert.match(failure, /return;/);
+  assert.doesNotMatch(failure, /offerFolder|setPhase\('reading'/);
+  // A taken place asks for another; it never clears what the user typed.
+  assert.doesNotMatch(failure, /state\.project = |state\.setup\.project = null/);
+  const start = sourceBetween('function startSetup()', '// loadSetupPreview reads');
+  assert.match(start, /requestId: newRequestID\('create'\)/);
+});
+
+test('the setup receipt leads with Open on the first note, one primary, and re-reads first', () => {
+  const look = sourceBetween('function renderLook(', 'function renderEverything(');
+  assert.match(look, /secondBrainFirstNoteView\(\s*state\.secondBrain,/);
+  assert.match(look, /if \(firstNote\) renderFirstNote\(body, firstNote\)/);
+  assert.match(look, /primaryOpen: Boolean\(firstNote\)/);
+  // Adding follow-ups gives way to Open while a first note is there.
+  assert.match(
+    look,
+    /if \(firstNote && view\.primary\) view\.primary = \{ \.\.\.view\.primary, style: 'outline' \}/
+  );
+  // No project note: the capture box is the next thing, with no file claimed.
+  assert.match(look, /startLine: state\.offerFolder && !firstNote \? EMPTY_START_LINE : ''/);
+  const doors = sourceBetween('function renderDoors(', '// renderFirstNote names');
+  assert.match(doors, /style: primaryOpen && state\.preview\.key !== key \? 'primary' : 'outline'/);
+  // Open folder stays, Open in Obsidian stays a quieter link.
+  assert.match(doors, /id: 'open-folder', label: OPEN_FOLDER_LABEL, style: 'outline'/);
+  assert.match(doors, /node\('a', 'pa-second-brain__open', 'Open in Obsidian'\)/);
+  const poll = sourceBetween('async function pollLook()', 'async function addFollowUps(');
+  assert.match(
+    poll,
+    /if \(state\.offerFolder && state\.look\?\.state === 'finished'\) await refresh\(\)/
+  );
+  // The first note is drawn as text.
+  const first = sourceBetween('function renderFirstNote(', '// renderPreview shows');
+  assert.doesNotMatch(first, /innerHTML/);
+});
+
+const moduleSource = readFileSync(
+  new URL('./personal-assistant-second-brain.js', import.meta.url),
+  'utf8'
+);
+function sourceBetween(from, to) {
+  const start = moduleSource.indexOf(from);
+  const end = moduleSource.indexOf(to, start + from.length);
+  assert.ok(start >= 0 && end > start, `${from} … ${to}`);
+  return moduleSource.slice(start, end);
+}
+
+test('the notes card is the assistant’s: hidden while a workspace agent is the recipient', () => {
+  assert.equal(secondBrainRecipientPersonal({ kind: 'personal' }), true);
+  assert.equal(secondBrainRecipientPersonal(null), true, 'no recipient system: only the assistant');
+  assert.equal(secondBrainRecipientPersonal({ kind: 'workspace_entry', name: 'Mira' }), false);
+  assert.equal(
+    secondBrainRecipientPersonal({ kind: 'workspace_entry', pending: true }),
+    false,
+    'still resolving who the drawer talks to is not the assistant yet'
+  );
+  for (const phase of ['ask', 'setup', 'result', 'manage', 'disconnect']) {
+    assert.equal(
+      secondBrainPlacement({ available: true, phase, pinned: false, personal: false }),
+      'none',
+      phase
+    );
+    assert.equal(
+      secondBrainPlacement({ available: true, phase, pinned: false, personal: true }),
+      'thread',
+      phase
+    );
+  }
+  // Callers that never say keep the old behavior.
+  assert.equal(secondBrainPlacement({ available: true, phase: 'ask', pinned: true }), 'needs');
+});
+
+test('the first showing is recorded only when the card is really in front of the user', () => {
+  const seen = { phase: 'ask', placement: 'thread', panelOpen: true, recorded: false };
+  assert.equal(secondBrainPromptDue(seen), true);
+  assert.equal(secondBrainPromptDue({ ...seen, placement: 'needs' }), true);
+  // A manager's drawer, a closed drawer, another step, or already recorded.
+  assert.equal(secondBrainPromptDue({ ...seen, placement: 'none' }), false);
+  assert.equal(secondBrainPromptDue({ ...seen, panelOpen: false }), false);
+  assert.equal(secondBrainPromptDue({ ...seen, phase: 'setup' }), false);
+  assert.equal(secondBrainPromptDue({ ...seen, recorded: true }), false);
+  // It is checked after every render and when the drawer opens, and the old
+  // record-on-open listener is gone.
+  assert.match(sourceBetween('function render() {', 'function baseName('), /maybeRecordPrompt\(\)/);
+  assert.match(moduleSource, /'personal-assistant:opened', \(\) => maybeRecordPrompt\(\)/);
+  assert.doesNotMatch(moduleSource, /markPromptedWhenSeen/);
+  // The record itself posts only /prompted: nothing is deferred or declined.
+  const record = sourceBetween('function maybeRecordPrompt()', '// placeWaitingResult');
+  assert.match(record, /'\/prompted'/);
+  assert.doesNotMatch(record, /'\/ask'|decide\(|\/disconnect/);
+});
+
+test('switching recipient hides and restores the card without answering or taking focus', () => {
+  const body = sourceBetween('function onRecipient(', '// ensurePersonalRecipient');
+  assert.match(body, /state\.focusNext = false/);
+  assert.doesNotMatch(body, /request\(|decide\(|setPhase\(|state\.history|state\.project/);
+  assert.match(moduleSource, /'personal-assistant:recipient', event =>\s+onRecipient\(/);
+});
+
+test('explicit Notes entries go through the panel’s guarded switch, never an unguarded pick', () => {
+  const ensure = sourceBetween('function ensurePersonalRecipient()', '// guarded wraps');
+  assert.match(ensure, /panel\.choosePersonal\(\{ retry: NOTES_HANDOFF_RETRY \}\)/);
+  assert.doesNotMatch(ensure, /\.pick\(/);
+  assert.equal(NOTES_HANDOFF_RETRY, 'Then open Notes again.');
+  for (const opener of [
+    'openChooser',
+    'openSetup',
+    'openLearned',
+    'openProject',
+    'openAsk',
+    'openManage',
+    'openDisconnect'
+  ]) {
+    assert.match(moduleSource, new RegExp(`${opener}: guarded\\(`), opener);
+  }
+  const select = sourceBetween('connectSelection: async', 'openLearned: guarded');
+  assert.match(select, /if \(!ensurePersonalRecipient\(\)\)/);
+  // Refused: the opener returns before touching any Notes state.
+  const guard = sourceBetween('function guarded(open)', 'function init()');
+  assert.match(guard, /if \(!ensurePersonalRecipient\(\)\) return false;\n\s+await open/);
+});
+
+test('each mode says what Ori does with the folder, and that only one can be connected', () => {
+  assert.match(
+    secondBrainModeLine({ source: { origin: 'created_by_ori' } }),
+    /^Ori keeps this folder/
+  );
+  assert.match(secondBrainModeLine({ source: { kind: 'obsidian' } }), /^Read-only: .*never writes/);
+  const connected = secondBrainManageView({
+    status: 'connected',
+    source: { name: 'Vault', kind: 'obsidian' }
+  });
+  assert.match(connected.mode, /^Read-only/);
+  assert.match(connected.oneFolder, new RegExp(`^${ONE_NOTES_FOLDER_LINE}`));
+  // A read-only source never offers capture.
+  assert.equal(connected.capture, false);
+  const chooser = secondBrainChooserView({ detected: [] });
+  assert.match(chooser.note, /never writes to it\. One notes folder/);
+  const consent = secondBrainConsentView({ name: 'Vault' }, { configured: false });
+  assert.ok(consent.lines.includes('Read-only. Nothing is moved, edited, or deleted.'));
+  assert.ok(
+    consent.lines.some(line => /won't save notes, journal entries or project notes/.test(line))
+  );
+  // The full model and keeping disclosure stays.
+  assert.ok(consent.lines.includes('No model is set, so the summary is counts only.'));
+  assert.ok(
+    consent.lines.includes(
+      'Ori keeps the folder path and the list of open items in Personal HQ, not your notes.'
+    )
+  );
+});
+
+test('disconnect is reviewed first, with truthful consequences for each origin', () => {
+  const created = secondBrainDisconnectView({
+    source: { name: 'Second Brain', origin: 'created_by_ori' }
+  });
+  assert.equal(created.title, 'Disconnect Second Brain?');
+  assert.ok(created.lines.includes('The folder and every note in it stay where they are.'));
+  assert.ok(created.lines.includes('Your follow-ups and tickets are kept.'));
+  assert.ok(
+    created.lines.includes('If you connect this folder again later, Ori will only read it.')
+  );
+  const read = secondBrainDisconnectView({ source: { name: 'Vault', kind: 'obsidian' } });
+  assert.ok(read.lines.includes('Nothing in it is moved, edited, or deleted.'));
+  assert.ok(!read.lines.some(line => /writing/.test(line)));
+  for (const view of [created, read]) {
+    assert.match(view.next, /new, empty place; Ori never writes into an existing folder\./);
+    assert.deepEqual(
+      view.actions.map(action => action.id),
+      ['confirm-disconnect', 'cancel']
+    );
+  }
+  assert.equal(
+    secondBrainDisconnectedLine('Vault'),
+    'Disconnected Vault. Ori no longer reads it; the folder and your follow-ups are kept.'
+  );
+  // The card's Disconnect opens the review; only its confirm posts.
+  const manage = sourceBetween('function renderManage(', '// renderDisconnect is');
+  assert.match(manage, /action\.id === 'disconnect'\) go\('disconnect'\)/);
+  assert.doesNotMatch(manage, /disconnect\(\)/);
+  const review = sourceBetween('function renderDisconnect(', '// renderProjects lists');
+  assert.match(review, /'confirm-disconnect'\) void disconnect\(\)/);
+  // Keep it connected goes back, with focus returned to Disconnect.
+  assert.ok(review.includes(`state.focusReturn = '[data-second-brain-action="disconnect"]';`));
+  assert.match(review, /focusReturn[^\n]*\n\s+back\(\);/);
+  // A refused or conflicting disconnect keeps the review and creates nothing;
+  // success lands on the Notes-first choice.
+  const run = sourceBetween('async function disconnect()', 'async function refresh()');
+  assert.doesNotMatch(run, /\/create|startSetup/);
+  assert.match(run, /setPhase\('manage'\)/);
+});
 
 test('the connection card says connected, missing, or not set up', () => {
   const now = Date.parse('2026-10-21T12:00:00Z');
@@ -95,13 +419,36 @@ test('the connection card says connected, missing, or not set up', () => {
   );
   assert.match(setUp.detail, /^Set up by Ori · /);
 
+  // Not set up is the same Notes-first choice as the ask, with no Not now or
+  // Don't ask again: opening it on purpose answers nothing.
   const none = secondBrainManageView({ status: 'not_connected' }, now);
   assert.equal(none.state, 'not_connected');
+  assert.equal(none.title, 'Set up your notes');
+  assert.equal(none.scope, 'Personal notes · Personal HQ');
   assert.deepEqual(
-    none.actions.map(action => action.label),
-    ['Set up my notes', 'I have a notes folder…']
+    none.actions.map(action => [action.id, action.style]),
+    [['setup', 'primary']]
   );
-  assert.equal(none.title, 'Your notes are not set up.');
+  assert.deepEqual(
+    none.existing.actions.map(action => action.id),
+    ['choose']
+  );
+  const declined = secondBrainManageView(
+    {
+      status: 'not_connected',
+      ask: { state: 'declined' },
+      detected: [{ id: 'v_1', name: 'Second Brain' }]
+    },
+    now
+  );
+  assert.deepEqual(
+    declined.actions.map(action => action.id),
+    ['setup']
+  );
+  assert.deepEqual(
+    declined.existing.actions.map(action => action.id),
+    ['read', 'choose']
+  );
 });
 
 test('since labels read like a person says them', () => {
@@ -141,40 +488,133 @@ test('the ask belongs to an active relationship only', () => {
   assert.equal(secondBrainAvailable(null), false);
 });
 
-test('with a detected vault the ask names it and offers read, set up, or not now', () => {
-  const view = secondBrainAskView(detected, true);
-  assert.equal(view.show, true);
-  assert.equal(
-    view.line,
-    'Want me to keep notes for you? I found your Obsidian vault "Second Brain". I can read it, or set up a folder of my own.'
-  );
-  assert.deepEqual(
-    view.actions.map(action => action.label),
-    ['Read Second Brain', 'Set up my notes', 'Another folder…', 'Not now']
-  );
-  assert.equal(view.actions[0].vaultId, 'v_1');
+// Every action the choice offers, the primary row and the quieter alternative.
+const allActions = view => [...view.actions, ...view.existing.actions];
+
+test('setup is the one primary action whether zero, one or several vaults were detected', () => {
+  const two = {
+    ...detected,
+    detected: [...detected.detected, { id: 'v_2', name: 'Work', parent: 'Documents' }]
+  };
+  for (const secondBrain of [{ ...detected, detected: [] }, detected, two]) {
+    for (const ask of [
+      { state: 'pending' },
+      { state: 'shown' },
+      { state: 'deferred', offer_again: true }
+    ]) {
+      const view = secondBrainAskView({ ...secondBrain, ask }, true);
+      assert.equal(view.show, true);
+      const primaries = allActions(view).filter(action => action.style === 'primary');
+      assert.deepEqual(
+        primaries.map(action => action.id),
+        ['setup'],
+        `${secondBrain.detected.length} vaults, ${ask.state}`
+      );
+      assert.equal(view.actions[0].label, 'Set up my notes');
+      // Not now sits right beside it; nothing in the alternative is primary.
+      assert.equal(view.actions[1].id, 'later');
+      assert.ok(view.existing.actions.every(action => action.style === 'outline'));
+    }
+  }
 });
 
-test('with nothing detected the ask points at a folder or offers to set one up', () => {
+test('the choice separates scope, title, benefit, and a read-only alternative', () => {
   const view = secondBrainAskView({ ...detected, detected: [] }, true);
-  assert.equal(
-    view.line,
-    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
-  );
+  assert.equal(view.scope, 'Personal notes · Personal HQ');
+  assert.equal(view.title, 'Set up your notes');
+  assert.match(view.benefit, /folder you own/);
+  assert.match(view.benefit, /works without Obsidian/);
+  assert.equal(view.existing.heading, 'Already have notes?');
+  assert.match(view.existing.line, /won't write to it/);
+  assert.equal(view.existing.detected, '');
   assert.deepEqual(
-    view.actions.map(action => action.label),
-    ['Set up my notes', 'I have a notes folder…', 'Not now']
+    view.existing.actions.map(action => [action.id, action.label]),
+    [['choose', 'Read a folder I have…']]
   );
-  assert.equal(view.actions[0].style, 'primary');
+  // The first ask says nothing of the old ambiguity.
+  for (const text of [view.title, view.benefit, view.existing.line]) {
+    assert.doesNotMatch(text, /of my own|second brain/i, text);
+  }
+});
+
+test('a detected vault is supporting detail in the alternative, never the headline', () => {
+  const view = secondBrainAskView(detected, true);
+  assert.equal(view.title, 'Set up your notes');
+  assert.doesNotMatch(view.title + view.benefit, /Second Brain/);
+  assert.equal(view.existing.detected, 'Obsidian vault detected: “Second Brain”');
   assert.deepEqual(
-    view.actions.map(action => action.id),
-    ['setup', 'choose', 'later']
+    view.existing.actions.map(action => [action.id, action.label]),
+    [
+      ['read', 'Read “Second Brain”'],
+      ['choose', 'Another folder…']
+    ]
   );
+  assert.equal(view.existing.actions[0].vaultId, 'v_1');
+
+  // Several vaults: none is singled out; the chooser lists them all.
+  const two = secondBrainAskView(
+    { ...detected, detected: [...detected.detected, { id: 'v_2', name: 'Work' }] },
+    true
+  );
+  assert.equal(two.existing.detected, '2 Obsidian vaults detected');
+  assert.deepEqual(
+    two.existing.actions.map(action => action.id),
+    ['choose']
+  );
+});
+
+test('a long or hostile vault name stays text in the alternative', () => {
+  const hostile = '<img src=x onerror=alert(1)> ' + 'Very long vault name '.repeat(12);
+  const view = secondBrainAskView({ ...detected, detected: [{ id: 'v_x', name: hostile }] }, true);
+  assert.equal(view.existing.detected, `Obsidian vault detected: “${hostile}”`);
+  assert.equal(view.existing.actions[0].vaultId, 'v_x');
+  // The choice is drawn with textContent only.
+  const source = readFileSync(
+    new URL('./personal-assistant-second-brain.js', import.meta.url),
+    'utf8'
+  );
+  const render = source.slice(
+    source.indexOf('function renderChoice('),
+    source.indexOf('function renderFillIn(')
+  );
+  assert.ok(render.length > 0);
+  assert.doesNotMatch(render, /innerHTML|insertAdjacentHTML/);
+});
+
+test('explicit Notes entries land on the Notes-first choice and never answer the ask', () => {
+  const source = readFileSync(
+    new URL('./personal-assistant-second-brain.js', import.meta.url),
+    'utf8'
+  );
+  const between = (from, to) => {
+    const start = source.indexOf(from);
+    const end = source.indexOf(to, start + from.length);
+    assert.ok(start >= 0 && end > start, `${from} … ${to}`);
+    return source.slice(start, end);
+  };
+  // openManage on nothing connected draws the choice, never the reader chooser.
+  const manage = between('openManage: guarded(async', "// The Profile's Disconnect");
+  assert.doesNotMatch(manage, /setPhase\('chooser'\)/);
+  assert.match(manage, /setPhase\('manage'\)/);
+  // Opening the choice, setup or the chooser posts nothing to the ask, so a
+  // decline or deferral on record stands until the user answers a prompt.
+  for (const [from, to] of [
+    ['openManage: guarded(async', "// The Profile's Disconnect"],
+    ['openSetup: guarded(async', '// A folder card in the conversation'],
+    ['openChooser: guarded(async', '// Set one up for me, straight'],
+    ['function startSetup()', '// loadSetupPreview reads'],
+    ['function renderChoice(', 'function renderFillIn(']
+  ]) {
+    assert.doesNotMatch(between(from, to), /\/ask|decide\(/, from);
+  }
+  // On the choice opened on purpose, Not now and Don't ask again do nothing.
+  const onChoice = between('function onChoiceAction(', 'function onAskAction(');
+  assert.match(onChoice, /'later' \|\| action\.id === 'none'\) return/);
 });
 
 test('the ask no longer offers "I don\'t keep notes", but a decline on record still reads', () => {
   for (const secondBrain of [detected, { ...detected, detected: [] }]) {
-    const ids = secondBrainAskView(secondBrain, true).actions.map(action => action.id);
+    const ids = allActions(secondBrainAskView(secondBrain, true)).map(action => action.id);
     assert.ok(!ids.includes('none'), ids.join());
   }
   assert.equal(secondBrainAskView({ ...detected, ask: { state: 'declined' } }, true).show, false);
@@ -441,27 +881,21 @@ test("a week after Not now the ask comes back with Don't ask again", () => {
   const view = secondBrainAskView(due, true);
   assert.equal(view.show, true);
   assert.equal(view.reoffer, true);
-  assert.equal(
-    view.line,
-    "Still want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
-  );
+  assert.equal(view.title, 'Still want to set up your notes?');
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label]),
     [
       ['setup', 'Set up my notes'],
-      ['choose', 'I have a notes folder…'],
       ['later', 'Not now'],
       ['none', "Don't ask again"]
     ]
   );
   const withVault = secondBrainAskView({ ...detected, ask: due.ask }, true);
-  assert.match(
-    withVault.line,
-    /^Still want me to keep notes for you\? I found your Obsidian vault/
-  );
+  assert.equal(withVault.title, 'Still want to set up your notes?');
   assert.equal(withVault.actions.at(-1).id, 'none');
+  assert.equal(withVault.existing.actions[0].id, 'read');
   // The first ask never offers Don't ask again.
-  assert.ok(!secondBrainAskView(detected, true).actions.some(action => action.id === 'none'));
+  assert.ok(!allActions(secondBrainAskView(detected, true)).some(action => action.id === 'none'));
   assert.equal(secondBrainAskView({ ...due, ask: { state: 'declined' } }, true).show, false);
 });
 
@@ -1016,7 +1450,7 @@ test('each answer carries one retry key and the Profile page action, and dismiss
     /if \(!state\.learned\.keys\[keyName\]\) state\.learned\.keys\[keyName\] = newRequestID\('learn'\)/
   );
   assert.match(source, /SETUP_LEARNING_ENDPOINT\}\/dismiss/);
-  assert.match(source, /openLearned,/);
+  assert.match(source, /openLearned: guarded\(openLearned\),/);
 });
 
 test('the project question belongs to a second brain that may keep project notes, once', () => {

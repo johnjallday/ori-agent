@@ -180,6 +180,8 @@ test('an open line in a project goes to its workspace, and every other line stay
   }
   const lookCard = page.locator('#personalAssistantSecondBrain');
   const lookAction = (id: string) => lookCard.locator(`[data-second-brain-action="${id}"]`);
+  // Reading a vault is the quieter alternative under "Already have notes?".
+  await lookCard.locator('[data-second-brain-existing] > summary').click();
   await lookAction('read').click();
   await lookAction('connect').click();
   await expect(lookAction('add')).toContainText(/ticket/, { timeout: 75_000 });
