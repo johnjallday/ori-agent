@@ -120,6 +120,7 @@ export default defineConfig([
       'internal/web/static/js/modules/sample-library.js',
       'internal/web/static/js/modules/library-return.js',
       'internal/web/static/js/modules/library-open.js',
+      'internal/web/static/js/modules/library-freshness.js',
       'internal/web/static/js/modules/library-setup.js',
       'internal/web/static/js/modules/map-library-sheet.js',
       'internal/web/static/js/modules/library-staffing.js',

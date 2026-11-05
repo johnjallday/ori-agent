@@ -9,14 +9,27 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// reconcileResult is what one reconciliation did beyond the entries it
+// wrote: relink conflicts it refused to guess at, and relinked entries that
+// carry a workspace link (the caller logs those; nothing here touches the
+// linked workspace).
+type reconcileResult struct {
+	RelinkConflicts int
+	MovedLinked     []string
+}
+
 // reconcileCandidates mutates only the caller's scratch document. Callers
 // publish it only after the entire result and current grant pass validation.
 // Metadata fields and historical observations are never reconstructed from
-// filesystem names or silently moved onto a same-named replacement.
-func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root, store workspace.Store, scope Scope) error {
+// filesystem names or silently moved onto a same-named replacement: a moved
+// folder keeps its record only through a relink match (relinkSources), which
+// needs the same folder identity, the same format and a shared project-file
+// name, and never a guess between several.
+func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root, store workspace.Store, scope Scope) (reconcileResult, error) {
+	var result reconcileResult
 	if doc == nil || store == nil || observed.RootID != scan.RootID || observed.Scope != scan.Scope ||
 		observed.StartedAt.IsZero() || len(observed.Candidates) > maxEntries {
-		return ErrCorrupt
+		return result, ErrCorrupt
 	}
 	seen := map[string]bool{}
 	for _, candidate := range observed.Candidates {
@@ -26,7 +39,7 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 				!strings.HasPrefix(candidate.RelativeFolder, scan.Scope+string(filepath.Separator))) ||
 			!folderdigest.KnownProjectFormat(candidate.Format) ||
 			seen[candidate.RelativeFolder] || len(candidate.Alternates) > 64 {
-			return ErrCorrupt
+			return result, ErrCorrupt
 		}
 		seen[candidate.RelativeFolder] = true
 		name := filepath.Base(candidate.RelativeFolder)
@@ -34,17 +47,17 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 			name = filepath.Base(root.Path)
 		}
 		if name == "" || !validText(name, 160) {
-			return ErrLimit // never truncate/guess a different project name
+			return result, ErrLimit // never truncate/guess a different project name
 		}
 		for _, alternate := range candidate.Alternates {
 			if alternate == "" || filepath.Base(alternate) != alternate || !validText(alternate, 240) {
-				return ErrCorrupt
+				return result, ErrCorrupt
 			}
 		}
 		// A candidate that moved or was replaced after the scan cannot become
 		// an association even if its former name still appears in the result.
 		if !directoryMatches(root, candidate.RelativeFolder, candidate.FileIdentity) {
-			return ErrUnavailable
+			return result, ErrUnavailable
 		}
 	}
 	// Read Home membership once, not for every discovered folder. The exact
@@ -56,20 +69,25 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 		}
 		home, err := store.Get(scope.HomeID)
 		if err != nil || home == nil {
-			return ErrConflict
+			return result, ErrConflict
 		}
 		linkedState = home.GetAssistantProgramState()
 		key := workspace.AssistantProgramKey{OwnerUserID: scope.OwnerUserID,
 			PluginID: scope.ProviderID, ProgramID: scope.ProgramID}
 		if linkedState == nil || linkedState.Key.Normalize() != key.Normalize() {
-			return ErrConflict
+			return result, ErrConflict
 		}
 		break
 	}
+	// Every folder this scan saw, before any entry is written: a relink may
+	// only take a prior observation this scan did not see again.
 	observedKeys := map[string]bool{}
 	for _, candidate := range observed.Candidates {
-		key := candidate.RelativeFolder + "\x00" + candidate.FileIdentity
-		observedKeys[key] = true
+		observedKeys[candidate.RelativeFolder+"\x00"+candidate.FileIdentity] = true
+	}
+	relinks := planRelinks(*doc, scan, observed, root, observedKeys)
+	result.RelinkConflicts = relinks.conflicts
+	for index, candidate := range observed.Candidates {
 		observation := Observation{RootID: root.ID, RelativeFolder: candidate.RelativeFolder,
 			FileIdentity: candidate.FileIdentity, Format: candidate.Format,
 			Alternates: append([]string(nil), candidate.Alternates...),
@@ -80,40 +98,51 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 		}
 		entryIndex, observationIndex, err := findExactObservation(*doc, observation)
 		if err != nil {
-			return err
+			return result, err
 		}
 		if entryIndex >= 0 {
 			// Facts stay only while the file that dates the song is the very
 			// file they were read from; otherwise the fact pass reads it again.
-			if prior := doc.Entries[entryIndex].Observations[observationIndex].Facts; prior != nil &&
-				candidate.DatedFile != nil && prior.ReadFrom.sameFile(*candidate.DatedFile) &&
-				factsFile(candidate.Format, candidate.DatedFile.File) {
-				observation.Facts = prior.clone()
-			}
+			keepFacts(&observation, doc.Entries[entryIndex].Observations[observationIndex], candidate)
 			doc.Entries[entryIndex].Observations[observationIndex] = observation
 			doc.Entries[entryIndex].Revision++
 			continue
 		}
 		entryIndex, err = findOverlappingObservation(*doc, root, observation)
 		if err != nil {
-			return err
+			return result, err
 		}
 		if entryIndex < 0 {
 			entryIndex, err = findExactLinkedEntry(*doc, root, candidate, store, scope, linkedState)
 			if err != nil {
-				return err
+				return result, err
 			}
 		}
 		if entryIndex >= 0 {
 			if len(doc.Entries[entryIndex].Observations) >= maxRoots {
-				return ErrLimit
+				return result, ErrLimit
 			}
 			doc.Entries[entryIndex].Observations = append(doc.Entries[entryIndex].Observations, observation)
 			doc.Entries[entryIndex].Revision++
 			continue
 		}
+		if source, ok := relinks.byCandidate[index]; ok {
+			// The song moved: its entry keeps its ID, fields, link and history;
+			// only the observation follows the folder (FR8). Writing it in place
+			// also keeps the unavailable pass below from marking it.
+			entry := &doc.Entries[source.entry]
+			prior := entry.Observations[source.observation]
+			keepFacts(&observation, prior, candidate)
+			observation.MovedFrom = &MovedFrom{RootID: prior.RootID, RelativeFolder: prior.RelativeFolder, ScanID: scan.ID}
+			entry.Observations[source.observation] = observation
+			entry.Revision++
+			if entry.Link != nil {
+				result.MovedLinked = append(result.MovedLinked, entry.ID)
+			}
+			continue
+		}
 		if len(doc.Entries) >= maxEntries {
-			return ErrLimit
+			return result, ErrLimit
 		}
 		doc.Entries = append(doc.Entries, Entry{ID: newID(), Revision: 1,
 			Observations: []Observation{observation}})
@@ -121,7 +150,7 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 	// A partial scan has not covered every prior observation. Even an empty
 	// partial result may not erase or mark any unvisited project as missing.
 	if observed.PartialReason != "" {
-		return nil
+		return result, nil
 	}
 	for i := range doc.Entries {
 		for j := range doc.Entries[i].Observations {
@@ -137,7 +166,113 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 			}
 		}
 	}
-	return nil
+	return result, nil
+}
+
+func keepFacts(observation *Observation, prior Observation, candidate Candidate) {
+	if prior.Facts != nil && candidate.DatedFile != nil && prior.Facts.ReadFrom.sameFile(*candidate.DatedFile) &&
+		factsFile(candidate.Format, candidate.DatedFile.File) {
+		observation.Facts = prior.Facts.clone()
+	}
+}
+
+type observationRef struct{ entry, observation int }
+
+// relinkPlan maps a candidate (by index in the scan result) to the one prior
+// observation it moved from, and counts candidates left alone because more
+// than one prior, or a prior claimed by more than one candidate, qualified.
+type relinkPlan struct {
+	byCandidate map[int]observationRef
+	conflicts   int
+}
+
+// planRelinks decides every relink of one scan before any entry is written,
+// so the outcome does not depend on candidate order. A candidate that the
+// exact match, the overlapping-root match or the exact-link adoption claims
+// never reaches its relink, as before.
+func planRelinks(doc Document, scan Scan, observed Discovery, root Root, observedKeys map[string]bool) relinkPlan {
+	plan := relinkPlan{byCandidate: map[int]observationRef{}}
+	sources := map[int][]observationRef{}
+	claims := map[observationRef][]int{}
+	for index, candidate := range observed.Candidates {
+		probe := Observation{RootID: root.ID, RelativeFolder: candidate.RelativeFolder, FileIdentity: candidate.FileIdentity}
+		if entryIndex, _, err := findExactObservation(doc, probe); err != nil || entryIndex >= 0 {
+			continue
+		}
+		for _, ref := range relinkSources(doc, scan, observed, root, candidate, observedKeys) {
+			sources[index] = append(sources[index], ref)
+			claims[ref] = append(claims[ref], index)
+		}
+	}
+	for index, refs := range sources {
+		if len(refs) == 1 && len(claims[refs[0]]) == 1 {
+			plan.byCandidate[index] = refs[0]
+			continue
+		}
+		plan.conflicts++
+	}
+	return plan
+}
+
+// relinkSources lists the prior observations a candidate may have moved from
+// (FR7, FR13). All of these must hold:
+//   - the same folder identity, the same format and at least one project-file
+//     name in common: identity numbers are reused after a delete (Linux), and
+//     people reuse names, so neither is enough alone;
+//   - a different place (root or folder) under a root that is still connected:
+//     a disconnected root is never a relink source;
+//   - the prior is gone from its place: already unavailable, about to be
+//     marked unavailable by this complete scan, or no longer that folder on
+//     disk;
+//   - a move into another root needs an entry with no observation there yet
+//     (one observation per root).
+func relinkSources(doc Document, scan Scan, observed Discovery, root Root, candidate Candidate, observedKeys map[string]bool) []observationRef {
+	var refs []observationRef
+	complete := observed.PartialReason == ""
+	for i, entry := range doc.Entries {
+		for j, prior := range entry.Observations {
+			if prior.FileIdentity != candidate.FileIdentity || prior.Format != candidate.Format ||
+				!sharesName(prior.Alternates, candidate.Alternates) ||
+				(prior.RootID == root.ID && prior.RelativeFolder == candidate.RelativeFolder) {
+				continue
+			}
+			source, connected := connectedRoot(doc, prior.RootID)
+			if !connected {
+				continue
+			}
+			if prior.RootID != root.ID && observationFor(entry, root.ID) != nil {
+				continue
+			}
+			gone := prior.Availability == "unavailable" ||
+				(prior.RootID == root.ID && complete && scanCoversFolder(scan.Scope, prior.RelativeFolder) &&
+					!observedKeys[prior.RelativeFolder+"\x00"+prior.FileIdentity]) ||
+				!directoryMatches(source, prior.RelativeFolder, prior.FileIdentity)
+			if gone {
+				refs = append(refs, observationRef{entry: i, observation: j})
+			}
+		}
+	}
+	return refs
+}
+
+func sharesName(a, b []string) bool {
+	for _, left := range a {
+		for _, right := range b {
+			if left == right {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func connectedRoot(doc Document, rootID string) (Root, bool) {
+	for _, root := range doc.Roots {
+		if root.ID == rootID {
+			return root, root.RevokedAt == nil
+		}
+	}
+	return Root{}, false
 }
 
 func scanCoversFolder(scanScope, relative string) bool {

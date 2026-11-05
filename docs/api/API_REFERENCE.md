@@ -2926,6 +2926,32 @@ No query string (any is `400`).
 
 An uninitialized library returns `{"initialized": false, "digest": null, "ready_proposals": 0, …}`. `digest` is the latest `complete` or `partial` scan's counts, or `null` when there is none or its folder was disconnected; it never carries a path or file name. When no single compatible installed integration can be checked, `activatable` and `unsupported_format` are `0` and `setup_note` names why (`setup_check_unavailable`, `home_provider_unavailable`, `project_provider_unavailable`, `provider_ambiguous`). `activatable` is guidance from saved state; a setup review repeats every check. `ready_proposals` counts ready suggestions among the shelf's newest 20. `proposal_run` is the Manager review receipt for the digest's scan: `started`, `finished` (reason empty or `proposal_limit`, `time_limit`, `token_limit`, `step_limit`, `model_error`) or `skipped` (`no_manager`, `no_model`, `provider_unavailable`, `unavailable`, `superseded`, `model_error`, `time_limit`, `interrupted`). `feedback` counts the owner's answers per suggestion kind; it is shown only and never reaches a prompt.
 
+Library upkeep (PRD `library-upkeep`): `last_complete_scan_at` is when the newest **complete** scan of a connected root finished (omitted when there is none; a partial or failed scan never moves it). The digest may also carry `moved` (songs this scan found at a new folder and relinked to their record) and `relink_conflicts` (folders left alone because more than one record matched); both are omitted when zero. Search rows (`GET …/library/projects`) and the detail row carry `moved: { root_id, relative_folder, from_root_id, from_relative_folder }` while the root's newest complete scan is the one that found the move.
+
+### Set Stage, Status or Priority for Several Songs
+
+**Endpoint:** `POST /api/workspaces/{workspaceID}/assistant-program/library/projects/fields/bulk`
+
+```json
+{
+  "entries": [{ "entry_id": "…", "if_fields_revision": 3 }],
+  "patch": { "status": "active" },
+  "idempotency_key": "library-bulk-fields-…"
+}
+```
+
+Owner only, strict JSON. `entries`: 1–100 unique songs, each with the fields revision the shelf showed. `patch` may name only `stage`, `status`, `priority` (0–5) or `clear_priority`; anything else, an empty patch, or `priority` with `clear_priority` is `400`. There is no review step. Each song is updated or skipped on its own, in one Home update:
+
+```json
+{
+  "updated": [{ "entry_id": "…", "fields": { "status": "active", "revision": 4, "author": "…", "source": "reviewed_user", "updated_at": "…" } }],
+  "skipped": [{ "entry_id": "…", "reason": "revision_changed" }],
+  "replay": false
+}
+```
+
+`reason` is `revision_changed` (edited since the shelf loaded) or `not_found`. The same `idempotency_key` with the same request returns the first outcome with `"replay": true`; with a different request, or once its outcome has aged out (the last 16 are kept), it is `409`.
+
 ### Dismiss a Suggestion
 
 **Endpoint:** `POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/dismiss`

@@ -578,9 +578,9 @@ func managerRunUserPrompt(digest LibraryDigest) string {
 		setup = "project setup readiness was not available (" + strings.ReplaceAll(digest.SetupNote, "_", " ") + ")"
 	}
 	return fmt.Sprintf("Scan review. A reviewed scan of one approved discovery folder just completed (coverage: %s). "+
-		"It observed %d projects: %d new, %d changed, %d no longer found; %s. "+
+		"It observed %d projects: %d new, %d changed, %d moved to a new folder (their records kept), %d no longer found; %s. "+
 		"Suggest at most three useful next steps for the owner, or none.",
-		digest.Coverage, digest.Projects, digest.New, digest.Updated, digest.Unavailable, setup)
+		digest.Coverage, digest.Projects, digest.New, digest.Updated, digest.Moved, digest.Unavailable, setup)
 }
 
 // managerTurnPrompt is one turn's instructions and the write tools it may call

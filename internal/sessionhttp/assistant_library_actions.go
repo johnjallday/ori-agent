@@ -463,6 +463,53 @@ func (h *Handler) CommitAssistantLibraryFields(w http.ResponseWriter, r *http.Re
 	_ = orihttp.RespondSuccess(w, map[string]any{"entry_id": entry.ID, "fields": entry.Fields, "replay": replay})
 }
 
+type libraryBulkFieldsRequest struct {
+	Entries        []projectlibrary.BulkFieldsEntry `json:"entries"`
+	Patch          projectlibrary.FieldsPatch       `json:"patch"`
+	IdempotencyKey string                           `json:"idempotency_key"`
+}
+
+// CommitAssistantLibraryBulkFields sets stage, status or priority for the
+// selected songs in one owner action (library-upkeep FR17). Each song is
+// updated or skipped on its own; a patch naming any other field is refused.
+func (h *Handler) CommitAssistantLibraryBulkFields(w http.ResponseWriter, r *http.Request) {
+	scope, _, ok := h.assistantLibraryScope(w, r)
+	if !ok {
+		return
+	}
+	var request libraryBulkFieldsRequest
+	if !decodeLibraryAction(w, r, &request) {
+		return
+	}
+	if len(request.Entries) == 0 || len(request.Entries) > projectlibrary.MaxBulkEntries {
+		_ = orihttp.RespondBadRequest(w, "Choose between 1 and 100 songs")
+		return
+	}
+	if !projectlibrary.BulkPatchAllowed(request.Patch) {
+		_ = orihttp.RespondBadRequest(w, "A bulk edit sets only stage, status or priority")
+		return
+	}
+	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 160 {
+		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		return
+	}
+	seen := make(map[string]bool, len(request.Entries))
+	for _, entry := range request.Entries {
+		if entry.EntryID == "" || len(entry.EntryID) > 160 || entry.IfFieldsRevision < 0 || seen[entry.EntryID] {
+			_ = orihttp.RespondBadRequest(w, "Invalid library request")
+			return
+		}
+		seen[entry.EntryID] = true
+	}
+	result, err := h.assistantLibraryStore().CommitBulkFields(scope, request.Entries, request.Patch,
+		request.IdempotencyKey, scope.OwnerUserID)
+	if err != nil {
+		respondLibraryActionError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, result)
+}
+
 type libraryRevisionRequest struct {
 	IfRevision int64 `json:"if_revision"`
 }

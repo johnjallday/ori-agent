@@ -38,6 +38,13 @@ type LibraryDigest struct {
 	// SetupNote explains why Activatable and UnsupportedFormat are zero
 	// without implying the entries are unusable.
 	SetupNote string `json:"setup_note,omitempty"`
+	// Moved counts songs this scan found at a new folder and relinked to
+	// their existing record (library-upkeep FR8); they are part of Projects,
+	// never New or Updated. RelinkConflicts counts folders that matched more
+	// than one prior record (or one record matched by several folders), so
+	// nothing was relinked for them. Older digests read both as zero.
+	Moved           int `json:"moved,omitempty"`
+	RelinkConflicts int `json:"relink_conflicts,omitempty"`
 }
 
 // Setup notes. They name a missing piece of host evidence, never a remedy
@@ -54,13 +61,14 @@ func (d LibraryDigest) valid(scans []Scan) bool {
 		d.ScannedAt.IsZero() || (d.Coverage != "complete" && d.Coverage != "partial") {
 		return false
 	}
-	for _, count := range []int{d.Projects, d.New, d.Updated, d.Unavailable, d.UnsupportedFormat, d.Activatable, d.Connected, d.NeedsFileChoice} {
+	for _, count := range []int{d.Projects, d.New, d.Updated, d.Unavailable, d.UnsupportedFormat, d.Activatable,
+		d.Connected, d.NeedsFileChoice, d.Moved, d.RelinkConflicts} {
 		if count < 0 || count > maxEntries {
 			return false
 		}
 	}
 	if d.New > d.Projects || d.Updated > d.Projects || d.Connected+d.Activatable+d.UnsupportedFormat > d.Projects ||
-		d.NeedsFileChoice > d.Activatable {
+		d.NeedsFileChoice > d.Activatable || d.Moved > d.Projects || d.New+d.Updated+d.Moved > d.Projects {
 		return false
 	}
 	switch d.SetupNote {
@@ -154,6 +162,8 @@ func buildLibraryDigest(before, after []Entry, scan Scan, finishedAt time.Time, 
 		switch {
 		case !existed:
 			digest.New++
+		case current.MovedFrom != nil && current.MovedFrom.ScanID == scan.ID:
+			digest.Moved++
 		case previous == nil || observationChanged(*previous, *current):
 			digest.Updated++
 		}
@@ -200,7 +210,7 @@ func (s *Store) publishScanCompleted(scope Scope, digest LibraryDigest) {
 	payload := workspace.LibraryScanCompleted{HomeID: scope.HomeID, ScanID: digest.ScanID,
 		RootID: digest.RootID, Coverage: digest.Coverage, Projects: digest.Projects, New: digest.New,
 		Updated: digest.Updated, Unavailable: digest.Unavailable,
-		UnsupportedFormat: digest.UnsupportedFormat, Activatable: digest.Activatable}
+		UnsupportedFormat: digest.UnsupportedFormat, Activatable: digest.Activatable, Moved: digest.Moved}
 	s.events.Publish(payload.Event("project_library"))
 	logger.Info("Project library scan completed", logger.Fields{"home_id": scope.HomeID,
 		"scan_id": digest.ScanID, "coverage": digest.Coverage, "projects": digest.Projects})
@@ -217,6 +227,27 @@ type LibrarySummary struct {
 	// ProposalRun is the Manager review receipt for the digest's scan, if any:
 	// the shelf shows its skipped reason or its source.
 	ProposalRun *ProposalRun `json:"proposal_run,omitempty"`
+	// LastCompleteScanAt is when the newest complete scan of a connected root
+	// finished. The shelf's freshness line and the map badge's age read it; a
+	// partial, failed or cancelled scan never moves it. Nil means no root has
+	// a complete scan yet.
+	LastCompleteScanAt *time.Time `json:"last_complete_scan_at,omitempty"`
+}
+
+// lastCompleteScanAt is the finish time of the newest complete scan whose root
+// is still connected. A scan of a smaller folder counts: it completed.
+func lastCompleteScanAt(doc Document, state *workspace.AssistantProgramState) *time.Time {
+	var newest *time.Time
+	for _, scan := range doc.Scans {
+		if scan.Status != "complete" || scan.FinishedAt == nil || !digestRootActive(doc, state, scan.RootID) {
+			continue
+		}
+		if newest == nil || scan.FinishedAt.After(*newest) {
+			finished := *scan.FinishedAt
+			newest = &finished
+		}
+	}
+	return newest
 }
 
 // Summary returns zeros for an uninitialized Home. A digest whose root was
@@ -229,7 +260,8 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 		}
 		return LibrarySummary{}, err
 	}
-	summary := LibrarySummary{Initialized: true, Revision: doc.Revision}
+	summary := LibrarySummary{Initialized: true, Revision: doc.Revision,
+		LastCompleteScanAt: lastCompleteScanAt(doc, state)}
 	if doc.Digest != nil && digestRootActive(doc, state, doc.Digest.RootID) {
 		current := digestWithLinks(doc, *doc.Digest)
 		summary.Digest = &current

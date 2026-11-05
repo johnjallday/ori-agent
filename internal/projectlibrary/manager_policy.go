@@ -113,6 +113,10 @@ func (s *Store) SearchForManager(authority ManagerAuthority, query Search) (Sear
 	if _, err := s.authorizeManager(authority); err != nil {
 		return SearchPage{}, err
 	}
+	// The Manager is told how many songs moved, never where (FR15).
+	for i := range page.Rows {
+		page.Rows[i].Moved = nil
+	}
 	return page, nil
 }
 
@@ -164,5 +168,6 @@ func (s *Store) DetailForManager(authority ManagerAuthority, entryID string) (De
 		return Detail{}, err
 	}
 	detail.Sources = nil
+	detail.Row.Moved = nil
 	return detail, nil
 }

@@ -148,6 +148,9 @@ type LibraryScanCompleted struct {
 	Unavailable       int    `json:"unavailable"`
 	UnsupportedFormat int    `json:"unsupported_format"`
 	Activatable       int    `json:"activatable"`
+	// Moved counts songs relinked to their record at a new folder. A count
+	// only: no path is ever carried on the bus.
+	Moved int `json:"moved"`
 }
 
 // Event wraps the payload for the bus. Data carries the same keys as the
@@ -157,7 +160,7 @@ func (p LibraryScanCompleted) Event(source string) Event {
 		Data: map[string]any{
 			"home_id": p.HomeID, "scan_id": p.ScanID, "root_id": p.RootID, "coverage": p.Coverage,
 			"projects": p.Projects, "new": p.New, "updated": p.Updated, "unavailable": p.Unavailable,
-			"unsupported_format": p.UnsupportedFormat, "activatable": p.Activatable,
+			"unsupported_format": p.UnsupportedFormat, "activatable": p.Activatable, "moved": p.Moved,
 		},
 		Metadata: map[string]string{}}
 }
@@ -192,6 +195,14 @@ func LibraryScanCompletedFromEvent(event Event) (LibraryScanCompleted, bool) {
 		if !valid {
 			return LibraryScanCompleted{}, false
 		}
+	}
+	// An event published before moves were counted has no key: zero.
+	if _, present := event.Data["moved"]; present {
+		moved, valid := count("moved")
+		if !valid {
+			return LibraryScanCompleted{}, false
+		}
+		p.Moved = moved
 	}
 	if p.HomeID != event.WorkspaceID || (p.Coverage != "complete" && p.Coverage != "partial") {
 		return LibraryScanCompleted{}, false

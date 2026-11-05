@@ -19,6 +19,9 @@ import { arrangementID, mountArrangementHistory } from './workspace-arrangement.
 import { mountHomeArrangementPlanner } from './home-arrangement.js';
 import { mountCollectionReview } from './home-collection-review.js';
 import { mountHomeCollections } from './home-collections.js';
+import { libraryFreshness } from './library-freshness.js';
+
+export { libraryFreshness, STALE_SCAN_MS } from './library-freshness.js';
 
 // The open helpers moved to library-open.js so the setup pop-up can share them
 // without loading this module on every page; existing importers keep working.
@@ -208,6 +211,13 @@ export function setupNextStep({ state = null, collection = '', carried = false }
   return { stage: 'ready' };
 }
 
+// The roots Rescan covers: connected (not disconnected, not awaiting a new
+// grant) roots on the loaded list, in the server's order.
+export function rescanRoots(state) {
+  const roots = Array.isArray(state?.roots) ? state.roots : [];
+  return roots.filter(root => root && root.id && !root.revoked_at && !root.needs_review);
+}
+
 export function libraryQuery({
   text = '',
   stage = '',
@@ -247,7 +257,8 @@ const DIGEST_SETUP_NOTES = {
 
 // libraryDigestText renders the Home's model-free scan digest. The digest
 // carries only IDs and counts; the folder name comes from the owner-only roots
-// list the shelf already loaded, reduced to its last path segment.
+// list the shelf already loaded, reduced to its last path segment. The scan's
+// age is the freshness line's job, so the sentence never repeats a date.
 export function libraryDigestText(digest, roots = []) {
   if (!digest || typeof digest !== 'object' || !digest.scan_id) return '';
   const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
@@ -256,14 +267,13 @@ export function libraryDigestText(digest, roots = []) {
     String(root?.path || '')
       .split(/[\\/]/)
       .filter(Boolean)
-      .pop() || 'an approved folder';
-  const scanned = new Date(digest.scanned_at);
-  const when = Number.isNaN(scanned.getTime())
-    ? 'an unknown date'
-    : scanned.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      .pop() || 'An approved folder';
   const projects = count(digest.projects);
   const parts = [`${projects} ${projects === 1 ? 'project' : 'projects'}`];
   if (count(digest.new) > 0) parts.push(`${count(digest.new)} new`);
+  // A moved song kept its record; a folder that matched more than one record
+  // was left alone rather than guessed at.
+  if (count(digest.moved) > 0) parts.push(`${count(digest.moved)} moved`);
   // Each song is in one bucket: already connected, can be set up, or an
   // unsupported format. A file choice is part of "can be set up", not another
   // bucket, so the parts never add up to more than the projects found.
@@ -281,10 +291,119 @@ export function libraryDigestText(digest, roots = []) {
       parts.push(`${count(digest.unsupported_format)} unsupported format`);
   }
   if (count(digest.unavailable) > 0) parts.push(`${count(digest.unavailable)} no longer found`);
-  let text = `Scanned ${name} on ${when}: ${parts.join(', ')}.`;
+  if (count(digest.relink_conflicts) > 0)
+    parts.push(`${count(digest.relink_conflicts)} could not be matched`);
+  let text = `${name}: ${parts.join(', ')}.`;
   if (digest.coverage === 'partial')
     text += ' Partial scan: folders it did not reach were left unchanged.';
   return text;
+}
+
+// Bulk field edits (library-upkeep FR16-FR19). "unknown" on the shelf is the
+// empty stored value; priority uses the detail form's 0-5 and Clear.
+export const BULK_UNDO_MS = 30_000;
+const bulkStored = choice => (choice === 'unknown' ? '' : String(choice || ''));
+export const BULK_FIELDS = {
+  stage: {
+    name: 'stage',
+    control: 'projectLibraryBulkStage',
+    patch: choice => ({ stage: bulkStored(choice) }),
+    read: row => bulkStored(row.stage || 'unknown'),
+    inverse: previous => ({ stage: previous || '' })
+  },
+  status: {
+    name: 'status',
+    control: 'projectLibraryBulkStatus',
+    patch: choice => ({ status: bulkStored(choice) }),
+    read: row => bulkStored(row.status || 'unknown'),
+    inverse: previous => ({ status: previous || '' })
+  },
+  priority: {
+    name: 'priority',
+    control: 'projectLibraryBulkPriority',
+    patch: choice => (choice === 'clear' ? { clear_priority: true } : { priority: Number(choice) }),
+    read: row => (Number.isInteger(row.priority) ? row.priority : null),
+    inverse: previous =>
+      Number.isInteger(previous) ? { priority: previous } : { clear_priority: true }
+  }
+};
+
+const BULK_SKIP_REASONS = {
+  revision_changed: 'changed elsewhere',
+  not_found: 'no longer in the library'
+};
+
+export function bulkCountText(count) {
+  const n = Number.isInteger(count) && count > 0 ? count : 0;
+  return `${n} ${n === 1 ? 'song' : 'songs'}`;
+}
+
+// " · 1 skipped (changed elsewhere)", or one part per reason when they differ.
+export function bulkSkippedText(skipped) {
+  const list = Array.isArray(skipped) ? skipped : [];
+  if (!list.length) return '';
+  const counts = new Map();
+  for (const item of list) {
+    const reason = BULK_SKIP_REASONS[item?.reason] || 'not changed';
+    counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  const reasons =
+    counts.size === 1
+      ? [...counts.keys()][0]
+      : [...counts.entries()].map(([reason, n]) => `${n} ${reason}`).join(', ');
+  return ` · ${list.length} skipped (${reasons})`;
+}
+
+// "Set stage to Mixing for 14 songs · 1 skipped (changed elsewhere)".
+export function bulkResultText(field, choice, updated, skipped) {
+  const songs = bulkCountText(updated);
+  if (field === 'priority' && choice === 'clear')
+    return `Cleared priority for ${songs}${bulkSkippedText(skipped)}`;
+  const value = field === 'priority' ? String(choice) : label(choice);
+  const shown = value.charAt(0).toUpperCase() + value.slice(1);
+  return `Set ${field} to ${shown} for ${songs}${bulkSkippedText(skipped)}`;
+}
+
+const MOVED_PATH_MAX = 40;
+
+// Long folders lose their start, never their end: the song's own folder name
+// is the part worth reading.
+function leftTruncate(text, max = MOVED_PATH_MAX) {
+  const value = String(text);
+  return value.length > max ? `…${value.slice(-(max - 1))}` : value;
+}
+
+// movedNoteText is the one-line note on a song a scan relinked (FR12):
+// "Found at <new> (was <old>)", relative folders only. A move between two
+// approved folders names each folder's last path segment too.
+export function movedNoteText(moved, roots = []) {
+  if (!moved || typeof moved !== 'object') return { text: '', full: '' };
+  const list = Array.isArray(roots) ? roots : [];
+  const rootName = id =>
+    String(list.find(item => item?.id === id)?.path || '')
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop() || 'an approved folder';
+  const crossRoot = moved.root_id !== moved.from_root_id;
+  const place = (rootID, folder) => {
+    const relative = typeof folder === 'string' ? folder : '';
+    if (!crossRoot) return relative || rootName(rootID);
+    return relative ? `${rootName(rootID)}/${relative}` : rootName(rootID);
+  };
+  const to = place(moved.root_id, moved.relative_folder);
+  const from = place(moved.from_root_id, moved.from_relative_folder);
+  return {
+    text: `Found at ${leftTruncate(to)} (was ${leftTruncate(from)})`,
+    full: `Found at ${to} (was ${from})`
+  };
+}
+
+function movedNoteNode(moved, roots) {
+  const note = movedNoteText(moved, roots);
+  if (!note.text) return null;
+  const element = node('small', 'project-library-moved', note.text);
+  element.title = note.full;
+  return element;
 }
 
 const RUN_SKIP_REASONS = {
@@ -581,6 +700,14 @@ export class ProjectLibraryPanel {
     this.searchInFlight = false;
     this.busy = false;
     this.selectedProjects = new Set();
+    // The shelf row each selected song had when it was picked: its connection
+    // (the setup queue takes catalog-only songs) and the fields revision and
+    // values a bulk edit and its Undo send.
+    this.selectedRows = new Map();
+    this.bulkUndo = null;
+    // The last library summary read, and Rescan's progress while it runs.
+    this.summary = null;
+    this.rescanProgress = null;
     this.queue = readActivationQueue(this.workspaceId);
     this.recentQueues = [];
     const fromOffer =
@@ -767,6 +894,21 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMoreRoots')
       ?.addEventListener('click', event => void this.moreRoots(event.currentTarget));
+    document
+      .getElementById('projectLibraryRescan')
+      ?.addEventListener('click', event => void this.rescanAll(event.currentTarget));
+    // Choosing a value applies it to every selected song; no second step.
+    for (const [field, spec] of Object.entries(BULK_FIELDS)) {
+      document.getElementById(spec.control)?.addEventListener('change', event => {
+        const select = event.currentTarget;
+        const choice = select.value;
+        select.value = '';
+        void this.applyBulk(field, choice, select);
+      });
+    }
+    document
+      .getElementById('projectLibraryBulkUndo')
+      ?.addEventListener('click', event => void this.undoBulk(event.currentTarget));
     document
       .getElementById('projectSetupNextAction')
       ?.addEventListener('click', event => void this.runSetupNext(event.currentTarget));
@@ -1312,6 +1454,9 @@ export class ProjectLibraryPanel {
     } catch (_) {
       summary = null;
     }
+    // The freshness line rides this same read: no extra request on load.
+    this.summary = summary;
+    this.renderFreshness();
     const digestText = libraryDigestText(summary?.digest, this.state?.roots);
     const digestLine = document.getElementById('projectLibraryDigest');
     if (digestLine) {
@@ -1894,28 +2039,41 @@ export class ProjectLibraryPanel {
     for (const row of this.rows) {
       const tr = node('tr');
       const pick = node('td');
-      if (!this.readOnly && row.connection === 'catalog_only') {
+      // Every song can be picked for a bulk stage/status/priority edit; the
+      // setup queue still takes only the catalog-only ones (queueIds).
+      if (this.selectedProjects.has(row.id)) this.selectedRows.set(row.id, row);
+      if (!this.readOnly) {
         const checkbox = node('input');
         checkbox.type = 'checkbox';
         checkbox.checked = this.selectedProjects.has(row.id);
-        checkbox.setAttribute('aria-label', `Select ${row.name} for serial project review`);
+        checkbox.setAttribute(
+          'aria-label',
+          row.connection === 'catalog_only'
+            ? `Select ${row.name} for serial project review`
+            : `Select ${row.name}`
+        );
         checkbox.addEventListener('change', () => {
           if (checkbox.checked && this.selectedProjects.size >= QUEUE_LIMIT) {
             checkbox.checked = false;
-            this.status(`Review at most ${QUEUE_LIMIT} projects per queue.`);
+            this.status(`Select at most ${QUEUE_LIMIT} songs at once.`);
             return;
           }
-          if (checkbox.checked) this.selectedProjects.add(row.id);
-          else this.selectedProjects.delete(row.id);
+          if (checkbox.checked) {
+            this.selectedProjects.add(row.id);
+            this.selectedRows.set(row.id, row);
+          } else {
+            this.selectedProjects.delete(row.id);
+            this.selectedRows.delete(row.id);
+          }
           this.renderQueueControls();
         });
         pick.append(checkbox);
       }
       const name = node('td');
-      name.append(
-        node('strong', '', row.name),
-        node('small', '', row.next_action || 'No next action saved')
-      );
+      name.append(node('strong', '', row.name));
+      const moved = movedNoteNode(row.moved, this.state?.roots);
+      if (moved) name.append(moved);
+      name.append(node('small', '', row.next_action || 'No next action saved'));
       const saved = lastSavedLabel(row.last_saved_at);
       const facts = songFactsLabel(row.facts);
       if (saved || facts) name.append(savedLine('project-library-saved', saved, facts));
@@ -2019,17 +2177,36 @@ export class ProjectLibraryPanel {
     return this.readOnly ? [] : this.rows.filter(row => row.connection === 'catalog_only');
   }
 
+  // The selected songs the setup queue and "Connect all selected" may take:
+  // catalog-only ones. A song picked only for a bulk edit stays out.
+  queueIds() {
+    return [...this.selectedProjects].filter(
+      id => (this.selectedRows.get(id)?.connection ?? 'catalog_only') === 'catalog_only'
+    );
+  }
+
+  clearSelection() {
+    this.selectedProjects.clear();
+    this.selectedRows.clear();
+  }
+
   toggleSelectAll() {
     const pickable = this.selectableRows();
     if (this.queue || !pickable.length) return;
     if (pickable.every(row => this.selectedProjects.has(row.id))) {
-      for (const row of pickable) this.selectedProjects.delete(row.id);
+      for (const row of pickable) {
+        this.selectedProjects.delete(row.id);
+        this.selectedRows.delete(row.id);
+      }
     } else {
       let left = 0;
       for (const row of pickable) {
         if (this.selectedProjects.has(row.id)) continue;
         if (this.selectedProjects.size >= QUEUE_LIMIT) left++;
-        else this.selectedProjects.add(row.id);
+        else {
+          this.selectedProjects.add(row.id);
+          this.selectedRows.set(row.id, row);
+        }
       }
       if (left)
         this.status(`Selected ${QUEUE_LIMIT}, the most one queue takes; ${left} were left out.`);
@@ -2048,12 +2225,12 @@ export class ProjectLibraryPanel {
   // that needs a file choice or an integration is left alone and named. The first
   // failure stops the rest; songs already connected stay connected.
   async connectSelected(trigger) {
-    if (this.queue || this.readOnly || this.busy || this.selectedProjects.size < 2) return;
+    if (this.queue || this.readOnly || this.busy || this.queueIds().length < 2) return;
     await this.run(trigger, 'Checking the selected songs…', async () => {
       const ready = [];
       const left = [];
       let integration = null;
-      for (const id of [...this.selectedProjects]) {
+      for (const id of this.queueIds()) {
         const path = `/projects/${encodeURIComponent(id)}`;
         const detail = await this.request(path);
         if (detail.row.connection === 'connected') {
@@ -2208,7 +2385,8 @@ export class ProjectLibraryPanel {
           : this.selectedProjects.size
             ? `${this.selectedProjects.size} selected · nothing is connected until you review and confirm.`
             : 'Choose at least two catalog-only projects to review one at a time.';
-    start.disabled = this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+    const queueable = this.queueIds().length;
+    start.disabled = this.busy || this.readOnly || !!pending || queueable < 2;
     const selectAll = document.getElementById('projectLibrarySelectAll');
     const connectAll = document.getElementById('projectLibraryConnectAll');
     if (selectAll) {
@@ -2219,12 +2397,152 @@ export class ProjectLibraryPanel {
       selectAll.disabled = this.busy || this.readOnly || !!pending || pickable.length === 0;
     }
     if (connectAll) {
-      connectAll.disabled =
-        this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+      connectAll.disabled = this.busy || this.readOnly || !!pending || queueable < 2;
     }
     resume.hidden = discard.hidden = !pending;
     resume.disabled = this.busy || this.readOnly || pending?.status === 'expired';
     discard.disabled = this.busy;
+    this.renderBulkControls();
+  }
+
+  // The selected songs a bulk edit sends, with the row each had when picked.
+  bulkTargets() {
+    return [...this.selectedProjects]
+      .map(id => this.selectedRows.get(id))
+      .filter(row => row && Number.isInteger(row.fields_revision));
+  }
+
+  // Set stage… / Set status… / Set priority… (FR16, FR21): shown from one
+  // selected song; a read-only Home has no checkboxes and no bulk controls.
+  renderBulkControls() {
+    const bar = document.getElementById('projectLibraryBulk');
+    if (!bar) return;
+    const targets = this.bulkTargets();
+    bar.hidden = this.readOnly || targets.length === 0;
+    const count = document.getElementById('projectLibraryBulkCount');
+    if (count) count.textContent = bulkCountText(targets.length);
+    for (const field of Object.keys(BULK_FIELDS)) {
+      const select = document.getElementById(BULK_FIELDS[field].control);
+      if (select) select.disabled = this.busy || this.readOnly || targets.length === 0;
+    }
+  }
+
+  // One bulk request for every selected song (FR17-FR19). Rows update in place
+  // from the response; nothing is reloaded. The result line offers Undo.
+  async applyBulk(field, choice, trigger) {
+    const spec = BULK_FIELDS[field];
+    const targets = this.bulkTargets();
+    if (!spec || !choice || this.readOnly || this.busy || !targets.length) return;
+    const patch = spec.patch(choice);
+    const previous = new Map(targets.map(row => [row.id, spec.read(row)]));
+    let outcome = null;
+    await this.run(
+      trigger,
+      `Setting ${spec.name} for ${bulkCountText(targets.length)}…`,
+      async () => {
+        outcome = await this.post('/projects/fields/bulk', {
+          entries: targets.map(row => ({
+            entry_id: row.id,
+            if_fields_revision: row.fields_revision
+          })),
+          patch,
+          idempotency_key: operationKey('bulk-fields')
+        });
+        this.applyBulkOutcome(outcome);
+        this.clearSelection();
+        this.renderRows();
+      }
+    );
+    if (!outcome) return;
+    const updated = Array.isArray(outcome.updated) ? outcome.updated : [];
+    this.showBulkResult(bulkResultText(field, choice, updated.length, outcome.skipped), {
+      field,
+      entries: updated.map(item => ({
+        id: item.entry_id,
+        previous: previous.get(item.entry_id),
+        revision: item.fields?.revision
+      }))
+    });
+  }
+
+  // Updated songs take the server's fields; the shelf keeps its row order.
+  applyBulkOutcome(outcome) {
+    for (const item of Array.isArray(outcome?.updated) ? outcome.updated : []) {
+      const row = this.rows.find(candidate => candidate.id === item.entry_id);
+      if (!row || !item.fields) continue;
+      row.stage = item.fields.stage || 'unknown';
+      row.status = item.fields.status || 'unknown';
+      if (item.fields.priority == null) delete row.priority;
+      else row.priority = item.fields.priority;
+      row.fields_revision = item.fields.revision;
+    }
+  }
+
+  showBulkResult(text, undo) {
+    const line = document.getElementById('projectLibraryBulkResult');
+    const message = document.getElementById('projectLibraryBulkResultText');
+    const button = document.getElementById('projectLibraryBulkUndo');
+    globalThis.clearTimeout?.(this.bulkUndo?.timer);
+    this.bulkUndo = null;
+    if (message) message.textContent = text;
+    if (line) line.hidden = false;
+    const undoable = undo && undo.entries.some(entry => Number.isInteger(entry.revision));
+    if (button) {
+      button.hidden = !undoable;
+      button.disabled = false;
+    }
+    if (!undoable) return;
+    // Undo is client state only and lasts thirty seconds (FR19).
+    this.bulkUndo = {
+      ...undo,
+      timer: globalThis.setTimeout?.(() => {
+        this.bulkUndo = null;
+        if (button) button.hidden = true;
+      }, BULK_UNDO_MS)
+    };
+  }
+
+  // Undo sends the inverse: each song's previous value, with the revision the
+  // bulk edit returned. Songs that shared a previous value go in one request.
+  async undoBulk(trigger) {
+    const undo = this.bulkUndo;
+    if (!undo || this.busy) return;
+    globalThis.clearTimeout?.(undo.timer);
+    this.bulkUndo = null;
+    const spec = BULK_FIELDS[undo.field];
+    const groups = new Map();
+    for (const entry of undo.entries) {
+      if (!Number.isInteger(entry.revision)) continue;
+      const key = JSON.stringify(entry.previous ?? null);
+      if (!groups.has(key)) groups.set(key, { previous: entry.previous, entries: [] });
+      groups.get(key).entries.push({ entry_id: entry.id, if_fields_revision: entry.revision });
+    }
+    let restored = 0;
+    let finished = false;
+    const skipped = [];
+    await this.run(trigger, 'Undoing…', async () => {
+      try {
+        for (const group of groups.values()) {
+          const outcome = await this.post('/projects/fields/bulk', {
+            entries: group.entries,
+            patch: spec.inverse(group.previous),
+            idempotency_key: operationKey('bulk-undo')
+          });
+          this.applyBulkOutcome(outcome);
+          restored += Array.isArray(outcome.updated) ? outcome.updated.length : 0;
+          skipped.push(...(Array.isArray(outcome.skipped) ? outcome.skipped : []));
+        }
+        finished = true;
+      } finally {
+        this.renderRows();
+      }
+    });
+    this.showBulkResult(
+      finished
+        ? `Undid: restored ${bulkCountText(restored)}${bulkSkippedText(skipped)}`
+        : `Undo stopped after restoring ${bulkCountText(restored)}. Refresh the shelf to see each song.`,
+      null
+    );
   }
 
   // Browser storage is only an optional same-tab, previously confirmed creator
@@ -2315,16 +2633,11 @@ export class ProjectLibraryPanel {
   }
 
   async startQueue(trigger) {
-    if (
-      this.queue ||
-      this.readOnly ||
-      this.selectedProjects.size < 2 ||
-      this.selectedProjects.size > QUEUE_LIMIT
-    )
-      return;
+    const ids = this.queueIds();
+    if (this.queue || this.readOnly || ids.length < 2 || ids.length > QUEUE_LIMIT) return;
     try {
       const { queue } = await this.post('/queue', {
-        ids: [...this.selectedProjects],
+        ids,
         request_key: operationKey('queue-start')
       });
       this.queue = {
@@ -2334,7 +2647,7 @@ export class ProjectLibraryPanel {
         pending: null
       };
       this.saveQueue();
-      this.selectedProjects.clear();
+      this.clearSelection();
       this.renderRows();
       await this.continueQueue(document.getElementById('projectLibraryQueueResume') || trigger);
     } catch (error) {
@@ -2863,15 +3176,97 @@ export class ProjectLibraryPanel {
     );
   }
 
-  async scanRootFlow(rootID, trigger, scopeID = '') {
+  // Rescan (FR2): the same review and commit pair as "Review scan" for every
+  // connected root in turn, without the confirmation page: a rescan of an
+  // already approved folder reads names only and grants nothing new. Each
+  // commit finishes before the next review starts, so two scans never overlap,
+  // and each review uses the revision the previous scan left.
+  async rescanAll(trigger) {
+    const roots = rescanRoots(this.state);
+    if (this.busy || this.readOnly || !roots.length) return;
+    const outcomes = [];
+    await this.run(trigger, 'Scanning…', async () => {
+      try {
+        for (const [index, root] of roots.entries()) {
+          this.rescanProgress = { index: index + 1, total: roots.length };
+          this.renderFreshness();
+          // The state may have been re-read after the previous scan.
+          if (!rescanRoots(this.state).some(item => item.id === root.id)) continue;
+          outcomes.push(await this.scanRootFlow(root.id, trigger, '', { confirmed: true }));
+        }
+      } finally {
+        this.rescanProgress = null;
+        this.renderFreshness();
+      }
+      if (outcomes.length > 1) {
+        const complete = outcomes.filter(item => item?.status === 'complete').length;
+        this.status(
+          `Rescanned ${outcomes.length} folders · ${complete} complete${
+            complete < outcomes.length ? ` · ${outcomes.length - complete} did not finish` : ''
+          }.`
+        );
+      }
+    });
+    this.renderFreshness(); // busy is released only after run() returns.
+  }
+
+  // The freshness line (FR1, FR3, FR5): how old the newest complete scan is,
+  // from the summary the shelf already read, and the Rescan button.
+  renderFreshness(now = Date.now()) {
+    const line = document.getElementById('projectLibraryFreshness');
+    if (!line) return;
+    const roots = rescanRoots(this.state);
+    line.hidden = !this.summary || this.state?.initialized !== true || !roots.length;
+    if (line.hidden) return;
+    const view = libraryFreshness(this.summary, now);
+    const text = document.getElementById('projectLibraryFreshnessText');
+    if (text) text.textContent = view.text;
+    line.classList.toggle('is-stale', view.stale);
+    const button = document.getElementById('projectLibraryRescan');
+    if (!button) return;
+    button.hidden = this.readOnly;
+    const progress = this.rescanProgress;
+    button.textContent = progress
+      ? progress.total > 1
+        ? `Scanning ${progress.index} of ${progress.total}…`
+        : 'Scanning…'
+      : 'Rescan';
+    button.disabled = this.busy || !!progress;
+  }
+
+  async scanRootFlow(rootID, trigger, scopeID = '', { confirmed = false } = {}) {
     const recordedScan = () =>
       (this.state?.roots || []).find(item => item.id === rootID)?.last_scan || null;
     const priorScanID = recordedScan()?.id || '';
-    const review = await this.post(`/roots/${encodeURIComponent(rootID)}/scans/review`, {
-      if_revision: this.state.revision,
-      ...(scopeID ? { scope_id: scopeID } : {})
-    });
+    const askReview = () =>
+      this.post(`/roots/${encodeURIComponent(rootID)}/scans/review`, {
+        if_revision: this.state.revision,
+        ...(scopeID ? { scope_id: scopeID } : {})
+      });
+    // Work that follows a scan (the Manager's turn, the song-facts pass) can
+    // advance the Home revision after the shelf re-read it. Rescan has no page
+    // in between to absorb that, so it reads the current revision first and
+    // asks once more if the review still finds it stale; a review grants
+    // nothing, so asking again is safe.
+    const freshRevision = async () => {
+      const current = await this.request('/roots');
+      if (Number.isSafeInteger(current?.revision)) this.state.revision = current.revision;
+    };
+    let review;
+    if (confirmed) {
+      await freshRevision();
+      try {
+        review = await askReview();
+      } catch (error) {
+        if (error.reason !== 'stale_review') throw error;
+        await freshRevision();
+        review = await askReview();
+      }
+    } else {
+      review = await askReview();
+    }
     if (
+      !confirmed &&
       !(await this.confirm(
         scopeID ? 'Scan this selected folder once?' : 'Scan this discovery folder once?',
         [
@@ -2889,7 +3284,7 @@ export class ProjectLibraryPanel {
     ) {
       await this.refresh(); // The inert review still advances the Home document revision.
       this.status('Scan canceled. The folder was not read.');
-      return;
+      return null;
     }
     const idempotencyKey = operationKey('scan');
     const commit = () =>
@@ -2917,7 +3312,7 @@ export class ProjectLibraryPanel {
           this.status(
             `The reply was lost, but this scan was recorded: ${label(seen.status)} · ${seen.entries_seen} names checked. It was not repeated.`
           );
-          return;
+          return seen;
         }
         throw again;
       }
@@ -2926,6 +3321,7 @@ export class ProjectLibraryPanel {
     this.status(
       `${label(receipt.status)} scan · ${receipt.entries_seen} entries seen · ${receipt.skipped_links + receipt.skipped_other} skipped${receipt.partial_reason ? ` · ${receipt.partial_reason}` : ''}.`
     );
+    return receipt;
   }
 
   async revokeRoot(root, trigger) {
@@ -3035,14 +3431,24 @@ export class ProjectLibraryPanel {
         `${label(detail.row.stage)} · ${label(detail.row.status)} · ${label(detail.row.connection)} · ${label(detail.row.availability || detail.row.last_observed_availability)}`
       );
       const sourceList = node('ul');
-      for (const source of detail.sources || [])
-        sourceList.append(
-          node(
-            'li',
-            '',
-            `${source.relative_folder || 'Selected root'} · ${label(source.format)} · ${label(source.last_observed_availability)}${source.total_alternates ? ` · ${source.total_alternates} project-file choices (selection requires a separate review)` : ''}`
-          )
+      for (const source of detail.sources || []) {
+        const item = node(
+          'li',
+          '',
+          `${source.relative_folder || 'Selected root'} · ${label(source.format)} · ${label(source.last_observed_availability)}${source.total_alternates ? ` · ${source.total_alternates} project-file choices (selection requires a separate review)` : ''}`
         );
+        // The move note sits under the folder it names.
+        const moved = detail.row?.moved;
+        if (
+          moved &&
+          moved.root_id === source.root_id &&
+          moved.relative_folder === source.relative_folder
+        ) {
+          const note = movedNoteNode(moved, this.state?.roots);
+          if (note) item.append(note);
+        }
+        sourceList.append(item);
+      }
       if (!sourceList.children.length)
         sourceList.append(
           node('li', '', 'An exact existing link is recorded; no folder was scanned.')

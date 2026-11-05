@@ -40,7 +40,10 @@ func observationAt(doc Document, rootID, relative string) (Entry, Observation, b
 	return Entry{}, Observation{}, false
 }
 
-func TestReconcile_ReplacementAndRenameLeaveEditedIdentityHistorical(t *testing.T) {
+// A renamed folder keeps its record (library-upkeep relink); a replacement
+// folder under the old name, with a different project file, is a new record
+// and never inherits the user's fields.
+func TestReconcile_ReplacementIsNewAndRenameKeepsTheRecord(t *testing.T) {
 	r, scope, _, tree, root := connectedMusicRoot(t)
 	if scan := reviewedRootScan(t, r, scope, root, "initial"); scan.Status != "complete" {
 		t.Fatal(scan)
@@ -83,29 +86,18 @@ func TestReconcile_ReplacementAndRenameLeaveEditedIdentityHistorical(t *testing.
 		t.Fatal(scan)
 	}
 	after, err := r.library.Read(scope)
-	if err != nil || len(after.Entries) != len(before.Entries)+2 {
+	if err != nil || len(after.Entries) != len(before.Entries)+1 {
 		t.Fatalf("replacement and rename lost history or forged a merge: %+v %v", after, err)
 	}
-	oldFound := false
-	for _, entry := range after.Entries {
-		if entry.ID != oldEntry.ID {
-			continue
-		}
-		oldFound = true
-		if entry.Fields.DisplayName != "Human title" || entry.Fields.Status != "on_hold" ||
-			len(entry.Observations) != 1 || entry.Observations[0].FileIdentity != oldObservation.FileIdentity ||
-			entry.Observations[0].Availability != "unavailable" || entry.Observations[0].LastCheckedAt.IsZero() {
-			t.Fatalf("user metadata was silently moved to replacement: %+v", entry)
-		}
+	kept, observation, ok := observationAt(after, root.ID, "MovedSong")
+	if !ok || kept.ID != oldEntry.ID || kept.Fields.DisplayName != "Human title" || kept.Fields.Status != "on_hold" ||
+		observation.FileIdentity != oldObservation.FileIdentity || observation.MovedFrom == nil ||
+		observation.MovedFrom.RelativeFolder != "Single" || len(kept.Observations) != 1 {
+		t.Fatalf("renamed folder did not keep its record: %+v", kept)
 	}
-	if !oldFound {
-		t.Fatal("historical entry was dropped")
-	}
-	for _, relative := range []string{"Single", "MovedSong"} {
-		entry, _, ok := observationAt(after, root.ID, relative)
-		if !ok || entry.ID == oldEntry.ID || entry.Fields.Revision != 0 {
-			t.Fatalf("new location was automatically given historical user fields: %+v", entry)
-		}
+	replacement, _, ok := observationAt(after, root.ID, "Single")
+	if !ok || replacement.ID == oldEntry.ID || replacement.Fields.Revision != 0 {
+		t.Fatalf("replacement was given historical user fields: %+v", replacement)
 	}
 }
 

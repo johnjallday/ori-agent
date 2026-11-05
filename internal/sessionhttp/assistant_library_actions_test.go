@@ -488,6 +488,47 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 			t.Fatalf("reviewed field edit/replay %d: %d %s", i, result.Code, result.Body.String())
 		}
 	}
+	// Bulk edits (library-upkeep FR17): owner-only, strict, stage/status/
+	// priority only, per-song outcomes and an exact replay.
+	bulk := func(homeID, body string) (int, string) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		handler.CommitAssistantLibraryBulkFields(response, assistantProgramRequest(http.MethodPost,
+			"/library/projects/fields/bulk", homeID, body))
+		return response.Code, response.Body.String()
+	}
+	bulkRevision := strconv.FormatInt(fieldRevision+1, 10)
+	bulkBody := `{"entries":[{"entry_id":"` + entryID + `","if_fields_revision":` + bulkRevision + `},` +
+		`{"entry_id":"missing-song","if_fields_revision":0}],"patch":{"status":"active"},"idempotency_key":"bulk-http"}`
+	for name, body := range map[string]string{
+		"other field":    `{"entries":[{"entry_id":"` + entryID + `","if_fields_revision":1}],"patch":{"next_action":"x"},"idempotency_key":"b1"}`,
+		"no songs":       `{"entries":[],"patch":{"status":"active"},"idempotency_key":"b2"}`,
+		"duplicate song": `{"entries":[{"entry_id":"a","if_fields_revision":0},{"entry_id":"a","if_fields_revision":0}],"patch":{"status":"active"},"idempotency_key":"b3"}`,
+		"no key":         `{"entries":[{"entry_id":"a","if_fields_revision":0}],"patch":{"status":"active"}}`,
+		"unknown field":  `{"entries":[{"entry_id":"a","if_fields_revision":0}],"patch":{"status":"active"},"idempotency_key":"b4","confirm":true}`,
+		"empty patch":    `{"entries":[{"entry_id":"a","if_fields_revision":0}],"patch":{},"idempotency_key":"b5"}`,
+	} {
+		if code, response := bulk(station.ID, body); code != http.StatusBadRequest {
+			t.Fatalf("bulk %s: %d %s", name, code, response)
+		}
+	}
+	if code, _ := bulk(project.ID, bulkBody); code != http.StatusNotFound {
+		t.Fatalf("linked project URL edited the Home's songs: %d", code)
+	}
+	for i := 0; i < 2; i++ {
+		code, response := bulk(station.ID, bulkBody)
+		if code != http.StatusOK || !strings.Contains(response, `"status":"active"`) ||
+			!strings.Contains(response, `{"entry_id":"missing-song","reason":"not_found"}`) ||
+			!strings.Contains(response, `"replay":`+strconv.FormatBool(i != 0)) {
+			t.Fatalf("bulk edit/replay %d: %d %s", i, code, response)
+		}
+	}
+	// The same revision again is now stale: skipped, not overwritten.
+	staleBody := strings.Replace(bulkBody, `"bulk-http"`, `"bulk-http-2"`, 1)
+	if code, response := bulk(station.ID, staleBody); code != http.StatusOK ||
+		!strings.Contains(response, `"reason":"revision_changed"`) || !strings.Contains(response, `"updated":[]`) {
+		t.Fatalf("stale bulk edit: %d %s", code, response)
+	}
 	if contents, err := os.ReadFile(marker); err != nil || string(contents) != "test-only marker" {
 		t.Fatalf("source file changed: %q %v", contents, err)
 	}

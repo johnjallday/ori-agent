@@ -118,6 +118,10 @@ type Document struct {
 	CollectionBrief *CollectionBrief    `json:"collection_brief,omitempty"`
 	Arrangements    []Arrangement       `json:"arrangements,omitempty"`
 	Collections     []LogicalCollection `json:"collections,omitempty"`
+	// BulkFieldReceipts are the per-song outcomes of the latest bulk field
+	// edits, kept so a retried request returns its first result. Bounded;
+	// older documents have none.
+	BulkFieldReceipts []BulkFieldReceipt `json:"bulk_field_receipts,omitempty"`
 }
 
 type Root struct {
@@ -144,6 +148,24 @@ type Observation struct {
 	// Facts are the song's tempo, length and track count, read by a consenting
 	// Home's fact pass from the file that dates the song. Nil: not read.
 	Facts *ObservedFacts `json:"facts,omitempty"`
+	// MovedFrom says where this song was recorded before the scan that found
+	// its folder here (a relink, library-upkeep FR8). Nil: it did not move, or
+	// the observation was stored before relinks existed.
+	MovedFrom *MovedFrom `json:"moved_from,omitempty"`
+}
+
+// MovedFrom is the previous place of a relinked observation and the scan that
+// found the move. It is history for the shelf note, never a path to act on.
+type MovedFrom struct {
+	RootID         string `json:"root_id"`
+	RelativeFolder string `json:"relative_folder"`
+	ScanID         string `json:"scan_id"`
+}
+
+func (m *MovedFrom) valid(o Observation) bool {
+	return m.RootID != "" && validText(m.RootID, 160) && validRelative(m.RelativeFolder) &&
+		m.ScanID != "" && validText(m.ScanID, 160) &&
+		(m.RootID != o.RootID || m.RelativeFolder != o.RelativeFolder)
 }
 
 // ObservedFacts are one song's facts and the exact project file they came from.
@@ -471,7 +493,8 @@ func (d Document) valid(scope Scope) bool {
 		for _, o := range e.Observations {
 			if !roots[o.RootID] || seenRoots[o.RootID] || !validRelative(o.RelativeFolder) ||
 				o.FileIdentity == "" || !validText(o.FileIdentity, 160) || o.ScanID == "" || o.ScannedAt.IsZero() ||
-				len(o.Alternates) > 64 || (o.Facts != nil && !o.Facts.valid(o)) {
+				len(o.Alternates) > 64 || (o.Facts != nil && !o.Facts.valid(o)) ||
+				(o.MovedFrom != nil && !o.MovedFrom.valid(o)) {
 				return false
 			}
 			if !folderdigest.KnownProjectFormat(o.Format) {
@@ -660,6 +683,9 @@ func (d Document) valid(scope Scope) bool {
 			return false
 		}
 		used[op.Key] = true
+	}
+	if !validBulkFieldReceipts(d.BulkFieldReceipts) {
+		return false
 	}
 	return d.validArrangements()
 }

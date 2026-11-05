@@ -1184,6 +1184,39 @@
 .project-library-queue > span {
   flex: 1 1 16rem;
 }
+/* Set stage / status / priority for the selected songs: same bar, own row. */
+.project-library-bulk {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--assistant-line);
+}
+.project-library-bulk[hidden],
+.project-library-bulk-result[hidden] {
+  display: none;
+}
+.project-library-bulk-count {
+  font-weight: 600;
+}
+.project-library-bulk .form-select {
+  width: auto;
+  min-width: 9.5rem;
+  max-width: 100%;
+}
+.project-library-bulk-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 0.8rem;
+  padding: 0.5rem 0.85rem;
+  border-left: 3px solid var(--assistant-amber);
+  background: var(--assistant-panel);
+  overflow-wrap: anywhere;
+}
 .project-library-queue-history {
   padding: 0 0 0.8rem;
   color: var(--assistant-muted);
@@ -1283,6 +1316,40 @@
 .project-library-resume h3 {
   margin: 0 0 1rem;
   font-family: "Chakra Petch", sans-serif;
+}
+/* How old the library picture is, with the one-click Rescan. Past a day it
+   takes the shelf's amber attention edge; no new colour. */
+.project-library-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin: 0 0 1rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--assistant-line);
+  border-left: 3px solid var(--assistant-line);
+  border-radius: 4px;
+  color: var(--assistant-muted);
+}
+.project-library-freshness.is-stale {
+  border-left-color: var(--assistant-amber);
+  color: var(--assistant-amber-deep);
+  font-weight: 600;
+}
+/* A relinked song's "Found at … (was …)" line: muted, one line. The text is
+   already shortened from the left so the song's folder name stays visible. */
+.project-library-moved {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--assistant-muted);
+  font-style: italic;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.project-library-detail-dialog li .project-library-moved {
+  margin-top: 0.15rem;
 }
 .project-library-digest {
   margin: -0.5rem 0 1rem;
