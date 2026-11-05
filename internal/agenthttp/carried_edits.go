@@ -20,6 +20,10 @@ type CarriedEdit struct {
 	Updated []workspace.WorkspaceRef `json:"updated"`
 	// Customised are the workspaces whose copy was changed there; they keep it.
 	Customised []workspace.WorkspaceRef `json:"customised"`
+	// Error says some copies could not be brought up to date. The agent's own
+	// edit is saved either way; a later save or the workspace itself repairs
+	// the copies. Empty when every tracked copy was handled.
+	Error string `json:"error,omitempty"`
 }
 
 // CopyStepReader names the workspaces whose copy of an agent Ori keeps in step
@@ -60,7 +64,8 @@ func (h *Handler) SetEditCarrier(carrier EditCarrier) {
 }
 
 // carryEdit runs the carrier after a saved edit. The edit itself is already
-// saved, so a carrier failure is logged and reported as nothing carried.
+// saved, so a carrier failure never undoes it — but it is reported, even when
+// no copy was updated, so the editor can say the copies may be behind.
 func (h *Handler) carryEdit(agentName string) *CarriedEdit {
 	if h.editCarrier == nil {
 		return nil
@@ -68,8 +73,9 @@ func (h *Handler) carryEdit(agentName string) *CarriedEdit {
 	carried, err := h.editCarrier.CarryEdit(agentName)
 	if err != nil {
 		logger.Warn("Agent edit could not reach every workspace copy", logger.Fields{"agent": agentName, "error": err.Error()})
+		carried.Error = "Some workspace copies of this agent could not be updated."
 	}
-	if len(carried.Updated) == 0 && len(carried.Customised) == 0 {
+	if len(carried.Updated) == 0 && len(carried.Customised) == 0 && carried.Error == "" {
 		return nil
 	}
 	if carried.Updated == nil {

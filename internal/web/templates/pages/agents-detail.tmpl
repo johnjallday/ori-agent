@@ -12,6 +12,25 @@
     .agent-workspaces .modern-btn { background-image: none; }
     .agent-workspaces a { color: var(--text-primary); text-decoration: underline; }
     .agent-workspaces[hidden] { display: none !important; }
+    /* Per-section edit state ("Unsaved changes", "Saving…", "Changed elsewhere"). */
+    .agent-edit-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border-color); color: var(--text-primary); background: var(--bg-secondary); }
+    .agent-edit-badge[hidden] { display: none !important; }
+    .agent-edit-badge[data-state="conflict"], .agent-edit-badge[data-state="unconfirmed"], .agent-edit-badge[data-state="error"] { border-color: var(--agent-edit-danger); color: var(--agent-edit-danger); }
+    /* Inline "keep editing / discard" confirmation for a dirty editor. */
+    .agent-discard-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); font-size: 14px; }
+    .agent-discard-confirm[hidden] { display: none !important; }
+    .agent-discard-confirm span { flex: 1 1 200px; }
+    /* Review of a section whose fields were changed elsewhere: saved vs. yours. */
+    .agent-conflict-review { margin-top: 12px; padding: 12px; border: 1px solid var(--danger-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); font-size: 14px; }
+    .agent-conflict-review[hidden] { display: none !important; }
+    .agent-conflict-review dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0; }
+    .agent-conflict-review dt { font-weight: 600; }
+    .agent-conflict-review dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .agent-conflict-review .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    /* Status colours with real contrast: --success-color is too light for text. */
+    :root { --agent-edit-success: #047857; --agent-edit-danger: #b91c1c; }
+    .dark-mode, [data-bs-theme="dark"] { --agent-edit-success: #34d399; --agent-edit-danger: #fca5a5; }
+    @media (prefers-color-scheme: dark) { :root:not(.light-mode):not([data-bs-theme="light"]) { --agent-edit-success: #34d399; --agent-edit-danger: #fca5a5; } }
     .agent-workspaces h2 { font-size: 20px; color: var(--text-primary); }
     .agent-workspaces p { color: var(--text-secondary); }
     .agent-workspaces fieldset { min-width: 0; }
@@ -70,14 +89,11 @@
       box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
     }
 
-    /* The left column holds the shared Appearance editor, which is a good deal
-       richer than the 96px avatar preview it replaced: three source cards, each
-       with its own actions. 240px was too narrow for it, and `min-width: 0`
-       below is what stops any future overflow from being painted over by the
-       second column instead of wrapping. */
+    /* The profile modal holds only fields its Save and Cancel own. Appearance
+       saves immediately, so it lives in its own section on the page. */
     .agent-profile-modal-grid {
       display: grid;
-      grid-template-columns: minmax(260px, 320px) 1fr;
+      grid-template-columns: 1fr;
       gap: 20px;
       align-items: start;
     }
@@ -86,11 +102,22 @@
       min-width: 0;
     }
 
-    .agent-profile-avatar-panel {
+    /* The shared Appearance editor: three source cards, each with its own
+       actions. min-width: 0 lets it wrap rather than overflow at phone width. */
+    .agent-appearance-panel {
+      max-width: 560px;
+      min-width: 0;
       border: 1px solid var(--border-color);
       border-radius: 12px;
       padding: 16px;
       background: var(--bg-secondary);
+    }
+
+    /* At phone width the editor's source cards need the whole card width; the
+       extra frame and section padding would push them past their box. */
+    @media (max-width: 575px) {
+      #appearanceSection { padding: 1rem !important; }
+      .agent-appearance-panel { padding: 0; border: 0; background: transparent; }
     }
 
     .agent-profile-avatar-preview {
@@ -498,20 +525,22 @@
         <div id="content" style="display: none;">
           <!-- Agent Header -->
           <div id="agentHeader" class="agent-header modern-card p-4 mb-4" style="display: none;">
-            <div class="d-flex align-items-center gap-3">
+            <!-- Wraps at narrow widths so the actions never push the page sideways. -->
+            <div class="d-flex align-items-center gap-3 flex-wrap w-100">
               <div id="agentAvatar" class="agent-avatar-large" style="width: 80px; height: 80px; border-radius: 16px; background: linear-gradient(135deg, var(--primary-color), var(--primary-light)); display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: white;">
                 --
               </div>
-              <div class="flex-grow-1">
-                <h1 id="agentName" style="font-size: 28px; margin: 0 0 8px 0; color: var(--text-primary);">Loading...</h1>
+              <div class="flex-grow-1" style="min-width: min(100%, 14rem);">
+                <h1 id="agentName" style="font-size: 28px; margin: 0 0 8px 0; color: var(--text-primary); overflow-wrap: anywhere;">Loading...</h1>
                 <div class="d-flex align-items-start gap-2">
                   <p id="agentDescription" class="agent-description-large flex-grow-1" style="color: var(--text-secondary); margin: 0;">Loading description...</p>
                 </div>
                 <!-- Where this agent comes from: "Customised in: …" for one of your
                      agents, "From workspace: …" for a workspace's own agent. -->
                 <p id="agentOriginNote" class="agent-description-large text-secondary mt-2 mb-0" hidden></p>
+                <p id="profilePageStatus" role="status" aria-live="polite" class="small mt-2 mb-0" style="color: var(--agent-edit-success);"></p>
               </div>
-              <div class="d-flex gap-2">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
                 <button id="addToMyAgentsButton" class="modern-btn modern-btn-primary" type="button" hidden>
                   Add to my agents
                 </button>
@@ -519,6 +548,7 @@
                         title="Open this agent's folder in your Workspace Directory">
                   Show in Finder
                 </button>
+                <span id="profileEditBadge" class="agent-edit-badge" data-edit-badge="profile" hidden></span>
                 <button id="editProfileButton" class="modern-btn modern-btn-primary" type="button">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
                     <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
@@ -546,6 +576,22 @@
 
           <!-- Setup Health -->
           <div id="setupHealthBanner" class="section-card modern-card p-3 mb-4 setup-health-banner" style="display: none;"></div>
+
+          <!-- Appearance saves each choice the moment it is made, so it is its
+               own section rather than part of the profile modal, whose Save
+               and Cancel own only the fields inside it. The shared editor is
+               the same control the Agents roster uses (FR-26/FR-85). -->
+          <section id="appearanceSection" class="section-card modern-card p-4 mb-4" aria-labelledby="appearanceTitle" aria-describedby="appearanceSaveNote">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <h3 id="appearanceTitle" class="section-title" style="font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary);">Appearance</h3>
+              <span class="agent-edit-badge">Changes save immediately</span>
+            </div>
+            <p id="appearanceSaveNote" class="small" style="color: var(--text-secondary); margin: 0 0 12px;">Each choice here is saved as soon as you make it. Saving or cancelling the profile does not change it.</p>
+            <div class="agent-appearance-panel">
+              <div id="agentAppearanceHost"></div>
+            </div>
+            <div id="appearanceStatus" role="status" aria-live="polite" class="small mt-2" style="color: var(--text-secondary);"></div>
+          </section>
 
           <section id="agentWorkspacesSection" class="agent-workspaces section-card modern-card p-4 mb-4" aria-labelledby="agentWorkspacesTitle" hidden>
             <h2 id="agentWorkspacesTitle" tabindex="-1">Workspaces</h2>
@@ -620,6 +666,7 @@
                     Configuration
                   </h3>
                   <div class="d-flex align-items-center gap-2">
+                    <span id="configEditBadge" class="agent-edit-badge" data-edit-badge="configuration" hidden></span>
                     <button id="editConfigBtn" class="modern-btn modern-btn-secondary" onclick="toggleConfigEditMode()">Edit</button>
                     <div id="configEditActions" class="d-flex gap-2" style="display: none;">
                       <button id="saveConfigBtn" class="modern-btn modern-btn-primary" onclick="saveConfigChanges()">Save</button>
@@ -713,7 +760,14 @@
                       </select>
                     </div>
                   </div>
-                  <div id="configEditStatus" class="small mt-3" style="color: var(--text-secondary);"></div>
+                </div>
+                <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
+                <div id="configEditStatus" tabindex="-1" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+                <div id="configConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
+                <div id="configDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="configDiscardText" hidden>
+                  <span id="configDiscardText">Discard your unsaved configuration changes? Other sections keep theirs.</span>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-discard-keep>Keep editing</button>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-discard-confirm>Discard changes</button>
                 </div>
                 </div>
 
@@ -730,6 +784,7 @@
                     System Prompt
                   </h3>
                   <div class="d-flex align-items-center gap-2">
+                    <span id="promptEditBadge" class="agent-edit-badge" data-edit-badge="prompt" hidden></span>
                     <button id="editPromptBtn" class="modern-btn modern-btn-secondary" onclick="togglePromptEditMode()">Edit</button>
                     <div id="promptEditActions" class="d-flex gap-2" style="display: none;">
                       <button id="savePromptBtn" class="modern-btn modern-btn-primary" onclick="savePromptChanges()">Save</button>
@@ -740,8 +795,16 @@
                 <div id="promptDisplay" style="padding: 16px; background: var(--bg-secondary); border-radius: 8px; font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;">Loading...</div>
 
                 <div id="promptEditForm" style="display: none;">
+                  <label for="editSystemPrompt" class="visually-hidden">System prompt</label>
                   <textarea id="editSystemPrompt" class="form-control" rows="10" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6;"></textarea>
-                  <div id="promptEditStatus" class="small mt-2" style="color: var(--text-secondary);"></div>
+                </div>
+                <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
+                <div id="promptEditStatus" tabindex="-1" role="status" aria-live="polite" class="small mt-2" style="color: var(--text-secondary);"></div>
+                <div id="promptConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
+                <div id="promptDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="promptDiscardText" hidden>
+                  <span id="promptDiscardText">Discard your unsaved system prompt? Other sections keep theirs.</span>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-discard-keep>Keep editing</button>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-discard-confirm>Discard changes</button>
                 </div>
                 </div>
               </div>
@@ -874,20 +937,12 @@
         <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
           <div>
             <h5 class="modal-title" id="profileEditTitle" style="color: var(--text-primary); margin: 0;">Edit Agent Profile</h5>
-            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Identity, avatar, favorite status, and tags.</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Name, description, favorite status, and tags. Appearance is edited on the page and saves on its own.</div>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <div class="agent-profile-modal-grid">
-            <!-- One Appearance section replaces the separate avatar-image panel
-                 and the colour field that used to sit in the form beside it.
-                 This page and the Agents roster edit the same agent, so they
-                 must offer the same control (FR-26/FR-85). -->
-            <div class="agent-profile-avatar-panel">
-              <div id="profileAppearanceHost"></div>
-            </div>
-
             <div>
               <div class="row g-3">
                 <div class="col-12">
@@ -910,10 +965,16 @@
                   <div id="profileTagsContainer" class="agent-profile-tags-container">
                     <input type="text" id="profileTagsInput" name="tags" class="agent-profile-tag-input" autocomplete="off" spellcheck="false" placeholder="Add tags…">
                   </div>
-                  <div class="form-helper" style="color: var(--text-muted); font-size: 12px; margin-top: 6px;">Press Enter to add a tag.</div>
+                  <div class="form-helper" style="color: var(--text-secondary); font-size: 12px; margin-top: 6px;">Press Enter to add a tag.</div>
                 </div>
               </div>
-              <div id="profileEditStatus" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+              <div id="profileEditStatus" tabindex="-1" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+              <div id="profileConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
+              <div id="profileDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="profileDiscardText" hidden>
+                <span id="profileDiscardText">Discard your unsaved profile changes? Other sections keep theirs.</span>
+                <button type="button" class="modern-btn modern-btn-secondary" data-discard-keep>Keep editing</button>
+                <button type="button" class="modern-btn modern-btn-secondary" data-discard-confirm>Discard changes</button>
+              </div>
             </div>
           </div>
         </div>
@@ -972,6 +1033,7 @@
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/agent-origin.js"></script>
   <script defer src="/js/modules/agent-workspace-editor.js"></script>
+  <script defer src="/js/modules/agent-edit-session.js"></script>
   <script defer src="/js/agents-detail.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>

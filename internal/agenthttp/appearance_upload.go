@@ -120,8 +120,7 @@ func (h *AppearanceUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 // this feature removes: the user uploads a picture and nothing appears to
 // happen (FR-36).
 func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request, agentName string) {
-	ag, ok := h.State.GetAgent(agentName)
-	if !ok || ag == nil {
+	if ag, ok := h.State.GetAgent(agentName); !ok || ag == nil {
 		orihttp.NotFound(w, "Agent not found")
 		return
 	}
@@ -140,10 +139,11 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// The concurrency and shared-definition guards run before a single byte is
+	// The ownership and shared-definition guards run before a single byte is
 	// written. A multipart request carries them as form fields because it has no
-	// JSON body to put them in (FR-16/FR-41/FR-42).
-	if !h.checkMutationGuards(w, r, ag, agentName) {
+	// JSON body to put them in (FR-16/FR-41/FR-42). The version is checked
+	// again where it counts: inside the store's protected mutation below.
+	if !h.checkMutationGuards(w, r, agentName) {
 		return
 	}
 
@@ -203,16 +203,23 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 	}
 	defer func() { _ = root.Close() }()
 
-	// The filename is derived entirely from the agent name and the sniffed
-	// type. The client's original path is never consulted, so there is nothing
-	// to traverse with (FR-64).
-	filename := uploadFilenameFor(h.State, agentName, ext)
-	previous := ag.Appearance.UploadedImage()
+	// The filename is derived from the agent name, the sniffed type, and a
+	// fresh random part. The client's original path is never consulted, so
+	// there is nothing to traverse with (FR-64). Because every upload gets a
+	// name of its own, staging it never overwrites the image on display, and
+	// replacing an image with another of the same format still changes the
+	// definition (and so its version).
+	filename, err := uploadFilenameFor(h.State, agentName, ext)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save image", err)
+		return
+	}
+	if _, err := root.Stat(filename); err == nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save image", fmt.Errorf("image name %q is taken", filename))
+		return
+	}
 
-	// Stream to a temporary file first, then rename into place. The previous
-	// image is only removed after the replacement is durably written and the
-	// record is saved — a failure anywhere before that leaves the agent showing
-	// exactly what it showed before (FR-37).
+	// Stream to a temporary file first, then rename it to its own new name.
 	tmpName := filename + ".upload.tmp"
 	if err := writeUploadFile(root, tmpName, file); err != nil {
 		_ = root.Remove(tmpName)
@@ -227,37 +234,53 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	ag.EnsureAppearance()
-	restore := ag.Appearance.Clone()
-	ag.Appearance.SetUpload(filename)
-
-	if err := h.State.SetAgent(agentName, ag); err != nil {
-		// The record is the source of truth, so a failed save means the upload
-		// did not happen. Roll the in-memory record back and delete only the
-		// file this request created — never the one it was replacing.
-		ag.Appearance = restore
-		if filename != previous {
-			_ = root.Remove(filename)
+	// Adopting the staged file is a definition mutation like any other: the
+	// version check and the switch to the new image happen in one protected
+	// operation, against the record as it is now (FR-16/FR-37).
+	expected := strings.TrimSpace(r.FormValue("expected_version"))
+	var previous string
+	committed, err := store.MutateDefinition(h.State, agentName, func(draft *agent.Agent) error {
+		if expected != "" {
+			if current := agentConfigVersion(draft); current != expected {
+				return &staleAgentEditError{current: current}
+			}
 		}
-		logger.Error("Failed to save agent appearance", logger.Fields{"error": err, "agent": agentName})
-		WriteAgentStoreError(w, "Failed to update agent", err)
+		draft.EnsureAppearance()
+		previous = draft.Appearance.UploadedImage()
+		draft.Appearance.SetUpload(filename)
+		return nil
+	})
+	if err != nil {
+		// Nothing references the staged file: it is this request's own, and the
+		// image the agent was showing is untouched.
+		_ = root.Remove(filename)
+		writeAgentMutationError(w, agentName, err)
 		return
 	}
 
-	// Only now is the old file expendable. A different extension means the
-	// replacement landed at a different filename, so the previous one is still
-	// on disk and unreferenced.
-	if previous != "" && previous != filename {
-		removeAppearanceUpload(h.State, agentName, previous)
-	}
+	// Only now is the replaced file expendable — and only if no agent still
+	// names it. A newer request's image always has its own name, so it can
+	// never be the one removed here.
+	removeUnreferencedUpload(h.State, agentName, previous, filename)
 
 	logger.Info("Appearance image uploaded", logger.Fields{"agent": agentName, "filename": filename})
 	orihttp.WriteJSON(w, map[string]any{
 		"success":    true,
-		"appearance": appearanceForAgent(ag),
+		"appearance": appearanceForAgent(committed),
 		"image_url":  "/avatars/" + filename,
 		"message":    "Image uploaded",
+		"version":    agentConfigVersion(committed),
+		"agent":      definitionReceipt(agentName, committed),
 	})
+}
+
+// removeUnreferencedUpload deletes a replaced image once no agent's
+// appearance names it any more.
+func removeUnreferencedUpload(st store.Store, agentName, previous, current string) {
+	if previous == "" || previous == current || avatarOwner(st, previous) != "" {
+		return
+	}
+	removeAppearanceUpload(st, agentName, previous)
 }
 
 // remove handles DELETE /api/agents/{name}/appearance/upload.
@@ -266,61 +289,64 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 // Deleting an image the agent was not displaying leaves the active mode — and
 // the saved character and colour — alone (FR-38/FR-39/FR-40).
 func (h *AppearanceUploadHandler) remove(w http.ResponseWriter, r *http.Request, agentName string) {
-	ag, ok := h.State.GetAgent(agentName)
-	if !ok || ag == nil {
+	if ag, ok := h.State.GetAgent(agentName); !ok || ag == nil {
 		orihttp.NotFound(w, "Agent not found")
 		return
 	}
-	if !h.checkMutationGuards(w, r, ag, agentName) {
+	if !h.checkMutationGuards(w, r, agentName) {
 		return
 	}
 
-	ag.EnsureAppearance()
-	previous := ag.Appearance.UploadedImage()
-	restore := ag.Appearance.Clone()
-	ag.Appearance.ClearUpload()
-
-	if err := h.State.SetAgent(agentName, ag); err != nil {
-		ag.Appearance = restore
-		logger.Error("Failed to save agent appearance", logger.Fields{"error": err, "agent": agentName})
-		WriteAgentStoreError(w, "Failed to update agent", err)
+	// DELETE has no body; the version travels as a query parameter.
+	expected := strings.TrimSpace(r.FormValue("expected_version"))
+	var previous string
+	committed, err := store.MutateDefinition(h.State, agentName, func(draft *agent.Agent) error {
+		if expected != "" {
+			if current := agentConfigVersion(draft); current != expected {
+				return &staleAgentEditError{current: current}
+			}
+		}
+		draft.EnsureAppearance()
+		previous = draft.Appearance.UploadedImage()
+		draft.Appearance.ClearUpload()
+		return nil
+	})
+	if err != nil {
+		writeAgentMutationError(w, agentName, err)
 		return
 	}
 
 	// The file goes only after the record no longer references it, so a crash
 	// between the two leaves an orphaned file rather than a broken reference.
-	if previous != "" {
-		removeAppearanceUpload(h.State, agentName, previous)
-	}
+	removeUnreferencedUpload(h.State, agentName, previous, "")
 
 	logger.Info("Appearance image removed", logger.Fields{"agent": agentName})
 	orihttp.WriteJSON(w, map[string]any{
 		"success":    true,
-		"appearance": appearanceForAgent(ag),
+		"appearance": appearanceForAgent(committed),
 		"message":    "Image removed",
+		"version":    agentConfigVersion(committed),
+		"agent":      definitionReceipt(agentName, committed),
 	})
 }
 
-// checkMutationGuards applies the same optimistic-concurrency and
-// shared-definition rules as a JSON appearance edit.
+// checkMutationGuards applies the ownership and shared-definition rules of a
+// JSON appearance edit before any byte is written. The version itself is
+// checked inside the store's protected mutation, against the record as it is
+// at write time.
 //
 // An upload is an appearance change like any other, so it must not be the one
 // path that can silently clobber a concurrent edit or skip the multi-workspace
 // warning. The tokens arrive as form fields because multipart has no JSON body:
 // `expected_version` and `confirm_shared_edit` (FR-16/FR-42).
-func (h *AppearanceUploadHandler) checkMutationGuards(w http.ResponseWriter, r *http.Request, ag *agent.Agent, agentName string) bool {
+func (h *AppearanceUploadHandler) checkMutationGuards(w http.ResponseWriter, r *http.Request, agentName string) bool {
 	if owned := workspaceOwnedAgent(h.State, agentName); owned != nil {
 		WriteAgentStoreError(w, "Failed to update agent", owned)
 		return false
 	}
 	if expected := strings.TrimSpace(r.FormValue("expected_version")); expected != "" {
-		current := agentConfigVersion(ag)
-		if expected != current {
-			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
-				"error":           "stale_agent_edit",
-				"message":         fmt.Sprintf("%q was changed since you loaded it. Reload the latest version and reapply your edit.", agentName),
-				"current_version": current,
-			})
+		if err := checkExpectedVersion(h.State, agentName, expected); err != nil {
+			writeAgentMutationError(w, agentName, err)
 			return false
 		}
 	}

@@ -55,12 +55,11 @@ async function openAgent(page: Page, name: string) {
   await expect(page.locator('#agentName')).toContainText(name);
 }
 
-// On the detail page the editor lives inside the Edit Profile modal.
+// On the detail page the editor is its own "Changes save immediately"
+// section, not part of the Edit Profile modal.
 async function openAppearanceEditor(page: Page) {
-  const host = page.locator('#profileAppearanceHost');
-  if (!(await host.isVisible().catch(() => false))) {
-    await page.locator('#editProfileButton').click();
-  }
+  const host = page.locator('#agentAppearanceHost');
+  await page.locator('#appearanceSection').scrollIntoViewIfNeeded();
   await expect(host).toBeVisible();
 }
 
@@ -76,7 +75,7 @@ async function openRoster(page: Page, name: string) {
 
 async function openPickerFromInspector(page: Page) {
   await openAppearanceEditor(page);
-  await page.locator('#profileAppearance-character-choose').click();
+  await page.locator('#agentAppearance-character-choose').click();
   await expect(page.locator('#charPicker')).toBeVisible();
 }
 
@@ -91,14 +90,17 @@ test.describe('choosing a character', () => {
     await openPickerFromInspector(page);
     await page.locator('.char-card', { hasText: 'Research Archivist' }).click();
     await page.locator('#charPickerConfirm').click();
+    // Appearance saves immediately; wait for the confirmation rather than
+    // reloading under the request (which the page now warns about).
+    await expect(page.locator('#agentAppearance-root')).toContainText('Saved.');
 
     // The real assertion: it survives a round trip, not just a local re-render.
     await page.reload({ waitUntil: 'domcontentloaded' });
     await openAppearanceEditor(page);
     // The editor lists all three sources, so "contains Generated" is trivially
     // true; the radio is what says which one is actually active.
-    await expect(page.locator('#profileAppearance-mode-character')).toBeChecked();
-    await expect(page.locator('#profileAppearance-root')).toContainText(
+    await expect(page.locator('#agentAppearance-mode-character')).toBeChecked();
+    await expect(page.locator('#agentAppearance-root')).toContainText(
       'Character art: Research Archivist'
     );
 
@@ -113,7 +115,7 @@ test.describe('choosing a character', () => {
     await openAgent(page, name);
     await openAppearanceEditor(page);
 
-    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#agentAppearance-mode-generated')).toBeChecked();
 
     await openPickerFromInspector(page);
     await page.locator('.char-card', { hasText: 'Product Builder' }).click();
@@ -122,13 +124,13 @@ test.describe('choosing a character', () => {
 
     // Selecting a card inside the picker stages nothing: only Confirm assigns.
     // Character therefore stays unselectable, because none was ever saved.
-    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
-    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
+    await expect(page.locator('#agentAppearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#agentAppearance-mode-character')).toBeDisabled();
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await openAppearanceEditor(page);
-    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
-    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
+    await expect(page.locator('#agentAppearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#agentAppearance-mode-character')).toBeDisabled();
   });
 
   test('choosing a character is appearance only — no voice control anywhere', async ({
@@ -152,7 +154,7 @@ test.describe('choosing a character', () => {
 
     await page.locator('.char-card', { hasText: 'Team Caretaker' }).click();
     await page.locator('#charPickerConfirm').click();
-    await expect(page.locator('#profileAppearance-root')).toContainText('Team Caretaker');
+    await expect(page.locator('#agentAppearance-root')).toContainText('Team Caretaker');
 
     const after = await (
       await request.get(`/api/agents/${encodeURIComponent(name)}/detail`)
@@ -173,18 +175,18 @@ test.describe('choosing a character', () => {
     await openPickerFromInspector(page);
     await page.locator('.char-card', { hasText: 'Operations Keeper' }).click();
     await page.locator('#charPickerConfirm').click();
-    await expect(page.locator('#profileAppearance-root')).toContainText('Operations Keeper');
+    await expect(page.locator('#agentAppearance-root')).toContainText('Operations Keeper');
 
-    await page.locator('#profileAppearance-character-remove').click();
-    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
+    await page.locator('#agentAppearance-character-remove').click();
+    await expect(page.locator('#agentAppearance-mode-generated')).toBeChecked();
     // The selection is gone, so Character is no longer selectable — which is
     // what distinguishes "removed" from merely "switched away from" (FR-33).
-    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
+    await expect(page.locator('#agentAppearance-mode-character')).toBeDisabled();
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await openAppearanceEditor(page);
-    await expect(page.locator('#profileAppearance-mode-generated')).toBeChecked();
-    await expect(page.locator('#profileAppearance-mode-character')).toBeDisabled();
+    await expect(page.locator('#agentAppearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#agentAppearance-mode-character')).toBeDisabled();
 
     // The roster follows the removal too, rather than keeping a stale label.
     await openRoster(page, name);
@@ -256,7 +258,7 @@ test.describe('the picker itself', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#charPicker')).toBeHidden();
-    await expect(page.locator('#profileAppearance-character-choose')).toBeFocused();
+    await expect(page.locator('#agentAppearance-character-choose')).toBeFocused();
   });
 });
 
@@ -349,8 +351,8 @@ test.describe('identity does not disturb the rest of the page', () => {
     await openAgent(page, 'Claude Code');
 
     // The server would reject an edit, so the UI must not offer one (FR-70/FR-92).
-    await expect(page.locator('#profileAppearance-character-choose')).toHaveCount(0);
-    await expect(page.locator('#profileAppearance-character-remove')).toHaveCount(0);
+    await expect(page.locator('#agentAppearance-character-choose')).toHaveCount(0);
+    await expect(page.locator('#agentAppearance-character-remove')).toHaveCount(0);
   });
 
   test('the same identity renders in Gallery and List', async ({ page }) => {

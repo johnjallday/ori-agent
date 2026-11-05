@@ -1082,9 +1082,10 @@ test.describe('Agents single-agent editing', () => {
 
   // The avatar-upload, stale-save and unsaved-guard tests that stood here
   // exercised the Inspector's Overview editor. That editor is gone: the
-  // standalone detail page is the editor of record, and it keeps its own
-  // appearance editor (#profileAppearanceHost) and its own version-checked
-  // save, so no capability went with them. What replaces them here is the
+  // standalone detail page is the editor of record. Its appearance section
+  // (#agentAppearanceHost), its version-checked saves, and its unsaved-change
+  // guards are covered in agents-detail-editing.spec.ts (save contract, draft
+  // isolation, appearance, recovery). What replaces them here is the
   // read-only contract — see "the Inspector saves no agent field, on any tab"
   // and "switching cards and tabs never raises an unsaved-changes prompt"
   // above.

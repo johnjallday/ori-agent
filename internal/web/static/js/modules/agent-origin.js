@@ -80,6 +80,13 @@
         kept.join(', ') + (kept.length === 1 ? ' keeps its' : ' keep their') + ' own changes.'
       );
     }
+    // A propagation failure is reported even when nothing else was: the
+    // agent's own edit is saved, but some workspace copies may be behind.
+    if (String(carried.error || '').trim()) {
+      parts.push(
+        'Some workspace copies could not be updated and may still use the previous version. Save again later, or update them from their workspace.'
+      );
+    }
     return parts.join(' ');
   }
 

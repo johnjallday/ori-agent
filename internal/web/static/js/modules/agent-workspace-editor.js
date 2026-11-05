@@ -77,7 +77,12 @@
     return next;
   }
 
-  function mount({ root, readAgent, onSaved = () => {} }) {
+  // leaveGuard is optional: a host page that protects other drafts passes
+  // { register(name, atRisk) } so one leave warning covers everything. Without
+  // it the editor protects itself, as before.
+  // writeSlot is optional too: { begin(), end() } from a host that allows one
+  // agent write at a time; begin throws to refuse while another is in flight.
+  function mount({ root, readAgent, onSaved = () => {}, leaveGuard = null, writeSlot = null }) {
     if (!root) return null;
     const list = root.querySelector('[data-workspace-list]');
     const status = root.querySelector('[data-workspace-status]');
@@ -197,6 +202,12 @@
 
     async function submit() {
       if (busy || !ready || !editable(agent) || !dirty()) return;
+      try {
+        writeSlot?.begin();
+      } catch (error) {
+        message(`${error.message} Your choices are kept.`);
+        return;
+      }
       const restoreFocus = document.activeElement === save;
       busy = true;
       message('Checking current membership…');
@@ -238,6 +249,7 @@
           `${error.message} Save was not confirmed. Your choices are kept. Reload current membership before saving again.`
         );
       } finally {
+        writeSlot?.end();
         busy = false;
         controls();
         if (restoreFocus && document.activeElement === document.body) status.focus();
@@ -262,13 +274,25 @@
     reload.addEventListener('click', () => {
       void load();
     });
-    window.addEventListener('beforeunload', event => {
-      if (!dirty() && !busy) return;
-      event.preventDefault();
-      event.returnValue = '';
-    });
+    const atRisk = () => dirty() || busy;
+    if (leaveGuard) leaveGuard.register('membership', atRisk);
+    else
+      window.addEventListener('beforeunload', event => {
+        if (!atRisk()) return;
+        event.preventDefault();
+        event.returnValue = '';
+      });
     return {
-      setAgent(value) {
+      atRisk,
+      // renamed: the host confirmed this is the same agent under a new name,
+      // so unsaved choices are rebased onto a fresh read rather than reset.
+      setAgent(value, { renamed = false } = {}) {
+        if (renamed && agent && value) {
+          agent = value;
+          root.hidden = false;
+          void load();
+          return;
+        }
         const first = !agent || agent.name !== value?.name;
         agent = value;
         root.hidden = !agent;

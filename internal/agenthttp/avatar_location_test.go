@@ -25,6 +25,17 @@ func rootScoutWithImage(t *testing.T) (*store.CompositeStore, string) {
 	return c, root
 }
 
+// scoutImage is the generated filename Scout's upload was stored under.
+func scoutImage(t *testing.T, st store.Store) string {
+	t.Helper()
+	ag, _ := st.GetAgent("Scout")
+	name := ag.Appearance.UploadedImage()
+	if !isUploadNameFor(name, "Scout", ".png") {
+		t.Fatalf("Scout's image name = %q", name)
+	}
+	return name
+}
+
 func uploadImage(t *testing.T, st store.Store, name string, img []byte) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -38,25 +49,27 @@ func uploadImage(t *testing.T, st store.Store, name string, img []byte) string {
 
 func TestARootAgentsImageIsWrittenToItsOwnFolder(t *testing.T) {
 	c, root := rootScoutWithImage(t)
+	img := scoutImage(t, c)
 	folder := filepath.Join(root, "Agents", "Scout")
-	if _, err := os.Stat(filepath.Join(folder, "Scout.png")); err != nil {
+	if _, err := os.Stat(filepath.Join(folder, img)); err != nil {
 		t.Fatalf("the image is not in the agent's folder: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(config.DefaultAgentAvatarsDir(), "Scout.png")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(config.DefaultAgentAvatarsDir(), img)); !os.IsNotExist(err) {
 		t.Error("a root agent's image must not be written to the shared folder")
 	}
-	if data, ok := ReadAvatarFile(c, "Scout.png"); !ok || !bytes.Equal(data, pngBytes) {
+	if data, ok := ReadAvatarFile(c, img); !ok || !bytes.Equal(data, pngBytes) {
 		t.Error("the uploaded image is not served")
 	}
 
 	// Replacing it with another format removes the superseded file.
-	if got := uploadImage(t, c, "Scout", gifBytes); got != "Scout.gif" {
+	got := uploadImage(t, c, "Scout", gifBytes)
+	if !isUploadNameFor(got, "Scout", ".gif") {
 		t.Fatalf("replacement filename = %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(folder, "Scout.png")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(folder, img)); !os.IsNotExist(err) {
 		t.Error("the previous image was left behind")
 	}
-	if _, ok := ReadAvatarFile(c, "Scout.gif"); !ok {
+	if _, ok := ReadAvatarFile(c, got); !ok {
 		t.Error("the replacement is not served")
 	}
 }
@@ -72,17 +85,18 @@ func TestServingNeverReadsAnythingButAnImage(t *testing.T) {
 
 func TestAMissingImageIsNotFoundAndTheAgentIsNotRewritten(t *testing.T) {
 	c, root := rootScoutWithImage(t)
+	img := scoutImage(t, c)
 	folder := filepath.Join(root, "Agents", "Scout")
 	definition := filepath.Join(folder, "agent_settings.json")
 	before, err := os.ReadFile(definition)
 	if err != nil {
 		t.Fatalf("read definition: %v", err)
 	}
-	if err := os.Remove(filepath.Join(folder, "Scout.png")); err != nil {
+	if err := os.Remove(filepath.Join(folder, img)); err != nil {
 		t.Fatalf("remove image: %v", err)
 	}
 
-	if _, ok := ReadAvatarFile(c, "Scout.png"); ok {
+	if _, ok := ReadAvatarFile(c, img); ok {
 		t.Error("a deleted image is still served")
 	}
 	c.ReloadRoot()
@@ -98,14 +112,15 @@ func TestAMissingImageIsNotFoundAndTheAgentIsNotRewritten(t *testing.T) {
 
 func TestRenamingCarriesTheImageAndDeletingRemovesIt(t *testing.T) {
 	c, root := rootScoutWithImage(t)
+	img := scoutImage(t, c)
 	if err := c.RenameAgent("Scout", "Ranger"); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
-	moved := filepath.Join(root, "Agents", "Ranger", "Scout.png")
+	moved := filepath.Join(root, "Agents", "Ranger", img)
 	if _, err := os.Stat(moved); err != nil {
 		t.Fatalf("the image did not move with the agent: %v", err)
 	}
-	if _, ok := ReadAvatarFile(c, "Scout.png"); !ok {
+	if _, ok := ReadAvatarFile(c, img); !ok {
 		t.Error("the renamed agent's image is not served")
 	}
 
@@ -119,6 +134,7 @@ func TestRenamingCarriesTheImageAndDeletingRemovesIt(t *testing.T) {
 
 func TestANewAgentReusingAnOldNameGetsItsOwnImageFilename(t *testing.T) {
 	c, _ := rootScoutWithImage(t)
+	img := scoutImage(t, c)
 	if err := c.RenameAgent("Scout", "Ranger"); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
@@ -126,17 +142,17 @@ func TestANewAgentReusingAnOldNameGetsItsOwnImageFilename(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	filename := uploadImage(t, c, "Scout", pngBytes)
-	if filename == "Scout.png" {
+	if filename == img {
 		t.Fatal("the new Scout reused the filename Ranger still names")
 	}
 	ranger, _ := c.GetAgent("Ranger")
-	if ranger.Appearance.UploadedImage() != "Scout.png" {
+	if ranger.Appearance.UploadedImage() != img {
 		t.Errorf("Ranger's image = %q", ranger.Appearance.UploadedImage())
 	}
 	if _, ok := ReadAvatarFile(c, filename); !ok {
 		t.Error("the new Scout's image is not served")
 	}
-	if _, ok := ReadAvatarFile(c, "Scout.png"); !ok {
+	if _, ok := ReadAvatarFile(c, img); !ok {
 		t.Error("Ranger's image is no longer served")
 	}
 }
