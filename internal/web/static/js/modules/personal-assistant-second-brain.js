@@ -1,10 +1,15 @@
-// Connect your second brain — the assistant's first message after Personal HQ.
+// Notes — the Personal Assistant's first message after Personal HQ.
 //
-// The assistant asks for the user's notes (naming the Obsidian vault it found,
-// if any), shows what reading them means before anything is read, connects the
-// folder read-only to the HQ, and comes back with one headline and one action:
-// add the open items as HQ follow-ups. This module owns that one turn in the
-// Home assistant drawer's conversation. It never sends a filesystem location:
+// The assistant offers to set up a notes folder the user owns (the one primary
+// action), with reading an existing folder as a quieter, read-only alternative
+// where a detected Obsidian vault is named. Setting up asks the project
+// question, writes the first note and opens it; reading shows what it means
+// before anything is read, connects the folder read-only to the HQ, and comes
+// back with one headline and one action: add the open items as HQ follow-ups.
+// The card is the Personal Assistant's: it is hidden while the drawer talks to
+// a workspace's own agent, and explicit entries switch the drawer to the
+// assistant through the panel's guarded recipient switch. This module owns that
+// one turn in the assistant drawer's conversation. It never sends a filesystem location:
 // a detected vault is named by its id, any other folder by the selection token
 // the folder-picker endpoint issued for it.
 
