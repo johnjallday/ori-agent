@@ -611,7 +611,20 @@ async function initAfterFirstLoad() {
       window.AgentSettingsOwnership?.mount({
         root: document.getElementById('settingsOwnershipSection'),
         agentName: currentAgent.name || agentName,
-        systemModelLinked: () => Boolean(currentAgent?.system_model_linked)
+        systemModelLinked: () => Boolean(currentAgent?.system_model_linked),
+        // A ?tab=ownership deep link lands again once the section has content:
+        // cards above it fill in after the first scroll and push it down.
+        onRendered: (() => {
+          let landed = false;
+          return () => {
+            if (landed) return;
+            landed = true;
+            if (new URLSearchParams(window.location.search).get('tab') !== 'ownership') return;
+            document
+              .getElementById('settingsOwnershipSection')
+              ?.scrollIntoView({ block: 'start', behavior: 'instant' });
+          };
+        })()
       }) || null;
     ownershipView?.syncAgent({ name: currentAgent.name, version: currentAgent.version });
     ownershipView?.setUnsaved(Boolean(editSession?.atRisk().length));

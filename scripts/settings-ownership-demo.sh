@@ -25,6 +25,7 @@
 #   workspace  "Ownership Custom"  own copy: model gpt-4.1, prompt "Custom workspace
 #                                  prompt.", instance role Reviewer + custom instructions
 #   workspace  "Ownership Direct"  attached later: no copy, reads the library
+#   workspace  "Ownership Scratch" own copy reserved for specs that make a deliberate edit
 #
 # The sandbox path is printed as SANDBOX=<path>; remove it with one rm -rf.
 
@@ -88,6 +89,7 @@ start_server
 post POST /api/agents "{\"name\":\"$agent\",\"model\":\"gpt-4o-mini\",\"system_prompt\":\"Library prompt.\"}" >/dev/null
 same_id="$(post POST /api/workspaces "{\"name\":\"Ownership Same\",\"entry_agent_name\":\"$agent\"}" | jq -r .folder.id)"
 custom_id="$(post POST /api/workspaces "{\"name\":\"Ownership Custom\",\"entry_agent_name\":\"$agent\"}" | jq -r .folder.id)"
+scratch_id="$(post POST /api/workspaces "{\"name\":\"Ownership Scratch\",\"entry_agent_name\":\"$agent\"}" | jq -r .folder.id)"
 stop_server
 
 # Second pass: startup snapshots each referenced agent into its workspace.
@@ -98,8 +100,8 @@ post PATCH "/api/workspaces/$custom_id/agents/$agent_path/instance-settings" '{"
 direct_id="$(post POST /api/workspaces '{"name":"Ownership Direct"}' | jq -r .folder.id)"
 post POST "/api/workspaces/$direct_id/agents" "{\"agent_name\":\"$agent\"}" >/dev/null
 
-jq -n --arg agent "$agent" --arg same "$same_id" --arg custom "$custom_id" --arg direct "$direct_id" \
-	'{agent:$agent, workspaces:{same:$same, custom:$custom, direct:$direct}}' >"$sandbox/settings-ownership-fixture.json"
+jq -n --arg agent "$agent" --arg same "$same_id" --arg custom "$custom_id" --arg direct "$direct_id" --arg scratch "$scratch_id" \
+	'{agent:$agent, workspaces:{same:$same, custom:$custom, direct:$direct, scratch:$scratch}}' >"$sandbox/settings-ownership-fixture.json"
 echo "FIXTURE=$sandbox/settings-ownership-fixture.json"
 echo "READY"
 

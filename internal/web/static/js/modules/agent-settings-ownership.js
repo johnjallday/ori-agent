@@ -385,6 +385,164 @@
     };
   }
 
+  // ---- Where to change it -----------------------------------------------------
+
+  // Only these destinations exist. Each is built here from validated pieces
+  // (canonical slug or workspace ID, encoded names); nothing the server sends is
+  // used as a URL. A family with no editor says so instead of linking.
+  const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
+
+  function workspacePathKey(ws) {
+    const slug = text(ws?.folder_slug);
+    if (SLUG_RE.test(slug)) return slug;
+    const id = text(ws?.id);
+    return ID_RE.test(id) ? id : '';
+  }
+
+  const FAMILY_LABELS = {
+    configuration: 'Model and generation settings',
+    profile: 'Role and description',
+    prompt: 'Base prompt',
+    guidance: "This instance's workspace guidance",
+    toolbox: 'Workspace Toolbox'
+  };
+
+  // ownerLinks lists, per setting family, where the existing editor for the
+  // selected context lives and what saving there affects.
+  function ownerLinks(projection, { systemModelLinked = false } = {}) {
+    const ctx = projection?.context || {};
+    const def = projection?.definition || {};
+    if (ctx.state !== 'ok' || def.state !== 'ok') return [];
+    const name = text(projection.agent);
+    const out = [];
+    if (ctx.kind === 'library' || def.source === 'library_fallback') {
+      const viaWorkspace = ctx.kind === 'workspace';
+      const reach = viaWorkspace
+        ? ' This workspace has no copy of its own, so it reads these from the library profile: the change also reaches every other workspace that does the same.'
+        : '';
+      out.push({
+        family: 'configuration',
+        label: 'Configuration on this page',
+        href: '#agentConfigurationSection',
+        scope: `Saves to the library profile.${reach}`
+      });
+      out.push({
+        family: 'profile',
+        label: 'Edit Profile on this page',
+        href: '#agentHeader',
+        scope: `Saves to the library profile. Workspace copies keep their own role and description.${reach}`
+      });
+      out.push({
+        family: 'prompt',
+        label: 'System prompt on this page',
+        href: '#promptSection',
+        scope: `Saves to the library profile.${reach}`
+      });
+      if (systemModelLinked && ctx.kind === 'library') {
+        out.push({
+          family: 'configuration',
+          label: 'App Default model in Settings',
+          href: '/settings#system-model',
+          scope:
+            "Conversations with this agent use the app's Default model. Changing it there affects every conversation that uses the Default model, not only this agent."
+        });
+      }
+      return out;
+    }
+    // A workspace's own copy: the workspace's editors, per agent name.
+    const key = workspacePathKey(ctx.workspace);
+    const tracked = ['in_step', 'pending'].includes(projection?.tracking?.state);
+    const copyScope =
+      `Changes this workspace's copy for every instance named ${name} here; the library profile and other workspaces are unchanged.` +
+      (tracked
+        ? ' After this change Ori treats the copy as customized, so later library model and prompt edits stop reaching it.'
+        : '');
+    out.push(
+      key
+        ? {
+            family: 'configuration',
+            label: 'Model editor in the workspace (model and provider only)',
+            href: `/workspaces/${encodeURIComponent(key)}?${new URLSearchParams({ editAgentModel: name })}`,
+            scope: `${copyScope} Reasoning level, temperature and output limit have no editor for a workspace copy. Opening the workspace page also activates the workspace and its lead conversation, as it always does.`
+          }
+        : {
+            family: 'configuration',
+            message: 'The workspace page could not be addressed, so no editor link is offered.'
+          }
+    );
+    out.push({
+      family: 'profile',
+      message: "No editor in Ori changes a workspace copy's role or description."
+    });
+    out.push(
+      key
+        ? {
+            family: 'prompt',
+            label: 'System prompt on the workspace agent page',
+            href: `/workspaces/${encodeURIComponent(key)}/agents/${encodeURIComponent(name)}#wad-prompt`,
+            scope: copyScope
+          }
+        : { family: 'prompt', message: 'The workspace page could not be addressed.' }
+    );
+    return out;
+  }
+
+  // workspaceOwnerLinks covers the instance-level owners in a workspace context.
+  function workspaceOwnerLinks(projection) {
+    const ctx = projection?.context || {};
+    if (ctx.kind !== 'workspace' || ctx.state !== 'ok') return [];
+    const name = text(projection.agent);
+    const key = workspacePathKey(ctx.workspace);
+    const out = [
+      {
+        family: 'guidance',
+        message: `No page in Ori edits an instance's workspace guidance yet. The API that changes it updates every instance named ${name} in this workspace, not only one.`
+      }
+    ];
+    if (key) {
+      out.push({
+        family: 'toolbox',
+        label: 'Open the agent in its workspace',
+        href: `/workspaces/${encodeURIComponent(key)}?${new URLSearchParams({ agent: name.toLowerCase() })}`,
+        scope:
+          'Then choose Loadout to see or change its Toolbox there. Opening Loadout can give an instance that has no Toolbox assignment one; looking here never does. Opening the workspace page also activates the workspace and its lead conversation, as it always does.'
+      });
+    }
+    return out;
+  }
+
+  const IMPACT_GROUPS = [
+    ['reads_library', 'Reads the library profile directly, so every saved change applies'],
+    ['kept_in_step', 'Kept in step: model and prompt changes are copied here'],
+    ['pending', 'Kept in step, waiting for the next model or prompt save'],
+    ['customized', 'Customized here: keeps its own settings'],
+    ['independent', "Independent copy: library changes don't reach it"],
+    ['unknown', 'Could not be checked']
+  ];
+
+  // impactView groups workspaces by how a library edit would reach them. It is
+  // advisory current evidence; the save itself still checks and confirms.
+  function impactView(projection) {
+    const impact = projection?.impact || {};
+    if (projection?.context?.kind !== 'library' || !['ok', 'partial'].includes(impact.state)) {
+      return { show: false, groups: [] };
+    }
+    const copies = Array.isArray(impact.copies) ? impact.copies : [];
+    const groups = IMPACT_GROUPS.map(([effect, label]) => ({
+      effect,
+      label,
+      names: copies.filter(c => c.effect === effect).map(c => text(c.name) || text(c.workspace_id))
+    })).filter(group => group.names.length);
+    return {
+      show: true,
+      empty: copies.length === 0,
+      partial: impact.state === 'partial',
+      groups,
+      notCarried: text(impact.not_carried)
+    };
+  }
+
   // ---- Mount ----------------------------------------------------------------
 
   function el(doc, tag, className, content) {
@@ -399,7 +557,7 @@
       import('/js/modules/personal-assistant-model.js').catch(() => w.PersonalAssistantModel);
   }
 
-  function mount({ root, agentName, fetchImpl, win, modelApi, systemModelLinked }) {
+  function mount({ root, agentName, fetchImpl, win, modelApi, systemModelLinked, onRendered }) {
     if (!root || !agentName) return null;
     const w = win || window;
     const doc = root.ownerDocument || document;
@@ -520,6 +678,87 @@
         block.append(preview);
       }
       if (view.note) block.append(el(doc, 'p', 'settings-ownership-excluded', view.note));
+      return [block];
+    }
+
+    function renderOwners(projection) {
+      const links = [
+        ...ownerLinks(projection, { systemModelLinked: linked() }),
+        ...workspaceOwnerLinks(projection)
+      ];
+      const impact = impactView(projection);
+      if (!links.length && !impact.show) return [];
+      const block = el(doc, 'div', 'settings-ownership-toolbox');
+      block.dataset.ownershipOwners = '';
+      block.append(el(doc, 'h4', 'settings-ownership-subheading', 'Where to change it'));
+      const list = el(doc, 'ul', 'settings-ownership-list');
+      for (const link of links) {
+        const item = el(doc, 'li', '');
+        item.dataset.ownerFamily = link.family;
+        item.append(
+          el(doc, 'span', 'settings-ownership-item-name', `${FAMILY_LABELS[link.family]}: `)
+        );
+        if (link.href) {
+          const anchor = el(doc, 'a', 'settings-ownership-link', link.label);
+          anchor.href = link.href;
+          item.append(anchor);
+          if (link.scope) item.append(el(doc, 'div', 'settings-ownership-item-detail', link.scope));
+        } else {
+          item.append(el(doc, 'span', 'settings-ownership-item-meta', link.message));
+        }
+        list.append(item);
+      }
+      if (links.length) block.append(list);
+      if (links.some(link => link.href && !link.href.startsWith('#'))) {
+        block.append(
+          el(
+            doc,
+            'p',
+            'settings-ownership-note',
+            "Those editors keep their own save checks and confirmations. Use your browser's Back button to return to this view."
+          )
+        );
+      }
+      if (impact.show) {
+        const wrap = el(doc, 'div', 'settings-ownership-impact');
+        wrap.dataset.ownershipImpact = '';
+        wrap.append(el(doc, 'h5', 'settings-ownership-minor', 'What a library change reaches'));
+        if (impact.empty) {
+          wrap.append(
+            el(doc, 'p', 'settings-ownership-note', 'This agent is not in any workspace.')
+          );
+        }
+        const groups = el(doc, 'ul', 'settings-ownership-list');
+        for (const group of impact.groups) {
+          const item = el(doc, 'li', '');
+          item.dataset.impact = group.effect;
+          item.append(el(doc, 'span', 'settings-ownership-item-name', `${group.label}: `));
+          item.append(el(doc, 'span', '', group.names.join(', ')));
+          groups.append(item);
+        }
+        if (impact.groups.length) wrap.append(groups);
+        wrap.append(
+          el(
+            doc,
+            'p',
+            'settings-ownership-note',
+            'Only model, provider, reasoning level, temperature, output limit and base prompt are copied to workspaces Ori keeps in step; role and description are not.'
+          )
+        );
+        if (impact.notCarried)
+          wrap.append(el(doc, 'p', 'settings-ownership-note', impact.notCarried));
+        wrap.append(
+          el(
+            doc,
+            'p',
+            'settings-ownership-excluded',
+            impact.partial
+              ? 'Some workspaces could not be checked. This is a summary of current records, not a promise: saving checks again.'
+              : 'This is a summary of current records, not a promise: saving checks again.'
+          )
+        );
+        block.append(wrap);
+      }
       return [block];
     }
 
@@ -727,6 +966,7 @@
       nodes.push(conversation);
       nodes.push(...renderPrompt(projection));
       nodes.push(...renderToolboxes(projection));
+      nodes.push(...renderOwners(projection));
       if (view.excluded) nodes.push(el(doc, 'p', 'settings-ownership-excluded', view.excluded));
       body.replaceChildren(...nodes);
       void renderConversation(projection, mine, conversation);
@@ -767,6 +1007,7 @@
         if (mine !== sequence || contextKey(ctx) !== key) return;
         renderOptions(projection);
         renderProjection(projection, mine);
+        if (typeof onRendered === 'function') onRendered();
         setStatus('', 'ready');
         if (focus === 'instance') body.querySelector?.('[data-ownership-instance]')?.focus?.();
       } catch (error) {
@@ -844,6 +1085,9 @@
     promptView,
     conversationRequest,
     conversationView,
-    toolboxView
+    toolboxView,
+    ownerLinks,
+    workspaceOwnerLinks,
+    impactView
   };
 })();

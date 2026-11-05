@@ -43,6 +43,7 @@ async function fixture(request: APIRequestContext) {
     same: byName('Ownership Same'),
     custom: byName('Ownership Custom'),
     direct: byName('Ownership Direct'),
+    scratch: byName('Ownership Scratch'),
     cleanup: async () => undefined
   };
 }
@@ -382,5 +383,115 @@ test.describe('slice 3', () => {
     await expect(direct(page)).toContainText('Availability unknown');
     await expect(direct(page)).toContainText('could not be read');
     await expect(direct(page)).not.toContainText(/\bAvailable\b/);
+  });
+});
+
+test.describe('slice 4', () => {
+  const owners = (page: Page) => section(page).locator('[data-ownership-owners]');
+
+  test('the roster and the workspace agent page open the matching context', async ({
+    page,
+    request
+  }) => {
+    const f = await fixture(request);
+    const settingsReads: string[] = [];
+    page.on('request', req => {
+      if (req.url().includes('/settings-ownership')) settingsReads.push(req.url());
+    });
+    await page.goto(`/agents?agent=${encodeURIComponent(f.name)}&tab=workspaces`);
+    const link = page.getByRole('link', {
+      name: `Settings ${f.name} uses in ${f.custom.name}`
+    });
+    await expect(link).toBeVisible();
+    // The Inspector stays lightweight: it never loads the ownership view.
+    expect(settingsReads).toEqual([]);
+    await link.click();
+    await expect(page).toHaveURL(
+      new RegExp(`ctx=workspace&studio_id=${f.custom.id}&tab=ownership`)
+    );
+    await expect(section(page)).toContainText(`In workspace “${f.custom.name}”`);
+    await expect(row(page, 'model')).toContainText('gpt-4.1');
+
+    await page.goto(`/workspaces/ownership-same/agents/${encodeURIComponent(f.name)}`);
+    await page.getByRole('link', { name: "Where this agent's settings come from" }).click();
+    await expect(section(page)).toContainText(`In workspace “${f.same.name}”`);
+  });
+
+  test('owner links reach the existing editors and Back keeps the context', async ({
+    page,
+    request
+  }) => {
+    const f = await fixture(request);
+    await openAgent(page, f.name);
+    await expect(owners(page)).toContainText('Configuration on this page');
+    await expect(
+      owners(page).getByRole('link', { name: 'Configuration on this page' })
+    ).toHaveAttribute('href', '#agentConfigurationSection');
+    const impact = section(page).locator('[data-ownership-impact]');
+    await expect(impact).toContainText('What a library change reaches');
+    await expect(impact).toContainText(`Independent copy: library changes don't reach it: `);
+    await expect(impact).toContainText(f.custom.name);
+    await expect(impact).toContainText(`Reads the library profile directly`);
+    await expect(impact).toContainText(f.direct.name);
+    await expect(impact).toContainText('role and description are not');
+    await expect(impact).toContainText('API keys');
+
+    await page.getByLabel('Viewing').selectOption({ label: `Workspace: ${f.custom.name}` });
+    await expect(owners(page)).toContainText('every instance named Ownership Writer here');
+    await expect(owners(page)).toContainText("No editor in Ori changes a workspace copy's role");
+    await expect(owners(page)).toContainText('updates every instance named Ownership Writer');
+    await expect(
+      owners(page).getByRole('link', { name: 'Open the agent in its workspace' })
+    ).toHaveAttribute('href', '/workspaces/ownership-custom?agent=ownership+writer');
+
+    // The prompt owner: the workspace agent page, scrolled to its editor.
+    await owners(page)
+      .getByRole('link', { name: 'System prompt on the workspace agent page' })
+      .click();
+    await expect(page).toHaveURL(
+      /\/workspaces\/ownership-custom\/agents\/Ownership%20Writer#wad-prompt$/
+    );
+    await expect(page.locator('#wad-prompt-view')).toContainText('Custom workspace prompt.');
+    await expect(page.locator('#wad-prompt')).toBeInViewport();
+    await page.goBack();
+    await expect(section(page)).toContainText(`In workspace “${f.custom.name}”`);
+    await expect(page.getByLabel('Viewing')).toHaveValue(`workspace:${f.custom.id}`);
+
+    // The model owner: the workspace's model editor opens for this agent.
+    await owners(page)
+      .getByRole('link', { name: /Model editor in the workspace/ })
+      .click();
+    await expect(page).toHaveURL(/\/workspaces\/ownership-custom/);
+    await expect(page.getByRole('dialog')).toContainText(/model/i);
+  });
+
+  test('an owner edit changes only its documented record (explicit sandbox write)', async ({
+    request
+  }) => {
+    // A deliberate write through the existing workspace model editor endpoint,
+    // separate from the read-only inspection steps above.
+    const f = await fixture(request);
+    const model = async (ws?: string) => {
+      const q = ws ? `?studio_id=${ws}` : '';
+      const res = await request.get(
+        `/api/agents/${encodeURIComponent(f.name)}/settings-ownership${q}`
+      );
+      const body = await res.json();
+      return body.definition.fields.find((x: any) => x.key === 'model').value;
+    };
+    const path = `/api/workspaces/${f.scratch.id}/agents/${encodeURIComponent(f.name)}`;
+    try {
+      const res = await request.patch(path, {
+        data: { model: 'gpt-4.1-mini', llm_provider: 'openai' }
+      });
+      expect(res.ok(), await res.text()).toBeTruthy();
+      expect(await model(f.scratch.id)).toBe('gpt-4.1-mini');
+      expect(await model(f.same.id)).toBe('gpt-4o-mini');
+      expect(await model()).toBe('gpt-4o-mini');
+      expect(await model(f.custom.id)).toBe('gpt-4.1');
+      expect(await model(f.direct.id)).toBe('gpt-4o-mini');
+    } finally {
+      await request.patch(path, { data: { model: 'gpt-4o-mini', llm_provider: 'openai' } });
+    }
   });
 });

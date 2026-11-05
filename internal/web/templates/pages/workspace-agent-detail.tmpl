@@ -66,6 +66,10 @@
                   <div class="wad-badges" id="wad-badges"></div>
                 </div>
               </div>
+              <p class="wad-note mb-0 mt-2">
+                <a id="wad-ownership-link" href="#" style="color: var(--text-primary); text-decoration: underline;">Where this agent's settings come from</a>
+                — compare this workspace with the library profile and find the right editor.
+              </p>
             </div>
 
             <!-- Model -->
@@ -80,8 +84,10 @@
               </div>
             </div>
 
-            <!-- System prompt (editable base prompt from config.json) -->
-            <div class="modern-card p-4 mb-3">
+            <!-- System prompt (editable base prompt from config.json). The id is
+                 the deep-link target used by the agent page's "Where to change
+                 it" (#wad-prompt). -->
+            <div id="wad-prompt" class="modern-card p-4 mb-3" style="scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px);">
               <div class="wad-section-head">
                 <h2 class="wad-section-title">System prompt</h2>
                 <div class="wad-prompt-actions">
@@ -218,8 +224,29 @@
       const agentName = "{{.Extra.AgentName}}";
       window.currentWorkspaceId = workspaceId;
       window.currentWorkspaceSlug = workspaceSlug;
+      const ownership = document.getElementById('wad-ownership-link');
+      if (ownership) {
+        const query = new URLSearchParams({ ctx: 'workspace', studio_id: workspaceId, tab: 'ownership' });
+        ownership.href = `/agents/${encodeURIComponent(agentName)}?${query}`;
+      }
       const page = new WorkspaceAgentDetailPage(workspaceId, agentName);
-      page.init().catch((error) => {
+      page.init().then(() => {
+        // A deep link to the prompt editor lands on it once the content and
+        // the prompt itself have rendered (they fill in after init returns).
+        if (window.location.hash !== '#wad-prompt') return;
+        let attempts = 0;
+        const land = () => {
+          const content = document.getElementById('wad-content');
+          const prompt = document.getElementById('wad-prompt-view');
+          const ready = content && !content.classList.contains('d-none') && prompt && prompt.textContent.trim() !== 'Loading…';
+          if (ready || ++attempts >= 30) {
+            document.getElementById('wad-prompt')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+            return;
+          }
+          window.setTimeout(land, 100);
+        };
+        land();
+      }).catch((error) => {
         console.error('Failed to initialize workspace agent detail page:', error);
       });
     });

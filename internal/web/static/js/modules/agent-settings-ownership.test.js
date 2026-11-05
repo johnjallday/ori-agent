@@ -725,3 +725,107 @@ test('Toolbox sections render as text, with progressive disclosure', async () =>
   );
   assert.match(body.textContent, /Trusted native tools: not allowed in this workspace\./);
 });
+
+// ---- Group 4: owners, routes and impact ------------------------------------
+
+const copyProjection = (ws, extra = {}) => ({
+  ...projection({ kind: 'workspace', ws, source: 'workspace_copy' }),
+  agent: 'Writer Ü',
+  ...extra
+});
+
+test('library context links to this page’s editors and the app Default model only when linked', () => {
+  const links = api.ownerLinks({ ...projection(), agent: 'Writer' });
+  assert.deepEqual(
+    [...links.map(l => `${l.family}:${l.href}`)],
+    ['configuration:#agentConfigurationSection', 'profile:#agentHeader', 'prompt:#promptSection']
+  );
+  const linked = api.ownerLinks({ ...projection(), agent: 'Writer' }, { systemModelLinked: true });
+  assert.equal(linked.at(-1).href, '/settings#system-model');
+  assert.match(linked.at(-1).scope, /every conversation that uses the Default model/);
+  assert.deepEqual([...api.workspaceOwnerLinks(projection())], []);
+});
+
+test('a workspace copy routes to the workspace’s editors with encoded names and per-name scope', () => {
+  const ws = { id: 'ws-1', name: 'Studio', folder_slug: 'my-studio' };
+  const links = api.ownerLinks(copyProjection(ws, { tracking: { state: 'in_step' } }));
+  const config = links.find(l => l.family === 'configuration');
+  assert.equal(config.href, '/workspaces/my-studio?editAgentModel=Writer+%C3%9C');
+  assert.match(config.scope, /every instance named Writer Ü here/);
+  assert.match(config.scope, /treats the copy as customized/);
+  assert.match(config.scope, /no editor for a workspace copy/);
+  assert.equal(
+    links.find(l => l.family === 'prompt').href,
+    '/workspaces/my-studio/agents/Writer%20%C3%9C#wad-prompt'
+  );
+  assert.equal(links.find(l => l.family === 'profile').href, undefined, 'no editor, no link');
+
+  const instance = api.workspaceOwnerLinks(copyProjection(ws));
+  assert.match(instance[0].message, /updates every instance named Writer Ü/);
+  assert.equal(instance[1].href, '/workspaces/my-studio?agent=writer+%C3%BC');
+  assert.match(instance[1].scope, /Opening Loadout can give an instance/);
+});
+
+test('hostile or unusable workspace identity never becomes a link', () => {
+  for (const ws of [
+    { id: '../../etc', folder_slug: '../x' },
+    { id: 'javascript:alert(1)', folder_slug: 'Not A Slug' },
+    { id: '', folder_slug: '' }
+  ]) {
+    const links = [
+      ...api.ownerLinks(copyProjection(ws)),
+      ...api.workspaceOwnerLinks(copyProjection(ws))
+    ];
+    for (const link of links) {
+      if (link.href)
+        assert.match(link.href, /^\/workspaces\/[A-Za-z0-9_-]+[?/]/, JSON.stringify(ws));
+    }
+    assert.ok(
+      links.some(l => l.message),
+      'unaddressable workspace says so'
+    );
+  }
+  // An ID is an acceptable fallback when the slug is not canonical.
+  const byId = api.ownerLinks(copyProjection({ id: 'ws_42', folder_slug: 'Bad Slug' }));
+  assert.match(byId.find(l => l.family === 'configuration').href, /^\/workspaces\/ws_42\?/);
+});
+
+test('a workspace that reads the library routes to the library editors and says what else it reaches', () => {
+  const links = api.ownerLinks({
+    ...projection({
+      kind: 'workspace',
+      ws: { id: 'w', folder_slug: 'w' },
+      source: 'library_fallback'
+    })
+  });
+  assert.equal(links[0].href, '#agentConfigurationSection');
+  assert.match(links[0].scope, /every other workspace that does the same/);
+  assert.deepEqual([...api.ownerLinks(projection({ def: 'degraded' }))], []);
+});
+
+test('impact groups workspaces by tracking, never by equal values', () => {
+  const view = api.impactView({
+    ...projection(),
+    impact: {
+      state: 'partial',
+      not_carried: 'API keys … never copied.',
+      copies: [
+        { workspace_id: 'a', name: 'A', effect: 'kept_in_step' },
+        { workspace_id: 'b', name: 'B', effect: 'customized' },
+        { workspace_id: 'c', name: 'C', effect: 'independent' },
+        { workspace_id: 'd', name: 'D', effect: 'reads_library' },
+        { workspace_id: 'e', name: 'E', effect: 'unknown' }
+      ]
+    }
+  });
+  assert.equal(view.show, true);
+  assert.equal(view.partial, true);
+  assert.deepEqual(
+    [...view.groups.map(g => `${g.effect}=${g.names.join('')}`)],
+    ['reads_library=D', 'kept_in_step=A', 'customized=B', 'independent=C', 'unknown=E']
+  );
+  assert.equal(
+    api.impactView(workspaceProjection({ impact: { state: 'ok', copies: [] } })).show,
+    false
+  );
+});
