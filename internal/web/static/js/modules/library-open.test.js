@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   lastSavedLabel,
+  libraryOpenedMessage,
   openLibrarySong,
   RECENT_SONGS_QUERY,
   recentSongs,
@@ -184,5 +185,25 @@ test('the Home library still exports the open helpers it always had', () => {
     'libraryOpenedMessage'
   ]) {
     assert.equal(typeof library[name], 'function', name);
+  }
+});
+
+test('an opened song without its assistant is never called ready', () => {
+  assert.match(
+    libraryOpenedMessage('Album-1', { staffing: 'added', agent_name: 'REAPER Assistant' }),
+    /^Album-1 is ready\. REAPER Assistant was added/
+  );
+  for (const staffing of [
+    'off',
+    'consent_stale',
+    'assistant_missing',
+    'needs_model',
+    'reconcile',
+    'unsettled',
+    'failed'
+  ]) {
+    const message = libraryOpenedMessage('Album-1', { staffing, created: true });
+    assert.doesNotMatch(message, /\bready\b/, staffing);
+    assert.match(message, /^Album-1 is open/, staffing);
   }
 });

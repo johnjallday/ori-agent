@@ -959,6 +959,10 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/staffing", s.Handlers.Session.GetAssistantLibraryStaffing)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/staffing", s.Handlers.Session.GetAssistantLibraryProjectStaffing)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/staffing", s.Handlers.Session.FinishAssistantLibraryProjectStaffing)
+		// The same finish from the project's own page: its Home and catalog row
+		// are resolved from the workspace, never named by the browser.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/library-staffing", s.Handlers.Session.GetProjectLibraryStaffing)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/library-staffing", s.Handlers.Session.FinishProjectLibraryStaffing)
 		// The Home's switch for its shared assistant (off / on / renew after a
 		// plugin update) and the way back when the assistant was deleted.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing", s.Handlers.Session.SetAssistantLibrarySharing)

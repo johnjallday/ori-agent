@@ -322,6 +322,41 @@ test('runSetup stops at a staffing failure, keeps the connected project and leav
   assert.equal(items[0].staffingRequestId, 'k');
 });
 
+test('runSetup stops enqueueing when the sheet closes and never undoes what was sent', async () => {
+  let open = true;
+  const client = fakeClient({
+    ...connectable('e1', 'Album-1', 'ws-1'),
+    'POST /projects/e1/staffing': () => {
+      open = false; // the person closed the sheet while this was in flight
+      return { workspace_id: 'ws-1', staffing: { state: 'added' } };
+    },
+    '/projects/e2': () => {
+      throw new Error('never reached');
+    }
+  });
+  const result = await runSetup({
+    client,
+    items: [
+      { id: 'e1', name: 'Album-1', file: 'Album-1.rpp' },
+      { id: 'e2', name: 'Album-2', file: 'Album-2.rpp' }
+    ],
+    staffing: { teamDigest: DIGEST },
+    shouldContinue: () => open,
+    operationKey: () => 'k'
+  });
+  assert.deepEqual(
+    result.done.map(item => [item.id, item.created, item.staffing.state]),
+    [['e1', true, 'added']]
+  );
+  assert.equal(result.failed, null);
+  assert.equal(result.stopped, true);
+  assert.deepEqual(
+    result.remaining.map(item => item.id),
+    ['e2']
+  );
+  assert.ok(!client.calls.some(call => call[1].startsWith('/projects/e2')));
+});
+
 test('runSetup treats a 200 that is not a filled role as a failure, never as success', async () => {
   const client = fakeClient({
     ...connectable('e1', 'Album-1', 'ws-1'),

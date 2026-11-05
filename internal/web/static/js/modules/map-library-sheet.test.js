@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   CONSENT_LINE,
+  assistantState,
   confirmLines,
   confirmStaffing,
   defaultTicked,
   openLibrarySheet,
   progressLine,
   sheetPosition,
+  loadConnectedStaffing,
+  mergeRuns,
+  resultRows,
   sheetView,
+  staffingRecovery,
+  summarizeRepair,
   summarizeRun
 } from './map-library-sheet.js';
 
@@ -130,6 +136,274 @@ test('progressLine keeps the connection and the assistant apart', () => {
     progressLine({ status: 'failed', stage: 'connection', message: 'it changed' }),
     'Failed: it changed'
   );
+});
+
+test('a connected row offers the assistant only when the Home can fill it, never ticked by default', () => {
+  assert.deepEqual(assistantState(null), {
+    known: false,
+    repairable: false,
+    line: '',
+    blocked: ''
+  });
+  assert.equal(assistantState({ filled: false, plan: 'join' }).repairable, true);
+  assert.equal(assistantState({ filled: false, plan: 'create' }).line, 'no assistant yet');
+  const off = assistantState({ filled: false, plan: 'off', message: 'Switched off.' });
+  assert.equal(off.repairable, false);
+  assert.equal(off.blocked, 'Switched off.');
+  assert.equal(
+    assistantState({ filled: true, shared: true, agent_name: 'REAPER Assistant' }).line,
+    'has REAPER Assistant'
+  );
+  assert.equal(
+    assistantState({ filled: true, shared: false, agent_name: 'Mix Buddy' }).line,
+    'has its own Mix Buddy'
+  );
+  const rowStaffing = {
+    e4: { filled: false, plan: 'join' },
+    e5: { filled: false, plan: 'off', message: 'Switched off.' }
+  };
+  const connected = [
+    { id: 'e4', name: 'Album-4', kind: 'connected', files: [] },
+    { id: 'e5', name: 'Album-5', kind: 'connected', files: [] }
+  ];
+  // Nothing is selected for repair until the person ticks it.
+  assert.equal(sheetView(connected, { rowStaffing }).repairing.length, 0);
+  const view = sheetView(connected, { rowStaffing, repair: new Set(['e4', 'e5']) });
+  assert.deepEqual(
+    view.repairing.map(item => item.id),
+    ['e4']
+  );
+  assert.equal(view.repairLabel, 'Add the assistant to 1');
+});
+
+const albums = ['Album-1', 'Album-2', 'Album-3', 'Album-4'].map((name, i) => ({
+  id: `e${i + 1}`,
+  name,
+  file: `${name}.rpp`
+}));
+
+test('resultRows keeps connection, assistant and unreached rows apart', () => {
+  const rows = resultRows({
+    items: albums,
+    result: {
+      done: [
+        { id: 'e1', workspaceId: 'ws-1', created: true, staffing: { state: 'added' } },
+        {
+          id: 'e2',
+          workspaceId: 'ws-2',
+          created: false,
+          staffing: { state: 'already', shared: false, agent_name: 'Mix Buddy' }
+        }
+      ],
+      failed: {
+        id: 'e3',
+        name: 'Album-3',
+        stage: 'staffing',
+        reason: 'needs_model',
+        workspaceId: 'ws-3',
+        created: true,
+        message: 'Set up a model.'
+      },
+      remaining: [albums[3]]
+    }
+  });
+  assert.deepEqual(
+    rows.map(row => [
+      row.name,
+      row.connection,
+      row.assistant,
+      row.complete,
+      row.recovery?.kind || ''
+    ]),
+    [
+      ['Album-1', 'Put on the map', 'assistant added', true, ''],
+      ['Album-2', 'Already on the map', 'kept its own Mix Buddy', true, ''],
+      ['Album-3', 'Put on the map', 'assistant not added: Set up a model.', false, 'settings'],
+      ['Album-4', 'Not reached', '', false, '']
+    ]
+  );
+  // A connected-but-unstaffed row keeps its workspace for the map and link.
+  assert.equal(rows[2].workspaceId, 'ws-3');
+  const closed = resultRows({
+    items: albums.slice(0, 2),
+    result: {
+      done: [
+        { id: 'e1', workspaceId: 'ws-1', created: true, staffing: { state: 'not_requested' } }
+      ],
+      failed: null,
+      remaining: [albums[1]],
+      stopped: true
+    }
+  });
+  assert.deepEqual(
+    closed.map(row => [row.connection, row.assistant]),
+    [
+      ['Put on the map', 'no assistant (placement only)'],
+      ['Not started (closed)', '']
+    ]
+  );
+  const notConnected = resultRows({
+    items: albums.slice(0, 1),
+    result: {
+      done: [],
+      failed: { id: 'e1', stage: 'connection', message: 'it changed' },
+      remaining: []
+    }
+  });
+  assert.equal(notConnected[0].connection, 'Not set up: it changed');
+  assert.equal(notConnected[0].recovery.kind, 'retry');
+});
+
+test('each stop points at the place that settles it; an unknown one retries', () => {
+  assert.equal(staffingRecovery('needs_model').kind, 'settings');
+  assert.equal(staffingRecovery('off').kind, 'sharing');
+  assert.equal(staffingRecovery('consent_stale').kind, 'sharing');
+  assert.equal(staffingRecovery('assistant_missing').kind, 'sharing');
+  assert.equal(staffingRecovery('reconcile').kind, 'agents');
+  assert.equal(staffingRecovery('sharing_changed').kind, 'reload');
+  assert.equal(staffingRecovery('failed').kind, 'retry');
+  assert.equal(staffingRecovery('unsettled').kind, 'retry');
+  assert.equal(staffingRecovery('').kind, 'retry');
+});
+
+test('mergeRuns keeps earlier successes and every confirmed row', () => {
+  const first = {
+    items: albums,
+    staffing: { teamDigest: 'd' },
+    kind: 'setup',
+    result: {
+      done: [{ id: 'e1', workspaceId: 'ws-1', created: true, staffing: { state: 'added' } }],
+      failed: { id: 'e2', stage: 'staffing', reason: 'failed', workspaceId: 'ws-2' },
+      remaining: albums.slice(2)
+    }
+  };
+  const retried = {
+    items: albums.slice(1),
+    staffing: { teamDigest: 'd' },
+    kind: 'setup',
+    result: {
+      done: albums.slice(1).map((a, i) => ({
+        id: a.id,
+        workspaceId: `ws-${i + 2}`,
+        created: i > 0,
+        staffing: { state: 'joined' }
+      })),
+      failed: null,
+      remaining: []
+    }
+  };
+  const merged = mergeRuns(first, retried);
+  assert.equal(merged.items.length, 4);
+  assert.deepEqual(
+    merged.result.done.map(item => item.id),
+    ['e1', 'e2', 'e3', 'e4']
+  );
+  assert.equal(merged.result.failed, null);
+  assert.ok(resultRows(merged).every(row => row.complete));
+});
+
+test('a retried row is still reported as put on the map by the run that stopped at it', () => {
+  const first = {
+    items: albums.slice(0, 2),
+    staffing: { teamDigest: 'd' },
+    kind: 'setup',
+    result: {
+      done: [],
+      failed: { id: 'e1', stage: 'staffing', reason: '', workspaceId: 'ws-1', created: true },
+      remaining: [albums[1]]
+    }
+  };
+  const merged = mergeRuns(first, {
+    items: albums.slice(0, 2),
+    staffing: { teamDigest: 'd' },
+    kind: 'setup',
+    result: {
+      done: [
+        {
+          id: 'e1',
+          workspaceId: 'ws-1',
+          created: false,
+          staffing: { state: 'already', shared: true }
+        },
+        { id: 'e2', workspaceId: 'ws-2', created: true, staffing: { state: 'joined' } }
+      ],
+      failed: null,
+      remaining: []
+    }
+  });
+  assert.deepEqual(
+    resultRows(merged).map(row => row.connection),
+    ['Put on the map', 'Put on the map']
+  );
+});
+
+test('a status line ends each sentence once, whatever the server message ends with', () => {
+  const plan = { roleLabel: 'REAPER Assistant' };
+  const stopped = message =>
+    summarizeRun(
+      {
+        done: [],
+        failed: { name: 'Album-1', stage: 'staffing', workspaceId: 'ws-1', message },
+        remaining: [{}]
+      },
+      { teamDigest: 'd' },
+      plan
+    );
+  assert.equal(
+    stopped('Library request failed (502)'),
+    '1 project is on the map. Album-1 is on the map, but its REAPER Assistant was not added: Library request failed (502). 1 not reached and left ticked.'
+  );
+  assert.equal(
+    stopped('Set up a model.'),
+    '1 project is on the map. Album-1 is on the map, but its REAPER Assistant was not added: Set up a model. 1 not reached and left ticked.'
+  );
+  assert.equal(
+    summarizeRun(
+      {
+        done: [],
+        failed: { name: 'Album-1', stage: 'connection', message: 'it changed.' },
+        remaining: []
+      },
+      null,
+      plan
+    ),
+    'Stopped at Album-1: it changed.'
+  );
+});
+
+test('summarizeRepair says what changed and where it stopped', () => {
+  const plan = { roleLabel: 'REAPER Assistant' };
+  assert.equal(
+    summarizeRepair({ done: [{}, {}], failed: null, remaining: [] }, plan),
+    '2 projects now have your shared REAPER Assistant.'
+  );
+  assert.equal(
+    summarizeRepair(
+      { done: [{}], failed: { name: 'Album-3', message: 'Set up a model.' }, remaining: [{}] },
+      plan
+    ),
+    '1 project now has your shared REAPER Assistant. Album-3: Set up a model. 1 not reached and left ticked.'
+  );
+});
+
+test('loadConnectedStaffing reads each connected row and drops unreadable ones', async () => {
+  const calls = [];
+  const statuses = await loadConnectedStaffing(
+    {
+      request: async path => {
+        calls.push(path);
+        if (path.includes('bad')) throw new Error('no');
+        return { filled: false, plan: 'join' };
+      }
+    },
+    [
+      { id: 'e1', kind: 'setup' },
+      { id: 'e4', kind: 'connected' },
+      { id: 'bad', kind: 'connected' }
+    ]
+  );
+  assert.deepEqual(calls, ['/projects/e4/staffing', '/projects/bad/staffing']);
+  assert.deepEqual(Object.keys(statuses), ['e4']);
 });
 
 test('summarizeRun never calls a connected but unstaffed project fully set up', () => {

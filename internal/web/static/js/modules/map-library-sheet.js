@@ -34,7 +34,10 @@ const SHEET_CLASS = 'ws-map-library-sheet';
  * ticked row ids, `progress` maps row id → { status, message } during and
  * after a run.
  */
-export function sheetView(rows, { chosen = {}, ticked = new Set(), progress = {} } = {}) {
+export function sheetView(
+  rows,
+  { chosen = {}, ticked = new Set(), progress = {}, rowStaffing = {}, repair = new Set() } = {}
+) {
   // What can be set up as it is comes first, then what needs a file chosen,
   // then what is already on the map, then what needs the dashboard; inside a
   // bucket the library's order is kept.
@@ -65,10 +68,17 @@ export function sheetView(rows, { chosen = {}, ticked = new Set(), progress = {}
       checkable,
       checked,
       reason: kind === SETUP_KINDS.DASHBOARD ? row.reason || setupLabel(kind) : '',
-      progress: progress[row.id] || null
+      progress: progress[row.id] || null,
+      assistant: kind === SETUP_KINDS.CONNECTED ? assistantState(rowStaffing[row.id]) : null,
+      repairChecked:
+        kind === SETUP_KINDS.CONNECTED &&
+        repair.has(row.id) &&
+        assistantState(rowStaffing[row.id]).repairable &&
+        !progress[row.id]
     };
   });
   const selected = items.filter(item => item.checked);
+  const repairing = items.filter(item => item.repairChecked);
   return {
     items,
     totals: setupTotals(list),
@@ -76,7 +86,38 @@ export function sheetView(rows, { chosen = {}, ticked = new Set(), progress = {}
     selected,
     buttonLabel: `Put ${selected.length} on the map`,
     buttonDisabled: selected.length === 0,
+    repairing,
+    repairLabel: `Add the assistant to ${repairing.length}`,
     allConnected: list.length > 0 && list.every(row => row.kind === SETUP_KINDS.CONNECTED)
+  };
+}
+
+/**
+ * A connected row's assistant, from its inert status read
+ * (GET …/projects/{id}/staffing). Pure. repairable is true only for an empty
+ * role the Home's current approval can fill (create or join); any other plan is
+ * a reason shown with the row, never an action.
+ */
+export function assistantState(status) {
+  if (!status) return { known: false, repairable: false, line: '', blocked: '' };
+  if (status.filled) {
+    const who = status.agent_name || 'an assistant';
+    return {
+      known: true,
+      repairable: false,
+      line: status.shared ? `has ${who}` : `has its own ${who}`,
+      blocked: ''
+    };
+  }
+  const plan = String(status.plan || '');
+  if (plan === 'create' || plan === 'join') {
+    return { known: true, repairable: true, line: 'no assistant yet', blocked: '' };
+  }
+  return {
+    known: true,
+    repairable: false,
+    line: 'no assistant',
+    blocked: String(status.message || '')
   };
 }
 
@@ -126,6 +167,12 @@ export function progressLine(progress) {
  * The status line after a run: what was connected, what happened to the
  * assistant, and where it stopped. Pure.
  */
+// A sentence ends once: a server message that already has its full stop keeps it.
+function sentence(text) {
+  const value = String(text || '').trim();
+  return /[.!?]$/.test(value) ? value : `${value}.`;
+}
+
 export function summarizeRun(result, staffing, plan) {
   const done = Array.isArray(result?.done) ? result.done : [];
   const failed = result?.failed || null;
@@ -140,13 +187,156 @@ export function summarizeRun(result, staffing, plan) {
   if (failed) {
     parts.push(
       failed.stage === 'staffing'
-        ? `${failed.name} is on the map, but its ${role} was not added: ${failed.message}`
-        : `Stopped at ${failed.name}: ${failed.message}.`
+        ? sentence(`${failed.name} is on the map, but its ${role} was not added: ${failed.message}`)
+        : sentence(`Stopped at ${failed.name}: ${failed.message}`)
     );
     if (remaining.length) parts.push(`${remaining.length} not reached and left ticked.`);
   }
   if (!parts.length) parts.push('Nothing was set up.');
   return parts.join(' ');
+}
+
+// What the person can do about an assistant that was not added, by reason.
+// Each points at the existing place that settles it; none decides anything.
+const STAFFING_RECOVERY = Object.freeze({
+  needs_model: { kind: 'settings', label: 'Set up a model' },
+  none: { kind: 'sharing', label: 'Review sharing on the Home' },
+  off: { kind: 'sharing', label: 'Review sharing on the Home' },
+  consent_stale: { kind: 'sharing', label: 'Review the updated assistant' },
+  invalid: { kind: 'sharing', label: 'Review sharing on the Home' },
+  unavailable: { kind: 'sharing', label: 'Review sharing on the Home' },
+  assistant_missing: { kind: 'sharing', label: 'Add the shared assistant again' },
+  reconcile: { kind: 'agents', label: 'Open Agents' },
+  sharing_changed: { kind: 'reload', label: 'Review again' },
+  request_reused: { kind: 'reload', label: 'Review again' },
+  not_shared: { kind: 'none', label: '' },
+  read_only: { kind: 'none', label: '' },
+  unavailable_target: { kind: 'none', label: '' }
+});
+
+/** The recovery for a reason a staffing step stopped; retry when unknown. Pure. */
+export function staffingRecovery(reason) {
+  return STAFFING_RECOVERY[reason] || { kind: 'retry', label: 'Try again' };
+}
+
+/**
+ * The results of one run, one row per project the person confirmed, in order.
+ * Pure. Connection and assistant are separate facts; a project that was
+ * connected before its assistant failed is reported connected, never as
+ * fully set up, and a project never reached says so.
+ */
+export function resultRows(run) {
+  const items = Array.isArray(run?.items) ? run.items : [];
+  const result = run?.result || {};
+  const done = new Map((result.done || []).map(item => [item.id, item]));
+  const failed = result.failed || null;
+  const unreached = new Set((result.remaining || []).map(item => item.id));
+  return items.map(item => {
+    const row = {
+      id: item.id,
+      name: item.name,
+      workspaceId: '',
+      connection: '',
+      assistant: '',
+      recovery: null,
+      complete: false
+    };
+    const finished = done.get(item.id);
+    if (finished) {
+      row.workspaceId = finished.workspaceId || '';
+      row.connection = finished.created ? 'Put on the map' : 'Already on the map';
+      row.assistant = staffingResultLabel(finished.staffing);
+      row.complete = true;
+      if (finished.staffing?.state === 'already' && finished.staffing.shared === false) {
+        row.assistant = `kept its own ${finished.staffing.agent_name || 'assistant'}`;
+      }
+      return row;
+    }
+    if (failed && failed.id === item.id) {
+      if (failed.stage === 'staffing') {
+        row.workspaceId = failed.workspaceId || '';
+        row.connection = failed.created ? 'Put on the map' : 'On the map';
+        row.assistant = `assistant not added: ${failed.message || 'it could not be added'}`;
+        row.recovery = staffingRecovery(failed.reason);
+      } else {
+        row.connection = `Not set up: ${failed.message || 'it could not be set up'}`;
+        row.recovery = { kind: 'retry', label: 'Try again' };
+      }
+      return row;
+    }
+    if (unreached.has(item.id)) {
+      row.connection = result.stopped ? 'Not started (closed)' : 'Not reached';
+      return row;
+    }
+    return row;
+  });
+}
+
+/**
+ * A retry's run folded into the run it continues: every row the person
+ * confirmed stays listed, earlier successes are kept, and the retried rows take
+ * their new outcome. Pure.
+ */
+export function mergeRuns(previous, next) {
+  const retried = new Set((next?.items || []).map(item => item.id));
+  const earlier = (previous?.result?.done || []).filter(item => !retried.has(item.id));
+  // The retried row was put on the map by the run that stopped at it: its
+  // retry only finishes the assistant, so it is still reported as put there.
+  const stopped = previous?.result?.failed;
+  const finished = (next?.result?.done || []).map(item =>
+    stopped && stopped.id === item.id && stopped.created ? { ...item, created: true } : item
+  );
+  return {
+    items: previous?.items || next?.items || [],
+    staffing: next?.staffing ?? previous?.staffing ?? null,
+    kind: next?.kind || previous?.kind || 'setup',
+    result: {
+      done: [...earlier, ...finished],
+      failed: next?.result?.failed || null,
+      remaining: next?.result?.remaining || [],
+      stopped: !!next?.result?.stopped
+    }
+  };
+}
+
+/** The status line after adding the assistant to projects on the map. Pure. */
+export function summarizeRepair(result, plan) {
+  const done = Array.isArray(result?.done) ? result.done : [];
+  const failed = result?.failed || null;
+  const remaining = Array.isArray(result?.remaining) ? result.remaining : [];
+  const role = plan?.roleLabel || 'assistant';
+  const parts = [];
+  if (done.length) {
+    parts.push(
+      `${done.length === 1 ? '1 project now has' : `${done.length} projects now have`} your shared ${role}.`
+    );
+  }
+  if (failed) {
+    parts.push(sentence(`${failed.name}: ${failed.message}`));
+    if (remaining.length) parts.push(`${remaining.length} not reached and left ticked.`);
+  }
+  if (!parts.length) parts.push('Nothing changed.');
+  return parts.join(' ');
+}
+
+/**
+ * Each connected row's assistant, read only (no reservation, no agent, no
+ * ticket). A row whose read fails stays unknown, never repairable.
+ */
+export async function loadConnectedStaffing(client, rows) {
+  const connected = (Array.isArray(rows) ? rows : []).filter(
+    row => row && row.kind === SETUP_KINDS.CONNECTED
+  );
+  const entries = await Promise.all(
+    connected.map(async row => {
+      try {
+        return [row.id, await client.request(`/projects/${encodeURIComponent(row.id)}/staffing`)];
+      } catch (_) {
+        return [row.id, null];
+      }
+    })
+  );
+  return Object.fromEntries(entries.filter(([, status]) => status));
 }
 
 /** The rows ticked by default: single-file projects only (FR-7). */
@@ -264,7 +454,15 @@ export function openLibrarySheet({
     // The Home's plan for the assistant, read with the rows (inert), and the
     // person's choice on the confirmation.
     staffingPlan: null,
-    staffingChoice: 'staff'
+    staffingChoice: 'staff',
+    // Connected rows: each one's assistant (inert reads) and the ones the
+    // person ticked to get the shared assistant (never ticked by default).
+    rowStaffing: {},
+    repair: new Set(),
+    // The last run, kept so its results stay on screen (and can be retried),
+    // and the workspace page each result row links to.
+    lastRun: null,
+    routes: {}
   };
 
   const root = el(doc, 'div', SHEET_CLASS);
@@ -405,10 +603,48 @@ export function openLibrarySheet({
           row.append(el(doc, 'span', `${SHEET_CLASS}-progress`, progressLine(item.progress)));
         }
       } else if (item.kind === SETUP_KINDS.CONNECTED) {
-        row.append(
-          el(doc, 'span', `${SHEET_CLASS}-name`, item.name),
-          el(doc, 'span', `${SHEET_CLASS}-state is-connected`, 'on the map')
-        );
+        const assistant = item.assistant || { known: false };
+        const where = assistant.line ? `on the map · ${assistant.line}` : 'on the map';
+        if (assistant.repairable) {
+          // Already on the map without its assistant: offered, never ticked by
+          // default, and never connected again.
+          const label = el(doc, 'label', `${SHEET_CLASS}-pick`);
+          const box = el(doc, 'input');
+          box.type = 'checkbox';
+          box.checked = item.repairChecked;
+          box.disabled = state.phase === 'running' || !!item.progress;
+          box.setAttribute('data-sheet-repair', item.id);
+          box.setAttribute('aria-label', `Add the shared assistant to ${item.name}`);
+          box.addEventListener('change', () => {
+            if (box.checked) state.repair.add(item.id);
+            else state.repair.delete(item.id);
+            render();
+            root.querySelector(`[data-sheet-repair="${CSS.escape(item.id)}"]`)?.focus();
+          });
+          label.append(
+            box,
+            el(doc, 'span', `${SHEET_CLASS}-name`, item.name),
+            el(doc, 'span', `${SHEET_CLASS}-state is-connected`, where)
+          );
+          row.append(label);
+        } else {
+          row.append(
+            el(doc, 'span', `${SHEET_CLASS}-name`, item.name),
+            el(doc, 'span', `${SHEET_CLASS}-state is-connected`, where)
+          );
+        }
+        if (assistant.blocked) {
+          const why = el(doc, 'span', `${SHEET_CLASS}-hint`, assistant.blocked);
+          row.append(why);
+          if (shelfRoute) {
+            const link = el(doc, 'a', `${SHEET_CLASS}-link`, 'review sharing');
+            link.href = shelfRoute;
+            row.append(link);
+          }
+        }
+        if (item.progress) {
+          row.append(el(doc, 'span', `${SHEET_CLASS}-progress`, progressLine(item.progress)));
+        }
       } else {
         row.append(el(doc, 'span', `${SHEET_CLASS}-name`, item.name));
         const why = el(doc, 'span', `${SHEET_CLASS}-state is-dashboard`, item.reason);
@@ -460,6 +696,164 @@ export function openLibrarySheet({
     }
     box.append(el(doc, 'p', `${SHEET_CLASS}-hint`, staffing.note));
     return box;
+  }
+
+  // The repair of projects already on the map: re-read the plan, then the same
+  // finish per project, in order, stopping at the first that fails. Nothing is
+  // connected again.
+  async function confirmRepair(items, staffing) {
+    state.lastRun = null;
+    const fresh = await loadStaffingPlan(api);
+    const again = confirmStaffing(fresh, items.length, 'staff');
+    if (!again.staff || again.teamDigest !== staffing.teamDigest) {
+      state.staffingPlan = fresh;
+      status.textContent = 'What adding the assistant does changed. Review it and confirm again.';
+      render();
+      focus();
+      return;
+    }
+    await execute(
+      items.map(item => ({ id: item.id, name: item.name, file: '' })),
+      { teamDigest: staffing.teamDigest },
+      'repair'
+    );
+  }
+
+  // One run, then its retained results (never an automatic close). The item
+  // objects are kept: an explicit retry re-sends the same staffing request ids.
+  // Closing the sheet stops what has not started; nothing is rolled back.
+  async function execute(items, staffing, kind) {
+    state.phase = 'running';
+    state.progress = {};
+    status.textContent = '';
+    render();
+    const result = await runSetup({
+      client: api,
+      items,
+      staffing,
+      shouldContinue: () => current === handle,
+      onProgress: (item, phase, detail) => {
+        state.progress[item.id] = {
+          status: phase,
+          stage: detail?.stage || '',
+          staffing: detail?.staffing || null,
+          message: detail?.message || ''
+        };
+        if (current === handle) render();
+      }
+    });
+    // A project connected before its assistant failed is on the map: the map
+    // and member lists show it, but it is not reported as fully set up.
+    const connected = result.done.map(item => item.workspaceId);
+    if (result.failed?.workspaceId) connected.push(result.failed.workspaceId);
+    state.created.push(...connected.filter(Boolean));
+    for (const item of result.done) {
+      state.ticked.delete(item.id);
+      state.repair.delete(item.id);
+    }
+    if (result.failed?.workspaceId) state.ticked.delete(result.failed.id);
+    if (state.created.length) onDone({ workspaceIds: state.created.slice() });
+    if (current !== handle) return; // closed while running: nothing more to show
+    const previous = state.lastRun;
+    // A retry continues the same confirmation: keep the rows it already showed.
+    const run =
+      previous && previous.retrying
+        ? mergeRuns(previous, { items, result, staffing, kind })
+        : { items, result, staffing, kind };
+    state.lastRun = run;
+    state.message =
+      kind === 'repair'
+        ? summarizeRepair(run.result, state.staffingPlan)
+        : summarizeRun(run.result, staffing, state.staffingPlan);
+    state.progress = {};
+    state.phase = 'results';
+    status.textContent = state.message;
+    render();
+    focus();
+    void resolveRoutes(resultRows(run));
+  }
+
+  // The retry of the row that stopped, and the rows after it, under the same
+  // confirmation and request ids.
+  async function retry() {
+    const run = state.lastRun;
+    if (!run?.result?.failed) return;
+    const start = run.items.findIndex(item => item.id === run.result.failed.id);
+    if (start < 0) return;
+    run.retrying = true;
+    await execute(run.items.slice(start), run.staffing, run.kind);
+  }
+
+  // Each result row links to its workspace page, which is addressed by slug:
+  // read it (nothing else) once the results show.
+  async function resolveRoutes(rows) {
+    const fetcher = fetchImpl || ((...args) => globalThis.fetch(...args));
+    for (const row of rows) {
+      if (!row.workspaceId || state.routes[row.workspaceId]) continue;
+      try {
+        const response = await fetcher(`/api/workspaces/${encodeURIComponent(row.workspaceId)}`, {
+          headers: { Accept: 'application/json' }
+        });
+        const ws = response.ok ? await response.json() : null;
+        if (ws?.folder_slug)
+          state.routes[row.workspaceId] = `/workspaces/${encodeURIComponent(ws.folder_slug)}`;
+      } catch (_) {
+        // No link; the row still says what happened.
+      }
+    }
+    if (current === handle && state.phase === 'results') render();
+  }
+
+  // Where each kind of recovery lives. None of them changes anything by being
+  // opened; the person decides there.
+  function recoveryHref(kind) {
+    if (kind === 'settings') return '/settings';
+    if (kind === 'agents') return '/agents';
+    if (kind === 'sharing' && shelfRoute)
+      return shelfRoute.replace(/#.*$/, '') + '#projectLibraryPanel';
+    return '';
+  }
+
+  // The retained results: one row per confirmed project with its connection
+  // and its assistant as separate facts, a link to the workspace, and the way
+  // to settle anything that stopped.
+  function renderResults(rows) {
+    const list = el(doc, 'ul', `${SHEET_CLASS}-results`);
+    list.setAttribute('data-sheet-results', '');
+    for (const result of rows) {
+      const row = el(doc, 'li', `${SHEET_CLASS}-result`);
+      row.setAttribute('data-sheet-result', result.id);
+      if (result.complete) row.classList.add('is-complete');
+      const head = el(doc, 'div', `${SHEET_CLASS}-result-head`);
+      head.append(el(doc, 'span', `${SHEET_CLASS}-name`, result.name));
+      const route = result.workspaceId ? state.routes[result.workspaceId] : '';
+      if (route) {
+        const open = el(doc, 'a', `${SHEET_CLASS}-link`, 'Open');
+        open.href = route;
+        open.setAttribute('aria-label', `Open ${result.name}`);
+        head.append(open);
+      }
+      row.append(head, el(doc, 'span', `${SHEET_CLASS}-hint`, result.connection));
+      if (result.assistant) row.append(el(doc, 'span', `${SHEET_CLASS}-hint`, result.assistant));
+      if (result.recovery) {
+        const href = recoveryHref(result.recovery.kind);
+        if (href && result.recovery.label) {
+          const fix = el(doc, 'a', `${SHEET_CLASS}-link`, result.recovery.label);
+          fix.href = href;
+          row.append(fix);
+        } else if (result.recovery.kind === 'reload') {
+          const review = el(doc, 'button', `${SHEET_CLASS}-link`, result.recovery.label);
+          review.type = 'button';
+          review.addEventListener('click', () => {
+            state.lastRun = null;
+            void load().then(() => focus());
+          });
+          row.append(review);
+        }
+      }
+      list.append(row);
+    }
+    return list;
   }
 
   // Confirmed: re-read the assistant plan first. A plan that changed since the
@@ -523,6 +917,79 @@ export function openLibrarySheet({
         focus();
       });
       footer.append(go, back);
+    } else if (state.phase === 'results' && state.lastRun) {
+      subtitle.textContent = 'What setup did';
+      body.append(renderResults(resultRows(state.lastRun)));
+      const failed = state.lastRun.result.failed;
+      const recovery =
+        failed && failed.stage === 'staffing'
+          ? staffingRecovery(failed.reason)
+          : failed
+            ? { kind: 'retry' }
+            : null;
+      if (recovery?.kind === 'retry') {
+        const again = el(
+          doc,
+          'button',
+          'modern-btn modern-btn-primary',
+          `Try ${failed.name} again`
+        );
+        again.type = 'button';
+        again.setAttribute('data-sheet-retry', '');
+        again.addEventListener('click', () => void retry());
+        footer.append(again);
+      }
+      const back = el(doc, 'button', 'modern-btn modern-btn-secondary', 'Back to the list');
+      back.type = 'button';
+      back.addEventListener('click', () => {
+        state.lastRun = null;
+        void load().then(() => focus());
+      });
+      const done = el(doc, 'button', 'modern-btn modern-btn-secondary', 'Close');
+      done.type = 'button';
+      done.addEventListener('click', () => close());
+      footer.append(back, done);
+    } else if (state.phase === 'repair') {
+      subtitle.textContent = view.subtitle;
+      const count = view.repairing.length;
+      body.append(
+        el(
+          doc,
+          'p',
+          `${SHEET_CLASS}-confirm-intro`,
+          `Add the shared assistant to ${count} ${count === 1 ? 'project' : 'projects'} already on the map:`
+        )
+      );
+      const lines = el(doc, 'ul', `${SHEET_CLASS}-confirm`);
+      for (const item of view.repairing) lines.append(el(doc, 'li', null, item.name));
+      body.append(lines);
+      const staffing = confirmStaffing(state.staffingPlan, count, 'staff');
+      const box = el(doc, 'div', `${SHEET_CLASS}-staffing`);
+      box.setAttribute('data-sheet-staffing', staffing.canStaff ? 'available' : 'unavailable');
+      if (staffing.canStaff) box.append(el(doc, 'p', `${SHEET_CLASS}-hint`, staffing.staffLine));
+      box.append(
+        el(
+          doc,
+          'p',
+          `${SHEET_CLASS}-hint`,
+          staffing.canStaff
+            ? `${staffing.note} Nothing is connected again and no other project changes.`
+            : staffing.note
+        )
+      );
+      body.append(box);
+      const go = el(doc, 'button', 'modern-btn modern-btn-primary', 'Add the assistant');
+      go.type = 'button';
+      go.disabled = !staffing.canStaff || count === 0;
+      go.addEventListener('click', () => void confirmRepair(view.repairing, staffing));
+      const back = el(doc, 'button', 'modern-btn modern-btn-secondary', 'Back');
+      back.type = 'button';
+      back.addEventListener('click', () => {
+        state.phase = 'list';
+        render();
+        focus();
+      });
+      footer.append(go, back);
     } else {
       subtitle.textContent = view.subtitle;
       if (!view.items.length) {
@@ -547,7 +1014,28 @@ export function openLibrarySheet({
       cancel.type = 'button';
       cancel.disabled = state.phase === 'running';
       cancel.addEventListener('click', () => close());
-      footer.append(go, cancel);
+      // With only projects already on the map ticked, a disabled "Put 0 on the
+      // map" beside the real action is just noise.
+      const nothingToPlace =
+        (view.repairing.length && view.selected.length === 0) ||
+        view.allConnected ||
+        state.phase === 'running';
+      if (!nothingToPlace) footer.append(go);
+      if (view.repairing.length) {
+        const repair = el(doc, 'button', 'modern-btn modern-btn-secondary', view.repairLabel);
+        repair.type = 'button';
+        repair.disabled = state.phase === 'running';
+        repair.setAttribute('data-sheet-repair-go', '');
+        repair.addEventListener('click', () => {
+          state.phase = 'repair';
+          state.message = '';
+          status.textContent = '';
+          render();
+          focus();
+        });
+        footer.append(repair);
+      }
+      footer.append(cancel);
       if (shelfRoute) {
         const link = el(doc, 'a', `${SHEET_CLASS}-shelf`, 'Open the project shelf');
         link.href = shelfRoute;
@@ -564,6 +1052,10 @@ export function openLibrarySheet({
       const [result, plan] = await Promise.all([loadSetupRows(api), loadStaffingPlan(api)]);
       state.rows = result.rows;
       state.staffingPlan = plan;
+      state.rowStaffing = await loadConnectedStaffing(api, state.rows);
+      for (const id of [...state.repair]) {
+        if (!assistantState(state.rowStaffing[id]).repairable) state.repair.delete(id);
+      }
       if (result.readOnly) {
         state.message = 'This Home is read-only; projects can only be viewed here.';
       }
@@ -585,40 +1077,12 @@ export function openLibrarySheet({
   }
 
   async function run(selected, staffing = null) {
-    state.phase = 'running';
-    state.progress = {};
-    status.textContent = '';
-    render();
-    const result = await runSetup({
-      client: api,
-      items: selected.map(item => ({ id: item.id, name: item.name, file: item.file })),
+    state.lastRun = null;
+    await execute(
+      selected.map(item => ({ id: item.id, name: item.name, file: item.file })),
       staffing,
-      onProgress: (item, phase, detail) => {
-        state.progress[item.id] = {
-          status: phase,
-          stage: detail?.stage || '',
-          staffing: detail?.staffing || null,
-          message: detail?.message || ''
-        };
-        if (current === handle) render();
-      }
-    });
-    // A project connected before its assistant failed is on the map: the map
-    // and member lists show it, but it is not reported as fully set up.
-    const connected = result.done.map(item => item.workspaceId);
-    if (result.failed?.workspaceId) connected.push(result.failed.workspaceId);
-    state.created.push(...connected.filter(Boolean));
-    for (const item of result.done) state.ticked.delete(item.id);
-    if (result.failed?.workspaceId) state.ticked.delete(result.failed.id);
-    state.message = summarizeRun(result, staffing, state.staffingPlan);
-    if (state.created.length) onDone({ workspaceIds: state.created.slice() });
-    if (current !== handle) return; // closed while running: nothing more to show
-    state.progress = {};
-    await load();
-    if (!result.failed && !staffing) {
-      const view = sheetView(state.rows, state);
-      if (view.selected.length === 0 && result.done.length) close();
-    }
+      'setup'
+    );
   }
 
   const handle = { homeID, close, focus, root };

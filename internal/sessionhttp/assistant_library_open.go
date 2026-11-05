@@ -139,6 +139,8 @@ type libraryOpener interface {
 	Activate(ctx context.Context, scope projectlibrary.Scope, activation libraryActivation) (string, error)
 	// Format is the project format the catalog observed for the row.
 	Format(scope projectlibrary.Scope, entryID string) string
+	// LinkedEntries are the catalog rows whose exact link names workspaceID.
+	LinkedEntries(scope projectlibrary.Scope, workspaceID string) ([]string, error)
 }
 
 type reviewedLibraryOpener struct {
@@ -181,6 +183,20 @@ func (o reviewedLibraryOpener) Activate(ctx context.Context, scope projectlibrar
 
 func (o reviewedLibraryOpener) Format(scope projectlibrary.Scope, entryID string) string {
 	return o.h.libraryEntryFormat(scope, entryID)
+}
+
+func (o reviewedLibraryOpener) LinkedEntries(scope projectlibrary.Scope, workspaceID string) ([]string, error) {
+	doc, err := o.h.assistantLibraryStore().Read(scope)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, entry := range doc.Entries {
+		if entry.Link != nil && entry.Link.WorkspaceID == workspaceID {
+			ids = append(ids, entry.ID)
+		}
+	}
+	return ids, nil
 }
 
 // OpenAssistantLibraryProject handles

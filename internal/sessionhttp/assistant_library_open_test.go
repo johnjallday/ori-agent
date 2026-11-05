@@ -83,6 +83,18 @@ func (f *fakeOpener) Activate(_ context.Context, _ projectlibrary.Scope, activat
 
 func (f *fakeOpener) Format(projectlibrary.Scope, string) string { return "reaper" }
 
+func (f *fakeOpener) LinkedEntries(_ projectlibrary.Scope, workspaceID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ids []string
+	for id, row := range f.rows {
+		if row.State == "connected" && row.WorkspaceID == workspaceID {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
 func openProvider() *agentworkspace.AssistantProjectProviderOwner {
 	return &agentworkspace.AssistantProjectProviderOwner{
 		PluginID: "reaper-plugin", PluginVersion: "0.9.0", BlueprintID: "reaper-song", BlueprintVersion: 1,

@@ -556,6 +556,110 @@ func (h *Handler) GetAssistantLibraryProjectStaffing(w http.ResponseWriter, r *h
 	_ = orihttp.RespondSuccess(w, row)
 }
 
+// ---- From the project itself ----------------------------------------------
+//
+// A song already on the map that never got the Home's assistant can finish it
+// from its own page. The browser names only the workspace: its Home and its
+// catalog row are resolved here, from the workspace's own link and the exact
+// catalog link back to it, never from names or a client scan.
+
+// projectStaffingTarget is one project workspace resolved to its Home and the
+// one catalog row linked to it.
+type projectStaffingTarget struct {
+	scope   projectlibrary.Scope
+	home    *workspace.Workspace
+	entryID string
+	songID  string
+}
+
+// resolveProjectStaffing answers 404 for a workspace that is not the caller's;
+// ok=false with no response written means it is not a library project (the
+// caller answers "not eligible").
+func (h *Handler) resolveProjectStaffing(w http.ResponseWriter, r *http.Request) (projectStaffingTarget, bool, bool) {
+	var target projectStaffingTarget
+	if h == nil || h.workspaceTaskStore == nil || h.currentUserID == nil {
+		_ = orihttp.RespondNotFound(w, "Workspace not found")
+		return target, false, true
+	}
+	owner, err := h.currentUserID(r.Context())
+	songID := strings.TrimSpace(r.PathValue("workspaceID"))
+	song, getErr := h.workspaceTaskStore.Get(songID)
+	if err != nil || strings.TrimSpace(owner) == "" || getErr != nil || song == nil || song.ID != songID || song.OwnerUserID != owner {
+		_ = orihttp.RespondNotFound(w, "Workspace not found")
+		return target, false, true
+	}
+	link := song.GetAssistantProjectLink()
+	if link == nil || strings.TrimSpace(link.StationWorkspaceID) == "" {
+		return target, false, false
+	}
+	scope, err := h.portfolioLibraryScope(owner, link.StationWorkspaceID)
+	if err != nil {
+		return target, false, false
+	}
+	home, err := h.workspaceTaskStore.Get(scope.HomeID)
+	opener := h.libraryOpener()
+	if err != nil || home == nil || opener == nil {
+		return target, false, false
+	}
+	entries, err := opener.LinkedEntries(scope, songID)
+	if err != nil || len(entries) != 1 {
+		return target, false, false // none, or ambiguous: never guessed
+	}
+	return projectStaffingTarget{scope: scope, home: home, entryID: entries[0], songID: songID}, true, false
+}
+
+// projectStaffingView is a project's own staffing status, read only.
+type projectStaffingView struct {
+	Eligible   bool   `json:"eligible"`
+	HomeID     string `json:"home_id,omitempty"`
+	HomeName   string `json:"home_name,omitempty"`
+	TeamDigest string `json:"team_digest,omitempty"`
+	libraryRowStaffing
+}
+
+// GetProjectLibraryStaffing handles GET /api/workspaces/{workspaceID}/library-staffing:
+// whether this project can get its Home's shared assistant, and what that
+// would do. It only reads.
+func (h *Handler) GetProjectLibraryStaffing(w http.ResponseWriter, r *http.Request) {
+	target, ok, answered := h.resolveProjectStaffing(w, r)
+	if answered {
+		return
+	}
+	if !ok {
+		_ = orihttp.RespondSuccess(w, projectStaffingView{})
+		return
+	}
+	row, err := h.rowStaffing(r.Context(), target.scope, target.home, target.entryID)
+	if err != nil || !row.Connected || row.WorkspaceID != target.songID {
+		_ = orihttp.RespondSuccess(w, projectStaffingView{})
+		return
+	}
+	_ = orihttp.RespondSuccess(w, projectStaffingView{
+		Eligible: true, HomeID: target.home.ID, HomeName: target.home.Name,
+		TeamDigest: h.librarySharing(target.scope, target.home).TeamDigest, libraryRowStaffing: row,
+	})
+}
+
+// FinishProjectLibraryStaffing handles POST /api/workspaces/{workspaceID}/library-staffing
+// {request_id, team_digest}: the same finish as the Home's, for this project.
+func (h *Handler) FinishProjectLibraryStaffing(w http.ResponseWriter, r *http.Request) {
+	target, ok, answered := h.resolveProjectStaffing(w, r)
+	if answered {
+		return
+	}
+	request, decoded := decodeStaffingRequest(w, r)
+	if !decoded {
+		return
+	}
+	if !ok {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "This workspace has no Home assistant to add.", "reason": "not_eligible",
+		})
+		return
+	}
+	h.finishLibraryRow(w, r, target.scope, target.home, target.entryID, request, target.songID)
+}
+
 // libraryRowExists answers 404 for a row the Home's catalog does not have,
 // through the same reviewed opener library Open reads.
 func (h *Handler) libraryRowExists(w http.ResponseWriter, scope projectlibrary.Scope, entryID string) bool {
@@ -622,16 +726,33 @@ func (h *Handler) FinishAssistantLibraryProjectStaffing(w http.ResponseWriter, r
 	if !ok || !h.libraryRowExists(w, scope, entryID) {
 		return
 	}
+	request, ok := decodeStaffingRequest(w, r)
+	if !ok {
+		return
+	}
+	h.finishLibraryRow(w, r, scope, home, entryID, request, "")
+}
+
+// decodeStaffingRequest is the finish's strict body: request_id and the exact
+// team digest the person confirmed, nothing else.
+func decodeStaffingRequest(w http.ResponseWriter, r *http.Request) (libraryStaffingRequest, bool) {
 	var request libraryStaffingRequest
 	if !decodeLibraryAction(w, r, &request) {
-		return
+		return request, false
 	}
 	request.RequestID = strings.TrimSpace(request.RequestID)
 	if request.RequestID == "" || len(request.RequestID) > 120 || strings.ContainsAny(request.RequestID, "\x00\r\n") ||
 		len(request.TeamDigest) != 64 {
 		_ = orihttp.RespondBadRequest(w, "Invalid library request")
-		return
+		return request, false
 	}
+	return request, true
+}
+
+// finishLibraryRow runs the finish for one catalog row of the Home. expectSong,
+// when set, is the workspace the caller resolved the row from: the row must
+// still be linked to exactly that workspace.
+func (h *Handler) finishLibraryRow(w http.ResponseWriter, r *http.Request, scope projectlibrary.Scope, home *workspace.Workspace, entryID string, request libraryStaffingRequest, expectSong string) {
 	if !h.staffingReceipts.admit(scope.HomeID+"\x00"+request.RequestID, entryID+"\x00"+request.TeamDigest) {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 			"error": "This request was already used for something else.", "reason": "request_reused",
@@ -642,6 +763,9 @@ func (h *Handler) FinishAssistantLibraryProjectStaffing(w http.ResponseWriter, r
 	if err != nil {
 		respondLibraryActionError(w, err)
 		return
+	}
+	if expectSong != "" && songID != expectSong {
+		songID = ""
 	}
 	if songID == "" {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{

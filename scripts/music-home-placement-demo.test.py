@@ -89,6 +89,28 @@ while true; do sleep 1; done
         self.assertNotIn("MUSIC_HOME_PLACEMENT_FAULT", calls)
         self.assertIn("URL=http://127.0.0.1:1/v1 KEY=disposable-no-inference", calls)
 
+    def test_staffing_repair_runs_only_the_repair_journey(self):
+        result = self.run_case("staffing-repair")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertEqual(calls.count("seed-song\n"), 5)
+        setup, repair = calls.split("e2e.sh\n")[1:3]
+        self.assertIn("collection automatic setup", setup)
+        self.assertIn("LIBRARY_SETUP_STAFFING=repair", repair)
+        self.assertNotIn("LIBRARY_SETUP_STAFFING=1", repair)
+        self.assertIn("-g\nrepair existing\n", repair)
+
+    def test_staffing_recovery_runs_only_the_recovery_journeys(self):
+        result = self.run_case("staffing-recovery")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertEqual(calls.count("seed-song\n"), 5)
+        setup, recovery = calls.split("e2e.sh\n")[1:3]
+        self.assertNotIn("LIBRARY_SETUP_STAFFING", setup)
+        self.assertIn("LIBRARY_SETUP_STAFFING=recovery", recovery)
+        self.assertIn("-g\nrecovery:\n", recovery)
+        self.assertNotIn("MUSIC_HOME_PLACEMENT_FAULT", calls)
+
     def test_a11y_case_is_explicit_and_discards_ambient_fault(self):
         self.env["MUSIC_HOME_PLACEMENT_FAULT"] = "occupied"
         self.env["MUSIC_HOME_PLACEMENT_COLLECTION_MAP"] = "1"

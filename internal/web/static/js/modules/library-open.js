@@ -62,12 +62,24 @@ export function libraryOpenedMessage(name, result) {
       return `${song} is ready. ${agent || 'Your assistant'} was added and joins each song you open.`;
     case 'joined':
       return `${song} is ready. ${agent || 'Your assistant'} joined it.`;
+    // The song is open but has no assistant: never called ready
+    // (library-setup-staffing).
     case 'off':
-      return `${song} is ready. Adding your assistant is switched off, so no agent was added.`;
+      return `${song} is open. Adding your assistant is switched off, so no agent was added.`;
     case 'consent_stale':
-      return `${song} is ready. Your assistant changed in a plugin update; review it on this Home to add it.`;
+      return `${song} is open. Your assistant changed in a plugin update; review it on this Home to add it.`;
     case 'assistant_missing':
-      return `${song} is ready. Your shared assistant is gone, so no agent was added.`;
+      return `${song} is open. Your shared assistant is gone, so no agent was added.`;
+    case 'needs_model':
+      return `${song} is open, but no assistant was added: set up a model first.`;
+    case 'reconcile':
+      return `${song} is open, but no assistant was added: an agent already uses the shared assistant's name.`;
+    case 'unsettled':
+      return `${song} is open. Its assistant was added but not yet recorded as the shared one; open it again to finish.`;
+    case 'failed':
+    case 'unavailable':
+    case 'invalid':
+      return `${song} is open, but its assistant could not be added. Open it again to retry.`;
     default:
       return result?.created ? `${song} is ready.` : `Opening ${song}.`;
   }

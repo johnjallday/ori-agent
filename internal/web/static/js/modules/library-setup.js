@@ -295,6 +295,7 @@ export async function runSetup({
   client,
   items,
   staffing = null,
+  shouldContinue = () => true,
   onProgress = () => {},
   operationKey = defaultOperationKey
 }) {
@@ -303,12 +304,20 @@ export async function runSetup({
   const queue = Array.isArray(items) ? items.filter(Boolean) : [];
   const digest = staffing && typeof staffing.teamDigest === 'string' ? staffing.teamDigest : '';
   let index = 0;
+  let stopped = false;
   for (; index < queue.length; index++) {
+    // Closing the sheet stops what is not started yet; an item already sent is
+    // never rolled back.
+    if (index > 0 && !shouldContinue()) {
+      stopped = true;
+      break;
+    }
     const item = queue[index];
     const path = entryPath(item.id);
     onProgress(item, 'working');
     let workspaceId = '';
     let stage = 'connection';
+    let created = false;
     try {
       const detail = await client.request(path);
       workspaceId = String(detail?.row?.workspace_id || '');
@@ -333,6 +342,7 @@ export async function runSetup({
           confirm: true
         });
         workspaceId = String(committed?.workspace_id || '');
+        created = true;
       }
       let staffed = { state: 'not_requested' };
       if (digest) {
@@ -351,7 +361,7 @@ export async function runSetup({
           throw error;
         }
       }
-      const result = { ...item, workspaceId, staffing: staffed };
+      const result = { ...item, workspaceId, created, staffing: staffed };
       done.push(result);
       onProgress(item, 'done', result);
     } catch (error) {
@@ -360,6 +370,7 @@ export async function runSetup({
         stage,
         reason: String(error?.reason || ''),
         workspaceId: stage === 'staffing' ? workspaceId : '',
+        created,
         staffing:
           stage === 'staffing'
             ? error?.payload?.staffing || { state: String(error?.reason || 'failed') }
@@ -370,6 +381,6 @@ export async function runSetup({
       break;
     }
   }
-  const remaining = failed ? queue.slice(index + 1) : [];
-  return { done, failed, remaining };
+  const remaining = failed ? queue.slice(index + 1) : stopped ? queue.slice(index) : [];
+  return { done, failed, remaining, stopped };
 }

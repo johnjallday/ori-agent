@@ -4105,6 +4105,39 @@
   font-size: 11px;
   cursor: pointer;
 }
+/* The retained results: one card per confirmed project. */
+.ws-map-library-sheet-results {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-map-library-sheet-result {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  border-left-width: 3px;
+  border-radius: 4px;
+}
+.ws-map-library-sheet-result.is-complete {
+  border-left-color: rgb(var(--ws-sheet-accent));
+}
+.ws-map-library-sheet-result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-map-library-sheet-result button.ws-map-library-sheet-link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
 /* The assistant choice on the confirmation: label on top, what it does below. */
 .ws-map-library-sheet-staffing {
   display: grid;
