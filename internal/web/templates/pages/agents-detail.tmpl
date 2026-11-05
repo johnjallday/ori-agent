@@ -43,6 +43,30 @@
     .agent-workspaces li a { display: inline-block; margin-top: 6px; text-decoration: underline; }
     .agent-workspaces :is(a, button, input, h2, [data-workspace-status]):focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
     .agent-workspaces-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    /* Where settings come from: read-only inspection of one chosen context. */
+    .settings-ownership { scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px); background: var(--bg-secondary); color: var(--text-primary); }
+    .settings-ownership[hidden] { display: none !important; }
+    .settings-ownership h2 { font-size: 20px; margin: 0; color: var(--text-primary); }
+    .settings-ownership p { color: var(--text-secondary); overflow-wrap: anywhere; }
+    .settings-ownership .settings-ownership-picker { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 12px 0; }
+    .settings-ownership label { font-weight: 600; color: var(--text-primary); }
+    .settings-ownership select { min-width: min(100%, 18rem); max-width: 100%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); }
+    .settings-ownership :is(select, button, h2):focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+    .settings-ownership .settings-ownership-heading { font-size: 16px; font-weight: 600; margin: 8px 0; color: var(--text-primary); overflow-wrap: anywhere; }
+    .settings-ownership .settings-ownership-source { color: var(--text-primary); margin: 4px 0; }
+    .settings-ownership-fields { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr) max-content; gap: 0 16px; margin: 12px 0; }
+    .settings-ownership-row { display: contents; }
+    .settings-ownership-row > * { padding: 8px 0; border-top: 1px solid var(--border-color); margin: 0; }
+    .settings-ownership-row dt { font-weight: 600; color: var(--text-secondary); font-size: 13px; }
+    .settings-ownership-row dd { color: var(--text-primary); overflow-wrap: anywhere; white-space: pre-wrap; }
+    .settings-ownership-row dd.is-empty { color: var(--text-secondary); font-style: italic; }
+    .settings-ownership-comparison { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+    .settings-ownership-comparison[data-comparison="different"] { color: var(--agent-edit-danger); }
+    .settings-ownership-excluded { font-size: 12px; }
+    @media (max-width: 575px) {
+      .settings-ownership-fields { grid-template-columns: minmax(0, 1fr); }
+      .settings-ownership-row dd { border-top: 0; padding-top: 0; }
+    }
 
     /* Toggle Switch Styles */
     .toggle-switch {
@@ -608,6 +632,23 @@
             </div>
           </section>
 
+          <!-- Read-only: which saved settings apply in one chosen context and
+               where they live. It never changes which record the editors on
+               this page save to. -->
+          <section id="settingsOwnershipSection" class="settings-ownership section-card modern-card p-4 mb-4" aria-labelledby="settingsOwnershipTitle" hidden>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <h2 id="settingsOwnershipTitle" tabindex="-1">Where settings come from</h2>
+              <span class="agent-edit-badge">Read only</span>
+            </div>
+            <p class="small mt-2 mb-0">See which saved settings apply in one place and where they are stored. Nothing here changes the agent.</p>
+            <div class="settings-ownership-picker">
+              <label for="settingsOwnershipContext">Viewing</label>
+              <select id="settingsOwnershipContext" data-ownership-context disabled></select>
+            </div>
+            <p data-ownership-status role="status" aria-live="polite" class="small mb-0"></p>
+            <div data-ownership-body></div>
+          </section>
+
           <!-- Quick Stats -->
           <div class="row g-3 mb-4">
             <div class="col-md-3">
@@ -1034,6 +1075,7 @@
   <script defer src="/js/modules/agent-origin.js"></script>
   <script defer src="/js/modules/agent-workspace-editor.js"></script>
   <script defer src="/js/modules/agent-edit-session.js"></script>
+  <script defer src="/js/modules/agent-settings-ownership.js"></script>
   <script defer src="/js/agents-detail.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>

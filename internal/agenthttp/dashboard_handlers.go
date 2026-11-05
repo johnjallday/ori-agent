@@ -41,6 +41,9 @@ type DashboardHandler struct {
 	// copySteps names the workspace copies kept in step with an agent, which
 	// are not customisations of it (see carried_edits.go).
 	copySteps CopyStepReader
+	// copyTracking reports a workspace copy's tracking state for the
+	// read-only settings-ownership inspection (settings_ownership.go).
+	copyTracking CopyTrackingReader
 }
 
 // XPPerLevelReporter is the one thing the dashboard needs from the evolution

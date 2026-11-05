@@ -245,6 +245,9 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if steps, ok := s.Storage.AgentEditCarrier.(agenthttp.CopyStepReader); ok {
 		dashboardHandler.SetCopyStepReader(steps)
 	}
+	if tracking, ok := s.Storage.AgentEditCarrier.(agenthttp.CopyTrackingReader); ok {
+		dashboardHandler.SetCopyTrackingReader(tracking)
+	}
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
@@ -271,6 +274,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		}
 		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/feed") && r.Method == http.MethodPost {
 			s.Handlers.Evolution.FeedAgent(w, r)
+			return
+		}
+		// Read-only settings ownership inspection. Exact suffix, before the
+		// substring /detail match below.
+		if agenthttp.IsSettingsOwnershipPath(r.URL.Path) {
+			dashboardHandler.GetSettingsOwnership(w, r)
 			return
 		}
 		// Route dashboard detail requests first
