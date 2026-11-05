@@ -36,11 +36,70 @@ export function secondBrainAvailable(personalAssistant) {
 // The one label for setting up a folder Ori writes, wherever it is offered.
 export const SET_UP_NOTES_LABEL = 'Set up my notes';
 
+// Whose notes these are, said above the choice so a card in a workspace's
+// drawer can never read as that workspace's own.
+export const NOTES_SCOPE_LABEL = 'Personal notes · Personal HQ';
+export const NOTES_CHOICE_TITLE = 'Set up your notes';
+export const NOTES_CHOICE_BENEFIT =
+  'A notes folder you own for your projects, people, ideas and journal. Plain Markdown that works without Obsidian.';
+export const EXISTING_NOTES_HEADING = 'Already have notes?';
+export const EXISTING_NOTES_LINE =
+  "Ori can read an existing notes folder instead. It won't write to it.";
+
+// secondBrainChoiceView is the Notes-first choice: setting up a folder Ori keeps
+// is the one primary action, and reading a folder the user already has is a
+// quieter alternative that says it is read-only. A detected vault is supporting
+// detail inside that alternative, never the headline, and is never chosen by
+// itself. Every vault, the folder dialog and a typed path stay one step away in
+// the chooser. prompt adds Not now (and, on a re-offer, Don't ask again); an
+// explicit visit (the Notes station, the Profile) has neither, so opening it
+// never answers the ask.
+export function secondBrainChoiceView(secondBrain, { prompt = false, reoffer = false } = {}) {
+  const vaults = (Array.isArray(secondBrain?.detected) ? secondBrain.detected : []).filter(
+    vault => vault?.id && vault?.name
+  );
+  const actions = [{ id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' }];
+  if (prompt) actions.push({ id: 'later', label: 'Not now', style: 'link' });
+  if (prompt && reoffer) actions.push({ id: 'none', label: "Don't ask again", style: 'link' });
+  const existing = [];
+  let detectedLine = '';
+  if (vaults.length === 1) {
+    detectedLine = `Obsidian vault detected: “${vaults[0].name}”`;
+    existing.push({
+      id: 'read',
+      label: `Read “${vaults[0].name}”`,
+      style: 'outline',
+      vaultId: vaults[0].id
+    });
+    existing.push({ id: 'choose', label: 'Another folder…', style: 'outline' });
+  } else {
+    if (vaults.length > 1) detectedLine = `${vaults.length} Obsidian vaults detected`;
+    existing.push({
+      id: 'choose',
+      label: vaults.length > 1 ? 'Choose a folder to read…' : 'Read a folder I have…',
+      style: 'outline'
+    });
+  }
+  return {
+    scope: NOTES_SCOPE_LABEL,
+    title: reoffer ? 'Still want to set up your notes?' : NOTES_CHOICE_TITLE,
+    benefit: NOTES_CHOICE_BENEFIT,
+    actions,
+    existing: {
+      heading: EXISTING_NOTES_HEADING,
+      line: EXISTING_NOTES_LINE,
+      detected: detectedLine,
+      actions: existing
+    }
+  };
+}
+
 // secondBrainAskView decides whether the assistant shows the ask and what it
 // says. Shown is not answered (Issue 776 FR11): it stays while nothing is
 // connected and the ask is pending or shown. Seven days after Not now the server
-// sets offer_again and it comes back as "Still want me…", with Don't ask again
-// as the way out (FR13). A decline on record (decision "none") ends it.
+// sets offer_again and it comes back as "Still want…", with Don't ask again as
+// the way out (FR13). A decline on record (decision "none") ends it. Whether a
+// vault was detected changes only the quieter alternative, never the primary.
 export function secondBrainAskView(secondBrain, available) {
   const askState = secondBrain?.ask?.state;
   const reoffer = askState === 'deferred' && secondBrain?.ask?.offer_again === true;
@@ -48,38 +107,7 @@ export function secondBrainAskView(secondBrain, available) {
     available === true &&
     secondBrain?.status === 'not_connected' &&
     (askState === 'pending' || askState === 'shown' || reoffer);
-  const opening = reoffer
-    ? 'Still want me to keep notes for you?'
-    : 'Want me to keep notes for you?';
-  const end = reoffer ? [{ id: 'none', label: "Don't ask again", style: 'link' }] : [];
-  const vault = Array.isArray(secondBrain?.detected) ? secondBrain.detected[0] : null;
-  // The ask leads with the job (FR2): what Ori will write, and that the folder
-  // is the user's.
-  if (vault?.id && vault?.name) {
-    return {
-      show,
-      reoffer,
-      line: `${opening} I found your Obsidian vault "${vault.name}". I can read it, or set up a folder of my own.`,
-      actions: [
-        { id: 'read', label: `Read ${vault.name}`, style: 'primary', vaultId: vault.id },
-        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'outline' },
-        { id: 'choose', label: 'Another folder…', style: 'outline' },
-        { id: 'later', label: 'Not now', style: 'link' },
-        ...end
-      ]
-    };
-  }
-  return {
-    show,
-    reoffer,
-    line: `${opening} I'll write what I learn, people, projects and your journal, into plain Markdown you own.`,
-    actions: [
-      { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
-      { id: 'choose', label: 'I have a notes folder…', style: 'outline' },
-      { id: 'later', label: 'Not now', style: 'link' },
-      ...end
-    ]
-  };
+  return { show, reoffer, ...secondBrainChoiceView(secondBrain, { prompt: true, reoffer }) };
 }
 
 // secondBrainAskPinned: the ask is the conversation's first message the first
@@ -626,16 +654,10 @@ export function sinceLabel(at, now = Date.now()) {
 export function secondBrainManageView(secondBrain, now = Date.now()) {
   const source = secondBrain?.source;
   if (!source?.name || secondBrain?.status === 'not_connected') {
-    return {
-      state: 'not_connected',
-      title: 'Your notes are not set up.',
-      detail:
-        'Ori can keep notes for you in plain Markdown you own, or read an Obsidian vault or Markdown folder you already have.',
-      actions: [
-        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
-        { id: 'choose', label: 'I have a notes folder…', style: 'outline' }
-      ]
-    };
+    // The same Notes-first choice as the ask, without Not now: visiting it
+    // answers nothing.
+    const choice = secondBrainChoiceView(secondBrain);
+    return { state: 'not_connected', ...choice, detail: choice.benefit };
   }
   const kind =
     source.origin === 'created_by_ori'
@@ -901,7 +923,9 @@ const state = {
   // The missions behind the checklist, null until read; the folder a chip put
   // in the composer (FR9, FR19).
   missions: null,
-  offerPrefilled: ''
+  offerPrefilled: '',
+  // Whether "Already have notes?" is open on the Notes-first choice.
+  existingOpen: false
 };
 
 let pathEntry = null;
@@ -990,9 +1014,36 @@ function setPhase(phase, { focus = true } = {}) {
 }
 
 function renderAsk(body) {
-  const view = secondBrainAskView(state.secondBrain, true);
-  body.append(node('p', 'pa-specialist-offer__headline', view.line));
-  body.append(actionRow(view.actions, onAskAction));
+  renderChoice(body, secondBrainAskView(state.secondBrain, true), onAskAction);
+}
+
+// renderChoice draws the Notes-first choice: whose notes, the title, what a
+// notes folder is for, the one primary action, then "Already have notes?" as a
+// quieter disclosure. Opening the disclosure reads, connects and creates nothing.
+function renderChoice(body, view, onAction) {
+  const choice = node('div', 'pa-second-brain__choice');
+  choice.append(node('p', 'pa-second-brain__scope', view.scope));
+  choice.append(node('h3', 'pa-specialist-offer__headline pa-second-brain__title', view.title));
+  choice.append(node('p', 'pa-second-brain__benefit', view.benefit));
+  const primary = actionRow(view.actions, onAction);
+  primary.classList.add('pa-second-brain__primary');
+  choice.append(primary);
+  const existing = node('details', 'pa-second-brain__existing');
+  existing.dataset.secondBrainExisting = '';
+  existing.open = state.existingOpen;
+  existing.addEventListener('toggle', () => {
+    state.existingOpen = existing.open;
+  });
+  const summary = node('summary', '', view.existing.heading);
+  if (view.existing.detected) {
+    summary.append(' ');
+    summary.append(node('span', 'pa-second-brain__detected', view.existing.detected));
+  }
+  existing.append(summary);
+  existing.append(node('p', 'pa-second-brain__existing-line', view.existing.line));
+  existing.append(actionRow(view.existing.actions, onAction));
+  choice.append(existing);
+  body.append(choice);
 }
 
 function renderFillIn(body) {
@@ -1829,6 +1880,10 @@ async function openFolder() {
 
 function renderManage(body) {
   const view = secondBrainManageView(state.secondBrain);
+  if (view.state === 'not_connected') {
+    renderChoice(body, view, onChoiceAction);
+    return;
+  }
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
   if (view.detail) body.append(node('p', 'pa-folder__note', view.detail));
   if (state.secondBrain?.source?.path) {
@@ -2637,6 +2692,14 @@ async function decide(decision) {
   announce();
 }
 
+// onChoiceAction answers the Notes-first choice opened on purpose (the Notes
+// station, the Profile, a link after a decline). It has no Not now, so nothing
+// here posts to the ask: the decision on record stands.
+function onChoiceAction(action) {
+  if (action.id === 'later' || action.id === 'none') return;
+  onAskAction(action);
+}
+
 function onAskAction(action) {
   if (action.id === 'read') {
     const vault = (state.secondBrain?.detected || []).find(item => item.id === action.vaultId);
@@ -2999,11 +3062,12 @@ function init() {
       state.history = [];
       showError('');
       state.askShownHere = true;
+      state.existingOpen = false;
       setPhase('ask');
       markPromptedWhenSeen();
     },
     // The Notes station and the Profile open the connection's own card:
-    // connected, missing, or not set up (which is the chooser).
+    // connected, missing, or not set up (the Notes-first choice).
     openManage: async () => {
       await refresh();
       state.pinned = false;
@@ -3012,8 +3076,9 @@ function init() {
       state.answer = '';
       state.history = [];
       showError('');
-      if (state.secondBrain?.status === 'not_connected') setPhase('chooser');
-      else setPhase('manage');
+      // Not connected is the Notes-first choice, never straight to the reader.
+      state.existingOpen = false;
+      setPhase('manage');
     },
     // Read the connection without changing what the drawer shows.
     status: refresh,

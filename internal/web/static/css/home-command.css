@@ -552,6 +552,79 @@ body.home-command-page .home-command-bridge * {
   overflow-wrap: anywhere;
 }
 
+/* The Notes-first choice: whose notes, what they are for, one primary action,
+   and "Already have notes?" as a quieter disclosure under a hairline. Scoped
+   to the Notes card so other offers keep their own look. */
+.pa-second-brain__choice {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pa-second-brain__scope {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.pa-second-brain__title {
+  font-size: 1rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.pa-second-brain__benefit {
+  margin: 0;
+  color: var(--hc-ink);
+  overflow-wrap: anywhere;
+}
+
+.pa-second-brain__primary {
+  margin-top: 2px;
+}
+
+.pa-second-brain__existing {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--hc-ink) 16%, transparent);
+  min-width: 0;
+}
+
+.pa-second-brain__existing > summary {
+  cursor: pointer;
+  color: var(--hc-ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pa-second-brain__existing > summary:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.pa-second-brain__detected {
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.pa-second-brain__existing-line {
+  margin: 6px 0;
+  color: var(--hc-ink-dim);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.pa-second-brain__existing .btn {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 /* The first week's three rows under the first headline (Issue 776 FR19). */
 .pa-second-brain__checklist {
   list-style: none;

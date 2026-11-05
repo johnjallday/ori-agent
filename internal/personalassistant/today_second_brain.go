@@ -88,10 +88,10 @@ func secondBrainAskItem(view SecondBrainView, askable bool) (TodayItem, bool) {
 	switch {
 	case view.Ask.State == secondbrain.AskPending || view.Ask.State == secondbrain.AskShown:
 		return TodayItem{ID: "second-brain-ask", Kind: "second_brain_ask",
-			Title: "Want Ori to keep notes for you?", Route: SecondBrainAskRoute}, true
+			Title: "Set up your notes", Route: SecondBrainAskRoute}, true
 	case view.Ask.OfferAgain:
 		return TodayItem{ID: "second-brain-ask", Kind: "second_brain_ask",
-			Title: "Still want Ori to keep notes for you?", Route: SecondBrainAskRoute}, true
+			Title: "Still want to set up your notes?", Route: SecondBrainAskRoute}, true
 	}
 	return TodayItem{}, false
 }

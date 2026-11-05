@@ -34,9 +34,9 @@ func TestTodaySecondBrain_AskRowUntilAnswered(t *testing.T) {
 		askable bool
 		title   string
 	}{
-		"never shown":          {notConnected(SecondBrainAskView{State: secondbrain.AskPending}), true, "Want Ori to keep notes for you?"},
-		"shown, unanswered":    {notConnected(SecondBrainAskView{State: secondbrain.AskShown}), true, "Want Ori to keep notes for you?"},
-		"a week after Not now": {notConnected(SecondBrainAskView{State: secondbrain.AskDeferred, OfferAgain: true}), true, "Still want Ori to keep notes for you?"},
+		"never shown":          {notConnected(SecondBrainAskView{State: secondbrain.AskPending}), true, "Set up your notes"},
+		"shown, unanswered":    {notConnected(SecondBrainAskView{State: secondbrain.AskShown}), true, "Set up your notes"},
+		"a week after Not now": {notConnected(SecondBrainAskView{State: secondbrain.AskDeferred, OfferAgain: true}), true, "Still want to set up your notes?"},
 		"inside the week":      {notConnected(SecondBrainAskView{State: secondbrain.AskDeferred}), true, ""},
 		"don't ask again":      {notConnected(SecondBrainAskView{State: secondbrain.AskDeclined}), true, ""},
 		"a paused assistant":   {notConnected(SecondBrainAskView{State: secondbrain.AskPending}), false, ""},

@@ -79,8 +79,8 @@ export function notesSourceView(secondBrain) {
   const source = secondBrain?.source;
   if (!source?.name || secondBrain?.status === 'not_connected') {
     return {
-      summary: 'Your notes are not connected.',
-      action: { label: 'Connect your notes', route: '/?quest=second-brain' },
+      summary: 'Your notes are not set up.',
+      action: { label: 'Set up your notes', route: '/?quest=second-brain' },
       disconnect: false
     };
   }

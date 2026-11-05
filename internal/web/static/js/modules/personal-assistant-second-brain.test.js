@@ -95,13 +95,36 @@ test('the connection card says connected, missing, or not set up', () => {
   );
   assert.match(setUp.detail, /^Set up by Ori · /);
 
+  // Not set up is the same Notes-first choice as the ask, with no Not now or
+  // Don't ask again: opening it on purpose answers nothing.
   const none = secondBrainManageView({ status: 'not_connected' }, now);
   assert.equal(none.state, 'not_connected');
+  assert.equal(none.title, 'Set up your notes');
+  assert.equal(none.scope, 'Personal notes · Personal HQ');
   assert.deepEqual(
-    none.actions.map(action => action.label),
-    ['Set up my notes', 'I have a notes folder…']
+    none.actions.map(action => [action.id, action.style]),
+    [['setup', 'primary']]
   );
-  assert.equal(none.title, 'Your notes are not set up.');
+  assert.deepEqual(
+    none.existing.actions.map(action => action.id),
+    ['choose']
+  );
+  const declined = secondBrainManageView(
+    {
+      status: 'not_connected',
+      ask: { state: 'declined' },
+      detected: [{ id: 'v_1', name: 'Second Brain' }]
+    },
+    now
+  );
+  assert.deepEqual(
+    declined.actions.map(action => action.id),
+    ['setup']
+  );
+  assert.deepEqual(
+    declined.existing.actions.map(action => action.id),
+    ['read', 'choose']
+  );
 });
 
 test('since labels read like a person says them', () => {
@@ -141,40 +164,133 @@ test('the ask belongs to an active relationship only', () => {
   assert.equal(secondBrainAvailable(null), false);
 });
 
-test('with a detected vault the ask names it and offers read, set up, or not now', () => {
-  const view = secondBrainAskView(detected, true);
-  assert.equal(view.show, true);
-  assert.equal(
-    view.line,
-    'Want me to keep notes for you? I found your Obsidian vault "Second Brain". I can read it, or set up a folder of my own.'
-  );
-  assert.deepEqual(
-    view.actions.map(action => action.label),
-    ['Read Second Brain', 'Set up my notes', 'Another folder…', 'Not now']
-  );
-  assert.equal(view.actions[0].vaultId, 'v_1');
+// Every action the choice offers, the primary row and the quieter alternative.
+const allActions = view => [...view.actions, ...view.existing.actions];
+
+test('setup is the one primary action whether zero, one or several vaults were detected', () => {
+  const two = {
+    ...detected,
+    detected: [...detected.detected, { id: 'v_2', name: 'Work', parent: 'Documents' }]
+  };
+  for (const secondBrain of [{ ...detected, detected: [] }, detected, two]) {
+    for (const ask of [
+      { state: 'pending' },
+      { state: 'shown' },
+      { state: 'deferred', offer_again: true }
+    ]) {
+      const view = secondBrainAskView({ ...secondBrain, ask }, true);
+      assert.equal(view.show, true);
+      const primaries = allActions(view).filter(action => action.style === 'primary');
+      assert.deepEqual(
+        primaries.map(action => action.id),
+        ['setup'],
+        `${secondBrain.detected.length} vaults, ${ask.state}`
+      );
+      assert.equal(view.actions[0].label, 'Set up my notes');
+      // Not now sits right beside it; nothing in the alternative is primary.
+      assert.equal(view.actions[1].id, 'later');
+      assert.ok(view.existing.actions.every(action => action.style === 'outline'));
+    }
+  }
 });
 
-test('with nothing detected the ask points at a folder or offers to set one up', () => {
+test('the choice separates scope, title, benefit, and a read-only alternative', () => {
   const view = secondBrainAskView({ ...detected, detected: [] }, true);
-  assert.equal(
-    view.line,
-    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
-  );
+  assert.equal(view.scope, 'Personal notes · Personal HQ');
+  assert.equal(view.title, 'Set up your notes');
+  assert.match(view.benefit, /folder you own/);
+  assert.match(view.benefit, /works without Obsidian/);
+  assert.equal(view.existing.heading, 'Already have notes?');
+  assert.match(view.existing.line, /won't write to it/);
+  assert.equal(view.existing.detected, '');
   assert.deepEqual(
-    view.actions.map(action => action.label),
-    ['Set up my notes', 'I have a notes folder…', 'Not now']
+    view.existing.actions.map(action => [action.id, action.label]),
+    [['choose', 'Read a folder I have…']]
   );
-  assert.equal(view.actions[0].style, 'primary');
+  // The first ask says nothing of the old ambiguity.
+  for (const text of [view.title, view.benefit, view.existing.line]) {
+    assert.doesNotMatch(text, /of my own|second brain/i, text);
+  }
+});
+
+test('a detected vault is supporting detail in the alternative, never the headline', () => {
+  const view = secondBrainAskView(detected, true);
+  assert.equal(view.title, 'Set up your notes');
+  assert.doesNotMatch(view.title + view.benefit, /Second Brain/);
+  assert.equal(view.existing.detected, 'Obsidian vault detected: “Second Brain”');
   assert.deepEqual(
-    view.actions.map(action => action.id),
-    ['setup', 'choose', 'later']
+    view.existing.actions.map(action => [action.id, action.label]),
+    [
+      ['read', 'Read “Second Brain”'],
+      ['choose', 'Another folder…']
+    ]
   );
+  assert.equal(view.existing.actions[0].vaultId, 'v_1');
+
+  // Several vaults: none is singled out; the chooser lists them all.
+  const two = secondBrainAskView(
+    { ...detected, detected: [...detected.detected, { id: 'v_2', name: 'Work' }] },
+    true
+  );
+  assert.equal(two.existing.detected, '2 Obsidian vaults detected');
+  assert.deepEqual(
+    two.existing.actions.map(action => action.id),
+    ['choose']
+  );
+});
+
+test('a long or hostile vault name stays text in the alternative', () => {
+  const hostile = '<img src=x onerror=alert(1)> ' + 'Very long vault name '.repeat(12);
+  const view = secondBrainAskView({ ...detected, detected: [{ id: 'v_x', name: hostile }] }, true);
+  assert.equal(view.existing.detected, `Obsidian vault detected: “${hostile}”`);
+  assert.equal(view.existing.actions[0].vaultId, 'v_x');
+  // The choice is drawn with textContent only.
+  const source = readFileSync(
+    new URL('./personal-assistant-second-brain.js', import.meta.url),
+    'utf8'
+  );
+  const render = source.slice(
+    source.indexOf('function renderChoice('),
+    source.indexOf('function renderFillIn(')
+  );
+  assert.ok(render.length > 0);
+  assert.doesNotMatch(render, /innerHTML|insertAdjacentHTML/);
+});
+
+test('explicit Notes entries land on the Notes-first choice and never answer the ask', () => {
+  const source = readFileSync(
+    new URL('./personal-assistant-second-brain.js', import.meta.url),
+    'utf8'
+  );
+  const between = (from, to) => {
+    const start = source.indexOf(from);
+    const end = source.indexOf(to, start + from.length);
+    assert.ok(start >= 0 && end > start, `${from} … ${to}`);
+    return source.slice(start, end);
+  };
+  // openManage on nothing connected draws the choice, never the reader chooser.
+  const manage = between('openManage: async', '// Read the connection without');
+  assert.doesNotMatch(manage, /setPhase\('chooser'\)/);
+  assert.match(manage, /setPhase\('manage'\)/);
+  // Opening the choice, setup or the chooser posts nothing to the ask, so a
+  // decline or deferral on record stands until the user answers a prompt.
+  for (const [from, to] of [
+    ['openManage: async', '// Read the connection without'],
+    ['openSetup: async', '// A folder card in the conversation'],
+    ['openChooser: async', '// Set one up for me, straight'],
+    ['function startSetup()', '// loadSetupPreview reads'],
+    ['function renderChoice(', 'function renderFillIn(']
+  ]) {
+    assert.doesNotMatch(between(from, to), /\/ask|decide\(/, from);
+  }
+  // On the choice opened on purpose, Not now and Don't ask again do nothing.
+  const onChoice = between('function onChoiceAction(', 'function onAskAction(');
+  assert.match(onChoice, /'later' \|\| action\.id === 'none'\) return/);
 });
 
 test('the ask no longer offers "I don\'t keep notes", but a decline on record still reads', () => {
   for (const secondBrain of [detected, { ...detected, detected: [] }]) {
-    const ids = secondBrainAskView(secondBrain, true).actions.map(action => action.id);
+    const ids = allActions(secondBrainAskView(secondBrain, true)).map(action => action.id);
     assert.ok(!ids.includes('none'), ids.join());
   }
   assert.equal(secondBrainAskView({ ...detected, ask: { state: 'declined' } }, true).show, false);
@@ -441,27 +557,21 @@ test("a week after Not now the ask comes back with Don't ask again", () => {
   const view = secondBrainAskView(due, true);
   assert.equal(view.show, true);
   assert.equal(view.reoffer, true);
-  assert.equal(
-    view.line,
-    "Still want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
-  );
+  assert.equal(view.title, 'Still want to set up your notes?');
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label]),
     [
       ['setup', 'Set up my notes'],
-      ['choose', 'I have a notes folder…'],
       ['later', 'Not now'],
       ['none', "Don't ask again"]
     ]
   );
   const withVault = secondBrainAskView({ ...detected, ask: due.ask }, true);
-  assert.match(
-    withVault.line,
-    /^Still want me to keep notes for you\? I found your Obsidian vault/
-  );
+  assert.equal(withVault.title, 'Still want to set up your notes?');
   assert.equal(withVault.actions.at(-1).id, 'none');
+  assert.equal(withVault.existing.actions[0].id, 'read');
   // The first ask never offers Don't ask again.
-  assert.ok(!secondBrainAskView(detected, true).actions.some(action => action.id === 'none'));
+  assert.ok(!allActions(secondBrainAskView(detected, true)).some(action => action.id === 'none'));
   assert.equal(secondBrainAskView({ ...due, ask: { state: 'declined' } }, true).show, false);
 });
 

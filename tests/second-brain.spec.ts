@@ -72,6 +72,16 @@ async function openDrawer(page: Page) {
 
 const card = (page: Page) => page.locator('#personalAssistantSecondBrain');
 const action = (page: Page, id: string) => card(page).locator(`[data-second-brain-action="${id}"]`);
+// The read-only alternative sits behind "Already have notes?"; opening it
+// reads and connects nothing.
+const existing = (page: Page) => card(page).locator('[data-second-brain-existing]');
+async function expandExisting(page: Page) {
+  if ((await existing(page).getAttribute('open')) === null)
+    await existing(page).locator('summary').click();
+  await expect(existing(page)).toHaveAttribute('open', '');
+}
+// The choice's primary row: Set up my notes, Not now (and Don't ask again).
+const primaryRow = (page: Page) => card(page).locator('.pa-second-brain__primary button');
 
 test.beforeAll(async ({ request }) => {
   const current = await secondBrain(request);
@@ -90,8 +100,14 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
   await resetGettingStarted(request);
   await openDrawer(page);
   await expect(card(page)).toBeVisible();
-  await expect(card(page)).toContainText(
-    'Want me to keep notes for you? I found your Obsidian vault "Second Brain".'
+  // Notes-first even with a vault detected: setup is the one primary action and
+  // the vault is supporting detail under "Already have notes?".
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+  await expect(card(page)).toContainText('Personal notes · Personal HQ');
+  await expect(primaryRow(page)).toHaveText(['Set up my notes', 'Not now']);
+  await expect(card(page).locator('.btn-primary')).toHaveText(['Set up my notes']);
+  await expect(existing(page).locator('summary')).toContainText(
+    'Obsidian vault detected: “Second Brain”'
   );
   // The ask is the conversation's first message, and the folder hand-over is
   // not shown beside it.
@@ -99,8 +115,12 @@ test('the ask opens the conversation, names the vault, and Not now ends the turn
     'personalAssistantSecondBrain'
   );
   await expect(page.getByText("Now let's explore a folder you're working in.")).toHaveCount(0);
-  await expect(action(page, 'read')).toHaveText('Read Second Brain');
+  await expandExisting(page);
+  await expect(action(page, 'read')).toHaveText('Read “Second Brain”');
+  await expect(existing(page)).toContainText("It won't write to it.");
   await expect.poll(async () => (await secondBrain(request)).ask.state).toBe('shown');
+  // Opening the alternative connected nothing.
+  expect((await secondBrain(request)).status).toBe('not_connected');
 
   await action(page, 'later').click();
   await expect(card(page)).toContainText(
@@ -143,12 +163,12 @@ test('shown is not answered: after a reload the ask waits under Needs you and on
   await expect(
     page.locator('#personalAssistantNeedsYouCards #personalAssistantSecondBrain')
   ).toHaveCount(1);
-  await expect(card(page)).toContainText('Want me to keep notes for you?');
+  await expect(card(page)).toContainText('Set up your notes');
   await expect(action(page, 'setup')).toHaveCount(1);
   await expect(action(page, 'later')).toHaveCount(1);
   await expect
     .poll(async () => (await todayNeeds(request)).find(row => row.kind === 'second_brain_ask'))
-    .toMatchObject({ title: 'Want Ori to keep notes for you?', route: '/?quest=second-brain' });
+    .toMatchObject({ title: 'Set up your notes', route: '/?quest=second-brain' });
 });
 
 test("Not now comes back on day 7 with Don't ask again, which ends it", async ({
@@ -169,13 +189,14 @@ test("Not now comes back on day 7 with Don't ask again, which ends it", async ({
   await page.reload();
   await openDrawer(page);
   await unfoldNeedsYou(page);
-  await expect(card(page)).toContainText('Still want me to keep notes for you?');
-  await expect(action(page, 'none')).toHaveText("Don't ask again");
+  await expect(card(page)).toContainText('Still want to set up your notes?');
+  await expect(primaryRow(page)).toHaveText(['Set up my notes', 'Not now', "Don't ask again"]);
+  await expect(card(page).locator('.btn-primary')).toHaveText(['Set up my notes']);
   await expect
     .poll(
       async () => (await todayNeeds(request)).find(row => row.kind === 'second_brain_ask')?.title
     )
-    .toBe('Still want Ori to keep notes for you?');
+    .toBe('Still want to set up your notes?');
 
   await action(page, 'none').click();
   await expect(card(page)).toContainText("Got it. I won't ask about notes again.");
@@ -191,14 +212,15 @@ test("Not now comes back on day 7 with Don't ask again, which ends it", async ({
 test("the ask offers Set up my notes instead of I don't keep notes", async ({ page, request }) => {
   await resetGettingStarted(request);
   await openDrawer(page);
+  await expandExisting(page);
   await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
-    'Read Second Brain',
     'Set up my notes',
-    'Another folder…',
-    'Not now'
+    'Not now',
+    'Read “Second Brain”',
+    'Another folder…'
   ]);
   await expect(action(page, 'none')).toHaveCount(0);
-  await expect(card(page)).toContainText('or set up a folder of my own.');
+  await expect(card(page)).not.toContainText('of my own');
   // A decline already on record still declines the ask and skips the mission.
   const response = await request.post(`${ENDPOINT}/ask`, {
     data: { decision: 'none', request_id: `spec-decline-${Date.now()}` }
@@ -227,13 +249,13 @@ test('with nothing detected the ask points at a folder, and the chooser takes a 
     await route.fulfill({ response, json: body });
   });
   await openDrawer(page);
-  await expect(card(page)).toContainText(
-    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
-  );
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+  await expect(existing(page).locator('.pa-second-brain__detected')).toHaveCount(0);
+  await expandExisting(page);
   await expect(card(page).locator('button')).toHaveText([
     'Set up my notes',
-    'I have a notes folder…',
-    'Not now'
+    'Not now',
+    'Read a folder I have…'
   ]);
 
   await action(page, 'choose').click();
@@ -245,7 +267,9 @@ test('with nothing detected the ask points at a folder, and the chooser takes a 
   await action(page, 'back').click();
   await expect(card(page)).toContainText('Where do you keep your notes?');
   await action(page, 'back').click();
-  await expect(card(page)).toContainText('Want me to keep notes for you?');
+  await expect(card(page)).toContainText('Set up your notes');
+  // Back returns to the choice with the alternative still open.
+  await expect(existing(page)).toHaveAttribute('open', '');
 });
 
 test('read the vault: consent, one headline, add the open items once, and Look again waits', async ({
@@ -254,6 +278,7 @@ test('read the vault: consent, one headline, add the open items once, and Look a
 }) => {
   await resetGettingStarted(request);
   await openDrawer(page);
+  await expandExisting(page);
   await action(page, 'read').click();
   await expect(card(page)).toContainText('Read Second Brain?');
   await expect(card(page)).toContainText(vault);

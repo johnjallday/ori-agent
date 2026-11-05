@@ -42,7 +42,7 @@ test('the Notes row names the connected folder, a missing one, or none', () => {
 
   const none = notesSourceView({ status: 'not_connected' });
   assert.equal(none.disconnect, false);
-  assert.equal(none.action.label, 'Connect your notes');
+  assert.equal(none.action.label, 'Set up your notes');
 });
 
 test('saved observation displays only its actual saved date and never claims a scan', () => {

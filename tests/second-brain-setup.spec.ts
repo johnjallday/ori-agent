@@ -122,13 +122,18 @@ test('the ask offers to set one up when no vault is found', async ({ page, reque
   await disconnect(request);
   await resetGettingStarted(request);
   await openDrawer(page);
-  await expect(card(page)).toContainText(
-    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
-  );
-  await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+  await expect(card(page)).toContainText('works without Obsidian');
+  // The existing-folder route is behind "Already have notes?", read-only.
+  await expect(card(page).locator('[data-second-brain-action]:visible')).toHaveText([
     'Set up my notes',
-    'I have a notes folder…',
     'Not now'
+  ]);
+  const existing = card(page).locator('[data-second-brain-existing]');
+  await existing.locator('summary').click();
+  await expect(existing).toContainText("It won't write to it.");
+  await expect(existing.locator('[data-second-brain-action]')).toHaveText([
+    'Read a folder I have…'
   ]);
 });
 
