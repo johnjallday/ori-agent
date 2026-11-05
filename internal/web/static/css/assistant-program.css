@@ -1184,6 +1184,39 @@
 .project-library-queue > span {
   flex: 1 1 16rem;
 }
+/* Set stage / status / priority for the selected songs: same bar, own row. */
+.project-library-bulk {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--assistant-line);
+}
+.project-library-bulk[hidden],
+.project-library-bulk-result[hidden] {
+  display: none;
+}
+.project-library-bulk-count {
+  font-weight: 600;
+}
+.project-library-bulk .form-select {
+  width: auto;
+  min-width: 9.5rem;
+  max-width: 100%;
+}
+.project-library-bulk-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 0.8rem;
+  padding: 0.5rem 0.85rem;
+  border-left: 3px solid var(--assistant-amber);
+  background: var(--assistant-panel);
+  overflow-wrap: anywhere;
+}
 .project-library-queue-history {
   padding: 0 0 0.8rem;
   color: var(--assistant-muted);

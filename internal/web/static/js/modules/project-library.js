@@ -299,6 +299,71 @@ export function libraryDigestText(digest, roots = []) {
   return text;
 }
 
+// Bulk field edits (library-upkeep FR16-FR19). "unknown" on the shelf is the
+// empty stored value; priority uses the detail form's 0-5 and Clear.
+export const BULK_UNDO_MS = 30_000;
+const bulkStored = choice => (choice === 'unknown' ? '' : String(choice || ''));
+export const BULK_FIELDS = {
+  stage: {
+    name: 'stage',
+    control: 'projectLibraryBulkStage',
+    patch: choice => ({ stage: bulkStored(choice) }),
+    read: row => bulkStored(row.stage || 'unknown'),
+    inverse: previous => ({ stage: previous || '' })
+  },
+  status: {
+    name: 'status',
+    control: 'projectLibraryBulkStatus',
+    patch: choice => ({ status: bulkStored(choice) }),
+    read: row => bulkStored(row.status || 'unknown'),
+    inverse: previous => ({ status: previous || '' })
+  },
+  priority: {
+    name: 'priority',
+    control: 'projectLibraryBulkPriority',
+    patch: choice => (choice === 'clear' ? { clear_priority: true } : { priority: Number(choice) }),
+    read: row => (Number.isInteger(row.priority) ? row.priority : null),
+    inverse: previous =>
+      Number.isInteger(previous) ? { priority: previous } : { clear_priority: true }
+  }
+};
+
+const BULK_SKIP_REASONS = {
+  revision_changed: 'changed elsewhere',
+  not_found: 'no longer in the library'
+};
+
+export function bulkCountText(count) {
+  const n = Number.isInteger(count) && count > 0 ? count : 0;
+  return `${n} ${n === 1 ? 'song' : 'songs'}`;
+}
+
+// " · 1 skipped (changed elsewhere)", or one part per reason when they differ.
+export function bulkSkippedText(skipped) {
+  const list = Array.isArray(skipped) ? skipped : [];
+  if (!list.length) return '';
+  const counts = new Map();
+  for (const item of list) {
+    const reason = BULK_SKIP_REASONS[item?.reason] || 'not changed';
+    counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  const reasons =
+    counts.size === 1
+      ? [...counts.keys()][0]
+      : [...counts.entries()].map(([reason, n]) => `${n} ${reason}`).join(', ');
+  return ` · ${list.length} skipped (${reasons})`;
+}
+
+// "Set stage to Mixing for 14 songs · 1 skipped (changed elsewhere)".
+export function bulkResultText(field, choice, updated, skipped) {
+  const songs = bulkCountText(updated);
+  if (field === 'priority' && choice === 'clear')
+    return `Cleared priority for ${songs}${bulkSkippedText(skipped)}`;
+  const value = field === 'priority' ? String(choice) : label(choice);
+  const shown = value.charAt(0).toUpperCase() + value.slice(1);
+  return `Set ${field} to ${shown} for ${songs}${bulkSkippedText(skipped)}`;
+}
+
 const MOVED_PATH_MAX = 40;
 
 // Long folders lose their start, never their end: the song's own folder name
@@ -635,6 +700,11 @@ export class ProjectLibraryPanel {
     this.searchInFlight = false;
     this.busy = false;
     this.selectedProjects = new Set();
+    // The shelf row each selected song had when it was picked: its connection
+    // (the setup queue takes catalog-only songs) and the fields revision and
+    // values a bulk edit and its Undo send.
+    this.selectedRows = new Map();
+    this.bulkUndo = null;
     // The last library summary read, and Rescan's progress while it runs.
     this.summary = null;
     this.rescanProgress = null;
@@ -827,6 +897,18 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryRescan')
       ?.addEventListener('click', event => void this.rescanAll(event.currentTarget));
+    // Choosing a value applies it to every selected song; no second step.
+    for (const [field, spec] of Object.entries(BULK_FIELDS)) {
+      document.getElementById(spec.control)?.addEventListener('change', event => {
+        const select = event.currentTarget;
+        const choice = select.value;
+        select.value = '';
+        void this.applyBulk(field, choice, select);
+      });
+    }
+    document
+      .getElementById('projectLibraryBulkUndo')
+      ?.addEventListener('click', event => void this.undoBulk(event.currentTarget));
     document
       .getElementById('projectSetupNextAction')
       ?.addEventListener('click', event => void this.runSetupNext(event.currentTarget));
@@ -1957,19 +2039,32 @@ export class ProjectLibraryPanel {
     for (const row of this.rows) {
       const tr = node('tr');
       const pick = node('td');
-      if (!this.readOnly && row.connection === 'catalog_only') {
+      // Every song can be picked for a bulk stage/status/priority edit; the
+      // setup queue still takes only the catalog-only ones (queueIds).
+      if (this.selectedProjects.has(row.id)) this.selectedRows.set(row.id, row);
+      if (!this.readOnly) {
         const checkbox = node('input');
         checkbox.type = 'checkbox';
         checkbox.checked = this.selectedProjects.has(row.id);
-        checkbox.setAttribute('aria-label', `Select ${row.name} for serial project review`);
+        checkbox.setAttribute(
+          'aria-label',
+          row.connection === 'catalog_only'
+            ? `Select ${row.name} for serial project review`
+            : `Select ${row.name}`
+        );
         checkbox.addEventListener('change', () => {
           if (checkbox.checked && this.selectedProjects.size >= QUEUE_LIMIT) {
             checkbox.checked = false;
-            this.status(`Review at most ${QUEUE_LIMIT} projects per queue.`);
+            this.status(`Select at most ${QUEUE_LIMIT} songs at once.`);
             return;
           }
-          if (checkbox.checked) this.selectedProjects.add(row.id);
-          else this.selectedProjects.delete(row.id);
+          if (checkbox.checked) {
+            this.selectedProjects.add(row.id);
+            this.selectedRows.set(row.id, row);
+          } else {
+            this.selectedProjects.delete(row.id);
+            this.selectedRows.delete(row.id);
+          }
           this.renderQueueControls();
         });
         pick.append(checkbox);
@@ -2082,17 +2177,36 @@ export class ProjectLibraryPanel {
     return this.readOnly ? [] : this.rows.filter(row => row.connection === 'catalog_only');
   }
 
+  // The selected songs the setup queue and "Connect all selected" may take:
+  // catalog-only ones. A song picked only for a bulk edit stays out.
+  queueIds() {
+    return [...this.selectedProjects].filter(
+      id => (this.selectedRows.get(id)?.connection ?? 'catalog_only') === 'catalog_only'
+    );
+  }
+
+  clearSelection() {
+    this.selectedProjects.clear();
+    this.selectedRows.clear();
+  }
+
   toggleSelectAll() {
     const pickable = this.selectableRows();
     if (this.queue || !pickable.length) return;
     if (pickable.every(row => this.selectedProjects.has(row.id))) {
-      for (const row of pickable) this.selectedProjects.delete(row.id);
+      for (const row of pickable) {
+        this.selectedProjects.delete(row.id);
+        this.selectedRows.delete(row.id);
+      }
     } else {
       let left = 0;
       for (const row of pickable) {
         if (this.selectedProjects.has(row.id)) continue;
         if (this.selectedProjects.size >= QUEUE_LIMIT) left++;
-        else this.selectedProjects.add(row.id);
+        else {
+          this.selectedProjects.add(row.id);
+          this.selectedRows.set(row.id, row);
+        }
       }
       if (left)
         this.status(`Selected ${QUEUE_LIMIT}, the most one queue takes; ${left} were left out.`);
@@ -2111,12 +2225,12 @@ export class ProjectLibraryPanel {
   // that needs a file choice or an integration is left alone and named. The first
   // failure stops the rest; songs already connected stay connected.
   async connectSelected(trigger) {
-    if (this.queue || this.readOnly || this.busy || this.selectedProjects.size < 2) return;
+    if (this.queue || this.readOnly || this.busy || this.queueIds().length < 2) return;
     await this.run(trigger, 'Checking the selected songs…', async () => {
       const ready = [];
       const left = [];
       let integration = null;
-      for (const id of [...this.selectedProjects]) {
+      for (const id of this.queueIds()) {
         const path = `/projects/${encodeURIComponent(id)}`;
         const detail = await this.request(path);
         if (detail.row.connection === 'connected') {
@@ -2271,7 +2385,8 @@ export class ProjectLibraryPanel {
           : this.selectedProjects.size
             ? `${this.selectedProjects.size} selected · nothing is connected until you review and confirm.`
             : 'Choose at least two catalog-only projects to review one at a time.';
-    start.disabled = this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+    const queueable = this.queueIds().length;
+    start.disabled = this.busy || this.readOnly || !!pending || queueable < 2;
     const selectAll = document.getElementById('projectLibrarySelectAll');
     const connectAll = document.getElementById('projectLibraryConnectAll');
     if (selectAll) {
@@ -2282,12 +2397,152 @@ export class ProjectLibraryPanel {
       selectAll.disabled = this.busy || this.readOnly || !!pending || pickable.length === 0;
     }
     if (connectAll) {
-      connectAll.disabled =
-        this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+      connectAll.disabled = this.busy || this.readOnly || !!pending || queueable < 2;
     }
     resume.hidden = discard.hidden = !pending;
     resume.disabled = this.busy || this.readOnly || pending?.status === 'expired';
     discard.disabled = this.busy;
+    this.renderBulkControls();
+  }
+
+  // The selected songs a bulk edit sends, with the row each had when picked.
+  bulkTargets() {
+    return [...this.selectedProjects]
+      .map(id => this.selectedRows.get(id))
+      .filter(row => row && Number.isInteger(row.fields_revision));
+  }
+
+  // Set stage… / Set status… / Set priority… (FR16, FR21): shown from one
+  // selected song; a read-only Home has no checkboxes and no bulk controls.
+  renderBulkControls() {
+    const bar = document.getElementById('projectLibraryBulk');
+    if (!bar) return;
+    const targets = this.bulkTargets();
+    bar.hidden = this.readOnly || targets.length === 0;
+    const count = document.getElementById('projectLibraryBulkCount');
+    if (count) count.textContent = bulkCountText(targets.length);
+    for (const field of Object.keys(BULK_FIELDS)) {
+      const select = document.getElementById(BULK_FIELDS[field].control);
+      if (select) select.disabled = this.busy || this.readOnly || targets.length === 0;
+    }
+  }
+
+  // One bulk request for every selected song (FR17-FR19). Rows update in place
+  // from the response; nothing is reloaded. The result line offers Undo.
+  async applyBulk(field, choice, trigger) {
+    const spec = BULK_FIELDS[field];
+    const targets = this.bulkTargets();
+    if (!spec || !choice || this.readOnly || this.busy || !targets.length) return;
+    const patch = spec.patch(choice);
+    const previous = new Map(targets.map(row => [row.id, spec.read(row)]));
+    let outcome = null;
+    await this.run(
+      trigger,
+      `Setting ${spec.name} for ${bulkCountText(targets.length)}…`,
+      async () => {
+        outcome = await this.post('/projects/fields/bulk', {
+          entries: targets.map(row => ({
+            entry_id: row.id,
+            if_fields_revision: row.fields_revision
+          })),
+          patch,
+          idempotency_key: operationKey('bulk-fields')
+        });
+        this.applyBulkOutcome(outcome);
+        this.clearSelection();
+        this.renderRows();
+      }
+    );
+    if (!outcome) return;
+    const updated = Array.isArray(outcome.updated) ? outcome.updated : [];
+    this.showBulkResult(bulkResultText(field, choice, updated.length, outcome.skipped), {
+      field,
+      entries: updated.map(item => ({
+        id: item.entry_id,
+        previous: previous.get(item.entry_id),
+        revision: item.fields?.revision
+      }))
+    });
+  }
+
+  // Updated songs take the server's fields; the shelf keeps its row order.
+  applyBulkOutcome(outcome) {
+    for (const item of Array.isArray(outcome?.updated) ? outcome.updated : []) {
+      const row = this.rows.find(candidate => candidate.id === item.entry_id);
+      if (!row || !item.fields) continue;
+      row.stage = item.fields.stage || 'unknown';
+      row.status = item.fields.status || 'unknown';
+      if (item.fields.priority == null) delete row.priority;
+      else row.priority = item.fields.priority;
+      row.fields_revision = item.fields.revision;
+    }
+  }
+
+  showBulkResult(text, undo) {
+    const line = document.getElementById('projectLibraryBulkResult');
+    const message = document.getElementById('projectLibraryBulkResultText');
+    const button = document.getElementById('projectLibraryBulkUndo');
+    globalThis.clearTimeout?.(this.bulkUndo?.timer);
+    this.bulkUndo = null;
+    if (message) message.textContent = text;
+    if (line) line.hidden = false;
+    const undoable = undo && undo.entries.some(entry => Number.isInteger(entry.revision));
+    if (button) {
+      button.hidden = !undoable;
+      button.disabled = false;
+    }
+    if (!undoable) return;
+    // Undo is client state only and lasts thirty seconds (FR19).
+    this.bulkUndo = {
+      ...undo,
+      timer: globalThis.setTimeout?.(() => {
+        this.bulkUndo = null;
+        if (button) button.hidden = true;
+      }, BULK_UNDO_MS)
+    };
+  }
+
+  // Undo sends the inverse: each song's previous value, with the revision the
+  // bulk edit returned. Songs that shared a previous value go in one request.
+  async undoBulk(trigger) {
+    const undo = this.bulkUndo;
+    if (!undo || this.busy) return;
+    globalThis.clearTimeout?.(undo.timer);
+    this.bulkUndo = null;
+    const spec = BULK_FIELDS[undo.field];
+    const groups = new Map();
+    for (const entry of undo.entries) {
+      if (!Number.isInteger(entry.revision)) continue;
+      const key = JSON.stringify(entry.previous ?? null);
+      if (!groups.has(key)) groups.set(key, { previous: entry.previous, entries: [] });
+      groups.get(key).entries.push({ entry_id: entry.id, if_fields_revision: entry.revision });
+    }
+    let restored = 0;
+    let finished = false;
+    const skipped = [];
+    await this.run(trigger, 'Undoing…', async () => {
+      try {
+        for (const group of groups.values()) {
+          const outcome = await this.post('/projects/fields/bulk', {
+            entries: group.entries,
+            patch: spec.inverse(group.previous),
+            idempotency_key: operationKey('bulk-undo')
+          });
+          this.applyBulkOutcome(outcome);
+          restored += Array.isArray(outcome.updated) ? outcome.updated.length : 0;
+          skipped.push(...(Array.isArray(outcome.skipped) ? outcome.skipped : []));
+        }
+        finished = true;
+      } finally {
+        this.renderRows();
+      }
+    });
+    this.showBulkResult(
+      finished
+        ? `Undid: restored ${bulkCountText(restored)}${bulkSkippedText(skipped)}`
+        : `Undo stopped after restoring ${bulkCountText(restored)}. Refresh the shelf to see each song.`,
+      null
+    );
   }
 
   // Browser storage is only an optional same-tab, previously confirmed creator
@@ -2378,16 +2633,11 @@ export class ProjectLibraryPanel {
   }
 
   async startQueue(trigger) {
-    if (
-      this.queue ||
-      this.readOnly ||
-      this.selectedProjects.size < 2 ||
-      this.selectedProjects.size > QUEUE_LIMIT
-    )
-      return;
+    const ids = this.queueIds();
+    if (this.queue || this.readOnly || ids.length < 2 || ids.length > QUEUE_LIMIT) return;
     try {
       const { queue } = await this.post('/queue', {
-        ids: [...this.selectedProjects],
+        ids,
         request_key: operationKey('queue-start')
       });
       this.queue = {
@@ -2397,7 +2647,7 @@ export class ProjectLibraryPanel {
         pending: null
       };
       this.saveQueue();
-      this.selectedProjects.clear();
+      this.clearSelection();
       this.renderRows();
       await this.continueQueue(document.getElementById('projectLibraryQueueResume') || trigger);
     } catch (error) {

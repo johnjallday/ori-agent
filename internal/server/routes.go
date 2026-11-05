@@ -1005,6 +1005,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/sessions/{sessionID}/recaps/commit", s.Handlers.Session.CommitAssistantStudioRecap)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/fields/review", s.Handlers.Session.ReviewAssistantLibraryFields)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/fields/commit", s.Handlers.Session.CommitAssistantLibraryFields)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/fields/bulk", s.Handlers.Session.CommitAssistantLibraryBulkFields)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/portfolio", s.Handlers.Session.GetAssistantPortfolio)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/portfolio/review", s.Handlers.Session.ReviewAssistantPortfolio)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/portfolio/commit", s.Handlers.Session.CommitAssistantPortfolio)

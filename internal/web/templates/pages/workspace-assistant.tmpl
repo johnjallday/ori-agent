@@ -231,7 +231,14 @@
                   <button id="projectLibraryQueueStart" class="modern-btn modern-btn-secondary" type="button" disabled>Review selected projects</button>
                   <button id="projectLibraryQueueResume" class="modern-btn modern-btn-secondary" type="button" hidden>Resume review queue</button>
                   <button id="projectLibraryQueueDiscard" class="modern-btn modern-btn-secondary" type="button" hidden>Discard queue</button>
+                  <div id="projectLibraryBulk" class="project-library-bulk" role="group" aria-labelledby="projectLibraryBulkCount" hidden>
+                    <span id="projectLibraryBulkCount" class="project-library-bulk-count"></span>
+                    <select id="projectLibraryBulkStage" class="form-select" aria-label="Set stage for the selected songs"><option value="">Set stage…</option><option value="unknown">Unknown</option><option value="idea">Idea</option><option value="writing">Writing</option><option value="recording">Recording</option><option value="editing">Editing</option><option value="mixing">Mixing</option><option value="mastering">Mastering</option></select>
+                    <select id="projectLibraryBulkStatus" class="form-select" aria-label="Set status for the selected songs"><option value="">Set status…</option><option value="unknown">Unknown</option><option value="planning">Planning</option><option value="active">Active</option><option value="on_hold">On hold</option><option value="complete">Complete</option><option value="archived">Archived</option></select>
+                    <select id="projectLibraryBulkPriority" class="form-select" aria-label="Set priority for the selected songs"><option value="">Set priority…</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="clear">Clear priority</option></select>
+                  </div>
                 </div>
+                <p id="projectLibraryBulkResult" class="project-library-bulk-result" hidden><span id="projectLibraryBulkResultText" role="status" aria-live="polite"></span> <button id="projectLibraryBulkUndo" class="modern-btn modern-btn-secondary" type="button" hidden>Undo</button></p>
                 <section id="projectLibraryQueueHistory" class="project-library-queue-history" aria-labelledby="projectLibraryQueueHistoryTitle" hidden>
                   <h3 id="projectLibraryQueueHistoryTitle">Recent review outcomes</h3>
                   <ul id="projectLibraryQueueHistoryRows"></ul>

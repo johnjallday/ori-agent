@@ -118,6 +118,10 @@ type Document struct {
 	CollectionBrief *CollectionBrief    `json:"collection_brief,omitempty"`
 	Arrangements    []Arrangement       `json:"arrangements,omitempty"`
 	Collections     []LogicalCollection `json:"collections,omitempty"`
+	// BulkFieldReceipts are the per-song outcomes of the latest bulk field
+	// edits, kept so a retried request returns its first result. Bounded;
+	// older documents have none.
+	BulkFieldReceipts []BulkFieldReceipt `json:"bulk_field_receipts,omitempty"`
 }
 
 type Root struct {
@@ -679,6 +683,9 @@ func (d Document) valid(scope Scope) bool {
 			return false
 		}
 		used[op.Key] = true
+	}
+	if !validBulkFieldReceipts(d.BulkFieldReceipts) {
+		return false
 	}
 	return d.validArrangements()
 }
