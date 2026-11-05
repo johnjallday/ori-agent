@@ -4,6 +4,9 @@ let currentAgent = null;
 // Per-section saved baselines, versions and drafts (modules/agent-edit-session.js).
 let editSession = null;
 let workspaceEditor = null;
+// Read-only "Where settings come from" view. It has no Save and never changes
+// which record the editors on this page write to.
+let ownershipView = null;
 // Set when the page itself confirmed a rename, so membership keeps its draft.
 let membershipRenamed = false;
 let agentName = '';
@@ -602,6 +605,46 @@ async function initAfterFirstLoad() {
   if (initializedAfterLoad) return;
   initializedAfterLoad = true;
 
+  // CLI agents have no saved definition to inspect.
+  if (currentAgent?.source !== 'cli' && currentAgent?.role !== 'cli_agent') {
+    ownershipView =
+      window.AgentSettingsOwnership?.mount({
+        root: document.getElementById('settingsOwnershipSection'),
+        agentName: currentAgent.name || agentName,
+        systemModelLinked: () => Boolean(currentAgent?.system_model_linked),
+        // A ?tab=ownership deep link lands again once the section has content:
+        // cards above it fill in after the first scroll and push it down.
+        // Cards above keep growing as their own reads finish, so keep landing
+        // on layout changes for a few seconds, until the reader moves.
+        onRendered: (() => {
+          let started = false;
+          return () => {
+            if (started) return;
+            started = true;
+            if (new URLSearchParams(window.location.search).get('tab') !== 'ownership') return;
+            const section = document.getElementById('settingsOwnershipSection');
+            const land = () => section?.scrollIntoView({ block: 'start', behavior: 'instant' });
+            land();
+            if (typeof ResizeObserver !== 'function') return;
+            const observer = new ResizeObserver(land);
+            const stop = () => {
+              observer.disconnect();
+              for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) {
+                window.removeEventListener(type, stop);
+              }
+            };
+            for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) {
+              window.addEventListener(type, stop, { passive: true });
+            }
+            observer.observe(document.getElementById('content') || document.body);
+            window.setTimeout(stop, 8000);
+          };
+        })()
+      }) || null;
+    ownershipView?.syncAgent({ name: currentAgent.name, version: currentAgent.version });
+    ownershipView?.setUnsaved(Boolean(editSession?.atRisk().length));
+  }
+
   document.getElementById('editProviderFilter')?.addEventListener('change', () => {
     window.requestAnimationFrame(updateEditReasoningVisibility);
   });
@@ -683,7 +726,8 @@ const TAB_SECTIONS = {
   prompt: 'promptSection',
   toolbox: 'capabilitiesSection',
   workspaces: 'agentWorkspacesSection',
-  appearance: 'appearanceSection'
+  appearance: 'appearanceSection',
+  ownership: 'settingsOwnershipSection'
 };
 
 function focusRequestedSection() {
@@ -856,6 +900,8 @@ function renderAgentDetails() {
   // After a confirmed rename the membership editor keeps unsaved choices.
   workspaceEditor?.setAgent(currentAgent, { renamed: membershipRenamed });
   membershipRenamed = false;
+  // Re-reads only after a confirmed change (name or version), never a draft.
+  ownershipView?.syncAgent({ name: currentAgent.name, version: currentAgent.version });
 
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
@@ -1083,6 +1129,7 @@ function sectionDisplayState(section) {
 function updateEditIndicators() {
   if (!editSession) return;
   const pending = editSession.pending();
+  ownershipView?.setUnsaved(editSession.atRisk().length > 0);
   // Assistive tech hears which section is busy saving.
   for (const [id, section] of [
     ['agentConfigurationSection', 'configuration'],
@@ -1772,7 +1819,12 @@ async function saveProfileChanges() {
   if (updatedName !== agentName) {
     agentName = updatedName;
     membershipRenamed = true;
-    window.history.replaceState({}, '', `/agents/${encodeURIComponent(updatedName)}`);
+    // Keep the query (viewing context, ?tab=) and hash: only the name moved.
+    window.history.replaceState(
+      {},
+      '',
+      `/agents/${encodeURIComponent(updatedName)}${window.location.search}${window.location.hash}`
+    );
     const skillsPageLink = document.getElementById('openSkillsPageLink');
     if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(updatedName)}`;
   }
@@ -2109,7 +2161,11 @@ async function verifyUnconfirmed(section) {
 function adoptRenamedIdentity(name) {
   membershipRenamed = true;
   agentName = name;
-  window.history.replaceState({}, '', `/agents/${encodeURIComponent(name)}`);
+  window.history.replaceState(
+    {},
+    '',
+    `/agents/${encodeURIComponent(name)}${window.location.search}${window.location.hash}`
+  );
   const skillsPageLink = document.getElementById('openSkillsPageLink');
   if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(name)}`;
 }

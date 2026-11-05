@@ -122,13 +122,18 @@ test('the ask offers to set one up when no vault is found', async ({ page, reque
   await disconnect(request);
   await resetGettingStarted(request);
   await openDrawer(page);
-  await expect(card(page)).toContainText(
-    "Want me to keep notes for you? I'll write what I learn, people, projects and your journal, into plain Markdown you own."
-  );
-  await expect(card(page).locator('[data-second-brain-action]')).toHaveText([
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+  await expect(card(page)).toContainText('works without Obsidian');
+  // The existing-folder route is behind "Already have notes?", read-only.
+  await expect(card(page).locator('[data-second-brain-action]:visible')).toHaveText([
     'Set up my notes',
-    'I have a notes folder…',
     'Not now'
+  ]);
+  const existing = card(page).locator('[data-second-brain-existing]');
+  await existing.locator('summary').click();
+  await expect(existing).toContainText("It won't write to it.");
+  await expect(existing.locator('[data-second-brain-action]')).toHaveText([
+    'Read a folder I have…'
   ]);
 });
 
@@ -206,6 +211,12 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
   );
   // The seeded items are the user's follow-ups already: nothing to add.
   await expect(action(page, 'add')).toHaveCount(0);
+  // The project was skipped: no first note is claimed, and the next useful
+  // thing is a quick note of the user's own.
+  await expect(card(page).locator('[data-second-brain-first-note]')).toHaveCount(0);
+  await expect(action(page, 'preview')).toHaveCount(0);
+  await expect(card(page)).toContainText('Start with a quick note');
+  await expect(card(page).locator('[data-second-brain-capture]')).toBeVisible();
   const link = card(page).getByRole('link', { name: 'Open in Obsidian' });
   await expect(link).toHaveAttribute('href', /^obsidian:\/\/open\?path=/);
 
@@ -247,6 +258,11 @@ test('the project question comes first and the folder opens with that note', asy
   await action(page, 'setup').click();
   await expect(card(page)).toContainText("What's the main thing you're working on right now?");
   await expect(action(page, 'save')).toHaveText('Next');
+  // It says why the question comes first, and that it can be skipped.
+  await expect(card(page).locator('[data-second-brain-stage="project"]')).toHaveText(
+    'Step 1 of 2 · Your first note'
+  );
+  await expect(card(page)).toContainText('You can skip this.');
   await expect(action(page, 'skip')).toHaveText('Skip');
   const answer = `Finishing the spring tour plan ${stamp}`;
   await card(page).locator('[data-project-answer]').fill(answer);
@@ -300,10 +316,18 @@ test('the project question comes first and the folder opens with that note', asy
   const preview = (await opened.json()).preview;
   expect(preview.body).toBe(note.slice(note.indexOf('\n---\n') + 5));
   expect(preview.truncated).toBe(false);
-  // The card offers it: Open {project}, Open folder and Open in Obsidian.
-  await card(page)
-    .getByRole('button', { name: `Open ${project}` })
-    .click();
+  // The receipt centres on that note: its name and where it is, with Open as
+  // the one primary action, Open folder beside it and Open in Obsidian quieter.
+  const first = card(page).locator('[data-second-brain-first-note]');
+  await expect(first).toContainText('Your first note');
+  await expect(first).toContainText(project);
+  await expect(first).toContainText(`Projects/${project}/README.md`);
+  const open = card(page).getByRole('button', { name: `Open ${project}` });
+  await expect(open).toHaveClass(/btn-primary/);
+  await expect(card(page).locator('.btn-primary')).toHaveCount(1);
+  await expect(action(page, 'open-folder')).toBeVisible();
+  await expect(card(page).getByRole('link', { name: 'Open in Obsidian' })).toBeVisible();
+  await open.click();
   await expect(card(page).locator('.pa-second-brain__preview')).toContainText(answer);
   const folder = await request.post(`${ENDPOINT}/open-folder`, {
     data: { request_id: `spec-open-${Date.now()}` }
@@ -503,11 +527,45 @@ test('a capture that looks like a secret is refused and nothing is written', asy
   expect(readdirSync(join(brain, 'Inbox')).sort()).toEqual(before);
 });
 
-test('disconnecting leaves the folder and everything in it', async ({ request }) => {
-  const name = `Spec Brain ${stamp}`;
-  const brain = join(documents, name);
+test('disconnecting is reviewed first and leaves the folder and everything in it', async ({
+  page,
+  request
+}) => {
+  // Whatever folder the earlier cases left connected, set up by Ori.
+  const current = await secondBrain(request);
+  expect(current.status).toBe('connected');
+  expect(current.source?.origin).toBe('created_by_ori');
+  const name = current.source!.name;
+  const brain = current.source!.path;
   const before = readdirSync(join(brain, 'Inbox')).sort();
-  await disconnect(request);
+  expect(before.length).toBeGreaterThan(0);
+  await openDrawer(page);
+  await page.evaluate(() =>
+    (
+      window as unknown as { PersonalAssistantSecondBrain: { openManage: () => Promise<boolean> } }
+    ).PersonalAssistantSecondBrain.openManage()
+  );
+  await expect(card(page)).toContainText(`Connected · ${name}`);
+  await expect(card(page)).toContainText('Ori keeps this folder');
+  await expect(card(page)).toContainText('One notes folder can be connected at a time.');
+
+  // Disconnect opens the review; Keep it connected changes nothing.
+  await action(page, 'disconnect').click();
+  await expect(card(page).getByRole('heading', { name: `Disconnect ${name}?` })).toBeVisible();
+  await expect(card(page)).toContainText('The folder and every note in it stay where they are.');
+  await expect(card(page)).toContainText(
+    'If you connect this folder again later, Ori will only read it.'
+  );
+  await action(page, 'cancel').click();
+  await expect(card(page)).toContainText(`Connected · ${name}`);
+  expect((await secondBrain(request)).status).toBe('connected');
+
+  await action(page, 'disconnect').click();
+  await action(page, 'confirm-disconnect').click();
+  await expect(card(page)).toContainText(`Disconnected ${name}.`);
+  // The way back to setup is right there.
+  await expect(card(page).getByRole('heading', { name: 'Set up your notes' })).toBeVisible();
+  await expect(action(page, 'setup')).toBeVisible();
   expect((await secondBrain(request)).status).toBe('not_connected');
   expect(readdirSync(join(brain, 'Inbox')).sort()).toEqual(before);
   expect(existsSync(join(brain, 'README.md'))).toBe(true);

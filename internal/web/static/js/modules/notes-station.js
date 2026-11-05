@@ -86,7 +86,7 @@ export function notesBadge(secondBrain, now = Date.now()) {
     return { value: "Can't find " + name, description: 'needs attention', tone: 'attention' };
   }
   if (!notesPanelAvailable(secondBrain)) {
-    return { value: 'Not set up', description: 'connect or set one up' };
+    return { value: 'Not set up', description: 'set up your notes' };
   }
   const at = secondBrain.last_look?.at;
   const since = at ? shortSince(at, now) : '';

@@ -79,8 +79,8 @@ export function notesSourceView(secondBrain) {
   const source = secondBrain?.source;
   if (!source?.name || secondBrain?.status === 'not_connected') {
     return {
-      summary: 'Your notes are not connected.',
-      action: { label: 'Connect your notes', route: '/?quest=second-brain' },
+      summary: 'Your notes are not set up.',
+      action: { label: 'Set up your notes', route: '/?quest=second-brain' },
       disconnect: false
     };
   }
@@ -93,14 +93,14 @@ export function notesSourceView(secondBrain) {
   }
   if (source.origin === 'created_by_ori') {
     return {
-      summary: `Notes: ${source.name} (set up by Ori). Ori keeps Inbox, Daily, People, a note per project and what it knows about you up to date, and never changes a note you edited. Disconnecting leaves the folder and everything in it.`,
+      summary: `Notes: ${source.name} (set up by Ori). Ori keeps Inbox, Daily, People, a note per project and what it knows about you up to date, and never changes a note you edited. Disconnecting leaves the folder and everything in it. One notes folder can be connected at a time.`,
       action: null,
       disconnect: true
     };
   }
   const kind = source.kind === 'obsidian' ? 'Obsidian' : 'Markdown folder';
   return {
-    summary: `Notes: ${source.name} (${kind}). Read-only: Ori keeps the folder path and the open items it found, not your notes.`,
+    summary: `Notes: ${source.name} (${kind}). Read-only: Ori keeps the folder path and the open items it found, not your notes. One notes folder can be connected at a time.`,
     action: null,
     disconnect: true
   };

@@ -2591,8 +2591,8 @@ For any connected folder, the `needs_you` section can carry one more row:
 
 While nothing is connected, for an active relationship, `needs_you` can carry:
 
-- `second_brain_ask`: "Want Ori to keep notes for you?" while the ask is `pending`
-  or `shown`, or "Still want Ori to keep notes for you?" once `offer_again` is
+- `second_brain_ask`: "Set up your notes" while the ask is `pending`
+  or `shown`, or "Still want to set up your notes?" once `offer_again` is
   true after Not now, with `route` `/?quest=second-brain` (which opens the ask).
   It goes when the user decides, and never shows after Don't ask again.
 

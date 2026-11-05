@@ -32,7 +32,7 @@ test('a station saying it is not set up is Not set up, whatever its tone', () =>
     'Not set up'
   );
   assert.equal(
-    stationStateWord({ value: 'Not set up', description: 'connect or set one up' }),
+    stationStateWord({ value: 'Not set up', description: 'set up your notes' }),
     'Not set up'
   );
   // Half-way is not "not set up": it needs the user.

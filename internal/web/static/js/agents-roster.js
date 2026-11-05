@@ -2616,6 +2616,18 @@
     return href;
   }
 
+  // The full page's read-only "Where settings come from", optionally for one
+  // workspace. The Inspector itself never loads that view's data.
+  function ownershipHref(name, workspaceId) {
+    var params = new URLSearchParams();
+    if (workspaceId) {
+      params.set('ctx', 'workspace');
+      params.set('studio_id', workspaceId);
+    }
+    params.set('tab', 'ownership');
+    return '/agents/' + encodeURIComponent(name) + '?' + params.toString();
+  }
+
   // Every configured fact, for every agent — the same list a built-in used to
   // get, now that no agent gets a form here. Model in particular is a card fact
   // that moved to this panel (FR-2/FR-42).
@@ -2726,7 +2738,7 @@
           '</p>'
         : members
             .map(function (ws) {
-              return readonlyWsRow(ws, listItem.role);
+              return readonlyWsRow(ws, listItem.role, isCLIAgent(listItem) ? '' : name);
             })
             .join('');
 
@@ -2749,8 +2761,18 @@
     els.workspacesBody.innerHTML = rows + footer;
   }
 
-  function readonlyWsRow(ws, role) {
+  function readonlyWsRow(ws, role, agentName) {
     var nm = esc(ws.name || 'Workspace');
+    var settings =
+      agentName && ws.id
+        ? ' <a class="ws-settings-link" href="' +
+          esc(ownershipHref(agentName, ws.id)) +
+          '" aria-label="Settings ' +
+          esc(agentName) +
+          ' uses in ' +
+          nm +
+          '">Settings here</a>'
+        : '';
     // folder_slug is what the workspace's own page is addressed by; without one
     // there is nothing honest to link to, so the name stays plain text rather
     // than becoming a link that 404s.
@@ -2760,7 +2782,7 @@
     var pill = ws.entry_point
       ? '<span class="ws-entry-pill">' + esc(commanderSlotLabel(role)) + '</span>'
       : '';
-    return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
+    return '<div class="ws-row"><span>' + link + '</span>' + pill + settings + '</div>';
   }
 
   /* ---- create agent -------------------------------------------------------- */
@@ -3675,7 +3697,11 @@
     fetchDetail(name)
       .then(function (detail) {
         if (state.selected !== name) return;
-        host.innerHTML = toolboxHTML(vm, detail);
+        host.innerHTML = toolboxHTML(
+          vm,
+          detail,
+          isCLIAgent(listItem) || isCLIAgent(detail) ? '' : name
+        );
       })
       .catch(function () {
         if (state.selected !== name) return;
@@ -3692,9 +3718,11 @@
       });
   }
 
-  function toolboxHTML(vm, detail) {
+  function toolboxHTML(vm, detail, name) {
     var caps = Array.isArray(detail && detail.capabilities) ? detail.capabilities : [];
-    var html = '<h3 class="stage-subhead">Global capabilities</h3>';
+    // Declared capabilities describe the agent; they are not a Toolbox
+    // selection, which the full page shows per context.
+    var html = '<h3 class="stage-subhead">Declared capabilities</h3>';
 
     if (caps.length === 0) {
       html +=
@@ -3729,8 +3757,14 @@
       esc((detail && detail.model) || 'Model needed') +
       '</dd>' +
       '</dl>' +
-      '<p class="stage-hint stage-hint--aside">Workspace-specific tool permissions are managed on ' +
-      'each workspace, not here.</p>';
+      '<p class="stage-hint stage-hint--aside">Declared capabilities are not a Toolbox. ' +
+      'Workspace-specific tool permissions are managed on each workspace, not here.' +
+      (name
+        ? ' <a class="stage-hint__link" href="' +
+          esc(ownershipHref(name)) +
+          '">See its Default Toolbox and each workspace’s pinned Toolbox ↗</a>'
+        : '') +
+      '</p>';
     return html;
   }
 
@@ -5380,6 +5414,14 @@
   // The legacy names are still matched so an install that has not yet run the
   // startup rename migration still marks the agent as permanent rather than
   // offering a delete the server will refuse.
+  // CLI agents have no saved definition, so the full page shows no settings
+  // ownership view for them and nothing links to it.
+  function isCLIAgent(agent) {
+    var source = String((agent && agent.source) || '').toLowerCase();
+    var role = String((agent && agent.role) || '').toLowerCase();
+    return source === 'cli' || role === 'cli_agent';
+  }
+
   function isPermanent(agent) {
     if (!agent) return false;
     var source = String(agent.source || '').toLowerCase();

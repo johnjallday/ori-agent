@@ -272,6 +272,9 @@ export function mountPersonalHQKnowledge(root = document) {
     return payload;
   }
 
+  // The Notes connection the Sources row last showed, as status:name.
+  let notesConnection = '';
+
   async function reload() {
     section.setAttribute('aria-busy', 'true');
     try {
@@ -307,6 +310,8 @@ export function mountPersonalHQKnowledge(root = document) {
       }
       // The notes folder's own status, for its Sources row (FR35).
       const notes = await request('/api/personal-assistant/second-brain').catch(() => null);
+      if (notes?.second_brain)
+        notesConnection = `${notes.second_brain.status}:${notes.second_brain.source?.name || ''}`;
       renderDossierSources(
         sourcesElement,
         notes?.second_brain
@@ -314,21 +319,21 @@ export function mountPersonalHQKnowledge(root = document) {
           : payload.sources,
         capabilities?.capabilities,
         {
+          // Disconnect is reviewed in the drawer, the same review as the
+          // connection card: what stops, what stays. Nothing is disconnected
+          // from here. Where the drawer cannot open, the Notes link opens it.
           onNotesDisconnect: async () => {
-            try {
-              await request('/api/personal-assistant/second-brain/disconnect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  request_id: `disconnect-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-                  if_version: notes.second_brain.version || 0
-                })
-              });
-            } finally {
-              // The drawer's own card and the HQ's Notes station follow.
-              await window.PersonalAssistantSecondBrain?.changed?.();
-              await reload();
+            const panel = window.PersonalAssistantPanel;
+            const drawer = window.PersonalAssistantSecondBrain;
+            if (
+              typeof panel?.open === 'function' &&
+              typeof drawer?.openDisconnect === 'function' &&
+              panel.open(document.getElementById('personalAssistantLauncher'), { focus: false })
+            ) {
+              await drawer.openDisconnect();
+              return;
             }
+            window.location.assign('/?quest=second-brain');
           }
         }
       );
@@ -897,6 +902,16 @@ export function mountPersonalHQKnowledge(root = document) {
   });
   addForm?.addEventListener('submit', saveExplicit);
   document.addEventListener('personal-assistant-knowledge-changed', () => {
+    if (!busy) void reload();
+  });
+  // The drawer's reviewed Disconnect (or a new connection) changes the Notes
+  // row: read it again only when the connection itself changed.
+  document.addEventListener('personal-assistant:second-brain', event => {
+    const secondBrain = event.detail?.secondBrain;
+    if (!secondBrain) return;
+    const key = `${secondBrain.status}:${secondBrain.source?.name || ''}`;
+    if (key === notesConnection) return;
+    notesConnection = key;
     if (!busy) void reload();
   });
   checkButton.addEventListener('click', () =>

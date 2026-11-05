@@ -1,10 +1,15 @@
-// Connect your second brain — the assistant's first message after Personal HQ.
+// Notes — the Personal Assistant's first message after Personal HQ.
 //
-// The assistant asks for the user's notes (naming the Obsidian vault it found,
-// if any), shows what reading them means before anything is read, connects the
-// folder read-only to the HQ, and comes back with one headline and one action:
-// add the open items as HQ follow-ups. This module owns that one turn in the
-// Home assistant drawer's conversation. It never sends a filesystem location:
+// The assistant offers to set up a notes folder the user owns (the one primary
+// action), with reading an existing folder as a quieter, read-only alternative
+// where a detected Obsidian vault is named. Setting up asks the project
+// question, writes the first note and opens it; reading shows what it means
+// before anything is read, connects the folder read-only to the HQ, and comes
+// back with one headline and one action: add the open items as HQ follow-ups.
+// The card is the Personal Assistant's: it is hidden while the drawer talks to
+// a workspace's own agent, and explicit entries switch the drawer to the
+// assistant through the panel's guarded recipient switch. This module owns that
+// one turn in the assistant drawer's conversation. It never sends a filesystem location:
 // a detected vault is named by its id, any other folder by the selection token
 // the folder-picker endpoint issued for it.
 
@@ -36,11 +41,70 @@ export function secondBrainAvailable(personalAssistant) {
 // The one label for setting up a folder Ori writes, wherever it is offered.
 export const SET_UP_NOTES_LABEL = 'Set up my notes';
 
+// Whose notes these are, said above the choice so a card in a workspace's
+// drawer can never read as that workspace's own.
+export const NOTES_SCOPE_LABEL = 'Personal notes · Personal HQ';
+export const NOTES_CHOICE_TITLE = 'Set up your notes';
+export const NOTES_CHOICE_BENEFIT =
+  'A notes folder you own for your projects, people, ideas and journal. Plain Markdown that works without Obsidian.';
+export const EXISTING_NOTES_HEADING = 'Already have notes?';
+export const EXISTING_NOTES_LINE =
+  "Ori can read an existing notes folder instead. It won't write to it.";
+
+// secondBrainChoiceView is the Notes-first choice: setting up a folder Ori keeps
+// is the one primary action, and reading a folder the user already has is a
+// quieter alternative that says it is read-only. A detected vault is supporting
+// detail inside that alternative, never the headline, and is never chosen by
+// itself. Every vault, the folder dialog and a typed path stay one step away in
+// the chooser. prompt adds Not now (and, on a re-offer, Don't ask again); an
+// explicit visit (the Notes station, the Profile) has neither, so opening it
+// never answers the ask.
+export function secondBrainChoiceView(secondBrain, { prompt = false, reoffer = false } = {}) {
+  const vaults = (Array.isArray(secondBrain?.detected) ? secondBrain.detected : []).filter(
+    vault => vault?.id && vault?.name
+  );
+  const actions = [{ id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' }];
+  if (prompt) actions.push({ id: 'later', label: 'Not now', style: 'link' });
+  if (prompt && reoffer) actions.push({ id: 'none', label: "Don't ask again", style: 'link' });
+  const existing = [];
+  let detectedLine = '';
+  if (vaults.length === 1) {
+    detectedLine = `Obsidian vault detected: “${vaults[0].name}”`;
+    existing.push({
+      id: 'read',
+      label: `Read “${vaults[0].name}”`,
+      style: 'outline',
+      vaultId: vaults[0].id
+    });
+    existing.push({ id: 'choose', label: 'Another folder…', style: 'outline' });
+  } else {
+    if (vaults.length > 1) detectedLine = `${vaults.length} Obsidian vaults detected`;
+    existing.push({
+      id: 'choose',
+      label: vaults.length > 1 ? 'Choose a folder to read…' : 'Read a folder I have…',
+      style: 'outline'
+    });
+  }
+  return {
+    scope: NOTES_SCOPE_LABEL,
+    title: reoffer ? 'Still want to set up your notes?' : NOTES_CHOICE_TITLE,
+    benefit: NOTES_CHOICE_BENEFIT,
+    actions,
+    existing: {
+      heading: EXISTING_NOTES_HEADING,
+      line: EXISTING_NOTES_LINE,
+      detected: detectedLine,
+      actions: existing
+    }
+  };
+}
+
 // secondBrainAskView decides whether the assistant shows the ask and what it
 // says. Shown is not answered (Issue 776 FR11): it stays while nothing is
 // connected and the ask is pending or shown. Seven days after Not now the server
-// sets offer_again and it comes back as "Still want me…", with Don't ask again
-// as the way out (FR13). A decline on record (decision "none") ends it.
+// sets offer_again and it comes back as "Still want…", with Don't ask again as
+// the way out (FR13). A decline on record (decision "none") ends it. Whether a
+// vault was detected changes only the quieter alternative, never the primary.
 export function secondBrainAskView(secondBrain, available) {
   const askState = secondBrain?.ask?.state;
   const reoffer = askState === 'deferred' && secondBrain?.ask?.offer_again === true;
@@ -48,38 +112,7 @@ export function secondBrainAskView(secondBrain, available) {
     available === true &&
     secondBrain?.status === 'not_connected' &&
     (askState === 'pending' || askState === 'shown' || reoffer);
-  const opening = reoffer
-    ? 'Still want me to keep notes for you?'
-    : 'Want me to keep notes for you?';
-  const end = reoffer ? [{ id: 'none', label: "Don't ask again", style: 'link' }] : [];
-  const vault = Array.isArray(secondBrain?.detected) ? secondBrain.detected[0] : null;
-  // The ask leads with the job (FR2): what Ori will write, and that the folder
-  // is the user's.
-  if (vault?.id && vault?.name) {
-    return {
-      show,
-      reoffer,
-      line: `${opening} I found your Obsidian vault "${vault.name}". I can read it, or set up a folder of my own.`,
-      actions: [
-        { id: 'read', label: `Read ${vault.name}`, style: 'primary', vaultId: vault.id },
-        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'outline' },
-        { id: 'choose', label: 'Another folder…', style: 'outline' },
-        { id: 'later', label: 'Not now', style: 'link' },
-        ...end
-      ]
-    };
-  }
-  return {
-    show,
-    reoffer,
-    line: `${opening} I'll write what I learn, people, projects and your journal, into plain Markdown you own.`,
-    actions: [
-      { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
-      { id: 'choose', label: 'I have a notes folder…', style: 'outline' },
-      { id: 'later', label: 'Not now', style: 'link' },
-      ...end
-    ]
-  };
+  return { show, reoffer, ...secondBrainChoiceView(secondBrain, { prompt: true, reoffer }) };
 }
 
 // secondBrainAskPinned: the ask is the conversation's first message the first
@@ -334,6 +367,46 @@ export function secondBrainFolderNameProblem(name) {
 // folder already holds the user's own words when it opens.
 export const SETUP_PROJECT_QUESTION = "What's the main thing you're working on right now?";
 
+// secondBrainSetupStage says where the setup turn is and why this step comes:
+// two steps, the project question that becomes the first note (optional), then
+// where the notes live. It adds no step of its own.
+export function secondBrainSetupStage(step) {
+  if (step === 'project') {
+    return {
+      label: 'Step 1 of 2 · Your first note',
+      why: "Your notes start with a note about what you're working on, in your words. You can skip this."
+    };
+  }
+  return {
+    label: 'Step 2 of 2 · Where your notes live',
+    why: 'Nothing is written until you press Set it up.'
+  };
+}
+
+// secondBrainFirstNoteView is the setup receipt's lead: the project note the
+// setup actually wrote, and Open as the main way in. It is shown only when the
+// connection lists that project as a note Ori wrote, so a skipped project, an
+// empty setup or a failed creation never claims a first note.
+export function secondBrainFirstNoteView(secondBrain, projectName) {
+  const name = String(projectName || '').trim();
+  if (!name || secondBrain?.status !== 'connected') return null;
+  if (secondBrain?.source?.origin !== 'created_by_ori') return null;
+  const projects = Array.isArray(secondBrain?.projects) ? secondBrain.projects : [];
+  const written = projects.find(project => project?.name === name && project?.ori_note === true);
+  if (!written) return null;
+  return {
+    label: 'Your first note',
+    name,
+    where: `Projects/${name}/README.md`,
+    line: 'It holds what you told me about it, in your words.'
+  };
+}
+
+// secondBrainEmptyStartLine leads a setup that wrote no project note to the
+// capture box: the next useful thing, without promising a file that is not there.
+export const EMPTY_START_LINE =
+  'Start with a quick note: write anything below and it goes to your Inbox as its own file.';
+
 // secondBrainSetupSeedLine says what the new folder starts with, from the
 // server's setup_preview and whether the user named a project (FR7). It never
 // promises a note the setup will not write.
@@ -446,6 +519,8 @@ export function secondBrainChooserView(secondBrain, { pickerOff = '', message = 
     }));
   return {
     title: vaults.length ? 'Which notes should I read?' : 'Where do you keep your notes?',
+    // Read-only, said before anything is picked, with the one-folder rule.
+    note: `Ori only reads this folder and never writes to it. ${ONE_NOTES_FOLDER_LINE}`,
     vaults,
     // "another" only when a vault is listed above it (FR21).
     pickLabel: vaults.length ? 'Pick another folder…' : 'Pick a folder…',
@@ -470,6 +545,7 @@ export function secondBrainConsentView(chosen, model, platform = '') {
     path: String(chosen?.path || ''),
     lines: [
       'Read-only. Nothing is moved, edited, or deleted.',
+      "Ori won't save notes, journal entries or project notes here; that needs a folder Ori set up.",
       'Ori reads the Markdown notes in it: up to 300 of the most recent, none over 256 KB.',
       configured
         ? `Short excerpts go to your model, ${model.provider}/${model.model}, to write the summary. Nothing else leaves ${machineName(platform)}.`
@@ -626,16 +702,10 @@ export function sinceLabel(at, now = Date.now()) {
 export function secondBrainManageView(secondBrain, now = Date.now()) {
   const source = secondBrain?.source;
   if (!source?.name || secondBrain?.status === 'not_connected') {
-    return {
-      state: 'not_connected',
-      title: 'Your notes are not set up.',
-      detail:
-        'Ori can keep notes for you in plain Markdown you own, or read an Obsidian vault or Markdown folder you already have.',
-      actions: [
-        { id: 'setup', label: SET_UP_NOTES_LABEL, style: 'primary' },
-        { id: 'choose', label: 'I have a notes folder…', style: 'outline' }
-      ]
-    };
+    // The same Notes-first choice as the ask, without Not now: visiting it
+    // answers nothing.
+    const choice = secondBrainChoiceView(secondBrain);
+    return { state: 'not_connected', ...choice, detail: choice.benefit };
   }
   const kind =
     source.origin === 'created_by_ori'
@@ -658,12 +728,60 @@ export function secondBrainManageView(secondBrain, now = Date.now()) {
   return {
     state: 'connected',
     title: `Connected · ${source.name}`,
+    mode: secondBrainModeLine(secondBrain),
+    oneFolder: `${ONE_NOTES_FOLDER_LINE} To use another, disconnect this one first.`,
     detail: since ? `${kind} · last look ${since}` : `${kind} · not looked at yet`,
     // A folder Ori set up says what Ori wrote in it and takes a quick note.
     written: created ? secondBrainWrittenLine(secondBrain.written_by_ori, now) : '',
     capture: created,
     actions: [{ id: 'again', label: 'Look again', style: 'primary' }, disconnect]
   };
+}
+
+// One notes folder at a time: said wherever a second one could be expected.
+export const ONE_NOTES_FOLDER_LINE = 'One notes folder can be connected at a time.';
+
+// secondBrainModeLine says what Ori does with the connected folder, by origin:
+// a folder Ori set up is one it keeps; any other is only read.
+export function secondBrainModeLine(secondBrain) {
+  if (secondBrain?.source?.origin === 'created_by_ori') {
+    return 'Ori keeps this folder: Inbox, Daily, People and a note per project. Notes you edit are never changed.';
+  }
+  return 'Read-only: Ori reads this folder for open items and never writes to it.';
+}
+
+// secondBrainDisconnectView is the review before Disconnect: what stops, what
+// stays, and what setting up again means. Nothing happens until Disconnect.
+export function secondBrainDisconnectView(secondBrain) {
+  const source = secondBrain?.source || {};
+  const name = String(source.name || 'your notes');
+  const created = source.origin === 'created_by_ori';
+  return {
+    title: `Disconnect ${name}?`,
+    lines: created
+      ? [
+          'Ori stops writing to this folder and reading it.',
+          'The folder and every note in it stay where they are.',
+          'Your follow-ups and tickets are kept.',
+          'If you connect this folder again later, Ori will only read it.'
+        ]
+      : [
+          'Ori stops reading this folder.',
+          'Nothing in it is moved, edited, or deleted.',
+          'Your follow-ups and tickets are kept.'
+        ],
+    next: `${ONE_NOTES_FOLDER_LINE} After this you can set up new notes in a new, empty place; Ori never writes into an existing folder.`,
+    actions: [
+      { id: 'confirm-disconnect', label: 'Disconnect', style: 'outline' },
+      { id: 'cancel', label: 'Keep it connected', style: 'link' }
+    ]
+  };
+}
+
+// secondBrainDisconnectedLine is the receipt above the Notes-first choice once
+// a folder is disconnected.
+export function secondBrainDisconnectedLine(name) {
+  return `Disconnected ${String(name || 'your notes')}. Ori no longer reads it; the folder and your follow-ups are kept.`;
 }
 
 // secondBrainWrittenLine says what Ori has put in the notes it keeps (FR16).
@@ -808,10 +926,76 @@ export function secondBrainError(payload, fallback = 'That did not work. Try aga
 // secondBrainPlacement says where the card shows: in the conversation while
 // the user is in the turn, in Needs you when the page loaded onto a result
 // still waiting for a decision (FR31), otherwise nowhere.
-export function secondBrainPlacement({ available, phase, pinned } = {}) {
-  if (available !== true || !phase || phase === 'idle') return 'none';
+// The card is the Personal Assistant's: while the drawer talks to a
+// workspace's own agent (personal === false) it is not shown at all, and the
+// turn waits, unchanged, for the user to switch back.
+export function secondBrainPlacement({ available, phase, pinned, personal = true } = {}) {
+  if (available !== true || personal === false || !phase || phase === 'idle') return 'none';
   return pinned === true ? 'needs' : 'thread';
 }
+
+// secondBrainRecipientPersonal: the drawer's current recipient is the hired
+// assistant. No recipient system on the page means only the assistant.
+export function secondBrainRecipientPersonal(recipient) {
+  return !recipient || recipient.kind === 'personal';
+}
+
+// secondBrainPromptDue: the ask's first showing is recorded only once the card
+// is really in front of the user: the ask is the step, it has a place (so the
+// assistant is the recipient), and the drawer is open. Hiding it for another
+// recipient, or a closed drawer, records nothing.
+export function secondBrainPromptDue({ phase, placement, panelOpen, recorded } = {}) {
+  return recorded !== true && phase === 'ask' && placement !== 'none' && panelOpen === true;
+}
+
+// secondBrainFocusSelector names where focus belongs when a step opens: the
+// field the step asks for (the project answer, its name, the folder name), the
+// safe way out of a review, otherwise '' for the step's first control.
+export function secondBrainFocusSelector({
+  phase,
+  setupStep = '',
+  projectStatus = '',
+  hasParent = false
+} = {}) {
+  const asking = phase === 'project' || (phase === 'setup' && setupStep === 'project');
+  if (asking && projectStatus === 'ask') return '[data-project-answer]';
+  if (asking && projectStatus === 'name') return '[data-project-name]';
+  if (phase === 'setup' && setupStep === 'place' && hasParent) return '[data-second-brain-name]';
+  if (phase === 'disconnect') return '[data-second-brain-action="cancel"]';
+  return '';
+}
+
+// The fields and controls whose focus (and caret) a repaint keeps: a status
+// read or a hint arriving rebuilds the card, never the user's place in it.
+const KEPT_FOCUS = [
+  'data-project-answer',
+  'data-project-name',
+  'data-second-brain-name',
+  'data-second-brain-capture',
+  'data-second-brain-action'
+];
+
+// secondBrainKeptFocusSelector is the selector that finds the focused element
+// again after a repaint, or '' when it is not one the card can find again.
+export function secondBrainKeptFocusSelector(element) {
+  if (!element?.getAttribute) return '';
+  for (const name of KEPT_FOCUS) {
+    if (!element.hasAttribute?.(name)) continue;
+    const value = element.getAttribute(name);
+    if (name === 'data-second-brain-action') {
+      return /^[a-z0-9-]+$/.test(String(value || '')) ? `[${name}="${value}"]` : '';
+    }
+    return `[${name}]`;
+  }
+  if (element.classList?.contains?.('folder-path-entry__input')) return '.folder-path-entry__input';
+  if (element.tagName === 'SUMMARY' && element.closest?.('[data-second-brain-existing]'))
+    return '[data-second-brain-existing] > summary';
+  return '';
+}
+
+// What the drawer's status line adds when a Notes entry could not switch it to
+// the assistant: how to come back once the reason has passed.
+export const NOTES_HANDOFF_RETRY = 'Then open Notes again.';
 
 export function newRequestID(prefix = 'sb') {
   const random =
@@ -825,6 +1009,8 @@ export function newRequestID(prefix = 'sb') {
 
 const state = {
   available: false,
+  // The drawer talks to the hired assistant (not a workspace's own agent).
+  personal: true,
   secondBrain: null,
   phase: 'idle', // ask | answered | chooser | setup | consent | reading | result | failed | fillin | learned
   pinned: false,
@@ -901,7 +1087,14 @@ const state = {
   // The missions behind the checklist, null until read; the folder a chip put
   // in the composer (FR9, FR19).
   missions: null,
-  offerPrefilled: ''
+  offerPrefilled: '',
+  // Whether "Already have notes?" is open on the Notes-first choice.
+  existingOpen: false,
+  // A control the user was on while it was disabled for a request, to put
+  // them back on once it is enabled again.
+  keptFocus: null,
+  // Where Back or Cancel returns focus, once (the control the step came from).
+  focusReturn: ''
 };
 
 let pathEntry = null;
@@ -971,7 +1164,10 @@ function actionRow(actions, onClick) {
 function go(phase) {
   if (
     state.phase !== phase &&
-    (state.phase === 'ask' || state.phase === 'chooser' || state.phase === 'manage')
+    (state.phase === 'ask' ||
+      state.phase === 'chooser' ||
+      state.phase === 'manage' ||
+      state.phase === 'disconnect')
   )
     state.history.push(state.phase);
   setPhase(phase);
@@ -990,9 +1186,36 @@ function setPhase(phase, { focus = true } = {}) {
 }
 
 function renderAsk(body) {
-  const view = secondBrainAskView(state.secondBrain, true);
-  body.append(node('p', 'pa-specialist-offer__headline', view.line));
-  body.append(actionRow(view.actions, onAskAction));
+  renderChoice(body, secondBrainAskView(state.secondBrain, true), onAskAction);
+}
+
+// renderChoice draws the Notes-first choice: whose notes, the title, what a
+// notes folder is for, the one primary action, then "Already have notes?" as a
+// quieter disclosure. Opening the disclosure reads, connects and creates nothing.
+function renderChoice(body, view, onAction) {
+  const choice = node('div', 'pa-second-brain__choice');
+  choice.append(node('p', 'pa-second-brain__scope', view.scope));
+  choice.append(node('h3', 'pa-specialist-offer__headline pa-second-brain__title', view.title));
+  choice.append(node('p', 'pa-second-brain__benefit', view.benefit));
+  const primary = actionRow(view.actions, onAction);
+  primary.classList.add('pa-second-brain__primary');
+  choice.append(primary);
+  const existing = node('details', 'pa-second-brain__existing');
+  existing.dataset.secondBrainExisting = '';
+  existing.open = state.existingOpen;
+  existing.addEventListener('toggle', () => {
+    state.existingOpen = existing.open;
+  });
+  const summary = node('summary', '', view.existing.heading);
+  if (view.existing.detected) {
+    summary.append(' ');
+    summary.append(node('span', 'pa-second-brain__detected', view.existing.detected));
+  }
+  existing.append(summary);
+  existing.append(node('p', 'pa-second-brain__existing-line', view.existing.line));
+  existing.append(actionRow(view.existing.actions, onAction));
+  choice.append(existing);
+  body.append(choice);
 }
 
 function renderFillIn(body) {
@@ -1054,7 +1277,7 @@ function renderFolderOffer(body, headline) {
 
 // renderChecklist is the first week's three rows under the first headline,
 // with the capture box the first row focuses (Issue 776 FR19).
-function renderChecklist(body) {
+function renderChecklist(body, { startLine = '' } = {}) {
   // A setup that just wrote the project note answered the question, whatever
   // the reply to /create carried.
   const secondBrain =
@@ -1090,6 +1313,7 @@ function renderChecklist(body) {
     list.append(item);
   }
   body.append(list);
+  if (startLine) body.append(node('p', 'pa-folder__note pa-second-brain__start', startLine));
   renderCapture(body);
 }
 
@@ -1648,6 +1872,7 @@ function renderProject(body) {
   // written until the folder is created with it (Issue 776 FR5, FR6).
   const setup = project.mode === 'setup';
   if (project.status === 'name') {
+    if (setup) renderSetupStage(body, 'project', { why: false });
     body.append(node('p', 'pa-specialist-offer__headline', `I'll call it ${project.name}. OK?`));
     const input = node('input', 'form-control form-control-sm');
     input.type = 'text';
@@ -1681,6 +1906,7 @@ function renderProject(body) {
     );
     return;
   }
+  if (setup) renderSetupStage(body, 'project');
   body.append(node('p', 'pa-specialist-offer__headline', project.prompt));
   if (project.hint) body.append(node('p', 'pa-folder__note', project.hint));
   const area = node('textarea', 'form-control form-control-sm');
@@ -1739,7 +1965,7 @@ function renderAnswered(body) {
 // renderDoors is the line of ways into the folder (Issue 776 FR15, FR16): Open
 // on the setup's project note, Open folder for any connected folder, and Open in
 // Obsidian for a folder Ori set up. The note opens inline, below the line.
-function renderDoors(body, { project = '' } = {}) {
+function renderDoors(body, { project = '', primaryOpen = false } = {}) {
   const connected =
     Boolean(state.secondBrain?.source?.name) && state.secondBrain?.status === 'connected';
   const openLink = secondBrainOpenLink(state.secondBrain);
@@ -1751,7 +1977,7 @@ function renderDoors(body, { project = '' } = {}) {
       {
         id: 'preview',
         label: state.preview.key === key ? 'Close' : `Open ${project}`,
-        style: 'outline'
+        style: primaryOpen && state.preview.key !== key ? 'primary' : 'outline'
       },
       () => void togglePreview('project', project)
     );
@@ -1776,6 +2002,18 @@ function renderDoors(body, { project = '' } = {}) {
     body.append(note);
   }
   renderPreview(body);
+}
+
+// renderFirstNote names the note the setup wrote, above the doors row whose
+// Open is the main action.
+function renderFirstNote(body, view) {
+  const box = node('div', 'pa-second-brain__first-note');
+  box.dataset.secondBrainFirstNote = view.name;
+  box.append(node('p', 'pa-second-brain__scope', view.label));
+  box.append(node('p', 'pa-second-brain__first-note-name', view.name));
+  box.append(node('p', 'pa-second-brain__path', view.where));
+  box.append(node('p', 'pa-folder__note', view.line));
+  body.append(box);
 }
 
 // renderPreview shows the opened note as plain paragraphs (text nodes only),
@@ -1829,23 +2067,63 @@ async function openFolder() {
 
 function renderManage(body) {
   const view = secondBrainManageView(state.secondBrain);
+  if (view.state === 'not_connected') {
+    // Right after a disconnect, its receipt sits above the way back to setup.
+    if (state.answer) {
+      const receipt = node('p', 'pa-folder__first-look', state.answer);
+      receipt.setAttribute('role', 'status');
+      body.append(receipt);
+    }
+    renderChoice(body, view, onChoiceAction);
+    return;
+  }
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
   if (view.detail) body.append(node('p', 'pa-folder__note', view.detail));
   if (state.secondBrain?.source?.path) {
     body.append(node('p', 'pa-second-brain__path', state.secondBrain.source.path));
   }
+  if (view.mode) body.append(node('p', 'pa-folder__note pa-second-brain__mode', view.mode));
   if (view.written) body.append(node('p', 'pa-folder__note', view.written));
   renderDoors(body);
   if (view.capture) renderCapture(body);
   renderProjects(body);
+  if (view.oneFolder) body.append(node('p', 'pa-folder__note', view.oneFolder));
   body.append(
     actionRow(view.actions, action => {
       if (action.id === 'again') void lookAgain();
-      else if (action.id === 'disconnect') void disconnect();
+      else if (action.id === 'disconnect') go('disconnect');
       else if (action.id === 'setup') startSetup();
       else {
         state.message = '';
         go('chooser');
+      }
+    })
+  );
+}
+
+// renderDisconnect is the review before Disconnect: the consequences for this
+// folder's origin, then Disconnect or Keep it connected. Cancel changes nothing.
+function renderDisconnect(body) {
+  // Disconnected elsewhere meanwhile: there is nothing left to review.
+  if (state.secondBrain?.status === 'not_connected') {
+    state.phase = 'manage';
+    renderManage(body);
+    return;
+  }
+  const view = secondBrainDisconnectView(state.secondBrain);
+  body.append(node('h3', 'pa-specialist-offer__headline pa-second-brain__title', view.title));
+  const list = node('ul', 'pa-folder__receipt pa-second-brain__consent');
+  list.dataset.layout = 'list';
+  view.lines.forEach(line => list.append(node('li', '', line)));
+  body.append(list);
+  body.append(node('p', 'pa-folder__note', view.next));
+  body.append(
+    actionRow(view.actions, action => {
+      if (action.id === 'confirm-disconnect') void disconnect();
+      else {
+        // Keep it connected returns focus to the Disconnect it came from.
+        state.focusReturn = '[data-second-brain-action="disconnect"]';
+        back();
       }
     })
   );
@@ -2029,14 +2307,8 @@ async function loadSetupInterview() {
     state.setup.step === 'project' &&
     project.status === 'ask'
   ) {
-    const typing = document.activeElement?.matches?.('[data-project-answer]');
-    const caret = typing ? document.activeElement.selectionStart : null;
+    // render keeps the focused field and its caret across the repaint.
     render();
-    if (typing) {
-      const area = document.querySelector('#personalAssistantSecondBrain [data-project-answer]');
-      area?.focus?.();
-      if (area && caret != null) area.setSelectionRange(caret, caret);
-    }
   }
 }
 
@@ -2074,11 +2346,21 @@ function backToSetupProject() {
   render();
 }
 
+// renderSetupStage says which of the two setup steps this is and why it comes.
+function renderSetupStage(body, step, { why = true } = {}) {
+  const stage = secondBrainSetupStage(step);
+  const label = node('p', 'pa-second-brain__scope', stage.label);
+  label.dataset.secondBrainStage = step;
+  body.append(label);
+  if (why) body.append(node('p', 'pa-folder__note', stage.why));
+}
+
 function renderSetup(body) {
   if (state.setup.step === 'project') {
     renderProject(body);
     return;
   }
+  renderSetupStage(body, 'place');
   if (state.setup.parent) {
     renderSetupConfirm(body);
     return;
@@ -2209,6 +2491,7 @@ function renderChooser(body) {
     message: state.message
   });
   body.append(node('p', 'pa-specialist-offer__headline', view.title));
+  body.append(node('p', 'pa-folder__note pa-second-brain__mode', view.note));
   if (view.message) body.append(node('p', 'pa-folder__note', view.message));
   if (view.vaults.length) {
     const list = node('ul', 'pa-second-brain__vaults');
@@ -2267,7 +2550,7 @@ function renderConsent(body) {
       node(
         'p',
         'pa-folder__note',
-        'Another notes folder is connected. Connecting this one replaces it.'
+        `${ONE_NOTES_FOLDER_LINE} Connecting this one disconnects the current one; its files stay where they are.`
       )
     );
   }
@@ -2302,14 +2585,23 @@ function renderLook(body) {
   if (view.alsoNoticed)
     body.append(node('p', 'pa-folder__note pa-second-brain__noticed', view.alsoNoticed));
   if (state.receipt) body.append(node('p', 'pa-folder__first-look', state.receipt));
-  // Right after a setup that wrote the project note, it opens here (FR8, FR16).
-  renderDoors(body, {
-    project: state.offerFolder && state.setup?.project?.name ? state.setup.project.name : ''
-  });
+  // Right after a setup that wrote the project note, the receipt centres on it:
+  // its name, what it holds, and Open as the main way in (FR8, FR16). Only a
+  // note the connection lists as Ori's is named, never one that was skipped.
+  const firstNote = secondBrainFirstNoteView(
+    state.secondBrain,
+    state.offerFolder ? state.setup?.project?.name : ''
+  );
+  if (firstNote) renderFirstNote(body, firstNote);
+  renderDoors(body, { project: firstNote?.name || '', primaryOpen: Boolean(firstNote) });
   // The first look of a folder Ori set up: the checklist, then the offer (FR19).
   if (state.offerFolder || String(view.headline || '').startsWith('Your notes are set up')) {
-    renderChecklist(body);
+    // No project note: the useful next thing is a first note of their own,
+    // said right above the capture box.
+    renderChecklist(body, { startLine: state.offerFolder && !firstNote ? EMPTY_START_LINE : '' });
   }
+  // One primary per state: with a first note to open, adding follow-ups waits.
+  if (firstNote && view.primary) view.primary = { ...view.primary, style: 'outline' };
   if (
     secondBrainFolderOfferShows({
       justSetUp: state.offerFolder,
@@ -2411,7 +2703,20 @@ function render() {
   const els = elements();
   if (!els?.body) return;
   const place = secondBrainPlacement(state);
-  const focusWithin = els.root.contains(document.activeElement);
+  const active = document.activeElement;
+  const focusWithin = els.root.contains(active);
+  // Where the user is in the card, so a repaint can put them back, caret and
+  // all. A control disabled while a request runs is remembered until it is back.
+  const keptSelector = focusWithin ? secondBrainKeptFocusSelector(active) : '';
+  const kept = keptSelector
+    ? {
+        selector: keptSelector,
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+      }
+    : focusWithin
+      ? null
+      : state.keptFocus;
   window.PersonalAssistantTranscript?.beforeChange?.();
   const home = place === 'needs' && els.needs ? els.needs : els.thread;
   // The card is moved, never copied, between the conversation and Needs you,
@@ -2434,6 +2739,7 @@ function render() {
     else if (state.phase === 'setup') renderSetup(els.body);
     else if (state.phase === 'consent') renderConsent(els.body);
     else if (state.phase === 'manage') renderManage(els.body);
+    else if (state.phase === 'disconnect') renderDisconnect(els.body);
     else if (state.phase === 'fillin') renderFillIn(els.body);
     else if (state.phase === 'learned') renderLearned(els.body);
     else if (state.phase === 'project') renderProject(els.body);
@@ -2444,20 +2750,47 @@ function render() {
     els.status.hidden = !els.status.textContent;
   }
   showError(state.error);
-  // A click moves focus into the new step; a turn that appears by itself never
-  // takes focus from the composer.
-  if (
-    (state.focusNext || focusWithin) &&
-    place !== 'none' &&
-    !document.getElementById('personalAssistantPanel')?.hidden
-  ) {
+  // A click moves focus into the new step, onto the field it asks for; a repaint
+  // keeps the user's place; a turn that appears by itself never takes focus
+  // from the composer.
+  state.keptFocus = null;
+  const open = place !== 'none' && !document.getElementById('personalAssistantPanel')?.hidden;
+  const again = open && !state.focusNext && kept ? els.body.querySelector(kept.selector) : null;
+  if (again) {
+    if (!again.disabled) {
+      again.focus?.({ preventScroll: true });
+      if (kept.start != null && typeof again.setSelectionRange === 'function') {
+        try {
+          again.setSelectionRange(kept.start, kept.end ?? kept.start);
+        } catch (_) {
+          // Not every field takes a selection; focus alone is kept.
+        }
+      }
+    } else {
+      state.keptFocus = kept;
+      els.root.tabIndex = -1;
+      els.root.focus?.({ preventScroll: true });
+    }
+  } else if (open && (state.focusNext || focusWithin)) {
+    const preferred =
+      state.focusReturn ||
+      secondBrainFocusSelector({
+        phase: state.phase,
+        setupStep: state.setup?.step,
+        projectStatus: state.project?.status,
+        hasParent: Boolean(state.setup?.parent)
+      });
+    state.focusReturn = '';
     const target =
-      els.body.querySelector('button:not([disabled]), input:not([disabled]), summary') || els.root;
+      (preferred && els.body.querySelector(`${preferred}:not([disabled])`)) ||
+      els.body.querySelector('button:not([disabled]), input:not([disabled]), summary') ||
+      els.root;
     if (target === els.root) els.root.tabIndex = -1;
     target.focus?.({ preventScroll: true });
   }
   state.focusNext = false;
   window.PersonalAssistantTranscript?.changed?.();
+  maybeRecordPrompt();
 }
 
 function baseName(path) {
@@ -2637,6 +2970,14 @@ async function decide(decision) {
   announce();
 }
 
+// onChoiceAction answers the Notes-first choice opened on purpose (the Notes
+// station, the Profile, a link after a decline). It has no Not now, so nothing
+// here posts to the ask: the decision on record stands.
+function onChoiceAction(action) {
+  if (action.id === 'later' || action.id === 'none') return;
+  onAskAction(action);
+}
+
 function onAskAction(action) {
   if (action.id === 'read') {
     const vault = (state.secondBrain?.detected || []).find(item => item.id === action.vaultId);
@@ -2715,6 +3056,9 @@ async function pollLook() {
       result: { failure: 'The look is taking longer than it should. Look again in a moment.' }
     };
   }
+  // A setup's first look: read the connection once more, so the receipt names
+  // only the project note that is really on disk (the create reply lists none).
+  if (state.offerFolder && state.look?.state === 'finished') await refresh();
   state.phase = state.look.state === 'failed' ? 'failed' : 'result';
   state.focusNext = elements()?.root?.contains(document.activeElement) || false;
   render();
@@ -2781,15 +3125,19 @@ async function disconnect() {
   }).catch(() => ({ ok: false, payload: {} }));
   state.busy = false;
   if (!ok) {
-    showError(secondBrainError(payload));
     // A newer version (another tab) is read again so the next try can land.
+    // The review stays while the folder is still connected; nothing is created.
     await refresh();
+    showError(secondBrainError(payload));
     render();
     return;
   }
   state.secondBrain = payload.second_brain || state.secondBrain;
-  state.answer = `Disconnected ${name}. Ori no longer reads it; your follow-ups are kept.`;
-  setPhase('answered');
+  state.answer = secondBrainDisconnectedLine(name);
+  state.history = [];
+  state.existingOpen = false;
+  // The way back to setup is right there: the Notes-first choice.
+  setPhase('manage');
   announce();
 }
 
@@ -2850,8 +3198,8 @@ async function load() {
       state.phase = 'ask';
       state.pinned = secondBrainAskPinned(state.secondBrain, { shownHere: state.askShownHere });
       if (!state.pinned) state.askShownHere = true;
+      // render records the first showing once the card is really seen.
       render();
-      markPromptedWhenSeen();
       return;
     }
     if (state.phase === 'idle' && state.secondBrain?.status !== 'not_connected') {
@@ -2872,37 +3220,33 @@ async function load() {
   }
 }
 
-// markPromptedWhenSeen records the ask's receipt once the user has the drawer
-// open while the ask is showing, not when a page merely loads with the drawer
-// closed: the ask is shown once, and a closed drawer has shown nothing.
+// maybeRecordPrompt records the ask's receipt once the card is actually in
+// front of the user: the ask is showing, the drawer is open, and the drawer
+// talks to the assistant. A page that loads with the drawer closed, or a drawer
+// talking to a workspace's own agent, has shown nothing. It runs after every
+// render and when the drawer opens, so it records at the first real showing.
 let promptRecorded = false;
-let promptWaiting = false;
-function markPromptedWhenSeen() {
-  if (promptRecorded) return;
-  const record = () => {
-    if (promptRecorded || state.phase !== 'ask') return;
-    promptRecorded = true;
-    void request('/prompted', {
-      method: 'POST',
-      body: { request_id: newRequestID('prompt') }
-    }).then(result => {
+function maybeRecordPrompt() {
+  const els = elements();
+  const due = secondBrainPromptDue({
+    phase: state.phase,
+    placement: els?.root && !els.root.hidden ? secondBrainPlacement(state) : 'none',
+    panelOpen: !document.getElementById('personalAssistantPanel')?.hidden,
+    recorded: promptRecorded
+  });
+  if (!due) return;
+  promptRecorded = true;
+  void request('/prompted', {
+    method: 'POST',
+    body: { request_id: newRequestID('prompt') }
+  }).then(
+    result => {
       if (result.ok && result.payload.second_brain) state.secondBrain = result.payload.second_brain;
       else promptRecorded = false;
-    });
-  };
-  if (!document.getElementById('personalAssistantPanel')?.hidden) {
-    record();
-    return;
-  }
-  if (promptWaiting) return;
-  promptWaiting = true;
-  document.addEventListener(
-    'personal-assistant:opened',
-    () => {
-      promptWaiting = false;
-      record();
     },
-    { once: true }
+    () => {
+      promptRecorded = false;
+    }
   );
 }
 
@@ -2935,37 +3279,79 @@ function onStatus(personalAssistant) {
   if (changed || !state.secondBrain) void load();
 }
 
+// onRecipient follows who the drawer talks to. Switching away hides the card
+// and changes nothing else; switching back shows the same card, in the same
+// step, without taking focus from the composer.
+function onRecipient(recipient) {
+  const personal = secondBrainRecipientPersonal(recipient);
+  if (personal === state.personal) return;
+  state.personal = personal;
+  state.focusNext = false;
+  render();
+}
+
+// ensurePersonalRecipient: an explicit Notes entry needs the drawer to talk to
+// the hired assistant. It asks the panel for the guarded switch the header
+// uses; a refusal (a reply in flight, a review waiting) leaves recipient,
+// review, draft and Notes exactly as they were, and the panel says why.
+function ensurePersonalRecipient() {
+  const recipients = window.PersonalAssistantRecipient;
+  if (secondBrainRecipientPersonal(recipients?.current?.())) return true;
+  const panel = window.PersonalAssistantPanel;
+  if (typeof panel?.choosePersonal !== 'function') return false;
+  if (!panel.choosePersonal({ retry: NOTES_HANDOFF_RETRY })) return false;
+  onRecipient(recipients?.current?.());
+  return state.personal;
+}
+
+// guarded wraps a public opener so it runs only once the drawer is the
+// assistant's.
+function guarded(open) {
+  return async (...args) => {
+    if (!ensurePersonalRecipient()) return false;
+    await open(...args);
+    return true;
+  };
+}
+
 function init() {
   if (!elements()) return;
   document.addEventListener('personal-assistant:status', event =>
     onStatus(event.detail?.personalAssistant)
   );
+  state.personal = secondBrainRecipientPersonal(window.PersonalAssistantRecipient?.current?.());
+  document.addEventListener('personal-assistant:recipient', event =>
+    onRecipient(event.detail?.recipient)
+  );
+  document.addEventListener('personal-assistant:opened', () => maybeRecordPrompt());
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   window.PersonalAssistantSecondBrain = {
     reload: load,
     // The Notes slot and the mission card open the chooser in place.
-    openChooser: async () => {
+    openChooser: guarded(async () => {
       if (!state.secondBrain) await load();
       state.pinned = false;
       state.latest = true;
       state.message = '';
       state.history = [];
       setPhase('chooser');
-    },
+    }),
     // Set one up for me, straight to its first step, as the conversation's
     // latest reply.
-    openSetup: async () => {
+    openSetup: guarded(async () => {
       if (!state.secondBrain) await load();
       state.pinned = false;
       state.latest = true;
       state.history = [];
       startSetup();
-    },
+    }),
     // A folder card in the conversation named an Obsidian vault: show what
     // connecting it means, as the conversation's latest reply (FR10).
     connectSelection: async ({ selectionToken, name, path } = {}) => {
       if (!selectionToken) throw new Error('That folder selection expired. Paste the path again.');
+      if (!ensurePersonalRecipient())
+        throw new Error(`Notes open with your assistant. ${NOTES_HANDOFF_RETRY}`);
       if (!state.secondBrain) await load();
       state.pinned = false;
       state.latest = true;
@@ -2974,19 +3360,19 @@ function init() {
     },
     // The first-batch report's Review what Ori learned: the card of what the
     // user's approved filing taught Ori, answered in place.
-    openLearned,
+    openLearned: guarded(openLearned),
     // The project question, on request (the drawer asks it by itself in order).
     // The project question on request: the checklist row and the Give Ori a
     // project mission (/?quest=second-brain-project, Issue 776 FR20).
-    openProject: async () => {
+    openProject: guarded(async () => {
       if (!state.secondBrain) await load();
       state.history = [];
       await askProjectNow();
-    },
+    }),
     // Today's ask row and the mission card (/?quest=second-brain): the ask while
     // it is unanswered or offered again (Issue 776 FR12), otherwise the
     // connection's own card.
-    openAsk: async () => {
+    openAsk: guarded(async () => {
       await refresh();
       if (!secondBrainAskView(state.secondBrain, state.available).show) {
         await window.PersonalAssistantSecondBrain.openManage();
@@ -2999,12 +3385,12 @@ function init() {
       state.history = [];
       showError('');
       state.askShownHere = true;
+      state.existingOpen = false;
       setPhase('ask');
-      markPromptedWhenSeen();
-    },
+    }),
     // The Notes station and the Profile open the connection's own card:
-    // connected, missing, or not set up (which is the chooser).
-    openManage: async () => {
+    // connected, missing, or not set up (the Notes-first choice).
+    openManage: guarded(async () => {
       await refresh();
       state.pinned = false;
       state.latest = true;
@@ -3012,9 +3398,28 @@ function init() {
       state.answer = '';
       state.history = [];
       showError('');
-      if (state.secondBrain?.status === 'not_connected') setPhase('chooser');
-      else setPhase('manage');
-    },
+      // Not connected is the Notes-first choice, never straight to the reader.
+      state.existingOpen = false;
+      setPhase('manage');
+    }),
+    // The Profile's Disconnect: the same review as the connection card, in the
+    // drawer. Keep it connected returns to the connection card.
+    openDisconnect: guarded(async () => {
+      await refresh();
+      state.pinned = false;
+      state.latest = true;
+      state.message = '';
+      state.answer = '';
+      showError('');
+      if (state.secondBrain?.status === 'not_connected') {
+        state.history = [];
+        state.existingOpen = false;
+        setPhase('manage');
+        return;
+      }
+      state.history = ['manage'];
+      setPhase('disconnect');
+    }),
     // Read the connection without changing what the drawer shows.
     status: refresh,
     // Another surface changed the connection (the Profile's Disconnect): read

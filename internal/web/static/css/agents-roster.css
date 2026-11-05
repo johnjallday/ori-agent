@@ -2980,6 +2980,14 @@ body.inspector-sheet-open {
 .ws-row a:hover {
   color: var(--primary-color, #4f46e5);
 }
+.ws-row {
+  flex-wrap: wrap;
+}
+.ws-row .ws-settings-link {
+  font-size: 13px;
+  text-decoration: underline;
+  white-space: nowrap;
+}
 
 .ws-entry-pill {
   font-size: 11px;

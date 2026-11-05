@@ -130,27 +130,51 @@ the default folder name and in that folder's own README, and
 `scripts/check-notes-copy.mjs` (run by `make test-js` and CI) fails on "second
 brain" anywhere else a person reads it.
 
-The ask leads with the job: "Want me to keep notes for you? I'll write what I
-learn, people, projects and your journal, into plain Markdown you own." with
-**Set up my notes**, **I have a notes folder…** and **Not now**; with a detected
-vault it names it ("I found your Obsidian vault "{name}". I can read it, or set up
-a folder of my own.") and offers **Read {name}**, **Set up my notes**,
-**Another folder…** and **Not now**.
+The ask is Notes-first (`secondBrainChoiceView`): a scope line
+**Personal notes · Personal HQ**, the title **Set up your notes**, one benefit
+line ("A notes folder you own for your projects, people, ideas and journal.
+Plain Markdown that works without Obsidian."), then **Set up my notes** as the
+only primary action beside **Not now**. Reading a folder the user already has is
+a quieter `<details>` disclosure, **Already have notes?**, which says "Ori can
+read an existing notes folder instead. It won't write to it." A detected vault is
+supporting detail there ("Obsidian vault detected: "{name}"", or "N Obsidian
+vaults detected"), never the headline: one vault offers **Read "{name}"** and
+**Another folder…**; several, or none, offer one route to the chooser, which
+lists every vault, the folder dialog and a typed path. Opening the disclosure
+reads, connects and creates nothing. Action ids (`setup`, `later`, `none`,
+`read`, `choose`) are unchanged.
+
+The ask belongs to the Personal Assistant. While the drawer talks to a
+workspace's own agent (its Commander) — or while the recipient is still being
+resolved — the card is not shown at all; its step, answers and server state are
+untouched, and switching to the assistant shows the same card without taking
+focus. Explicit Notes entries (`openAsk`, `openManage`, `openSetup`,
+`openChooser`, `openProject`, `openLearned`, `openDisconnect`,
+`connectSelection`) first hand the drawer to the assistant through the panel's
+guarded recipient switch (`PersonalAssistantPanel.choosePersonal`, the same path
+as the header menu: switch lock, `resetConversation`, reviews closed, composer
+and the Commander's session kept). A refusal (a reply in flight, a review or
+planning waiting, the conversation loading) changes nothing and the status line
+says why, followed by "Then open Notes again."
 
 Shown is not answered. The ask shows while nothing is connected and its state is
 `pending` or `shown`: the first time it is the conversation's first message after
 the relationship becomes active, and on every later load it waits as a pinned
 Needs you card with the same actions. Today carries a Needs you row,
-`second_brain_ask` ("Want Ori to keep notes for you?", route
-`/?quest=second-brain`), for an active relationship; inside the drawer the card
-is that row. `/?quest=second-brain` opens the ask while it is unanswered and the
-chooser or the connection card otherwise. Its receipt (`POST …/prompted`) still
-records the first showing only, once the drawer is open while the ask shows.
+`second_brain_ask` ("Set up your notes", route `/?quest=second-brain`), for an
+active relationship; inside the drawer the card is that row.
+`/?quest=second-brain` opens the ask while it is unanswered and the connection
+card otherwise; a connection card with nothing connected is the same
+Notes-first choice without Not now, so visiting it after a deferral or a
+decline answers nothing. Its receipt (`POST …/prompted`) records the first
+showing only, and only once the card is actually visible: the ask is the step,
+the assistant is the recipient, and the drawer is open (`secondBrainPromptDue`,
+checked after every render and on `personal-assistant:opened`).
 
 **Not now** replies "Okay. The Notes building on your HQ map sets this up whenever
 you're ready." and defers. From the seventh local calendar day after it
 (`Ask.OfferAgain`, `AskAgainDays`), the status carries `offer_again` and the card
-and the Today row come back as "Still want me to keep notes for you?" with the
+and the Today row come back as "Still want to set up your notes?" with the
 same actions plus **Don't ask again**, which records decision `none` (declined,
 mission skipped). Not now on the re-offer defers another seven days. The ask
 replaces the folder hand-over: while the second-brain record can be read, the
@@ -283,7 +307,13 @@ note carries `ori: facts` and is rendered exactly as the fill-in would render it
 so the first sync adopts it and says nothing.
 
 **The project question comes first** (Issue 776). **Set up my notes** (from the
-ask, the chooser, the connection card) opens one card in two steps: "What's the
+ask, the chooser, the connection card) opens one card in two steps, each labelled
+(`secondBrainSetupStage`): "Step 1 of 2 · Your first note" with "Your notes start
+with a note about what you're working on, in your words. You can skip this.", and
+"Step 2 of 2 · Where your notes live" with "Nothing is written until you press Set
+it up." (pressing it saves the answer as a fact first, even if the place is then
+refused). Entering the question focuses its textarea; the name step focuses the
+name: "What's the
 main thing you're working on right now?" (the textarea, the folder suggestion
 when the interview has one, **Next**, **Skip**, then the existing "I'll call it
 {name}. OK?" step), and then the place card (**Set it up**, **Somewhere else…**,
@@ -309,9 +339,18 @@ are set up. I wrote your first note: {name}." for the project note alone; "Your
 notes are set up: your project note, N follow-ups in Inbox, M people." with seeds
 too; "Your notes are set up: N follow-ups in Inbox, M people." without a project;
 "Your notes are set up. They're empty until I learn something about you." for
-nothing. Under it: **Open {name}** (the preview, below) right after a setup that
-wrote the note, **Open folder**, **Open in Obsidian**, then the first-week
-checklist and the capture box ("The Notes panel"), then the folder offer: "Show me
+nothing. Right after a setup that wrote the note, the receipt centres on it
+(`secondBrainFirstNoteView`): "Your first note", its name,
+`Projects/{name}/README.md` and "It holds what you told me about it, in your
+words.", with **Open {name}** (the preview, below) as the card's one primary
+action; a look's "Add … as follow-ups" is shown as a secondary action meanwhile.
+The note is named only when a status read taken as the first look finishes lists
+it under `projects` with `ori_note: true` (the `/create` reply carries no
+`projects`), so a skipped project, an empty setup or a failed creation never
+claims one; those lead with "Start with a quick note: write anything below and
+it goes to your Inbox as its own file." right above the capture box. **Open
+folder** and **Open in Obsidian** stay, then the first-week checklist and the
+capture box ("The Notes panel"), then the folder offer: "Show me
 a folder and I'll sort it with you. Names that keep coming up become People
 notes." with Downloads, Music, Documents and Desktop when the machine has them,
 and **Choose a folder…**. A chip attaches that folder to the composer exactly as
@@ -328,7 +367,27 @@ result card; the "Looked at {name} · N open items" Done row is unchanged.
 Items in seeded `Inbox/` notes, and in `follow_up` notes (below), are marked
 `seeded`: they are never suggested and never added as follow-ups, because the
 user already has them. Only one notes folder is connected at a time, so setting
-one up while one is connected is a conflict, not a replace. New setups write
+one up while one is connected is a conflict, not a replace. The chooser, the
+consent card, the connection card and the Profile say so ("One notes folder can
+be connected at a time."), and each says what Ori does with that kind of folder
+(`secondBrainModeLine`: "Ori keeps this folder…" for one Ori set up, "Read-only:
+Ori reads this folder for open items and never writes to it." otherwise; the
+consent card adds "Ori won't save notes, journal entries or project notes here;
+that needs a folder Ori set up."). A read-only source never shows capture.
+
+**Disconnect is reviewed.** The connection card's **Disconnect** opens a review
+(`secondBrainDisconnectView`) before anything is sent: for a folder Ori set up,
+"Ori stops writing to this folder and reading it.", "The folder and every note
+in it stay where they are.", "Your follow-ups and tickets are kept." and "If you
+connect this folder again later, Ori will only read it."; for any other folder,
+"Ori stops reading this folder." and "Nothing in it is moved, edited, or
+deleted."; then that new notes need a new, empty place. **Keep it connected**
+changes nothing. Success lands on the Notes-first choice with "Disconnected
+{name}. Ori no longer reads it; the folder and your follow-ups are kept."; a
+refusal or version conflict re-reads the status and stays on the review, and
+nothing is created. The Profile's Disconnect opens the same review in the drawer
+(`openDisconnect`) instead of posting itself, and its Sources row re-reads when
+the connection changes. New setups write
 `.obsidian/app.json` with `"propertiesInDocument": "hidden"`, so Obsidian shows
 the marker out of sight; existing setups are not touched.
 

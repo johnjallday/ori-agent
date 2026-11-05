@@ -15410,7 +15410,7 @@ export class WorkspaceCommandView {
             escapeHtml(badge.value + ' · ' + badge.description) +
             '</p>' +
             '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">' +
-            (secondBrain?.source?.name ? 'Connection…' : 'Connect notes…') +
+            (secondBrain?.source?.name ? 'Connection…' : 'Set up notes…') +
             '</button>'
         )
       );
