@@ -362,6 +362,46 @@ export function secondBrainFolderNameProblem(name) {
 // folder already holds the user's own words when it opens.
 export const SETUP_PROJECT_QUESTION = "What's the main thing you're working on right now?";
 
+// secondBrainSetupStage says where the setup turn is and why this step comes:
+// two steps, the project question that becomes the first note (optional), then
+// where the notes live. It adds no step of its own.
+export function secondBrainSetupStage(step) {
+  if (step === 'project') {
+    return {
+      label: 'Step 1 of 2 · Your first note',
+      why: "Your notes start with a note about what you're working on, in your words. You can skip this."
+    };
+  }
+  return {
+    label: 'Step 2 of 2 · Where your notes live',
+    why: 'Nothing is written until you press Set it up.'
+  };
+}
+
+// secondBrainFirstNoteView is the setup receipt's lead: the project note the
+// setup actually wrote, and Open as the main way in. It is shown only when the
+// connection lists that project as a note Ori wrote, so a skipped project, an
+// empty setup or a failed creation never claims a first note.
+export function secondBrainFirstNoteView(secondBrain, projectName) {
+  const name = String(projectName || '').trim();
+  if (!name || secondBrain?.status !== 'connected') return null;
+  if (secondBrain?.source?.origin !== 'created_by_ori') return null;
+  const projects = Array.isArray(secondBrain?.projects) ? secondBrain.projects : [];
+  const written = projects.find(project => project?.name === name && project?.ori_note === true);
+  if (!written) return null;
+  return {
+    label: 'Your first note',
+    name,
+    where: `Projects/${name}/README.md`,
+    line: 'It holds what you told me about it, in your words.'
+  };
+}
+
+// secondBrainEmptyStartLine leads a setup that wrote no project note to the
+// capture box: the next useful thing, without promising a file that is not there.
+export const EMPTY_START_LINE =
+  'Start with a quick note: write anything below and it goes to your Inbox as its own file.';
+
 // secondBrainSetupSeedLine says what the new folder starts with, from the
 // server's setup_preview and whether the user named a project (FR7). It never
 // promises a note the setup will not write.
@@ -1182,7 +1222,7 @@ function renderFolderOffer(body, headline) {
 
 // renderChecklist is the first week's three rows under the first headline,
 // with the capture box the first row focuses (Issue 776 FR19).
-function renderChecklist(body) {
+function renderChecklist(body, { startLine = '' } = {}) {
   // A setup that just wrote the project note answered the question, whatever
   // the reply to /create carried.
   const secondBrain =
@@ -1218,6 +1258,7 @@ function renderChecklist(body) {
     list.append(item);
   }
   body.append(list);
+  if (startLine) body.append(node('p', 'pa-folder__note pa-second-brain__start', startLine));
   renderCapture(body);
 }
 
@@ -1776,6 +1817,7 @@ function renderProject(body) {
   // written until the folder is created with it (Issue 776 FR5, FR6).
   const setup = project.mode === 'setup';
   if (project.status === 'name') {
+    if (setup) renderSetupStage(body, 'project', { why: false });
     body.append(node('p', 'pa-specialist-offer__headline', `I'll call it ${project.name}. OK?`));
     const input = node('input', 'form-control form-control-sm');
     input.type = 'text';
@@ -1809,6 +1851,7 @@ function renderProject(body) {
     );
     return;
   }
+  if (setup) renderSetupStage(body, 'project');
   body.append(node('p', 'pa-specialist-offer__headline', project.prompt));
   if (project.hint) body.append(node('p', 'pa-folder__note', project.hint));
   const area = node('textarea', 'form-control form-control-sm');
@@ -1867,7 +1910,7 @@ function renderAnswered(body) {
 // renderDoors is the line of ways into the folder (Issue 776 FR15, FR16): Open
 // on the setup's project note, Open folder for any connected folder, and Open in
 // Obsidian for a folder Ori set up. The note opens inline, below the line.
-function renderDoors(body, { project = '' } = {}) {
+function renderDoors(body, { project = '', primaryOpen = false } = {}) {
   const connected =
     Boolean(state.secondBrain?.source?.name) && state.secondBrain?.status === 'connected';
   const openLink = secondBrainOpenLink(state.secondBrain);
@@ -1879,7 +1922,7 @@ function renderDoors(body, { project = '' } = {}) {
       {
         id: 'preview',
         label: state.preview.key === key ? 'Close' : `Open ${project}`,
-        style: 'outline'
+        style: primaryOpen && state.preview.key !== key ? 'primary' : 'outline'
       },
       () => void togglePreview('project', project)
     );
@@ -1904,6 +1947,18 @@ function renderDoors(body, { project = '' } = {}) {
     body.append(note);
   }
   renderPreview(body);
+}
+
+// renderFirstNote names the note the setup wrote, above the doors row whose
+// Open is the main action.
+function renderFirstNote(body, view) {
+  const box = node('div', 'pa-second-brain__first-note');
+  box.dataset.secondBrainFirstNote = view.name;
+  box.append(node('p', 'pa-second-brain__scope', view.label));
+  box.append(node('p', 'pa-second-brain__first-note-name', view.name));
+  box.append(node('p', 'pa-second-brain__path', view.where));
+  box.append(node('p', 'pa-folder__note', view.line));
+  body.append(box);
 }
 
 // renderPreview shows the opened note as plain paragraphs (text nodes only),
@@ -2238,11 +2293,21 @@ function backToSetupProject() {
   render();
 }
 
+// renderSetupStage says which of the two setup steps this is and why it comes.
+function renderSetupStage(body, step, { why = true } = {}) {
+  const stage = secondBrainSetupStage(step);
+  const label = node('p', 'pa-second-brain__scope', stage.label);
+  label.dataset.secondBrainStage = step;
+  body.append(label);
+  if (why) body.append(node('p', 'pa-folder__note', stage.why));
+}
+
 function renderSetup(body) {
   if (state.setup.step === 'project') {
     renderProject(body);
     return;
   }
+  renderSetupStage(body, 'place');
   if (state.setup.parent) {
     renderSetupConfirm(body);
     return;
@@ -2467,14 +2532,23 @@ function renderLook(body) {
   if (view.alsoNoticed)
     body.append(node('p', 'pa-folder__note pa-second-brain__noticed', view.alsoNoticed));
   if (state.receipt) body.append(node('p', 'pa-folder__first-look', state.receipt));
-  // Right after a setup that wrote the project note, it opens here (FR8, FR16).
-  renderDoors(body, {
-    project: state.offerFolder && state.setup?.project?.name ? state.setup.project.name : ''
-  });
+  // Right after a setup that wrote the project note, the receipt centres on it:
+  // its name, what it holds, and Open as the main way in (FR8, FR16). Only a
+  // note the connection lists as Ori's is named, never one that was skipped.
+  const firstNote = secondBrainFirstNoteView(
+    state.secondBrain,
+    state.offerFolder ? state.setup?.project?.name : ''
+  );
+  if (firstNote) renderFirstNote(body, firstNote);
+  renderDoors(body, { project: firstNote?.name || '', primaryOpen: Boolean(firstNote) });
   // The first look of a folder Ori set up: the checklist, then the offer (FR19).
   if (state.offerFolder || String(view.headline || '').startsWith('Your notes are set up')) {
-    renderChecklist(body);
+    // No project note: the useful next thing is a first note of their own,
+    // said right above the capture box.
+    renderChecklist(body, { startLine: state.offerFolder && !firstNote ? EMPTY_START_LINE : '' });
   }
+  // One primary per state: with a first note to open, adding follow-ups waits.
+  if (firstNote && view.primary) view.primary = { ...view.primary, style: 'outline' };
   if (
     secondBrainFolderOfferShows({
       justSetUp: state.offerFolder,
@@ -2890,6 +2964,9 @@ async function pollLook() {
       result: { failure: 'The look is taking longer than it should. Look again in a moment.' }
     };
   }
+  // A setup's first look: read the connection once more, so the receipt names
+  // only the project note that is really on disk (the create reply lists none).
+  if (state.offerFolder && state.look?.state === 'finished') await refresh();
   state.phase = state.look.state === 'failed' ? 'failed' : 'result';
   state.focusNext = elements()?.root?.contains(document.activeElement) || false;
   render();

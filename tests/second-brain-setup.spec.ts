@@ -211,6 +211,12 @@ test('set one up: parent, name, confirm; the folder is made, seeded, connected a
   );
   // The seeded items are the user's follow-ups already: nothing to add.
   await expect(action(page, 'add')).toHaveCount(0);
+  // The project was skipped: no first note is claimed, and the next useful
+  // thing is a quick note of the user's own.
+  await expect(card(page).locator('[data-second-brain-first-note]')).toHaveCount(0);
+  await expect(action(page, 'preview')).toHaveCount(0);
+  await expect(card(page)).toContainText('Start with a quick note');
+  await expect(card(page).locator('[data-second-brain-capture]')).toBeVisible();
   const link = card(page).getByRole('link', { name: 'Open in Obsidian' });
   await expect(link).toHaveAttribute('href', /^obsidian:\/\/open\?path=/);
 
@@ -252,6 +258,11 @@ test('the project question comes first and the folder opens with that note', asy
   await action(page, 'setup').click();
   await expect(card(page)).toContainText("What's the main thing you're working on right now?");
   await expect(action(page, 'save')).toHaveText('Next');
+  // It says why the question comes first, and that it can be skipped.
+  await expect(card(page).locator('[data-second-brain-stage="project"]')).toHaveText(
+    'Step 1 of 2 · Your first note'
+  );
+  await expect(card(page)).toContainText('You can skip this.');
   await expect(action(page, 'skip')).toHaveText('Skip');
   const answer = `Finishing the spring tour plan ${stamp}`;
   await card(page).locator('[data-project-answer]').fill(answer);
@@ -305,10 +316,18 @@ test('the project question comes first and the folder opens with that note', asy
   const preview = (await opened.json()).preview;
   expect(preview.body).toBe(note.slice(note.indexOf('\n---\n') + 5));
   expect(preview.truncated).toBe(false);
-  // The card offers it: Open {project}, Open folder and Open in Obsidian.
-  await card(page)
-    .getByRole('button', { name: `Open ${project}` })
-    .click();
+  // The receipt centres on that note: its name and where it is, with Open as
+  // the one primary action, Open folder beside it and Open in Obsidian quieter.
+  const first = card(page).locator('[data-second-brain-first-note]');
+  await expect(first).toContainText('Your first note');
+  await expect(first).toContainText(project);
+  await expect(first).toContainText(`Projects/${project}/README.md`);
+  const open = card(page).getByRole('button', { name: `Open ${project}` });
+  await expect(open).toHaveClass(/btn-primary/);
+  await expect(card(page).locator('.btn-primary')).toHaveCount(1);
+  await expect(action(page, 'open-folder')).toBeVisible();
+  await expect(card(page).getByRole('link', { name: 'Open in Obsidian' })).toBeVisible();
+  await open.click();
   await expect(card(page).locator('.pa-second-brain__preview')).toContainText(answer);
   const folder = await request.post(`${ENDPOINT}/open-folder`, {
     data: { request_id: `spec-open-${Date.now()}` }

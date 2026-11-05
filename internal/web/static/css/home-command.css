@@ -618,6 +618,28 @@ body.home-command-page .home-command-bridge * {
   overflow-wrap: anywhere;
 }
 
+/* The setup receipt's lead: the first note Ori wrote, above its Open. */
+.pa-second-brain__first-note {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hc-signal) 10%, transparent);
+  min-width: 0;
+}
+
+.pa-second-brain__first-note > p {
+  margin: 0;
+}
+
+.pa-second-brain__first-note-name {
+  color: var(--hc-ink);
+  font-size: 1rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .pa-second-brain__existing .btn {
   max-width: 100%;
   white-space: normal;

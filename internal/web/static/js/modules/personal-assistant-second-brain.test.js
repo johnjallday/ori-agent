@@ -64,8 +64,93 @@ import {
   secondBrainDisconnectView,
   secondBrainDisconnectedLine,
   ONE_NOTES_FOLDER_LINE,
-  NOTES_HANDOFF_RETRY
+  NOTES_HANDOFF_RETRY,
+  secondBrainSetupStage,
+  secondBrainFirstNoteView,
+  EMPTY_START_LINE
 } from './personal-assistant-second-brain.js';
+
+test('the setup says which of its two steps this is and why the project comes first', () => {
+  const first = secondBrainSetupStage('project');
+  assert.equal(first.label, 'Step 1 of 2 · Your first note');
+  assert.match(first.why, /You can skip this\./);
+  const second = secondBrainSetupStage('place');
+  assert.equal(second.label, 'Step 2 of 2 · Where your notes live');
+  assert.equal(second.why, 'Nothing is written until you press Set it up.');
+});
+
+test('the receipt names a first note only when the connection lists it as Ori’s', () => {
+  const created = {
+    status: 'connected',
+    source: { name: 'Second Brain', origin: 'created_by_ori' },
+    projects: [{ name: 'Tour', rel: 'Projects/Tour', ori_note: true }]
+  };
+  const view = secondBrainFirstNoteView(created, 'Tour');
+  assert.deepEqual(view, {
+    label: 'Your first note',
+    name: 'Tour',
+    where: 'Projects/Tour/README.md',
+    line: 'It holds what you told me about it, in your words.'
+  });
+  // Skipped or empty: no project name, no first note.
+  assert.equal(secondBrainFirstNoteView(created, ''), null);
+  assert.equal(secondBrainFirstNoteView(created, null), null);
+  // Not on disk, or a folder the user wrote: never claimed.
+  assert.equal(secondBrainFirstNoteView({ ...created, projects: [] }, 'Tour'), null);
+  assert.equal(
+    secondBrainFirstNoteView({ ...created, projects: [{ name: 'Tour', ori_note: false }] }, 'Tour'),
+    null
+  );
+  // A failed creation (nothing connected) or a read-only source: never.
+  assert.equal(secondBrainFirstNoteView({ ...created, status: 'not_connected' }, 'Tour'), null);
+  assert.equal(
+    secondBrainFirstNoteView({ ...created, source: { name: 'Vault', kind: 'obsidian' } }, 'Tour'),
+    null
+  );
+  assert.match(EMPTY_START_LINE, /goes to your Inbox as its own file/);
+});
+
+test('a refused or failed creation keeps the answers and never shows a receipt', () => {
+  const create = sourceBetween('async function createSecondBrain()', 'async function decide(');
+  // One retry key for the whole attempt: a repeated confirm replays, never makes two.
+  assert.match(create, /request_id: state\.setup\.requestId/);
+  assert.doesNotMatch(create, /newRequestID\('create'\)/);
+  // Every refusal returns before the receipt state is touched.
+  const failure = create.slice(create.indexOf('if (!ok) {'), create.indexOf('state.secondBrain ='));
+  assert.match(failure, /return;/);
+  assert.doesNotMatch(failure, /offerFolder|setPhase\('reading'/);
+  // A taken place asks for another; it never clears what the user typed.
+  assert.doesNotMatch(failure, /state\.project = |state\.setup\.project = null/);
+  const start = sourceBetween('function startSetup()', '// loadSetupPreview reads');
+  assert.match(start, /requestId: newRequestID\('create'\)/);
+});
+
+test('the setup receipt leads with Open on the first note, one primary, and re-reads first', () => {
+  const look = sourceBetween('function renderLook(', 'function renderEverything(');
+  assert.match(look, /secondBrainFirstNoteView\(\s*state\.secondBrain,/);
+  assert.match(look, /if \(firstNote\) renderFirstNote\(body, firstNote\)/);
+  assert.match(look, /primaryOpen: Boolean\(firstNote\)/);
+  // Adding follow-ups gives way to Open while a first note is there.
+  assert.match(
+    look,
+    /if \(firstNote && view\.primary\) view\.primary = \{ \.\.\.view\.primary, style: 'outline' \}/
+  );
+  // No project note: the capture box is the next thing, with no file claimed.
+  assert.match(look, /startLine: state\.offerFolder && !firstNote \? EMPTY_START_LINE : ''/);
+  const doors = sourceBetween('function renderDoors(', '// renderFirstNote names');
+  assert.match(doors, /style: primaryOpen && state\.preview\.key !== key \? 'primary' : 'outline'/);
+  // Open folder stays, Open in Obsidian stays a quieter link.
+  assert.match(doors, /id: 'open-folder', label: OPEN_FOLDER_LABEL, style: 'outline'/);
+  assert.match(doors, /node\('a', 'pa-second-brain__open', 'Open in Obsidian'\)/);
+  const poll = sourceBetween('async function pollLook()', 'async function addFollowUps(');
+  assert.match(
+    poll,
+    /if \(state\.offerFolder && state\.look\?\.state === 'finished'\) await refresh\(\)/
+  );
+  // The first note is drawn as text.
+  const first = sourceBetween('function renderFirstNote(', '// renderPreview shows');
+  assert.doesNotMatch(first, /innerHTML/);
+});
 
 const moduleSource = readFileSync(
   new URL('./personal-assistant-second-brain.js', import.meta.url),
