@@ -129,6 +129,28 @@ func applyAgentUpdate(draft *agent.Agent, f *agentUpdateFields) error {
 	return nil
 }
 
+// errVersionCurrent ends a check-only pass through the store's protected
+// mutation without writing anything.
+var errVersionCurrent = errors.New("expected version is current")
+
+// checkExpectedVersion reports, under the store lock and without writing,
+// whether expected is still the stored version. It lets a request that is
+// already stale be refused before anything else — notably before the user is
+// asked to confirm a change to a shared agent that could not be applied
+// anyway. The authoritative check is still the one inside the mutation.
+func checkExpectedVersion(st store.Store, name, expected string) error {
+	_, err := store.MutateDefinition(st, name, func(draft *agent.Agent) error {
+		if current := agentConfigVersion(draft); current != expected {
+			return &staleAgentEditError{current: current}
+		}
+		return errVersionCurrent
+	})
+	if errors.Is(err, errVersionCurrent) {
+		return nil
+	}
+	return err
+}
+
 // writeAgentMutationError answers a refused or failed definition mutation.
 // Nothing was written in any of these cases.
 func writeAgentMutationError(w http.ResponseWriter, agentName string, err error) {

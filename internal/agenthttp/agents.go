@@ -549,6 +549,15 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A request that is already stale is refused first, so the user is never
+	// asked to confirm a shared change that could not be applied anyway.
+	if req.ExpectedVersion != nil {
+		if err := checkExpectedVersion(h.State, agentName, *req.ExpectedVersion); err != nil {
+			writeAgentMutationError(w, agentName, err)
+			return
+		}
+	}
+
 	// Workspace membership drives the shared-edit / rename guards (PRD FR9/FR10).
 	// The system assistant ("Ori") is exempt (PRD FR1). Computed once from the
 	// metadata-only cache.

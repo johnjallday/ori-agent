@@ -4,6 +4,8 @@ let currentAgent = null;
 // Per-section saved baselines, versions and drafts (modules/agent-edit-session.js).
 let editSession = null;
 let workspaceEditor = null;
+// Set when the page itself confirmed a rename, so membership keeps its draft.
+let membershipRenamed = false;
 let agentName = '';
 let isEditingConfig = false;
 let isEditingPrompt = false;
@@ -574,6 +576,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     root: document.getElementById('agentWorkspacesSection'),
     readAgent: fetchAgentDetail,
     leaveGuard,
+    // Membership saves share the page's one-write-at-a-time slot.
+    writeSlot: {
+      begin: () => editSession?.beginExternal('membership'),
+      end: () => {
+        editSession?.endExternal('membership');
+        updateEditIndicators();
+      }
+    },
     onSaved: membership => {
       if (currentAgent) Object.assign(currentAgent, membership);
     }
@@ -606,8 +616,10 @@ async function initAfterFirstLoad() {
     expertToggle.addEventListener('change', async () => {
       const desired = expertToggle.checked;
       expertToggle.disabled = true;
-      const ok = await setAgentExpertMode(desired);
-      if (!ok) {
+      // false: refused, so the switch goes back; "unknown": it already shows
+      // the saved setting from a fresh read.
+      const result = await setAgentExpertMode(desired);
+      if (result === false) {
         expertToggle.checked = !desired;
       }
       expertToggle.disabled = false;
@@ -841,7 +853,9 @@ function renderAgentDetails() {
   if (descEl) descEl.textContent = description;
 
   renderAgentOrigin();
-  workspaceEditor?.setAgent(currentAgent);
+  // After a confirmed rename the membership editor keeps unsaved choices.
+  workspaceEditor?.setAgent(currentAgent, { renamed: membershipRenamed });
+  membershipRenamed = false;
 
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
@@ -1002,20 +1016,39 @@ const leaveGuard = {
 };
 
 const SECTION_UI = {
-  profile: { badge: 'profileEditBadge', save: 'profileSaveBtn', confirm: 'profileDiscardConfirm' },
+  profile: {
+    badge: 'profileEditBadge',
+    save: 'profileSaveBtn',
+    confirm: 'profileDiscardConfirm',
+    container: 'profileEditModal',
+    status: 'profileEditStatus'
+  },
   configuration: {
     badge: 'configEditBadge',
     save: 'saveConfigBtn',
     confirm: 'configDiscardConfirm',
-    fields: 'configEditForm'
+    fields: 'configEditForm',
+    container: 'agentConfigurationSection',
+    status: 'configEditStatus'
   },
   prompt: {
     badge: 'promptEditBadge',
     save: 'savePromptBtn',
     confirm: 'promptDiscardConfirm',
-    fields: 'promptEditForm'
+    fields: 'promptEditForm',
+    container: 'promptSection',
+    status: 'promptEditStatus'
   }
 };
+
+// The control that had focus when a section froze for its save.
+const frozenFocus = {};
+
+// rememberFocus records the focused control before a save disables it.
+function rememberFocus(section) {
+  const container = document.getElementById(SECTION_UI[section].container);
+  if (container?.contains(document.activeElement)) frozenFocus[section] = document.activeElement;
+}
 
 const BADGE_TEXT = {
   dirty: 'Unsaved changes',
@@ -1080,16 +1113,35 @@ function updateEditIndicators() {
       section === 'profile'
         ? document.querySelector('#profileEditModal .modal-body')
         : document.getElementById(ui.fields);
+    const container = document.getElementById(ui.container);
+    // Freezing disables the focused control; remember it so focus can come
+    // back after the save instead of falling to the page.
+    if (frozen && !frozenFocus[section] && container?.contains(document.activeElement)) {
+      frozenFocus[section] = document.activeElement;
+    }
+    let thawed = false;
     scope?.querySelectorAll('input, textarea, select').forEach(input => {
-      if (input.closest('#profileAppearanceHost')) return;
       if (frozen) {
         if (!input.disabled) input.dataset.frozenBySave = '1';
         input.disabled = true;
       } else if (input.dataset.frozenBySave) {
         delete input.dataset.frozenBySave;
         input.disabled = false;
+        thawed = true;
       }
     });
+    if (!frozen && frozenFocus[section]) {
+      const remembered = frozenFocus[section];
+      delete frozenFocus[section];
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost || thawed) {
+        const target =
+          remembered.isConnected && !remembered.disabled && remembered.offsetParent !== null
+            ? remembered
+            : document.getElementById(ui.status);
+        if (lost) target?.focus?.();
+      }
+    }
   }
 }
 
@@ -1703,6 +1755,7 @@ async function saveProfileChanges() {
   // setting two write paths that could disagree (FR-41).
   editSession.setDraft('profile', readProfileFields());
 
+  rememberFocus('profile');
   setProfileSavingState(true);
   const outcome = await saveSection('profile', setProfileStatus, 'profile');
   setProfileSavingState(false);
@@ -1718,6 +1771,7 @@ async function saveProfileChanges() {
   const updatedName = outcome.receipt.name || agentName;
   if (updatedName !== agentName) {
     agentName = updatedName;
+    membershipRenamed = true;
     window.history.replaceState({}, '', `/agents/${encodeURIComponent(updatedName)}`);
     const skillsPageLink = document.getElementById('openSkillsPageLink');
     if (skillsPageLink) skillsPageLink.href = `/skills?agent=${encodeURIComponent(updatedName)}`;
@@ -1881,12 +1935,14 @@ function showConflictReview(section) {
   const title = document.createElement('strong');
   title.textContent = 'Changed elsewhere';
   const list = document.createElement('dl');
+  const touched = editSession.touched(section);
   for (const key of editSession.conflictFields(section)) {
     const label = FIELD_LABELS[key] || key;
-    for (const [term, value] of [
-      [`${label} — saved now`, latest[key]],
-      [`${label} — yours`, draft[key]]
-    ]) {
+    // A field only coupled to one the user changed (the model beside a
+    // reasoning level) is shown as saved, not labelled as the user's.
+    const rows = [[`${label} — saved now`, latest[key]]];
+    if (touched.includes(key)) rows.push([`${label} — yours`, draft[key]]);
+    for (const [term, value] of rows) {
       const dt = document.createElement('dt');
       dt.textContent = term;
       const dd = document.createElement('dd');
@@ -1978,12 +2034,31 @@ async function verifyUnconfirmed(section) {
     latest = await fetchAgentDetailNamed(agentName);
   } catch (error) {
     if (isAgentNotFoundError(error) && requestedName && requestedName !== agentName) {
+      let candidate = null;
       try {
-        latest = await fetchAgentDetailNamed(requestedName);
-        renamedTo = latest?.name || requestedName;
+        candidate = await fetchAgentDetailNamed(requestedName);
       } catch {
-        latest = null;
+        candidate = null;
       }
+      // An agent under the requested name is only taken to be this one when
+      // the rest of its definition is exactly what this page was editing.
+      // Anything else (another agent that already had that name, say) leaves
+      // the outcome unproven rather than guessed.
+      if (
+        candidate &&
+        (!editSession.matchesBaseline('configuration', candidate) ||
+          !editSession.matchesBaseline('prompt', candidate))
+      ) {
+        setStatus(
+          `Ori could not confirm whether "${agentName}" was renamed to "${requestedName}": the old name is gone, and the agent now called "${requestedName}" does not match what you were editing. Nothing was sent again; your changes are kept here.`,
+          'error'
+        );
+        appendStatusAction(section, 'Check again', () => verifyUnconfirmed(section));
+        updateEditIndicators();
+        return;
+      }
+      latest = candidate;
+      renamedTo = candidate ? candidate.name || requestedName : '';
     }
   }
   if (!latest) {
@@ -2032,6 +2107,7 @@ async function verifyUnconfirmed(section) {
 // adoptRenamedIdentity points the page at an agent's new name once a read
 // has shown the rename happened.
 function adoptRenamedIdentity(name) {
+  membershipRenamed = true;
   agentName = name;
   window.history.replaceState({}, '', `/agents/${encodeURIComponent(name)}`);
   const skillsPageLink = document.getElementById('openSkillsPageLink');
@@ -2043,6 +2119,9 @@ function adoptRenamedIdentity(name) {
 function adoptReceipt(receipt) {
   const saved = receipt?.agent;
   if (!saved || !currentAgent) return;
+  // A confirmed rename moves the page's identity before anything re-renders,
+  // so every later read (membership included) asks for the new name.
+  if (receipt.name && receipt.name !== agentName) adoptRenamedIdentity(receipt.name);
   confirmedEpoch += 1;
   currentAgent = {
     ...currentAgent,
@@ -2052,6 +2131,11 @@ function adoptReceipt(receipt) {
   };
   lastReconciliation = editSession.observe(currentAgent, receipt.version);
   renderAgentDetails();
+  // A follow-up step (the Default model alignment) changed the record again
+  // after this save; read it so the next save starts from the newer version.
+  if (receipt.current_version && receipt.current_version !== receipt.version) {
+    void refreshAgentDetails();
+  }
 }
 
 // confirmSharedEdit asks before changing a definition several workspaces
@@ -2242,6 +2326,7 @@ async function saveConfigChanges() {
   }
   editSession.setDraft('configuration', fields);
 
+  rememberFocus('configuration');
   setConfigSavingState(true);
   const outcome = await saveSection('configuration', setConfigStatus, 'configuration');
   setConfigSavingState(false);
@@ -2382,6 +2467,7 @@ async function savePromptChanges() {
     system_prompt: document.getElementById('editSystemPrompt')?.value ?? ''
   });
 
+  rememberFocus('prompt');
   setPromptSavingState(true);
   const outcome = await saveSection('prompt', setPromptStatus, 'system prompt');
   setPromptSavingState(false);
@@ -3041,31 +3127,45 @@ async function setAgentExpertMode(enabled) {
   const name = currentAgent?.name || agentName;
   if (!name) return false;
   // One definition write at a time from this page.
-  if (editSession?.pending()) {
-    showToast?.('Wait for the current save to finish, then try again.', 'error');
+  try {
+    editSession?.beginExternal('expert');
+  } catch (error) {
+    showToast?.(`${error.message} Try again when it has finished.`, 'error');
     return false;
   }
   try {
-    const response = await fetch(`/api/agents/${encodeURIComponent(name)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expert_mode: enabled })
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      if (typeof showToast === 'function') {
-        showToast(data?.error || 'Failed to update expert mode', 'error');
-      }
-      if (data?.code === AGENT_CHANGED_ON_DISK) {
-        await refreshAgentDetails();
-      }
+    let response;
+    try {
+      response = await fetch(`/api/agents/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expert_mode: enabled })
+      });
+    } catch (error) {
+      console.error('Expert mode change not confirmed:', error);
+      response = null;
+    }
+    const data = response ? await response.json().catch(() => null) : null;
+    if (response?.ok && data) {
+      await renderSkills();
+      return true;
+    }
+    if (response && !response.ok) {
+      showToast?.(data?.message || data?.error || 'Failed to update expert mode', 'error');
+      if (data?.code === AGENT_CHANGED_ON_DISK) await refreshAgentDetails();
       return false;
     }
+    // No readable answer: the change may have landed. Show what is saved
+    // instead of assuming it failed; it is not sent again.
     await renderSkills();
-    return true;
-  } catch (error) {
-    console.error('Failed to update expert mode:', error);
-    return false;
+    showToast?.(
+      'Ori could not confirm the expert mode change. The switch shows the saved setting; it was not sent again.',
+      'error'
+    );
+    return 'unknown';
+  } finally {
+    editSession?.endExternal('expert');
+    updateEditIndicators();
   }
 }
 

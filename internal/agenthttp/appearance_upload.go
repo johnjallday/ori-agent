@@ -344,6 +344,12 @@ func (h *AppearanceUploadHandler) checkMutationGuards(w http.ResponseWriter, r *
 		WriteAgentStoreError(w, "Failed to update agent", owned)
 		return false
 	}
+	if expected := strings.TrimSpace(r.FormValue("expected_version")); expected != "" {
+		if err := checkExpectedVersion(h.State, agentName, expected); err != nil {
+			writeAgentMutationError(w, agentName, err)
+			return false
+		}
+	}
 
 	if isSystemAssistantAgent(agentName) {
 		return true

@@ -251,6 +251,23 @@ func TestSharedEditConfirmationKeepsTheReviewedVersion(t *testing.T) {
 	}
 }
 
+// TestStaleSharedEditIsRefusedBeforeAskingForConfirmation: the user is not
+// asked to confirm a shared change that could not be applied anyway.
+func TestStaleSharedEditIsRefusedBeforeAskingForConfirmation(t *testing.T) {
+	h := guardTestHandler(t, []string{"Shared"}, map[string][]string{"ws-a": {"Shared"}, "ws-b": {"Shared"}})
+	rr := patchAgent(t, h, "Shared", `{"system_prompt":"x","expected_version":"deadbeefdeadbeef"}`)
+	if rr.Code != http.StatusConflict || decodeReceipt(t, rr).Code != staleAgentEditCode {
+		t.Fatalf("expected stale_agent_edit before any confirmation, got %d %s", rr.Code, rr.Body.String())
+	}
+	isolateAvatarDir(t)
+	upload := NewAppearanceUploadHandler(h.State, h.workspaceStore)
+	rec := httptest.NewRecorder()
+	upload.ServeHTTP(rec, uploadRequest(t, "Shared", pngBytes, map[string]string{"expected_version": "deadbeefdeadbeef"}))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), staleAgentEditCode) {
+		t.Fatalf("stale upload: expected stale_agent_edit, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestRenameSavesFieldsAndMovesTheAgent covers the successful rename receipt.
 func TestRenameSavesFieldsAndMovesTheAgent(t *testing.T) {
 	h, dash := versionTestHandlers(t, "Solo")

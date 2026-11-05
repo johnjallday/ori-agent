@@ -398,6 +398,25 @@ test('reapplying sends only my edits, never the stale untouched fields', () => {
   });
 });
 
+test('reapplying a reasoning-only edit keeps the newer model and provider', () => {
+  const s = api.createSession(
+    agent({ provider: 'codex', model: 'gpt-5', reasoning_effort: 'low' })
+  );
+  s.setDraft('configuration', { reasoning_effort: 'high' });
+  s.observe(
+    agent({ version: 'v2', provider: 'claude_code', model: 'opus', reasoning_effort: 'low' })
+  );
+  assert.equal(s.state('configuration'), 'conflict');
+  assert.deepEqual(plain(s.touched('configuration')), ['reasoning_effort']);
+  s.reapply('configuration');
+  assert.deepEqual(plain(s.beginSubmit('configuration')), {
+    reasoning_effort: 'high',
+    model: 'opus',
+    llm_provider: 'claude_code',
+    expected_version: 'v2'
+  });
+});
+
 function conflicted() {
   const s = api.createSession(agent());
   s.setDraft('configuration', { temperature: 0.2, role: 'researcher' });

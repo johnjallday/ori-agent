@@ -113,6 +113,13 @@ func (s *fileStore) MutateAgentDefinition(name string, mutate func(draft *agent.
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return nil, err
 		}
+		// Runtime state goes first, as in persistAgentUnlocked: rewriting an
+		// older-format definition drops the state keys it still carries, so
+		// they must already be saved elsewhere. A failure here is before the
+		// commit point and changes nothing.
+		if err := s.persistStateUnlocked(name); err != nil {
+			return nil, err
+		}
 		// The atomic replace is the commit point: before it, nothing changed;
 		// after it, the new definition is what every reader gets.
 		if err := writeFileIfChanged(path, data); err != nil {

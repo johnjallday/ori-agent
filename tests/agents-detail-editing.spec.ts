@@ -618,6 +618,47 @@ test.describe('draft isolation', () => {
     }
   });
 
+  test('a confirmed rename keeps unsaved membership choices', async ({ page, request }) => {
+    const name = await createAgent(request);
+    const renamed = `${name} Renamed`;
+    const ws = await request.post('/api/workspaces', { data: { name: `${name} WS` } });
+    expect(ws.ok(), await ws.text()).toBeTruthy();
+    const folder = (await ws.json()).folder;
+    try {
+      await page.goto(`/agents/${encodeURIComponent(name)}?tab=workspaces`);
+      await expect(page.locator('[data-workspace-status]')).toContainText('Membership loaded');
+      await page.locator(`[data-workspace-id="${folder.id}"]`).check();
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileAgentNameInput').fill(renamed);
+      await page.locator('#profileSaveBtn').click();
+      await expect(page.locator('#agentName')).toHaveText(renamed);
+      await expect(page.locator('[data-workspace-status]')).toContainText('unsaved choices');
+      await expect(page.locator(`[data-workspace-id="${folder.id}"]`)).toBeChecked();
+    } finally {
+      await request.delete(`/api/workspaces/${folder.id}?confirm=true&delete_sessions=true`);
+      await removeAgent(request, renamed);
+      await removeAgent(request, name);
+    }
+  });
+
+  test('focus returns from a saving section instead of falling to the page', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      await openAgent(page, name);
+      await editPrompt(page, 'Keyboard save');
+      await page.locator('#savePromptBtn').focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#promptEditStatus')).toContainText('System prompt saved');
+      const focused = await page.evaluate(() => document.activeElement?.id || 'body');
+      expect(['promptEditStatus', 'editPromptBtn', 'savePromptBtn']).toContain(focused);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+
   test('a saved rename updates the address without a leave warning', async ({ page, request }) => {
     const name = await createAgent(request);
     const renamed = `${name} Renamed`;
@@ -1142,6 +1183,40 @@ test.describe('recovery', () => {
     }
   });
 
+  test('a lost rename is not resolved onto an unrelated agent that has the requested name', async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    const other = `${name} Other`;
+    try {
+      await openAgent(page, name);
+      // Another agent already answers to the requested name, with a different
+      // definition; the original agent disappears meanwhile (another tab).
+      expect(
+        (
+          await request.post('/api/agents', {
+            data: { name: other, model: 'gpt-4o-mini', system_prompt: 'Somebody else.' }
+          })
+        ).ok()
+      ).toBeTruthy();
+      await interceptPatch(page, name, async route => {
+        await request.delete(`/api/agents?name=${encodeURIComponent(name)}`);
+        await route.abort('failed');
+      });
+      await page.locator('#editProfileButton').click();
+      await page.locator('#profileAgentNameInput').fill(other);
+      await page.locator('#profileSaveBtn').click();
+      await expect(page.locator('#profileEditStatus')).toContainText('could not confirm whether');
+      expect(new URL(page.url()).pathname).toBe(`/agents/${encodeURIComponent(name)}`);
+      await expect(page.locator('#agentName')).toHaveText(name);
+      await expect(page.locator('#profileAgentNameInput')).toHaveValue(other);
+    } finally {
+      await removeAgent(request, other);
+      await removeAgent(request, name);
+    }
+  });
+
   test('a rename target taken meanwhile is refused with the draft kept', async ({
     page,
     request
@@ -1220,4 +1295,104 @@ test.describe('recovery', () => {
       await removeAgent(request, name);
     }
   });
+});
+
+// axe, scoped to the editing surfaces so unrelated page chrome cannot mask or
+// fail them (the same approach as the roster accessibility spec).
+async function axeViolations(page: Page, selector: string) {
+  return page.evaluate(async target => {
+    const root = document.querySelector(target);
+    if (!root) return [`missing ${target}`];
+    const result = await (window as any).axe.run(root, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+    });
+    return result.violations.map(
+      (v: any) => `${v.id}: ${v.nodes.map((n: any) => n.target.join(' ')).join(', ')}`
+    );
+  }, selector);
+}
+
+test.describe('save contract', () => {
+  test("a workspace's own agent offers no editing, appearance included (stubbed origin)", async ({
+    page,
+    request
+  }) => {
+    const name = await createAgent(request);
+    try {
+      // The detail answer is the real one with a workspace origin, as the
+      // composite store reports for an agent only a workspace holds.
+      await page.route(`**/api/agents/${encodeURIComponent(name)}/detail`, async route => {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.origin = { source: 'workspace', workspace_id: 'ws-x', workspace_name: 'Song X' };
+        await route.fulfill({ response, json });
+      });
+      const sent = recordPatches(page);
+      await openAgent(page, name);
+      for (const id of ['#editProfileButton', '#editConfigBtn', '#editPromptBtn'])
+        await expect(page.locator(id)).toBeHidden();
+      await expect(page.locator('#agentAppearance-color')).toHaveCount(0);
+      await expect(page.locator('#agentAppearance-file')).toHaveCount(0);
+      expect(sent).toHaveLength(0);
+    } finally {
+      await removeAgent(request, name);
+    }
+  });
+});
+
+test.describe('accessibility', () => {
+  for (const theme of ['light', 'dark']) {
+    for (const width of [1280, 390]) {
+      test(`editing states pass axe (${theme}, ${width}px)`, async ({ page, request }) => {
+        const name = await createAgent(request);
+        try {
+          await page.addInitScript(selected => {
+            window.localStorage.setItem('ori-theme', selected);
+          }, theme);
+          await page.setViewportSize({ width, height: 900 });
+          await openAgent(page, name);
+          await page.addScriptTag({
+            url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js'
+          });
+
+          // Drafts with badges, and a conflict review on the prompt.
+          await editTemperature(page, '0.4');
+          await editPrompt(page, 'Mine');
+          await request.patch(`/api/agents/${encodeURIComponent(name)}`, {
+            data: { system_prompt: 'Theirs' }
+          });
+          await page.locator('#savePromptBtn').click();
+          await expect(page.locator('#promptConflictReview')).toBeVisible();
+          for (const target of [
+            '#agentConfigurationSection',
+            '#promptSection',
+            '#appearanceSection'
+          ]) {
+            expect(await axeViolations(page, target), `${target} (${theme}, ${width}px)`).toEqual(
+              []
+            );
+          }
+
+          // The prompt's discard confirmation, reached by keyboard.
+          await page.locator('#editPromptBtn').focus();
+          await page.keyboard.press('Enter');
+          await expect(page.locator('#promptDiscardConfirm [data-discard-keep]')).toBeFocused();
+          expect(await axeViolations(page, '#promptSection')).toEqual([]);
+          await page.keyboard.press('Enter'); // Keep editing
+
+          // The profile modal with its discard bar.
+          await page.locator('#editProfileButton').click();
+          await page.locator('#profileDescriptionInput').fill('Dirty');
+          await page.keyboard.press('Escape');
+          await expect(page.locator('#profileDiscardConfirm')).toBeVisible();
+          expect(await axeViolations(page, '#profileEditModal .modal-content')).toEqual([]);
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+          ).toBeLessThanOrEqual(0);
+        } finally {
+          await removeAgent(request, name);
+        }
+      });
+    }
+  }
 });

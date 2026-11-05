@@ -762,7 +762,7 @@
                   </div>
                 </div>
                 <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
-                <div id="configEditStatus" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+                <div id="configEditStatus" tabindex="-1" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
                 <div id="configConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
                 <div id="configDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="configDiscardText" hidden>
                   <span id="configDiscardText">Discard your unsaved configuration changes? Other sections keep theirs.</span>
@@ -799,7 +799,7 @@
                   <textarea id="editSystemPrompt" class="form-control" rows="10" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6;"></textarea>
                 </div>
                 <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
-                <div id="promptEditStatus" role="status" aria-live="polite" class="small mt-2" style="color: var(--text-secondary);"></div>
+                <div id="promptEditStatus" tabindex="-1" role="status" aria-live="polite" class="small mt-2" style="color: var(--text-secondary);"></div>
                 <div id="promptConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
                 <div id="promptDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="promptDiscardText" hidden>
                   <span id="promptDiscardText">Discard your unsaved system prompt? Other sections keep theirs.</span>
@@ -965,10 +965,10 @@
                   <div id="profileTagsContainer" class="agent-profile-tags-container">
                     <input type="text" id="profileTagsInput" name="tags" class="agent-profile-tag-input" autocomplete="off" spellcheck="false" placeholder="Add tags…">
                   </div>
-                  <div class="form-helper" style="color: var(--text-muted); font-size: 12px; margin-top: 6px;">Press Enter to add a tag.</div>
+                  <div class="form-helper" style="color: var(--text-secondary); font-size: 12px; margin-top: 6px;">Press Enter to add a tag.</div>
                 </div>
               </div>
-              <div id="profileEditStatus" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+              <div id="profileEditStatus" tabindex="-1" role="status" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
               <div id="profileConflictReview" class="agent-conflict-review" role="group" aria-label="Changed elsewhere" hidden></div>
               <div id="profileDiscardConfirm" class="agent-discard-confirm" role="group" aria-labelledby="profileDiscardText" hidden>
                 <span id="profileDiscardText">Discard your unsaved profile changes? Other sections keep theirs.</span>

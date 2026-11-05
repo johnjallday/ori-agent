@@ -73,9 +73,16 @@
     return JSON.stringify(a) === JSON.stringify(b);
   }
 
-  function changedFields(section, baseline, draft) {
+  // touchedFields are the fields whose values the draft actually changed.
+  function touchedFields(section, baseline, draft) {
     const next = normalizeDraft(section, baseline, draft);
-    const changed = Object.keys(baseline).filter(key => !same(baseline[key], next[key]));
+    return Object.keys(baseline).filter(key => !same(baseline[key], next[key]));
+  }
+
+  // changedFields adds the fields coupled to a touched one: they travel
+  // together in a patch and conflict together.
+  function changedFields(section, baseline, draft) {
+    const changed = touchedFields(section, baseline, draft);
     for (const group of COUPLED[section] || []) {
       if (group.some(key => changed.includes(key))) {
         for (const key of group) if (!changed.includes(key)) changed.push(key);
@@ -373,8 +380,19 @@
         }
         return out;
       },
+      // matchesBaseline reports whether an agent read has exactly this
+      // section's saved values — evidence (not proof) that it is the same agent.
+      matchesBaseline(section, agentValues) {
+        return same(valuesFromAgent(section, agentValues), get(section).baseline);
+      },
+      // touched lists the fields the draft itself changed.
+      touched(section) {
+        const s = get(section);
+        return s.draft ? touchedFields(section, s.baseline, s.draft) : [];
+      },
       // conflictFields lists the fields a conflict is about: the ones the
-      // draft changes that were also changed in the latest saved values.
+      // draft changes (with their coupled fields) that were also changed in
+      // the latest saved values.
       conflictFields(section) {
         const s = get(section);
         if (!s.latest || !s.draft) return [];
@@ -401,7 +419,9 @@
         if (!s.latest) throw new Error('There are no newer saved values to review against.');
         // Fields the user did not edit take the latest values, so they are not
         // sent back as stale "changes".
-        const edited = s.draft ? changedFields(section, s.baseline, s.draft) : [];
+        // Only fields the user actually changed: a field merely coupled to one
+        // (model beside reasoning) takes the latest value.
+        const edited = s.draft ? touchedFields(section, s.baseline, s.draft) : [];
         if (s.draft) {
           for (const key of Object.keys(s.latest)) {
             if (!edited.includes(key)) s.draft[key] = s.latest[key];
