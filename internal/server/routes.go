@@ -968,6 +968,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/dismiss", s.Handlers.Session.DismissAssistantLibraryProposal)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects", s.Handlers.Session.SearchAssistantLibrary)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}", s.Handlers.Session.GetAssistantLibraryProject)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/files", s.Handlers.Session.ListAssistantLibraryFiles)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/preview", s.Handlers.Session.PreviewAssistantLibraryFile)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/forget/review", s.Handlers.Session.ReviewAssistantLibraryForget)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/forget/commit", s.Handlers.Session.CommitAssistantLibraryForget)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/activation", s.Handlers.Session.GetAssistantLibraryActivation)

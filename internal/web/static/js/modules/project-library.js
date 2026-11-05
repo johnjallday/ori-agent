@@ -30,6 +30,7 @@ import {
   savedMetadataTime
 } from './project-library-browser.js';
 import { workspacePageURL } from './workspace-routes.js';
+import { mountLibraryFiles, boundedPreview } from './project-library-files.js';
 
 export { libraryFreshness, STALE_SCAN_MS } from './library-freshness.js';
 
@@ -3629,14 +3630,31 @@ export class ProjectLibraryPanel {
       if (state.tab === 'overview') await this.renderBrowserOverview(state.detail, content, turn);
       else if (state.tab === 'sessions')
         await this.renderBrowserSessions(state.detail, content, turn);
-      else
-        content.append(
-          node(
-            'p',
-            '',
-            'Files are not available in this browser yet. Discovery metadata is not permission to read a project folder. Use the explicit workspace or setup options in Overview; selecting this tab connects nothing.'
-          )
-        );
+      else {
+        const base = `/projects/${encodeURIComponent(state.detail.row.id)}`;
+        mountLibraryFiles(content, {
+          signal: turn.signal,
+          request: async (path, signal) => {
+            try {
+              return await this.request(`${base}/files?${new URLSearchParams({ path })}`, {
+                signal
+              });
+            } catch (error) {
+              error.code = error.payload?.code || error.code;
+              throw error;
+            }
+          },
+          preview: async (entry, signal) => {
+            const response = await this.fetchImpl(
+              this.url(
+                `${base}/preview?${new URLSearchParams({ path: entry.path, version: entry.version })}`
+              ),
+              { signal }
+            );
+            return boundedPreview(response, signal);
+          }
+        });
+      }
     } catch (error) {
       if (!turn.current()) return;
       content.replaceChildren(

@@ -177,6 +177,53 @@
   outline: 2px solid var(--assistant-amber-deep);
   outline-offset: 3px;
 }
+.project-library-file-tree {
+  list-style: none;
+  max-height: 24rem;
+  overflow: auto;
+  padding-left: 1rem;
+}
+.project-library-file-tree ul {
+  list-style: none;
+  padding-left: 1rem;
+}
+.project-library-file-tree button {
+  border: 0;
+  background: none;
+  color: var(--assistant-ink);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  padding: 0.3rem;
+}
+.project-library-file-tree button:hover {
+  text-decoration: underline;
+}
+.project-library-file-preview h4 {
+  font: inherit;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.project-library-file-tree small {
+  color: var(--assistant-muted);
+}
+.project-library-file-preview {
+  border-top: 1px solid var(--assistant-line);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.project-library-file-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24rem;
+  overflow: auto;
+  color: var(--assistant-ink);
+}
+.project-library-file-preview img {
+  max-width: 100%;
+  max-height: 24rem;
+  object-fit: contain;
+}
 @media (max-width: 900px) {
   .project-library-browser {
     grid-template-columns: minmax(0, 1fr);
