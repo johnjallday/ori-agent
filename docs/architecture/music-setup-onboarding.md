@@ -417,6 +417,29 @@ with no model for a new agent, or when a fill is refused, the child is created
 unstaffed exactly as before and the team step that follows still offers each
 role. See "Roles the create fills" in `docs/workspace-team-readiness.md`.
 
+**Bulk setup and repair add the shared assistant only when confirmed
+(library-setup-staffing, 2026-11).** Library *activation* is unchanged and
+connection-only: it never adds an agent, and its review token is never staffing
+approval. The map's setup sheet and the dashboard's **Connect selected** now read
+the Home's inert assistant plan before asking, say what confirming does ("creates
+your Home's shared REAPER Assistant once and adds that same assistant to each",
+or "adds the existing one"), and offer a plain **only put on the map** choice;
+when no assistant can be added (no or switched-off sharing, an older team, a
+missing model, a deleted shared assistant) they say why and offer only the
+placement. Confirming runs the staffing-only finish after each project's own
+connection, under the consent the owner already gave on the Home: it never
+grants, renews or replaces anything, and it writes no ticket, selects no mode,
+seeds no work, reads no project file and calls no model. A project already on the
+map without its assistant gets it only when the person ticks it (Home Details →
+**Set up projects…**, or **Add the shared REAPER Assistant** on the project's own
+empty roster, beside the ordinary Hire). A run ends in a results view that keeps
+the connection and the assistant as separate facts per project: a project
+connected before its assistant stopped is reported connected, never fully set
+up, with the place that settles it and an explicit **Try again**. Contract, states
+and API: `docs/architecture/project-library.md` ("Shared assistant on confirmed
+setup and repair") and `docs/api/API_REFERENCE.md`. The later song-assistant
+handoff builds its continuation and review on these outcomes.
+
 *The child's roster.* `GET /api/workspaces/{child}/roles` used to list the
 **Home's** roles for a linked child (the station declaration) and none of its own.
 It now lists the child's snapshotted project roles (project scope only) and only

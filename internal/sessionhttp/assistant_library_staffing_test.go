@@ -544,6 +544,85 @@ func TestFinishStaffing_AFailedWriteIsReportedAndRetrySafe(t *testing.T) {
 	}
 }
 
+// An approval for another blueprint is not this song's approval: not_shared, and
+// nothing is added or reserved.
+func TestFinishStaffing_AnApprovalForAnotherBlueprintIsNotShared(t *testing.T) {
+	f := newStaffingFixture(t, "two")
+	if _, err := f.staffs.Consents().Grant(openHomeID, agentworkspace.ProjectStaffingConsentGrant{
+		Source: agentworkspace.ProjectStaffingConsentFolderOffer, PluginID: "reaper-plugin", BlueprintID: "another-blueprint",
+		TeamDigest: openDigest, RoleIDs: []string{"reaper-assistant"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, payload := f.finish(t, openHomeID, "two", finishBody("r"))
+	if code != http.StatusConflict || payload["reason"] != openStaffingNotShare {
+		t.Fatalf("other blueprint = %d %v", code, payload)
+	}
+	if len(f.staffed) != 0 || len(f.sharedAgents()) != 0 {
+		t.Fatalf("staffed under another blueprint's approval: %v", f.staffed)
+	}
+}
+
+// A manual Hire (another tab) fills the role while the finish is creating the
+// shared assistant: the person's own agent stays, the song is reported as
+// having its own, and the abandoned reservation is given up, so that agent is
+// never adopted as the shared one later.
+func TestFinishStaffing_AManualHireRacingTheCreateWinsAndLeavesNoReservation(t *testing.T) {
+	f := newStaffingFixture(t, "two", "three")
+	f.grant(t)
+	inner := f.handler.assistantWorkspaceRoleStaffer
+	f.handler.assistantWorkspaceRoleStaffer = func(ctx context.Context, id string, fills []RoleStaffingFill) error {
+		// The person's own Hire lands first...
+		if err := inner(ctx, id, []RoleStaffingFill{{RoleID: "reaper-assistant", Mode: "create", Name: "Mix Buddy"}}); err != nil {
+			return err
+		}
+		// ...so the shared create is refused by the role binding.
+		return errors.New("role already filled")
+	}
+	code, payload := f.finish(t, openHomeID, "two", finishBody("r"))
+	staffing, _ := payload["staffing"].(map[string]any)
+	if code != http.StatusOK || staffing["state"] != openStaffingAlready || staffing["agent_name"] != "Mix Buddy" || staffing["shared"] != false {
+		t.Fatalf("race = %d %v", code, payload)
+	}
+	if role := f.consentRole(t); role.PendingName != "" || role.AgentName != "" || role.ReservedAt != nil {
+		t.Fatalf("the abandoned reservation was kept: %+v", role)
+	}
+	// A later manual Hire of the label's own name is never mistaken for the
+	// shared assistant.
+	f.handler.assistantWorkspaceRoleStaffer = inner
+	if err := inner(context.Background(), "song-three", []RoleStaffingFill{{RoleID: "reaper-assistant", Mode: "create", Name: "REAPER Assistant"}}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := f.finish(t, openHomeID, "three", finishBody("r3")); code != http.StatusOK {
+		t.Fatal("finish after a manual hire failed")
+	}
+	if role := f.consentRole(t); role.AgentName != "" {
+		t.Fatalf("a manual hire was adopted as the shared assistant: %+v", role)
+	}
+}
+
+// If the consent's record of the create is lost while the assistant is being
+// added (a concurrent change outside the turn), the finish says so: bound, but
+// not recorded as the shared one. It is never reported as added.
+func TestFinishStaffing_ACreateThatCannotBeRecordedIsUnsettled(t *testing.T) {
+	f := newStaffingFixture(t, "two")
+	f.grant(t)
+	inner := f.handler.assistantWorkspaceRoleStaffer
+	f.handler.assistantWorkspaceRoleStaffer = func(ctx context.Context, id string, fills []RoleStaffingFill) error {
+		if err := inner(ctx, id, fills); err != nil {
+			return err
+		}
+		return f.staffs.Consents().ReleaseReservation(openHomeID, "reaper-assistant", fills[0].Name)
+	}
+	code, payload := f.finish(t, openHomeID, "two", finishBody("r"))
+	if code != http.StatusConflict || payload["reason"] != staffingUnsettled {
+		t.Fatalf("unsettled = %d %v", code, payload)
+	}
+	if staffing, _ := payload["staffing"].(map[string]any); staffing["agent_name"] != "REAPER Assistant" {
+		t.Fatalf("the bound agent was not named: %v", payload)
+	}
+}
+
 // The reads never write: no reservation, no agent, no consent change.
 func TestFinishStaffing_StatusReadsAreInert(t *testing.T) {
 	f := newStaffingFixture(t, "two")

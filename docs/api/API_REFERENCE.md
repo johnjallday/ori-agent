@@ -2972,7 +2972,43 @@ Every route is for the authenticated owner of that exact Home (`404` otherwise) 
 { "request_id": "open-7f3a", "selected_file": "Song 001 alt.rpp" }
 ```
 
-Makes the project's workspace (or uses the one it already has), records File-only mode, fills its required project roles under the Home's standing staffing consent and seeds its first task. `selected_file` is only for a folder with several project files. Answers `200` with `{ entry_id, workspace_id, route, created, staffing, agent_name, first_task }`, where `staffing` is `added` (the shared assistant was created), `joined` (bound), `already` (the role was filled), `off` (switched off: no agent), `none` (no consent), `not_shared`, `consent_stale` or `assistant_missing`. The same `request_id` finishes a half-done open instead of making a second workspace. `409 needs_choice` with `project_files` when the folder has several project files; `409 consent_stale` (before anything is made) when the installed blueprint's team changed since the consent; `409 needs_model` before the workspace is made when the assistant would be created and no model is set. Search rows carry `can_open` for the rows this can open.
+Makes the project's workspace (or uses the one it already has), records File-only mode, fills its required project roles under the Home's standing staffing consent and seeds its first task. `selected_file` is only for a folder with several project files. Answers `200` with `{ entry_id, workspace_id, route, created, staffing, agent_name, first_task }`, where `staffing` is `added` (the shared assistant was created), `joined` (bound), `already` (the role was filled), `off` (switched off: no agent), `none` (no consent), `not_shared`, `consent_stale`, `assistant_missing`, or one of the stops listed under "Add the Shared Assistant to a Connected Project" (`failed`, `unsettled`, `reconcile`, `needs_model`, `invalid`, `read_only`, `unavailable`, `unavailable_target`): a failed write is reported as such, never as `none`. The same `request_id` finishes a half-done open instead of making a second workspace. `409 needs_choice` with `project_files` when the folder has several project files; `409 consent_stale` (before anything is made) when the installed blueprint's team changed since the consent; `409 needs_model` before the workspace is made when the assistant would be created and no model is set. Search rows carry `can_open` for the rows this can open.
+
+### Add the Shared Assistant to a Connected Project
+
+Library activation (`…/activation/review` and `…/commit`) only connects a project; it never adds an agent. A confirmed bulk setup, a repair of projects already on the map and the project's own empty roster add the Home's one shared assistant through this staffing-only finish, under the consent the owner already gave. It never grants or renews consent, turns sharing on, replaces a deleted assistant, writes a ticket, selects a mode, seeds work, reads a project file or calls a model. Bodies are strict (unknown, duplicate and trailing fields are `400`; `request_id` ≤ 120 characters).
+
+**Endpoint:** `GET /api/workspaces/{homeID}/assistant-program/library/staffing`
+
+Inert preview for projects not yet connected: `{ sharing, plan, agent_name, role_label, message }`. `plan` is `create` (the first project makes the shared assistant), `join` (it exists), or a reason it cannot be added (below), with `message`. It reserves nothing.
+
+**Endpoint:** `GET /api/workspaces/{homeID}/assistant-program/library/projects/{entryID}/staffing`
+
+Inert per-row status: `{ entry_id, connected, workspace_id, filled, shared, agent_name, role_label, plan, message }`. `shared` says whether a filled role is held by the shared assistant or the project's own agent; a role bound to a deleted shared assistant reads `filled: false` with `plan: assistant_missing`.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/library/projects/{entryID}/staffing`
+
+```json
+{ "request_id": "staffing-9c1", "team_digest": "…" }
+```
+
+`team_digest` is the `sharing.team_digest` the person confirmed; the consent must still be for exactly that team inside the operation (`409 sharing_changed` otherwise). Answers `200` `{ entry_id, workspace_id, staffing: { state, agent_name, role_label, shared, warning? } }` for `added`, `joined` and `already`, and `409 { reason, error, workspace_id, staffing, sharing }` for every other state. A `request_id` reused for another project or approval is `409 request_reused`; `409 not_connected` for a row not on the map. The finish converges on current state, so repeating a request (after a lost answer or a restart) only fills what is missing.
+
+| state | meaning |
+| --- | --- |
+| `added` / `joined` / `already` | role filled by a new shared agent / the existing one / was already filled (own or shared). `warning: copies_untracked` when the agent was recorded but tracking this project's copy failed |
+| `none` / `off` / `consent_stale` / `unavailable` / `invalid` | no consent / switched off / older team (consent, installed and the project's pinned digests differ) / no installed blueprint / unreadable record: review sharing on the Home |
+| `not_shared` | no shared role for this project, or the consent covers another blueprint |
+| `assistant_missing` | the recorded shared agent is gone: use the re-add above, then retry |
+| `needs_model` | a new assistant needs a configured model (checked before anything is reserved; joining needs none) |
+| `reconcile` | an agent no project proves the consent created already holds the reserved name: the owner renames or removes it, then retries |
+| `failed` | a write failed and the role is still empty; retry |
+| `unsettled` | the assistant is bound but not yet recorded as the shared one; retry completes it |
+| `read_only` / `unavailable_target` | the Home's integration is unavailable / the Home or project is not active or not the caller's |
+
+**Endpoints:** `GET` and `POST /api/workspaces/{workspaceID}/library-staffing`
+
+The same status and finish from a project's own workspace. The server resolves the workspace's Home and the one catalog row linked to it; the body of the POST is the same (`request_id`, `team_digest`). `GET` answers `{ eligible: false }` for a workspace that is not a library project of the caller's Home, has no or more than one catalog link; `POST` answers `409 not_eligible`. Another owner's workspace is `404`. When eligible, `GET` adds `home_id`, `home_name` and `team_digest` to the row status.
 
 ### The Staffing Switch
 

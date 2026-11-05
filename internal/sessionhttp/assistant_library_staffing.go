@@ -284,7 +284,14 @@ func (h *Handler) afterStaffingError(tx *projectstaffing.Tx, songID string, fill
 	staffs := h.projectStaffing
 	if song, err := staffs.Song(songID); err == nil {
 		if _, filled := song.FilledRoles()[fill.RoleID]; filled {
-			// Someone else filled it in between (a manual Hire, another tab).
+			// Someone else filled it in between (a manual Hire, another tab). A
+			// create that made nothing gives its reservation up, so that agent's
+			// name is never mistaken for the shared one later.
+			if fill.Mode == projectstaffing.ModeCreate && !staffs.AgentExists(fill.Name) {
+				if err := tx.ReleaseReservation(fill.RoleID, fill.Name); err != nil {
+					logger.Warn("Shared staffing: the reservation was not released", logger.Fields{"workspace_id": songID, "error": err.Error()})
+				}
+			}
 			return h.alreadyFilled(tx, songID, label)
 		}
 	}
