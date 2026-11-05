@@ -1304,6 +1304,20 @@
   color: var(--assistant-amber-deep);
   font-weight: 600;
 }
+/* A relinked song's "Found at … (was …)" line: muted, one line. The text is
+   already shortened from the left so the song's folder name stays visible. */
+.project-library-moved {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--assistant-muted);
+  font-style: italic;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.project-library-detail-dialog li .project-library-moved {
+  margin-top: 0.15rem;
+}
 .project-library-digest {
   margin: -0.5rem 0 1rem;
   font-weight: 600;

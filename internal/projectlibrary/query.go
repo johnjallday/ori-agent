@@ -59,6 +59,50 @@ type SearchRow struct {
 	// it is catalog-only with an available source in a format the installed
 	// project blueprint opens. The open action repeats every check.
 	CanOpen bool `json:"can_open,omitempty"`
+	// Moved is the shelf's "found at a new place" note for a song a scan
+	// relinked (library-upkeep FR12). Relative folders under approved roots
+	// only, shown until the next complete scan of that root; the Manager's
+	// projections drop it.
+	Moved *RowMove `json:"moved,omitempty"`
+}
+
+type RowMove struct {
+	RootID         string `json:"root_id"`
+	RelativeFolder string `json:"relative_folder"`
+	FromRootID     string `json:"from_root_id"`
+	FromFolder     string `json:"from_relative_folder"`
+}
+
+// newestCompleteScans maps each root to its newest complete scan.
+func newestCompleteScans(doc Document) map[string]string {
+	newest := map[string]string{}
+	finished := map[string]time.Time{}
+	for _, scan := range doc.Scans {
+		if scan.Status != "complete" || scan.FinishedAt == nil {
+			continue
+		}
+		if at, seen := finished[scan.RootID]; !seen || scan.FinishedAt.After(at) {
+			newest[scan.RootID], finished[scan.RootID] = scan.ID, *scan.FinishedAt
+		}
+	}
+	return newest
+}
+
+// moveNote is the row's move note: an observation that the root's newest
+// complete scan relinked, on a connected root, still usable. rootID scopes it
+// like the rest of a root-filtered row.
+func moveNote(entry Entry, newest map[string]string, roots map[string]Root, inactive map[string]bool, rootID string) *RowMove {
+	for _, observed := range entry.Observations {
+		move := observed.MovedFrom
+		if move == nil || (rootID != "" && observed.RootID != rootID) || move.ScanID != observed.ScanID ||
+			newest[observed.RootID] != observed.ScanID || roots[observed.RootID].RevokedAt != nil ||
+			inactive[observed.RootID] || (observed.Availability != "available" && observed.Availability != "ambiguous") {
+			continue
+		}
+		return &RowMove{RootID: observed.RootID, RelativeFolder: observed.RelativeFolder,
+			FromRootID: move.RootID, FromFolder: move.RelativeFolder}
+	}
+	return nil
 }
 
 type SearchPage struct {
@@ -141,6 +185,7 @@ func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
 		factsOn := state.GetSongDetailsConsent().Active()
 		row := s.projectSearchRow(scope, entry, roots, linked, inactive, factsOn)
 		row.applySessionActivity(latestSessionActivity(doc.Sessions)[entry.ID])
+		row.Moved = moveNote(entry, newestCompleteScans(doc), roots, inactive, "")
 		result := Detail{Row: row,
 			EntryRevision: entry.Revision, Fields: entry.Fields, Revision: doc.Revision, ProviderReadOnly: !state.PluginAvailable}
 		result.TotalSources = len(entry.Observations)
@@ -336,6 +381,7 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 	}
 	sessionActivity := latestSessionActivity(doc.Sessions)
 	factsOn := state.GetSongDetailsConsent().Active()
+	newest := newestCompleteScans(doc)
 	rows := make([]SearchRow, 0, len(doc.Entries))
 	for _, entry := range doc.Entries {
 		// A root filter scopes the displayed source, format, availability and
@@ -343,6 +389,7 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 		// match one root while showing another root's unrelated format.
 		row := s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, query.RootID, factsOn)
 		row.applySessionActivity(sessionActivity[entry.ID])
+		row.Moved = moveNote(entry, newest, roots, inactive, query.RootID)
 		if query.matches(row, entry) {
 			rows = append(rows, row)
 		}

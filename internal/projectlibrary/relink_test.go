@@ -176,6 +176,47 @@ func TestRelink_RenamedFolderKeepsItsRecordFieldsAndHistory(t *testing.T) {
 	}
 }
 
+// FR12: the shelf row and the detail carry the move note only while the
+// root's newest complete scan is the one that found the move.
+func TestRelink_ShelfRowAndDetailShowTheMoveUntilTheNextScan(t *testing.T) {
+	r, scope, _, tree, root := connectedMusicRoot(t)
+	reviewedRootScan(t, r, scope, root, "note-initial")
+	if err := os.Rename(tree.single, filepath.Join(tree.root, "Night Drive")); err != nil {
+		t.Fatal(err)
+	}
+	reviewedRootScan(t, r, scope, root, "note-moved")
+	rowFor := func(query Search) SearchRow {
+		t.Helper()
+		query.PageSize, query.Sort, query.Text = 25, "name", "Night Drive"
+		page, err := r.library.Query(scope, query)
+		if err != nil || len(page.Rows) != 1 {
+			t.Fatalf("query: %+v %v", page, err)
+		}
+		return page.Rows[0]
+	}
+	row := rowFor(Search{})
+	want := RowMove{RootID: root.ID, RelativeFolder: "Night Drive", FromRootID: root.ID, FromFolder: "Single"}
+	if row.Moved == nil || *row.Moved != want {
+		t.Fatalf("row move note: %+v", row.Moved)
+	}
+	if filtered := rowFor(Search{RootID: root.ID}); filtered.Moved == nil {
+		t.Fatal("a root filter on the song's own root hid its note")
+	}
+	detail, err := r.library.Detail(scope, row.ID)
+	if err != nil || detail.Row.Moved == nil || *detail.Row.Moved != want {
+		t.Fatalf("detail move note: %+v %v", detail.Row.Moved, err)
+	}
+	encoded, err := json.Marshal(row)
+	if err != nil || strings.Contains(string(encoded), tree.root) {
+		t.Fatalf("row leaks an absolute path: %s", encoded)
+	}
+	// The next complete scan of the root: the note is gone, the record stays.
+	reviewedRootScan(t, r, scope, root, "note-next")
+	if again := rowFor(Search{}); again.Moved != nil || again.ID != row.ID {
+		t.Fatalf("note outlived the next complete scan: %+v", again)
+	}
+}
+
 // A root scan reads songs one folder deep, so a song moved into a new
 // subfolder is first "no longer found"; the scan of that subfolder then
 // relinks the record an earlier scan already marked unavailable.

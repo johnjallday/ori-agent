@@ -271,6 +271,9 @@ export function libraryDigestText(digest, roots = []) {
   const projects = count(digest.projects);
   const parts = [`${projects} ${projects === 1 ? 'project' : 'projects'}`];
   if (count(digest.new) > 0) parts.push(`${count(digest.new)} new`);
+  // A moved song kept its record; a folder that matched more than one record
+  // was left alone rather than guessed at.
+  if (count(digest.moved) > 0) parts.push(`${count(digest.moved)} moved`);
   // Each song is in one bucket: already connected, can be set up, or an
   // unsupported format. A file choice is part of "can be set up", not another
   // bucket, so the parts never add up to more than the projects found.
@@ -288,10 +291,54 @@ export function libraryDigestText(digest, roots = []) {
       parts.push(`${count(digest.unsupported_format)} unsupported format`);
   }
   if (count(digest.unavailable) > 0) parts.push(`${count(digest.unavailable)} no longer found`);
+  if (count(digest.relink_conflicts) > 0)
+    parts.push(`${count(digest.relink_conflicts)} could not be matched`);
   let text = `${name}: ${parts.join(', ')}.`;
   if (digest.coverage === 'partial')
     text += ' Partial scan: folders it did not reach were left unchanged.';
   return text;
+}
+
+const MOVED_PATH_MAX = 40;
+
+// Long folders lose their start, never their end: the song's own folder name
+// is the part worth reading.
+function leftTruncate(text, max = MOVED_PATH_MAX) {
+  const value = String(text);
+  return value.length > max ? `…${value.slice(-(max - 1))}` : value;
+}
+
+// movedNoteText is the one-line note on a song a scan relinked (FR12):
+// "Found at <new> (was <old>)", relative folders only. A move between two
+// approved folders names each folder's last path segment too.
+export function movedNoteText(moved, roots = []) {
+  if (!moved || typeof moved !== 'object') return { text: '', full: '' };
+  const list = Array.isArray(roots) ? roots : [];
+  const rootName = id =>
+    String(list.find(item => item?.id === id)?.path || '')
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop() || 'an approved folder';
+  const crossRoot = moved.root_id !== moved.from_root_id;
+  const place = (rootID, folder) => {
+    const relative = typeof folder === 'string' ? folder : '';
+    if (!crossRoot) return relative || rootName(rootID);
+    return relative ? `${rootName(rootID)}/${relative}` : rootName(rootID);
+  };
+  const to = place(moved.root_id, moved.relative_folder);
+  const from = place(moved.from_root_id, moved.from_relative_folder);
+  return {
+    text: `Found at ${leftTruncate(to)} (was ${leftTruncate(from)})`,
+    full: `Found at ${to} (was ${from})`
+  };
+}
+
+function movedNoteNode(moved, roots) {
+  const note = movedNoteText(moved, roots);
+  if (!note.text) return null;
+  const element = node('small', 'project-library-moved', note.text);
+  element.title = note.full;
+  return element;
 }
 
 const RUN_SKIP_REASONS = {
@@ -1928,10 +1975,10 @@ export class ProjectLibraryPanel {
         pick.append(checkbox);
       }
       const name = node('td');
-      name.append(
-        node('strong', '', row.name),
-        node('small', '', row.next_action || 'No next action saved')
-      );
+      name.append(node('strong', '', row.name));
+      const moved = movedNoteNode(row.moved, this.state?.roots);
+      if (moved) name.append(moved);
+      name.append(node('small', '', row.next_action || 'No next action saved'));
       const saved = lastSavedLabel(row.last_saved_at);
       const facts = songFactsLabel(row.facts);
       if (saved || facts) name.append(savedLine('project-library-saved', saved, facts));
@@ -3111,14 +3158,24 @@ export class ProjectLibraryPanel {
         `${label(detail.row.stage)} · ${label(detail.row.status)} · ${label(detail.row.connection)} · ${label(detail.row.availability || detail.row.last_observed_availability)}`
       );
       const sourceList = node('ul');
-      for (const source of detail.sources || [])
-        sourceList.append(
-          node(
-            'li',
-            '',
-            `${source.relative_folder || 'Selected root'} · ${label(source.format)} · ${label(source.last_observed_availability)}${source.total_alternates ? ` · ${source.total_alternates} project-file choices (selection requires a separate review)` : ''}`
-          )
+      for (const source of detail.sources || []) {
+        const item = node(
+          'li',
+          '',
+          `${source.relative_folder || 'Selected root'} · ${label(source.format)} · ${label(source.last_observed_availability)}${source.total_alternates ? ` · ${source.total_alternates} project-file choices (selection requires a separate review)` : ''}`
         );
+        // The move note sits under the folder it names.
+        const moved = detail.row?.moved;
+        if (
+          moved &&
+          moved.root_id === source.root_id &&
+          moved.relative_folder === source.relative_folder
+        ) {
+          const note = movedNoteNode(moved, this.state?.roots);
+          if (note) item.append(note);
+        }
+        sourceList.append(item);
+      }
       if (!sourceList.children.length)
         sourceList.append(
           node('li', '', 'An exact existing link is recorded; no folder was scanned.')

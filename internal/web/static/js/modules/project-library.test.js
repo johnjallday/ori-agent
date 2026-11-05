@@ -5,6 +5,7 @@ import {
   activationStateLabel,
   projectTeamURL,
   libraryDigestText,
+  movedNoteText,
   libraryOpenAction,
   libraryOpenChoices,
   libraryOpenRoute,
@@ -3804,6 +3805,107 @@ test('each library row shows its save time and song facts on one line', () => {
   } finally {
     globalThis.document = previousDocument;
   }
+});
+
+test('a relinked row shows where it was found, under its title', () => {
+  const previousDocument = globalThis.document;
+  const makeElement = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    title: '',
+    dataset: {},
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {},
+    setAttribute() {}
+  });
+  const tbody = makeElement('tbody');
+  globalThis.document = {
+    createElement: makeElement,
+    getElementById: id => (id === 'projectLibraryRows' ? tbody : null)
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = { roots: [{ id: 'root-1', path: '/Users/owner/Albums' }] };
+    panel.rows = [
+      {
+        id: 'moved',
+        name: 'Night Drive',
+        moved: {
+          root_id: 'root-1',
+          relative_folder: 'Night Drive',
+          from_root_id: 'root-1',
+          from_relative_folder: 'untitled 4'
+        }
+      },
+      { id: 'still', name: 'Still' }
+    ];
+    panel.renderRows();
+    const cells = tbody.children.map(tr => tr.children[1].children);
+    assert.equal(cells[0][0].textContent, 'Night Drive');
+    assert.equal(cells[0][1].className, 'project-library-moved');
+    assert.equal(cells[0][1].textContent, 'Found at Night Drive (was untitled 4)');
+    assert.equal(
+      cells[1].some(child => child.className === 'project-library-moved'),
+      false,
+      'a song that did not move has no note'
+    );
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('the moved note keeps the end of long folders and names roots for cross-root moves', () => {
+  const roots = [
+    { id: 'a', path: '/Users/owner/Albums' },
+    { id: 'b', path: '/Volumes/Archive/Demos' }
+  ];
+  assert.equal(JSON.stringify(movedNoteText(null, roots)), JSON.stringify({ text: '', full: '' }));
+  const long = movedNoteText(
+    {
+      root_id: 'a',
+      relative_folder: 'Released/2026/The Very Long Collection Name/Night Drive',
+      from_root_id: 'a',
+      from_relative_folder: 'Night Drive'
+    },
+    roots
+  );
+  assert.match(long.text, /^Found at …[^(]*\/Night Drive \(was Night Drive\)$/);
+  assert.equal(long.text.split(' (was')[0].length <= 'Found at '.length + 40, true);
+  assert.equal(
+    long.full,
+    'Found at Released/2026/The Very Long Collection Name/Night Drive (was Night Drive)'
+  );
+  const across = movedNoteText(
+    { root_id: 'b', relative_folder: 'Song', from_root_id: 'a', from_relative_folder: 'Song' },
+    roots
+  );
+  assert.equal(across.text, 'Found at Demos/Song (was Albums/Song)');
+  const rootItself = movedNoteText(
+    { root_id: 'b', relative_folder: '', from_root_id: 'gone', from_relative_folder: 'Song' },
+    roots
+  );
+  assert.equal(rootItself.text, 'Found at Demos (was an approved folder/Song)');
+});
+
+test('the digest sentence counts moved songs and folders that could not be matched', () => {
+  const roots = [{ id: 'root-1', path: '/Users/owner/Albums' }];
+  const text = libraryDigestText(
+    { ...DIGEST, new: 1, moved: 3, unavailable: 1, relink_conflicts: 2 },
+    roots
+  );
+  assert.equal(
+    text,
+    'Albums: 6 projects, 1 new, 3 moved, 5 can be set up, 1 unsupported format, 1 no longer found, 2 could not be matched.'
+  );
+  const quiet = libraryDigestText({ ...DIGEST, moved: 0, relink_conflicts: -1 }, roots);
+  assert.equal(/moved|matched/.test(quiet), false, 'zero and forged counts are not shown');
 });
 
 test('the Manager section is titled by its role and leads with the brief and its source', () => {
