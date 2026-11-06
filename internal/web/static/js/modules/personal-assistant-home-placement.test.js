@@ -133,7 +133,7 @@ function controller() {
   );
   vm.runInContext(
     code.replaceAll('export function ', 'function ') +
-      '\nglobalThis.harness = { startOneCardSetup, actOnSourceCreationReview, observeSourceCreationResult, renderSourceCreationReview, navigateFolderHomeMap, sourceReviewMapAvailable, review: () => sourceCreationReview };',
+      '\nglobalThis.harness = { startOneCardSetup, chooseProjectEntry, actOnSourceCreationReview, observeSourceCreationResult, renderSourceCreationReview, navigateFolderHomeMap, sourceReviewMapAvailable, review: () => sourceCreationReview };',
     context
   );
   return { ...context.harness, context, state, effects, placement: () => placement };
@@ -180,6 +180,74 @@ test('an existing Home starts in automatic mode and confirmation cannot move or 
   assert.equal(c.effects.setup, 1, 'only the canonical source operation is dispatched');
   assert.equal(c.effects.position, 0);
   assert.equal(c.effects.retries, 0);
+});
+
+test('music later-project brief stays with the source even before blur, without changing fixed Home identity', async () => {
+  const c = controller();
+  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.plan.brief_default = 'Later goal';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  await c.actOnSourceCreationReview(c.review(), {
+    action: 'dirty',
+    field: 'mission',
+    value: 'Keep my unsent brief'
+  });
+  assert.equal(c.state.brief.value, 'Keep my unsent brief');
+  assert.equal(c.state.brief.offerId, 'offer');
+  assert.equal(c.review().dirty, false);
+  assert.equal(c.state.offer.plan.destination.name, 'Music Home');
+  assert.equal(c.effects.setup, 0);
+});
+
+test('music project-file editing delegates to the source and cannot edit an accepted run', async () => {
+  const c = controller();
+  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.plan.entry_candidates = ['Song.rpp', 'Mix.rpp'];
+  c.state.offer.plan.entry_name = 'Song.rpp';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  const calls = [];
+  c.context.postOffer = async (id, action, body) => {
+    calls.push({ id, action, body });
+    return { ok: true };
+  };
+  await c.chooseProjectEntry('unknown.rpp');
+  assert.equal(calls.length, 0);
+  await c.chooseProjectEntry('Mix.rpp');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, 'offer');
+  assert.equal(calls[0].action, 'entry');
+  assert.equal(calls[0].body.plan_digest, 'digest');
+  assert.equal(calls[0].body.entry_name, 'Mix.rpp');
+  c.review().pending = true;
+  await c.chooseProjectEntry('Mix.rpp');
+  assert.equal(calls.length, 1);
+  assert.equal(c.effects.setup, 0);
+});
+
+test('a late music file-choice reply cannot clear the replacement conversation busy state', async () => {
+  const c = controller();
+  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.plan.entry_candidates = ['Song.rpp', 'Mix.rpp'];
+  c.state.offer.plan.entry_name = 'Song.rpp';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  c.context.reviewResponseGuard = () => {
+    const generation = c.state.reviewGeneration;
+    return () => generation === c.state.reviewGeneration;
+  };
+  let complete;
+  c.context.postOffer = () =>
+    new Promise(resolve => {
+      complete = resolve;
+    });
+  const pending = c.chooseProjectEntry('Mix.rpp');
+  c.state.reviewGeneration++;
+  c.state.offer = { id: 'replacement' };
+  c.state.busy = true;
+  complete({ ok: false, payload: { error: 'late refusal' } });
+  await pending;
+  assert.equal(c.state.busy, true);
+  assert.equal(c.state.offer.id, 'replacement');
+  assert.equal(c.effects.setup, 0);
 });
 
 test('Home review requires a canonical Home destination, not a name', () => {

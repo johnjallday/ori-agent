@@ -16,10 +16,17 @@ test('music wizard opens only on review, preserves the creator and closes withou
   mkdirSync(`${evidence}/wizard`, { recursive: true });
   const before = await musicHomeSnapshot(request);
   let setupPosts = 0;
+  let setupBrief = '';
+  let setupEntry = '';
+  let selectedEntry = '';
   let inference = 0;
   page.on('request', request => {
     if (request.method() !== 'POST') return;
-    if (/folder-digest\/offers\/[^/]+\/setup$/.test(request.url())) setupPosts++;
+    if (/folder-digest\/offers\/[^/]+\/setup$/.test(request.url())) {
+      setupPosts++;
+      setupBrief = request.postDataJSON().brief;
+      setupEntry = request.postDataJSON().entry_name;
+    }
     if (/\/(turns|chat|completions|from-inbox)$/.test(request.url())) inference++;
   });
   await page.goto('/?panel=today&folder=show');
@@ -62,6 +69,8 @@ test('music wizard opens only on review, preserves the creator and closes withou
   await expect(review).toContainText('Ori Music Demo');
   await page.screenshot({ path: `${evidence}/wizard/review.png` });
   await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const brief = review.getByRole('textbox', { name: 'Later project goal', exact: true });
+  await brief.fill('Keep this later-project arrangement brief.');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(entry).toBeFocused();
@@ -72,6 +81,28 @@ test('music wizard opens only on review, preserves the creator and closes withou
   await expect(
     review.getByRole('button', { name: 'Use automatic placement', exact: true })
   ).toHaveAttribute('aria-pressed', 'true');
+  await expect(brief).toHaveValue('Keep this later-project arrangement brief.');
+  if (process.env.MUSIC_HOME_PLACEMENT_TWO_FILES === '1') {
+    await review
+      .getByRole('button', { name: 'Review choices & requirements', exact: true })
+      .click();
+    const choice = dialog.locator('#personalAssistantFolderEntryChoice');
+    const alternative = choice.getByRole('radio', { checked: false }).first();
+    selectedEntry = await alternative.inputValue();
+    const saved = page.waitForResponse(
+      response => response.url().endsWith('/entry') && response.request().method() === 'POST'
+    );
+    await alternative.check();
+    expect((await saved).ok()).toBe(true);
+    await page.screenshot({ path: `${evidence}/wizard/choices.png` });
+    expect(setupPosts).toBe(0);
+    expect(await musicHomeSnapshot(request)).toEqual(before);
+    await dialog.getByRole('button', { name: 'Close setup review', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await entry.click();
+    await expect(brief).toHaveValue('Keep this later-project arrangement brief.');
+    await page.screenshot({ path: `${evidence}/wizard/edited-return.png` });
+  }
   // Repeated source entry is presentation only and cannot repeat confirmation.
   await entry.dispatchEvent('click');
   await expect(page.locator('.modal.show')).toHaveCount(1);
@@ -80,6 +111,8 @@ test('music wizard opens only on review, preserves the creator and closes withou
     timeout: 60_000
   });
   expect(setupPosts).toBe(1);
+  expect(setupBrief).toBe('Keep this later-project arrangement brief.');
+  if (selectedEntry) expect(setupEntry).toBe(selectedEntry);
   expect(inference).toBe(0);
   const after = await musicHomeSnapshot(request);
   const homes = after.workspaces.filter((workspace: any) => workspace.kind === 'group');
@@ -90,6 +123,131 @@ test('music wizard opens only on review, preserves the creator and closes withou
   ).toHaveLength(0);
   expect((await musicHomeResourceCounts(request, homes[0].id)).projects).toHaveLength(1);
   await page.screenshot({ path: `${evidence}/wizard/result.png` });
+});
+
+test('music prerequisites use one sibling review, explicit approval, and a fresh source return', async ({
+  page,
+  request
+}) => {
+  const kind = process.env.MUSIC_HOME_WIZARD_PREREQUISITE;
+  const song = process.env.MUSIC_HOME_PLACEMENT_SONG;
+  test.skip(!kind || !song, 'requires an explicit disposable missing-prerequisite case');
+  test.setTimeout(180_000);
+  mkdirSync(`${evidence}/prerequisites-${kind}`, { recursive: true });
+  const before = await musicHomeSnapshot(request);
+  const plugins = async () =>
+    (await (await request.get('/api/plugins')).json()).plugins
+      .map((plugin: any) => [plugin.name, plugin.enabled, plugin.version])
+      .sort();
+  const installed = await plugins();
+  const confirmations: any[] = [];
+  let setups = 0;
+  page.on('request', request => {
+    if (request.method() !== 'POST') return;
+    if (request.url().endsWith('/prerequisites') && request.postDataJSON()?.confirm)
+      confirmations.push(request.postDataJSON());
+    if (/\/(setup|decide|turns|chat|completions)$/.test(request.url())) setups++;
+  });
+  await page.goto('/?panel=today&folder=show');
+  await page.locator('.folder-path-entry__input:visible').first().fill(song!);
+  await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
+  await page
+    .locator('[data-source-setup-summary]')
+    .getByRole('button', { name: 'Review setup', exact: true })
+    .click();
+  const dialog = page.locator('#addFolderModal');
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole('heading', { name: 'Review music folder setup', exact: true })
+  ).toBeFocused();
+  const choices = dialog.getByRole('button', {
+    name: 'Review choices & requirements',
+    exact: true
+  });
+  if (await choices.isVisible()) await choices.click();
+  const requirements = dialog.locator(`[data-requirement-kind="${kind}"]`);
+  const install = requirements.getByRole('button', { name: /^Install / });
+  await expect(install).toBeEnabled({ timeout: 30_000 });
+  await install.click();
+  const sibling = page.locator('#pluginSetupWizard');
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(sibling).toBeVisible();
+  await expect(
+    sibling.getByRole('button', { name: 'Confirm installation', exact: true })
+  ).toBeEnabled({ timeout: 60_000 });
+  await page.screenshot({ path: `${evidence}/prerequisites-${kind}/review.png` });
+  await sibling.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(sibling).toBeHidden();
+  await expect(dialog).toBeVisible();
+  expect(confirmations).toHaveLength(0);
+  expect(setups).toBe(0);
+  expect(await plugins()).toEqual(installed);
+  expect(await musicHomeSnapshot(request)).toEqual(before);
+  await install.click();
+  await sibling.getByRole('button', { name: 'Confirm installation', exact: true }).click();
+  if (kind === 'integration') {
+    await expect(
+      sibling.getByRole('button', { name: 'Confirm enablement', exact: true })
+    ).toBeEnabled({ timeout: 60_000 });
+    await sibling.getByRole('button', { name: 'Confirm enablement', exact: true }).click();
+  }
+  await expect(sibling.getByRole('button', { name: 'Back to setup', exact: true })).toBeVisible({
+    timeout: 60_000
+  });
+  await sibling.getByRole('button', { name: 'Back to setup', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(sibling).toBeHidden();
+  await expect(dialog).toContainText('Nothing to download');
+  expect(confirmations).toHaveLength(kind === 'integration' ? 2 : 1);
+  expect(setups).toBe(0);
+  expect(await musicHomeSnapshot(request)).toEqual(before);
+  const recovered = await plugins();
+  expect(recovered.every((plugin: any) => plugin[1])).toBe(true);
+  expect(
+    recovered.find(
+      (plugin: any) =>
+        plugin[0] === (kind === 'integration' ? 'reaper-plugin' : 'music-project-management')
+    )?.[2]
+  ).toBe(kind === 'integration' ? '0.9.0' : '0.3.0');
+  await page.screenshot({ path: `${evidence}/prerequisites-${kind}/returned.png` });
+  await dialog.getByRole('button', { name: 'Close setup review', exact: true }).click();
+  expect(await musicHomeSnapshot(request)).toEqual(before);
+  expect(setups).toBe(0);
+});
+
+test('music guided setup releases the shell and returns to the same observed source', async ({
+  page,
+  request
+}) => {
+  const song = process.env.MUSIC_HOME_PLACEMENT_SONG;
+  test.skip(!song, 'requires a fresh isolated candidate music sandbox');
+  test.setTimeout(120_000);
+  const before = await musicHomeSnapshot(request);
+  await page.goto('/?panel=today&folder=show');
+  await page.locator('.folder-path-entry__input:visible').first().fill(song!);
+  await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
+  await page
+    .locator('[data-source-setup-summary]')
+    .getByRole('button', { name: 'Review setup', exact: true })
+    .click();
+  const source = page.locator('#addFolderModal');
+  await source.getByRole('button', { name: 'Review choices & requirements', exact: true }).click();
+  const offer = await page.evaluate(() => (window as any).PersonalAssistantFolder.current().id);
+  await source.getByRole('button', { name: 'Adjust…', exact: true }).click();
+  const guided = page.locator('#specialistSetupJourneyModal');
+  await expect(guided).toBeVisible();
+  await expect(source).toBeHidden();
+  await expect(page.locator('.modal.show')).toHaveCount(1);
+  expect(await musicHomeSnapshot(request)).toEqual(before);
+  await page.locator('#specialistSetupJourneyClose').click();
+  await expect(guided).toBeHidden();
+  await expect(source).toBeVisible();
+  await expect(page.locator('.modal.show')).toHaveCount(1);
+  expect(await page.evaluate(() => (window as any).PersonalAssistantFolder.current().id)).toBe(
+    offer
+  );
+  expect(await musicHomeSnapshot(request)).toEqual(before);
 });
 
 test('Downloads review uses the shared dialog without creating resources', async ({ page }) => {

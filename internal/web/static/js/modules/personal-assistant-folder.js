@@ -3035,13 +3035,18 @@ const pluginSetupWizard = createPluginSetupWizard({
       return lifecycle?.trustSummary?.(lifecycle.trustModel(report)) || '';
     }
   },
-  onClose: ({ changed }) => {
-    if (changed)
-      void window.PersonalAssistantFolderSetup?.recheckReview?.(
+  onClose: async ({ changed }) => {
+    const returning = musicPrerequisiteReturn;
+    musicPrerequisiteReturn = null;
+    if (changed && (!returning || musicDialogCurrent(returning)))
+      await window.PersonalAssistantFolderSetup?.recheckReview?.(
         state.offer,
         document.activeElement
       );
+    // The sibling finishes its own focus restoration before we reacquire.
+    await Promise.resolve();
     render();
+    if (returning && musicDialogCurrent(returning)) musicSetupDialog().open(returning);
   }
 });
 
@@ -4027,6 +4032,10 @@ function renderOffer(place) {
   renderHire(els, view.hire, state.offer);
   const confirmTitle = document.getElementById('personalAssistantFolderConfirmTitle');
   if (confirmTitle)
+    confirmTitle.textContent = musicSetupOffer(state.offer)
+      ? 'Choices & requirements'
+      : 'Confirm setup';
+  if (confirmTitle)
     confirmTitle.hidden = Boolean(
       receipt.visible || view.setup || !folderOfferWaiting(state.offer)
     );
@@ -4040,7 +4049,7 @@ function renderOffer(place) {
     prerequisites,
     {
       blocked: state.busy || conversationReviewLoading(),
-      openWizard: (kind, trigger) => pluginSetupWizard.open(pluginSetupRows(), { kind, trigger })
+      openWizard: (kind, trigger) => void openSourcePluginWizard(kind, trigger)
     }
   );
   pluginSetupWizard.sync();
@@ -4078,7 +4087,12 @@ function renderOffer(place) {
         state.busy ||
         conversationReviewLoading() ||
         prerequisites.active() ||
-        Boolean(sourceCreationReview) ||
+        Boolean(
+          sourceCreationReview &&
+          (!musicSetupOffer(state.offer) ||
+            sourceCreationReview.pending ||
+            sourceCreationReview.result)
+        ) ||
         Boolean(state.offer?.needs_pick),
       onChange: name => void chooseProjectEntry(name)
     }
@@ -4344,7 +4358,10 @@ function renderOffer(place) {
               ? 'btn btn-sm btn-outline-secondary'
               : 'btn btn-sm btn-link';
         button.dataset.folderAction = action.id;
-        button.textContent = action.label;
+        button.textContent =
+          musicSetupOffer(state.offer) && action.oneCard && !state.offer.setup
+            ? 'Return to setup review'
+            : action.label;
         button.disabled = actionBusy;
         button.addEventListener('click', () => runAction(action));
         // Remove sits beside the headline, where a way out is looked for; the
@@ -4572,6 +4589,24 @@ async function repickConversationReview(offer) {
 
 function runAction(action) {
   if (conversationReviewLoading()) return;
+  if (
+    !action.sourceHandoff &&
+    musicSetupOffer(state.offer) &&
+    (action.journey ||
+      action.adjustStructure ||
+      action.structureGroup ||
+      action.href ||
+      action.repick) &&
+    musicSetupDialog().owns(musicDialogReference)
+  ) {
+    const ref = musicDialogReference;
+    void musicSetupDialog()
+      .suspend()
+      .then(hidden => {
+        if (hidden && musicDialogCurrent(ref)) runAction({ ...action, sourceHandoff: true });
+      });
+    return;
+  }
   if (action.homeMap) {
     void navigateFolderHomeMap(action.homeID, action.homeMap);
     return;
@@ -4981,8 +5016,45 @@ export function musicSetupOffer(offer) {
 let musicDialog = null;
 let musicDialogReference = null;
 let musicSummary = null;
+let musicPrerequisiteReturn = null;
+async function openSourcePluginWizard(kind, trigger) {
+  const ref = musicDialogReference;
+  if (musicSetupOffer(state.offer) && musicSetupDialog().owns(ref)) {
+    if (!(await musicSetupDialog().suspend()) || !musicDialogCurrent(ref)) return;
+    musicPrerequisiteReturn = ref;
+  }
+  pluginSetupWizard.open(pluginSetupRows(), { kind, trigger });
+}
 function musicSetupDialog() {
   return (musicDialog ||= createSourceSetupDialog());
+}
+let musicGuidedReturnCleanup = null;
+function returnFromMusicGuidedSetup(ref) {
+  musicGuidedReturnCleanup?.();
+  const modal = document.getElementById('specialistSetupJourneyModal');
+  if (!modal || !musicDialogCurrent(ref)) return;
+  const cleanup = () => {
+    modal.removeEventListener('hidden.bs.modal', returned);
+    musicGuidedReturnCleanup = null;
+  };
+  const returned = () =>
+    setTimeout(async () => {
+      if (!musicDialogCurrent(ref)) {
+        cleanup();
+        return;
+      }
+      // Guided Setup also hides temporarily for its own child editors. Do not
+      // compete with them; wait for its eventual real dismissal.
+      if (document.querySelector('dialog[open], .modal.show')) return;
+      if (!(await pollSetup())) return;
+      if (!musicDialogCurrent(ref)) {
+        cleanup();
+        return;
+      }
+      if (musicSetupDialog().open(ref)) cleanup();
+    }, 0);
+  musicGuidedReturnCleanup = cleanup;
+  modal.addEventListener('hidden.bs.modal', returned);
 }
 function musicDialogCurrent(ref) {
   return (
@@ -5284,6 +5356,10 @@ function renderSourceCreationReview() {
   }
   host.hidden = false;
   review.panel ||= mountPlacementPanel(host, intent => {
+    // Keep supported unsent brief text with the source even when Escape closes
+    // the shell before the browser delivers change/blur. Never a second draft.
+    if (intent.action === 'dirty' && intent.field === 'mission' && musicSetupOffer(state.offer))
+      intent.value = host.querySelector('[data-placement-field="mission"]')?.value;
     void actOnSourceCreationReview(review, intent);
   });
   if (
@@ -5387,10 +5463,13 @@ function renderSourceCreationReview() {
     nameMaxLength: 120,
     goalMaxLength: 2000,
     canEditName: Boolean(offer.software && offer.plan?.visual?.entity?.operation === 'create'),
-    canEditGoal: !review.home && Boolean(offer.plan?.brief_default),
+    canEditGoal: (!review.home || musicSetupOffer(offer)) && Boolean(offer.plan?.brief_default),
     subjectKind: review.home ? 'group' : undefined,
     placeLabel: review.home ? 'Place & set up on map' : undefined,
     title: review.home ? `Review ${offer.plan.destination.name}` : undefined,
+    note: musicSetupOffer(offer)
+      ? 'Home identity and roles are fixed by this plan. Closing does not undo separately approved plugin changes.'
+      : undefined,
     canChangeBlueprint: false,
     detailsLabel: musicSetupOffer(offer)
       ? 'Review choices & requirements'
@@ -5538,6 +5617,15 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
   if (review.pending || review.result) return;
   if (action === 'dirty') {
     review.dirty = true;
+    if (
+      field === 'mission' &&
+      typeof value === 'string' &&
+      musicSetupOffer(state.offer) &&
+      state.offer.plan?.brief_default
+    ) {
+      state.brief = { offerId: state.offer.id, value, typed: true };
+      review.dirty = false;
+    }
     return;
   }
   if (action === 'edit') {
@@ -5799,7 +5887,8 @@ async function chooseProjectEntry(name) {
     state.busy ||
     conversationReviewLoading() ||
     prerequisites.active() ||
-    sourceCreationReview
+    (sourceCreationReview &&
+      (!musicSetupOffer(offer) || sourceCreationReview.pending || sourceCreationReview.result))
   )
     return;
   if (!offer.plan.entry_candidates?.includes(name) || name === offer.plan.entry_name) return;
@@ -6296,11 +6385,14 @@ async function pollSetup() {
     const payload = await readJSON(response);
     if (!current() || state.offer?.id !== id) return;
     // Once the run settles the read returns the resolved offer, which ends the poll.
-    state.offer = payload?.folder_digest?.offer || state.offer;
+    if (payload?.folder_digest?.offer?.id !== id) return false;
+    state.offer = payload.folder_digest.offer;
     announceOffer();
     render();
+    return true;
   } catch (_) {
     // The next tick tries again.
+    return false;
   }
 }
 
@@ -6346,8 +6438,13 @@ async function startCapabilityJourney() {
           }
         : { source: 'host', quest_id: capability.setup_quest_id };
     selection.folder_offer_id = state.offer.id;
-    if (!(await openSpecialistSetupJourney(selection)) && current()) {
+    const opened = await openSpecialistSetupJourney(selection);
+    if (!current()) return;
+    if (!opened) {
       showError('Could not open setup. Choose Continue setup to try again.');
+      if (musicDialogCurrent(musicDialogReference)) musicSetupDialog().open(musicDialogReference);
+    } else if (musicSetupOffer(state.offer)) {
+      returnFromMusicGuidedSetup(musicDialogReference);
     }
   } catch (error) {
     if (current())
