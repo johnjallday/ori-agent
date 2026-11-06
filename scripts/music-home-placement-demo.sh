@@ -2,7 +2,7 @@
 # Real-candidate Music Home placement acceptance, always in a fresh sandbox.
 # Usage: ./scripts/music-home-placement-demo.sh --case CASE --port PORT \
 #   --reaper-source DIR --music-source DIR --music-ref REF
-# CASE: single, pointer, later, collection, collection-map, staffing, staffing-repair, staffing-recovery, accept, layout, ack, occupied, partial,
+# CASE: wizard, single, pointer, later, collection, collection-map, staffing, staffing-repair, staffing-recovery, accept, layout, ack, occupied, partial,
 #       stale, two-tabs, competing-home, disabled-provider, deleted-home, missing-model,
 #       a11y-light, a11y-dark, a11y-touch, a11y-tree, a11y-zoom, chat, chat-choice, chat-a11y
 # chat: the Home is set up, then Go to lands on its map where the manager's
@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 case "$case_name" in
-single | chat | chat-choice | chat-a11y | pointer | later | collection | collection-map | staffing | staffing-repair | staffing-recovery | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
+wizard | single | chat | chat-choice | chat-a11y | pointer | later | collection | collection-map | staffing | staffing-repair | staffing-recovery | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
 *) echo "unknown case: $case_name" >&2; exit 2 ;;
 esac
 [[ "$port" =~ ^[0-9]+$ ]] || { echo 'port must be numeric' >&2; exit 2; }
@@ -75,6 +75,9 @@ args=(--port "$port" --env "MUSIC_HOME_PLACEMENT_SONG=$sandbox/Documents/Ori Mus
 pattern=single-song
 spec=tests/music-home-map-placement.spec.ts
 case "$case_name" in
+wizard)
+	spec=tests/reaper-folder-setup-wizard.spec.ts
+	pattern='music wizard' ;;
 a11y-*)
 	args+=(--env "MUSIC_HOME_PLACEMENT_A11Y=${case_name#a11y-}")
 	spec=tests/music-home-map-placement.a11y.spec.ts

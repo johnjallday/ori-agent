@@ -156,6 +156,16 @@ while true; do sleep 1; done
         self.assertIn("tests/music-home-map-placement.a11y.spec.ts", a11y)
         self.assertIn("manager hand-off", a11y)
 
+    def test_wizard_runs_only_the_source_dialog_journey(self):
+        result = self.run_case("wizard")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertEqual(calls.count("e2e.sh\n"), 1)
+        self.assertIn("tests/reaper-folder-setup-wizard.spec.ts", calls)
+        self.assertIn("-g\nmusic wizard\n", calls)
+        self.assertNotIn("MUSIC_HOME_PLACEMENT_FAULT", calls)
+        self.assertIn("URL=http://127.0.0.1:1/v1 KEY=disposable-no-inference", calls)
+
     def test_bad_case_launches_nothing(self):
         result = self.run_case("not-a-case")
         self.assertEqual(result.returncode, 2)

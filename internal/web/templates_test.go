@@ -339,6 +339,9 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 	html := createWorkspaceModalMarkup(t, page)
 
 	for _, want := range []string{
+		// Source setup borrows this shell but never enters ordinary creation.
+		`id="sourceSetupDialogHost" class="source-setup-dialog-host" aria-label="Music folder setup" hidden`,
+		`id="folderModalTitle" tabindex="-1"`,
 		// Four ordered step sections.
 		`id="wizardStep1"`,
 		`id="wizardStep2"`,

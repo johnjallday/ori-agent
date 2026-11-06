@@ -229,7 +229,7 @@ export function workspaceCreationReviewHTML(view = {}) {
     ${creationReviewNavigationHTML(view)}
     <footer class="assisted-placement__footer">
       <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Back</button>
-      <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>
+      <button type="button" data-placement-action="cancel"${disabled}>${escapeReviewText(view.cancelLabel || 'Cancel draft')}</button>
       ${view.automatic ? `<button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !view.reviewed || view.dirty || locked ? ' disabled' : ''}>${escapeReviewText(view.busy ? 'Working…' : view.confirmLabel || 'Create workspace')}</button>` : ''}
     </footer></section>`;
 }

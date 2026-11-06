@@ -6,6 +6,7 @@ import {
   sourceHomePlacementResult,
   sourceHomeObservationResult,
   sourceHomeReviewPlan,
+  musicSetupOffer,
   folderHomeMapTarget,
   folderLandingRoute
 } from './personal-assistant-folder.js';
@@ -42,6 +43,7 @@ function controller() {
     // Outside the evaluated slice: the real landing choice, and the library
     // summary read faked as "nothing to set up" unless a test says otherwise.
     folderLandingRoute,
+    musicSetupOffer,
     libraryToSetUp: async () => context.toSetUpForTest || 0,
     console,
     document: {

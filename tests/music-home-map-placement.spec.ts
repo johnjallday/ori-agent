@@ -493,6 +493,11 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     state: 'ready',
     layout_subject_new: true
   });
+  await page
+    .locator('#addFolderModal')
+    .getByRole('button', { name: 'Close setup review', exact: true })
+    .click();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
   await page.locator('#personalAssistantClose').click();
   await expect(page.locator(`.ws-map-district[data-group-id="${home.id}"]`)).toBeVisible();
   await page.screenshot({ path: `${evidence}/positioned-empty-home.png` });
@@ -916,8 +921,11 @@ test(`collection ${collectionOnMap ? 'map' : 'automatic'} setup finishes a Home 
   await page
     .getByRole('button', { name: 'Review library setup', exact: true })
     .click({ timeout: 15_000 });
-  await page.getByRole('button', { name: 'Set up', exact: true }).click({ timeout: 15_000 });
-  const review = page.locator('[data-source-creation-review]:visible');
+  await page
+    .locator('[data-source-setup-summary]')
+    .getByRole('button', { name: 'Review setup', exact: true })
+    .click({ timeout: 15_000 });
+  const review = page.locator('#addFolderModal [data-source-creation-review]:visible');
   await expect(review).toBeVisible();
   await expect(review.getByRole('textbox', { name: 'Group name', exact: true })).toHaveValue(
     'Music Production Home'

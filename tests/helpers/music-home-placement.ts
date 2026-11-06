@@ -34,11 +34,15 @@ export async function openMusicHomeReview(page: Page, song: string, tree = false
     name: `Open ${path.basename(song)} review`,
     exact: true
   });
-  const first = page.getByRole('button', { name: /^(Set up|Prepare) Music Production Home$/ });
+  const first = page
+    .locator('[data-source-setup-summary]')
+    .getByRole('button', { name: 'Review setup', exact: true });
   await expect(first.or(existing)).toBeVisible();
   if (await existing.isVisible()) await existing.click();
   await first.click();
-  const review = page.locator('[data-source-creation-review]:visible');
+  const dialog = page.locator('#addFolderModal[data-source-setup-owner]');
+  await expect(dialog).toBeVisible();
+  const review = dialog.locator('[data-source-creation-review]:visible');
   await expect(review).toBeVisible();
   return review;
 }
