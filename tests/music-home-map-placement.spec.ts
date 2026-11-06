@@ -845,6 +845,9 @@ test('collection library Opens keep the explicitly positioned Home and earlier c
   for (const entry of unopened.slice(0, 2)) {
     const priorIDs = new Set((await snapshot(request)).workspaces.map((w: any) => w.id));
     await page.goto(`/workspaces/${home.folder_slug}/assistant#projectLibraryPanel`);
+    // The library browser keeps the one-click recent-song actions in its
+    // activity disclosure. Inspecting a row is deliberately not Open.
+    await page.getByText('Library tools and saved activity', { exact: true }).click();
     const openedResponse = page.waitForResponse(
       response =>
         response.url().endsWith(`/projects/${entry.id}/open`) &&

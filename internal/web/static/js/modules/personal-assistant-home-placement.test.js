@@ -137,6 +137,49 @@ function controller() {
   return { ...context.harness, context, state, effects, placement: () => placement };
 }
 
+test('opening the source review is inert and retains the same source choices without touching an unrelated creator', async () => {
+  const c = controller();
+  const draft = { name: 'Unrelated draft', goal: 'Keep this unsent goal' };
+  c.context.window.sessionManager = {
+    workspaceCreatorContext: draft,
+    workspaceBuildApi: () => assert.fail('source review must not transfer to a build'),
+    showAddWorkspaceModal: () => assert.fail('source review must not reset the creator')
+  };
+  await c.startOneCardSetup({});
+  const review = c.review();
+  review.candidate = { x: 20, y: 30 };
+  await c.startOneCardSetup({});
+  assert.equal(c.review(), review);
+  assert.deepEqual(review.candidate, { x: 20, y: 30 });
+  assert.equal(c.context.window.sessionManager.workspaceCreatorContext, draft);
+  assert.deepEqual(draft, { name: 'Unrelated draft', goal: 'Keep this unsent goal' });
+  assert.equal(c.effects.setup, 0);
+  assert.equal(c.effects.position, 0);
+  assert.equal(c.effects.proofReads, 0);
+});
+
+test('an existing Home starts in automatic mode and confirmation cannot move or restaff it through placement', async () => {
+  const c = controller();
+  c.state.offer.plan.destination.status = 'existing';
+  c.state.offer.plan.destination.workspace_id = 'home';
+  c.state.offer.plan.visual.entity.operation = 'reuse';
+  await c.startOneCardSetup({});
+  const review = c.review();
+  assert.equal(review.automatic, true);
+  assert.equal(c.sourceReviewMapAvailable(), false);
+  await c.actOnSourceCreationReview(review, { action: 'place' });
+  assert.equal(c.placement(), undefined);
+  assert.equal(c.effects.setup, 0);
+  await c.actOnSourceCreationReview(review, { action: 'confirm' });
+  c.state.offer.home_result.created_by_this_operation = false;
+  c.state.offer.home_result.layout_subject_new = false;
+  await c.observeSourceCreationResult(review);
+  assert.equal(review.existing, true);
+  assert.equal(c.effects.setup, 1, 'only the canonical source operation is dispatched');
+  assert.equal(c.effects.position, 0);
+  assert.equal(c.effects.retries, 0);
+});
+
 test('Home review requires a canonical Home destination, not a name', () => {
   assert.equal(sourceHomeReviewPlan({ visual: { entity: { kind: 'home' } } }), false);
   assert.equal(
