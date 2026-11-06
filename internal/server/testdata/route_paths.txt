@@ -294,6 +294,7 @@
 /api/workspace-map/layout
 /api/workspace-map/parcels/open-by-ref
 /api/workspace-map/parcels/x/open
+/api/workspace-updates
 /api/workspaces
 /api/workspaces/build-sessions
 /api/workspaces/build-sessions/availability

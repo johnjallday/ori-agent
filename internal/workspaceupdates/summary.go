@@ -35,6 +35,7 @@ type WelcomeSource struct {
 }
 
 type Summary struct {
+	version     int64                    // internal fence for a bounded aggregate's final authority read
 	WorkspaceID string                   `json:"workspace_id"`
 	FolderSlug  string                   `json:"folder_slug"`
 	Name        string                   `json:"name"`
@@ -82,7 +83,7 @@ func (s *Service) summary(ctx context.Context, owner, id string, retried bool) (
 		return Summary{}, err
 	}
 	version := ws.Version
-	out := Summary{WorkspaceID: ws.ID, FolderSlug: ws.FolderSlug, Name: safeLabel(ws.Name, 120), ObservedAt: time.Now().UTC(),
+	out := Summary{version: version, WorkspaceID: ws.ID, FolderSlug: ws.FolderSlug, Name: safeLabel(ws.Name, 120), ObservedAt: time.Now().UTC(),
 		Welcome: WelcomeSource{State: "not_applicable"}, Review: filejanitor.FilingReview{State: "not_applicable"}}
 	if scope, eligible := Scope(ws, owner); eligible {
 		out.Welcome.AgentInstanceID, out.Welcome.AgentName = scope.AgentInstanceID, safeLabel(scope.AgentName, 100)

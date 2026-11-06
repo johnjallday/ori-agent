@@ -101,6 +101,7 @@
             aria-label="Show Updates">
             <span class="cockpit-flyout-toggle__label">Updates</span>
             <span class="cockpit-flyout-toggle__count" data-cockpit-rail-toggle-count hidden></span>
+            <span class="cockpit-workspace-update-badge" data-cockpit-workspace-update-badge hidden></span>
           </button>
           <!--
             Quests: Progression's always-available compact entry point,
@@ -234,6 +235,7 @@
                home-workspace-cockpit.js from the SAME shared state Map, Tree,
                and Summary read — no extra fetch (FR111). -->
           <section id="cockpitTodayAttention" class="cockpit-today-section" aria-label="Needs attention"></section>
+          <section id="cockpitWorkspaceUpdates" class="cockpit-today-section" aria-label="Workspace messages and filing reviews" tabindex="-1" hidden></section>
           <section id="cockpitTodayScheduled" class="cockpit-today-section" aria-label="Scheduled today"></section>
 
           <!-- Global plugin updates share this existing Updates destination.

@@ -28,6 +28,11 @@ import {
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
+import {
+  parseWorkspaceUpdateIntent,
+  withoutWorkspaceUpdateIntent,
+  matchesWorkspaceUpdateIntent
+} from './workspace-update-signals.js';
 import { TicketCounts } from './ticket-count-line.js';
 import {
   consumeGroupTemplateLanding,
@@ -297,6 +302,8 @@ export class WorkspaceCommandView {
     // held pending until page data is available to sanitize against (FR91).
     this._urlBootState =
       typeof window !== 'undefined' ? parseWorkspaceURLState(window.location.search) : null;
+    this._updateArrival =
+      typeof window !== 'undefined' ? parseWorkspaceUpdateIntent(window.location.search) : null;
     this._urlStateApplied = false;
     this._urlSyncEnabled = false;
     this._lastSyncedURLState = null;
@@ -552,6 +559,7 @@ export class WorkspaceCommandView {
     this.ensureGroupTemplateStatus();
     this.ensureWorkspaceProtection();
     this.applyBootURLState();
+    void this.consumeUpdateArrival();
   }
 
   // The linked folder's Protection fact is stored evidence the server reads;
@@ -1025,6 +1033,7 @@ export class WorkspaceCommandView {
     // Data may not have been ready the first time activate() ran; retry once
     // page.tasks/agents are actually populated (FR90: refresh restores from URL).
     this.applyBootURLState();
+    void this.consumeUpdateArrival();
   }
 
   // ---------- URL / history restoration (group 6) ----------
@@ -2544,15 +2553,72 @@ export class WorkspaceCommandView {
     return Boolean(opened);
   }
 
-  async openUpdateMessage(trigger) {
+  async openUpdateMessage(trigger, expected = null) {
     const id = this.workspaceId();
-    const opened = await window.PersonalAssistantPanel?.openWorkspaceWelcome?.(id, trigger);
+    const opened = await window.PersonalAssistantPanel?.openWorkspaceWelcome?.(
+      id,
+      trigger,
+      expected
+    );
     if (!opened && this.active && this.workspaceId() === id) {
       this.workNotice =
         'The conversation could not be opened. Finish any draft or active reply, or refresh workspace status.';
       this.render();
     }
     return Boolean(opened);
+  }
+
+  async consumeUpdateArrival() {
+    if (!this.active || !this.workspaceId() || !this._updateArrival || this._updateArrivalWaiting)
+      return;
+    if (typeof document !== 'undefined' && document.readyState === 'loading') {
+      this._updateArrivalWaiting = true;
+      document.addEventListener(
+        'DOMContentLoaded',
+        () => {
+          this._updateArrivalWaiting = false;
+          void this.consumeUpdateArrival();
+        },
+        { once: true }
+      );
+      return;
+    }
+    const intent = this._updateArrival;
+    const id = this.workspaceId();
+    this._updateArrival = null; // consumed before any asynchronous source read
+    const unavailable = () => {
+      this.workNotice =
+        'This update is unavailable or its destination changed. Refresh workspace status to see current updates.';
+      this.render();
+      if (!this.container?.querySelector?.('#workspaceNextActionRegion'))
+        window.Toast?.info?.(this.workNotice);
+    };
+    const query = withoutWorkspaceUpdateIntent(window.location.search);
+    try {
+      window.history.replaceState(
+        window.history.state,
+        '',
+        window.location.pathname + (query ? `?${query}` : '') + (window.location.hash || '')
+      );
+    } catch (_) {
+      return unavailable(); // do not leave a replayable intent after navigation
+    }
+    if (intent.invalid || intent.workspaceId !== id) return unavailable();
+    const view = await workspaceUpdates.refresh(id);
+    if (!this.active || this.workspaceId() !== id) return;
+    if (view.state !== 'ready' || view.stale || !matchesWorkspaceUpdateIntent(intent, view.data))
+      return unavailable();
+    const opened =
+      intent.kind === 'welcome'
+        ? await this.openUpdateMessage(undefined, intent)
+        : await this.openUpdateReview();
+    if (
+      !opened &&
+      this.active &&
+      this.workspaceId() === id &&
+      !this.container?.querySelector?.('#workspaceNextActionRegion')
+    )
+      window.Toast?.info?.(this.workNotice);
   }
 
   runNextAction(key, trigger) {

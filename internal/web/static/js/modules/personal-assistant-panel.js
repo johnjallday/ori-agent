@@ -19,11 +19,20 @@ import {
 import { createLeadWelcome } from './personal-assistant-lead-welcome.js';
 import { workspaceUpdates, exposedWelcomeMessages } from './workspace-updates.js';
 import {
+  matchesWorkspaceUpdateIntent,
+  parseWorkspaceUpdateIntent
+} from './workspace-update-signals.js';
+
+import {
   createCreationStatusSurface,
   createCreationTransition
 } from './workspace-creation-transition.js';
 import { mountFirstLookReports } from './first-look-report.js';
 import { briefModeView, briefSend } from './personal-assistant-brief-mode.js';
+
+// Capture before Command consumes its one-shot update intent. Drawer restoration
+// must not race that consumption and open chat on a Review-only arrival.
+const panelArrivalSearch = typeof window !== 'undefined' ? window.location?.search || '' : '';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
 const PANEL_OPEN_KEY = 'ori.personalAssistant.panelOpen';
@@ -355,14 +364,15 @@ export function assistantPanelOpenIntent(search, hasToday, pathname = '') {
   // `?panel=assistant` on a workspace page opens the drawer on its entry agent
   // (a song's hand-off lands on its Home this way).
   const assistant = panel === 'assistant' && WORKSPACE_PAGE_PATH.test(String(pathname || ''));
+  const updateArrival = parseWorkspaceUpdateIntent(search) !== null;
   return {
-    requestedOpen: today || assistant,
-    restoreAllowed: panel !== 'backup-recovery',
+    requestedOpen: !updateArrival && (today || assistant),
+    restoreAllowed: !updateArrival && panel !== 'backup-recovery',
     // `/?panel=today` is the way to what needs the user (the "N need you"
     // line, the HQ card, a locked mission), so it opens Today's strip too.
     // `&folder=show` is the way to the folder flow in the conversation.
-    revealToday: today && !params.has('folder'),
-    consumes: today || assistant ? panel : ''
+    revealToday: !updateArrival && today && !params.has('folder'),
+    consumes: !updateArrival && (today || assistant) ? panel : ''
   };
 }
 
@@ -919,7 +929,7 @@ function scheduleWelcomeExposure() {
 
 // Explicit navigation only. Re-read authority before selecting the exact saved
 // thread. No synthetic turn, scan or work action, and no unsent draft discarded.
-async function openWelcome(trigger) {
+async function openWelcome(trigger, expected = null) {
   const before = recipients()?.current?.();
   if (before?.kind !== RECIPIENT_WORKSPACE_ENTRY || !before.available) return false;
   const view = await workspaceUpdates.refresh(before.workspaceId);
@@ -930,6 +940,13 @@ async function openWelcome(trigger) {
     current?.kind !== before.kind
   )
     return false;
+  if (
+    expected &&
+    (view.state !== 'ready' || view.stale || !matchesWorkspaceUpdateIntent(expected, view.data))
+  ) {
+    setStatus('This saved message is unavailable. Its conversation may have changed.');
+    return false;
+  }
   renderWelcomeIndicator(view);
   const source = currentWelcome();
   if (view.state !== 'ready' || source?.state !== 'ready' || !source.session_id) {
@@ -962,6 +979,21 @@ async function openWelcome(trigger) {
     now?.kind !== current.kind
   )
     return false;
+  if (hydrated && expected) {
+    const verified = await workspaceUpdates.refresh(current.workspaceId);
+    const recipient = recipients()?.current?.();
+    if (
+      verified.state !== 'ready' ||
+      verified.stale ||
+      !matchesWorkspaceUpdateIntent(expected, verified.data) ||
+      recipient?.workspaceId !== current.workspaceId ||
+      recipient?.name !== current.name ||
+      recipient?.kind !== current.kind
+    ) {
+      setStatus('This saved message changed while opening. Refresh updates to try again.');
+      return false;
+    }
+  }
   open(trigger, { preserveConversation: true });
   if (!hydrated) {
     setStatus('This saved conversation is unavailable. Refresh updates to try again.');
@@ -971,7 +1003,18 @@ async function openWelcome(trigger) {
   return true;
 }
 
-async function openWorkspaceWelcome(workspaceId, trigger) {
+async function openWorkspaceWelcome(workspaceId, trigger, expected = null) {
+  if (
+    routeContext().workspace_id !== workspaceId ||
+    creationTransition.blocksReveal() ||
+    (expected && expected.workspaceId !== workspaceId)
+  )
+    return false;
+  if (!state.els) init();
+  // A URL arrival can beat the initial relationship request. The resolver must
+  // first know the Personal HQ identity; a pending Commander is not a failed
+  // destination, and must not consume the user's one-shot action prematurely.
+  await refresh();
   if (routeContext().workspace_id !== workspaceId || creationTransition.blocksReveal())
     return false;
   await recipients()?.refresh?.();
@@ -989,7 +1032,7 @@ async function openWorkspaceWelcome(workspaceId, trigger) {
     }
     if (!chooseRecipient(RECIPIENT_WORKSPACE_ENTRY)) return false;
   }
-  return openWelcome(trigger);
+  return openWelcome(trigger, expected);
 }
 
 function renderEntrySessionBar() {
@@ -2400,7 +2443,7 @@ function init() {
   // workspace's page. Wait for the server-owned identity first; a query string
   // must not make an unhired assistant appear hired.
   const intent = assistantPanelOpenIntent(
-    window.location.search,
+    panelArrivalSearch,
     Boolean(state.els.todayBanner),
     window.location.pathname
   );

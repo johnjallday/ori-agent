@@ -5,6 +5,12 @@ import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // workspace-map.js reaches the same count line before it renders a tile.
 import { TicketCounts } from './ticket-count-line.js';
 import { createLibraryBadgeLoader, libraryShelfRoute } from './home-library-badges.js';
+import { workspaceUpdates, watchWorkspaceUpdatePage } from './workspace-updates.js';
+import {
+  workspaceUpdateSignals,
+  workspaceUpdateBadgeText,
+  renderWorkspaceUpdateSection
+} from './workspace-update-signals.js';
 import { openLibrarySheet } from './map-library-sheet.js';
 import { workspacePageURL } from './workspace-routes.js';
 import {
@@ -1798,6 +1804,7 @@ export function renderWorkspaceAreaStatusHTML(status) {
 // modal context stay single-authority (FR117).
 import {
   mountTree,
+  updateTreeWorkspaceBadges,
   ancestorIds,
   isWorkspaceRowKind,
   removeWorkspaceTag,
@@ -1915,6 +1922,8 @@ import {
     updatesBody: document.getElementById('cockpitUpdatesFlyoutBody'),
     updatesClose: document.querySelector('#cockpitUpdatesFlyout [data-cockpit-flyout-close]'),
     todayAttention: document.getElementById('cockpitTodayAttention'),
+    workspaceUpdates: document.getElementById('cockpitWorkspaceUpdates'),
+    workspaceUpdateBadge: document.querySelector('[data-cockpit-workspace-update-badge]'),
     todayScheduled: document.getElementById('cockpitTodayScheduled'),
     // Quests: the flyout host exists from Group 1 (its content is
     // progression-widget.js's own DOM); the trigger button lands in Group 2.
@@ -2052,6 +2061,7 @@ import {
     // FR 11). Empty until the summaries answer; a Map drawn without them is
     // correct, just briefly plainer.
     libraryBadges: {},
+    workspaceUpdateBadges: {},
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
       allowWorkspaceHydration: false,
@@ -2224,6 +2234,7 @@ import {
       // Navigation-only badges for program Homes whose library has something
       // ready to review. The click is handled below, never by the Map.
       libraryBadges: state.libraryBadges,
+      workspaceUpdateBadges: state.workspaceUpdateBadges,
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
       selectOnly: true,
@@ -3801,6 +3812,7 @@ import {
       els.railToggle.setAttribute('aria-label', openUpdates ? 'Hide Updates' : 'Show Updates');
     }
     if (els.updatesFlyout) els.updatesFlyout.hidden = !openUpdates;
+    if (openUpdates && canHydrateWorkspaceData()) workspaceUpdates.invalidatePage();
 
     if (els.questsToggle) {
       els.questsToggle.setAttribute('aria-expanded', openQuests ? 'true' : 'false');
@@ -3976,7 +3988,112 @@ import {
 
   // ---- Today (now Updates): immediate work (FR75, FR87) ----
 
+  let stopUpdateWatch = null;
+  let unsubscribeUpdatePage = null;
+  let unsubscribeUpdateItems = null;
+  let updateRenderQueued = false;
+  let updateSignalSignature = '';
+  let updateSectionHTML = '';
+
+  function renderSavedWorkspaceUpdates() {
+    if (!els.workspaceUpdates) return;
+    const allowed = canHydrateWorkspaceData();
+    els.workspaceUpdates.hidden = !allowed;
+    if (!allowed) {
+      if (els.workspaceUpdateBadge) els.workspaceUpdateBadge.hidden = true;
+      return;
+    }
+    const page = workspaceUpdates.readPage();
+    const badges = Object.create(null);
+    const ids = new Set([...state.flattened.map(ws => ws.id), ...(page.ids || [])]);
+    for (const id of [...ids].sort()) {
+      const view = workspaceUpdateSignals(workspaceUpdates.read(id), { stale: page.stale });
+      if (view.workspaceId === id && (view.signals.length || view.state === 'unavailable'))
+        badges[id] = view;
+    }
+    const signature = JSON.stringify(badges);
+    if (signature !== updateSignalSignature) {
+      const previous = updateSignalSignature;
+      updateSignalSignature = signature;
+      state.workspaceUpdateBadges = badges;
+      window.OriWorkspaceMap?.workspaceUpdates?.update?.(els.map, badges);
+      updateTreeWorkspaceBadges(els.treeNav, badges);
+      if (previous && page.state !== 'loading')
+        announce('Workspace messages and filing review information updated.');
+    }
+    const html = renderWorkspaceUpdateSection(page, id => workspaceUpdates.read(id));
+    if (html !== updateSectionHTML) {
+      const focused = els.workspaceUpdates.contains(document.activeElement)
+        ? document.activeElement
+        : null;
+      const kind = focused?.getAttribute('data-workspace-update');
+      const workspaceId = focused?.getAttribute('data-update-workspace');
+      const control = ['refresh', 'more', 'start'].find(name =>
+        focused?.hasAttribute(`data-workspace-updates-${name}`)
+      );
+      updateSectionHTML = html;
+      els.workspaceUpdates.innerHTML = html;
+      if (focused) {
+        const target = kind
+          ? Array.from(els.workspaceUpdates.querySelectorAll('[data-workspace-update]')).find(
+              link =>
+                link.getAttribute('data-workspace-update') === kind &&
+                link.getAttribute('data-update-workspace') === workspaceId
+            )
+          : control
+            ? els.workspaceUpdates.querySelector(`[data-workspace-updates-${control}]`)
+            : null;
+        (target || els.workspaceUpdates).focus({ preventScroll: true });
+      }
+    }
+    if (els.workspaceUpdateBadge) {
+      const shown = workspaceUpdateBadgeText(page, Object.values(badges));
+      els.workspaceUpdateBadge.textContent = shown;
+      els.workspaceUpdateBadge.hidden = !shown;
+      els.workspaceUpdateBadge.title = page.hasMore
+        ? `${shown}. More workspaces have not been checked yet.`
+        : shown;
+    }
+  }
+
+  function queueUpdateRender() {
+    if (updateRenderQueued) return;
+    updateRenderQueued = true;
+    queueMicrotask(() => {
+      updateRenderQueued = false;
+      renderSavedWorkspaceUpdates();
+    });
+  }
+
+  function startWorkspaceUpdateWatch() {
+    if (!canHydrateWorkspaceData() || stopUpdateWatch) return;
+    unsubscribeUpdatePage = workspaceUpdates.subscribePage(queueUpdateRender);
+    unsubscribeUpdateItems = workspaceUpdates.subscribe(queueUpdateRender);
+    stopUpdateWatch = watchWorkspaceUpdatePage({
+      isActive: () => canHydrateWorkspaceData() && root.isConnected !== false && !root.hidden
+    });
+  }
+
+  function stopWorkspaceUpdateWatch() {
+    stopUpdateWatch?.();
+    unsubscribeUpdatePage?.();
+    unsubscribeUpdateItems?.();
+    stopUpdateWatch = unsubscribeUpdatePage = unsubscribeUpdateItems = null;
+  }
+
+  els.workspaceUpdates?.addEventListener('click', event => {
+    if (!canHydrateWorkspaceData() || workspaceUpdates.readPage().state === 'loading') return;
+    if (event.target.closest('[data-workspace-updates-refresh]')) workspaceUpdates.invalidatePage();
+    else if (event.target.closest('[data-workspace-updates-more]'))
+      void workspaceUpdates.refreshPage({ after: workspaceUpdates.readPage().nextAfter });
+    else if (event.target.closest('[data-workspace-updates-start]'))
+      void workspaceUpdates.refreshPage();
+  });
+  window.addEventListener('pagehide', stopWorkspaceUpdateWatch);
+  window.addEventListener('pageshow', startWorkspaceUpdateWatch);
+
   function renderToday() {
+    renderSavedWorkspaceUpdates();
     if (els.todayAttention) {
       els.todayAttention.innerHTML = renderAttentionSectionHTML(attentionItems(state.flattened));
     }
@@ -4818,6 +4935,7 @@ import {
       mountMap();
     });
     // Library badges need the Home ids, so they follow the workspace list.
+    startWorkspaceUpdateWatch();
     const cycle = state.inFlight;
     void cycle
       .then(() => refreshLibraryBadges({ force: !libraryBadgesLoaded }))
@@ -5261,6 +5379,9 @@ import {
     const status = await loadOnboardingStatus({ force });
     state.onboardingGate = onboardingGateDecision(status);
     if (!canHydrateWorkspaceData()) {
+      stopWorkspaceUpdateWatch();
+      workspaceUpdates.reset();
+      state.workspaceUpdateBadges = {};
       state.loading = false;
       state.tree = [];
       state.flattened = [];

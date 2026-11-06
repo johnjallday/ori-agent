@@ -1799,6 +1799,47 @@
   transform: translateY(0);
   transition: transform 0.16s ease;
 }
+/* In-tile labels, not nested controls. The existing tile menu supplies their
+   keyboard actions; labels move with the building during drag/zoom. */
+.ws-map-update-markers {
+  position: absolute;
+  z-index: 7;
+  top: 20px;
+  right: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  max-width: 146px;
+}
+
+.ws-map-update-markers .workspace-update-signal {
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 5px;
+  border: 1px solid var(--ws-faction);
+  border-radius: 3px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+  font: 11px/1.3 var(--ws-font-mono);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ws-map-update-markers [data-map-update-route] {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ws-map-update-markers .is-stale {
+  border-style: dashed;
+  border-color: var(--ws-line-bright);
+}
+
+.ws-map-canvas.is-activity-far .ws-map-update-markers {
+  display: none;
+}
+
 .ws-map-tile:hover {
   transform: translateY(-4px);
 }

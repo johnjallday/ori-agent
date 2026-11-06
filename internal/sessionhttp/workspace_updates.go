@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -43,12 +45,12 @@ func updateError(w http.ResponseWriter, err error) {
 	_ = orihttp.RespondAPIError(w, status, &orihttp.APIError{Code: code, Message: message})
 }
 
-func (h *Handler) workspaceUpdateOwner(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
+func (h *Handler) workspaceUpdateOwner(w http.ResponseWriter, r *http.Request, method string, allowQuery bool) (string, bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	if !orihttp.RequireMethod(w, r, method) {
 		return "", false
 	}
-	if r.URL.RawQuery != "" {
+	if !allowQuery && r.URL.RawQuery != "" {
 		_ = orihttp.RespondBadRequest(w, "workspace updates do not accept query parameters")
 		return "", false
 	}
@@ -67,7 +69,7 @@ func (h *Handler) workspaceUpdateOwner(w http.ResponseWriter, r *http.Request, m
 // GetWorkspaceUpdates is observational: neither opening the workspace nor
 // hydrating its summary delivers/acknowledges a conversation or starts work.
 func (h *Handler) GetWorkspaceUpdates(w http.ResponseWriter, r *http.Request) {
-	owner, ok := h.workspaceUpdateOwner(w, r, http.MethodGet)
+	owner, ok := h.workspaceUpdateOwner(w, r, http.MethodGet, false)
 	if !ok {
 		return
 	}
@@ -79,8 +81,39 @@ func (h *Handler) GetWorkspaceUpdates(w http.ResponseWriter, r *http.Request) {
 	_ = orihttp.RespondJSON(w, http.StatusOK, out)
 }
 
+// ListWorkspaceUpdates shares the per-workspace sources through one bounded,
+// owner-scoped read. Query parameters can select a page, never an owner.
+func (h *Handler) ListWorkspaceUpdates(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.workspaceUpdateOwner(w, r, http.MethodGet, true)
+	if !ok {
+		return
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	valid := err == nil && len(r.URL.RawQuery) <= 512
+	for key, values := range query {
+		if (key != "after" && key != "limit") || len(values) != 1 {
+			valid = false
+		}
+	}
+	limit := session.MaxWorkspaceUpdatePage
+	if query.Has("limit") {
+		limit, err = strconv.Atoi(query.Get("limit"))
+		valid = valid && err == nil && strconv.Itoa(limit) == query.Get("limit")
+	}
+	if !valid || !session.ValidWorkspaceUpdatePage(query.Get("after"), limit) {
+		_ = orihttp.RespondBadRequest(w, "Workspace updates accept only after and limit (1–100).")
+		return
+	}
+	out, err := h.workspaceUpdates.Aggregate(r.Context(), owner, query.Get("after"), limit)
+	if err != nil {
+		updateError(w, err)
+		return
+	}
+	_ = orihttp.RespondJSON(w, http.StatusOK, out)
+}
+
 func (h *Handler) AcknowledgeWorkspaceUpdate(w http.ResponseWriter, r *http.Request) {
-	owner, ok := h.workspaceUpdateOwner(w, r, http.MethodPost)
+	owner, ok := h.workspaceUpdateOwner(w, r, http.MethodPost, false)
 	if !ok {
 		return
 	}

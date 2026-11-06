@@ -3,6 +3,35 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { TicketCounts } from './ticket-count-line.js';
+import {
+  workspaceUpdateSignals,
+  renderWorkspaceUpdateMapMarkers,
+  safeSignalRoute
+} from './workspace-update-signals.js';
+
+const updateSignalBridge = {
+  renderMap: renderWorkspaceUpdateMapMarkers,
+  safeRoute: safeSignalRoute
+};
+function mapUpdateView({ seen = false, message = 'welcome', pending = 2 } = {}) {
+  return workspaceUpdateSignals({
+    state: 'ready',
+    data: {
+      workspace_id: 'ws-1',
+      folder_slug: 'alpha',
+      name: 'Alpha',
+      welcome: {
+        state: 'ready',
+        unread_count: seen ? 0 : 1,
+        agent_name: 'Mira',
+        agent_instance_id: 'lead',
+        session_id: 'chat',
+        messages: [{ message_id: message, revision: 1, ...(seen ? { seen_at: 'saved' } : {}) }]
+      },
+      review: { state: 'ready', batch_id: 'batch', root_id: 'root', pending_count: pending }
+    }
+  });
+}
 
 const source = readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8');
 const buildingArtSource = readFileSync(
@@ -33,7 +62,7 @@ function loadComputeLayout() {
 
 // Load the IIFE and grab the full exposed API (used for meta-rendering tests).
 function loadOriWorkspaceMap() {
-  const window = { OriTicketCounts: TicketCounts };
+  const window = { OriTicketCounts: TicketCounts, OriWorkspaceUpdateSignals: updateSignalBridge };
   const sandbox = { window, document: {} };
   vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
   vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
@@ -9262,6 +9291,7 @@ class TestCustomEvent {
 }
 
 function loadMapForMenu(env, positions) {
+  env.window.OriWorkspaceUpdateSignals = updateSignalBridge;
   vm.runInNewContext(
     source,
     {
@@ -9329,6 +9359,112 @@ const tileTarget = id => sel =>
   sel.includes('data-ws-id') && !sel.includes('data-hq-site')
     ? { getAttribute: () => id, focus() {}, focused: false }
     : null;
+
+test('workspace update markers are separate labelled spans, not nested controls or ticket counts', () => {
+  const map = loadOriWorkspaceMap();
+  map.workspaceUpdates.setSnapshot({ 'ws-1': mapUpdateView() });
+  const html = map.tileHTML({
+    ws: { id: 'ws-1', name: 'Alpha', ticket_counts: { ready: 7 } },
+    col: 0,
+    row: 0
+  });
+  assert.match(html, /New message/);
+  assert.match(html, /2 files to review/);
+  assert.match(html, /7 ready/);
+  assert.match(html, /Shift\+F10 for update actions/);
+  assert.doesNotMatch(map.workspaceUpdates.markerHTML('ws-1'), /<(?:a|button)\b/);
+  assert.equal(Object.keys(map.workspaceUpdates.routes('ws-1')).length, 2);
+  map.workspaceUpdates.setSnapshot({ 'ws-1': { ...mapUpdateView(), workspaceId: 'foreign' } });
+  assert.equal(map.workspaceUpdates.markerHTML('ws-1'), '');
+  assert.equal(Object.keys(map.workspaceUpdates.routes('ws-1')).length, 0);
+});
+
+test('source refresh patches Map labels without moving camera, selection, menu or a live drag', async () => {
+  const view = mapUpdateView();
+  const { map, harness, env } = await menuHarness({
+    handlers: { workspaceUpdateBadges: { 'ws-1': view } }
+  });
+  const destinations = [];
+  env.window.location.assign = route => destinations.push(route);
+  const tile = harness.tile('ws-1');
+  let writes = 0;
+  let markerHTML = '';
+  const host = {
+    get innerHTML() {
+      return markerHTML;
+    },
+    set innerHTML(value) {
+      markerHTML = value;
+      writes++;
+    }
+  };
+  const query = tile.querySelector;
+  tile.querySelector = selector =>
+    selector === '[data-workspace-update-markers]' ? host : query(selector);
+  tile.setAttribute('aria-label', 'Alpha');
+  tile.setAttribute('data-update-accessible-suffix', '');
+  map.workspaceUpdates.update(harness.container, { 'ws-1': view });
+  const label = tile.getAttribute('aria-label');
+  map.workspaceUpdates.update(harness.container, { 'ws-1': view });
+  assert.equal(writes, 1, 'unchanged labels never replace the marker DOM');
+  assert.equal(tile.getAttribute('aria-label'), label);
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  const menu = harness.menu.item('workspace-update-welcome');
+  assert.ok(menu, 'the ordinary keyboard/context menu exposes the message action');
+  const world = harness.world.style.transform;
+  const selected = tile.classList.contains('is-selected');
+  const html = harness.container.innerHTML;
+  map.workspaceUpdates.update(harness.container, { 'ws-1': mapUpdateView({ message: 'later' }) });
+  assert.equal(harness.container.innerHTML, html, 'no world remount');
+  assert.equal(harness.world.style.transform, world);
+  assert.equal(tile.classList.contains('is-selected'), selected);
+  assert.equal(
+    harness.menu.item('workspace-update-welcome'),
+    menu,
+    'an open menu keeps its exact intent'
+  );
+  menu.fire('click');
+  assert.equal(
+    destinations[0],
+    view.signals[0].route,
+    'a held menu never silently switches message'
+  );
+  enableDragMode(harness);
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(70, 50));
+  assert.equal(tile.classList.contains('is-dragging'), true);
+  const position = { ...tile.at() };
+  map.workspaceUpdates.update(harness.container, { 'ws-1': mapUpdateView({ seen: true }) });
+  assert.deepEqual({ ...tile.at() }, position);
+  assert.equal(tile.classList.contains('is-dragging'), true);
+  map.unmount(harness.container);
+});
+
+test('a Map update marker navigates without selecting or dragging, and rejects a tampered route', async () => {
+  const selected = [];
+  const view = mapUpdateView();
+  const { map, harness, env } = await menuHarness({
+    handlers: { workspaceUpdateBadges: { 'ws-1': view }, onSelect: id => selected.push(id) }
+  });
+  const destinations = [];
+  env.window.location.assign = route => destinations.push(route);
+  enableDragMode(harness);
+  const tile = harness.tile('ws-1');
+  const target = route => ({
+    closest: selector =>
+      selector === '[data-map-update-route]' ? { getAttribute: () => route } : null
+  });
+  tile.fire('pointerdown', tilePointer(0, 0, { target: target(view.signals[1].route) }));
+  tile.fire('pointermove', tilePointer(80, 60));
+  tile.fire('pointerup', tilePointer(80, 60));
+  tile.fire('click', tilePointer(0, 0, { target: target(view.signals[1].route) }));
+  assert.equal(tile.pointerCaptures, 0);
+  assert.deepEqual(selected, []);
+  assert.deepEqual(destinations, [view.signals[1].route]);
+  tile.fire('click', tilePointer(0, 0, { target: target('javascript:alert(1)') }));
+  assert.equal(destinations.length, 1);
+  map.unmount(harness.container);
+});
 
 test('contextMenuHTML renders a menu with menuitems, dividers, danger and disabled variants', () => {
   const { contextMenuHTML } = loadOriWorkspaceMap();
@@ -9617,6 +9753,32 @@ test('the menu opens with the first item focused and moves focus with the arrows
     '-1',
     'only one item is tabbable'
   );
+});
+
+test('menu arrows belong to the menu, not the camera or move mode underneath it', async () => {
+  const { map, harness } = await menuHarness({
+    handlers: { workspaceUpdateBadges: { 'ws-1': mapUpdateView() } }
+  });
+  enableDragMode(harness);
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  const world = harness.world.style.transform;
+  const position = { ...harness.tile('ws-1').at() };
+  for (let i = 0; i < 2; i++) {
+    let stopped = false;
+    const event = keyEvent('ArrowDown', {
+      stopPropagation() {
+        stopped = true;
+      }
+    });
+    harness.menu.menu().fire('keydown', event);
+    if (!stopped) harness.fire('keydown', event); // real DOM bubbling to the canvas
+    assert.equal(stopped, true);
+  }
+  assert.equal(harness.menu.focused().action, 'workspace-update-welcome');
+  assert.equal(harness.menu.isOpen(), true);
+  assert.equal(harness.world.style.transform, world);
+  assert.deepEqual({ ...harness.tile('ws-1').at() }, position);
+  map.unmount(harness.container);
 });
 
 test('Enter activates the focused item and Escape closes without acting', async () => {
