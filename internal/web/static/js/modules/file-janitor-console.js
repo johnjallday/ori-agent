@@ -3361,6 +3361,22 @@
     return true;
   }
 
+  // Update links select the current review, never an old preparation's pinned
+  // batch or approval. A live selection/confirmation in another batch stays
+  // with its existing owner until the user finishes it.
+  function openLatestReview(options = {}) {
+    if (
+      busy ||
+      (consoleOpen &&
+        (pendingPreview || selected.size > 0) &&
+        (lastBatch?.id || '') !== (options.batchId || ''))
+    )
+      return false;
+    linkedBatchID = '';
+    setPreparationRoute('');
+    return open({ ...options, tab: 'review' });
+  }
+
   // The console shows every batch waiting for review, so opening it means the
   // map's File Janitor parcels have been seen (task-run-show FR40). parcel-open.js
   // is a module that can run after this deferred script, so a console opened by
@@ -4768,6 +4784,7 @@
    * @property {string} rootId
    * @property {string} batchId
    * @property {number|null} pendingCount
+   * @property {number|null} needsReviewCount
    * @property {'manual'|'paused'|'watching'|null} mode
    * @property {boolean} scanning
    * @property {'idle'|'running'|'failed'} scanState
@@ -4831,6 +4848,7 @@
       rootId: String(settings.root_id || ''),
       batchId: String(lastBatch?.id || ''),
       pendingCount: batchLoaded ? pendingCount() : null,
+      needsReviewCount: batchLoaded ? Number(lastBatch?.summary?.needs_review) || 0 : null,
       mode: !configured
         ? null
         : manualScansOnly(settings)
@@ -5141,6 +5159,7 @@
     stationState,
     subscribe,
     open,
+    openLatestReview,
     close,
     focusSetup,
     isOpen: () => consoleOpen,

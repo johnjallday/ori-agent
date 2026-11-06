@@ -13,6 +13,9 @@ func (b *ServerBuilder) wireWorkspaceUpdates() {
 		return
 	}
 	service := workspaceupdates.New(store, b.workspaceStore, b.chatHandler, b.resetWork)
+	if b.fileJanitorService != nil {
+		service.SetReviewReader(b.fileJanitorService)
+	}
 	b.workspaceUpdates = service
 	b.sessionHandler.SetWorkspaceUpdates(service)
 	b.sessionHandler.SetWorkspaceWelcomeCreated(func(ctx context.Context, id string) error {

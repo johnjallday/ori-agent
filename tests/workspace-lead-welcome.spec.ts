@@ -151,7 +151,7 @@ test('creation saves a quiet welcome before entry, then exposes its first assess
   expect((await ok(await request.get(`/api/sessions?folder_id=${id}`))).sessions).toHaveLength(1);
 });
 
-test('the Curator offers filing choices without waiting for a goal assessment', async ({
+test('saved filing updates navigate independently and retain remaining review after exposure', async ({
   page,
   request
 }, testInfo) => {
@@ -188,14 +188,15 @@ test('the Curator offers filing choices without waiting for a goal assessment', 
   const batches = await ok(await request.get(`/api/workspaces/${id}/file-janitor/batches`));
   const calls = modelCalls().length;
   let automaticActions = 0;
+  const filingOperations: string[] = [];
   page.on('request', req => {
-    if (
-      req.method() === 'POST' &&
-      /\/file-janitor\/(scan|prepare-review|decisions|preview|apply)$/.test(
-        new URL(req.url()).pathname
-      )
-    )
+    const operation = new URL(req.url()).pathname.match(
+      /\/file-janitor\/(scan|prepare-review|decisions|preview|apply|undo)$/
+    );
+    if (req.method() === 'POST' && operation) {
       automaticActions++;
+      filingOperations.push(operation[1]);
+    }
   });
   await installLocalCdn(page);
   await expect
@@ -208,18 +209,45 @@ test('the Curator offers filing choices without waiting for a goal assessment', 
       },
       { timeout: 45000 }
     )
-    .toContain('2 items waiting for review');
+    .toContain('2 files ready for review');
   await page.goto(`/workspaces/${slug}`);
+  const card = page.locator('#workspaceNextActionRegion');
+  await expect(card).toContainText('2 files ready for review');
   await expect(page.locator('#personalAssistantUnread')).toBeVisible({ timeout: 30000 });
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
-  await page.locator('#personalAssistantLauncher').click();
+  const beforeOpen = await ok(await request.get(`/api/workspaces/${id}/updates`));
+  await expect(card.locator('h3')).toHaveText('2 files ready for review');
+  await expect(card.getByRole('button', { name: 'Review files', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('filing-update-card.png'), fullPage: true });
+  await card.getByRole('button', { name: 'Review files', exact: true }).click();
+  await expect(page.locator('#fileJanitorConsoleDialog')).toBeVisible();
+  await expect(page.locator('#fileJanitorConsoleBody')).toContainText('report.pdf');
+  expect((await ok(await request.get(`/api/workspaces/${id}/updates`))).welcome.unread_count).toBe(
+    beforeOpen.welcome.unread_count
+  );
+  expect(automaticActions).toBe(0);
+  await page.locator('[data-fj-console-close]').click();
+  await card.getByRole('button', { name: /Ask Ask Ori/ }).click();
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   const messages = page.locator('#homeAssistantConversation');
-  await expect(messages).toContainText('1. Review proposed filing');
-  await expect(messages).toContainText('2. Discuss uncertain files');
-  await expect(messages).toContainText('3. Understand the filing rules');
-  await expect(messages).toContainText('2 items waiting for review');
-  await expect(messages).toContainText('I’d start with the proposed filing');
+  await expect(messages).toContainText('2 files ready for review');
+  await expect(messages).toContainText('1 marked Needs review');
+  await expect(messages).toContainText('Nothing moves without your explicit approval');
+  await expect(messages).not.toContainText('reply with a number');
+  // Hydration reveals the latest message, not necessarily the beginning of
+  // the earlier introduction. Explicitly expose that earlier message too.
+  await page.locator('#personalAssistantScroll').hover();
+  await page.mouse.wheel(0, -600);
+  await expect
+    .poll(
+      async () =>
+        (await ok(await request.get(`/api/workspaces/${id}/updates`))).welcome.unread_count
+    )
+    .toBe(0);
+  expect((await ok(await request.get(`/api/workspaces/${id}/updates`))).review.pending_count).toBe(
+    2
+  );
+  await expect(card).toContainText('2 files ready for review');
   // An earlier generic introduction remains historical when a capability is
   // installed afterwards. The newly saved filing message is independent.
   const filingMessage = messages.locator('[data-lead-message-id]').last();
@@ -235,10 +263,10 @@ test('the Curator offers filing choices without waiting for a goal assessment', 
     req => req.method() === 'POST' && new URL(req.url()).pathname === '/api/chat'
   );
   await page.screenshot({
-    path: testInfo.outputPath('curator-welcome-choices.png'),
+    path: testInfo.outputPath('curator-welcome-exposed.png'),
     fullPage: true
   });
-  await page.locator('#personalAssistantInput').fill('2');
+  await page.locator('#personalAssistantInput').fill('Why are some files marked Needs review?');
   await page.locator('#personalAssistantSend').click();
   expect((await sent).headers()['x-session-id']).toBe(sessions[0].id);
   // Curator runtime/tool initialization can outlast the default UI assertion wait.
@@ -251,6 +279,68 @@ test('the Curator offers filing choices without waiting for a goal assessment', 
     expect(existsSync(join(root, name))).toBe(true);
     expect(readFileSync(join(root, name), 'utf8')).toBe('synthetic filing fixture');
   }
+  const savedBeforeFiling = await ok(await request.get(`/api/sessions/${sessions[0].id}`));
+  await page.locator('#personalAssistantClose').click();
+  await card.getByText('Source details', { exact: true }).click();
+  await expect(card).toContainText('Batch completed');
+  await expect(card).toContainText('Review observed');
+  await expect(card).toContainText('Message 1 exposed');
+  await page.screenshot({ path: testInfo.outputPath('filing-source-details.png'), fullPage: true });
+  expect(automaticActions).toBe(0);
+
+  // Only this explicit selection/preview/confirmation authorizes filing.
+  await card.getByRole('button', { name: 'Review files', exact: true }).click();
+  const row = page
+    .locator('#fileJanitorConsoleBody .fj-row-item')
+    .filter({ hasText: 'report.pdf' });
+  await row.locator('.fj-select').check();
+  await page.locator('#fileJanitorApprove').click();
+  await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+  expect(existsSync(join(root, 'report.pdf'))).toBe(true);
+  await page.locator('#fileJanitorConfirmApply').click();
+  await expect
+    .poll(() => existsSync(join(root, 'Filed', 'Documents', 'report.pdf')), { timeout: 30000 })
+    .toBe(true);
+  expect(existsSync(join(root, 'uncertain.qqq'))).toBe(true);
+  await expect
+    .poll(
+      async () =>
+        (await ok(await request.get(`/api/workspaces/${id}/updates`))).review.pending_count
+    )
+    .toBe(1);
+  await page.locator('[data-fj-console-close]').click();
+  await expect(card).toContainText('1 file ready for review');
+  await expect(page.locator('#personalAssistantUnread')).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('filing-partial-update.png'), fullPage: true });
+  expect((await ok(await request.get(`/api/sessions/${sessions[0].id}`))).messages).toEqual(
+    savedBeforeFiling.messages
+  );
+  expect(modelCalls().length).toBe(calls + 1);
+  const operations = Object.fromEntries(
+    ['scan', 'prepare-review', 'decisions', 'preview', 'apply', 'undo'].map(kind => [
+      kind,
+      filingOperations.filter(value => value === kind).length
+    ])
+  );
+  expect(operations.scan).toBe(0);
+  expect(operations['prepare-review']).toBe(0);
+  expect(operations.preview).toBe(1);
+  expect(operations.apply).toBe(1);
+  expect(operations.undo).toBe(0);
+  writeFileSync(
+    testInfo.outputPath('filing-operation-counts.json'),
+    JSON.stringify(
+      {
+        explicit_fixture_preparation: { setup: 1, scan: 1 },
+        navigation_mutations: 0,
+        after_explicit_partial_filing: operations,
+        update_generated_model_calls: 0,
+        explicit_user_chat_calls: modelCalls().length - calls
+      },
+      null,
+      2
+    )
+  );
 });
 
 test('a draft in another conversation is preserved while a quiet welcome waits', async ({

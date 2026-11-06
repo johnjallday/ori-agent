@@ -24,8 +24,11 @@ export function createWorkspaceUpdates({ fetchImpl = (...args) => fetch(...args)
     if (!data || data.workspace_id !== id || !data.welcome?.state) return false;
     // Failure of one source does not erase a previously verified observation.
     // Its qualification is explicit; it can never authorize navigation/seen.
-    if (data.welcome.state === 'unavailable' && item.view.data?.welcome) {
-      data = { ...data, welcome: { ...item.view.data.welcome, state: 'unavailable', stale: true } };
+    data = { ...data, review: data.review || { state: 'unavailable' } };
+    for (const source of ['welcome', 'review']) {
+      if (data[source].state === 'unavailable' && item.view.data?.[source]) {
+        data[source] = { ...item.view.data[source], state: 'unavailable', stale: true };
+      }
     }
     publish(id, item, { state: 'ready', data, stale: false });
     return true;
@@ -66,6 +69,21 @@ export function createWorkspaceUpdates({ fetchImpl = (...args) => fetch(...args)
     });
     return work;
   }
+  function invalidate(id) {
+    if (!id) return;
+    const item = entry(id);
+    const pending = item.mutation || item.read;
+    if (!pending) return void refresh(id);
+    // A commit hint during a read must cause one subsequent canonical read,
+    // not be lost by coalescing into the pre-commit response.
+    if (item.invalidated) return;
+    item.invalidated = true;
+    const scope = generation;
+    void pending.finally(() => {
+      item.invalidated = false;
+      if (scope === generation && entries.get(id) === item) void refresh(id);
+    });
+  }
   function acknowledge(id, message) {
     const item = entry(id);
     const scope = generation;
@@ -103,6 +121,7 @@ export function createWorkspaceUpdates({ fetchImpl = (...args) => fetch(...args)
   }
   return {
     refresh,
+    invalidate,
     acknowledge,
     read: id => entries.get(id)?.view || empty(),
     subscribe(listener) {
@@ -118,6 +137,65 @@ export function createWorkspaceUpdates({ fetchImpl = (...args) => fetch(...args)
 }
 
 export const workspaceUpdates = createWorkspaceUpdates();
+
+// A mounted workspace shares one canonical summary watcher with its presenters.
+// Existing console notifications cover preparation/manual scans/decisions/apply/
+// undo. They are hints only. The slow active-workspace read also catches automatic
+// scans or lost hints; it is not whole-tree polling or an execution callback.
+export function watchWorkspaceUpdates(
+  id,
+  {
+    updates = workspaceUpdates,
+    document: doc = globalThis.document,
+    window: win = globalThis.window,
+    setTimer = setInterval,
+    clearTimer = clearInterval
+  } = {}
+) {
+  let disposed = false;
+  let signature = '';
+  const refresh = () => {
+    if (!disposed && doc?.visibilityState !== 'hidden') updates.invalidate(id);
+  };
+  const changed = event => {
+    const snapshot = event.detail?.state;
+    const state = snapshot?.actionState;
+    if (
+      snapshot?.workspaceId !== id ||
+      !state ||
+      [state.status?.state, state.batch?.state].includes('loading')
+    )
+      return;
+    const next = JSON.stringify([
+      snapshot.generation,
+      state.status,
+      state.batch,
+      state.applies,
+      state.rootId,
+      state.batchId,
+      state.pendingCount,
+      state.needsReviewCount,
+      state.readiness,
+      state.scanning,
+      state.latestReceipt
+    ]);
+    if (next === signature) return;
+    signature = next;
+    refresh();
+  };
+  doc?.addEventListener('ori:file-janitor-changed', changed);
+  doc?.addEventListener('visibilitychange', refresh);
+  for (const event of ['focus', 'pageshow', 'popstate']) win?.addEventListener(event, refresh);
+  const timer = setTimer(refresh, 30000);
+  refresh();
+  return () => {
+    disposed = true;
+    clearTimer(timer);
+    doc?.removeEventListener('ori:file-janitor-changed', changed);
+    doc?.removeEventListener('visibilitychange', refresh);
+    for (const event of ['focus', 'pageshow', 'popstate']) win?.removeEventListener(event, refresh);
+  };
+}
 
 // Exposure records visibility, not comprehension. For long messages, their
 // beginning and at least 80px must be inside the viewport. No scroll/focus

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorkspaceUpdates, exposedWelcomeMessages } from './workspace-updates.js';
+import {
+  createWorkspaceUpdates,
+  exposedWelcomeMessages,
+  watchWorkspaceUpdates
+} from './workspace-updates.js';
 
 const summary = (id = 'ws', seen = false) => ({
   workspace_id: id,
@@ -186,4 +190,105 @@ test('long messages require their beginning and 80px; scroll-away never counts',
   assert.equal(exposedWelcomeMessages(input).length, 1);
   input.source.messages[0].seen_at = 'saved';
   assert.equal(exposedWelcomeMessages(input).length, 0);
+});
+
+test('independent source failure retains only qualified observations', async () => {
+  let data = { ...summary(), review: { state: 'ready', pending_count: 10, batch_id: 'batch' } };
+  const updates = createWorkspaceUpdates({ fetchImpl: async () => response(data) });
+  await updates.refresh('ws');
+  data = {
+    ...summary(),
+    welcome: { state: 'unavailable' },
+    review: { state: 'ready', pending_count: 2, batch_id: 'batch' }
+  };
+  await updates.refresh('ws');
+  assert.equal(updates.read('ws').data.welcome.stale, true);
+  assert.equal(updates.read('ws').data.review.pending_count, 2);
+  data = { ...summary('ws', true), review: { state: 'unavailable' } };
+  await updates.refresh('ws');
+  assert.equal(updates.read('ws').data.welcome.unread_count, 0);
+  assert.deepEqual(updates.read('ws').data.review, {
+    state: 'unavailable',
+    stale: true,
+    pending_count: 2,
+    batch_id: 'batch'
+  });
+});
+
+test('a committed change during a read gets one trailing canonical read', async () => {
+  const wait = deferred();
+  let reads = 0;
+  const updates = createWorkspaceUpdates({
+    fetchImpl: () => {
+      reads++;
+      return reads === 1 ? wait.promise : Promise.resolve(response(summary('ws', true)));
+    }
+  });
+  const pending = updates.refresh('ws');
+  updates.invalidate('ws');
+  updates.invalidate('ws');
+  wait.resolve(response(summary()));
+  await pending;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 2);
+  assert.equal(updates.read('ws').data.welcome.unread_count, 0);
+});
+
+test('local filing hints and active return only invalidate; cleanup removes listeners and polling', () => {
+  const doc = new EventTarget();
+  const win = new EventTarget();
+  doc.visibilityState = 'visible';
+  const hints = [];
+  let poll;
+  let cleared = false;
+  const stop = watchWorkspaceUpdates('ws', {
+    document: doc,
+    window: win,
+    updates: { invalidate: id => hints.push(id) },
+    setTimer: (fn, delay) => {
+      assert.equal(delay, 30000);
+      poll = fn;
+      return 7;
+    },
+    clearTimer: id => {
+      assert.equal(id, 7);
+      cleared = true;
+    }
+  });
+  const send = (id, count) =>
+    doc.dispatchEvent(
+      new CustomEvent('ori:file-janitor-changed', {
+        detail: {
+          state: {
+            workspaceId: id,
+            actionState: {
+              status: { state: 'ready' },
+              batch: { state: 'ready' },
+              pendingCount: count
+            }
+          }
+        }
+      })
+    );
+  send('other', 10);
+  assert.equal(hints.length, 1);
+  send('ws', 10); // preparation/manual scan
+  send('ws', 10); // unchanged refresh never announces or invalidates again
+  send('ws', 9); // partial apply/decision
+  send('ws', 10); // undo
+  assert.equal(hints.length, 4);
+  doc.visibilityState = 'hidden';
+  poll();
+  win.dispatchEvent(new Event('focus'));
+  assert.equal(hints.length, 4);
+  doc.visibilityState = 'visible';
+  doc.dispatchEvent(new Event('visibilitychange'));
+  poll(); // missing/automatic scan hint recovers on a canonical active read
+  assert.equal(hints.length, 6);
+  stop();
+  send('ws', 0);
+  poll();
+  win.dispatchEvent(new Event('pageshow'));
+  assert.equal(hints.length, 6);
+  assert.equal(cleared, true);
 });

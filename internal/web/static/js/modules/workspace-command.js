@@ -27,6 +27,7 @@ import {
 } from './workspace-folder-shape.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
+import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import { TicketCounts } from './ticket-count-line.js';
 import {
   consumeGroupTemplateLanding,
@@ -2350,6 +2351,11 @@ export class WorkspaceCommandView {
     this._renderDeferredByDrag = false;
     this._nextActionUnsubscribe?.();
     this._nextActionUnsubscribe = null;
+    this._updatesUnsubscribe?.();
+    this._updatesWatch?.();
+    this._updatesUnsubscribe = null;
+    this._updatesWatch = null;
+    this._updatesListening = false;
     this._nextActionController = null;
     this._nextActionWorkspace = '';
   }
@@ -2360,14 +2366,26 @@ export class WorkspaceCommandView {
     const id = this.workspaceId();
     if (this._nextActionController === controller && this._nextActionWorkspace === id) return;
     this.disposeNextAction();
-    if (!id || !controller?.subscribe) return;
+    if (!id) return;
     this._nextActionController = controller;
     this._nextActionWorkspace = id;
     const signatureOf = () => {
-      const { taskWork: _taskWork, ...descriptor } = this.nextAction();
+      const { taskWork: _taskWork, sourceRows: _sourceRows, ...descriptor } = this.nextAction();
       return JSON.stringify(descriptor);
     };
     let signature = signatureOf();
+    if (typeof window.addEventListener === 'function') {
+      this._updatesListening = true;
+      this._updatesUnsubscribe = workspaceUpdates.subscribe(changedID => {
+        if (!this.active || changedID !== id || this.workspaceId() !== id) return;
+        const next = signatureOf();
+        if (next === signature) return;
+        signature = next;
+        if (['map', 'details'].includes(this.viewMode)) this.render();
+      });
+      this._updatesWatch = watchWorkspaceUpdates(id);
+    }
+    if (!controller?.subscribe) return;
     this._nextActionUnsubscribe = controller.subscribe(snapshot => {
       if (
         !this.active ||
@@ -2387,6 +2405,10 @@ export class WorkspaceCommandView {
     return typeof window === 'undefined' ? null : window.FileJanitorConsole?.getActionState?.();
   }
 
+  updatesView() {
+    return this._updatesListening ? workspaceUpdates.read(this.workspaceId()) : undefined;
+  }
+
   nextAction() {
     const page = this.page || {};
     const state = page.tasksLoadFailed
@@ -2397,7 +2419,8 @@ export class WorkspaceCommandView {
     return resolveWorkspaceNextAction({
       workspaceId: this.workspaceId(),
       tasks: { state, items: page.tasks },
-      console: this.janitorActionState()
+      console: this.janitorActionState(),
+      updates: this.updatesView()
     });
   }
 
@@ -2460,8 +2483,19 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
       '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
+      (view.updateLabel
+        ? `<p class="ws-cmd-update-label">${escapeHtml(view.updateLabel)}</p>`
+        : '') +
       `<h3>${escapeHtml(view.title)}</h3><p>${escapeHtml(view.description)}</p>` +
+      '<div class="ws-cmd-update-actions">' +
       primary +
+      (view.message && action?.kind !== 'welcome'
+        ? `<button type="button" class="ws-cmd-agent-action" data-cmd-update-message data-cmd-work-key="update-message">${escapeHtml(view.message.label)}${view.message.unread ? ' · New message' : ''}</button>`
+        : '') +
+      '</div>' +
+      (view.sourceRows?.length
+        ? `<details class="ws-cmd-update-sources" data-cmd-update-sources${this.updateSourcesExpanded ? ' open' : ''}><summary data-cmd-work-key="sources">Source details</summary><dl>${view.sourceRows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl><p>Message exposure is not a filing decision. Nothing moves without your approval.</p></details>`
+        : '') +
       view.qualifications
         .map(text => `<p class="ws-cmd-work-qualification">${escapeHtml(text)}</p>`)
         .join('') +
@@ -2478,6 +2512,47 @@ export class WorkspaceCommandView {
   retryWorkSources() {
     void this.page?.loadTasks?.();
     if (typeof window !== 'undefined') void window.FileJanitorConsole?.refresh?.();
+    if (this._updatesListening) workspaceUpdates.invalidate(this.workspaceId());
+  }
+
+  async openUpdateReview(trigger) {
+    const id = this.workspaceId();
+    const view = await workspaceUpdates.refresh(id);
+    if (!this.active || this.workspaceId() !== id) return false;
+    const review = view.data?.review;
+    if (
+      view.state !== 'ready' ||
+      view.stale ||
+      review?.state !== 'ready' ||
+      review.stale ||
+      !review.root_id
+    ) {
+      this.workNotice = 'This filing review is unavailable. Refresh workspace status to try again.';
+      this.render();
+      return false;
+    }
+    const opened = window.FileJanitorConsole?.openLatestReview?.({
+      source: 'workspace-updates',
+      trigger,
+      batchId: review.batch_id || ''
+    });
+    if (!opened) {
+      this.workNotice =
+        'The review could not be opened. Finish the current review or refresh workspace status. Your selections have been kept.';
+      this.render();
+    }
+    return Boolean(opened);
+  }
+
+  async openUpdateMessage(trigger) {
+    const id = this.workspaceId();
+    const opened = await window.PersonalAssistantPanel?.openWorkspaceWelcome?.(id, trigger);
+    if (!opened && this.active && this.workspaceId() === id) {
+      this.workNotice =
+        'The conversation could not be opened. Finish any draft or active reply, or refresh workspace status.';
+      this.render();
+    }
+    return Boolean(opened);
   }
 
   runNextAction(key, trigger) {
@@ -2488,6 +2563,9 @@ export class WorkspaceCommandView {
       return;
     }
     this.workNotice = '';
+    if (action.owner === 'updates') return void this.openUpdateMessage(trigger);
+    if (action.owner === 'console' && action.kind === 'review' && this.updatesView())
+      return void this.openUpdateReview(trigger);
     if (action.owner === 'task') {
       this.runWorkAction(action.kind, action.id, trigger);
     } else if (action.owner === 'console') {
@@ -2575,6 +2653,10 @@ export class WorkspaceCommandView {
     root.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
+      if (button.hasAttribute('data-cmd-update-message')) {
+        void this.openUpdateMessage(button);
+        return;
+      }
       if (button.hasAttribute('data-cmd-next-action')) {
         this.runNextAction(button.getAttribute('data-cmd-next-action'), button);
         return;
@@ -2651,6 +2733,8 @@ export class WorkspaceCommandView {
       Boolean(document.activeElement?.hasAttribute?.('data-cmd-parent-group'));
     const admin = this.container.querySelector?.('[data-cmd-admin]');
     if (admin) this.adminExpanded = admin.open;
+    const updateSources = this.container.querySelector('[data-cmd-update-sources]');
+    if (updateSources) this.updateSourcesExpanded = updateSources.open;
     this.rememberCapabilityInspectorFocus();
     this.rememberLoadoutAddFocus();
     this.rememberRailFocus();

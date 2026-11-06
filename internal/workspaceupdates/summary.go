@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -34,11 +35,12 @@ type WelcomeSource struct {
 }
 
 type Summary struct {
-	WorkspaceID string        `json:"workspace_id"`
-	FolderSlug  string        `json:"folder_slug"`
-	Name        string        `json:"name"`
-	ObservedAt  time.Time     `json:"observed_at"`
-	Welcome     WelcomeSource `json:"welcome"`
+	WorkspaceID string                   `json:"workspace_id"`
+	FolderSlug  string                   `json:"folder_slug"`
+	Name        string                   `json:"name"`
+	ObservedAt  time.Time                `json:"observed_at"`
+	Welcome     WelcomeSource            `json:"welcome"`
+	Review      filejanitor.FilingReview `json:"review"`
 }
 
 func safeLabel(value string, limit int) string {
@@ -55,9 +57,11 @@ func safeLabel(value string, limit int) string {
 }
 
 func (s *Service) ownedWorkspace(owner, id string) (*workspace.Workspace, error) {
-	ws, err := ReadWorkspace(s.workspaces, id)
-	if err != nil {
-		return nil, err
+	// Projection authority is the primary workspace identity. A missing setup
+	// snapshot or conversation must not hide independently valid filing work.
+	ws, err := s.workspaces.Get(id)
+	if err != nil || ws == nil {
+		return nil, ErrNotFound
 	}
 	if owner == "" || workspaceOwner(ws) != owner || ws.Status == workspace.StatusTrashed || ws.Status == workspace.StatusMissing {
 		return nil, ErrNotFound
@@ -69,23 +73,36 @@ func (s *Service) ownedWorkspace(owner, id string) (*workspace.Workspace, error)
 // writes. A source failure is not an authoritative zero. The caller may retain
 // qualified last-known information, but never turn that into action authority.
 func (s *Service) Summary(ctx context.Context, owner, id string) (Summary, error) {
+	return s.summary(ctx, owner, id, false)
+}
+
+func (s *Service) summary(ctx context.Context, owner, id string, retried bool) (Summary, error) {
 	ws, err := s.ownedWorkspace(owner, id)
 	if err != nil {
 		return Summary{}, err
 	}
+	version := ws.Version
 	out := Summary{WorkspaceID: ws.ID, FolderSlug: ws.FolderSlug, Name: safeLabel(ws.Name, 120), ObservedAt: time.Now().UTC(),
-		Welcome: WelcomeSource{State: "not_applicable"}}
-	scope, eligible := Scope(ws, owner)
-	if !eligible {
-		return out, nil
+		Welcome: WelcomeSource{State: "not_applicable"}, Review: filejanitor.FilingReview{State: "not_applicable"}}
+	if scope, eligible := Scope(ws, owner); eligible {
+		out.Welcome.AgentInstanceID, out.Welcome.AgentName = scope.AgentInstanceID, safeLabel(scope.AgentName, 100)
+		delivery, err := s.store.ReadWelcome(ctx, scope)
+		if err != nil {
+			out.Welcome.State = StateUnavailable
+		} else {
+			out.Welcome.State = StateReady
+			out.Welcome.WelcomeDelivery = &delivery
+		}
 	}
-	out.Welcome.AgentInstanceID, out.Welcome.AgentName = scope.AgentInstanceID, safeLabel(scope.AgentName, 100)
-	delivery, err := s.store.ReadWelcome(ctx, scope)
-	if err != nil {
-		out.Welcome.State = StateUnavailable
-	} else {
-		out.Welcome.State = StateReady
-		out.Welcome.WelcomeDelivery = &delivery
+	if s.reviews != nil {
+		review, err := s.reviews.ReadFilingReview(ctx, owner, id)
+		if err != nil {
+			out.Review = filejanitor.FilingReview{State: StateUnavailable}
+		} else {
+			out.Review = review
+		}
+	} else if ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
+		out.Review.State = StateUnavailable
 	}
 	// A transfer/deletion while another source is read cannot lend the first
 	// snapshot's labels or messages to the now-foreign workspace.
@@ -93,7 +110,13 @@ func (s *Service) Summary(ctx context.Context, owner, id string) (Summary, error
 	if err != nil {
 		return Summary{}, err
 	}
-	if latest.Version != ws.Version {
+	if latest.Version != version {
+		// Page activation and unrelated workspace metadata can advance the
+		// version while sources are read. Retry once from current authority;
+		// never relax the fence or loop indefinitely during active changes.
+		if !retried && ctx.Err() == nil {
+			return s.summary(ctx, owner, id, true)
+		}
 		return Summary{}, ErrUnavailable
 	}
 	return out, nil

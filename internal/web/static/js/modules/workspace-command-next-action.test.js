@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkspaceCommandView } from './workspace-command.js';
+import { workspaceUpdates } from './workspace-updates.js';
 
 globalThis.document = { getElementById: () => null };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -135,6 +136,112 @@ function bindPrimary(command) {
   };
   return { html, button, click: () => click({ target: { closest: () => button } }) };
 }
+
+function updateData(batch = 'current') {
+  return {
+    workspace_id: 'w',
+    name: 'Desktop <script>',
+    review: {
+      state: 'ready',
+      root_id: 'root',
+      batch_id: batch,
+      pending_count: 10,
+      batch_completed_at: '2026-01-01T00:00:00Z',
+      observed_at: '2026-01-02T00:00:00Z'
+    },
+    welcome: {
+      state: 'ready',
+      session_id: 'saved-chat',
+      agent_instance_id: 'lead',
+      agent_name: 'Mira <img>',
+      unread_count: 1
+    }
+  };
+}
+
+test('shared projection renders one primary, actual-lead Ask and escaped Source details', () => {
+  const command = view([], { janitorState: reviewState() });
+  command.updatesView = () => ({ state: 'ready', data: updateData() });
+  const html = command.renderWorkFirst();
+  assert.equal((html.match(/is-primary/g) || []).length, 1);
+  assert.match(html, /10 files ready for review/);
+  assert.match(html, /Ask Mira &lt;img&gt; · New message/);
+  assert.match(html, /Desktop &lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>|<img>/);
+  assert.match(html, /Source details/);
+  assert.match(html, /Nothing moves without your approval/);
+});
+
+test('update Review binding re-reads and opens the current batch without any work request', async t => {
+  workspaceUpdates.reset();
+  const command = view([], { janitorState: reviewState() });
+  command.active = true;
+  command.updatesView = () => ({ state: 'ready', data: updateData('old') });
+  const calls = [];
+  const opened = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.window = {
+    location: { search: '' },
+    FileJanitorConsole: {
+      openLatestReview: options => {
+        opened.push(options);
+        return true;
+      }
+    }
+  };
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => updateData('new') };
+  };
+  t.after(() => {
+    delete globalThis.window;
+    globalThis.fetch = previousFetch;
+    workspaceUpdates.reset();
+  });
+  const primary = bindPrimary(command);
+  primary.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/workspaces/w/updates');
+  assert.equal(calls[0].options.method, undefined);
+  assert.deepEqual(opened, [
+    { source: 'workspace-updates', trigger: primary.button, batchId: 'new' }
+  ]);
+});
+
+test('mounted Command shares one disposable watcher and ignores unchanged observations', async t => {
+  workspaceUpdates.reset();
+  const priorDocument = globalThis.document;
+  const previousFetch = globalThis.fetch;
+  globalThis.document = new EventTarget();
+  globalThis.document.getElementById = () => null;
+  globalThis.document.visibilityState = 'visible';
+  globalThis.window = new EventTarget();
+  globalThis.window.location = { search: '' };
+  globalThis.window.FileJanitorConsole = { subscribe: () => () => {} };
+  globalThis.fetch = async () => ({ ok: true, json: async () => updateData() });
+  const command = view([], { janitorState: reviewState() });
+  command.active = true;
+  let renders = 0;
+  command.render = () => renders++;
+  t.after(() => {
+    command.disposeNextAction();
+    globalThis.document = priorDocument;
+    delete globalThis.window;
+    globalThis.fetch = previousFetch;
+    workspaceUpdates.reset();
+  });
+  command.ensureNextActionSubscription();
+  command.ensureNextActionSubscription();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(command.nextAction().title, '10 files ready for review');
+  assert.equal(renders, 1);
+  await workspaceUpdates.refresh('w');
+  assert.equal(renders, 1);
+  command.disposeNextAction();
+  await workspaceUpdates.refresh('w');
+  assert.equal(renders, 1);
+});
 
 test('Details renders one review CTA and real binding dispatches only console navigation', () => {
   const command = view([running], { janitorState: reviewState() });

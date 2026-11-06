@@ -125,7 +125,7 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	if assessment == "" && isCurator && curator.ID == ag.WorkspaceTools.executingInstanceID {
 		intro += "\n\nYour saved filing review will appear here when it is available. Nothing moves without your approval in File Janitor."
 	} else if assessment == "" {
-		intro += "\n\nI don’t have a saved assessment yet. We can discuss the goal here; a review uses the existing Goal settings controls. Once there’s a saved assessment, we can talk through the findings and next step."
+		intro += "\n\nI don’t have a saved assessment yet. Ask me about your goal, or choose a review in Goal settings when you’re ready."
 		if strings.TrimSpace(ws.Mission) == "" {
 			intro += "\n\nWhat outcome would you like us to work toward?"
 		}

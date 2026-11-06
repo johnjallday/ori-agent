@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -27,12 +28,17 @@ type WorkspaceReader interface {
 	Get(string) (*workspace.Workspace, error)
 }
 
+type ReviewReader interface {
+	ReadFilingReview(context.Context, string, string) (filejanitor.FilingReview, error)
+}
+
 // Service retries only the finite, host-written delivery for explicitly
 // enrolled workspaces. No GET or lifecycle callback can enroll a legacy tree.
 type Service struct {
 	store      Store
 	workspaces WorkspaceReader
 	composer   Composer
+	reviews    ReviewReader
 	gate       *resetstate.WorkGate
 	interval   time.Duration
 	wake       chan struct{}
@@ -44,6 +50,9 @@ type Service struct {
 func New(store Store, workspaces WorkspaceReader, composer Composer, gate *resetstate.WorkGate) *Service {
 	return &Service{store: store, workspaces: workspaces, composer: composer, gate: gate, interval: 30 * time.Second, wake: make(chan struct{}, 1)}
 }
+
+// SetReviewReader wires the independent saved-state reader before Start.
+func (s *Service) SetReviewReader(reader ReviewReader) { s.reviews = reader }
 
 // ReadWorkspace combines SQLite-owned identity/version/work with folder-owned
 // setup facts. Ordinary creation can write folder scaffolding without changing

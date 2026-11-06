@@ -55,23 +55,12 @@ func (s *Service) ReadCuratorWelcome(ctx context.Context, userID, workspaceID, i
 	}
 	if found {
 		out.HasSavedScan = true
-		if batch.WorkspaceID != workspaceID || len(candidates) != len(batch.CandidateIDs) {
+		install, _ := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
+		if !reviewBatchScope(batch, candidates, workspaceID, root.Generation, install) {
 			return CuratorWelcome{}, errCuratorWelcomeUnavailable
 		}
-		seen := make(map[string]bool)
-		for _, candidate := range candidates {
-			if candidate.WorkspaceID != workspaceID || candidate.BatchID != batch.ID || candidate.ID == "" || seen[candidate.ID] {
-				return CuratorWelcome{}, errCuratorWelcomeUnavailable
-			}
-			seen[candidate.ID] = true
-			if candidate.State != CandidatePending && candidate.State != CandidateApproved {
-				continue
-			}
-			out.Pending++
-			if candidate.NeedsReview {
-				out.NeedsReview++
-			}
-		}
+		batch = SummarizeBatch(batch, candidates)
+		out.Pending, out.NeedsReview = batch.Summary.Proposed, batch.Summary.NeedsReview
 		out.BatchCompletedAt = batch.CompletedAt
 	} else {
 		// A ready hook can precede the first scan. Absence is not an empty

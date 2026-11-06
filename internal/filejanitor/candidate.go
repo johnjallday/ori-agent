@@ -340,6 +340,10 @@ type JanitorBatch struct {
 	Source      ScanSource `json:"source"`
 	StartedAt   time.Time  `json:"started_at"`
 	CompletedAt time.Time  `json:"completed_at,omitempty"`
+	// Scope is saved with new batches by the existing authorized scan. It is
+	// inert provenance, never a grant or an approval. Legacy batches predate it.
+	RootID                string     `json:"root_id,omitempty"`
+	CapabilityInstalledAt *time.Time `json:"capability_installed_at,omitempty"`
 	// CandidateIDs is the batch's contents, in scan order.
 	CandidateIDs []string `json:"candidate_ids,omitempty"`
 	// Ineligible records what the scan skipped and why. Names only — no paths,

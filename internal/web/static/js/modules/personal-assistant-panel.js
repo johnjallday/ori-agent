@@ -865,6 +865,14 @@ function renderWelcomeIndicator(view = state.welcomeView) {
   scheduleWelcomeExposure();
 }
 
+function welcomeBlockedByModal() {
+  return Array.from(
+    document.querySelectorAll('.modal.show, dialog[open], [aria-modal="true"]')
+  ).some(
+    element => element.getClientRects().length > 0 && element.getAttribute('aria-hidden') !== 'true'
+  );
+}
+
 let welcomeExposureFrame = null;
 const welcomeAcknowledging = new Set();
 function scheduleWelcomeExposure() {
@@ -885,9 +893,7 @@ function scheduleWelcomeExposure() {
       focused: document.hasFocus(),
       settled: window.PersonalAssistantTranscript?.isSettled?.() === true,
       blocked: Boolean(
-        switchLock() ||
-        creationTransition.blocksReveal() ||
-        document.querySelector('.modal.show, dialog[open]')
+        switchLock() || creationTransition.blocksReveal() || welcomeBlockedByModal()
       ),
       viewport: pane.getBoundingClientRect(),
       rows: Array.from(transcript.querySelectorAll('[data-lead-message-id]')).map(row => ({
@@ -931,6 +937,10 @@ async function openWelcome(trigger) {
     setStatus('This message is unavailable. Refresh updates to try again.');
     return false;
   }
+  if (creationTransition.blocksReveal()) {
+    setStatus('Finish workspace creation before opening this message.');
+    return false;
+  }
   const lock = switchLock();
   const changing = recipients()?.sessionId?.() !== source.session_id;
   if (lock || (changing && (state.draft || state.els?.input?.value))) {
@@ -959,6 +969,27 @@ async function openWelcome(trigger) {
   }
   scheduleWelcomeExposure();
   return true;
+}
+
+async function openWorkspaceWelcome(workspaceId, trigger) {
+  if (routeContext().workspace_id !== workspaceId || creationTransition.blocksReveal())
+    return false;
+  await recipients()?.refresh?.();
+  if (routeContext().workspace_id !== workspaceId || creationTransition.blocksReveal())
+    return false;
+  if (recipients()?.current?.()?.kind !== RECIPIENT_WORKSPACE_ENTRY) {
+    const lock = switchLock();
+    if (lock || state.draft || state.els?.input?.value) {
+      open(trigger, { preserveConversation: true });
+      setStatus(
+        lock ||
+          'Finish or clear your draft before changing conversations. Your draft has been kept.'
+      );
+      return false;
+    }
+    if (!chooseRecipient(RECIPIENT_WORKSPACE_ENTRY)) return false;
+  }
+  return openWelcome(trigger);
 }
 
 function renderEntrySessionBar() {
@@ -2223,7 +2254,7 @@ function init() {
       return (
         window.workspaceDetail?.initialListsLoaded === true &&
         (!window.SetupWizard || (setup && (!setup.applicable || setup.state === 'ready'))) &&
-        !document.querySelector('.modal.show, dialog[open]') &&
+        !welcomeBlockedByModal() &&
         !creationTransition.blocksReveal()
       );
     },
@@ -2398,6 +2429,7 @@ const api = {
   init,
   open,
   openWelcome,
+  openWorkspaceWelcome,
   openActivity: (trigger, options = {}) => {
     if (state.open) {
       if (options.focus === true) focusOnOpen();
