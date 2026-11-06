@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -367,8 +368,18 @@ func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, ta
 	}
 	current := recipeExecutor(task, agentName, chosen)
 	reviewed, _ := task.Context[TaskContextReviewedExecutor].(string)
-	if (recipe == FirstTaskRecipeFolderSummary || reviewed != "") && reviewed != current.Digest {
+	if (recipe == FirstTaskRecipeFolderSummary || recipe == LearningDraftRecipe || reviewed != "") && reviewed != current.Digest {
 		return "", &TaskBlockedError{ReasonCode: "execution_changed", Reason: "Review the current ticket executor, model and permitted file scope before starting this summary. Nothing was read or sent to a model."}
+	}
+	maxTokens := 0
+	if recipe == LearningDraftRecipe {
+		if err := h.consumeLearningReview(task, chosen); err != nil {
+			return "", &TaskBlockedError{ReasonCode: "execution_changed", Reason: "Review the current Ticket executor and input before starting this draft. Nothing was sent to a model."}
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		maxTokens = LearningDraftMaxTokens
 	}
 	runner := h.recipes[recipe]
 	window := llm.ResolveModelContextWindow(chosen.provider, chosen.model)
@@ -387,6 +398,7 @@ func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, ta
 		SystemPrompt:        brief.System,
 		Messages:            []llm.Message{llm.NewUserMessage(brief.User)},
 		ContextWindowTokens: window,
+		MaxTokens:           maxTokens,
 		ReasoningEffort:     chosen.effort,
 		Isolated:            true,
 	})
@@ -462,7 +474,7 @@ func withoutReservedTaskContext(context map[string]any) map[string]any {
 // ReservedTaskContextKey reports a context key only the server may write.
 func ReservedTaskContextKey(key string) bool {
 	switch strings.TrimSpace(key) {
-	case TaskContextFirstTaskRecipe, TaskContextFirstTaskRecipeVersion, TaskContextFirstTaskFailure, TaskContextFolderSummaryScope, TaskContextReviewedExecutor:
+	case TaskContextFirstTaskRecipe, TaskContextFirstTaskRecipeVersion, TaskContextFirstTaskFailure, TaskContextFolderSummaryScope, TaskContextReviewedExecutor, TaskContextLearning:
 		return true
 	}
 	return false

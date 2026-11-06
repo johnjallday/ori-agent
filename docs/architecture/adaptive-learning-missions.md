@@ -57,7 +57,10 @@ Existing owners stay authoritative:
 3. `TaskRunBridge` creates a fresh Run per execution with
    `Scope.TargetTaskID`, persists `CurrentRunID` best-effort, then executes.
    `CurrentRunID` is mutable; its persistence error is currently ignored. Read
-   the canonical Run and its scope, not only that pointer.
+   the canonical Run and its scope, not only that pointer. Production tracing
+   also found that status transitions did not populate Run timestamps. The
+   canonical SQLite/memory owners now stamp first execution and terminal times;
+   historical missing timestamps remain unavailable, never backfilled.
 4. OriAgentExecutor stores an `ArtifactFile` with metadata role `task_result`
    and a raw-result artifact. Select the unique canonical file-result artifact,
    pin its ID and SHA-256 of exact bytes. Never select the latest arbitrary
@@ -153,6 +156,16 @@ creates/links a Ready Ticket, and a separate existing explicit Start starts it.
 Stopping learning never cancels an ordinary Ticket or Run. Unknown execution
 outcome means “Check the linked Ticket”, never automatic replay.
 
+The bounded draft uses the existing Ticket Start route, with an executor/input
+review from `GET /api/workspaces/{studioID}/tickets/{ticketID}/execution`.
+`POST .../start` supplies its `executor_digest`. The host binds exact input,
+recipe version, assigned agent, provider/model and effort. Only the winning
+start claim records approval; duplicate clicks cannot renew consumed approval.
+The recipe consumes it before a single isolated call (1200 output tokens,
+30-second deadline). Edited text/model and automatic retries require fresh
+review. Import removes the approval while retaining the restrictive recipe.
+These execution rules do not depend on the learning mission remaining active.
+
 ## Durable records and transitions
 
 Use the application's SQLite connection and migration **88** (recheck head at
@@ -161,6 +174,10 @@ same change. No continuity collector/export/import registration.
 
 - `learning_owners`: owner, revision, deletion epoch, scoped consent/settings,
   configured-model fingerprint, cadence counters; off/on-request/automatic.
+- `learning_sources`: device-local owner/workspace incarnation, foreign-keyed to
+  the canonical workspace registration. Deletion revokes it even if an import
+  later restores the same ID/timestamp. Only explicit proposal admission creates
+  it; no GET or portable content can restore it.
 - `learning_instances`: ID, owner/epoch, revision, structure/version, immutable
   proposal JSON, workspace incarnation, status/blocker, acceptance and timestamps.
 - `learning_operations`: owner + operation ID unique, kind, request digest,
@@ -196,8 +213,11 @@ then expose Start. Reconciliation looks up the exact intended ID and source
 marker and validates payload, scope and incarnation. If creation outcome cannot
 be proven (including deletion after creation), show recoverable unknown, never
 create a second Ticket. A separate attempt claim is written before start and
-bound by the canonical execution owner at Run creation, not by “latest Run”
-heuristics or event timestamps. A later unrelated Run cannot fulfill the claim.
+bound to a server-reserved Run ID **before** canonical Run creation, not by
+“latest Run” heuristics or event timestamps. The Run bridge's compiled reservation
+hook may refuse creation; `CreateRunRequest.HostRunID` is not a JSON field. An
+interruption after reservation keeps that exact identity unavailable/unknown,
+never adopts a later attempt. A later unrelated Run cannot fulfill the claim.
 After restart, reconcile persisted exact references without replaying execution.
 
 WorkGate permits cover every finite mutation and callback through persistence.
@@ -285,6 +305,8 @@ unavailable/foreign, 409 stale/unknown/replayed-different-content, 429 quota,
   operation/revision; prepares real Ticket only, never implicit start.
 - `POST /api/learning-missions/instances/{id}/review`: issue pinned review
   challenge or submit its exact nonce/decision/reason; never caller completion.
+  Preparing a challenge returns the exact canonical `result_text` it binds;
+  result bodies are not copied into learning receipts, status or diagnostics.
 - `POST /api/learning-missions/preferences`: scoped consent, mode, guidance,
   explicit interests/effort; revocation fences in-flight writes.
 - `POST /api/learning-missions/clear`: explicit history/preferences/exclusions

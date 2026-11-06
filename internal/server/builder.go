@@ -52,6 +52,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/homeupgrade"
 	"github.com/johnjallday/ori-agent/internal/integrationrelease"
+	"github.com/johnjallday/ori-agent/internal/learningmissions"
 	"github.com/johnjallday/ori-agent/internal/linkcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
@@ -284,8 +285,10 @@ type ServerBuilder struct {
 	noteHandler *notehttp.Handler
 
 	// Onboarding progression (quest log)
-	progressionEngine  *progression.Engine
-	progressionHandler *progressionhttp.Handler
+	progressionEngine       *progression.Engine
+	progressionHandler      *progressionhttp.Handler
+	learningMissions        *learningmissions.Service
+	learningMissionsHandler *learningMissionHandler
 
 	// Session files management
 	sessionFilesStore   *sessionfiles.Store
@@ -650,6 +653,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeOrchestration(); err != nil { // Phase 21
 		return nil, fmt.Errorf("orchestration phase failed: %w", err)
 	}
+	b.initializeLearningMissions()      // Recipe, reviewed Ticket start and local learning owner
 	b.initializeWorkspaceOrchestrator() // Phase 22
 	b.wireCalendarOpsPrepTaskExecutor() // Phase 22.1 — Calendar Ops meeting-prep needs the orchestrator
 	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
@@ -789,6 +793,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		SmartInput:            b.smartInputHandler,
 		Note:                  b.noteHandler,
 		Progression:           b.progressionHandler,
+		LearningMissions:      b.learningMissionsHandler,
 		SessionFiles:          b.sessionFilesHandler,
 		Review:                b.reviewHandler,
 		Evolution:             b.evolutionHandler,

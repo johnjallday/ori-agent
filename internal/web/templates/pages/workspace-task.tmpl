@@ -229,6 +229,8 @@
                   </div>
                 </div>
                 <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
+                <section id="learningTicketReview" class="learning-panel" aria-label="Bounded draft and learning review"
+                         data-studio-id="{{.Extra.WorkspaceID}}" data-ticket-id="{{.Extra.TaskID}}" hidden></section>
 
                 <div id="workspace-task-output-card" class="workspace-task-result-block" hidden>
                   <div class="workspace-task-page-card-header workspace-task-result-block-header">
@@ -6751,6 +6753,7 @@
 
   <script type="module">
     import { WorkspaceTaskPage } from '/js/modules/workspace-task.js';
+    import '/js/modules/learning-mission-review.js';
     import { isSafeReturnTarget } from '/js/modules/workspace-url-state.js';
 
     document.addEventListener('DOMContentLoaded', () => {

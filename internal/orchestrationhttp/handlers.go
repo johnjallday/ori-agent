@@ -572,6 +572,13 @@ func (h *Handler) TicketItemHandler(w http.ResponseWriter, r *http.Request) {
 	h.ticketHandler.TicketItemHandler(w, r)
 }
 
+// SetTicketStartReview wires the host recipe review without changing ordinary starts.
+func (h *Handler) SetTicketStartReview(review func(*http.Request, string, string, string, string) (func() error, error)) {
+	if h.ticketHandler != nil {
+		h.ticketHandler.SetStartReview(review)
+	}
+}
+
 // TicketStartHandler handles POST
 // /api/workspaces/{studioID}/tickets/{ticketID}/start.
 func (h *Handler) TicketStartHandler(w http.ResponseWriter, r *http.Request) {

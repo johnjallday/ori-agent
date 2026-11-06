@@ -116,11 +116,14 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, workspaceID string) ([]*Run,
 }
 
 func (s *SQLiteStore) UpdateStatus(ctx context.Context, workspaceID, runID string, status RunStatus, message string) error {
+	now := time.Now()
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspace_runs
-		SET status = ?, error = CASE WHEN ? = '' THEN error ELSE ? END, updated_at = ?
+		SET status = ?, error = CASE WHEN ? = '' THEN error ELSE ? END, updated_at = ?,
+		    started_at = CASE WHEN ? THEN COALESCE(started_at, ?) ELSE started_at END,
+		    finished_at = CASE WHEN ? THEN COALESCE(finished_at, ?) ELSE finished_at END
 		WHERE workspace_id = ? AND id = ?
-	`, string(status), message, message, time.Now(), workspaceID, runID)
+	`, string(status), message, message, now, status == RunStatusExecuting, now, terminalRunStatus(status), now, workspaceID, runID)
 	return checkRunUpdate(result, err, "update workspace run status")
 }
 

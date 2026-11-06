@@ -33,6 +33,10 @@ const (
 	RunStatusRejected         RunStatus = "rejected"
 )
 
+func terminalRunStatus(status RunStatus) bool {
+	return status == RunStatusSucceeded || status == RunStatusFailed || status == RunStatusCancelled || status == RunStatusRejected
+}
+
 type ExecutorKind string
 
 const (

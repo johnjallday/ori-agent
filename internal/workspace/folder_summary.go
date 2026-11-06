@@ -61,7 +61,13 @@ type RecipeExecutor struct {
 
 func recipeExecutor(task Task, agentName string, chosen recipeProvider) RecipeExecutor {
 	scope, _ := FolderSummaryScopeOf(task)
-	encoded, _ := json.Marshal([]any{task.WorkspaceID, task.ID, task.To, agentName, chosen.name, chosen.model, chosen.effort, FirstTaskRecipe(&task), scope})
+	values := []any{task.WorkspaceID, task.ID, task.To, agentName, chosen.name, chosen.model, chosen.effort, FirstTaskRecipe(&task), scope}
+	if FirstTaskRecipe(&task) == LearningDraftRecipe {
+		// A draft review binds the exact supplied text and host recipe version,
+		// not just the model. Editing after review requires fresh consent.
+		values = append(values, task.Details, task.Context[TaskContextFirstTaskRecipeVersion])
+	}
+	encoded, _ := json.Marshal(values)
 	sum := sha256.Sum256(encoded)
 	return RecipeExecutor{Agent: agentName, Provider: chosen.name, Model: chosen.model, Digest: hex.EncodeToString(sum[:])}
 }

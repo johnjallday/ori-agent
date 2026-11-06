@@ -551,6 +551,10 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/complete", s.Handlers.Onboarding.Complete)
 	mux.HandleFunc("/api/onboarding/reset", s.Handlers.Onboarding.Reset)
 
+	if s.Handlers.LearningMissions != nil {
+		s.Handlers.LearningMissions.Register(mux)
+	}
+
 	// Onboarding progression (quest log)
 	if s.Handlers.Progression != nil {
 		mux.HandleFunc("/api/progression", s.Handlers.Progression.GetStatus)

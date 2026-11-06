@@ -2958,7 +2958,12 @@ export class WorkspaceTaskPage {
     // the button (the previous gating left users with no obvious next
     // step on a pending+unassigned task — discoverability bug #5).
     if (status === 'pending' || status === 'assigned') {
-      const runLabel = hasAgent ? 'Run' : 'Assign & Run';
+      const runLabel =
+        this.task?.context?.folder_first_task_recipe === 'learning_draft'
+          ? 'Review execution'
+          : hasAgent
+            ? 'Run'
+            : 'Assign & Run';
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="execute">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${this.escapeHtml(runLabel)}
       </button>`);
@@ -2966,7 +2971,7 @@ export class WorkspaceTaskPage {
 
     if (status === 'failed' || status === 'completed') {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="execute">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>Re-run
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>${this.task?.context?.folder_first_task_recipe === 'learning_draft' ? 'Review learning / execution' : 'Re-run'}
       </button>`);
     }
 
@@ -10114,6 +10119,18 @@ export class WorkspaceTaskPage {
   }
 
   async executeTask() {
+    if (this.task?.context?.folder_first_task_recipe === 'learning_draft') {
+      const review = document.getElementById('learningTicketReview');
+      if (review && !review.hidden) {
+        review.scrollIntoView({ block: 'center' });
+        review.querySelector('h3')?.focus();
+      }
+      this.notify(
+        'info',
+        'Review the bounded draft input and model in the learning review section before starting.'
+      );
+      return;
+    }
     const status = String(this.task?.status || '')
       .trim()
       .toLowerCase();
