@@ -2305,7 +2305,10 @@ test('a waiting card is placed in the Needs you cards, and opens the strip only 
   // One host: Needs you's cards container (els.needs), never a slot that Home
   // moves under a folded line.
   assert.match(source, /needs: document\.getElementById\('personalAssistantNeedsYouCards'\)/);
-  assert.match(source, /const home = state\.reviewSlot \|\| \(needs \? els\.needs : els\.root\);/);
+  assert.match(
+    source,
+    /const inlineHome = state\.reviewSlot \|\| \(needs \? els\.needs : els\.root\);/
+  );
   assert.doesNotMatch(source, /needsHost/);
   // The card claims itself while it is in this tab's conversation; moving to
   // Needs you asks Home to open the strip with that claim, once.

@@ -24,6 +24,7 @@ class PlacementDemoContract(unittest.TestCase):
 mkdir -p "$FIXTURE_SANDBOX"
 printf 'worktree=%s\n' "$PWD" > "$FIXTURE_SANDBOX/.ori-demo-owner"
 printf 'MODEL=%s URL=%s KEY=%s\n' "$NARRATED_DEMO_MODEL" "$OPENAI_BASE_URL" "$OPENAI_API_KEY" >> "$TRACE"
+printf 'RELEASES=%s MODE=%s\n' "$ORI_INTEGRATION_RELEASES_API" "$1" >> "$TRACE"
 printf 'READY SANDBOX=%s ORI_URL=http://localhost:9998 SONG=synthetic MODE=installed\n' "$FIXTURE_SANDBOX"
 trap 'exit 0' TERM INT
 while true; do sleep 1; done
@@ -155,6 +156,81 @@ while true; do sleep 1; done
         self.assertIn("MUSIC_HOME_PLACEMENT_A11Y=chat", a11y)
         self.assertIn("tests/music-home-map-placement.a11y.spec.ts", a11y)
         self.assertIn("manager hand-off", a11y)
+
+    def test_wizard_runs_only_the_source_dialog_journey(self):
+        result = self.run_case("wizard")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertEqual(calls.count("e2e.sh\n"), 1)
+        self.assertIn("tests/reaper-folder-setup-wizard.spec.ts", calls)
+        self.assertIn("-g\nmusic wizard\n", calls)
+        self.assertNotIn("MUSIC_HOME_PLACEMENT_FAULT", calls)
+        self.assertIn("URL=http://127.0.0.1:1/v1 KEY=disposable-no-inference", calls)
+
+    def test_wizard_choices_and_guided_handoff_are_explicit_cases(self):
+        song = self.sandbox / "Documents" / "Ori Music Demo"
+        song.mkdir(parents=True)
+        (song / "Ori Music Demo.rpp").write_text("<REAPER_PROJECT>\n")
+        result = self.run_case("wizard-choice")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((song / "Ori Music Demo (mix).rpp").is_file())
+        self.assertIn("MUSIC_HOME_PLACEMENT_TWO_FILES=1", self.trace.read_text())
+        self.trace.unlink()
+        result = self.run_case("wizard-quest")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertIn("-g\nmusic guided\n", calls)
+        self.assertNotIn("MUSIC_HOME_PLACEMENT_TWO_FILES", calls)
+
+    def test_native_picker_is_explicit_and_restarts_only_the_owned_sandbox(self):
+        self.env["FIXTURE_STOPPED"] = str(self.root / "stopped")
+        self.env["ORI_DEMO_OPEN"] = "1"
+        narrated = self.scripts / "narrated-folder-demo.sh"
+        narrated.write_text(narrated.read_text().replace("while true; do sleep 1; done", 'while [[ ! -e "$FIXTURE_STOPPED" ]]; do sleep 0.1; done'))
+        self.stub("stop-demo-server.sh", 'printf "stop-demo-server.sh\\n%s\\n" "$@" >> "$TRACE"\ntouch "$FIXTURE_STOPPED"\n')
+        self.stub("curl", 'exit 0\n')
+        self.stub("demo-server.sh", 'printf "NATIVE OPEN=%s\\n" "$ORI_DEMO_OPEN" >> "$TRACE"\nprintf "%s\\n" "$@" >> "$TRACE"\ntrap "exit 0" TERM INT\nwhile true; do sleep 1; done\n')
+        self.env["PATH"] = str(self.scripts) + os.pathsep + self.env["PATH"]
+        result = self.run_case("wizard-native")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertIn(f"NATIVE OPEN=0\n--native-picker\n9998\n{self.sandbox.resolve()}", calls)
+        self.assertRegex(calls, r"MUSIC_HOME_NATIVE_SERVER_PID=\d+")
+        self.assertIn("-g\nmusic native picker\n", calls)
+        self.assertEqual(calls.count("stop-demo-server.sh\n"), 2)
+
+    def test_wizard_response_cases_reach_the_browser_not_an_unused_argument_array(self):
+        for case in ["wizard-close", "wizard-close-unknown"]:
+            with self.subTest(case=case):
+                result = self.run_case(case)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"MUSIC_HOME_WIZARD_RESPONSE={case}", self.trace.read_text())
+                self.trace.unlink()
+        self.env["MUSIC_HOME_WIZARD_RESPONSE"] = "wizard-close-unknown"
+        result = self.run_case("wizard")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("MUSIC_HOME_WIZARD_RESPONSE", self.trace.read_text())
+
+    def test_missing_integration_uses_published_floor_and_its_own_sandbox(self):
+        self.sandbox = self.root / "ori-demo.narrated-integration-missing-fixture"
+        self.env["FIXTURE_SANDBOX"] = str(self.sandbox)
+        result = self.run_case("wizard-integration-missing")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertIn("RELEASES=http://127.0.0.1:1 MODE=integration-missing", calls)
+        self.assertIn("MUSIC_HOME_WIZARD_PREREQUISITE=integration", calls)
+        self.assertIn("-g\nmusic prerequisites\n", calls)
+
+    def test_missing_provider_uninstalls_only_the_sandbox_package_before_review(self):
+        self.stub("curl", 'printf "curl\\n%s\\n" "$@" >> "$TRACE"\n')
+        self.env["PATH"] = str(self.scripts) + os.pathsep + self.env["PATH"]
+        result = self.run_case("wizard-provider-missing")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertIn("http://localhost:9998/api/plugins/music-project-management", calls)
+        self.assertIn("MUSIC_HOME_WIZARD_PREREQUISITE=provider", calls)
+        self.assertIn("RELEASES=http://127.0.0.1:1 MODE=installed", calls)
+        self.assertLess(calls.index("curl\n"), calls.index("e2e.sh\n"))
 
     def test_bad_case_launches_nothing(self):
         result = self.run_case("not-a-case")

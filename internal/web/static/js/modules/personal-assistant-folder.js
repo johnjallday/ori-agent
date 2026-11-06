@@ -13,6 +13,7 @@ import './folder-plan-lines.js';
 import { folderPickCopy } from './folder-pick-copy.js';
 import './folder-setup-visual.js';
 import { mountPlacementPanel } from './assisted-workspace-placement.js';
+import { createSourceSetupDialog } from './source-setup-dialog.js';
 import { setupCreationReviewMaterial } from './workspace-creation-review.js';
 // Sets window.OriFolderRecognitionLines: the Recognized and Needs lines, in the
 // build pane's words.
@@ -3034,13 +3035,18 @@ const pluginSetupWizard = createPluginSetupWizard({
       return lifecycle?.trustSummary?.(lifecycle.trustModel(report)) || '';
     }
   },
-  onClose: ({ changed }) => {
-    if (changed)
-      void window.PersonalAssistantFolderSetup?.recheckReview?.(
+  onClose: async ({ changed }) => {
+    const returning = musicPrerequisiteReturn;
+    musicPrerequisiteReturn = null;
+    if (changed && (!returning || musicDialogCurrent(returning)))
+      await window.PersonalAssistantFolderSetup?.recheckReview?.(
         state.offer,
         document.activeElement
       );
+    // The sibling finishes its own focus restoration before we reacquire.
+    await Promise.resolve();
     render();
+    if (returning && musicDialogCurrent(returning)) musicSetupDialog().open(returning);
   }
 });
 
@@ -3966,7 +3972,8 @@ function renderOffer(place) {
   // on Today's strip while that is folded). It is moved, never copied, so its
   // controls and their handlers stay the same.
   const needs = place === 'needs' && els.needs;
-  const home = state.reviewSlot || (needs ? els.needs : els.root);
+  const inlineHome = state.reviewSlot || (needs ? els.needs : els.root);
+  const home = musicSetupOffer(state.offer) ? musicSetupDialog().host || inlineHome : inlineHome;
   if (els.offer.parentElement !== home) home.append(els.offer);
   // A card that leaves this tab's conversation for Needs you opens the strip
   // once (personal-assistant-needs-reveal.js); one found waiting does not.
@@ -4025,6 +4032,10 @@ function renderOffer(place) {
   renderHire(els, view.hire, state.offer);
   const confirmTitle = document.getElementById('personalAssistantFolderConfirmTitle');
   if (confirmTitle)
+    confirmTitle.textContent = musicSetupOffer(state.offer)
+      ? 'Choices & requirements'
+      : 'Confirm setup';
+  if (confirmTitle)
     confirmTitle.hidden = Boolean(
       receipt.visible || view.setup || !folderOfferWaiting(state.offer)
     );
@@ -4038,7 +4049,7 @@ function renderOffer(place) {
     prerequisites,
     {
       blocked: state.busy || conversationReviewLoading(),
-      openWizard: (kind, trigger) => pluginSetupWizard.open(pluginSetupRows(), { kind, trigger })
+      openWizard: (kind, trigger) => void openSourcePluginWizard(kind, trigger)
     }
   );
   pluginSetupWizard.sync();
@@ -4076,7 +4087,12 @@ function renderOffer(place) {
         state.busy ||
         conversationReviewLoading() ||
         prerequisites.active() ||
-        Boolean(sourceCreationReview) ||
+        Boolean(
+          sourceCreationReview &&
+          (!musicSetupOffer(state.offer) ||
+            sourceCreationReview.pending ||
+            sourceCreationReview.result)
+        ) ||
         Boolean(state.offer?.needs_pick),
       onChange: name => void chooseProjectEntry(name)
     }
@@ -4342,7 +4358,10 @@ function renderOffer(place) {
               ? 'btn btn-sm btn-outline-secondary'
               : 'btn btn-sm btn-link';
         button.dataset.folderAction = action.id;
-        button.textContent = action.label;
+        button.textContent =
+          musicSetupOffer(state.offer) && action.oneCard && !state.offer.setup
+            ? 'Return to setup review'
+            : action.label;
         button.disabled = actionBusy;
         button.addEventListener('click', () => runAction(action));
         // Remove sits beside the headline, where a way out is looked for; the
@@ -4454,6 +4473,7 @@ function render() {
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderHomeSongs();
   renderSourceCreationReview();
+  renderMusicSetupEntry(state.reviewSlot ? 'thread' : place);
   announceFinishedRun();
   syncSetupPolling();
 }
@@ -4569,6 +4589,24 @@ async function repickConversationReview(offer) {
 
 function runAction(action) {
   if (conversationReviewLoading()) return;
+  if (
+    !action.sourceHandoff &&
+    musicSetupOffer(state.offer) &&
+    (action.journey ||
+      action.adjustStructure ||
+      action.structureGroup ||
+      action.href ||
+      action.repick) &&
+    musicSetupDialog().owns(musicDialogReference)
+  ) {
+    const ref = musicDialogReference;
+    void musicSetupDialog()
+      .suspend()
+      .then(hidden => {
+        if (hidden && musicDialogCurrent(ref)) runAction({ ...action, sourceHandoff: true });
+      });
+    return;
+  }
   if (action.homeMap) {
     void navigateFolderHomeMap(action.homeID, action.homeMap);
     return;
@@ -4961,6 +4999,158 @@ async function cancelConflictingBuild() {
   render();
 }
 
+// The server derives this domain from its host-owned capability table for both
+// supported projects and portfolios, including missing prerequisites. Do not
+// duplicate plugin/blueprint identities or recognize filenames in the browser.
+// Suppressed capabilities and non-music intake keep their original presentation.
+export function musicSetupOffer(offer) {
+  return Boolean(
+    offer?.id && !offer.needs_candidate && offer.capability?.domain === 'music_production'
+  );
+}
+
+export function musicSetupNeedsConfirmation(offer) {
+  return Boolean(
+    musicSetupOffer(offer) &&
+    offer.status === 'pending' &&
+    conversationFolderOfferView(offer, { confirm: true }).actions?.some(
+      action => action.oneCard && !action.retry && !action.openSong
+    )
+  );
+}
+
+let musicDialog = null;
+let musicDialogReference = null;
+let musicSummary = null;
+let musicPrerequisiteReturn = null;
+async function openSourcePluginWizard(kind, trigger) {
+  const ref = musicDialogReference;
+  if (musicSetupOffer(state.offer) && musicSetupDialog().owns(ref)) {
+    if (!(await musicSetupDialog().suspend()) || !musicDialogCurrent(ref)) return;
+    musicPrerequisiteReturn = ref;
+  }
+  pluginSetupWizard.open(pluginSetupRows(), { kind, trigger });
+}
+function musicSetupDialog() {
+  return (musicDialog ||= createSourceSetupDialog());
+}
+let musicGuidedReturnCleanup = null;
+function returnFromMusicGuidedSetup(ref) {
+  musicGuidedReturnCleanup?.();
+  const modal = document.getElementById('specialistSetupJourneyModal');
+  if (!modal || !musicDialogCurrent(ref)) return;
+  const cleanup = () => {
+    modal.removeEventListener('hidden.bs.modal', returned);
+    if (musicGuidedReturnCleanup === cleanup) musicGuidedReturnCleanup = null;
+  };
+  const returned = () =>
+    setTimeout(async () => {
+      if (musicGuidedReturnCleanup !== cleanup) return;
+      if (!musicDialogCurrent(ref)) {
+        cleanup();
+        return;
+      }
+      // Guided Setup also hides temporarily for its own child editors. Do not
+      // compete with them; wait for its eventual real dismissal.
+      if (document.querySelector('dialog[open], .modal.show')) return;
+      if (!(await pollSetup()) || musicGuidedReturnCleanup !== cleanup) return;
+      if (!musicDialogCurrent(ref)) {
+        cleanup();
+        return;
+      }
+      if (musicSetupDialog().open(ref)) cleanup();
+    }, 0);
+  musicGuidedReturnCleanup = cleanup;
+  modal.addEventListener('hidden.bs.modal', returned);
+}
+function musicDialogCurrent(ref) {
+  return (
+    Boolean(ref) &&
+    ref === musicDialogReference &&
+    ref.generation === state.reviewGeneration &&
+    ref.offerID === state.offer?.id &&
+    musicSetupOffer(state.offer)
+  );
+}
+function musicSetupReference() {
+  if (!musicDialogCurrent(musicDialogReference)) {
+    musicGuidedReturnCleanup?.();
+    if (musicDialog?.visible()) void musicDialog.invalidate();
+    const ref = {
+      kind: 'music-folder',
+      offerID: state.offer.id,
+      generation: state.reviewGeneration,
+      title: 'Review music folder setup',
+      current: () => musicDialogCurrent(ref)
+    };
+    musicDialogReference = ref;
+  }
+  return musicDialogReference;
+}
+
+async function openMusicSetupReview(trigger) {
+  if (!musicSetupOffer(state.offer)) return false;
+  const ref = musicSetupReference();
+  ref.invoker = trigger || document.activeElement;
+  if (!musicSetupDialog().open(ref)) {
+    const message =
+      'Finish or close the current workspace editor first. Its choices are unchanged.';
+    if (musicSummary) musicSummary.querySelector('[role="status"]').textContent = message;
+    return false;
+  }
+  if (musicSummary) musicSummary.querySelector('[role="status"]').textContent = '';
+  if (
+    musicSetupNeedsConfirmation(state.offer) &&
+    state.offer.plan?.digest &&
+    !state.offer.needs_pick
+  )
+    await startOneCardSetup({ sourceDialogEntry: true });
+  return true;
+}
+
+function renderMusicSetupEntry(place) {
+  const els = elements();
+  const eligible = musicSetupOffer(state.offer) && place !== 'none';
+  if (!eligible) {
+    musicSummary?.remove();
+    musicSummary = null;
+    if (musicDialog?.visible()) void musicDialog.invalidate();
+    return;
+  }
+  musicSetupReference();
+  const home = state.reviewSlot || (place === 'needs' ? els.needs : els.root);
+  if (!musicSummary) {
+    musicSummary = document.createElement('section');
+    musicSummary.className = 'source-setup-summary';
+    musicSummary.dataset.sourceSetupSummary = '';
+    const copy = document.createElement('p');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'modern-btn modern-btn-secondary';
+    button.addEventListener('click', () => void openMusicSetupReview(button));
+    const message = document.createElement('p');
+    message.setAttribute('role', 'status');
+    musicSummary.append(copy, button, message);
+  }
+  if (musicSummary.parentElement !== home) home?.append(musicSummary);
+  const accepted = Boolean(
+    state.offer.setup ||
+    state.offer.home_result ||
+    (sourceCreationReview &&
+      sourceReviewCurrent(sourceCreationReview) &&
+      sourceCreationReview.pending)
+  );
+  const name = state.offer.subject?.name || state.offer.folder || 'Selected folder';
+  musicSummary.firstElementChild.textContent = accepted
+    ? `${name} · Setup status and saved results. Closing the review does not undo accepted work.`
+    : musicSetupNeedsConfirmation(state.offer)
+      ? `${name} · Review its music setup before confirming. No Home or project is created by opening the review.`
+      : `${name} · Review the available setup options. Opening the review changes no Home or project.`;
+  musicSummary.querySelector('button').textContent = accepted
+    ? 'View setup status'
+    : 'Review setup';
+}
+
 // An inert shared surface around this source controller, not a source-to-build
 // transfer. Its key and token are references; brief/name setters and all requests
 // remain with this existing offer owner.
@@ -5120,7 +5310,13 @@ function sourceReviewRestore(review) {
       preserveConversation: true
     });
   render();
-  document.getElementById('sourceCreationReviewTitle')?.focus({ preventScroll: true });
+  if (musicSetupOffer(state.offer)) {
+    const ref = musicDialogReference;
+    // Let the map's Escape/click finish before Bootstrap starts trapping keys.
+    setTimeout(() => {
+      if (sourceReviewCurrent(review) && musicDialogCurrent(ref)) musicSetupDialog().open(ref);
+    }, 0);
+  } else document.getElementById('sourceCreationReviewTitle')?.focus({ preventScroll: true });
 }
 
 function renderSourceCreationReview() {
@@ -5155,7 +5351,9 @@ function renderSourceCreationReview() {
     sourceReviewCurrent(review) &&
     !review.pending &&
     !review.result &&
-    (!offer?.plan || (review.home && !sourceHomeReviewPlan(offer.plan)))
+    (!offer?.plan ||
+      (review.home && !sourceHomeReviewPlan(offer.plan)) ||
+      (musicSetupOffer(offer) && !musicSetupNeedsConfirmation(offer)))
   )
     review.editing = true;
   const active =
@@ -5174,6 +5372,10 @@ function renderSourceCreationReview() {
   }
   host.hidden = false;
   review.panel ||= mountPlacementPanel(host, intent => {
+    // Keep supported unsent brief text with the source even when Escape closes
+    // the shell before the browser delivers change/blur. Never a second draft.
+    if (intent.action === 'dirty' && intent.field === 'mission' && musicSetupOffer(state.offer))
+      intent.value = host.querySelector('[data-placement-field="mission"]')?.value;
     void actOnSourceCreationReview(review, intent);
   });
   if (
@@ -5225,6 +5427,13 @@ function renderSourceCreationReview() {
     },
     briefFor(offer) ?? offer.plan?.brief_default ?? ''
   );
+  if (musicSetupOffer(offer)) {
+    projection.rows.unshift({
+      label: 'Selected folder',
+      value: offer.subject?.name || offer.folder || 'Held selection',
+      detail: 'Uses the held selection. Linked in place; nothing is moved.'
+    });
+  }
   const deferred = Boolean(offer.software || offer.plan?.optional_task);
   review.actionLabel = deferred
     ? 'Create & prepare workspace'
@@ -5237,10 +5446,11 @@ function renderSourceCreationReview() {
     review.actionLabel = 'Set up Home';
     projection.destination = `${offer.plan.destination.status === 'new' ? 'New' : 'Existing'} Home: ${offer.plan.destination.name}. Position changes no membership or access.`;
     const handoffAt = offer.plan.lines.findIndex(line => line.kind === 'handoff');
-    if (handoffAt >= 0 && offer.plan.hire && projection.rows[0]) {
+    const hireRow = projection.rows[musicSetupOffer(offer) ? 1 : 0];
+    if (handoffAt >= 0 && offer.plan.hire && hireRow) {
       // This is the deferred song's hire, not the Home's Portfolio Manager.
-      projection.rows[0].label = `Later project · ${projection.rows[0].label}`;
-      projection.rows[0].detail +=
+      hireRow.label = `Later project · ${hireRow.label}`;
+      hireRow.detail +=
         ' Assigned only when you explicitly open the project, not by this Home setup.';
     }
     projection.facts = projection.facts.map((fact, index) => ({
@@ -5269,12 +5479,18 @@ function renderSourceCreationReview() {
     nameMaxLength: 120,
     goalMaxLength: 2000,
     canEditName: Boolean(offer.software && offer.plan?.visual?.entity?.operation === 'create'),
-    canEditGoal: !review.home && Boolean(offer.plan?.brief_default),
+    canEditGoal: (!review.home || musicSetupOffer(offer)) && Boolean(offer.plan?.brief_default),
     subjectKind: review.home ? 'group' : undefined,
     placeLabel: review.home ? 'Place & set up on map' : undefined,
     title: review.home ? `Review ${offer.plan.destination.name}` : undefined,
+    note: musicSetupOffer(offer)
+      ? 'Home identity and roles are fixed by this plan. Closing does not undo separately approved plugin changes.'
+      : undefined,
     canChangeBlueprint: false,
-    detailsLabel: 'Edit with the source owner',
+    detailsLabel: musicSetupOffer(offer)
+      ? 'Review choices & requirements'
+      : 'Edit with the source owner',
+    cancelLabel: musicSetupOffer(offer) ? 'Close review' : undefined,
     automatic: review.automatic,
     canPlace: sourceReviewMapAvailable(),
     reviewed: Boolean(offer.plan?.digest && !offer.needs_pick),
@@ -5363,7 +5579,7 @@ async function retrySourceHomePosition(review) {
 }
 
 async function actOnSourceCreationReview(review, { action, field, value }) {
-  if (!sourceReviewCurrent(review) || state.busy || review.observing) return;
+  if (!sourceReviewCurrent(review) || state.busy || review.observing || review.editing) return;
   if (action === 'read-status') {
     // One explicit re-read; a failure waits for the next explicit request.
     review.observeFailed = false;
@@ -5403,6 +5619,10 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     else await window.sessionManager?.openExistingResourceWorkspace?.(review.result.id);
     return;
   }
+  if (musicSetupOffer(state.offer) && (action === 'back' || action === 'cancel')) {
+    await musicSetupDialog().close();
+    return;
+  }
   if (action === 'back' || action === 'cancel' || action === 'details') {
     review.editing = true;
     render();
@@ -5413,6 +5633,15 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
   if (review.pending || review.result) return;
   if (action === 'dirty') {
     review.dirty = true;
+    if (
+      field === 'mission' &&
+      typeof value === 'string' &&
+      musicSetupOffer(state.offer) &&
+      state.offer.plan?.brief_default
+    ) {
+      state.brief = { offerId: state.offer.id, value, typed: true };
+      review.dirty = false;
+    }
     return;
   }
   if (action === 'edit') {
@@ -5447,6 +5676,16 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
   ) {
     review.key = sourceReviewKey();
     review.automatic = false;
+    if (musicSetupOffer(state.offer)) {
+      const ref = musicDialogReference;
+      if (
+        !musicSetupDialog().owns(ref) ||
+        !(await musicSetupDialog().suspend()) ||
+        !sourceReviewCurrent(review) ||
+        !musicDialogCurrent(ref)
+      )
+        return;
+    }
     review.onMap = true;
     // The drawer steps aside; this conversation and its live review stay intact.
     if (window.OriCreationTransition) {
@@ -5664,7 +5903,8 @@ async function chooseProjectEntry(name) {
     state.busy ||
     conversationReviewLoading() ||
     prerequisites.active() ||
-    sourceCreationReview
+    (sourceCreationReview &&
+      (!musicSetupOffer(offer) || sourceCreationReview.pending || sourceCreationReview.result))
   )
     return;
   if (!offer.plan.entry_candidates?.includes(name) || name === offer.plan.entry_name) return;
@@ -5694,6 +5934,15 @@ export function setupEntryName(offer, action) {
 }
 
 async function startOneCardSetup(action) {
+  if (
+    musicSetupOffer(state.offer) &&
+    !action?.reviewedSourceKey &&
+    !action?.sourceDialogEntry &&
+    !state.offer?.setup
+  ) {
+    await openMusicSetupReview(document.activeElement);
+    return;
+  }
   // The source remains the only setup owner. Single-song and collection Home
   // phases use this inert review too; the song's later Open stays in the Home.
   if (
@@ -5717,7 +5966,8 @@ async function startOneCardSetup(action) {
       }
       sourceCreationReview.editing = false;
       render();
-      document.getElementById('sourceCreationReviewTitle')?.focus({ preventScroll: true });
+      if (!musicSetupOffer(state.offer))
+        document.getElementById('sourceCreationReviewTitle')?.focus({ preventScroll: true });
       return;
     }
     if (
@@ -6151,11 +6401,14 @@ async function pollSetup() {
     const payload = await readJSON(response);
     if (!current() || state.offer?.id !== id) return;
     // Once the run settles the read returns the resolved offer, which ends the poll.
-    state.offer = payload?.folder_digest?.offer || state.offer;
+    if (payload?.folder_digest?.offer?.id !== id) return false;
+    state.offer = payload.folder_digest.offer;
     announceOffer();
     render();
+    return true;
   } catch (_) {
     // The next tick tries again.
+    return false;
   }
 }
 
@@ -6201,8 +6454,13 @@ async function startCapabilityJourney() {
           }
         : { source: 'host', quest_id: capability.setup_quest_id };
     selection.folder_offer_id = state.offer.id;
-    if (!(await openSpecialistSetupJourney(selection)) && current()) {
+    const opened = await openSpecialistSetupJourney(selection);
+    if (!current()) return;
+    if (!opened) {
       showError('Could not open setup. Choose Continue setup to try again.');
+      if (musicDialogCurrent(musicDialogReference)) musicSetupDialog().open(musicDialogReference);
+    } else if (musicSetupOffer(state.offer)) {
+      returnFromMusicGuidedSetup(musicDialogReference);
     }
   } catch (error) {
     if (current())

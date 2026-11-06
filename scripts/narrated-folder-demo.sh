@@ -12,8 +12,8 @@
 #   installed            both candidates are installed, and Ori treats those
 #                        exact local copies as the reviewed releases.
 #   integration-missing  both are staged, then the REAPER plugin is uninstalled:
-#                        the plan installs it first, from the staged copy,
-#                        without the network.
+#                        explicit recovery uses the host-reviewed published
+#                        release (the staged override only accepts installed copies).
 #   provider-missing     Music Project Management is never installed: there is
 #                        no Home template to plan a new Home from, so the plan
 #                        is unavailable and says which plugin it waits on.
@@ -113,8 +113,8 @@ for _ in $(seq 1 600); do
 done
 grep -q 'Press Ctrl-C to stop the server' "$log" || fail "the sandbox was not ready after 10 minutes (log: $log)"
 if [[ "$mode" == "integration-missing" ]]; then
-	# The staged copy stays the server's reviewed source, so the plan's install
-	# line installs exactly it again.
+	# Removing only the disposable installation exercises the normal reviewed
+	# release reader. The development-source override is not an install source.
 	curl -fsS -o /dev/null -X DELETE "$base_url/api/plugins/reaper-plugin" -H 'X-Requested-With: XMLHttpRequest' ||
 		fail "the REAPER plugin could not be uninstalled"
 	echo "ok   uninstalled reaper-plugin (the plan installs it first)"
