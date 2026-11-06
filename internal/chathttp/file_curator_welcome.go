@@ -32,7 +32,13 @@ func (h *Handler) leadWelcomeContext(ctx context.Context, ws *workspace.Workspac
 		saved, err = h.fileCuratorWelcome.ReadCuratorWelcome(ctx, owner, ws.ID, instanceID)
 		available = err == nil
 	}
-	return fileCuratorWelcomeText(saved, available)
+	// Readiness can be saved before preparation's scan commits. An unavailable
+	// read or no saved scan is not an assessment: keep its one delivery slot
+	// open for the real saved result, without retrying any preparation here.
+	if !available || !saved.Configured || !saved.HasSavedScan {
+		return ""
+	}
+	return fileCuratorWelcomeText(saved, true)
 }
 
 func fileCuratorWelcomeText(saved filejanitor.CuratorWelcome, available bool) string {

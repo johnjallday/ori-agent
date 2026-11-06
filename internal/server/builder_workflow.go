@@ -540,6 +540,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	b.wireRuntimeCapabilities()
 	b.wireWorkspaceSurfaces()
 	b.wireProjectTemplateResolver()
+	b.wireWorkspaceUpdates()
 	b.wireSetupWizard()
 	// The coordinate map resolves node ownership through the composed workspace
 	// store, so it wires here for the same reason (#292 FR-99).

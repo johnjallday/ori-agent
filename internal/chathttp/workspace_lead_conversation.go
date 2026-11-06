@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspaceupdates"
 )
 
 type leadConversationStore interface {
@@ -42,72 +43,22 @@ func (h *Handler) LeadConversationOpen(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	id := strings.TrimSpace(r.PathValue("workspaceID"))
-	ws, err := h.workspaceStore.Get(id)
-	if err != nil || ws == nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	owner := userprofile.LocalUserID
+	var current func(context.Context) (string, error)
 	if h.userProvider != nil {
-		owner, err = h.userProvider.CurrentUserID(r.Context())
-		if err != nil || owner == "" {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
+		current = h.userProvider.CurrentUserID
 	}
-	wsOwner := strings.TrimSpace(ws.OwnerUserID)
-	if wsOwner == "" {
-		wsOwner = userprofile.LocalUserID
+	owner, err := workspaceupdates.ResolveOwner(r.Context(), current)
+	if err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
 	}
-	if owner != wsOwner {
+	out, err := workspaceupdates.Deliver(r.Context(), h, store, owner, id)
+	if errors.Is(err, workspaceupdates.ErrNotFound) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	unavailable := func() { writeJSONResponse(w, map[string]any{"state": "unavailable", "changed": false}) }
-	if ws.Kind == "group" || ws.AssistantProgramState != nil || ws.Status == workspace.StatusTrashed || ws.Status == workspace.StatusMissing {
-		unavailable()
-		return
-	}
-	if setup := ws.SetupWizardState(); setup != workspace.SetupWizardStateNotApplicable && setup != workspace.SetupWizardStateReady {
-		writeJSONResponse(w, map[string]any{"state": "waiting_setup", "changed": false})
-		return
-	}
-	name := strings.TrimSpace(ws.EntryAgentName())
-	if name == "" {
-		unavailable()
-		return
-	}
-	ag, err := h.resolveEffectiveAgent(name, normalizedChatRouteContext{WorkspaceID: id})
-	if err != nil || ag.WorkspaceTools == nil {
-		unavailable()
-		return
-	}
-	live, err := ag.WorkspaceTools.assessmentWorkspace()
-	if err != nil {
-		unavailable()
-		return
-	}
-	if live.Version != ws.Version {
-		w.WriteHeader(http.StatusConflict)
-		return
-	}
-	intro := "Hi, I’m " + welcomeText(name, 100) + ", the lead for " + welcomeText(ws.Name, 120) + "."
-	if goal := workspace.GoalOutcomeLine(ws.Mission); goal != "" {
-		intro += " I’ll help you work toward: " + welcomeText(goal, 500)
-	}
-	assessment := h.leadWelcomeContext(r.Context(), ws, owner, ag.WorkspaceTools.executingInstanceID)
-	if assessment == "" {
-		intro += "\n\nI don’t have a saved assessment yet. We can discuss the goal here; a review uses the existing Goal settings controls. Once there’s a saved assessment, we can talk through the findings and next step."
-		if strings.TrimSpace(ws.Mission) == "" {
-			intro += "\n\nWhat outcome would you like us to work toward?"
-		}
-	}
-	out, err := store.EnsureLeadConversation(r.Context(), session.LeadConversationInput{
-		WorkspaceID: id, WorkspaceVersion: ws.Version, OwnerUserID: owner,
-		AgentInstanceID: ag.WorkspaceTools.executingInstanceID, AgentName: name,
-		Introduction: intro, Assessment: assessment,
-	})
 	if errors.Is(err, session.ErrWorkspaceVersionConflict) {
 		w.WriteHeader(http.StatusConflict)
 		return
@@ -117,6 +68,73 @@ func (h *Handler) LeadConversationOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONResponse(w, out)
+}
+
+// ComposeLeadWelcome reads the same owner-scoped canonical workspace and exact
+// runtime lead for both HTTP fallback and background delivery. It does not write
+// messages, activate setup, inspect project files, or call a provider.
+func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (session.LeadConversationInput, string, error) {
+	var input session.LeadConversationInput
+	if h.workspaceStore == nil {
+		return input, "", workspaceupdates.ErrUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return input, "", err
+	}
+	ws, err := workspaceupdates.ReadWorkspace(h.workspaceStore, id)
+	if err != nil {
+		return input, "", err
+	}
+	wsOwner := strings.TrimSpace(ws.OwnerUserID)
+	if wsOwner == "" {
+		wsOwner = userprofile.LocalUserID
+	}
+	if owner != wsOwner {
+		return input, "", workspaceupdates.ErrNotFound
+	}
+	unavailable := func() (session.LeadConversationInput, string, error) {
+		return input, workspaceupdates.StateUnavailable, nil
+	}
+	if ws.Kind == "group" || ws.AssistantProgramState != nil || ws.Status == workspace.StatusTrashed || ws.Status == workspace.StatusMissing {
+		return unavailable()
+	}
+	if setup := ws.SetupWizardState(); setup != workspace.SetupWizardStateNotApplicable && setup != workspace.SetupWizardStateReady {
+		return input, workspaceupdates.StateWaitingSetup, nil
+	}
+	name := strings.TrimSpace(ws.EntryAgentName())
+	if name == "" {
+		return unavailable()
+	}
+	ag, err := h.resolveEffectiveAgent(name, normalizedChatRouteContext{WorkspaceID: id})
+	if err != nil || ag.WorkspaceTools == nil {
+		return unavailable()
+	}
+	live, err := ag.WorkspaceTools.assessmentWorkspace()
+	if err != nil {
+		return unavailable()
+	}
+	if live.Version != ws.Version {
+		return input, "", session.ErrWorkspaceVersionConflict
+	}
+	intro := "Hi, I’m " + welcomeText(name, 100) + ", the lead for " + welcomeText(ws.Name, 120) + "."
+	if goal := workspace.GoalOutcomeLine(ws.Mission); goal != "" {
+		intro += " I’ll help you work toward: " + welcomeText(goal, 500)
+	}
+	assessment := h.leadWelcomeContext(ctx, ws, owner, ag.WorkspaceTools.executingInstanceID)
+	curator, isCurator := ws.FileCurator()
+	if assessment == "" && isCurator && curator.ID == ag.WorkspaceTools.executingInstanceID {
+		intro += "\n\nYour saved filing review will appear here when it is available. Nothing moves without your approval in File Janitor."
+	} else if assessment == "" {
+		intro += "\n\nI don’t have a saved assessment yet. We can discuss the goal here; a review uses the existing Goal settings controls. Once there’s a saved assessment, we can talk through the findings and next step."
+		if strings.TrimSpace(ws.Mission) == "" {
+			intro += "\n\nWhat outcome would you like us to work toward?"
+		}
+	}
+	return session.LeadConversationInput{
+		WorkspaceID: id, WorkspaceVersion: ws.Version, OwnerUserID: owner,
+		AgentInstanceID: ag.WorkspaceTools.executingInstanceID, AgentName: name,
+		Introduction: intro, Assessment: assessment,
+	}, workspaceupdates.StateReady, nil
 }
 
 // Reuse the assessment and task suggestions produced by the authorized review,

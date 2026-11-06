@@ -17,6 +17,7 @@ import {
   switchLockMessage
 } from './personal-assistant-recipient.js';
 import { createLeadWelcome } from './personal-assistant-lead-welcome.js';
+import { workspaceUpdates, exposedWelcomeMessages } from './workspace-updates.js';
 import {
   createCreationStatusSurface,
   createCreationTransition
@@ -829,6 +830,137 @@ function recipients() {
   return window.PersonalAssistantRecipient || null;
 }
 
+function currentWelcome() {
+  const current = recipients()?.current?.();
+  const view = state.welcomeView;
+  if (
+    current?.kind !== RECIPIENT_WORKSPACE_ENTRY ||
+    !current.available ||
+    view?.data?.workspace_id !== current.workspaceId ||
+    view.data.welcome?.agent_name !== current.name
+  )
+    return null;
+  return { ...view.data.welcome, stale: view.stale || view.data.welcome.stale };
+}
+
+function renderWelcomeIndicator(view = state.welcomeView) {
+  state.welcomeView = view;
+  const els = state.els;
+  if (!els?.unread) return;
+  const source = currentWelcome();
+  const unread = source?.unread_count > 0;
+  const label = unread
+    ? `${source.stale ? 'Last known: new' : 'New'} message from ${source.agent_name}`
+    : '';
+  const accessible = els.unread.querySelector('span');
+  if (accessible && accessible.textContent !== label) accessible.textContent = label;
+  els.unread.hidden = !unread;
+  els.unread.title = label;
+  if (els.welcome) {
+    // Do not remove a focused control as an acknowledgement response arrives.
+    els.welcome.hidden = !unread && document.activeElement !== els.openWelcome;
+    const text = label || 'Message opened';
+    if (els.welcomeLabel.textContent !== text) els.welcomeLabel.textContent = text;
+  }
+  scheduleWelcomeExposure();
+}
+
+let welcomeExposureFrame = null;
+const welcomeAcknowledging = new Set();
+function scheduleWelcomeExposure() {
+  if (welcomeExposureFrame !== null || !state.open) return;
+  welcomeExposureFrame = requestAnimationFrame(() => {
+    welcomeExposureFrame = null;
+    const source = currentWelcome();
+    const pane = document.getElementById('personalAssistantScroll');
+    const transcript = document.getElementById('homeAssistantConversation');
+    const current = recipients()?.current?.();
+    if (!pane || !transcript || !source || state.welcomeView?.state !== 'ready' || source.stale)
+      return;
+    const messages = exposedWelcomeMessages({
+      source,
+      sessionId: recipients()?.sessionId?.(),
+      open: state.open && !state.suspended && state.els.panel.hidden === false,
+      visible: document.visibilityState === 'visible',
+      focused: document.hasFocus(),
+      settled: window.PersonalAssistantTranscript?.isSettled?.() === true,
+      blocked: Boolean(
+        switchLock() ||
+        creationTransition.blocksReveal() ||
+        document.querySelector('.modal.show, dialog[open]')
+      ),
+      viewport: pane.getBoundingClientRect(),
+      rows: Array.from(transcript.querySelectorAll('[data-lead-message-id]')).map(row => ({
+        messageId: row.dataset.leadMessageId,
+        sessionId: row.dataset.leadSessionId,
+        bounds: row.getBoundingClientRect()
+      }))
+    });
+    for (const message of messages) {
+      const key = `${current.workspaceId}\n${message.message_id}\n${message.revision}`;
+      if (welcomeAcknowledging.has(key)) continue;
+      welcomeAcknowledging.add(key);
+      void workspaceUpdates
+        .acknowledge(current.workspaceId, {
+          session_id: source.session_id,
+          message_id: message.message_id,
+          revision: message.revision
+        })
+        .finally(() => welcomeAcknowledging.delete(key));
+    }
+  });
+}
+
+// Explicit navigation only. Re-read authority before selecting the exact saved
+// thread. No synthetic turn, scan or work action, and no unsent draft discarded.
+async function openWelcome(trigger) {
+  const before = recipients()?.current?.();
+  if (before?.kind !== RECIPIENT_WORKSPACE_ENTRY || !before.available) return false;
+  const view = await workspaceUpdates.refresh(before.workspaceId);
+  const current = recipients()?.current?.();
+  if (
+    current?.workspaceId !== before.workspaceId ||
+    current?.name !== before.name ||
+    current?.kind !== before.kind
+  )
+    return false;
+  renderWelcomeIndicator(view);
+  const source = currentWelcome();
+  if (view.state !== 'ready' || source?.state !== 'ready' || !source.session_id) {
+    open(trigger, { preserveConversation: true });
+    setStatus('This message is unavailable. Refresh updates to try again.');
+    return false;
+  }
+  const lock = switchLock();
+  const changing = recipients()?.sessionId?.() !== source.session_id;
+  if (lock || (changing && (state.draft || state.els?.input?.value))) {
+    open(trigger, { preserveConversation: true });
+    setStatus(
+      lock || 'Finish or clear your draft before opening this message. Your draft has been kept.'
+    );
+    return false;
+  }
+  recipients().rememberSession(current.workspaceId, {
+    id: source.session_id,
+    title: 'Getting started'
+  });
+  const hydrated = await hydrateEntryConversation({ force: true, exact: true });
+  const now = recipients()?.current?.();
+  if (
+    now?.workspaceId !== current.workspaceId ||
+    now?.name !== current.name ||
+    now?.kind !== current.kind
+  )
+    return false;
+  open(trigger, { preserveConversation: true });
+  if (!hydrated) {
+    setStatus('This saved conversation is unavailable. Refresh updates to try again.');
+    return false;
+  }
+  scheduleWelcomeExposure();
+  return true;
+}
+
 function renderEntrySessionBar() {
   const els = state.els;
   if (!els) return;
@@ -891,7 +1023,7 @@ function entryTarget(recipient) {
  * unless `force` (opening the drawer, switching to it). A failure leaves one
  * status line and never blocks sending.
  */
-async function hydrateEntryConversation({ force = false } = {}) {
+async function hydrateEntryConversation({ force = false, exact = false } = {}) {
   const ctl = recipients();
   const current = ctl?.current?.();
   if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || !current.available) {
@@ -906,7 +1038,7 @@ async function hydrateEntryConversation({ force = false } = {}) {
   const ticket = ++entryHydration.sequence;
   let loaded;
   try {
-    loaded = await ctl.loadSession();
+    loaded = await ctl.loadSession({ exact });
   } catch (_) {
     loaded = { session: null, error: true };
   }
@@ -928,13 +1060,17 @@ async function hydrateEntryConversation({ force = false } = {}) {
   transcript?.beginHydration?.();
   try {
     for (const row of entrySessionRows(loaded.session)) {
-      window.OriAskRouting.appendMessage(
+      const element = window.OriAskRouting.appendMessage(
         row.role,
         row.content,
         row.role === 'assistant'
           ? { author: { name: now.name, appearance: now.appearance } }
           : undefined
       );
+      if (element && row.id) {
+        element.dataset.leadMessageId = row.id;
+        element.dataset.leadSessionId = loaded.session.id;
+      }
     }
   } finally {
     transcript?.endHydration?.();
@@ -1078,6 +1214,7 @@ function renderIdentity() {
   const { els, view, personalAssistant } = state;
   if (!els) return;
   const who = identity();
+  renderWelcomeIndicator();
   els.launcher.hidden = !who.launcherVisible;
   els.launcherName.textContent = who.name;
   if (els.launcherRole) els.launcherRole.textContent = who.role;
@@ -1990,6 +2127,10 @@ function init() {
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
+    unread: document.getElementById('personalAssistantUnread'),
+    welcome: document.getElementById('personalAssistantWelcome'),
+    welcomeLabel: document.getElementById('personalAssistantWelcomeLabel'),
+    openWelcome: document.getElementById('personalAssistantOpenWelcome'),
     modelSetup: document.getElementById('personalAssistantModelSetup'),
     workspaceContext: document.getElementById('personalAssistantWorkspaceContext'),
     legacyHandoff: document.getElementById('personalAssistantRecoveredHandoff'),
@@ -2010,7 +2151,25 @@ function init() {
       interview: document.getElementById('personalAssistantTodayInterview')
     }
   };
-  launcher.addEventListener('click', () => (state.open ? close() : open(launcher)));
+  launcher.addEventListener('click', () => {
+    if (state.open) close();
+    else if (currentWelcome()?.unread_count > 0) void openWelcome(launcher);
+    else open(launcher);
+  });
+  state.els.openWelcome?.addEventListener('click', event => void openWelcome(event.currentTarget));
+  state.els.openWelcome?.addEventListener('blur', () => renderWelcomeIndicator());
+  document.addEventListener('personal-assistant:exposure', scheduleWelcomeExposure);
+  document.addEventListener('personal-assistant:opened', scheduleWelcomeExposure);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      void state.leadWelcome?.refresh();
+      scheduleWelcomeExposure();
+    }
+  });
+  window.addEventListener('focus', () => {
+    void state.leadWelcome?.refresh();
+    scheduleWelcomeExposure();
+  });
   state.els.close?.addEventListener('click', close);
   state.drawer = readDrawerPrefs(browserStorage());
   const resize = state.els.resize;
@@ -2075,22 +2234,10 @@ function init() {
         state.els?.input?.value ||
         document.activeElement?.matches?.('input, textarea, select, [contenteditable="true"]')
       ),
-    deliver: async (sessionId, { reveal }) => {
-      const current = recipients()?.current?.();
-      if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY) return;
-      recipients().rememberSession(current.workspaceId, {
-        id: sessionId,
-        title: 'Getting started'
-      });
-      // Reveal while this recipient is still current. A close or navigation
-      // during asynchronous hydration must not reopen a different conversation.
-      if (reveal) open(null, { focus: false, preserveConversation: true, unsolicited: true });
-      await hydrateEntryConversation({ force: true });
-    }
+    changed: renderWelcomeIndicator
   });
   document.addEventListener('ori:setup-status', () => void state.leadWelcome.refresh());
   document.addEventListener('ori:workspace-goal-state', () => void state.leadWelcome.refresh());
-  document.addEventListener('personal-assistant:closed', () => state.leadWelcome.quiet());
   window.addEventListener('pagehide', event => {
     if (!event.persisted) state.leadWelcome.destroy();
   });
@@ -2250,6 +2397,7 @@ function init() {
 const api = {
   init,
   open,
+  openWelcome,
   openActivity: (trigger, options = {}) => {
     if (state.open) {
       if (options.focus === true) focusOnOpen();

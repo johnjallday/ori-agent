@@ -1,10 +1,14 @@
-// One-time host-written arrival conversation. No /api/chat, synthetic user
-// turn, model invocation or task action. The server owns durable deduplication.
+import { workspaceUpdates } from './workspace-updates.js';
+
+// Quiet discovery plus the existing explicit/on-entry legacy fallback. Host
+// delivery never selects a session, hydrates chat, opens the drawer or marks
+// anything seen. New-workspace recovery does not depend on this controller.
 export function createLeadWelcome({
   target,
   ready,
   busy,
-  deliver,
+  changed = () => {},
+  updates = workspaceUpdates,
   fetchImpl = (...args) => fetch(...args),
   setTimer = setTimeout,
   clearTimer = clearTimeout
@@ -14,10 +18,11 @@ export function createLeadWelcome({
   let inFlight = false;
   let attempts = 0;
   let timer = null;
-  let queued = null;
-  let quiet = false;
   let done = false;
   let stopped = false;
+  const unsubscribe = updates.subscribe((id, view) => {
+    if (!stopped && id === target()?.workspaceId) changed(view);
+  });
 
   function schedule() {
     if (!stopped && !done && attempts < 60 && timer === null) {
@@ -34,80 +39,44 @@ export function createLeadWelcome({
     const nextKey = current ? `${current.workspaceId}\n${current.name}` : '';
     if (key !== nextKey) {
       key = nextKey;
-      generation += 1;
+      generation++;
       inFlight = false;
       attempts = 0;
-      queued = null;
-      quiet = false;
       done = false;
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+      changed(current ? updates.read(current.workspaceId) : null);
     }
-    if (!current || current.fresh || done) return;
-    if (inFlight) return;
-    if (!ready() || busy()) {
-      schedule();
-      return;
-    }
-    if (queued) {
-      const delivery = queued;
-      queued = null;
-      if (current.sessionId !== delivery.expectedSessionId) {
-        done = true;
-        return;
-      }
-      const token = generation;
-      inFlight = true;
-      try {
-        await deliver(delivery.session_id, { reveal: !quiet });
-        if (token === generation && !delivery.awaiting_assessment) done = true;
-      } catch (_) {
-        // The persisted message remains available through ordinary hydration.
-      } finally {
-        if (token === generation) {
-          inFlight = false;
-          schedule();
-        }
-      }
-      return;
-    }
+    if (!current || inFlight) return;
     const token = generation;
-    const sessionId = current.sessionId;
+    const stillCurrent = () =>
+      !stopped &&
+      token === generation &&
+      target()?.workspaceId === current.workspaceId &&
+      target()?.name === current.name;
     inFlight = true;
-    attempts += 1;
     try {
+      const view = await updates.refresh(current.workspaceId);
+      if (!stillCurrent()) return;
+      changed(view);
+      // Draft/New/transition guards apply to legacy enrollment only, not to
+      // displaying an update the server has already saved independently.
+      if (done || target()?.fresh || !ready() || busy()) return;
+      attempts++;
       const response = await fetchImpl(
         `/api/workspaces/${encodeURIComponent(current.workspaceId)}/lead-conversation/open`,
         { method: 'POST' }
       );
-      if (!response.ok) {
-        schedule();
-        return;
-      }
+      if (!response.ok) return;
       const result = await response.json();
-      const now = target();
-      if (
-        token !== generation ||
-        !now ||
-        now.workspaceId !== current.workspaceId ||
-        now.name !== current.name ||
-        now.fresh ||
-        now.sessionId !== sessionId
-      )
-        return;
-      if (result.state === 'waiting_setup') {
-        schedule();
-        return;
+      if (!stillCurrent()) return;
+      done = result.state !== 'waiting_setup' && !result.awaiting_assessment;
+      if (result.changed) {
+        const updated = await updates.refresh(current.workspaceId);
+        if (stillCurrent()) changed(updated);
       }
-      if (result.changed && result.session_id) {
-        queued = { ...result, expectedSessionId: sessionId };
-        if (ready() && !busy()) {
-          queued = null;
-          await deliver(result.session_id, { reveal: !quiet });
-        }
-      }
-      if (token === generation) done = !result.awaiting_assessment && !queued;
     } catch (_) {
-      // An uncertain delivery is never replayed as a new conversation. A
-      // retry reads the same server receipt; ordinary chat remains available.
+      // Uncertain delivery retries only the existing idempotent host receipt.
     } finally {
       if (token === generation) {
         inFlight = false;
@@ -117,13 +86,11 @@ export function createLeadWelcome({
   }
   return {
     refresh,
-    quiet() {
-      quiet = true;
-    },
     destroy() {
       stopped = true;
-      generation += 1;
+      generation++;
       if (timer !== null) clearTimer(timer);
+      unsubscribe();
     }
   };
 }

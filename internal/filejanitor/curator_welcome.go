@@ -15,6 +15,7 @@ import (
 // No goal assessment is required to discuss a filing batch.
 type CuratorWelcome struct {
 	Configured       bool
+	HasSavedScan     bool // distinguishes a saved empty result from preparation still in flight
 	Pending          int
 	NeedsReview      int
 	BatchCompletedAt time.Time
@@ -53,6 +54,7 @@ func (s *Service) ReadCuratorWelcome(ctx context.Context, userID, workspaceID, i
 		return CuratorWelcome{}, errCuratorWelcomeUnavailable
 	}
 	if found {
+		out.HasSavedScan = true
 		if batch.WorkspaceID != workspaceID || len(candidates) != len(batch.CandidateIDs) {
 			return CuratorWelcome{}, errCuratorWelcomeUnavailable
 		}
@@ -71,6 +73,21 @@ func (s *Service) ReadCuratorWelcome(ctx context.Context, userID, workspaceID, i
 			}
 		}
 		out.BatchCompletedAt = batch.CompletedAt
+	} else {
+		// A ready hook can precede the first scan. Absence is not an empty
+		// result and must not consume the welcome's later-assessment slot.
+		state, err := s.store.LoadScanState(workspaceID)
+		if err != nil {
+			return CuratorWelcome{}, errCuratorWelcomeUnavailable
+		}
+		// Successful zero-candidate preparation creates no batch. Its saved
+		// operation receipt, scoped to this root, is still a real result.
+		for _, receipt := range state.ScanOperations {
+			if receipt.RootID == root.Generation && !receipt.CompletedAt.IsZero() {
+				out.HasSavedScan = true
+				break
+			}
+		}
 	}
 	// Revocation, relinking, removal and changed associations cannot lend the
 	// old batch to a newly resolved root or Curator while this read is in flight.

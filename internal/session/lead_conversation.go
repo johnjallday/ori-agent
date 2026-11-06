@@ -42,6 +42,18 @@ func (h *hybridStore) EnsureLeadConversation(ctx context.Context, in LeadConvers
 		if owner != in.OwnerUserID || status == "trashed" || status == "missing" || version != in.WorkspaceVersion {
 			return ErrWorkspaceVersionConflict
 		}
+		// Creation enrollment binds the original lead even before the first
+		// message exists. Neither recovery nor the legacy POST may transfer
+		// that pending welcome to a replacement instance with the same name.
+		var enrolledOwner, enrolledInstance, enrolledName string
+		var enrollmentSettled bool
+		enrollmentErr := tx.QueryRowContext(ctx, `SELECT owner_user_id,agent_instance_id,agent_name,settled FROM workspace_welcome_enrollments WHERE workspace_id=?`, in.WorkspaceID).Scan(&enrolledOwner, &enrolledInstance, &enrolledName, &enrollmentSettled)
+		if enrollmentErr != nil && !errors.Is(enrollmentErr, sql.ErrNoRows) {
+			return enrollmentErr
+		}
+		if enrollmentErr == nil && (enrollmentSettled || enrolledOwner != in.OwnerUserID || enrolledInstance != in.AgentInstanceID || enrolledName != in.AgentName) {
+			return nil
+		}
 		var instance, name, sessionID, deliveredOwner string
 		var delivered bool
 		err := tx.QueryRowContext(ctx, `SELECT owner_user_id, agent_instance_id, agent_name, session_id, assessment_delivered FROM workspace_lead_conversations WHERE workspace_id=?`, in.WorkspaceID).Scan(&deliveredOwner, &instance, &name, &sessionID, &delivered)
@@ -68,7 +80,7 @@ func (h *hybridStore) EnsureLeadConversation(ctx context.Context, in LeadConvers
 				content += "\n\n" + in.Assessment
 				delivered = true
 			}
-			if err := insertLeadMessage(ctx, tx, sessionID, content, now); err != nil {
+			if err := insertLeadMessage(ctx, tx, in.WorkspaceID, sessionID, content, 1, now); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE workspace_lead_conversations SET assessment_delivered=? WHERE workspace_id=?`, delivered, in.WorkspaceID); err != nil {
@@ -107,7 +119,7 @@ func (h *hybridStore) EnsureLeadConversation(ctx context.Context, in LeadConvers
 			return nil
 		}
 		if users == 0 {
-			if err := insertLeadMessage(ctx, tx, sessionID, in.Assessment, time.Now().UTC()); err != nil {
+			if err := insertLeadMessage(ctx, tx, in.WorkspaceID, sessionID, in.Assessment, 2, time.Now().UTC()); err != nil {
 				return err
 			}
 			out.Changed = true
@@ -125,8 +137,12 @@ func (h *hybridStore) EnsureLeadConversation(ctx context.Context, in LeadConvers
 	return out, nil
 }
 
-func insertLeadMessage(ctx context.Context, tx *sql.Tx, sessionID, content string, at time.Time) error {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,model,tokens_used,created_at) VALUES(?,?,'assistant',?,'',0,?)`, uuid.NewString(), sessionID, content, at); err != nil {
+func insertLeadMessage(ctx context.Context, tx *sql.Tx, workspaceID, sessionID, content string, revision int, at time.Time) error {
+	messageID := uuid.NewString()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,model,tokens_used,created_at) VALUES(?,?,'assistant',?,'',0,?)`, messageID, sessionID, content, at); err != nil {
+		return err
+	}
+	if err := recordWelcomeMessage(ctx, tx, workspaceID, sessionID, messageID, revision, at); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET message_count=message_count+1,updated_at=? WHERE id=?`, at, sessionID); err != nil {

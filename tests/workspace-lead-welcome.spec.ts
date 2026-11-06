@@ -32,7 +32,7 @@ test.beforeAll(async ({ request }) => {
   );
 });
 
-test('creation opens the lead conversation, then brings its first assessment once', async ({
+test('creation saves a quiet welcome before entry, then exposes its first assessment once', async ({
   page,
   request,
   context
@@ -66,16 +66,38 @@ test('creation opens the lead conversation, then brings its first assessment onc
     })
   );
   const { id, folder_slug: slug } = created.folder;
+  // No workspace page or drawer has been opened. Recovery is server-owned.
+  await expect
+    .poll(
+      async () =>
+        (await ok(await request.get(`/api/workspaces/${id}/updates`))).welcome.unread_count,
+      { timeout: 45000 }
+    )
+    .toBe(1);
   await installLocalCdn(page);
   await page.goto(`/workspaces/${slug}`);
   const panel = page.locator('#personalAssistantPanel');
-  await expect(panel).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#personalAssistantUnread')).toBeVisible({ timeout: 30_000 });
+  await expect(panel).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('quiet-unread-launcher.png'), fullPage: true });
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(panel).toBeVisible();
   await expect(page.locator('#personalAssistantPanelTitle')).toHaveText('Ask Ori');
   const messages = page.locator('#homeAssistantConversation');
   await expect(messages).toContainText('Hi, I’m Ask Ori');
   await expect(page.locator('#personalAssistantWorkspaceContext')).toHaveText(
     'Context · Newsletter Desk'
   );
+  await expect
+    .poll(
+      async () =>
+        (await ok(await request.get(`/api/workspaces/${id}/updates`))).welcome.unread_count
+    )
+    .toBe(0);
+  // A later host message is discovered quietly too; it does not replace the
+  // currently displayed transcript or move its scroll position.
+  await expect(page.locator('#personalAssistantWelcome')).toBeVisible({ timeout: 60_000 });
+  await page.locator('#personalAssistantOpenWelcome').click();
   await expect(messages).toContainText('Get editor review of the newsletter', { timeout: 60_000 });
   await expect(messages).toContainText('Nothing has been started');
   await expect(messages).toContainText('Source: saved assessment completed');
@@ -96,13 +118,18 @@ test('creation opens the lead conversation, then brings its first assessment onc
   // A second tab sees the durable conversation but does not announce it again.
   const other = await context.newPage();
   await installLocalCdn(other);
-  const reopened = other.waitForResponse(response =>
-    response.url().endsWith('/lead-conversation/open')
-  );
+  await expect
+    .poll(
+      async () =>
+        (await ok(await request.get(`/api/workspaces/${id}/updates`))).welcome.unread_count
+    )
+    .toBe(0);
   await other.goto(`/workspaces/${slug}`);
-  expect((await (await reopened).json()).changed).toBe(false);
+  await expect(other.locator('#personalAssistantLauncher')).toBeVisible();
+  await expect(other.locator('#personalAssistantUnread')).toBeHidden();
   await expect(other.locator('#personalAssistantPanel')).toBeHidden();
   await other.close();
+  await page.bringToFront();
   expect((await ok(await request.get(`/api/sessions/${sessionId}`))).messages).toHaveLength(
     original.messages.length
   );
@@ -171,16 +198,33 @@ test('the Curator offers filing choices without waiting for a goal assessment', 
       automaticActions++;
   });
   await installLocalCdn(page);
+  await expect
+    .poll(
+      async () => {
+        const update = await ok(await request.get(`/api/workspaces/${id}/updates`));
+        if (!update.welcome.session_id) return '';
+        const saved = await ok(await request.get(`/api/sessions/${update.welcome.session_id}`));
+        return saved.messages.map((message: { content: string }) => message.content).join('\n');
+      },
+      { timeout: 45000 }
+    )
+    .toContain('2 items waiting for review');
   await page.goto(`/workspaces/${slug}`);
-  await expect(page.locator('#personalAssistantPanel')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('#personalAssistantUnread')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   const messages = page.locator('#homeAssistantConversation');
   await expect(messages).toContainText('1. Review proposed filing');
   await expect(messages).toContainText('2. Discuss uncertain files');
   await expect(messages).toContainText('3. Understand the filing rules');
   await expect(messages).toContainText('2 items waiting for review');
   await expect(messages).toContainText('I’d start with the proposed filing');
-  await expect(messages).not.toContainText('saved assessment');
-  await expect(messages).not.toContainText('Goal settings');
+  // An earlier generic introduction remains historical when a capability is
+  // installed afterwards. The newly saved filing message is independent.
+  const filingMessage = messages.locator('[data-lead-message-id]').last();
+  await expect(filingMessage).not.toContainText('saved assessment');
+  await expect(filingMessage).not.toContainText('Goal settings');
   expect(modelCalls().length).toBe(calls);
   expect((await ok(await request.get(`/api/workspaces/${id}/mission`))).mission_runs).toHaveLength(
     0
@@ -209,10 +253,10 @@ test('the Curator offers filing choices without waiting for a goal assessment', 
   }
 });
 
-test('a draft is preserved, and a workspace without a review gets an honest introduction', async ({
+test('a draft in another conversation is preserved while a quiet welcome waits', async ({
   page,
   request
-}) => {
+}, testInfo) => {
   const before = modelCalls().length;
   const created = await ok(
     await request.post('/api/workspaces', {
@@ -221,8 +265,24 @@ test('a draft is preserved, and a workspace without a review gets an honest intr
   );
   const { id, folder_slug: slug } = created.folder;
   await installLocalCdn(page);
-  await page.addInitScript(() =>
-    sessionStorage.setItem('ori.personalAssistant.panelDraft', 'My unsent question')
+  await expect
+    .poll(
+      async () =>
+        (await ok(await request.get(`/api/workspaces/${id}/updates`))).welcome.unread_count,
+      { timeout: 45000 }
+    )
+    .toBe(1);
+  const draftSession = await ok(
+    await request.post('/api/sessions', {
+      data: { title: 'Draft discussion', folder_id: id, agent_name: 'Ask Ori' }
+    })
+  );
+  await page.addInitScript(
+    ({ workspaceId, sessionId }) => {
+      sessionStorage.setItem('ori.personalAssistant.panelDraft', 'My unsent question');
+      sessionStorage.setItem(`ori.personalAssistant.recipientSession.${workspaceId}`, sessionId);
+    },
+    { workspaceId: id, sessionId: draftSession.id }
   );
   let deliveries = 0;
   page.on('request', req => {
@@ -235,8 +295,19 @@ test('a draft is preserved, and a workspace without a review gets an honest intr
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantInput')).toHaveValue('My unsent question');
+  await expect(page.locator('#personalAssistantPanelStatus')).toContainText(
+    'Your draft has been kept'
+  );
+  await expect(page.locator('#homeAssistantConversation')).not.toContainText('Hi, I’m');
+  await page.screenshot({
+    path: testInfo.outputPath('quiet-welcome-draft-guard.png'),
+    fullPage: true
+  });
+  expect((await ok(await request.get(`/api/workspaces/${id}/updates`))).welcome.unread_count).toBe(
+    1
+  );
   await page.locator('#personalAssistantInput').fill('');
-  await page.locator('#personalAssistantPanelTitle').click();
+  await page.locator('#personalAssistantOpenWelcome').click();
   await expect(page.locator('#homeAssistantConversation')).toContainText(
     'I don’t have a saved assessment yet',
     { timeout: 15000 }
@@ -248,5 +319,6 @@ test('a draft is preserved, and a workspace without a review gets an honest intr
   expect((await ok(await request.get(`/api/workspaces/${id}/mission`))).mission_runs).toHaveLength(
     0
   );
-  expect((await ok(await request.get(`/api/sessions?folder_id=${id}`))).sessions).toHaveLength(1);
+  // One welcome plus the explicitly created draft discussion, never a third.
+  expect((await ok(await request.get(`/api/sessions?folder_id=${id}`))).sessions).toHaveLength(2);
 });

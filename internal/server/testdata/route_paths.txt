@@ -475,3 +475,6 @@
 /api/workspaces/x/setup-wizard/steps/folder/skip
 /api/workspaces/x/plans/x/reconcile
 /api/workspaces/x/plan-diagnostics
+# Host-authored welcome updates: reads and exact-message exposure are separate.
+/api/workspaces/x/updates
+/api/workspaces/x/updates/seen

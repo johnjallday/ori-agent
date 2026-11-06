@@ -103,7 +103,7 @@ func TestLeadConversationOpen_CuratorUsesFilingStateWithoutGoalAssessment(t *tes
 			h.SetSessionStore(sessions)
 			ag, _ := h.store.GetAgent("cli-agent")
 			h.SetRuntimeResolver(&stubChatRuntimeResolver{resolved: &workspace.ResolvedAgentRuntime{Agent: ag, AgentInstance: &ws.AgentInstances[0], FromWorkspaceCopy: true}})
-			reader := &stubCuratorWelcomeReader{value: filejanitor.CuratorWelcome{Configured: true, Pending: 2, NeedsReview: 1}}
+			reader := &stubCuratorWelcomeReader{value: filejanitor.CuratorWelcome{Configured: true, HasSavedScan: true, Pending: 2, NeedsReview: 1}}
 			if mode == "unavailable reader" {
 				reader.err = errors.New("PRIVATE PROVIDER PATH")
 			}
@@ -122,7 +122,7 @@ func TestLeadConversationOpen_CuratorUsesFilingStateWithoutGoalAssessment(t *tes
 				w := httptest.NewRecorder()
 				h.LeadConversationOpen(w, r)
 				var out session.LeadConversationResult
-				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Changed != (i == 0) || out.AwaitingAssessment {
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Changed != (i == 0) || out.AwaitingAssessment != (mode == "unavailable reader") {
 					t.Fatalf("welcome %d %s", w.Code, w.Body.String())
 				}
 				if id != "" && out.SessionID != id {
@@ -142,10 +142,14 @@ func TestLeadConversationOpen_CuratorUsesFilingStateWithoutGoalAssessment(t *tes
 				t.Fatalf("messages: %+v", conversation.Messages)
 			}
 			text := conversation.Messages[len(conversation.Messages)-1].Content
-			if !strings.Contains(text, "What would you like to do?") || strings.Contains(text, "saved assessment") || strings.Contains(text, "Goal settings") || strings.Contains(text, "PRIVATE PROVIDER PATH") {
+			if strings.Contains(text, "saved assessment") || strings.Contains(text, "Goal settings") || strings.Contains(text, "PRIVATE PROVIDER PATH") {
 				t.Fatalf("wrong fallback: %s", text)
 			}
-			if mode != "unavailable reader" && !strings.Contains(text, "Discuss uncertain files") {
+			if mode == "unavailable reader" {
+				if !strings.Contains(text, "when it is available") {
+					t.Fatal("unavailable evidence consumed assessment", text)
+				}
+			} else if !strings.Contains(text, "What would you like to do?") || !strings.Contains(text, "Discuss uncertain files") {
 				t.Fatal(text)
 			}
 			for _, call := range reader.calls {
@@ -177,6 +181,20 @@ func TestWorkspaceAssessmentPrompt_KeepsCuratorChoicesSeparateFromGoalReviews(t 
 		if !strings.Contains(guidance, want) {
 			t.Fatalf("missing %q: %s", want, guidance)
 		}
+	}
+}
+
+func TestLeadWelcomeContext_WaitsForRealSavedFilingResult(t *testing.T) {
+	_, _, ws := assessmentFixture(t)
+	ws.InstalledCapabilities = []workspace.InstalledCapability{{ID: workspace.CapabilityFileJanitor, Version: 1, InstalledAt: time.Now(), OwnedResources: []workspace.CapabilityResource{{Kind: workspace.ResourceCompanionAgent, ID: ws.AgentInstances[0].ID}}}}
+	reader := &stubCuratorWelcomeReader{value: filejanitor.CuratorWelcome{Configured: true}}
+	h := &Handler{fileCuratorWelcome: reader}
+	if got := h.leadWelcomeContext(t.Context(), ws, "local", ws.AgentInstances[0].ID); got != "" {
+		t.Fatal("pre-scan absence consumed the later-assessment slot", got)
+	}
+	reader.value.HasSavedScan = true // a verified zero-candidate scan is a real result
+	if got := h.leadWelcomeContext(t.Context(), ws, "local", ws.AgentInstances[0].ID); !strings.Contains(got, "doesn’t mean the folder is empty") {
+		t.Fatal("saved zero result was lost", got)
 	}
 }
 

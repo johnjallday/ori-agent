@@ -35,6 +35,15 @@ func TestLeadConversationOpen_SpeaksFirstWithoutRunningAnything(t *testing.T) {
 	h.SetSessionStore(sessions)
 	ag, _ := h.store.GetAgent("cli-agent")
 	h.SetRuntimeResolver(&stubChatRuntimeResolver{resolved: &workspace.ResolvedAgentRuntime{Agent: ag, AgentInstance: &ws.AgentInstances[0], FromWorkspaceCopy: true}})
+	// Server hooks use this composition directly, not a fabricated request.
+	input, state, err := h.ComposeLeadWelcome(t.Context(), "local", ws.ID)
+	if err != nil || state != "ready" || input.AgentInstanceID != ws.AgentInstances[0].ID || input.WorkspaceVersion != ws.Version {
+		t.Fatalf("host composition: %+v %s %v", input, state, err)
+	}
+	var count int
+	if err := sessions.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sessions`).Scan(&count); err != nil || count != 0 {
+		t.Fatal("composition wrote a conversation", err)
+	}
 	var id string
 	for i := range 2 {
 		r := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/lead-conversation/open", nil)
@@ -130,6 +139,12 @@ func TestLeadConversationOpen_RefusesOtherOwnersUnreadySetupAndGlobalNamesakes(t
 			}
 			if mode == "setup" && !strings.Contains(w.Body.String(), "waiting_setup") {
 				t.Fatalf("missing setup was treated as ready: %s", w.Body.String())
+			}
+			if mode != "selector" && mode != "refresh" {
+				input, state, err := h.ComposeLeadWelcome(t.Context(), "local", ws.ID)
+				if state == "ready" || input.Introduction != "" || (mode == "owner" && err == nil) {
+					t.Fatalf("direct host path bypassed restriction: %+v %s %v", input, state, err)
+				}
 			}
 		})
 	}
