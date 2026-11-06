@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  browserAuthoritySnapshot,
   libraryJSON,
   seedProjectBrowser,
   sourceHashes
@@ -21,7 +22,7 @@ test('105-project browser: lazy inspection, paging, workspace return and narrow 
 }) => {
   const fixture = await seedProjectBrowser(request, sandbox);
   const hashes = sourceHashes(fixture.source_root);
-  const before = await libraryJSON(await request.get(`${fixture.api}/projects`));
+  const before = await browserAuthoritySnapshot(request, fixture.api);
   const posts: string[] = [],
     sourceRequests: string[] = [],
     reads: string[] = [];
@@ -225,6 +226,7 @@ test('105-project browser: lazy inspection, paging, workspace return and narrow 
   const after = await libraryJSON(await request.get(`${fixture.api}/projects`));
   expect(after.revision).toBe(before.revision);
   expect(after.total).toBe(105);
+  expect(await browserAuthoritySnapshot(request, fixture.api)).toEqual(before);
   writeFileSync(
     'tasks/evidence-project-library-browser/03-files/reads.json',
     JSON.stringify(
@@ -236,6 +238,13 @@ test('105-project browser: lazy inspection, paging, workspace return and narrow 
         sourceHashesUnchanged: true,
         libraryRevisionUnchanged: after.revision === before.revision,
         entries: after.total,
+        workspacesUnchanged: before.workspaces.length,
+        globalAgentsUnchanged: before.agentNames.length,
+        workspaceAgentInstancesUnchanged: before.workspaces.reduce(
+          (count, workspace) => count + workspace.agents.length,
+          0
+        ),
+        discoveryGrantsAndChildReferencesUnchanged: true,
         controlledFailures: [
           'held real detail response',
           'held real preview response',

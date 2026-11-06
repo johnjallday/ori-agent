@@ -92,6 +92,33 @@ export async function seedProjectBrowser(
   return { ...fixture, api, route: `/workspaces/${slug}/assistant#projectLibraryPanel` };
 }
 
+// Keep complete authority snapshots in memory, not browser storage or evidence
+// files (directory references contain absolute paths). Compare before/after.
+export async function browserAuthoritySnapshot(request: APIRequestContext, api: string) {
+  const catalog = await libraryJSON(await request.get(`${api}/projects`));
+  const roots = await libraryJSON(await request.get(`${api}/roots`));
+  const { folders } = await libraryJSON(await request.get('/api/workspaces'));
+  const { agents } = await libraryJSON(await request.get('/api/agents'));
+  const workspaces = [];
+  for (const { id } of folders.sort((a: { id: string }, b: { id: string }) =>
+    a.id.localeCompare(b.id)
+  )) {
+    const workspace = await libraryJSON(await request.get(`/api/workspaces/${id}`));
+    workspaces.push({
+      id,
+      agents: workspace.agent_instances || [],
+      directories: workspace.directory_references || []
+    });
+  }
+  return {
+    revision: catalog.revision,
+    entries: catalog.total,
+    roots,
+    workspaces,
+    agentNames: agents.map((agent: { name: string }) => agent.name).sort()
+  };
+}
+
 export function sourceHashes(root: string): Record<string, string> {
   const hashes: Record<string, string> = {};
   const visit = (relative: string) => {

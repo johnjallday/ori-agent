@@ -25,7 +25,14 @@ test('canonical collections, quick views and revision-checked contextual bulk ed
     if (path.includes('/assistant-program/library')) calls.push({ path, method: req.method() });
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(fixture.route);
+  // Reach the scaled catalog from the real Home Map, not just a direct URL.
+  await page.goto('/');
+  await page.locator(`.ws-map-tile[data-ws-id="${fixture.home_id}"]`).focus();
+  await page.keyboard.press('Enter');
+  await page.waitForURL(`**${fixture.route.split('/assistant')[0]}`);
+  await page.locator('[data-assistant-program-entry]').click();
+  await page.locator('#projectLibraryJump').click();
+  await expect(page).toHaveURL(new URL(fixture.route, page.url()).href);
   const rows = page.locator('#projectLibraryRows tr');
   const count = page.locator('#projectLibraryCount');
   const bulk = page.locator('#projectLibraryBulk');
@@ -44,6 +51,50 @@ test('canonical collections, quick views and revision-checked contextual bulk ed
       .click();
   };
   await expect(rows).toHaveCount(25);
+  // Unlike the read-only acceptance fixture, this library has bulk checkboxes.
+  // common.css enlarges these targets to 44px below 768 CSS pixels, including
+  // desktop native zoom. Their column must not overlap the inspect buttons.
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 720, height: 500 },
+    { width: 741, height: 404 }
+  ]) {
+    await page.setViewportSize(viewport);
+    const contained = await rows.evaluateAll(elements =>
+      elements.every(row => {
+        const input = row.querySelector('input[type="checkbox"]');
+        if (!input) return true;
+        const box = input.getBoundingClientRect();
+        const cell = input.closest('td')!.getBoundingClientRect();
+        const inspect = row.querySelector('.project-library-name')!.getBoundingClientRect();
+        return box.left >= cell.left && box.right <= cell.right && box.right <= inspect.left;
+      })
+    );
+    expect(contained, `Bulk checkbox must stay in its column at ${viewport.width}px`).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true
+    );
+    const checkbox = page.getByRole('checkbox', { name: 'Select Project 000', exact: true });
+    await checkbox.focus();
+    await page.keyboard.press('Space');
+    await expect(checkbox).toBeChecked();
+    await expect(bulk).toBeVisible();
+    await expect(page.locator('#projectLibraryPaneTitle')).toHaveText('Select a project');
+    await page.locator('#projectLibraryBulkStage').focus();
+    await expect
+      .poll(() =>
+        page.locator('#projectLibraryBulkStage').evaluate(element => {
+          const box = element.getBoundingClientRect();
+          const navbar = document.querySelector('nav.navbar')!.getBoundingClientRect();
+          return box.top >= navbar.bottom && box.bottom <= innerHeight;
+        })
+      )
+      .toBe(true);
+    await checkbox.focus();
+    await page.keyboard.press('Space');
+    await expect(checkbox).not.toBeChecked();
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await expect(bulk).toBeHidden();
   await expect(page.locator('#projectLibraryQueueActions')).toBeHidden();
   await view('needs_attention').click();

@@ -1110,7 +1110,7 @@ test('Home resume renders only bounded saved-user cards with trusted detail navi
         }))
       };
     };
-    panel.details = id => requests.push(`open:${id}`);
+    panel.details = (id, _trigger, tab) => requests.push(`open:${id}:${tab}`);
     await panel.renderResume();
     assert.deepEqual(requests, ['/resume']);
     assert.equal(section.hidden, false);
@@ -1118,7 +1118,7 @@ test('Home resume renders only bounded saved-user cards with trusted detail navi
     assert.equal(container.children[0].children[0].textContent, '<Song 0>');
     const button = container.children[0].children.at(-1);
     button.click();
-    assert.deepEqual(requests, ['/resume', 'open:id-0']);
+    assert.deepEqual(requests, ['/resume', 'open:id-0:sessions']);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -3466,7 +3466,7 @@ test('coming back reopens the same song once, after re-reading it from the serve
     await panel.resumeFromIntegration();
     assert.deepEqual(log.requests, ['/projects/entry-9'], 'the song is re-read, not trusted');
     assert.deepEqual(log.details, [['entry-9', null]]);
-    assert.match(log.statuses.at(-1), /Its integration status was checked again/);
+    assert.match(log.statuses.at(-1), /Inspect its saved information or check setup options/);
     assert.equal(page.map.size, 0, 'the hint is spent');
     await panel.resumeFromIntegration();
     assert.equal(log.details.length, 1, 'a reload or second call never repeats the return');

@@ -22,6 +22,36 @@ const deferred = () => {
 };
 const record = id => ({ row: { id, name: id } });
 
+test('narrow inspection scrolls its focused heading below the navbar and honors an explicit tab', async t => {
+  const previousDocument = globalThis.document;
+  const previousMatchMedia = globalThis.matchMedia;
+  t.after(() => {
+    globalThis.document = previousDocument;
+    globalThis.matchMedia = previousMatchMedia;
+  });
+  const calls = [];
+  const header = { scrollIntoView: options => calls.push(['scroll-header', options]) };
+  const heading = {
+    focus: options => calls.push(['focus', options]),
+    closest: selector => {
+      assert.equal(selector, '.project-library-pane-head');
+      return header;
+    }
+  };
+  globalThis.document = {
+    getElementById: id => (id === 'projectLibraryPaneTitle' ? heading : null)
+  };
+  globalThis.matchMedia = () => ({ matches: true });
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.browser.select = async (id, tab) => calls.push(['select', id, tab]);
+  await panel.details('entry', null, 'sessions');
+  assert.deepEqual(calls, [
+    ['select', 'entry', 'sessions'],
+    ['focus', { preventScroll: true }],
+    ['scroll-header', { block: 'start', behavior: 'instant' }]
+  ]);
+});
+
 test('rapid selection cancels A; a late A cannot overwrite B or invoke mutations', async () => {
   const pending = [],
     changes = [];

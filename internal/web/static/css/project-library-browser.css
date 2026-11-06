@@ -1,7 +1,30 @@
 /* The existing warm-paper / amber index, now a compact catalog and reading
    desk. All colors inherit the assistant page's light/dark theme contract. */
-#projectLibraryPanel {
-  scroll-margin-top: 5rem;
+/* Reserve the fixed navbar in the scroll viewport, not only in anchor margins:
+   native keyboard focus can otherwise scroll bulk/filter controls behind it.
+   Other pages do not acquire this scroll padding. */
+html:has(#projectLibraryPanel) {
+  scroll-padding-top: var(--navbar-offset, 76px);
+  scroll-padding-bottom: 1rem;
+}
+#projectLibraryPanel,
+.project-library-pane-head,
+#projectLibraryPanel :is(button, input, select, summary, a, [tabindex]) {
+  scroll-margin-top: 1rem;
+}
+/* Keep the catalog's warm-paper identity in both supported themes. Scope the
+   tokens to this surface rather than recoloring unrelated Home panels. */
+[data-bs-theme="dark"] #projectLibraryPanel {
+  --assistant-ink: #eee8dd;
+  --assistant-paper: #201d18;
+  --assistant-panel: #29251e;
+  --assistant-amber: #e9ac62;
+  --assistant-amber-deep: #efb96d;
+  --assistant-red: #f4a193;
+  --assistant-line: rgba(230, 214, 190, 0.24);
+  --assistant-muted: #b8b0a3;
+  color: var(--assistant-ink);
+  background: var(--assistant-paper);
 }
 .project-library-scopes,
 .project-library-collection-scope,
@@ -283,6 +306,13 @@
   }
   .project-library-tab-panel {
     max-height: none;
+  }
+}
+@media (max-width: 768px) {
+  /* common.css gives checkboxes a 44px touch target here (also at native
+     desktop zoom). Keep that target inside its own column, not over a name. */
+  .project-library-browser .project-library-table th:first-child {
+    width: calc(44px + 1rem);
   }
 }
 @media (max-width: 480px) {

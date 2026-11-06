@@ -1885,7 +1885,7 @@ export class ProjectLibraryPanel {
       );
       const open = node('button', 'modern-btn modern-btn-secondary', `View ${card.name} session`);
       open.type = 'button';
-      open.addEventListener('click', () => void this.details(card.entry_id, open));
+      open.addEventListener('click', () => void this.details(card.entry_id, open, 'sessions'));
       item.append(open);
       if (card.workspace_id) {
         const workspace = node(
@@ -3479,9 +3479,9 @@ export class ProjectLibraryPanel {
       );
       return;
     }
-    await this.details(hint.entry_id, null);
-    // After details(): its own progress message would otherwise replace this one.
-    this.status('Back on your song. Its integration status was checked again.');
+    await this.details(hint.entry_id, null, 'overview');
+    // Return to saved metadata; checking setup remains an explicit action.
+    this.status('Back on your song. Inspect its saved information or check setup options.');
   }
 
   browserQuery() {
@@ -3732,14 +3732,20 @@ export class ProjectLibraryPanel {
     if (clear) clear.hidden = labels.length === 0;
   }
 
-  async details(entryID, trigger) {
+  async details(entryID, trigger, tab = this.browser.tab) {
     this.restoreRead.cancel();
     this.restoringBrowser = false;
     this.paneHidden = false;
     this.inspectionTrigger = trigger;
-    const pending = this.browser.select(entryID);
-    if (globalThis.matchMedia?.('(max-width: 900px)').matches)
-      document.getElementById('projectLibraryPaneTitle')?.focus();
+    const pending = this.browser.select(entryID, tab);
+    if (globalThis.matchMedia?.('(max-width: 900px)').matches) {
+      const heading = document.getElementById('projectLibraryPaneTitle');
+      heading?.focus({ preventScroll: true });
+      // Keep both Back and the focused heading below the fixed, wrapping navbar.
+      // Scroll viewport padding follows the navbar's live height in zoomed layouts.
+      const header = heading?.closest?.('.project-library-pane-head') || heading;
+      header?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+    }
     await pending;
   }
 

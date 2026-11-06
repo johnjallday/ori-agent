@@ -1,6 +1,63 @@
 # Project Library: implementation evidence and contract
 
-This note records verified inputs for `tasks/tasks-music-production-library.md`. It is not a grant to change companion repositories, installed plugins, source folders, or production state. Tasks 1.2–1.6 froze the contract. Home persistence, reviewed initialization, roots, discovery, scans and reconciliation now have focused service tests; production policy, APIs and UI remain unfinished.
+This document describes the Home-owned Project Library. It is not a grant to change companion repositories, installed plugins, source folders, or production state. The browser contract below describes the current implementation; the dated implementation history that follows records earlier decisions and limitations, not current installation identities or authorization to resume old tasks.
+
+## Project browser contract
+
+### Inspection and navigation
+
+The existing Home assistant page contains one compact, server-paged catalog, not a new all-Homes dashboard. Rows show bulk selection, project/name and optional next action, stage, and observed last-saved time. Unset values have accessible explanations. Last saved is an observed project-file timestamp, not evidence of recent work; scanned time and reviewed session-note activity remain distinct.
+
+The project-name button selects a persistent **Overview / Files / Sessions** pane. Inspection is separate from bulk checkboxes and from the existing explicit setup, workspace, source-folder reveal, scan, and review actions. Overview reads saved owner metadata only. Sessions loads its bounded history on demand; its existing review/confirmation forms are unchanged. Inspection never activates a project, grants access, staffs an agent, scans a source, calls a model, or launches an application.
+
+Search and advanced filters run against the whole catalog before paging (25 rows by default, maximum 50 per page). **More projects** loads another page without selecting its entries. At widths up to 900 CSS pixels the pane replaces the list; **Back to projects** restores row focus and list position. Native table, button, checkbox and tab semantics are used rather than an incomplete ARIA grid.
+
+User/Home-scoped session storage contains bounded navigation intent: filters/sort, view and collection identity, selected entry/tab, scroll position and up to 20 loaded pages. It contains no file bytes, directory paths, cursor authority, membership snapshots or permission tokens. Reload/workspace return requeries metadata and tab authority; missing or filtered-out selections are cleared. Independent request generations reject late list/detail/tab results. A Files instance is disposed when its project or tab changes, cancelling requests and releasing image Blob URLs.
+
+### Files authority is independent of discovery
+
+The owner-only routes are:
+
+- `GET /api/workspaces/{homeID}/assistant-program/library/projects/{entryID}/files?path=<relative>`
+- `GET /api/workspaces/{homeID}/assistant-program/library/projects/{entryID}/preview?path=<relative>&version=<listing-witness>`
+
+The root listing omits `path`. The client supplies only Home/entry IDs and bounded relative navigation, never an absolute root or a chosen child workspace. Duplicate or unknown query parameters refuse. There are no agent-tool registrations for these routes.
+
+`projectlibrary/browser_access.go` resolves the canonical owner Home and entry, an exact reciprocal connected child/link with complete mirror agreement, a supported typed project locator, and an independently granted child directory reference with empty purpose. Primary and folder-mirror references must agree. A matching saved observation supplies the project's directory identity witness; **it does not grant content access**. Discovery revocation or provider loss does not itself remove an independent child grant. Catalog-only entries, foreign scope, contested links/mirrors, managed locators, internal-purpose references and legacy references without a pinned identity fail closed. There is no fallback to Ori-managed `files/` or `outputs/`, automatic setup, or enrollment of a replacement folder on GET.
+
+On supported Unix targets, absolute ancestors and relative components are opened descriptor-relatively without following symlinks. The source root's device/inode and the locator's regular entry are checked. Directory names and file bytes are buffered within fixed budgets, then authority, root identity and current location are rechecked before exposure. Replaced directories/files and revoked references discard results. The preview `version` is an opaque comparison witness from a listing, not a credential; every request independently authenticates scope. Unsupported platforms refuse rather than using unsafe traversal.
+
+### Bounded reads and safe presentation
+
+| Operation | Bound / behavior |
+| --- | --- |
+| Listing | One immediate directory; reads at most 501 names, returns at most 500 entries and 128 KiB of escaped JSON; explicit partial flag |
+| Navigation | Relative path at most 1,024 UTF-8 bytes / 32 components; no traversal, absolute paths, symlink or special-file reads |
+| Text | At most 512 KiB, enforced server-side and again while consuming the client stream |
+| Images | PNG/JPEG only, at most 2 MiB and 16 million pixels; SVG, animated formats and other unsupported files remain metadata-only |
+| Request | Three-second context; cancellation and final authority/location checks |
+| UI | Root request only on Files selection; immediate-child requests on expansion; preview only on selection; at most 32 expanded folders |
+
+Responses are `no-store`, `nosniff`, and sandbox-CSP protected. Errors are typed and pathless. Names, code and HTML render as inert text. Markdown uses the existing renderer only with DOMPurify available, then removes active/remote media, link/source/style attributes; otherwise it displays literal text. No recursive preload, file write, rename, delete, move, upload, application launch or model submission is part of Files. Missing, denied, changed, oversized, unsupported and partial results are distinct from empty directories.
+
+These protections are not an atomic cross-process revocation transaction: permission can change immediately after the last check. Device/inode identity has filesystem reuse limitations. A context deadline cannot guarantee interruption of a stalled kernel/filesystem call. Windows compile coverage is not Windows runtime support or runtime verification.
+
+### Collections, quick views and contextual management
+
+- **All** retains the inclusive catalog, including archived records.
+- **Recently saved** sorts observed `last_saved` descending, retaining unknown dates last; it does not infer activity.
+- **Needs attention** is the union of saved `needs_review` connection state and `unavailable` / `ambiguous` availability, with each entry counted once. It is not a production-stage inference.
+- **Archived** filters administrative status only; it does not move or delete files.
+
+Canonical collection membership is applied before projection, sorting and paging, and combines with search/filters/views. The normalized collection revision enters the query cursor digest. Missing, foreign, deleted or stale collections refuse explicitly; they never silently broaden to All. The existing collection catalog's navigation callback selects this shared browser; standalone collection member browsing is unchanged.
+
+Bulk controls appear only after checkbox selection. **Select loaded projects** is explicitly bounded to loaded results and the first 100 IDs; loading more does not extend selection. Filter/view/collection changes clear picks with feedback. Connected and catalog-only rows can be selected for metadata edits; the separate setup queue remains catalog-only. Existing per-entry revision checks, partial results and revision-safe Undo remain authoritative. Metadata edits/Undo requery loaded pages and selected metadata; rows leaving the active filter are explained and deselected. They do not implicitly restart an open Files tab or scan a source.
+
+The automated real-host fixtures use owned disposable storage and either an absent historical provider or a generated inert generic provider installed through normal host APIs. These prove host boundaries, not a published provider release, native picker, screen reader, DAW, or model integration. Performance/side-effect receipts and manual acceptance observations belong in the feature findings and delivery evidence, not assertions of cross-platform guarantees here.
+
+## Historical implementation record
+
+The following sections retain the original Music Library implementation evidence and subsequent feature notes. Their source revisions, task status and candidate paths are historical.
 
 ## Pre-implementation identity check (2026-09-25 UTC; task 1.1)
 
