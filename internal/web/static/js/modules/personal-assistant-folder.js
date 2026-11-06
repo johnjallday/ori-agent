@@ -4999,17 +4999,13 @@ async function cancelConflictingBuild() {
   render();
 }
 
-// Eligibility comes from host-owned registry/blueprint evidence, not a folder
-// name, extension or an assistant's prose. Non-music intake stays inline.
+// The server derives this domain from its host-owned capability table for both
+// supported projects and portfolios, including missing prerequisites. Do not
+// duplicate plugin/blueprint identities or recognize filenames in the browser.
+// Suppressed capabilities and non-music intake keep their original presentation.
 export function musicSetupOffer(offer) {
   return Boolean(
-    offer?.id &&
-    !offer.needs_candidate &&
-    (offer.blueprint === 'reaper-song' ||
-      offer.capability?.setup_plugin_id === 'reaper-plugin' ||
-      offer.destination_blocker?.integration_key === 'ori_reaper' ||
-      (offer.portfolio?.provider_key === 'music_project_management' &&
-        offer.portfolio?.integration_key === 'ori_reaper'))
+    offer?.id && !offer.needs_candidate && offer.capability?.domain === 'music_production'
   );
 }
 

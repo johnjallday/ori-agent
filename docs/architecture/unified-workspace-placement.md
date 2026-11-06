@@ -21,6 +21,33 @@ renderer projects these owners and emits intentions. It never retains another
 material draft, calls a model, constructs a request, grants permissions, creates
 profiles, executes a plan or treats display text as authority.
 
+### Source-owned REAPER dialog
+
+Recognized REAPER song/collection offers use **Review setup** to open the shared
+`#addFolderModal`; attachment alone never opens it. `source-setup-dialog.js` only
+acquires the shell and moves the original source card into
+`#sourceSetupDialogHost`. It clones no form, creates no build session, retains no
+material draft, and makes no request. The host-derived `capability.domain`
+classifies eligible music offers; plugin identities stay in the host table,
+not another browser registry. No filename or model prose is authority. Chat keeps a
+compact review/status entry; there is only one active confirmation surface.
+
+`personal-assistant-folder.js` still owns `startOneCardSetup`, the source setters,
+`actOnSourceCreationReview`, plan/currentness fences and the original
+`/folder-digest/offers/:id/setup` operation. The File Janitor-only `/from-inbox`
+transfer is never used. Home identity/team remain fixed, while supported brief
+and project-file choices stay with their existing owners. Home/catalog setup
+creates no song workspace; later Open remains a separate Home/library action.
+
+The adapter refuses a shell already in use, fences ordinary creator lifecycle
+listeners, and restores the creator's unchanged presentation after release.
+Close hides the source review without declining it; suspension releases the
+shell before map input or a sibling prerequisite/quest. Return checks the exact
+source/generation and current terms. A retired callback cannot reopen the shell
+or initialize an ordinary build. Already-approved prerequisite effects remain;
+accepted or unknown delivery can only observe or explicitly continue the
+original operation. Reload restores canonical state, never browser-held access.
+
 ### Bounded review projection
 
 A projection identifies the editor generation, current material revision and
@@ -394,7 +421,7 @@ own canonical confirm, status and retry callbacks.
 
 | Moment | What the user sees | What cannot happen |
 | --- | --- | --- |
-| Attach and review | Conversation and the full review stay; chat stays behind a creator modal | No collapse before the user chooses the Map |
+| Attach and review | Conversation stays; REAPER's explicit Review setup opens the source-owned modal, like the ordinary creator's shared shell | Attachment does not open a dialog; no collapse before the user chooses the Map |
 | Enter placement | The drawer is suspended (`suspend`, not `close`), the modal closes, then Map input starts | The initiating click cannot confirm; a held Enter (`event.repeat`) is ignored |
 | Back, Escape, view change | The same review returns with unsent text, width and scroll | No resource, grant, scan or position write; the open preference is untouched |
 | Final gesture | Map stays clear and locked with owner pending copy | Escape and Back are inert after the gesture; no second dispatch |
@@ -403,8 +430,8 @@ own canonical confirm, status and retry callbacks.
 | Unsolicited reveal | Lead welcome and activity wait until the lifetime ends (`blocksReveal`, `open({ unsolicited })`) | Nothing opens over a placement or its receipt |
 
 Details is the existing full receipt: the creator modal for ordinary, Group,
-managed Home and build-setup owners, the drawer for source-owned reviews and Home
-projects. File Janitor keeps its own map-hosted accepted panel
+managed Home and build-setup owners; the source-owned shared dialog for eligible
+REAPER folder reviews; and the drawer for other source reviews and Home projects. File Janitor keeps its own map-hosted accepted panel
 (`assisted-placement-host--map`), which already satisfies this contract, and uses
 the coordinator only for the drawer and lifetime. Automatic placement, Tree, narrow
 widths and unavailable maps never enter a lifetime and behave as before. Without a

@@ -186,7 +186,7 @@ test('an existing Home starts in automatic mode and confirmation cannot move or 
 
 test('music later-project brief stays with the source even before blur, without changing fixed Home identity', async () => {
   const c = controller();
-  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.capability = { domain: 'music_production' };
   c.state.offer.plan.brief_default = 'Later goal';
   await c.startOneCardSetup({ sourceDialogEntry: true });
   await c.actOnSourceCreationReview(c.review(), {
@@ -203,7 +203,7 @@ test('music later-project brief stays with the source even before blur, without 
 
 test('music project-file editing delegates to the source and cannot edit an accepted run', async () => {
   const c = controller();
-  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.capability = { domain: 'music_production' };
   c.state.offer.plan.entry_candidates = ['Song.rpp', 'Mix.rpp'];
   c.state.offer.plan.entry_name = 'Song.rpp';
   await c.startOneCardSetup({ sourceDialogEntry: true });
@@ -228,7 +228,7 @@ test('music project-file editing delegates to the source and cannot edit an acce
 
 test('a late music file-choice reply cannot clear the replacement conversation busy state', async () => {
   const c = controller();
-  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.capability = { domain: 'music_production' };
   c.state.offer.plan.entry_candidates = ['Song.rpp', 'Mix.rpp'];
   c.state.offer.plan.entry_name = 'Song.rpp';
   await c.startOneCardSetup({ sourceDialogEntry: true });
@@ -397,7 +397,7 @@ test('enter, hover and Back retain review and candidate with no domain effects; 
 
 test('music map handoff waits for hidden and abandons a replaced generation before starting placement', async () => {
   const c = controller();
-  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.capability = { domain: 'music_production' };
   await c.startOneCardSetup({ sourceDialogEntry: true });
   let hidden;
   const ref = {};
@@ -422,7 +422,7 @@ test('music map handoff waits for hidden and abandons a replaced generation befo
 
 test('music map Back callback cannot reopen the shell after conversation replacement', async () => {
   const c = controller();
-  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.capability = { domain: 'music_production' };
   await c.startOneCardSetup({ sourceDialogEntry: true });
   let returned,
     opens = 0;
@@ -447,7 +447,7 @@ test('music map Back callback cannot reopen the shell after conversation replace
 
 test('re-entering a pending music review preserves its original request and cannot confirm twice', async () => {
   const c = controller();
-  c.state.offer.blueprint = 'reaper-song';
+  c.state.offer.capability = { domain: 'music_production' };
   await c.startOneCardSetup({ sourceDialogEntry: true });
   const review = c.review();
   await c.actOnSourceCreationReview(review, { action: 'suggested' });

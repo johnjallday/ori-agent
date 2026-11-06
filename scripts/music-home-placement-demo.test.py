@@ -182,6 +182,23 @@ while true; do sleep 1; done
         self.assertIn("-g\nmusic guided\n", calls)
         self.assertNotIn("MUSIC_HOME_PLACEMENT_TWO_FILES", calls)
 
+    def test_native_picker_is_explicit_and_restarts_only_the_owned_sandbox(self):
+        self.env["FIXTURE_STOPPED"] = str(self.root / "stopped")
+        self.env["ORI_DEMO_OPEN"] = "1"
+        narrated = self.scripts / "narrated-folder-demo.sh"
+        narrated.write_text(narrated.read_text().replace("while true; do sleep 1; done", 'while [[ ! -e "$FIXTURE_STOPPED" ]]; do sleep 0.1; done'))
+        self.stub("stop-demo-server.sh", 'printf "stop-demo-server.sh\\n%s\\n" "$@" >> "$TRACE"\ntouch "$FIXTURE_STOPPED"\n')
+        self.stub("curl", 'exit 0\n')
+        self.stub("demo-server.sh", 'printf "NATIVE OPEN=%s\\n" "$ORI_DEMO_OPEN" >> "$TRACE"\nprintf "%s\\n" "$@" >> "$TRACE"\ntrap "exit 0" TERM INT\nwhile true; do sleep 1; done\n')
+        self.env["PATH"] = str(self.scripts) + os.pathsep + self.env["PATH"]
+        result = self.run_case("wizard-native")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.trace.read_text()
+        self.assertIn(f"NATIVE OPEN=0\n--native-picker\n9998\n{self.sandbox.resolve()}", calls)
+        self.assertRegex(calls, r"MUSIC_HOME_NATIVE_SERVER_PID=\d+")
+        self.assertIn("-g\nmusic native picker\n", calls)
+        self.assertEqual(calls.count("stop-demo-server.sh\n"), 2)
+
     def test_wizard_response_cases_reach_the_browser_not_an_unused_argument_array(self):
         for case in ["wizard-close", "wizard-close-unknown"]:
             with self.subTest(case=case):

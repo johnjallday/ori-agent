@@ -2,7 +2,7 @@
 # Real-candidate Music Home placement acceptance, always in a fresh sandbox.
 # Usage: ./scripts/music-home-placement-demo.sh --case CASE --port PORT \
 #   --reaper-source DIR --music-source DIR --music-ref REF
-# CASE: wizard, wizard-choice, wizard-quest, wizard-close, wizard-close-unknown, wizard-integration-missing, wizard-provider-missing, single, pointer, later, collection, collection-map, staffing, staffing-repair, staffing-recovery, accept, layout, ack, occupied, partial,
+# CASE: wizard, wizard-choice, wizard-quest, wizard-native, wizard-close, wizard-close-unknown, wizard-integration-missing, wizard-provider-missing, single, pointer, later, collection, collection-map, staffing, staffing-repair, staffing-recovery, accept, layout, ack, occupied, partial,
 #       stale, two-tabs, competing-home, disabled-provider, deleted-home, missing-model,
 #       a11y-light, a11y-dark, a11y-touch, a11y-tree, a11y-zoom, chat, chat-choice, chat-a11y
 # chat: the Home is set up, then Go to lands on its map where the manager's
@@ -13,7 +13,7 @@ root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
 # Each explicit case owns these flags; an old shell export must not add a fault.
 unset MUSIC_HOME_PLACEMENT_FAULT MUSIC_HOME_PLACEMENT_CONFIRM MUSIC_HOME_PLACEMENT_COLLECTION \
-	MUSIC_HOME_PLACEMENT_LIBRARY MUSIC_HOME_PLACEMENT_SECOND_SONG MUSIC_HOME_PLACEMENT_A11Y MUSIC_HOME_PLACEMENT_COLLECTION_MAP MUSIC_HOME_PLACEMENT_TWO_FILES MUSIC_HOME_WIZARD_PREREQUISITE MUSIC_HOME_WIZARD_RESPONSE
+	MUSIC_HOME_PLACEMENT_LIBRARY MUSIC_HOME_PLACEMENT_SECOND_SONG MUSIC_HOME_PLACEMENT_A11Y MUSIC_HOME_PLACEMENT_COLLECTION_MAP MUSIC_HOME_PLACEMENT_TWO_FILES MUSIC_HOME_WIZARD_PREREQUISITE MUSIC_HOME_WIZARD_RESPONSE MUSIC_HOME_NATIVE_SERVER_PID
 case_name=single
 port=8956
 sources=()
@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 case "$case_name" in
-wizard | wizard-choice | wizard-quest | wizard-close | wizard-close-unknown | wizard-integration-missing | wizard-provider-missing | single | chat | chat-choice | chat-a11y | pointer | later | collection | collection-map | staffing | staffing-repair | staffing-recovery | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
+wizard | wizard-choice | wizard-quest | wizard-native | wizard-close | wizard-close-unknown | wizard-integration-missing | wizard-provider-missing | single | chat | chat-choice | chat-a11y | pointer | later | collection | collection-map | staffing | staffing-repair | staffing-recovery | accept | layout | ack | occupied | partial | stale | two-tabs | competing-home | disabled-provider | deleted-home | missing-model | a11y-light | a11y-dark | a11y-touch | a11y-tree | a11y-zoom) ;;
 *) echo "unknown case: $case_name" >&2; exit 2 ;;
 esac
 [[ "$port" =~ ^[0-9]+$ ]] || { echo 'port must be numeric' >&2; exit 2; }
@@ -54,7 +54,7 @@ env OPENAI_API_KEY=disposable-no-inference OPENAI_BASE_URL=http://127.0.0.1:1/v1
 	"$root/scripts/narrated-folder-demo.sh" "$demo_mode" "${sources[@]}" --port "$port" >"$log" 2>&1 &
 demo_pid=$!
 for _ in $(seq 1 600); do
-	if grep -q '^READY SANDBOX=' "$log"; then ready=1; break; fi
+	if grep -q '^READY SANDBOX=' "$log" 2>/dev/null; then ready=1; break; fi
 	if ! kill -0 "$demo_pid" 2>/dev/null; then echo "staging failed; see $log" >&2; exit 1; fi
 	sleep 1
 done
@@ -91,6 +91,26 @@ wizard | wizard-choice | wizard-close | wizard-close-unknown)
 	fi
 	spec=tests/reaper-folder-setup-wizard.spec.ts
 	pattern='music wizard' ;;
+wizard-native)
+	# Explicit opt-in to real macOS picker UI. Reuse only this verified disposable
+	# installation through the existing native-picker demo entrypoint.
+	"$root/scripts/stop-demo-server.sh" "$port"
+	wait "$demo_pid" || true
+	env OPENAI_API_KEY=disposable-no-inference OPENAI_BASE_URL=http://127.0.0.1:1/v1 \
+		ORI_DEMO_OPEN=0 ORI_INTEGRATION_RELEASES_API=http://127.0.0.1:1 \
+		ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$sandbox/plugin-source/reaper-plugin" \
+		ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE="$sandbox/plugin-source/music-project-management" \
+		"$root/scripts/demo-server.sh" --native-picker "$port" "$sandbox" >"$log_dir/native-picker.log" 2>&1 &
+	demo_pid=$!
+	for _ in $(seq 1 120); do
+		if curl -fsS -o /dev/null --max-time 1 "http://localhost:$port/health" 2>/dev/null; then break; fi
+		kill -0 "$demo_pid" 2>/dev/null || { echo 'native demo stopped' >&2; exit 1; }
+		sleep 1
+	done
+	curl -fsS -o /dev/null --max-time 1 "http://localhost:$port/health"
+	args+=(--env "MUSIC_HOME_NATIVE_SERVER_PID=$demo_pid")
+	spec=tests/reaper-folder-setup-wizard.spec.ts
+	pattern='music native picker' ;;
 wizard-quest)
 	spec=tests/reaper-folder-setup-wizard.spec.ts
 	pattern='music guided' ;;
@@ -111,7 +131,8 @@ a11y-*)
 	pattern='source Home' ;;
 chat) pattern='single-song' ;;
 chat-choice)
-	# A song folder with two project files: the manager asks which one to open.
+	# Select a project file in the source review, then verify the manager's
+	# separate Open carries that exact choice without asking a second time.
 	song_dir="$sandbox/Documents/Ori Music Demo"
 	cp "$song_dir/Ori Music Demo.rpp" "$song_dir/Ori Music Demo (mix).rpp"
 	args+=(--env MUSIC_HOME_PLACEMENT_TWO_FILES=1)

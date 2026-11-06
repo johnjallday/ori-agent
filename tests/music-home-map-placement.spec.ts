@@ -24,6 +24,7 @@ const collection = process.env.MUSIC_HOME_PLACEMENT_COLLECTION || '';
 const secondSong = process.env.MUSIC_HOME_PLACEMENT_SECOND_SONG || '';
 // The song folder holds two project files (scripts/music-home-placement-demo.sh --case chat-choice).
 const twoFiles = process.env.MUSIC_HOME_PLACEMENT_TWO_FILES === '1';
+let reviewedEntry = '';
 test.describe.configure({ mode: 'serial' });
 let restoreFault: (() => Promise<void>) | null = null;
 let unchangedSource: (() => Promise<void>) | null = null;
@@ -134,6 +135,26 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     if (r.method() === 'POST' && /\/(turns|chat|completions)$/.test(r.url())) inferencePosts++;
   });
   const review = await openMusicHomeReview(page, song);
+  if (twoFiles) {
+    await review
+      .getByRole('button', { name: 'Review choices & requirements', exact: true })
+      .click();
+    const choice = page
+      .locator('#personalAssistantFolderEntryChoice')
+      .getByRole('radio', { checked: false })
+      .first();
+    reviewedEntry = await choice.inputValue();
+    const saved = page.waitForResponse(
+      response => response.url().endsWith('/entry') && response.request().method() === 'POST'
+    );
+    await choice.check();
+    expect((await saved).ok()).toBe(true);
+    await page
+      .locator('#addFolderModal')
+      .getByRole('button', { name: 'Return to setup review', exact: true })
+      .click();
+    await expect(review).toBeVisible();
+  }
   await expect(review).toContainText('does not open its workspace');
   if (fault === 'two-tabs') {
     const source = (await (await request.get('/api/personal-assistant/folder-digest')).json())
@@ -585,9 +606,13 @@ test('single-song chat hand-off: the manager offers the song and it stands where
   let setupPosts = 0;
   let modelPosts = 0;
   let sessionPosts = 0;
+  let openedFile = '';
   page.on('request', r => {
     if (r.method() !== 'POST') return;
-    if (/folder-digest\/offers\/[^/]+\/setup$/.test(r.url())) setupPosts++;
+    if (/folder-digest\/offers\/[^/]+\/setup$/.test(r.url())) {
+      setupPosts++;
+      openedFile = r.postDataJSON().entry_name;
+    }
     if (/\/(turns|chat|completions)$/.test(r.url())) modelPosts++;
     if (/\/api\/sessions$/.test(r.url())) sessionPosts++;
   });
@@ -663,29 +688,15 @@ test('single-song chat hand-off: the manager offers the song and it stands where
       x: Number.parseFloat((element as HTMLElement).style.left),
       y: Number.parseFloat((element as HTMLElement).style.top)
     }));
-  let candidate = await point();
+  const candidate = await point();
   await page.keyboard.press('Enter');
   await expect.poll(() => setupPosts).toBe(1);
   if (twoFiles) {
-    // Two project files: the open stops before anything is made, and the
-    // manager asks which file, in the card. Nothing was placed. The Map says so
-    // first, and Continue brings back the card that asks.
-    await openMapReceiptDetails(page, 'was not opened');
-    const choices = offers.locator('[data-home-offer-choice]');
-    await expect(choices).toHaveCount(2, { timeout: 90_000 });
-    await expect(offers).toContainText(
-      'Ori Music Demo has more than one project file. Which one should I open?'
-    );
-    await expect(offers).toContainText('Nothing was opened or placed yet.');
-    expect(
-      (await snapshot(request)).workspaces.filter((w: any) => w.parent_id === home.id)
-    ).toHaveLength(0);
-    await page.screenshot({ path: `${chatEvidence}/choose-project-file.png` });
-    await offers.getByRole('button', { name: /with Ori Music Demo \(mix\)\.rpp$/ }).click();
-    await expect(preview).toBeVisible();
-    candidate = await point();
-    await page.keyboard.press('Enter');
-    await expect.poll(() => setupPosts).toBe(2);
+    // The source review chose a real alternative before Home setup. The later
+    // manager Open must carry it, not silently change it or ask a second time.
+    expect(reviewedEntry).toBeTruthy();
+    expect(openedFile).toBe(reviewedEntry);
+    await expect(offers.locator('[data-home-offer-choice]')).toHaveCount(0);
   }
   // The Map stays clear while it runs; the receipt is one explicit click away.
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
@@ -705,7 +716,7 @@ test('single-song chat hand-off: the manager offers the song and it stands where
   expect(resource.parent_id).toBe(home.id);
   expect(JSON.stringify(resource)).toContain(brief);
   await expect(page.locator(`.ws-map-tile[data-ws-id="${child.id}"]`)).toHaveClass(/is-selected/);
-  expect(setupPosts).toBe(twoFiles ? 2 : 1);
+  expect(setupPosts).toBe(1);
   expect(sessionPosts).toBe(0);
   expect(modelPosts).toBe(0);
   // The Home page's card no longer offers the opened song.

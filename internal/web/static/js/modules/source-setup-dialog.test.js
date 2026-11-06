@@ -118,18 +118,24 @@ test('eligibility requires canonical music evidence, never names or a fabricated
     }),
     false
   );
-  assert.equal(musicSetupOffer({ id: 'a', blueprint: 'reaper-song' }), true);
+  const canonical = { id: 'a', capability: { domain: 'music_production' } };
+  assert.equal(musicSetupOffer(canonical), true);
+  assert.equal(musicSetupOffer({ ...canonical, needs_candidate: true }), false);
+  assert.equal(musicSetupOffer({ ...canonical, portfolio: { projects: 5 } }), true);
+  assert.equal(musicSetupOffer({ ...canonical, availability: 'integration_missing' }), true);
+  // Plugin identities are not another browser registry. A suppressed capability
+  // or an unrelated declaration with a familiar name does not acquire the shell.
+  assert.equal(musicSetupOffer({ id: 'a', blueprint: 'reaper-song' }), false);
   assert.equal(
-    musicSetupOffer({ id: 'a', blueprint: 'reaper-song', needs_candidate: true }),
+    musicSetupOffer({ id: 'a', capability: { setup_plugin_id: 'reaper-plugin' } }),
     false
   );
+  assert.equal(musicSetupOffer({ ...canonical, capability: null }), false);
   assert.equal(
-    musicSetupOffer({
-      id: 'a',
-      portfolio: { provider_key: 'music_project_management', integration_key: 'ori_reaper' }
-    }),
-    true
+    musicSetupOffer({ ...canonical, capability: { domain: 'software_project' } }),
+    false
   );
+  assert.equal(musicSetupOffer({ ...canonical, id: '' }), false);
   assert.equal(musicSetupOffer({ id: 'a', blueprint: 'writing' }), false);
 });
 

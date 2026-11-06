@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { attachPlacementFolder, placementJSON } from './helpers/assisted-workspace-placement';
 
 import {
@@ -23,7 +26,9 @@ test.afterEach(async () => {
 });
 
 const responseCase = process.env.MUSIC_HOME_WIZARD_RESPONSE || '';
-const evidence = `tasks/evidence-reaper-folder-setup-wizard${responseCase ? `/${responseCase}` : ''}`;
+const evidence =
+  process.env.MUSIC_HOME_PLACEMENT_EVIDENCE ||
+  `tasks/evidence-reaper-folder-setup-wizard${responseCase ? `/${responseCase}` : ''}`;
 
 test(`music wizard ${responseCase || 'automatic'}: explicit review, preserved creator, close and original operation`, async ({
   page,
@@ -276,6 +281,7 @@ test('music prerequisites use one sibling review, explicit approval, and a fresh
   await sibling.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(sibling).toBeHidden();
   await expect(dialog).toBeVisible();
+  await expect(page.locator('#folderModalTitle')).toBeFocused();
   expect(confirmations).toHaveLength(0);
   expect(setups).toBe(0);
   expect(await plugins()).toEqual(installed);
@@ -293,6 +299,7 @@ test('music prerequisites use one sibling review, explicit approval, and a fresh
   });
   await sibling.getByRole('button', { name: 'Back to setup', exact: true }).click();
   await expect(dialog).toBeVisible();
+  await expect(page.locator('#folderModalTitle')).toBeFocused();
   await expect(sibling).toBeHidden();
   await expect(dialog).toContainText('Nothing to download');
   expect(confirmations).toHaveLength(kind === 'integration' ? 2 : 1);
@@ -320,6 +327,7 @@ test('music guided setup releases the shell and returns to the same observed sou
   test.skip(!song, 'requires a fresh isolated candidate music sandbox');
   test.setTimeout(120_000);
   const before = await musicHomeSnapshot(request);
+  mkdirSync(`${evidence}/guided`, { recursive: true });
   await page.goto('/?panel=today&folder=show');
   await page.locator('.folder-path-entry__input:visible').first().fill(song!);
   await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
@@ -335,15 +343,208 @@ test('music guided setup releases the shell and returns to the same observed sou
   await expect(guided).toBeVisible();
   await expect(source).toBeHidden();
   await expect(page.locator('.modal.show')).toHaveCount(1);
+  await expect(guided.locator('.modal-dialog')).toHaveCSS('transform', 'none');
   expect(await musicHomeSnapshot(request)).toEqual(before);
+  await page.screenshot({ path: `${evidence}/guided/quest.png` });
   await page.locator('#specialistSetupJourneyClose').click();
   await expect(guided).toBeHidden();
   await expect(source).toBeVisible();
+  await expect(page.locator('#folderModalTitle')).toBeFocused();
+  await page.screenshot({ path: `${evidence}/guided/returned.png` });
   await expect(page.locator('.modal.show')).toHaveCount(1);
   expect(await page.evaluate(() => (window as any).PersonalAssistantFolder.current().id)).toBe(
     offer
   );
   expect(await musicHomeSnapshot(request)).toEqual(before);
+});
+
+test('music native picker cancels without effects and returns a real synthetic selection to explicit review', async ({
+  page,
+  request
+}) => {
+  const serverPID = process.env.MUSIC_HOME_NATIVE_SERVER_PID || '';
+  const song = process.env.MUSIC_HOME_PLACEMENT_SONG || '';
+  test.skip(!serverPID, 'explicit wizard-native case only: real macOS UI');
+  test.setTimeout(90_000);
+  expect(process.platform).toBe('darwin');
+  const consoleUID = Number(
+    execFileSync('/usr/bin/stat', ['-f', '%u', '/dev/console'], {
+      encoding: 'utf8',
+      timeout: 5_000
+    }).trim()
+  );
+  expect(
+    consoleUID,
+    'Native acceptance requires this user’s interactive macOS desktop; never switch users or bypass privacy permissions'
+  ).toBe(process.getuid?.());
+  expect(serverPID).toMatch(/^\d+$/);
+  const root = resolve(import.meta.dirname, '..');
+  const sandbox = realpathSync(resolve(song, '../..'));
+  expect(sandbox.startsWith(`${realpathSync(tmpdir())}/ori-demo.narrated-installed-`)).toBe(true);
+  expect(readFileSync(resolve(sandbox, '.ori-demo-owner'), 'utf8')).toBe(`worktree=${root}\n`);
+  const children = () => {
+    expect(
+      execFileSync('/bin/ps', ['-p', serverPID, '-o', 'comm='], {
+        encoding: 'utf8',
+        timeout: 5_000
+      }).trim()
+    ).toBe(resolve(root, 'bin/ori-agent'));
+    try {
+      return execFileSync('/usr/bin/pgrep', ['-P', serverPID, '-x', 'osascript'], {
+        encoding: 'utf8',
+        timeout: 5_000
+      })
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+    } catch (error) {
+      if ((error as { status?: number }).status === 1) return [];
+      throw error;
+    }
+  };
+  const native = async (action: 'cancel' | 'choose') => {
+    await expect.poll(children, { timeout: 10_000 }).toHaveLength(1);
+    const child = children()[0];
+    expect(child).toMatch(/^\d+$/);
+    await expect
+      .poll(
+        () =>
+          Number(
+            execFileSync(
+              '/usr/bin/osascript',
+              [
+                '-e',
+                'on run argv\nset targetPID to (item 1 of argv) as integer\ntell application "System Events" to return count of (application processes whose unix id is targetPID)\nend run',
+                child
+              ],
+              { encoding: 'utf8', timeout: 5_000 }
+            ).trim()
+          ),
+        {
+          timeout: 10_000,
+          message: 'The owned native chooser must be accessible in this macOS desktop session'
+        }
+      )
+      .toBe(1);
+    console.log(`OWNED_NATIVE_PICKER action=${action} server=${serverPID} child=${child}`);
+    const output = execFileSync(
+      '/usr/bin/osascript',
+      [
+        resolve(root, 'tests/helpers/backup-native-picker.applescript'),
+        child,
+        action,
+        action === 'choose' ? realpathSync(song) : ''
+      ],
+      { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    expect(output.trim()).toBe(action === 'choose' ? 'chosen' : 'cancelled');
+    await expect.poll(children).toHaveLength(0);
+  };
+  const before = await musicHomeSnapshot(request);
+  let effects = 0;
+  page.on('request', request => {
+    if (
+      request.method() === 'POST' &&
+      /\/(setup|decide|turns|chat|completions|from-inbox)$/.test(request.url())
+    )
+      effects++;
+  });
+  try {
+    await page.goto('/?panel=today&folder=show');
+    const pick = page.getByRole('button', { name: 'Pick another folder…', exact: true }).first();
+    await pick.click();
+    await native('cancel');
+    await expect(pick).toBeEnabled();
+    await expect(page.locator('[data-source-setup-summary]')).toHaveCount(0);
+    expect(await musicHomeSnapshot(request)).toEqual(before);
+    await pick.click();
+    await native('choose');
+    const dialog = page.locator('#addFolderModal');
+    const entry = page
+      .locator('[data-source-setup-summary]')
+      .getByRole('button', { name: 'Review setup', exact: true });
+    await expect(entry).toBeVisible();
+    await expect(dialog).toBeHidden();
+    expect(await musicHomeSnapshot(request)).toEqual(before);
+    await entry.click();
+    await expect(page.locator('#folderModalTitle')).toBeFocused();
+    await expect(dialog.locator('[data-source-creation-review]')).toContainText('Ori Music Demo');
+    mkdirSync(`${evidence}/native-picker`, { recursive: true });
+    await page.screenshot({ path: `${evidence}/native-picker/returned.png` });
+    await page.keyboard.press('Escape');
+    await expect(entry).toBeFocused();
+    expect(await musicHomeSnapshot(request)).toEqual(before);
+    expect(effects).toBe(0);
+  } finally {
+    for (const child of children()) {
+      try {
+        execFileSync(
+          '/usr/bin/osascript',
+          [resolve(root, 'tests/helpers/backup-native-picker.applescript'), child, 'cancel', ''],
+          { timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] }
+        );
+      } catch {
+        // Preserve the original desktop-session failure instead of masking it
+        // with teardown. Recheck ownership before stopping only our chooser;
+        // never leave an inaccessible native dialog process behind.
+        if (children().includes(child)) process.kill(Number(child), 'SIGTERM');
+        console.warn(`OWNED_NATIVE_PICKER cleanup stopped inaccessible child=${child}`);
+      }
+    }
+  }
+});
+
+test('ordinary folder import keeps its own confirmation and creates one real workspace', async ({
+  page
+}) => {
+  const sandbox = process.env.ORI_INBOX_SANDBOX || '';
+  test.skip(!sandbox, 'requires an owned disposable inbox server');
+  const root = realpathSync(sandbox);
+  expect(root.startsWith(`${realpathSync(tmpdir())}/ori-inbox-demo-`)).toBe(true);
+  expect(readFileSync(resolve(root, '.ori-demo-owner'), 'utf8')).toBe(
+    `worktree=${process.cwd()}\n`
+  );
+  const source = mkdtempSync(resolve(root, 'ordinary-import-'));
+  const file = resolve(source, 'notes.txt');
+  const bytes = 'Ordinary import regression: keep these bytes unchanged.\n';
+  writeFileSync(file, bytes, { mode: 0o600 });
+  const before = await placementJSON(page, '/api/workspaces');
+  const agents = await placementJSON(page, '/api/agents');
+  let imports = 0;
+  let sourceSetups = 0;
+  page.on('request', request => {
+    if (request.method() !== 'POST') return;
+    if (request.url().endsWith('/api/workspaces/import')) imports++;
+    if (/\/(setup|from-inbox|turns|chat)$/.test(request.url())) sourceSetups++;
+  });
+  await page.goto('/workspaces?import=1');
+  const dialog = page.locator('#addFolderModal');
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('#folderImportToggle')).toBeChecked();
+  await page.locator('#folderImportPathInput').fill(source);
+  await page.locator('#folderImportPathInput').blur();
+  await expect(page.locator('#createFolderBtn')).toBeEnabled();
+  expect((await placementJSON(page, '/api/workspaces')).folders).toEqual(before.folders);
+  expect(imports).toBe(0);
+  const imported = page.waitForResponse(
+    response =>
+      response.url().endsWith('/api/workspaces/import') && response.request().method() === 'POST'
+  );
+  await page.locator('#createFolderBtn').click();
+  const response = await imported;
+  expect(response.ok(), await response.text()).toBe(true);
+  const result = await response.json();
+  await expect(dialog).toBeHidden();
+  const after = await placementJSON(page, '/api/workspaces');
+  const added = after.folders.filter(
+    (folder: any) => !before.folders.some((old: any) => old.id === folder.id)
+  );
+  expect(added).toHaveLength(1);
+  expect(added[0].id).toBe(result.folder.id);
+  expect(result.directory.path).toBe(source);
+  expect(await placementJSON(page, '/api/agents')).toEqual(agents);
+  expect(readFileSync(file, 'utf8')).toBe(bytes);
+  expect({ imports, sourceSetups }).toEqual({ imports: 1, sourceSetups: 0 });
 });
 
 test('Downloads review uses the shared dialog without creating resources', async ({ page }) => {

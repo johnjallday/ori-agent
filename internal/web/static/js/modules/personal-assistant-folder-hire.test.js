@@ -371,7 +371,7 @@ test('a later song, with its Home ready, only leads to the Home', () => {
 });
 
 test('the music shell borrows only a canonical setup action, never converts a ready-Home link into confirmation', () => {
-  const fresh = { ...handoffOffer(), blueprint: 'reaper-song' };
+  const fresh = { ...handoffOffer(), capability: { domain: 'music_production' } };
   assert.equal(musicSetupNeedsConfirmation(fresh), true);
   assert.equal(
     musicSetupNeedsConfirmation({
