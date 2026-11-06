@@ -254,6 +254,7 @@ test('fresh restoration replays loaded pages, not old cursors, and handles a rem
     calls.push(more);
     panel.rows = [{ id: 'b' }];
     panel.cursor = 'fresh-page';
+    return true;
   };
   panel.browser.request = async () => record('b');
   await panel.restoreBrowserResults();

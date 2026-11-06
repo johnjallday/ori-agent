@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 type BrowserFixture = {
+  provider_source: string;
   home_id: string;
   home_folder: string;
   child_folders: string[];
@@ -19,8 +20,13 @@ export async function libraryJSON(response: Awaited<ReturnType<APIRequestContext
 }
 
 // Guarded test-only export, then the same real import API used for portable
-// workspaces. No route-fulfilled library responses, paid models or installs.
-export async function seedProjectBrowser(request: APIRequestContext, sandbox: string) {
+// workspaces. No route-fulfilled library responses or paid models. Writable
+// acceptance optionally installs an inert generic fixture ONLY in this sandbox.
+export async function seedProjectBrowser(
+  request: APIRequestContext,
+  sandbox: string,
+  { writable = false } = {}
+) {
   expect(sandbox, 'use e2e-fresh --sandbox-env ORI_LIBRARY_BROWSER_SANDBOX').toBeTruthy();
   execFileSync(
     'go',
@@ -42,6 +48,36 @@ export async function seedProjectBrowser(request: APIRequestContext, sandbox: st
     readFileSync(join(sandbox, 'project-library-browser-fixture', 'fixture.json'), 'utf8')
   );
   await libraryJSON(await request.post('/api/onboarding/skip'));
+  if (writable) {
+    expect((await request.get(`/api/workspaces/${fixture.home_id}`)).status()).toBe(404);
+    const source = fixture.provider_source;
+    expect(source).toBe(join(sandbox, 'project-library-browser-fixture', 'provider'));
+    await libraryJSON(await request.post('/api/plugins/install', { data: { source } }));
+    await libraryJSON(
+      await request.post('/api/plugins/install', { data: { source, confirm: true } })
+    );
+    await libraryJSON(await request.post('/api/plugins/browser-fixture/enable', { data: {} }));
+    execFileSync(
+      'go',
+      [
+        'test',
+        '-short',
+        './internal/projectlibrary',
+        '-run',
+        '^TestBrowserFixtureBindProvider$',
+        '-count=1'
+      ],
+      {
+        env: {
+          ...process.env,
+          ORI_LIBRARY_BROWSER_SANDBOX: sandbox,
+          ORI_LIBRARY_BROWSER_BIND_PROVIDER: '1'
+        },
+        timeout: 120_000,
+        stdio: 'pipe'
+      }
+    );
+  }
   for (const path of [...fixture.child_folders, fixture.home_folder]) {
     await libraryJSON(await request.post('/api/workspaces/import', { data: { path } }));
   }
@@ -49,6 +85,7 @@ export async function seedProjectBrowser(request: APIRequestContext, sandbox: st
   const projects = await libraryJSON(await request.get(`${api}/projects`));
   expect(projects.total).toBe(fixture.entry_count);
   expect(projects.rows).toHaveLength(25);
+  expect(projects.provider_read_only).toBe(!writable);
   const workspace = await libraryJSON(await request.get(`/api/workspaces/${fixture.home_id}`));
   const slug = workspace.folder_slug;
   expect(slug, 'use the real slug, not an ID URL').toBeTruthy();

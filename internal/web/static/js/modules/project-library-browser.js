@@ -2,6 +2,8 @@
 // setup, grant, model, OS-open or workspace-activation capability.
 export const LIBRARY_TABS = ['overview', 'files', 'sessions'];
 export const LIBRARY_FILTERS = {
+  view: 'projectLibraryView',
+  collectionID: 'projectLibraryCollection',
   text: 'projectLibrarySearch',
   stage: 'projectLibraryStage',
   status: 'projectLibraryStatusFilter',
@@ -14,7 +16,14 @@ export const LIBRARY_FILTERS = {
   direction: 'projectLibraryDirection'
 };
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(value);
+export const LIBRARY_VIEWS = {
+  all: 'All',
+  recently_saved: 'Recently saved',
+  needs_attention: 'Needs attention',
+  archived: 'Archived'
+};
 const choices = {
+  view: ['', ...Object.keys(LIBRARY_VIEWS)],
   stage: ['', 'unknown', 'idea', 'writing', 'recording', 'editing', 'mixing', 'mastering'],
   status: ['', 'unknown', 'planning', 'active', 'on_hold', 'complete', 'archived'],
   connection: ['', 'connected', 'catalog_only', 'needs_review'],

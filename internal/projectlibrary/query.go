@@ -18,18 +18,21 @@ import (
 // Search is a bounded metadata-only query. The caller authenticates the
 // current user before supplying the Home scope; no path is accepted or emitted.
 type Search struct {
-	Text         string `json:"text,omitempty"`
-	Stage        string `json:"stage,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Format       string `json:"format,omitempty"`
-	Connection   string `json:"connection,omitempty"`
-	Availability string `json:"availability,omitempty"`
-	RootID       string `json:"root_id,omitempty"`
-	Priority     *int   `json:"priority,omitempty"`
-	Sort         string `json:"sort,omitempty"`
-	Direction    string `json:"direction,omitempty"`
-	PageSize     int    `json:"page_size,omitempty"`
-	Cursor       string `json:"cursor,omitempty"`
+	View               string `json:"view,omitempty"`
+	CollectionID       string `json:"collection_id,omitempty"`
+	CollectionRevision int64  `json:"collection_revision,omitempty"`
+	Text               string `json:"text,omitempty"`
+	Stage              string `json:"stage,omitempty"`
+	Status             string `json:"status,omitempty"`
+	Format             string `json:"format,omitempty"`
+	Connection         string `json:"connection,omitempty"`
+	Availability       string `json:"availability,omitempty"`
+	RootID             string `json:"root_id,omitempty"`
+	Priority           *int   `json:"priority,omitempty"`
+	Sort               string `json:"sort,omitempty"`
+	Direction          string `json:"direction,omitempty"`
+	PageSize           int    `json:"page_size,omitempty"`
+	Cursor             string `json:"cursor,omitempty"`
 }
 
 type SearchRow struct {
@@ -106,11 +109,12 @@ func moveNote(entry Entry, newest map[string]string, roots map[string]Root, inac
 }
 
 type SearchPage struct {
-	Rows             []SearchRow `json:"rows"`
-	Total            int         `json:"total"`
-	Revision         int64       `json:"revision"`
-	NextCursor       string      `json:"next_cursor,omitempty"`
-	ProviderReadOnly bool        `json:"provider_read_only"`
+	Collection       *CollectionCard `json:"collection,omitempty"`
+	Rows             []SearchRow     `json:"rows"`
+	Total            int             `json:"total"`
+	Revision         int64           `json:"revision"`
+	NextCursor       string          `json:"next_cursor,omitempty"`
+	ProviderReadOnly bool            `json:"provider_read_only"`
 }
 
 // Detail deliberately excludes absolute grant paths, child workspace state,
@@ -319,6 +323,34 @@ func (q *Search) normalize(doc Document) error {
 	default:
 		return ErrConflict
 	}
+	switch q.View {
+	case "", "all":
+		q.View = ""
+	case "recently_saved":
+		q.Sort, q.Direction = "last_saved", "desc"
+	case "needs_attention", "archived":
+	default:
+		return ErrConflict
+	}
+	if q.CollectionRevision < 0 || (q.CollectionID == "" && q.CollectionRevision != 0) || !validText(q.CollectionID, 160) {
+		return ErrConflict
+	}
+	if q.CollectionID != "" {
+		found := false
+		for _, collection := range doc.Collections {
+			if collection.ID != q.CollectionID {
+				continue
+			}
+			if q.CollectionRevision != 0 && q.CollectionRevision != collection.Revision {
+				return ErrConflict
+			}
+			q.CollectionRevision, found = collection.Revision, true
+			break
+		}
+		if !found {
+			return ErrUnavailable
+		}
+	}
 	if q.RootID != "" {
 		for _, root := range doc.Roots {
 			if root.ID == q.RootID {
@@ -373,6 +405,22 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 			return SearchPage{}, err
 		}
 	}
+	var collection *CollectionCard
+	var members map[string]bool
+	if query.CollectionID != "" {
+		members = map[string]bool{}
+		for _, saved := range doc.Collections {
+			if saved.ID != query.CollectionID {
+				continue
+			}
+			card := collectionCard(saved)
+			collection = &card
+			for _, id := range saved.EntryIDs {
+				members[id] = true
+			}
+			break
+		}
+	}
 	linked := make(map[string]bool, len(state.LinkedProjectIDs))
 	for _, id := range state.LinkedProjectIDs {
 		linked[id] = true
@@ -390,6 +438,9 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 	newest := newestCompleteScans(doc)
 	rows := make([]SearchRow, 0, len(doc.Entries))
 	for _, entry := range doc.Entries {
+		if members != nil && !members[entry.ID] {
+			continue
+		}
 		// A root filter scopes the displayed source, format, availability and
 		// scan time together. Otherwise a record observed under two roots could
 		// match one root while showing another root's unrelated format.
@@ -401,7 +452,7 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return searchLess(rows[i], rows[j], query.Sort, query.Direction) })
-	page := SearchPage{Rows: make([]SearchRow, 0, query.PageSize), Total: len(rows),
+	page := SearchPage{Collection: collection, Rows: make([]SearchRow, 0, query.PageSize), Total: len(rows),
 		Revision: doc.Revision, ProviderReadOnly: !state.PluginAvailable}
 	start := 0
 	if cursor.LastID != "" {
@@ -551,6 +602,13 @@ func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[strin
 }
 
 func (q Search) matches(row SearchRow, entry Entry) bool {
+	if q.View == "archived" && row.Status != "archived" {
+		return false
+	}
+	if q.View == "needs_attention" && row.Connection != "needs_review" &&
+		row.Availability != "unavailable" && row.Availability != "ambiguous" && row.Availability != "revoked_source" {
+		return false
+	}
 	if q.Stage != "" && row.Stage != q.Stage ||
 		q.Status != "" && row.Status != q.Status ||
 		q.Format != "" && row.Format != q.Format || q.Connection != "" && row.Connection != q.Connection ||

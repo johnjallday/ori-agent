@@ -1223,7 +1223,7 @@ test('out-of-order search responses and double-clicked More cannot mix or duplic
     projectLibraryPriority: { value: '' },
     projectLibrarySort: { value: 'name' }
   };
-  globalThis.document = { getElementById: id => elements[id] };
+  globalThis.document = { getElementById: id => elements[id], querySelectorAll: () => [] };
   try {
     const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
     panel.state = { provider_read_only: false };
@@ -3031,15 +3031,29 @@ const readySong = (id, name, file = 'Song.rpp') => ({
   }
 });
 
-test('select all picks every selectable song shown and clears them on the next press', () => {
+test('select loaded includes connected bulk targets while the setup queue stays catalog-only', () => {
   const { panel } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')]);
   panel.rows.push({ id: 'c', name: 'Album-3', connection: 'connected' });
   panel.toggleSelectAll();
   assert.deepEqual(
     [...panel.selectedProjects].sort(),
-    ['a', 'b'],
-    'connected songs are not picked'
+    ['a', 'b', 'c'],
+    'connected projects can receive bulk metadata edits'
   );
+  assert.deepEqual(panel.queueIds().sort(), ['a', 'b']);
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 0);
+});
+
+test('selection is capped at 100 loaded projects and Clear works for a partial selection', () => {
+  const { panel } = batchPanel(
+    Array.from({ length: 105 }, (_, i) => readySong(`entry-${i}`, `Project ${i}`))
+  );
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 100);
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 0);
+  panel.selectedProjects.add('entry-104');
   panel.toggleSelectAll();
   assert.equal(panel.selectedProjects.size, 0);
 });

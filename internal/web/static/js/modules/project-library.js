@@ -24,6 +24,7 @@ import {
   LibraryBrowserState,
   ReadEpoch,
   LIBRARY_FILTERS,
+  LIBRARY_VIEWS,
   readNavigation,
   saveNavigation,
   rowException,
@@ -230,6 +231,9 @@ export function rescanRoots(state) {
 }
 
 export function libraryQuery({
+  view = '',
+  collectionID = '',
+  collectionRevision = '',
   text = '',
   stage = '',
   status = '',
@@ -244,6 +248,9 @@ export function libraryQuery({
 } = {}) {
   const query = new URLSearchParams({ page_size: '25', sort, direction });
   for (const [key, value] of Object.entries({
+    view,
+    collection_id: collectionID,
+    collection_revision: collectionRevision,
     text: text.trim(),
     stage,
     status,
@@ -852,6 +859,16 @@ export class ProjectLibraryPanel {
         const heading = document.getElementById('projectLibraryTitle');
         heading?.setAttribute('tabindex', '-1');
         heading?.focus();
+      } else if (
+        trigger?.isConnected &&
+        Object.values(BULK_FIELDS).some(spec => spec.control === trigger.id) &&
+        !this.bulkTargets().length
+      ) {
+        const title = document.getElementById('projectLibraryTitle');
+        if (title) {
+          title.tabIndex = -1;
+          title.focus();
+        }
       } else if (trigger?.isConnected) {
         trigger.disabled =
           (trigger.id === 'projectLibraryAdd' &&
@@ -1350,6 +1367,18 @@ export class ProjectLibraryPanel {
     const current = () => home === this.workspaceId && generation === this.collectionGeneration;
     this.collectionBrowser = mountHomeCollections(container, {
       isCurrent: current,
+      onSelect: async collection => {
+        if (!current()) return;
+        document.getElementById('projectLibraryCollection').value = collection.id;
+        this.collectionScope = collection;
+        document.getElementById('projectLibraryCollections').open = false;
+        await this.search(false);
+        const title = document.getElementById('projectLibraryTitle');
+        if (title) {
+          title.tabIndex = -1;
+          title.focus({ preventScroll: true });
+        }
+      },
       request: (path, options) => {
         if (!current()) throw new Error('Home changed');
         return this.request(path, options);
@@ -2013,7 +2042,7 @@ export class ProjectLibraryPanel {
       if (!restoring) {
         this.restoreRead.cancel();
         this.restoringBrowser = false;
-        this.clearSelection();
+        this.clearBrowserSelection('Selection cleared because the result scope changed.');
         this.browser.clear();
       }
       tbody.replaceChildren();
@@ -2025,12 +2054,19 @@ export class ProjectLibraryPanel {
       moreButton.disabled = true;
     }
     const query = this.browserQuery();
-    const params = libraryQuery({ ...query, cursor: more ? this.cursor : '' });
+    const collectionRevision =
+      this.collectionScope?.id === query.collectionID ? this.collectionScope.revision : '';
+    const params = libraryQuery({ ...query, collectionRevision, cursor: more ? this.cursor : '' });
     this.renderAppliedFilters(query);
     this.status('Loading saved projects…');
     try {
       const page = await this.request(`/projects?${params}`, { signal: turn.signal });
       if (generation !== this.searchGeneration || !turn.current()) return;
+      if (this.state) this.state.provider_read_only = page.provider_read_only;
+      if (this.readOnly)
+        this.clearBrowserSelection('Selection cleared because this library is read-only.');
+      this.collectionScope = page.collection || null;
+      this.renderAppliedFilters(query);
       this.loadedPages++;
       this.rows.push(...(page.rows || []));
       this.cursor = page.next_cursor || '';
@@ -2049,11 +2085,29 @@ export class ProjectLibraryPanel {
             ? 'Select a project to inspect it. Only explicit actions change your library or open a workspace.'
             : 'No projects match. Try another filter or review a folder scan.'
       );
+      return true;
     } catch (error) {
       if (generation !== this.searchGeneration || !turn.current()) return;
       this.cursor = '';
       moreButton.hidden = true;
-      this.status(error.message || 'Could not load this page. Refresh the library and retry.');
+      if (query.collectionID) {
+        this.rows = [];
+        tbody.replaceChildren();
+        this.clearBrowserSelection(
+          'Selection cleared because collection membership could not be checked.'
+        );
+        this.browser.clear();
+        this.renderQueueControls();
+        document.getElementById('projectLibraryCount').textContent = 'Collection unavailable';
+        const empty = document.getElementById('projectLibraryEmpty');
+        if (empty) empty.hidden = true;
+      }
+      this.status(
+        query.collectionID
+          ? 'This collection changed or is unavailable. Refresh membership to recheck this same collection, or explicitly leave it. No unrelated projects were loaded.'
+          : error.message || 'Could not load this page. Refresh the library and retry.'
+      );
+      return false;
     } finally {
       if (turn.current()) {
         this.searchInFlight = false;
@@ -2075,16 +2129,13 @@ export class ProjectLibraryPanel {
         const checkbox = node('input');
         checkbox.type = 'checkbox';
         checkbox.checked = this.selectedProjects.has(row.id);
-        checkbox.setAttribute(
-          'aria-label',
-          row.connection === 'catalog_only'
-            ? `Select ${row.name} for serial project review`
-            : `Select ${row.name}`
-        );
+        checkbox.setAttribute('aria-label', `Select ${row.name}`);
         checkbox.addEventListener('change', () => {
+          const notice = document.getElementById('projectLibrarySelectionNotice');
+          if (notice) notice.textContent = '';
           if (checkbox.checked && this.selectedProjects.size >= QUEUE_LIMIT) {
             checkbox.checked = false;
-            this.status(`Select at most ${QUEUE_LIMIT} songs at once.`);
+            this.status(`Select at most ${QUEUE_LIMIT} projects at once.`);
             return;
           }
           if (checkbox.checked) {
@@ -2182,9 +2233,10 @@ export class ProjectLibraryPanel {
     group.querySelector('button')?.focus();
   }
 
-  // Rows a person can pick: catalog-only songs on the pages loaded so far.
+  // Bulk fields apply to every loaded canonical entry. The setup queue uses
+  // queueIds separately; connected and needs-review entries are not excluded.
   selectableRows() {
-    return this.readOnly ? [] : this.rows.filter(row => row.connection === 'catalog_only');
+    return this.readOnly ? [] : this.rows;
   }
 
   // The selected songs the setup queue and "Connect all selected" may take:
@@ -2195,6 +2247,13 @@ export class ProjectLibraryPanel {
     );
   }
 
+  clearBrowserSelection(message) {
+    const count = this.selectedProjects.size;
+    this.clearSelection();
+    const notice = document.getElementById('projectLibrarySelectionNotice');
+    if (notice && count) notice.textContent = message;
+  }
+
   clearSelection() {
     this.selectedProjects.clear();
     this.selectedRows.clear();
@@ -2203,11 +2262,10 @@ export class ProjectLibraryPanel {
   toggleSelectAll() {
     const pickable = this.selectableRows();
     if (this.queue || !pickable.length) return;
-    if (pickable.every(row => this.selectedProjects.has(row.id))) {
-      for (const row of pickable) {
-        this.selectedProjects.delete(row.id);
-        this.selectedRows.delete(row.id);
-      }
+    const notice = globalThis.document?.getElementById('projectLibrarySelectionNotice');
+    if (notice) notice.textContent = '';
+    if (this.selectedProjects.size) {
+      this.clearSelection();
     } else {
       let left = 0;
       for (const row of pickable) {
@@ -2219,9 +2277,13 @@ export class ProjectLibraryPanel {
         }
       }
       if (left)
-        this.status(`Selected ${QUEUE_LIMIT}, the most one queue takes; ${left} were left out.`);
+        this.status(
+          `Selected ${QUEUE_LIMIT}, the limit for one action; ${left} loaded projects were left out.`
+        );
       else if (this.cursor)
-        this.status('Selected every song shown. Load more to include the rest.');
+        this.status(
+          'Selected the loaded projects only. Loading more does not select additional projects.'
+        );
     }
     this.renderRows();
     this.renderQueueControls();
@@ -2401,9 +2463,12 @@ export class ProjectLibraryPanel {
     const connectAll = document.getElementById('projectLibraryConnectAll');
     if (selectAll) {
       const pickable = this.selectableRows();
-      const everyPicked =
-        pickable.length > 0 && pickable.every(row => this.selectedProjects.has(row.id));
-      selectAll.textContent = everyPicked ? 'Clear selection' : `Select all (${pickable.length})`;
+      selectAll.textContent = this.selectedProjects.size
+        ? 'Clear selection'
+        : pickable.length > QUEUE_LIMIT
+          ? `Select first ${QUEUE_LIMIT} loaded projects`
+          : `Select loaded projects (${pickable.length})`;
+      selectAll.hidden = this.readOnly;
       selectAll.disabled = this.busy || this.readOnly || !!pending || pickable.length === 0;
     }
     if (connectAll) {
@@ -2412,6 +2477,8 @@ export class ProjectLibraryPanel {
     resume.hidden = discard.hidden = !pending;
     resume.disabled = this.busy || this.readOnly || pending?.status === 'expired';
     discard.disabled = this.busy;
+    const setupActions = document.getElementById('projectLibraryQueueActions');
+    if (setupActions) setupActions.hidden = !pending && (this.readOnly || queueable < 2);
     this.renderBulkControls();
   }
 
@@ -2437,8 +2504,8 @@ export class ProjectLibraryPanel {
     }
   }
 
-  // One bulk request for every selected song (FR17-FR19). Rows update in place
-  // from the response; nothing is reloaded. The result line offers Undo.
+  // One existing revision-checked bulk request. Refresh only saved result and
+  // selected-pane metadata afterward; never scan or refresh Files implicitly.
   async applyBulk(field, choice, trigger) {
     const spec = BULK_FIELDS[field];
     const targets = this.bulkTargets();
@@ -2461,6 +2528,7 @@ export class ProjectLibraryPanel {
         this.applyBulkOutcome(outcome);
         this.clearSelection();
         this.renderRows();
+        await this.refreshBrowserMetadata();
       }
     );
     if (!outcome) return;
@@ -2545,6 +2613,7 @@ export class ProjectLibraryPanel {
         finished = true;
       } finally {
         this.renderRows();
+        await this.refreshBrowserMetadata();
       }
     });
     this.showBulkResult(
@@ -3416,12 +3485,17 @@ export class ProjectLibraryPanel {
   }
 
   browserQuery() {
-    return Object.fromEntries(
+    const query = Object.fromEntries(
       Object.entries(LIBRARY_FILTERS).map(([field, id]) => [
         field,
         document.getElementById(id)?.value || ''
       ])
     );
+    if (query.view === 'recently_saved') {
+      query.sort = 'last_saved';
+      query.direction = 'desc';
+    }
+    return query;
   }
 
   browserIntent() {
@@ -3465,24 +3539,53 @@ export class ProjectLibraryPanel {
     }
   }
 
-  async restoreBrowserResults() {
+  async refreshBrowserMetadata() {
+    if (!document.getElementById('projectLibraryBrowser')) return;
+    this.pendingBrowserIntent = this.browserIntent();
+    if (await this.restoreBrowserResults({ metadataOnly: true })) {
+      this.status(
+        'Saved results refreshed; rows that no longer match your filters are no longer shown. No folder scan ran.'
+      );
+    }
+  }
+
+  async restoreBrowserResults({ metadataOnly = false } = {}) {
     const turn = this.restoreRead.begin();
     const intent = this.pendingBrowserIntent || this.browserIntent();
     this.pendingBrowserIntent = null;
     this.restoringBrowser = true;
+    this.collectionScope = null; // Return/reload resolves fresh membership; no stored revision is authority.
     try {
       for (const [field, value] of Object.entries(intent.query || {})) {
         const input = document.getElementById(LIBRARY_FILTERS[field]);
         if (input) input.value = value;
       }
-      await this.search(false, { restoring: true });
+      if (!(await this.search(false, { restoring: true }))) return false;
       if (!turn.current()) return;
       for (let page = 1; page < Math.min(20, intent.pages || 1) && this.cursor; page++) {
-        await this.search(true, { restoring: true });
+        if (!(await this.search(true, { restoring: true }))) return false;
         if (!turn.current()) return;
       }
       if (intent.selected && this.rows.some(row => row.id === intent.selected)) {
-        await this.browser.select(intent.selected, intent.tab);
+        if (metadataOnly) {
+          const detailTurn = this.browser.detailRead.begin();
+          try {
+            const detail = await this.request(`/projects/${encodeURIComponent(intent.selected)}`, {
+              signal: detailTurn.signal
+            });
+            if (
+              !turn.current() ||
+              !detailTurn.current() ||
+              this.browser.selected !== intent.selected
+            )
+              return;
+            if (detail?.row?.id !== intent.selected) throw new Error('Project changed');
+            this.browser.detail = detail;
+            if (this.browser.tab === 'overview') await this.renderBrowser();
+          } catch (_) {
+            if (turn.current() && detailTurn.current()) this.browser.clear();
+          }
+        } else await this.browser.select(intent.selected, intent.tab);
       } else if (intent.selected) {
         this.browser.clear();
         this.status('The selected project is no longer in these results. Select another project.');
@@ -3490,6 +3593,7 @@ export class ProjectLibraryPanel {
       if (!turn.current()) return;
       const list = document.getElementById('projectLibraryListScroll');
       if (list) list.scrollTop = intent.scroll || 0;
+      return true;
     } finally {
       if (turn.current()) {
         this.restoringBrowser = false;
@@ -3499,6 +3603,30 @@ export class ProjectLibraryPanel {
   }
 
   initBrowser() {
+    for (const button of document.querySelectorAll('[data-library-view]')) {
+      button.addEventListener('click', () => {
+        document.getElementById('projectLibraryView').value = button.dataset.libraryView;
+        void this.search(false);
+      });
+    }
+    document.getElementById('projectLibraryLeaveCollection')?.addEventListener('click', () => {
+      document.getElementById('projectLibraryCollection').value = '';
+      this.collectionScope = null;
+      void this.search(false);
+    });
+    document.getElementById('projectLibraryRefreshCollection')?.addEventListener('click', () => {
+      this.collectionScope = null;
+      void this.search(false);
+      void this.renderCollections();
+    });
+    for (const id of Object.values(LIBRARY_FILTERS)) {
+      document.getElementById(id)?.addEventListener('input', () => {
+        if (!this.selectedProjects.size) return;
+        this.clearBrowserSelection('Selection cleared. Apply the filters to refresh the results.');
+        this.renderRows();
+        this.renderQueueControls();
+      });
+    }
     const tabs = [...document.querySelectorAll('[data-library-tab]')];
     for (const [index, tab] of tabs.entries()) {
       tab.addEventListener('click', () => this.browser.changeTab(tab.dataset.libraryTab));
@@ -3550,14 +3678,52 @@ export class ProjectLibraryPanel {
   }
 
   renderAppliedFilters(query) {
+    const view = query.view || 'all';
+    for (const button of document.querySelectorAll('[data-library-view]'))
+      button.setAttribute('aria-pressed', String(button.dataset.libraryView === view));
+    const note = document.getElementById('projectLibraryViewNote');
+    if (note)
+      note.textContent =
+        {
+          recently_saved:
+            'Observed project-file save time, newest first; unknown dates last. This is not evidence of recent work.',
+          needs_attention:
+            'Saved link or availability exceptions: links needing review, unavailable or ambiguous sources, and ended discovery consent. No production stage is inferred.',
+          archived:
+            'Saved administrative status only. Archiving does not move or delete project files.'
+        }[view] || '';
+    for (const field of ['sort', 'direction']) {
+      const input = document.getElementById(LIBRARY_FILTERS[field]);
+      if (input) {
+        input.disabled = view === 'recently_saved';
+        if (input.disabled) input.value = query[field];
+      }
+    }
+    const scope = document.getElementById('projectLibraryCollectionScope');
+    if (scope) scope.hidden = !query.collectionID;
+    const collectionLabel = document.getElementById('projectLibraryCollectionLabel');
+    if (collectionLabel)
+      collectionLabel.textContent = query.collectionID
+        ? `Collection: ${this.collectionScope?.id === query.collectionID ? this.collectionScope.name : query.collectionID}`
+        : '';
     const labels = [];
     for (const [field, id] of Object.entries(LIBRARY_FILTERS)) {
-      if (!query[field] || field === 'sort' || field === 'direction') continue;
+      if (
+        !query[field] ||
+        field === 'sort' ||
+        field === 'direction' ||
+        (field === 'view' && query.view === 'all')
+      )
+        continue;
       const input = document.getElementById(id);
       labels.push(
         field === 'text'
           ? `Search: ${query.text}`
-          : input?.selectedOptions?.[0]?.textContent || label(query[field])
+          : field === 'view'
+            ? LIBRARY_VIEWS[query.view]
+            : field === 'collectionID'
+              ? 'Within selected collection'
+              : input?.selectedOptions?.[0]?.textContent || label(query[field])
       );
     }
     const summary = document.getElementById('projectLibraryApplied');

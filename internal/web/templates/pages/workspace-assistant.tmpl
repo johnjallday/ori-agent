@@ -199,10 +199,6 @@
                   <p id="projectLibraryProposalsNote">Manager suggestions are untrusted drafts or navigation hints. They cannot select folders, save sessions, change notes, or start project work. Review and confirm each change separately as the Home owner.</p>
                   <div id="projectLibraryProposalRows" class="project-library-resume-cards"></div>
                 </section>
-                <section class="project-library-resume" aria-labelledby="projectLibraryCollectionsTitle">
-                  <h3 id="projectLibraryCollectionsTitle">Logical collections</h3>
-                  <div id="projectLibraryCollectionBrowser"></div>
-                </section>
                 <section id="projectLibraryArrangementPlanning" class="project-library-resume" aria-label="Organize library"></section>
                 <section id="projectLibraryArrangements" class="project-library-resume" aria-labelledby="projectLibraryArrangementsTitle" hidden>
                   <h3 id="projectLibraryArrangementsTitle">Saved arrangements</h3>
@@ -212,7 +208,17 @@
                 <div id="projectLibraryRoots" class="project-library-roots" aria-label="Approved discovery folders"></div>
                 <div class="project-library-footer"><span id="projectLibraryRootCount"></span><button id="projectLibraryMoreRoots" class="modern-btn modern-btn-secondary" type="button" hidden>More folders</button></div>
                 </details>
+                <div class="project-library-scopes" role="group" aria-label="Project views">
+                  <button type="button" data-library-view="all" aria-pressed="true">All</button>
+                  <button type="button" data-library-view="recently_saved" aria-pressed="false">Recently saved</button>
+                  <button type="button" data-library-view="needs_attention" aria-pressed="false">Needs attention</button>
+                  <button type="button" data-library-view="archived" aria-pressed="false">Archived</button>
+                </div>
+                <p id="projectLibraryViewNote" class="project-library-scope-note"></p>
+                <details id="projectLibraryCollections" class="project-library-collections"><summary>Collections</summary><div id="projectLibraryCollectionBrowser"></div></details>
+                <div id="projectLibraryCollectionScope" class="project-library-collection-scope" hidden><span id="projectLibraryCollectionLabel" role="status"></span><button id="projectLibraryLeaveCollection" type="button" class="modern-btn modern-btn-secondary">Leave collection</button><button id="projectLibraryRefreshCollection" type="button" class="modern-btn modern-btn-secondary">Refresh membership</button></div>
                 <form id="projectLibrarySearchForm" class="project-library-toolbar" role="search">
+                  <input id="projectLibraryView" type="hidden" value="all"><input id="projectLibraryCollection" type="hidden" value="">
                   <label for="projectLibrarySearch">Search projects</label>
                   <div class="project-library-toolbar-row">
                     <input id="projectLibrarySearch" class="form-control" type="search" maxlength="120" autocomplete="off" placeholder="Project name or next action">
@@ -232,20 +238,20 @@
                   </div></details>
                   <div class="project-library-applied"><span id="projectLibraryApplied" role="status"></span><button id="projectLibraryClear" type="button" class="modern-btn modern-btn-secondary" hidden>Clear filters</button></div>
                 </form>
-                <div class="project-library-queue" aria-label="Selected project setup queue">
+                <div class="project-library-selection-tools"><button id="projectLibrarySelectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Select loaded projects</button><span id="projectLibrarySelectionNotice" role="status"></span></div>
+                <div id="projectLibraryQueueActions" class="project-library-queue" aria-label="Selected project setup queue" hidden>
                   <span id="projectLibraryQueueStatus" role="status" aria-live="polite">Choose catalog-only projects to review one at a time.</span>
-                  <button id="projectLibrarySelectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Select all</button>
                   <button id="projectLibraryConnectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Connect all selected</button>
                   <button id="projectLibraryQueueStart" class="modern-btn modern-btn-secondary" type="button" disabled>Review selected projects</button>
                   <button id="projectLibraryQueueResume" class="modern-btn modern-btn-secondary" type="button" hidden>Resume review queue</button>
                   <button id="projectLibraryQueueDiscard" class="modern-btn modern-btn-secondary" type="button" hidden>Discard queue</button>
+                </div>
                   <div id="projectLibraryBulk" class="project-library-bulk" role="group" aria-labelledby="projectLibraryBulkCount" hidden>
                     <span id="projectLibraryBulkCount" class="project-library-bulk-count"></span>
                     <select id="projectLibraryBulkStage" class="form-select" aria-label="Set stage for the selected songs"><option value="">Set stage…</option><option value="unknown">Unknown</option><option value="idea">Idea</option><option value="writing">Writing</option><option value="recording">Recording</option><option value="editing">Editing</option><option value="mixing">Mixing</option><option value="mastering">Mastering</option></select>
                     <select id="projectLibraryBulkStatus" class="form-select" aria-label="Set status for the selected songs"><option value="">Set status…</option><option value="unknown">Unknown</option><option value="planning">Planning</option><option value="active">Active</option><option value="on_hold">On hold</option><option value="complete">Complete</option><option value="archived">Archived</option></select>
                     <select id="projectLibraryBulkPriority" class="form-select" aria-label="Set priority for the selected songs"><option value="">Set priority…</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="clear">Clear priority</option></select>
                   </div>
-                </div>
                 <p id="projectLibraryBulkResult" class="project-library-bulk-result" hidden><span id="projectLibraryBulkResultText" role="status" aria-live="polite"></span> <button id="projectLibraryBulkUndo" class="modern-btn modern-btn-secondary" type="button" hidden>Undo</button></p>
                 <section id="projectLibraryQueueHistory" class="project-library-queue-history" aria-labelledby="projectLibraryQueueHistoryTitle" hidden>
                   <h3 id="projectLibraryQueueHistoryTitle">Recent review outcomes</h3>

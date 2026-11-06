@@ -18,11 +18,12 @@ import (
 // host's ordinary import route, never a product backdoor or a fake HTTP API.
 // No agents, paid providers, installed packages or user folders are required.
 type browserFixture struct {
-	HomeID       string   `json:"home_id"`
-	HomeFolder   string   `json:"home_folder"`
-	ChildFolders []string `json:"child_folders"`
-	SourceRoot   string   `json:"source_root"`
-	EntryCount   int      `json:"entry_count"`
+	ProviderSource string   `json:"provider_source,omitempty"`
+	HomeID         string   `json:"home_id"`
+	HomeFolder     string   `json:"home_folder"`
+	ChildFolders   []string `json:"child_folders"`
+	SourceRoot     string   `json:"source_root"`
+	EntryCount     int      `json:"entry_count"`
 }
 
 func browserFixtureSandbox(raw, owner string) (string, error) {
@@ -335,6 +336,7 @@ func TestBrowserFixtureExport(t *testing.T) {
 		t.Fatal("refusing to overwrite an existing fixture:", err)
 	}
 	_, _, fixture := createBrowserFixture(t, root)
+	fixture.ProviderSource = writeBrowserProviderFixture(t, root)
 	encoded, err := json.MarshalIndent(fixture, "", "  ")
 	if err != nil {
 		t.Fatal(err)
