@@ -1,6 +1,29 @@
 import { expect as baseExpect, type APIRequestContext, type Page } from '@playwright/test';
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
 const expect = baseExpect.configure({ timeout: 60_000 });
+
+// Fingerprint synthetic source bytes as well as file/directory membership.
+// Never follow links out of the explicit fixture tree.
+export async function musicSourceSnapshot(root: string) {
+  const files: Record<string, string> = {};
+  async function walk(directory: string, prefix = '') {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const relative = `${prefix}${entry.name}`;
+      if (entry.isDirectory()) {
+        files[`${relative}/`] = 'directory';
+        await walk(path.join(directory, entry.name), `${relative}/`);
+      } else if (entry.isFile()) {
+        files[relative] = createHash('sha256')
+          .update(await fs.readFile(path.join(directory, entry.name)))
+          .digest('hex');
+      } else throw new Error(`Unexpected non-file fixture entry: ${relative}`);
+    }
+  }
+  await walk(root);
+  return files;
+}
 
 export async function musicHomeSnapshot(request: APIRequestContext) {
   const body = await (await request.get('/api/workspaces')).json();

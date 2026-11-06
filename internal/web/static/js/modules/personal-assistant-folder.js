@@ -5013,6 +5013,16 @@ export function musicSetupOffer(offer) {
   );
 }
 
+export function musicSetupNeedsConfirmation(offer) {
+  return Boolean(
+    musicSetupOffer(offer) &&
+    offer.status === 'pending' &&
+    conversationFolderOfferView(offer, { confirm: true }).actions?.some(
+      action => action.oneCard && !action.retry && !action.openSong
+    )
+  );
+}
+
 let musicDialog = null;
 let musicDialogReference = null;
 let musicSummary = null;
@@ -5035,10 +5045,11 @@ function returnFromMusicGuidedSetup(ref) {
   if (!modal || !musicDialogCurrent(ref)) return;
   const cleanup = () => {
     modal.removeEventListener('hidden.bs.modal', returned);
-    musicGuidedReturnCleanup = null;
+    if (musicGuidedReturnCleanup === cleanup) musicGuidedReturnCleanup = null;
   };
   const returned = () =>
     setTimeout(async () => {
+      if (musicGuidedReturnCleanup !== cleanup) return;
       if (!musicDialogCurrent(ref)) {
         cleanup();
         return;
@@ -5046,7 +5057,7 @@ function returnFromMusicGuidedSetup(ref) {
       // Guided Setup also hides temporarily for its own child editors. Do not
       // compete with them; wait for its eventual real dismissal.
       if (document.querySelector('dialog[open], .modal.show')) return;
-      if (!(await pollSetup())) return;
+      if (!(await pollSetup()) || musicGuidedReturnCleanup !== cleanup) return;
       if (!musicDialogCurrent(ref)) {
         cleanup();
         return;
@@ -5067,6 +5078,7 @@ function musicDialogCurrent(ref) {
 }
 function musicSetupReference() {
   if (!musicDialogCurrent(musicDialogReference)) {
+    musicGuidedReturnCleanup?.();
     if (musicDialog?.visible()) void musicDialog.invalidate();
     const ref = {
       kind: 'music-folder',
@@ -5091,7 +5103,11 @@ async function openMusicSetupReview(trigger) {
     return false;
   }
   if (musicSummary) musicSummary.querySelector('[role="status"]').textContent = '';
-  if (state.offer.status === 'pending' && state.offer.plan?.digest && !state.offer.needs_pick)
+  if (
+    musicSetupNeedsConfirmation(state.offer) &&
+    state.offer.plan?.digest &&
+    !state.offer.needs_pick
+  )
     await startOneCardSetup({ sourceDialogEntry: true });
   return true;
 }
@@ -5131,7 +5147,9 @@ function renderMusicSetupEntry(place) {
   const name = state.offer.subject?.name || state.offer.folder || 'Selected folder';
   musicSummary.firstElementChild.textContent = accepted
     ? `${name} · Setup status and saved results. Closing the review does not undo accepted work.`
-    : `${name} · Review its music setup before confirming. No Home or project is created by opening the review.`;
+    : musicSetupNeedsConfirmation(state.offer)
+      ? `${name} · Review its music setup before confirming. No Home or project is created by opening the review.`
+      : `${name} · Review the available setup options. Opening the review changes no Home or project.`;
   musicSummary.querySelector('button').textContent = accepted
     ? 'View setup status'
     : 'Review setup';
@@ -5337,7 +5355,9 @@ function renderSourceCreationReview() {
     sourceReviewCurrent(review) &&
     !review.pending &&
     !review.result &&
-    (!offer?.plan || (review.home && !sourceHomeReviewPlan(offer.plan)))
+    (!offer?.plan ||
+      (review.home && !sourceHomeReviewPlan(offer.plan)) ||
+      (musicSetupOffer(offer) && !musicSetupNeedsConfirmation(offer)))
   )
     review.editing = true;
   const active =
@@ -5563,7 +5583,7 @@ async function retrySourceHomePosition(review) {
 }
 
 async function actOnSourceCreationReview(review, { action, field, value }) {
-  if (!sourceReviewCurrent(review) || state.busy || review.observing) return;
+  if (!sourceReviewCurrent(review) || state.busy || review.observing || review.editing) return;
   if (action === 'read-status') {
     // One explicit re-read; a failure waits for the next explicit request.
     review.observeFailed = false;

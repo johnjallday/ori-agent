@@ -13,6 +13,7 @@ import {
   folderFirstLookAvailable,
   folderFirstLookOpen,
   handoffFirstPressLabel,
+  musicSetupNeedsConfirmation,
   isInboxFolderOffer,
   hireLookView,
   hireView,
@@ -367,6 +368,26 @@ test('a later song, with its Home ready, only leads to the Home', () => {
       ['no', undefined]
     ]
   );
+});
+
+test('the music shell borrows only a canonical setup action, never converts a ready-Home link into confirmation', () => {
+  const fresh = { ...handoffOffer(), blueprint: 'reaper-song' };
+  assert.equal(musicSetupNeedsConfirmation(fresh), true);
+  assert.equal(
+    musicSetupNeedsConfirmation({
+      ...fresh,
+      plan: {
+        ...fresh.plan,
+        suggested_in: {
+          name: 'Music Production Home',
+          route: '/workspaces/music-home?mode=map&panel=assistant'
+        }
+      }
+    }),
+    false
+  );
+  assert.equal(musicSetupNeedsConfirmation({ ...fresh, status: 'resolved' }), false);
+  assert.equal(musicSetupNeedsConfirmation({ ...fresh, needs_pick: true }), false);
 });
 
 test('a single song’s first press reviews Home setup; its project brief stays in the Home', () => {

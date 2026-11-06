@@ -7,6 +7,7 @@ import {
   sourceHomeObservationResult,
   sourceHomeReviewPlan,
   musicSetupOffer,
+  musicSetupNeedsConfirmation,
   folderHomeMapTarget,
   folderLandingRoute
 } from './personal-assistant-folder.js';
@@ -44,6 +45,7 @@ function controller() {
     // summary read faked as "nothing to set up" unless a test says otherwise.
     folderLandingRoute,
     musicSetupOffer,
+    musicSetupNeedsConfirmation,
     libraryToSetUp: async () => context.toSetUpForTest || 0,
     console,
     document: {
@@ -393,6 +395,85 @@ test('enter, hover and Back retain review and candidate with no domain effects; 
   assert.equal(review.result.id, 'home');
 });
 
+test('music map handoff waits for hidden and abandons a replaced generation before starting placement', async () => {
+  const c = controller();
+  c.state.offer.blueprint = 'reaper-song';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  let hidden;
+  const ref = {};
+  c.context.musicDialogReference = ref;
+  c.context.musicDialogCurrent = () => c.state.reviewGeneration === 1;
+  c.context.musicSetupDialog = () => ({
+    owns: owner => owner === ref,
+    suspend: () =>
+      new Promise(resolve => {
+        hidden = resolve;
+      })
+  });
+  const pending = c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  assert.equal(c.placement(), undefined);
+  c.state.reviewGeneration++;
+  hidden(true);
+  await pending;
+  assert.equal(c.placement(), undefined);
+  assert.equal(c.effects.setup, 0);
+  assert.equal(c.effects.position, 0);
+});
+
+test('music map Back callback cannot reopen the shell after conversation replacement', async () => {
+  const c = controller();
+  c.state.offer.blueprint = 'reaper-song';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  let returned,
+    opens = 0;
+  c.context.musicDialogReference = {};
+  c.context.musicDialogCurrent = () => c.state.reviewGeneration === 1;
+  c.context.musicSetupDialog = () => ({
+    owns: () => true,
+    suspend: async () => true,
+    open: () => opens++
+  });
+  c.context.setTimeout = callback => {
+    returned = callback;
+  };
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  c.placement().onBack();
+  assert.equal(opens, 0);
+  c.state.reviewGeneration++;
+  returned();
+  assert.equal(opens, 0);
+  assert.equal(c.effects.setup, 0);
+});
+
+test('re-entering a pending music review preserves its original request and cannot confirm twice', async () => {
+  const c = controller();
+  c.state.offer.blueprint = 'reaper-song';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  const review = c.review();
+  await c.actOnSourceCreationReview(review, { action: 'suggested' });
+  let complete,
+    calls = 0,
+    request;
+  c.context.postOffer = async (_id, _action, body) => {
+    calls++;
+    request = body.request_id;
+    return new Promise(resolve => {
+      complete = resolve;
+    });
+  };
+  const pending = c.actOnSourceCreationReview(review, { action: 'confirm' });
+  assert.equal(review.pending, true);
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  assert.equal(c.review(), review);
+  await c.actOnSourceCreationReview(review, { action: 'confirm' });
+  assert.equal(calls, 1);
+  assert.equal(review.acceptedRequestID, request);
+  complete({ ok: true, payload: {} });
+  await pending;
+  assert.equal(review.acceptedRequestID, request);
+  assert.equal(calls, 1);
+});
+
 test('automatic mode only clears candidate; hidden/narrow/read-only maps cannot place', async () => {
   const c = controller();
   await c.startOneCardSetup({});
@@ -437,6 +518,19 @@ test('lost confirmation retires the old nothing-is-set-up summary without claimi
   assert.equal(c.review().result, undefined);
   await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
   assert.equal(c.effects.setup, 1);
+  assert.equal(c.effects.position, 0);
+});
+
+test('a retired confirmation panel cannot dispatch after handing back to source choices', async () => {
+  const c = controller();
+  c.context.focusFolderAction = () => {};
+  await c.startOneCardSetup({});
+  const review = c.review();
+  await c.actOnSourceCreationReview(review, { action: 'suggested' });
+  await c.actOnSourceCreationReview(review, { action: 'details' });
+  assert.equal(review.editing, true);
+  await c.actOnSourceCreationReview(review, { action: 'confirm' });
+  assert.equal(c.effects.setup, 0);
   assert.equal(c.effects.position, 0);
 });
 

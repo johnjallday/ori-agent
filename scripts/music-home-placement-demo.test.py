@@ -182,6 +182,18 @@ while true; do sleep 1; done
         self.assertIn("-g\nmusic guided\n", calls)
         self.assertNotIn("MUSIC_HOME_PLACEMENT_TWO_FILES", calls)
 
+    def test_wizard_response_cases_reach_the_browser_not_an_unused_argument_array(self):
+        for case in ["wizard-close", "wizard-close-unknown"]:
+            with self.subTest(case=case):
+                result = self.run_case(case)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"MUSIC_HOME_WIZARD_RESPONSE={case}", self.trace.read_text())
+                self.trace.unlink()
+        self.env["MUSIC_HOME_WIZARD_RESPONSE"] = "wizard-close-unknown"
+        result = self.run_case("wizard")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("MUSIC_HOME_WIZARD_RESPONSE", self.trace.read_text())
+
     def test_missing_integration_uses_published_floor_and_its_own_sandbox(self):
         self.sandbox = self.root / "ori-demo.narrated-integration-missing-fixture"
         self.env["FIXTURE_SANDBOX"] = str(self.sandbox)

@@ -33,7 +33,7 @@ function target() {
     }
   };
 }
-function fixture({ transitioning = false } = {}) {
+function fixture({ transitioning = false, closing = false } = {}) {
   const modal = target(),
     win = target();
   let shown = false,
@@ -69,7 +69,7 @@ function fixture({ transitioning = false } = {}) {
       if (this._isTransitioning) return;
       modal.fire('hide.bs.modal');
       shown = false;
-      modal.fire('hidden.bs.modal');
+      if (!closing) modal.fire('hidden.bs.modal');
     }
   };
   const ref = {
@@ -179,6 +179,48 @@ test('Escape during show waits for hidden and cannot leave a hidden focus trap o
   assert.equal(f.effects.focus, 0);
   assert.equal(f.effects.closes, 1);
   assert.equal(f.effects.resets, 0);
+});
+
+test('invalidated opening never takes focus and finishes before another owner can open', async () => {
+  const f = fixture({ transitioning: true });
+  f.adapter.open(f.ref);
+  f.stale();
+  const hidden = f.adapter.invalidate();
+  const newer = { ...f.ref, offerID: 'newer', current: () => true };
+  assert.equal(f.adapter.open(newer), false);
+  f.bs._isTransitioning = false;
+  f.modal.fire('shown.bs.modal');
+  assert.equal(await hidden, true);
+  assert.equal(f.effects.focus, 0);
+  assert.equal(f.effects.closes, 0);
+  assert.equal(f.effects.returned, 0);
+  assert.equal(f.effects.resets, 0);
+  assert.equal(f.adapter.open(newer), true);
+});
+
+test('close during hide cannot reacquire or focus an expired source; queued suspension remains singular', async () => {
+  const f = fixture({ closing: true });
+  f.adapter.open(f.ref);
+  const hidden = f.adapter.suspend();
+  assert.equal(await f.adapter.suspend(), false);
+  assert.equal(f.adapter.open(f.ref), false);
+  assert.equal(f.host.hidden, false, 'ownership remains fenced through Bootstrap hidden');
+  f.stale();
+  f.modal.fire('hidden.bs.modal');
+  assert.equal(await hidden, true);
+  assert.equal(f.effects.closes, 0);
+  assert.equal(f.effects.returned, 0);
+  assert.equal(f.effects.resets, 0);
+  assert.equal(f.adapter.open(f.ref), false);
+});
+
+test('a newer foreground dialog prevents focus restoration when the source closes', async () => {
+  const f = fixture();
+  f.adapter.open(f.ref);
+  f.others.push({});
+  await f.adapter.close();
+  assert.equal(f.effects.closes, 1);
+  assert.equal(f.effects.returned, 0);
 });
 
 test('suspension releases only presentation, does not close/return focus, and rechecks ownership', async () => {

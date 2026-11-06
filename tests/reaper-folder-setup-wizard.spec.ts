@@ -2,11 +2,30 @@ import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { attachPlacementFolder, placementJSON } from './helpers/assisted-workspace-placement';
 
-import { musicHomeSnapshot, musicHomeResourceCounts } from './helpers/music-home-placement';
+import {
+  musicHomeSnapshot,
+  musicHomeResourceCounts,
+  musicSourceSnapshot
+} from './helpers/music-home-placement';
 
-const evidence = 'tasks/evidence-reaper-folder-setup-wizard';
+let unchangedSource: (() => Promise<void>) | null = null;
+test.beforeEach(async () => {
+  const root = process.env.MUSIC_HOME_PLACEMENT_SONG;
+  if (!root) return;
+  const before = await musicSourceSnapshot(root);
+  unchangedSource = async () => {
+    expect(await musicSourceSnapshot(root)).toEqual(before);
+  };
+});
+test.afterEach(async () => {
+  await unchangedSource?.();
+  unchangedSource = null;
+});
 
-test('music wizard opens only on review, preserves the creator and closes without effects before automatic setup', async ({
+const responseCase = process.env.MUSIC_HOME_WIZARD_RESPONSE || '';
+const evidence = `tasks/evidence-reaper-folder-setup-wizard${responseCase ? `/${responseCase}` : ''}`;
+
+test(`music wizard ${responseCase || 'automatic'}: explicit review, preserved creator, close and original operation`, async ({
   page,
   request
 }) => {
@@ -18,7 +37,30 @@ test('music wizard opens only on review, preserves the creator and closes withou
   let setupPosts = 0;
   let setupBrief = '';
   let setupEntry = '';
+  let setupRequestID = '';
   let selectedEntry = '';
+  let releaseResponse!: () => void;
+  let accepted!: () => void;
+  let delivered!: () => void;
+  const serverAccepted = new Promise<void>(resolve => {
+    accepted = resolve;
+  });
+  const deliver = new Promise<void>(resolve => {
+    releaseResponse = resolve;
+  });
+  const deliveryDone = new Promise<void>(resolve => {
+    delivered = resolve;
+  });
+  if (responseCase)
+    await page.route(/folder-digest\/offers\/[^/]+\/setup$/, async route => {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true); // real acceptance; delay/drop only delivery
+      accepted();
+      await deliver;
+      if (responseCase === 'wizard-close-unknown') await route.abort('failed');
+      else await route.fulfill({ response });
+      delivered();
+    });
   let inference = 0;
   page.on('request', request => {
     if (request.method() !== 'POST') return;
@@ -26,6 +68,7 @@ test('music wizard opens only on review, preserves the creator and closes withou
       setupPosts++;
       setupBrief = request.postDataJSON().brief;
       setupEntry = request.postDataJSON().entry_name;
+      setupRequestID = request.postDataJSON().request_id;
     }
     if (/\/(turns|chat|completions|from-inbox)$/.test(request.url())) inference++;
   });
@@ -107,6 +150,38 @@ test('music wizard opens only on review, preserves the creator and closes withou
   await entry.dispatchEvent('click');
   await expect(page.locator('.modal.show')).toHaveCount(1);
   await review.getByRole('button', { name: 'Set up Home', exact: true }).click();
+  if (responseCase) {
+    await serverAccepted;
+    const close = dialog.getByRole('button', { name: 'Close setup review', exact: true });
+    const status = page
+      .locator('[data-source-setup-summary]')
+      .getByRole('button', { name: 'View setup status', exact: true });
+    await close.click();
+    await expect(dialog).toBeHidden();
+    await expect(status).toBeFocused();
+    await status.click();
+    await expect(
+      review.getByRole('heading', { name: 'Checking Home setup', exact: true })
+    ).toBeVisible();
+    await expect(review.getByRole('button', { name: 'Set up Home', exact: true })).toHaveCount(0);
+    expect(setupPosts).toBe(1);
+    await close.click();
+    await expect(dialog).toBeHidden();
+    releaseResponse();
+    await deliveryDone;
+    if (responseCase === 'wizard-close-unknown')
+      await expect(review).toContainText('Confirmation delivery is unknown');
+    else
+      await expect
+        .poll(() =>
+          page.evaluate(() => (window as any).PersonalAssistantFolder.current()?.home_result?.state)
+        )
+        .toBe('ready');
+    await expect(dialog).toBeHidden();
+    await status.click();
+    if (responseCase === 'wizard-close-unknown')
+      await review.getByRole('button', { name: 'Read saved status', exact: true }).click();
+  }
   await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible({
     timeout: 60_000
   });
@@ -121,8 +196,29 @@ test('music wizard opens only on review, preserves the creator and closes withou
   expect(
     after.workspaces.filter((workspace: any) => workspace.parent_id === homes[0].id)
   ).toHaveLength(0);
-  expect((await musicHomeResourceCounts(request, homes[0].id)).projects).toHaveLength(1);
+  const counts = await musicHomeResourceCounts(request, homes[0].id);
+  expect(counts.projects).toHaveLength(1);
+  const source = (await (await request.get('/api/personal-assistant/folder-digest')).json())
+    .folder_digest.offer;
+  expect(source.home_result.request_id).toBe(setupRequestID);
   await page.screenshot({ path: `${evidence}/wizard/result.png` });
+  await dialog.getByRole('button', { name: 'Close setup review', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await page.reload();
+  await expect(dialog).toBeHidden();
+  await page
+    .locator('[data-source-setup-summary]')
+    .getByRole('button', { name: 'View setup status', exact: true })
+    .click();
+  await expect(dialog).toContainText('Music Production Home');
+  await expect(
+    dialog.getByRole('button', { name: 'Go to Music Production Home', exact: true })
+  ).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Set up Home', exact: true })).toHaveCount(0);
+  expect(await musicHomeResourceCounts(request, homes[0].id)).toEqual(counts);
+  expect(setupPosts).toBe(1);
+  expect((await musicHomeSnapshot(request)).positions).toEqual(after.positions);
+  await page.screenshot({ path: `${evidence}/wizard/saved-status.png` });
 });
 
 test('music prerequisites use one sibling review, explicit approval, and a fresh source return', async ({
