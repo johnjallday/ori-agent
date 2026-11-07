@@ -119,9 +119,12 @@ const (
 )
 
 type staffingRoleInput struct {
-	RoleID        string `json:"role_id"`
-	SourceWitness string `json:"-"` // supplied only by compiled reviewed callers
-	Name          string `json:"name"`
+	RoleID               string `json:"role_id"`
+	SourceWitness        string `json:"-"` // supplied only by compiled reviewed callers
+	CapabilityWitness    string `json:"-"`
+	ChoiceDigest         string `json:"-"`
+	PreviousChoiceDigest string `json:"-"`
+	Name                 string `json:"name"`
 	// Mode is "create" or "bind". Absent means "create".
 	//
 	// decodeStaffingInput normalizes an explicit "create" back to the empty
@@ -315,9 +318,19 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(ctx context.Context, scop
 	if targetIdentity == "" {
 		return CanonicalResult{}, ErrConflict
 	}
+	if targetScope == workspace.AssistantRoleScopeHome {
+		state := target.GetAssistantProgramState()
+		if state == nil || state.Declaration == nil || (!state.Hired && len(state.Declaration.Stages) == 0) {
+			return CanonicalResult{}, ErrInvalid
+		}
+	}
 	rolesByID := make(map[string]workspace.AssistantProgramRoleSpec, len(owner.declaration.Roles))
 	for _, role := range owner.declaration.Roles {
 		rolesByID[role.ID] = role
+	}
+	capabilityGuard, err := a.staffingCapabilities(target, targetScope, input, rolesByID)
+	if err != nil {
+		return CanonicalResult{}, err
 	}
 	// Only strict creation can prove rollback ownership. A saved/assigned
 	// profile never enters this list; changed/shared/unknown sources survive.
@@ -345,6 +358,9 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(ctx context.Context, scop
 			created, createErr := a.createStaffingProfile(ctx, requested.Name, &store.CreateAgentConfig{
 				Role: types.AgentRole(role.Role), Model: requested.Model,
 				LLMProvider: requested.Provider, SystemPrompt: role.SystemPrompt,
+				// Keep the declaration's public purpose discoverable if this
+				// definition is retained. Never mine its private system prompt.
+				Description:     role.Description,
 				ReasoningEffort: requested.ReasoningEffort,
 				Appearance:      requested.Appearance.Clone(),
 			})
@@ -425,7 +441,7 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(ctx context.Context, scop
 		bindings = append(bindings, workspace.AssistantRoleBinding{RoleID: role.ID, AgentInstanceID: instance.ID, AgentName: instance.Name})
 	}
 	expectedRevision := projection.Scopes[0].BindingRevision
-	err = a.updateStaffingBindings(ctx, target.ID, selected, func(current *workspace.Workspace) error {
+	err = a.updateStaffingBindings(ctx, target.ID, selected, capabilityGuard, func(current *workspace.Workspace) error {
 		if staffingTargetIdentity(current) != targetIdentity {
 			return ErrConflict
 		}
@@ -442,8 +458,16 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(ctx context.Context, scop
 			if state == nil || state.HomeBindings.StateRevision != expectedRevision {
 				return workspace.ErrAssistantBindingVersionConflict
 			}
+			for i, role := range input.Roles {
+				if err := recordHomeStaffingChoice(state, role, bindings[i]); err != nil {
+					return err
+				}
+			}
 			state.HomeBindings = workspace.AssistantRoleBindingSet{StateRevision: expectedRevision + 1, Bindings: append(state.HomeBindings.Bindings, bindings...)}
 			if !state.Hired {
+				if state.Declaration == nil || len(state.Declaration.Stages) == 0 {
+					return ErrInvalid
+				}
 				now := time.Now().UTC()
 				state.Hired = true
 				state.HiredAt = &now
@@ -579,13 +603,18 @@ func (a *AssistantStaffingAdapter) StaffFromReviewedWorkspaceSetup(ctx context.C
 type RoleFill struct {
 	// SourceWitness is private evidence supplied by an already reviewed host
 	// plan. It is never accepted from role-endpoint JSON or model output.
-	SourceWitness   string `json:"-"`
-	RoleID          string
-	Mode            string
-	Name            string
-	Provider        string
-	Model           string
-	ReasoningEffort string
+	SourceWitness     string `json:"-"`
+	CapabilityWitness string `json:"-"`
+	// ChoiceDigest and its predecessor are supplied only by an existing
+	// reviewed Home/folder owner, never accepted as role-endpoint authority.
+	ChoiceDigest         string `json:"-"`
+	PreviousChoiceDigest string `json:"-"`
+	RoleID               string
+	Mode                 string
+	Name                 string
+	Provider             string
+	Model                string
+	ReasoningEffort      string
 	// Appearance is the staged face for a create; ignored for a bind.
 	Appearance *types.AgentAppearance
 }
@@ -636,6 +665,18 @@ func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(ctx context.Context, wor
 	if err != nil {
 		return err
 	}
+	input.Roles[0].SourceWitness = requested.SourceWitness
+	input.Roles[0].CapabilityWitness = requested.CapabilityWitness
+	input.Roles[0].ChoiceDigest = requested.ChoiceDigest
+	input.Roles[0].PreviousChoiceDigest = requested.PreviousChoiceDigest
+	if requested.ChoiceDigest != "" || requested.PreviousChoiceDigest != "" {
+		if targetScope != workspace.AssistantRoleScopeHome {
+			return ErrInvalid
+		}
+		if completed, err := reviewedHomeStaffingReplay(owner.station, input.Roles[0]); err != nil || completed {
+			return err
+		}
+	}
 	commitAction := ActionAddHomeStaffing
 	if targetScope == workspace.AssistantRoleScopeProject {
 		commitAction = ActionAddProjectStaffing
@@ -655,7 +696,6 @@ func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(ctx context.Context, wor
 		return err
 	}
 	reviewed := ActionReviewMaterial{CommitAction: commitAction, Staffing: projection}
-	input.Roles[0].SourceWitness = requested.SourceWitness
 	_, err = a.commitReviewedRoles(ctx, scope, owner, targetScope, commitAction, input, reviewed)
 	return err
 }
@@ -712,6 +752,13 @@ func (a *AssistantStaffingAdapter) workspaceRoleOwner(targetID string) (*staffin
 // goes through the adapter's ordinary Review/Commit pair rather than around it,
 // so there is exactly one code path that binds a role (FR54).
 func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx context.Context, projectID string, fills []RoleFill) error {
+	for _, fill := range fills {
+		if fill.ChoiceDigest != "" || fill.PreviousChoiceDigest != "" || fill.CapabilityWitness != "" {
+			// A Home-only reviewed step must not be laundered through the
+			// older cross-scope batch contract.
+			return ErrInvalid
+		}
+	}
 	if len(fills) == 0 {
 		return nil
 	}

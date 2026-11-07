@@ -657,7 +657,7 @@
     const source =
       run && Array.isArray(run.lines) && run.lines.length
         ? run.lines
-        : plan && plan.ready === true
+        : plan && (plan.ready === true || plan.home_staffing)
           ? plan.lines
           : [];
     // A plugin the plan reports as ready is checked off before the run.
@@ -670,7 +670,7 @@
       !lines.length && plan && plan.ready !== true
         ? COPY.planUnavailable(text(plan.unavailable), text(plan.unavailable_subject))
         : '';
-    els.plan.hidden = !lines.length && !note;
+    els.plan.hidden = !lines.length && !note && !plan?.home_staffing;
     if (lines.length) {
       shared.renderSetupLines(els.planLines, lines, document, {
         kindIcons: true,
@@ -1018,6 +1018,9 @@
     const entryChoice = createElement('div');
     entryChoice.id = 'workspaceBuildEntryChoice';
     entryChoice.hidden = true;
+    const homeStaffing = createElement('div');
+    homeStaffing.id = 'workspaceBuildHomeStaffing';
+    homeStaffing.hidden = true;
     const consequences = createElement('div', 'folder-setup-consequences');
     const progress = createElement('div');
     const details = createElement('details', 'folder-setup-details');
@@ -1031,6 +1034,7 @@
       requirements,
       hireBlock.hire,
       entryChoice,
+      homeStaffing,
       consequences,
       progress,
       sketch,

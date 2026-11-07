@@ -425,9 +425,10 @@ func (h *Handler) ChooseFolderCandidate(w http.ResponseWriter, r *http.Request) 
 }
 
 type folderSoftwareReviewRequest struct {
-	RequestID     string  `json:"request_id"`
-	WorkspaceName *string `json:"workspace_name"`
-	AssistantName *string `json:"assistant_name"`
+	RequestID     string          `json:"request_id"`
+	WorkspaceName *string         `json:"workspace_name"`
+	AssistantName *string         `json:"assistant_name"`
+	HomeStaffing  json.RawMessage `json:"home_staffing,omitempty"`
 }
 
 // ReviewFolderSoftware is the click on Review setup for a recognized software
@@ -435,7 +436,8 @@ type folderSoftwareReviewRequest struct {
 // README, instructions and build files, through its bounded inspector, and it
 // returns the offer with what was read and the plan Set up would carry out. It
 // accepts a request id only: no folder, path or file name. It creates nothing
-// and calls no model.
+// and calls no model. An explicit Home-staffing recommendation uses this same
+// existing review route, but never the software inspector.
 func (h *Handler) ReviewFolderSoftware(w http.ResponseWriter, r *http.Request) {
 	h.changeFolderSoftwareReview(w, r, false)
 }
@@ -566,7 +568,7 @@ func (h *Handler) changeFolderSoftwareReview(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req folderSoftwareReviewRequest
-	allowed := []string{"request_id"}
+	allowed := []string{"request_id", "home_staffing"}
 	if adjust {
 		allowed = append(allowed, "workspace_name", "assistant_name")
 	}
@@ -575,6 +577,10 @@ func (h *Handler) changeFolderSoftwareReview(w http.ResponseWriter, r *http.Requ
 	}
 	userID, ok := h.currentUserID(w, r)
 	if !ok {
+		return
+	}
+	if len(req.HomeStaffing) > 0 {
+		h.changeFolderHomeStaffing(w, r, userID, offerID, req, adjust)
 		return
 	}
 	input := personalassistant.FolderSoftwareReviewInput{RequestID: req.RequestID, WorkspaceName: req.WorkspaceName, AssistantName: req.AssistantName}

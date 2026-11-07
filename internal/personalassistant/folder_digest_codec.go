@@ -32,6 +32,16 @@ func decodeFolderDigest(data []byte, owner KnowledgeOwner) (FolderDigestDocument
 				return FolderDigestDocument{}, ErrKnowledgeCorrupt
 			}
 		}
+		doc.SchemaVersion = 2
+	}
+	if doc.SchemaVersion == 2 {
+		// Legacy runs cannot acquire new assignment/source authority merely by
+		// presenting new fields under an old schema number.
+		for _, offer := range doc.Offers {
+			if offer.HomeStaffingReview != nil || (offer.Setup != nil && (offer.Setup.Intent.HomeStaffing != nil || offer.Setup.Intent.RequiresHomeStaffing)) {
+				return FolderDigestDocument{}, ErrKnowledgeCorrupt
+			}
+		}
 		doc.SchemaVersion = FolderDigestSchemaVersion
 	}
 	if err := validateFolderDigest(doc); err != nil {

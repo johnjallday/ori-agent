@@ -304,6 +304,7 @@ type AssistantProgramState struct {
 	Declaration      *AssistantProgramDeclaration `json:"declaration"`
 	LinkedProjectIDs []string                     `json:"linked_project_ids,omitempty"`
 	HomeBindings     AssistantRoleBindingSet      `json:"home_bindings,omitempty"`
+	StaffingReceipts []AssistantStaffingReceipt   `json:"staffing_receipts,omitempty"`
 	Portfolio        AssistantPortfolioState      `json:"portfolio,omitempty"`
 	// ProjectLibrary is a Home-owned, metadata-only document. An absent value
 	// means the legacy portfolio is still authoritative. Keep it in this same
@@ -365,6 +366,7 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.Declaration = CloneAssistantProgramDeclaration(source.Declaration)
 	clone.LinkedProjectIDs = append([]string(nil), source.LinkedProjectIDs...)
 	clone.HomeBindings = CloneAssistantRoleBindingSet(source.HomeBindings)
+	clone.StaffingReceipts = append([]AssistantStaffingReceipt(nil), source.StaffingReceipts...)
 	clone.Portfolio = CloneAssistantPortfolioState(source.Portfolio)
 	clone.ProjectLibrary = append(json.RawMessage(nil), source.ProjectLibrary...)
 	clone.ProjectLibraryInitReviews = append([]AssistantProjectLibraryInitReview(nil), source.ProjectLibraryInitReviews...)

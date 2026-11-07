@@ -263,6 +263,9 @@ func (s *fileStore) createAgentUnlocked(name string, config *CreateAgentConfig, 
 			Settings:     defaultSettings,
 			Status:       types.AgentStatusActive, // New agents start as active
 		}
+		if config != nil && strings.TrimSpace(config.Description) != "" {
+			newAgent.Metadata = &types.AgentMetadata{Description: strings.TrimSpace(config.Description)}
+		}
 		if config != nil && config.Appearance != nil {
 			newAgent.Appearance = config.Appearance.Clone()
 			newAgent.Appearance.Normalize()

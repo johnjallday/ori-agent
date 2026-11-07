@@ -118,6 +118,9 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	}
 	plan = plan.Stamped()
 	v.Plan = &plan
+	if plan.HomeStaffing != nil {
+		v.HomeStaffing = plan.HomeStaffing.Clone()
+	}
 	v.Needs = folderPlanNeeds(offer.Subject, plan.Intent)
 	// The names the plan uses, so the card's fields start from them rather than
 	// from a reading of the plan's wording.
@@ -411,7 +414,8 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		// re-pick, decision or run must not be overwritten by this old click.
 		if item.Status != offer.Status || item.FolderKey != offer.FolderKey || item.RootIdentity != offer.RootIdentity ||
 			item.SubjectIdentity != offer.SubjectIdentity || !reflect.DeepEqual(item.Subject, offer.Subject) ||
-			item.EntryName != offer.EntryName || !reflect.DeepEqual(item.Setup, offer.Setup) {
+			item.EntryName != offer.EntryName || !reflect.DeepEqual(item.Setup, offer.Setup) ||
+			!reflect.DeepEqual(item.HomeStaffingReview, offer.HomeStaffingReview) {
 			return ErrConflict
 		}
 		if item.Status == FolderOfferPending {

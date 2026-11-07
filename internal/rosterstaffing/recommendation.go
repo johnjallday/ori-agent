@@ -30,6 +30,7 @@ type Role struct {
 	Scope                string   `json:"scope"`
 	Purpose              string   `json:"purpose"`
 	RequiredCapabilities []string `json:"required_capabilities"`
+	RequiredSkills       []string `json:"required_skills,omitempty"`
 	Occupied             bool     `json:"occupied"`
 }
 
@@ -73,8 +74,9 @@ func Prepare(input Input) (Input, string, error) {
 	}
 	input.Roles = append([]Role(nil), input.Roles...)
 	seen := map[string]bool{}
+	hasSkillRequirements := false
 	for i, role := range input.Roles {
-		if !safeIdentifier(role.ID) || seen[role.ID] || (role.Scope != "home" && role.Scope != "project" && role.Scope != "workspace") || len(role.RequiredCapabilities) > MaxCapabilities {
+		if !safeIdentifier(role.ID) || seen[role.ID] || (role.Scope != "home" && role.Scope != "project" && role.Scope != "workspace") || len(role.RequiredCapabilities) > MaxCapabilities || len(role.RequiredSkills) > MaxCapabilities {
 			return Input{}, "", ErrInvalidRecommendation
 		}
 		if role.TargetID != safeText(role.TargetID, 160) {
@@ -88,6 +90,13 @@ func Prepare(input Input) (Input, string, error) {
 				return Input{}, "", ErrInvalidRecommendation
 			}
 		}
+		role.RequiredSkills = append([]string(nil), role.RequiredSkills...)
+		for _, name := range role.RequiredSkills {
+			if !safeIdentifier(name) {
+				return Input{}, "", ErrInvalidRecommendation
+			}
+		}
+		hasSkillRequirements = hasSkillRequirements || len(role.RequiredSkills) > 0
 		input.Roles[i] = role
 	}
 	input.Goal = safeText(input.Goal, MaxPurposeRunes)
@@ -102,7 +111,11 @@ func Prepare(input Input) (Input, string, error) {
 		if err != nil {
 			return Input{}, "", ErrInvalidRecommendation
 		}
-		prompt := rankingRules + "\n<staffing_data>" + string(data) + "</staffing_data>"
+		rules := rankingRules
+		if hasSkillRequirements {
+			rules += " Required skills are hard constraints: only enabled_skill evidence proves existing membership; authored declared_capability cannot substitute. Membership does not prove source availability, active Toolbox selection, tested tool access or new permissions. Unknown skill metadata is not proof of no suitable profile."
+		}
+		prompt := rules + "\n<staffing_data>" + string(data) + "</staffing_data>"
 		if len(prompt)+len(rankingCorrection) <= MaxPromptBytes {
 			return input, prompt, nil
 		}
@@ -196,6 +209,13 @@ func Validate(input Input, proposal Proposal) (Recommendation, error) {
 				if fact.Kind == "declared_purpose" {
 					substantive = true
 				}
+				if fact.Kind == "enabled_skill" {
+					for _, required := range role.RequiredSkills {
+						if fact.Value == required {
+							substantive = true
+						}
+					}
+				}
 				if fact.Kind == "declared_capability" {
 					for _, required := range role.RequiredCapabilities {
 						if fact.Value == required {
@@ -213,7 +233,7 @@ func Validate(input Input, proposal Proposal) (Recommendation, error) {
 		}
 		if item.State == NoSuitableMatch {
 			for _, c := range input.Roster.Candidates {
-				if eligible(c, role) && !hasPurpose(c) {
+				if (eligible(c, role) && !hasPurpose(c)) || (c.Ready && len(role.RequiredSkills) > 0 && !c.skillsKnown) {
 					item.State = NeedsChoice
 					break
 				}
@@ -243,6 +263,11 @@ func eligible(c Candidate, role Role) bool {
 	}
 	for _, required := range role.RequiredCapabilities {
 		if !c.capabilities[required] {
+			return false
+		}
+	}
+	for _, required := range role.RequiredSkills {
+		if c.CapabilityWitness == "" || !c.skills[required] {
 			return false
 		}
 	}

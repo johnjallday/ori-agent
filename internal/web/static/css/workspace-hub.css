@@ -6123,6 +6123,39 @@ body.chat-panel-open .chat-panel-backdrop {
    the two — a solid border and full-strength ink — while Optional
    recedes; the difference is emphasis, never alarm.
    ============================================================ */
+.folder-home-staffing {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  margin-block: 1rem;
+}
+
+.folder-home-staffing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.folder-home-staffing__editor {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  background: var(--bg-secondary);
+}
+
+.folder-home-staffing__editor[hidden] {
+  display: none;
+}
+
+.folder-home-staffing__editor .workspace-existing-agent-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
 .ws-role-roster__count {
   margin: 0 0 0.5rem;
   color: var(--text-secondary);

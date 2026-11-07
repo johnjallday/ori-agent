@@ -33,14 +33,17 @@ type Evidence struct {
 }
 
 type Candidate struct {
-	Handle       string     `json:"handle"`
-	Name         string     `json:"-"` // UI only: names must not substitute for purpose.
-	Source       string     `json:"source"`
-	Ready        bool       `json:"configured"` // configuration only; no live credentials tested
-	Evidence     []Evidence `json:"evidence"`
-	Gaps         []string   `json:"gaps"`
-	Witness      string     `json:"-"`
-	capabilities map[string]bool
+	Handle            string     `json:"handle"`
+	Name              string     `json:"-"` // UI only: names must not substitute for purpose.
+	Source            string     `json:"source"`
+	Ready             bool       `json:"configured"` // configuration only; no live credentials tested
+	Evidence          []Evidence `json:"evidence"`
+	Gaps              []string   `json:"gaps"`
+	Witness           string     `json:"-"`
+	CapabilityWitness string     `json:"-"`
+	capabilities      map[string]bool
+	skills            map[string]bool
+	skillsKnown       bool
 }
 
 type Coverage struct {
@@ -64,10 +67,21 @@ type Assignment struct {
 	WorkspaceLabel string
 }
 
+// SkillMembership is supplied by the source-fenced metadata reader, never by
+// authored capabilities. Complete describes the requested declaration's skill
+// set, not live tool connectivity or active Toolbox slots.
+type SkillMembership struct {
+	SourceWitness string
+	Witness       string
+	Enabled       []string
+	Complete      bool
+}
+
 type Readers struct {
 	Profiles        func(context.Context) store.StaffingSnapshot
 	Assignments     func(context.Context, string) ([]Assignment, bool)
 	ModelConfigured func(provider, model string) bool
+	Skills          func(context.Context, store.StaffingProfile) SkillMembership
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$`)
@@ -132,6 +146,33 @@ func Collect(ctx context.Context, owner string, readers Readers) Roster {
 			}
 			c.capabilities[capability] = true
 			add("declared_capability", capability)
+		}
+		if readers.Skills != nil {
+			membership := readers.Skills(ctx, p)
+			c.skills = map[string]bool{}
+			if membership.SourceWitness == p.Witness && reviewDigest(membership.Witness) {
+				c.CapabilityWitness, c.skillsKnown = membership.Witness, membership.Complete
+				enabled := append([]string(nil), membership.Enabled...)
+				sort.Strings(enabled)
+				for _, name := range enabled {
+					if !safeIdentifier(name) {
+						c.skillsKnown = false
+						continue
+					}
+					if c.skills[name] {
+						continue
+					}
+					if len(c.skills) == MaxCapabilities {
+						c.skillsKnown = false
+						break
+					}
+					c.skills[name] = true
+					add("enabled_skill", name)
+				}
+			}
+			if !c.skillsKnown {
+				c.Gaps = append(c.Gaps, "skill_metadata_unknown")
+			}
 		}
 		if !out.Coverage.AssignmentsComplete {
 			c.Gaps = append(c.Gaps, "assignments_unknown")

@@ -125,6 +125,27 @@ export function setupCreationReviewMaterial(session = {}, brief = '') {
   const plan = session.plan || {};
   const hire = plan.hire;
   const rows = [];
+  for (const choice of plan.home_staffing?.choices || []) {
+    const role = plan.home_staffing.roles?.find(item => item.role_id === choice.role_id);
+    rows.push({
+      label: `Home · ${role?.label || choice.role_id}`,
+      value: `${choice.name} · ${choice.mode === 'assign' ? 'Reuse saved agent' : 'Create new agent'}`,
+      detail:
+        choice.mode === 'assign'
+          ? 'Saved configuration and other assignments stay unchanged. No new skill or access grants.'
+          : [choice.provider, choice.model, 'Created only when you confirm this setup.']
+              .filter(Boolean)
+              .join(' · ')
+    });
+  }
+  for (const role of plan.home_staffing?.roles || []) {
+    if (role.held_name)
+      rows.push({
+        label: `Home · ${role.label || role.role_id}`,
+        value: `${role.held_name} · Already present`,
+        detail: 'This existing holder is not replaced.'
+      });
+  }
   if (hire)
     rows.push({
       label: hire.role_label || 'Plan-owned team',

@@ -227,7 +227,8 @@ func (b *ServerBuilder) initializeSetupJourney() {
 					roles = append(roles, setupjourney.RoleFill{
 						RoleID: fill.RoleID, Mode: mode, Name: fill.Name,
 						Provider: fill.Provider, Model: fill.Model, ReasoningEffort: fill.ReasoningEffort,
-						Appearance: fill.Appearance,
+						Appearance: fill.Appearance, SourceWitness: fill.SourceWitness, CapabilityWitness: fill.CapabilityWitness,
+						ChoiceDigest: fill.ChoiceDigest, PreviousChoiceDigest: fill.PreviousChoiceDigest,
 					})
 				}
 				return roles
@@ -243,6 +244,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 				},
 			)
 			b.sessionHandler.SetAssistantRoleUnstaffer(staffingAdapter.UnstaffRoleFromWorkspace)
+			b.sessionHandler.SetStaffingSkillReader(serverStaffingToolGrants{builder: b}.ReadStaffingSkills)
 		}
 	}
 	registry, err := setupjourney.NewReaderRegistry(readers)

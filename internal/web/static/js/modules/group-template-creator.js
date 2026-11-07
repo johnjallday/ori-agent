@@ -103,27 +103,58 @@
     }
   }
 
-  // The canonical request fields. Nothing else is ever sent: ownership, source,
-  // parent, team, and project fields are server-derived or out of scope.
-  function reviewRequest(entry, name) {
-    return {
+  // Public intent only. The existing review owner captures private witnesses
+  // and freezes creation defaults; the browser never supplies those witnesses.
+  function reviewRequest(entry, name, staffing = []) {
+    const request = {
       group_template_id: String(entry?.id || ''),
       revision: String(entry?.revision || ''),
       name: String(name || '').trim()
     };
+    if (staffing.length) {
+      request.role_staffing = staffing.map(item => {
+        const fill = normalizeFill(item.fill);
+        return {
+          role_id: item.roleId,
+          mode: fill.mode,
+          name: fill.name,
+          ...(fill.recommendation ? { recommendation: fill.recommendation } : {}),
+          ...(fill.provider ? { provider: fill.provider } : {}),
+          ...(fill.model ? { model: fill.model } : {}),
+          ...(fill.reasoningEffort ? { reasoning_effort: fill.reasoningEffort } : {}),
+          ...(fill.appearance ? { appearance: fill.appearance } : {})
+        };
+      });
+      const tokens = new Set(
+        staffing.filter(item => item.fill.recommendation).map(item => item.fill.adviceToken)
+      );
+      if (tokens.size === 1) request.staffing_advice_token = [...tokens][0];
+    }
+    return request;
   }
 
-  function commitRequest(entry, name, token, idempotencyKey) {
+  function commitRequest(entry, name, token, idempotencyKey, staffing = []) {
     return {
-      ...reviewRequest(entry, name),
+      ...reviewRequest(entry, name, staffing),
       group_review_token: String(token || ''),
       idempotency_key: String(idempotencyKey || '')
     };
   }
 
-  function reviewKey(entry, name) {
-    const request = reviewRequest(entry, name);
-    return JSON.stringify([request.group_template_id, request.revision, request.name]);
+  function reviewKey(entry, name, staffing = []) {
+    return JSON.stringify(reviewRequest(entry, name, staffing));
+  }
+
+  function currentReviewRequest(manager) {
+    return reviewRequest(
+      selectedManaged(manager?.workspaceCreatorContext),
+      currentName(),
+      staffingPlan(manager)
+    );
+  }
+
+  function currentReviewKey(manager) {
+    return JSON.stringify(currentReviewRequest(manager));
   }
 
   function stateFor(context) {
@@ -139,11 +170,12 @@
         pending: null,
         error: '',
         loadToken: 0,
-        // Staged Home role fills per managed entry: entry id → Map(role id →
-        // { mode, name, provider, model }). Nothing here is sent until the
-        // Home-only commit has succeeded.
+        // Staged choices go into the existing exact review, never role PUTs.
         fills: {},
-        seeded: {}
+        seeded: {},
+        advice: null,
+        adviceRequest: null,
+        choiceRevision: 0
       };
     }
     return context.groupTemplates;
@@ -253,11 +285,9 @@
 
   // ---- Home role staffing ---------------------------------------------------
   //
-  // The review/commit endpoint creates exactly one Home and refuses every team
-  // field. Staffing is therefore a separate, immediate follow-on: the wizard
-  // stages fills here and, only after a successful commit, sends one
-  // PUT /api/workspaces/{home}/roles/{role} per staged role. A program Home's
-  // prompt is applied server-side, so no fill ever carries one.
+  // Exact choices travel with the existing Home review/commit. The server
+  // delegates roles to its canonical writers and owns replay. Advice stays
+  // separate from these fills; a Home prompt is never part of browser intent.
 
   const FILL_CREATE = 'create';
   const FILL_ASSIGN = 'assign';
@@ -268,15 +298,15 @@
     );
   }
 
-  function roleDefaultName(role) {
-    return String(role?.default_name || role?.label || '').trim();
-  }
-
   function resetFills(context) {
     const state = context?.groupTemplates;
     if (!state) return;
     state.fills = {};
     state.seeded = {};
+    state.adviceRequest?.controller?.abort();
+    state.adviceRequest = null;
+    state.advice = null;
+    state.choiceRevision++;
   }
 
   function fillsFor(context, entry) {
@@ -310,7 +340,14 @@
       provider: mode === FILL_CREATE ? String(fill?.provider || '').trim() : '',
       model: mode === FILL_CREATE ? String(fill?.model || '').trim() : '',
       // The Create form's reasoning level; empty means the model's default.
-      reasoningEffort: mode === FILL_CREATE ? String(fill?.reasoningEffort || '').trim() : ''
+      reasoningEffort: mode === FILL_CREATE ? String(fill?.reasoningEffort || '').trim() : '',
+      ...(mode === FILL_ASSIGN && fill?.recommendation
+        ? {
+            recommendation: String(fill.recommendation),
+            adviceToken: String(fill.adviceToken || ''),
+            adviceKey: String(fill.adviceKey || '')
+          }
+        : {})
     };
     // An assigned agent wears its own face; only a Create carries one.
     const appearance = mode === FILL_CREATE ? normalizeStagedAppearance(fill?.appearance) : null;
@@ -318,12 +355,9 @@
     return normalized;
   }
 
-  // Every required Home role starts as Create under its default name; optional
-  // roles start empty. When a saved agent already has that name, the role starts
-  // as Assign instead — a Create under a taken name is refused by the server, so
-  // the wizard never proposes one. Seeding waits for the saved agents to load
-  // (or fail) and runs once per template selection, so a role the user cleared
-  // stays cleared.
+  // Roles start undecided. In particular a default name is neither a reason to
+  // reuse a saved profile nor permission to create one. Keep this lifecycle
+  // hook for the shared wizard, without inventing provisional fills.
   function seedFills(manager) {
     const context = manager?.workspaceCreatorContext;
     const state = stateFor(context);
@@ -331,19 +365,6 @@
     if (!state || !entry || !managedActive(manager) || state.seeded[entry.id]) return false;
     const saved = manager.groupTemplateSavedAgentsState?.();
     if (saved === 'idle' || saved === 'loading') return false;
-    const fills = fillsFor(context, entry);
-    for (const role of homeRoles(entry)) {
-      if (!role.required || fills.has(role.role_id) || !roleEditable(entry, role)) continue;
-      const name = roleDefaultName(role);
-      if (!name) continue;
-      const attachable = manager.findAttachableSavedAgent?.(name);
-      fills.set(
-        role.role_id,
-        attachable
-          ? normalizeFill({ mode: FILL_ASSIGN, name: String(attachable.name || name) })
-          : normalizeFill({ mode: FILL_CREATE, name })
-      );
-    }
     state.seeded[entry.id] = true;
     return true;
   }
@@ -483,6 +504,10 @@
       return false;
     if (!roleEditable(entry, role) || fillNameProblem(manager, roleId, next.name)) return false;
     fillsFor(context, entry).set(roleId, next);
+    context.groupTemplates.review = null;
+    context.groupTemplates.choiceRevision++;
+    context.groupTemplates.adviceRequest?.controller?.abort();
+    context.groupTemplates.adviceRequest = null;
     return true;
   }
 
@@ -495,7 +520,16 @@
       context?.groupTemplates?.sharedReview?.accepted
     )
       return false;
-    return fillsFor(context, entry).delete(roleId);
+    const changed = fillsFor(context, entry).delete(roleId);
+    if (changed) {
+      context.groupTemplates.review = null;
+      context.groupTemplates.choiceRevision++;
+      context.groupTemplates.adviceRequest?.controller?.abort();
+      context.groupTemplates.adviceRequest = null;
+      const row = context.groupTemplates.advice?.data?.roles.find(item => item.roleId === roleId);
+      if (row) row.state = 'stale';
+    }
+    return changed;
   }
 
   function stagedFill(manager, roleId) {
@@ -520,6 +554,206 @@
       }));
   }
 
+  function fillProblem(manager, fill) {
+    const entry = selectedManaged(manager?.workspaceCreatorContext);
+    if (
+      fill.recommendation &&
+      (!fill.adviceToken || fill.adviceKey !== reviewKey(entry, currentName()))
+    ) {
+      return `The recommendation for ${fill.name} changed. Clear it and choose again.`;
+    }
+    const savedStatus = manager.groupTemplateSavedAgentsState?.();
+    if (
+      (!savedStatus || savedStatus === 'ready') &&
+      typeof manager.findAttachableSavedAgent === 'function'
+    ) {
+      const saved = manager.findAttachableSavedAgent(fill.name);
+      if (
+        fill.mode === FILL_ASSIGN &&
+        (!saved || (fill.recommendation && saved.name !== fill.name))
+      ) {
+        return `${fill.name} is no longer available for this choice. Clear the role and choose again.`;
+      }
+      if (fill.mode === FILL_CREATE && saved)
+        return `An agent named ${fill.name} already exists. Rename this creation or assign it explicitly.`;
+    }
+    return '';
+  }
+
+  function teamProblem(manager) {
+    const entry = selectedManaged(manager.workspaceCreatorContext);
+    for (const [roleId] of fillsFor(manager.workspaceCreatorContext, entry)) {
+      const role = homeRoles(entry).find(item => item.role_id === roleId);
+      if (!role || !roleEditable(entry, role))
+        return 'A chosen role changed or is already held. Clear the pending choices and review the current group.';
+    }
+    const plan = staffingPlan(manager);
+    for (const item of plan) {
+      const problem = fillProblem(manager, item.fill);
+      if (problem) return problem;
+    }
+    const tokens = new Set(
+      plan.filter(item => item.fill.recommendation).map(item => item.fill.adviceToken)
+    );
+    if (tokens.size > 1)
+      return 'These recommendations came from different reviews. Clear the older recommended choices and choose from one current review, or assign manually.';
+    const review = manager.workspaceCreatorContext?.groupTemplates?.review;
+    if (review?.status === 'ready' && review.key === currentReviewKey(manager)) {
+      const missing = review.data?.role_staffing?.find(
+        role => role.mode === FILL_CREATE && (!role.provider || !role.model)
+      );
+      if (missing) return `Choose a provider and model for ${missing.name} before confirming.`;
+    }
+    return '';
+  }
+
+  function roleAdvice(manager, roleId) {
+    const state = manager.workspaceCreatorContext?.groupTemplates;
+    const entry = selectedManaged(manager.workspaceCreatorContext);
+    const advice = state?.advice;
+    if (!advice || !entry) return null;
+    const row = advice.data.roles.find(role => role.roleId === roleId && role.scope === 'home');
+    const stale =
+      advice.key !== reviewKey(entry, currentName()) ||
+      advice.data.templateId !== entry.id ||
+      advice.data.templateRevision !== entry.revision;
+    return {
+      ...(row || { roleId, scope: 'home', choices: [] }),
+      state: stale
+        ? 'stale'
+        : ['recommended', 'needs_choice'].includes(advice.data.state)
+          ? row?.state || 'needs_choice'
+          : advice.data.state,
+      complete: advice.data.complete,
+      assignmentsComplete: advice.data.assignmentsComplete
+    };
+  }
+
+  async function recommend(manager) {
+    const context = manager?.workspaceCreatorContext;
+    const state = stateFor(context);
+    const entry = selectedManaged(context);
+    if (
+      !entry ||
+      !isSelectable(entry) ||
+      state.pending ||
+      state.sharedReview?.accepted ||
+      state.adviceRequest ||
+      nameProblem(currentName())
+    )
+      return false;
+    const key = reviewKey(entry, currentName());
+    const request = {
+      key,
+      revision: state.choiceRevision,
+      controller: typeof AbortController === 'function' ? new AbortController() : null
+    };
+    state.adviceRequest = request;
+    manager.refreshWizardChrome?.();
+    const current = () =>
+      manager.workspaceCreatorContext === context &&
+      state.adviceRequest === request &&
+      reviewKey(selectedManaged(context), currentName()) === key &&
+      state.choiceRevision === request.revision;
+    try {
+      const response = await fetch(REVIEW_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ ...reviewRequest(entry, currentName()), recommend_staffing: true }),
+        ...(request.controller ? { signal: request.controller.signal } : {})
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!current()) return false;
+      const review = body?.group_template_review;
+      const data =
+        review?.staffing_advice?.version === 2
+          ? window.CreateWorkspaceTeamDraft?.normalizeStaffingAdvice(review.staffing_advice)
+          : null;
+      if (!response.ok || !data || !review.review_token)
+        throw new Error('Recommendations are unavailable. Choose manually or create a new agent.');
+      state.advice = { key, data, token: review.review_token };
+      return true;
+    } catch (_) {
+      if (current())
+        state.advice = {
+          key,
+          token: '',
+          data: {
+            templateId: entry.id,
+            templateRevision: entry.revision,
+            state: 'unavailable',
+            roles: [],
+            complete: false,
+            assignmentsComplete: false
+          }
+        };
+      return false;
+    } finally {
+      if (state.adviceRequest === request) state.adviceRequest = null;
+      if (manager.workspaceCreatorContext === context) manager.refreshWizardChrome?.();
+    }
+  }
+
+  function useRecommendation(manager, roleId, handle) {
+    const state = manager.workspaceCreatorContext?.groupTemplates;
+    const advice = roleAdvice(manager, roleId);
+    if (
+      state?.adviceRequest ||
+      stagedFill(manager, roleId) ||
+      !['recommended', 'needs_choice'].includes(advice?.state)
+    )
+      return false;
+    const choice = advice.choices.find(item => item.handle === handle);
+    if (!choice?.configured || !['root', 'legacy'].includes(choice.source)) return false;
+    const changed = setFill(manager, roleId, {
+      mode: FILL_ASSIGN,
+      name: choice.name,
+      recommendation: choice.handle,
+      adviceToken: state.advice.token,
+      adviceKey: state.advice.key
+    });
+    if (changed) manager.refreshWizardChrome?.();
+    return changed;
+  }
+
+  function reviewedOutcomes(result, staffing) {
+    const rows = Array.isArray(result?.home_staffing?.roles) ? result.home_staffing.roles : [];
+    return staffing.map(item => {
+      const matches = rows.filter(
+        row =>
+          row.role_id === item.roleId &&
+          row.name === item.fill.name &&
+          row.action === item.fill.mode
+      );
+      const outcome = matches.length === 1 ? matches[0].outcome : '';
+      const ok = ['assigned', 'created', 'already_present'].includes(outcome);
+      return {
+        roleId: item.roleId,
+        label: item.label,
+        ok,
+        outcome,
+        ...(ok
+          ? {}
+          : {
+              error:
+                'This exact reviewed choice was not completed. Review the remaining role from the group.'
+            })
+      };
+    });
+  }
+
+  function frozenRequest(request) {
+    const copy = JSON.parse(JSON.stringify(request));
+    const freeze = value => {
+      if (value && typeof value === 'object') {
+        Object.values(value).forEach(freeze);
+        Object.freeze(value);
+      }
+      return value;
+    };
+    return freeze(copy);
+  }
+
   // The roster projection WorkspaceRoleRoster draws. Program Home roles carry
   // no `proposed` block: their setup is never disclosed to the browser.
   function teamRoster(manager) {
@@ -533,7 +767,25 @@
         readOnlyReason && reportedRole(entry, role.role_id)?.state === 'filled'
           ? reportedRole(entry, role.role_id).agent || null
           : null;
-      const fill = readOnlyReason ? null : fills.get(role.role_id);
+      let fill = readOnlyReason ? null : fills.get(role.role_id);
+      const review = context?.groupTemplates?.review;
+      if (
+        fill?.mode === FILL_CREATE &&
+        review?.status === 'ready' &&
+        review.key === currentReviewKey(manager)
+      ) {
+        const frozen = review.data?.role_staffing?.find(
+          item =>
+            item.role_id === role.role_id && item.mode === fill.mode && item.name === fill.name
+        );
+        if (frozen)
+          fill = {
+            ...fill,
+            provider: frozen.provider || '',
+            model: frozen.model || '',
+            appearance: frozen.appearance || fill.appearance
+          };
+      }
       // An empty row already says Missing or Optional in its tag; a filled
       // row's tag names its agent, so the marker moves into the description.
       const marker = fill || holder ? (role.required ? 'Required' : 'Optional') : '';
@@ -556,7 +808,9 @@
                 ...(fill.provider ? { provider: fill.provider } : {})
               }
             : null),
-        source: holder ? 'group' : fill?.mode === FILL_ASSIGN ? 'assigned' : 'created'
+        source: holder ? 'group' : fill?.mode === FILL_ASSIGN ? 'assigned' : 'created',
+        staffing: !fill && !readOnlyReason ? roleAdvice(manager, role.role_id) : null,
+        needs_clear: Boolean(fill && fillProblem(manager, fill))
       };
       if (readOnlyReason) {
         row.read_only = true;
@@ -586,7 +840,7 @@
 
   const TEAM_TITLE = 'Staff the group';
   const TEAM_DESCRIPTION =
-    'The blueprint proposes these group roles. Required ones are prefilled; you can rename, assign a saved agent, or leave a role empty.';
+    'Check your saved agents first, then choose who fills each role. You can assign manually, create a new agent, or leave a role empty.';
 
   // Draws the Team step for a managed template. The ordinary team layout's
   // pieces that describe a workspace roster are emptied here; the ordinary
@@ -610,7 +864,7 @@
       summary.textContent = !staffable
         ? 'Nothing to staff here: this group’s roles are already filled or are set up from the group page.'
         : saved === 'idle' || saved === 'loading'
-          ? 'Checking your saved agents before proposing names…'
+          ? 'Loading saved agents for manual selection…'
           : isReusable(entry)
             ? 'The group is reused unchanged. Only its empty required roles can be staffed here, right after you confirm on Review.'
             : 'Nothing is created or staffed until you confirm on Review. Each role is filled right after the group exists.';
@@ -619,13 +873,43 @@
       const node = document.getElementById(id);
       if (node) node.hidden = true;
     }
-    for (const id of [
-      'workspaceTeamIssues',
-      'workspaceTeamBatchActions',
-      'workspaceTeamRoster',
-      'workspaceTeamModelNote'
-    ]) {
+    for (const id of ['workspaceTeamIssues', 'workspaceTeamRoster', 'workspaceTeamModelNote']) {
       document.getElementById(id)?.replaceChildren();
+    }
+    const actions = document.getElementById('workspaceTeamBatchActions');
+    if (actions) {
+      actions.hidden = false;
+      actions.replaceChildren();
+      const button = el(
+        'button',
+        'workspace-wizard-inline-action',
+        manager.workspaceCreatorContext.groupTemplates.adviceRequest
+          ? 'Checking saved agents…'
+          : 'Recommend saved agents'
+      );
+      button.type = 'button';
+      button.disabled = Boolean(
+        manager.workspaceCreatorContext.groupTemplates.adviceRequest ||
+        manager.workspaceCreatorContext.groupTemplates.pending ||
+        !homeRoles(entry).some(role => roleEditable(entry, role))
+      );
+      button.addEventListener('click', () => void recommend(manager));
+      actions.append(button);
+      if (teamProblem(manager)) {
+        const clear = el('button', 'workspace-wizard-inline-action', 'Clear pending choices');
+        clear.type = 'button';
+        clear.disabled = Boolean(
+          manager.workspaceCreatorContext.groupTemplates.pending ||
+          manager.workspaceCreatorContext.groupTemplates.sharedReview?.accepted
+        );
+        clear.addEventListener('click', () => {
+          if (clear.disabled) return;
+          resetFills(manager.workspaceCreatorContext);
+          manager.workspaceCreatorContext.groupTemplates.review = null;
+          manager.refreshWizardChrome?.();
+        });
+        actions.append(clear);
+      }
     }
     const layout = document.getElementById('workspaceTeamLayout');
     const picker = document.getElementById('existingAgentRosterPanel');
@@ -645,6 +929,7 @@
       onRequestCreate: (roleId, row) => manager.openGroupTemplateRoleSetup?.(roleId, row),
       onEdit: (roleId, row, opener) => manager.openGroupTemplateRoleSetup?.(roleId, row, opener),
       onAssign: (roleId, row) => manager.openGroupTemplateRoleAssign?.(roleId, row),
+      onRecommend: (roleId, handle) => useRecommendation(manager, roleId, handle),
       onClear: (roleId, row) => manager.clearGroupTemplateRole?.(roleId, row)
     });
   }
@@ -1012,19 +1297,12 @@
     if (!entry) return '';
     const name = currentName();
     const review =
-      state.review && state.review.key === reviewKey(entry, name) ? state.review : null;
+      state.review && state.review.key === currentReviewKey(manager) ? state.review : null;
     const plan = staffingPlan(manager);
     const staffed = plan.length;
     let status = 'Preparing a review… nothing has been created.';
     if (review?.status === 'ready') {
-      // The server reviews the group alone ("nothing else is created"); the
-      // role fills are separate requests, so say where they come in.
-      status = [
-        review.data?.summary || '',
-        staffed ? 'The roles listed below are then staffed one at a time.' : ''
-      ]
-        .filter(Boolean)
-        .join(' ');
+      status = review.data?.summary || '';
     }
     if (review?.status === 'error') status = review.error;
     if (state.pending?.uncertain) {
@@ -1090,7 +1368,19 @@
     const fills = fillsFor(manager.workspaceCreatorContext, entry);
     const lines = roles.map(role => {
       const label = String(role.label || role.role_id);
-      if (roleEditable(entry, role)) return outcomeLine(label, fills.get(role.role_id));
+      if (roleEditable(entry, role)) {
+        const fill = fills.get(role.role_id);
+        const frozen =
+          manager.workspaceCreatorContext.groupTemplates.review?.data?.role_staffing?.find(
+            item =>
+              item.role_id === role.role_id && item.name === fill?.name && item.mode === fill?.mode
+          );
+        const model =
+          fill?.mode === FILL_CREATE && frozen
+            ? ` · ${frozen.provider && frozen.model ? `${frozen.provider} / ${frozen.model}` : 'Needs a model'}`
+            : '';
+        return outcomeLine(label, fill) + model;
+      }
       const holder = reportedRole(entry, role.role_id);
       return holder?.state === 'filled'
         ? `${label} · Already filled by “${String(holder.agent?.name || 'its holder')}”`
@@ -1115,11 +1405,16 @@
     const state = stateFor(context);
     const entry = selectedManaged(context);
     if (!state || !entry || !isSelectable(entry) || state.pending) return;
-    const name = currentName();
-    const key = reviewKey(entry, name);
+    const key = currentReviewKey(manager);
+    if (state.review?.key === key) return;
+    const problem = teamProblem(manager);
+    if (problem) {
+      state.review = { key, status: 'error', data: null, error: problem };
+      manager.refreshWorkspaceReview?.();
+      return;
+    }
     // An error is not an instruction to repeat a request on every redraw.
     // Explicit refresh (or a material change) is the next review boundary.
-    if (state.review?.key === key) return;
     const review = { key, status: 'loading', data: null, error: '' };
     state.review = review;
     manager.refreshWorkspaceReview?.();
@@ -1127,7 +1422,7 @@
       const response = await fetch(REVIEW_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(reviewRequest(entry, name))
+        body: JSON.stringify(currentReviewRequest(manager))
       });
       const body = await response.json().catch(() => ({}));
       if (manager.workspaceCreatorContext !== context || state.review !== review) return;
@@ -1160,7 +1455,11 @@
     )
       return false;
     if (state.pending) return true;
-    return state.review?.status === 'ready' && state.review.key === reviewKey(entry, currentName());
+    return (
+      !teamProblem(manager) &&
+      state.review?.status === 'ready' &&
+      state.review.key === currentReviewKey(manager)
+    );
   }
 
   function ctaLabel(manager) {
@@ -1197,57 +1496,6 @@
     const toast = window.Toast?.[notice.tone];
     if (typeof toast === 'function') toast.call(window.Toast, notice.message, options);
     else manager.showToast?.(notice.message, notice.tone);
-  }
-
-  function roleURL(homeId, roleId) {
-    return `/api/workspaces/${encodeURIComponent(homeId)}/roles/${encodeURIComponent(roleId)}`;
-  }
-
-  // One role, one request. A 409 saying the role is already filled means an
-  // earlier attempt landed and its response was lost, so it counts as staffed.
-  async function fillRole(homeId, item) {
-    const fill = normalizeFill(item.fill);
-    try {
-      const response = await fetch(roleURL(homeId, item.roleId), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          mode: fill.mode,
-          name: fill.name,
-          provider: fill.provider,
-          model: fill.model,
-          // Present only for a level the Create form offered (Codex, Claude Code).
-          ...(fill.reasoningEffort ? { reasoning_effort: fill.reasoningEffort } : {}),
-          // The staged face, when the Create form chose one.
-          ...(fill.appearance ? { appearance: fill.appearance } : {})
-        })
-      });
-      const body = await response.json().catch(() => ({}));
-      if (response.ok) return { ok: true };
-      const message = String(body?.message || body?.error || '').trim();
-      if (response.status === 409 && /already fills this role/i.test(message)) {
-        return { ok: true, alreadyFilled: true };
-      }
-      return {
-        ok: false,
-        error: message || `${item.label} could not be staffed (${response.status}).`
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error: `${item.label} could not be staffed: ${error?.message || 'the request did not return'}.`
-      };
-    }
-  }
-
-  // Fills run in declaration order after the commit. A failure never stops the
-  // remaining roles and never undoes the group or an earlier fill.
-  async function fillRoles(homeId, staffing) {
-    const outcomes = [];
-    for (const item of staffing) {
-      outcomes.push({ roleId: item.roleId, label: item.label, ...(await fillRole(homeId, item)) });
-    }
-    return outcomes;
   }
 
   function joinLabels(labels) {
@@ -1381,9 +1629,15 @@
         return false;
       }
       state.pending = {
-        request: commitRequest(entry, name, state.review.data.review_token, crypto.randomUUID()),
-        // The staffing plan is part of what the user confirmed; a retry of a
-        // lost commit sends exactly these fills afterward.
+        request: commitRequest(
+          entry,
+          name,
+          state.review.data.review_token,
+          crypto.randomUUID(),
+          staffingPlan(manager)
+        ),
+        // Freeze intent for result comparison. Retry repeats only this exact
+        // envelope; the server observes completed canonical role receipts.
         staffing: staffingPlan(manager),
         uncertain: false
       };
@@ -1394,7 +1648,7 @@
     if (pending.observationOnly) return false;
     if (typeof options.onAccepted === 'function') {
       try {
-        options.onAccepted(Object.freeze({ request: Object.freeze({ ...pending.request }) }));
+        options.onAccepted(Object.freeze({ request: frozenRequest(pending.request) }));
       } catch (error) {
         state.pending = null;
         manager.showWorkspaceCreateError?.(
@@ -1443,7 +1697,7 @@
         options.onRefused?.();
         state.pending = null;
         state.review = {
-          key: reviewKey(entry, name),
+          key: currentReviewKey(manager),
           status: 'error',
           data: null,
           error: `${body?.group_template?.summary || body?.group_requirement?.summary || body?.error || 'This review changed.'} Review it again.`
@@ -1520,7 +1774,7 @@
       // roster and position are not new terms we can silently confirm.
       const staffing = !changedToReuse && Array.isArray(pending.staffing) ? pending.staffing : [];
       if (createBtn && staffing.length) createBtn.textContent = 'Staffing roles…';
-      const outcomes = await fillRoles(result.home_workspace_id, staffing);
+      const outcomes = reviewedOutcomes(result, staffing);
       if (manager.workspaceCreatorContext !== context) return false;
       await manager.refreshWorkspaceSurfacesAfterOrdinaryGroupCreate?.();
       if (manager.workspaceCreatorContext !== context) return false;
@@ -1591,6 +1845,13 @@
     reviewRequest,
     commitRequest,
     reviewKey,
+    currentReviewRequest,
+    currentReviewKey,
+    recommend,
+    useRecommendation,
+    roleAdvice,
+    teamProblem,
+    reviewedOutcomes,
     stateFor,
     selectedManaged,
     chooserMode,
@@ -1611,7 +1872,6 @@
     promptNote,
     teamRoster,
     renderTeam,
-    fillRoles,
     landingNotice,
     landingURL,
     load,

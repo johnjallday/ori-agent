@@ -75,7 +75,7 @@ func (h *folderSetupHost) validateNewHomeDestination(ctx context.Context, req pe
 		if err != nil || *actual != *expected {
 			return personalassistant.ErrFolderPlanChanged
 		}
-		return nil
+		return h.checkFolderHomeTeam(ctx, req, nil)
 	}
 	// A timestamp or matching name cannot establish that this run created the
 	// Home. Only its persisted progress receipt may identify the resulting parent.
@@ -94,5 +94,5 @@ func (h *folderSetupHost) validateNewHomeDestination(ctx context.Context, req pe
 	if *actual != *expected {
 		return personalassistant.ErrFolderPlanChanged
 	}
-	return nil
+	return h.checkFolderHomeTeam(ctx, req, home)
 }

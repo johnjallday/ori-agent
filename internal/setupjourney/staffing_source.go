@@ -94,26 +94,35 @@ func (a *AssistantStaffingAdapter) staffingSources(ctx context.Context, input st
 	return selected, nil
 }
 
-func (a *AssistantStaffingAdapter) updateStaffingBindings(ctx context.Context, targetID string, selected []store.StaffingSelection, mutate func(*workspace.Workspace) error) error {
+func (a *AssistantStaffingAdapter) updateStaffingBindings(ctx context.Context, targetID string, selected []store.StaffingSelection, capabilities StaffingCapabilityGuard, mutate func(*workspace.Workspace) error) error {
 	if len(selected) == 0 {
+		if capabilities != nil {
+			return ErrConflict
+		}
 		return a.workspaces.Update(targetID, mutate)
 	}
 	return store.WithStaffingProfiles(ctx, a.profiles, selected, func(profiles map[string]*agent.Agent) error {
-		return workspace.UpdateStaffingBindings(a.workspaces, targetID, func(current *workspace.Workspace) error {
-			if current.Status == workspace.StatusTrashed || current.Status == workspace.StatusMissing {
-				return ErrConflict
-			}
-			if err := mutate(current); err != nil {
-				return err
-			}
-			// Copies contain the exact fenced definition, not a post-check name
-			// lookup; do not run the generic snapshot decorator under this lock.
-			for name, profile := range profiles {
-				if err := a.workspaces.SaveWorkspaceAgent(targetID, name, profile); err != nil {
+		apply := func() error {
+			return workspace.UpdateStaffingBindings(a.workspaces, targetID, func(current *workspace.Workspace) error {
+				if current.Status == workspace.StatusTrashed || current.Status == workspace.StatusMissing {
+					return ErrConflict
+				}
+				if err := mutate(current); err != nil {
 					return err
 				}
-			}
-			return nil
-		})
+				// Copies contain the exact fenced definition, not a post-check name
+				// lookup; do not run the generic snapshot decorator under this lock.
+				for name, profile := range profiles {
+					if err := a.workspaces.SaveWorkspaceAgent(targetID, name, profile); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		}
+		if capabilities != nil {
+			return capabilities(apply)
+		}
+		return apply()
 	})
 }

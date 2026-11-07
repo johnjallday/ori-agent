@@ -62,12 +62,21 @@ func normalizeSkillKey(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-func (m *Manager) getSkillRegistry(agentName string) (SkillRegistry, string, error) {
+func (m *Manager) profileRegistryPath(agentName string) (string, error) {
 	dir, err := m.agentDir(agentName)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, skillStateFileName), nil
+}
+
+func (m *Manager) getSkillRegistry(agentName string) (SkillRegistry, string, error) {
+	path, err := m.profileRegistryPath(agentName)
 	if err != nil {
 		return SkillRegistry{}, "", err
 	}
-	path := filepath.Join(dir, skillStateFileName)
+	m.registryMu.RLock()
+	defer m.registryMu.RUnlock()
 	registry, err := loadSkillRegistry(path)
 	if err != nil {
 		return SkillRegistry{}, "", err
@@ -84,7 +93,13 @@ func (m *Manager) updateSkillState(agentName, skillName string, updateFn func(*S
 		return fmt.Errorf("skill name is required")
 	}
 
-	registry, path, err := m.getSkillRegistry(agentName)
+	path, err := m.profileRegistryPath(agentName)
+	if err != nil {
+		return err
+	}
+	m.registryMu.Lock()
+	defer m.registryMu.Unlock()
+	registry, err := loadSkillRegistry(path)
 	if err != nil {
 		return err
 	}
@@ -150,6 +165,8 @@ func (m *Manager) PrepareProfileSkillEnable(agentName string, skillNames []strin
 	}
 	path := filepath.Join(dir, skillStateFileName)
 	return func() error {
+		m.registryMu.Lock()
+		defer m.registryMu.Unlock()
 		registry, err := loadSkillRegistry(path)
 		if err != nil {
 			return err
@@ -172,7 +189,13 @@ func (m *Manager) ClearSkillState(agentName, skillName string) error {
 		return fmt.Errorf("skill name is required")
 	}
 
-	registry, path, err := m.getSkillRegistry(agentName)
+	path, err := m.profileRegistryPath(agentName)
+	if err != nil {
+		return err
+	}
+	m.registryMu.Lock()
+	defer m.registryMu.Unlock()
+	registry, err := loadSkillRegistry(path)
 	if err != nil {
 		return err
 	}

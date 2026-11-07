@@ -29,6 +29,8 @@ func (s *MemoryStore) SaveReceipt(_ context.Context, receipt Receipt) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	receipt.HomeStaffing = receipt.HomeStaffing.Clone()
+	receipt.HomeAdvice = receipt.HomeAdvice.Clone()
 	s.receipts[receipt.Token] = receipt
 	return nil
 }
@@ -43,6 +45,8 @@ func (s *MemoryStore) GetReceipt(_ context.Context, token string) (Receipt, erro
 	if !ok {
 		return Receipt{}, ErrNotFound
 	}
+	receipt.HomeStaffing = receipt.HomeStaffing.Clone()
+	receipt.HomeAdvice = receipt.HomeAdvice.Clone()
 	return receipt, nil
 }
 

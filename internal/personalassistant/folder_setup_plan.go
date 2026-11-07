@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/rosterstaffing"
 )
 
 // Line kinds of a folder setup plan, in the order the card shows them.
@@ -178,6 +179,12 @@ type FolderSetupIntent struct {
 	Portfolio     bool `json:"portfolio,omitempty"`
 	StaffsHome    bool `json:"staffs_home,omitempty"`
 	GrantsConsent bool `json:"grants_consent,omitempty"`
+	// HomeStaffing is the exact host-validated team, separate from advisory
+	// Hire/Visual projections. Nil retains legacy authority only: never reuse.
+	HomeStaffing *rosterstaffing.TeamIntent `json:"home_staffing,omitempty"`
+	// RequiresHomeStaffing marks a new roster-first plan. An undecided team
+	// has no confirmable digest and must never fall back to legacy creation.
+	RequiresHomeStaffing bool `json:"requires_home_staffing,omitempty"`
 	// OpensProjects are the catalog targets the run opens once they are listed,
 	// in order, each a plain folder name (never a path). A single song's plan
 	// holds exactly its own name; a collection's opens none.
@@ -407,6 +414,7 @@ type FolderSetupPlan struct {
 	EntryCandidates []string                `json:"entry_candidates,omitempty"`
 	OptionalTask    bool                    `json:"optional_task,omitempty"`
 	Visual          *FolderSetupVisual      `json:"visual,omitempty"`
+	HomeStaffing    *FolderHomeStaffingView `json:"home_staffing,omitempty"`
 	Lines           []FolderPlanLine        `json:"lines"`
 	Digest          string                  `json:"digest"`
 	Destination     *FolderSetupDestination `json:"destination,omitempty"`
@@ -494,6 +502,7 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
+	stamped.Intent.HomeStaffing = p.Intent.HomeStaffing.Clone()
 	stamped.EntryName = p.EntryName
 	stamped.EntryCandidates = append([]string(nil), p.EntryCandidates...)
 	stamped.OptionalTask = p.Intent.OptionalTaskPolicy == FolderOptionalSummaryPolicy
@@ -502,6 +511,7 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 		stamped.Intent.Model = &model
 	}
 	stamped.Visual = CloneFolderSetupVisual(p.Visual)
+	stamped.HomeStaffing = p.HomeStaffing.Clone()
 	if stamped.Visual != nil && (p.Intent.Placement == "grouped" || p.Intent.Placement == "standalone") {
 		stamped.Visual.Placement = p.Intent.Placement
 	}
@@ -546,6 +556,23 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 		} else {
 			sum := sha256.Sum256(append([]byte(stamped.Digest+"\x00opens\x00"), encoded...))
 			stamped.Digest = hex.EncodeToString(sum[:])
+		}
+	}
+	if stamped.Intent.HomeStaffing != nil || stamped.Intent.RequiresHomeStaffing {
+		if stamped.Digest == "" || p.Destination == nil ||
+			(p.Intent.Destination != nil && *p.Intent.Destination != *p.Destination) ||
+			validateFolderHomeStaffing(stamped.Intent) != nil {
+			stamped.Digest = ""
+		} else {
+			// Bind the enclosing owner/destination/provider and effect promise,
+			// not just the choices' names or their display projection.
+			encoded, err := json.Marshal(stamped.Intent)
+			if err != nil {
+				stamped.Digest = ""
+			} else {
+				sum := sha256.Sum256(append([]byte(stamped.Digest+"\x00home-staffing-v1\x00"), encoded...))
+				stamped.Digest = hex.EncodeToString(sum[:])
+			}
 		}
 	}
 	if !validSetupPlanEntries(stamped.EntryName, stamped.EntryCandidates) {
@@ -744,6 +771,9 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 		}
 	}
 	intent := run.Intent
+	if err := validateFolderHomeStaffing(intent); err != nil {
+		return err
+	}
 	if intent.OptionalTaskPolicy != "" && intent.OptionalTaskPolicy != FolderOptionalSummaryPolicy {
 		return fmt.Errorf("%w: optional task policy", errFolderDigestInvalid)
 	}

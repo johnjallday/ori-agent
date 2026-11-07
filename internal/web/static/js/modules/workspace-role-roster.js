@@ -291,6 +291,7 @@
         declared_purpose: 'Declared purpose',
         declared_role: 'Declared role',
         declared_capability: 'Declared capability',
+        enabled_skill: 'Enabled skill (collection membership)',
         current_assignment: 'Current assignment'
       };
       (choice.reasons || []).slice(0, 3).forEach(function (reason) {
@@ -302,6 +303,7 @@
         configuration_unavailable: 'This saved agent needs configuration before reuse.',
         purpose_unknown: 'No declared purpose is available.',
         capability_metadata_partial: 'Capability details are incomplete.',
+        skill_metadata_unknown: 'Required skill membership could not be fully verified.',
         assignment_metadata_partial: 'Only some assignments are shown.'
       };
       (choice.gaps || []).forEach(function (gap) {

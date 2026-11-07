@@ -413,15 +413,12 @@
 
   // Host advice is presentation data, never a filled role or assignment. Keep
   // only its public, bounded facts; source witnesses never belong in the UI.
-  function setStaffingAdvice(draft, advice) {
-    if (!draft) return false;
-    if (!advice || advice.version !== 1) {
-      draft.staffingAdvice = null;
-      return false;
-    }
+  function normalizeStaffingAdvice(advice) {
+    if (!advice || ![1, 2].includes(advice.version)) return null;
     const states = ['recommended', 'needs_choice', 'no_suitable_match', 'unavailable', 'stale'];
-    draft.staffingAdvice = {
+    return {
       templateId: text(advice.template_id),
+      templateRevision: text(advice.template_revision),
       state: states.includes(advice.state) ? advice.state : 'unavailable',
       complete: advice.coverage?.complete === true,
       assignmentsComplete: advice.coverage?.assignments_complete === true,
@@ -453,7 +450,13 @@
             }))
         }))
     };
-    return true;
+  }
+
+  function setStaffingAdvice(draft, advice) {
+    if (!draft) return false;
+    // The ordinary persisted builder retains its original V1 contract.
+    draft.staffingAdvice = advice?.version === 1 ? normalizeStaffingAdvice(advice) : null;
+    return Boolean(draft.staffingAdvice);
   }
 
   function staffingRoleAdvice(draft, roleId) {
@@ -2097,6 +2100,7 @@
     setIncludeBlueprintTeam,
     setAssistantHire,
     setRoleFill,
+    normalizeStaffingAdvice,
     setStaffingAdvice,
     staffingRoleAdvice,
     selectStaffingChoice,

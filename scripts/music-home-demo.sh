@@ -37,7 +37,8 @@ Options:
   --restart-check   In a reviewed test only (portfolio-reviewed needs --reaper-source),
                     restart this sandbox's server once when the browser requests
                     it (never user state).
-  --suite NAME      Browser test suite: home (default), reviewed-placement
+  --suite NAME      Browser test suite: home (default), reviewed-placement, roster-staffing,
+                    roster-folder (local), roster-folder-reviewed (published)
                     (shared managed-Home review/recovery; local candidate),
                     portfolio (local refusal),
                     portfolio-reviewed (published release; test only),
@@ -167,14 +168,14 @@ done
 
 [[ -n "$plugin_source" ]] || fail "--source or ORI_MUSIC_PLUGIN_SOURCE is required"
 reviewed_suite=0
-if [[ "$test_suite" == "portfolio-reviewed" || "$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" ]]; then
+if [[ "$test_suite" == "portfolio-reviewed" || "$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" || "$test_suite" == "roster-folder-reviewed" ]]; then
 	reviewed_suite=1
 fi
 if [[ -n "$reaper_source" && "$test_suite" == "home-profile" ]]; then
 	# The profile suite installs the local Music candidate and, beside it, this
 	# REAPER export: its facts operation is what lists the fixture templates.
 	[[ "$mode" == "test" && "$provider_mode" == "local" ]] || fail "--reaper-source with --suite home-profile needs test --provider local"
-elif [[ -n "$reaper_source" ]] && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)) || [[ "$test_suite" == "onboarding" ]]; }; then
+elif [[ -n "$reaper_source" ]] && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)) || [[ "$test_suite" == "onboarding" || "$test_suite" == "roster-folder-reviewed" ]]; }; then
 	fail "--reaper-source needs test --suite portfolio-reviewed|manager-notifications --provider reviewed, or --suite home-profile (the onboarding suite installs REAPER through the reviewed quest and takes no export)"
 fi
 [[ "$port" =~ ^[0-9]+$ ]] || fail "port must be numeric"
@@ -186,8 +187,8 @@ if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 fi
 [[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ||
 	"$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" || "$test_suite" == "package-upgrade" ||
-	"$test_suite" == "home-profile" || "$test_suite" == "reviewed-placement" ]] || \
-	fail "--suite needs home, reviewed-placement, portfolio, portfolio-reviewed, manager-notifications, onboarding, package-upgrade or home-profile"
+	"$test_suite" == "home-profile" || "$test_suite" == "reviewed-placement" || "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]] || \
+	fail "--suite needs home, reviewed-placement, roster-staffing, roster-folder, roster-folder-reviewed, portfolio, portfolio-reviewed, manager-notifications, onboarding, package-upgrade or home-profile"
 if { [[ "$test_suite" == "package-upgrade" ]] && [[ -z "$upgrade_source" ]]; } ||
 	{ [[ "$test_suite" != "package-upgrade" ]] && [[ -n "$upgrade_source" ]]; }; then
 	fail "--suite package-upgrade and --upgrade-source go together"
@@ -198,7 +199,7 @@ if [[ "$mode" != "test" && "$test_suite" != "home" ]]; then
 fi
 if { ((reviewed_suite == 1)) && [[ "$provider_mode" != "reviewed" ]]; } ||
 	{ [[ "$provider_mode" == "reviewed" ]] && { [[ "$mode" != "test" ]] || ((reviewed_suite == 0)); }; }; then
-	fail "portfolio-reviewed, manager-notifications and onboarding require test --provider reviewed; other suites require local"
+	fail "portfolio-reviewed, manager-notifications, onboarding and roster-folder-reviewed require test --provider reviewed; other suites require local"
 fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
@@ -265,6 +266,20 @@ test_pid=""
 # per-user Applications folder already follows the sandbox HOME, so two empty
 # fixture bundles give exactly two "installed" DAWs.
 server_env=()
+if ((reviewed_suite == 1)); then
+	# Reviewed acceptance must never inherit a local development override.
+	server_env+=("ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE=" "ORI_REVIEWED_INTEGRATION_DEV_SOURCE=")
+fi
+# These suites use the isolated scripted provider boundary only. Placement
+# chooses a new profile explicitly (metadata, no inference); roster-staffing
+# also exercises real recommendations without a credentialed provider call.
+staffing_fixtures=0
+if [[ "$test_suite" == "reviewed-placement" || "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]]; then
+	server_env+=("LM_STUDIO_BASE_URL=http://127.0.0.1:8944/v1" "LM_STUDIO_MODEL=ori-synthetic-model")
+fi
+if [[ "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]]; then
+	staffing_fixtures=1
+fi
 profile_fixtures=0
 if [[ "$test_suite" == "home-profile" ]]; then
 	profile_fixtures=1
@@ -323,6 +338,11 @@ trap 'exit 130' HUP INT TERM
 
 archive="$sandbox/evidence/music-project-management.tar"
 bundled_plugin="$sandbox/plugin-source/music-project-management"
+if [[ "$test_suite" == "roster-folder" ]]; then
+	# The existing exact-source development reader is necessary for recognized
+	# folders. It reports DevelopmentCopy, never verified released provenance.
+	server_env+=("ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE=$bundled_plugin")
+fi
 git -C "$plugin_root" archive --format=tar --output="$archive" "$candidate_revision"
 archive_sha256="$(shasum -a 256 "$archive" | awk '{print $1}')"
 mkdir -p "$bundled_plugin"
@@ -471,6 +491,10 @@ if [[ "$mode" == "test" ]]; then
 	playwright_file="tests/music-home-candidate.spec.ts"
 	if [[ "$test_suite" == "reviewed-placement" ]]; then
 		playwright_file="tests/unified-managed-home-review.spec.ts"
+	elif [[ "$test_suite" == "roster-staffing" ]]; then
+		playwright_file="tests/roster-first-home-staffing.spec.ts"
+	elif [[ "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]]; then
+		playwright_file="tests/roster-first-folder-staffing.spec.ts"
 	elif [[ "$test_suite" == "portfolio" ]]; then
 		playwright_file="tests/music-home-portfolio.spec.ts"
 	elif [[ "$test_suite" == "portfolio-reviewed" ]]; then
@@ -488,6 +512,7 @@ if [[ "$mode" == "test" ]]; then
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			ORI_MUSIC_HOME_SANDBOX="$sandbox" \
 			ORI_MUSIC_HOME_ACCEPTANCE=1 \
+			ORI_STAFFING_DEMO="$staffing_fixtures" \
 			ORI_HOME_PROFILE_FIXTURES="$profile_fixtures" \
 			ORI_MUSIC_PROVIDER_MODE="$provider_mode" \
 			ORI_MUSIC_RESTART_TEST="$restart_check" \

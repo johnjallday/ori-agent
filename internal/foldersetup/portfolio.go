@@ -51,7 +51,9 @@ type HomeRole struct {
 	Name   string
 }
 
-// HomeStaffing fills the Home's required roles with new agents.
+// HomeStaffing retains the legacy create-only contract. An exact HomeStaffing
+// intent requires the ReviewedHomeStaffing extension instead; its choices are
+// never passed to these fresh-name/default-model methods.
 type HomeStaffing interface {
 	Missing(ctx context.Context, homeID string) ([]HomeRole, error)
 	// ModelReady says a new agent would have a model to chat with.
@@ -139,6 +141,7 @@ type Sharing interface {
 type PortfolioReceiptFacts struct {
 	HomeCreated bool
 	AddedAgents []string
+	HomeRoles   []HomeRoleOutcome
 	Listed      ScanOutcome
 	// Shared says the collection has projects the shared assistant can join.
 	Shared bool
@@ -255,6 +258,14 @@ func (p *PortfolioRunner) Run(ctx context.Context, cfg PortfolioConfig) (Result,
 		(cfg.Plan.Intent.SetsProfile && p.Profile == nil) || (len(cfg.Plan.Intent.OpensProjects) > 0 && p.Opener == nil) {
 		return Result{}, ErrPortfolioNotWired
 	}
+	if cfg.Plan.Intent.HomeStaffing != nil || cfg.Plan.Intent.RequiresHomeStaffing {
+		if _, ok := p.Staffing.(ReviewedHomeStaffing); !ok {
+			return Result{}, ErrPortfolioNotWired
+		}
+		if stamped := cfg.Plan.Stamped(); stamped.Digest == "" || stamped.Digest != cfg.Plan.Digest {
+			return Result{}, personalassistant.ErrFolderPlanChanged
+		}
+	}
 	state := &run{
 		Runner:    &Runner{Install: p.Install, Providers: p.Providers, Progress: p.Progress, NewKey: p.NewKey},
 		cfg:       Config{Plan: cfg.Plan},
@@ -297,6 +308,7 @@ type portfolioRun struct {
 	// homeCreated and added are what this run made, for the receipt.
 	homeCreated bool
 	added       []string
+	homeRoles   []HomeRoleOutcome
 	// opened is the song this pass opened (or finished opening).
 	opened *OpenOutcome
 }
@@ -426,7 +438,7 @@ func (s *portfolioRun) drive(ctx context.Context) error {
 	}
 	rows, err := s.runner.Receipts.Receipt(ctx, s.homeID, PortfolioReceiptFacts{
 		HomeCreated: s.homeCreated || (s.cfg.Plan.Intent.CreatesHome && s.cfg.HomeID != ""), AddedAgents: s.added, Listed: listed,
-		Shared: s.cfg.Plan.Intent.SharedProjects, Opened: s.opened,
+		Shared: s.cfg.Plan.Intent.SharedProjects, Opened: s.opened, HomeRoles: s.homeRoles,
 	})
 	if err != nil {
 		return failed("could not read back what was set up: " + err.Error())
@@ -544,6 +556,9 @@ func (s *portfolioRun) staffHome(ctx context.Context) error {
 	if !s.cfg.Plan.Intent.StaffsHome {
 		s.done(personalassistant.FolderPlanAgents)
 		return nil
+	}
+	if team := s.cfg.Plan.Intent.HomeStaffing; team != nil {
+		return s.staffReviewedHome(ctx, team)
 	}
 	missing, err := s.runner.Staffing.Missing(ctx, s.homeID)
 	if err != nil {

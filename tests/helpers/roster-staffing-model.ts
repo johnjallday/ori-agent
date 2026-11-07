@@ -4,7 +4,7 @@ type Evidence = { id: string; kind: string; value: string };
 type Candidate = { handle: string; evidence: Evidence[] };
 type Input = {
   roster: { candidates: Candidate[] };
-  roles: { id: string; target_id: string }[];
+  roles: { id: string; target_id: string; occupied?: boolean; required_skills?: string[] }[];
 };
 
 // Synthetic provider boundary only. Ori's roster, builder, persistence and HTTP
@@ -40,8 +40,9 @@ export async function startRosterStaffingModel(port = 8944) {
       .map((m: { content: string }) => m.content)
       .join('\n');
     const isBuild = system.includes('Right now you are setting up a new workspace');
-    if (isBuild) calls++;
-    if (isBuild && ((payload.tools || []).length || mode === 'unavailable')) {
+    const isHome = system.startsWith('Recommend staffing, never assign or create anything.');
+    if (isBuild || isHome) calls++;
+    if ((isBuild || isHome) && ((payload.tools || []).length || mode === 'unavailable')) {
       response.writeHead(503);
       response.end(
         JSON.stringify({ error: { message: 'Synthetic unavailable', type: 'fixture' } })
@@ -98,6 +99,24 @@ export async function startRosterStaffingModel(port = 8944) {
             : []
       }
     };
+    const homeReply = {
+      roles: (input?.roles || [])
+        .filter(role => !role.occupied)
+        .map(role => {
+          const selected =
+            candidate && role.id === 'portfolio_manager' && mode !== 'no_suitable_match';
+          const fact =
+            candidate?.evidence.find(e => e.kind === 'declared_purpose') ||
+            candidate?.evidence.find(
+              e => e.kind === 'enabled_skill' && role.required_skills?.includes(e.value)
+            );
+          return {
+            role_id: role.id,
+            state: selected && fact ? mode : mode === 'no_suitable_match' ? mode : 'needs_choice',
+            choices: selected && fact ? [{ candidate: candidate.handle, evidence: [fact.id] }] : []
+          };
+        })
+    };
     response.end(
       JSON.stringify({
         id: 'staffing-fixture',
@@ -109,7 +128,11 @@ export async function startRosterStaffingModel(port = 8944) {
             message: {
               role: 'assistant',
               content: JSON.stringify(
-                isBuild ? reply : { text: 'Synthetic background response; no work requested.' }
+                isHome
+                  ? homeReply
+                  : isBuild
+                    ? reply
+                    : { text: 'Synthetic background response; no work requested.' }
               )
             },
             finish_reason: 'stop'

@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
+import { startRosterStaffingModel } from './helpers/roster-staffing-model';
 
 // Real exact-candidate owner/journal/role/layout acceptance. The Music wrapper
 // must stage its immutable candidate in disposable HOME/data first. No model,
@@ -9,6 +10,28 @@ test.skip(
   process.env.ORI_TEST_REVIEW_HOMES !== '1' && process.env.ORI_MUSIC_HOME_ACCEPTANCE !== '1',
   'requires isolated exact Music candidate'
 );
+
+// The harness supplies only this isolated metadata/model boundary. These
+// manual-choice cases must not invoke recommendation inference at all.
+let model: Awaited<ReturnType<typeof startRosterStaffingModel>>;
+test.beforeAll(async () => {
+  model = await startRosterStaffingModel();
+});
+test.afterAll(async () => {
+  if (model) {
+    try {
+      expect(model.calls()).toBe(0);
+    } finally {
+      await model.stop();
+    }
+  }
+});
+test.beforeEach(async ({ request }) => {
+  const configured = await request.post('/api/settings/system-model', {
+    data: { provider: 'lmstudio', model: 'ori-synthetic-model' }
+  });
+  expect(configured.ok(), await configured.text()).toBeTruthy();
+});
 
 async function snapshot(request: APIRequestContext) {
   const workspaces = await (await request.get('/api/workspaces')).json();
@@ -53,6 +76,17 @@ async function openReview(page: Page, name?: string, resume = false) {
   if (name) await creator.locator('#folderNameInput').fill(name);
   await creator.locator('#wizardNextBtn').click();
   await expect(creator.locator('#wizardStep3')).toBeVisible();
+  if (name) {
+    // Required roles no longer imply permission to create. Deliberately stage
+    // this creation; the exact team is part of the one server commit below.
+    await creator
+      .getByRole('button', { name: 'Create an agent for Music Portfolio Manager', exact: true })
+      .click();
+    const form = page.locator('#addAgentModal');
+    await form.locator('[data-agent-create-field="name"]').fill('Portfolio Manager');
+    await form.getByRole('button', { name: 'Use for this role', exact: true }).click();
+    await expect(form).toBeHidden();
+  }
   await creator.locator('#wizardNextBtn').click();
   const review = creator.locator('#workspaceCreationReviewPanel');
   await expect(review).toBeVisible();
@@ -115,7 +149,7 @@ test(`managed Home ${map ? 'map frame' : 'automatic'}${lost ? ' with lost real d
   await expect(review).toContainText('Music Portfolio Manager');
   await expect(review).toContainText('Sample Library Manager');
   await expect(review).toContainText(
-    'No project, scan, schedule, task, tool access or application opening'
+    'No project, scan, schedule, ticket, tool access or application opening'
   );
   await expect(page.locator('#createFolderBtn')).toBeHidden();
   // The old creator/proposal entry may reveal review, never act as consent.
@@ -210,24 +244,23 @@ test(`managed Home ${map ? 'map frame' : 'automatic'}${lost ? ' with lost real d
     expect(afterRepair.agents).toEqual(beforeRepair.agents);
   }
   expect(commits).toBe(originalCommits);
-  expect(staffing).toBe(lost ? 0 : 1);
+  expect(staffing).toBe(0);
   expect(ordinary).toBe(0);
   const after = await snapshot(request);
   expect(after.ids).toHaveLength(1);
-  expect(after.agents.filter((item: string) => !before.agents.includes(item))).toEqual(
-    lost ? [] : ['Portfolio Manager']
-  );
+  expect(after.agents.filter((item: string) => !before.agents.includes(item))).toEqual([
+    'Portfolio Manager'
+  ]);
   const homeID = after.ids[0];
   if (map) expect(after.layout.layout.positions[homeID]).toEqual(candidate);
   else expect(after.layout).toEqual(before.layout);
   const home = await (await request.get(`/api/workspaces/${homeID}`)).json();
   expect(home).toMatchObject({ id: homeID, name, kind: 'group' });
-  expect(home.agent_instances || []).toHaveLength(lost ? 0 : 1);
-  if (!lost)
-    expect(home.agent_instances[0]).toMatchObject({
-      name: 'Portfolio Manager',
-      role_id: 'portfolio_manager'
-    });
+  expect(home.agent_instances || []).toHaveLength(1);
+  expect(home.agent_instances[0]).toMatchObject({
+    name: 'Portfolio Manager',
+    role_id: 'portfolio_manager'
+  });
   expect(home.tasks || []).toHaveLength(0);
   expect(home.scheduled_tasks || []).toHaveLength(0);
   expect(home.assistant_program.state.key.plugin_id).toBe('music-project-management');
@@ -240,13 +273,13 @@ test(`managed Home ${map ? 'map frame' : 'automatic'}${lost ? ' with lost real d
     review.getByRole('heading', { name: 'Check confirmed Home', exact: true })
   ).toBeVisible();
   expect(commits).toBe(originalCommits);
-  expect(staffing).toBe(lost ? 0 : 1);
+  expect(staffing).toBe(0);
   await review.getByRole('button', { name: 'Read saved status', exact: true }).click();
   await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible();
   await expect(review).toContainText('Reading status did not resume staffing');
   expect(await snapshot(request)).toEqual(after);
   expect(commits).toBe(originalCommits);
-  expect(staffing).toBe(lost ? 0 : 1);
+  expect(staffing).toBe(0);
   if (sourceAfter)
     expect((await request.post('/api/plugins/music-project-management/enable')).ok()).toBeTruthy();
   await review.getByRole('button', { name: 'Close', exact: true }).click();
@@ -260,7 +293,7 @@ test(`managed Home ${map ? 'map frame' : 'automatic'}${lost ? ' with lost real d
   await review.locator('[data-placement-action="confirm"]').click();
   await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible();
   expect(commits).toBe(originalCommits + 1);
-  expect(staffing).toBe(1);
+  expect(staffing).toBe(0);
   expect(ordinary).toBe(0);
   const final = await snapshot(request);
   expect(final.ids).toEqual(after.ids);
@@ -268,5 +301,5 @@ test(`managed Home ${map ? 'map frame' : 'automatic'}${lost ? ' with lost real d
   expect(final.agents.filter((item: string) => !before.agents.includes(item))).toEqual([
     'Portfolio Manager'
   ]);
-  if (!lost) expect(final).toEqual(after);
+  expect(final).toEqual(after);
 });
