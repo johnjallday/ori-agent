@@ -174,6 +174,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-hq-card.js',
       'internal/web/static/js/modules/personal-assistant-folder.js',
       'internal/web/static/js/modules/assisted-workspace-placement.js',
+      'internal/web/static/js/modules/source-setup-dialog.js',
       'internal/web/static/js/modules/workspace-creation-review.js',
       'internal/web/static/js/modules/managed-home-review.js',
       'internal/web/static/js/modules/grouped-creation-operation.js',

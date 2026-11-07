@@ -14,6 +14,29 @@ The journey this makes continuous:
 > select a song → review its exact file and connection → separately approve any
 > project staffing → open the child or return to the same Home.
 
+## Source setup review presentation
+
+Recognized REAPER songs/collections enter through **Review setup → Review music
+folder setup → explicit confirmation** in the shared Create Workspace shell.
+Attachment is inert; chat retains a compact review/status entry. The original
+source card is moved, not cloned into another draft. `FolderDigestService`,
+source review generations/plan digests and accepted operation records remain
+authoritative; no plugin contract or reviewed floor changes.
+
+Home name/team are fixed. Supported later-project brief and file choices remain
+source-owned. Prerequisite and Guided Setup owners use one foreground dialog at
+a time, returning only to a current source after refreshing readiness. Close is
+not decline or rollback. Map placement suspends the dialog until Back/Escape;
+its valid final gesture confirms the same reviewed operation. Accepted/uncertain
+runs reopen as status, never a fresh setup. Reload preserves only canonical data,
+not an unsaved brief or expired folder selection. See
+[unified workspace placement](unified-workspace-placement.md) for shell ownership.
+
+Home/catalog setup still creates no song workspaces. A ready-Home song suggestion
+remains **Go to Music Production Home**, not a new setup confirmation. The
+Portfolio Manager/library owns the later separate Open, with the original
+reviewed project file, shared-assistant consent and staffing boundaries intact.
+
 ## Rules that hold in every state
 
 1. **Navigation is not authority.** A query parameter, `sessionStorage` value,
@@ -196,35 +219,23 @@ only when the root's recorded last scan differs from the one before the review.
   and labels the current check unavailable; it never claims saved data vanished.
 - **Recovery:** saved sessions, paging, filters, and last-observed labels persist.
 
-### S4a. End of a one-card collection setup: "Pick a song to start with"
+### S4a. End of source-owned Home/catalog setup
 
-- **Owner:** the resolved folder offer (`outcome.kind = home`, `outcome.workspace_id`
-  names the Home) and the library's `last_saved` search (`project-library.md`,
-  "Last saved and recent songs").
-- **Target:** the run pop-up (`#folderSetupRunModal`) that the user opened by
-  pressing **Set up** and kept open until the run finished.
-- **What it shows:** the first time the open pop-up reaches done on a Home receipt,
-  it reads `projects?sort=last_saved&direction=desc&page_size=25` once and keeps up
-  to six songs that can be opened and have a save time: "Pick a song to start
-  with", "{Home} is ready with N songs. These are the ones you saved most
-  recently.", each song with "Saved …" and **Open** (the library's one-click open,
-  request ID reused on a retry). What was set up folds under a closed "What I set
-  up"; the footer link reads "Browse all N songs" and lands on the library. An
-  existing-Home collection (S2b) run ends the same way, over the whole library.
-- **Open:** "Opening {song}…", every Open disabled, then the song's workspace. A
-  folder with several project files answers `needs_choice`: its file names come
-  back as chips under that song and focus moves to the first. Any other failure
-  shows the server's message in the pop-up's error line and the buttons come back.
-- **Fallbacks (today's done screen, unchanged):** the read fails, no song is both
-  openable and dated (for example an all-Ableton collection), or the receipt is a
-  single project rather than a Home. Never an empty list or a list error.
-- **Once:** nothing is stored. A pop-up closed while the run is going never reads
-  the list; one closed on the last screen does not come back on reload. The card's
-  own receipt and Home link are unchanged. The Home library keeps the same list
-  at its top as "Recently saved" for every later visit.
-- **Song facts:** on a Home that reads song details (S4b) each song's line is
-  "Saved 3 days ago · 14 tracks · 92 BPM · 3:41"; a song without facts (another
-  format, an unreadable file) shows "Saved …" only.
+- **Owner:** the resolved folder offer (`outcome.kind = home`,
+  `outcome.workspace_id` names the Home), its accepted operation and verified
+  resource proof. Displaying the result never grants new placement authority to
+  a reused Home.
+- **Target:** the original source review in the shared dialog, or the compact
+  map status after manual placement. **View setup status** / **Details** returns
+  to that same owner. Closing does not cancel or repeat the accepted operation.
+- **What it shows:** **Home ready**, truthful catalog effects and **Go to Music
+  Production Home**. Catalog records are not project buildings. Position-only
+  repair stays separate from setup completion; a partial or unknown operation
+  is not reported ready.
+- **Later Open:** the Home's Portfolio Manager/library offers songs and owns
+  their separate Open/file-choice/staffing boundary. The dialog neither opens
+  songs automatically nor grants a new child operation from a Home receipt.
+  The library's **Recently saved** list and song facts (S4b) remain on the Home.
 
 ### S4b. Song details: the card's line and the switch
 

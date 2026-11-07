@@ -4,13 +4,15 @@
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable workspace-create-modal-dialog">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-        <h6 id="folderModalTitle" class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
+        <h6 id="folderModalTitle" tabindex="-1" class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
         <!-- Reopens the assistant's build pane after "I'll do it myself".
              Shown only while build mode is available for this open. -->
         <button type="button" id="workspaceBuildWithBtn" class="workspace-build-with-btn" hidden></button>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close create workspace"></button>
       </div>
       <p id="workspaceBuildModeStatus" class="workspace-build-mode-status" role="status" hidden></p>
+      <!-- Presentation borrowed by the source owner; never a creator/build draft. -->
+      <section id="sourceSetupDialogHost" class="source-setup-dialog-host" aria-label="Music folder setup" hidden></section>
       <section id="assistedWorkspacePlacementPanel" class="assisted-placement-host" hidden></section>
       <!-- One active surface: the conversation or the existing editable wizard. -->
       <aside id="workspaceBuildPane" class="workspace-build-pane" aria-label="Build with your assistant" hidden></aside>
