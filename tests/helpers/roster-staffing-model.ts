@@ -14,6 +14,8 @@ export async function startRosterStaffingModel(port = 8944) {
   let workspaceName = 'Synthetic Staffing Review';
   let purpose = 'Builds and reviews software';
   let calls = 0;
+  let held: Promise<void> | null = null;
+  let releaseHeld: (() => void) | null = null;
   const server = createServer(async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
     if (request.method === 'GET') {
@@ -42,6 +44,11 @@ export async function startRosterStaffingModel(port = 8944) {
     const isBuild = system.includes('Right now you are setting up a new workspace');
     const isHome = system.startsWith('Recommend staffing, never assign or create anything.');
     if (isBuild || isHome) calls++;
+    if (isHome && held) {
+      const wait = held;
+      held = null;
+      await wait;
+    }
     if ((isBuild || isHome) && ((payload.tools || []).length || mode === 'unavailable')) {
       response.writeHead(503);
       response.end(
@@ -157,9 +164,20 @@ export async function startRosterStaffingModel(port = 8944) {
       purpose = value;
     },
     calls: () => calls,
+    holdNextRecommendation: () => {
+      held = new Promise<void>(resolve => {
+        releaseHeld = resolve;
+      });
+      return () => {
+        releaseHeld?.();
+        releaseHeld = null;
+      };
+    },
     stop: () =>
-      new Promise<void>((resolve, reject) =>
-        server.close(error => (error ? reject(error) : resolve()))
-      )
+      new Promise<void>((resolve, reject) => {
+        releaseHeld?.();
+        releaseHeld = null;
+        server.close(error => (error ? reject(error) : resolve()));
+      })
   };
 }

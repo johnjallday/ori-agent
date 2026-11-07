@@ -98,6 +98,9 @@ function adviceDOM(state = 'recommended', configured = true, compact = false, sc
     source: 'root',
     configured,
     reasons: [{ kind: 'declared_purpose', value: '<script>not executable</script>' }],
+    assignments: [
+      { kind: 'current_assignment', value: 'home-lead — <script>Reviewed collection</script>' }
+    ],
     gaps: []
   };
   api.render(
@@ -131,7 +134,12 @@ test('saved advice uses text-only reasons and reports explicit recommended and a
   const { container, calls, nodes, buttons } = adviceDOM();
   assert.equal(calls.length, 0, 'render must not select or assign');
   assert.ok(container.textContent.includes('<script>not executable</script>'));
-  assert.ok(container.textContent.includes('Current assignments could not be verified'));
+  assert.ok(container.textContent.includes('Current assignments could not be fully verified'));
+  assert.ok(
+    container.textContent.includes(
+      'Verified current role: home-lead — <script>Reviewed collection</script>'
+    )
+  );
   assert.equal(
     nodes.some(node => node.tag === 'script' || node.tag === 'img'),
     false
@@ -148,7 +156,7 @@ test('saved advice uses text-only reasons and reports explicit recommended and a
 test('compact ordinary advice keeps evidence and limitations while Team and scoped roles retain target details', () => {
   const compact = adviceDOM('recommended', true, true);
   for (const copy of [
-    'Current assignments could not be verified',
+    'Current assignments could not be fully verified',
     'Model configured; not live-tested.',
     'Its settings stay as they are.'
   ]) {

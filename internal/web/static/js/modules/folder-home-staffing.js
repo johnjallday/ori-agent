@@ -121,7 +121,18 @@
     const status = node('p', 'pa-folder__note');
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
-    root.append(heading, note, actions, problem, rows, formHost, status);
+    const settings = node('p', 'pa-folder__note');
+    const settingsLink = node('a', '', 'Review saved agents');
+    settingsLink.href = '/agents';
+    settings.append(
+      settingsLink,
+      node(
+        'span',
+        '',
+        ' to check configuration, skill membership or whether a workspace-only profile can be made reusable. Changes here never grant access; after editing a profile, clear its original choice and choose again.'
+      )
+    );
+    root.append(heading, note, actions, problem, rows, formHost, settings, status);
     host.replaceChildren(root);
 
     function closeEditor(focus = true) {

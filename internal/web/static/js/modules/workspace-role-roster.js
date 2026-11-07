@@ -70,7 +70,7 @@
     staffingUnavailable: 'Recommendations are unavailable. Choose manually or create a new agent.',
     staffingStale: 'This advice has changed. Ask your assistant to refresh it, or choose manually.',
     staffingPartial: 'Only part of the roster could be assessed.',
-    staffingAssignmentsUnknown: 'Current assignments could not be verified.',
+    staffingAssignmentsUnknown: 'Current assignments could not be fully verified.',
     staffingPreserved: 'Reuses the saved profile. Its settings stay as they are.'
   };
 
@@ -299,6 +299,14 @@
           reasons.append(element('li', '', labels[reason.kind] + ': ' + text(reason.value)));
       });
       card.append(reasons);
+      var assignments = element('ul', 'ws-role-advice__assignments');
+      (Array.isArray(choice.assignments) ? choice.assignments : [])
+        .slice(0, 8)
+        .forEach(function (fact) {
+          if (fact && fact.kind === 'current_assignment')
+            assignments.append(element('li', '', 'Verified current role: ' + text(fact.value)));
+        });
+      if (assignments.children.length) card.append(assignments);
       var gaps = {
         configuration_unavailable: 'This saved agent needs configuration before reuse.',
         purpose_unknown: 'No declared purpose is available.',

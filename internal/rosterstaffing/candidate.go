@@ -46,6 +46,18 @@ type Candidate struct {
 	skillsKnown       bool
 }
 
+// AssignmentEvidence is host-observed disclosure, independent of which fit
+// reasons the model chooses. It is not permission to replace another holder.
+func (c Candidate) AssignmentEvidence() []Evidence {
+	var out []Evidence
+	for _, fact := range c.Evidence {
+		if fact.Kind == "current_assignment" {
+			out = append(out, fact)
+		}
+	}
+	return out
+}
+
 type Coverage struct {
 	Complete            bool `json:"complete"`
 	AssignmentsComplete bool `json:"assignments_complete"`

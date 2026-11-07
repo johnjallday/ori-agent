@@ -91,7 +91,9 @@ func (h *Handler) workspaceBuildRoster(ctx context.Context, owner string) roster
 	return rosterstaffing.Collect(ctx, owner, rosterstaffing.Readers{
 		Profiles:        func(ctx context.Context) store.StaffingSnapshot { return store.ReadStaffingSnapshot(ctx, h.agentStore) },
 		ModelConfigured: configured,
-		// CustomizedIn is not assignment evidence. No reader means unknown.
+		Assignments:     h.reviewedHomeAssignments,
+		// CustomizedIn is not assignment evidence. Exact observed Home reviews
+		// disclose a verified subset; coverage remains explicitly incomplete.
 	})
 }
 
@@ -135,7 +137,7 @@ func finishBuildStaffing(session *personalassistant.WorkspaceBuildSession, outco
 		for _, choice := range proposal.Choices {
 			candidate := byHandle[choice.Candidate]
 			item := personalassistant.BuildStaffingChoice{Handle: candidate.Handle, Name: candidate.Name, Source: candidate.Source,
-				Configured: candidate.Ready, SourceWitness: candidate.Witness, Gaps: append([]string(nil), candidate.Gaps...)}
+				Configured: candidate.Ready, SourceWitness: candidate.Witness, Gaps: append([]string(nil), candidate.Gaps...), Assignments: candidate.AssignmentEvidence()}
 			for _, id := range choice.Evidence {
 				for _, fact := range candidate.Evidence {
 					if fact.ID == id {

@@ -38,7 +38,7 @@ Options:
                     restart this sandbox's server once when the browser requests
                     it (never user state).
   --suite NAME      Browser test suite: home (default), reviewed-placement, roster-staffing,
-                    roster-folder (local), roster-folder-reviewed (published)
+                    roster-folder (local), roster-folder-recovery, roster-folder-reviewed (published)
                     (shared managed-Home review/recovery; local candidate),
                     portfolio (local refusal),
                     portfolio-reviewed (published release; test only),
@@ -187,8 +187,8 @@ if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 fi
 [[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ||
 	"$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" || "$test_suite" == "package-upgrade" ||
-	"$test_suite" == "home-profile" || "$test_suite" == "reviewed-placement" || "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]] || \
-	fail "--suite needs home, reviewed-placement, roster-staffing, roster-folder, roster-folder-reviewed, portfolio, portfolio-reviewed, manager-notifications, onboarding, package-upgrade or home-profile"
+	"$test_suite" == "home-profile" || "$test_suite" == "reviewed-placement" || "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" || "$test_suite" == "roster-folder-recovery" ]] || \
+	fail "--suite needs home, reviewed-placement, roster-staffing, roster-folder, roster-folder-recovery, roster-folder-reviewed, portfolio, portfolio-reviewed, manager-notifications, onboarding, package-upgrade or home-profile"
 if { [[ "$test_suite" == "package-upgrade" ]] && [[ -z "$upgrade_source" ]]; } ||
 	{ [[ "$test_suite" != "package-upgrade" ]] && [[ -n "$upgrade_source" ]]; }; then
 	fail "--suite package-upgrade and --upgrade-source go together"
@@ -274,10 +274,10 @@ fi
 # chooses a new profile explicitly (metadata, no inference); roster-staffing
 # also exercises real recommendations without a credentialed provider call.
 staffing_fixtures=0
-if [[ "$test_suite" == "reviewed-placement" || "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]]; then
+if [[ "$test_suite" == "reviewed-placement" || "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" || "$test_suite" == "roster-folder-recovery" ]]; then
 	server_env+=("LM_STUDIO_BASE_URL=http://127.0.0.1:8944/v1" "LM_STUDIO_MODEL=ori-synthetic-model")
 fi
-if [[ "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]]; then
+if [[ "$test_suite" == "roster-staffing" || "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" || "$test_suite" == "roster-folder-recovery" ]]; then
 	staffing_fixtures=1
 fi
 profile_fixtures=0
@@ -338,7 +338,7 @@ trap 'exit 130' HUP INT TERM
 
 archive="$sandbox/evidence/music-project-management.tar"
 bundled_plugin="$sandbox/plugin-source/music-project-management"
-if [[ "$test_suite" == "roster-folder" ]]; then
+if [[ "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-recovery" ]]; then
 	# The existing exact-source development reader is necessary for recognized
 	# folders. It reports DevelopmentCopy, never verified released provenance.
 	server_env+=("ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE=$bundled_plugin")
@@ -493,7 +493,7 @@ if [[ "$mode" == "test" ]]; then
 		playwright_file="tests/unified-managed-home-review.spec.ts"
 	elif [[ "$test_suite" == "roster-staffing" ]]; then
 		playwright_file="tests/roster-first-home-staffing.spec.ts"
-	elif [[ "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" ]]; then
+	elif [[ "$test_suite" == "roster-folder" || "$test_suite" == "roster-folder-reviewed" || "$test_suite" == "roster-folder-recovery" ]]; then
 		playwright_file="tests/roster-first-folder-staffing.spec.ts"
 	elif [[ "$test_suite" == "portfolio" ]]; then
 		playwright_file="tests/music-home-portfolio.spec.ts"
@@ -513,6 +513,7 @@ if [[ "$mode" == "test" ]]; then
 			ORI_MUSIC_HOME_SANDBOX="$sandbox" \
 			ORI_MUSIC_HOME_ACCEPTANCE=1 \
 			ORI_STAFFING_DEMO="$staffing_fixtures" \
+			ORI_STAFFING_FOLDER_RECOVERY="$([[ "$test_suite" == "roster-folder-recovery" ]] && printf 1 || printf 0)" \
 			ORI_HOME_PROFILE_FIXTURES="$profile_fixtures" \
 			ORI_MUSIC_PROVIDER_MODE="$provider_mode" \
 			ORI_MUSIC_RESTART_TEST="$restart_check" \

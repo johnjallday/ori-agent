@@ -67,6 +67,13 @@ function staffingAdviceFixture() {
             source: 'root',
             configured: true,
             reasons: [{ kind: 'declared_purpose', value: 'Reviews software tools.' }],
+            assignments: [
+              {
+                kind: 'current_assignment',
+                value: 'home-lead — Reviewed collection',
+                source_witness: 'PRIVATE_PROOF_CANARY'
+              }
+            ],
             gaps: ['assignments_unknown'],
             source_witness: 'PRIVATE_WITNESS_CANARY',
             settings: { system_prompt: 'PRIVATE_PROMPT_CANARY' }
@@ -87,6 +94,9 @@ test('host staffing advice is bounded presentation data and changes no team inte
   assert.equal(draft.roleFills.size, 0);
   assert.equal(JSON.stringify(draft.staffingAdvice).includes('PRIVATE_'), false);
   assert.equal(Draft.staffingRoleAdvice(draft, 'engineer').assignmentsComplete, false);
+  assert.deepEqual(Draft.staffingRoleAdvice(draft, 'engineer').choices[0].assignments, [
+    { kind: 'current_assignment', value: 'home-lead — Reviewed collection' }
+  ]);
 });
 
 test('explicit recommendation selection retains only its handle through payload and resume', () => {

@@ -89,6 +89,31 @@ func (s *Service) ReviewedHomeAdvice(ctx context.Context, input Input, token str
 	return receipt.HomeAdvice.Clone(), nil
 }
 
+// ObservedHomeTeam reads original completed-operation material for a compiled
+// metadata observer. Expiry is deliberately irrelevant to past provenance, but
+// this result is never pending-role execution authority. The observer must
+// independently match the current canonical role receipt, binding and instance.
+func (s *Service) ObservedHomeTeam(ctx context.Context, owner, token, key, homeID string, current *workspace.AssistantProgramState) (HomeStaffingReview, error) {
+	if s == nil || s.receipts == nil || strings.TrimSpace(owner) == "" || strings.TrimSpace(token) == "" || strings.TrimSpace(key) == "" || current == nil || current.GroupTemplate == nil {
+		return HomeStaffingReview{}, ErrUnavailable
+	}
+	receipt, err := s.receipts.GetReceipt(ctx, token)
+	if err != nil || receipt.OwnerUserID != owner || receipt.OperationKind != OperationPrepareHome ||
+		receipt.HomeStaffing == nil || receipt.HomeStaffing.Validate() != nil || receipt.ReviewDigest != receiptDigest(receipt) ||
+		receipt.GroupTemplateID == "" || receipt.GroupTemplateRev == "" || receipt.ProgramKey == nil ||
+		current.Key != *receipt.ProgramKey || current.Key.OwnerUserID != owner ||
+		current.GroupTemplate.GroupTemplateID != receipt.GroupTemplateID || current.GroupTemplate.GroupTemplateRevision != receipt.GroupTemplateRev {
+		return HomeStaffingReview{}, ErrReviewStale
+	}
+	op, err := s.receipts.GetOperation(ctx, owner, OperationPrepareHome, key)
+	if err != nil || op.OwnerUserID != owner || op.OperationKind != OperationPrepareHome || op.Status != OperationSucceeded ||
+		op.ReviewDigest != receipt.ReviewDigest || op.InputDigest != receipt.InputDigest || op.HomeWorkspaceID == "" || op.HomeWorkspaceID != homeID ||
+		op.OperationDigest != operationDigest(op) {
+		return HomeStaffingReview{}, ErrReviewStale
+	}
+	return HomeStaffingReview{Team: receipt.HomeStaffing.Clone(), HomeWorkspaceID: op.HomeWorkspaceID, ReviewDigest: receipt.ReviewDigest}, nil
+}
+
 func (s *Service) homeReviewReceipt(ctx context.Context, input Input, token string) (Receipt, error) {
 	if s == nil || s.receipts == nil {
 		return Receipt{}, ErrUnavailable

@@ -6323,14 +6323,16 @@ body.chat-panel-open .chat-panel-backdrop {
 }
 
 .ws-role-advice__note,
-.ws-role-advice__reasons {
+.ws-role-advice__reasons,
+.ws-role-advice__assignments {
   margin: 0.3rem 0;
   color: var(--text-secondary);
   font-size: 0.75rem;
   line-height: 1.5;
 }
 
-.ws-role-advice__reasons {
+.ws-role-advice__reasons,
+.ws-role-advice__assignments {
   padding-inline-start: 1rem;
 }
 
@@ -6397,7 +6399,7 @@ body.chat-panel-open .chat-panel-backdrop {
 }
 
 .ws-role-tag__source {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .ws-role-tag__source::before {

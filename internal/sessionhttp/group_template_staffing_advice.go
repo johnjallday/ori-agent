@@ -63,7 +63,7 @@ func (h *Handler) RecommendHomeStaffing(ctx context.Context, target HomeStaffing
 		return out
 	}
 	readers := rosterstaffing.Readers{Profiles: func(ctx context.Context) store.StaffingSnapshot { return store.ReadStaffingSnapshot(ctx, h.agentStore) },
-		ModelConfigured: h.workspaceBuild.ProfileModelConfigured}
+		ModelConfigured: h.workspaceBuild.ProfileModelConfigured, Assignments: h.reviewedHomeAssignments}
 	if len(requestedSkills) > 0 && h.staffingSkillReader != nil {
 		readers.Skills = func(ctx context.Context, profile store.StaffingProfile) rosterstaffing.SkillMembership {
 			return h.staffingSkillReader(ctx, store.StaffingSelection{Name: profile.Name, Witness: profile.Witness}, requestedSkills, target.Personal)
@@ -97,7 +97,7 @@ func (h *Handler) RecommendHomeStaffing(ctx context.Context, target HomeStaffing
 		for _, choice := range proposal.Choices {
 			candidate := candidates[choice.Candidate]
 			item := rosterstaffing.AdviceChoice{Handle: candidate.Handle, Name: candidate.Name, Source: candidate.Source,
-				Configured: candidate.Ready, SourceWitness: candidate.Witness, CapabilityWitness: candidate.CapabilityWitness, Gaps: append([]string(nil), candidate.Gaps...)}
+				Configured: candidate.Ready, SourceWitness: candidate.Witness, CapabilityWitness: candidate.CapabilityWitness, Gaps: append([]string(nil), candidate.Gaps...), Assignments: candidate.AssignmentEvidence()}
 			for _, id := range choice.Evidence {
 				for _, fact := range candidate.Evidence {
 					if fact.ID == id {

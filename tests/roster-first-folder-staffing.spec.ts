@@ -14,6 +14,7 @@ test('recognized build and collection review preserve and reuse the exact saved 
 }, testInfo) => {
   const sandbox = process.env.ORI_MUSIC_HOME_SANDBOX || '';
   const reviewed = process.env.ORI_MUSIC_PROVIDER_MODE === 'reviewed';
+  const recovery = process.env.ORI_STAFFING_FOLDER_RECOVERY === '1';
   test.skip(
     process.env.ORI_STAFFING_DEMO !== '1' ||
       process.env.ORI_MUSIC_HOME_ACCEPTANCE !== '1' ||
@@ -34,7 +35,9 @@ test('recognized build and collection review preserve and reuse the exact saved 
     ((await json(await request.get('/api/agents'))).agents as { name: string }[])
       .map(agent => agent.name)
       .sort();
-  const manager = `Aster ${Date.now()}`;
+  const manager = recovery
+    ? `Aster ${Date.now()} North Star Portfolio Coordination and Handoffs`
+    : `Aster ${Date.now()}`;
   let rolePUTs = 0;
   page.on('request', outgoing => {
     if (outgoing.method() === 'PUT' && /\/roles\//.test(new URL(outgoing.url()).pathname))
@@ -152,7 +155,7 @@ test('recognized build and collection review preserve and reuse the exact saved 
       )
     );
     const before = await names();
-    const version = (
+    let version = (
       await json(await request.get(`/api/agents/${encodeURIComponent(manager)}/detail`))
     ).version;
     await installLocalCdn(page);
@@ -208,13 +211,98 @@ test('recognized build and collection review preserve and reuse the exact saved 
         { timeout: 20_000 }
       )
       .toBe(true);
+    if (recovery) {
+      await page.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
     await summary.getByRole('button', { name: 'Review setup', exact: true }).click();
     const dialog = page.locator('#addFolderModal[data-source-setup-owner]');
     await expect(dialog).toBeVisible();
     const team = dialog.locator('#personalAssistantFolderHomeStaffing');
     await expect(team).toBeVisible();
     await expect(team.locator('[data-role-id="portfolio_manager"]')).toContainText('Missing');
-    await team.getByRole('button', { name: 'Recommend saved agents', exact: true }).click();
+    if (recovery) {
+      model.mode('unavailable');
+      const rank = team.getByRole('button', { name: 'Recommend saved agents', exact: true });
+      await rank.focus();
+      await page.keyboard.press('Enter');
+      await expect(team).toContainText('unavailable');
+      const assign = team.getByRole('button', {
+        name: 'Assign an agent to Music Portfolio Manager',
+        exact: true
+      });
+      await assign.focus();
+      await page.keyboard.press('Enter');
+      const search = team.getByRole('searchbox', {
+        name: 'Find a saved agent for Music Portfolio Manager',
+        exact: true
+      });
+      await search.fill('No such synthetic profile');
+      await expect(team).toContainText(
+        'No saved agents match this search. You can go back and create a new agent.'
+      );
+      await page.screenshot({
+        path: testInfo.outputPath('04-empty-manual-search.png'),
+        fullPage: true
+      });
+      await search.fill(manager);
+      const pick = team.getByRole('button', {
+        name: `Assign ${manager} to Music Portfolio Manager`,
+        exact: true
+      });
+      await pick.focus();
+      await page.keyboard.press('Enter');
+      const row = team.locator('[data-role-id="portfolio_manager"]');
+      await expect(row).toContainText(manager);
+      await expect(row).toBeFocused();
+      await expect(team.locator('[aria-live="polite"]')).toContainText('Review updated');
+      expect(model.calls()).toBe(1);
+      expect(await names()).toEqual(before);
+      await row.scrollIntoViewIfNeeded();
+      expect((await row.boundingBox())!.width).toBeLessThanOrEqual(390);
+      await page.screenshot({
+        path: testInfo.outputPath('04-unavailable-manual-dark-narrow.png'),
+        fullPage: true
+      });
+      await row.getByRole('button', { name: 'Clear Music Portfolio Manager', exact: true }).click();
+      model.mode('recommended');
+      const release = model.holdNextRecommendation();
+      await team
+        .getByRole('button', {
+          name: /^(Recommend saved agents|Refresh recommendation)$/,
+          exact: true
+        })
+        .click();
+      await expect.poll(() => model.calls()).toBe(2);
+      await team.getByRole('button', { name: 'Clear pending choices', exact: true }).click();
+      await expect(team.locator('[data-role-id="portfolio_manager"]')).toHaveAttribute(
+        'data-state',
+        'empty'
+      );
+      release();
+      // Observe after delivery: the original clear, not the late advice, owns
+      // the revision. No profile, accepted run or selected choice was created.
+      await expect
+        .poll(async () => {
+          const snapshot = (
+            await json(
+              await request.get(`/api/personal-assistant/folder-digest?offer_id=${offerID}`)
+            )
+          ).folder_digest.offer;
+          return {
+            choices: snapshot.home_staffing.choices?.length || 0,
+            advice: Boolean(snapshot.home_staffing.advice),
+            setup: Boolean(snapshot.setup)
+          };
+        })
+        .toEqual({ choices: 0, advice: false, setup: false });
+    }
+    await team
+      .getByRole('button', {
+        name: /^(Recommend saved agents|Refresh recommendation)$/,
+        exact: true
+      })
+      .click();
     const use = team.getByRole('button', {
       name: `Use ${manager} for Music Portfolio Manager`,
       exact: true
@@ -227,7 +315,62 @@ test('recognized build and collection review preserve and reuse the exact saved 
       fullPage: true
     });
     await use.click();
+    await expect(team.locator('[data-role-id="portfolio_manager"]')).toHaveAttribute(
+      'data-state',
+      'filled'
+    );
     await expect(team.locator('[data-role-id="portfolio_manager"]')).toContainText(manager);
+    if (recovery) {
+      // A deliberate shared-profile edit in the disposable fixture must stale
+      // the original selected witness. GET/reopen cannot renew or re-rank it.
+      await json(
+        await request.patch(`/api/agents/${encodeURIComponent(manager)}`, {
+          data: {
+            expected_version: version,
+            confirm_shared_edit: true,
+            description:
+              'Coordinates revised music portfolio priorities and reviewed project handoffs.'
+          }
+        })
+      );
+      version = (await json(await request.get(`/api/agents/${encodeURIComponent(manager)}/detail`)))
+        .version;
+      await page.goto('/?panel=today');
+      await expect
+        .poll(
+          async () => {
+            if ((await today.getAttribute('aria-expanded')) === 'false') await today.click();
+            return summary.isVisible();
+          },
+          { timeout: 20_000 }
+        )
+        .toBe(true);
+      await summary.getByRole('button', { name: 'Review setup', exact: true }).click();
+      await expect(team).toContainText('Clear');
+      const stale = await json(
+        await request.get(`/api/personal-assistant/folder-digest?offer_id=${offerID}`)
+      );
+      expect(stale.folder_digest.offer.home_staffing.state).toBe('stale');
+      expect(stale.folder_digest.offer.home_staffing.choices[0].name).toBe(manager);
+      expect(stale.folder_digest.offer.plan.digest || '').toBe('');
+      expect(model.calls()).toBe(3);
+      await team.locator('[data-role-id="portfolio_manager"]').scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath('04-stale-original-choice.png'),
+        fullPage: true
+      });
+      await team
+        .locator('[data-role-id="portfolio_manager"]')
+        .getByRole('button', { name: 'Clear Music Portfolio Manager', exact: true })
+        .click();
+      await team
+        .getByRole('button', { name: 'Assign an agent to Music Portfolio Manager', exact: true })
+        .click();
+      await team
+        .getByRole('button', { name: `Assign ${manager} to Music Portfolio Manager`, exact: true })
+        .click();
+      expect(model.calls()).toBe(3);
+    }
     await dialog.getByRole('button', { name: 'Return to setup review', exact: true }).click();
     const final = dialog.locator('[data-source-creation-review]:visible');
     await expect(final).toContainText(`${manager} · Reuse saved agent`);
@@ -305,13 +448,26 @@ test('recognized build and collection review preserve and reuse the exact saved 
       }
       expect(releaseInputs).toHaveLength(2);
     }
-    expect(model.calls()).toBe(1);
+    expect(model.calls()).toBe(recovery ? 3 : 1);
     expect(rolePUTs).toBe(0);
     await writeFile(
       testInfo.outputPath('03-folder-staffing-evidence.json'),
       JSON.stringify(
         {
           providerBoundary: 'scripted',
+          recovery: recovery
+            ? {
+                unavailableManual: true,
+                staleOriginalPreserved: true,
+                clearBeatsLateAdvice: true,
+                deliberateSourceEdit: true,
+                keyboardFocus: true,
+                emptySearchManualFallback: true,
+                longName: true,
+                viewport: '390x844',
+                theme: 'dark'
+              }
+            : undefined,
           pluginInput: reviewed
             ? 'genuine reviewed published release'
             : 'exact local candidate, not reviewed-release acceptance',

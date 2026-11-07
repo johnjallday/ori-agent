@@ -444,6 +444,13 @@
                   kind: text(reason.kind),
                   value: text(reason.value).slice(0, 400)
                 })),
+              assignments: (Array.isArray(choice.assignments) ? choice.assignments : [])
+                .filter(fact => fact && fact.kind === 'current_assignment')
+                .slice(0, 8)
+                .map(fact => ({
+                  kind: 'current_assignment',
+                  value: text(fact.value).slice(0, 400)
+                })),
               gaps: (Array.isArray(choice.gaps) ? choice.gaps : [])
                 .slice(0, 8)
                 .map(gap => text(gap).slice(0, 80))

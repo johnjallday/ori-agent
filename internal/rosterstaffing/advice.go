@@ -33,6 +33,7 @@ type AdviceChoice struct {
 	Source            string     `json:"source"`
 	Configured        bool       `json:"configured"`
 	Reasons           []Evidence `json:"reasons"`
+	Assignments       []Evidence `json:"assignments,omitempty"`
 	Gaps              []string   `json:"gaps,omitempty"`
 	SourceWitness     string     `json:"source_witness,omitempty"`
 	CapabilityWitness string     `json:"capability_witness,omitempty"`
@@ -51,6 +52,7 @@ func (s *Advice) Clone() *Advice {
 		for j := range out.Roles[i].Choices {
 			choice := &out.Roles[i].Choices[j]
 			choice.Reasons = append([]Evidence(nil), choice.Reasons...)
+			choice.Assignments = append([]Evidence(nil), choice.Assignments...)
 			choice.Gaps = append([]string(nil), choice.Gaps...)
 		}
 	}
@@ -90,7 +92,7 @@ func (s *Advice) Validate(contextVersion int64) error {
 		roles[role.RoleID] = true
 		for _, choice := range role.Choices {
 			if !adviceOpaque(choice.Handle) || !adviceOpaque(choice.SourceWitness) || !adviceText(choice.Name, 120) ||
-				(choice.Source != "root" && choice.Source != "legacy") || len(choice.Reasons) == 0 || len(choice.Reasons) > 3 || len(choice.Gaps) > 8 ||
+				(choice.Source != "root" && choice.Source != "legacy") || len(choice.Reasons) == 0 || len(choice.Reasons) > 3 || len(choice.Gaps) > 8 || len(choice.Assignments) > 8 ||
 				(choice.CapabilityWitness != "" && (s.Version != 2 || !reviewDigest(choice.CapabilityWitness))) {
 				return ErrInvalidAdvice
 			}
@@ -105,6 +107,11 @@ func (s *Advice) Validate(contextVersion int64) error {
 						return ErrInvalidAdvice
 					}
 				default:
+					return ErrInvalidAdvice
+				}
+			}
+			for _, assignment := range choice.Assignments {
+				if assignment.Kind != "current_assignment" || !adviceOpaque(assignment.ID) || assignment.Value == "" || safeText(assignment.Value, MaxPurposeRunes) != assignment.Value {
 					return ErrInvalidAdvice
 				}
 			}
