@@ -1450,3 +1450,88 @@ textarea.form-control:focus {
   justify-self: start;
   margin-top: 0.15rem;
 }
+
+/* Songs and assistants (home-song-roster.js): Home Details' read-only list of
+   linked songs. Each row wraps its parts; no horizontal scroll at 360 px. */
+.song-roster-mount[hidden] {
+  display: none;
+}
+
+.song-roster {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.song-roster-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.song-roster-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.song-roster-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--cozy-line, rgba(127, 127, 127, 0.25));
+}
+
+.song-roster-row:first-child {
+  border-top: 0;
+}
+
+.song-roster-song {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.song-roster-keeper,
+.song-roster-work {
+  font-size: 0.85rem;
+}
+
+.song-roster-session {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+
+.song-roster-muted,
+.song-roster-empty {
+  opacity: 0.75;
+}
+
+.song-roster-empty {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.song-roster a:focus-visible,
+.song-roster-show-all:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.song-roster-show-all {
+  justify-self: start;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}

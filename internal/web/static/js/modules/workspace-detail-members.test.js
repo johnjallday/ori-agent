@@ -312,3 +312,111 @@ test('an empty Home member list offers the setup sheet when projects wait (folde
   assert.equal(libraryEmptyStateFromSummary({ digest: null }), null);
   assert.equal(libraryEmptyStateFromSummary(null), null);
 });
+
+// A text-only node for the Songs and assistants mount (innerHTML throws).
+function rosterMount() {
+  const doc = {
+    createElement: tag => node(tag),
+    createTextNode: value => ({ textContent: String(value), children: [] })
+  };
+  function node(tag) {
+    const attributes = {};
+    return {
+      tagName: tag.toUpperCase(),
+      ownerDocument: doc,
+      children: [],
+      className: '',
+      hidden: true,
+      _text: '',
+      get textContent() {
+        return this.children.length ? this.children.map(c => c.textContent).join('') : this._text;
+      },
+      set textContent(value) {
+        this.children = [];
+        this._text = String(value);
+      },
+      set innerHTML(_value) {
+        throw new Error('innerHTML must not be used');
+      },
+      append(...nodes) {
+        this.children.push(...nodes);
+      },
+      replaceChildren(...nodes) {
+        this.children = nodes;
+      },
+      setAttribute(k, v) {
+        attributes[k] = String(v);
+      },
+      getAttribute(k) {
+        return attributes[k] ?? null;
+      },
+      addEventListener() {}
+    };
+  }
+  return node('div');
+}
+
+test('a managed Home lists its songs and assistants after the library section', async t => {
+  const asked = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    asked.push(url);
+    return {
+      ok: true,
+      json: async () => ({
+        rows: [
+          {
+            workspace_id: 'song-1',
+            title: 'Song 001',
+            keeper_agent_name: 'REAPER Assistant',
+            last_session: null,
+            open_work_counts: { ready: 2 },
+            workspace_route: '/workspaces/song-001'
+          }
+        ],
+        total: 1
+      })
+    };
+  });
+  const panel = new WorkspaceMembersPanel('home-1');
+  panel.els = { songRoster: rosterMount() };
+  panel.group = {
+    id: 'home-1',
+    folder_slug: 'music-home',
+    group_template: { kind: 'managed_home' }
+  };
+  await panel.loadSongRoster();
+  assert.deepEqual(asked, ['/api/workspaces/home-1/assistant-program/library/roster']);
+  assert.equal(panel.els.songRoster.hidden, false);
+  assert.match(panel.els.songRoster.textContent, /Songs and assistants/);
+  assert.match(panel.els.songRoster.textContent, /Song 001REAPER AssistantNo sessions yet2 ready/);
+  // The template places the mount after the member list, before the roll-ups.
+  const template = readFileSync(
+    new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
+    'utf8'
+  );
+  const list = template.indexOf('id="workspace-detail-members-list"');
+  const roster = template.indexOf('id="workspace-detail-song-roster"');
+  const rollups = template.indexOf('id="workspace-detail-members-rollups"');
+  assert.ok(list > 0 && list < roster && roster < rollups);
+});
+
+test('a plain group or an unreadable roster leaves the section hidden', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return { ok: false, status: 409, json: async () => ({}) };
+  });
+  const plain = new WorkspaceMembersPanel('team');
+  plain.els = { songRoster: rosterMount() };
+  plain.group = { id: 'team', kind: 'group' };
+  await plain.loadSongRoster();
+  assert.equal(calls, 0);
+  assert.equal(plain.els.songRoster.hidden, true);
+
+  const home = new WorkspaceMembersPanel('home-1');
+  home.els = { songRoster: rosterMount() };
+  home.group = { id: 'home-1', group_template: { kind: 'managed_home' } };
+  await home.loadSongRoster();
+  assert.equal(calls, 1);
+  assert.equal(home.els.songRoster.hidden, true);
+});
