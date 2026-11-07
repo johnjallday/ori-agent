@@ -223,8 +223,9 @@ These execution rules do not depend on the learning mission remaining active.
 
 ## Durable records and transitions
 
-Use the application's SQLite connection and migration **88** (recheck head at
-introduction). New tables are local-only and enter `ResetRecordTables` in the
+Use the application's SQLite connection and migration **89**, after upstream's
+workspace-updates migration 88. New tables are local-only and enter
+`ResetRecordTables` in the
 same change. No continuity collector/export/import registration.
 
 - `learning_owners`: owner, revision, deletion epoch, scoped consent/settings,

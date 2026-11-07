@@ -34,6 +34,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
+	"github.com/johnjallday/ori-agent/internal/workspaceupdates"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -62,6 +63,7 @@ type Server struct {
 	// closing process keeps dispatching work.
 	workspacePlanAuto        *workspaceplan.AutoRunner
 	fileJanitorAutomation    *filejanitor.Automation
+	workspaceUpdates         *workspaceupdates.Service
 	backupRecoveryService    *backuprecovery.Service
 	blueprintReintake        *blueprintintake.ReintakeAutomation
 	assistantSetupRetries    *assistantsetup.RetryRunner
@@ -156,6 +158,9 @@ func (s *Server) Start() {
 	if s.continuityWorker != nil {
 		s.continuityWorker.Start()
 	}
+	if s.workspaceUpdates != nil {
+		s.workspaceUpdates.Start()
+	}
 	if s.externalMemory != nil {
 		s.externalMemory.Start()
 	}
@@ -226,6 +231,16 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) shutdownBackground(ctx context.Context) error {
+	// Join update bookkeeping before closing any store. A timed-out stop stays
+	// retryable and keeps its lifetime permit; reset cannot mistake it for idle.
+	if s.workspaceUpdates != nil {
+		drainCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := s.workspaceUpdates.Stop(drainCtx)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
 	// Retryable, before once-only closure: an ambiguous metadata child/request
 	// retains ownership and must never have stores or the process lease closed
 	// behind it. No new backup request is admitted once Close begins.

@@ -1296,8 +1296,19 @@ func (b *ServerBuilder) wireSetupWizard() {
 	}
 	// A File Janitor workspace reaching ready completes Mission 02, Tidy your
 	// Downloads (tasks/prd-starter-missions.md FR10).
-	onReady = append(onReady, b.completeShowFolderOnWizardReady)
+	onReady = append(onReady, b.completeShowFolderOnWizardReady, b.notifyWorkspaceWelcomeReady)
 	service.SetCompletionHook(composeCompletionHooks(onReady...))
+	if b.sessionHandler != nil {
+		// This runs only on the user's explicit successful preparation request,
+		// not from update recovery. Preserve the wizard's canonical derivation.
+		b.sessionHandler.SetWorkspacePreparationCompleted(func(ctx context.Context, id string) error {
+			_, err := service.Status(ctx, id)
+			if err == nil {
+				b.notifyWorkspaceWelcomeReady(ctx, id)
+			}
+			return err
+		})
+	}
 }
 
 // blueprintWizardLookup resolves a blueprint by the template ID a workspace

@@ -6,7 +6,7 @@ import "context"
 // workspace FK: deleting a source must revoke its local identity without
 // erasing earned aggregate practice or replay tombstones.
 // App-record reset explicitly inventories all of these tables.
-func (db *DB) migration088LearningMissions(ctx context.Context) error {
+func (db *DB) migration089LearningMissions(ctx context.Context) error {
 	_, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS learning_owners (
  owner_id TEXT PRIMARY KEY CHECK(length(owner_id) BETWEEN 1 AND 128),

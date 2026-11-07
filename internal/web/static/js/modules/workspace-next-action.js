@@ -27,6 +27,29 @@ function completionAt(value) {
   return Number.isFinite(at) ? at : null;
 }
 
+export function updateSourceRows(saved) {
+  if (!saved) return [];
+  const rows = [];
+  const when = value =>
+    completionAt(value) === null ? 'Unavailable' : new Date(value).toLocaleString();
+  const review = saved.review;
+  if (review?.batch_id) {
+    rows.push(['Filing source', 'Saved File Janitor review']);
+    rows.push(['Batch', review.batch_id]);
+    rows.push(['Batch completed', when(review.batch_completed_at)]);
+    rows.push(['Review observed', when(review.observed_at)]);
+  }
+  for (const message of saved.welcome?.messages || []) {
+    if (![1, 2].includes(message.revision)) continue;
+    rows.push([`Message ${message.revision} saved`, when(message.delivered_at)]);
+    rows.push([
+      `Message ${message.revision} exposed`,
+      message.seen_at ? when(message.seen_at) : 'Not yet exposed'
+    ]);
+  }
+  return rows;
+}
+
 function taskTitle(task) {
   return String(task.description || task.name || task.title || 'Untitled ticket');
 }
@@ -77,20 +100,50 @@ export function resolveWorkspaceNextAction(input) {
   const janitor = input.console?.workspaceId === workspaceId ? input.console : null;
   const statusState = janitor?.status?.state || 'loading';
   const known = statusState === 'ready' && janitor?.applies === true;
+  const updateView = input.updates;
+  const saved = updateView?.data?.workspace_id === workspaceId ? updateView.data : null;
+  const review = saved?.review || { state: updateView?.state || 'loading' };
+  const reviewReady =
+    updateView?.state === 'ready' && !updateView.stale && review.state === 'ready' && !review.stale;
+  const welcome = saved?.welcome;
+  const message =
+    updateView?.state === 'ready' &&
+    !updateView.stale &&
+    welcome?.state === 'ready' &&
+    !welcome.stale &&
+    welcome.session_id &&
+    welcome.agent_name
+      ? {
+          owner: 'updates',
+          kind: 'welcome',
+          id: welcome.session_id,
+          key: `welcome:${welcome.agent_instance_id}:${welcome.session_id}`,
+          label: `Ask ${welcome.agent_name}`,
+          name: welcome.agent_name,
+          unread: welcome.unread_count > 0
+        }
+      : null;
   const qualifications = [];
   const ongoing = [];
   const qualify = (name, source) => {
-    if (!source || ['ready', 'not_applicable'].includes(source.state)) return;
+    if (!source || ['ready', 'not_applicable', 'unconfigured'].includes(source.state)) return;
     qualifications.push(
       `${name} ${name === 'Tickets' ? 'are' : 'is'} ${source.state === 'unavailable' ? 'unavailable' : 'loading'}.${source.stale ? ' Last known information may be out of date.' : ''}`
     );
   };
   qualify('Tickets', { state: taskState });
   qualify('File review status', janitor?.status || { state: 'loading' });
-  if (known) {
-    qualify('File review', janitor.batch);
-    qualify('Filing history', janitor.history);
-  }
+  if (updateView) {
+    qualify(
+      'File review',
+      updateView.state === 'ready' ? review : { state: updateView.state, stale: updateView.stale }
+    );
+    if (!reviewReady && review.pending_count > 0)
+      ongoing.push(
+        `Last known: ${review.pending_count} file${review.pending_count === 1 ? '' : 's'} to review. Refresh to confirm.`
+      );
+  } else if (known) qualify('File review', janitor.batch);
+  if (known) qualify('Filing history', janitor.history);
   if (current) ongoing.push(`Running: ${taskTitle(current)}`);
   if (janitor?.scanning) ongoing.push('Scanning for files. Nothing moves without approval.');
   if (known && janitor.scanState === 'failed')
@@ -108,7 +161,19 @@ export function resolveWorkspaceNextAction(input) {
     statusState,
     ...(known ? [janitor.batch?.state, janitor.history?.state] : [])
   ].includes('loading');
-  const finish = descriptor => ({ ...descriptor, isLoading, qualifications, ongoing, taskWork });
+  const finish = descriptor => ({
+    ...descriptor,
+    isLoading: isLoading || updateView?.state === 'loading',
+    qualifications,
+    ongoing,
+    taskWork,
+    message,
+    sourceRows: updateSourceRows(saved),
+    updateLabel:
+      saved && descriptor.kind === 'review' && reviewReady && review.pending_count > 0
+        ? `${message?.name || 'File review'} · ${saved.name}`
+        : ''
+  });
   const taskDescriptor = task => {
     const presentation = resolveTaskPresentation(task);
     const action = presentation.primaryAction;
@@ -169,14 +234,25 @@ export function resolveWorkspaceNextAction(input) {
         'Review consent',
         'attention'
       );
-    if (janitor.batch?.state === 'ready' && janitor.pendingCount > 0)
-      return consoleDescriptor(
-        'review',
-        `${janitor.pendingCount} file${janitor.pendingCount === 1 ? '' : 's'} ready for review`,
-        'Review the proposals and choose what happens. Nothing moves on open.',
-        'Review files',
-        'attention'
-      );
+  }
+  const pending = updateView
+    ? reviewReady
+      ? review.pending_count
+      : 0
+    : known && janitor.batch?.state === 'ready'
+      ? janitor.pendingCount
+      : 0;
+  if (pending > 0) {
+    const descriptor = consoleDescriptor(
+      'review',
+      `${pending} file${pending === 1 ? '' : 's'} ready for review`,
+      'Review the proposed filing locations. Nothing moves without your approval.',
+      'Review files',
+      'attention'
+    );
+    if (updateView)
+      descriptor.action.key = `review:${workspaceId}:${review.installed_at}:${review.root_id}:${review.batch_id}`;
+    return descriptor;
   }
   if (current) return taskDescriptor(current);
   if (known && janitor.scanning)
@@ -211,10 +287,19 @@ export function resolveWorkspaceNextAction(input) {
       receipt.result === 'applied' && !partial ? 'success' : 'attention'
     );
   }
+  if (message?.unread)
+    return finish({
+      kind: 'welcome',
+      title: `New message from ${message.name}`,
+      description: 'Open the saved conversation when you’re ready.',
+      tone: 'neutral',
+      action: { ...message, label: 'Open message' }
+    });
   if (qualifications.length) {
     const failed =
       taskState === 'unavailable' ||
       statusState === 'unavailable' ||
+      (updateView && (updateView.state === 'unavailable' || review.state === 'unavailable')) ||
       (known && [janitor.batch?.state, janitor.history?.state].includes('unavailable'));
     return finish({
       kind: failed ? 'unavailable' : 'loading',

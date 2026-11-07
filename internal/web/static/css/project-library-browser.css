@@ -1,0 +1,338 @@
+/* The existing warm-paper / amber index, now a compact catalog and reading
+   desk. All colors inherit the assistant page's light/dark theme contract. */
+/* Reserve the fixed navbar in the scroll viewport, not only in anchor margins:
+   native keyboard focus can otherwise scroll bulk/filter controls behind it.
+   Other pages do not acquire this scroll padding. */
+html:has(#projectLibraryPanel) {
+  scroll-padding-top: var(--navbar-offset, 76px);
+  scroll-padding-bottom: 1rem;
+}
+#projectLibraryPanel,
+.project-library-pane-head,
+#projectLibraryPanel :is(button, input, select, summary, a, [tabindex]) {
+  scroll-margin-top: 1rem;
+}
+/* Keep the catalog's warm-paper identity in both supported themes. Scope the
+   tokens to this surface rather than recoloring unrelated Home panels. */
+[data-bs-theme="dark"] #projectLibraryPanel {
+  --assistant-ink: #eee8dd;
+  --assistant-paper: #201d18;
+  --assistant-panel: #29251e;
+  --assistant-amber: #e9ac62;
+  --assistant-amber-deep: #efb96d;
+  --assistant-red: #f4a193;
+  --assistant-line: rgba(230, 214, 190, 0.24);
+  --assistant-muted: #b8b0a3;
+  color: var(--assistant-ink);
+  background: var(--assistant-paper);
+}
+.project-library-scopes,
+.project-library-collection-scope,
+.project-library-selection-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.65rem 0;
+}
+.project-library-scopes button {
+  border: 1px solid var(--assistant-line);
+  border-radius: 1.25rem;
+  padding: 0.45rem 0.85rem;
+  color: var(--assistant-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.project-library-scopes button[aria-pressed="true"] {
+  border-color: var(--assistant-amber);
+  background: color-mix(in srgb, var(--assistant-amber) 12%, transparent);
+  font-weight: 650;
+}
+.project-library-scopes button:focus-visible {
+  outline: 2px solid var(--assistant-amber);
+  outline-offset: 3px;
+}
+.project-library-scope-note,
+.project-library-selection-tools > span {
+  color: var(--assistant-muted);
+  font-size: 0.85rem;
+}
+.project-library-scope-note:empty {
+  display: none;
+}
+.project-library-collections > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.project-library-collection-scope > span {
+  overflow-wrap: anywhere;
+}
+.project-library-management {
+  margin: 0.75rem 0;
+  border-block: 1px solid var(--assistant-line);
+  padding: 0.65rem 0;
+}
+.project-library-management > summary,
+.project-library-filters > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--assistant-muted);
+  font: 600 0.8rem/1.6 var(--font-mono, monospace);
+}
+.project-library-filters {
+  margin-top: 0.65rem;
+}
+.project-library-applied {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.project-library-applied:has(button[hidden]) {
+  margin: 0;
+}
+.project-library-applied > span {
+  color: var(--assistant-muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.project-library-browser {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  border: 1px solid var(--assistant-line);
+  background: var(--assistant-panel);
+  border-radius: 4px;
+}
+.project-library-results {
+  min-width: 0;
+  padding: 0 0.75rem 0.75rem;
+}
+.project-library-browser .project-library-table-wrap {
+  max-height: 65vh;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.project-library-browser .project-library-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+.project-library-browser .project-library-table th {
+  position: sticky;
+  top: 0;
+  background: var(--assistant-paper);
+  z-index: 1;
+}
+.project-library-browser .project-library-table th:first-child {
+  width: 2.25rem;
+}
+.project-library-browser .project-library-table th:nth-child(2) {
+  width: auto;
+}
+.project-library-browser .project-library-table th:nth-child(3) {
+  width: 5.5rem;
+}
+.project-library-browser .project-library-table th:nth-child(4) {
+  width: 6.5rem;
+}
+.project-library-browser .project-library-table td {
+  padding: 0.55rem 0.35rem;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.project-library-browser tr.is-selected {
+  background: color-mix(in srgb, var(--assistant-amber) 12%, transparent);
+}
+.project-library-browser tr.is-selected td:nth-child(2) {
+  box-shadow: inset 3px 0 var(--assistant-amber);
+}
+.project-library-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  border: 0;
+  padding: 0.2rem 0.4rem;
+  background: none;
+  color: var(--assistant-ink);
+  text-align: left;
+  font: inherit;
+  font-weight: 650;
+  width: 100%;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.project-library-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.project-library-browser small {
+  padding-inline: 0.4rem;
+}
+.project-library-browser .project-library-exception {
+  color: var(--assistant-amber-deep);
+}
+.project-library-pane {
+  min-width: 0;
+  border-left: 1px solid var(--assistant-line);
+}
+.project-library-pane-head {
+  padding: 1.1rem 1.25rem 0.6rem;
+}
+.project-library-pane-head h3 {
+  margin: 0.65rem 0;
+  font:
+    600 1.4rem/1.25 "Chakra Petch",
+    sans-serif;
+  overflow-wrap: anywhere;
+}
+.project-library-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding-inline: 1rem;
+  border-bottom: 1px solid var(--assistant-line);
+}
+.project-library-tabs button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 0.7rem;
+  background: none;
+  color: var(--assistant-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.project-library-tabs button[aria-selected="true"] {
+  color: var(--assistant-ink);
+  border-bottom-color: var(--assistant-amber);
+  font-weight: 650;
+}
+.project-library-tab-panel {
+  padding: 1.25rem;
+  max-height: 56vh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.project-library-tab-panel > :first-child {
+  margin-top: 0;
+}
+.project-library-overview-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+}
+.project-library-overview-facts dd {
+  margin: 0;
+}
+.project-library-pane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+.project-library-pane .project-library-session-history {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.project-library-browser [hidden] {
+  display: none;
+}
+.project-library-browser button:focus-visible,
+.project-library-browser a:focus-visible,
+.project-library-management > summary:focus-visible,
+.project-library-filters > summary:focus-visible {
+  outline: 2px solid var(--assistant-amber-deep);
+  outline-offset: 3px;
+}
+.project-library-file-tree {
+  list-style: none;
+  max-height: 24rem;
+  overflow: auto;
+  padding-left: 1rem;
+}
+.project-library-file-tree ul {
+  list-style: none;
+  padding-left: 1rem;
+}
+.project-library-file-tree button {
+  border: 0;
+  background: none;
+  color: var(--assistant-ink);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  padding: 0.3rem;
+}
+.project-library-file-tree button:hover {
+  text-decoration: underline;
+}
+.project-library-file-preview h4 {
+  font: inherit;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.project-library-file-tree small {
+  color: var(--assistant-muted);
+}
+.project-library-file-preview {
+  border-top: 1px solid var(--assistant-line);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.project-library-file-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24rem;
+  overflow: auto;
+  color: var(--assistant-ink);
+}
+.project-library-file-preview img {
+  max-width: 100%;
+  max-height: 24rem;
+  object-fit: contain;
+}
+@media (max-width: 900px) {
+  .project-library-browser {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .project-library-pane {
+    border-left: 0;
+  }
+  .project-library-browser:not(.is-inspecting) .project-library-pane,
+  .project-library-browser.is-inspecting .project-library-results {
+    display: none;
+  }
+  .project-library-tab-panel {
+    max-height: none;
+  }
+}
+@media (max-width: 768px) {
+  /* common.css gives checkboxes a 44px touch target here (also at native
+     desktop zoom). Keep that target inside its own column, not over a name. */
+  .project-library-browser .project-library-table th:first-child {
+    width: calc(44px + 1rem);
+  }
+}
+@media (max-width: 480px) {
+  .project-library-panel {
+    padding: 0.8rem;
+  }
+  .assistant-program-page {
+    width: calc(100% - 1rem);
+  }
+  .project-library-results {
+    padding-inline: 0.25rem;
+  }
+  .project-library-browser .project-library-table th:nth-child(3) {
+    width: 4.2rem;
+  }
+  .project-library-browser .project-library-table th:nth-child(4) {
+    width: 4.7rem;
+  }
+  .project-library-pane-head,
+  .project-library-tab-panel {
+    padding: 0.85rem;
+  }
+}

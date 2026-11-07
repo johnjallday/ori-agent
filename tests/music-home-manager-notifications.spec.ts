@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
 
 // Run only in a disposable HOME through the reviewed Music journey:
 //   ./scripts/music-home-demo.sh test --suite manager-notifications --provider reviewed \
@@ -18,6 +19,7 @@ test.skip(
   'requires music-home-demo.sh test --suite manager-notifications --provider reviewed'
 );
 test.setTimeout(240_000);
+test.use({ actionTimeout: 15_000 });
 
 async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
   const text = await response.text();
@@ -119,24 +121,18 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   expect(offer).toMatchObject({ status: 'pending', capability: { setup_source: 'portfolio' } });
   await page.goto('/?panel=today&folder=show');
   page.on('dialog', dialog => dialog.accept()); // Only inside the disposable HOME.
-  // With the provider not installed yet the folder is first proposed as a plain
-  // group; listing it in the Home is the Adjust choice this suite takes.
+  // The collection now proposes the Music Home directly, even before its
+  // provider is installed. Use the reviewed setup route, not the retired Adjust UI.
   const proposed = page.locator('#personalAssistantFolderOffer');
-  await proposed.getByRole('button', { name: 'Adjust…', exact: true }).click();
-  const sheet = proposed.locator('[data-folder-adjust]').first();
-  await sheet.locator('input[type=radio][value=library]').check();
-  await sheet.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(proposed).toContainText('music projects');
-  await page
-    .locator('#personalAssistantFolderOffer')
-    .locator('[data-folder-action="setup"]')
-    .click();
+  const today = page.locator('#personalAssistantTodayStripToggle');
+  if ((await today.getAttribute('aria-expanded')) === 'false') await today.click();
+  await proposed.getByRole('button', { name: 'Yes, set up Music Production Home' }).click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible({ timeout: 90_000 });
   await creator.getByRole('button', { name: 'Continue →' }).click();
   await creator.getByRole('button', { name: 'Continue →' }).click();
   await creator.getByRole('button', { name: 'Review →' }).click();
-  await creator.locator('#createFolderBtn').click();
+  await confirmCreatorFinalAction(page, { open: true });
   await page.waitForURL(/\/assistant\?folder_offer_id=/, { timeout: 30_000 });
   const homes = (await json(await request.get('/api/workspaces'))).folders.filter(
     (row: { kind: string }) => row.kind === 'group'
@@ -144,6 +140,10 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   expect(homes).toHaveLength(1);
   const homeID = homes[0].id;
   const base = `/api/workspaces/${homeID}/assistant-program/library`;
+  if (await page.locator('#personalAssistantPanel').isVisible()) {
+    await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  }
 
   if (reaperSource) {
     // A paired run installs the clean REAPER export before the scan so the
@@ -221,6 +221,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
       (await json(await request.get(`/api/workspaces/${homeID}`))).agent_instances
     ).toHaveLength(agentsAfterScan);
   };
+  await shelf.locator('#projectLibraryManagement > summary').click();
   const digestLine = shelf.locator('#projectLibraryDigest');
   await expect(digestLine).toBeVisible();
   if (reaperSource) {
@@ -317,7 +318,8 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   const directChatSuggestion = async () => {
     await saveChatSuggestion('Album-0');
     expect((await json(await request.get(`${base}/summary`))).ready_proposals).toBe(1);
-    await page.goto(summary.route.replace('#projectLibraryProposals', ''));
+    await page.goto(summary.route);
+    await page.reload(); // A same-URL hash navigation does not refresh the saved suggestions.
     const card = shelf.locator('#projectLibraryProposalRows .project-library-resume-card');
     await expect(card).toHaveCount(1);
     await expect(card).toContainText(
@@ -340,9 +342,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     await expect(page.locator('[data-library-badge]')).toHaveCount(0);
     await directChatSuggestion();
     await page.goto('/');
-    await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
-      '6 new · 1 to review'
-    );
+    await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText('1 to review');
     expect(projectFiles.map(hash)).toEqual(before);
     await expectNoGrantOrStaffingChange();
     return;
@@ -360,9 +360,9 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   ]);
   await page.goto('/');
   const badge = page.locator(`[data-library-badge="${homeID}"]`);
-  await expect(badge).toHaveText('6 new · 5 ready');
+  await expect(badge).toHaveText('5 to set up');
   await expect(badge).toHaveAccessibleName(
-    `${homeName} library: 6 new projects, 5 ready to set up. Open the suggestions shelf.`
+    `${homeName} library: 5 projects to set up. Open the suggestions shelf.`
   );
   await shot(page, '03-map-badge-light');
   await setTheme('dark');
@@ -380,12 +380,16 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   await shot(page, '05-map-badge-390-dark');
   await page.setViewportSize({ width: 1280, height: 900 });
   await setTheme('light');
-  // Keyboard only: the badge is a real button and no map key handler
-  // swallows Enter on it.
+  // Keyboard only: the current Map opens its inert setup sheet first. The
+  // sheet's navigation link reaches this same shelf without confirming setup.
   await badge.focus();
   await expect(badge).toBeFocused();
   await page.keyboard.press('Enter');
-  await page.waitForURL(/\/assistant#projectLibraryProposals$/);
+  const setupSheet = page.getByRole('dialog', { name: `Set up projects from ${homeName}` });
+  await expect(setupSheet).toBeVisible();
+  await setupSheet.getByRole('link', { name: 'Open the project shelf', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await page.waitForURL(/\/assistant#projectLibraryProposals$/, { timeout: 15_000 });
   await expect(page.locator('#projectLibraryProposalsTitle')).toBeFocused();
   await expect(page.locator('#projectLibraryDigest')).toContainText('5 can be set up');
   await expectHeadingUncovered(page, '#projectLibraryProposalsTitle');
@@ -423,7 +427,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   await directChatSuggestion();
   await page.goto('/');
   await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
-    '6 new · 5 ready · 1 to review'
+    '5 to set up · 1 to review'
   );
   expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
     workspacesBeforeScan
@@ -436,9 +440,9 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   const album1 = await saveChatSuggestion('Album-1');
   await page.goto('/');
   await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
-    '6 new · 5 ready · 2 to review'
+    '5 to set up · 2 to review'
   );
-  await page.goto(summary.route.replace('#projectLibraryProposals', ''));
+  await page.goto(summary.route);
   const suggestionCards = shelf.locator('#projectLibraryProposalRows .project-library-resume-card');
   await expect(suggestionCards).toHaveCount(2);
   await suggestionCards
@@ -483,7 +487,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   await suggestionCards.first().scrollIntoViewIfNeeded();
   await shot(page, '11-dismissed-and-confirmed');
   await page.goto('/');
-  await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText('6 new · 5 ready');
+  await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText('5 to set up');
   await page.goto('/action-center');
   await expect(page.locator('#action-center-library')).toContainText('6 new · 5 ready to set up');
   await expect(page.locator('#action-center-library')).not.toContainText('to review');
@@ -508,7 +512,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   }
   // Reduced motion: the shelf renders without its entrance animation.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto(summary.route.replace('#projectLibraryProposals', ''));
+  await page.goto(summary.route);
   await answered();
   await expect(suggestionCards.filter({ hasText: 'Album-0' })).toContainText('Dismissed by you');
   await expect(shelf.locator('#projectLibraryFeedback')).toHaveText(

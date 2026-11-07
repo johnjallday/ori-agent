@@ -124,6 +124,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
+	"github.com/johnjallday/ori-agent/internal/workspaceupdates"
 )
 
 // ServerBuilder builds a Server instance through a series of initialization phases.
@@ -454,6 +455,7 @@ type ServerBuilder struct {
 	fileJanitorHandler    *filejanitorhttp.Handler
 	fileJanitorService    *filejanitor.Service
 	fileJanitorAutomation *filejanitor.Automation
+	workspaceUpdates      *workspaceupdates.Service
 	backupRecoveryService *backuprecovery.Service
 	backupRecoveryHandler *backuprecoveryhttp.Handler
 	// fileJanitorCapabilityRuntime is held so a later wiring phase can give it
@@ -746,6 +748,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Workflow.DailyBriefScheduler = b.dailyBriefScheduler
 	b.server.Workflow.MapActivityTracker = b.mapActivityTracker
 	b.server.fileJanitorAutomation = b.fileJanitorAutomation
+	b.server.workspaceUpdates = b.workspaceUpdates
 	b.server.backupRecoveryService = b.backupRecoveryService
 	b.server.blueprintReintake = b.blueprintReintake
 	b.server.assistantSetupRetries = b.assistantSetupRetries

@@ -529,6 +529,44 @@
   cursor: pointer;
 }
 
+.personal-assistant-launcher__unread {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ori-accent-strong);
+  outline: 2px solid var(--ori-surface);
+}
+
+.personal-assistant-panel__welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ori-line);
+  color: var(--ori-ink);
+  font-size: 12px;
+}
+
+.personal-assistant-panel__welcome button {
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: var(--ori-surface);
+  color: var(--ori-accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.personal-assistant-panel__welcome button:focus-visible {
+  outline: 2px solid var(--ori-accent-strong);
+  outline-offset: 2px;
+}
+
+.personal-assistant-launcher__unread[hidden],
+.personal-assistant-panel__welcome[hidden],
 .personal-assistant-launcher[hidden],
 .personal-assistant-panel__avatar[hidden],
 .personal-assistant-panel[hidden] {

@@ -29,6 +29,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
+	"github.com/johnjallday/ori-agent/internal/workspaceupdates"
 )
 
 // Handler handles session-related HTTP requests.
@@ -165,6 +166,11 @@ type Handler struct {
 	// workspaceBuild wires "Build with your assistant" sessions; nil leaves
 	// the Create Workspace wizard manual everywhere.
 	workspaceBuild *WorkspaceBuildDeps
+	// Host bookkeeping at successful creation / explicitly requested preparation.
+	// These are never invoked from import, status GETs or recovery replays.
+	workspaceUpdates              *workspaceupdates.Service
+	workspaceWelcomeCreated       func(context.Context, string) error
+	workspacePreparationCompleted func(context.Context, string) error
 	// buildReviews is the lease on the folder setups builds run: one setup
 	// request at a time per build.
 	buildReviews buildReviewGate

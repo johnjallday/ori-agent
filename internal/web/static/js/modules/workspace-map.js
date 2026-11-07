@@ -700,6 +700,73 @@
   // and the badge only navigates: the host owns the click. Anything that is
   // not a same-origin suggestions-shelf route is dropped here.
   var libraryBadges = Object.create(null);
+  var workspaceUpdateBadges = Object.create(null);
+
+  function setWorkspaceUpdateBadges(snapshot) {
+    workspaceUpdateBadges = Object.create(null);
+    Object.keys(snapshot || {}).forEach(function (id) {
+      var view = snapshot[id];
+      if (view && view.workspaceId === id && Array.isArray(view.signals))
+        workspaceUpdateBadges[id] = view;
+    });
+  }
+
+  function workspaceUpdateLabel(id) {
+    var view = workspaceUpdateBadges[id];
+    if (!view) return '';
+    var labels = (view.signals || []).map(function (signal) {
+      return signal.text;
+    });
+    if (!labels.length && view.state === 'unavailable') labels.push('Updates unavailable');
+    var hint = Object.keys(workspaceUpdateRoutes(id)).length
+      ? '. Use Shift+F10 for update actions'
+      : '. Refresh Updates to confirm';
+    return labels.length ? '. Workspace updates: ' + labels.join('; ') + hint : '';
+  }
+
+  function workspaceUpdateMarkers(id) {
+    var presenter = window.OriWorkspaceUpdateSignals;
+    return presenter && presenter.renderMap ? presenter.renderMap(workspaceUpdateBadges[id]) : '';
+  }
+
+  function workspaceUpdateRoutes(id) {
+    var view = workspaceUpdateBadges[id];
+    var routes = Object.create(null);
+    var presenter = window.OriWorkspaceUpdateSignals;
+    if (view && presenter && presenter.safeRoute)
+      (view.signals || []).forEach(function (signal) {
+        var route = presenter.safeRoute(view, signal);
+        if (route) routes[signal.kind] = route;
+      });
+    return routes;
+  }
+
+  // Patch labels only: a source refresh must not remount the world, lose a
+  // selection/menu, move the camera or interrupt a drag. Menu routes are frozen
+  // when opened; the destination revalidates that exact navigation intent.
+  function updateWorkspaceBadges(container, snapshot) {
+    setWorkspaceUpdateBadges(snapshot);
+    if (lastMount && lastMount.container === container)
+      lastMount.state = Object.assign({}, lastMount.state, { workspaceUpdateBadges: snapshot });
+    if (!container || !container.querySelectorAll) return;
+    Array.prototype.forEach.call(
+      container.querySelectorAll('.ws-map-tile[data-ws-id]'),
+      function (tile) {
+        var id = tile.getAttribute('data-ws-id');
+        var host = tile.querySelector('[data-workspace-update-markers]');
+        var html = workspaceUpdateMarkers(id);
+        if (host && host.innerHTML !== html) host.innerHTML = html;
+        var before = tile.getAttribute('data-update-accessible-suffix') || '';
+        var label = tile.getAttribute('aria-label') || '';
+        if (before && label.slice(-before.length) === before)
+          label = label.slice(0, -before.length);
+        var after = workspaceUpdateLabel(id);
+        tile.setAttribute('data-update-accessible-suffix', after);
+        if (tile.getAttribute('aria-label') !== label + after)
+          tile.setAttribute('aria-label', label + after);
+      }
+    );
+  }
   var LIBRARY_SHELF_ROUTE = /^\/workspaces\/[^/?#\s]+\/assistant#projectLibraryProposals$/;
   // World-space room for the badge line: a 44px touch target plus the row gap.
   var LIBRARY_BADGE_CLEARANCE = 48;
@@ -2633,7 +2700,8 @@
       (hasKeeper ? ', entry agent ' + ws.entry_agent_name : '') +
       (isHQ ? ', Personal HQ' : '') +
       economyLabel +
-      actionHint
+      actionHint +
+      workspaceUpdateLabel(ws.id)
     );
   }
 
@@ -2686,6 +2754,9 @@
       'px;--i:' +
       (index || 0) +
       '" ' +
+      'data-update-accessible-suffix="' +
+      escapeHtml(workspaceUpdateLabel(ws.id)) +
+      '" ' +
       'aria-label="' +
       escapeHtml(tileAccessibleName(ws, isSel, null)) +
       '">' +
@@ -2708,6 +2779,9 @@
       // Same badge slot as HQ, so the economy's badges inherit the tile's own
       // custom properties and render correctly in both themes (FR36).
       economyBadgesHTML(ws.id) +
+      '<span data-workspace-update-markers>' +
+      workspaceUpdateMarkers(ws.id) +
+      '</span>' +
       structure +
       '<span class="ws-map-tile-name">' +
       escapeHtml(ws.name || 'Workspace') +
@@ -4676,6 +4750,13 @@
       { label: 'Open workspace', action: 'open' },
       { label: 'Open → Backlog', action: 'open-backlog' }
     ];
+    var updateView = workspaceUpdateBadges[id];
+    var updateRoutes = workspaceUpdateRoutes(id);
+    if (updateView)
+      (updateView.signals || []).forEach(function (signal) {
+        if (updateRoutes[signal.kind])
+          items.push({ label: signal.text, action: 'workspace-update-' + signal.kind });
+      });
     // Giving a task is a Home map action (FR48); a group page already has its
     // own Give work button one click away.
     if (!scoped) items.push(giveTaskMenuItem(ws));
@@ -5127,9 +5208,12 @@
       default:
         handled = false;
     }
-    // Enter and Space are prevented too: a <button> would otherwise synthesize
-    // a click and run the action a second time.
+    // The menu owns these keys. Its host lives inside the camera: allowing an
+    // arrow to bubble would also pan (or move a selected building) and dismiss
+    // the very menu the user is navigating. Enter/Space must not synthesize a
+    // second click either.
     if (handled && event.preventDefault) event.preventDefault();
+    if (handled && event.stopPropagation) event.stopPropagation();
   }
 
   function openContextMenu(container, spec) {
@@ -5187,6 +5271,12 @@
         announce(container, 'Opening ' + name);
         if (options && typeof options.onOpen === 'function') options.onOpen(id);
         else openWorkspace(id);
+        break;
+      case 'workspace-update-welcome':
+      case 'workspace-update-review':
+        var updateRoute =
+          context.updateRoutes && context.updateRoutes[action.replace('workspace-update-', '')];
+        if (updateRoute) window.location.assign(updateRoute);
         break;
       case 'open-unit':
         if (context.unit) openUnit(container, context.unit, options);
@@ -5432,6 +5522,7 @@
           (target.unit && target.unit.name) ||
           (target.type === 'hq' ? 'Personal HQ' : 'workspace'),
         unit: target.unit || null,
+        updateRoutes: workspaceUpdateRoutes(target.id),
         // Canvas and district Build share the same camera/snap placement rule.
         world:
           target.type === 'canvas' || target.type === 'district'
@@ -5581,6 +5672,20 @@
       //     double-click always opens.
       el.addEventListener('click', function (e) {
         var id = el.getAttribute('data-ws-id');
+        var onUpdate = e.target && e.target.closest && e.target.closest('[data-map-update-route]');
+        if (isTile && onUpdate) {
+          e.preventDefault();
+          e.stopPropagation();
+          var updateRoute = onUpdate.getAttribute('data-map-update-route');
+          var allowedRoutes = workspaceUpdateRoutes(id);
+          if (
+            Object.keys(allowedRoutes).some(function (kind) {
+              return allowedRoutes[kind] === updateRoute;
+            })
+          )
+            window.location.assign(updateRoute);
+          return;
+        }
         var onCheck = e.target && e.target.closest && e.target.closest('[data-ws-check]');
         // The harvest pile is a control inside the tile, so it claims the click
         // outright: clicking it must open the pile, never select the workspace
@@ -8685,6 +8790,8 @@
         // never start a spatial move (FR-76).
         if (event.metaKey || event.ctrlKey || event.shiftKey) return;
         if (event.target && event.target.closest && event.target.closest('[data-ws-check]')) return;
+        if (event.target && event.target.closest && event.target.closest('[data-map-update-route]'))
+          return;
         // Same for the harvest pile: pressing it opens the popover, and a press
         // that also began dragging the building would make the popover appear
         // somewhere the tile no longer is (city-economy FR37).
@@ -11083,6 +11190,7 @@
     // Read before districtHTML runs, like the economy. A host that passes
     // none draws no library badge.
     setLibraryBadges(state && state.libraryBadges);
+    setWorkspaceUpdateBadges(state && state.workspaceUpdateBadges);
     setLibraryEmptyState(state && state.libraryEmptyState);
     var allWorkspaces = (state && state.workspaces) || [];
     // Scoped mode is decided before anything reads the workspace list, so
@@ -11407,6 +11515,12 @@
     libraryBadges: {
       setSnapshot: setLibraryBadges,
       badgeHTML: libraryBadgeHTML
+    },
+    workspaceUpdates: {
+      setSnapshot: setWorkspaceUpdateBadges,
+      update: updateWorkspaceBadges,
+      markerHTML: workspaceUpdateMarkers,
+      routes: workspaceUpdateRoutes
     },
     computeLayout: computeMapLayout,
     // The task-run show's live activity layer. The map subscribes to

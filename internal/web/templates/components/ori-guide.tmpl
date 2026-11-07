@@ -93,6 +93,7 @@
       <span id="personalAssistantLauncherStatus" class="personal-assistant-launcher__status" hidden></span>
       <span id="personalAssistantWorkStatus" class="personal-assistant-launcher__status" hidden></span>
     </span>
+    <span id="personalAssistantUnread" class="personal-assistant-launcher__unread" hidden><span class="visually-hidden"></span></span>
   </button>
   <section id="personalAssistantPanel" class="personal-assistant-panel" role="dialog"
            aria-labelledby="personalAssistantPanelTitle" hidden>
@@ -183,6 +184,11 @@
         <i class="bi bi-x-lg" aria-hidden="true"></i>
       </button>
     </header>
+
+    <div id="personalAssistantWelcome" class="personal-assistant-panel__welcome" hidden>
+      <span id="personalAssistantWelcomeLabel" role="status" aria-live="polite"></span>
+      <button type="button" id="personalAssistantOpenWelcome">Open message</button>
+    </div>
 
     <!-- Under the header, only while one of them has something: the earlier
          conversations Continue… lists, the conversation's note (reserved for

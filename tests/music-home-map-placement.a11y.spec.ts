@@ -18,7 +18,9 @@ const variant = process.env.MUSIC_HOME_PLACEMENT_A11Y || 'light';
 const touch = variant === 'touch';
 const theme = ['dark', 'touch', 'zoom'].includes(variant) ? 'dark' : 'light';
 const manual = ['light', 'dark'].includes(variant);
-const evidence = `tasks/evidence-music-home-map-placement/delivery/${variant}`;
+const evidence =
+  process.env.MUSIC_HOME_PLACEMENT_EVIDENCE ||
+  `tasks/evidence-music-home-map-placement/delivery/${variant}`;
 let axe = '';
 test.use({
   viewport: touch ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
@@ -100,12 +102,31 @@ async function noOverflow(page: Page) {
   expect(
     await page.evaluate(() => {
       const panel = document.querySelector('#personalAssistantPanel') as HTMLElement;
+      const modal = document.querySelector('#addFolderModal') as HTMLElement;
+      const body = modal.querySelector('.modal-body') as HTMLElement;
+      const host = modal.querySelector('#sourceSetupDialogHost') as HTMLElement;
       return {
         page: document.documentElement.scrollWidth > innerWidth + 1,
-        panel: panel.scrollWidth > panel.clientWidth + 1
+        panel: panel.scrollWidth > panel.clientWidth + 1,
+        modal: modal.scrollWidth > modal.clientWidth + 1,
+        body: body.scrollWidth > body.clientWidth + 1,
+        host: host.scrollWidth > host.clientWidth + 1,
+        nestedScroll:
+          [modal, body, host].filter(
+            element =>
+              /auto|scroll/.test(getComputedStyle(element).overflowY) &&
+              element.scrollHeight > element.clientHeight + 1
+          ).length > 1
       };
     })
-  ).toEqual({ page: false, panel: false });
+  ).toEqual({
+    page: false,
+    panel: false,
+    modal: false,
+    body: false,
+    host: false,
+    nestedScroll: false
+  });
 }
 
 async function exercise(page: Page) {
@@ -142,13 +163,25 @@ async function exercise(page: Page) {
       writes++;
   });
   const review = await openMusicHomeReview(page, selectedSong, variant === 'tree');
+  const dialog = page.locator('#addFolderModal');
+  if (!touch) {
+    const close = dialog.getByRole('button', { name: 'Close setup review', exact: true });
+    await usable(close, 'Shift+Tab');
+    await close.press('Enter');
+    await expect(dialog).toBeHidden();
+    const entry = page
+      .locator('[data-source-setup-summary]')
+      .getByRole('button', { name: 'Review setup', exact: true });
+    await expect(entry).toBeFocused();
+    await entry.press('Enter');
+    await expect(page.locator('#folderModalTitle')).toBeFocused();
+  }
   await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
   const homeName = review.getByRole('textbox', { name: 'Group name', exact: true });
   await expect(homeName).toHaveAttribute('readonly', '');
   await expect(homeName).toHaveValue('Music Production Home');
-  await expect(
-    review.getByRole('textbox', { name: 'Later project goal', exact: true })
-  ).toHaveAttribute('readonly', '');
+  const goal = review.getByRole('textbox', { name: 'Later project goal', exact: true });
+  await expect(goal).toBeEditable();
   await expect(
     review.getByRole('heading', { name: 'Later project · REAPER Assistant', exact: true })
   ).toHaveCount(1);
@@ -165,7 +198,7 @@ async function exercise(page: Page) {
     .scrollIntoViewIfNeeded();
   await capture(page, 'later-team');
   await noOverflow(page);
-  await accessibility(page, '[data-source-creation-review]');
+  await accessibility(page, '#addFolderModal');
   const place = review.getByRole('button', { name: 'Place & set up on map', exact: true });
   let candidate: { x: number; y: number } | undefined;
   if (manual) {
@@ -187,7 +220,7 @@ async function exercise(page: Page) {
     expect(await snapshot(page.request)).toEqual(before);
     await canvas.press('Escape');
     await expect(review).toBeVisible();
-    await expect(review.locator(':focus')).toHaveCount(1);
+    await expect(dialog.locator(':focus')).toHaveCount(1);
     await usable(place);
     await place.press('Enter');
     expect(
@@ -223,9 +256,9 @@ async function exercise(page: Page) {
   await expect(review.getByRole('status')).toContainText(
     'Library entries are not project buildings'
   );
-  await expect(review.locator(':focus')).toHaveCount(1);
+  await expect(dialog.locator(':focus')).toHaveCount(1);
   await noOverflow(page);
-  await accessibility(page, '[data-source-creation-review]');
+  await accessibility(page, '#addFolderModal');
   const after = await snapshot(page.request);
   const homes = after.workspaces.filter((w: any) => w.kind === 'group');
   expect(homes).toHaveLength(1);

@@ -26,30 +26,29 @@ func (s *stubCuratorWelcomeReader) ReadCuratorWelcome(_ context.Context, owner, 
 	return s.value, s.err
 }
 
-func TestFileCuratorWelcome_OffersOnlyStateBackedChoices(t *testing.T) {
+func TestFileCuratorWelcome_OffersConciseStateBackedNavigation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		saved     filejanitor.CuratorWelcome
 		available bool
 		want      string
 		uncertain bool
-		choices   int
 	}{
-		{"batch with uncertainty", filejanitor.CuratorWelcome{Configured: true, Pending: 3, NeedsReview: 1}, true, "3 items waiting for review", true, 3},
-		{"confident batch", filejanitor.CuratorWelcome{Configured: true, Pending: 1}, true, "1 item waiting for review", false, 2},
-		{"no batch", filejanitor.CuratorWelcome{Configured: true}, true, "choose Scan now", false, 2},
-		{"setup missing", filejanitor.CuratorWelcome{}, true, "existing setup controls", false, 2},
-		{"unavailable", filejanitor.CuratorWelcome{Configured: true, Pending: 99, NeedsReview: 99}, false, "can’t verify", false, 2},
+		{"batch with uncertainty", filejanitor.CuratorWelcome{Configured: true, Pending: 3, NeedsReview: 1}, true, "3 files ready for review", true},
+		{"confident batch", filejanitor.CuratorWelcome{Configured: true, Pending: 1}, true, "1 file ready for review", false},
+		{"no batch", filejanitor.CuratorWelcome{Configured: true}, true, "Choose Scan now explicitly", false},
+		{"setup missing", filejanitor.CuratorWelcome{}, true, "existing setup controls", false},
+		{"unavailable", filejanitor.CuratorWelcome{Configured: true, Pending: 99, NeedsReview: 99}, false, "can’t verify", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text := fileCuratorWelcomeText(tc.saved, tc.available)
-			if !strings.Contains(text, tc.want) || strings.Contains(text, "Discuss uncertain files") != tc.uncertain {
+			if !strings.Contains(text, tc.want) || strings.Contains(text, "marked Needs review") != tc.uncertain {
 				t.Fatalf("wrong choices: %s", text)
 			}
-			if strings.Count(text, "\n1. ") != 1 || strings.Count(text, "\n2. ") != 1 || strings.Contains(text, "\n3. ") != (tc.choices == 3) || strings.Contains(text, "\n4. ") {
-				t.Fatalf("choice count: %s", text)
+			if strings.Contains(text, "\n1. ") || strings.Contains(text, "reply with a number") || len([]rune(text)) > 650 {
+				t.Fatalf("welcome is not concise navigation guidance: %s", text)
 			}
-			for _, want := range []string{"I’d start", "Understand the filing rules", "reply with a number", "does not scan or approve anything", "explicit approval in the review screen"} {
+			for _, want := range []string{"ask about filing rules", "does not scan", "read file contents", "explicit approval in File Janitor"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("missing %q: %s", want, text)
 				}
@@ -69,7 +68,7 @@ func TestFileCuratorWelcome_OffersOnlyStateBackedChoices(t *testing.T) {
 func TestFileCuratorWelcome_UsesBatchDateNotReadTime(t *testing.T) {
 	saved := filejanitor.CuratorWelcome{Configured: true, Pending: 2, BatchCompletedAt: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC), ReadAt: time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)}
 	text := fileCuratorWelcomeText(saved, true)
-	if !strings.Contains(text, "batch completed 2026-10-20 09:00 UTC") || !strings.Contains(text, "read 2026-10-30 10:00 UTC") {
+	if !strings.Contains(text, "batch completed 2026-10-20 09:00 UTC") || strings.Contains(text, "2026-10-30") {
 		t.Fatal(text)
 	}
 }
@@ -103,7 +102,7 @@ func TestLeadConversationOpen_CuratorUsesFilingStateWithoutGoalAssessment(t *tes
 			h.SetSessionStore(sessions)
 			ag, _ := h.store.GetAgent("cli-agent")
 			h.SetRuntimeResolver(&stubChatRuntimeResolver{resolved: &workspace.ResolvedAgentRuntime{Agent: ag, AgentInstance: &ws.AgentInstances[0], FromWorkspaceCopy: true}})
-			reader := &stubCuratorWelcomeReader{value: filejanitor.CuratorWelcome{Configured: true, Pending: 2, NeedsReview: 1}}
+			reader := &stubCuratorWelcomeReader{value: filejanitor.CuratorWelcome{Configured: true, HasSavedScan: true, Pending: 2, NeedsReview: 1}}
 			if mode == "unavailable reader" {
 				reader.err = errors.New("PRIVATE PROVIDER PATH")
 			}
@@ -122,7 +121,7 @@ func TestLeadConversationOpen_CuratorUsesFilingStateWithoutGoalAssessment(t *tes
 				w := httptest.NewRecorder()
 				h.LeadConversationOpen(w, r)
 				var out session.LeadConversationResult
-				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Changed != (i == 0) || out.AwaitingAssessment {
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Changed != (i == 0) || out.AwaitingAssessment != (mode == "unavailable reader") {
 					t.Fatalf("welcome %d %s", w.Code, w.Body.String())
 				}
 				if id != "" && out.SessionID != id {
@@ -142,10 +141,14 @@ func TestLeadConversationOpen_CuratorUsesFilingStateWithoutGoalAssessment(t *tes
 				t.Fatalf("messages: %+v", conversation.Messages)
 			}
 			text := conversation.Messages[len(conversation.Messages)-1].Content
-			if !strings.Contains(text, "What would you like to do?") || strings.Contains(text, "saved assessment") || strings.Contains(text, "Goal settings") || strings.Contains(text, "PRIVATE PROVIDER PATH") {
+			if strings.Contains(text, "saved assessment") || strings.Contains(text, "Goal settings") || strings.Contains(text, "PRIVATE PROVIDER PATH") {
 				t.Fatalf("wrong fallback: %s", text)
 			}
-			if mode != "unavailable reader" && !strings.Contains(text, "Discuss uncertain files") {
+			if mode == "unavailable reader" {
+				if !strings.Contains(text, "when it is available") {
+					t.Fatal("unavailable evidence consumed assessment", text)
+				}
+			} else if !strings.Contains(text, "Use Review files") || !strings.Contains(text, "marked Needs review") {
 				t.Fatal(text)
 			}
 			for _, call := range reader.calls {
@@ -177,6 +180,20 @@ func TestWorkspaceAssessmentPrompt_KeepsCuratorChoicesSeparateFromGoalReviews(t 
 		if !strings.Contains(guidance, want) {
 			t.Fatalf("missing %q: %s", want, guidance)
 		}
+	}
+}
+
+func TestLeadWelcomeContext_WaitsForRealSavedFilingResult(t *testing.T) {
+	_, _, ws := assessmentFixture(t)
+	ws.InstalledCapabilities = []workspace.InstalledCapability{{ID: workspace.CapabilityFileJanitor, Version: 1, InstalledAt: time.Now(), OwnedResources: []workspace.CapabilityResource{{Kind: workspace.ResourceCompanionAgent, ID: ws.AgentInstances[0].ID}}}}
+	reader := &stubCuratorWelcomeReader{value: filejanitor.CuratorWelcome{Configured: true}}
+	h := &Handler{fileCuratorWelcome: reader}
+	if got := h.leadWelcomeContext(t.Context(), ws, "local", ws.AgentInstances[0].ID); got != "" {
+		t.Fatal("pre-scan absence consumed the later-assessment slot", got)
+	}
+	reader.value.HasSavedScan = true // a verified zero-candidate scan is a real result
+	if got := h.leadWelcomeContext(t.Context(), ws, "local", ws.AgentInstances[0].ID); !strings.Contains(got, "doesn’t mean the folder is empty") {
+		t.Fatal("saved zero result was lost", got)
 	}
 }
 

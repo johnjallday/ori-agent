@@ -212,8 +212,8 @@ export function workspaceCreationReviewHTML(view = {}) {
   return `<section class="assisted-placement" aria-label="Review proposed ${group ? 'group' : 'workspace'}">
     ${creationReviewHeaderHTML({ title: view.title || `Make room for ${view.name || 'your workspace'}`, titleId: `${prefix}Title`, note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art })}
     <div class="assisted-placement__fields">
-      <div><label for="${escapeReviewText(prefix)}Name">${group ? 'Group name' : 'Workspace name'}</label><input id="${escapeReviewText(prefix)}Name" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${view.canEditName === false ? ' readonly' : ''}${disabled}></div>
-      ${view.showGoal === false ? '' : `<div><label for="${escapeReviewText(prefix)}Goal">${escapeReviewText(view.goalLabel || (group ? 'Purpose' : 'Goal'))}</label><textarea id="${escapeReviewText(prefix)}Goal" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>`}
+      <div><label for="${escapeReviewText(prefix)}Name">${group ? 'Group name' : 'Workspace name'}</label><input id="${escapeReviewText(prefix)}Name" name="${escapeReviewText(prefix)}Name" autocomplete="off" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${view.canEditName === false ? ' readonly' : ''}${disabled}></div>
+      ${view.showGoal === false ? '' : `<div><label for="${escapeReviewText(prefix)}Goal">${escapeReviewText(view.goalLabel || (group ? 'Purpose' : 'Goal'))}</label><textarea id="${escapeReviewText(prefix)}Goal" name="${escapeReviewText(prefix)}Goal" autocomplete="off" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>`}
     </div>
     ${creationReviewSlotsHTML(view.rows, { locked })}
     <button type="button" data-placement-action="details"${disabled}>${escapeReviewText(view.detailsLabel || 'Edit details & advanced settings')}</button>
@@ -229,7 +229,7 @@ export function workspaceCreationReviewHTML(view = {}) {
     ${creationReviewNavigationHTML(view)}
     <footer class="assisted-placement__footer">
       <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Back</button>
-      <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>
+      <button type="button" data-placement-action="cancel"${disabled}>${escapeReviewText(view.cancelLabel || 'Cancel draft')}</button>
       ${view.automatic ? `<button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !view.reviewed || view.dirty || locked ? ' disabled' : ''}>${escapeReviewText(view.busy ? 'Working…' : view.confirmLabel || 'Create workspace')}</button>` : ''}
     </footer></section>`;
 }

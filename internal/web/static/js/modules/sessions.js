@@ -902,6 +902,7 @@ const sessionManager = {
     window.addEventListener(
       'keydown',
       event => {
+        if (addFolderModal?.dataset.sourceSetupOwner) return;
         if (event.key !== 'Escape' || !addFolderModal?.classList.contains('show')) return;
         event.preventDefault();
         event.stopPropagation();
@@ -14149,6 +14150,7 @@ const sessionManager = {
     if (
       this.workspaceCreatorContext ||
       this.workspaceBuild ||
+      document.getElementById('addFolderModal')?.dataset.sourceSetupOwner ||
       document.getElementById('addFolderModal')?.classList.contains('show')
     )
       throw new Error(
@@ -21185,6 +21187,10 @@ const sessionManager = {
   showAddWorkspaceModal(options = {}) {
     const modalElement = document.getElementById('addFolderModal');
     if (!modalElement) return;
+    if (modalElement.dataset.sourceSetupOwner) {
+      this.showToast('Close the current setup review first. Its choices are unchanged.', 'warning');
+      return;
+    }
     this.dismissCreationMapOutcome();
 
     const contextOptions = {

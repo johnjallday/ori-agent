@@ -138,6 +138,28 @@ function ticketPayload() {
   };
 }
 
+// These established fictional workspaces have no new welcome or filing work.
+// Supply canonical-shaped read projections, never a seen/delivery mutation.
+function workspaceUpdate(id: string) {
+  const source = workspace(id);
+  return {
+    workspace_id: id,
+    folder_slug:
+      id === README_SCENES.workspace_command.workspace_id
+        ? 'product-launch'
+        : id.replace(/^ws-/, ''),
+    name: source.name,
+    observed_at: README_CAPTURE_CLOCK,
+    welcome: { state: 'ready', unread_count: 0, messages: [] },
+    review: {
+      state: 'not_applicable',
+      pending_count: 0,
+      needs_review_count: 0,
+      observed_at: README_CAPTURE_CLOCK
+    }
+  };
+}
+
 async function installFixtureRoutes(page: Page) {
   assertReadmeSceneContract();
   for (const [name, assetPath] of Object.entries(captureAssets)) {
@@ -585,6 +607,28 @@ async function installFixtureRoutes(page: Page) {
     }
     if (url.pathname === '/api/workspaces') {
       await json(route, { folders: README_SCENES.workspaces });
+      return;
+    }
+    if (
+      request.method() === 'GET' &&
+      url.pathname === '/api/workspace-updates' &&
+      url.search === '?limit=100'
+    ) {
+      await json(route, {
+        items: README_SCENES.workspaces.map(row => workspaceUpdate(row.id)),
+        has_more: false
+      });
+      return;
+    }
+    const updateID = /^\/api\/workspaces\/([^/]+)\/updates$/.exec(url.pathname)?.[1];
+    if (
+      request.method() === 'GET' &&
+      updateID &&
+      !url.search &&
+      (updateID === README_SCENES.workspace_command.workspace_id ||
+        README_SCENES.workspaces.some(row => row.id === updateID))
+    ) {
+      await json(route, workspaceUpdate(updateID));
       return;
     }
     // The coordinate Workspace Map reads the current user's layout on mount

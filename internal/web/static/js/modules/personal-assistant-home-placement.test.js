@@ -6,6 +6,8 @@ import {
   sourceHomePlacementResult,
   sourceHomeObservationResult,
   sourceHomeReviewPlan,
+  musicSetupOffer,
+  musicSetupNeedsConfirmation,
   folderHomeMapTarget,
   folderLandingRoute
 } from './personal-assistant-folder.js';
@@ -42,6 +44,8 @@ function controller() {
     // Outside the evaluated slice: the real landing choice, and the library
     // summary read faked as "nothing to set up" unless a test says otherwise.
     folderLandingRoute,
+    musicSetupOffer,
+    musicSetupNeedsConfirmation,
     libraryToSetUp: async () => context.toSetUpForTest || 0,
     console,
     document: {
@@ -131,11 +135,122 @@ function controller() {
   );
   vm.runInContext(
     code.replaceAll('export function ', 'function ') +
-      '\nglobalThis.harness = { startOneCardSetup, actOnSourceCreationReview, observeSourceCreationResult, renderSourceCreationReview, navigateFolderHomeMap, sourceReviewMapAvailable, review: () => sourceCreationReview };',
+      '\nglobalThis.harness = { startOneCardSetup, chooseProjectEntry, actOnSourceCreationReview, observeSourceCreationResult, renderSourceCreationReview, navigateFolderHomeMap, sourceReviewMapAvailable, review: () => sourceCreationReview };',
     context
   );
   return { ...context.harness, context, state, effects, placement: () => placement };
 }
+
+test('opening the source review is inert and retains the same source choices without touching an unrelated creator', async () => {
+  const c = controller();
+  const draft = { name: 'Unrelated draft', goal: 'Keep this unsent goal' };
+  c.context.window.sessionManager = {
+    workspaceCreatorContext: draft,
+    workspaceBuildApi: () => assert.fail('source review must not transfer to a build'),
+    showAddWorkspaceModal: () => assert.fail('source review must not reset the creator')
+  };
+  await c.startOneCardSetup({});
+  const review = c.review();
+  review.candidate = { x: 20, y: 30 };
+  await c.startOneCardSetup({});
+  assert.equal(c.review(), review);
+  assert.deepEqual(review.candidate, { x: 20, y: 30 });
+  assert.equal(c.context.window.sessionManager.workspaceCreatorContext, draft);
+  assert.deepEqual(draft, { name: 'Unrelated draft', goal: 'Keep this unsent goal' });
+  assert.equal(c.effects.setup, 0);
+  assert.equal(c.effects.position, 0);
+  assert.equal(c.effects.proofReads, 0);
+});
+
+test('an existing Home starts in automatic mode and confirmation cannot move or restaff it through placement', async () => {
+  const c = controller();
+  c.state.offer.plan.destination.status = 'existing';
+  c.state.offer.plan.destination.workspace_id = 'home';
+  c.state.offer.plan.visual.entity.operation = 'reuse';
+  await c.startOneCardSetup({});
+  const review = c.review();
+  assert.equal(review.automatic, true);
+  assert.equal(c.sourceReviewMapAvailable(), false);
+  await c.actOnSourceCreationReview(review, { action: 'place' });
+  assert.equal(c.placement(), undefined);
+  assert.equal(c.effects.setup, 0);
+  await c.actOnSourceCreationReview(review, { action: 'confirm' });
+  c.state.offer.home_result.created_by_this_operation = false;
+  c.state.offer.home_result.layout_subject_new = false;
+  await c.observeSourceCreationResult(review);
+  assert.equal(review.existing, true);
+  assert.equal(c.effects.setup, 1, 'only the canonical source operation is dispatched');
+  assert.equal(c.effects.position, 0);
+  assert.equal(c.effects.retries, 0);
+});
+
+test('music later-project brief stays with the source even before blur, without changing fixed Home identity', async () => {
+  const c = controller();
+  c.state.offer.capability = { domain: 'music_production' };
+  c.state.offer.plan.brief_default = 'Later goal';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  await c.actOnSourceCreationReview(c.review(), {
+    action: 'dirty',
+    field: 'mission',
+    value: 'Keep my unsent brief'
+  });
+  assert.equal(c.state.brief.value, 'Keep my unsent brief');
+  assert.equal(c.state.brief.offerId, 'offer');
+  assert.equal(c.review().dirty, false);
+  assert.equal(c.state.offer.plan.destination.name, 'Music Home');
+  assert.equal(c.effects.setup, 0);
+});
+
+test('music project-file editing delegates to the source and cannot edit an accepted run', async () => {
+  const c = controller();
+  c.state.offer.capability = { domain: 'music_production' };
+  c.state.offer.plan.entry_candidates = ['Song.rpp', 'Mix.rpp'];
+  c.state.offer.plan.entry_name = 'Song.rpp';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  const calls = [];
+  c.context.postOffer = async (id, action, body) => {
+    calls.push({ id, action, body });
+    return { ok: true };
+  };
+  await c.chooseProjectEntry('unknown.rpp');
+  assert.equal(calls.length, 0);
+  await c.chooseProjectEntry('Mix.rpp');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, 'offer');
+  assert.equal(calls[0].action, 'entry');
+  assert.equal(calls[0].body.plan_digest, 'digest');
+  assert.equal(calls[0].body.entry_name, 'Mix.rpp');
+  c.review().pending = true;
+  await c.chooseProjectEntry('Mix.rpp');
+  assert.equal(calls.length, 1);
+  assert.equal(c.effects.setup, 0);
+});
+
+test('a late music file-choice reply cannot clear the replacement conversation busy state', async () => {
+  const c = controller();
+  c.state.offer.capability = { domain: 'music_production' };
+  c.state.offer.plan.entry_candidates = ['Song.rpp', 'Mix.rpp'];
+  c.state.offer.plan.entry_name = 'Song.rpp';
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  c.context.reviewResponseGuard = () => {
+    const generation = c.state.reviewGeneration;
+    return () => generation === c.state.reviewGeneration;
+  };
+  let complete;
+  c.context.postOffer = () =>
+    new Promise(resolve => {
+      complete = resolve;
+    });
+  const pending = c.chooseProjectEntry('Mix.rpp');
+  c.state.reviewGeneration++;
+  c.state.offer = { id: 'replacement' };
+  c.state.busy = true;
+  complete({ ok: false, payload: { error: 'late refusal' } });
+  await pending;
+  assert.equal(c.state.busy, true);
+  assert.equal(c.state.offer.id, 'replacement');
+  assert.equal(c.effects.setup, 0);
+});
 
 test('Home review requires a canonical Home destination, not a name', () => {
   assert.equal(sourceHomeReviewPlan({ visual: { entity: { kind: 'home' } } }), false);
@@ -280,6 +395,85 @@ test('enter, hover and Back retain review and candidate with no domain effects; 
   assert.equal(review.result.id, 'home');
 });
 
+test('music map handoff waits for hidden and abandons a replaced generation before starting placement', async () => {
+  const c = controller();
+  c.state.offer.capability = { domain: 'music_production' };
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  let hidden;
+  const ref = {};
+  c.context.musicDialogReference = ref;
+  c.context.musicDialogCurrent = () => c.state.reviewGeneration === 1;
+  c.context.musicSetupDialog = () => ({
+    owns: owner => owner === ref,
+    suspend: () =>
+      new Promise(resolve => {
+        hidden = resolve;
+      })
+  });
+  const pending = c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  assert.equal(c.placement(), undefined);
+  c.state.reviewGeneration++;
+  hidden(true);
+  await pending;
+  assert.equal(c.placement(), undefined);
+  assert.equal(c.effects.setup, 0);
+  assert.equal(c.effects.position, 0);
+});
+
+test('music map Back callback cannot reopen the shell after conversation replacement', async () => {
+  const c = controller();
+  c.state.offer.capability = { domain: 'music_production' };
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  let returned,
+    opens = 0;
+  c.context.musicDialogReference = {};
+  c.context.musicDialogCurrent = () => c.state.reviewGeneration === 1;
+  c.context.musicSetupDialog = () => ({
+    owns: () => true,
+    suspend: async () => true,
+    open: () => opens++
+  });
+  c.context.setTimeout = callback => {
+    returned = callback;
+  };
+  await c.actOnSourceCreationReview(c.review(), { action: 'place' });
+  c.placement().onBack();
+  assert.equal(opens, 0);
+  c.state.reviewGeneration++;
+  returned();
+  assert.equal(opens, 0);
+  assert.equal(c.effects.setup, 0);
+});
+
+test('re-entering a pending music review preserves its original request and cannot confirm twice', async () => {
+  const c = controller();
+  c.state.offer.capability = { domain: 'music_production' };
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  const review = c.review();
+  await c.actOnSourceCreationReview(review, { action: 'suggested' });
+  let complete,
+    calls = 0,
+    request;
+  c.context.postOffer = async (_id, _action, body) => {
+    calls++;
+    request = body.request_id;
+    return new Promise(resolve => {
+      complete = resolve;
+    });
+  };
+  const pending = c.actOnSourceCreationReview(review, { action: 'confirm' });
+  assert.equal(review.pending, true);
+  await c.startOneCardSetup({ sourceDialogEntry: true });
+  assert.equal(c.review(), review);
+  await c.actOnSourceCreationReview(review, { action: 'confirm' });
+  assert.equal(calls, 1);
+  assert.equal(review.acceptedRequestID, request);
+  complete({ ok: true, payload: {} });
+  await pending;
+  assert.equal(review.acceptedRequestID, request);
+  assert.equal(calls, 1);
+});
+
 test('automatic mode only clears candidate; hidden/narrow/read-only maps cannot place', async () => {
   const c = controller();
   await c.startOneCardSetup({});
@@ -324,6 +518,19 @@ test('lost confirmation retires the old nothing-is-set-up summary without claimi
   assert.equal(c.review().result, undefined);
   await c.placement().onConfirm(c.review().token, { x: 1600, y: 900 });
   assert.equal(c.effects.setup, 1);
+  assert.equal(c.effects.position, 0);
+});
+
+test('a retired confirmation panel cannot dispatch after handing back to source choices', async () => {
+  const c = controller();
+  c.context.focusFolderAction = () => {};
+  await c.startOneCardSetup({});
+  const review = c.review();
+  await c.actOnSourceCreationReview(review, { action: 'suggested' });
+  await c.actOnSourceCreationReview(review, { action: 'details' });
+  assert.equal(review.editing, true);
+  await c.actOnSourceCreationReview(review, { action: 'confirm' });
+  assert.equal(c.effects.setup, 0);
   assert.equal(c.effects.position, 0);
 });
 
