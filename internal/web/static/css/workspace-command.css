@@ -2753,6 +2753,44 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-work-first p {
   margin: 8px 0 12px;
 }
+.ws-cmd-update-label {
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+}
+.ws-cmd-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.ws-cmd-update-sources {
+  margin-top: 16px;
+  border-top: 1px solid var(--ws-line);
+  padding-top: 8px;
+  font-size: 13px;
+}
+.ws-cmd-update-sources summary {
+  cursor: pointer;
+  min-height: 36px;
+  padding-block: 8px;
+}
+.ws-cmd-update-sources summary:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 4px;
+}
+.ws-cmd-update-sources dl {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr);
+  gap: 8px 16px;
+  margin: 8px 0;
+}
+.ws-cmd-update-sources dt {
+  color: var(--ws-ink-dim);
+  font-weight: 400;
+}
+.ws-cmd-update-sources dd {
+  margin: 0;
+}
 .ws-cmd-work-state {
   font-size: 13px;
   font-weight: 600;

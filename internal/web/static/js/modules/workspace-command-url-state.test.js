@@ -40,6 +40,11 @@ function makeHistoryHarness(initialSearch = '') {
     addEventListener(type, fn) {
       if (type === 'popstate') listeners.push(fn);
     },
+    removeEventListener(type, fn) {
+      if (type !== 'popstate') return;
+      const index = listeners.indexOf(fn);
+      if (index !== -1) listeners.splice(index, 1);
+    },
     Toast: { info() {} }
   };
   return {
@@ -109,16 +114,27 @@ function withHarness(initialSearch, fn) {
   const originalLocalStorage = globalThis.localStorage;
   const harness = makeHistoryHarness(initialSearch);
   const container = makeContainer();
+  const subscribe = WorkspaceCommandView.prototype.ensureNextActionSubscription;
+  const mounted = new Set();
+  WorkspaceCommandView.prototype.ensureNextActionSubscription = function () {
+    mounted.add(this);
+    return subscribe.call(this);
+  };
   try {
     globalThis.document = {
       getElementById: id => (id === 'workspaceCommandView' ? container : null),
       addEventListener() {},
+      removeEventListener() {},
       activeElement: null
     };
     globalThis.window = harness.win;
     globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
     fn({ harness, container });
   } finally {
+    // A browser tears down the page on navigation. This mutable fake must
+    // explicitly release real summary timers/subscriptions before replacing it.
+    for (const view of mounted) view.disposeNextAction();
+    WorkspaceCommandView.prototype.ensureNextActionSubscription = subscribe;
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;
     globalThis.localStorage = originalLocalStorage;

@@ -8,20 +8,34 @@ function fixture() {
     ready: true,
     busy: false,
     reads: [],
-    deliveries: [],
-    timers: []
+    changes: [],
+    timers: [],
+    summaries: []
   };
   f.answer = { session_id: 'welcome', changed: true, awaiting_assessment: false };
+  f.view = { state: 'ready', data: { workspace_id: 'ws', welcome: { unread_count: 1 } } };
+  f.updates = {
+    read: () => f.view,
+    refresh: async id => {
+      f.summaries.push(id);
+      return f.view;
+    },
+    subscribe: listener => {
+      f.listener = listener;
+      return () => {
+        f.listener = null;
+      };
+    }
+  };
   f.controller = createLeadWelcome({
     target: () => f.current,
     ready: () => f.ready,
     busy: () => f.busy,
+    updates: f.updates,
+    changed: view => f.changes.push(view),
     fetchImpl: async (url, init) => {
       f.reads.push({ url, init });
       return { ok: true, json: async () => f.answer };
-    },
-    deliver: async (id, options) => {
-      f.deliveries.push({ id, ...options });
     },
     setTimer: fn => {
       f.timers.push(fn);
@@ -32,147 +46,94 @@ function fixture() {
   return f;
 }
 
-test('arrival delivers once, through the existing conversation, without a chat/model call', async () => {
+test('arrival saves through the legacy fallback but only publishes a quiet summary', async () => {
   const f = fixture();
   await f.controller.refresh();
   await f.controller.refresh();
-  assert.deepEqual(f.deliveries, [{ id: 'welcome', reveal: true }]);
   assert.deepEqual(f.reads, [
     { url: '/api/workspaces/ws/lead-conversation/open', init: { method: 'POST' } }
   ]);
+  assert.equal(f.current.sessionId, '');
+  assert.ok(f.changes.every(change => change === f.view));
+  assert.equal(f.view.data.welcome.unread_count, 1); // no implicit seen
 });
 
-test('setup, drafts, other recipients and New never trigger the welcome', async () => {
-  for (const mode of ['setup', 'busy', 'other', 'new']) {
+test('setup, drafts and New suppress only legacy delivery, not already saved discovery', async () => {
+  for (const mode of ['setup', 'busy', 'new']) {
     const f = fixture();
     if (mode === 'setup') f.ready = false;
     if (mode === 'busy') f.busy = true;
-    if (mode === 'other') f.current = null;
     if (mode === 'new') f.current.fresh = true;
     await f.controller.refresh();
     assert.equal(f.reads.length, 0);
-    assert.equal(f.deliveries.length, 0);
+    assert.deepEqual(f.summaries, ['ws']);
+    assert.equal(f.changes.at(-1), f.view);
+    assert.equal(f.current.sessionId, '');
   }
 });
 
-test('another tab or reload with an already delivered receipt never reopens the drawer', async () => {
+test('another recipient neither delivers nor retains a workspace indicator', async () => {
   const f = fixture();
-  f.answer.changed = false;
   await f.controller.refresh();
-  assert.equal(f.deliveries.length, 0);
+  f.current = null;
+  await f.controller.refresh();
+  assert.equal(f.changes.at(-1), null);
+  assert.equal(f.reads.length, 1);
 });
 
-test('closing the drawer does not reopen it for the eventual first assessment', async () => {
+test('a delayed assessment remains a summary update, never a drawer/session instruction', async () => {
   const f = fixture();
   f.answer.awaiting_assessment = true;
   await f.controller.refresh();
-  f.controller.quiet();
-  f.answer = { session_id: 'welcome', changed: true, awaiting_assessment: false };
+  f.answer.awaiting_assessment = false;
+  f.view = { ...f.view, data: { workspace_id: 'ws', welcome: { unread_count: 2 } } };
   await f.controller.refresh();
-  assert.deepEqual(f.deliveries, [
-    { id: 'welcome', reveal: true },
-    { id: 'welcome', reveal: false }
-  ]);
+  assert.equal(f.changes.at(-1).data.welcome.unread_count, 2);
+  assert.equal(f.current.sessionId, '');
+  assert.equal(f.reads.length, 2);
 });
 
-test('late responses cannot replace a different workspace or a user-started conversation', async () => {
-  for (const mode of ['workspace', 'session', 'new']) {
-    const f = fixture();
-    let resolve;
-    const wait = new Promise(r => {
-      resolve = r;
+test('late responses cannot publish into a different workspace', async () => {
+  const f = fixture();
+  let finish;
+  f.updates.refresh = () =>
+    new Promise(resolve => {
+      finish = resolve;
     });
-    const ctl = createLeadWelcome({
-      target: () => f.current,
-      ready: () => true,
-      busy: () => false,
-      fetchImpl: () => wait,
-      deliver: () => {
-        throw new Error('stale delivery');
-      },
-      setTimer: () => 1,
-      clearTimer: () => {}
-    });
-    const work = ctl.refresh();
-    if (mode === 'workspace') f.current = { ...f.current, workspaceId: 'elsewhere' };
-    if (mode === 'session') f.current = { ...f.current, sessionId: 'user-session' };
-    if (mode === 'new') f.current = { ...f.current, fresh: true };
-    resolve({ ok: true, json: async () => f.answer });
-    await work;
-    ctl.destroy();
-  }
+  const work = f.controller.refresh();
+  f.current = { workspaceId: 'elsewhere', name: 'Mira', sessionId: 'user-session' };
+  finish(f.view);
+  await work;
+  assert.equal(f.reads.length, 0);
+  assert.equal(f.changes.length, 1); // initial snapshot only
+  assert.equal(f.current.sessionId, 'user-session');
+  f.controller.destroy();
 });
 
-test('finishing an old delivery does not mark another workspace as delivered', async () => {
-  let current = { workspaceId: 'first', name: 'Mira', sessionId: '' };
-  let ready = true,
-    finish,
-    started,
-    reads = 0;
-  const waiting = new Promise(resolve => {
-    finish = resolve;
-  });
-  const delivering = new Promise(resolve => {
-    started = resolve;
-  });
-  const controller = createLeadWelcome({
-    target: () => current,
-    ready: () => ready,
-    busy: () => false,
-    fetchImpl: async () => {
-      reads++;
-      return { ok: true, json: async () => ({ session_id: 'welcome', changed: true }) };
-    },
-    deliver: async () => {
-      started();
-      if (current.workspaceId === 'first') await waiting;
-    },
-    setTimer: () => 1,
-    clearTimer: () => {}
-  });
-  const old = controller.refresh();
-  await delivering;
-  current = { ...current, workspaceId: 'second' };
-  ready = false;
-  await controller.refresh();
-  finish();
-  await old;
-  ready = true;
-  await controller.refresh();
-  assert.equal(reads, 2);
-  controller.destroy();
+test('New chosen during a summary read still prevents legacy delivery', async () => {
+  const f = fixture();
+  let finish;
+  f.updates.refresh = () =>
+    new Promise(resolve => {
+      finish = resolve;
+    });
+  const work = f.controller.refresh();
+  f.current.fresh = true;
+  finish(f.view);
+  await work;
+  assert.equal(f.reads.length, 0);
+  assert.equal(f.current.sessionId, '');
 });
 
-test('a response deferred by a draft never replaces a subsequently started conversation', async () => {
-  for (const newSession of [false, true]) {
-    let current = { workspaceId: 'ws', name: 'Mira', sessionId: '' };
-    let busy = false,
-      resolve;
-    const delivered = [];
-    const promise = new Promise(r => {
-      resolve = r;
-    });
-    const ctl = createLeadWelcome({
-      target: () => current,
-      ready: () => true,
-      busy: () => busy,
-      fetchImpl: () => promise,
-      deliver: async id => delivered.push(id),
-      setTimer: () => 1,
-      clearTimer: () => {}
-    });
-    const work = ctl.refresh();
-    busy = true;
-    resolve({
-      ok: true,
-      json: async () => ({ session_id: 'welcome', changed: true, awaiting_assessment: false })
-    });
-    await work;
-    assert.equal(delivered.length, 0);
-    busy = false;
-    if (newSession) current = { ...current, sessionId: 'user-created' };
-    await ctl.refresh();
-    assert.deepEqual(delivered, newSession ? [] : ['welcome']);
-    ctl.destroy();
-  }
+test('shared refreshes apply only to the current workspace; destruction removes listeners', async () => {
+  const f = fixture();
+  const foreign = { state: 'ready', data: { workspace_id: 'other' } };
+  f.listener('other', foreign);
+  assert.equal(f.changes.length, 0);
+  f.listener('ws', f.view);
+  assert.equal(f.changes.length, 1);
+  f.controller.destroy();
+  assert.equal(f.listener, null);
+  await f.controller.refresh();
+  assert.equal(f.reads.length, 0);
 });

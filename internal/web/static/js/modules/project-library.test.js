@@ -1110,7 +1110,7 @@ test('Home resume renders only bounded saved-user cards with trusted detail navi
         }))
       };
     };
-    panel.details = id => requests.push(`open:${id}`);
+    panel.details = (id, _trigger, tab) => requests.push(`open:${id}:${tab}`);
     await panel.renderResume();
     assert.deepEqual(requests, ['/resume']);
     assert.equal(section.hidden, false);
@@ -1118,7 +1118,7 @@ test('Home resume renders only bounded saved-user cards with trusted detail navi
     assert.equal(container.children[0].children[0].textContent, '<Song 0>');
     const button = container.children[0].children.at(-1);
     button.click();
-    assert.deepEqual(requests, ['/resume', 'open:id-0']);
+    assert.deepEqual(requests, ['/resume', 'open:id-0:sessions']);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -1223,7 +1223,7 @@ test('out-of-order search responses and double-clicked More cannot mix or duplic
     projectLibraryPriority: { value: '' },
     projectLibrarySort: { value: 'name' }
   };
-  globalThis.document = { getElementById: id => elements[id] };
+  globalThis.document = { getElementById: id => elements[id], querySelectorAll: () => [] };
   try {
     const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
     panel.state = { provider_read_only: false };
@@ -3031,15 +3031,29 @@ const readySong = (id, name, file = 'Song.rpp') => ({
   }
 });
 
-test('select all picks every selectable song shown and clears them on the next press', () => {
+test('select loaded includes connected bulk targets while the setup queue stays catalog-only', () => {
   const { panel } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')]);
   panel.rows.push({ id: 'c', name: 'Album-3', connection: 'connected' });
   panel.toggleSelectAll();
   assert.deepEqual(
     [...panel.selectedProjects].sort(),
-    ['a', 'b'],
-    'connected songs are not picked'
+    ['a', 'b', 'c'],
+    'connected projects can receive bulk metadata edits'
   );
+  assert.deepEqual(panel.queueIds().sort(), ['a', 'b']);
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 0);
+});
+
+test('selection is capped at 100 loaded projects and Clear works for a partial selection', () => {
+  const { panel } = batchPanel(
+    Array.from({ length: 105 }, (_, i) => readySong(`entry-${i}`, `Project ${i}`))
+  );
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 100);
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 0);
+  panel.selectedProjects.add('entry-104');
   panel.toggleSelectAll();
   assert.equal(panel.selectedProjects.size, 0);
 });
@@ -3452,7 +3466,7 @@ test('coming back reopens the same song once, after re-reading it from the serve
     await panel.resumeFromIntegration();
     assert.deepEqual(log.requests, ['/projects/entry-9'], 'the song is re-read, not trusted');
     assert.deepEqual(log.details, [['entry-9', null]]);
-    assert.match(log.statuses.at(-1), /Its integration status was checked again/);
+    assert.match(log.statuses.at(-1), /Inspect its saved information or check setup options/);
     assert.equal(page.map.size, 0, 'the hint is spent');
     await panel.resumeFromIntegration();
     assert.equal(log.details.length, 1, 'a reload or second call never repeats the return');
@@ -3792,7 +3806,7 @@ test('a read-only Home still lists its recent songs, without Open', () => {
   assert.equal(many.cards.length, 6);
 });
 
-test('each library row shows its save time and song facts on one line', () => {
+test('compact library rows separate last saved from inspection and omit routine facts', () => {
   const previousDocument = globalThis.document;
   const makeElement = tag => ({
     tag,
@@ -3827,18 +3841,14 @@ test('each library row shows its save time and song facts on one line', () => {
       { id: 'undated', name: 'Undated' }
     ];
     panel.renderRows();
-    const lines = tbody.children.map(tr =>
-      tr.children[1].children.find(child => child.className === 'project-library-saved')
-    );
-    assert.match(
-      lines[0].textContent.replaceAll('\xa0', ' '),
-      /^Saved .+ · 14 tracks · 92 BPM, varies · 3:41$/
-    );
-    assert.match(lines[0].textContent, /14\xa0tracks · 92\xa0BPM,\xa0varies/);
-    assert.equal(lines[0].dataset.songFacts, '14 tracks · 92 BPM, varies · 3:41');
-    assert.match(lines[1].textContent, /^Saved [^·]+$/, 'no facts: only "Saved …"');
-    assert.equal(lines[1].dataset.songFacts, undefined);
-    assert.equal(lines[2], undefined, 'no save time and no facts: no line');
+    assert.ok(tbody.children.every(tr => tr.children.length === 4));
+    const saved = tbody.children.map(tr => tr.children[3].textContent);
+    assert.match(saved[0], /^Saved [^·]+$/);
+    assert.match(saved[1], /^Saved [^·]+$/);
+    assert.equal(saved[2], '—', 'unset save time is a quiet accessible dash');
+    assert.equal(tbody.children[0].children[1].children[0].tag, 'button');
+    assert.equal(tbody.children[0].children[1].children[0].dataset.libraryEntry, 'with-facts');
+    assert.equal(tbody.children[0].children[2].textContent, '—');
     assert.doesNotMatch(
       tbody.children.map(tr => tr.children[1].children.map(c => c.textContent).join(' ')).join(' '),
       /\b(progress|complete|ready|unknown)\b/i

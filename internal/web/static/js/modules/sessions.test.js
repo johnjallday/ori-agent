@@ -51,6 +51,22 @@ function loadSessionManager(
   return window.sessionManager;
 }
 
+test('a borrowed source shell refuses ordinary and inbox entry before mutating any creator state', async () => {
+  const modal = { dataset: { sourceSetupOwner: 'music-folder' } };
+  const manager = loadSessionManager(undefined, {}, { getElementById: () => modal });
+  const warnings = [];
+  manager.showToast = message => warnings.push(message);
+  manager.beginWorkspaceCreatorContext = () =>
+    assert.fail('ordinary context must not be initialized');
+  manager.dismissCreationMapOutcome = () => assert.fail('source map outcome must not be dismissed');
+  manager.workspaceBuildApi = () => assert.fail('source must never enter File Janitor transfer');
+  manager.showAddWorkspaceModal({ name: 'Other' });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Close the current setup review/);
+  await assert.rejects(manager.openInboxWorkspacePlacement({}), /current workspace editor/);
+  assert.equal(manager.pendingWorkspaceCreatorOptions, null);
+});
+
 test('a deferred optional summary does not acquire the software owner or its names-only setter', () => {
   const manager = loadSessionManager();
   manager.workspaceBuild = {

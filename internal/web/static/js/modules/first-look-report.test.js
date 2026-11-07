@@ -632,9 +632,18 @@ test('Home draws reports as Needs you cards that count, and the drawer draws the
   assert.match(home, /const count = cards \+ reported \+ queued;/);
   assert.match(home, /revealOwnReports\(list\);/);
   assert.doesNotMatch(home, /personalAssistantNeedsFolded|needsHost/);
-  // The folder card waiting on its answer sits in Needs you itself.
+  // Non-music cards keep the original Needs you placement. Music borrows the
+  // shared shell for its single card and leaves a compact entry in that slot.
   const folder = read('personal-assistant-folder.js');
-  assert.match(folder, /const home = state\.reviewSlot \|\| \(needs \? els\.needs : els\.root\);/);
+  assert.match(
+    folder,
+    /const inlineHome = state\.reviewSlot \|\| \(needs \? els\.needs : els\.root\);/
+  );
+  assert.match(
+    folder,
+    /const home = musicSetupOffer\(state\.offer\) \? musicSetupDialog\(\)\.host \|\| inlineHome : inlineHome;/
+  );
+  assert.match(folder, /if \(els\.offer\.parentElement !== home\) home\.append\(els\.offer\);/);
   assert.doesNotMatch(folder, /needsHost/);
   // "Needs you" in the assistant's line opens the strip at that report.
   assert.match(folder, /linkNeedsYouWords\(row, \(\) => revealReportCard\(look\?\.task_id\)\);/);

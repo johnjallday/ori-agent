@@ -3,6 +3,7 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 <link rel="stylesheet" href="/css/assistant-program.css">
+<link rel="stylesheet" href="/css/project-library-browser.css">
 <link rel="stylesheet" href="/css/home-package-upgrade.css">
 <body class="bg-light assistant-program-body" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
   {{template "navbar.tmpl" .}}
@@ -153,6 +154,8 @@
                   <span id="projectLibraryFreshnessText"></span>
                   <button id="projectLibraryRescan" class="modern-btn modern-btn-secondary" type="button">Rescan</button>
                 </div>
+                <details id="projectLibraryManagement" class="project-library-management">
+                  <summary>Library tools and saved activity</summary>
                 <section id="projectLibraryRecent" class="project-library-resume project-library-recent" aria-labelledby="projectLibraryRecentTitle" hidden>
                   <h3 id="projectLibraryRecentTitle">Recently saved</h3>
                   <div id="projectLibraryRecentCards" class="project-library-resume-cards project-library-recent-cards"></div>
@@ -196,10 +199,6 @@
                   <p id="projectLibraryProposalsNote">Manager suggestions are untrusted drafts or navigation hints. They cannot select folders, save sessions, change notes, or start project work. Review and confirm each change separately as the Home owner.</p>
                   <div id="projectLibraryProposalRows" class="project-library-resume-cards"></div>
                 </section>
-                <section class="project-library-resume" aria-labelledby="projectLibraryCollectionsTitle">
-                  <h3 id="projectLibraryCollectionsTitle">Logical collections</h3>
-                  <div id="projectLibraryCollectionBrowser"></div>
-                </section>
                 <section id="projectLibraryArrangementPlanning" class="project-library-resume" aria-label="Organize library"></section>
                 <section id="projectLibraryArrangements" class="project-library-resume" aria-labelledby="projectLibraryArrangementsTitle" hidden>
                   <h3 id="projectLibraryArrangementsTitle">Saved arrangements</h3>
@@ -208,10 +207,26 @@
                 </section>
                 <div id="projectLibraryRoots" class="project-library-roots" aria-label="Approved discovery folders"></div>
                 <div class="project-library-footer"><span id="projectLibraryRootCount"></span><button id="projectLibraryMoreRoots" class="modern-btn modern-btn-secondary" type="button" hidden>More folders</button></div>
+                </details>
+                <div class="project-library-scopes" role="group" aria-label="Project views">
+                  <button type="button" data-library-view="all" aria-pressed="true">All</button>
+                  <button type="button" data-library-view="recently_saved" aria-pressed="false">Recently saved</button>
+                  <button type="button" data-library-view="needs_attention" aria-pressed="false">Needs attention</button>
+                  <button type="button" data-library-view="archived" aria-pressed="false">Archived</button>
+                </div>
+                <p id="projectLibraryViewNote" class="project-library-scope-note"></p>
+                <details id="projectLibraryCollections" class="project-library-collections"><summary>Collections</summary><div id="projectLibraryCollectionBrowser"></div></details>
+                <div id="projectLibraryCollectionScope" class="project-library-collection-scope" hidden><span id="projectLibraryCollectionLabel" role="status"></span><button id="projectLibraryLeaveCollection" type="button" class="modern-btn modern-btn-secondary">Leave collection</button><button id="projectLibraryRefreshCollection" type="button" class="modern-btn modern-btn-secondary">Refresh membership</button></div>
                 <form id="projectLibrarySearchForm" class="project-library-toolbar" role="search">
+                  <input id="projectLibraryView" type="hidden" value="all"><input id="projectLibraryCollection" type="hidden" value="">
                   <label for="projectLibrarySearch">Search projects</label>
                   <div class="project-library-toolbar-row">
                     <input id="projectLibrarySearch" class="form-control" type="search" maxlength="120" autocomplete="off" placeholder="Project name or next action">
+                    <select id="projectLibrarySort" class="form-select" aria-label="Sort projects"><option value="name">Name</option><option value="last_saved">Last saved</option><option value="status">Status</option><option value="priority">Priority</option><option value="next_action">Next action</option><option value="sourced_activity">Saved-note activity</option><option value="scanned_at">Last scan</option></select>
+                    <select id="projectLibraryDirection" class="form-select" aria-label="Sort direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
+                    <button class="modern-btn modern-btn-secondary" type="submit">Find</button>
+                  </div>
+                  <details class="project-library-filters"><summary>Filters</summary><div class="project-library-toolbar-row">
                     <select id="projectLibraryStage" class="form-select" aria-label="Production stage"><option value="">All stages</option><option value="unknown">Stage unknown</option><option value="idea">Idea</option><option value="writing">Writing</option><option value="recording">Recording</option><option value="editing">Editing</option><option value="mixing">Mixing</option><option value="mastering">Mastering</option></select>
                     <select id="projectLibraryFormat" class="form-select" aria-label="Observed project format"><option value="">All formats</option></select>
                     <select id="projectLibraryRoot" class="form-select" aria-label="Discovery folder"><option value="">All discovery folders</option></select>
@@ -219,34 +234,47 @@
                     <select id="projectLibraryConnection" class="form-select" aria-label="Project connection"><option value="">All connections</option><option value="catalog_only">Catalog only</option><option value="connected">Connected</option><option value="needs_review">Needs review</option></select>
                     <select id="projectLibraryAvailability" class="form-select" aria-label="Last observed availability"><option value="">Any availability</option><option value="available">Available at last scan</option><option value="ambiguous">Needs file choice</option><option value="unavailable">Unavailable at last scan</option><option value="revoked_source">Discovery consent ended</option><option value="not_scanned">Not scanned</option></select>
                     <select id="projectLibraryPriority" class="form-select" aria-label="Saved priority"><option value="">Any priority</option><option value="0">Priority 0</option><option value="1">Priority 1</option><option value="2">Priority 2</option><option value="3">Priority 3</option><option value="4">Priority 4</option><option value="5">Priority 5</option></select>
-                    <select id="projectLibrarySort" class="form-select" aria-label="Sort projects"><option value="name">Name</option><option value="last_saved">Last saved</option><option value="status">Status</option><option value="priority">Priority</option><option value="next_action">Next action</option><option value="sourced_activity">Sourced activity</option><option value="scanned_at">Last scan</option></select>
-                    <select id="projectLibraryDirection" class="form-select" aria-label="Sort direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
-                    <button class="modern-btn modern-btn-secondary" type="submit">Find</button>
-                  </div>
+                    <button class="modern-btn modern-btn-secondary" type="submit">Apply filters</button>
+                  </div></details>
+                  <div class="project-library-applied"><span id="projectLibraryApplied" role="status"></span><button id="projectLibraryClear" type="button" class="modern-btn modern-btn-secondary" hidden>Clear filters</button></div>
                 </form>
-                <div class="project-library-queue" aria-label="Selected project setup queue">
+                <div class="project-library-selection-tools"><button id="projectLibrarySelectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Select loaded projects</button><span id="projectLibrarySelectionNotice" role="status"></span></div>
+                <div id="projectLibraryQueueActions" class="project-library-queue" aria-label="Selected project setup queue" hidden>
                   <span id="projectLibraryQueueStatus" role="status" aria-live="polite">Choose catalog-only projects to review one at a time.</span>
-                  <button id="projectLibrarySelectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Select all</button>
                   <button id="projectLibraryConnectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Connect all selected</button>
                   <button id="projectLibraryQueueStart" class="modern-btn modern-btn-secondary" type="button" disabled>Review selected projects</button>
                   <button id="projectLibraryQueueResume" class="modern-btn modern-btn-secondary" type="button" hidden>Resume review queue</button>
                   <button id="projectLibraryQueueDiscard" class="modern-btn modern-btn-secondary" type="button" hidden>Discard queue</button>
+                </div>
                   <div id="projectLibraryBulk" class="project-library-bulk" role="group" aria-labelledby="projectLibraryBulkCount" hidden>
                     <span id="projectLibraryBulkCount" class="project-library-bulk-count"></span>
                     <select id="projectLibraryBulkStage" class="form-select" aria-label="Set stage for the selected songs"><option value="">Set stage…</option><option value="unknown">Unknown</option><option value="idea">Idea</option><option value="writing">Writing</option><option value="recording">Recording</option><option value="editing">Editing</option><option value="mixing">Mixing</option><option value="mastering">Mastering</option></select>
                     <select id="projectLibraryBulkStatus" class="form-select" aria-label="Set status for the selected songs"><option value="">Set status…</option><option value="unknown">Unknown</option><option value="planning">Planning</option><option value="active">Active</option><option value="on_hold">On hold</option><option value="complete">Complete</option><option value="archived">Archived</option></select>
                     <select id="projectLibraryBulkPriority" class="form-select" aria-label="Set priority for the selected songs"><option value="">Set priority…</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="clear">Clear priority</option></select>
                   </div>
-                </div>
                 <p id="projectLibraryBulkResult" class="project-library-bulk-result" hidden><span id="projectLibraryBulkResultText" role="status" aria-live="polite"></span> <button id="projectLibraryBulkUndo" class="modern-btn modern-btn-secondary" type="button" hidden>Undo</button></p>
                 <section id="projectLibraryQueueHistory" class="project-library-queue-history" aria-labelledby="projectLibraryQueueHistoryTitle" hidden>
                   <h3 id="projectLibraryQueueHistoryTitle">Recent review outcomes</h3>
                   <ul id="projectLibraryQueueHistoryRows"></ul>
                 </section>
-                <div class="project-library-table-wrap" tabindex="0" aria-label="Project library results" aria-describedby="projectLibraryStatus">
-                  <table class="project-library-table"><thead><tr><th scope="col">Pick</th><th scope="col">Project</th><th scope="col">Stage / status</th><th scope="col">Connection</th><th scope="col">Last observed source</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="projectLibraryRows"></tbody></table>
+                <div id="projectLibraryBrowser" class="project-library-browser">
+                  <section id="projectLibraryResults" class="project-library-results" aria-label="Project results">
+                    <div id="projectLibraryListScroll" class="project-library-table-wrap" tabindex="0" aria-label="Project library results" aria-describedby="projectLibraryStatus">
+                      <table class="project-library-table"><thead><tr><th scope="col"><span class="visually-hidden">Select for bulk actions</span></th><th scope="col">Project</th><th scope="col">Stage</th><th scope="col">Last saved</th></tr></thead><tbody id="projectLibraryRows"></tbody></table>
+                    </div>
+                    <p id="projectLibraryEmpty" class="project-library-empty" hidden>No projects match. Change your search or clear filters to return to the catalog.</p>
+                    <div class="project-library-footer"><span id="projectLibraryCount"></span><button id="projectLibraryMore" class="modern-btn modern-btn-secondary" type="button" hidden>More projects</button></div>
+                  </section>
+                  <section id="projectLibraryPane" class="project-library-pane" aria-label="Selected project">
+                    <div class="project-library-pane-head"><button id="projectLibraryBack" type="button" class="modern-btn modern-btn-secondary" hidden>Back to projects</button><h3 id="projectLibraryPaneTitle" tabindex="-1">Select a project</h3></div>
+                    <div id="projectLibraryTabs" class="project-library-tabs" role="tablist" aria-label="Project information" hidden>
+                      <button id="projectLibraryTabOverview" type="button" role="tab" data-library-tab="overview" aria-selected="true" aria-controls="projectLibraryTabPanel">Overview</button>
+                      <button id="projectLibraryTabFiles" type="button" role="tab" data-library-tab="files" aria-selected="false" aria-controls="projectLibraryTabPanel" tabindex="-1">Files</button>
+                      <button id="projectLibraryTabSessions" type="button" role="tab" data-library-tab="sessions" aria-selected="false" aria-controls="projectLibraryTabPanel" tabindex="-1">Sessions</button>
+                    </div>
+                    <div id="projectLibraryTabPanel" class="project-library-tab-panel" role="tabpanel" tabindex="0" aria-labelledby="projectLibraryPaneTitle"><p>Inspect saved information without opening a workspace or a project application.</p></div>
+                  </section>
                 </div>
-                <div class="project-library-footer"><span id="projectLibraryCount"></span><button id="projectLibraryMore" class="modern-btn modern-btn-secondary" type="button" hidden>More projects</button></div>
               </div>
             </section>
 
@@ -315,6 +343,8 @@
   <!-- This standalone page hosts the shared assistant drawer too. Its work
        dispatcher requires the same DX API utilities as other workspace pages. -->
   {{template "scripts-dx-utils.tmpl" .}}
+  <script defer src="/js/modules/themeManager.js"></script>
+  {{template "theme-init.tmpl" .}}
   <script type="module">
     import { AssistantProgramPage } from '/js/modules/assistant-program.js';
     import { SampleLibraryPanel } from '/js/modules/sample-library.js';

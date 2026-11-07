@@ -115,6 +115,45 @@
   display: none !important;
 }
 
+/* The borrowed shell has one scroll surface. Ordinary creator controls retain
+   their DOM/values but are never exposed or focusable while a source owns it. */
+#addFolderModal[data-source-setup-owner]
+  .modal-content
+  > :not(.modal-header):not(#sourceSetupDialogHost),
+#addFolderModal[data-source-setup-owner] #workspaceBuildWithBtn {
+  display: none !important;
+}
+#addFolderModal[data-source-setup-owner] #folderModalTitle::after {
+  content: none;
+}
+.source-setup-dialog-host {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding: 1rem;
+}
+.source-setup-dialog-host[hidden] {
+  display: none;
+}
+.source-setup-dialog-host .pa-folder__offer {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  max-height: none;
+}
+.source-setup-dialog-host .assisted-placement {
+  max-width: 42rem;
+}
+.source-setup-summary {
+  padding: 0.75rem;
+  border-left: 2px solid var(--border-color);
+  overflow-wrap: anywhere;
+}
+.source-setup-summary p {
+  margin: 0 0 0.5rem;
+}
+
 /* Full setup review; on Map this host appears only for progress/results.
    The reviewed placement click itself confirms creation. */
 .assisted-placement {

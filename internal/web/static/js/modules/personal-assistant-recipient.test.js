@@ -448,6 +448,7 @@ const latestRoute =
 const mira = name => ({
   id: name,
   agent_name: 'REAPER Assistant',
+  folder_id: 'ws-1',
   title: 't-' + name,
   messages: []
 });
@@ -514,6 +515,39 @@ test('none is a new conversation; a gone or reassigned stored session falls back
     storedId: 'sess-deleted'
   });
   assert.equal(goneOut.error, false);
+});
+
+test('a moved namesake session is never hydrated in the old workspace', async () => {
+  const fetchImpl = fakeFetch({
+    '/api/sessions/moved': { body: { ...mira('moved'), folder_id: 'other' } },
+    [latestRoute]: { body: { sessions: [] } }
+  });
+  const out = await loadEntrySession({
+    fetchImpl,
+    workspaceId: 'ws-1',
+    agentName: 'REAPER Assistant',
+    storedId: 'moved'
+  });
+  assert.equal(out.session, null);
+  assert.equal(out.error, false);
+});
+
+test('explicit update navigation never falls back from a stale exact conversation', async () => {
+  for (const body of [{ ...mira('moved'), folder_id: 'other' }, null]) {
+    const fetchImpl = fakeFetch({
+      '/api/sessions/moved': { status: body ? 200 : 404, body },
+      [latestRoute]: { body: { sessions: [{ id: 'another', agent_name: 'REAPER Assistant' }] } }
+    });
+    const out = await loadEntrySession({
+      fetchImpl,
+      workspaceId: 'ws-1',
+      agentName: 'REAPER Assistant',
+      storedId: 'moved',
+      exact: true
+    });
+    assert.deepEqual(out, { session: null, stored: true, error: true });
+    assert.deepEqual(fetchImpl.seen, ['/api/sessions/moved']);
+  }
 });
 
 test('a server failure is an error that keeps the stored session', async () => {

@@ -476,5 +476,11 @@ func (h *Handler) prepareCreatedBuild(w http.ResponseWriter, r *http.Request, ow
 		return
 	}
 	h.recordObservedBuildPreparation(r.Context(), owner, build, &outcome)
+	if h.workspacePreparationCompleted != nil {
+		if err := h.workspacePreparationCompleted(r.Context(), ws.ID); err != nil {
+			incomplete("setup_status_unavailable", "The filing review is saved, but setup status could not be confirmed. Open this workspace; no new scan is needed.", "result")
+			return
+		}
+	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "workspace_id": ws.ID, "folder_slug": slug, "preparation": prepared, "outcome": outcome})
 }

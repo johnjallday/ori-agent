@@ -132,7 +132,9 @@ async function sessionsIn(request: APIRequestContext, workspaceId: string) {
 }
 
 // Arrival delivery has its own real-host journey in workspace-lead-welcome.
-// These routing tests deliberately exercise an otherwise empty conversation.
+// These routing tests deliberately exercise an explicit New conversation. The
+// host may already have delivered its quiet welcome before this browser exists;
+// intercepting the legacy on-entry POST no longer prevents that saved history.
 test.beforeEach(async ({ page }) => {
   await page.route('**/lead-conversation/open', route =>
     route.fulfill({ json: { changed: false } })
@@ -160,6 +162,9 @@ test('a workspace with a Commander opens as its entry agent and sends to it', as
     'Ask Mira about this workspace… (/task creates a ticket)'
   );
   await expect(page.locator('#personalAssistantChips')).toBeHidden();
+  await expect.poll(async () => (await sessionsIn(request, seeded.commander.id)).length).toBe(1);
+  const before = await sessionsIn(request, seeded.commander.id);
+  await chooseConversation(page, '#personalAssistantEntrySessionNew');
   await expect(page.locator('#personalAssistantEntrySessionTitle')).toHaveText('New conversation');
 
   await page.locator('#personalAssistantInput').fill('What can you do in this workspace?');
@@ -171,7 +176,9 @@ test('a workspace with a Commander opens as its entry agent and sends to it', as
     folder_id: seeded.commander.id,
     agent_name: 'Mira'
   });
-  const created = await sessionsIn(request, seeded.commander.id);
+  const after = await sessionsIn(request, seeded.commander.id);
+  const created = after.filter(session => !before.some(old => old.id === session.id));
+  expect(after).toHaveLength(before.length + 1);
   expect(created.map(session => session.agent_name)).toEqual(['Mira']);
   expect(traffic.chats).toHaveLength(1);
   expect(traffic.chats[0].sessionId).toBe(created[0].id);
@@ -254,9 +261,10 @@ test('New forgets the session and the next message starts another', async ({ pag
   await expect(page.locator('#personalAssistantEntrySessionTitle')).toHaveText(
     'What can you do in this workspace?'
   );
+  const before = await sessionsIn(request, seeded.commander.id);
   await chooseConversation(page, '#personalAssistantEntrySessionNew');
   await expect(page.locator('#personalAssistantEntrySessionTitle')).toHaveText('New conversation');
-  expect(await sessionsIn(request, seeded.commander.id)).toHaveLength(1);
+  expect(await sessionsIn(request, seeded.commander.id)).toEqual(before);
   await page.locator('#personalAssistantInput').fill('Hello again.');
   await page.locator('#personalAssistantSend').click();
   await expect(
@@ -264,7 +272,10 @@ test('New forgets the session and the next message starts another', async ({ pag
   ).toContainText('Fixture reply from Mira.');
   expect(traffic.sessions).toHaveLength(1);
   const sessions = await sessionsIn(request, seeded.commander.id);
-  expect(sessions).toHaveLength(2);
+  expect(sessions).toHaveLength(before.length + 1);
+  const created = sessions.filter(session => !before.some(old => old.id === session.id));
+  expect(created).toHaveLength(1);
+  expect(traffic.chats[0].sessionId).toBe(created[0].id);
   expect(sessions.every(session => session.agent_name === 'Mira')).toBe(true);
 });
 

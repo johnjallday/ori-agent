@@ -205,6 +205,15 @@ async function captureCuratorSettings(page: Page, path: string) {
  */
 async function clearBlockingModals(page: Page) {
   const gate = page.locator('#workspace-detail-task-confirm-modal');
+  // A deep-linked native Review can own the top layer before the older
+  // Commander nudge settles. Close that owner, decline, then restore the saved
+  // arrival; never click through a native dialog or suppress its modality.
+  let returnTo = '';
+  if ((await gate.isVisible()) && (await console_(page).isVisible())) {
+    returnTo = page.url();
+    await console_(page).getByRole('button', { name: 'Close File Janitor', exact: true }).click();
+    await expect(console_(page)).toBeHidden();
+  }
   const notNow = gate.getByRole('button', { name: 'Not now' });
   if (await notNow.isVisible().catch(() => false)) {
     await notNow.click();
@@ -214,6 +223,7 @@ async function clearBlockingModals(page: Page) {
     await page.locator('#workspace-detail-task-confirm-close').click();
     await expect(gate).toBeHidden({ timeout: 15000 });
   }
+  if (returnTo) await page.goto(returnTo);
 }
 
 /**
@@ -788,7 +798,7 @@ test.describe('File Janitor capability', () => {
     await page.locator('[data-fj-console-close]').click();
     await expect(station).toBeFocused();
 
-    await page.getByRole('button', { name: 'Tickets', exact: true }).click();
+    await page.locator('[data-cmd-view-mode="tickets"]').click();
     await expect(page.locator('#fileJanitorMount')).toBeHidden();
 
     await page.getByRole('button', { name: 'Details', exact: true }).click();

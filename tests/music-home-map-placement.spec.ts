@@ -2,6 +2,7 @@ import { test, expect as baseExpect } from '@playwright/test';
 import {
   musicHomeSnapshot as snapshot,
   musicHomeResourceCounts as resourceCounts,
+  musicSourceSnapshot,
   openMusicHomeReview
 } from './helpers/music-home-placement';
 import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
@@ -14,20 +15,34 @@ const expect = baseExpect.configure({ timeout: 60_000 });
 // setup and Home proof are real server operations, never response fixtures.
 const song = process.env.MUSIC_HOME_PLACEMENT_SONG || '';
 const fault = process.env.MUSIC_HOME_PLACEMENT_FAULT || '';
-const evidence = fault
-  ? `tasks/evidence-music-home-map-placement/group-4/${fault}`
-  : 'tasks/evidence-music-home-map-placement/group-2';
+const evidence =
+  process.env.MUSIC_HOME_PLACEMENT_EVIDENCE ||
+  (fault
+    ? `tasks/evidence-music-home-map-placement/group-4/${fault}`
+    : 'tasks/evidence-music-home-map-placement/group-2');
 const collection = process.env.MUSIC_HOME_PLACEMENT_COLLECTION || '';
 const secondSong = process.env.MUSIC_HOME_PLACEMENT_SECOND_SONG || '';
 // The song folder holds two project files (scripts/music-home-placement-demo.sh --case chat-choice).
 const twoFiles = process.env.MUSIC_HOME_PLACEMENT_TWO_FILES === '1';
+let reviewedEntry = '';
 test.describe.configure({ mode: 'serial' });
 let restoreFault: (() => Promise<void>) | null = null;
+let unchangedSource: (() => Promise<void>) | null = null;
+test.beforeEach(async () => {
+  const root = collection || song;
+  if (!root) return;
+  const before = await musicSourceSnapshot(root);
+  unchangedSource = async () => {
+    expect(await musicSourceSnapshot(root)).toEqual(before);
+  };
+});
 test.afterEach(async () => {
   if (restoreFault) {
     await restoreFault();
     restoreFault = null;
   }
+  await unchangedSource?.();
+  unchangedSource = null;
 });
 
 test('single-song reviewed empty Home is positioned before any project Open', async ({
@@ -120,6 +135,26 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     if (r.method() === 'POST' && /\/(turns|chat|completions)$/.test(r.url())) inferencePosts++;
   });
   const review = await openMusicHomeReview(page, song);
+  if (twoFiles) {
+    await review
+      .getByRole('button', { name: 'Review choices & requirements', exact: true })
+      .click();
+    const choice = page
+      .locator('#personalAssistantFolderEntryChoice')
+      .getByRole('radio', { checked: false })
+      .first();
+    reviewedEntry = await choice.inputValue();
+    const saved = page.waitForResponse(
+      response => response.url().endsWith('/entry') && response.request().method() === 'POST'
+    );
+    await choice.check();
+    expect((await saved).ok()).toBe(true);
+    await page
+      .locator('#addFolderModal')
+      .getByRole('button', { name: 'Return to setup review', exact: true })
+      .click();
+    await expect(review).toBeVisible();
+  }
   await expect(review).toContainText('does not open its workspace');
   if (fault === 'two-tabs') {
     const source = (await (await request.get('/api/personal-assistant/folder-digest')).json())
@@ -142,8 +177,9 @@ test('single-song reviewed empty Home is positioned before any project Open', as
         (id: string) => (window as any).PersonalAssistantConversation.resume(id),
         source.conversation_id
       );
-    const launch = secondTab.getByRole('button', {
-      name: /^(Set up|Prepare) Music Production Home$/
+    const launch = secondTab.locator('[data-source-setup-summary]').getByRole('button', {
+      name: 'Review setup',
+      exact: true
     });
     const reopen = secondTab.getByRole('button', {
       name: 'Open Ori Music Demo review',
@@ -165,11 +201,20 @@ test('single-song reviewed empty Home is positioned before any project Open', as
   await review.getByRole('button', { name: 'Place & set up on map', exact: true }).click();
   const preview = page.locator('.ws-map-placement-preview');
   await expect(preview).toBeVisible();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(page.locator('[data-ws-map-viewport]')).toBeFocused();
   await page.screenshot({ path: `${evidence}/empty-frame-preview.png` });
   expect(await snapshot(request)).toEqual(before);
   expect(setupPosts).toBe(0);
   await page.keyboard.press('Escape');
   await expect(review).toBeVisible();
+  await expect(page.locator('#folderModalTitle')).toBeFocused();
+  await expect(page.locator('.modal.show')).toHaveCount(1);
+  await expect(page.locator('#personalAssistantPanel [data-source-creation-review]')).toHaveCount(
+    0
+  );
+  await page.screenshot({ path: `${evidence}/returned-review.png` });
   expect(await snapshot(request)).toEqual(before);
   await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   expect(setupPosts).toBe(0);
@@ -258,7 +303,7 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     await page.keyboard.press('Enter');
   }
   if (['competing-home', 'disabled-provider', 'missing-model'].includes(fault)) {
-    const sourcePanel = page.locator('#personalAssistantPanel');
+    const sourcePanel = page.locator('#addFolderModal[data-source-setup-owner]');
     await expect(sourcePanel).toBeVisible();
     await expect(sourcePanel).toContainText(
       /changed|unavailable|Review the current setup|system model/i
@@ -332,6 +377,10 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     await page.screenshot({ path: `${evidence}/partial-home.png` });
     await readOffer();
     await page.reload();
+    await page
+      .locator('[data-source-setup-summary]')
+      .getByRole('button', { name: 'View setup status', exact: true })
+      .click();
     await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
     const observed = await snapshot(request);
     expect(observed.positions).toEqual(before.positions);
@@ -340,6 +389,38 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     expect(setupPosts).toBe(1);
     expect(positionWrites).toBe(0);
     expect(faultInjected).toBe(true);
+    await restoreFault!();
+    restoreFault = null;
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(async () => (await readOffer())?.setup?.stop_reason).toBe('handoff_ready');
+    const resumed = await readOffer();
+    expect(resumed.home_result.home_id).toBe(offer.home_result.home_id);
+    expect(resumed.home_result.request_id).toBe(offer.home_result.request_id);
+    expect(resumed.home_result.plan_digest).toBe(offer.home_result.plan_digest);
+    const completed = await resourceCounts(request, offer.home_result.home_id);
+    expect(completed.workspaces.length).toBe(partial.workspaces.length);
+    // The original staffing owner leaves a visible, unsaved allocation when
+    // the agent-store write fails. Explicit continuation allocates its working
+    // manager; the presentation must neither hide nor delete the failed one.
+    expect(completed.agents.length).toBe(partial.agents.length + 1);
+    expect(completed.agents).toEqual(
+      expect.arrayContaining(partial.agents.map((agent: any) => agent.name))
+    );
+    const staffedHome = await (
+      await request.get(`/api/workspaces/${offer.home_result.home_id}`)
+    ).json();
+    expect(staffedHome.agent_instances).toHaveLength(1);
+    expect(completed.roots).toHaveLength(1);
+    expect(completed.projects).toHaveLength(1);
+    expect((await snapshot(request)).positions).toEqual(before.positions);
+    expect(setupPosts).toBe(2, 'only the explicit same-run continuation adds a POST');
+    expect(positionWrites).toBe(0);
+    await expect(
+      page
+        .locator('#addFolderModal')
+        .getByRole('button', { name: 'Go to Music Production Home', exact: true })
+    ).toBeVisible();
+    await page.screenshot({ path: `${evidence}/partial-continued.png` });
     return;
   }
   if (fault === 'accept') {
@@ -493,6 +574,11 @@ test('single-song reviewed empty Home is positioned before any project Open', as
     state: 'ready',
     layout_subject_new: true
   });
+  await page
+    .locator('#addFolderModal')
+    .getByRole('button', { name: 'Close setup review', exact: true })
+    .click();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
   await page.locator('#personalAssistantClose').click();
   await expect(page.locator(`.ws-map-district[data-group-id="${home.id}"]`)).toBeVisible();
   await page.screenshot({ path: `${evidence}/positioned-empty-home.png` });
@@ -520,9 +606,13 @@ test('single-song chat hand-off: the manager offers the song and it stands where
   let setupPosts = 0;
   let modelPosts = 0;
   let sessionPosts = 0;
+  let openedFile = '';
   page.on('request', r => {
     if (r.method() !== 'POST') return;
-    if (/folder-digest\/offers\/[^/]+\/setup$/.test(r.url())) setupPosts++;
+    if (/folder-digest\/offers\/[^/]+\/setup$/.test(r.url())) {
+      setupPosts++;
+      openedFile = r.postDataJSON().entry_name;
+    }
     if (/\/(turns|chat|completions)$/.test(r.url())) modelPosts++;
     if (/\/api\/sessions$/.test(r.url())) sessionPosts++;
   });
@@ -598,29 +688,15 @@ test('single-song chat hand-off: the manager offers the song and it stands where
       x: Number.parseFloat((element as HTMLElement).style.left),
       y: Number.parseFloat((element as HTMLElement).style.top)
     }));
-  let candidate = await point();
+  const candidate = await point();
   await page.keyboard.press('Enter');
   await expect.poll(() => setupPosts).toBe(1);
   if (twoFiles) {
-    // Two project files: the open stops before anything is made, and the
-    // manager asks which file, in the card. Nothing was placed. The Map says so
-    // first, and Continue brings back the card that asks.
-    await openMapReceiptDetails(page, 'was not opened');
-    const choices = offers.locator('[data-home-offer-choice]');
-    await expect(choices).toHaveCount(2, { timeout: 90_000 });
-    await expect(offers).toContainText(
-      'Ori Music Demo has more than one project file. Which one should I open?'
-    );
-    await expect(offers).toContainText('Nothing was opened or placed yet.');
-    expect(
-      (await snapshot(request)).workspaces.filter((w: any) => w.parent_id === home.id)
-    ).toHaveLength(0);
-    await page.screenshot({ path: `${chatEvidence}/choose-project-file.png` });
-    await offers.getByRole('button', { name: /with Ori Music Demo \(mix\)\.rpp$/ }).click();
-    await expect(preview).toBeVisible();
-    candidate = await point();
-    await page.keyboard.press('Enter');
-    await expect.poll(() => setupPosts).toBe(2);
+    // The source review chose a real alternative before Home setup. The later
+    // manager Open must carry it, not silently change it or ask a second time.
+    expect(reviewedEntry).toBeTruthy();
+    expect(openedFile).toBe(reviewedEntry);
+    await expect(offers.locator('[data-home-offer-choice]')).toHaveCount(0);
   }
   // The Map stays clear while it runs; the receipt is one explicit click away.
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
@@ -640,7 +716,7 @@ test('single-song chat hand-off: the manager offers the song and it stands where
   expect(resource.parent_id).toBe(home.id);
   expect(JSON.stringify(resource)).toContain(brief);
   await expect(page.locator(`.ws-map-tile[data-ws-id="${child.id}"]`)).toHaveClass(/is-selected/);
-  expect(setupPosts).toBe(twoFiles ? 2 : 1);
+  expect(setupPosts).toBe(1);
   expect(sessionPosts).toBe(0);
   expect(modelPosts).toBe(0);
   // The Home page's card no longer offers the opened song.
@@ -736,9 +812,23 @@ test('existing Home Show and Move preserve later project anchors and canonical m
     x: (el as HTMLElement).style.left,
     y: (el as HTMLElement).style.top
   }));
+  const beforeSecond = await resourceCounts(request, home.id);
   await page.goto('/?panel=today&folder=show');
   await page.locator('.folder-path-entry__input:visible').first().fill(secondSong);
   await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
+  await page
+    .locator('[data-source-setup-summary]')
+    .getByRole('button', { name: 'Review setup', exact: true })
+    .click();
+  const existingReview = page.locator('#addFolderModal[data-source-setup-owner]');
+  await expect(existingReview).toBeVisible();
+  await expect(page.locator('#folderModalTitle')).toBeFocused();
+  await expect(
+    existingReview.getByRole('button', { name: 'Set up Home', exact: true })
+  ).toHaveCount(0);
+  expect(await resourceCounts(request, home.id)).toEqual(beforeSecond);
+  expect((await snapshot(request)).positions).toEqual(first.positions);
+  await page.screenshot({ path: `${evidence}/ready-home-link.png` });
   await page
     .getByRole('button', { name: /Go to Music Production Home/ })
     .first()
@@ -772,6 +862,10 @@ test('existing Home Show and Move preserve later project anchors and canonical m
     // vanished suggestion / early workspace as successful completed staffing.
     expect((await readSecond()).setup.stop_reason).toBe('failed');
     await page.goto('/');
+    await page
+      .locator('[data-source-setup-summary]')
+      .getByRole('button', { name: 'View setup status', exact: true })
+      .click();
     await page.getByRole('button', { name: 'Try again', exact: true }).click();
   }
   await expect.poll(async () => (await readSecond()).status).toBe('resolved');
@@ -845,6 +939,9 @@ test('collection library Opens keep the explicitly positioned Home and earlier c
   for (const entry of unopened.slice(0, 2)) {
     const priorIDs = new Set((await snapshot(request)).workspaces.map((w: any) => w.id));
     await page.goto(`/workspaces/${home.folder_slug}/assistant#projectLibraryPanel`);
+    // The library browser keeps the one-click recent-song actions in its
+    // activity disclosure. Inspecting a row is deliberately not Open.
+    await page.getByText('Library tools and saved activity', { exact: true }).click();
     const openedResponse = page.waitForResponse(
       response =>
         response.url().endsWith(`/projects/${entry.id}/open`) &&
@@ -913,8 +1010,11 @@ test(`collection ${collectionOnMap ? 'map' : 'automatic'} setup finishes a Home 
   await page
     .getByRole('button', { name: 'Review library setup', exact: true })
     .click({ timeout: 15_000 });
-  await page.getByRole('button', { name: 'Set up', exact: true }).click({ timeout: 15_000 });
-  const review = page.locator('[data-source-creation-review]:visible');
+  await page
+    .locator('[data-source-setup-summary]')
+    .getByRole('button', { name: 'Review setup', exact: true })
+    .click({ timeout: 15_000 });
+  const review = page.locator('#addFolderModal [data-source-creation-review]:visible');
   await expect(review).toBeVisible();
   await expect(review.getByRole('textbox', { name: 'Group name', exact: true })).toHaveValue(
     'Music Production Home'

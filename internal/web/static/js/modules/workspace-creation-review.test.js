@@ -363,6 +363,8 @@ test('recognized setup projects fixed plan roles and optional first-task boundar
     detailsLabel: 'Review the full plan'
   });
   assert.match(html, /id="sourceSetupName"/);
+  assert.match(html, /name="sourceSetupName" autocomplete="off"/);
+  assert.match(html, /name="sourceSetupGoal" autocomplete="off"/);
   assert.match(html, /readonly/);
   assert.match(html, /&lt;project&gt;/);
   assert.doesNotMatch(html, /data-placement-action="blueprint"|File Curator|metadata scan/);

@@ -481,17 +481,27 @@ func (h *Handler) SearchAssistantLibrary(w http.ResponseWriter, r *http.Request)
 	}
 	allowed := map[string]bool{"text": true, "stage": true, "status": true, "format": true,
 		"connection": true, "availability": true, "root_id": true, "priority": true,
-		"sort": true, "direction": true, "page_size": true, "cursor": true}
+		"sort": true, "direction": true, "page_size": true, "cursor": true,
+		"view": true, "collection_id": true, "collection_revision": true}
 	for name, values := range values {
 		if !allowed[name] || len(values) != 1 {
 			_ = orihttp.RespondBadRequest(w, "Invalid library search")
 			return
 		}
 	}
-	query := projectlibrary.Search{Text: values.Get("text"), Stage: values.Get("stage"),
+	query := projectlibrary.Search{View: values.Get("view"), CollectionID: values.Get("collection_id"),
+		Text: values.Get("text"), Stage: values.Get("stage"),
 		Status: values.Get("status"), Format: values.Get("format"), Connection: values.Get("connection"),
 		Availability: values.Get("availability"), RootID: values.Get("root_id"), Sort: values.Get("sort"),
 		Direction: values.Get("direction"), Cursor: values.Get("cursor")}
+	if raw, present := values["collection_revision"]; present {
+		value, err := strconv.ParseInt(raw[0], 10, 64)
+		if err != nil || value < 1 {
+			_ = orihttp.RespondBadRequest(w, "Invalid collection revision")
+			return
+		}
+		query.CollectionRevision = value
+	}
 	if raw := values.Get("priority"); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil {

@@ -46,6 +46,7 @@ import {
   sectionOfKind
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
+import { renderWorkspaceUpdateSignals } from './workspace-update-signals.js';
 import {
   MENU_DELETE,
   MENU_MOVE,
@@ -869,6 +870,11 @@ function rowHTML(row, ctx) {
       `aria-haspopup="menu" aria-label="Actions for ${name}">${iconHTML('more', { size: 16 })}</button>`
     : '';
 
+  const updateView = ctx.workspaceUpdateBadges?.[row.workspaceId];
+  const updates =
+    isWorkspaceRow && updateView?.workspaceId === row.workspaceId
+      ? renderWorkspaceUpdateSignals(updateView, { tabIndex: ctx.tabbableId === row.id ? 0 : -1 })
+      : '';
   return (
     `<li class="cockpit-tree-node${row.isGroup ? ' is-group' : ''}" role="none">` +
     `<div class="${classes.join(' ')}" role="treeitem" ` +
@@ -894,10 +900,41 @@ function rowHTML(row, ctx) {
     iconHTML(rowIconName(row)) +
     `<span class="cockpit-tree-name" title="${name}">${name}</span>` +
     markerHTML(row) +
+    (isWorkspaceRow
+      ? `<span class="cockpit-tree-updates" data-tree-updates="${escapeHtml(row.workspaceId)}"${updates ? '' : ' hidden'}>${updates}</span>`
+      : '') +
     more +
     '</div>' +
     '</li>'
   );
+}
+
+// Source refreshes only patch the small markers. They must not remount the
+// column, cancel a name being typed, collapse folders or change scroll position.
+export function updateTreeWorkspaceBadges(container, badges) {
+  if (!container?.querySelectorAll) return;
+  container.querySelectorAll('[data-tree-updates]').forEach(host => {
+    const id = host.getAttribute('data-tree-updates');
+    const row = host.closest('[data-tree-row]');
+    const view = badges?.[id];
+    const html =
+      view?.workspaceId === id
+        ? renderWorkspaceUpdateSignals(view, {
+            tabIndex: row?.getAttribute('tabindex') === '0' ? 0 : -1
+          })
+        : '';
+    if (host.innerHTML === html) return;
+    const focused = host.contains(document.activeElement);
+    const kind = focused ? document.activeElement.getAttribute('data-workspace-update') : '';
+    host.innerHTML = html;
+    host.hidden = !html;
+    if (focused) {
+      const replacement = Array.from(host.querySelectorAll('[data-workspace-update]')).find(
+        link => link.getAttribute('data-workspace-update') === kind
+      );
+      (replacement || row)?.focus?.({ preventScroll: true });
+    }
+  });
 }
 
 function emptyDropHTML(row) {
@@ -1180,6 +1217,7 @@ export function mountTree(container, state, callbacks) {
       activeId,
       tabbableId,
       bulkState: bulkSelectionState(state.flattened, selected),
+      workspaceUpdateBadges: state.workspaceUpdateBadges,
       activeTags,
       filter,
       unsearched: hasUnsearchedContents(visibleTree, state.treeContents)
@@ -1454,15 +1492,34 @@ function bindTree(container, state, cb, rows) {
     if (typeof cb.onAnnounce === 'function') cb.onAnnounce(msg);
   };
 
+  const setRowTabStop = el => {
+    container.querySelectorAll('[data-tree-row]').forEach(r => r.setAttribute('tabindex', '-1'));
+    el.setAttribute('tabindex', '0');
+    container
+      .querySelectorAll('[data-workspace-update]')
+      .forEach(link =>
+        link.setAttribute('tabindex', link.closest('[data-tree-row]') === el ? '0' : '-1')
+      );
+    state.focusId = el.getAttribute('data-tree-row');
+  };
   const focusRow = id => {
     const el = container.querySelector(`[data-tree-row="${cssEscape(id)}"]`);
     if (!el) return;
-    container.querySelectorAll('[data-tree-row]').forEach(r => r.setAttribute('tabindex', '-1'));
-    el.setAttribute('tabindex', '0');
+    setRowTabStop(el);
     el.focus();
-    state.focusId = id;
     syncNewNoteButton();
   };
+  on('focusin', event => {
+    if (
+      !event.target.matches('[data-tree-row]') &&
+      !event.target.closest('[data-workspace-update]')
+    )
+      return;
+    const el = event.target.closest('[data-tree-row]');
+    if (!el || el.getAttribute('data-tree-row') === state.focusId) return;
+    setRowTabStop(el);
+    syncNewNoteButton();
+  });
 
   // The header's New note button follows the current row, which arrow keys
   // change without a redraw (FR50).
@@ -1659,6 +1716,7 @@ function bindTree(container, state, cb, rows) {
   ];
 
   on('click', e => {
+    if (e.target.closest('[data-workspace-update]')) return; // native scoped navigation, not row activation/bulk selection
     for (const [selector, handler] of clickActions) {
       const el = e.target.closest(selector);
       if (el && container.contains(el)) {
@@ -1795,7 +1853,21 @@ function bindTree(container, state, cb, rows) {
     container.classList.remove('is-dragging');
   };
 
+  let updatePointer = false;
+  on('pointerdown', e => {
+    updatePointer = Boolean(e.target.closest('[data-workspace-update]'));
+  });
+  on('pointerup', () => {
+    updatePointer = false;
+  });
+  on('pointercancel', () => {
+    updatePointer = false;
+  });
   on('dragstart', e => {
+    if (updatePointer || e.target.closest('[data-workspace-update]')) {
+      e.preventDefault();
+      return;
+    }
     const rowEl = dropRowFor(e.target);
     if (!rowEl) return;
     state.draggingId = rowEl.getAttribute('data-tree-row');

@@ -136,3 +136,23 @@ test('late replies cannot repopulate an invalidated or different Home', async ()
   await again;
   assert.ok(!find(root, card.name));
 });
+
+test('library navigation receives canonical collection identity without downloading member pages', async () => {
+  const root = dom(),
+    calls = [],
+    selected = [];
+  const api = mountHomeCollections(root, {
+    isCurrent: () => true,
+    request: async path => {
+      calls.push(path);
+      return list();
+    },
+    onSelect: collection => selected.push(collection)
+  });
+  await api.refresh();
+  find(root, 'Browse projects').events.click();
+  await settle();
+  assert.deepEqual(calls, ['/collections']);
+  assert.deepEqual(selected, [card]);
+  assert.equal(find(root, 'View members'), undefined);
+});

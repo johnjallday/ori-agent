@@ -16,6 +16,7 @@ test.skip(
   'requires music-home-demo.sh test --suite portfolio-reviewed --provider reviewed'
 );
 test.setTimeout(180_000); // Released-source resolution and optional process restart require time.
+test.use({ actionTimeout: 15_000 });
 
 async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
   const text = await response.text();
@@ -26,6 +27,25 @@ async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
 async function shot(page: Page, name: string) {
   mkdirSync(evidenceDir, { recursive: true });
   await page.screenshot({ path: join(evidenceDir, `${name}.png`) });
+}
+
+// Setup remains an explicit action after inert row inspection. Keep all of the
+// existing setup/consent/session assertions below; selecting a row alone is no
+// longer permission to open the setup dialog or read activation eligibility.
+async function reviewProject(page: Page, name: string) {
+  await management(page);
+  await page.getByRole('button', { name: `Inspect ${name}`, exact: true }).click();
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+  await page
+    .locator('#projectLibraryPane')
+    .getByRole('button', { name: 'Check setup options' })
+    .click();
+}
+
+async function management(page: Page) {
+  const disclosure = page.locator('#projectLibraryManagement');
+  if (!(await disclosure.evaluate(element => (element as HTMLDetailsElement).open)))
+    await disclosure.locator(':scope > summary').click();
 }
 
 test('the reviewed release resolves a real portfolio offer, then separate reviews grant and scan its folder', async ({
@@ -187,6 +207,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   const approvedRoots = await json(await request.get(`${base}/roots`));
   expect(approvedRoots.total_roots).toBe(1);
   await shot(page, '22-reviewed-portfolio-populated-shelf');
+  await shelf.locator('.project-library-filters > summary').click();
   await expect(shelf.locator('#projectLibraryRoot option')).toHaveCount(2);
   await shelf.locator('#projectLibraryRoot').selectOption(approvedRoots.roots[0].id);
   await shelf.locator('#projectLibraryFormat').selectOption('reaper');
@@ -233,10 +254,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await page.keyboard.press('Enter');
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
   await page.setViewportSize({ width: 1280, height: 900 });
-  await shelf
-    .locator('#projectLibraryRows')
-    .getByRole('button', { name: 'Review Album-3' })
-    .click();
+  await reviewProject(page, 'Album-3');
   const setup = page.getByRole('dialog', { name: 'Album-3' });
   await expect(setup.getByRole('heading', { name: 'Project setup' })).toBeVisible();
   await expect(setup).toContainText(
@@ -282,9 +300,15 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     ).toEqual(pluginsBefore);
     // Leave without confirming (or come back after finishing) and return.
     await page.goto(homePath);
-    await expect(page.getByRole('dialog', { name: 'Album-3' })).toBeVisible({ timeout: 30_000 });
-    await expect(setup).toContainText('Needs a project integration');
+    await expect(page.locator('#projectLibraryPaneTitle')).toHaveText('Album-3', {
+      timeout: 30_000
+    });
     await expect(shelf.locator('#projectLibraryStatus')).toContainText('Back on your song');
+    await page
+      .locator('#projectLibraryPane')
+      .getByRole('button', { name: 'Check setup options' })
+      .click();
+    await expect(setup).toContainText('Needs a project integration');
     await shot(page, '22b2-back-on-the-same-song');
     expect(await page.evaluate(() => sessionStorage.getItem('ori:library-return'))).toBeNull();
     expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
@@ -304,16 +328,14 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await planner.getByRole('button', { name: 'Review session' }).click();
   const goalReview = page.getByRole('dialog', { name: 'Save this goal?' });
   await expect(goalReview).toContainText(
-    'No project connection, task, or DAW operation is created'
+    'No project connection, ticket, or DAW operation is created'
   );
   await shot(page, '22c-reviewed-portfolio-session-goal-review');
   await goalReview.getByRole('button', { name: 'Save goal' }).click();
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('Goal saved');
-  await shelf
-    .locator('#projectLibraryRows')
-    .getByRole('button', { name: 'Review Album-3' })
-    .click();
-  const sessionDetail = page.getByRole('dialog', { name: 'Album-3' });
+  await page.getByRole('button', { name: 'Inspect Album-3', exact: true }).click();
+  await page.getByRole('tab', { name: 'Sessions', exact: true }).click();
+  const sessionDetail = page.locator('#projectLibraryPane');
   await expect(sessionDetail).toContainText('Listen to the rough mix');
   await sessionDetail.getByRole('button', { name: 'Wrap up session' }).click();
   const wrap = page.getByRole('dialog', { name: 'Wrap up studio session' });
@@ -329,6 +351,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('Recap saved');
   await page.reload();
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
+  await management(page);
   const resume = shelf.locator('#projectLibraryResume');
   await expect(resume).toContainText('Pick up where you left off');
   await expect(resume).toContainText('User-authored note');
@@ -336,9 +359,13 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await resume.scrollIntoViewIfNeeded();
   await shot(page, '22d-reviewed-portfolio-home-resume-after-reload');
   await resume.getByRole('button', { name: 'View Album-3 session' }).click();
-  const resumed = page.getByRole('dialog', { name: 'Album-3' });
+  const resumed = page.locator('#projectLibraryPane');
+  await expect(page.getByRole('tab', { name: 'Sessions', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
   await expect(resumed).toContainText('User recap: Kept the quieter chorus');
-  await expect(resumed).toContainText('Next action: Record a scratch vocal');
+  await expect(resumed).toContainText('Saved session next action: Record a scratch vocal');
   await shot(page, '22d-reviewed-portfolio-resume-after-reload');
   await resumed.getByRole('button', { name: 'View full session' }).click();
   const fullSession = page.getByRole('dialog', { name: 'Studio session · Album-3' });
@@ -349,10 +376,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
 
   // Metadata labels are explicit user edits, never inferred from the scan or
   // recap. Verify populated results and the independent stage/status filters.
-  await shelf
-    .locator('#projectLibraryRows')
-    .getByRole('button', { name: 'Review Album-3' })
-    .click();
+  await reviewProject(page, 'Album-3');
   await page
     .getByRole('dialog', { name: 'Album-3' })
     .getByRole('button', { name: 'Edit project notes' })
@@ -367,6 +391,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(editReview).toContainText('status: active');
   await shot(page, '22g-reviewed-portfolio-explicit-stage-status-review');
   await editReview.getByRole('button', { name: 'Save notes' }).click();
+  await shelf.locator('.project-library-filters > summary').click();
   await shelf.locator('#projectLibraryStage').selectOption('mixing');
   await shelf.locator('#projectLibraryStatusFilter').selectOption('active');
   await shelf.locator('#projectLibraryAvailability').selectOption('available');
@@ -377,7 +402,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('1 of 1 projects');
   await expect(shelf.locator('#projectLibraryRows')).toContainText('Album-3');
   await expect(shelf.locator('#projectLibraryRows').locator('td').nth(2)).toContainText('mixing');
-  await expect(shelf.locator('#projectLibraryRows').locator('td').nth(2)).toContainText('active');
+  await page.getByRole('button', { name: 'Inspect Album-3', exact: true }).click();
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+  await expect(page.locator('#projectLibraryPane')).toContainText('active');
   await shelf.locator('#projectLibraryStatusFilter').selectOption('unknown');
   await shelf.locator('#projectLibrarySearchForm').getByRole('button', { name: 'Find' }).click();
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('0 of 0 projects');
@@ -427,16 +454,17 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   });
   expect(refusedGoal.status()).toBe(409);
   expect((await json(await request.get(`${base}/projects/${albumID}/sessions`))).total).toBe(1);
+  await management(page);
   await shelf
     .locator('#projectLibraryResume')
     .getByRole('button', { name: 'View Album-3 session' })
     .click();
-  const pausedDetail = page.getByRole('dialog', { name: 'Album-3' });
+  const pausedDetail = page.locator('#projectLibraryPane');
   await expect(pausedDetail).toContainText('User recap: Kept the quieter chorus');
   await expect(pausedDetail.getByRole('button', { name: 'Plan a session' })).toHaveCount(0);
   await expect(pausedDetail.getByRole('button', { name: 'Wrap up session' })).toHaveCount(0);
   await shot(page, '22f-reviewed-portfolio-resume-with-provider-disabled');
-  await pausedDetail.getByRole('button', { name: 'Close' }).click();
+  await pausedDetail.getByRole('button', { name: 'Back to projects' }).click();
   const reenable = await request.post('/api/plugins/music-project-management/enable', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' }
   });
@@ -445,6 +473,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(shelf.locator('#projectLibraryStatus')).not.toContainText(
     'Saved records are readable'
   );
+  await management(page);
   await shelf
     .locator('#projectLibraryRoots')
     .getByRole('button', { name: 'Review smaller folder' })
@@ -480,10 +509,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     const workspacesBefore = (await json(await request.get('/api/workspaces'))).folders;
     await page.reload();
     await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-3' })
-      .click();
+    await reviewProject(page, 'Album-3');
     const eligible = page.getByRole('dialog', { name: 'Album-3' });
     await expect(eligible).toContainText('Installed project roles: REAPER Assistant');
     await expect(eligible).toContainText('Song.rpp');
@@ -496,10 +522,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
       workspacesBefore.length
     );
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-3' })
-      .click();
+    await reviewProject(page, 'Album-3');
     await page
       .getByRole('dialog', { name: 'Album-3' })
       .getByRole('button', { name: 'Review project setup' })
@@ -597,15 +620,20 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     ).toEqual(before);
     await page.reload();
     const afterRestartView = await json(await request.get(`${base}/projects`));
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-3' })
-      .click();
+    await reviewProject(page, 'Album-3');
     const linkedDetail = page.getByRole('dialog', { name: 'Album-3' });
     await expect(
       linkedDetail.getByRole('link', { name: 'Open connected workspace' })
     ).toHaveAttribute('href', childRoute);
     await linkedDetail.getByRole('button', { name: 'Close' }).click();
+    // The actual activation-created locator/reference, not the generic browser
+    // fixture: Files must resolve this original project and never parse its DAW format.
+    await page.getByRole('tab', { name: 'Files', exact: true }).click();
+    const actualFiles = page.locator('#projectLibraryPane');
+    await expect(actualFiles.getByRole('button', { name: 'Song.rpp', exact: true })).toBeVisible();
+    await actualFiles.getByRole('button', { name: 'Song.rpp', exact: true }).click();
+    await expect(actualFiles).toContainText('Preview is not supported for this file');
+    await shot(page, '25b-activation-created-project-files');
     const returnToHome = page.url();
     await shelf
       .locator('#projectLibraryResume')
@@ -626,8 +654,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     // Home owns queue order and skip receipts. A browser key is only an
     // optional same-tab creator retry; clearing it must not lose the next
     // song after a skip. Each song still needs its own review/confirmation.
-    await shelf.getByRole('checkbox', { name: 'Select Album-1 for serial project review' }).check();
-    await shelf.getByRole('checkbox', { name: 'Select Album-2 for serial project review' }).check();
+    await management(page);
+    await shelf.getByRole('checkbox', { name: 'Select Album-1', exact: true }).check();
+    await shelf.getByRole('checkbox', { name: 'Select Album-2', exact: true }).check();
     await shelf.locator('#projectLibraryQueueStart').click();
     const firstInQueue = page.getByRole('dialog', { name: 'Song 1 of 2 · Album-1' });
     await expect(firstInQueue).toContainText('Skipping creates nothing');
@@ -654,6 +683,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     try {
       const freshPage = await freshContext.newPage();
       await freshPage.goto(page.url());
+      await management(freshPage);
       await expect(freshPage.locator('#projectLibraryQueueStatus')).toContainText('1 skipped');
       await expect(freshPage.locator('#projectLibraryQueueResume')).toBeVisible();
       const newHint = await freshPage.evaluate(
@@ -699,12 +729,14 @@ test('the reviewed release resolves a real portfolio offer, then separate review
         songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
       ).toEqual(before);
       await expect(page.locator('#assistantProgramPage')).toHaveAttribute('aria-busy', 'false');
+      await management(page);
       await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
       await shelf.locator('#projectLibraryQueueStatus').scrollIntoViewIfNeeded();
       await shot(page, '39-actual-server-restart-queue-pending');
     }
     await page.evaluate(() => sessionStorage.clear()); // no local queue survives
     await page.reload();
+    await management(page);
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('1 skipped');
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
     await shelf.locator('#projectLibraryQueueResume').click();
@@ -739,9 +771,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
         return page.rows.find((row: { id: string }) => row.id === album2ID)?.connection;
       })
       .toBe('connected');
-    await expect(
-      shelf.locator('#projectLibraryRows tr').filter({ hasText: 'Album-2' })
-    ).toContainText('connected');
+    await page.getByRole('button', { name: 'Inspect Album-2', exact: true }).click();
+    await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+    await expect(page.locator('#projectLibraryPane')).toContainText('connected');
     await page.evaluate(() => {
       const status = document.getElementById('projectLibraryQueueStatus');
       if (status) scrollTo(0, scrollY + status.getBoundingClientRect().top - 160);
@@ -749,6 +781,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await shot(page, '27b-confirmed-project-lost-browser-reply');
     await page.unroute(commitRoute);
     await page.reload();
+    await management(page);
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
     await shelf.locator('#projectLibraryQueueResume').click();
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('Choose at least two');
@@ -774,6 +807,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(afterQueue).toHaveLength(workspacesBefore.length + 2);
     await shot(page, '28-serial-queue-confirmed-second-song');
     await page.reload();
+    await management(page);
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
     expect((await json(await request.get(`${base}/projects/${albumID}/sessions`))).total).toBe(1);
 
@@ -783,6 +817,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     const alternate = join(documents, 'Album-4', 'Alternate.rpp');
     writeFileSync(alternate, 'fixture-alternate; metadata-only', { mode: 0o600 });
     const alternateHash = createHash('sha256').update(readFileSync(alternate)).digest('hex');
+    await management(page);
     await shelf
       .locator('#projectLibraryRoots')
       .getByRole('button', { name: 'Review scan' })
@@ -796,10 +831,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     );
     await expect(shelf).toHaveAttribute('aria-busy', 'false');
     await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-4' })
-      .click();
+    await reviewProject(page, 'Album-4');
     const ambiguous = page.getByRole('dialog', { name: 'Album-4' });
     await expect(ambiguous).toContainText('Choose the authoritative project file');
     await expect(ambiguous).toContainText('Alternate.rpp');
@@ -823,10 +855,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(createHash('sha256').update(readFileSync(alternate)).digest('hex')).toBe(alternateHash);
 
     // The same Home owns user notes even for a catalog-only, ambiguous song.
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-4' })
-      .click();
+    await reviewProject(page, 'Album-4');
     await page
       .getByRole('dialog', { name: 'Album-4' })
       .getByRole('button', { name: 'Edit project notes' })
@@ -862,12 +891,12 @@ test('the reviewed release resolves a real portfolio offer, then separate review
         return state.fields.purpose;
       })
       .toBe('Record a scratch vocal');
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-4' })
-      .click();
-    const savedNotes = page.getByRole('dialog', { name: 'Album-4' });
-    await expect(savedNotes).toContainText('Next action: Not set');
+    await page.getByRole('button', { name: 'Inspect Album-4', exact: true }).click();
+    await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+    const savedNotes = page.locator('#projectLibraryPane');
+    await expect(
+      savedNotes.locator('dd[aria-label="Next action not known or not set"]')
+    ).toBeVisible();
     const savedFields = (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields;
     expect(savedFields).toMatchObject({
       purpose: 'Record a scratch vocal',
@@ -877,13 +906,10 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       milestones: [{ label: 'Record guide vocal', due_date: '2026-10-13' }],
       archive_review_state: 'ready'
     });
-    await savedNotes.getByRole('button', { name: 'Close' }).click();
+    await savedNotes.getByRole('button', { name: 'Back to projects' }).click();
     const milestoneID = savedFields.milestones[0].id;
     await page.reload();
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-4' })
-      .click();
+    await reviewProject(page, 'Album-4');
     await page
       .getByRole('dialog', { name: 'Album-4' })
       .getByRole('button', { name: 'Edit project notes' })
@@ -919,6 +945,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     // Disconnecting discovery is not a project revoke or deletion. Cancel is
     // inert; confirmation ends future root reads but retains saved Home notes
     // and the independently reviewed Album-3/Album-2 workspace links.
+    await management(page);
     await shelf.locator('#projectLibraryRoots').getByRole('button', { name: 'Disconnect' }).click();
     const disconnect = page.getByRole('dialog', { name: 'Disconnect this discovery folder?' });
     await expect(disconnect).toContainText('5 catalog records retain their historical notes');
@@ -944,6 +971,12 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(blockedSetup.state).toBe('revoked_source');
     const linkedSetup = await json(await request.get(`${base}/projects/${albumID}/activation`));
     expect(linkedSetup).toMatchObject({ state: 'connected', workspace_id: committed.workspace_id });
+    await page.getByRole('button', { name: 'Inspect Album-3', exact: true }).click();
+    await page.getByRole('tab', { name: 'Files', exact: true }).click();
+    await expect(
+      page.locator('#projectLibraryPane').getByRole('button', { name: 'Song.rpp', exact: true })
+    ).toBeVisible(); // Independent child grant survives the real discovery revocation.
+    await shot(page, '31b-child-files-after-discovery-revocation');
     await expect(
       shelf.locator('#projectLibraryResume').getByRole('button', { name: 'Open Album-3 workspace' })
     ).toBeVisible();
@@ -953,10 +986,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       purpose: 'Record a scratch vocal',
       milestones: [{ id: milestoneID, complete: true }]
     });
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-4' })
-      .click();
+    await reviewProject(page, 'Album-4');
     const revokedDetails = page.getByRole('dialog', { name: 'Album-4' });
     await expect(revokedDetails).toContainText('Discovery consent ended');
     await revokedDetails.getByRole('button', { name: 'Plan a session' }).click();
@@ -1008,6 +1038,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields.next_action
     ).toBe(beforeSuggestion.fields.next_action);
     await page.reload();
+    await management(page);
     const suggestions = page.locator('#projectLibraryProposals');
     await expect(suggestions).toContainText(suggestedAction);
     await expect(suggestions).toContainText('Only a Home suggestion; no DAW progress inferred.');
@@ -1060,14 +1091,16 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(navigation.success, JSON.stringify(navigation)).toBe(true);
     expect(navigation.response).toContain('Navigation suggestion saved only');
     await page.reload();
+    await management(page);
     const navSuggestions = page.locator('#projectLibraryProposals');
     await expect(navSuggestions).toContainText('No setup was reviewed or authorized');
     await navSuggestions.getByRole('button', { name: 'View Album-4 setup options' }).click();
-    const navDetails = page.getByRole('dialog', { name: 'Album-4' });
-    await expect(navDetails).toContainText('Discovery consent ended');
+    const navDetails = page.locator('#projectLibraryPane');
+    await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+    await expect(navDetails).toContainText('revoked source');
     await expect(navDetails.getByRole('button', { name: 'Review project setup' })).toHaveCount(0);
     await shot(page, '38-reviewed-manager-navigation-revoked');
-    await navDetails.getByRole('button', { name: 'Close' }).click();
+    await navDetails.getByRole('button', { name: 'Back to projects' }).click();
     expect((await json(await request.get('/api/workspaces'))).folders.length).toBe(
       childCountBeforeNavigation
     );
@@ -1110,6 +1143,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions`))).total
     ).toBe(sessionsBeforeGoal.total);
     await page.reload();
+    await management(page);
     const goalSuggestions = page.locator('#projectLibraryProposals');
     const goalButton = goalSuggestions.getByRole('button', { name: 'Edit Album-4 suggested goal' });
     await expect(goalSuggestions).toContainText(goalDraft);
@@ -1210,6 +1244,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
         .recap
     ).toBeFalsy();
     await page.reload();
+    await management(page);
     const recapSuggestions = page.locator('#projectLibraryProposals');
     const recapButton = recapSuggestions.getByRole('button', {
       name: 'Edit Album-4 suggested recap'
@@ -1307,6 +1342,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(discoverySuggestion.success, JSON.stringify(discoverySuggestion)).toBe(true);
     expect(discoverySuggestion.response).toContain('Navigation suggestion saved only');
     await page.reload();
+    await management(page);
     const rootSuggestions = page.locator('#projectLibraryProposals');
     await expect(rootSuggestions).toContainText('No folder was selected, approved or scanned');
     await rootSuggestions.getByRole('button', { name: 'View discovery folder options' }).click();
@@ -1325,8 +1361,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     // A revoked root blocks project review, not an explicit queue Skip. Save
     // the later Album-4 item, then forget it separately below and require a
     // second Skip rather than silently deleting the remaining queue order.
-    await shelf.getByRole('checkbox', { name: 'Select Album-1 for serial project review' }).check();
-    await shelf.getByRole('checkbox', { name: 'Select Album-4 for serial project review' }).check();
+    await management(page);
+    await shelf.getByRole('checkbox', { name: 'Select Album-1', exact: true }).check();
+    await shelf.getByRole('checkbox', { name: 'Select Album-4', exact: true }).check();
     await shelf.locator('#projectLibraryQueueStart').click();
     const revokedQueue = page.getByRole('dialog', { name: 'Song 1 of 2 · Album-1' });
     await expect(revokedQueue).toContainText('Project setup is unavailable');
@@ -1350,10 +1387,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       index: 1,
       skipped: [afterDisconnect.rows.find((r: { name: string }) => r.name === 'Album-1')?.id]
     });
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-4' })
-      .click();
+    await reviewProject(page, 'Album-4');
     await page
       .getByRole('dialog', { name: 'Album-4' })
       .getByRole('button', { name: 'Review forgetting this Home record' })
@@ -1365,10 +1399,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await shot(page, '32-reviewed-historical-record-forget-impact');
     await forget.getByRole('button', { name: 'Cancel' }).press('Enter');
     expect((await json(await request.get(`${base}/projects`))).total).toBe(5);
-    await shelf
-      .locator('#projectLibraryRows')
-      .getByRole('button', { name: 'Review Album-4' })
-      .click();
+    await reviewProject(page, 'Album-4');
     await page
       .getByRole('dialog', { name: 'Album-4' })
       .getByRole('button', { name: 'Review forgetting this Home record' })
@@ -1408,8 +1439,8 @@ test('the reviewed release resolves a real portfolio offer, then separate review
 
     // A provider loss cannot authorize new setup/skip, but the owner must
     // still be able to discard *only* the pending Home navigation metadata.
-    await shelf.getByRole('checkbox', { name: 'Select Album-0 for serial project review' }).check();
-    await shelf.getByRole('checkbox', { name: 'Select Album-1 for serial project review' }).check();
+    await shelf.getByRole('checkbox', { name: 'Select Album-0', exact: true }).check();
+    await shelf.getByRole('checkbox', { name: 'Select Album-1', exact: true }).check();
     await shelf.locator('#projectLibraryQueueStart').click();
     await page
       .getByRole('dialog', { name: 'Song 1 of 2 · Album-0' })
@@ -1421,6 +1452,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     });
     expect(disableForQueue.ok(), await disableForQueue.text()).toBeTruthy();
     await page.reload();
+    await management(page);
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('0 of 2 handled');
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeDisabled();
     await shelf.locator('#projectLibraryQueueStatus').scrollIntoViewIfNeeded();
@@ -1484,6 +1516,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await bare.goto(homeRoute);
     expect(new URL(bare.url()).search).toBe('');
     await expect(bare.locator('#projectLibraryPanel')).toBeVisible();
+    await management(bare);
     return { bare, shelf: bare.locator('#projectLibraryPanel'), libraryPosts };
   };
   const activeRoots = async () => (await json(await request.get(`${base}/roots`))).total_roots;

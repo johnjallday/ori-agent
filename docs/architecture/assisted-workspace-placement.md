@@ -7,6 +7,13 @@ The same review/placement presentation for every other creation owner is
 specified in [unified-workspace-placement.md](unified-workspace-placement.md);
 this File Janitor permission and preparation contract is unchanged by it.
 
+Recognized REAPER songs/collections now use the same `#addFolderModal` shell
+through `source-setup-dialog.js`, but keep their original source card and setup
+owner. They never call `/from-inbox`, acquire a File Janitor build session, or
+inherit its folder/agent controls. Either owner refuses an already-owned shell
+before initializing or resetting creator state. See the source-owned REAPER
+section in the unified contract for close, suspension and current-source return.
+
 ## Authority
 
 The interaction is **propose → review/edit → click to place and create**.

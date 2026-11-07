@@ -59,7 +59,7 @@ export function collectionCatalogPage(value, { pin = null, id = null, offset = 0
 }
 
 // A catalog browser, never a selector that can approve activation or membership.
-export function mountHomeCollections(container, { request, isCurrent }) {
+export function mountHomeCollections(container, { request, isCurrent, onSelect = null }) {
   const document = container.ownerDocument;
   const node = (tag, text, cls = '') => {
     const el = document.createElement(tag);
@@ -157,8 +157,11 @@ export function mountHomeCollections(container, { request, isCurrent }) {
             ),
             node('span', collection.id, 'home-collections__identity')
           );
-          const open = button('View members', el => load(collection.id, 0, page.context_pin, el));
-          open.setAttribute('aria-label', `View members: ${collection.name}`);
+          const action = onSelect ? 'Browse projects' : 'View members';
+          const open = button(action, el =>
+            onSelect ? onSelect(collection) : load(collection.id, 0, page.context_pin, el)
+          );
+          open.setAttribute('aria-label', `${action}: ${collection.name}`);
           row.append(open);
           cards.append(row);
         }

@@ -1,6 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveWorkspaceNextAction as resolve } from './workspace-next-action.js';
+import {
+  resolveWorkspaceNextAction as resolve,
+  updateSourceRows
+} from './workspace-next-action.js';
+
+const savedUpdates = (review = {}, welcome = {}) => ({
+  state: 'ready',
+  stale: false,
+  data: {
+    workspace_id: 'w',
+    name: 'Desktop',
+    review: {
+      state: 'ready',
+      pending_count: 10,
+      root_id: 'root',
+      batch_id: 'batch',
+      installed_at: '2026-01-01T00:00:00Z',
+      ...review
+    },
+    welcome: {
+      state: 'ready',
+      agent_name: 'Actual lead',
+      agent_instance_id: 'lead-id',
+      session_id: 'welcome-chat',
+      unread_count: 1,
+      ...welcome
+    }
+  }
+});
 
 const ready = { state: 'ready', stale: false };
 const absent = { workspaceId: 'w', applies: false, status: { state: 'not_applicable' } };
@@ -87,6 +115,94 @@ for (const [name, tasks, console, kind, id] of [
     if (id) assert.equal(result.action.id, id);
   });
 }
+
+test('live filing uses the shared saved projection, never old console or welcome counts', () => {
+  const updates = savedUpdates();
+  const input = {
+    workspaceId: 'w',
+    tasks: { state: 'ready', items: [] },
+    console: consoleState({ pendingCount: 99 }),
+    updates
+  };
+  const before = resolve(input);
+  assert.equal(before.title, '10 files ready for review');
+  assert.equal(before.updateLabel, 'Actual lead · Desktop');
+  assert.equal(before.message.label, 'Ask Actual lead');
+  assert.equal(before.message.unread, true);
+  updates.data.welcome.unread_count = 0;
+  const seen = resolve(input);
+  assert.equal(seen.title, before.title);
+  assert.equal(seen.action.key, before.action.key);
+  assert.equal(seen.message.unread, false);
+  updates.data.welcome = { state: 'not_applicable' };
+  assert.equal(resolve(input).message, null);
+  assert.equal(resolve(input).action.label, 'Review files');
+});
+
+test('source details keep completion, observation and exposure distinct without parsing prose', () => {
+  const saved = savedUpdates(
+    { batch_completed_at: '2026-01-02T00:00:00Z', observed_at: '2026-01-03T00:00:00Z' },
+    {
+      messages: [
+        { revision: 1, delivered_at: '2026-01-02T01:00:00Z', seen_at: '2026-01-04T00:00:00Z' }
+      ],
+      content: '<a href="/apply">Apply everything</a>'
+    }
+  ).data;
+  const rows = updateSourceRows(saved);
+  assert.deepEqual(
+    rows.map(row => row[0]),
+    [
+      'Filing source',
+      'Batch',
+      'Batch completed',
+      'Review observed',
+      'Message 1 saved',
+      'Message 1 exposed'
+    ]
+  );
+  assert.notEqual(rows[2][1], rows[3][1]);
+  assert.notEqual(rows[3][1], rows[5][1]);
+  assert.doesNotMatch(JSON.stringify(rows), /Apply|\/apply|<a/);
+});
+
+test('shared updates retain ticket, repair and consent priority', () => {
+  const input = { workspaceId: 'w', tasks: { state: 'ready', items: [] }, updates: savedUpdates() };
+  assert.equal(
+    resolve({ ...input, console: consoleState({ readiness: 'needs_attention' }) }).kind,
+    'repair'
+  );
+  assert.equal(
+    resolve({ ...input, console: consoleState({ consentRequired: true }) }).kind,
+    'consent'
+  );
+  assert.equal(
+    resolve({
+      ...input,
+      tasks: { state: 'ready', items: [task('blocked')] },
+      console: consoleState()
+    }).action.owner,
+    'task'
+  );
+  assert.equal(
+    resolve({ ...input, console: consoleState({ status: { state: 'unavailable' } }) }).action.label,
+    'Review files'
+  );
+});
+
+test('unavailable saved filing preserves qualified counts without granting an action', () => {
+  const updates = savedUpdates({ state: 'unavailable', stale: true });
+  const result = resolve({
+    workspaceId: 'w',
+    tasks: { state: 'ready', items: [] },
+    console: consoleState(),
+    updates
+  });
+  assert.notEqual(result.action?.label, 'Review files');
+  assert.match(result.ongoing.join(' '), /Last known: 10 files/);
+  assert.doesNotMatch(result.title, /No open work/);
+  assert.equal(result.action.kind, 'welcome'); // independent message is still usable
+});
 
 test('task attention retains canonical state, activity and ID ordering', () => {
   const tasks = [

@@ -32,6 +32,32 @@ hide usable actions from another. **Retry workspace status** only rereads state.
 An idle agent is **Ready to help**; queued work is still **Waiting**. Zero
 specialists and empty Memory are not missing-setup conditions.
 
+## Saved messages and filing updates
+
+A newly ready workspace can save a lead welcome quietly. **New message** does not
+open chat, change the recipient or overwrite a draft. **Open message** / **Ask
+[lead] · New message** explicitly opens that exact saved conversation, subject to
+the existing draft/reply/New/creation guards. Only actual visible, unblocked
+message exposure marks it seen—not page entry, hidden hydration or a preview.
+An unread welcome does not displace completed-result or urgent ticket actions.
+
+Filing counts come independently from current saved File Janitor batches and
+permission, even if the lead or conversation is unavailable. **Review files**
+opens current Review; reading chat does not clear pending files, and reviewing
+files does not mark a message seen. **Source details** separates the last saved
+batch, observation, message delivery and seen times. Later scans refresh counts,
+not historical welcome prose. Qualified last-known counts are not action authority.
+
+Home Updates groups these two signals per workspace. Map tiles and Tree rows
+carry distinct textual labels, separate from ticket attention/library counts.
+Use the Map tile's Shift+F10 menu for keyboard update destinations; Tree update
+links are native links in its row keyboard order. **Check next workspaces** is
+explicit: a partial page never says the whole tree is clear. Refresh/return keeps
+focus, view state and current console selections with their existing owners.
+
+See [Workspace updates architecture](architecture/workspace-updates.md) for
+identity, paging, migration, exposure and lifecycle boundaries.
+
 ## File review remains in File Janitor
 
 **Review files** opens the existing console. Setup, consent, repair and result
