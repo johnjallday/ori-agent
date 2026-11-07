@@ -21,7 +21,11 @@ export async function learningStatus(request: APIRequestContext, base: string) {
   return response.json();
 }
 
-export async function seedLearningWorkspace(request: APIRequestContext, base: string) {
+export async function seedLearningWorkspace(
+  request: APIRequestContext,
+  base: string,
+  name = 'Learning workshop'
+) {
   const sandbox = verifyLearningSandbox(base, process.env.ORI_LEARNING_DEMO_SANDBOX, process.cwd());
   // Verify the running server, not just an environment variable, belongs to
   // the disposable HOME before making even an onboarding/preferences write.
@@ -38,7 +42,7 @@ export async function seedLearningWorkspace(request: APIRequestContext, base: st
     model: 'gpt-4o-mini'
   });
   const workspace = await learningPost(request, base, '/api/orchestration/workspace', {
-    name: 'Learning workshop',
+    name,
     participating_agents: ['Learning writer']
   });
   return workspace.workspace_id as string;

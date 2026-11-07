@@ -1,0 +1,57 @@
+{
+  "status": "BLOCKED_PROVIDER_REJECTION",
+  "date": "2026-11-07",
+  "provider": "Anthropic Claude API",
+  "requested_model": "claude-sonnet-5-5",
+  "credential_source": "Explicitly supplied ANTHROPIC_API_KEY environment variable; value never recorded",
+  "data": "Synthetic invitation-practice context only; no installed configuration, native account discovery, user files, transcripts, tools or MCP",
+  "execution_path": "Production learning Service.Propose admission, learningDesigner, ClaudeProvider and strict publication validator; owned SQLite and explicitly fictional source eligibility metadata",
+  "limits": {
+    "budget_usd": 1,
+    "max_calls": 10,
+    "max_input_bytes": 16384,
+    "max_output_tokens": 1200,
+    "max_response_bytes": 8192,
+    "timeout_seconds": 30,
+    "retries": 0,
+    "fallbacks": 0
+  },
+  "pricing_reference": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "checked_date": "2026-11-07",
+    "standard_input_usd_per_million": 2,
+    "standard_output_usd_per_million": 10
+  },
+  "observed": {
+    "calls_attempted": 1,
+    "case": "garden-guided",
+    "http_status": 400,
+    "provider_error_type": "invalid_request_error",
+    "provider_error_detail": "Not retained; billing, model availability and exact rejection cause are unverified",
+    "personalized_proposals_returned": 0,
+    "input_tokens": null,
+    "output_tokens": null,
+    "usage_status": "NOT REPORTED; the initial scratch sample's default zero fields are not measured zero usage",
+    "actual_charge_usd": null,
+    "conservative_reserved_usd": 0.045792,
+    "reservation_basis": "Full 16384 input-byte ceiling treated as tokens, 512 extra framing tokens, and 1200 output tokens at standard public rates; retained despite missing usage"
+  },
+  "rubric": {
+    "status": "NOT ASSESSABLE: no personalized output",
+    "relevance": null,
+    "achievable_next_action": null,
+    "appropriate_guidance": null,
+    "unnecessary_work": null,
+    "safety": null,
+    "clarity": null
+  },
+  "coverage": {
+    "completed_live_cases": 0,
+    "remaining_live_cases": "Different interest, scoped prior practice, explicit Basic with unknown history, partial/missing sources, hostile name, revision and materially different reuse NOT RUN",
+    "host_only_negative_cases_in_this_run": "NOT RUN: stopped on first provider rejection",
+    "controlled_integration_evidence": "Separate existing controlled provider tests; not substituted for live quality",
+    "retention_study": "UNMEASURED"
+  },
+  "scratch_evidence": "tmp/adaptive-learning-missions/live-quality-hYgZYM/{ledger.json,samples.json,run.jsonl}",
+  "delivery": "3.7 and quality-dependent 6.1 remain unchecked. No full committed-branch CI or PR opening claimed. Diagnose the provider rejection before a separately authorized continuation; do not replay this attempt."
+}

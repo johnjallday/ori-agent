@@ -330,6 +330,7 @@ export default defineConfig([
     files: [
       'scripts/demo-folder-first.mjs',
       'scripts/learning-missions-demo.mjs',
+      'scripts/learning-missions-demo-control.mjs',
       'scripts/learning-missions-demo.test.mjs',
       'scripts/demo-assistant-drawer.mjs',
       'tests/fixtures/assistant-folder-response*.js'
