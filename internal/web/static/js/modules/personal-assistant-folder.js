@@ -5117,6 +5117,10 @@ async function openMusicSetupReview(trigger) {
     return false;
   }
   if (musicSummary) musicSummary.querySelector('[role="status"]').textContent = '';
+  void window.FolderHomeStaffing?.suggest(
+    elements()?.homeStaffing,
+    () => musicDialogCurrent(ref) && musicSetupDialog().owns(ref)
+  );
   if (
     musicSetupNeedsConfirmation(state.offer) &&
     state.offer.plan?.digest &&

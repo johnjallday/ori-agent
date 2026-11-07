@@ -85,6 +85,9 @@
     let generation = 0;
     let pendingRank = null;
     let rowsSignature = '';
+    let manualEpoch = 0;
+    const attempted = new Set();
+    const preselected = new Map();
     const prefix = `folderHomeStaffing${++sequence}`;
     const node = (tag, className, value) => {
       const el = document.createElement(tag);
@@ -108,7 +111,7 @@
     const note = node(
       'p',
       'pa-folder__note',
-      'Choose each required role. Saved profiles and their other assignments stay unchanged. Nothing is staffed until you confirm setup.'
+      'Review each required role. Saved profiles and their other assignments stay unchanged. Nothing is staffed until you confirm setup.'
     );
     const actions = node('div', 'folder-home-staffing__actions');
     const recommend = button('Recommend saved agents', () => void recommendAgents());
@@ -165,6 +168,10 @@
       clear.hidden = !(view.choices?.length || view.advice || ranking);
       clear.disabled = mutation || Boolean(opts.disabled);
       const projection = roster(view);
+      for (const role of projection.roles) {
+        role.recommended =
+          preselected.get(role.role_id) === role.agent?.name && Boolean(role.agent);
+      }
       const signature = JSON.stringify([projection, mutation, Boolean(opts.disabled)]);
       if (signature === rowsSignature) return;
       rowsSignature = signature;
@@ -199,6 +206,9 @@
       const nextOwner = text(next.owner);
       if (owner !== nextOwner) {
         generation++;
+        manualEpoch++;
+        attempted.clear();
+        preselected.clear();
         pendingRank?.abort();
         closeEditor(false);
         owner = nextOwner;
@@ -213,7 +223,16 @@
         view = next.view;
       draw();
     }
-    async function act(action, fields = {}) {
+    async function act(action, fields = {}, automatic = false) {
+      if (!automatic) {
+        manualEpoch++;
+        if (action === 'choose_staffing' && fields.choice?.role_id)
+          preselected.delete(fields.choice.role_id);
+        if (action === 'clear_staffing') {
+          if (fields.role_id) preselected.delete(fields.role_id);
+          else preselected.clear();
+        }
+      }
       if (destroyed || mutation || opts.disabled || !view) return null;
       const isRank = action === 'recommend_staffing';
       if (isRank && ranking) return null;
@@ -265,7 +284,7 @@
           mutation = ranking = false;
           pendingRank = null;
           draw();
-          if (succeeded && !isRank) {
+          if (succeeded && !isRank && !automatic) {
             const role = fields.choice?.role_id || fields.role_id;
             if (role) window.WorkspaceRoleRoster?.focusRole(rows, role);
             else if (action === 'clear_staffing') recommend.focus();
@@ -273,14 +292,79 @@
         }
       }
     }
-    async function prepared() {
+    async function prepared(automatic = false) {
       if (!view || opts.disabled || mutation) return false;
       if (view.state === 'needs_review' || !view.context_digest)
-        return Boolean(await act('prepare_staffing'));
+        return Boolean(await act('prepare_staffing', {}, automatic));
       return true;
     }
     async function recommendAgents() {
       if (await prepared()) await act('recommend_staffing');
+    }
+    // The owner calls this on explicit review open, never mount/GET/poll.
+    // Even an empty Clear retains a durable revision and suppresses another
+    // automatic attempt after refresh/reopen. Never automatically create.
+    async function suggest(current = () => true) {
+      if (
+        !view ||
+        destroyed ||
+        opts.disabled ||
+        editor ||
+        mutation ||
+        ranking ||
+        Number(view.revision || 0) !== 0 ||
+        view.choices?.length ||
+        view.advice ||
+        !view.roles?.some(role => role.required && !role.held_name) ||
+        !['needs_review', 'needs_choice'].includes(view.state)
+      )
+        return;
+      const key = owner + '\u0000' + (view.context_digest || '');
+      if (attempted.has(key)) return;
+      attempted.add(key);
+      const epoch = manualEpoch;
+      const originalOwner = owner;
+      const untouched = () =>
+        !destroyed && current() && owner === originalOwner && manualEpoch === epoch && !editor;
+      if (!(await prepared(true)) || !untouched()) return;
+      const adviceView = await act('recommend_staffing', {}, true);
+      if (!adviceView || !untouched()) return;
+      const context = adviceView.context_digest;
+      for (const role of adviceView.roles || []) {
+        if (!untouched() || view.context_digest !== context) return;
+        if (
+          !role.required ||
+          role.held_name ||
+          view.choices?.some(choice => choice.role_id === role.role_id)
+        )
+          continue;
+        const advice = adviceView.advice?.roles?.find(item => item.role_id === role.role_id);
+        const candidate = advice?.state === 'recommended' ? advice.choices?.[0] : null;
+        if (!candidate?.configured || !candidate.handle || !candidate.name) continue;
+        const result = await act(
+          'choose_staffing',
+          {
+            choice: {
+              role_id: role.role_id,
+              mode: 'assign',
+              name: candidate.name,
+              recommendation: candidate.handle
+            }
+          },
+          true
+        );
+        if (!result || !untouched()) return;
+        preselected.set(role.role_id, candidate.name);
+        const reasons = (candidate.reasons || [])
+          .slice(0, 3)
+          .map(reason => text(reason.value))
+          .filter(Boolean);
+        status.textContent =
+          'Recommended saved agent preselected. ' +
+          (reasons.length ? 'Why: ' + reasons.join(' · ') + ' ' : '') +
+          'Review the team before confirming setup.';
+        draw();
+      }
     }
     async function metadata(url) {
       const response = await fetch(url, { headers: { Accept: 'application/json' } });
@@ -291,6 +375,7 @@
       return response.json();
     }
     async function openEditor(roleId, mode) {
+      manualEpoch++;
       if (!(await prepared())) return;
       const role = view.roles?.find(item => item.role_id === roleId);
       if (!role || role.held_name || view.choices?.some(choice => choice.role_id === roleId))
@@ -458,11 +543,16 @@
         mounted.delete(host);
         host.replaceChildren();
       },
-      act
+      act,
+      suggest
     };
     mounted.set(host, api);
     draw();
     return api;
   }
-  window.FolderHomeStaffing = { roster, mount };
+  window.FolderHomeStaffing = {
+    roster,
+    mount,
+    suggest: (host, current) => mounted.get(host)?.suggest(current)
+  };
 })();

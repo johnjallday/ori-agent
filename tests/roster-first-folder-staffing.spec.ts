@@ -267,17 +267,13 @@ test('recognized build and collection review preserve and reuse the exact saved 
       await page.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
       await page.setViewportSize({ width: 390, height: 844 });
     }
+    if (recovery) model.mode('unavailable');
     await summary.getByRole('button', { name: 'Review setup', exact: true }).click();
     const dialog = page.locator('#addFolderModal[data-source-setup-owner]');
     await expect(dialog).toBeVisible();
     const team = dialog.locator('#personalAssistantFolderHomeStaffing');
     await expect(team).toBeVisible();
-    await expect(team.locator('[data-role-id="portfolio_manager"]')).toContainText('Missing');
     if (recovery) {
-      model.mode('unavailable');
-      const rank = team.getByRole('button', { name: 'Recommend saved agents', exact: true });
-      await rank.focus();
-      await page.keyboard.press('Enter');
       await expect(team).toContainText('unavailable');
       const assign = team.getByRole('button', {
         name: 'Assign an agent to Music Portfolio Manager',
@@ -349,24 +345,46 @@ test('recognized build and collection review preserve and reuse the exact saved 
         })
         .toEqual({ choices: 0, advice: false, setup: false });
     }
-    await team
-      .getByRole('button', {
-        name: /^(Recommend saved agents|Refresh recommendation)$/,
+    if (recovery) {
+      await team
+        .getByRole('button', {
+          name: /^(Recommend saved agents|Refresh recommendation)$/,
+          exact: true
+        })
+        .click();
+      const use = team.getByRole('button', {
+        name: `Use ${manager} for Music Portfolio Manager`,
         exact: true
-      })
-      .click();
-    const use = team.getByRole('button', {
-      name: `Use ${manager} for Music Portfolio Manager`,
-      exact: true
-    });
-    await expect(use).toBeEnabled();
+      });
+      await expect(use).toBeEnabled();
+      await use.click();
+    } else {
+      await expect(team).toContainText('Recommended saved agent preselected');
+      await expect(team.locator('[data-role-id="portfolio_manager"]')).toContainText('Recommended');
+      expect(model.calls()).toBe(1);
+      const pending = (
+        await json(await request.get(`/api/personal-assistant/folder-digest?offer_id=${offerID}`))
+      ).folder_digest.offer;
+      expect(pending.setup).toBeFalsy();
+      expect(pending.home_staffing.choices).toHaveLength(1);
+      expect(pending.home_staffing.choices[0]).toMatchObject({
+        role_id: 'portfolio_manager',
+        mode: 'assign',
+        name: manager
+      });
+      expect(
+        (await json(await request.get('/api/workspaces'))).folders.filter(
+          (entry: { kind: string }) => entry.kind === 'group'
+        )
+      ).toHaveLength(0);
+      expect(model.calls()).toBe(1);
+    }
     expect(await names()).toEqual(before);
-    await use.scrollIntoViewIfNeeded();
+    await team.locator('[data-role-id="portfolio_manager"]').scrollIntoViewIfNeeded();
     await page.screenshot({
       path: testInfo.outputPath('03-folder-recommendation.png'),
       fullPage: true
     });
-    await use.click();
     await expect(team.locator('[data-role-id="portfolio_manager"]')).toHaveAttribute(
       'data-state',
       'filled'

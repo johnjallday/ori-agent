@@ -84,6 +84,145 @@ function fixture(options = {}) {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+const recommendedView = (state = 'recommended') =>
+  view({
+    revision: 1,
+    advice: {
+      version: 2,
+      state,
+      coverage: { complete: true },
+      roles: [
+        {
+          role_id: 'manager',
+          scope: 'home',
+          state,
+          choices: [
+            {
+              handle: 'saved-handle',
+              name: 'Aster',
+              source: 'root',
+              configured: true,
+              reasons: [{ kind: 'declared_purpose', value: 'Coordinates music projects.' }]
+            }
+          ]
+        }
+      ]
+    }
+  });
+
+test('review open checks once and preselects a host-recommended required role without executing setup', async () => {
+  const { api, host, renders } = fixture();
+  const calls = [];
+  const onAction = async input => {
+    calls.push(plain(input));
+    return input.action === 'recommend_staffing'
+      ? recommendedView()
+      : { ...recommendedView(), revision: 2, choices: [input.choice] };
+  };
+  const controller = api.mount(host, { owner: 'offer', view: view(), onAction });
+  assert.equal(calls.length, 0, 'mount is observational');
+  await controller.suggest();
+  assert.deepEqual(
+    calls.map(input => input.action),
+    ['recommend_staffing', 'choose_staffing']
+  );
+  assert.deepEqual(calls[1].choice, {
+    role_id: 'manager',
+    mode: 'assign',
+    name: 'Aster',
+    recommendation: 'saved-handle'
+  });
+  assert.equal(renders.at(-1).value.roles[0].recommended, true);
+  assert.ok(host.textContent.includes('Recommended saved agent preselected'));
+  await controller.suggest();
+  assert.equal(calls.length, 2);
+});
+
+test('automatic checks never select ties or renew a clear tombstone on reopen', async () => {
+  const { api, host } = fixture();
+  const calls = [];
+  const onAction = async input => {
+    calls.push(input);
+    return recommendedView('needs_choice');
+  };
+  const controller = api.mount(host, { owner: 'offer', view: view(), onAction });
+  await controller.suggest();
+  assert.deepEqual(
+    calls.map(input => input.action),
+    ['recommend_staffing']
+  );
+  const next = fixture();
+  await next.api
+    .mount(next.host, { owner: 'offer', view: view({ revision: 1 }), onAction })
+    .suggest();
+  assert.equal(calls.length, 1, 'a durable empty revision is an explicit user edit');
+});
+
+test('manual clear or closing the review defeats late automatic preselection', async () => {
+  for (const action of ['clear', 'close', 'manual']) {
+    const { api, host, renders } = fixture();
+    const calls = [];
+    let finish;
+    let open = true;
+    const onAction = input => {
+      calls.push(input);
+      return input.action === 'recommend_staffing'
+        ? new Promise(resolve => {
+            finish = resolve;
+          })
+        : Promise.resolve(view({ revision: 1 }));
+    };
+    const controller = api.mount(host, { owner: 'offer', view: view(), onAction });
+    const pending = controller.suggest(() => open);
+    await tick();
+    if (action === 'clear') await controller.act('clear_staffing');
+    else if (action === 'manual') renders.at(-1).callbacks.onAssign('manager');
+    else open = false;
+    finish(recommendedView());
+    await pending;
+    assert.equal(
+      calls.some(input => input.action === 'choose_staffing'),
+      false
+    );
+    assert.equal(renders.at(-1).value.filled_count, 0);
+  }
+});
+
+test('held and optional-only roles need no automatic check; unavailable candidates are never selected', async () => {
+  for (const roles of [
+    [{ role_id: 'manager', required: true, held_name: 'Existing' }],
+    [{ role_id: 'manager', required: false }]
+  ]) {
+    const { api, host } = fixture();
+    let calls = 0;
+    await api
+      .mount(host, {
+        owner: 'offer',
+        view: view({ roles }),
+        onAction: async () => {
+          calls++;
+        }
+      })
+      .suggest();
+    assert.equal(calls, 0);
+  }
+  const { api, host } = fixture();
+  const calls = [];
+  const unavailable = recommendedView();
+  unavailable.advice.roles[0].choices[0].configured = false;
+  await api
+    .mount(host, {
+      owner: 'offer',
+      view: view(),
+      onAction: async input => {
+        calls.push(input.action);
+        return unavailable;
+      }
+    })
+    .suggest();
+  assert.deepEqual(calls, ['recommend_staffing']);
+});
+
 test('Home role projection separates held roles, original choices and advice', () => {
   const { api } = fixture();
   const data = view({
