@@ -27,6 +27,8 @@ import {
 } from './workspace-folder-shape.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { workspaceNavigationHTML, workspaceSettingsHTML } from './workspace-command-chrome.js';
+import { WorkspacePanels } from './workspace-panels.js';
+import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import {
@@ -639,7 +641,7 @@ export class WorkspaceCommandView {
     return this.groupTemplateStatusPending;
   }
 
-  groupTemplateStatusHTML() {
+  groupTemplateStatusHTML({ quietSuccess = false } = {}) {
     const status = this.groupTemplateStatus;
     if (!this.isGroupWorkspace() || !status || status.kind !== 'managed_home') return '';
     const team = status.team || {};
@@ -653,6 +655,8 @@ export class WorkspaceCommandView {
     const integration = status.integration || {};
     const { copy: integrationCopy, className: integrationClass } =
       groupTemplateIntegrationFact(integration);
+    if (quietSuccess && verified && team.state === 'ready' && integration.state === 'available')
+      return '';
     const optional = Array.isArray(team.optional_home_roles)
       ? team.optional_home_roles.map(role => role.label).filter(Boolean)
       : [];
@@ -1390,7 +1394,7 @@ export class WorkspaceCommandView {
   handleGlobalKeydown(event) {
     this.noteRailKeyboard(event);
     if (!this.active || !event || event.key !== 'Escape') return;
-    if (this.statModalSection || this.identityEditMode) return;
+    if (this.statModalSection || this.identityEditMode || this.workspacePanels?.kind) return;
     if (this.backlogDrawerOpen) {
       this.closeBacklogDrawer();
       return;
@@ -1882,10 +1886,12 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-nav-btn ws-cmd-give-work" data-cmd-give-work aria-haspopup="dialog">Give work</button>' +
       '</div></div>' +
       this.identityEditorHTML(name, description) +
+      '<div class="ws-cmd-destinations">' +
       this.commandViewSwitchHTML() +
+      '<button type="button" class="ws-cmd-nav-btn" data-cmd-resources aria-haspopup="dialog">Resources</button></div>' +
       // Keep safety/setup sources visible until their Group 2 replacements exist.
       '<div class="ws-cmd-header-status">' +
-      this.groupTemplateStatusHTML() +
+      this.groupTemplateStatusHTML({ quietSuccess: true }) +
       this.anchorDetailsHTML() +
       (hqDetails
         ? '<p class="ws-hq-facts" data-cmd-hq-facts>' + this.hqFactsHTML() + '</p>'
@@ -2743,6 +2749,8 @@ export class WorkspaceCommandView {
       return;
     }
     this._renderDeferredByDrag = false;
+    this.workspacePanels?.syncIdentity();
+    this.workspacePanels?.refreshResources();
     this.captureChromeState();
     const workFocus =
       typeof document !== 'undefined'
@@ -2829,6 +2837,7 @@ export class WorkspaceCommandView {
 
     this.bindIdentityControls();
     this.bindChromeDisclosures();
+    this.bindConfigDrafts();
     this.bindWorkFirst();
     this.announceNextAction();
     if (workFocus) {
@@ -2882,8 +2891,8 @@ export class WorkspaceCommandView {
     // The stat manager modal lives inside the .ws-cmd container (so it inherits
     // the tactical tokens) but survives full re-renders: re-attach + repaint it.
     if (this.statModalEl && this.container && this.container.appendChild) {
-      this.container.appendChild(this.statModalEl);
-      if (this.statModalSection) {
+      if (!this.statModalEl.parentNode) document.body.appendChild(this.statModalEl);
+      if (this.statModalSection && !this.statModalEl.hidden) {
         this.renderStatModalBody();
         this.setCommandBackgroundInert(true);
         this.restoreDailyBriefPanelView();
@@ -2912,6 +2921,26 @@ export class WorkspaceCommandView {
         this.trayEl.hidden = false;
         this.renderTrayBody();
       }
+    }
+  }
+
+  openWorkspacePanel(kind, trigger, section = '') {
+    if (!this.workspacePanels) this.workspacePanels = new WorkspacePanels(this);
+    this.workspacePanels.open(kind, trigger, section);
+  }
+
+  bindConfigDrafts() {
+    if (typeof document === 'undefined') return;
+    for (const id of ['workspace-detail-intent-form', 'workspace-detail-settings-form']) {
+      const form = document.getElementById?.(id);
+      if (!form || form.dataset?.draftBound) continue;
+      form.dataset.draftBound = '1';
+      form.addEventListener('input', () => {
+        form.dataset.draftDirty = this.workspaceId();
+      });
+      form.addEventListener('change', () => {
+        form.dataset.draftDirty = this.workspaceId();
+      });
     }
   }
 
@@ -2998,6 +3027,14 @@ export class WorkspaceCommandView {
       const giveWork = event.target.closest('[data-cmd-give-work]');
       if (giveWork) {
         this.page?.showAddTaskModal?.({ trigger: giveWork });
+        return;
+      }
+      const panelDoor = event.target.closest('[data-cmd-settings], [data-cmd-resources]');
+      if (panelDoor) {
+        this.openWorkspacePanel(
+          panelDoor.hasAttribute('data-cmd-resources') ? 'resources' : 'settings',
+          panelDoor
+        );
         return;
       }
       const settingsOwner = event.target.closest('[data-cmd-settings-owner]');
@@ -3265,6 +3302,8 @@ export class WorkspaceCommandView {
         return { title: 'Manager Settings', addLabel: '' };
       case 'mission':
         return { title: 'Goal Settings', addLabel: '' };
+      case 'triggers':
+        return { title: 'Triggers', addLabel: '' };
       case 'intent':
         return { title: 'Workspace Intent', addLabel: '' };
       default:
@@ -3293,6 +3332,19 @@ export class WorkspaceCommandView {
     el.hidden = false;
     this.renderStatModalBody();
     this.setCommandBackgroundInert(true);
+    workspaceOverlayCoordinator().open({
+      id: 'workspace-command-manager',
+      kind: 'modal',
+      container: el,
+      canEscape: () => this.canCloseStatModal(),
+      onClose: info => {
+        el.hidden = true;
+        if (info.reason === 'closed') this.closeStatModal({ coordinated: true });
+      },
+      onResume: () => {
+        el.hidden = false;
+      }
+    });
     const panel = el.querySelector('.ws-cmd-modal-panel');
     if (panel && typeof panel.focus === 'function') {
       try {
@@ -3303,7 +3355,21 @@ export class WorkspaceCommandView {
     }
   }
 
-  closeStatModal() {
+  canCloseStatModal() {
+    if (typeof document === 'undefined') return true;
+    return !['workspace-detail-intent-form', 'workspace-detail-settings-form'].some(
+      id => document.getElementById?.(id)?.dataset?.draftDirty === this.workspaceId()
+    );
+  }
+
+  closeStatModal({ coordinated = false } = {}) {
+    if (
+      !coordinated &&
+      !this.canCloseStatModal() &&
+      !window.confirm('Close this editor? Unsaved changes remain until you leave this workspace.')
+    )
+      return;
+    if (!coordinated && workspaceOverlayCoordinator().close('workspace-command-manager')) return;
     const trigger = this.statModalTrigger;
     const wasSection = this.statModalSection;
     const wasBoard = this.taskModalBoardMode;
@@ -3470,7 +3536,7 @@ export class WorkspaceCommandView {
     if (typeof document === 'undefined' || typeof document.createElement !== 'function')
       return null;
     const el = document.createElement('div');
-    el.className = 'ws-cmd-modal';
+    el.className = 'ws-cmd ws-cmd-modal';
     el.hidden = true;
     el.innerHTML =
       '<div class="ws-cmd-modal-backdrop" data-cmd-modal-action="close"></div>' +
@@ -3546,7 +3612,7 @@ export class WorkspaceCommandView {
       this.trapStatModalFocus(event);
     });
     this.statModalEl = el;
-    if (this.container && this.container.appendChild) this.container.appendChild(el);
+    document.body.appendChild(el);
     return el;
   }
 
@@ -4018,6 +4084,7 @@ export class WorkspaceCommandView {
       key === 'skills' ||
       key === 'settings' ||
       key === 'mission' ||
+      key === 'triggers' ||
       key === 'intent' ||
       key === MEMORY_STATION
     );
@@ -4026,7 +4093,7 @@ export class WorkspaceCommandView {
   // Config sections that carry no list count in the modal header.
   sectionHasNoCount(section) {
     const key = String(section || '');
-    return key === 'settings' || key === 'mission' || key === 'intent';
+    return key === 'settings' || key === 'mission' || key === 'intent' || key === 'triggers';
   }
 
   taskViewToggleHTML(section) {
@@ -13378,6 +13445,8 @@ export class WorkspaceCommandView {
         return 'workspace-detail-config-settings-tab';
       case 'mission':
         return 'workspace-detail-config-mission-tab';
+      case 'triggers':
+        return 'workspace-detail-config-triggers-tab';
       case 'intent':
         return 'workspace-detail-config-intent-tab';
       case 'calendar':
@@ -15971,10 +16040,12 @@ export class WorkspaceCommandView {
           page.memoryManager.load();
         break;
       case 'settings':
-        if (typeof page.renderWorkspaceSettings === 'function') page.renderWorkspaceSettings();
+        if (typeof page.renderWorkspaceSettings === 'function')
+          page.renderWorkspaceSettings({ preserveDraft: true });
         break;
       case 'intent':
-        if (typeof page.renderWorkspaceIntent === 'function') page.renderWorkspaceIntent();
+        if (typeof page.renderWorkspaceIntent === 'function')
+          page.renderWorkspaceIntent({ preserveDraft: true });
         break;
       default:
         break;

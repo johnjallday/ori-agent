@@ -560,8 +560,10 @@
       banner.hidden = true;
       return;
     }
-    banner.hidden = false;
     const presentation = bannerPresentation(status, runtimeStatus);
+    // Quiet success is available in Workspace settings → Advanced. Required,
+    // blocked and reconnect states keep their owning banner in every view.
+    banner.hidden = presentation.tone === 'ready';
     if (bannerState) {
       bannerState.textContent = presentation.state;
       bannerState.className = `setup-wizard-banner-state setup-wizard-banner-state-${presentation.tone}`;

@@ -84,9 +84,6 @@ async function serveReadyContinuity(page: Page, workspaceId: string) {
 
 function measureHeader(page: Page) {
   return page.evaluate(() => {
-    // Continuity reattaches its live chip after a Command refresh. Measure only
-    // the complete real header, never treat that brief detachment as zero.
-    if (!document.querySelector('.ws-cmd-continuity-mount .workspace-continuity-chip')) return null;
     const rect = (selector: string) =>
       (document.querySelector(selector) as HTMLElement).getBoundingClientRect();
     const title = rect('.ws-cmd-title');
@@ -111,7 +108,6 @@ function measureHeader(page: Page) {
       pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
       titleWidth: title.width,
       nameWidth: name.getBoundingClientRect().width,
-      chipRight: rect('.ws-cmd-continuity-mount .workspace-continuity-chip').right,
       headerRight: rect('.ws-cmd-topbar').right,
       tabs
     };
@@ -140,9 +136,7 @@ for (const width of [375, 320]) {
 
     await page.goto(`/workspaces/${workspace.folder_slug}`);
     await expect(page.locator('[data-cmd-view-mode="dashboard"]')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('.ws-cmd-continuity-mount .workspace-continuity-chip')).toContainText(
-      'Ready to move as of'
-    );
+    await expect(page.locator('.ws-cmd-topbar #workspaceContinuityChip')).toHaveCount(0);
 
     let measured: Awaited<ReturnType<typeof measureHeader>> = null;
     await expect
@@ -153,9 +147,7 @@ for (const width of [375, 320]) {
       .toBe(true);
     const header = measured as NonNullable<Awaited<ReturnType<typeof measureHeader>>>;
     expect(header.pageOverflow, 'nothing pushes the page sideways').toBeLessThanOrEqual(0);
-    expect(header.chipRight, 'the status chip stays inside the header').toBeLessThanOrEqual(
-      header.headerRight + 0.5
-    );
+
     expect(header.nameWidth, 'the name has its own line').toBeGreaterThanOrEqual(
       header.titleWidth - 0.5
     );
@@ -164,5 +156,11 @@ for (const width of [375, 320]) {
     await page.locator('[data-cmd-disclosure="views"] > summary').click();
     await expect(page.getByRole('link', { name: 'Plans', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toBeVisible();
+    await page.locator('[data-cmd-disclosure="views"] > summary').press('Escape');
+    await page.locator('[data-cmd-settings]').click();
+    await page.locator('[data-panel-section="advanced"]').click();
+    await expect(
+      page.locator('[data-cmd-continuity-settings-mount] #workspaceContinuityChip')
+    ).toContainText('Ready to move as of');
   });
 }

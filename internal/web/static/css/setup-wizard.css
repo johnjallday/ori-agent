@@ -111,7 +111,9 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   max-height: inherit;
-  height: 100%;
+  /* A percentage against an auto-height native dialog collapses in WebKit.
+     Let content size the grid; max-height still bounds its scrolling body. */
+  height: auto;
 }
 
 .setup-wizard-header {

@@ -101,6 +101,7 @@ export class OverlayCoordinator {
       id: String(o.id || ''),
       kind: String(o.kind || 'modal'),
       onClose: typeof o.onClose === 'function' ? o.onClose : null,
+      onResume: typeof o.onResume === 'function' ? o.onResume : null,
       canEscape: typeof o.canEscape === 'function' ? o.canEscape : null,
       trigger: o.trigger || null,
       container: o.container || null,
@@ -145,6 +146,7 @@ export class OverlayCoordinator {
       const resume = this._topModalAny();
       if (resume && resume.suspended) {
         resume.suspended = false;
+        if (resume.onResume) resume.onResume();
         if (resume.container) {
           this._effects.setInert(resume.container);
           this._effects.trapFocus(resume.container);
@@ -291,14 +293,14 @@ function trapFocus(container) {
       first.focus();
     }
   };
-  document.addEventListener('keydown', onKeydown, true);
+  document.addEventListener?.('keydown', onKeydown, true);
   trapByContainer.set(container, onKeydown);
 }
 
 function releaseFocusTrap(container) {
   const onKeydown = trapByContainer.get(container);
   if (!onKeydown) return;
-  document.removeEventListener('keydown', onKeydown, true);
+  document.removeEventListener?.('keydown', onKeydown, true);
   trapByContainer.delete(container);
 }
 

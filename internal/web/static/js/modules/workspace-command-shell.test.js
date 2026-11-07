@@ -108,10 +108,10 @@ test('every shared header has one real Give work door, Settings and literal iden
     view.viewMode = mode;
     const html = view.commandBarHTML(view.page.workspace, view.page.workspace.name, '', {});
     assert.equal((html.match(/data-cmd-give-work/g) || []).length, 1);
-    assert.equal((html.match(/data-cmd-settings>/g) || []).length, 1);
+    assert.equal((html.match(/data-cmd-settings aria-haspopup/g) || []).length, 1);
     assert.match(html, /&lt;img src=x&gt;/);
     assert.doesNotMatch(html, /No description|No tags|ws-cmd-readout/);
-    assert.match(html, /data-cmd-settings-owner="tools"/);
+    assert.match(html, /data-cmd-resources aria-haspopup="dialog"/);
   }
 });
 

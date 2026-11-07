@@ -46,25 +46,6 @@ export function workspaceNavigationHTML({
 
 // Transitional access to the real owners. Group 2 consolidates these into the
 // persistent Settings host; no configuration is saved by opening this disclosure.
-export function workspaceSettingsHTML({ diagnostics, workflow }) {
-  const action = (attribute, value, label) =>
-    `<button type="button" class="ws-cmd-view-btn" ${attribute}="${value}">${label}</button>`;
-  return (
-    '<details class="ws-cmd-disclosure" data-cmd-disclosure="settings">' +
-    '<summary class="ws-cmd-nav-btn" data-cmd-settings>Settings</summary>' +
-    '<div class="ws-cmd-disclosure-body" aria-label="Workspace settings">' +
-    '<strong>General</strong>' +
-    action('data-cmd-edit-identity', 'name', 'Name') +
-    action('data-cmd-edit-identity', 'description', 'Description &amp; intent') +
-    action('data-cmd-edit-identity', 'tags', 'Tags') +
-    '<strong>Goal &amp; automation</strong>' +
-    action('data-cmd-settings-owner', 'mission', 'Goal settings') +
-    action('data-cmd-settings-owner', 'settings', 'Manager settings') +
-    '<strong>Tools &amp; connections</strong>' +
-    action('data-cmd-settings-owner', 'tools', 'Workspace tools') +
-    `<a class="ws-cmd-view-btn ws-cmd-view-link" href="${chromeText(workflow)}">Orchestration Skills</a>` +
-    '<strong>Advanced</strong>' +
-    `<a class="ws-cmd-view-btn ws-cmd-view-link" href="${chromeText(diagnostics)}">Diagnostics</a>` +
-    '</div></details>'
-  );
+export function workspaceSettingsHTML() {
+  return '<button type="button" class="ws-cmd-nav-btn" data-cmd-settings aria-haspopup="dialog">Settings</button>';
 }

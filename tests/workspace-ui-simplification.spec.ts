@@ -39,7 +39,9 @@ async function capture(page: Page, name: string) {
       })
     )
     .toBe('1');
-  await page.screenshot({ path: `tasks/evidence-workspace-ui-simplification/group-1/${name}.png` });
+  await page.screenshot({
+    path: `tasks/evidence-workspace-ui-simplification/${name.startsWith('panels-') ? 'group-2' : 'group-1'}/${name}.png`
+  });
 }
 
 async function refresh(page: Page) {
@@ -77,9 +79,13 @@ test('shell: shared capture preserves its draft through refresh and returns focu
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('[data-cmd-give-work]')).toBeFocused();
   await page.locator('[data-cmd-settings]').click();
-  await page.locator('[data-cmd-settings-owner="settings"]').click();
+  await page.locator('[data-panel-section="automation"]').click();
+  await page
+    .getByRole('button', { name: 'Manager behavior & planning policy', exact: true })
+    .click();
   await expect(page.getByRole('dialog', { name: 'Manager Settings', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close manager' }).click();
+  await page.getByRole('button', { name: 'Close workspace panel' }).click();
   await expect(page.locator('[data-cmd-settings]')).toBeFocused();
   expect(writes).toEqual([]);
   for (const mode of ['map', 'tickets', 'details']) {
@@ -178,6 +184,239 @@ test('shell: declared non-music Home and catalog occupy one safe contribution ho
     );
     if (mode === 'map') await capture(page, 'declared-destinations');
   }
+});
+
+test('panels: General edits keep drafts through refresh and save at the real endpoint', async ({
+  page
+}) => {
+  const ws = await workspace(page);
+  await open(page, ws.folder_slug);
+  await page.locator('[data-cmd-settings]').click();
+  const panel = page.getByRole('dialog', { name: 'Workspace settings', exact: true });
+  await expect(panel).toBeVisible();
+  await panel.locator('#ws-panel-description').fill('Unsaved <literal> description');
+  await refresh(page);
+  await expect(panel.locator('#ws-panel-description')).toHaveValue('Unsaved <literal> description');
+  await panel.getByRole('button', { name: 'Save description', exact: true }).click();
+  await expect(panel.locator('[data-panel-status]')).toHaveText('Saved.');
+  await capture(page, 'panels-general');
+  const stored = await (await page.request.get(`/api/workspaces/${ws.id}`)).json();
+  expect((stored.folder ?? stored.workspace ?? stored).description).toBe(
+    'Unsaved <literal> description'
+  );
+  await refresh(page);
+  await expect(panel.locator('#ws-panel-description')).toHaveValue('Unsaved <literal> description');
+  await panel.getByRole('button', { name: 'Close workspace panel' }).click();
+  await expect(page.locator('[data-cmd-settings]')).toBeFocused();
+});
+
+test('panels: dirty Escape is guarded and Resources child owners suspend rather than stack', async ({
+  page
+}) => {
+  const ws = await workspace(page);
+  await open(page, ws.folder_slug);
+  await page.locator('[data-cmd-settings]').click();
+  const panel = page.getByRole('dialog', { name: 'Workspace settings', exact: true });
+  await panel.locator('#ws-panel-name').fill('Unsaved name');
+  page.once('dialog', dialog => dialog.dismiss());
+  await panel.press('Escape');
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('#ws-panel-name')).toHaveValue('Unsaved name');
+  page.once('dialog', dialog => dialog.accept());
+  await panel.getByRole('button', { name: 'Close workspace panel' }).click();
+  await page.locator('[data-cmd-resources]').click();
+  const resources = page.getByRole('dialog', { name: 'Resources', exact: true });
+  await expect(resources).toBeVisible();
+  for (const key of ['files', 'sessions', 'memory']) {
+    await page.locator(`[data-panel-section="${key}"]`).click();
+    await expect(resources).toBeVisible();
+    await capture(page, `panels-resources-${key}`);
+  }
+  await page.getByRole('button', { name: 'Open memory manager', exact: true }).click();
+  await expect(resources).not.toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Memory', exact: true })).toBeVisible();
+  await refresh(page);
+  await page.getByRole('button', { name: 'Close manager' }).click();
+  await expect(resources).toBeVisible();
+  await resources.getByRole('button', { name: 'Close workspace panel' }).click();
+  await expect(page.locator('[data-cmd-resources]')).toBeFocused();
+});
+
+test('panels: config-owner intent drafts survive background refresh without a repeated initialization', async ({
+  page
+}) => {
+  const ws = await workspace(page);
+  await open(page, ws.folder_slug);
+  await page.locator('[data-cmd-settings]').click();
+  await page.getByRole('button', { name: 'Intent & setup context', exact: true }).click();
+  const intent = page.getByRole('dialog', { name: 'Workspace Intent', exact: true });
+  await expect(intent).toBeVisible();
+  await intent.locator('#workspace-detail-intent-context').fill('Keep this context draft');
+  await refresh(page);
+  await expect(intent.locator('#workspace-detail-intent-context')).toHaveValue(
+    'Keep this context draft'
+  );
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Close manager' }).click();
+  await expect(page.getByRole('dialog', { name: 'Workspace settings', exact: true })).toBeVisible();
+});
+
+test('panels: failed save leaves a literal draft and opening tool/automation sections performs no operation', async ({
+  page
+}) => {
+  const ws = await workspace(page);
+  await open(page, ws.folder_slug);
+  await page.route(`**/api/workspaces/${ws.id}`, route =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({ status: 500, json: { error: 'Fixture save failure' } })
+      : route.continue()
+  );
+  await page.locator('[data-cmd-settings]').click();
+  const panel = page.getByRole('dialog', { name: 'Workspace settings', exact: true });
+  await panel.locator('#ws-panel-description').fill('<script>literal draft</script>');
+  await panel.getByRole('button', { name: 'Save description', exact: true }).click();
+  await expect(panel.locator('[data-panel-status]')).toContainText('Could not save');
+  await expect(panel.locator('#ws-panel-description')).toHaveValue(
+    '<script>literal draft</script>'
+  );
+  page.once('dialog', dialog => dialog.accept());
+  await panel.locator('[data-panel-section="automation"]').click();
+  const writes: string[] = [];
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() !== 'GET' &&
+      /\/(?:execute|run|activate|install|approve|transition|enable)$/.test(path)
+    )
+      writes.push(path);
+  });
+  await panel.locator('[data-panel-section="tools"]').click();
+  await panel.getByRole('button', { name: 'Skills', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Tools', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close manager' }).click();
+  await expect(panel.getByRole('button', { name: 'Skills', exact: true })).toBeFocused();
+  await panel.locator('[data-panel-section="advanced"]').click();
+  await expect(panel.getByRole('link', { name: 'Diagnostics', exact: true })).toBeVisible();
+  expect(writes).toEqual([]);
+});
+
+test('panels: real note editor suspends Resources and returns to its actual opener', async ({
+  page
+}) => {
+  const ws = await workspace(page);
+  await open(page, ws.folder_slug);
+  await page.locator('[data-cmd-resources]').click();
+  const resources = page.getByRole('dialog', { name: 'Resources', exact: true });
+  await resources.getByRole('button', { name: 'New note', exact: true }).click();
+  const editor = page.locator('#noteEditorModal');
+  await expect(editor).toBeVisible();
+  await expect(resources).not.toBeVisible();
+  await refresh(page);
+  await expect(editor).toBeVisible();
+  await editor.getByRole('button', { name: 'Close note editor', exact: true }).click();
+  await expect(resources).toBeVisible();
+  await expect(resources.getByRole('button', { name: 'New note', exact: true })).toBeFocused();
+});
+
+test('panels: imported routines consent survives same-version refresh and rejects stale or unavailable data', async ({
+  page
+}) => {
+  const ws = await workspace(page);
+  let version = 3;
+  let failed = false;
+  const writes: string[] = [];
+  await page.route(`**/api/workspaces/${ws.id}/continuity`, route =>
+    route.fulfill({
+      status: failed ? 500 : 200,
+      json: failed
+        ? {}
+        : {
+            success: true,
+            continuity: {
+              workspace_id: ws.id,
+              state: 'ready',
+              checkpoint_at: '2026-10-21T05:42:48Z',
+              attachment: 'imported_inactive',
+              imported: true,
+              background_allowed: false,
+              manual_allowed: true,
+              attachment_version: version,
+              tree_ready: true
+            }
+          }
+    })
+  );
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/continuity/activate'))
+      writes.push(request.url());
+  });
+  await open(page, ws.folder_slug);
+  await expect(page.locator('.ws-cmd-topbar #workspaceContinuityChip')).toContainText(
+    'routines off'
+  );
+  await page.locator('[data-cmd-settings]').click();
+  await page.locator('[data-panel-section="advanced"]').click();
+  await page.getByRole('button', { name: 'Moving this workspace', exact: true }).click();
+  const dialog = page.locator('#workspaceContinuityDialog');
+  await expect(dialog).toBeVisible();
+  await dialog.locator('#workspaceContinuityActivateBtn').click();
+  await expect(dialog.locator('#workspaceContinuityConfirm')).toBeVisible();
+  await page.evaluate(() => (window as any).WorkspaceContinuityStatus.refresh());
+  await refresh(page);
+  await expect(dialog.locator('#workspaceContinuityConfirm')).toBeVisible();
+  await capture(page, 'panels-imported-consent');
+  version = 4;
+  await page.evaluate(() => (window as any).WorkspaceContinuityStatus.refresh());
+  await expect(dialog.locator('#workspaceContinuityConfirm')).not.toBeVisible();
+  failed = true;
+  await page.evaluate(() => (window as any).WorkspaceContinuityStatus.refresh());
+  await expect(dialog.locator('#workspaceContinuityDialogLabel')).toContainText('unavailable');
+  await dialog.locator('#workspaceContinuityCloseBtn').click();
+  await expect(page.getByRole('dialog', { name: 'Workspace settings', exact: true })).toBeVisible();
+  expect(writes).toEqual([]);
+});
+
+test('panels: quiet setup success lives in Advanced while owner details remain available', async ({
+  page
+}) => {
+  const ws = await workspace(page);
+  // Controlled read/owner-open acknowledgement fixture, not a performed setup.
+  const status = {
+    workspace_id: ws.id,
+    applicable: true,
+    state: 'ready',
+    blueprint_id: 'host-fixture',
+    blueprint_name: 'Host fixture',
+    title: 'Host setup details',
+    current_step_id: 'summary',
+    dismissed: true,
+    auto_open: false,
+    steps: [
+      {
+        id: 'summary',
+        kind: 'summary',
+        title: 'Setup complete',
+        required: true,
+        status: 'completed'
+      }
+    ]
+  };
+  await page.route(`**/api/workspaces/${ws.id}/setup-wizard`, route =>
+    route.fulfill({ json: { setup: status } })
+  );
+  await page.route(`**/api/workspaces/${ws.id}/setup-wizard/open`, route =>
+    route.fulfill({ json: { setup: status } })
+  );
+  await open(page, ws.folder_slug);
+  await expect(page.locator('#setupWizardBanner')).not.toBeVisible();
+  await page.locator('[data-cmd-settings]').click();
+  await page.locator('[data-panel-section="advanced"]').click();
+  await capture(page, 'panels-advanced');
+  await page.getByRole('button', { name: 'Setup & template details', exact: true }).click();
+  await expect(page.locator('#setupWizardDialog')).toBeVisible();
+  await expect(page.locator('#setupWizardTitle')).toHaveText('Host setup details');
+  await page.locator('#setupWizardClose').click();
+  await expect(page.getByRole('dialog', { name: 'Workspace settings', exact: true })).toBeVisible();
 });
 
 test('shell: canonical ticket and filter arrivals keep their selection', async ({ page }) => {
@@ -302,7 +541,7 @@ for (const width of [320, 390, 768, 1440]) {
       await capture(page, `map-${width}`);
     }
     await expect(page.locator('[data-cmd-settings]')).toBeVisible();
-    for (const key of ['settings', 'views']) {
+    for (const key of ['views']) {
       const disclosure = page.locator(`[data-cmd-disclosure="${key}"]`);
       await disclosure.locator('summary').click();
       const menu = disclosure.locator('.ws-cmd-disclosure-body');

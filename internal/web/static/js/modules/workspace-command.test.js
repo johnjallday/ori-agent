@@ -279,16 +279,14 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   );
   assert.doesNotMatch(container.innerHTML, /href="\/workspaces"/);
   assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/canvas"/);
-  assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/diagnostics"/);
-  assert.match(container.innerHTML, /href="\/workflows"/);
-  assert.match(container.innerHTML, /data-cmd-edit-identity="name"/);
-  assert.match(container.innerHTML, /data-cmd-edit-identity="description"/);
-  assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
+  assert.match(container.innerHTML, /data-cmd-settings aria-haspopup="dialog"/);
+  assert.match(container.innerHTML, /data-cmd-resources aria-haspopup="dialog"/);
+  assert.doesNotMatch(container.innerHTML, /data-cmd-edit-identity=/);
   // Counts belong to Tickets; workspace tools remain reachable in Settings.
   assert.match(container.innerHTML, /data-cmd-view-mode="tickets"/);
   assert.match(container.innerHTML, /data-cmd-ticket-count/);
   assert.doesNotMatch(container.innerHTML, /ws-cmd-readout/);
-  assert.match(container.innerHTML, /data-cmd-settings-owner="tools"/);
+  assert.match(container.innerHTML, /data-cmd-settings aria-haspopup="dialog"/);
   // "Workspace notes" on every workspace (PRD 766 FR25).
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Workspace notes</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
@@ -773,7 +771,7 @@ test('command subtitle includes mission automation state when mission state is l
 
     assert.match(html, /Workflow · Guided/);
     assert.match(commandView.commandSubtitle('Guided'), /Workflow · Guided · Goal · Enabled/);
-    assert.match(html, /data-cmd-settings-owner="mission"/);
+    assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
     assert.match(html, /id="workspace-command-subtitle"/);
   } finally {
     globalThis.window = originalWindow;
@@ -9732,7 +9730,7 @@ test('HQ Details: opening the Notes station goes to the inline panel, not a dial
 
 test('HQ Details: the Daily Brief and Memory panels survive a re-render in the stat modal', () => {
   const page = hqPanelsPage();
-  const { doc, container, config, commandView } = page;
+  const { doc, config, commandView } = page;
   const originalDocument = globalThis.document;
   globalThis.document = doc;
   try {
@@ -9752,7 +9750,11 @@ test('HQ Details: the Daily Brief and Memory panels survive a re-render in the s
 
     commandView.statModalSection = 'daily-brief';
     commandView.render();
-    assert.equal(modal.parentNode, container, 'the modal is re-attached after the write');
+    assert.equal(
+      modal.parentNode,
+      doc.body,
+      'the manager lives outside replaceable Command markup'
+    );
     assert.equal(briefRoot.parentNode, panel, 'with the brief root inside');
     commandView.render();
     assert.equal(briefRoot.parentNode, panel, 'the same brief root after a second render');
@@ -9857,8 +9859,8 @@ test('HQ Details: the header comes first, with the HQ chips, facts line and edit
   assert.match(html, /ws-cmd-hq-badge">Personal HQ<\/span>/);
   assert.match(html, /Workflow · Guided<\/span>/);
   assert.match(html, /Where my day starts\./);
-  assert.match(html, /data-cmd-edit-identity="name"/);
-  assert.match(html, /data-cmd-edit-identity="description"/);
+  assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
+  assert.doesNotMatch(html.split('</header>')[0], /data-cmd-edit-identity=/);
   assert.match(html, /data-cmd-hq-goal-edit aria-label="Edit goal"/);
   const facts = html.match(/<p class="ws-hq-facts" data-cmd-hq-facts>(.*?)<\/p>/)[1];
   assert.match(facts, /Lead<\/span> <span class="ws-hq-fact-value">Atlas</);
@@ -9880,8 +9882,8 @@ test('HQ Overview uses the shared primary views, secondary links and Settings', 
   assert.match(secondary, /href="[^"]*\/plans">Plans/);
   assert.match(secondary, /href="[^"]*\/canvas">Canvas/);
   assert.doesNotMatch(nav, /Diagnostics|Orchestration Skills/);
-  assert.match(html, /data-cmd-settings>/);
-  assert.match(html, /href="[^"]*\/diagnostics">Diagnostics/);
+  assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
+  assert.doesNotMatch(nav, /\/diagnostics/);
 });
 
 test('HQ Overview keeps counts with Tickets and the specialized content instead of stat tiles', () => {

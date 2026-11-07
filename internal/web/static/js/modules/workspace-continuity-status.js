@@ -4,7 +4,14 @@
 (function () {
   'use strict';
 
-  const state = { workspaceId: '', status: null, busy: false, chip: null };
+  const state = {
+    workspaceId: '',
+    status: null,
+    busy: false,
+    chip: null,
+    confirmVersion: null,
+    readFailed: false
+  };
 
   function el(id) {
     return document.getElementById(id);
@@ -36,12 +43,22 @@
   }
 
   function render() {
-    const view = window.WorkspaceContinuity?.describeStatus?.(state.status);
+    const view = state.readFailed
+      ? {
+          state: 'unavailable',
+          label: 'Portability status unavailable',
+          detail: 'Ori could not read the latest saved state. Retry before moving this workspace.',
+          imported: state.status?.imported === true,
+          backgroundAllowed: false,
+          canActivate: false,
+          canDeactivate: false
+        }
+      : window.WorkspaceContinuity?.describeStatus?.(state.status);
     const chip = chipElement();
     if (!view || !chip) return;
     // The Personal HQ header shows a short word for this state rather than
     // the chip and its timestamp (PRD 766 FR5); it reads the view from here.
-    window.WorkspaceContinuityStatus = { view };
+    window.WorkspaceContinuityStatus = { view, open, refresh: load };
     document.dispatchEvent(new CustomEvent('ori:workspace-continuity-changed'));
     chip.hidden = false;
     chip.dataset.state = view.state;
@@ -65,7 +82,14 @@
     const deactivate = el('workspaceContinuityDeactivateBtn');
     if (deactivate) deactivate.hidden = !view.canDeactivate;
     const confirm = el('workspaceContinuityConfirm');
-    if (confirm) confirm.hidden = true;
+    if (
+      state.readFailed ||
+      !view.canActivate ||
+      state.confirmVersion !== state.status?.attachment_version
+    )
+      state.confirmVersion = null;
+    if (confirm) confirm.hidden = state.confirmVersion === null;
+    place();
   }
 
   async function load() {
@@ -74,10 +98,17 @@
       const { ok, result } = await request(
         `/api/workspaces/${encodeURIComponent(state.workspaceId)}/continuity`
       );
-      if (!ok || !result.continuity) return;
+      if (!ok || !result.continuity) {
+        state.readFailed = true;
+        render();
+        return;
+      }
+      state.readFailed = false;
       state.status = result.continuity;
       render();
     } catch (error) {
+      state.readFailed = true;
+      render();
       console.warn('Workspace portability status unavailable:', error);
     }
   }
@@ -101,13 +132,19 @@
   }
 
   async function setRoutines(enable) {
-    if (state.busy || !state.status) return;
+    if (
+      state.busy ||
+      !state.status ||
+      state.readFailed ||
+      (enable && state.confirmVersion !== state.status.attachment_version)
+    )
+      return;
     state.busy = true;
     try {
       const { ok, result } = await request(
         `/api/workspaces/${encodeURIComponent(state.workspaceId)}/continuity/activate`,
         'POST',
-        { enable, version: state.status.attachment_version || 0 }
+        { enable, version: enable ? state.confirmVersion : state.status.attachment_version || 0 }
       );
       if (result.continuity) state.status = result.continuity;
       render();
@@ -133,8 +170,17 @@
   // The Command view header re-renders often; keep the chip in its mount.
   function place() {
     const chip = chipElement();
-    const mount = document.querySelector('[data-cmd-continuity-mount]');
-    if (chip && mount && chip.parentElement !== mount) mount.appendChild(chip);
+    const view = window.WorkspaceContinuityStatus?.view;
+    const important =
+      state.readFailed ||
+      (view?.imported && !view?.backgroundAllowed) ||
+      ['unavailable', 'failed', 'error'].includes(view?.state);
+    const settings = document.querySelector('[data-cmd-continuity-settings-mount]');
+    const mount = important ? document.querySelector('[data-cmd-continuity-mount]') : settings;
+    if (chip) {
+      chip.hidden = !mount;
+      if (mount && chip.parentElement !== mount) mount.appendChild(chip);
+    }
   }
 
   function wire() {
@@ -163,7 +209,8 @@
     el('workspaceContinuityPrepareBtn')?.addEventListener('click', () => void prepareNow());
     el('workspaceContinuityActivateBtn')?.addEventListener('click', () => {
       const confirm = el('workspaceContinuityConfirm');
-      if (confirm) confirm.hidden = false;
+      state.confirmVersion = state.status?.attachment_version ?? null;
+      if (confirm) confirm.hidden = state.confirmVersion === null;
       el('workspaceContinuityConfirmBtn')?.focus?.();
     });
     el('workspaceContinuityConfirmBtn')?.addEventListener('click', () => void setRoutines(true));
