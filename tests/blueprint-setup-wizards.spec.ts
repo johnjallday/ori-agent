@@ -177,12 +177,7 @@ test.describe('Blueprint Setup Wizard', () => {
     await page.goto('/workspaces');
     // The create launcher lives in a toolbar the Map view can collapse; click it
     // through the DOM so this test is about the preview, not about chrome.
-    await page.evaluate(() =>
-      (
-        document.getElementById('launcherCreateWorkspaceBtn') ||
-        document.getElementById('cockpitCreateWorkspaceBtn')
-      )?.click()
-    );
+    await page.getByRole('button', { name: 'New Workspace', exact: true }).click();
     await expect(page.locator('#addFolderModal')).toBeVisible({ timeout: 15000 });
     const card = page.locator(`[data-template-id="${TEMPLATE_ID}"]`).first();
     await expect(card).toBeVisible({ timeout: 15000 });
@@ -197,6 +192,10 @@ test.describe('Blueprint Setup Wizard', () => {
     await managerRole
       .getByRole('button', { name: 'Create an agent for Wizard Shell Manager' })
       .click();
+    // The real owner focuses the name when its Bootstrap transition completes.
+    const name = page.locator('[data-agent-create-field="name"]');
+    await expect(name).toBeFocused();
+    await name.fill(`Wizard Shell Manager ${Date.now().toString(36)}`);
     await page.locator('#createAgentBtn').click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
     await expect(managerRole).toContainText('Wizard Shell Manager');
@@ -237,6 +236,7 @@ test.describe('Blueprint Setup Wizard', () => {
     // ---- dismissal: recorded, and it does not make the workspace ready ----
     await page.locator('#setupWizardClose').click();
     await expect(dialog(page)).toBeHidden();
+    await expect.poll(async () => (await setupState(request, workspace.id)).dismissed).toBe(true);
     const dismissed = await setupState(request, workspace.id);
     expect(dismissed.dismissed).toBe(true);
     expect(dismissed.state).not.toBe('ready');
@@ -388,7 +388,8 @@ test.describe('Blueprint Setup Wizard', () => {
     await page.keyboard.press('Escape');
     await expect(dialog(page)).toBeHidden();
     // Dismissal is recorded server-side, and it does not make the workspace
-    // ready — closing a dialog is not finishing setup.
+    // ready — closing a dialog is not finishing setup. Its write is async.
+    await expect.poll(async () => (await setupState(request, workspace.id)).dismissed).toBe(true);
     const dismissed = await setupState(request, workspace.id);
     expect(dismissed.dismissed).toBe(true);
     expect(dismissed.state).not.toBe('ready');

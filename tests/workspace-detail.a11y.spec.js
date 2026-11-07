@@ -40,7 +40,8 @@ for (const theme of ['light', 'dark']) {
     try {
       await page.goto(`/workspaces/${folder.folder_slug}`);
       const area = page.getByRole('region', { name: 'Next action', exact: true });
-      await expect(area.getByRole('button', { name: 'Give work', exact: true })).toBeVisible();
+      await expect(page.locator('[data-cmd-give-work]')).toBeVisible();
+      await expect(area.getByRole('button', { name: 'Give work', exact: true })).toHaveCount(0);
       await page.keyboard.press('Tab');
       await area.getByRole('button', { name: 'All tickets', exact: true }).focus();
       await expect(area.getByRole('button', { name: 'All tickets', exact: true })).toHaveCSS(
@@ -49,7 +50,8 @@ for (const theme of ['light', 'dark']) {
       );
       // All tickets opens the board (the legacy tasks drawer is gone, PRD 760 FR-33).
       await page.keyboard.press('Enter');
-      await expect(page.locator('#hubTicketsGiveWork')).toBeVisible();
+      await expect(page.locator('[data-cmd-give-work]')).toBeVisible();
+      await expect(page.locator('#hubTicketsGiveWork')).toHaveCount(0);
       await page.locator('[data-cmd-view-mode="details"]').click();
       await expect(area.getByRole('button', { name: 'All tickets', exact: true })).toBeVisible();
       await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
@@ -130,7 +132,7 @@ for (const theme of ['light', 'dark']) {
     }
   });
   // PRD 766 FR29: the Personal HQ's Details page, header first and station-first.
-  test(`Personal HQ Details: header first, attention strip, main column and rail (${theme})`, async ({
+  test(`Personal HQ Details mount contract: header first, attention strip, main column and rail (${theme})`, async ({
     page
   }, testInfo) => {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
@@ -143,6 +145,12 @@ for (const theme of ['light', 'dark']) {
     });
     expect(response.ok(), await response.text()).toBeTruthy();
     const { folder } = await response.json();
+    // Controlled read fixture: exercise HQ host mounts without creating an HQ
+    // or claiming brief/email/model execution. All subsequent refreshes agree.
+    await page.route(`**/api/orchestration/workspace?id=${folder.id}`, async route => {
+      const response = await route.fetch();
+      await route.fulfill({ json: { ...(await response.json()), designation: 'personal_hq' } });
+    });
     const agentName = `HQ Lead ${stamp}`;
     expect(
       (await page.request.post('/api/agents', { data: { name: agentName, type: 'general' } })).ok()
@@ -158,6 +166,9 @@ for (const theme of ['light', 'dark']) {
       await page.goto(`/workspaces/${folder.folder_slug}`);
       await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();
       await page.waitForFunction(() => Boolean(window.workspaceDetail?.workspace?.id));
+      // Wait for the actual canonical page read, not network-idle (live status
+      // polling intentionally keeps the page active).
+      await page.waitForFunction(() => Boolean(window.workspaceCommand?.page?.initialListsLoaded));
       // Display fixture only, as above: the canonical HQ designation on this
       // workspace, without building an HQ. The goal's own status line is
       // silenced so the strip starts empty, and every top mount is given
@@ -179,8 +190,8 @@ for (const theme of ['light', 'dark']) {
           el.hidden = false;
           el.textContent = 'Fixture mount ' + id;
         }
-        window.workspaceDetail.workspace.designation = 'personal_hq';
         window.workspaceCommand.setCommandViewMode('details', { focus: false });
+        window.workspaceCommand.render();
       });
       const header = page.locator('.ws-hq-header');
       await expect(header).toBeVisible();
@@ -193,7 +204,8 @@ for (const theme of ['light', 'dark']) {
         for (const id of [
           'workspaceGroupRequirementStatus',
           'workspaceEmailConnectMount',
-          'blueprintIntakePending'
+          'blueprintIntakePending',
+          'workspaceFirstTaskBanner'
         ]) {
           document.getElementById(id).hidden = true;
         }
@@ -287,14 +299,13 @@ for (const theme of ['light', 'dark']) {
       await expect(page.locator('[data-cmd-manage-section="stations"]')).toHaveCount(0);
       await expect(page.getByRole('button', { name: /^Workspace notes/ })).toBeVisible();
 
-      // More views is a keyboard menu that closes on Escape (FR6).
-      const more = page.getByRole('button', { name: 'More views' });
-      await expect(more).toHaveAttribute('aria-haspopup', 'menu');
+      // Shared secondary navigation is a native disclosure with real links.
+      const more = page.locator('[data-cmd-disclosure="views"] > summary');
       await more.focus();
       await page.keyboard.press('Enter');
-      await expect(page.getByRole('menuitem', { name: 'Canvas' })).toBeFocused();
+      await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toBeVisible();
       await page.keyboard.press('Escape');
-      await expect(page.getByRole('menu', { name: 'More views' })).toBeHidden();
+      await expect(page.getByRole('link', { name: 'Canvas', exact: true })).not.toBeVisible();
       await expect(more).toBeFocused();
 
       // Plain names only, in what is shown and in what is announced (FR23).
@@ -346,17 +357,15 @@ for (const theme of ['light', 'dark']) {
         })
       ).ok()
     ).toBeTruthy();
-    // Display fixture only, as above: the HQ designation without building an
-    // HQ. It is set again after a reload, which the server never stored.
+    // Controlled designation read fixture; no application DOM/state patch.
+    await page.route(`**/api/orchestration/workspace?id=${folder.id}`, async route => {
+      const response = await route.fetch();
+      await route.fulfill({ json: { ...(await response.json()), designation: 'personal_hq' } });
+    });
     const openHQMap = async () => {
-      await page.goto(`/workspaces/${folder.folder_slug}`);
+      await page.goto(`/workspaces/${folder.folder_slug}?mode=map`);
       await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();
       await page.waitForFunction(() => Boolean(window.workspaceDetail?.workspace?.id));
-      await page.evaluate(() => {
-        window.workspaceDetail.workspace.designation = 'personal_hq';
-        window.workspaceCommand.setCommandViewMode('map', { focus: false });
-        window.workspaceCommand.render();
-      });
     };
     const scanMap = async label => {
       const violations = await page.evaluate(async () => {
@@ -371,11 +380,17 @@ for (const theme of ['light', 'dark']) {
     // modal it hosts, not only the map region.
     const tacticalWords = () =>
       page.evaluate(() => {
-        const root = document.querySelector('#workspaceCommandView');
-        const labels = [...root.querySelectorAll('[aria-label], [title]')].map(
-          el => (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')
-        );
-        return [root.innerText, ...labels].join('\n');
+        const roots = [
+          ...document.querySelectorAll('#workspaceCommandView, .ws-cmd-modal:not([hidden])')
+        ];
+        return roots
+          .flatMap(root => {
+            const labels = [...root.querySelectorAll('[aria-label], [title]')].map(
+              el => (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')
+            );
+            return [root.innerText, ...labels];
+          })
+          .join('\n');
       });
     try {
       await openHQMap();
@@ -467,16 +482,15 @@ for (const theme of ['light', 'dark']) {
       }
       await page.setViewportSize({ width: 1440, height: 900 });
 
-      // Free: the field, its buildings and the belt with plain names (FR18).
+      // Free keeps its actual buildings and arrangement, with shared destinations.
       await arrangement.getByRole('button', { name: 'Free' }).click();
       await expect(page.locator('.ws-cmd-map-shell.is-hq:not(.is-flow)')).toBeVisible();
-      await expect(operationsMap.locator('.ws-cmd-map-belt')).toBeVisible();
+      await expect(operationsMap.locator('.ws-cmd-map-belt')).toHaveCount(0);
       await expect(operationsMap.locator('.ws-cmd-map-hq-station').first()).toBeFocused();
-      for (const label of ['Workspace goal', 'Tickets', 'Backlog', 'Inventory', 'Stations']) {
-        await expect(
-          operationsMap.locator(`.ws-cmd-map-belt-btn[aria-label="${label}"]`)
-        ).toHaveCount(1);
-      }
+      await expect(page.locator('[data-cmd-map-resources]')).toBeVisible();
+      await expect(page.locator('[data-cmd-view-mode="tickets"]')).toBeVisible();
+      await expect(page.locator('[data-cmd-settings]')).toBeVisible();
+      await expect(operationsMap.locator('[data-cmd-hq-station="memory"]')).toBeVisible();
       for (const term of ['Outpost', 'Commander', 'Garrison', 'Quest Board', 'Loadout', 'Keeper']) {
         expect(await tacticalWords(), term).not.toContain(term);
       }
@@ -496,7 +510,7 @@ for (const theme of ['light', 'dark']) {
           agents: rects('.ws-cmd-map-agent'),
           stations: rects('.ws-cmd-map-hq-station'),
           switches: rects('.ws-cmd-map-arrangement'),
-          fixed: rects('.ws-cmd-map-quest-fab, .ws-cmd-map-belt')
+          fixed: rects('.ws-cmd-map-toolbar')
         };
       });
       const overlaps = (a, b) =>
@@ -584,6 +598,22 @@ for (const theme of ['light', 'dark']) {
     expect(workspaceId).toBeTruthy();
     expect(workspaceSlug).toBeTruthy();
 
+    // Controlled project metadata read fixture: do not patch application DOM/state
+    // or invoke a real OS project opener to establish accessibility coverage.
+    let projectAvailable = false;
+    await page.route(`**/api/orchestration/workspace?id=${workspaceId}`, async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({
+        json: {
+          ...body,
+          project_path: projectAvailable ? 'accessibility-project' : '',
+          shared_data: projectAvailable
+            ? { ...body.shared_data, project_entry_path: 'project.rpp' }
+            : {}
+        }
+      });
+    });
     const workspaceActivated = page.waitForResponse(response =>
       response.url().includes('/api/orchestration/workspace/activate?id=')
     );
@@ -592,18 +622,11 @@ for (const theme of ['light', 'dark']) {
     });
     await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();
     await workspaceActivated;
-    await page.evaluate(() => {
-      window.workspaceDetail.workspace.project_path = '';
-      window.workspaceDetail.workspace.shared_data = {};
-      window.workspaceCommand.refresh();
-    });
+
     await expect(page.locator('[data-cmd-open-project]')).toHaveCount(0);
 
-    await page.evaluate(() => {
-      window.workspaceDetail.workspace.project_path = 'accessibility-project';
-      window.workspaceDetail.workspace.shared_data = { project_entry_path: 'project.rpp' };
-      window.workspaceCommand.refresh();
-    });
+    projectAvailable = true;
+    await page.evaluate(() => window.workspaceDetail.loadWorkspace());
     const openProject = page.getByRole('button', {
       name: 'Open project using the system default application'
     });
@@ -621,22 +644,23 @@ for (const theme of ['light', 'dark']) {
     const expectMapTheme = async expectedTheme => {
       const expectedNameColor =
         expectedTheme === 'light' ? 'rgb(10, 10, 10)' : 'rgb(238, 240, 243)';
-      const expectedQuestColor =
+      const expectedCaptureColor =
         expectedTheme === 'light' ? 'rgb(31, 33, 40)' : 'rgb(214, 217, 222)';
       await expect(operationsMap.locator('.ws-cmd-map-agent-copy strong').first()).toHaveCSS(
         'color',
         expectedNameColor
       );
-      await expect(page.locator('.ws-cmd-map-quest-fab')).toHaveCSS('color', expectedQuestColor);
+      await expect(page.locator('[data-cmd-give-work]')).toHaveCSS('color', expectedCaptureColor);
+      await expect(page.locator('.ws-cmd-map-quest-fab, .ws-cmd-map-belt')).toHaveCount(0);
       const style = await operationsMap.evaluate(element => {
         const read = selector => getComputedStyle(element.parentElement.querySelector(selector));
         const computed = getComputedStyle(element);
         const agent = read('.ws-cmd-map-agent');
         const agentName = read('.ws-cmd-map-agent-copy strong');
         const agentStatus = read('.ws-cmd-map-agent-status');
-        const belt = read('.ws-cmd-map-belt');
-        const beltButton = read('.ws-cmd-map-belt-btn');
-        const questButton = read('.ws-cmd-map-quest-fab');
+        const toolbar = read('.ws-cmd-map-toolbar');
+        const resourcesButton = read('[data-cmd-map-resources]');
+        const captureButton = getComputedStyle(document.querySelector('[data-cmd-give-work]'));
         const viewSwitch = getComputedStyle(document.querySelector('.ws-cmd-view-switch'));
         const inactiveView = getComputedStyle(
           document.querySelector('[data-cmd-view-mode="details"]')
@@ -647,9 +671,9 @@ for (const theme of ['light', 'dark']) {
           agentBackgroundImage: agent.backgroundImage,
           agentNameColor: agentName.color,
           agentStatusBackground: agentStatus.backgroundColor,
-          beltBackgroundImage: belt.backgroundImage,
-          beltButtonColor: beltButton.color,
-          questButtonColor: questButton.color,
+          toolbarBackground: toolbar.backgroundColor,
+          resourcesButtonColor: resourcesButton.color,
+          captureButtonColor: captureButton.color,
           viewSwitchBackground: viewSwitch.backgroundColor,
           inactiveViewColor: inactiveView.color
         };
@@ -666,20 +690,20 @@ for (const theme of ['light', 'dark']) {
         expect(style.agentBackgroundImage).not.toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(255, 255, 255, 0.88)');
-        expect(style.beltBackgroundImage).toContain('rgba(255, 255, 255, 0.97)');
-        expect(style.beltButtonColor).toBe('rgb(92, 92, 94)');
-        expect(style.questButtonColor).toBe(expectedQuestColor);
-        expect(style.viewSwitchBackground).toBe('rgba(255, 255, 255, 0.92)');
+        expect(style.toolbarBackground).toBe('rgb(236, 239, 242)');
+        expect(style.resourcesButtonColor).toBe('rgb(92, 92, 94)');
+        expect(style.captureButtonColor).toBe(expectedCaptureColor);
+        expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0)');
         expect(style.inactiveViewColor).toBe('rgb(31, 33, 40)');
       } else {
         expect(style.agentBackgroundImage).toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(0, 0, 0, 0.24)');
-        expect(style.beltBackgroundImage).toContain('rgba(17, 22, 29, 0.9)');
-        expect(style.beltButtonColor).toBe('rgb(139, 144, 154)');
-        expect(style.questButtonColor).toBe(expectedQuestColor);
-        expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0.2)');
-        expect(style.inactiveViewColor).toBe('rgb(125, 131, 142)');
+        expect(style.toolbarBackground).toBe('rgb(22, 24, 29)');
+        expect(style.resourcesButtonColor).toBe('rgb(139, 144, 154)');
+        expect(style.captureButtonColor).toBe(expectedCaptureColor);
+        expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0)');
+        expect(style.inactiveViewColor).toBe('rgb(133, 139, 150)');
       }
       return style;
     };
@@ -727,7 +751,7 @@ for (const theme of ['light', 'dark']) {
     // Leave the existing Details-mode accessibility assertions in their original theme.
     if (theme === 'dark') await toggleTheme('dark');
     expect(await expectMapTheme(theme)).toEqual(startingStyle);
-    await page.getByRole('button', { name: 'Details', exact: true }).click();
+    await page.getByRole('button', { name: 'Overview', exact: true }).click();
     await expect(openProject).toBeVisible();
     await page.locator('#workspaceCommandView').evaluate(async root => {
       const finiteAnimations = root

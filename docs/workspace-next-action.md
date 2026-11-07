@@ -1,14 +1,20 @@
 # Workspace next action
 
-Ordinary workspaces show the same **Next action** in Map and Details. The Map,
+Ordinary workspaces show the same **Next action** in Map and Overview (the internal
+`details` key is unchanged). The Map,
 stations, agent controls, Memory, and the ticket board remain available. Group maps,
 Personal HQ and dashboards keep their existing journeys. A next action about work
 opens the ticket; see [One work-item model](architecture/work-item-model.md) for
 what a ticket and a run are.
 
+Team and Resources now use compact entries; full agent controls and editors keep
+their existing owners. See [Workspace navigation](workspace-navigation.md) for the
+old-control destination map, canonical Tickets history, mutable-panel guarantees,
+and the unresolved configured first-goal admission boundary.
+
 ## How recommendations are chosen
 
-The shared resolver uses canonical task presentation and File Janitor's public,
+The shared resolver uses the existing ticket/task presentation and File Janitor's public,
 identity-bound action summary. It does not identify capabilities or starter tasks
 by their names, hide tasks, or change their completion state.
 
@@ -98,7 +104,7 @@ In another terminal:
 
 The filing journey uses synthetic temporary files and performs an explicit scan,
 partial apply and Undo. It also checks that navigation performs no operations.
-Layout tests cover Map/Details, both themes, 320/390/768/1280px, long task names,
+Layout tests cover Map/Overview, both themes, 320/390/768/1280px, long ticket names,
 keyboard focus and zoom-equivalent reflow. HQ designation and queued/long task
 states in those tests are labelled display/response fixtures, not live agent or
 brief execution. The example-plugin regression installs only into demo storage.

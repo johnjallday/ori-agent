@@ -156,7 +156,10 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   recordNavigation(page);
 });
-test.afterEach(() => {
+test.afterEach(async ({ page }) => {
+  // Delayed real-read fixtures must finish before Playwright disposes their
+  // request context; cancellation on teardown is not a product response.
+  await page.unrouteAll({ behavior: 'wait' });
   expect(navigationWrites).toEqual([]);
   expect(modelCalls()).toBe(providerCallsBefore);
 });
@@ -202,11 +205,16 @@ test('Home updates: keyboard Map message arrival exposes only its saved conversa
   // Reproduce an arrival faster than the recipient's Personal HQ lookup. It
   // must wait for identity readiness, not consume the intent as unavailable.
   await page.route(/\/api\/personal-assistant$/, async route => {
+    const arrival =
+      new URL(route.request().frame().url()).pathname === `/workspaces/${letters.folder_slug}`;
     const response = await route.fetch();
-    if (new URL(route.request().frame().url()).pathname === `/workspaces/${letters.folder_slug}`) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    await route.fulfill({ response });
+    const reply = {
+      status: response.status(),
+      headers: response.headers(),
+      body: await response.body()
+    };
+    if (arrival) await new Promise(resolve => setTimeout(resolve, 500));
+    await route.fulfill(reply);
   });
   const before = await updates(request, letters.id);
   const otherUnread = (await updates(request, filing.id)).welcome.unread_count;

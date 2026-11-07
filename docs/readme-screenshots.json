@@ -127,7 +127,8 @@
       "timezone": "UTC",
       "required_visible_selectors": [
         "#workspaceCommandView",
-        ".ws-cmd-deck",
+        ".ws-cmd-team",
+        "#workspaceNextActionRegion",
         "#workspace-command-mission-card"
       ],
       "caption": "Workspace Command keeps agents, tasks, notes, files, and mission operations in one active workspace.",

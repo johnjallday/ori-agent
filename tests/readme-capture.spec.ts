@@ -81,6 +81,7 @@ function workspace(id: string) {
     mcp_bindings: [],
     agent_mcp_access: [],
     shared_data: {},
+    ticket_counts: ticketPayload().counts,
     workspace_settings: { execution_mode: 'guided' }
   };
 }
@@ -128,8 +129,11 @@ function ticketPayload() {
     linked_note_ids: [],
     state_history: []
   }));
+  const counts = { backlog: 0, ready: 0, in_progress: 0, review: 0, done: 0, cancelled: 0 };
+  for (const ticket of tickets) counts[ticket.state as keyof typeof counts]++;
   return {
     tickets,
+    counts,
     count: tickets.length,
     total: tickets.length,
     truncated: false,
@@ -1457,16 +1461,25 @@ test('captures Workspace Command with agents, task state, note/file context, and
     'workspace',
     `/workspaces/${seeded!.folder_slug}`,
     '#workspaceCommandView',
-    'Launch decision brief',
-    // The portability chip joins the Command header on a short timer after the
-    // header renders; wait for it there so both captures photograph it.
+    'Mira',
+    // Wait for the real portability read, but do not open Advanced or restore
+    // retired header success chrome merely to imitate the accepted old photo.
     async scenePage => {
-      await expect(
-        scenePage.locator('[data-cmd-continuity-mount] #workspaceContinuityChip')
-      ).toHaveText(/^Ready to move as of /);
+      await expect(scenePage.locator('#workspaceContinuityChip')).toHaveText(
+        /^Ready to move as of /
+      );
+      await expect(scenePage.locator('.ws-cmd-team')).toBeVisible();
+      await expect(scenePage.locator('[data-cmd-ticket-count]')).toHaveText(
+        String(ticketPayload().tickets.length)
+      );
+      await expect(scenePage.locator('#workspaceNextActionRegion')).toBeVisible();
+      await expect(scenePage.locator('#workspaceNextActionRegion')).not.toContainText(
+        'Checking workspace work'
+      );
     }
   );
-  await expect(page.locator('.ws-cmd-deck')).toBeVisible();
+  await expect(page.locator('.ws-cmd-team')).toBeVisible();
+  await expect(page.locator('[data-cmd-team-toggle]')).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#workspace-command-mission-card')).toBeVisible();
   await expect(page.locator('[data-view="detailed"]')).toHaveCount(0);
 });
