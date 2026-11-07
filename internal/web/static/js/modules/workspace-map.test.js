@@ -10775,6 +10775,28 @@ test('a scoped mount draws only its group, without collapse controls, and unmoun
   assert.match(container.innerHTML, /data-group-menu="g"/);
 });
 
+test('a view-only scoped unmount preserves the camera without writing layout or leaking into Home', async () => {
+  const writes = [];
+  const map = loadMapWithFetch((url, options = {}) => {
+    if (options.method && options.method !== 'GET') writes.push(url);
+    return jsonResponse({ schema_version: 1, revision: 1, positions: {} });
+  });
+  const harness = createCameraHarness({ tiles: ['m1', 'deep'] });
+  map.mount(harness.container, scopedMountState({ selectedId: 'm1' }));
+  await flush();
+  harness.container.querySelector('[data-map-zoom-in]').click();
+  const before = { ...map.getCamera() };
+  map.unmount(harness.container, { preservePresentation: true });
+  assert.equal(map.getScopeGroupId(), '', 'the suspended map is not still mounted');
+  map.mount(harness.container, scopedMountState({ selectedId: 'm1' }));
+  await flush();
+  assert.deepEqual({ ...map.getCamera() }, before);
+  assert.equal(map.getSelectedId(), 'm1');
+  assert.deepEqual(writes, []);
+  map.unmount(harness.container);
+  assert.equal(map.getScopeGroupId(), '');
+});
+
 test('the scoped district is still resolved for placement even though it is not drawn', () => {
   const map = loadOriWorkspaceMap();
   const rows = map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g');
@@ -11208,6 +11230,39 @@ test('frame insets centre the opening view in the clear area, whatever the zoom'
   // the space the overlays leave, and zoom cancels out of that position.
   assert.ok(Math.abs(inset.x - plain.x - 120) < 0.5, 'x shift ' + (inset.x - plain.x));
   assert.ok(Math.abs(inset.y - plain.y - 50) < 0.5, 'y shift ' + (inset.y - plain.y));
+});
+
+test('a raised scoped dock frames above its whole measured bottom clearance', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, revision: 1, positions: {} })
+  );
+  const harness = createCameraHarness({ tiles: ['m1', 'deep'], width: 1000, height: 600 });
+  const dock = {
+    offsetHeight: 60,
+    getBoundingClientRect: () => ({ top: 440, height: 60, bottom: 500 })
+  };
+  harness.canvas.closest = () => ({ querySelector: () => dock });
+  harness.canvas.getBoundingClientRect = () => ({
+    left: 0,
+    top: 0,
+    width: 1000,
+    height: 600,
+    right: 1000,
+    bottom: 600
+  });
+  map.mount(harness.container, scopedMountState());
+  await flush();
+  const layout = map.computeWorldLayout(map.scopeWorkspacesToGroup(SCOPED_WORLD, 'g'), {
+    positions: {},
+    scope: { groupId: 'g', nested: false }
+  });
+  const bounds = map.scopedFrameBounds(layout, 'g');
+  const center = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
+  const screen = map.camera.worldToScreen(center, map.getCamera(), { width: 1000, height: 600 });
+  assert.ok(
+    Math.abs(screen.y - 216) < 0.5,
+    'framed above the dock and its bottom clearance: ' + screen.y
+  );
 });
 
 test('a scoped mount frames its district instead of restoring Home’s camera, and never saves one', async () => {

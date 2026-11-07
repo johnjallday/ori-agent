@@ -474,6 +474,9 @@
   // scopeNested marks a group nested inside another group: Home draws no
   // district for it, so its frame here is automatic and has no layout record.
   var scopeGroupId = '';
+  // Session presentation only, owned by this renderer. An interior view switch
+  // may release listeners without forgetting the same group's camera/selection.
+  var scopedPresentation = null;
   var scopeNested = false;
   // Screen space a host's own overlays cover along the top and left edges of
   // the canvas. Framing (open, Fit, Reset view) centres content in what is
@@ -7206,7 +7209,19 @@
     var theatre = canvas.closest('.ws-map-theatre');
     var dock = theatre && theatre.querySelector('.ws-map-control-dock');
     var height = dock ? Number(dock.offsetHeight) || 0 : 0;
-    // The dock sits 14px off the bottom edge; keep a little air above it too.
+    // Reserve its real bottom clearance too (the scoped phone dock clears the
+    // global assistant). Fall back for an unmeasured/hidden first paint.
+    var canvasRect = canvas.getBoundingClientRect && canvas.getBoundingClientRect();
+    var dockRect = dock && dock.getBoundingClientRect && dock.getBoundingClientRect();
+    if (
+      height > 0 &&
+      canvasRect &&
+      dockRect &&
+      dockRect.height > 0 &&
+      canvasRect.bottom > dockRect.top
+    ) {
+      return Math.max(CONTROL_STRIP_HEIGHT, canvasRect.bottom - dockRect.top + 8);
+    }
     return height > 0 ? Math.max(CONTROL_STRIP_HEIGHT, height + 14 + 8) : CONTROL_STRIP_HEIGHT;
   }
 
@@ -11222,6 +11237,14 @@
     // Scoped mode is decided before anything reads the workspace list, so
     // stats, layout, bindings, and selection all see only the group.
     scopeGroupId = String((state && state.scopeGroupId) || '').trim();
+    var restoreScoped =
+      !cameraReady && scopedPresentation && scopedPresentation.groupId === scopeGroupId;
+    if (restoreScoped) {
+      camera = scopedPresentation.camera;
+      multiSelected = scopedPresentation.multiSelected;
+      cameraReady = true;
+      scopedPresentation = null;
+    }
     scopeNested = !!scopeGroupId && isNestedGroup(allWorkspaces, scopeGroupId);
     frameInsets = normalizeFrameInsets(state && state.frameInsets);
     scopeUnits = scopeGroupId ? normalizeScopeUnits(state && state.units) : [];
@@ -11320,6 +11343,7 @@
     // Map/Tree switch reconciles into the world the user is already looking at
     // rather than snapping them back to a default view (FR-106).
     ensureCamera(container);
+    if (restoreScoped) setCamera(camera, container, { persist: false });
     applyCamera(container);
     bindViewportPan(container);
     bindViewportWheel(container);
@@ -11385,8 +11409,22 @@
   }
 
   /** Tear down the map view (called when switching away). */
-  function unmount(container) {
+  function unmount(container, options) {
     if (!container) return;
+    if (
+      options &&
+      options.preservePresentation &&
+      cameraReady &&
+      scopeGroupId &&
+      lastMount &&
+      lastMount.container === container
+    ) {
+      scopedPresentation = {
+        groupId: scopeGroupId,
+        camera: { centerX: camera.centerX, centerY: camera.centerY, zoom: camera.zoom },
+        multiSelected: Object.assign(Object.create(null), multiSelected)
+      };
+    }
     // Leaving the Map cannot strand the wizard in a page-local placement
     // state. Clear it before DOM teardown, then let the draft resume review.
     var abandonedPlacement =

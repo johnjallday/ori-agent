@@ -121,8 +121,12 @@ async function completeCreateWizard(page: Page, name: string) {
   await page.locator('[data-ws-map-placement-confirm]').click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeHidden();
   if (reviewed) {
-    // Preview removal precedes the deferred result-editor handoff. Wait for
-    // that actual canonical result, not an instantaneous visibility guess.
+    // Group-aware placement settles on its real map receipt; Details returns
+    // to that verified review, without creating or submitting a second time.
+    const receipt = page.locator('[data-creation-map-status]');
+    await expect(receipt).toContainText(`Workspace created · ${name}`);
+    await expect(receipt).toContainText('No run or scan was started by placement.');
+    await receipt.getByRole('button', { name: 'Details', exact: true }).click();
     await expect(
       review.getByRole('heading', { name: 'Workspace created', exact: true })
     ).toBeVisible();
@@ -184,20 +188,30 @@ async function emptyPointOn(page: Page): Promise<{ x: number; y: number }> {
     [0.15, 0.45],
     [0.6, 0.5]
   ];
-  for (const [fx, fy] of candidates) {
-    const point = { x: box.x + box.width * fx, y: box.y + box.height * fy };
-    const isEmpty = await page.evaluate(
-      ([x, y]) => {
-        const el = document.elementFromPoint(x, y);
-        return (
-          !!el && (el.classList.contains('ws-map-canvas') || el.classList.contains('ws-map-world'))
-        );
-      },
-      [point.x, point.y]
-    );
-    if (isEmpty) return point;
+  // A hidden creator can still have its real fading backdrop for a frame.
+  // Wait for genuinely uncovered ground; never remove it or force a click.
+  for (let fy = 0.1; fy < 0.95; fy += 0.1) {
+    for (let fx = 0.1; fx < 0.95; fx += 0.1) candidates.push([fx, fy]);
   }
-  throw new Error('no empty spot found on the map');
+  const deadline = Date.now() + 5000;
+  do {
+    for (const [fx, fy] of candidates) {
+      const point = { x: box.x + box.width * fx, y: box.y + box.height * fy };
+      const isEmpty = await page.evaluate(
+        ([x, y]) => {
+          const el = document.elementFromPoint(x, y);
+          return (
+            !!el &&
+            (el.classList.contains('ws-map-canvas') || el.classList.contains('ws-map-world'))
+          );
+        },
+        [point.x, point.y]
+      );
+      if (isEmpty) return point;
+    }
+    await page.waitForTimeout(50);
+  } while (Date.now() < deadline);
+  throw new Error('no uncovered empty spot found on the map after settling');
 }
 
 /**
