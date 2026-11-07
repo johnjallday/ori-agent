@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { learningForTicket } from './learning-mission-review.js';
+import { learningForTicket, observationForTicket } from './learning-mission-review.js';
 
 const row = {
   id: 'mission',
@@ -14,6 +14,13 @@ test('review handoff requires both exact workspace and Ticket identity', () => {
   assert.equal(learningForTicket(status, 'workspace', 'ticket'), row);
   assert.equal(learningForTicket(status, 'foreign', 'ticket'), null);
   assert.equal(learningForTicket(status, 'workspace', 'other'), null);
+});
+
+test('ordinary review handoff requires its own exact scoped host observation', () => {
+  const observed = { id: 'claim', studio_id: 'workspace', ticket_id: 'ticket', ready: true };
+  assert.equal(observationForTicket({ observations: [observed] }, 'workspace', 'ticket'), observed);
+  assert.equal(observationForTicket({ observations: [observed] }, 'foreign', 'ticket'), null);
+  assert.equal(observationForTicket({ instances: [row] }, 'workspace', 'ticket'), null);
 });
 
 test('stopped or cleared learning does not manufacture a new result review', () => {

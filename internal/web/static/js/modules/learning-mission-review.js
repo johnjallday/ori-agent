@@ -5,7 +5,9 @@ import {
   learningElement,
   learningButton,
   learningField,
-  learningBlockers
+  learningBlockers,
+  learningResult,
+  focusLearningControl
 } from './learning-missions.js';
 
 export function learningForTicket(status, workspaceID, ticketID) {
@@ -15,6 +17,14 @@ export function learningForTicket(status, workspaceID, ticketID) {
         row.definition.studio_id === workspaceID &&
         row.progress.ticket_id === ticketID &&
         ['active', 'blocked', 'completed'].includes(row.state)
+    ) || null
+  );
+}
+
+export function observationForTicket(status, workspaceID, ticketID) {
+  return (
+    (status?.observations || []).find(
+      row => row.studio_id === workspaceID && row.ticket_id === ticketID
     ) || null
   );
 }
@@ -33,12 +43,14 @@ export class LearningTicketReview extends LearningMissions {
   async refresh() {
     this.status = await this.api.get(learningRoot);
     this.instance = learningForTicket(this.status, this.workspaceID, this.ticketID);
+    this.observation = observationForTicket(this.status, this.workspaceID, this.ticketID);
     this.ticket = await this.api.get(this.ticketPath);
     this.execution = null;
+    this.executionError = '';
     try {
       this.execution = await this.api.get(`${this.ticketPath}/execution`);
     } catch (error) {
-      if (!this.instance && error.status === 404) {
+      if (!this.instance && !this.observation && error.status === 404) {
         this.root.hidden = true;
         return;
       }
@@ -63,11 +75,25 @@ export class LearningTicketReview extends LearningMissions {
       )
     );
     if (this.execution && ['ready', 'backlog'].includes(this.ticket.state) && !this.started) {
-      const { executor, input, disclosure } = this.execution;
+      const { executor, input, disclosure, original, original_text: originalText } = this.execution;
       this.body.append(
         learningElement(d, 'h4', `${executor.agent} · ${executor.provider} / ${executor.model}`),
-        learningElement(d, 'p', disclosure),
-        learningElement(d, 'pre', input, 'learning-result')
+        learningElement(d, 'p', disclosure)
+      );
+      if (original)
+        this.body.append(
+          learningElement(d, 'h4', 'Exact original supplied to this revision'),
+          learningElement(
+            d,
+            'p',
+            `Run ${original.run_id} · Artifact ${original.artifact_id} · Complete inline result, not a history excerpt.`,
+            'learning-caption'
+          ),
+          learningResult(d, 'Exact original supplied to this revision', originalText)
+        );
+      this.body.append(
+        learningElement(d, 'h4', original ? 'Reviewed correction' : 'Reviewed input'),
+        learningResult(d, original ? 'Reviewed correction' : 'Reviewed input', input)
       );
       this.body.append(
         learningButton(d, 'Start this Ticket with this input and model', () =>
@@ -94,7 +120,30 @@ export class LearningTicketReview extends LearningMissions {
       );
     }
     const i = this.instance;
-    if (i?.state === 'completed') {
+    if (this.observation) {
+      this.body.append(
+        learningElement(
+          d,
+          'p',
+          'This ordinary execution was observed after your workspace opt-in. A result-specific review can record practice without creating a mission. Guidance outside the mission path remains unknown.',
+          'learning-caption'
+        )
+      );
+      if (this.observation.ready)
+        this.body.append(
+          learningButton(d, 'Inspect existing result for practice', () =>
+            this.action(() => this.openReview())
+          )
+        );
+      else
+        this.body.append(
+          learningElement(
+            d,
+            'p',
+            'Waiting for an exact completed result. This does not hold or change the Ticket.'
+          )
+        );
+    } else if (i?.state === 'completed') {
       this.body.append(
         learningElement(
           d,
@@ -121,11 +170,12 @@ export class LearningTicketReview extends LearningMissions {
             'learning-caption'
           )
         );
-        this.body.append(
-          learningButton(d, 'Inspect the exact result for learning', () =>
-            this.action(() => this.openReview())
-          )
-        );
+        if (i.state === 'active')
+          this.body.append(
+            learningButton(d, 'Inspect the exact result for learning', () =>
+              this.action(() => this.openReview())
+            )
+          );
       } else
         this.body.append(
           learningElement(
@@ -152,10 +202,15 @@ export class LearningTicketReview extends LearningMissions {
 
   async openReview() {
     const i = this.instance;
+    const observed = this.observation;
     const out = await this.api.mutate(
-      `${learningRoot}/instances/${encodeURIComponent(i.id)}/review`,
+      observed
+        ? `${learningRoot}/observations/${encodeURIComponent(observed.id)}/review`
+        : `${learningRoot}/instances/${encodeURIComponent(i.id)}/review`,
       this.status.owner.revision,
-      { instance_revision: i.revision, action: 'prepare' }
+      observed
+        ? { observed_revision: observed.revision, action: 'prepare' }
+        : { instance_revision: i.revision, action: 'prepare' }
     );
     if (!out.review || !out.result_text)
       throw new Error('Exact result bytes are unavailable. No decision was recorded.');
@@ -181,9 +236,71 @@ export class LearningTicketReview extends LearningMissions {
         d,
         'p',
         'Complete canonical inline result; no history snippet or model rating. Your reason is a report of your judgment, not proof it is correct.'
-      ),
-      learningElement(d, 'pre', out.result_text, 'learning-result')
+      )
     );
+    const ordinary = Boolean(out.observation);
+    const revision = out.instance?.definition.structure === 'improve_result';
+    const reuse = out.instance?.definition.structure === 'repeat_success';
+    if (ordinary)
+      this.body.append(
+        learningElement(d, 'h4', 'Reviewed ordinary input'),
+        learningResult(d, 'Reviewed ordinary input', out.observed_input),
+        learningElement(
+          d,
+          'p',
+          'No mission is created. This saves your decision, not a quality rating; unchanged-input retries do not add distinct practice.',
+          'learning-caption'
+        )
+      );
+    const results = learningElement(
+      d,
+      'div',
+      undefined,
+      out.review.original ? 'learning-comparison' : ''
+    );
+    if (out.review.original) {
+      const original = learningElement(d, 'section');
+      original.append(
+        learningElement(d, 'h4', 'Selected original'),
+        learningElement(
+          d,
+          'p',
+          `Run ${out.review.original.run_id} · Artifact ${out.review.original.artifact_id}`,
+          'learning-caption'
+        ),
+        learningResult(d, 'Selected original result', out.original_text)
+      );
+      results.append(original);
+    }
+    const current = learningElement(d, 'section');
+    current.append(
+      learningElement(d, 'h4', revision ? 'Revision result' : reuse ? 'New result' : 'Result'),
+      learningResult(d, 'Current exact result', out.result_text)
+    );
+    results.append(current);
+    this.body.append(results);
+    if (revision)
+      this.body.append(
+        learningElement(d, 'h4', 'Reviewed correction'),
+        learningResult(d, 'Reviewed correction', out.instance.progress.input)
+      );
+    if (reuse)
+      this.body.append(
+        learningElement(d, 'h4', 'Previously reviewed input'),
+        learningResult(d, 'Previously reviewed input', out.original_input),
+        learningElement(d, 'h4', 'New reviewed input'),
+        learningResult(d, 'New reviewed input', out.instance.progress.input),
+        learningElement(
+          d,
+          'p',
+          `Your explanation of the difference: ${out.instance.progress.input_change}`
+        ),
+        learningElement(
+          d,
+          'p',
+          'Evaluation practice can be recorded for any decision. Successful reuse is recorded only if you choose Use it.'
+        )
+      );
     const select = options => {
       const input = learningElement(d, 'select', undefined, 'form-select');
       const blank = learningElement(d, 'option', 'Choose…');
@@ -216,29 +333,44 @@ export class LearningTicketReview extends LearningMissions {
       learningField(d, 'Reason', reason),
       learningField(d, 'Optional note (500 characters)', note)
     );
+    const change = learningElement(d, 'textarea', undefined, 'form-control');
+    change.rows = 3;
+    change.maxLength = 500;
+    if (revision)
+      this.body.append(learningField(d, 'What changed? (required, 500 characters)', change));
     this.body.append(
       learningButton(d, 'Record this result-specific decision', () =>
         this.action(async () => {
           if (!decision.value || !reason.value || (reason.value === 'other' && !note.value.trim()))
             throw new Error('Choose a decision and reason; Other requires a note.');
+          if (revision && !change.value.trim())
+            throw new Error(
+              'Describe what changed, including if the revision is unchanged or unsuitable.'
+            );
           await this.api.mutate(
-            `${learningRoot}/instances/${encodeURIComponent(out.instance.id)}/review`,
+            ordinary
+              ? `${learningRoot}/observations/${encodeURIComponent(out.observation.id)}/review`
+              : `${learningRoot}/instances/${encodeURIComponent(out.instance.id)}/review`,
             this.status.owner.revision,
             {
-              instance_revision: out.instance.revision,
+              ...(ordinary
+                ? { observed_revision: out.observation.revision }
+                : { instance_revision: out.instance.revision }),
               action: 'submit',
               review_id: out.review.id,
               decision: decision.value,
               reason: reason.value,
-              note: note.value
+              note: note.value,
+              ...(revision ? { change: change.value } : {})
             }
           );
           await this.refresh();
+          if (ordinary) return 'Existing-work review recorded. No mission was created.';
         })
       ),
       learningButton(d, 'Close without a decision', () => this.action(() => this.refresh()))
     );
-    decision.focus();
+    focusLearningControl(title);
   }
 }
 
