@@ -4,7 +4,14 @@ import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // Importing this also registers window.OriTicketCounts, which is how the classic
 // workspace-map.js reaches the same count line before it renders a tile.
 import { TicketCounts } from './ticket-count-line.js';
-import { createLibraryBadgeLoader, libraryShelfRoute } from './home-library-badges.js';
+import {
+  LIBRARY_BADGE_MIN_REFRESH_MS,
+  createLibraryBadgeLoader,
+  libraryHomeIds,
+  libraryShelfRoute
+} from './home-library-badges.js';
+import { songFactsLabel } from './library-open.js';
+import { renderSongCard, songCardURL, songCardView } from './song-card.js';
 import { workspaceUpdates, watchWorkspaceUpdatePage } from './workspace-updates.js';
 import {
   workspaceUpdateSignals,
@@ -1386,6 +1393,55 @@ export function renderSummaryRailHTML(view) {
  * Order follows PRD §6 "Context-Rail Priority": identity and operational state,
  * recommended next move, open/ask actions, metrics, then the compact roster.
  */
+// ---- Song card in the selected context (song-card PRD FR9, FR10) ----
+//
+// A workspace whose parent is a program Home is a song candidate; the server
+// decides (linked:false renders nothing). The card itself is song-card.js,
+// shared with Workspace Details — no second implementation here.
+
+export const SONG_CARD_MOUNT_HTML =
+  '<div class="song-card-mount cockpit-song-card" data-song-card-mount hidden></div>';
+
+/** True when `item` is a non-group workspace directly under a managed Home. */
+export function isHomeSong(item, workspaces) {
+  if (!item || isGroupWorkspace(item) || !item.parent_id) return false;
+  const parent = (Array.isArray(workspaces) ? workspaces : []).find(
+    ws => ws && ws.id === item.parent_id
+  );
+  return parent?.group_template?.kind === 'managed_home';
+}
+
+/** The workspace context HTML with the card's mount right after its header. */
+export function withSongCardMount(html) {
+  const source = String(html || '');
+  const end = source.indexOf('</header>');
+  if (end < 0) return SONG_CARD_MOUNT_HTML + source;
+  const at = end + '</header>'.length;
+  return source.slice(0, at) + SONG_CARD_MOUNT_HTML + source.slice(at);
+}
+
+/** Workspace id → facts text, from each Home's roster rows (shelf wording). */
+export function songFactsSnapshot(rosters) {
+  const snapshot = {};
+  for (const rows of Object.values(rosters || {})) {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const id = String(row?.workspace_id || '');
+      // The tile says tempo and length; the card and the tooltip keep the
+      // track count and "varies". A song with only a track count shows that.
+      const facts = row?.facts && typeof row.facts === 'object' ? row.facts : null;
+      const text =
+        songFactsLabel(facts && { ...facts, track_count: 0, tempo_varies: false }) ||
+        songFactsLabel(facts);
+      if (id && text) snapshot[id] = text;
+    }
+  }
+  return snapshot;
+}
+
+export function songRosterURL(homeID) {
+  return `/api/workspaces/${encodeURIComponent(String(homeID || ''))}/assistant-program/library/roster`;
+}
+
 export function renderWorkspaceRailHTML(view) {
   if (!view) return '';
   return (
@@ -2061,6 +2117,9 @@ import {
     // FR 11). Empty until the summaries answer; a Map drawn without them is
     // correct, just briefly plainer.
     libraryBadges: {},
+    // A linked song's facts text keyed by workspace id, from each Home's
+    // roster, for the tile meta line (song-card PRD FR10).
+    songFacts: {},
     workspaceUpdateBadges: {},
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
@@ -2234,6 +2293,7 @@ import {
       // Navigation-only badges for program Homes whose library has something
       // ready to review. The click is handled below, never by the Map.
       libraryBadges: state.libraryBadges,
+      songFacts: state.songFacts,
       workspaceUpdateBadges: state.workspaceUpdateBadges,
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
@@ -3889,6 +3949,10 @@ import {
       return;
     }
 
+    const song = isHomeSong(item, state.flattened);
+    const workspaceHTML = isGroupWorkspace(item)
+      ? ''
+      : renderWorkspaceRailHTML(workspaceRailView(item));
     showContextPanel(
       isGroupWorkspace(item)
         ? renderGroupRailHTML(
@@ -3897,9 +3961,39 @@ import {
               district: mapDistrictView(item.id)
             })
           )
-        : renderWorkspaceRailHTML(workspaceRailView(item))
+        : song
+          ? withSongCardMount(workspaceHTML)
+          : workspaceHTML
     );
+    if (song) void fillSongCard(item.id);
     if (announceChange) announce(`${item.name} selected.`);
+  }
+
+  // The last card per song, so a re-render of the context (every refresh)
+  // shows it at once instead of flashing empty while the fetch runs.
+  const songCardCache = new Map();
+
+  function songCardMount() {
+    return els.railContext?.querySelector?.('[data-song-card-mount]') || null;
+  }
+
+  async function fillSongCard(workspaceID) {
+    if (songCardCache.has(workspaceID))
+      renderSongCard(songCardMount(), songCardCache.get(workspaceID));
+    let view = null;
+    try {
+      const response = await fetch(songCardURL(workspaceID), {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`song card ${response.status}`);
+      view = songCardView(await response.json());
+    } catch (err) {
+      console.warn('home-workspace-cockpit: song card unavailable', err);
+      if (songCardCache.has(workspaceID)) return; // Keep the last good card.
+    }
+    songCardCache.set(workspaceID, view);
+    // The selection may have moved on, or the context re-rendered, meanwhile.
+    if (state.selectedId === workspaceID) renderSongCard(songCardMount(), view);
   }
 
   /** Replace content in the one stable modal body without changing visibility. */
@@ -4869,8 +4963,40 @@ import {
     if (ids.length && typeof map?.framePlaced === 'function') map.framePlaced(ids, groupId);
   }
 
+  // Each Home's song roster, read on the same path as the library badges
+  // (refresh, tab return, back/forward) and reused inside the badge window
+  // unless forced: no polling of its own (song-card PRD FR21).
+  let songRostersAt = 0;
+  async function refreshSongFacts({ force = false } = {}) {
+    if (!canHydrateWorkspaceData()) return;
+    const now = Date.now();
+    if (!force && songRostersAt && now - songRostersAt < LIBRARY_BADGE_MIN_REFRESH_MS) return;
+    songRostersAt = now;
+    const homes = libraryHomeIds(state.flattened);
+    const rosters = {};
+    await Promise.all(
+      homes.map(async id => {
+        try {
+          const response = await fetch(songRosterURL(id), {
+            headers: { Accept: 'application/json' }
+          });
+          if (!response.ok) return;
+          const body = await response.json();
+          rosters[id] = Array.isArray(body?.rows) ? body.rows : [];
+        } catch (err) {
+          console.warn('home-workspace-cockpit: song roster unavailable', err);
+        }
+      })
+    );
+    const next = songFactsSnapshot(rosters);
+    if (JSON.stringify(next) === JSON.stringify(state.songFacts)) return;
+    state.songFacts = next;
+    mountMap();
+  }
+
   async function refreshLibraryBadges({ force = false } = {}) {
     if (!canHydrateWorkspaceData()) return;
+    void refreshSongFacts({ force });
     let next;
     try {
       next = await libraryBadgeLoader.load(state.flattened, { force });

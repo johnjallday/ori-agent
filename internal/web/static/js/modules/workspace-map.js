@@ -700,6 +700,11 @@
   // and the badge only navigates: the host owns the click. Anything that is
   // not a same-origin suggestions-shelf route is dropped here.
   var libraryBadges = Object.create(null);
+  // A linked song's facts ("6 tracks · 92 BPM · 2:12"), keyed by workspace id
+  // and worded by the host with the shelf's songFactsLabel (song-card PRD
+  // FR10). Appended to that tile's meta line; every other tile is unchanged.
+  var songFacts = Object.create(null);
+  var SONG_FACTS_MAX = 40;
   var workspaceUpdateBadges = Object.create(null);
 
   function setWorkspaceUpdateBadges(snapshot) {
@@ -794,6 +799,17 @@
         // Projects the setup sheet could set up; the district menu says so.
         count: Number.isInteger(badge.count) && badge.count > 0 ? badge.count : 0
       };
+    });
+  }
+
+  function setSongFacts(snapshot) {
+    songFacts = Object.create(null);
+    if (!snapshot || typeof snapshot !== 'object') return;
+    Object.keys(snapshot).forEach(function (id) {
+      var text = typeof snapshot[id] === 'string' ? snapshot[id].replace(/\s+/g, ' ').trim() : '';
+      if (!id || !text) return;
+      songFacts[id] =
+        text.length > SONG_FACTS_MAX ? text.slice(0, SONG_FACTS_MAX - 1).trim() + '…' : text;
     });
   }
 
@@ -2637,7 +2653,9 @@
     // Counts the server did not send leave the line at the agents alone: a dash
     // in a tile's name would be read out as nothing at all.
     var work = workCountLine(ws.ticket_counts);
-    return work ? agentsText + ' · ' + work : agentsText;
+    var line = work ? agentsText + ' · ' + work : agentsText;
+    var facts = ws && ws.id ? songFacts[ws.id] : '';
+    return facts ? line + ' · ' + facts : line;
   }
 
   /**
@@ -2787,7 +2805,13 @@
       escapeHtml(ws.name || 'Workspace') +
       '</span>' +
       (mode ? '<span class="ws-map-tile-type">' + escapeHtml(mode) + '</span>' : '') +
-      '<span class="ws-map-tile-meta">' +
+      // A song tile's longer line is held to two lines so it never runs under
+      // the next tile's status flag; the accessible name keeps all of it.
+      '<span class="ws-map-tile-meta' +
+      (songFacts[ws.id] ? ' has-song-facts' : '') +
+      '"' +
+      (songFacts[ws.id] ? ' title="' + escapeHtml(meta) + '"' : '') +
+      '>' +
       escapeHtml(meta) +
       '</span>' +
       '</button>'
@@ -11190,6 +11214,8 @@
     // Read before districtHTML runs, like the economy. A host that passes
     // none draws no library badge.
     setLibraryBadges(state && state.libraryBadges);
+    // A host that passes none (every surface but Home) draws plain meta lines.
+    setSongFacts(state && state.songFacts);
     setWorkspaceUpdateBadges(state && state.workspaceUpdateBadges);
     setLibraryEmptyState(state && state.libraryEmptyState);
     var allWorkspaces = (state && state.workspaces) || [];
@@ -11515,6 +11541,10 @@
     libraryBadges: {
       setSnapshot: setLibraryBadges,
       badgeHTML: libraryBadgeHTML
+    },
+    // A linked song's facts on its tile's meta line (song-card PRD FR10).
+    songFacts: {
+      setSnapshot: setSongFacts
     },
     workspaceUpdates: {
       setSnapshot: setWorkspaceUpdateBadges,
