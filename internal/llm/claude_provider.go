@@ -52,11 +52,12 @@ const claudeWorkspaceIDOption = "workspace_id"
 
 // ClaudeProvider implements the Provider interface for Anthropic's Claude
 type ClaudeProvider struct {
-	mu          sync.RWMutex
-	client      anthropic.Client
-	apiKey      string
-	workspaceID string // sent as anthropic-workspace-id; empty sends none
-	httpClient  *http.Client
+	mu                sync.RWMutex
+	client            anthropic.Client
+	apiKey            string
+	workspaceID       string // sent as anthropic-workspace-id; empty sends none
+	httpClient        *http.Client
+	textConfiguration string
 
 	// fetchMu lets one model-list fetch run at a time; callers that wait on
 	// it reuse its result. modelsMu guards the cached list, so reading it
@@ -98,10 +99,11 @@ func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
 	}
 
 	return &ClaudeProvider{
-		client:      client,
-		apiKey:      config.APIKey,
-		workspaceID: workspaceID,
-		httpClient:  httpClient,
+		client:            client,
+		apiKey:            config.APIKey,
+		workspaceID:       workspaceID,
+		httpClient:        httpClient,
+		textConfiguration: claudeTextConfiguration(workspaceID),
 	}
 }
 
@@ -346,8 +348,13 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		params.Tools = tools
 	}
 
-	// Make API call
-	client, _ := p.snapshot()
+	// Pin the same destination snapshot that the owner reviewed.
+	p.mu.RLock()
+	client, configuration := p.client, p.textConfiguration
+	p.mu.RUnlock()
+	if err := checkTextConfiguration(req, configuration); err != nil {
+		return nil, err
+	}
 	message, err := client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, classifyAnthropicError("anthropic", err)
@@ -545,6 +552,7 @@ func (p *ClaudeProvider) UpdateClient(apiKey string) {
 	p.apiKey = apiKey
 	p.httpClient = httpClient
 	p.client = client
+	p.textConfiguration = claudeTextConfiguration(p.workspaceID)
 	p.mu.Unlock()
 
 	// A different key can call a different set of models.

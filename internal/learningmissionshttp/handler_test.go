@@ -84,6 +84,8 @@ func TestStrictRequestsCannotMutateWithExtraDuplicateOrTrailingFields(t *testing
 		`{"operation_id":"a","studio_id":"workspace","actor":"user"}`,
 		`{"operation_id":"a","studio_id":"workspace","owner_id":"local"}`,
 		`{"operation_id":"a","studio_id":"workspace","complete":true}`,
+		`{"operation_id":"a","studio_id":"workspace","automatic":true}`,
+		`{"operation_id":"a","studio_id":"workspace","milestone_id":"forged"}`,
 		`{"operation_id":"a","studio_id":null}`,
 		`{"operation_id":"a","studio_id":"workspace","expected_revision":1.5}`,
 		`{"operation_id":"` + strings.Repeat("x", learningmissions.MaxInputBytes) + `"}`,

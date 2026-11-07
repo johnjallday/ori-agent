@@ -57,8 +57,29 @@ func scanInstance(row rowScanner) (Instance, error) {
 	var i Instance
 	var definition, progress string
 	err := row.Scan(&i.ID, &i.OwnerID, &i.Epoch, &i.Revision, &i.State, &definition, &progress, &i.CreatedAt, &i.UpdatedAt)
-	if err != nil || len(definition) > MaxRecordBytes || len(progress) > MaxRecordBytes ||
-		json.Unmarshal([]byte(definition), &i.Definition) != nil || json.Unmarshal([]byte(progress), &i.Progress) != nil {
+	if err != nil || len(definition) > MaxRecordBytes || len(progress) > MaxRecordBytes {
+		return Instance{}, ErrUnavailable
+	}
+	var header struct {
+		Structure      StructureID `json:"structure"`
+		Version        int         `json:"version"`
+		SupportVersion int         `json:"support_version"`
+	}
+	if json.Unmarshal([]byte(definition), &header) != nil || !validID(string(header.Structure)) {
+		return Instance{}, ErrUnavailable
+	}
+	_, supported := Lookup(header.Structure, header.Version)
+	if supported != nil || header.SupportVersion > GuidanceProtocolVersion {
+		// Never decode an unsupported schema's private/newly-shaped fields.
+		// State-only retirement preserves its raw immutable bytes in SQLite.
+		i.Definition = Definition{Structure: header.Structure, Version: header.Version, SupportVersion: header.SupportVersion}
+		i.Progress = Progress{Blocker: "definition_unavailable"}
+		if !errors.Is(i.Validate(), ErrUnsupported) {
+			return Instance{}, ErrUnavailable
+		}
+		return i, nil
+	}
+	if json.Unmarshal([]byte(definition), &i.Definition) != nil || json.Unmarshal([]byte(progress), &i.Progress) != nil {
 		return Instance{}, ErrUnavailable
 	}
 	// Retired definitions remain inspectable, but all writers call Validate.
@@ -109,9 +130,11 @@ func (s *SQLiteStore) Instances(ctx context.Context, owner string) ([]Instance, 
 // Mutation is only valid inside Change's callback. No external work may be
 // performed in it: record an operation, commit, then cross the owner boundary.
 type Mutation struct {
-	ctx   context.Context
-	tx    *sql.Tx
-	owner Owner
+	ctx              context.Context
+	tx               *sql.Tx
+	owner            Owner
+	storageControl   bool
+	storageAdmission bool
 }
 
 // Change requires an exact owner revision AND deletion epoch. allowCreate is
@@ -137,6 +160,10 @@ func (s *SQLiteStore) Change(ctx context.Context, id string, revision, epoch int
 	}
 	if owner.Revision != revision || owner.Epoch != epoch {
 		return Owner{}, ErrConflict
+	}
+	beforeStorage, err := learningStorageUsage(ctx, tx, id)
+	if err != nil {
+		return Owner{}, err
 	}
 	if owner.Revision == 0 {
 		if !allowCreate {
@@ -167,6 +194,9 @@ func (s *SQLiteStore) Change(ctx context.Context, id string, revision, epoch int
 		m.owner.Revision, m.owner.Epoch, prefs, id); err != nil {
 		return Owner{}, ErrUnavailable
 	}
+	if err := m.checkStorage(beforeStorage); err != nil {
+		return Owner{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Owner{}, ErrUnavailable // unknown commit outcome: caller must read its operation
 	}
@@ -178,6 +208,7 @@ func (m *Mutation) Instance(id string) (Instance, error) {
 }
 
 func (m *Mutation) InsertInstance(i Instance) error {
+	m.storageAdmission = true
 	if i.OwnerID != m.owner.ID || i.Epoch != m.owner.Epoch || i.Revision != 1 || i.State != Offered {
 		return ErrInvalid
 	}
@@ -205,6 +236,9 @@ func (m *Mutation) UpdateInstance(i Instance, expected int64) error {
 		return ErrConflict
 	}
 	if err := i.Validate(); err != nil {
+		if errors.Is(err, ErrUnsupported) {
+			return m.retireUnsupported(i, expected)
+		}
 		return err
 	}
 	previous, err := m.Instance(i.ID)
@@ -226,6 +260,9 @@ func (m *Mutation) UpdateInstance(i Instance, expected int64) error {
 	p, err := encode(i.Progress, MaxRecordBytes)
 	if err != nil {
 		return err
+	}
+	if (i.State != previous.State && i.State != Active) || (i.State == Active && previous.State == Active && previous.Progress.TicketID != "") {
+		m.storageControl = true
 	}
 	result, err := m.tx.ExecContext(m.ctx, `UPDATE learning_instances SET revision=?,state=?,progress=?,updated_at_ms=? WHERE owner_id=? AND id=? AND epoch=? AND revision=?`,
 		i.Revision, i.State, p, i.UpdatedAt, i.OwnerID, i.ID, i.Epoch, expected)
@@ -266,6 +303,9 @@ func (s *SQLiteStore) Operation(ctx context.Context, owner, id string) (Operatio
 }
 
 func (m *Mutation) InsertOperation(op Operation) error {
+	if op.Kind == "generate" || op.Kind == "prepare_work" || op.Kind == "observe" || op.Kind == "propose" || op.Kind == "adjust" {
+		m.storageAdmission = true
+	}
 	if op.Epoch != m.owner.Epoch {
 		return ErrConflict
 	}
@@ -299,6 +339,9 @@ func (m *Mutation) UpdateOperation(op Operation) error {
 	if err != nil {
 		return err
 	}
+	if op.Status != "pending" {
+		m.storageControl = true
+	}
 	_, err = m.tx.ExecContext(m.ctx, `UPDATE learning_operations SET status=?,record=? WHERE owner_id=? AND id=?`, op.Status, data, m.owner.ID, op.ID)
 	if err != nil {
 		return ErrUnavailable
@@ -307,6 +350,7 @@ func (m *Mutation) UpdateOperation(op Operation) error {
 }
 
 func (m *Mutation) InsertReview(r Review) error {
+	m.storageAdmission = true
 	if r.Epoch != m.owner.Epoch || r.Validate() != nil {
 		return ErrInvalid
 	}
@@ -325,6 +369,28 @@ func (m *Mutation) InsertReview(r Review) error {
 func (m *Mutation) Credit(e Evidence) (bool, error) {
 	if err := e.Validate(); err != nil {
 		return false, err
+	}
+	if e.AttemptDigest != "" {
+		review, err := m.Review(e.ReviewID)
+		if err != nil || review.Decision == "" {
+			return false, ErrUnavailable
+		}
+		var existing int
+		// The writer transaction makes this secondary identity atomic. Retries
+		// with unchanged (including whitespace-only) input cannot add credit or
+		// upgrade old support. Legacy receipts use their exact input digest.
+		if err := m.tx.QueryRowContext(m.ctx, `SELECT COUNT(*) FROM learning_evidence e
+ LEFT JOIN learning_reviews r ON r.owner_id=e.owner_id AND r.id=json_extract(e.record,'$.review_id')
+ WHERE e.owner_id=? AND json_extract(e.record,'$.competency')=? AND
+ (json_extract(e.record,'$.attempt_digest')=? OR (COALESCE(json_extract(e.record,'$.attempt_digest'),'')='' AND
+ json_extract(r.record,'$.result.studio_id')=? AND json_extract(r.record,'$.result.incarnation')=? AND
+ json_extract(r.record,'$.result.ticket_id')=? AND json_extract(r.record,'$.input_digest')=?))`,
+			m.owner.ID, e.Competency, e.AttemptDigest, review.Result.WorkspaceID, review.Result.Incarnation, review.Result.TicketID, review.InputDigest).Scan(&existing); err != nil {
+			return false, ErrUnavailable
+		}
+		if existing > 0 {
+			return false, nil
+		}
 	}
 	data, err := encode(e, MaxResponseBytes)
 	if err != nil {

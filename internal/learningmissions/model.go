@@ -21,23 +21,24 @@ var (
 )
 
 const (
-	MaxWorkspaces     = 5
-	MaxCandidates     = 8
-	MaxInputBytes     = 16 * 1024
-	MaxResponseBytes  = 8 * 1024
-	MaxDraftBytes     = 4 * 1024
-	MaxResultBytes    = 64 * 1024
-	MaxOutputTokens   = 1200
-	GenerationTimeout = 30 * time.Second
-	ExplicitSpacing   = 30 * time.Second
-	AutomaticSpacing  = 24 * time.Hour
-	DailyCalls        = 10
-	OfferLifetime     = 24 * time.Hour
-	ReviewLifetime    = 10 * time.Minute
-	DeferCooldown     = 7 * 24 * time.Hour
-	MaxRecordBytes    = 16 * 1024
-	MaxLearningBytes  = 16 * 1024 * 1024
-	MaxEvidence       = 10000
+	MaxWorkspaces           = 5
+	MaxCandidates           = 8
+	MaxInputBytes           = 16 * 1024
+	MaxResponseBytes        = 8 * 1024
+	MaxDraftBytes           = 4 * 1024
+	MaxResultBytes          = 64 * 1024
+	MaxOutputTokens         = 1200
+	GenerationTimeout       = 30 * time.Second
+	ExplicitSpacing         = 30 * time.Second
+	AutomaticSpacing        = 24 * time.Hour
+	DailyCalls              = 10
+	OfferLifetime           = 24 * time.Hour
+	ReviewLifetime          = 10 * time.Minute
+	DeferCooldown           = 7 * 24 * time.Hour
+	MaxRecordBytes          = 16 * 1024
+	MaxLearningBytes        = 16 * 1024 * 1024
+	MaxEvidence             = 10000
+	GuidanceProtocolVersion = 1
 )
 
 type State string
@@ -79,15 +80,32 @@ const (
 )
 
 type Preferences struct {
-	Mode             string   `json:"mode"`
-	WorkspaceIDs     []string `json:"workspace_ids"`
-	Observe          bool     `json:"observe"`
-	ObservationSince int64    `json:"observation_since_ms,omitempty"`
-	Guidance         Guidance `json:"guidance"`
-	Focus            string   `json:"focus,omitempty"`
-	Effort           string   `json:"effort"`
-	ModelFingerprint string   `json:"model_fingerprint,omitempty"`
-	ConsentVersion   int      `json:"consent_version"`
+	Mode                string                    `json:"mode"`
+	WorkspaceIDs        []string                  `json:"workspace_ids"`
+	ScopeBindings       map[string]string         `json:"scope_bindings,omitempty"`
+	Exclusions          []RecommendationExclusion `json:"exclusions,omitempty"`
+	Observe             bool                      `json:"observe"`
+	ObservationSince    int64                     `json:"observation_since_ms,omitempty"`
+	ObservationRevision int64                     `json:"observation_revision,omitempty"`
+	SuggestionSince     int64                     `json:"suggestion_since_ms,omitempty"`
+	SuggestionRevision  int64                     `json:"suggestion_revision,omitempty"`
+	Guidance            Guidance                  `json:"guidance"`
+	FullGuidance        bool                      `json:"full_guidance,omitempty"`
+	Focus               string                    `json:"focus,omitempty"`
+	Effort              string                    `json:"effort"`
+	ModelFingerprint    string                    `json:"model_fingerprint,omitempty"`
+	ConsentVersion      int                       `json:"consent_version"`
+}
+
+// AllowsScope requires the exact local incarnation explicitly approved by the
+// owner. Legacy IDs alone and imported/restored IDs cannot revive consent.
+func (p Preferences) AllowsScope(workspaceID, incarnation string) bool {
+	return p.ConsentVersion == DisclosureVersion && validID(workspaceID) && validID(incarnation) &&
+		slices.Contains(p.WorkspaceIDs, workspaceID) && p.ScopeBindings[workspaceID] == incarnation
+}
+
+func (p Preferences) Observes(workspaceID, incarnation string) bool {
+	return p.Observe && p.ObservationSince > 0 && slices.Contains([]string{"on_request", "automatic"}, p.Mode) && p.AllowsScope(workspaceID, incarnation)
 }
 
 func DefaultPreferences() Preferences {
@@ -102,6 +120,22 @@ func (p Preferences) Validate() error {
 		(p.ModelFingerprint != "" && !validDigest(p.ModelFingerprint)) {
 		return ErrInvalid
 	}
+	if len(p.ScopeBindings) > MaxWorkspaces || len(p.Exclusions) > MaxRecommendationExclusions {
+		return ErrInvalid
+	}
+	for id, incarnation := range p.ScopeBindings {
+		if !validID(id) || !validID(incarnation) {
+			return ErrInvalid
+		}
+	}
+	exclusions := map[string]bool{}
+	for _, exclusion := range p.Exclusions {
+		key := exclusion.WorkspaceID + "\x00" + string(exclusion.Structure) + "\x00" + exclusion.Topic
+		if exclusion.Validate() != nil || exclusions[key] {
+			return ErrInvalid
+		}
+		exclusions[key] = true
+	}
 	seen := map[string]bool{}
 	for _, id := range p.WorkspaceIDs {
 		if !validID(id) || seen[id] {
@@ -110,6 +144,9 @@ func (p Preferences) Validate() error {
 		seen[id] = true
 	}
 	if (p.Observe || p.Mode == "automatic") && (len(p.WorkspaceIDs) == 0 || p.ConsentVersion != 1) {
+		return ErrInvalid
+	}
+	if p.ObservationRevision < 0 || p.SuggestionSince < 0 || p.SuggestionRevision < 0 {
 		return ErrInvalid
 	}
 	if p.Observe && p.ObservationSince <= 0 {
@@ -140,24 +177,52 @@ type Definition struct {
 	Goal             string      `json:"goal"`
 	Scope            string      `json:"scope"`
 	Why              string      `json:"why"`
+	FocusTopic       string      `json:"focus_topic,omitempty"`
+	Signals          []string    `json:"host_signals,omitempty"`
 	Steps            []string    `json:"steps"`
 	Guidance         Guidance    `json:"guidance"`
+	SupportVersion   int         `json:"support_version,omitempty"`
 	Hints            []string    `json:"hints,omitempty"`
 	Personalized     bool        `json:"personalized"`
+	Automatic        bool        `json:"automatic,omitempty"`
 	ModelFingerprint string      `json:"model_fingerprint,omitempty"`
 	OriginalReceipt  string      `json:"original_receipt,omitempty"`
 	ExpiresAt        int64       `json:"expires_at_ms"`
+	ReplacesID       string      `json:"replaces_id,omitempty"`
+	ReplacesRevision int64       `json:"replaces_revision,omitempty"`
+	Adjustment       string      `json:"adjustment,omitempty"`
+	CoachingDepth    string      `json:"coaching_depth,omitempty"`
+	InputLimit       int         `json:"input_limit,omitempty"`
 }
 
 func (d Definition) Validate() error {
 	if _, err := Lookup(d.Structure, d.Version); err != nil {
 		return err
 	}
+	if d.SupportVersion < 0 || d.SupportVersion > GuidanceProtocolVersion {
+		return ErrUnsupported
+	}
 	if !validID(d.WorkspaceID) || !validID(d.Incarnation) || !validID(d.CandidateRef) ||
 		!validDigest(d.ScopeDigest) || !boundedText(d.Goal, 300, true) ||
 		!boundedText(d.Scope, 1000, true) || !boundedText(d.Why, 500, true) ||
 		!validSteps(d.Structure, d.Version, d.Steps) || len(d.Hints) > len(d.Steps) ||
 		!slices.Contains([]Guidance{GuidanceBasic, GuidanceGuided}, d.Guidance) || d.ExpiresAt <= 0 {
+		return ErrInvalid
+	}
+	if (d.ReplacesID == "" && d.ReplacesRevision != 0) || (d.ReplacesID != "" && (!validID(d.ReplacesID) || d.ReplacesRevision < 1)) ||
+		(d.Adjustment != "" && !slices.Contains([]string{"smaller", "alternative"}, d.Adjustment)) || (d.InputLimit != 0 && (d.InputLimit < 256 || d.InputLimit > MaxDraftBytes)) {
+		return ErrInvalid
+	}
+	if d.CoachingDepth != "" && ((!slices.Contains([]string{"basic", "full", "brief"}, d.CoachingDepth)) || (d.CoachingDepth == "basic") != (d.Guidance == GuidanceBasic)) {
+		return ErrInvalid
+	}
+	if (d.CoachingDepth == "brief" && len(d.Hints) > 1) || (d.CoachingDepth == "basic" && len(d.Hints) > 0) {
+		return ErrInvalid
+	}
+	if d.Automatic && !d.Personalized {
+		return ErrInvalid
+	}
+	if (d.FocusTopic != "" && !validDigest(d.FocusTopic)) || !validPolicySignals(d.Signals) {
 		return ErrInvalid
 	}
 	for _, hint := range d.Hints {
@@ -193,21 +258,23 @@ func (r ResultRef) Validate() error {
 }
 
 type Progress struct {
-	Blocker     string     `json:"blocker,omitempty"`
-	TicketID    string     `json:"ticket_id,omitempty"`
-	OperationID string     `json:"operation_id,omitempty"`
-	AttemptID   string     `json:"attempt_id,omitempty"`
-	RunID       string     `json:"run_id,omitempty"`
-	Input       string     `json:"input,omitempty"`
-	Assignee    string     `json:"assignee,omitempty"`
-	InputDigest string     `json:"input_digest,omitempty"`
-	InputChange string     `json:"input_change,omitempty"`
-	Correction  string     `json:"correction,omitempty"`
-	Result      *ResultRef `json:"result,omitempty"`
-	AcceptedAt  int64      `json:"accepted_at_ms,omitempty"`
-	HintsShown  bool       `json:"hints_shown"`
-	HintsUsed   bool       `json:"hints_used"`
-	ReviewID    string     `json:"review_id,omitempty"`
+	Blocker             string     `json:"blocker,omitempty"`
+	TicketID            string     `json:"ticket_id,omitempty"`
+	OperationID         string     `json:"operation_id,omitempty"`
+	AttemptID           string     `json:"attempt_id,omitempty"`
+	RunID               string     `json:"run_id,omitempty"`
+	Input               string     `json:"input,omitempty"`
+	Assignee            string     `json:"assignee,omitempty"`
+	InputDigest         string     `json:"input_digest,omitempty"`
+	InputChange         string     `json:"input_change,omitempty"`
+	Correction          string     `json:"correction,omitempty"`
+	Result              *ResultRef `json:"result,omitempty"`
+	Original            *ResultRef `json:"original,omitempty"`
+	OriginalInputDigest string     `json:"original_input_digest,omitempty"`
+	AcceptedAt          int64      `json:"accepted_at_ms,omitempty"`
+	HintsShown          bool       `json:"hints_shown"`
+	HintsUsed           bool       `json:"hints_used"`
+	ReviewID            string     `json:"review_id,omitempty"`
 }
 
 func (p Progress) Validate() error {
@@ -220,6 +287,11 @@ func (p Progress) Validate() error {
 		!boundedText(p.InputChange, 500, false) || !utf8.ValidString(p.Input) || !utf8.ValidString(p.Correction) ||
 		(p.InputDigest != "" && !validDigest(p.InputDigest)) {
 		return ErrInvalid
+	}
+	if p.Original != nil {
+		if p.Original.Validate() != nil || !validDigest(p.OriginalInputDigest) {
+			return ErrInvalid
+		}
 	}
 	if p.Result != nil {
 		return p.Result.Validate()
@@ -245,6 +317,9 @@ func (i Instance) Validate() error {
 		i.CreatedAt <= 0 || i.UpdatedAt < i.CreatedAt {
 		return ErrInvalid
 	}
+	if i.Definition.ReplacesID == i.ID {
+		return ErrInvalid
+	}
 	if err := i.Definition.Validate(); err != nil {
 		return err
 	}
@@ -252,28 +327,53 @@ func (i Instance) Validate() error {
 }
 
 type Operation struct {
-	ID             string `json:"id"`
-	Kind           string `json:"kind"`
-	Status         string `json:"status"`
-	Epoch          int64  `json:"-"`
-	RequestDigest  string `json:"-"`
-	InstanceID     string `json:"instance_id,omitempty"`
-	TicketID       string `json:"ticket_id,omitempty"`
-	ReviewID       string `json:"review_id,omitempty"`
-	AttemptID      string `json:"attempt_id,omitempty"`
-	Failure        string `json:"failure,omitempty"`
-	CreatedAt      int64  `json:"created_at_ms"`
-	ReservedTokens int    `json:"reserved_tokens,omitempty"`
-	ActualTokens   *int   `json:"actual_tokens,omitempty"`
+	ID                   string        `json:"id"`
+	Kind                 string        `json:"kind"`
+	Status               string        `json:"status"`
+	Epoch                int64         `json:"-"`
+	RequestDigest        string        `json:"-"`
+	InstanceID           string        `json:"instance_id,omitempty"`
+	TicketID             string        `json:"ticket_id,omitempty"`
+	ReviewID             string        `json:"review_id,omitempty"`
+	AttemptID            string        `json:"attempt_id,omitempty"`
+	Failure              string        `json:"failure,omitempty"`
+	CreatedAt            int64         `json:"created_at_ms"`
+	ReservedTokens       int           `json:"reserved_tokens,omitempty"`
+	ModelFingerprint     string        `json:"model_fingerprint,omitempty"`
+	Automatic            bool          `json:"automatic,omitempty"`
+	ActualTokens         *int          `json:"actual_tokens,omitempty"`
+	Observation          *ObservedWork `json:"observation,omitempty"`
+	ObservationID        string        `json:"observation_id,omitempty"`
+	Milestone            *Milestone    `json:"milestone,omitempty"`
+	MilestoneID          string        `json:"milestone_id,omitempty"`
+	CandidateFingerprint string        `json:"candidate_fingerprint,omitempty"`
 }
 
 func (o Operation) Validate() error {
 	if !validID(o.ID) || !validID(o.Kind) || len(o.Kind) > 32 || !validDigest(o.RequestDigest) || o.Epoch < 1 || o.CreatedAt <= 0 ||
 		!slices.Contains([]string{"pending", "succeeded", "failed", "unknown", "invalidated"}, o.Status) || o.ReservedTokens < 0 ||
-		(o.ActualTokens != nil && *o.ActualTokens < 0) {
+		(o.ActualTokens != nil && *o.ActualTokens < 0) || (o.ModelFingerprint != "" && !validDigest(o.ModelFingerprint)) {
 		return ErrInvalid
 	}
-	for _, id := range []string{o.InstanceID, o.TicketID, o.ReviewID, o.AttemptID, o.Failure} {
+	if o.Observation != nil && (o.Kind != "observe" || o.Observation.Validate() != nil || o.Observation.ID != o.ID || o.Observation.Epoch != o.Epoch || o.Observation.CreatedAt != o.CreatedAt || o.InstanceID != "" || o.ObservationID != "") {
+		return ErrInvalid
+	}
+	if o.Kind == "observe" && o.Observation == nil {
+		return ErrInvalid
+	}
+	if o.Milestone != nil && (o.Kind != "milestone" || o.Milestone.Validate() != nil || o.Milestone.ID != o.ID || o.Milestone.Epoch != o.Epoch || o.Milestone.CreatedAt != o.CreatedAt) {
+		return ErrInvalid
+	}
+	if o.Kind == "milestone" && o.Milestone == nil {
+		return ErrInvalid
+	}
+	if o.Automatic && (o.Kind != "generate" || !validID(o.MilestoneID) || !validDigest(o.CandidateFingerprint)) {
+		return ErrInvalid
+	}
+	if o.CandidateFingerprint != "" && (!o.Automatic || !validDigest(o.CandidateFingerprint)) {
+		return ErrInvalid
+	}
+	for _, id := range []string{o.InstanceID, o.TicketID, o.ReviewID, o.AttemptID, o.Failure, o.ObservationID, o.MilestoneID} {
 		if id != "" && !validID(id) {
 			return ErrInvalid
 		}
@@ -284,6 +384,7 @@ func (o Operation) Validate() error {
 type Review struct {
 	ID              string      `json:"id"`
 	InstanceID      string      `json:"instance_id,omitempty"`
+	ObservationID   string      `json:"observation_id,omitempty"`
 	Revision        int64       `json:"revision"`
 	Epoch           int64       `json:"epoch"`
 	Structure       StructureID `json:"structure"`
@@ -295,6 +396,7 @@ type Review struct {
 	Note            string      `json:"note,omitempty"`
 	Change          string      `json:"change,omitempty"`
 	Guidance        Guidance    `json:"guidance"`
+	SupportVersion  int         `json:"support_version,omitempty"`
 	HintsShown      bool        `json:"hints_shown"`
 	HintsUsed       bool        `json:"hints_used"`
 	InputDigest     string      `json:"input_digest"`
@@ -309,6 +411,12 @@ func (r Review) Validate() error {
 		r.CreatedAt <= 0 || r.ExpiresAt <= r.CreatedAt || !validDigest(r.InputDigest) ||
 		!slices.Contains([]Guidance{GuidanceUnknown, GuidanceBasic, GuidanceGuided}, r.Guidance) {
 		return ErrInvalid
+	}
+	if r.ObservationID != "" && (!validID(r.ObservationID) || r.InstanceID != "") {
+		return ErrInvalid
+	}
+	if r.SupportVersion < 0 || r.SupportVersion > GuidanceProtocolVersion {
+		return ErrUnsupported
 	}
 	if _, err := Lookup(r.Structure, r.Version); err != nil {
 		return err
@@ -340,21 +448,29 @@ func (r Review) Validate() error {
 }
 
 type Evidence struct {
-	Key         string      `json:"key"`
-	ReviewID    string      `json:"review_id"`
-	Structure   StructureID `json:"structure"`
-	Version     int         `json:"version"`
-	Competency  string      `json:"competency"`
-	Guidance    Guidance    `json:"guidance"`
-	Reused      bool        `json:"reused"`
-	Unavailable bool        `json:"unavailable"`
-	CreatedAt   int64       `json:"created_at_ms"`
+	Key            string      `json:"key"`
+	ReviewID       string      `json:"review_id"`
+	Structure      StructureID `json:"structure"`
+	Version        int         `json:"version"`
+	Competency     string      `json:"competency"`
+	Guidance       Guidance    `json:"guidance"`
+	SupportVersion int         `json:"support_version,omitempty"`
+	AttemptDigest  string      `json:"attempt_digest,omitempty"`
+	Reused         bool        `json:"reused"`
+	Unavailable    bool        `json:"unavailable"`
+	CreatedAt      int64       `json:"created_at_ms"`
 }
 
 func (e Evidence) Validate() error {
 	if !validDigest(e.Key) || !validID(e.ReviewID) || e.CreatedAt <= 0 ||
 		!slices.Contains([]string{"delegate", "evaluate", "improve", "reuse"}, e.Competency) ||
 		!slices.Contains([]Guidance{GuidanceUnknown, GuidanceBasic, GuidanceGuided}, e.Guidance) {
+		return ErrInvalid
+	}
+	if e.AttemptDigest != "" && !validDigest(e.AttemptDigest) {
+		return ErrInvalid
+	}
+	if e.SupportVersion < 0 {
 		return ErrInvalid
 	}
 	_, err := Lookup(e.Structure, e.Version)
@@ -366,7 +482,8 @@ func validID(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+		allowed := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.'
+		if !allowed {
 			return false
 		}
 	}

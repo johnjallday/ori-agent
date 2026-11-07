@@ -14,11 +14,12 @@ import (
 // Candidate contains only host-authorized identity and bounded display data.
 // It contains no paths, tools, permission grants or executable model fields.
 type Candidate struct {
-	Ref         string
-	WorkspaceID string
-	Incarnation string
-	ScopeDigest string
-	Name        string
+	Ref          string
+	WorkspaceID  string
+	Incarnation  string
+	ScopeDigest  string
+	Name         string
+	ReviewedGoal string // accepted local goal only; never a result/transcript body
 }
 
 // Source is the narrow canonical-owner adapter. Metadata is not an execution
@@ -32,11 +33,13 @@ type Service struct {
 	// One server-owned service coordinates cross-store draft writes with
 	// stop/clear. Durable epochs still fence callbacks/restarts; this lock
 	// prevents a local clear from interleaving the admitted workspace write.
-	effects sync.RWMutex
-	store   *SQLiteStore
-	gate    *resetstate.WorkGate
-	source  Source
-	now     func() time.Time
+	effects       sync.RWMutex
+	store         *SQLiteStore
+	gate          *resetstate.WorkGate
+	source        Source
+	designer      Designer               // configured once by the server before serving requests
+	milestoneWake func(owner, id string) // startup-only wiring; nil means quiet
+	now           func() time.Time
 }
 
 func NewService(store *SQLiteStore, gate *resetstate.WorkGate, source Source) *Service {
@@ -50,7 +53,12 @@ type MutationRequest struct {
 
 type ProposalRequest struct {
 	MutationRequest
-	WorkspaceID string `json:"studio_id"`
+	WorkspaceID      string      `json:"studio_id"`
+	Personalize      bool        `json:"personalize,omitempty"`
+	ModelFingerprint string      `json:"model_fingerprint,omitempty"`
+	ConsentVersion   int         `json:"consent_version,omitempty"`
+	Structure        StructureID `json:"structure,omitempty"`
+	CandidateRef     string      `json:"candidate_ref,omitempty"`
 }
 
 type DecisionRequest struct {
@@ -60,16 +68,23 @@ type DecisionRequest struct {
 }
 
 type Outcome struct {
-	fresh      bool      // only this call committed the new operation; never serialized
-	Operation  Operation `json:"operation"`
-	Instance   *Instance `json:"instance,omitempty"`
-	Review     *Review   `json:"review,omitempty"`
-	ResultText string    `json:"result_text,omitempty"` // explicit review only; never persisted here
+	fresh         bool          // only this call committed the new operation; never serialized
+	Operation     Operation     `json:"operation"`
+	Instance      *Instance     `json:"instance,omitempty"`
+	Review        *Review       `json:"review,omitempty"`
+	ResultText    string        `json:"result_text,omitempty"` // explicit review only; never persisted here
+	OriginalText  string        `json:"original_text,omitempty"`
+	OriginalInput string        `json:"original_input,omitempty"`
+	Observation   *ObservedView `json:"observation,omitempty"`
+	ObservedInput string        `json:"observed_input,omitempty"`
 }
 
 type Status struct {
-	Owner     Owner      `json:"owner"`
-	Instances []Instance `json:"instances"`
+	Owner        Owner               `json:"owner"`
+	Instances    []Instance          `json:"instances"`
+	Model        *ModelConfiguration `json:"model,omitempty"`
+	Competencies CompetencySummary   `json:"competencies"`
+	Observations []ObservedView      `json:"observations,omitempty"`
 }
 
 func (s *Service) Status(ctx context.Context, owner string) (Status, error) {
@@ -84,7 +99,15 @@ func (s *Service) Status(ctx context.Context, owner string) (Status, error) {
 	for n := range instances {
 		instances[n] = s.visibleInstance(ctx, owner, instances[n])
 	}
-	return Status{Owner: o, Instances: instances}, err
+	competencies, _ := s.store.Competencies(ctx, owner) // unknown coverage must not disable owner controls
+	observations, _ := s.observationViews(ctx, o)       // unknown tracking does not change ordinary work
+	out := Status{Owner: o, Instances: instances, Competencies: competencies, Observations: observations}
+	if s.designer != nil {
+		if model, modelErr := s.designer.Configuration(ctx); modelErr == nil && model.Validate() == nil {
+			out.Model = &model
+		}
+	}
+	return out, err
 }
 
 func (s *Service) Operation(ctx context.Context, owner, id string) (Outcome, error) {
@@ -100,6 +123,12 @@ func (s *Service) outcome(ctx context.Context, owner string, op Operation) Outco
 	if op.InstanceID != "" {
 		if i, err := s.store.Instance(ctx, owner, op.InstanceID); err == nil {
 			out.Instance = &i
+		}
+	}
+	if op.ObservationID != "" {
+		if claim, err := s.store.Operation(ctx, owner, op.ObservationID); err == nil && claim.Observation != nil {
+			work := claim.Observation
+			out.Observation = &ObservedView{ID: work.ID, Revision: work.Revision, WorkspaceID: work.WorkspaceID, TicketID: work.TicketID}
 		}
 	}
 	if op.ReviewID != "" {
@@ -161,6 +190,9 @@ func (s *Service) apply(ctx context.Context, owner string, req MutationRequest, 
 	op := Operation{ID: req.OperationID, Kind: kind, Status: "succeeded", RequestDigest: hash, CreatedAt: s.now().UTC().UnixMilli()}
 	_, err = s.store.Change(ctx, owner, current.Revision, current.Epoch, current.Revision == 0, func(m *Mutation) error {
 		op.Epoch = m.owner.Epoch
+		if err := m.retain(op.CreatedAt); err != nil {
+			return err
+		}
 		if err := mutate(m, &op); err != nil {
 			return err
 		}
@@ -187,17 +219,25 @@ func (s *Service) apply(ctx context.Context, owner string, req MutationRequest, 
 // creates/starts a Ticket. The chosen workspace is not silently opted into
 // ongoing observation or automatic suggestions.
 func (s *Service) Propose(ctx context.Context, owner string, req ProposalRequest) (Outcome, error) {
-	var candidate Candidate
+	if !validSelection(req.Structure, req.CandidateRef) {
+		return Outcome{}, ErrInvalid
+	}
+	if req.Personalize {
+		return s.generate(ctx, owner, req)
+	}
+	if req.ModelFingerprint != "" || req.ConsentVersion != 0 {
+		return Outcome{}, ErrInvalid
+	}
+	var candidate EligibleCandidate
+	var ranked rankedCandidate
 	return s.apply(ctx, owner, req.MutationRequest, "propose", req, func(o Owner) error {
 		if o.Preferences.Mode == "off" || s.source == nil || !validID(req.WorkspaceID) {
 			return ErrUnavailable
 		}
 		var err error
-		candidate, err = s.source.Candidate(ctx, owner, req.WorkspaceID)
-		if err != nil || candidate.WorkspaceID != req.WorkspaceID || !boundedText(candidate.Name, 120, true) {
-			return ErrUnavailable
-		}
-		return nil
+		ranked, err = s.selectCandidate(ctx, o, req.WorkspaceID, req.Structure, req.CandidateRef)
+		candidate = ranked.Candidate
+		return err
 	}, func(m *Mutation, op *Operation) error {
 		// Active work takes priority; no recommendation feed alongside it.
 		var occupied int
@@ -210,12 +250,13 @@ func (s *Service) Propose(ctx context.Context, owner string, req ProposalRequest
 		if err := m.BindSource(candidate.WorkspaceID, candidate.Incarnation); err != nil {
 			return err
 		}
-		structure, _ := Lookup(DelegateInspect, 1)
+		structure, _ := Lookup(candidate.Structure, 1)
+		goal, scope, why := genericCopy(candidate.Structure)
 		i := Instance{ID: uuid.NewString(), OwnerID: owner, Epoch: m.owner.Epoch, Revision: 1, State: Offered,
-			Definition: Definition{Structure: DelegateInspect, Version: 1, WorkspaceID: candidate.WorkspaceID,
+			Definition: Definition{Structure: candidate.Structure, Version: 1, WorkspaceID: candidate.WorkspaceID,
 				Incarnation: candidate.Incarnation, CandidateRef: candidate.Ref, ScopeDigest: candidate.ScopeDigest,
-				Goal: "Delegate a small draft and inspect the result", Scope: "Use only text you explicitly supply in this workspace. Nothing is sent or run until you review and start a Ticket.",
-				Why: "You chose this workspace to practice reviewing useful work.", Steps: structure.Steps,
+				Goal: goal, Scope: scope, Why: why, Steps: structure.Steps, OriginalReceipt: candidate.OriginalReceipt,
+				FocusTopic: recommendationTopic(m.owner.Preferences.Focus), Signals: slices.Clone(ranked.Signals), SupportVersion: GuidanceProtocolVersion,
 				Guidance: m.owner.Preferences.Guidance, ExpiresAt: s.now().Add(OfferLifetime).UnixMilli()},
 			CreatedAt: op.CreatedAt, UpdatedAt: op.CreatedAt}
 		op.InstanceID = i.ID
@@ -229,7 +270,7 @@ func (s *Service) Decide(ctx context.Context, owner, id string, req DecisionRequ
 	}
 	s.effects.Lock()
 	defer s.effects.Unlock()
-	if !validID(id) || req.InstanceRevision < 1 || !slices.Contains([]string{"accept", "stop", "defer", "decline"}, req.Decision) {
+	if !validID(id) || req.InstanceRevision < 1 || !slices.Contains([]string{"accept", "stop", "defer", "decline", "discard"}, req.Decision) {
 		return Outcome{}, ErrInvalid
 	}
 	payload := struct {
@@ -247,10 +288,20 @@ func (s *Service) Decide(ctx context.Context, owner, id string, req DecisionRequ
 		if i.Definition.ExpiresAt <= s.now().UnixMilli() {
 			return ErrConflict
 		}
-		candidate, err := s.source.Candidate(ctx, owner, i.Definition.WorkspaceID)
-		if err != nil || candidate.Ref != i.Definition.CandidateRef || candidate.ScopeDigest != i.Definition.ScopeDigest {
+		if i.Definition.Personalized {
+			if s.designer == nil {
+				return ErrUnavailable
+			}
+			model, err := s.designer.Configuration(ctx)
+			if err != nil || model.Fingerprint != i.Definition.ModelFingerprint {
+				return ErrConflict
+			}
+		}
+		if _, err := s.source.Candidate(ctx, owner, i.Definition.WorkspaceID); err != nil {
 			return ErrUnavailable
 		}
+		// Ranking a newer candidate must not invalidate the still-eligible
+		// exact contract the owner is accepting.
 		return s.validateSource(ctx, owner, i.Definition)
 	}, func(m *Mutation, op *Operation) error {
 		i, err := m.Instance(id)
@@ -265,16 +316,45 @@ func (s *Service) Decide(ctx context.Context, owner, id string, req DecisionRequ
 				return err
 			}
 		}
-		next := map[string]State{"accept": Active, "stop": Stopped, "defer": Deferred, "decline": Declined}[req.Decision]
+		if req.Decision == "discard" && (i.State != Offered || i.Definition.ReplacesID == "") {
+			return ErrInvalid
+		}
+		next := map[string]State{"accept": Active, "stop": Stopped, "defer": Deferred, "decline": Declined, "discard": Invalidated}[req.Decision]
+		if errors.Is(i.Definition.Validate(), ErrUnsupported) {
+			if req.Decision != "stop" {
+				return ErrUnsupported
+			}
+			if i.State == Offered {
+				next = Invalidated
+			}
+		}
 		if !CanTransition(i.State, next) {
 			return ErrConflict
 		}
-		i.State, i.Revision, i.UpdatedAt = next, i.Revision+1, op.CreatedAt
+		if err := m.invalidatePendingSuggestions("owner_decision"); err != nil {
+			return err
+		}
+		if next == Deferred || next == Declined {
+			if err := m.excludeRecommendation(i, next, op.CreatedAt); err != nil {
+				return err
+			}
+		}
 		if next == Active {
+			m.storageAdmission = true
+			if err := m.acceptReplacement(i, op.CreatedAt); err != nil {
+				return err
+			}
 			i.Progress.AcceptedAt = op.CreatedAt
 		}
+		i.State, i.Revision, i.UpdatedAt = next, i.Revision+1, op.CreatedAt
 		op.InstanceID = i.ID
-		return m.UpdateInstance(i, req.InstanceRevision)
+		if err := m.UpdateInstance(i, req.InstanceRevision); err != nil {
+			return err
+		}
+		if next == Stopped {
+			return m.invalidateReplacementOffers(i.ID, op.CreatedAt)
+		}
+		return nil
 	})
 }
 
@@ -287,16 +367,44 @@ func (s *Service) ClearHistory(ctx context.Context, owner string, req MutationRe
 	s.effects.Lock()
 	defer s.effects.Unlock()
 	return s.apply(ctx, owner, req, "clear_history", req, nil, func(m *Mutation, op *Operation) error {
+		m.storageControl = true
 		for _, query := range []string{
 			`DELETE FROM learning_evidence WHERE owner_id=?`,
 			`DELETE FROM learning_reviews WHERE owner_id=?`,
 			`DELETE FROM learning_instances WHERE owner_id=?`,
-			`DELETE FROM learning_sources WHERE owner_id=?`,
+			// Old mutation revisions and the advanced epoch prevent replay even
+			// after these non-billing records are explicitly forgotten.
+			`DELETE FROM learning_operations WHERE owner_id=? AND kind!='generate'`,
 			`UPDATE learning_operations SET status='invalidated',record=json_set(record,'$.status','invalidated') WHERE owner_id=? AND status='pending'`,
 		} {
 			if _, err := m.tx.ExecContext(ctx, query, owner); err != nil {
 				return ErrUnavailable
 			}
+		}
+		// Explicit history clear can forget old uncertain design receipts once
+		// outside retention/budget windows. The new epoch still fences replay.
+		if _, err := m.tx.ExecContext(ctx, `DELETE FROM learning_operations WHERE owner_id=? AND kind='generate' AND created_at_ms<?`, owner, op.CreatedAt-RetentionAge.Milliseconds()); err != nil {
+			return ErrUnavailable
+		}
+		// Preserve only identities explicitly retained by ongoing scope consent.
+		// Old work is still fenced by the new learning epoch; retaining these
+		// identities cannot recreate deleted receipts or backfill observation.
+		keep := map[string]string{}
+		p := m.owner.Preferences
+		if p.Mode != "off" && (p.Observe || p.Mode == "automatic") {
+			for _, id := range p.WorkspaceIDs {
+				if p.AllowsScope(id, p.ScopeBindings[id]) {
+					keep[id] = p.ScopeBindings[id]
+				}
+			}
+		}
+		bindings, err := encode(keep, MaxResponseBytes)
+		if err != nil {
+			return err
+		}
+		if _, err := m.tx.ExecContext(ctx, `DELETE FROM learning_sources WHERE owner_id=? AND NOT EXISTS
+ (SELECT 1 FROM json_each(?) WHERE key=learning_sources.workspace_id AND value=learning_sources.incarnation)`, owner, bindings); err != nil {
+			return ErrUnavailable
 		}
 		m.owner.Epoch++
 		op.Epoch = m.owner.Epoch

@@ -102,6 +102,9 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if err := CheckIsolatedRequest(req); err != nil {
 		return nil, err
 	}
+	if err := checkTextConfiguration(req, p.BoundedTextConfiguration()); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(p.apiKey) == "" {
 		return nil, fmt.Errorf("gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
 	}

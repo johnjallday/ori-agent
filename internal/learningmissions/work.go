@@ -20,6 +20,7 @@ type WorkRequest struct {
 	InstanceRevision int64  `json:"instance_revision"`
 	Input            string `json:"input"`
 	Assignee         string `json:"assignee"`
+	InputChange      string `json:"input_change,omitempty"`
 }
 
 // PrepareWork first commits the intended Ticket identity and exact input. Only
@@ -33,9 +34,9 @@ func (s *Service) PrepareWork(ctx context.Context, owner, id string, req WorkReq
 	defer release() // includes cross-store effect and its final receipt
 	s.effects.RLock()
 	defer s.effects.RUnlock()
-	req.Input, req.Assignee = strings.TrimSpace(req.Input), strings.TrimSpace(req.Assignee)
+	req.Input, req.Assignee, req.InputChange = strings.TrimSpace(req.Input), strings.TrimSpace(req.Assignee), strings.TrimSpace(req.InputChange)
 	if !validID(id) || req.InstanceRevision < 1 || req.Input == "" || len(req.Input) > MaxDraftBytes ||
-		!boundedText(req.Input, MaxDraftBytes, true) || !boundedText(req.Assignee, 128, true) {
+		!boundedText(req.Input, MaxDraftBytes, true) || !boundedText(req.Assignee, 128, true) || !boundedText(req.InputChange, 500, false) {
 		return Outcome{}, ErrInvalid
 	}
 	host, ok := s.source.(WorkHost)
@@ -46,6 +47,8 @@ func (s *Service) PrepareWork(ctx context.Context, owner, id string, req WorkReq
 		ID      string      `json:"id"`
 		Request WorkRequest `json:"request"`
 	}{id, req}
+	var original *OriginalProof
+	var inputDigest string
 	out, err := s.apply(ctx, owner, req.MutationRequest, "prepare_work", payload, func(Owner) error {
 		i, err := s.store.Instance(ctx, owner, id)
 		if err != nil || s.validateSource(ctx, owner, i.Definition) != nil {
@@ -54,7 +57,37 @@ func (s *Service) PrepareWork(ctx context.Context, owner, id string, req WorkReq
 		if i.State != Active || i.Revision != req.InstanceRevision || i.Progress.OperationID != "" {
 			return ErrConflict
 		}
-		return host.CheckWork(ctx, owner, i, req.Assignee)
+		if len(req.Input) > definitionInputLimit(i.Definition) {
+			return ErrInvalid
+		}
+		if i.Definition.Structure != DelegateInspect {
+			prior, err := s.original(ctx, owner, i.Definition)
+			if err != nil || prior.Review.DecidedAt > i.Progress.AcceptedAt {
+				return ErrUnavailable
+			}
+			original = &prior
+			i.Progress.Original = &prior.Result.Ref
+			if i.Definition.Structure == RepeatSuccess && (req.InputChange == "" || normalizedInputDigest(req.Input) == normalizedInputDigest(prior.Result.InputText)) {
+				return ErrInvalid
+			}
+		}
+		if i.Definition.Structure != RepeatSuccess && req.InputChange != "" {
+			return ErrInvalid
+		}
+		if err := host.CheckWork(ctx, owner, i, req.Assignee); err != nil {
+			return err
+		}
+		inputDigest = digest([]byte(req.Input))
+		if binder, ok := s.source.(WorkInputBinder); ok {
+			var err error
+			inputDigest, err = binder.InputDigest(ctx, owner, i, req.Input)
+			if err != nil || !validDigest(inputDigest) {
+				return ErrUnavailable
+			}
+		} else if i.Definition.Structure == ImproveResult {
+			return ErrUnsupported
+		}
+		return nil
 	}, func(m *Mutation, op *Operation) error {
 		i, err := m.Instance(id)
 		if err != nil {
@@ -63,10 +96,21 @@ func (s *Service) PrepareWork(ctx context.Context, owner, id string, req WorkReq
 		if i.State != Active || i.Revision != req.InstanceRevision || i.Progress.OperationID != "" {
 			return ErrConflict
 		}
+		if len(req.Input) > definitionInputLimit(i.Definition) {
+			return ErrInvalid
+		}
 		if err := m.CheckSource(i.Definition); err != nil {
 			return err
 		}
-		i.Progress.Input, i.Progress.Assignee, i.Progress.InputDigest = req.Input, req.Assignee, digest([]byte(req.Input))
+		if original != nil {
+			saved, err := m.Review(i.Definition.OriginalReceipt)
+			if err != nil || saved.Decision == "" || saved.Result != original.Result.Ref || saved.InputDigest != original.Review.InputDigest {
+				return ErrUnavailable
+			}
+			i.Progress.Original = &original.Result.Ref
+			i.Progress.OriginalInputDigest = normalizedInputDigest(original.Result.InputText)
+		}
+		i.Progress.Input, i.Progress.Assignee, i.Progress.InputDigest, i.Progress.InputChange = req.Input, req.Assignee, inputDigest, req.InputChange
 		i.Progress.TicketID, i.Progress.AttemptID, i.Progress.OperationID = uuid.NewString(), uuid.NewString(), op.ID
 		i.Revision++
 		i.UpdatedAt = op.CreatedAt

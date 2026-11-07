@@ -13,6 +13,9 @@ func (s *Service) Reconcile(ctx context.Context, owner, workspaceID string) erro
 	defer release()
 	s.effects.Lock()
 	defer s.effects.Unlock()
+	if err := s.recoverGeneration(ctx, owner); err != nil {
+		return err
+	}
 	instances, err := s.store.Instances(ctx, owner)
 	if err != nil {
 		return err

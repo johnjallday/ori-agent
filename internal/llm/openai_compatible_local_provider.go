@@ -254,6 +254,9 @@ func (p *OpenAICompatibleLocalProvider) Chat(ctx context.Context, req ChatReques
 	if err := CheckIsolatedRequest(req); err != nil {
 		return nil, err
 	}
+	if err := checkTextConfiguration(req, p.BoundedTextConfiguration()); err != nil {
+		return nil, err
+	}
 	messages := convertMessagesToOpenAI(req.Messages, req.SystemPrompt)
 
 	params := openai.ChatCompletionNewParams{

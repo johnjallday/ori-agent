@@ -18,9 +18,13 @@ func (s *SQLiteStore) SourceIncarnation(ctx context.Context, owner, workspace st
 }
 
 func (m *Mutation) CheckSource(d Definition) error {
+	return m.checkScope(d.WorkspaceID, d.Incarnation)
+}
+
+func (m *Mutation) checkScope(workspace, expected string) error {
 	var incarnation string
-	err := m.tx.QueryRowContext(m.ctx, `SELECT incarnation FROM learning_sources WHERE owner_id=? AND workspace_id=?`, m.owner.ID, d.WorkspaceID).Scan(&incarnation)
-	if err != nil || incarnation != d.Incarnation {
+	err := m.tx.QueryRowContext(m.ctx, `SELECT incarnation FROM learning_sources WHERE owner_id=? AND workspace_id=?`, m.owner.ID, workspace).Scan(&incarnation)
+	if err != nil || incarnation != expected {
 		return ErrUnavailable
 	}
 	return nil

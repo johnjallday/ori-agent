@@ -31,6 +31,7 @@ func reviewFixture(t *testing.T) (*Service, *database.DB, Instance) {
 		t.Fatal(err)
 	}
 	s.source = &reviewSource{proof: proof}
+	s.now = func() time.Time { return time.UnixMilli(proof.FinishedAt + 1) }
 	return s, db, i
 }
 
@@ -42,6 +43,19 @@ func prepareReview(t *testing.T, s *Service, i Instance) Outcome {
 		t.Fatalf("prepare review must not complete: %+v %v", out, err)
 	}
 	return out
+}
+
+func TestReviewCannotPredateCanonicalResultCompletion(t *testing.T) {
+	s, _, instance := reviewFixture(t)
+	finished := s.source.(*reviewSource).proof.FinishedAt
+	s.now = func() time.Time { return time.UnixMilli(finished - 1) }
+	if _, err := s.ReviewResult(t.Context(), "local", instance.ID, ReviewRequest{MutationRequest: MutationRequest{OperationID: "future-result", ExpectedRevision: 2}, InstanceRevision: 2, Action: "prepare"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("review predating result: %v", err)
+	}
+	owner, _ := s.store.Owner(t.Context(), "local")
+	if owner.Revision != 2 {
+		t.Fatal("future result manufactured a challenge")
+	}
 }
 
 func TestReviewReceiptCompletesAtomicallyAndReplaysWithoutDuplicateCredit(t *testing.T) {

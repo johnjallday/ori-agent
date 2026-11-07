@@ -25,6 +25,8 @@ type isolatingProvider struct {
 	hold func()
 }
 
+func (p *isolatingProvider) BoundedTextConfiguration() string { return strings.Repeat("a", 64) }
+
 func (p *isolatingProvider) Capabilities() llm.ProviderCapabilities {
 	return llm.ProviderCapabilities{SupportsTools: true, SupportsNativeMCP: true, SupportsIsolatedChat: p.isolates}
 }

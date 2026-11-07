@@ -468,6 +468,9 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if err := CheckIsolatedRequest(req); err != nil {
 		return nil, err
 	}
+	if err := checkTextConfiguration(req, p.BoundedTextConfiguration()); err != nil {
+		return nil, err
+	}
 	ollamaReq := p.buildRequest(req, false)
 
 	ollamaResp, status, body, err := p.postChat(ctx, ollamaReq)
@@ -477,7 +480,7 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	// Graceful downgrade: a server that rejects a JSON Schema "format" object
 	// (Ollama < 0.5) gets one retry with plain "json" so structured tasks still
 	// benefit from JSON-mode instead of failing outright (WS3.12).
-	if status != http.StatusOK && len(ollamaReq.Format) > 0 && !bytes.Equal(ollamaReq.Format, ollamaJSONFormat) && looksLikeFormatUnsupported(status, body) {
+	if !req.SingleAttempt && status != http.StatusOK && len(ollamaReq.Format) > 0 && !bytes.Equal(ollamaReq.Format, ollamaJSONFormat) && looksLikeFormatUnsupported(status, body) {
 		ollamaReq.Format = ollamaJSONFormat
 		ollamaResp, status, body, err = p.postChat(ctx, ollamaReq)
 		if err != nil {

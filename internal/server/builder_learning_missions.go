@@ -18,7 +18,7 @@ func (b *ServerBuilder) initializeLearningMissions() {
 		b.taskHandler == nil || b.workspaceRunBridge == nil || b.resetWork == nil || b.userProvider == nil || b.orchestrationHandler == nil {
 		return
 	}
-	b.taskHandler.SetRecipeRunner(workspace.LearningDraftRecipe, learningDraftRunner{store: b.workspaceStore})
+	b.taskHandler.SetRecipeRunner(workspace.LearningDraftRecipe, learningDraftRunner{store: b.workspaceStore, runs: b.workspaceRunStore})
 	store := learningmissions.NewSQLiteStore(b.sessionStore.DB())
 	tickets := workspace.NewTicketService(b.workspaceStore)
 	tickets.SetEventBus(b.eventBus)
@@ -51,13 +51,37 @@ func (b *ServerBuilder) initializeLearningMissions() {
 		return learningmissions.ErrUnavailable
 	}
 	service := learningmissions.NewService(store, b.resetWork, source)
+	if b.configManager != nil {
+		service.SetDesigner(&learningDesigner{settings: b.configManager, factory: b.llmFactory})
+	}
 	handler := &learningMissionHandler{Handler: learningmissionshttp.NewHandler(service, b.userProvider), source: source,
-		users: b.userProvider, executor: b.taskHandler}
+		users: b.userProvider, executor: b.taskHandler, learning: service}
+	// Startup discards queued milestones; it never catches up generation.
+	if owner, err := b.userProvider.CurrentUserID(context.Background()); err == nil {
+		if err := service.RetirePendingMilestones(context.Background(), owner); err == nil {
+			handler.milestones = learningmissions.NewMilestoneWorker(service)
+		} else {
+			logger.Debug("Automatic learning suggestions unavailable", logger.Fields{"reason": "milestone_recovery_unavailable"})
+		}
+	}
 	b.learningMissions = service
 	b.learningMissionsHandler = handler
 	b.orchestrationHandler.SetTicketStartReview(handler.startReview)
 	b.workspaceRunBridge.SetRunReservation(func(ctx context.Context, task workspace.Task, runID string) error {
-		return reserveLearningRun(ctx, service, store, source, task, runID)
+		if err := reserveLearningRun(ctx, service, store, source, task, runID); err != nil {
+			return err
+		}
+		if binding, ok := workspace.LearningObservation(task); ok {
+			input, err := workspace.LearningTaskInputDigest(task)
+			if err == nil {
+				err = service.ReserveObservedRun(ctx, binding.OwnerID, learningmissions.ObservedRun{OperationID: binding.OperationID, WorkspaceID: task.WorkspaceID,
+					TicketID: task.ID, StartToken: binding.StartToken, InputDigest: input, RunID: runID})
+			}
+			if err != nil {
+				logger.Debug("Ordinary practice tracking unavailable", logger.Fields{"reason": "start_binding_unavailable"})
+			}
+		}
+		return nil // tracking never owns permission to cancel ordinary work
 	})
 	reconcile := func(workspaceID string) {
 		ctx := context.Background()
@@ -98,7 +122,8 @@ func reserveLearningRun(ctx context.Context, service *learningmissions.Service, 
 	if i.Epoch != binding.Epoch || i.State != learningmissions.Active || i.Progress.RunID != "" {
 		return nil
 	}
-	if i.Progress.TicketID != task.ID || i.Progress.InputDigest != learningDigest([]byte(task.Details)) || source.MatchTicket(ctx, binding.OwnerID, i) != nil {
+	inputDigest, inputErr := workspace.LearningTaskInputDigest(task)
+	if inputErr != nil || i.Progress.TicketID != task.ID || i.Progress.InputDigest != inputDigest || source.MatchTicket(ctx, binding.OwnerID, i) != nil {
 		// Editing the Ticket does not widen its recipe, but it is no longer the
 		// accepted practice input. Do not bind an unrelated attempt to learning.
 		return nil
@@ -117,9 +142,11 @@ func reserveLearningRun(ctx context.Context, service *learningmissions.Service, 
 
 type learningMissionHandler struct {
 	*learningmissionshttp.Handler
-	source   learningMissionSource
-	users    userprofile.UserProvider
-	executor *workspace.LLMTaskHandler
+	source     learningMissionSource
+	users      userprofile.UserProvider
+	executor   *workspace.LLMTaskHandler
+	learning   *learningmissions.Service
+	milestones *learningmissions.MilestoneWorker
 }
 
 func (h *learningMissionHandler) Register(mux *http.ServeMux) {
@@ -153,11 +180,27 @@ func (h *learningMissionHandler) execution(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "execution_unavailable", http.StatusConflict)
 		return
 	}
+	original, err := workspace.LearningOriginal(*task)
+	if err != nil {
+		http.Error(w, "execution_unavailable", http.StatusConflict)
+		return
+	}
+	originalText := ""
+	if original != nil {
+		originalText, err = readLearningOriginal(r.Context(), h.source.workspaces, h.source.runs, ws.ID, *original)
+		if err != nil {
+			http.Error(w, "execution_unavailable", http.StatusConflict)
+			return
+		}
+	}
 	_ = orihttp.RespondJSON(w, http.StatusOK, struct {
-		Executor   *workspace.RecipeExecutor `json:"executor"`
-		Input      string                    `json:"input"`
-		Disclosure string                    `json:"disclosure"`
-	}{executor, task.Details, "One isolated model call, up to 1200 output tokens and 30 seconds. Only this input is sent to the assigned model; provider charges may apply. No tools, files or external actions. Starting work is separate from starting learning."})
+		Executor     *workspace.RecipeExecutor        `json:"executor"`
+		Input        string                           `json:"input"`
+		Original     *workspace.LearningDraftOriginal `json:"original,omitempty"`
+		OriginalText string                           `json:"original_text,omitempty"`
+		Disclosure   string                           `json:"disclosure"`
+	}{Executor: executor, Input: task.Details, Original: original, OriginalText: originalText,
+		Disclosure: "One isolated model call, up to 1200 output tokens and 30 seconds. Only the supplied input and any exact original shown here are sent to the assigned model; provider charges may apply. No tools, files or external actions. Starting work is separate from starting learning."})
 }
 
 func (h *learningMissionHandler) startReview(r *http.Request, studioID, ticketID, assignee, digest string) (func() error, error) {
@@ -184,6 +227,27 @@ func (h *learningMissionHandler) startReview(r *http.Request, studioID, ticketID
 		return nil, learningmissions.ErrConflict
 	}
 	return func() error {
-		return h.executor.ReviewLearningExecutor(r.Context(), studioID, ticketID, assignee, digest)
+		var consent learningmissions.ObservationConsent
+		if h.learning != nil {
+			// A failed read leaves an empty grant; observation is optional and
+			// cannot block this separately approved execution.
+			consent, _ = h.learning.CaptureObservationConsent(r.Context(), owner, studioID)
+		}
+		if err := h.executor.ReviewLearningExecutor(r.Context(), studioID, ticketID, assignee, digest); err != nil {
+			return err
+		}
+		if h.learning != nil {
+			current, err := h.source.owned(owner, studioID)
+			if err == nil {
+				fresh, readErr := current.GetTask(ticketID)
+				if readErr == nil {
+					err = h.learning.ObserveStart(r.Context(), owner, studioID, ticketID, workspace.LearningReviewedStart(*fresh), consent)
+				}
+			}
+			if err != nil {
+				logger.Debug("Ordinary practice tracking unavailable", logger.Fields{"reason": "observation_unavailable"})
+			}
+		}
+		return nil
 	}, nil
 }

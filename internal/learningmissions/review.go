@@ -48,12 +48,22 @@ func (s *Service) ReviewResult(ctx context.Context, owner, id string, req Review
 		if i.Revision != req.InstanceRevision {
 			return ErrConflict
 		}
+		if i.Definition.Structure != ImproveResult && req.Change != "" {
+			return ErrInvalid
+		}
+		if i.Definition.Structure != DelegateInspect {
+			prior, err := s.original(ctx, owner, i.Definition)
+			if err != nil || i.Progress.Original == nil || *i.Progress.Original != prior.Result.Ref ||
+				i.Progress.OriginalInputDigest != normalizedInputDigest(prior.Result.InputText) {
+				return ErrUnavailable
+			}
+		}
 		reader, ok := s.source.(ResultSource)
 		if !ok || s.validateSource(ctx, owner, i.Definition) != nil {
 			return ErrUnavailable
 		}
 		proof, err = reader.Result(ctx, owner, i)
-		if err != nil {
+		if err != nil || proof.FinishedAt > s.now().UnixMilli() {
 			return ErrUnavailable
 		}
 		return VerifyResult(owner, i, proof)
@@ -71,6 +81,9 @@ func (s *Service) ReviewResult(ctx context.Context, owner, id string, req Review
 		if err := VerifyResult(owner, i, proof); err != nil {
 			return err
 		}
+		if proof.FinishedAt > op.CreatedAt {
+			return ErrUnavailable
+		}
 		op.InstanceID = i.ID
 		if req.Action == "prepare" {
 			i.Progress.Result = &proof.Ref
@@ -78,7 +91,8 @@ func (s *Service) ReviewResult(ctx context.Context, owner, id string, req Review
 			i.UpdatedAt = op.CreatedAt
 			r := Review{ID: uuid.NewString(), InstanceID: id, Revision: i.Revision, Epoch: i.Epoch,
 				Structure: i.Definition.Structure, Version: i.Definition.Version, Result: proof.Ref,
-				Guidance: i.Definition.Guidance, HintsShown: i.Progress.HintsShown, HintsUsed: i.Progress.HintsUsed,
+				Original: i.Progress.Original, OriginalReceipt: i.Definition.OriginalReceipt,
+				Guidance: i.Definition.Guidance, SupportVersion: i.Definition.SupportVersion, HintsShown: i.Progress.HintsShown, HintsUsed: i.Progress.HintsUsed,
 				InputDigest: i.Progress.InputDigest, CreatedAt: op.CreatedAt, ExpiresAt: s.now().Add(ReviewLifetime).UnixMilli()}
 			if err := m.InsertReview(r); err != nil {
 				return err
@@ -101,15 +115,30 @@ func (s *Service) ReviewResult(ctx context.Context, owner, id string, req Review
 		if err := m.ConsumeReview(r); err != nil {
 			return err
 		}
+		milestoneKey := ""
 		for _, e := range evidence {
-			if _, err := m.Credit(e); err != nil {
+			added, err := m.Credit(e)
+			if err != nil {
 				return err
+			}
+			if added && milestoneKey == "" {
+				milestoneKey = e.Key
 			}
 		}
 		i.State, i.Revision, i.UpdatedAt, i.Progress.ReviewID = Completed, i.Revision+1, op.CreatedAt, r.ID
+		if i.Definition.Structure == RepeatSuccess && r.Decision != "use" {
+			i.State, i.Progress.Blocker = Blocked, "result_not_useful"
+		}
 		op.ReviewID = r.ID
-		return m.UpdateInstance(i, req.InstanceRevision)
+		if err := m.UpdateInstance(i, req.InstanceRevision); err != nil {
+			return err
+		}
+		op.MilestoneID, err = m.queueMilestone(r, milestoneKey)
+		return err
 	})
+	if err == nil && out.fresh && out.Operation.MilestoneID != "" && s.milestoneWake != nil {
+		s.milestoneWake(owner, out.Operation.MilestoneID)
+	}
 	if err != nil || req.Action != "prepare" {
 		return out, err
 	}
@@ -125,6 +154,13 @@ func (s *Service) ReviewResult(ctx context.Context, owner, id string, req Review
 	}
 	if out.Review.ExpiresAt <= s.now().UnixMilli() || out.Review.Decision != "" {
 		return Outcome{}, ErrConflict
+	}
+	if out.Instance.Definition.Structure != DelegateInspect {
+		prior, err := s.original(ctx, owner, out.Instance.Definition)
+		if err != nil || out.Review.Original == nil || *out.Review.Original != prior.Result.Ref {
+			return Outcome{}, ErrUnavailable
+		}
+		out.OriginalText, out.OriginalInput = prior.Result.Text, prior.Result.InputText
 	}
 	out.ResultText = proof.Text
 	return out, nil

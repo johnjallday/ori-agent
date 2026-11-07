@@ -2,11 +2,11 @@ package workspace
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -73,6 +73,8 @@ func (h *LLMTaskHandler) ReviewLearningExecutor(ctx context.Context, workspaceID
 				return fmt.Errorf("execution changed")
 			}
 			saved.Context[TaskContextReviewedExecutor] = expected
+			saved.Context[TaskContextLearningStart] = uuid.NewString()
+			delete(saved.Context, TaskContextLearningObservation)
 			return nil
 		})
 	})
@@ -91,6 +93,8 @@ func (h *LLMTaskHandler) consumeLearningReview(task Task, chosen recipeProvider)
 				return fmt.Errorf("execution changed")
 			}
 			delete(saved.Context, TaskContextReviewedExecutor)
+			delete(saved.Context, TaskContextLearningStart)
+			delete(saved.Context, TaskContextLearningObservation)
 			return nil
 		})
 	})
@@ -103,6 +107,7 @@ type LearningDraftInput struct {
 	Input       string
 	Assignee    string
 	Binding     LearningTicketBinding
+	Original    *LearningDraftOriginal
 }
 
 // CreateLearningDraft is a compiled-owner seam, never a public create input.
@@ -110,8 +115,8 @@ type LearningDraftInput struct {
 // reconciled by ID rather than invoking this method to recreate missing work.
 func (s *TicketService) CreateLearningDraft(input LearningDraftInput) (*Ticket, error) {
 	input.Input = strings.TrimSpace(input.Input)
-	sum := sha256.Sum256([]byte(input.Input))
-	if input.Binding.InputDigest != hex.EncodeToString(sum[:]) {
+	digest, err := LearningInputDigest(input.Input, input.Original)
+	if err != nil || input.Binding.InputDigest != digest || (input.Original != nil && input.Original.TicketID == input.TicketID) {
 		return nil, invalidTicketField("learning", "reviewed input changed")
 	}
 	if strings.TrimSpace(input.TicketID) == "" || len(input.Input) > 4096 || strings.TrimSpace(input.Input) == "" ||
@@ -160,6 +165,9 @@ func (s *TicketService) CreateLearningDraft(input LearningDraftInput) (*Ticket, 
 		}
 		if err := ws.MutateTask(task.ID, func(saved *Task) error {
 			saved.Context[TaskContextLearning] = input.Binding
+			if input.Original != nil {
+				saved.Context[TaskContextLearningOriginal] = *input.Original
+			}
 			saved.AwaitingExecutionIntent = true
 			persisted = *saved
 			return nil

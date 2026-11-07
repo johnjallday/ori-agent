@@ -31,10 +31,11 @@ func isReasoningModel(model string) bool {
 
 // OpenAIProvider implements the Provider interface for OpenAI
 type OpenAIProvider struct {
-	mu         sync.RWMutex
-	client     openai.Client
-	apiKey     string
-	httpClient *http.Client
+	mu                sync.RWMutex
+	client            openai.Client
+	apiKey            string
+	httpClient        *http.Client
+	textConfiguration string
 }
 
 // snapshot returns the current client and api key under read lock.
@@ -61,9 +62,10 @@ func NewOpenAIProvider(config ProviderConfig) *OpenAIProvider {
 	}
 
 	return &OpenAIProvider{
-		client:     client,
-		apiKey:     config.APIKey,
-		httpClient: httpClient,
+		client:            client,
+		apiKey:            config.APIKey,
+		httpClient:        httpClient,
+		textConfiguration: openAITextConfiguration(),
 	}
 }
 
@@ -107,7 +109,12 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if err := CheckIsolatedRequest(req); err != nil {
 		return nil, err
 	}
-	client, apiKey := p.snapshot()
+	p.mu.RLock()
+	client, apiKey, configuration := p.client, p.apiKey, p.textConfiguration
+	p.mu.RUnlock()
+	if err := checkTextConfiguration(req, configuration); err != nil {
+		return nil, err
+	}
 	if apiKey == "" {
 		return nil, fmt.Errorf("OpenAI API key is required (set OPENAI_API_KEY or configure it in settings)")
 	}
@@ -452,6 +459,7 @@ func (p *OpenAIProvider) UpdateClient(apiKey string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.apiKey = apiKey
+	p.textConfiguration = openAITextConfiguration()
 	p.client = openai.NewClient(
 		option.WithAPIKey(apiKey),
 		option.WithHTTPClient(p.httpClient),

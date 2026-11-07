@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -30,17 +31,21 @@ func learningRoute(t *testing.T, h http.Handler, method, path string, body any, 
 	if w.Code != status {
 		t.Fatalf("%s %s: %d %s", method, path, w.Code, w.Body.String())
 	}
-	if into != nil && json.Unmarshal(w.Body.Bytes(), into) != nil {
-		t.Fatalf("invalid reply: %s", w.Body.String())
+	if into != nil {
+		// Reused destinations must not retain fields omitted by a later reply.
+		reflect.ValueOf(into).Elem().SetZero()
+		if json.Unmarshal(w.Body.Bytes(), into) != nil {
+			t.Fatalf("invalid reply: %s", w.Body.String())
+		}
 	}
 }
 
 func TestLearningMissionsProductionRoutesExecuteAndReviewExactResult(t *testing.T) {
-	b, h := newDailyBriefTestServer(t)
+	b, h := newLearningTestServer(t)
 	if b.learningMissions == nil || b.learningMissionsHandler == nil {
 		t.Fatal("learning owner not wired")
 	}
-	provider := &assessmentProvider{replies: []llm.ChatResponse{{Content: "A short draft for review."}, {Content: "A later ordinary draft."}}}
+	provider := &assessmentProvider{replies: []llm.ChatResponse{{Content: "A short draft for review.", FinishReason: llm.FinishReasonStop}, {Content: "A later ordinary draft.", FinishReason: llm.FinishReasonStop}}}
 	b.llmFactory.Register("openai", provider)
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Learning fixture", Agents: []string{"Draft writer"}})
 	ws.OwnerUserID = "local"
@@ -114,15 +119,43 @@ func TestLearningMissionsProductionRoutesExecuteAndReviewExactResult(t *testing.
 		t.Fatalf("delegate/evaluate credit: %d %v", count, err)
 	}
 	req := provider.sent()[0]
-	if err := llm.CheckIsolatedRequest(req); err != nil || req.MaxTokens != 1200 {
+	if err := llm.CheckIsolatedRequest(req); err != nil || req.MaxTokens != 1200 || !req.SingleAttempt || req.ProviderConfiguration == "" {
 		t.Fatalf("execution scope: %+v %v", req, err)
 	}
+
+	recorded := status()
+	progress := recorded.Competencies.Items[1]
+	if progress.Competency != "evaluate" || progress.Guided != 1 || progress.State != "practiced_with_guidance" || len(progress.EvidenceKeys) != 1 {
+		t.Fatalf("versioned practice projection: %+v", recorded.Competencies)
+	}
+	evidencePath := "/api/learning-missions/evidence/" + progress.EvidenceKeys[0]
+	for range 2 {
+		var evidence learningmissions.EvidenceView
+		learningRoute(t, h, http.MethodGet, evidencePath, nil, 200, &evidence)
+		if evidence.ResultText == "" || evidence.InputText != view.Input || evidence.Review.Result.RunID != i.Progress.RunID || evidence.Review.Decision != "reject" {
+			t.Fatalf("canonical review inspection: %+v", evidence)
+		}
+	}
+	if status().Owner.Revision != recorded.Owner.Revision || len(provider.sent()) != 1 {
+		t.Fatal("evidence inspection enrolled, credited or executed")
+	}
+
+	// Reset Getting Started owns only the fixed progression graph, not this
+	// separate learning contract, consumed review or deduplicated practice.
+	// A newcomer with no hired assistant must be able to reset this graph too.
+	learningRoute(t, h, http.MethodPost, "/api/progression/reset", map[string]any{}, 200, nil)
+	afterStarterReset := status()
+	if afterStarterReset.Owner.Revision != recorded.Owner.Revision || !reflect.DeepEqual(afterStarterReset.Competencies, recorded.Competencies) || afterStarterReset.Instances[0].Revision != recorded.Instances[0].Revision || len(provider.sent()) != 1 {
+		t.Fatal("Getting Started reset changed separate learning or executed work")
+	}
+	learningRoute(t, h, http.MethodGet, evidencePath, nil, 200, nil)
 
 	// Clearing learning removes authority, not the actual Ticket or its recipe.
 	learningRoute(t, h, http.MethodPost, "/api/learning-missions/clear", map[string]any{"operation_id": "clear", "expected_revision": status().Owner.Revision, "scope": "history"}, 200, nil)
 	if len(status().Instances) != 0 {
 		t.Fatal("history not cleared")
 	}
+	learningRoute(t, h, http.MethodGet, evidencePath, nil, 404, nil)
 	service := workspace.NewTicketService(b.workspaceStore)
 	if _, err := service.Transition(ws.ID, ticketID, workspace.TicketTransitionInput{To: workspace.TicketStateDone, Actor: workspace.TicketActorUser}); err != nil {
 		t.Fatal(err)

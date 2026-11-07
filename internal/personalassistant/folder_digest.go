@@ -1047,8 +1047,8 @@ func (s *FolderDigestService) ClearFirstPrompt(ctx context.Context, userID strin
 		doc.FirstPromptShownAt = nil
 		return nil
 	})
-	if errors.Is(err, ErrNeedsHQ) || errors.Is(err, ErrRepairNeeded) {
-		return nil // No valid active HQ exists to hold the prompt yet.
+	if errors.Is(err, ErrNeedsHQ) || errors.Is(err, ErrRepairNeeded) || errors.Is(err, ErrNotFound) {
+		return nil // No relationship/valid active HQ exists to hold the prompt yet.
 	}
 	return err
 }

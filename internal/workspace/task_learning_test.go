@@ -44,8 +44,9 @@ func TestPublicTicketCreationCannotSupplyLearningAuthority(t *testing.T) {
 	service, store := newTicketTestService(t)
 	ws := newTicketTestWorkspace(t, store, "Practice")
 	ticket, err := service.Create(TicketCreateInput{WorkspaceID: ws.ID, State: TicketStateReady, Title: "Forged",
-		Context: map[string]any{TaskContextFirstTaskRecipe: LearningDraftRecipe, TaskContextLearning: LearningTicketBinding{
-			OwnerID: "local", InstanceID: "mission", OperationID: "prepare-work", Epoch: 1, InputDigest: strings.Repeat("a", 64)}}})
+		Context: map[string]any{TaskContextLearningStart: "11111111-1111-4111-8111-111111111111", TaskContextLearningObservation: "forged",
+			TaskContextFirstTaskRecipe: LearningDraftRecipe, TaskContextLearning: LearningTicketBinding{
+				OwnerID: "local", InstanceID: "mission", OperationID: "prepare-work", Epoch: 1, InputDigest: strings.Repeat("a", 64)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func TestPublicTicketCreationCannotSupplyLearningAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := LearningBinding(*task); ok || FirstTaskRecipe(task) != "" {
+	if _, ok := LearningBinding(*task); ok || FirstTaskRecipe(task) != "" || task.Context[TaskContextLearningStart] != nil || task.Context[TaskContextLearningObservation] != nil {
 		t.Fatal("public creation retained host-only learning markers")
 	}
 }
@@ -68,8 +69,9 @@ func TestLearningBindingDoesNotSurviveWorkspaceImport(t *testing.T) {
 	if err := json.Unmarshal(data, &ws); err != nil {
 		t.Fatal(err)
 	}
-	ws.Tasks[0].Context = map[string]any{TaskContextFirstTaskRecipe: LearningDraftRecipe,
-		TaskContextLearning: LearningTicketBinding{OwnerID: "local", InstanceID: "mission", OperationID: "work", Epoch: 1, InputDigest: strings.Repeat("a", 64)}}
+	ws.Tasks[0].Context = map[string]any{TaskContextReviewedExecutor: strings.Repeat("b", 64), TaskContextLearningStart: "11111111-1111-4111-8111-111111111111", TaskContextLearningObservation: "copied",
+		TaskContextFirstTaskRecipe: LearningDraftRecipe,
+		TaskContextLearning:        LearningTicketBinding{OwnerID: "local", InstanceID: "mission", OperationID: "work", Epoch: 1, InputDigest: strings.Repeat("a", 64)}}
 	data, err := ws.ToJSON()
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +85,7 @@ func TestLearningBindingDoesNotSurviveWorkspaceImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := projected.Workspace.Tasks[0]
-	if _, ok := LearningBinding(task); ok || FirstTaskRecipe(&task) != LearningDraftRecipe {
+	if _, ok := LearningBinding(task); ok || FirstTaskRecipe(&task) != LearningDraftRecipe || task.Context[TaskContextLearningStart] != nil || task.Context[TaskContextLearningObservation] != nil || task.Context[TaskContextReviewedExecutor] != nil {
 		t.Fatal("import kept local learning authority or relaxed the bounded recipe")
 	}
 }

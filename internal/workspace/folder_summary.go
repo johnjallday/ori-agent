@@ -65,7 +65,8 @@ func recipeExecutor(task Task, agentName string, chosen recipeProvider) RecipeEx
 	if FirstTaskRecipe(&task) == LearningDraftRecipe {
 		// A draft review binds the exact supplied text and host recipe version,
 		// not just the model. Editing after review requires fresh consent.
-		values = append(values, task.Details, task.Context[TaskContextFirstTaskRecipeVersion])
+		original, _ := LearningOriginal(task)
+		values = append(values, task.Details, task.Context[TaskContextFirstTaskRecipeVersion], chosen.configuration, original)
 	}
 	encoded, _ := json.Marshal(values)
 	sum := sha256.Sum256(encoded)

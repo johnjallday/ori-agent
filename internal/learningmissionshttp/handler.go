@@ -24,11 +24,17 @@ func NewHandler(service *learningmissions.Service, users userprofile.UserProvide
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/learning-missions", h.Status)
 	mux.HandleFunc("POST /api/learning-missions/proposals", h.Propose)
+	mux.HandleFunc("POST /api/learning-missions/preferences", h.Preferences)
 	mux.HandleFunc("POST /api/learning-missions/instances/{id}/decisions", h.Decide)
+	mux.HandleFunc("POST /api/learning-missions/instances/{id}/alternatives", h.Adjust)
 	mux.HandleFunc("POST /api/learning-missions/instances/{id}/review", h.Review)
+	mux.HandleFunc("POST /api/learning-missions/observations/{id}/review", h.ObservedReview)
 	mux.HandleFunc("POST /api/learning-missions/instances/{id}/work", h.Work)
 	mux.HandleFunc("POST /api/learning-missions/clear", h.Clear)
 	mux.HandleFunc("GET /api/learning-missions/operations/{id}", h.Operation)
+	mux.HandleFunc("GET /api/learning-missions/instances/{id}/original", h.Original)
+	mux.HandleFunc("GET /api/learning-missions/evidence/{key}", h.Evidence)
+	mux.HandleFunc("GET /api/learning-missions/diagnostics", h.Diagnostics)
 }
 
 // Owner is resolved outside the body. Exact origin (including port) protects
@@ -78,6 +84,8 @@ func respond(w http.ResponseWriter, value any, err error) {
 		code, reason = http.StatusConflict, "state_changed"
 	case errors.Is(err, learningmissions.ErrUnsupported):
 		code, reason = http.StatusConflict, "definition_unavailable"
+	case errors.Is(err, learningmissions.ErrStorageLimit):
+		code, reason = http.StatusTooManyRequests, "storage_limit_reached"
 	case errors.Is(err, learningmissions.ErrLimit):
 		code, reason = http.StatusTooManyRequests, "limit_reached"
 	case errors.Is(err, resetstate.ErrWorkFenced), errors.Is(err, resetstate.ErrWorkUntracked):
@@ -145,6 +153,45 @@ func (h *Handler) Review(w http.ResponseWriter, r *http.Request) {
 	respond(w, h.service.VisibleOutcome(r.Context(), owner, value), err)
 }
 
+func (h *Handler) Adjust(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.owner(w, r, true)
+	if !ok {
+		return
+	}
+	var req learningmissions.AdjustmentRequest
+	if !parse(w, r, &req) {
+		return
+	}
+	value, err := h.service.Adjust(r.Context(), owner, r.PathValue("id"), req)
+	respond(w, h.service.VisibleOutcome(r.Context(), owner, value), err)
+}
+
+func (h *Handler) ObservedReview(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.owner(w, r, true)
+	if !ok {
+		return
+	}
+	var req learningmissions.ObservedReviewRequest
+	if !parse(w, r, &req) {
+		return
+	}
+	value, err := h.service.ReviewObserved(r.Context(), owner, r.PathValue("id"), req)
+	respond(w, h.service.VisibleOutcome(r.Context(), owner, value), err)
+}
+
+func (h *Handler) Preferences(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.owner(w, r, true)
+	if !ok {
+		return
+	}
+	var req learningmissions.PreferencesRequest
+	if !parse(w, r, &req) {
+		return
+	}
+	value, err := h.service.UpdatePreferences(r.Context(), owner, req)
+	respond(w, value, err)
+}
+
 func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 	owner, ok := h.owner(w, r, true)
 	if !ok {
@@ -157,12 +204,37 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 	if !parse(w, r, &req) {
 		return
 	}
-	if req.Scope != "history" {
+	switch req.Scope {
+	case "history":
+		value, err := h.service.ClearHistory(r.Context(), owner, req.MutationRequest)
+		respond(w, value, err)
+	case "preferences":
+		value, err := h.service.ClearPreferences(r.Context(), owner, req.MutationRequest)
+		respond(w, value, err)
+	default:
 		respond(w, nil, learningmissions.ErrInvalid)
-		return
 	}
-	value, err := h.service.ClearHistory(r.Context(), owner, req.MutationRequest)
-	respond(w, value, err)
+}
+
+func (h *Handler) Diagnostics(w http.ResponseWriter, r *http.Request) {
+	if owner, ok := h.owner(w, r, false); ok {
+		value, err := h.service.Diagnostics(r.Context(), owner)
+		respond(w, value, err)
+	}
+}
+
+func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
+	if owner, ok := h.owner(w, r, false); ok {
+		value, err := h.service.EvidenceView(r.Context(), owner, r.PathValue("key"))
+		respond(w, value, err)
+	}
+}
+
+func (h *Handler) Original(w http.ResponseWriter, r *http.Request) {
+	if owner, ok := h.owner(w, r, false); ok {
+		value, err := h.service.OriginalView(r.Context(), owner, r.PathValue("id"))
+		respond(w, value, err)
+	}
 }
 
 func (h *Handler) Operation(w http.ResponseWriter, r *http.Request) {
