@@ -317,6 +317,10 @@ export class WorkspaceMembersPanel {
     const sheet = slug
       ? { href: `/workspaces/${encodeURIComponent(slug)}/assistant#projectLibraryProposals` }
       : null;
+    // A refresh replaces the rows; keep the keyboard on the song it was on.
+    const active = globalThis.document?.activeElement;
+    const focusedHref =
+      active && mount.contains?.(active) ? active.getAttribute?.('href') || '' : '';
     renderRoster(
       mount,
       rosterView(this.songRosterRows, { expanded: this.songRosterExpanded, sheet }),
@@ -335,6 +339,12 @@ export class WorkspaceMembersPanel {
         }
       }
     );
+    if (focusedHref) {
+      const again = Array.from(mount.querySelectorAll?.('a[href]') || []).find(
+        link => link.getAttribute('href') === focusedHref
+      );
+      again?.focus?.({ preventScroll: true });
+    }
   }
 
   openLibrarySheet(trigger) {

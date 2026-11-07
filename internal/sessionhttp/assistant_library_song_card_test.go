@@ -230,3 +230,52 @@ func TestSongCardHTTP_UnlinkedForeignAndQuery(t *testing.T) {
 		t.Fatalf("missing workspace: %d", response.Code)
 	}
 }
+
+// divergedChildMirror is a primary store whose folder mirror holds the song
+// with its link one revision ahead, as a half-finished write leaves it.
+type divergedChildMirror struct {
+	workspace.Store
+	childID string
+}
+
+func (m divergedChildMirror) GetMirrorWorkspace(id string) (*workspace.Workspace, bool, error) {
+	found, err := m.Get(id)
+	if err != nil || found == nil || id != m.childID {
+		return found, true, err
+	}
+	encoded, err := json.Marshal(found)
+	if err != nil {
+		return nil, true, err
+	}
+	var clone workspace.Workspace
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		return nil, true, err
+	}
+	link := clone.GetAssistantProjectLink()
+	link.StateRevision++
+	clone.SetAssistantProjectLink(link)
+	return &clone, true, nil
+}
+
+func TestSongCardHTTP_DivergedMirrorShowsNoFactsAndLeavesTheRoster(t *testing.T) {
+	handler, store, station, project, scope, _ := songCardHTTPFixture(t)
+	initializeSongCardLibrary(t, store, scope)
+	seedSongFacts(t, store, scope, project.ID)
+	if err := workspace.NewSongDetailsConsents(store).Grant(station.ID, "offer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if body := decodeSongCard(t, songCardRequest(t, handler, project.ID, "")); body.EntryID == "" || body.Facts == nil {
+		t.Fatalf("agreeing mirrors must show the entry: %+v", body)
+	}
+	handler.SetWorkspaceTaskStore(divergedChildMirror{Store: store, childID: project.ID})
+	body := decodeSongCard(t, songCardRequest(t, handler, project.ID, ""))
+	if !body.Linked || body.EntryID != "" || body.Facts != nil || body.FactsState != "" || body.LastSavedAt != nil ||
+		body.HomeEntryRoute != "" || body.FactsSwitchRoute != "" || body.HomeRoute != "/workspaces/music-home" ||
+		strings.Contains(body.StatusLine, "BPM") || body.KeeperAgentName != "Studio Keeper" {
+		t.Fatalf("a diverged link must keep the card without facts or Open in Home: %+v", body)
+	}
+	roster := decodeRoster(t, rosterRequest(t, handler, station.ID, ""))
+	if roster.Total != 0 || len(roster.Rows) != 0 {
+		t.Fatalf("a diverged song must leave the roster: %+v", roster)
+	}
+}

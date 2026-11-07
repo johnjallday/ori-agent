@@ -1249,6 +1249,18 @@ export class ProjectLibraryPanel {
         next && !next.hidden
           ? document.getElementById('projectSetupNextTitle')
           : document.getElementById('projectLibraryTitle');
+    } else if (hash === '#projectLibrarySongDetails') {
+      // A song card's "Turn on project details" lands on the switch itself;
+      // the arrival only shows it, the user decides (song-card PRD FR11).
+      const section = document.getElementById('projectLibrarySongDetails');
+      const shown = section && !section.hidden;
+      if (shown) {
+        const management = document.getElementById('projectLibraryManagement');
+        if (management) management.open = true;
+      }
+      heading = shown
+        ? document.getElementById('projectLibrarySongDetailsTitle')
+        : document.getElementById('projectLibraryTitle');
     } else {
       return;
     }

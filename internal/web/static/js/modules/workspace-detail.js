@@ -466,6 +466,7 @@ export class WorkspaceDetailPage {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    clearTimeout(this.songWorkTimer);
     for (const resource of this._resourceRequests?.keys() || [])
       this.invalidateResourceRequest(resource);
     for (const unsubscribe of [
@@ -2648,6 +2649,17 @@ export class WorkspaceDetailPage {
     const id = String(this.workspace?.id || '').trim();
     if (!mount || !id) return Promise.resolve(null);
     return loadSongCard(mount, id);
+  }
+
+  // A burst of ticket events re-reads the card and a Home's roster once, a
+  // moment after the last one (song-card PRD FR21). No timer runs otherwise.
+  noteSongWorkChanged() {
+    clearTimeout(this.songWorkTimer);
+    this.songWorkTimer = setTimeout(() => {
+      this.songWorkTimer = null;
+      void this.refreshSongCard();
+      if (this.membersPanel?.active) void this.membersPanel.loadSongRoster?.();
+    }, 300);
   }
 
   renderGroupRequirementStatus() {
@@ -17052,7 +17064,11 @@ export class WorkspaceDetailPage {
     window.workspaceCommand?.handleActivityEvent?.(event);
     // A run moves its ticket with no click on this page, so the work tile and an
     // open board follow these events (PRD 760 FR-11).
-    if (TICKET_MOVING_EVENTS.has(event.type)) window.workspaceCommand?.noteTicketWorkChanged?.();
+    if (TICKET_MOVING_EVENTS.has(event.type)) {
+      window.workspaceCommand?.noteTicketWorkChanged?.();
+      // The Song card's status line and a Home's roster say open work too.
+      this.noteSongWorkChanged();
+    }
 
     switch (event.type) {
       case 'task_created':

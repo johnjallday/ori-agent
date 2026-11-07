@@ -2592,6 +2592,25 @@ test('a linked song shows the Song card above the Command view; other workspaces
     assert.equal(mount.hidden, true);
     assert.equal(mount.children.length, 0);
   });
+  await withSongCardPage({ linked: false }, async (_mount, asked) => {
+    // A burst of ticket events re-reads the card and a Home's roster once.
+    const page = new WorkspaceDetailPage('song');
+    page.workspace = { id: 'song-id' };
+    let rosterReads = 0;
+    page.membersPanel = { active: true, loadSongRoster: async () => rosterReads++ };
+    page.noteSongWorkChanged();
+    page.noteSongWorkChanged();
+    page.noteSongWorkChanged();
+    assert.deepEqual(asked, [], 'nothing is read before the burst settles');
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.deepEqual(asked, ['/api/workspaces/song-id/song-card']);
+    assert.equal(rosterReads, 1);
+    page.membersPanel.active = false;
+    page.noteSongWorkChanged();
+    page.destroy?.();
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.equal(asked.length, 1, 'a destroyed page reads nothing');
+  });
   await withSongCardPage({ linked: true }, async (mount, asked) => {
     const page = new WorkspaceDetailPage('loading');
     page.workspace = null;
