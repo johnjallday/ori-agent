@@ -17,7 +17,12 @@ import (
 
 func wireReviewedGroupStaffing(t *testing.T, h *Handler, workspaces workspace.Store) *setupjourney.AssistantStaffingAdapter {
 	t.Helper()
-	adapter := setupjourney.NewAssistantStaffingAdapter(workspaces, h.agentStore, nil,
+	return wireReviewedGroupStaffingWithGrants(t, h, workspaces, nil)
+}
+
+func wireReviewedGroupStaffingWithGrants(t *testing.T, h *Handler, workspaces workspace.Store, grants setupjourney.StaffingToolGrants) *setupjourney.AssistantStaffingAdapter {
+	t.Helper()
+	adapter := setupjourney.NewAssistantStaffingAdapter(workspaces, h.agentStore, grants,
 		func() (string, string) { t.Error("reviewed role resolved an undisclosed default"); return "", "" },
 		func(provider, model string) error {
 			if provider != "scripted" || model != "scripted-1" {

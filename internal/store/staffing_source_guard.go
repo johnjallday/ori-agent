@@ -75,7 +75,7 @@ func (c *CompositeStore) withStaffingSources(ctx context.Context, use func(staff
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	snapshot := c.readStaffingSnapshotLocked(ctx, func(st Store) StaffingSnapshot {
+	snapshot := c.readStaffingSnapshotLocked(func(st Store) StaffingSnapshot {
 		return st.(*fileStore).staffingSnapshotLocked(ctx)
 	})
 	owners := make(map[string]*fileStore, len(snapshot.Profiles))

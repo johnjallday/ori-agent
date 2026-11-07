@@ -296,7 +296,7 @@ func (h *Handler) CommitGroupTemplateHome(w http.ResponseWriter, r *http.Request
 		summary = "An existing group was reused unchanged. No project workspace or team was created."
 	}
 	var staffing *groupHomeStaffingOutcome
-	if team != nil && !((reviewed.HomeWorkspaceID == "" && createdByThisOperation) || reviewed.HomeWorkspaceID == home.ID) {
+	if team != nil && (reviewed.HomeWorkspaceID != "" || !createdByThisOperation) && reviewed.HomeWorkspaceID != home.ID {
 		staffing = groupHomeTeamNeedsReview(team)
 	} else {
 		staffing = h.applyGroupHomeTeam(r.Context(), home.ID, claim.Operation.ReviewDigest, team)

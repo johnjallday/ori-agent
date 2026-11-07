@@ -29,6 +29,7 @@ func TestWorkspaceBuildStaffingLiveClaude(t *testing.T) {
 	if model == "" {
 		model = "claude-sonnet-5-5"
 	}
+	noFit := os.Getenv("ORI_LIVE_STAFFING_CASE") == "no_fit"
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("ORI_DATA_DIR", home)
@@ -40,10 +41,14 @@ func TestWorkspaceBuildStaffingLiveClaude(t *testing.T) {
 	if err := f.handler.agentStore.CreateAgent("Portfolio Manager", &store.CreateAgentConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	for name, purpose := range map[string]string{
+	purposes := map[string]string{
 		"Scout":             "Coordinates music portfolio priorities, release milestones, blockers and deliverable handoffs. Does not control audio software.",
 		"Portfolio Manager": "Reviews tax filings, accounting ledgers and personal investment portfolios. Does not coordinate music projects.",
-	} {
+	}
+	if noFit {
+		purposes["Scout"] = "Records physical warehouse inventories, invoices and stocktake dates. Does not coordinate music projects."
+	}
+	for name, purpose := range purposes {
 		if err := f.handler.agentStore.UpdateAgent(name, func(a *agent.Agent) error {
 			a.Settings.Provider, a.Settings.Model = "anthropic", model
 			a.Metadata = &types.AgentMetadata{Description: purpose}
@@ -60,27 +65,44 @@ func TestWorkspaceBuildStaffingLiveClaude(t *testing.T) {
 	}
 	before := len(f.handler.agentStore.ListAgents())
 	session := f.start(t)
-	status, body := f.turn(t, session, map[string]any{"text": "Plan a music portfolio and recommend a saved agent for the manager role from its declared purpose. Only prepare the draft; do not create or assign anything."})
+	message := "Use the Music Planning blueprint and recommend a saved agent for its manager role from declared purpose. Only prepare the draft; do not create or assign anything."
+	if noFit {
+		message += " If no saved agent fits music coordination, report no suitable match and keep this blueprint's team undecided; do not switch blueprints or invent a saved fit."
+	}
+	status, body := f.turn(t, session, map[string]any{"text": message})
 	if status != http.StatusOK {
 		t.Fatalf("live turn status %d (response omitted)", status)
 	}
 	got := sessionOf(t, body)
-	if provider.calls != 1 || got.Staffing == nil || got.Staffing.State != rosterstaffing.Recommended || len(got.Staffing.Roles) != 1 || len(got.Staffing.Roles[0].Choices) == 0 || got.Staffing.Roles[0].Choices[0].Name != "Scout" {
+	valid := got.Staffing != nil && len(got.Staffing.Roles) == 1
+	if valid && noFit {
+		valid = got.Staffing.State == rosterstaffing.NoSuitableMatch && len(got.Staffing.Roles[0].Choices) == 0
+	} else if valid {
+		valid = got.Staffing.State == rosterstaffing.Recommended && len(got.Staffing.Roles[0].Choices) > 0 && got.Staffing.Roles[0].Choices[0].Name == "Scout"
+	}
+	if provider.calls != 1 || !valid {
 		state := "absent"
 		if got.Staffing != nil {
 			state = got.Staffing.State
 		}
-		t.Fatalf("live ranking contract failed: calls=%d state=%s (prose omitted)", provider.calls, state)
+		t.Fatalf("live ranking contract failed: calls=%d state=%s expected_blueprint=%t reply_decoded=%t proposal_roles=%d proposal_state=%s (prose omitted)", provider.calls, state, got.Draft.TemplateID == "music-planning", provider.replyDecoded, provider.proposalRoles, provider.proposalState)
 	}
 	if len(f.handler.agentStore.ListAgents()) != before || len(got.Draft.RoleStaffing) != 0 || got.CreateNow {
 		t.Fatal("advisory live probe changed staffing")
 	}
-	t.Logf("provider=anthropic model=%s calls=%d synthetic_profiles=%d recommended=Scout evidence_refs=%d no_assignment=true", model, provider.calls, before, len(got.Staffing.Roles[0].Choices[0].Reasons))
+	if noFit {
+		t.Logf("provider=anthropic model=%s calls=%d synthetic_profiles=%d state=no_suitable_match choices=0 no_assignment=true", model, provider.calls, before)
+	} else {
+		t.Logf("provider=anthropic model=%s calls=%d synthetic_profiles=%d recommended=Scout evidence_refs=%d no_assignment=true", model, provider.calls, before, len(got.Staffing.Roles[0].Choices[0].Reasons))
+	}
 }
 
 type oneCallStaffingProvider struct {
 	llm.Provider
-	calls int
+	calls         int
+	replyDecoded  bool
+	proposalRoles int
+	proposalState string
 }
 
 func (p *oneCallStaffingProvider) Chat(ctx context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -88,5 +110,20 @@ func (p *oneCallStaffingProvider) Chat(ctx context.Context, request llm.ChatRequ
 		return nil, errors.New("live staffing call budget or isolation refused")
 	}
 	p.calls++
-	return p.Provider.Chat(ctx, request)
+	response, err := p.Provider.Chat(ctx, request)
+	if err == nil && response != nil {
+		if reply, decodeErr := decodeBuildReply(response.Content); decodeErr == nil {
+			p.replyDecoded = true
+			p.proposalRoles = len(reply.Staffing.Roles)
+			if p.proposalRoles > 0 {
+				switch state := reply.Staffing.Roles[0].State; state {
+				case rosterstaffing.Recommended, rosterstaffing.NeedsChoice, rosterstaffing.NoSuitableMatch, rosterstaffing.Unavailable, rosterstaffing.Stale:
+					p.proposalState = state
+				default:
+					p.proposalState = "unsupported"
+				}
+			}
+		}
+	}
+	return response, err
 }

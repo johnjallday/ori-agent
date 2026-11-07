@@ -14,6 +14,7 @@ export async function startRosterStaffingModel(port = 8944) {
   let workspaceName = 'Synthetic Staffing Review';
   let purpose = 'Builds and reviews software';
   let calls = 0;
+  const observedEvidence = new Set<string>();
   let held: Promise<void> | null = null;
   let releaseHeld: (() => void) | null = null;
   const server = createServer(async (request, response) => {
@@ -58,6 +59,9 @@ export async function startRosterStaffingModel(port = 8944) {
     }
     const data = system.match(/<staffing_data>([\s\S]*?)<\/staffing_data>/)?.[1];
     const input: Input | undefined = data ? JSON.parse(data) : undefined;
+    for (const profile of input?.roster.candidates || []) {
+      for (const fact of profile.evidence || []) observedEvidence.add(fact.value);
+    }
     const candidate = input?.roster.candidates.find(c =>
       c.evidence.some(e => e.value.includes(purpose))
     );
@@ -164,6 +168,7 @@ export async function startRosterStaffingModel(port = 8944) {
       purpose = value;
     },
     calls: () => calls,
+    sawEvidence: (value: string) => observedEvidence.has(value),
     holdNextRecommendation: () => {
       held = new Promise<void>(resolve => {
         releaseHeld = resolve;

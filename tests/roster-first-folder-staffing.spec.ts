@@ -15,6 +15,7 @@ test('recognized build and collection review preserve and reuse the exact saved 
   const sandbox = process.env.ORI_MUSIC_HOME_SANDBOX || '';
   const reviewed = process.env.ORI_MUSIC_PROVIDER_MODE === 'reviewed';
   const recovery = process.env.ORI_STAFFING_FOLDER_RECOVERY === '1';
+  const single = process.env.ORI_STAFFING_FOLDER_SINGLE === '1';
   test.skip(
     process.env.ORI_STAFFING_DEMO !== '1' ||
       process.env.ORI_MUSIC_HOME_ACCEPTANCE !== '1' ||
@@ -38,6 +39,7 @@ test('recognized build and collection review preserve and reuse the exact saved 
   const manager = recovery
     ? `Aster ${Date.now()} North Star Portfolio Coordination and Handoffs`
     : `Aster ${Date.now()}`;
+  const privatePurpose = 'music-project-management · Workspace-private purpose fixture';
   let rolePUTs = 0;
   page.on('request', outgoing => {
     if (outgoing.method() === 'PUT' && /\/roles\//.test(new URL(outgoing.url()).pathname))
@@ -47,7 +49,7 @@ test('recognized build and collection review preserve and reuse the exact saved 
     await request.post('/api/onboarding/skip');
     await prepareFolderCreationRuntime(request);
     const documents = join(sandbox, 'Documents');
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < (single ? 1 : 5); i++) {
       const folder = join(documents, `Roster album ${i}`);
       await mkdir(folder, { recursive: true, mode: 0o750 });
       await writeFile(join(folder, 'Song.rpp'), `synthetic metadata fixture ${i}`, { mode: 0o600 });
@@ -154,6 +156,41 @@ test('recognized build and collection review preserve and reuse the exact saved 
         { data: { custom_instructions: 'PRIVATE_OTHER_ASSIGNMENT_CANARY' } }
       )
     );
+    if (recovery) {
+      // Supported synthetic lifecycle leaves only a restorable workspace copy,
+      // never a global reusable source. Do not inspect/traverse Trash files.
+      const privateName = `Private Copy ${Date.now()}`;
+      await json(
+        await request.post('/api/agents', {
+          data: {
+            name: privateName,
+            llm_provider: 'lmstudio',
+            model: 'ori-synthetic-model',
+            description: privatePurpose
+          }
+        })
+      );
+      const privateWorkspace = (
+        await json(
+          await request.post('/api/workspaces', {
+            data: {
+              name: `Private source ${Date.now()}`,
+              create_template_agents: false,
+              existing_agent_names: [privateName],
+              entry_agent_name: privateName
+            }
+          })
+        )
+      ).folder;
+      const trashed = await request.delete(
+        `/api/workspaces/${privateWorkspace.id}?confirm=true&delete_sessions=false`
+      );
+      expect(trashed.ok(), await trashed.text()).toBeTruthy();
+      expect(await names()).toContain(privateName);
+      const deleted = await request.delete(`/api/agents?name=${encodeURIComponent(privateName)}`);
+      expect(deleted.ok(), await deleted.text()).toBeTruthy();
+      expect(await names()).not.toContain(privateName);
+    }
     const before = await names();
     let version = (
       await json(await request.get(`/api/agents/${encodeURIComponent(manager)}/detail`))
@@ -190,16 +227,31 @@ test('recognized build and collection review preserve and reuse the exact saved 
       })
     );
 
-    const scanned = await json(
-      await request.post('/api/personal-assistant/folder-digest/scan', {
-        data: { chip: 'documents' }
-      })
-    );
-    expect(scanned.offer.portfolio.projects).toBe(5);
-    expect(scanned.offer.home_staffing.state).toBe('needs_choice');
-    expect(scanned.offer.plan.digest || '').toBe('');
-    const offerID = scanned.offer.id;
-    await page.goto('/?panel=today');
+    let offer;
+    if (single) {
+      await page.goto('/?panel=today&folder=show');
+      await page
+        .locator('.folder-path-entry__input:visible')
+        .first()
+        .fill(join(documents, 'Roster album 0'));
+      await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
+      await expect(page.locator('[data-source-setup-summary]')).toBeVisible();
+      offer = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
+      expect(offer.portfolio).toBeFalsy();
+    } else {
+      offer = (
+        await json(
+          await request.post('/api/personal-assistant/folder-digest/scan', {
+            data: { chip: 'documents' }
+          })
+        )
+      ).offer;
+      expect(offer.portfolio.projects).toBe(5);
+      await page.goto('/?panel=today');
+    }
+    expect(offer.home_staffing.state).toBe('needs_choice');
+    expect(offer.plan.digest || '').toBe('');
+    const offerID = offer.id;
     const today = page.locator('#personalAssistantTodayStripToggle');
     const summary = page.locator('[data-source-setup-summary]');
     await expect
@@ -410,14 +462,32 @@ test('recognized build and collection review preserve and reuse the exact saved 
     const readOffer = async () =>
       (await json(await request.get(`/api/personal-assistant/folder-digest?offer_id=${offerID}`)))
         .folder_digest.offer;
-    await expect.poll(async () => (await readOffer()).status, { timeout: 90_000 }).toBe('resolved');
+    await expect
+      .poll(
+        async () => (single ? (await readOffer()).setup?.stop_reason : (await readOffer()).status),
+        { timeout: 90_000 }
+      )
+      .toBe(single ? 'handoff_ready' : 'resolved');
     const completed = await readOffer();
     expect(completed.home_result).toMatchObject({ state: 'ready', home_id: homeID });
-    expect(completed.outcome.receipt).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: manager, detail: 'reused saved agent', assigned: true })
-      ])
-    );
+    if (single) {
+      const home = await json(await request.get(`/api/workspaces/${homeID}`));
+      expect(home.assistant_program.state.staffing_receipts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role_id: 'portfolio_manager',
+            agent_name: manager,
+            action: 'assign'
+          })
+        ])
+      );
+    } else {
+      expect(completed.outcome.receipt).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: manager, detail: 'reused saved agent', assigned: true })
+        ])
+      );
+    }
     await expect(final.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('03-folder-reuse-result.png'),
@@ -449,6 +519,7 @@ test('recognized build and collection review preserve and reuse the exact saved 
       expect(releaseInputs).toHaveLength(2);
     }
     expect(model.calls()).toBe(recovery ? 3 : 1);
+    expect(model.sawEvidence(privatePurpose)).toBe(false);
     expect(rolePUTs).toBe(0);
     await writeFile(
       testInfo.outputPath('03-folder-staffing-evidence.json'),
@@ -463,6 +534,7 @@ test('recognized build and collection review preserve and reuse the exact saved 
                 deliberateSourceEdit: true,
                 keyboardFocus: true,
                 emptySearchManualFallback: true,
+                trashPrivateCopyExcluded: true,
                 longName: true,
                 viewport: '390x844',
                 theme: 'dark'
@@ -480,7 +552,8 @@ test('recognized build and collection review preserve and reuse the exact saved 
             action: 'assign',
             profileCount: before.length,
             profileUnchanged: true,
-            resolved: true,
+            resolved: !single,
+            singleProjectHandoffReady: single || undefined,
             reusedReceipt: true,
             standaloneAssignmentUnchanged: true,
             projectsOpened: 0

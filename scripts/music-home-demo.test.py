@@ -133,7 +133,7 @@ chmod 0755 "$root/artifacts/reaper-plugin-darwin-arm64"
                     self.assert_unchanged()
 
     def test_roster_suite_accepts_only_disposable_exact_local_candidate(self):
-        for suite in ("roster-staffing", "roster-folder", "roster-folder-recovery"):
+        for suite in ("roster-staffing", "roster-folder", "roster-folder-recovery", "roster-folder-song"):
             with self.subTest(suite=suite):
                 result, sandbox, barrier = self.run_demo(False, "reviewed-candidate", suite=suite)
                 self.assertEqual(result.returncode, 73, result.stdout + result.stderr)
@@ -142,7 +142,7 @@ chmod 0755 "$root/artifacts/reaper-plugin-darwin-arm64"
                 self.assert_unchanged()
 
     def test_roster_suite_cannot_claim_reviewed_release_acceptance(self):
-        for suite in ("roster-staffing", "roster-folder", "roster-folder-recovery"):
+        for suite in ("roster-staffing", "roster-folder", "roster-folder-recovery", "roster-folder-song"):
             with self.subTest(suite=suite):
                 result, sandbox, barrier = self.run_demo(False, "reviewed-candidate", suite=suite, provider="reviewed")
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)

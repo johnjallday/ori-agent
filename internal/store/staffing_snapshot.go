@@ -67,11 +67,11 @@ type staffingSourceWitness struct {
 func (c *CompositeStore) ReadStaffingSnapshot(ctx context.Context) StaffingSnapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.readStaffingSnapshotLocked(ctx, func(st Store) StaffingSnapshot { return ReadStaffingSnapshot(ctx, st) })
+	return c.readStaffingSnapshotLocked(func(st Store) StaffingSnapshot { return ReadStaffingSnapshot(ctx, st) })
 }
 
 // Caller holds the composite root lock; read chooses the member locking policy.
-func (c *CompositeStore) readStaffingSnapshotLocked(ctx context.Context, read func(Store) StaffingSnapshot) StaffingSnapshot {
+func (c *CompositeStore) readStaffingSnapshotLocked(read func(Store) StaffingSnapshot) StaffingSnapshot {
 	result := read(c.system)
 	allNames := append([]string(nil), result.sourceNames...)
 	if c.root == nil || inspectAgentRoot(c.rootPath) != "" {
@@ -131,7 +131,7 @@ func (s *fileStore) staffingSnapshotLocked(ctx context.Context) StaffingSnapshot
 		}
 	}
 	entries, err := os.ReadDir(s.agentsDir())
-	if err != nil && !(os.IsNotExist(err) && len(s.agents) == 0) {
+	if err != nil && (!os.IsNotExist(err) || len(s.agents) != 0) {
 		return StaffingSnapshot{sourceNames: result.sourceNames}
 	}
 	// Detect newly added definitions omitted by the loaded store, without
