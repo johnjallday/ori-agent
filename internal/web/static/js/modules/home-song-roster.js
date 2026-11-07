@@ -12,6 +12,7 @@
  */
 
 import { format as openWorkLine } from './ticket-count-line.js';
+import { songFactsLabel } from './library-open.js';
 import { safeWorkspaceRoute } from './song-card.js';
 
 export const ROSTER_VISIBLE_ROWS = 10;
@@ -26,6 +27,27 @@ const text = value => (typeof value === 'string' ? value.trim() : '');
 
 export function rosterURL(homeID) {
   return `/api/workspaces/${encodeURIComponent(String(homeID || ''))}/assistant-program/library/roster`;
+}
+
+/**
+ * Workspace id → a map tile's facts text, from Home id → roster rows (song-card
+ * PRD FR10). Both maps use it: Home's map and a Home's own page map.
+ */
+export function songFactsSnapshot(rosters) {
+  const snapshot = {};
+  for (const rows of Object.values(rosters || {})) {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const id = String(row?.workspace_id || '');
+      // The tile says tempo and length; the card and the tooltip keep the
+      // track count and "varies". A song with only a track count shows that.
+      const facts = row?.facts && typeof row.facts === 'object' ? row.facts : null;
+      const label =
+        songFactsLabel(facts && { ...facts, track_count: 0, tempo_varies: false }) ||
+        songFactsLabel(facts);
+      if (id && label) snapshot[id] = label;
+    }
+  }
+  return snapshot;
 }
 
 /** "Nov 5", or "Nov 5, 2025" outside the current year; '' for no date. */

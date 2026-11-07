@@ -1031,6 +1031,49 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+/* A Home's selected linked song (song-card PRD FR9): the shared card from
+   components.css, under Give work, scrolling inside itself when tall. */
+.ws-cmd-map-song-card {
+  width: min(320px, calc(100vw - 48px));
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+  border-radius: 10px;
+}
+.ws-cmd-map-song-card {
+  position: relative;
+}
+.ws-cmd-map-song-card .song-card {
+  margin-bottom: 0;
+  padding-right: 2.5rem;
+}
+/* "Hide song card": the card can cover the songs on a small screen. */
+.ws-cmd-map-song-card-hide {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-cmd-map-song-card-hide:hover {
+  border-color: var(--cozy-line, #cdbf9f);
+  color: var(--cozy-ink, #2b2417);
+}
+.ws-cmd-map-song-card-hide:focus-visible {
+  outline: 2px solid var(--cozy-moss, #4a6b4a);
+  outline-offset: 1px;
+}
 .ws-cmd-map-quest-composer {
   width: min(340px, calc(100vw - 48px));
   display: flex;
@@ -7055,6 +7098,10 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-map-quest-composer {
     width: 100%;
+  }
+  .ws-cmd-map-song-card {
+    width: 100%;
+    max-height: 40vh;
   }
   .ws-cmd-map-window-backdrop {
     padding: 12px;

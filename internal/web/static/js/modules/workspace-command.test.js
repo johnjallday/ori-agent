@@ -8419,6 +8419,224 @@ test('agents reach the map as units; a status change patches them, a roster chan
   }
 });
 
+// --- a Home's own map: song facts on tiles and the selected song's card ------
+// (song-card PRD FR9, FR10)
+
+function songCardSlot() {
+  const doc = {
+    createElement: tag => songNode(tag, doc),
+    createTextNode: value => ({ textContent: String(value), children: [] })
+  };
+  return songNode('div', doc);
+}
+
+function songNode(tag, doc) {
+  const attributes = {};
+  return {
+    tagName: tag.toUpperCase(),
+    ownerDocument: doc,
+    children: [],
+    className: '',
+    hidden: true,
+    _text: '',
+    get textContent() {
+      return this.children.length ? this.children.map(c => c.textContent).join('') : this._text;
+    },
+    set textContent(value) {
+      this.children = [];
+      this._text = String(value);
+    },
+    append(...nodes) {
+      this.children.push(...nodes);
+    },
+    replaceChildren(...nodes) {
+      this.children = nodes;
+      this._text = '';
+    },
+    setAttribute(k, v) {
+      attributes[k] = String(v);
+    },
+    getAttribute(k) {
+      return attributes[k] ?? null;
+    }
+  };
+}
+
+test('a Home’s own map shows its songs’ facts and the selected linked song’s card', async () => {
+  const commandView = detachmentCommandView('group', [
+    { id: 'm1', name: 'Night Drive' },
+    { id: 'sub', name: 'Stems', kind: 'group', children: [] }
+  ]);
+  commandView.active = true;
+  commandView.groupTemplateStatus = { kind: 'managed_home' };
+  const mounts = [];
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = { appendChild: node => (node.parentNode = slot) };
+  const cardSlot = songCardSlot();
+  commandView.container = {
+    querySelector: sel =>
+      sel.includes('data-cmd-detachment-slot')
+        ? slot
+        : sel.includes('data-cmd-song-card-slot')
+          ? cardSlot
+          : null
+  };
+  commandView.detachmentMapEl = host;
+  let selected = '';
+  const requests = [];
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  globalThis.window = {
+    OriWorkspaceMap: {
+      mount: (el, state) => mounts.push(state),
+      unmount() {},
+      getSelectedId: () => selected,
+      scopeWorkspacesToGroup: (rows, id) =>
+        rows.filter(row => row.id === id || row.parent_id === id)
+    }
+  };
+  let cardStatus = 200;
+  globalThis.fetch = async url => {
+    requests.push(String(url));
+    if (String(url).endsWith('/library/roster')) {
+      return {
+        ok: true,
+        json: async () => ({
+          rows: [
+            { workspace_id: 'm1', facts: { tempo_bpm: 92, length_seconds: 221, track_count: 14 } }
+          ]
+        })
+      };
+    }
+    return {
+      ok: cardStatus === 200,
+      status: cardStatus,
+      json: async () => ({
+        linked: true,
+        home_name: 'Studio',
+        title: 'Night Drive',
+        facts: { tempo_bpm: 92, length_seconds: 221, track_count: 14 },
+        facts_state: 'on',
+        keeper_agent_name: 'Studio Keeper',
+        status_line: '14 tracks · 92 BPM · 3:41; no open work'
+      })
+    };
+  };
+  try {
+    await commandView.loadDetachmentSongFacts();
+    assert.equal(mounts.length, 1, 'new facts re-mount the map');
+    assert.deepEqual(mounts[0].songFacts, { m1: '92 BPM · 3:41' }, 'tempo · length on the tile');
+    assert.equal(requests[0], '/api/workspaces/g/assistant-program/library/roster');
+
+    // The same facts again: no re-mount.
+    await commandView.loadDetachmentSongFacts();
+    assert.equal(mounts.length, 1);
+
+    // Selecting the song reads its card into the dock.
+    selected = 'm1';
+    mounts[0].onSelect('m1', { id: 'm1', parent_id: 'g', kind: 'workspace' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests.at(-1), '/api/workspaces/m1/song-card');
+    assert.equal(cardSlot.hidden, false);
+    assert.match(cardSlot.textContent, /Night Drive/);
+    assert.match(cardSlot.textContent, /Kept by Studio Keeper/);
+
+    // A re-render repaints it from the last read, without a fetch.
+    const before = requests.length;
+    cardSlot.replaceChildren();
+    cardSlot.hidden = true;
+    commandView.syncDetachmentMap();
+    assert.equal(requests.length, before);
+    assert.equal(cardSlot.hidden, false);
+
+    // A failed re-read keeps the last good card.
+    cardStatus = 500;
+    mounts[0].onSelect('m1', { id: 'm1', parent_id: 'g', kind: 'workspace' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cardSlot.hidden, false);
+
+    // A group member, a workspace elsewhere, or nothing: no card, no fetch.
+    const reads = requests.length;
+    for (const [id, row] of [
+      ['sub', { id: 'sub', parent_id: 'g', kind: 'group' }],
+      ['other', { id: 'other', parent_id: 'x', kind: 'workspace' }],
+      ['', null]
+    ]) {
+      mounts[0].onSelect(id, row);
+      assert.equal(cardSlot.hidden, true, `no card for ${id || 'no selection'}`);
+    }
+    assert.equal(requests.length, reads);
+
+    // A shown card carries "Hide song card"; hiding keeps the selection, and
+    // a click on the tile (even the same one) brings the card back.
+    cardStatus = 200;
+    mounts[0].onSelect('m1', { id: 'm1', parent_id: 'g', kind: 'workspace' });
+    await new Promise(resolve => setImmediate(resolve));
+    const hideButton = cardSlot.children.find(
+      node => node.getAttribute?.('data-cmd-song-card-hide') === ''
+    );
+    assert.ok(hideButton, 'the card has a hide button');
+    assert.equal(hideButton.getAttribute('aria-label'), 'Hide song card');
+    commandView.hideDetachmentSongCard();
+    assert.equal(cardSlot.hidden, true);
+    // A re-mount that kept the hidden song selected leaves the card hidden.
+    commandView.detachmentMountedKey = '';
+    commandView.syncDetachmentMap();
+    assert.equal(cardSlot.hidden, true, 'a hidden card stays hidden through a re-mount');
+    mounts.at(-1).onSelect('m1', { id: 'm1', parent_id: 'g', kind: 'workspace' });
+    assert.equal(cardSlot.hidden, false, 'choosing the tile again shows it');
+
+    // Map → Details → Map: the map kept the song selected, so its card returns.
+    commandView.unmountDetachmentMap();
+    commandView.container = { querySelector: () => null };
+    commandView.syncDetachmentMap(); // Details: no slots
+    commandView.container = {
+      querySelector: sel =>
+        sel.includes('data-cmd-detachment-slot')
+          ? slot
+          : sel.includes('data-cmd-song-card-slot')
+            ? cardSlot
+            : null
+    };
+    cardSlot.replaceChildren();
+    cardSlot.hidden = true;
+    commandView.syncDetachmentMap();
+    assert.equal(cardSlot.hidden, false, 'the still-selected song has its card back');
+    // A re-mount whose selection is gone takes the card with it.
+    selected = '';
+    commandView.detachmentMountedKey = '';
+    commandView.syncDetachmentMap();
+    assert.equal(cardSlot.hidden, true);
+
+    // Not a managed Home: no roster read and no card.
+    commandView.groupTemplateStatus = { kind: 'custom' };
+    const plain = requests.length;
+    await commandView.loadDetachmentSongFacts();
+    mounts.at(-1).onSelect('m1', { id: 'm1', parent_id: 'g', kind: 'workspace' });
+    assert.equal(requests.length, plain);
+    assert.equal(cardSlot.hidden, true);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
+  }
+});
+
+test('only a managed Home’s Map dock carries a hidden song card slot under Give work', () => {
+  const home = detachmentCommandView('group');
+  home.groupTemplateStatus = { kind: 'managed_home' };
+  assert.match(
+    home.renderOperationsMap(),
+    /data-cmd-map-give-work[\s\S]*?<div class="song-card-mount ws-cmd-map-song-card" data-cmd-song-card-slot hidden><\/div><\/div>/
+  );
+  assert.doesNotMatch(
+    detachmentCommandView('group').renderOperationsMap(),
+    /data-cmd-song-card-slot/
+  );
+});
+
 // --- the task-run show on the Operations map (task-run-show §4.5) ------------
 
 function showCommandView(kind = '') {

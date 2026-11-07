@@ -51,7 +51,13 @@ import {
   projectStaffingOffer,
   sharedAssistantOfferHTML
 } from './library-staffing.js';
-import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
+import {
+  flattenWorkspaceTree,
+  buildMapMetadata,
+  isGroupWorkspace as isGroupRow
+} from './workspace-map-snapshot.js';
+import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
+import { renderSongCard, songCardURL, songCardView } from './song-card.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
   deleteWorkspaces as deleteWorkspacesAction,
@@ -12356,7 +12362,13 @@ export class WorkspaceCommandView {
     return (
       '<div class="ws-cmd-map-quest-dock">' +
       '<button type="button" class="ws-cmd-map-quest-fab" data-cmd-map-give-work aria-haspopup="dialog">' +
-      '<i class="bi bi-plus-lg" aria-hidden="true"></i><span>Give work</span></button></div>'
+      '<i class="bi bi-plus-lg" aria-hidden="true"></i><span>Give work</span></button>' +
+      // A managed Home's selected linked song shows its card here (song-card
+      // PRD FR9); song-card.js fills it. No other map gets the slot.
+      (this.groupTemplateStatus?.kind === 'managed_home'
+        ? '<div class="song-card-mount ws-cmd-map-song-card" data-cmd-song-card-slot hidden></div>'
+        : '') +
+      '</div>'
     );
   }
 
@@ -12409,6 +12421,10 @@ export class WorkspaceCommandView {
     if (flow) this.restoreFlowOpenerFocus(root);
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      if (event.target.closest('[data-cmd-song-card-hide]')) {
+        this.hideDetachmentSongCard();
+        return;
+      }
       const arrangement = event.target.closest('[data-cmd-map-arrangement]');
       if (arrangement) {
         const value = arrangement.getAttribute('data-cmd-map-arrangement');
@@ -13582,8 +13598,107 @@ export class WorkspaceCommandView {
       // The empty lot's library count is drawn by the mount, so a changed
       // count is a reason to re-mount too.
       '::' +
-      JSON.stringify(this.libraryEmptyState || null)
+      JSON.stringify(this.libraryEmptyState || null) +
+      // A linked song's facts are drawn on its tile's meta line by the mount.
+      '::' +
+      JSON.stringify(this.detachmentSongFacts || {})
     );
+  }
+
+  /**
+   * A managed Home's linked songs' facts for their tiles (song-card PRD FR10),
+   * from the Home's roster: the same text Home's own map shows. Anything else,
+   * or an unreadable roster, leaves the tiles as they were.
+   */
+  async loadDetachmentSongFacts() {
+    const workspaceId = this.workspaceId();
+    const status = this.groupTemplateStatus;
+    let next = {};
+    if (workspaceId && status && status.kind === 'managed_home') {
+      try {
+        const response = await fetch(rosterURL(workspaceId), {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store'
+        });
+        if (!response.ok) return;
+        const body = await response.json();
+        next = songFactsSnapshot({
+          [workspaceId]: Array.isArray(body?.rows) ? body.rows : []
+        });
+      } catch (err) {
+        return;
+      }
+    }
+    if (this.workspaceId() !== workspaceId) return;
+    if (JSON.stringify(next) === JSON.stringify(this.detachmentSongFacts || {})) return;
+    this.detachmentSongFacts = next;
+    if (this.active) this.syncDetachmentMap();
+  }
+
+  /**
+   * The map's selection changed. A workspace directly under a managed Home is
+   * a song candidate; the server decides, and `linked:false` shows nothing.
+   */
+  selectDetachmentMember(id, row, { fromMount = false } = {}) {
+    const homeId = this.workspaceId();
+    const candidate =
+      Boolean(id && row && homeId) &&
+      row.parent_id === homeId &&
+      !isGroupRow(row) &&
+      this.groupTemplateStatus?.kind === 'managed_home';
+    // A click on a tile (even the same one) brings a hidden card back.
+    if (!fromMount) this.detachmentSongCardHidden = '';
+    this.detachmentSongCardId = candidate ? id : '';
+    this.paintDetachmentSongCard();
+    if (candidate) void this.loadDetachmentSongCard(id);
+  }
+
+  /**
+   * "Hide song card": the card can cover the songs on a small screen, so it
+   * goes away until the next tile is chosen. The selection is left alone.
+   */
+  hideDetachmentSongCard() {
+    this.detachmentSongCardHidden = this.detachmentSongCardId || '';
+    this.detachmentSongCardId = '';
+    this.paintDetachmentSongCard();
+    this.container?.querySelector?.('[data-cmd-map-give-work]')?.focus?.({ preventScroll: true });
+  }
+
+  async loadDetachmentSongCard(id) {
+    if (!this.detachmentSongCards) this.detachmentSongCards = new Map();
+    let view = null;
+    try {
+      const response = await fetch(songCardURL(id), { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`song card ${response.status}`);
+      view = songCardView(await response.json());
+    } catch (err) {
+      console.warn('workspace-command: song card unavailable', err);
+      if (this.detachmentSongCards.has(id)) return; // Keep the last good card.
+    }
+    this.detachmentSongCards.set(id, view);
+    // The selection may have moved on meanwhile; paint shows whatever is current.
+    if (this.detachmentSongCardId === id) this.paintDetachmentSongCard();
+  }
+
+  /** Fill the dock's slot from the last card read for the selected song. */
+  paintDetachmentSongCard() {
+    const slot =
+      this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-song-card-slot]')
+        : null;
+    if (!slot) return;
+    const id = this.detachmentSongCardId || '';
+    const cards = this.detachmentSongCards;
+    const card = renderSongCard(slot, id && cards && cards.has(id) ? cards.get(id) : null);
+    if (!card) return;
+    const doc = slot.ownerDocument || globalThis.document;
+    const hide = doc.createElement('button');
+    hide.type = 'button';
+    hide.className = 'ws-cmd-map-song-card-hide';
+    hide.setAttribute('data-cmd-song-card-hide', '');
+    hide.setAttribute('aria-label', 'Hide song card');
+    hide.textContent = '×';
+    slot.append(hide);
   }
 
   /**
@@ -13593,6 +13708,8 @@ export class WorkspaceCommandView {
    * Re-mounts the scoped map when the answer changed.
    */
   async loadLibraryEmptyState() {
+    // The same moments re-read the songs' tile facts.
+    void this.loadDetachmentSongFacts();
     const workspaceId = this.workspaceId();
     const status = this.groupTemplateStatus;
     let next = null;
@@ -13747,6 +13864,9 @@ export class WorkspaceCommandView {
     const host = this.ensureDetachmentHost();
     if (!host) return;
     if (host.parentNode !== slot) slot.appendChild(host);
+    // The dock was rebuilt with the rest of the view; the selected song's card
+    // comes back from the last read, without a fetch.
+    this.paintDetachmentSongCard();
     // The toolbar was rebuilt with the rest of the view; an Add existing picker
     // the user had open comes back, without pulling focus from wherever they are.
     if (this.detachmentPickerOpen) this.openDetachmentPicker({ focus: false });
@@ -13780,6 +13900,10 @@ export class WorkspaceCommandView {
       // A Home with projects on its shelf says so on its empty lot
       // (folder-to-map-handoff FR-6).
       libraryEmptyState: this.libraryEmptyState || null,
+      // A linked song's tempo · length on its tile, as on Home's map (song-card
+      // PRD FR10), and its card in the dock when selected (FR9).
+      songFacts: this.detachmentSongFacts || {},
+      onSelect: (id, row) => this.selectDetachmentMember(id, row),
       onSetupProjects: (groupId, { element } = {}) => this.openLibrarySetupSheet(element),
       // The combined surface's overlays cover the top band and the left
       // column; the district opens framed in what they leave clear.
@@ -13811,6 +13935,16 @@ export class WorkspaceCommandView {
     // just-built or just-moved member is selected explicitly (FR-18, FR-25).
     if (selectedId && typeof map.setSelectedId === 'function') {
       map.setSelectedId(host, workspaces, selectedId);
+    }
+    // The card follows the selection the mount kept: a song still selected
+    // after a Details round trip gets its card back (unless it was hidden),
+    // and a member that is gone takes its card with it.
+    const kept = typeof map.getSelectedId === 'function' ? map.getSelectedId() || '' : '';
+    const hiddenByUser = Boolean(kept) && kept === this.detachmentSongCardHidden;
+    if (kept !== (this.detachmentSongCardId || '') && !hiddenByUser) {
+      this.selectDetachmentMember(kept, workspaces.find(row => row && row.id === kept) || null, {
+        fromMount: true
+      });
     }
   }
 
@@ -13954,6 +14088,8 @@ export class WorkspaceCommandView {
     this.detachmentMountedKey = '';
     this.detachmentUnitsSignature = '';
     this._detachmentDragActive = false;
+    // The card and the facts stay: the next mount reconciles the card with
+    // whatever selection the map kept.
   }
 
   renderDetachmentPanel() {

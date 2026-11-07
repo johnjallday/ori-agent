@@ -10,7 +10,7 @@ import {
   libraryHomeIds,
   libraryShelfRoute
 } from './home-library-badges.js';
-import { songFactsLabel } from './library-open.js';
+import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
 import { renderSongCard, songCardURL, songCardView } from './song-card.js';
 import { workspaceUpdates, watchWorkspaceUpdatePage } from './workspace-updates.js';
 import {
@@ -1420,26 +1420,12 @@ export function withSongCardMount(html) {
   return source.slice(0, at) + SONG_CARD_MOUNT_HTML + source.slice(at);
 }
 
-/** Workspace id → facts text, from each Home's roster rows (shelf wording). */
-export function songFactsSnapshot(rosters) {
-  const snapshot = {};
-  for (const rows of Object.values(rosters || {})) {
-    for (const row of Array.isArray(rows) ? rows : []) {
-      const id = String(row?.workspace_id || '');
-      // The tile says tempo and length; the card and the tooltip keep the
-      // track count and "varies". A song with only a track count shows that.
-      const facts = row?.facts && typeof row.facts === 'object' ? row.facts : null;
-      const text =
-        songFactsLabel(facts && { ...facts, track_count: 0, tempo_varies: false }) ||
-        songFactsLabel(facts);
-      if (id && text) snapshot[id] = text;
-    }
-  }
-  return snapshot;
-}
+// Workspace id → facts text from each Home's roster rows; shared with a Home's
+// own page map, so it lives with the roster.
+export { songFactsSnapshot };
 
 export function songRosterURL(homeID) {
-  return `/api/workspaces/${encodeURIComponent(String(homeID || ''))}/assistant-program/library/roster`;
+  return rosterURL(homeID);
 }
 
 export function renderWorkspaceRailHTML(view) {
