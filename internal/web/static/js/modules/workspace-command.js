@@ -26,6 +26,7 @@ import {
   filesystemBindingSubtitle
 } from './workspace-folder-shape.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
+import { workspaceNavigationHTML, workspaceSettingsHTML } from './workspace-command-chrome.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import {
@@ -1635,35 +1636,18 @@ export class WorkspaceCommandView {
   }
 
   commandViewSwitchHTML() {
-    const modes = [
-      { key: 'details', label: 'Details' },
-      { key: 'map', label: 'Map' },
-      { key: 'tickets', label: 'Tickets' }
-    ];
-    // Shown only when this workspace actually has a dashboard, so a workspace
-    // without one looks exactly as it did before the feature existed (FR4).
-    if (this.hasCustomDashboard()) modes.push({ key: 'dashboard', label: 'Dashboard' });
-    return (
-      '<div class="ws-cmd-view-switch" role="group" aria-label="Workspace view">' +
-      modes
-        .map(mode => {
-          const active = this.viewMode === mode.key;
-          return (
-            '<button type="button" class="ws-cmd-view-btn' +
-            (active ? ' is-active' : '') +
-            '" data-cmd-view-mode="' +
-            escapeHtml(mode.key) +
-            '" aria-pressed="' +
-            (active ? 'true' : 'false') +
-            '">' +
-            escapeHtml(mode.label) +
-            '</button>'
-          );
-        })
-        .join('') +
-      this.plansLinkHTML() +
-      '</div>'
-    );
+    return workspaceNavigationHTML({
+      mode: this.viewMode,
+      dashboard: this.hasCustomDashboard(),
+      plans: this.plansLinkHTML(),
+      canvas: this.workspaceSlug() ? this.workspaceRoute('/canvas') : '',
+      ticketCount: TicketCounts.isKnown(this.currentTicketCounts())
+        ? TicketCounts.openCount(this.currentTicketCounts())
+        : '—',
+      ticketDescription:
+        TicketCounts.describe(this.currentTicketCounts()) || 'Ticket counts unavailable',
+      ticketAlert: this.hasAttentionTasks()
+    });
   }
 
   // Plans is a LINK, not a fourth view mode.
@@ -1847,133 +1831,73 @@ export class WorkspaceCommandView {
     });
   }
 
-  commandBarHTML(ws, name, mode, stats) {
-    const description = String((ws && ws.description) || '').trim();
-    const isGroup = this.isGroupWorkspace();
-    // The HQ speaks plainly everywhere (PRD 767 FR18); other workspaces keep
-    // their tactical eyebrow.
-    const kicker = isGroup
-      ? 'Detachment · Command'
-      : this.isPersonalHQ()
-        ? HQ_LABELS.yourHQ
-        : 'Outpost · Command';
-    const groupBadge = isGroup
-      ? '<span class="ws-cmd-group-badge" title="Group workspace">Group</span>'
-      : '';
-    // Both Command modes now carry HQ surface (Details gains a Stations rail
-    // panel), so the Personal HQ badge shows in Map and Details alike (FR15) —
-    // never for non-HQ workspaces. Echoes the ws-map-tile-hq-badge treatment
-    // from the base map.
-    const hqBadge = this.isPersonalHQ()
-      ? '<span class="ws-cmd-hq-badge" title="Personal HQ">Personal HQ</span>'
-      : '';
+  commandBarHTML(ws, name, mode, _stats) {
+    const description = String(ws?.description || '').trim();
     const tags = this.workspaceTags();
-    const isLongDescription = Array.from(description).length > 150;
-    const descriptionClass =
-      'ws-cmd-description' +
-      (!description ? ' is-empty' : '') +
-      (isLongDescription && !this.identityExpanded ? ' is-collapsed' : '');
-    const descriptionText = description || 'No description';
-    const workflowHref = this.workflowHref();
-    const workflowLabel = mode ? 'Workflow · ' + mode : '';
-    const subtitle = this.commandSubtitle(mode);
-
+    const long = Array.from(description).length > 150;
+    const hqDetails = this.isPersonalHQ() && this.viewMode === 'details';
     return (
-      '<header class="ws-cmd-topbar' +
-      (isGroup ? ' is-group' : '') +
+      '<header class="ws-cmd-topbar ws-cmd-compact' +
+      (this.isGroupWorkspace() ? ' is-group' : '') +
+      (hqDetails ? ' ws-hq-header' : '') +
       '"' +
       this.groupAccentStyle(ws) +
       '>' +
       '<div class="ws-cmd-nav">' +
-      // Back action from a workspace-scoped page points at Home, the canonical
-      // workspace overview, and says so (PRD FR11/FR12). It used to say
-      // "Workspaces" and rely on the /workspaces compatibility redirect.
       '<a class="ws-cmd-nav-btn" data-cmd-nav-home href="/" aria-label="Back to the workspace map on Home">Home</a>' +
       this.parentGroupLinkHTML() +
-      '<a class="ws-cmd-nav-btn" href="' +
-      escapeHtml(this.workspaceRoute('/canvas')) +
-      '">Canvas</a>' +
-      (this.viewMode === 'details'
-        ? ''
-        : '<a class="ws-cmd-nav-btn" href="' +
-          escapeHtml(this.workspaceRoute('/diagnostics')) +
-          '">Diagnostics</a>') +
-      '<a class="ws-cmd-nav-btn" href="' +
-      escapeHtml(workflowHref) +
-      '">Orchestration Skills</a>' +
       this.projectOpenActionHTML() +
-      this.commandViewSwitchHTML() +
       '</div>' +
-      '<div class="ws-cmd-crest">' +
-      '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' +
-      '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/><path d="M3 21h18"/></svg>' +
-      '</div>' +
-      '<div class="ws-cmd-title">' +
-      '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">' +
-      escapeHtml(kicker) +
-      '</span></div>' +
-      '<div class="ws-cmd-title-row">' +
-      '<h2>' +
+      '<div class="ws-cmd-identity-line"><div class="ws-cmd-title">' +
+      '<div class="ws-cmd-title-row"><h2>' +
       escapeHtml(name) +
       '</h2>' +
-      groupBadge +
-      hqBadge +
-      // Portability status ("Ready to move", imported/routines off) is owned by
-      // workspace-continuity-status.js, which keeps its chip in this mount.
-      '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
-      (this.viewMode === 'details'
-        ? ''
-        : '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>') +
+      (this.isPersonalHQ()
+        ? '<span class="ws-cmd-hq-badge">Personal HQ</span>'
+        : this.isGroupWorkspace()
+          ? '<span class="ws-cmd-group-badge">Group</span>'
+          : '') +
       '</div>' +
+      (description
+        ? '<div class="ws-cmd-description-row"><p class="ws-cmd-description' +
+          (long && !this.identityExpanded ? ' is-collapsed' : '') +
+          '">' +
+          escapeHtml(description) +
+          '</p>' +
+          (long
+            ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
+              Boolean(this.identityExpanded) +
+              '">' +
+              (this.identityExpanded ? 'Less' : 'More') +
+              '</button>'
+            : '') +
+          '</div>'
+        : '') +
+      (tags.length ? '<div class="ws-cmd-tags">' + this.commandTagsHTML(tags) + '</div>' : '') +
+      '</div><div class="ws-cmd-header-actions">' +
+      workspaceSettingsHTML({
+        diagnostics: this.workspaceRoute('/diagnostics'),
+        workflow: this.workflowHref()
+      }) +
+      '<button type="button" class="ws-cmd-nav-btn ws-cmd-give-work" data-cmd-give-work aria-haspopup="dialog">Give work</button>' +
+      '</div></div>' +
+      this.identityEditorHTML(name, description) +
+      this.commandViewSwitchHTML() +
+      // Keep safety/setup sources visible until their Group 2 replacements exist.
+      '<div class="ws-cmd-header-status">' +
       this.groupTemplateStatusHTML() +
       this.anchorDetailsHTML() +
-      '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
-      escapeHtml(workflowLabel) +
+      (hqDetails
+        ? '<p class="ws-hq-facts" data-cmd-hq-facts>' + this.hqFactsHTML() + '</p>'
+        : '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>') +
+      '<span class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
+      escapeHtml(mode ? 'Workflow · ' + mode : '') +
       '"' +
-      (subtitle ? '' : ' hidden') +
+      (mode ? '' : ' hidden') +
       '>' +
-      escapeHtml(subtitle) +
-      '</div>' +
-      '<div class="ws-cmd-description-row">' +
-      '<p class="' +
-      descriptionClass +
-      '">' +
-      escapeHtml(descriptionText) +
-      '</p>' +
-      (this.viewMode === 'details'
-        ? ''
-        : '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>') +
-      (isLongDescription
-        ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
-          (this.identityExpanded ? 'true' : 'false') +
-          '">' +
-          (this.identityExpanded ? 'Less' : 'More') +
-          '</button>'
-        : '') +
-      '</div>' +
+      escapeHtml(mode ? 'Workflow · ' + mode : '') +
+      '</span></div>' +
       this.buildSummaryHTML(ws) +
-      '<div class="ws-cmd-tags-row">' +
-      '<div class="ws-cmd-tags">' +
-      this.commandTagsHTML(tags) +
-      '</div>' +
-      (this.viewMode === 'details'
-        ? ''
-        : '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="tags" aria-label="Edit workspace tags">Edit</button>') +
-      '</div>' +
-      (this.viewMode === 'details' ? '' : this.identityEditorHTML(name, description)) +
-      '</div>' +
-      '<div class="ws-cmd-readout">' +
-      this.statBoxHTML(stats.agents, 'Agents', 'agents', 'View agents') +
-      this.statBoxHTML(
-        stats.tools,
-        'Tools',
-        'tools',
-        'Open tools: MCP, skills, plugins, and find tools'
-      ) +
-      // One tile says how much work there is (PRD 760 FR-7). It replaces the
-      // old Open Tasks and Tickets pair, which counted the same rows two ways.
-      this.workTileHTML() +
-      '</div>' +
       '</header>'
     );
   }
@@ -2013,6 +1937,20 @@ export class WorkspaceCommandView {
   /** Repaints the work tile's value and name in place, without a full render. */
   paintWorkTile() {
     if (!this.container || typeof this.container.querySelector !== 'function') return;
+    const destination = this.container.querySelector('[data-cmd-view-mode="tickets"]');
+    if (destination) {
+      const counts = this.currentTicketCounts();
+      const count = destination.querySelector('[data-cmd-ticket-count]');
+      if (count)
+        count.textContent = TicketCounts.isKnown(counts)
+          ? String(TicketCounts.openCount(counts))
+          : '—';
+      destination.setAttribute(
+        'title',
+        TicketCounts.describe(counts) || 'Ticket counts unavailable'
+      );
+      destination.classList?.toggle('is-alert', this.hasAttentionTasks());
+    }
     const tile = this.container.querySelector('[data-cmd-section="tickets"]');
     if (!tile) return;
     // The HQ's header shows the same counts as one number, "Open tickets".
@@ -2363,6 +2301,14 @@ export class WorkspaceCommandView {
   }
 
   disposeNextAction() {
+    if (typeof window !== 'undefined' && this.chromeResize) {
+      window.removeEventListener?.('resize', this.chromeResize);
+      this.chromeResize = null;
+    }
+    if (typeof document !== 'undefined' && this.chromeOutsideClick) {
+      document.removeEventListener?.('click', this.chromeOutsideClick);
+      this.chromeOutsideClick = null;
+    }
     this._renderDeferredByDrag = false;
     this._nextActionUnsubscribe?.();
     this._nextActionUnsubscribe = null;
@@ -2490,9 +2436,10 @@ export class WorkspaceCommandView {
       action?.owner === 'task'
         ? ` data-cmd-work-action="${escapeHtml(action.kind)}" data-cmd-work-task="${escapeHtml(action.id)}"`
         : '';
-    const primary = action
-      ? `<button type="button" id="workspaceNextAction" class="ws-cmd-agent-action is-primary" data-cmd-next-action="${escapeHtml(action.key)}" data-cmd-work-key="next"${taskAttrs}>${escapeHtml(action.label)}</button>`
-      : '';
+    const primary =
+      action && !(action.owner === 'workspace' && action.kind === 'create')
+        ? `<button type="button" id="workspaceNextAction" class="ws-cmd-agent-action is-primary" data-cmd-next-action="${escapeHtml(action.key)}" data-cmd-work-key="next"${taskAttrs}>${escapeHtml(action.label)}</button>`
+        : '';
     return (
       '<section id="workspaceNextActionRegion" class="ws-cmd-work-first" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
@@ -2796,6 +2743,7 @@ export class WorkspaceCommandView {
       return;
     }
     this._renderDeferredByDrag = false;
+    this.captureChromeState();
     const workFocus =
       typeof document !== 'undefined'
         ? document.activeElement?.getAttribute?.('data-cmd-work-key')
@@ -2850,7 +2798,6 @@ export class WorkspaceCommandView {
             : '<div class="ws-cmd-layout">' +
               '<main class="ws-cmd-main">' +
               this.renderWorkFirst() +
-              this.renderWorkspaceAdmin() +
               this.renderUnstaffedBanner() +
               this.renderMissionPanel() +
               this.renderFollowUpsHost() +
@@ -2876,14 +2823,12 @@ export class WorkspaceCommandView {
     this.parkHQPanels();
     const hqDetails = this.viewMode === 'details' && this.isPersonalHQ();
     this.container.innerHTML =
-      (hqDetails
-        ? this.hqCommandBarHTML(ws, name, mode, stats)
-        : this.commandBarHTML(ws, name, mode, stats)) +
+      this.commandBarHTML(ws, name, mode, stats) +
       body +
       this.loadoutAddModalHTML(this.loadoutAddAgent);
 
     this.bindIdentityControls();
-    this.bindIdentityControls(this.container.querySelector('[data-cmd-admin]'));
+    this.bindChromeDisclosures();
     this.bindWorkFirst();
     this.announceNextAction();
     if (workFocus) {
@@ -2970,10 +2915,96 @@ export class WorkspaceCommandView {
     }
   }
 
+  captureChromeState() {
+    const root = this.container?.querySelector?.('.ws-cmd-topbar');
+    if (!root) return;
+    this.chromeOpen = Array.from(root.querySelectorAll?.('[data-cmd-disclosure]') || [])
+      .filter(node => node.open)
+      .map(node => node.getAttribute('data-cmd-disclosure'));
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    this.chromeFocus = null;
+    if (active && root.contains?.(active)) {
+      for (const attribute of ['data-cmd-view-mode', 'data-cmd-give-work', 'data-cmd-settings']) {
+        if (active.hasAttribute?.(attribute))
+          this.chromeFocus = { attribute, value: active.getAttribute(attribute) };
+      }
+      const disclosure = active.closest?.('[data-cmd-disclosure]');
+      if (disclosure && active.tagName === 'SUMMARY')
+        this.chromeFocus = { disclosure: disclosure.getAttribute('data-cmd-disclosure') };
+    }
+  }
+
+  bindChromeDisclosures() {
+    const root = this.container?.querySelector?.('.ws-cmd-topbar');
+    if (!root) return;
+    const disclosures = Array.from(root.querySelectorAll?.('[data-cmd-disclosure]') || []);
+    const position = node => {
+      if (!node.open || typeof window === 'undefined') return;
+      const body = node.querySelector('.ws-cmd-disclosure-body');
+      if (!body) return;
+      const edge = 16;
+      const left = node.getBoundingClientRect().left;
+      const width = body.getBoundingClientRect().width;
+      body.style.right = 'auto';
+      body.style.left =
+        Math.max(edge, Math.min(left, window.innerWidth - width - edge)) - left + 'px';
+    };
+    disclosures.forEach(node => {
+      node.open = (this.chromeOpen || []).includes(node.getAttribute('data-cmd-disclosure'));
+      node.addEventListener('toggle', () => position(node));
+      position(node);
+      node.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !node.open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        node.open = false;
+        node.querySelector('summary')?.focus();
+      });
+      node.addEventListener('click', event => {
+        if (event.target.closest('button, a')) node.open = false;
+      });
+    });
+    if (typeof document !== 'undefined') {
+      if (this.chromeOutsideClick) document.removeEventListener?.('click', this.chromeOutsideClick);
+      this.chromeOutsideClick = event =>
+        disclosures.forEach(node => {
+          if (!node.contains(event.target)) node.open = false;
+        });
+      document.addEventListener?.('click', this.chromeOutsideClick);
+    }
+    if (typeof window !== 'undefined') {
+      if (this.chromeResize) window.removeEventListener?.('resize', this.chromeResize);
+      this.chromeResize = () => disclosures.forEach(position);
+      window.addEventListener?.('resize', this.chromeResize);
+    }
+    const focus = this.chromeFocus;
+    this.chromeFocus = null;
+    if (focus?.disclosure) {
+      disclosures
+        .find(node => node.getAttribute('data-cmd-disclosure') === focus.disclosure)
+        ?.querySelector('summary')
+        ?.focus?.({ preventScroll: true });
+    } else if (focus) {
+      Array.from(root.querySelectorAll?.('[' + focus.attribute + ']') || [])
+        .find(node => node.getAttribute(focus.attribute) === focus.value)
+        ?.focus?.({ preventScroll: true });
+    }
+  }
+
   bindIdentityControls(root = this.container && this.container.querySelector('.ws-cmd-topbar')) {
     if (!root) return;
 
     root.addEventListener('click', event => {
+      const giveWork = event.target.closest('[data-cmd-give-work]');
+      if (giveWork) {
+        this.page?.showAddTaskModal?.({ trigger: giveWork });
+        return;
+      }
+      const settingsOwner = event.target.closest('[data-cmd-settings-owner]');
+      if (settingsOwner) {
+        this.openStatModal(settingsOwner.getAttribute('data-cmd-settings-owner'), settingsOwner);
+        return;
+      }
       const relinkAnchor = event.target.closest('[data-cmd-relink-anchor]');
       if (relinkAnchor) {
         event.preventDefault();
@@ -3253,6 +3284,7 @@ export class WorkspaceCommandView {
       this.activeToolsTab = this.toolsTab(this.activeToolsTab).key;
     }
     this._memoryPanelLoaded = false;
+    this._configModalVisit = '';
     this.statModalTrigger = trigger || null;
     const el = this.ensureStatModal();
     if (!el) return;
@@ -3351,11 +3383,19 @@ export class WorkspaceCommandView {
   // gone by the time the panel closes. A station's opener is found again by its
   // key, so focus still returns to where the user was.
   resolveStatModalTrigger(trigger) {
-    if (!trigger || trigger.isConnected !== false) return trigger;
+    if (!trigger) return null;
     // A building on the map or rail, a card in the HQ's stations grid
     // (PRD 766) or a Flow map node (PRD 767), rebuilt by a render while its
     // panel was open.
     const has = name => typeof trigger.hasAttribute === 'function' && trigger.hasAttribute(name);
+    if (
+      has('data-cmd-settings') ||
+      has('data-cmd-settings-owner') ||
+      has('data-cmd-edit-identity')
+    ) {
+      return this.container?.querySelector?.('[data-cmd-settings]') || null;
+    }
+    if (trigger.isConnected !== false) return trigger;
     const attr = has('data-cmd-hq-card')
       ? 'data-cmd-hq-card'
       : has('data-cmd-flow-node')
@@ -3677,7 +3717,11 @@ export class WorkspaceCommandView {
     if (tabId) this.showConfigTab({ tabId });
     // The memory pane keeps live state (an inline edit, a promote form) and
     // loads once when its panel opens; a background repaint only re-mounts it.
-    if (section !== MEMORY_STATION || !this._memoryPanelLoaded) this.refreshConfigData(section);
+    const visit = this.workspaceId() + ':' + section;
+    if (this._configModalVisit !== visit) {
+      this.refreshConfigData(section);
+      this._configModalVisit = visit;
+    }
     if (section === MEMORY_STATION) this._memoryPanelLoaded = true;
     // expandMountedConfig must run LAST: refreshConfigData re-collapses the config
     // content, so the rail (syncSystemsSurface) also expands last — mirror that order.
@@ -12361,8 +12405,6 @@ export class WorkspaceCommandView {
   mapGiveWorkHTML() {
     return (
       '<div class="ws-cmd-map-quest-dock">' +
-      '<button type="button" class="ws-cmd-map-quest-fab" data-cmd-map-give-work aria-haspopup="dialog">' +
-      '<i class="bi bi-plus-lg" aria-hidden="true"></i><span>Give work</span></button>' +
       // A managed Home's selected linked song shows its card here (song-card
       // PRD FR9); song-card.js fills it. No other map gets the slot.
       (this.groupTemplateStatus?.kind === 'managed_home'

@@ -284,10 +284,11 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /data-cmd-edit-identity="name"/);
   assert.match(container.innerHTML, /data-cmd-edit-identity="description"/);
   assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
-  // One work tile replaces the Open Tasks and Tickets pair (PRD 760 FR-7).
-  assert.match(container.innerHTML, /<div class="ws-l">Tickets<\/div>/);
-  assert.doesNotMatch(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
-  assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
+  // Counts belong to Tickets; workspace tools remain reachable in Settings.
+  assert.match(container.innerHTML, /data-cmd-view-mode="tickets"/);
+  assert.match(container.innerHTML, /data-cmd-ticket-count/);
+  assert.doesNotMatch(container.innerHTML, /ws-cmd-readout/);
+  assert.match(container.innerHTML, /data-cmd-settings-owner="tools"/);
   // "Workspace notes" on every workspace (PRD 766 FR25).
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Workspace notes</);
   assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
@@ -538,8 +539,8 @@ test('the HQ Map opens in Flow with three labelled lanes and the switch (767 FR2
   // FR15, FR16: no belt, no positioned buildings, nothing to drag.
   assert.doesNotMatch(html, /ws-cmd-map-belt/);
   assert.doesNotMatch(html, /--station-x|--station-y|ws-cmd-map-hq-station|data-station-drag/);
-  // FR4: Give work is the same in both arrangements.
-  assert.match(html, /data-cmd-map-give-work/);
+  // Both arrangements use the same shared-header Give work, never a second FAB.
+  assert.doesNotMatch(html, /data-cmd-map-give-work/);
   assert.deepEqual(tacticalTermsIn(html), []);
 });
 
@@ -770,7 +771,9 @@ test('command subtitle includes mission automation state when mission state is l
       commandView.computeStats()
     );
 
-    assert.match(html, /Workflow · Guided · Goal · Enabled/);
+    assert.match(html, /Workflow · Guided/);
+    assert.match(commandView.commandSubtitle('Guided'), /Workflow · Guided · Goal · Enabled/);
+    assert.match(html, /data-cmd-settings-owner="mission"/);
     assert.match(html, /id="workspace-command-subtitle"/);
   } finally {
     globalThis.window = originalWindow;
@@ -1218,10 +1221,10 @@ test('command bar shows group badge and color accent for group workspaces', () =
     commandView.computeStats()
   );
 
-  assert.match(html, /ws-cmd-topbar is-group/);
+  assert.match(html, /ws-cmd-topbar ws-cmd-compact is-group/);
   assert.match(html, /ws-cmd-group-badge/);
   assert.match(html, /--ws-group-accent: #3b82f6/);
-  assert.match(html, /Detachment · Command/);
+  assert.match(html, /ws-cmd-group-badge">Group/);
 });
 
 test('group accent color is sourced from the members-panel group node (detail workspace has none)', () => {
@@ -1283,7 +1286,8 @@ test('command bar omits group treatment for non-group workspaces', () => {
 
   assert.doesNotMatch(html, /ws-cmd-group-badge/);
   assert.doesNotMatch(html, /is-group/);
-  assert.match(html, /Outpost · Command/);
+  assert.match(html, /Solo Outpost/);
+  assert.doesNotMatch(html, /Outpost · Command/);
 });
 
 test('detachment rail panel renders only for group workspaces with member count', () => {
@@ -1869,7 +1873,8 @@ test('the work tile is tinted when any ticket needs attention', () => {
     commandView.computeStats()
   );
 
-  assert.match(html, /class="ws-cmd-stat ws-cmd-stat-work is-alert" data-cmd-section="tickets"/);
+  assert.match(html, /class="ws-cmd-view-btn is-alert" data-cmd-view-mode="tickets"/);
+  assert.match(html, /data-cmd-ticket-count>—</, 'unknown counts never become zero');
   assert.doesNotMatch(html, /data-cmd-section="tasks"/, 'the Open Tasks tile is gone');
 });
 
@@ -4327,7 +4332,7 @@ test('Operations Map controls expose accessible pressed and dialog state', () =>
   });
 
   const switcher = commandView.commandViewSwitchHTML();
-  assert.match(switcher, /role="group" aria-label="Workspace view"/);
+  assert.match(switcher, /<nav class="ws-cmd-view-switch" aria-label="Workspace views"/);
   assert.match(switcher, /data-cmd-view-mode="map" aria-pressed="true"/);
 
   const tray = commandView.renderMapToolTray();
@@ -8629,7 +8634,7 @@ test('only a managed Home’s Map dock carries a hidden song card slot under Giv
   home.groupTemplateStatus = { kind: 'managed_home' };
   assert.match(
     home.renderOperationsMap(),
-    /data-cmd-map-give-work[\s\S]*?<div class="song-card-mount ws-cmd-map-song-card" data-cmd-song-card-slot hidden><\/div><\/div>/
+    /ws-cmd-map-quest-dock[\s\S]*?<div class="song-card-mount ws-cmd-map-song-card" data-cmd-song-card-slot hidden><\/div><\/div>/
   );
   assert.doesNotMatch(
     detachmentCommandView('group').renderOperationsMap(),
@@ -8917,7 +8922,7 @@ test("a member's header links to its parent group right after Home, by the group
   const nav = withSurfaceHost([], () => parentNavOf(parentNavView(STUDIO)));
   assert.match(
     nav,
-    /aria-label="Back to the workspace map on Home">Home<\/a><a class="ws-cmd-nav-btn ws-cmd-nav-parent" data-cmd-parent-group href="\/workspaces\/studio-sessions" title="Open the group Studio Sessions"><span class="ws-cmd-nav-parent-arrow" aria-hidden="true">←<\/span><span class="ws-cmd-nav-parent-label">Group: <span class="ws-cmd-nav-parent-name">Studio Sessions<\/span><\/span><\/a><a class="ws-cmd-nav-btn" href="\/workspaces\/drum-tracking\/canvas">Canvas</
+    /aria-label="Back to the workspace map on Home">Home<\/a><a class="ws-cmd-nav-btn ws-cmd-nav-parent" data-cmd-parent-group href="\/workspaces\/studio-sessions" title="Open the group Studio Sessions"><span class="ws-cmd-nav-parent-arrow" aria-hidden="true">←<\/span><span class="ws-cmd-nav-parent-label">Group: <span class="ws-cmd-nav-parent-name">Studio Sessions<\/span><\/span><\/a><\/div>/
   );
   assert.ok(!nav.includes(STUDIO.id), 'the route uses the slug, never the group UUID');
   assert.equal((nav.match(/data-cmd-parent-group/g) || []).length, 1);
@@ -9844,10 +9849,13 @@ test('HQ Details: the header comes first, with the HQ chips, facts line and edit
       }
     }
   });
-  assert.ok(html.startsWith('<header class="ws-cmd-topbar ws-hq-header"'), 'header is first');
-  assert.match(html, /<h2 id="ws-hq-title">My HQ<\/h2>/);
-  assert.match(html, /<span class="ws-hq-chip is-hq">Your HQ<\/span>/);
-  assert.match(html, /<span class="ws-hq-chip">Workflow · Guided<\/span>/);
+  assert.ok(
+    html.startsWith('<header class="ws-cmd-topbar ws-cmd-compact ws-hq-header"'),
+    'header is first'
+  );
+  assert.match(html, /<h2>My HQ<\/h2>/);
+  assert.match(html, /ws-cmd-hq-badge">Personal HQ<\/span>/);
+  assert.match(html, /Workflow · Guided<\/span>/);
   assert.match(html, /Where my day starts\./);
   assert.match(html, /data-cmd-edit-identity="name"/);
   assert.match(html, /data-cmd-edit-identity="description"/);
@@ -9862,42 +9870,29 @@ test('HQ Details: the header comes first, with the HQ chips, facts line and edit
   assert.doesNotMatch(html, /ws-cmd-garrison|ws-cmd-work-first|data-cmd-admin|ws-cmd-mission"/);
 });
 
-test('HQ Details: the view switch keeps four views and folds the rest into More views (FR6)', () => {
+test('HQ Overview uses the shared primary views, secondary links and Settings', () => {
   const { html } = hqDetailsMarkup();
-  const nav = html.match(/<div class="ws-cmd-nav">(.*?)<\/div><div class="ws-cmd-title/)[1];
-  for (const label of ['Details', 'Map', 'Tickets', 'Plans']) {
-    assert.match(nav, new RegExp('>' + label + '</(button|a)>'), label);
-  }
-  assert.match(
-    nav,
-    /data-cmd-hq-more-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="ws-hq-more-menu">More views</
-  );
-  const menu = nav.match(/<div class="ws-hq-menu"[^>]*>(.*?)<\/div>/);
-  assert.match(menu[0], /role="menu"/);
-  assert.match(menu[0], / hidden>/, 'closed until opened');
-  assert.deepEqual(
-    [...menu[1].matchAll(/role="menuitem"[^>]*>([^<]+)</g)].map(match => match[1]),
-    ['Canvas', 'Diagnostics', 'Orchestration Skills']
-  );
-  // Nowhere else on the nav row.
-  assert.equal(nav.split('>Canvas<').length, 2);
+  const nav = html.match(/<nav class="ws-cmd-view-switch"[^>]*>(.*?)<\/nav>/)[1];
+  for (const mode of ['details', 'map', 'tickets'])
+    assert.match(nav, new RegExp('data-cmd-view-mode="' + mode + '"'));
+  assert.match(nav, />Overview<\/button>/);
+  const secondary = nav.match(/<details[^>]*data-cmd-disclosure="views"[^>]*>(.*?)<\/details>/)[1];
+  assert.match(secondary, /href="[^"]*\/plans">Plans/);
+  assert.match(secondary, /href="[^"]*\/canvas">Canvas/);
+  assert.doesNotMatch(nav, /Diagnostics|Orchestration Skills/);
+  assert.match(html, /data-cmd-settings>/);
+  assert.match(html, /href="[^"]*\/diagnostics">Diagnostics/);
 });
 
-test('HQ Details: four tiles read existing counts and lead to their panels (FR7)', () => {
-  const { html } = hqDetailsMarkup();
-  const tiles = html.match(
-    /<div class="ws-cmd-readout ws-hq-tiles"[^>]*>(.*?)<\/div><\/header>/
-  )[1];
-  assert.deepEqual(
-    [...tiles.matchAll(/<div class="ws-l">([^<]+)<\/div>/g)].map(match => match[1]),
-    ['Needs you', 'Follow-ups', 'Open tickets', 'Team']
-  );
-  assert.match(tiles, /data-cmd-hq-jump="needs-you"[^>]*><div class="ws-v">0</);
-  // Follow-ups unknown until the panel has counted them.
-  assert.match(tiles, /data-cmd-hq-jump="followups"[^>]*><div class="ws-v">—</);
-  // Open tickets = review + in progress + ready, the server's own counts.
-  assert.match(tiles, /data-cmd-section="tickets"[^>]*><div class="ws-v">6</);
-  assert.match(tiles, /data-cmd-hq-jump="team"[^>]*><div class="ws-v">2</);
+test('HQ Overview keeps counts with Tickets and the specialized content instead of stat tiles', () => {
+  const { html, commandView } = hqDetailsMarkup();
+  assert.doesNotMatch(html, /ws-cmd-readout/);
+  assert.match(html, /data-cmd-ticket-count>6</);
+  assert.match(html, /data-cmd-hq-needs/);
+  assert.match(html, /data-cmd-followups-host/);
+  assert.match(html, /ws-hq-team-title/);
+  // Existing source semantics remain: unknown follow-ups is not zero.
+  assert.equal(commandView.hqTilesValues().followups.value, '—');
 });
 
 test('HQ Details: no lines means no strip; the no-model goal reason is one line (FR8, FR10)', () => {

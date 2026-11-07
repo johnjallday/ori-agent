@@ -14,17 +14,19 @@ function withEntryDocument(callback) {
       if (selector === '[data-home-profile-entry]') {
         return inserted.find(item => Object.hasOwn(item.dataset, 'homeProfileEntry')) || null;
       }
-      if (selector === 'a[href$="/plans"]') return null;
+      if (selector === '[data-resource-catalog-entry]') {
+        return inserted.find(item => Object.hasOwn(item.dataset, 'resourceCatalogEntry')) || null;
+      }
       return null;
     },
-    insertBefore(node) {
+    appendChild(node) {
       inserted.push(node);
     }
   };
   globalThis.document = {
     body: {},
     querySelector(selector) {
-      return selector === '.ws-cmd-view-switch' ? switcher : null;
+      return selector === '[data-cmd-program-destinations]' ? switcher : null;
     },
     createElement() {
       return {
@@ -67,7 +69,7 @@ test('assistant navigation appears only for declared programs and uses slug rout
   });
 });
 
-test('hired assistant navigation carries the compact stage and level summary', async () => {
+test('hired assistant navigation keeps progression on the owning page', async () => {
   await withEntryDocument(async inserted => {
     const entry = new AssistantProgramEntry({
       workspaceId: 'workspace-uuid',
@@ -84,8 +86,8 @@ test('hired assistant navigation carries the compact stage and level summary', a
       })
     });
     await entry.init();
-    assert.equal(inserted[0].textContent, 'Producer Home · Collaborator L2');
-    assert.match(inserted[0].attributes['aria-label'], /level 2/);
+    assert.equal(inserted[0].textContent, 'Producer Home');
+    assert.equal(inserted[0].attributes['aria-label'], 'Open Producer Home');
   });
 });
 
@@ -105,7 +107,7 @@ test('an activation-only legacy program gets the generic optional-home fallback'
   });
 });
 
-test('a Home whose package declares a profile card gets a link straight to it', async () => {
+test('a declared profile shares its Home destination instead of duplicating top-level links', async () => {
   const program = extra => ({
     available: true,
     is_station: true,
@@ -125,16 +127,13 @@ test('a Home whose package declares a profile card gets a link straight to it', 
   await withEntryDocument(async inserted => {
     const entry = entryFor(program({ home_profile_title: 'Your studio' }));
     await entry.init();
-    assert.equal(inserted.length, 2);
-    assert.equal(inserted[0].textContent, 'Music Production Home · Helper L1');
-    // Named by the package's own title, and it lands on the card itself.
-    assert.equal(inserted[1].textContent, 'Your studio');
-    assert.equal(inserted[1].href, '/workspaces/music-home/assistant#homeProfilePanel');
-    assert.equal(inserted[1].attributes['aria-label'], 'Open Your studio on Music Production Home');
-    // The page re-renders its switch often; the links are added once.
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].textContent, 'Music Production Home');
+    assert.equal(inserted[0].href, '/workspaces/music-home/assistant');
+    // The profile is linked on that page, and refresh cannot duplicate its Home.
     entry.render();
     entry.render();
-    assert.equal(inserted.length, 2);
+    assert.equal(inserted.length, 1);
   });
   // No declared card, no link.
   await withEntryDocument(async inserted => {
@@ -145,6 +144,45 @@ test('a Home whose package declares a profile card gets a link straight to it', 
   await withEntryDocument(async inserted => {
     await entryFor(program({ is_station: false, home_profile_title: 'Your studio' })).init();
     assert.equal(inserted.length, 1);
+  });
+});
+
+test('a resource catalog is separate, literal non-music names survive repeated renders', async () => {
+  await withEntryDocument(async inserted => {
+    const entry = new AssistantProgramEntry({
+      workspaceId: 'research',
+      workspaceSlug: 'research',
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({
+          available: true,
+          resource_workspace: true,
+          declaration: { station_name: '<Research & learning>' }
+        })
+      })
+    });
+    await entry.init();
+    entry.render();
+    assert.equal(inserted.length, 2);
+    assert.equal(inserted[0].textContent, '<Research & learning>');
+    assert.equal(inserted[1].href, '/workspaces/research/catalog');
+  });
+});
+
+test('failed, not-yet-loaded and absent declarations never guess a destination', async () => {
+  await withEntryDocument(async inserted => {
+    for (const fetchImpl of [
+      async () => ({ ok: false }),
+      async () => {
+        throw new Error('offline');
+      }
+    ]) {
+      const entry = new AssistantProgramEntry({ workspaceId: 'w', workspaceSlug: 'w', fetchImpl });
+      entry.render();
+      assert.equal(inserted.length, 0);
+      await entry.init();
+      assert.equal(inserted.length, 0);
+    }
   });
 });
 

@@ -17,6 +17,40 @@ import {
   templatesView
 } from './home-profile.js';
 
+test('the profile owner exposes a literal named jump only while its card is visible', () => {
+  const previous = globalThis.document;
+  const nodes = Object.fromEntries(
+    [
+      'homeProfilePanel',
+      'homeProfileJump',
+      'homeProfileTitle',
+      'homeProfileIntro',
+      'homeProfileReadOnly',
+      'homeProfileDetect',
+      'homeProfileRows'
+    ].map(id => [id, { hidden: true, textContent: '', replaceChildren() {} }])
+  );
+  globalThis.document = { getElementById: id => nodes[id] || null };
+  try {
+    const panel = Object.create(HomeProfilePanel.prototype);
+    panel.view = {
+      available: true,
+      title: '<Research profile>',
+      fields: [{ kind: 'defaults', label: 'Defaults' }]
+    };
+    panel.renderRow = () => ({});
+    panel.render();
+    assert.equal(nodes.homeProfileJump.hidden, false);
+    assert.equal(nodes.homeProfileJump.textContent, '<Research profile> ↓');
+    panel.view = { available: false };
+    panel.render();
+    assert.equal(nodes.homeProfileJump.hidden, true);
+    assert.equal(nodes.homeProfilePanel.hidden, true);
+  } finally {
+    globalThis.document = previous;
+  }
+});
+
 const DATE = { locale: 'en-US', timeZone: 'UTC' };
 
 const CHOICES = {

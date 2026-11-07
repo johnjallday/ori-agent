@@ -10375,3 +10375,156 @@ button.ws-cmd-rpg-class-card:focus-visible {
     min-height: 0;
   }
 }
+
+/* Shared workspace chrome: quiet identity, one action pair, wrapping destinations.
+   Existing type and theme tokens intentionally match the rest of Ori. */
+.ws-cmd .ws-cmd-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--ws-line);
+  background: transparent;
+  box-shadow: none;
+  clip-path: none;
+  min-width: 0;
+}
+.ws-cmd-compact .ws-cmd-nav {
+  flex: none;
+}
+.ws-cmd-identity-line {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-width: 0;
+}
+.ws-cmd-identity-line .ws-cmd-title {
+  flex: 1 1 280px;
+}
+.ws-cmd-compact .ws-cmd-title h2 {
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-transform: none;
+  letter-spacing: -0.3px;
+  color: var(--ws-ink);
+  font-size: clamp(22px, 2.2vw, 30px);
+}
+.ws-cmd-compact .ws-cmd-title-row {
+  flex-wrap: wrap;
+}
+.ws-cmd-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-cmd-compact .ws-cmd-nav-btn,
+.ws-cmd-compact .ws-cmd-view-btn {
+  clip-path: none;
+  font-family: var(--ws-font-display);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  min-height: 36px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.ws-cmd-compact .ws-cmd-nav-parent {
+  max-width: min(320px, 100%);
+}
+.ws-cmd-compact .ws-cmd-view-btn.is-alert {
+  color: var(--ws-alert);
+}
+.ws-cmd-compact .ws-cmd-give-work {
+  background: var(--ws-faction-deep);
+  border-color: var(--ws-faction);
+  color: var(--ws-ink);
+  font-weight: 600;
+}
+.ws-cmd-compact .ws-cmd-view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+.ws-cmd-program-destinations {
+  display: contents;
+}
+.ws-cmd-disclosure {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+.ws-cmd-disclosure summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ws-cmd-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+.ws-cmd-disclosure summary::after {
+  content: "⌄";
+}
+.ws-cmd-disclosure-body {
+  position: absolute;
+  z-index: var(--wsx-layer-menu);
+  top: 100%;
+  left: 0;
+  width: 240px;
+  max-width: calc(100vw - 48px);
+  padding: 8px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 8px;
+  background: var(--ws-panel);
+  box-shadow: var(--ws-glow);
+  max-height: min(65vh, 560px);
+  overflow-y: auto;
+}
+.ws-cmd-header-actions .ws-cmd-disclosure-body {
+  left: auto;
+  right: 0;
+}
+.ws-cmd-disclosure-body > * {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+.ws-cmd-disclosure-body > strong {
+  padding: 8px 10px 2px;
+  font-size: 12px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-header-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.ws-cmd-header-status:empty {
+  display: none;
+}
+@media (max-width: 600px) {
+  .ws-cmd-header-actions .ws-cmd-disclosure-body {
+    right: auto;
+    left: 0;
+  }
+  .ws-cmd-compact .ws-cmd-view-switch {
+    width: 100%;
+  }
+  .ws-cmd-compact .ws-cmd-nav-parent-label {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

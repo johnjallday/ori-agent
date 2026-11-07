@@ -1,4 +1,5 @@
 import { test, expect, Page, APIRequestContext } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 /**
  * workspace-parent-group-navigation: a workspace that belongs to a Group links
@@ -114,6 +115,7 @@ async function refreshInPlace(page: Page) {
 const tag = () => String(Date.now()).slice(-6);
 
 test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
   await skipOnboarding(page);
 });
 
@@ -129,7 +131,7 @@ test('a member opened directly links to its group right after Home, and Back ret
   await expect(link).toHaveAttribute('href', `/workspaces/${group.folder_slug}`);
   await expect(page.getByRole('link', { name: `Group: ${group.name}` })).toBeVisible();
   await expect(link).toHaveAttribute('title', `Open the group ${group.name}`);
-  // Immediately after Home, before Canvas.
+  // Immediately after Home; Canvas is a native link in secondary navigation.
   const order = await page.evaluate(() => {
     const link = document.querySelector('.ws-cmd-nav [data-cmd-parent-group]');
     return [
@@ -137,7 +139,11 @@ test('a member opened directly links to its group right after Home, and Back ret
       link?.nextElementSibling?.textContent?.trim()
     ];
   });
-  expect(order).toEqual([true, 'Canvas']);
+  expect(order).toEqual([true, undefined]);
+  await expect(page.locator('[data-cmd-disclosure="views"] a[href$="/canvas"]')).toHaveAttribute(
+    'href',
+    `/workspaces/${member.folder_slug}/canvas`
+  );
 
   await link.click();
   await expect(page).toHaveURL(new RegExp(`/workspaces/${group.folder_slug}$`));
@@ -284,13 +290,8 @@ for (const viewport of [
       const nav = document.querySelector('.ws-cmd-nav') as HTMLElement;
       const bar = document.querySelector('.ws-cmd-topbar') as HTMLElement;
       const home = document.querySelector('.ws-cmd-nav [data-cmd-nav-home]') as HTMLElement;
-      // Page width with and without the link, in one synchronous read. Other
-      // header content (the late "Ready to move" chip, a Dashboard tab) can
-      // widen a phone page on its own; only the link's share is this feature's.
+      // Measure the real layout without temporarily removing any content.
       const pageWidth = document.documentElement.scrollWidth;
-      link.style.display = 'none';
-      const pageWidthWithoutLink = document.documentElement.scrollWidth;
-      link.style.display = '';
       const barStyle = getComputedStyle(bar);
       return {
         linkWidth: link.getBoundingClientRect().width,
@@ -300,20 +301,24 @@ for (const viewport of [
         barContentRight: bar.getBoundingClientRect().right - parseFloat(barStyle.paddingRight),
         linkRight: link.getBoundingClientRect().right,
         truncated: label.scrollWidth > label.clientWidth,
-        pageWidth,
-        pageWidthWithoutLink
+        pageWidth
       };
     });
-    expect(metrics.truncated, 'the long name is cut short visually').toBe(true);
+    if (viewport.width > 600)
+      expect(metrics.truncated, 'desktop parent label is bounded').toBe(true);
     expect(metrics.linkWidth).toBeLessThanOrEqual(320);
     expect(metrics.linkRight).toBeLessThanOrEqual(metrics.navRight + 0.5);
     expect(metrics.navRight, 'the nav row stays inside its bar').toBeLessThanOrEqual(
       metrics.barContentRight + 0.5
     );
-    expect(metrics.linkHeight, 'one line, like its neighbours').toBeLessThanOrEqual(
-      metrics.homeHeight + 1
-    );
-    expect(metrics.pageWidth, 'the link adds no page width').toBe(metrics.pageWidthWithoutLink);
+    expect(
+      metrics.linkHeight,
+      'the link keeps a usable target while wrapping on phones'
+    ).toBeGreaterThanOrEqual(metrics.homeHeight - 1);
+    expect(
+      metrics.pageWidth,
+      'the complete header fits without hiding the link'
+    ).toBeLessThanOrEqual(viewport.width);
 
     // Keyboard: Home, then the group link; Enter follows it.
     await page.locator('.ws-cmd-nav [data-cmd-nav-home]').focus();

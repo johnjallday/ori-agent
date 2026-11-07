@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 /**
  * The workspace Command header at phone widths: nothing runs off the page,
@@ -83,30 +84,35 @@ async function serveReadyContinuity(page: Page, workspaceId: string) {
 
 function measureHeader(page: Page) {
   return page.evaluate(() => {
+    // Continuity reattaches its live chip after a Command refresh. Measure only
+    // the complete real header, never treat that brief detachment as zero.
+    if (!document.querySelector('.ws-cmd-continuity-mount .workspace-continuity-chip')) return null;
     const rect = (selector: string) =>
       (document.querySelector(selector) as HTMLElement).getBoundingClientRect();
     const title = rect('.ws-cmd-title');
     const name = document.querySelector('.ws-cmd-title h2') as HTMLElement;
-    const tabs = [...document.querySelectorAll<HTMLElement>('.ws-cmd-view-switch > *')].map(tab => {
-      // The label's own width against the tab's content box.
-      const style = getComputedStyle(tab);
-      const range = document.createRange();
-      range.selectNodeContents(tab);
-      const label = range.getBoundingClientRect().width;
-      const inner =
-        tab.getBoundingClientRect().width -
-        parseFloat(style.paddingLeft) -
-        parseFloat(style.paddingRight) -
-        parseFloat(style.borderLeftWidth) -
-        parseFloat(style.borderRightWidth);
-      return { text: tab.textContent?.trim(), fits: label <= inner + 0.5 };
-    });
+    const tabs = [...document.querySelectorAll<HTMLElement>('.ws-cmd-view-switch > button')].map(
+      tab => {
+        // The label's own width against the tab's content box.
+        const style = getComputedStyle(tab);
+        const range = document.createRange();
+        range.selectNode(tab.firstChild!);
+        const label = range.getBoundingClientRect().width;
+        const inner =
+          tab.getBoundingClientRect().width -
+          parseFloat(style.paddingLeft) -
+          parseFloat(style.paddingRight) -
+          parseFloat(style.borderLeftWidth) -
+          parseFloat(style.borderRightWidth);
+        return { text: tab.firstChild?.textContent?.trim(), fits: label <= inner + 0.5 };
+      }
+    );
     return {
       pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
       titleWidth: title.width,
       nameWidth: name.getBoundingClientRect().width,
       chipRight: rect('.ws-cmd-continuity-mount .workspace-continuity-chip').right,
-      titleRight: title.right,
+      headerRight: rect('.ws-cmd-topbar').right,
       tabs
     };
   });
@@ -117,6 +123,7 @@ for (const width of [375, 320]) {
     page
   }) => {
     await page.setViewportSize({ width, height: 812 });
+    await installLocalCdn(page);
     await skipOnboarding(page);
     const workspace = await createWorkspace(
       page,
@@ -137,21 +144,25 @@ for (const width of [375, 320]) {
       'Ready to move as of'
     );
 
-    const header = await measureHeader(page);
+    let measured: Awaited<ReturnType<typeof measureHeader>> = null;
+    await expect
+      .poll(async () => {
+        measured = await measureHeader(page);
+        return measured !== null;
+      })
+      .toBe(true);
+    const header = measured as NonNullable<Awaited<ReturnType<typeof measureHeader>>>;
     expect(header.pageOverflow, 'nothing pushes the page sideways').toBeLessThanOrEqual(0);
-    expect(header.chipRight, 'the status chip stays in the title column').toBeLessThanOrEqual(
-      header.titleRight + 0.5
+    expect(header.chipRight, 'the status chip stays inside the header').toBeLessThanOrEqual(
+      header.headerRight + 0.5
     );
     expect(header.nameWidth, 'the name has its own line').toBeGreaterThanOrEqual(
       header.titleWidth - 0.5
     );
-    expect(header.tabs.map(tab => tab.text)).toEqual([
-      'Details',
-      'Map',
-      'Tickets',
-      'Dashboard',
-      'Plans'
-    ]);
+    expect(header.tabs.map(tab => tab.text)).toEqual(['Overview', 'Map', 'Tickets', 'Dashboard']);
     for (const tab of header.tabs) expect(tab.fits, `${tab.text} shows its whole word`).toBe(true);
+    await page.locator('[data-cmd-disclosure="views"] > summary').click();
+    await expect(page.getByRole('link', { name: 'Plans', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toBeVisible();
   });
 }

@@ -17409,7 +17409,8 @@ export class WorkspaceDetailPage {
       workspaceName: this.workspace?.name || '',
       agents: this.workspace?.agents || [],
       assignee: options?.assignee || '',
-      trigger: typeof document !== 'undefined' ? document.activeElement : null,
+      trigger:
+        options?.trigger || (typeof document !== 'undefined' ? document.activeElement : null),
       onSaved: () => this.loadTasks()
     });
   }

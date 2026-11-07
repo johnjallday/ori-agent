@@ -306,6 +306,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-interview-launcher.js',
       'internal/web/static/js/modules/workspace-tags-card.js',
       'internal/web/static/js/modules/workspace-command.js',
+      'internal/web/static/js/modules/workspace-command-chrome.js',
       'internal/web/static/js/modules/workspace-command-rail.js',
       'internal/web/static/js/modules/workspace-execution-controller.js',
       'internal/web/static/js/modules/workspace-followups.js',
