@@ -624,6 +624,27 @@ async function installFixtureRoutes(page: Page) {
       await json(route, {});
       return;
     }
+    // Learning mounts beside finite Getting Started and reads saved state.
+    // This fictional owner has not enrolled: no offers, observations or earned
+    // practice. Only GET is fixtured; a mutation remains an unexpected request.
+    if (url.pathname === '/api/learning-missions' && request.method() === 'GET') {
+      await json(route, {
+        owner: {
+          revision: 0,
+          preferences: {
+            mode: 'on_request',
+            workspace_ids: [],
+            observe: false,
+            guidance: 'guided',
+            effort: 'small',
+            consent_version: 0
+          }
+        },
+        instances: [],
+        observations: []
+      });
+      return;
+    }
     // City Economy: the Home HUD's chips and Energy bar, and the map's Farm
     // badge and harvest pile, all read from this one route.
     if (url.pathname === '/api/economy') {
