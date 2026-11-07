@@ -35,6 +35,7 @@ import { flattenWorkspaceTree, isGroupWorkspace } from './workspace-map-snapshot
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 import { openParcelByRef } from './parcel-open.js';
 import { taskCreateBody } from './quick-task.js';
+import { loadSongCard } from './song-card.js';
 // Importing this registers window.OriGiveWork, the flow every door opens.
 import './give-work.js';
 
@@ -2569,6 +2570,7 @@ export class WorkspaceDetailPage {
       }
       await this.renderWorkspaceInfo(request);
       if (!this.isResourceRequestCurrent(request)) return;
+      void this.refreshSongCard();
       this.renderGroupRequirementStatus();
       this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
@@ -2632,6 +2634,20 @@ export class WorkspaceDetailPage {
     } finally {
       action.disabled = false;
     }
+  }
+
+  // The Song card above the Command view, only for a song linked to a Home
+  // library (song-card PRD FR8, FR12). Any other workspace answers
+  // linked:false and the mount stays hidden and empty.
+  // A card problem never fails the page load.
+  refreshSongCard() {
+    const mount =
+      typeof document?.getElementById === 'function'
+        ? document.getElementById('workspaceSongCardMount')
+        : null;
+    const id = String(this.workspace?.id || '').trim();
+    if (!mount || !id) return Promise.resolve(null);
+    return loadSongCard(mount, id);
   }
 
   renderGroupRequirementStatus() {
