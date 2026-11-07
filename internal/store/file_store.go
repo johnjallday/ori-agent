@@ -52,6 +52,9 @@ type fileStore struct {
 	// only runtime state, so the definition file is left alone.
 	knownDefinitions map[string][]byte
 
+	// staffingWitnesses are process-local read witnesses, not persisted agent IDs.
+	staffingWitnesses map[string]staffingSourceWitness
+
 	// state keeps status, statistics, and evolution out of the definition file.
 	// Nil means "derive it from the agents folder" (see stateStore).
 	state *RuntimeStateStore

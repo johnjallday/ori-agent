@@ -100,9 +100,11 @@ func (p *scriptedProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.Ch
 func (p *scriptedProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
 	return nil, errors.New("not streamed")
 }
-func (p *scriptedProvider) Name() string                            { return "scripted" }
-func (p *scriptedProvider) Type() llm.ProviderType                  { return llm.ProviderTypeCloud }
-func (p *scriptedProvider) Capabilities() llm.ProviderCapabilities  { return llm.ProviderCapabilities{} }
+func (p *scriptedProvider) Name() string           { return "scripted" }
+func (p *scriptedProvider) Type() llm.ProviderType { return llm.ProviderTypeCloud }
+func (p *scriptedProvider) Capabilities() llm.ProviderCapabilities {
+	return llm.ProviderCapabilities{SupportsIsolatedChat: true}
+}
 func (p *scriptedProvider) ValidateConfig(llm.ProviderConfig) error { return nil }
 func (p *scriptedProvider) DefaultModels() []string                 { return []string{"scripted-1"} }
 
@@ -204,7 +206,8 @@ func newBuildFixtureOn(t *testing.T, handler *Handler, structured bool, replies 
 			}
 			return WorkspaceBuildModel{Provider: provider, ProviderName: "scripted", Model: "scripted-1"}, nil
 		},
-		ModelAvailable: func(provider, model string) bool { return provider == "scripted" && model == "scripted-1" },
+		ModelAvailable:         func(provider, model string) bool { return provider == "scripted" && model == "scripted-1" },
+		ProfileModelConfigured: func(provider, model string) bool { return provider == "scripted" && model == "scripted-1" },
 	})
 	return f
 }

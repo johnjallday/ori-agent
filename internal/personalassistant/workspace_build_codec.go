@@ -25,6 +25,13 @@ func decodeWorkspaceBuild(data []byte, owner KnowledgeOwner) (WorkspaceBuildDocu
 	if err := decoder.Decode(&struct{}{}); err != io.EOF || doc.Version < 1 || doc.Owner != owner {
 		return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 	}
+	if doc.SchemaVersion < 6 {
+		for _, session := range doc.Sessions {
+			if session.Staffing != nil {
+				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
+			}
+		}
+	}
 	legacy := doc.SchemaVersion >= 1 && doc.SchemaVersion < 4
 	if doc.SchemaVersion >= 1 && doc.SchemaVersion < 5 {
 		for _, session := range doc.Sessions {

@@ -64,7 +64,10 @@ type WorkspaceBuildDeps struct {
 	// ModelAvailable reports whether a provider/model pair a team agent names
 	// can be resolved.
 	ModelAvailable func(provider, model string) bool
-	CurrentUserID  func(ctx context.Context) (string, error)
+	// ProfileModelConfigured checks saved configuration without network/model
+	// discovery or credential probes. Ranking must never call ModelAvailable.
+	ProfileModelConfigured func(provider, model string) bool
+	CurrentUserID          func(ctx context.Context) (string, error)
 	// Folders observes a folder the user attaches in the pane and resolves it
 	// at Create. Nil leaves the pane without Add folder.
 	Folders WorkspaceBuildFolders
@@ -350,8 +353,10 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 	var view any = session
 	if session != nil {
 		userID := h.workspaceBuildUserID(ctx)
+		public := *session
+		public.Staffing = session.Staffing.Public()
 		built := buildSessionView{
-			WorkspaceBuildSession: session,
+			WorkspaceBuildSession: &public,
 			Plan:                  h.workspaceBuildPlan(ctx, userID, nil, session),
 			SetupRun:              h.readBuildSetupRun(ctx, userID, nil, session),
 		}
@@ -707,11 +712,18 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 	}
 	validation := buildValidation{
 		catalog:      offerableCatalog(catalog),
-		agents:       h.workspaceBuildAgents(),
 		groups:       h.workspaceBuildGroups(ctx, userID),
+		staffing:     h.workspaceBuildStaffing(ctx, userID, &staged, offerableCatalog(catalog)),
 		nameTaken:    func(name string) bool { return h.workspaceNameTaken(ctx, name) },
 		modelOK:      deps.ModelAvailable,
 		proposalOnly: automatic || req.Auto || (staged.Retry != nil && staged.Retry.Auto) || staged.Folder != nil,
+	}
+	if validation.staffing != nil {
+		for _, candidate := range validation.staffing.input.Roster.Candidates {
+			validation.agents = append(validation.agents, buildSavedAgent{Name: candidate.Name})
+		}
+	} else {
+		validation.agents = h.workspaceBuildAgents(ctx, userID)
 	}
 	if plan != nil && plan.Ready && staged.Folder != nil && staged.Folder.Observation.ID == plannedFor {
 		validation.plan = plan
@@ -924,6 +936,8 @@ type buildOutcome struct {
 // blueprints as chips. The first reply to a description must also set the
 // blueprint, the name, and the description.
 func (h *Handler) askWorkspaceBuildModel(ctx context.Context, readiness buildReadiness, session *personalassistant.WorkspaceBuildSession, validation buildValidation) buildOutcome {
+	ctx, cancel := context.WithTimeout(ctx, workspaceBuildModelTimeout)
+	defer cancel()
 	input := buildPromptInput{
 		AssistantName: session.Assistant.DisplayName,
 		Session:       session,
@@ -933,16 +947,25 @@ func (h *Handler) askWorkspaceBuildModel(ctx context.Context, readiness buildRea
 		Plan:          validation.plan,
 		WaitsOn:       validation.waitsOn,
 		ProposalOnly:  validation.proposalOnly,
+		Staffing:      validation.staffing,
+	}
+	if readiness.model.Provider == nil || !readiness.model.Provider.Capabilities().SupportsIsolatedChat {
+		// A native provider without an enforceable no-tools mode may still
+		// build manually, but receives no roster ranking data or authority.
+		input.Staffing = nil
 	}
 	messages := buildMessages(session)
 	prompted := cloneBuildSession(*session)
 	input.Session = &prompted
 	for attempt := 0; attempt < 2; attempt++ {
 		input.Nudge = attempt > 0
-		reply, err := callBuildModel(ctx, readiness.model, buildSystemPrompt(input), messages)
+		reply, err := callBuildModel(ctx, readiness.model, buildSystemPrompt(input), messages, input.Staffing != nil)
 		if err != nil {
-			logger.Warn("Workspace build model call failed", logger.Fields{"session_id": session.ID, "attempt": attempt + 1, "error": err})
+			logger.Warn("Workspace build model call failed", logger.Fields{"session_id": session.ID, "attempt": attempt + 1, "reason": "provider_or_schema"})
 			return buildOutcome{kind: "failure"}
+		}
+		if input.Staffing == nil {
+			reply.Staffing.Roles = nil
 		}
 		if validation.proposalOnly {
 			reply.CreateNow = false
@@ -1019,6 +1042,7 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	chipPrefix := fmt.Sprintf("c%d-", session.TurnCount)
 	switch outcome.kind {
 	case "failure":
+		finishBuildStaffing(session, outcome, validation.staffing)
 		choices := []personalassistant.BuildChoice{{ID: buildChoiceTryAgain, Label: buildCopyTryAgain}}
 		session.Append(personalassistant.BuildTranscriptEntry{
 			Role: personalassistant.BuildRoleAssistant, Text: buildCopyModelFailure, Choices: choices, Fixed: true, At: now,
@@ -1043,6 +1067,7 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 
 	reply := outcome.reply
 	result := applyBuildReply(session, reply.Patch, validation)
+	finishBuildStaffing(session, outcome, validation.staffing)
 	session.Rejections = result.rejections
 	session.Applied = result.applied
 	session.AskFolder = result.askFolder
@@ -1260,20 +1285,15 @@ func buildAlternatives(proposed []buildReplyAlternate, validation buildValidatio
 }
 
 // workspaceBuildAgents are the saved agents the assistant may assign.
-func (h *Handler) workspaceBuildAgents() []buildSavedAgent {
+func (h *Handler) workspaceBuildAgents(ctx context.Context, userID string) []buildSavedAgent {
 	if h.agentStore == nil {
 		return nil
 	}
 	out := []buildSavedAgent{}
-	for _, name := range h.agentStore.ListAgents() {
-		agent, ok := h.agentStore.GetAgent(name)
-		if !ok || agent == nil {
-			continue
-		}
-		out = append(out, buildSavedAgent{Name: name, Role: string(agent.Role), Model: agent.Settings.Model})
-		if len(out) == 50 {
-			break
-		}
+	// The same source-aware projection as ranking, never composite name
+	// resolution (which can answer with a workspace-private copy).
+	for _, candidate := range h.workspaceBuildRoster(ctx, userID).Candidates {
+		out = append(out, buildSavedAgent{Name: candidate.Name})
 	}
 	return out
 }

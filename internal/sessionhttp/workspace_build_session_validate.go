@@ -127,6 +127,7 @@ type buildValidation struct {
 	groups       []buildGroup
 	nameTaken    func(name string) bool
 	modelOK      func(provider, model string) bool
+	staffing     *buildStaffingContext
 	// plan is the host's ready setup plan for a recognized folder. With one,
 	// the reply may set only what plannedBuildPatch keeps.
 	plan *personalassistant.BuildFolderPlan

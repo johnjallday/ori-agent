@@ -20,7 +20,7 @@ import (
 // draft is exactly the create request the wizard submits; nothing here
 // creates, installs, or attaches anything.
 const (
-	WorkspaceBuildSchemaVersion = 5
+	WorkspaceBuildSchemaVersion = 6
 	workspaceBuildFileName      = "workspace-build-v1.json"
 	workspaceBuildLockName      = "workspace-build-v1.lock"
 	workspaceBuildMaxBytes      = 512 * 1024
@@ -334,6 +334,7 @@ type WorkspaceBuildSession struct {
 	Draft               BuildDraft             `json:"draft"`
 	TeamState           json.RawMessage        `json:"team_state,omitempty"`
 	TeamPatch           *BuildTeamPatch        `json:"team_patch,omitempty"`
+	Staffing            *BuildStaffing         `json:"staffing,omitempty"`
 	Transcript          []BuildTranscriptEntry `json:"transcript"`
 	PendingQuestion     *BuildQuestion         `json:"pending_question"`
 	Why                 []BuildWhy             `json:"why,omitempty"`
@@ -450,6 +451,7 @@ func (s *WorkspaceBuildSession) Settle() {
 	s.Transcript = []BuildTranscriptEntry{}
 	s.TeamState = nil
 	s.TeamPatch = nil
+	s.Staffing = nil
 	s.PendingQuestion = nil
 	s.Why = nil
 	s.Alternatives = nil
@@ -570,6 +572,9 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 }
 
 func validateBuildSession(session WorkspaceBuildSession) error {
+	if err := session.Staffing.validate(session.ContextVersion); err != nil {
+		return err
+	}
 	if err := session.PlacementSource.validate(); err != nil {
 		return err
 	}

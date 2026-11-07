@@ -117,6 +117,12 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 			}
 			for _, field := range fields {
 				session.EditedFields[field] = session.Version + 1
+				switch field {
+				case "blueprint_id", "description", "goal", "inputs", "parent_id", "team":
+					if session.Staffing != nil {
+						session.Staffing.State = "stale"
+					}
+				}
 			}
 			session.CreateNow = false
 			lines = describeFormEdit(before, draft, validation)
