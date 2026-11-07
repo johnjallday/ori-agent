@@ -6,6 +6,27 @@ import (
 	"testing"
 )
 
+func TestLearningOriginalIdentifierAllowlist(t *testing.T) {
+	for r := rune(0); r < 128; r++ {
+		id := "a" + string(r) + "b"
+		ref := LearningDraftOriginal{TicketID: id, RunID: id, ArtifactID: id, Digest: strings.Repeat("a", 64)}
+		want := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.'
+		if ref.valid() != want {
+			t.Fatalf("identifier rune %U: expected allowed=%t", r, want)
+		}
+	}
+	for _, id := range []string{"", ".", "..", "café", "😀", strings.Repeat("a", 129)} {
+		ref := LearningDraftOriginal{TicketID: id, RunID: "run", ArtifactID: "artifact", Digest: strings.Repeat("a", 64)}
+		if ref.valid() {
+			t.Fatalf("invalid identifier accepted: %q", id)
+		}
+	}
+	ref := LearningDraftOriginal{TicketID: strings.Repeat("a", 128), RunID: "run", ArtifactID: "artifact", Digest: strings.Repeat("a", 64)}
+	if !ref.valid() {
+		t.Fatal("maximum-length safe identifier refused")
+	}
+}
+
 func TestLearningOriginalIsReservedAndBoundToInputAndExecutionReview(t *testing.T) {
 	original := &LearningDraftOriginal{TicketID: "original-ticket", RunID: "original-run", ArtifactID: "original-artifact", Digest: strings.Repeat("a", 64)}
 	plain, err := LearningInputDigest(" correction ", nil)
