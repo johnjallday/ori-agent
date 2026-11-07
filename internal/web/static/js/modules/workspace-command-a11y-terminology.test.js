@@ -129,7 +129,7 @@ function wordsOf(html) {
   return attributes.join(' | ') + ' | ' + html.replace(/<[^>]+>/g, ' ');
 }
 
-test('terminology: the HQ map belt reads Workspace goal, Tickets, Backlog, Inventory, Stations', () => {
+test('terminology: legacy HQ panels retain plain names and the shared Map toolbar exposes Resources', () => {
   const view = hqMapView();
   assert.deepEqual(
     view.mapWindowOptions().map(option => [option.key, option.label]),
@@ -143,11 +143,18 @@ test('terminology: the HQ map belt reads Workspace goal, Tickets, Backlog, Inven
   );
   view.mapArrangement = 'free';
   view.mapArrangementFor = 'hq';
-  const belt = view.renderMapToolTray();
-  for (const label of ['Workspace goal', 'Tickets', 'Backlog', 'Inventory', 'Stations']) {
-    assert.match(belt, new RegExp('aria-label="' + label + '"'));
-    assert.match(belt, new RegExp('title="' + label + '"'));
-  }
+  const toolbar = view.renderMapToolTray();
+  assert.match(toolbar, /aria-label="Map resources"/);
+  assert.match(toolbar, /data-cmd-map-resources[^>]*>Resources</);
+  assert.doesNotMatch(toolbar, /data-cmd-map-window|ws-cmd-map-belt/);
+  const chrome = view.commandBarHTML(
+    view.page.workspace,
+    'Personal HQ',
+    'Guided',
+    view.computeStats()
+  );
+  assert.match(chrome, /data-cmd-view-mode="tickets"/);
+  assert.match(chrome, /data-cmd-settings/);
 });
 
 test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
@@ -157,7 +164,7 @@ test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
   view.mapArrangement = 'free';
   view.mapArrangementFor = 'hq';
   const free = view.renderOperationsMap();
-  assert.match(free, /ws-cmd-map-belt/);
+  assert.match(free, /ws-cmd-map-toolbar/);
   // The lead unit says Lead.
   assert.match(free, /aria-label="Select Atlas, Lead · Personal HQ\. /);
   const windows = ['objective', 'objectives', 'backlog', 'inventory', 'stations'].map(key => {
@@ -183,7 +190,7 @@ test('terminology: no tactical word on the HQ map in Flow or in Free', () => {
   }
 });
 
-test('terminology: off the map, the HQ says Your HQ and Lead (eyebrow, Agents window, roster)', () => {
+test('terminology: compact HQ identity and Lead remain plain in shared chrome, Agents and roster', () => {
   const words = workspace => {
     const view = hqMapView();
     view.page.workspace = workspace;
@@ -204,7 +211,7 @@ test('terminology: off the map, the HQ says Your HQ and Lead (eyebrow, Agents wi
   };
 
   const hq = words({ id: 'hq', name: 'Personal HQ', designation: 'personal_hq' });
-  assert.match(hq.bar, />Your HQ</);
+  assert.match(hq.bar, /ws-cmd-hq-badge">Personal HQ</);
   assert.doesNotMatch(hq.bar, /Outpost/);
   assert.match(hq.agents, /★ Lead</);
   assert.match(hq.agents, /title="Lead — can&#39;t be removed"|title="Lead — can't be removed"/);
@@ -213,7 +220,8 @@ test('terminology: off the map, the HQ says Your HQ and Lead (eyebrow, Agents wi
 
   // An ordinary workspace keeps its words.
   const plain = words({ id: 'w', name: 'Studio' });
-  assert.match(plain.bar, /Outpost · Command/);
+  assert.match(plain.bar, /<h2>Studio<\/h2>/);
+  assert.doesNotMatch(plain.bar, /ws-cmd-hq-badge|Outpost · Command/);
   assert.match(plain.agents, /★ Commander</);
   assert.match(plain.roster, />CMD</);
 });
@@ -232,8 +240,16 @@ test('terminology: an ordinary workspace map keeps its own words', () => {
     }
   });
   const html = view.renderOperationsMap();
-  assert.match(html, /aria-label="Backlog"/);
-  assert.match(html, /aria-label="Workspace Goal"/);
+  assert.match(html, /aria-label="Map resources"/);
+  assert.match(html, /data-cmd-map-resources[^>]*>Resources</);
+  assert.ok(
+    view.mapWindowOptions().some(option => option.key === 'backlog' && option.label === 'Backlog')
+  );
+  assert.ok(
+    view
+      .mapWindowOptions()
+      .some(option => option.key === 'objective' && option.label === 'Workspace Goal')
+  );
   assert.match(html, /Acting Commander/);
   assert.doesNotMatch(html, /ws-cmd-map-arrangement|is-flow/);
 });

@@ -246,6 +246,64 @@ test('re-selecting the same agent does not push a duplicate entry (FR86 no-op de
   });
 });
 
+test('canonical Tickets and selected IDs participate in history without inventing a mode key', () => {
+  withHarness('', ({ harness }) => {
+    let owned = { ticket: '', tickets: 'all' };
+    const restored = [];
+    harness.win.WorkspaceHubTickets = {
+      init() {},
+      load() {},
+      getPresentationState: () => owned,
+      applyPresentationState: state => {
+        owned = { ...state };
+        restored.push(state);
+      }
+    };
+    const view = new WorkspaceCommandView(makePage());
+    harness.calls.length = 0;
+    view.setCommandViewMode('tickets', { focus: false });
+    assert.match(harness.win.location.search, /tickets=all/);
+    assert.doesNotMatch(harness.win.location.search, /mode=tickets/);
+    owned = { ticket: 'canonical-id', tickets: 'review' };
+    view.syncURLState();
+    const ticketSearch = harness.win.location.search;
+    assert.match(ticketSearch, /ticket=canonical-id/);
+    view.setCommandViewMode('map', { focus: false });
+    assert.equal(
+      view.viewMode,
+      'map',
+      'a newly serialized Ticket URL is not replayed as a fresh arrival'
+    );
+    assert.doesNotMatch(harness.win.location.search, /[?&]tickets?=/);
+    harness.calls.length = 0;
+    harness.fireExternalNavigation(ticketSearch);
+    assert.equal(view.viewMode, 'tickets');
+    assert.deepEqual(restored, [{ ticket: 'canonical-id', tickets: 'review' }]);
+    assert.equal(
+      harness.calls.filter(([kind]) => kind === 'push').length,
+      0,
+      'popstate does not push its own return'
+    );
+  });
+});
+
+test('legacy full-ticket return targets retain the canonical selection and filter in the same workspace', () => {
+  withHarness('', ({ harness }) => {
+    harness.win.WorkspaceHubTickets = {
+      init() {},
+      load() {},
+      getPresentationState: () => ({ ticket: 'canonical-id', tickets: 'backlog' })
+    };
+    const view = new WorkspaceCommandView(makePage());
+    view.setCommandViewMode('tickets', { focus: false });
+    const link = new URL(view.taskHrefWithReturn('legacy-id'), 'http://localhost');
+    const returned = new URL(link.searchParams.get('return'), 'http://localhost');
+    assert.equal(returned.pathname, '/workspaces/ws-1');
+    assert.equal(returned.searchParams.get('ticket'), 'canonical-id');
+    assert.equal(returned.searchParams.get('tickets'), 'backlog');
+  });
+});
+
 test('collapsing the tray is presentational: no push/replace with a new URL, only history.state updates (FR87-FR88)', () => {
   withHarness('', ({ harness }) => {
     const view = new WorkspaceCommandView(makePage());

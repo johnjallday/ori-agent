@@ -164,6 +164,7 @@ unchanged; without this confirmed import such a folder would otherwise sit in
 `repair_needed`, since recovery needs one global profile and a brief config.
 
 **Security review outcomes (2026-09-28).** Fixed on this branch:
+
 - **Imported IDs:** every restored record ID must be `SafeRecordID`
   (`[A-Za-z0-9][A-Za-z0-9._-]*`, ≤128). Record IDs reach URLs, attributes
   and inline handlers in the existing UI.
@@ -180,6 +181,7 @@ unchanged; without this confirmed import such a folder would otherwise sit in
   cannot send without a CORS preflight.
 
 Recorded, not changed here:
+
 - A checkpoint-less folder dropped into the Workspace Directory is still
   registered by rescan, as before this feature (it never had a review step).
 - Store-node base directories and file-watch paths keep their saved values.
@@ -238,18 +240,18 @@ The writer observes the canonical persistence boundaries below. UI event hooks
 alone are insufficient; tools, maintenance, retries and server jobs use the same
 stores without passing through a browser.
 
-| Component | Inclusion and restore authority | Mutations that invalidate preparation |
-| --- | --- | --- |
-| Workspace tree, tasks/tickets, collaboration messages, layout, capability definitions | `workspace.json`, session workspace projection and stable instance IDs. Physical children only. Existing task/number/instance IDs survive; no blueprint replay. | `FileStore.Save/SaveAt/Update/RebindExistingFolder`, physical move/reparent/root reconciliation, agent attachment changes, task/ticket/workflow/mission writes, notes and direct file edits. Old and new parents must become dirty on a move. |
-| Workspace agents and assets | Exact `GetWorkspaceAgent(workspaceID, instance.Name)` after validating that the stable instance belongs to that workspace. Never `GetAgent(name)` as identity proof. | `SaveWorkspaceAgent`, attach/detach, snapshot backfill, workspace-scoped edit/rename, asset/skill edits and deletions. Existing independent workspace definitions must not be overwritten from the global roster. |
-| Assistant agreement | `personal_assistant_state` only when its HQ and exact entry instance belong to the owner checkpoint; profile provenance must agree. | Create/update/CAS, hire/HQ finalization, pause/resume, mandate/focus/appearance edits, specialist accept/decline, rename and assignment finalization. Moving a binding dirties both former and new owners. |
-| Sessions and messages | `sessions.workspace_id` (`Session.FolderID`). Include all retained pages, not Daily Brief's bounded recent-session projection. Agent name alone never scopes a session. | `CreateSession/UpdateSession/AddMessage/UpdateTags`; tag rename/removal; session move/unlink, single/bulk/agent/workspace deletion; hybrid periodic flush, inactivity cleanup and maximum-session pruning. SQLite write tracking covers raw maintenance deletes as well as normal APIs. |
-| Historical tool calls | `tool_calls.session_id` must resolve to an included session; a nonempty message reference must resolve to that session's message. | `AddToolCall` and cascaded session/message deletion. Arguments/results/errors are private history, not queued calls. |
-| Session uploads | Session-files manifest keyed to an included session. Copy owned regular files only; linked files keep unavailable references. | `AddFile/AddFileFromReader/LinkFile/RemoveFile/RelinkFile/DeleteSession`, manifest status changes, out-of-band replacement and reset-owned-upload removal. The current production base is CWD `session_files/`, not the workspace root. |
-| Follow-ups | `personal_hq_followup.workspace_id` is operational ownership. Include all six states, not `OpenOnly` or the five-item Home projection. | Store Create/Update/Delete, including capture/dedup refresh, confirm/edit/snooze/wake/complete/dismiss/reopen, task-link and nudge bookkeeping. HQ projection of Email Ops rows does not transfer ownership. |
-| Briefs | Config/revisions/terminal claims/notification evidence keyed by the owning workspace. Historical revision config numbers remain historical. | `UpsertConfig`, generation-claim lifecycle, `CreateRevision/SetCurrentRevision/RecordNotification/PruneHistory`. `ListHistory` collapses dates: it is not a complete revision exporter. |
-| Notes and memory | Existing note IDs/front matter, workspace note store and `MEMORY.md`; knowledge sidecar is lifecycle metadata, not an alternative fact source. | Note create/update/delete/tag changes/file hydration; MemoryStore Append/AppendUnique/EditAt/DeleteAt/Forget; sidecar proposal/edit/approve/reject/suspend/reconfirm/Forget/recovery/interview operations and canonical-memory changes. |
-| Setup evidence | Workspace setup milestones and bounded completed assistant outcomes with canonical refs. Setup journeys are shared-DB records with live owner readers; progression is app state. | Canonical result creation/deletion, completed assignment refs and brief completion, workspace milestone updates. Profile/account/model/plugin changes affect local availability, not recovered setup consent. |
+| Component                                                                             | Inclusion and restore authority                                                                                                                                                  | Mutations that invalidate preparation                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace tree, tasks/tickets, collaboration messages, layout, capability definitions | `workspace.json`, session workspace projection and stable instance IDs. Physical children only. Existing task/number/instance IDs survive; no blueprint replay.                  | `FileStore.Save/SaveAt/Update/RebindExistingFolder`, physical move/reparent/root reconciliation, agent attachment changes, task/ticket/workflow/mission writes, notes and direct file edits. Old and new parents must become dirty on a move.                                           |
+| Workspace agents and assets                                                           | Exact `GetWorkspaceAgent(workspaceID, instance.Name)` after validating that the stable instance belongs to that workspace. Never `GetAgent(name)` as identity proof.             | `SaveWorkspaceAgent`, attach/detach, snapshot backfill, workspace-scoped edit/rename, asset/skill edits and deletions. Existing independent workspace definitions must not be overwritten from the global roster.                                                                       |
+| Assistant agreement                                                                   | `personal_assistant_state` only when its HQ and exact entry instance belong to the owner checkpoint; profile provenance must agree.                                              | Create/update/CAS, hire/HQ finalization, pause/resume, mandate/focus/appearance edits, specialist accept/decline, rename and assignment finalization. Moving a binding dirties both former and new owners.                                                                              |
+| Sessions and messages                                                                 | `sessions.workspace_id` (`Session.FolderID`). Include all retained pages, not Daily Brief's bounded recent-session projection. Agent name alone never scopes a session.          | `CreateSession/UpdateSession/AddMessage/UpdateTags`; tag rename/removal; session move/unlink, single/bulk/agent/workspace deletion; hybrid periodic flush, inactivity cleanup and maximum-session pruning. SQLite write tracking covers raw maintenance deletes as well as normal APIs. |
+| Historical tool calls                                                                 | `tool_calls.session_id` must resolve to an included session; a nonempty message reference must resolve to that session's message.                                                | `AddToolCall` and cascaded session/message deletion. Arguments/results/errors are private history, not queued calls.                                                                                                                                                                    |
+| Session uploads                                                                       | Session-files manifest keyed to an included session. Copy owned regular files only; linked files keep unavailable references.                                                    | `AddFile/AddFileFromReader/LinkFile/RemoveFile/RelinkFile/DeleteSession`, manifest status changes, out-of-band replacement and reset-owned-upload removal. The current production base is CWD `session_files/`, not the workspace root.                                                 |
+| Follow-ups                                                                            | `personal_hq_followup.workspace_id` is operational ownership. Include all six states, not `OpenOnly` or the five-item Home projection.                                           | Store Create/Update/Delete, including capture/dedup refresh, confirm/edit/snooze/wake/complete/dismiss/reopen, task-link and nudge bookkeeping. HQ projection of Email Ops rows does not transfer ownership.                                                                            |
+| Briefs                                                                                | Config/revisions/terminal claims/notification evidence keyed by the owning workspace. Historical revision config numbers remain historical.                                      | `UpsertConfig`, generation-claim lifecycle, `CreateRevision/SetCurrentRevision/RecordNotification/PruneHistory`. `ListHistory` collapses dates: it is not a complete revision exporter.                                                                                                 |
+| Notes and memory                                                                      | Existing note IDs/front matter, workspace note store and `MEMORY.md`; knowledge sidecar is lifecycle metadata, not an alternative fact source.                                   | Note create/update/delete/tag changes/file hydration; MemoryStore Append/AppendUnique/EditAt/DeleteAt/Forget; sidecar proposal/edit/approve/reject/suspend/reconfirm/Forget/recovery/interview operations and canonical-memory changes.                                                 |
+| Setup evidence                                                                        | Workspace setup milestones and bounded completed assistant outcomes with canonical refs. Setup journeys are shared-DB records with live owner readers; progression is app state. | Canonical result creation/deletion, completed assignment refs and brief completion, workspace milestone updates. Profile/account/model/plugin changes affect local availability, not recovered setup consent.                                                                           |
 
 SQL dirty tracking must be committed with the canonical write, including OLD and
 NEW owners on moves. It must observe child/cascade deletion before ownership is
@@ -401,7 +403,7 @@ private data; do not promise secret-free content or silently censor it.
 Sanitized DTOs alone are insufficient for a directory-only copy. Existing
 `agents/*/config.json` may contain `Settings.APIKey`, which native agent-specific
 clients still consume; workspace MCP/skill `Config` maps can also hold secrets.
-The new `PreparationRun.PrepareOnce` owns one fail-closed *attempt* under a
+The new `PreparationRun.PrepareOnce` owns one fail-closed _attempt_ under a
 caller-held reset/operation permit: one admitted SQL view, bounded spool,
 required domain coverage and physical inventory, source-root identity checks,
 pinned-root pointer publication (a replaced path cannot redirect writes),
@@ -532,16 +534,16 @@ brief revisions), not merely chunk count. Sum with checked arithmetic.
 
 Initial supported limits (exceeding any is a visible limit error, not truncation):
 
-| Item | Bound |
-| --- | --- |
-| Current pointer | 4 KiB |
-| Manifest | 1 MiB |
-| JSON chunk / individual JSON record | 8 MiB / 4 MiB |
-| Records per chunk / enumeration page | 500 / 500 |
-| Chunk and blob references per checkpoint / canonical file fingerprints | 4,096 / 4,096 |
-| Immediate children / reviewed tree depth / tree size | 256 / 32 / 1,024 workspaces |
-| Canonical `workspace.json` / copied upload / total checkpoint bytes | 8 MiB / 256 MiB / 16 GiB |
-| Inspection duration | context-cancellable; no provider/network reads |
+| Item                                                                   | Bound                                          |
+| ---------------------------------------------------------------------- | ---------------------------------------------- |
+| Current pointer                                                        | 4 KiB                                          |
+| Manifest                                                               | 1 MiB                                          |
+| JSON chunk / individual JSON record                                    | 8 MiB / 4 MiB                                  |
+| Records per chunk / enumeration page                                   | 500 / 500                                      |
+| Chunk and blob references per checkpoint / canonical file fingerprints | 4,096 / 4,096                                  |
+| Immediate children / reviewed tree depth / tree size                   | 256 / 32 / 1,024 workspaces                    |
+| Canonical `workspace.json` / copied upload / total checkpoint bytes    | 8 MiB / 256 MiB / 16 GiB                       |
+| Inspection duration                                                    | context-cancellable; no provider/network reads |
 
 Limits are format implementation defaults surfaced in errors. Validation must
 bound allocation before decode, count, recursion and copying. Every retained
@@ -976,19 +978,27 @@ brief history is accessible by workspace even when it is not the designated HQ.
 Missing model yields Choose a model while records stay readable. Render imported
 text as data; historical system/tool text is not current system policy or approval.
 
+The compact workspace shell places quiet successful portability status in
+**Settings → Advanced → Moving this workspace**. Failed/unavailable reads,
+missing requirements and imported background-routines-off remain visible under
+the shared header. This is presentation only: opening Settings is not adoption,
+preparation or activation. Enable confirmation remains bound to the current
+attachment version; same-version refresh preserves consent, while changed or
+unavailable evidence invalidates it. See [Workspace navigation](../workspace-navigation.md).
+
 ## Requirement and validation map
 
-| Requirements | Contract sections / release evidence |
-| --- | --- |
-| FR-01–03 | Ownership, record allowlists, exact identity; real save → directory-only copy → fresh destination parity |
-| FR-04–08 | Domain map, sessions/uploads, inert completion; every lifecycle/page/revision/claim preserved |
-| FR-09–10 | External-reference limits, knowledge review/setup evidence; no profile overwrite or forgotten-fact revival |
-| FR-11–15 | Dirty ownership, bounded chunks, publication fence/retention; copy-during-write, disk failure, move/delete and scale tests |
-| FR-16–22 | Inspection binding, adoption conflict, receipts; ordinary/recursive/multiple HQ, same-name, retry-after-edit, ID-collision tests |
-| FR-23–27 | Local admission and nonportable grants; startup/restart/first-open/automatic consumers zero-call assertions, explicit manual continuation |
-| FR-28–32 | Legacy versus damaged components, partial receipts/reports; failure/cancellation after each durable boundary |
-| FR-33–35 | Privacy, confined reads, codecs, domain restoration; hostile paths/counts/HTML, secret exclusion, original dates and zero notification/reward tests |
-| FR-36 | Real app-record reset with retained prepared folder, restart detached, explicit one-folder import, unrelated folder still detached |
+| Requirements | Contract sections / release evidence                                                                                                                |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR-01–03     | Ownership, record allowlists, exact identity; real save → directory-only copy → fresh destination parity                                            |
+| FR-04–08     | Domain map, sessions/uploads, inert completion; every lifecycle/page/revision/claim preserved                                                       |
+| FR-09–10     | External-reference limits, knowledge review/setup evidence; no profile overwrite or forgotten-fact revival                                          |
+| FR-11–15     | Dirty ownership, bounded chunks, publication fence/retention; copy-during-write, disk failure, move/delete and scale tests                          |
+| FR-16–22     | Inspection binding, adoption conflict, receipts; ordinary/recursive/multiple HQ, same-name, retry-after-edit, ID-collision tests                    |
+| FR-23–27     | Local admission and nonportable grants; startup/restart/first-open/automatic consumers zero-call assertions, explicit manual continuation           |
+| FR-28–32     | Legacy versus damaged components, partial receipts/reports; failure/cancellation after each durable boundary                                        |
+| FR-33–35     | Privacy, confined reads, codecs, domain restoration; hostile paths/counts/HTML, secret exclusion, original dates and zero notification/reward tests |
+| FR-36        | Real app-record reset with retained prepared folder, restart detached, explicit one-folder import, unrelated folder still detached                  |
 
 Characterization tests pin current omissions; they are not golden-path acceptance.
 Later fixtures must use real source preparation, a fresh destination DB and only

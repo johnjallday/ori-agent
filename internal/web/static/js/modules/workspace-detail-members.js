@@ -459,6 +459,7 @@ export class WorkspaceMembersPanel {
       if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`);
       const data = await res.json();
       if (!isCurrent()) return;
+      this.readFailed = false;
       this.tree = data.workspaces || data.folders || [];
       this.group = findWorkspaceNode(this.tree, this.workspaceId);
       if (!isGroupNode(this.group)) {
@@ -477,6 +478,7 @@ export class WorkspaceMembersPanel {
     } catch (err) {
       if (!isCurrent()) return;
       console.error('Failed to load group members:', err);
+      this.readFailed = true;
       this.showError('Failed to load members.');
     }
   }
@@ -518,7 +520,7 @@ export class WorkspaceMembersPanel {
     if (this._destroyed || this.rollupObserver || !this.els.panel) return;
     if (this.els.rollups) {
       this.els.rollups.innerHTML =
-        '<div class="group-detail-empty">Expand the panel to load member tickets, notes, and files.</div>';
+        '<div class="group-detail-empty">Member inventory includes tickets, notes, and files.</div>';
     }
     this.rollupObserver = new MutationObserver(() => {
       if (

@@ -73,7 +73,12 @@ test('loading and failure never masquerade as an idle workspace; Retry has one o
   const failed = view([], { tasksLoadFailed: true });
   assert.match(failed.renderWorkFirst(), /Retry workspace status/);
   assert.doesNotMatch(failed.renderWorkFirst(), /Give work|No open work/);
-  assert.match(view([]).renderWorkFirst(), /Give work/);
+  assert.match(view([]).renderWorkFirst(), /No open work/);
+  assert.doesNotMatch(
+    view([]).renderWorkFirst(),
+    /data-cmd-next-action="create"/,
+    'idle uses shared-header Give work'
+  );
 });
 
 test('closed and Backlog records do not invent work or a missing result', () => {

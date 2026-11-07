@@ -155,6 +155,41 @@ function cardByLabel(page: Page, label: string) {
   });
 }
 
+async function openWorkspaceCreator(page: Page) {
+  await page.getByRole('button', { name: 'New Workspace', exact: true }).click();
+  const manual = page.getByRole('button', { name: 'Set up manually', exact: true });
+  if (await manual.isVisible()) await manual.click();
+}
+
+async function confirmReviewedCreation(page: Page, keyboard = false) {
+  const review = page.locator('#workspaceCreationReviewPanel');
+  const automatic = review.getByRole('button', { name: 'Use automatic placement', exact: true });
+  if (keyboard) await automatic.press('Enter');
+  else await automatic.click();
+  const confirm = review.locator('[data-placement-action="confirm"]');
+  if (keyboard) await confirm.press('Enter');
+  else await confirm.click();
+  // Automatic placement ends at the real receipt, not manual map placement.
+  // The caller inspects canonical run state before choosing Open workspace.
+  await expect(
+    page.getByRole('region', { name: 'Workspace creation result', exact: true }).getByRole('status')
+  ).toContainText('No run or scan was started by placement.');
+}
+
+async function createdWorkspace(request: APIRequestContext, name: string) {
+  let found: { id: string; folder_slug: string } | undefined;
+  await expect
+    .poll(async () => {
+      const body = await ok(await request.get('/api/workspaces'));
+      found = (body.workspaces || body.folders || []).find(
+        (item: { name: string }) => item.name === name
+      );
+      return Boolean(found?.id && found.folder_slug);
+    })
+    .toBe(true);
+  return found!;
+}
+
 let workspaceId = '';
 let workspaceSlug = '';
 
@@ -178,11 +213,7 @@ test('a workspace created from the modal takes its description as its goal and r
 }) => {
   answerGoalRunsWith('{"items": []}');
   await page.goto('/workspaces');
-  await page.evaluate(() => {
-    const el = document.getElementById('addFolderModal');
-    // @ts-expect-error bootstrap is a page global
-    window.bootstrap.Modal.getOrCreateInstance(el).show();
-  });
+  await openWorkspaceCreator(page);
   await expect(cardByLabel(page, 'Blank')).toBeVisible();
   await cardByLabel(page, 'Blank').click();
   await page.locator('#wizardNextBtn').click();
@@ -199,19 +230,9 @@ test('a workspace created from the modal takes its description as its goal and r
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
 
-  // The page moves into the new workspace as soon as it exists, so the create
-  // answer is read on its way through rather than from the page afterwards,
-  // and the first open's request is held until the state at create is read.
-  let resolveCreated: (body: { folder: { id: string; folder_slug: string } }) => void = () => {};
-  const created = new Promise<{ folder: { id: string; folder_slug: string } }>(resolve => {
-    resolveCreated = resolve;
-  });
-  await page.route('**/api/workspaces', async route => {
-    if (route.request().method() !== 'POST') return route.continue();
-    const response = await route.fetch();
-    resolveCreated(await ok(response));
-    await route.fulfill({ response });
-  });
+  // Creation uses the reviewed commit owner. Read its actual persisted record
+  // at the receipt, before choosing Open workspace; do not assume a legacy POST.
+  // Hold any first-open admission until that canonical at-create read finishes.
   let releaseFirstOpen: () => void = () => {};
   const firstOpenHeld = new Promise<void>(resolve => {
     releaseFirstOpen = resolve;
@@ -220,10 +241,8 @@ test('a workspace created from the modal takes its description as its goal and r
     await firstOpenHeld;
     await route.continue().catch(() => {});
   });
-  await page.locator('#createFolderBtn').click();
-  const placeHere = page.getByRole('button', { name: 'Create workspace here' });
-  await placeHere.click({ timeout: 5_000 }).catch(() => {});
-  const { folder } = await created;
+  await confirmReviewedCreation(page);
+  const folder = await createdWorkspace(request, 'Modal Goal Desk');
 
   // Nothing runs at create: the workspace has its goal and its first run
   // waits for the first open.
@@ -237,13 +256,30 @@ test('a workspace created from the modal takes its description as its goal and r
   releaseFirstOpen();
   await page.unroute('**/mission/first-open');
   const id = folder.id;
-  await page.goto(`/workspaces/${folder.folder_slug}`);
+  await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
   await expect
     .poll(async () => (await missionState(request, id)).first_run_pending, { timeout: 15_000 })
     .toBe(false);
   const run = await waitForRuns(request, id, 1);
   expect(run.origin).toBe('first_goal');
   expect(run.succeeded).toBe(true);
+  // Approved navigation exception: the existing first-open owner runs once,
+  // never a second time because shared views/history refresh it.
+  const repeated: string[] = [];
+  page.on('request', req => {
+    if (
+      req.method() === 'POST' &&
+      /\/mission\/(first-open|trigger)$/.test(new URL(req.url()).pathname)
+    )
+      repeated.push(req.url());
+  });
+  for (const mode of ['map', 'tickets', 'details'])
+    await page.locator(`[data-cmd-view-mode="${mode}"]`).click();
+  await page.reload();
+  await expect(page.locator('#workspace-command-mission-title')).toHaveText(GOAL);
+  expect((await missionState(request, id)).mission_runs).toHaveLength(1);
+  expect(goalRunPrompts()).toHaveLength(1);
+  expect(repeated).toEqual([]);
 });
 
 test('saving the first goal starts a run whose suggestions reach the Backlog drawer (SM6, FR24, FR27)', async ({
@@ -261,12 +297,15 @@ test('saving the first goal starts a run whose suggestions reach the Backlog dra
   workspaceSlug = body.folder.folder_slug;
 
   await page.goto(`/workspaces/${workspaceSlug}`);
-  await expect(page.locator('#workspace-command-mission-title')).toHaveText('No goal yet');
-  await page.locator('#workspace-command-mission-edit').click();
+  await expect(page.locator('#workspace-command-mission-card')).toHaveCount(0);
+  await page.locator('[data-cmd-settings]').click();
+  await page.locator('[data-panel-section="automation"]').click();
+  await page.getByRole('button', { name: 'Goal & findings', exact: true }).click();
   await expect(page.locator('#workspace-detail-goal-modal')).toBeVisible();
   await page.fill('#workspace-detail-goal-modal-text', GOAL);
   await page.locator('#workspace-detail-goal-modal-save').click();
   await expect(page.locator('#workspace-detail-goal-modal')).toBeHidden();
+  await page.getByRole('button', { name: 'Close workspace panel', exact: true }).click();
 
   const status = page.locator('#workspace-command-mission-action-status');
   await expect(status).toHaveText(IN_FLIGHT);
@@ -514,10 +553,7 @@ test('stock authoring: preview, duplicate, edit and create preserve custom and e
   const customGoal = 'Review 日本語 evidence <b>literally</b> before proposing changes.';
   const before = goalRunPrompts().length;
   await page.goto('/workspaces');
-  await page.evaluate(() => {
-    // @ts-expect-error bootstrap is a page global
-    window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
-  });
+  await openWorkspaceCreator(page);
   await cardByLabel(page, 'Code Project').click();
   await expect(page.locator('#templateBriefingGoalValue')).toHaveText(stockGoal);
   await page.locator('#templateBriefingGoalValue').scrollIntoViewIfNeeded();
@@ -560,10 +596,7 @@ test('stock authoring: preview, duplicate, edit and create preserve custom and e
 
   for (const [index, override] of ['My reviewed project outcome', ''].entries()) {
     await page.goto('/workspaces');
-    await page.evaluate(() => {
-      // @ts-expect-error bootstrap is a page global
-      window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
-    });
+    await openWorkspaceCreator(page);
     await page.locator('[data-template-id="goal-review-copy"]').click();
     await expect(page.locator('#templateBriefingGoalValue')).toHaveText(customGoal);
     await expect(page.locator('#templateBriefingGoalValue b')).toHaveCount(0);
@@ -587,31 +620,15 @@ test('stock authoring: preview, duplicate, edit and create preserve custom and e
     await page.locator('[data-existing-agent-add="Ask Ori"]').click();
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep4')).toBeVisible();
-    let resolveCreated!: (body: { folder: { id: string; folder_slug: string } }) => void;
-    const created = new Promise<{ folder: { id: string; folder_slug: string } }>(resolve => {
-      resolveCreated = resolve;
-    });
-    // Read before fulfilling: navigation otherwise discards Chromium's body.
-    await page.route('**/api/workspaces', async route => {
-      if (route.request().method() !== 'POST') return route.continue();
-      const response = await route.fetch();
-      resolveCreated(await ok(response));
-      await route.fulfill({ response });
-    });
-    await page.locator('#createFolderBtn').click();
-    await page
-      .getByRole('button', { name: 'Create workspace here' })
-      .click({ timeout: 5_000 })
-      .catch(() => {});
-    const body = await created;
-    await page.unroute('**/api/workspaces');
-    const state = await missionState(request, body.folder.id);
+    await confirmReviewedCreation(page);
+    const folder = await createdWorkspace(request, `Copy Goal Intent ${index}`);
+    const state = await missionState(request, folder.id);
     expect(state.mission).toBe(override);
     expect(state.mission_runs).toHaveLength(0);
-    await page.goto(`/workspaces/${body.folder.folder_slug}`);
-    await expect(page.locator('#workspace-command-mission-title')).toHaveText(
-      override || 'No goal yet'
-    );
+    await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
+    if (override)
+      await expect(page.locator('#workspace-command-mission-title')).toHaveText(override);
+    else await expect(page.locator('#workspace-command-mission-card')).toHaveCount(0);
     await captureGoalState(
       page,
       testInfo.outputPath(override ? 'copy-workspace-override.png' : 'copy-workspace-empty.png')
@@ -640,10 +657,7 @@ test('stock defaults: Writing and Code prefill from the real library and retain 
   ];
   for (const item of cases) {
     await page.goto('/workspaces');
-    await page.evaluate(() => {
-      // @ts-expect-error bootstrap is a page global
-      window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
-    });
+    await openWorkspaceCreator(page);
     await cardByLabel(page, item.name).click();
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#folderGoalInput')).toHaveValue(item.goal);
@@ -734,12 +748,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(goalRunPrompts()).toHaveLength(before);
 
       await page.goto('/workspaces');
-      await page.evaluate(() => {
-        // @ts-expect-error bootstrap is a page global
-        window.bootstrap.Modal.getOrCreateInstance(
-          document.getElementById('addFolderModal')
-        ).show();
-      });
+      await openWorkspaceCreator(page);
       await cardByLabel(page, 'Writing Project').click();
       await expect(page.locator('#templateBriefingGoalValue')).toHaveText(goal);
       await page.locator('#wizardNextBtn').press('Enter');
@@ -751,16 +760,7 @@ for (const theme of ['light', 'dark'] as const) {
         .click();
       await page.locator('[data-existing-agent-add="Ask Ori"]').click();
       await page.locator('#wizardNextBtn').press('Enter');
-      let resolveCreated!: (body: { folder: { id: string; folder_slug: string } }) => void;
-      const created = new Promise<{ folder: { id: string; folder_slug: string } }>(resolve => {
-        resolveCreated = resolve;
-      });
-      await page.route('**/api/workspaces', async route => {
-        if (route.request().method() !== 'POST') return route.continue();
-        const response = await route.fetch();
-        resolveCreated(await ok(response));
-        await route.fulfill({ response });
-      });
+
       let release!: () => void;
       const held = new Promise<void>(resolve => {
         release = resolve;
@@ -769,26 +769,22 @@ for (const theme of ['light', 'dark'] as const) {
         await held;
         await route.continue().catch(() => {});
       });
-      await page.locator('#createFolderBtn').press('Enter');
-      await page
-        .getByRole('button', { name: 'Create workspace here' })
-        .click({ timeout: 5_000 })
-        .catch(() => {});
-      const { folder } = await created;
+      await confirmReviewedCreation(page, true);
+      const folder = await createdWorkspace(request, `Manuscript ${layout} ${theme}`);
       const initial = await missionState(request, folder.id);
       expect(initial.mission).toBe(goal);
       expect(initial.mission_runs).toHaveLength(0);
       expect(goalRunPrompts()).toHaveLength(before);
       release();
       await page.unroute('**/mission/first-open');
-      await page.goto(`/workspaces/${folder.folder_slug}`);
+      await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
       const run = await waitForRuns(request, folder.id, 1);
       expect(run.tasks_created).toBe(1);
       expect(await suggestedTitles(request, folder.id)).toEqual([title]);
       expect(goalRunPrompts()).toHaveLength(before + 1);
       expect(goalRunPrompts().at(-1)).toContain(goal);
       await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
-        '1 task suggested'
+        '1 ticket suggested'
       );
       await page.locator('#workspace-command-mission-title').scrollIntoViewIfNeeded();
       await page.screenshot({

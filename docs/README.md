@@ -5,16 +5,19 @@ This directory contains detailed documentation for Ori Agent.
 ## Quick Links
 
 ### Getting Started
+
 - [Main README](../README.md) - Project overview and quick start
 - [macOS Installation](./INSTALLATION_MACOS.md) - Installing on macOS
 - [Linux Installation](./INSTALLATION_LINUX.md) - Installing on Linux
 - [Windows Installation](./INSTALLATION_WINDOWS.md) - Installing on Windows
 
 ### API & Development
+
 - [API Reference](./api/API_REFERENCE.md) - HTTP API endpoint documentation
 - [LLM Provider Guide](../internal/llm/README.md) - LLM provider abstraction and implementation
 
 ### Development Tools
+
 - [External development tools](./devtools.md) - Source/target/runtime boundary,
   retained commands, offline validation and recovery
 - [Ori–Herdr Devflow Bridge](./herdr-devflow.md) - Entry to the external operating guide
@@ -27,13 +30,15 @@ This directory contains detailed documentation for Ori Agent.
   `./scripts/devops.sh explore` remains the compatibility entrypoint
 
 ### Feature Guides
+
 - [Scheduler Nodes Guide](./SCHEDULER_NODES_GUIDE.md) - Complete guide to using scheduler nodes for task automation
 - [Custom Workspace Dashboard](./features/custom-workspace-dashboard.md) - Write your own HTML
   dashboard for a workspace, reading live workspace data in a sandboxed frame
 - [Moving a Workspace](./features/moving-workspaces.md) - Copy a workspace folder to another computer
   and continue with its history (and your assistant)
+- [Workspace Navigation](./workspace-navigation.md) - Shared header, Settings/Resources, destination map and state ownership.
 - [Workspace Next Action](./workspace-next-action.md) - The shared **Next action** recommendation
-  in Map and Details, and how it is chosen
+  in Map and Overview, and how it is chosen
 - [Workspace Team Readiness](./workspace-team-readiness.md) - The Create Workspace staffing
   contract: when a blueprint role counts as filled
 - [Plugins](./plugins.md) - Installing Claude Code- and Codex-compatible plugins (MCP servers,
@@ -51,6 +56,7 @@ This directory contains detailed documentation for Ori Agent.
 - [Premium Features](./premium_features.md) - Premium feature overview
 
 ### Testing & Quality
+
 - [Smoke Tests Guide](./testing/SMOKE_TESTS.md) - Automated installer smoke testing (CI/CD)
 - [Testing Installers](./TESTING_INSTALLERS.md) - Manual installer testing guide (VMs, Docker)
 - [Test Cheat Sheet](./testing/TEST_CHEATSHEET.md) - Quick command reference
@@ -62,6 +68,7 @@ This directory contains detailed documentation for Ori Agent.
   isolated disposable server
 
 ### Release & Deployment
+
 - [Release Checklist](./RELEASE_CHECKLIST.md) - Pre-release validation checklist
 - [RC Testing Protocol](./RC_TEST_PROTOCOL.md) - Core and change-specific checks for every
   exact release candidate before stable promotion
@@ -72,12 +79,14 @@ This directory contains detailed documentation for Ori Agent.
   product screenshots ([screenshot manifest](./readme-screenshots.json))
 
 ### Project Policies
+
 - [Ori Services](../ORI_SERVICES.md) - Private services access and scope
 - [Trademarks](../TRADEMARKS.md) - Branding and trademark usage
 - [Character Asset Provenance Register](./CHARACTER_ASSET_PROVENANCE.md) - Review record for every
   shipped character asset ([hashes](./character-asset-hashes.txt))
 
 ### Feature Planning
+
 - [PRD-to-Task Coverage Audit](./PRD_TASK_COVERAGE_AUDIT.md) - Final planning-quality check before creating a feature worktree
 - [Feature Discovery Playbook](./feature-discovery/PLAYBOOK.md) - Weekly routine that produces a
   ranked shortlist of feature candidates
@@ -87,10 +96,12 @@ This directory contains detailed documentation for Ori Agent.
   reports (first run: 2026-07-18)
 
 ### Architecture & Contracts
+
 - [Anchored Folder Workspaces](./architecture/anchored-folder-workspace.md) - Managed,
   anchored and imported shapes; explicit folder access and the sidecar lifecycle
 
 #### Assistant
+
 - [Personal Assistant Foundation Contract](./architecture/personal-assistant-foundation-contract.md) -
   The Personal Assistant foundation contract v1 and its amendments (guided Personal HQ, follow-up
   ownership, portable import)
@@ -110,6 +121,7 @@ This directory contains detailed documentation for Ori Agent.
   or Markdown folder) as a read-only Personal HQ source
 
 #### Workspaces & placement
+
 - [Workspace Build Sessions](./architecture/workspace-build-sessions.md) - "Build with your assistant": the draft is the create request, validation, storage, privacy
 - [Workspace Goal Runs](./architecture/workspace-goal-runs.md) - How a goal run turns the workspace goal into Backlog suggestions and findings, and when it starts
 - [Assisted Workspace Placement](./architecture/assisted-workspace-placement.md) - Propose →
@@ -130,6 +142,7 @@ This directory contains detailed documentation for Ori Agent.
   a Home's project library: roots, scans and portfolio authority
 
 #### Setup & onboarding
+
 - [Specialist Setup Journey Contract](./architecture/specialist-setup-journey-contract.md) - Host
   contracts for generic specialist setup journeys, with REAPER as the v1 declaration
 - [Host-owned Setup Quests](./architecture/host-setup-quests.md) - Contract for host-owned setup
@@ -146,12 +159,14 @@ This directory contains detailed documentation for Ori Agent.
   inputs, bundled skills, reviewed record application and re-intake automation
 
 #### Plugins & surfaces
+
 - [Plugin Workspace Surfaces](./architecture/plugin-workspace-surfaces.md) - Architecture
   decision for trusted plugin contributions through one versioned Workspace Surface protocol
 - [Workspace Surface Protocol v1](./architecture/plugin-workspace-surfaces-v1.md) - The frozen,
   normative Workspace Surface protocol v1 contract
 
 #### Integrations (Google, email, REAPER)
+
 - [Google Account Connection Spike](./architecture/google-account-connection-spike.md) -
   Compatibility spike for the Google Account Connection hub (Gmail, Calendar, Drive)
 - [Google OAuth Client Setup](./architecture/google-account-connection-oauth-setup.md) - Setting
@@ -166,6 +181,7 @@ This directory contains detailed documentation for Ori Agent.
   (contract v1)
 
 #### Backup, reset & continuity
+
 - [Backup & Recovery Contract](./architecture/backup-and-recovery-contract.md) - Integration
   contract v1: Ori observes approved backup metadata; the external application does the work
 - [Settings Reset](./architecture/settings-reset.md) - Scope and lifecycle of Replay Setup, Reset
@@ -174,10 +190,12 @@ This directory contains detailed documentation for Ori Agent.
   workspace continuity v1: moving a workspace folder with its history
 
 #### Platform boundaries
+
 - [Open-Core Boundaries](./architecture/open-core-boundaries.md) - Separation of OSS core and private services
 - [Herdr Standalone Wake v1 Contract](./architecture/herdr-standalone-wake-v1-contract.md) - Location of the verbatim accepted contract in the external toolbox
 
 ### Design & Examples
+
 - [Assistant Folder Response Prototype](./design/assistant-folder-response-prototype.html) -
   Fixture-backed folder-response prototype (not production)
 - [Workspace Dashboard Example](./examples/workspace-dashboard/index.html) - Worked example for
@@ -186,6 +204,7 @@ This directory contains detailed documentation for Ori Agent.
   drives REAPER over its Web Remote HTTP interface from a CLI agent's shell
 
 ### UI Documentation
+
 - [Form Styling Index](./ui/FORM_STYLING_INDEX.md) - Navigation guide for all form styling docs
 - [Form Design Reference](./ui/AGENT_FORM_DESIGN_REFERENCE.md) - Complete form design system
 - [Form Comparison](./ui/FORM_COMPARISON.md) - Comparison between different form implementations
@@ -223,7 +242,7 @@ docs/
 ├── reaper-integration.md               # Ori's REAPER integration
 ├── backup-and-recovery.md              # Backup & Recovery guide
 ├── file-curator-guidance.md            # File Janitor's optional Curator
-├── workspace-next-action.md            # Map/Details Next action
+├── workspace-next-action.md            # Map/Overview Next action
 ├── workspace-team-readiness.md         # Create Workspace staffing contract
 │
 ├── api/

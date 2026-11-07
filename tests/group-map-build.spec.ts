@@ -62,14 +62,28 @@ async function openGroupMap(page: Page, slug: string) {
   await map.waitFor({ timeout: 20000 });
   await map.locator('[data-ws-map-viewport]').waitFor({ timeout: 20000 });
   await expect(page.getByRole('region', { name: 'Next action', exact: true })).toHaveCount(0);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    const root = document.querySelector('.ws-cmd-opmap.is-combined');
+    await Promise.all(
+      (root?.getAnimations({ subtree: true }) || [])
+        .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+        .map(animation => animation.finished.catch(() => {}))
+    );
+  });
   return map;
 }
 
 type Box = { x: number; y: number; width: number; height: number };
 
-function boxesOverlap(a: Box | null, b: Box | null) {
+function boxesOverlap(a: Box | null, b: Box | null, epsilon = 0) {
   if (!a || !b) return false;
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  return (
+    a.x < b.x + b.width - epsilon &&
+    a.x + a.width > b.x + epsilon &&
+    a.y < b.y + b.height - epsilon &&
+    a.y + a.height > b.y + epsilon
+  );
 }
 
 test('a group page draws its own district, and its coordinates are Home’s', async ({
@@ -94,7 +108,7 @@ test('a group page draws its own district, and its coordinates are Home’s', as
   await expect(page.locator('.ws-cmd-opmap')).toHaveCount(1);
   await expect(zone.locator('.ws-map-unit.is-commander')).toBeVisible();
   await expect(zone.locator('.ws-cmd-map-command-post')).toHaveCount(0);
-  const toolbar = zone.locator('[data-map-zone="detachment"]');
+  const toolbar = page.locator('[data-map-zone="detachment"]');
   await expect(toolbar).toHaveAttribute('role', 'toolbar');
   await expect(toolbar.locator('.ws-cmd-map-zone-count')).toHaveText('2');
   await expect(zone.locator(`.ws-map-tile[data-ws-id="${member.id}"]`)).toBeVisible();
@@ -214,7 +228,8 @@ test('Build from a group page opens the shared wizard with the parent locked', a
   await createMember(page, `Seed ${tag}`, group.id);
 
   const zone = await openGroupMap(page, group.folder_slug);
-  await zone.locator('[data-cmd-detachment-build]').click();
+  await page.locator('[data-cmd-add-workspace] > summary').click();
+  await page.locator('[data-cmd-group-create]').click();
 
   // FR-15/FR-17: the whole wizard, with this group fixed as the destination.
   const modal = page.locator('#addFolderModal');
@@ -230,28 +245,24 @@ test('Build from a group page opens the shared wizard with the parent locked', a
   // FR-20: cancelling leaves no pending build site behind.
   await modal.getByRole('button', { name: 'Cancel' }).first().click();
   await expect(modal).toBeHidden();
+  await expect(page.locator('[data-cmd-add-workspace] > summary')).toBeFocused();
   expect(
     await page.evaluate(() => (window as unknown as OriWindow).OriWorkspaceMap.hasPendingBuild())
   ).toBe(false);
 });
 
-test('the Details panel’s plus button opens the same locked creator', async ({ page }) => {
+test('the Overview Add workspace menu opens the same locked creator', async ({ page }) => {
   await skipOnboarding(page);
   const tag = String(Date.now()).slice(-5);
   const group = await createGroup(page, `Details Group ${tag}`);
 
   await page.goto(`/workspaces/${group.folder_slug}?mode=details`);
-  // Details mode reaches the Detachment panel through the Command rail, which
-  // relocates the legacy members panel into its own host.
-  const manage = page.locator('[data-cmd-manage-section="members"]');
-  await manage.waitFor({ timeout: 20000 });
-  await manage.click();
-  const plus = page.locator('#workspace-detail-create-member-btn');
-  await plus.waitFor({ timeout: 20000 });
+  await page.locator('[data-cmd-add-workspace] > summary').click();
+  const create = page.locator('[data-cmd-group-create]');
   // FR-22: the bare name+description form is gone from the page.
   await expect(page.locator('#workspace-detail-member-create-form')).toHaveCount(0);
 
-  await plus.click();
+  await create.click();
   const modal = page.locator('#addFolderModal');
   await expect(modal).toBeVisible();
   await expect(modal.locator('#folderParentSelect')).toHaveValue(group.id);
@@ -283,7 +294,9 @@ test('an ordinary workspace’s Map mode has no zone and asks for no layout', as
 // width no control may sit on another, and none may cover a member building.
 for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
-  { name: 'phone', width: 390, height: 844 }
+  { name: 'tablet', width: 768, height: 900 },
+  { name: 'phone', width: 390, height: 844 },
+  { name: 'small phone', width: 320, height: 900 }
 ]) {
   test(`the combined group map keeps its controls apart at ${viewport.name} width`, async ({
     page
@@ -318,13 +331,13 @@ for (const viewport of [
         const root = document.querySelector('.ws-cmd-opmap.is-combined');
         return {
           overlays: {
-            quest: box(document.querySelector('.ws-cmd-map-quest-fab')),
-            belt: box(root && root.querySelector('.ws-cmd-map-belt')),
-            toolbar: box(root && root.querySelector('.ws-cmd-map-group-bar')),
+            toolbar: box(
+              root?.closest('.ws-cmd-map-shell')?.querySelector('.ws-cmd-map-group-bar') ?? null
+            ),
             controls: box(root && root.querySelector('.ws-map-control-dock'))
           },
           // Page-wide floating widgets pinned to the viewport's corner.
-          floating: box(document.querySelector('button[aria-label^="Open Ori Help"]')),
+          floating: box(document.querySelector('#personalAssistantLauncher')),
           // Buildings and the agents standing beside them: everything the
           // district opens framed on.
           tiles: Array.from(
@@ -334,7 +347,9 @@ for (const viewport of [
               )) ||
               []
           ).map(box),
-          units: (root && root.querySelectorAll('.ws-cmd-detachment-host .ws-map-unit').length) || 0
+          units:
+            (root && root.querySelectorAll('.ws-cmd-detachment-host .ws-map-unit').length) || 0,
+          stations: Array.from(root?.querySelectorAll('.ws-cmd-map-hq-station') || []).map(box)
         };
       });
     let snapshot = await measure();
@@ -353,9 +368,6 @@ for (const viewport of [
     const names = Object.keys(overlays) as (keyof typeof overlays)[];
     for (let i = 0; i < names.length; i += 1) {
       for (const other of names.slice(i + 1)) {
-        // New Quest and the belt are the agent map's own controls, unchanged
-        // here; at phone width they already overlap on every workspace's map.
-        if (names[i] === 'quest' && other === 'belt' && viewport.width <= 640) continue;
         expect(
           boxesOverlap(overlays[names[i]], overlays[other]),
           `${names[i]} and ${other} overlap`
@@ -363,17 +375,26 @@ for (const viewport of [
       }
     }
 
-    // The map's own controls stay clear of the page's floating help widget,
-    // which owns the viewport's bottom-right corner (desktop; a phone has no
-    // width to keep them apart).
-    if (viewport.width > 640 && snapshot.floating) {
+    // The compact dock must clear the real global assistant on phones too.
+    if (snapshot.floating) {
       expect(
         boxesOverlap(overlays.controls, snapshot.floating),
-        'map controls sit under the floating help widget'
+        'map controls sit under the global assistant'
       ).toBe(false);
     }
 
-    // The district opens framed in the space the overlays leave clear, and no
+    for (const station of snapshot.stations) {
+      expect(
+        boxesOverlap(station, overlays.toolbar),
+        'a saved station sits under the toolbar'
+      ).toBe(false);
+      for (const tile of snapshot.tiles) {
+        expect(boxesOverlap(station, tile, 0.5), 'a member or agent is obscured by a station').toBe(
+          false
+        );
+      }
+    }
+    // The district opens framed in the space the controls leave clear, and no
     // agent stands on a building.
     snapshot.tiles.forEach((box, index) => {
       for (const name of names) {
@@ -382,7 +403,12 @@ for (const viewport of [
         );
       }
       for (const other of snapshot.tiles.slice(index + 1)) {
-        expect(boxesOverlap(box, other), 'two things stand on one spot').toBe(false);
+        // The 170px world pitch meets a 170.25px label box with these fonts;
+        // ignore only subpixel box rounding, not an obscured label or control.
+        expect(
+          boxesOverlap(box, other, 0.5),
+          `two things stand on one spot: ${JSON.stringify([box, other])}`
+        ).toBe(false);
       }
     });
 

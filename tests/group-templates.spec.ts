@@ -55,6 +55,13 @@ async function fixtureTemplate(request: APIRequestContext): Promise<GroupTemplat
   return entry as GroupTemplate;
 }
 
+async function advancedSetupStatus(page: Page) {
+  await page.locator('[data-cmd-settings]').click();
+  const panel = page.getByRole('dialog', { name: 'Workspace settings', exact: true });
+  await panel.locator('[data-panel-section="advanced"]').click();
+  return panel.locator('.ws-cmd-group-template');
+}
+
 async function openGroupCreator(page: Page) {
   await page.goto('/');
   await page.waitForFunction(() => Boolean((window as any).sessionManager?.showAddWorkspaceModal));
@@ -357,9 +364,7 @@ test('choosing the template again reuses the group unchanged and staffs its miss
   await sharedReview.getByRole('button', { name: 'Open group', exact: true }).click();
 
   await page.waitForURL(url => /^\/workspaces\/[^/]+$/.test(url.pathname));
-  await expect(page.locator('.ws-cmd-group-template')).toContainText(
-    'Ready — 1 of 1 required set up'
-  );
+  await expect(await advancedSetupStatus(page)).toContainText('Ready — 1 of 1 required set up');
   await expect(page.locator('#addAgentModal')).toBeHidden();
   expect(await workspaceIDs(request)).toEqual(beforeWorkspaces);
   expect(await agentNames(request)).toEqual([...beforeAgents, staffed].sort());
@@ -419,8 +424,10 @@ test('the group page separates template, coordinator and integration through set
   await page.locator('#createAgentBtn').click();
   expect('system_prompt' in (await fill).postDataJSON()).toBe(false);
   await expect(page.locator('#addAgentModal')).toBeHidden();
-  await expect(strip).toContainText('Ready — 1 of 1 required set up');
-  await expect(strip.getByRole('button', { name: /Set up/ })).toHaveCount(0);
+  const ready = await advancedSetupStatus(page);
+  await expect(ready).toContainText('Ready — 1 of 1 required set up');
+  await expect(ready.getByRole('button', { name: /Set up/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close workspace panel', exact: true }).click();
 
   const roles = await json(await request.get(`/api/workspaces/${homeID}/roles`));
   const byID = Object.fromEntries(
@@ -450,9 +457,10 @@ test('the group page separates template, coordinator and integration through set
 
   await json(await request.post(`/api/plugins/${PLUGIN_NAME}/enable`));
   await page.reload();
-  await expect(strip).toContainText('Ready — 1 of 1 required set up');
-  await expect(strip).toContainText('Available');
-  await expect(strip).not.toContainText('Unavailable');
+  const enabled = await advancedSetupStatus(page);
+  await expect(enabled).toContainText('Ready — 1 of 1 required set up');
+  await expect(enabled).toContainText('Available');
+  await expect(enabled).not.toContainText('Unavailable');
 
   expect(await workspaceIDs(request)).toEqual(beforeWorkspaces);
   expect((await listed()).group_template).toMatchObject({ name: 'Research Program Home' });

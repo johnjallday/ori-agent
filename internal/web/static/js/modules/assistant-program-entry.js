@@ -1,15 +1,11 @@
 import { workspacePageURL } from './workspace-routes.js';
 
-/**
- * Adds an optional declaration-named team home only when the server says this
- * workspace participates in an assistant program. A MutationObserver keeps the
- * link present when WorkspaceCommandView re-renders its switch.
- */
+/** Declaration-owned destinations. The host is independent of secondary links. */
 export class AssistantProgramEntry {
   constructor({ workspaceId, workspaceSlug, fetchImpl = globalThis.fetch } = {}) {
     this.workspaceId = String(workspaceId || '').trim();
     this.workspaceSlug = String(workspaceSlug || '').trim();
-    this.fetchImpl = (...args) => fetchImpl(...args);
+    this.fetchImpl = typeof fetchImpl === 'function' ? (...args) => fetchImpl(...args) : null;
     this.visible = false;
     this.program = null;
     this.observer = null;
@@ -23,85 +19,54 @@ export class AssistantProgramEntry {
         { headers: { Accept: 'application/json' } }
       );
       if (!response.ok) return;
-      const program = await response.json();
-      this.program = program;
-      this.visible = Boolean(program && (program.available || program.activation_needed));
-      if (!this.visible) return;
-      this.install();
+      this.program = await response.json();
+      this.visible = Boolean(this.program?.available || this.program?.activation_needed);
+      if (this.visible) this.install();
     } catch (_) {
-      // Optional contributions fail closed: no declaration means no link.
+      // Optional contributions fail closed. No declaration means no guessed link.
     }
   }
 
   install() {
     this.render();
     if (typeof MutationObserver !== 'function' || !document.body) return;
+    this.observer?.disconnect();
     this.observer = new MutationObserver(() => this.render());
     this.observer.observe(document.body, { childList: true, subtree: true });
   }
 
   render() {
     if (!this.visible) return;
-    const switcher = document.querySelector('.ws-cmd-view-switch');
-    if (!switcher) return;
-    const plans = switcher.querySelector('a[href$="/plans"]');
+    const host = document.querySelector('[data-cmd-program-destinations]');
+    if (!host) return;
     const homeName = String(this.program?.declaration?.station_name || '').trim() || 'Team Home';
-    if (!switcher.querySelector('[data-assistant-program-entry]')) {
-      const link = document.createElement('a');
-      link.className = 'ws-cmd-view-btn ws-cmd-view-link';
-      link.dataset.assistantProgramEntry = '';
-      link.href = workspacePageURL(this.workspaceSlug, ['assistant']);
-      link.textContent = this.program?.hired
-        ? `${homeName} · ${this.program.stage_label || 'Active'} L${this.program.level || 1}`
-        : homeName;
-      link.setAttribute(
-        'aria-label',
-        this.program?.hired
-          ? `Open ${homeName}, ${this.program.stage_label || 'active'}, level ${this.program.level || 1}`
-          : `Open ${homeName}`
+    this.addLink(host, 'assistantProgramEntry', 'assistant', homeName, `Open ${homeName}`);
+    if (this.program?.resource_workspace) {
+      this.addLink(
+        host,
+        'resourceCatalogEntry',
+        'catalog',
+        'Catalog',
+        'Open this workspace’s catalog'
       );
-      switcher.insertBefore(link, plans || null);
     }
-    this.renderProfileLink(switcher, plans, homeName);
-    this.renderCatalogLink(switcher, plans);
   }
 
-  // A resource workspace holds a catalog on its own page.
-  renderCatalogLink(switcher, plans) {
-    if (
-      !this.program?.resource_workspace ||
-      switcher.querySelector('[data-resource-catalog-entry]')
-    )
-      return;
+  addLink(host, key, route, label, accessibleName) {
+    const attribute = 'data-' + key.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase());
+    if (host.querySelector(`[${attribute}]`)) return;
     const link = document.createElement('a');
     link.className = 'ws-cmd-view-btn ws-cmd-view-link';
-    link.dataset.resourceCatalogEntry = '';
-    link.href = workspacePageURL(this.workspaceSlug, ['catalog']);
-    link.textContent = 'Catalog';
-    link.setAttribute('aria-label', 'Open this workspace’s catalog');
-    switcher.insertBefore(link, plans || null);
-  }
-
-  // A Home whose package declares a profile card gets a second link, named by
-  // the package's own title, that lands on that card. The card sits below four
-  // other panels on the Home's page, so the Home's link alone does not show
-  // that it exists. A linked project has no card of its own and gets no link.
-  renderProfileLink(switcher, plans, homeName) {
-    const title = this.program?.is_station
-      ? String(this.program?.home_profile_title || '').trim()
-      : '';
-    if (!title || switcher.querySelector('[data-home-profile-entry]')) return;
-    const link = document.createElement('a');
-    link.className = 'ws-cmd-view-btn ws-cmd-view-link';
-    link.dataset.homeProfileEntry = '';
-    link.href = `${workspacePageURL(this.workspaceSlug, ['assistant'])}#homeProfilePanel`;
-    link.textContent = title;
-    link.setAttribute('aria-label', `Open ${title} on ${homeName}`);
-    switcher.insertBefore(link, plans || null);
+    link.dataset[key] = '';
+    link.href = workspacePageURL(this.workspaceSlug, [route]);
+    // Literal text: these names belong to a declaration, not to this renderer.
+    link.textContent = label;
+    link.setAttribute('aria-label', accessibleName);
+    host.appendChild(link);
   }
 
   destroy() {
-    if (this.observer) this.observer.disconnect();
+    this.observer?.disconnect();
     this.observer = null;
   }
 }

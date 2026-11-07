@@ -24,8 +24,9 @@
 // workspaces that have one. This module is pure and has no way to check that,
 // so it accepts the value as well-formed and leaves availability to the caller
 // (workspace-command.js normalizeCommandViewMode), which falls back to details
-// when the workspace has no dashboard. `tickets` is deliberately absent: it has
-// never been URL-addressable, and making it so is a separate change.
+// when the workspace has no dashboard. Tickets keeps its existing `ticket` /
+// `tickets` vocabulary, not a new mode value; workspace-ticket-url-state.js
+// bridges that owner's presentation into the shared history.
 export const MODE = Object.freeze({ MAP: 'map', DETAILS: 'details', DASHBOARD: 'dashboard' });
 const VALID_MODES = new Set([MODE.MAP, MODE.DETAILS, MODE.DASHBOARD]);
 // `settings` opens the Manager Settings surface. It is here because the Plans

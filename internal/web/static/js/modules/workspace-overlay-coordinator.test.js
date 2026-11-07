@@ -49,6 +49,25 @@ test('closing the child modal resumes the suspended parent (FR119)', () => {
   assert.equal(c.modalCount(), 1);
 });
 
+test('a suspended live owner is made visible again without rebuilding its draft', () => {
+  const { c } = makeCoordinator();
+  const owner = { hidden: false, draft: 'unsaved' };
+  c.open({
+    id: 'parent',
+    kind: 'modal',
+    onClose: info => {
+      if (info.reason === 'suspended') owner.hidden = true;
+    },
+    onResume: () => {
+      owner.hidden = false;
+    }
+  });
+  c.open({ id: 'child', kind: 'modal' });
+  assert.equal(owner.hidden, true);
+  c.close('child');
+  assert.deepEqual(owner, { hidden: false, draft: 'unsaved' });
+});
+
 test('a user action never opens a modal under an existing one (FR117) — no two active modals', () => {
   const { c } = makeCoordinator();
   c.open({ id: 'a', kind: 'modal' });

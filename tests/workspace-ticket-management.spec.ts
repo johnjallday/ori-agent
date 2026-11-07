@@ -1,4 +1,12 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+
+test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+  await page.route('**/api/onboarding/status', route =>
+    route.fulfill({ json: { needs_onboarding: false, completed: true, skipped: true } })
+  );
+});
 
 /**
  * End-to-end acceptance path for tasks/prd-workspace-ticket-management.md.
@@ -19,7 +27,9 @@ import { test, expect, type Page, type APIRequestContext } from '@playwright/tes
  */
 
 async function createWorkspace(request: APIRequestContext, name: string): Promise<string> {
-  const res = await request.post('/api/workspaces', { data: { name } });
+  const res = await request.post('/api/workspaces', {
+    data: { name, blank: true, create_template_agents: true }
+  });
   expect(res.ok()).toBeTruthy();
   const body = await res.json();
   return body.folder?.id || body.id;
@@ -53,19 +63,11 @@ async function workspaceSlug(request: APIRequestContext, studioId: string): Prom
   return body.folder_slug || body.folder?.folder_slug || body.workspace?.folder_slug;
 }
 
-/** The workspace page auto-opens modals that swallow clicks; clear them. */
+/** Seed a staffed blank workspace and navigate normally; never remove overlays. */
 async function openTickets(page: Page, studioId: string) {
   const slug = await workspaceSlug(page.request, studioId);
   await page.goto(`/workspaces/${slug}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(2500);
-  await page.evaluate(() => {
-    document.querySelectorAll('.modal.show').forEach(modal => {
-      modal.classList.remove('show');
-      (modal as HTMLElement).style.display = 'none';
-    });
-    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-    document.body.classList.remove('modal-open');
-  });
+  await expect(page.locator('[data-cmd-give-work]')).toBeVisible({ timeout: 20000 });
   // Tickets is a view mode beside Details and Map, not a modal.
   await page.click('[data-cmd-view-mode="tickets"]');
   await page.waitForSelector('#hubTicketsList', { state: 'visible', timeout: 10000 });

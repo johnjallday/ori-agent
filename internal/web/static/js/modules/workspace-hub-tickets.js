@@ -698,6 +698,11 @@
     tickets: [],
     selectedTicketId: '',
     initialized: false,
+    workspaceId: '',
+    readGeneration: 0,
+    selectionGeneration: 0,
+    presentationGeneration: 0,
+    pendingTicketId: '',
     // Board vs List. Both render the same loaded tickets, so switching views
     // never re-queries and never shows different data (FR-58).
     boardMode: false,
@@ -869,6 +874,11 @@
     if (!list) return;
 
     list.replaceChildren();
+    if (!view.lastPage) {
+      if (empty) empty.hidden = true;
+      updateCount();
+      return;
+    }
     if (!view.tickets.length) {
       if (empty) {
         empty.hidden = false;
@@ -909,6 +919,10 @@
     if (!board) return;
 
     board.replaceChildren();
+    if (!view.lastPage) {
+      updateCount();
+      return;
+    }
     const byState = new Map(BOARD_COLUMNS.map(column => [column.id, []]));
     // Cancelled tickets have no default column; they stay reachable through
     // the List's state filter rather than being silently dropped from view.
@@ -1124,8 +1138,20 @@
 
   /** Paints whichever view is active from the already-loaded tickets. */
   function render() {
+    const root = view.boardMode ? view.elements.board : view.elements.list;
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    const focused =
+      active?.matches?.('.ticket-card-open') && root?.contains?.(active)
+        ? active.closest('[data-ticket-id]')?.dataset.ticketId
+        : '';
     if (view.boardMode) renderBoard();
     else renderList();
+    // A background read can repaint between Tab and Enter. Retain the exact
+    // ticket, without choosing another row or stealing focus from an editor.
+    if (focused)
+      root
+        .querySelector(`[data-ticket-id="${cssEscape(focused)}"] .ticket-card-open`)
+        ?.focus({ preventScroll: true });
   }
 
   function hasActiveFilters() {
@@ -1141,6 +1167,10 @@
   function updateCount() {
     const node = view.elements.count;
     if (!node) return;
+    if (!view.lastPage) {
+      node.textContent = '—';
+      return;
+    }
     const shown = view.tickets.length;
     const page = view.lastPage;
     let label = shown === 1 ? '1 ticket' : `${shown} tickets`;
@@ -1153,7 +1183,7 @@
 
   /** Loads the selected workspace's tickets from the server. */
   async function load() {
-    const studioId = currentStudioId();
+    const studioId = synchronizeWorkspace();
     if (!studioId) {
       view.tickets = [];
       view.lastPage = null;
@@ -1162,6 +1192,8 @@
       return;
     }
 
+    const generation = ++view.readGeneration;
+    const current = () => generation === view.readGeneration && studioId === currentStudioId();
     // A reload follows every change, so it must not wipe what that change said.
     const holdOutcome = Date.now() - view.outcomeAt < OUTCOME_HOLD_MS;
     if (!holdOutcome) setStatus('Loading tickets…');
@@ -1174,6 +1206,7 @@
         archive: view.filters.archive,
         includeDescendants: view.filters.includeDescendants
       });
+      if (!current()) return;
       view.tickets = result.tickets;
       view.lastPage = result;
       announceCounts(studioId, result.counts);
@@ -1181,6 +1214,7 @@
       if (!holdOutcome) setStatus('');
       void followSelectedTicket(result.tickets);
     } catch (error) {
+      if (!current()) return;
       view.tickets = [];
       view.lastPage = null;
       render();
@@ -1213,12 +1247,18 @@
   }
 
   /** Opens the server-backed detail view for one ticket. */
-  async function openDetail(owningWorkspaceId, ticketId) {
+  async function openDetail(owningWorkspaceId, ticketId, { notify = true } = {}) {
     const detail = view.elements.detail;
     if (!detail) return;
-
+    const studioId = synchronizeWorkspace();
+    const generation = ++view.selectionGeneration;
+    const current = () =>
+      generation === view.selectionGeneration &&
+      studioId === currentStudioId() &&
+      view.selectedTicketId === ticketId;
     if (view.selectedTicketId !== ticketId) view.detailOutcome = null;
     view.selectedTicketId = ticketId;
+    if (notify) presentationChanged();
     detail.hidden = false;
     if (view.elements.detailBody) {
       view.elements.detailBody.replaceChildren();
@@ -1232,8 +1272,10 @@
       // user acts on a ticket, so it must show the server's current record
       // and current version, not a snapshot that may already be stale.
       const ticket = await api.get(owningWorkspaceId, ticketId);
+      if (!current()) return;
       renderDetail(ticket);
     } catch (error) {
+      if (!current()) return;
       if (view.elements.detailTitle) {
         view.elements.detailTitle.textContent = 'Could not load ticket';
       }
@@ -2085,10 +2127,96 @@
     node.textContent = message;
   }
 
-  function closeDetail() {
+  function synchronizeWorkspace() {
+    const id = currentStudioId();
+    if (view.workspaceId && view.workspaceId !== id) {
+      view.selectionGeneration++;
+      view.presentationGeneration++;
+      view.selectedTicketId = '';
+      view.selectedTicket = null;
+      view.pendingTicketId = '';
+      view.tickets = [];
+      view.lastPage = null;
+      view.outcomeAt = 0;
+      if (view.elements.detail) view.elements.detail.hidden = true;
+      if (view.elements.detailTitle) view.elements.detailTitle.textContent = '';
+      view.elements.detailBody?.replaceChildren();
+      view.elements.list?.replaceChildren();
+      view.elements.board?.replaceChildren();
+      if (view.elements.empty) view.elements.empty.hidden = true;
+      updateCount();
+    }
+    view.workspaceId = id;
+    return id;
+  }
+
+  /** Read-only presentation seam; the ticket module remains the sole owner. */
+  function getPresentationState() {
+    if (!view.initialized || view.workspaceId !== currentStudioId()) return null;
+    return {
+      ticket: view.pendingTicketId || view.selectedTicketId,
+      tickets: view.filters.states.join(',') || 'all'
+    };
+  }
+
+  function presentationChanged() {
+    view.presentationGeneration++;
+    view.pendingTicketId = '';
+    if (
+      typeof window === 'undefined' ||
+      typeof window.dispatchEvent !== 'function' ||
+      typeof CustomEvent !== 'function'
+    )
+      return;
+    window.dispatchEvent(
+      new CustomEvent('ori:ticket-view', { detail: { studioId: currentStudioId() } })
+    );
+  }
+
+  async function applyPresentationState(state = {}) {
+    if (!view.initialized) return false;
+    const studioId = synchronizeWorkspace();
+    const generation = ++view.presentationGeneration;
+    const ticketId = String(state.ticket || '');
+    view.pendingTicketId = ticketId;
+    view.filters.states = [
+      ...new Set(
+        String(state.tickets || '')
+          .split(',')
+          .map(value => value.trim().toLowerCase())
+          .filter(value => TICKET_STATES.some(meta => meta.id === value))
+      )
+    ];
+    paintFilterChips();
+    if (ticketId !== view.selectedTicketId && view.elements.detail)
+      view.elements.detail.hidden = true;
+    await load();
+    if (generation !== view.presentationGeneration || studioId !== currentStudioId()) return false;
+    view.pendingTicketId = '';
+    if (!ticketId) closeDetail({ notify: false });
+    else {
+      const preserveDraft =
+        view.selectedTicketId === ticketId &&
+        view.selectedTicket?.id === ticketId &&
+        view.elements.detailBody?.querySelector('details[open], .ticket-start-chooser');
+      if (preserveDraft) view.elements.detail.hidden = false;
+      else {
+        const owner =
+          view.tickets.find(ticket => ticket.id === ticketId)?.owningWorkspaceId ||
+          (view.selectedTicket?.id === ticketId && view.selectedTicket.owningWorkspaceId) ||
+          studioId;
+        await openDetail(owner, ticketId, { notify: false });
+      }
+    }
+    return true;
+  }
+
+  function closeDetail({ notify = true } = {}) {
     const openerId = view.selectedTicketId;
+    view.selectionGeneration++;
     view.selectedTicketId = '';
     view.selectedTicket = null;
+    if (notify) presentationChanged();
     if (view.elements.detail) view.elements.detail.hidden = true;
 
     // Focus returns to the card that opened the detail, not to the top of the
@@ -2178,7 +2306,7 @@
       view.elements.boardBtn.addEventListener('click', () => setBoardMode(true));
     }
     wireFilterControls();
-
+    synchronizeWorkspace();
     view.initialized = true;
     void openDeepLinkedTicket();
   }
@@ -2212,22 +2340,9 @@
     if (!studioId) return;
     if (!ticketId && !stateFilter) return;
 
-    if (stateFilter && stateFilter !== 'all') {
-      if (TICKET_STATES.some(state => state.id === stateFilter)) {
-        view.filters.states = [stateFilter];
-        paintFilterChips();
-      }
-    }
-
-    // Load the list first so closing detail returns to a populated view rather
-    // than an empty one.
-    await load();
-    if (!ticketId) return;
-    try {
-      await openDetail(studioId, ticketId);
-    } catch {
-      setStatus('That ticket could not be found in this workspace.', 'error');
-    }
+    // History and initial arrivals use the same owner, with no synthetic click
+    // or history push. A pending read cannot overwrite a later user selection.
+    await applyPresentationState({ ticket: ticketId, tickets: stateFilter });
   }
 
   /**
@@ -2252,6 +2367,7 @@
           view.filters.states = [...active];
         }
         paintFilterChips();
+        presentationChanged();
         void load();
       });
     }
@@ -2306,6 +2422,7 @@
     view.filters.states =
       wanted && wanted !== 'all' && TICKET_STATES.some(item => item.id === wanted) ? [wanted] : [];
     paintFilterChips();
+    presentationChanged();
     return load();
   }
 
@@ -2369,6 +2486,8 @@
     render,
     setBoardMode,
     openDetail,
-    closeDetail
+    closeDetail,
+    getPresentationState,
+    applyPresentationState
   };
 })();

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { WorkspaceCommandView } from './workspace-command.js';
+import { OverlayCoordinator } from './workspace-overlay-coordinator.js';
 import { wireWorkspaceFollowUps } from './workspace-followups.js';
 import { tacticalTermsIn } from './hq-labels.js';
 
@@ -279,43 +280,26 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   );
   assert.doesNotMatch(container.innerHTML, /href="\/workspaces"/);
   assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/canvas"/);
-  assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/diagnostics"/);
-  assert.match(container.innerHTML, /href="\/workflows"/);
-  assert.match(container.innerHTML, /data-cmd-edit-identity="name"/);
-  assert.match(container.innerHTML, /data-cmd-edit-identity="description"/);
-  assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
-  // One work tile replaces the Open Tasks and Tickets pair (PRD 760 FR-7).
-  assert.match(container.innerHTML, /<div class="ws-l">Tickets<\/div>/);
-  assert.doesNotMatch(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
-  assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
-  // "Workspace notes" on every workspace (PRD 766 FR25).
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Workspace notes</);
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-sessions">Sessions</);
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-folders">Linked Folders</);
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-files">Files</);
-  assert.match(container.innerHTML, /id="ws-cmd-rail-title-systems">Systems</);
-  assert.match(container.innerHTML, /data-cmd-primary-section="notes"/);
-  assert.match(container.innerHTML, /data-cmd-primary-section="folders"/);
-  assert.match(container.innerHTML, /data-cmd-primary-section="files"/);
-  // Systems has nothing to create, so its row is the toggle alone.
-  assert.match(container.innerHTML, /data-cmd-manage-section="systems"/);
-  assert.doesNotMatch(container.innerHTML, /data-cmd-primary-section="systems"/);
-  assert.doesNotMatch(container.innerHTML, /No notes yet\./);
-  assert.doesNotMatch(container.innerHTML, /No schedules yet\./);
-  assert.doesNotMatch(container.innerHTML, /No sessions yet\./);
-  assert.doesNotMatch(container.innerHTML, /No linked folders yet\./);
+  assert.match(container.innerHTML, /data-cmd-settings aria-haspopup="dialog"/);
+  assert.match(container.innerHTML, /data-cmd-resources aria-haspopup="dialog"/);
+  assert.doesNotMatch(container.innerHTML, /data-cmd-edit-identity=/);
+  // Counts belong to Tickets; workspace tools remain reachable in Settings.
+  assert.match(container.innerHTML, /data-cmd-view-mode="tickets"/);
+  assert.match(container.innerHTML, /data-cmd-ticket-count/);
+  assert.doesNotMatch(container.innerHTML, /ws-cmd-readout/);
+  assert.match(container.innerHTML, /data-cmd-settings aria-haspopup="dialog"/);
+  // Resources replace the subsystem rail; Team controls remain contextual.
+  for (const key of ['notes', 'files', 'memory', 'sessions'])
+    assert.match(container.innerHTML, new RegExp('data-cmd-resource-section="' + key + '"'));
+  assert.match(container.innerHTML, /data-cmd-team-agent="Atlas"/);
+  assert.doesNotMatch(container.innerHTML, /class="ws-cmd-deck"|<aside class="ws-cmd-rail/);
+  commandView.teamExpanded = true;
+  commandView.render();
   assert.match(container.innerHTML, /★ Acting Commander/);
   assert.match(container.innerHTML, />Model<\/span>/);
   assert.match(container.innerHTML, /Tickets · 1/);
   assert.match(container.innerHTML, /title="Run"/);
-  assert.match(container.innerHTML, /data-cmd-manage-section="notes" aria-expanded="false"/);
-  // The rail element is new on every render, so the "last used with a
-  // pointer" state has to be written into it each time.
-  assert.match(container.innerHTML, /<aside class="ws-cmd-rail">/);
-  commandView.railPointerFocus = true;
-  commandView.render();
-  assert.match(container.innerHTML, /<aside class="ws-cmd-rail is-pointer">/);
+  assert.match(container.innerHTML, /data-cmd-team-toggle aria-expanded="true"/);
   assert.doesNotMatch(
     container.innerHTML,
     /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/
@@ -538,8 +522,8 @@ test('the HQ Map opens in Flow with three labelled lanes and the switch (767 FR2
   // FR15, FR16: no belt, no positioned buildings, nothing to drag.
   assert.doesNotMatch(html, /ws-cmd-map-belt/);
   assert.doesNotMatch(html, /--station-x|--station-y|ws-cmd-map-hq-station|data-station-drag/);
-  // FR4: Give work is the same in both arrangements.
-  assert.match(html, /data-cmd-map-give-work/);
+  // Both arrangements use the same shared-header Give work, never a second FAB.
+  assert.doesNotMatch(html, /data-cmd-map-give-work/);
   assert.deepEqual(tacticalTermsIn(html), []);
 });
 
@@ -594,7 +578,7 @@ test('switching the arrangement remembers it and redraws the map alone (767 FR2,
     assert.equal(view.currentMapArrangement(), 'free');
     assert.match(shell.outerHTML, /class="ws-cmd-map-shell is-hq"/);
     assert.match(shell.outerHTML, /ws-cmd-map-hq-station/);
-    assert.match(shell.outerHTML, /ws-cmd-map-belt/);
+    assert.match(shell.outerHTML, /ws-cmd-map-toolbar/);
     assert.equal(rendered, 0, 'the page is not re-rendered');
     assert.equal(bound, 1);
     assert.match(focused[0], /ws-cmd-map-hq-station/);
@@ -770,7 +754,9 @@ test('command subtitle includes mission automation state when mission state is l
       commandView.computeStats()
     );
 
-    assert.match(html, /Workflow · Guided · Goal · Enabled/);
+    assert.match(html, /Workflow · Guided/);
+    assert.match(commandView.commandSubtitle('Guided'), /Workflow · Guided · Goal · Enabled/);
+    assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
     assert.match(html, /id="workspace-command-subtitle"/);
   } finally {
     globalThis.window = originalWindow;
@@ -903,10 +889,7 @@ test('mission panel disables Run Now when no saved goal is runnable', () => {
   try {
     const html = commandView.renderMissionPanel();
 
-    assert.match(html, /Set a goal so your agents can suggest work/);
-    assert.match(html, />Set Goal<\/button>/);
-    assert.match(html, /id="workspace-command-mission-run"[^>]* disabled/);
-    assert.match(html, /title="Set a goal before running"/);
+    assert.equal(html, '', 'known unconfigured optional goal is in Settings, not a default card');
   } finally {
     globalThis.window = originalWindow;
   }
@@ -1218,10 +1201,10 @@ test('command bar shows group badge and color accent for group workspaces', () =
     commandView.computeStats()
   );
 
-  assert.match(html, /ws-cmd-topbar is-group/);
+  assert.match(html, /ws-cmd-topbar ws-cmd-compact is-group/);
   assert.match(html, /ws-cmd-group-badge/);
   assert.match(html, /--ws-group-accent: #3b82f6/);
-  assert.match(html, /Detachment · Command/);
+  assert.match(html, /ws-cmd-group-badge">Group/);
 });
 
 test('group accent color is sourced from the members-panel group node (detail workspace has none)', () => {
@@ -1283,7 +1266,8 @@ test('command bar omits group treatment for non-group workspaces', () => {
 
   assert.doesNotMatch(html, /ws-cmd-group-badge/);
   assert.doesNotMatch(html, /is-group/);
-  assert.match(html, /Outpost · Command/);
+  assert.match(html, /Solo Outpost/);
+  assert.doesNotMatch(html, /Outpost · Command/);
 });
 
 test('detachment rail panel renders only for group workspaces with member count', () => {
@@ -1869,7 +1853,8 @@ test('the work tile is tinted when any ticket needs attention', () => {
     commandView.computeStats()
   );
 
-  assert.match(html, /class="ws-cmd-stat ws-cmd-stat-work is-alert" data-cmd-section="tickets"/);
+  assert.match(html, /class="ws-cmd-view-btn is-alert" data-cmd-view-mode="tickets"/);
+  assert.match(html, /data-cmd-ticket-count>—</, 'unknown counts never become zero');
   assert.doesNotMatch(html, /data-cmd-section="tasks"/, 'the Open Tasks tile is gone');
 });
 
@@ -4327,11 +4312,12 @@ test('Operations Map controls expose accessible pressed and dialog state', () =>
   });
 
   const switcher = commandView.commandViewSwitchHTML();
-  assert.match(switcher, /role="group" aria-label="Workspace view"/);
+  assert.match(switcher, /<nav class="ws-cmd-view-switch" aria-label="Workspace views"/);
   assert.match(switcher, /data-cmd-view-mode="map" aria-pressed="true"/);
 
   const tray = commandView.renderMapToolTray();
-  assert.match(tray, /data-cmd-map-window="inventory" aria-label="Inventory" aria-pressed="true"/);
+  assert.match(tray, /data-cmd-map-resources aria-haspopup="dialog">Resources/);
+  assert.doesNotMatch(tray, /data-cmd-map-window=/);
 
   const windowHTML = commandView.renderMapWindow(null);
   assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Inventory"/);
@@ -4495,7 +4481,7 @@ test('Operations Map renders units first and keeps support panels hidden by defa
 
     assert.match(html, /ws-cmd-map-shell/);
     assert.match(html, /data-map-zone="agents"/);
-    assert.match(html, /data-cmd-map-window="inventory"/);
+    assert.match(html, /data-cmd-map-resources/);
     assert.doesNotMatch(html, /ws-cmd-map-stations/);
     assert.doesNotMatch(html, /ws-cmd-map-station-node/);
     assert.match(html, /Researcher/);
@@ -7925,9 +7911,14 @@ test('a group’s Map mode is one combined surface: the map slot, agents over it
     /<section class="ws-cmd-map-world is-overlay" data-map-zone="agents"[^>]*><div class="ws-cmd-map-command-post">/
   );
   assert.match(groupHTML, /Studio Group Manager|ws-cmd-map-empty|ws-cmd-map-command-row/);
-  // The toolbar, the tool belt, New Quest, and the map window all stay.
-  assert.match(groupHTML, /data-map-zone="detachment" role="toolbar" aria-label="Detachment"/);
-  assert.match(groupHTML, /class="ws-cmd-map-belt"/);
+  // Shared destinations replace the tool belt without removing the actual map.
+  assert.match(
+    groupHTML,
+    /data-map-zone="detachment" role="toolbar" aria-label="Group map controls"/
+  );
+  assert.match(groupHTML, /data-cmd-map-resources/);
+  assert.match(groupHTML, /data-cmd-add-workspace/);
+  assert.doesNotMatch(groupHTML, /class="ws-cmd-map-belt"/);
   assert.match(groupHTML, /ws-cmd-map-quest-dock/);
   assert.match(groupHTML, /data-cmd-detachment-picker hidden/);
   assert.doesNotMatch(groupHTML, /ws-map-tile/, 'the view draws no member tiles itself');
@@ -8000,11 +7991,11 @@ test('an agent name too long for an anchor id falls back to a stable hashed key'
 
 test('the toolbar offers Build and Add existing, enabled even when the layout is read-only', () => {
   const html = detachmentCommandView('group').renderOperationsMap();
-  assert.match(html, /data-cmd-detachment-build>Build<\/button>/);
-  assert.match(html, /data-cmd-detachment-add aria-expanded="false">Add existing…<\/button>/);
+  assert.match(html, /data-cmd-group-create>Create new<\/button>/);
+  assert.match(html, /data-cmd-group-link>Add existing<\/button>/);
   // Neither touches the layout until the workspace exists (FR-4, FR-11).
-  assert.doesNotMatch(html, /data-cmd-detachment-(build|add)[^>]*disabled/);
-  assert.match(html, /ws-cmd-map-zone-action is-primary" data-cmd-detachment-build/);
+  assert.doesNotMatch(html, /data-cmd-group-(create|link)[^>]*disabled/);
+  assert.match(html, /data-cmd-add-workspace/);
   // Nothing else: the group page draws no district of its own to resize or
   // restyle, so no layout menu rides along (PRD §10).
   assert.doesNotMatch(html, /data-cmd-detachment-layout/);
@@ -8148,6 +8139,38 @@ test('Group selected on a group page builds a nested group from the checked memb
   }
 });
 
+test('group creator returns to the live shared menu only after a real close', () => {
+  const c = detachmentCommandView('group');
+  c.active = true;
+  const events = new Map();
+  let focused = 0;
+  const modal = {
+    dataset: {},
+    addEventListener: (key, handler) => events.set(key, handler),
+    removeEventListener: key => events.delete(key)
+  };
+  const oldDocument = globalThis.document;
+  globalThis.document = { getElementById: () => modal, querySelector: () => null };
+  c.container = { querySelector: () => ({ focus: () => focused++ }) };
+  try {
+    c.bindGroupCreatorReturn();
+    const closed = events.get('hidden.bs.modal');
+    modal.dataset.suspendedForAgentSetup = '1';
+    closed();
+    assert.equal(focused, 0, 'child setup is not cancellation');
+    delete modal.dataset.suspendedForAgentSetup;
+    closed();
+    assert.equal(focused, 1);
+    assert.equal(events.size, 0);
+    c.bindGroupCreatorReturn();
+    c.page._destroyed = true;
+    events.get('hidden.bs.modal')();
+    assert.equal(focused, 1, 'a retired workspace cannot steal focus');
+  } finally {
+    globalThis.document = oldDocument;
+  }
+});
+
 test('Add existing renders the members panel’s own picker into the toolbar', () => {
   const commandView = detachmentCommandView('group');
   const host = { hidden: true, innerHTML: '' };
@@ -8181,6 +8204,14 @@ test('Add existing renders the members panel’s own picker into the toolbar', (
   commandView.page.membersPanel.reload = async () => {};
   commandView.render = () => {};
   commandView.openDetachmentPicker();
+  calls[0].hooks.onAdded('stale-result');
+  calls[0].hooks.onCancel();
+  assert.equal(
+    commandView.detachmentPickerOpen,
+    true,
+    'an old callback cannot close a newer picker'
+  );
+  assert.notEqual(commandView.pendingDetachmentSelectionId, 'stale-result');
   calls[1].hooks.onAdded('ws-moved');
   assert.equal(commandView.pendingDetachmentSelectionId, 'ws-moved');
   assert.equal(commandView.detachmentPickerOpen, false);
@@ -8208,21 +8239,20 @@ test('frame insets reserve the top band and, when it fits, the agent column', ()
 
   const desktop = viewWith({
     'ws-cmd-opmap': rect(32, 100, 1436, 560),
-    'ws-cmd-map-quest-fab': rect(50, 118, 135, 45),
-    'ws-cmd-map-group-bar': rect(588, 119, 324, 57),
-    'ws-cmd-map-belt': rect(1183, 119, 266, 58),
+    'ws-cmd-map-group-bar': rect(32, 31, 1436, 57),
+    'ws-cmd-map-toolbar': rect(32, 30, 1436, 58),
     'ws-cmd-map-command-post': rect(51, 172, 212, 184)
   });
-  // Lowest overlay bottom (the belt, 177) less the map top (100), plus a gap.
-  assert.deepEqual(desktop.detachmentFrameInsets(), { top: 89, left: 243 });
+  // Toolbar is above the canvas; only the in-canvas repair post reserves space.
+  assert.deepEqual(desktop.detachmentFrameInsets(), { top: 0, left: 243 });
 
   // A phone still reserves its narrower column, so no building opens under it.
   const narrow = viewWith({
     'ws-cmd-opmap': rect(0, 0, 360, 560),
-    'ws-cmd-map-group-bar': rect(16, 84, 250, 44),
+    'ws-cmd-map-group-bar': rect(0, -56, 360, 44),
     'ws-cmd-map-command-post': rect(16, 144, 132, 180)
   });
-  assert.deepEqual(narrow.detachmentFrameInsets(), { top: 140, left: 160 });
+  assert.deepEqual(narrow.detachmentFrameInsets(), { top: 0, left: 160 });
 
   // A column covering most of the map leaves nothing to frame into; float it.
   const cramped = viewWith({
@@ -8462,6 +8492,63 @@ function songNode(tag, doc) {
   };
 }
 
+test('hiding a song card returns focus to its real selected tile, with Resources as fallback', () => {
+  const c = Object.create(WorkspaceCommandView.prototype);
+  const focused = [];
+  const tile = { getAttribute: () => 'song', focus: () => focused.push('tile') };
+  c.container = {
+    querySelectorAll: () => [tile],
+    querySelector: () => ({ focus: () => focused.push('resources') })
+  };
+  c.paintDetachmentSongCard = () => {};
+  c.detachmentSongCardId = 'song';
+  c.hideDetachmentSongCard();
+  assert.equal(c.detachmentSongCardHidden, 'song');
+  assert.equal(c.detachmentSongCardId, '');
+  assert.deepEqual(focused, ['tile']);
+  c.container.querySelectorAll = () => [];
+  c.hideDetachmentSongCard();
+  assert.deepEqual(focused, ['tile', 'resources']);
+});
+
+test('initial group framing reserves installed upper stations without moving them', () => {
+  const c = Object.create(WorkspaceCommandView.prototype);
+  const station = { getBoundingClientRect: () => ({ top: 168, bottom: 260, height: 92 }) };
+  const root = {
+    getBoundingClientRect: () => ({ top: 100, left: 0, width: 390, height: 680 }),
+    querySelectorAll: () => [station]
+  };
+  c.container = {
+    querySelector: selector => (selector === '.ws-cmd-opmap.is-combined' ? root : null)
+  };
+  assert.deepEqual(c.detachmentFrameInsets(), { top: 172, left: 0 });
+});
+
+test('an unreadable group tree is unavailable, not a zero-member map', () => {
+  const c = detachmentCommandView('group');
+  c.page.membersPanel.tree = [];
+  c.page.membersPanel.readFailed = true;
+  const toolbar = c.renderDetachmentToolbar();
+  assert.match(toolbar, /Workspace count unavailable/);
+  assert.doesNotMatch(toolbar, /is-empty/);
+  const slot = {};
+  const host = { parentNode: slot, innerHTML: '' };
+  c.container = {
+    querySelector: selector => (selector.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  c.ensureDetachmentHost = () => host;
+  const oldWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: { mount: () => assert.fail('must not draw an empty lot') }
+  };
+  try {
+    c.syncDetachmentMap();
+    assert.match(host.innerHTML, /Workspace map is loading or unavailable/);
+  } finally {
+    globalThis.window = oldWindow;
+  }
+});
+
 test('a Home’s own map shows its songs’ facts and the selected linked song’s card', async () => {
   const commandView = detachmentCommandView('group', [
     { id: 'm1', name: 'Night Drive' },
@@ -8624,12 +8711,12 @@ test('a Home’s own map shows its songs’ facts and the selected linked song�
   }
 });
 
-test('only a managed Home’s Map dock carries a hidden song card slot under Give work', () => {
+test('only a managed Home’s Map dock retains the selected song card slot', () => {
   const home = detachmentCommandView('group');
   home.groupTemplateStatus = { kind: 'managed_home' };
   assert.match(
     home.renderOperationsMap(),
-    /data-cmd-map-give-work[\s\S]*?<div class="song-card-mount ws-cmd-map-song-card" data-cmd-song-card-slot hidden><\/div><\/div>/
+    /ws-cmd-map-quest-dock[\s\S]*?<div class="song-card-mount ws-cmd-map-song-card" data-cmd-song-card-slot hidden><\/div><\/div>/
   );
   assert.doesNotMatch(
     detachmentCommandView('group').renderOperationsMap(),
@@ -8917,7 +9004,7 @@ test("a member's header links to its parent group right after Home, by the group
   const nav = withSurfaceHost([], () => parentNavOf(parentNavView(STUDIO)));
   assert.match(
     nav,
-    /aria-label="Back to the workspace map on Home">Home<\/a><a class="ws-cmd-nav-btn ws-cmd-nav-parent" data-cmd-parent-group href="\/workspaces\/studio-sessions" title="Open the group Studio Sessions"><span class="ws-cmd-nav-parent-arrow" aria-hidden="true">←<\/span><span class="ws-cmd-nav-parent-label">Group: <span class="ws-cmd-nav-parent-name">Studio Sessions<\/span><\/span><\/a><a class="ws-cmd-nav-btn" href="\/workspaces\/drum-tracking\/canvas">Canvas</
+    /aria-label="Back to the workspace map on Home">Home<\/a><a class="ws-cmd-nav-btn ws-cmd-nav-parent" data-cmd-parent-group href="\/workspaces\/studio-sessions" title="Open the group Studio Sessions"><span class="ws-cmd-nav-parent-arrow" aria-hidden="true">←<\/span><span class="ws-cmd-nav-parent-label">Group: <span class="ws-cmd-nav-parent-name">Studio Sessions<\/span><\/span><\/a><\/div>/
   );
   assert.ok(!nav.includes(STUDIO.id), 'the route uses the slug, never the group UUID');
   assert.equal((nav.match(/data-cmd-parent-group/g) || []).length, 1);
@@ -9727,7 +9814,7 @@ test('HQ Details: opening the Notes station goes to the inline panel, not a dial
 
 test('HQ Details: the Daily Brief and Memory panels survive a re-render in the stat modal', () => {
   const page = hqPanelsPage();
-  const { doc, container, config, commandView } = page;
+  const { doc, config, commandView } = page;
   const originalDocument = globalThis.document;
   globalThis.document = doc;
   try {
@@ -9747,7 +9834,11 @@ test('HQ Details: the Daily Brief and Memory panels survive a re-render in the s
 
     commandView.statModalSection = 'daily-brief';
     commandView.render();
-    assert.equal(modal.parentNode, container, 'the modal is re-attached after the write');
+    assert.equal(
+      modal.parentNode,
+      doc.body,
+      'the manager lives outside replaceable Command markup'
+    );
     assert.equal(briefRoot.parentNode, panel, 'with the brief root inside');
     commandView.render();
     assert.equal(briefRoot.parentNode, panel, 'the same brief root after a second render');
@@ -9844,13 +9935,16 @@ test('HQ Details: the header comes first, with the HQ chips, facts line and edit
       }
     }
   });
-  assert.ok(html.startsWith('<header class="ws-cmd-topbar ws-hq-header"'), 'header is first');
-  assert.match(html, /<h2 id="ws-hq-title">My HQ<\/h2>/);
-  assert.match(html, /<span class="ws-hq-chip is-hq">Your HQ<\/span>/);
-  assert.match(html, /<span class="ws-hq-chip">Workflow · Guided<\/span>/);
+  assert.ok(
+    html.startsWith('<header class="ws-cmd-topbar ws-cmd-compact ws-hq-header"'),
+    'header is first'
+  );
+  assert.match(html, /<h2>My HQ<\/h2>/);
+  assert.match(html, /ws-cmd-hq-badge">Personal HQ<\/span>/);
+  assert.match(html, /Workflow · Guided<\/span>/);
   assert.match(html, /Where my day starts\./);
-  assert.match(html, /data-cmd-edit-identity="name"/);
-  assert.match(html, /data-cmd-edit-identity="description"/);
+  assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
+  assert.doesNotMatch(html.split('</header>')[0], /data-cmd-edit-identity=/);
   assert.match(html, /data-cmd-hq-goal-edit aria-label="Edit goal"/);
   const facts = html.match(/<p class="ws-hq-facts" data-cmd-hq-facts>(.*?)<\/p>/)[1];
   assert.match(facts, /Lead<\/span> <span class="ws-hq-fact-value">Atlas</);
@@ -9862,42 +9956,29 @@ test('HQ Details: the header comes first, with the HQ chips, facts line and edit
   assert.doesNotMatch(html, /ws-cmd-garrison|ws-cmd-work-first|data-cmd-admin|ws-cmd-mission"/);
 });
 
-test('HQ Details: the view switch keeps four views and folds the rest into More views (FR6)', () => {
+test('HQ Overview uses the shared primary views, secondary links and Settings', () => {
   const { html } = hqDetailsMarkup();
-  const nav = html.match(/<div class="ws-cmd-nav">(.*?)<\/div><div class="ws-cmd-title/)[1];
-  for (const label of ['Details', 'Map', 'Tickets', 'Plans']) {
-    assert.match(nav, new RegExp('>' + label + '</(button|a)>'), label);
-  }
-  assert.match(
-    nav,
-    /data-cmd-hq-more-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="ws-hq-more-menu">More views</
-  );
-  const menu = nav.match(/<div class="ws-hq-menu"[^>]*>(.*?)<\/div>/);
-  assert.match(menu[0], /role="menu"/);
-  assert.match(menu[0], / hidden>/, 'closed until opened');
-  assert.deepEqual(
-    [...menu[1].matchAll(/role="menuitem"[^>]*>([^<]+)</g)].map(match => match[1]),
-    ['Canvas', 'Diagnostics', 'Orchestration Skills']
-  );
-  // Nowhere else on the nav row.
-  assert.equal(nav.split('>Canvas<').length, 2);
+  const nav = html.match(/<nav class="ws-cmd-view-switch"[^>]*>(.*?)<\/nav>/)[1];
+  for (const mode of ['details', 'map', 'tickets'])
+    assert.match(nav, new RegExp('data-cmd-view-mode="' + mode + '"'));
+  assert.match(nav, />Overview<\/button>/);
+  const secondary = nav.match(/<details[^>]*data-cmd-disclosure="views"[^>]*>(.*?)<\/details>/)[1];
+  assert.match(secondary, /href="[^"]*\/plans">Plans/);
+  assert.match(secondary, /href="[^"]*\/canvas">Canvas/);
+  assert.doesNotMatch(nav, /Diagnostics|Orchestration Skills/);
+  assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
+  assert.doesNotMatch(nav, /\/diagnostics/);
 });
 
-test('HQ Details: four tiles read existing counts and lead to their panels (FR7)', () => {
-  const { html } = hqDetailsMarkup();
-  const tiles = html.match(
-    /<div class="ws-cmd-readout ws-hq-tiles"[^>]*>(.*?)<\/div><\/header>/
-  )[1];
-  assert.deepEqual(
-    [...tiles.matchAll(/<div class="ws-l">([^<]+)<\/div>/g)].map(match => match[1]),
-    ['Needs you', 'Follow-ups', 'Open tickets', 'Team']
-  );
-  assert.match(tiles, /data-cmd-hq-jump="needs-you"[^>]*><div class="ws-v">0</);
-  // Follow-ups unknown until the panel has counted them.
-  assert.match(tiles, /data-cmd-hq-jump="followups"[^>]*><div class="ws-v">—</);
-  // Open tickets = review + in progress + ready, the server's own counts.
-  assert.match(tiles, /data-cmd-section="tickets"[^>]*><div class="ws-v">6</);
-  assert.match(tiles, /data-cmd-hq-jump="team"[^>]*><div class="ws-v">2</);
+test('HQ Overview keeps counts with Tickets and the specialized content instead of stat tiles', () => {
+  const { html, commandView } = hqDetailsMarkup();
+  assert.doesNotMatch(html, /ws-cmd-readout/);
+  assert.match(html, /data-cmd-ticket-count>6</);
+  assert.match(html, /data-cmd-hq-needs/);
+  assert.match(html, /data-cmd-followups-host/);
+  assert.match(html, /ws-hq-team-title/);
+  // Existing source semantics remain: unknown follow-ups is not zero.
+  assert.equal(commandView.hqTilesValues().followups.value, '—');
 });
 
 test('HQ Details: no lines means no strip; the no-model goal reason is one line (FR8, FR10)', () => {
@@ -10129,7 +10210,11 @@ test('HQ Details says no tactical word, in text or aria-labels (FR23)', () => {
   });
   assert.deepEqual(tacticalTermsIn(html), []);
   // The ordinary Details still speaks its own vocabulary; only the HQ changed.
-  assert.notDeepEqual(tacticalTermsIn(ordinaryDetailsMarkup()), []);
+  assert.deepEqual(
+    tacticalTermsIn(ordinaryDetailsMarkup()),
+    [],
+    'shared chrome is quieter on ordinary workspaces too'
+  );
 });
 
 test('HQ Details rail: Team first and open, the lead marked, Give work for each agent (FR19)', () => {
@@ -10460,44 +10545,88 @@ test('Show all lists every open item in the Notes panel', () => {
   }
 });
 
-test('a map building keeps focus when the map repaints under it', () => {
-  const originalDocument = globalThis.document;
-  const originalWindow = globalThis.window;
+test('manager focus returns only after its body-level inertness is released', () => {
+  const c = Object.create(WorkspaceCommandView.prototype);
+  const oldWindow = globalThis.window;
+  const events = [];
+  let inert = false;
+  const coordinator = new OverlayCoordinator({
+    setInert: () => {
+      inert = true;
+      events.push('inert');
+    },
+    releaseInert: () => {
+      inert = false;
+      events.push('release');
+    },
+    trapFocus() {},
+    restoreFocus: trigger => trigger.focus()
+  });
+  globalThis.window = { workspaceOverlayCoordinator: coordinator };
+  c.ensureStatModal = () => ({ hidden: true, querySelector: () => null });
+  c.renderStatModalBody = () => {};
+  c.setCommandBackgroundInert = () => {};
+  c.mapStationRegistry = () => [];
+  c.resolveStatModalTrigger = () => ({
+    focus: () => {
+      assert.equal(inert, false);
+      events.push('focus');
+    }
+  });
   try {
-    globalThis.window = {};
-    const building = key => {
-      const node = {
-        key,
-        focused: 0,
-        getAttribute: name => (name === 'data-cmd-hq-station' ? key : null),
-        closest: selector => (selector.includes('ws-cmd-map-hq-station') ? node : null),
-        focus: () => {
-          node.focused += 1;
-          globalThis.document.activeElement = node;
-        }
-      };
-      return node;
-    };
-    const before = building('second-brain');
-    globalThis.document = { activeElement: before };
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    let buildings = [building('memory'), before];
-    hq.container = { contains: () => true, querySelectorAll: () => buildings };
-    hq.rememberMapStationFocus();
-    // The repaint replaced every building; focus sits on the old, detached one.
-    const after = building('second-brain');
-    buildings = [building('memory'), after];
-    hq.restoreMapStationFocus();
-    assert.equal(after.focused, 1);
-    assert.equal(globalThis.document.activeElement, after);
-    // Nothing remembered, nothing moved.
-    hq.restoreMapStationFocus();
-    assert.equal(after.focused, 1);
+    c.openStatModal('memory', {});
+    coordinator.close('workspace-command-manager');
+    assert.deepEqual(events, ['inert', 'release', 'focus']);
   } finally {
-    globalThis.document = originalDocument;
-    globalThis.window = originalWindow;
+    globalThis.window = oldWindow;
   }
 });
+
+for (const attribute of ['data-cmd-hq-station', 'data-cmd-flow-node']) {
+  test(`a map building/Flow node keeps focus through repaint (${attribute})`, () => {
+    const originalDocument = globalThis.document;
+    const originalWindow = globalThis.window;
+    try {
+      globalThis.window = {};
+      const building = key => {
+        const node = {
+          key,
+          focused: 0,
+          getAttribute: name => (name === attribute ? key : null),
+          closest: selector =>
+            selector.includes(
+              attribute === 'data-cmd-hq-station' ? 'ws-cmd-map-hq-station' : 'ws-cmd-flow-node'
+            )
+              ? node
+              : null,
+          focus: () => {
+            node.focused += 1;
+            globalThis.document.activeElement = node;
+          }
+        };
+        return node;
+      };
+      const before = building('second-brain');
+      globalThis.document = { activeElement: before };
+      const hq = makeHQCommandView({ id: 'hq-1' });
+      let buildings = [building('memory'), before];
+      hq.container = { contains: () => true, querySelectorAll: () => buildings };
+      hq.rememberMapStationFocus();
+      // The repaint replaced every building; focus sits on the old, detached one.
+      const after = building('second-brain');
+      buildings = [building('memory'), after];
+      hq.restoreMapStationFocus();
+      assert.equal(after.focused, 1);
+      assert.equal(globalThis.document.activeElement, after);
+      // Nothing remembered, nothing moved.
+      hq.restoreMapStationFocus();
+      assert.equal(after.focused, 1);
+    } finally {
+      globalThis.document = originalDocument;
+      globalThis.window = originalWindow;
+    }
+  });
+}
 
 test('the Notes station turns to attention for a stale or came-due look, and the rail row says why', () => {
   const originalWindow = globalThis.window;

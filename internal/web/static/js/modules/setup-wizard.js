@@ -216,6 +216,14 @@
   // firstUnresolvedId is where the wizard resumes: the step the server named,
   // or the first unresolved one when it named none.
   function firstUnresolvedId() {
+    if (status?.state === STATE_READY) {
+      const steps = status.steps || [];
+      return (
+        [...steps].reverse().find(step => step.kind === 'summary')?.id ||
+        steps[steps.length - 1]?.id ||
+        ''
+      );
+    }
     if (status?.current_step_id) return status.current_step_id;
     const pending = (status?.steps || []).find(step => !isResolved(step));
     return pending ? pending.id : (status?.steps || [])[0]?.id || '';
@@ -560,8 +568,10 @@
       banner.hidden = true;
       return;
     }
-    banner.hidden = false;
     const presentation = bannerPresentation(status, runtimeStatus);
+    // Quiet success is available in Workspace settings → Advanced. Required,
+    // blocked and reconnect states keep their owning banner in every view.
+    banner.hidden = presentation.tone === 'ready';
     if (bannerState) {
       bannerState.textContent = presentation.state;
       bannerState.className = `setup-wizard-banner-state setup-wizard-banner-state-${presentation.tone}`;

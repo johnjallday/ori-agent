@@ -50,7 +50,7 @@
   /* ink */
   --ws-ink: #d6d9de;
   --ws-ink-dim: #8b909a;
-  --ws-ink-faint: #7d838e;
+  --ws-ink-faint: #858b96;
 
   /* semantic accents */
   --ws-faction: #46d39a;
@@ -1564,7 +1564,12 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
    so both themes are covered by the light-theme token overrides below. */
 .ws-cmd-map-hq-station {
   position: absolute;
-  left: var(--station-x, 90%);
+  --station-half-width: 79px;
+  left: clamp(
+    calc(var(--station-half-width) + 8px),
+    var(--station-x, 90%),
+    calc(100% - var(--station-half-width) - 8px)
+  );
   top: var(--station-y, 22%);
   transform: translate(-50%, -50%);
   z-index: 4;
@@ -1628,6 +1633,7 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
    button: the art, location, and state are all inert content inside the same
    keyboard/click target. */
 .ws-cmd-map-hq-station.has-visual {
+  --station-half-width: 113px;
   grid-template-columns: 88px minmax(0, 1fr);
   grid-template-rows: auto auto auto;
   width: 226px;
@@ -7312,7 +7318,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   position: fixed;
   top: clamp(76px, 10vh, 112px);
   right: 16px;
-  bottom: 16px;
+  /* A non-modal drawer must leave the global assistant launcher's hit area clear. */
+  bottom: calc(var(--ori-launcher-clearance-y, 88px) + 16px);
   width: min(420px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
@@ -10373,5 +10380,506 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-flow-lead {
     min-height: 0;
+  }
+}
+
+/* Shared workspace chrome: quiet identity, one action pair, wrapping destinations.
+   Existing type and theme tokens intentionally match the rest of Ori. */
+.ws-cmd .ws-cmd-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--ws-line);
+  background: transparent;
+  box-shadow: none;
+  clip-path: none;
+  min-width: 0;
+}
+/* The entrance animation gives the header its own stacking context. Raise
+   that context while a disclosure is open, not just the dropdown inside it:
+   otherwise later Map toolbar/Flow content paints over Canvas. Stay below
+   modal owners and the app navbar; a closed header needs no elevated layer. */
+.ws-cmd .ws-cmd-compact:has([data-cmd-disclosure][open]) {
+  position: relative;
+  z-index: var(--wsx-layer-popover);
+}
+.ws-cmd-compact .ws-cmd-nav {
+  flex: none;
+}
+.ws-cmd-identity-line {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-width: 0;
+}
+.ws-cmd-identity-line .ws-cmd-title {
+  flex: 1 1 280px;
+}
+.ws-cmd-compact .ws-cmd-title h2 {
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-transform: none;
+  letter-spacing: -0.3px;
+  color: var(--ws-ink);
+  font-size: clamp(22px, 2.2vw, 30px);
+}
+.ws-cmd-compact .ws-cmd-title-row {
+  flex-wrap: wrap;
+}
+.ws-cmd-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-cmd-compact .ws-cmd-nav-btn,
+.ws-cmd-compact .ws-cmd-view-btn {
+  clip-path: none;
+  font-family: var(--ws-font-display);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  min-height: 36px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.ws-cmd-compact .ws-cmd-nav-parent {
+  max-width: min(320px, 100%);
+}
+.ws-cmd-compact .ws-cmd-view-btn.is-alert {
+  color: var(--ws-alert);
+}
+.ws-cmd-compact .ws-cmd-give-work {
+  background: var(--ws-faction-deep);
+  border-color: var(--ws-faction);
+  color: var(--ws-ink);
+  font-weight: 600;
+}
+.ws-cmd-compact .ws-cmd-view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+.ws-cmd-program-destinations {
+  display: contents;
+}
+.ws-cmd-disclosure {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+.ws-cmd-disclosure summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ws-cmd-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+.ws-cmd-disclosure summary::after {
+  content: "⌄";
+}
+.ws-cmd-disclosure-body {
+  position: absolute;
+  z-index: var(--wsx-layer-menu);
+  top: 100%;
+  left: 0;
+  width: 240px;
+  max-width: calc(100vw - 48px);
+  padding: 8px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 8px;
+  background: var(--ws-panel);
+  box-shadow: var(--ws-glow);
+  max-height: min(65vh, 560px);
+  overflow-y: auto;
+}
+.ws-cmd-header-actions .ws-cmd-disclosure-body {
+  left: auto;
+  right: 0;
+}
+.ws-cmd-disclosure-body > * {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+.ws-cmd-disclosure-body > strong {
+  padding: 8px 10px 2px;
+  font-size: 12px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-header-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.ws-cmd-header-status:empty {
+  display: none;
+}
+@media (max-width: 600px) {
+  .ws-cmd-header-actions .ws-cmd-disclosure-body {
+    right: auto;
+    left: 0;
+  }
+  .ws-cmd-compact .ws-cmd-view-switch {
+    width: 100%;
+  }
+  .ws-cmd-compact .ws-cmd-nav-parent-label {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+.ws-cmd-destinations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-cmd.ws-workspace-panels {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-modal-layer, 30000);
+  display: grid;
+  justify-items: end;
+  padding: 16px;
+}
+.ws-workspace-panels[hidden] {
+  display: none;
+}
+.ws-panels-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+.ws-panels-dialog {
+  position: relative;
+  width: min(620px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 24px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 12px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+}
+.ws-panels-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ws-panels-dialog h2 {
+  font-size: 24px;
+}
+.ws-panels-dialog nav {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 16px 0;
+  gap: 6px;
+}
+.ws-panels-dialog .ws-cmd-view-btn,
+.ws-panels-dialog .ws-cmd-nav-btn {
+  font-family: var(--ws-font-display);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 14px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  clip-path: none;
+  min-height: 36px;
+  max-width: 100%;
+}
+.ws-panels-dialog [data-panel-content] > button,
+.ws-panels-dialog [data-panel-content] > a {
+  margin: 4px;
+}
+.ws-panels-dialog form {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0;
+}
+.ws-panels-dialog label {
+  font-weight: 600;
+}
+.ws-panels-dialog input,
+.ws-panels-dialog textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 6px;
+  color: var(--ws-ink);
+  background: var(--ws-bg-2);
+}
+.ws-panels-dialog p {
+  overflow-wrap: anywhere;
+}
+.ws-panels-dialog .ws-panel-note input {
+  width: auto;
+  margin-right: 6px;
+}
+.ws-cmd.ws-cmd-modal {
+  z-index: var(--app-modal-layer, 30000);
+}
+
+/* Work-first Overview. Context stays compact until a person asks for controls. */
+.ws-cmd-overview {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  align-items: start;
+  /* The last contextual action must be scrollable clear of the global launcher. */
+  padding-bottom: calc(var(--ori-launcher-clearance-y, 88px) + 24px);
+}
+.ws-cmd-team-empty {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.ws-cmd-context {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.ws-cmd-team,
+.ws-cmd-resource-access,
+.ws-cmd-capability-access,
+.ws-cmd-linked-workspaces {
+  min-width: 0;
+  border: 1px solid var(--ws-line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--ws-panel);
+}
+.ws-cmd-team > header,
+.ws-cmd-linked-workspaces > header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ws-cmd-team h3,
+.ws-cmd-resource-access h3,
+.ws-cmd-capability-access h3,
+.ws-cmd-linked-workspaces h3 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+.ws-cmd-team-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ws-cmd-team-agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--ws-line);
+  color: var(--ws-ink);
+  text-align: left;
+}
+.ws-cmd-team-agent > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.ws-cmd-team-agent strong,
+.ws-cmd-team-agent small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-team-agent small {
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-team-agent .ws-cmd-character {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+.ws-cmd-resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-bottom: 1px solid var(--ws-line);
+  background: transparent;
+  color: var(--ws-ink);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-team-agent:focus-visible,
+.ws-cmd-resource-row:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-overview:has(.ws-cmd-garrison) .ws-cmd-context {
+  grid-column: 1 / -1;
+}
+.ws-cmd-linked-workspaces .workspace-detail-panel {
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  min-height: 0;
+}
+.ws-cmd-linked-workspaces .workspace-detail-panel-close,
+.ws-cmd-linked-workspaces .workspace-detail-panel-title,
+.ws-cmd-linked-workspaces #workspace-detail-add-member-btn,
+.ws-cmd-linked-workspaces #workspace-detail-create-member-btn {
+  display: none;
+}
+.ws-cmd-linked-workspaces .workspace-detail-panel-header {
+  padding: 0;
+}
+.ws-cmd-linked-workspaces .workspace-detail-panel-body {
+  padding: 0;
+}
+.ws-cmd-linked-workspaces .group-member-row {
+  padding: 10px 0;
+}
+.ws-cmd-add-workspace .ws-cmd-disclosure-body {
+  right: 0;
+  left: auto;
+}
+.ws-cmd-linked-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Toolbar space is outside the canvas: do not cover or relocate saved stations. */
+.ws-cmd-map-toolbar,
+.ws-cmd-map-group-bar {
+  position: relative;
+  inset: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel);
+  transform: none;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+.ws-cmd-map-group-bar .ws-cmd-add-workspace {
+  margin-left: auto;
+}
+.ws-cmd-member-read-state {
+  flex-basis: 100%;
+  padding: 12px;
+  margin: 0;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-map-group-bar .ws-cmd-detachment-picker {
+  left: auto;
+  right: 0;
+  transform: none;
+  min-width: 0;
+  width: min(380px, calc(100vw - 80px));
+}
+.ws-cmd-map-toolbar .ws-cmd-nav-btn,
+.ws-cmd-map-group-bar .ws-cmd-nav-btn {
+  flex: 0 1 auto;
+}
+.ws-cmd-map-toolbar .ws-cmd-nav-btn,
+.ws-cmd-add-workspace .ws-cmd-nav-btn,
+.ws-cmd-map-group-bar .ws-cmd-nav-btn,
+.ws-cmd-add-workspace .ws-cmd-view-btn {
+  font-family: var(--ws-font-display);
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: 0;
+  clip-path: none;
+}
+.ws-cmd-work-first.is-quiet {
+  padding: 10px 16px;
+}
+.ws-cmd-work-first.is-quiet h3 {
+  font-size: 16px;
+  margin: 0;
+}
+.ws-cmd-work-first.is-quiet p {
+  margin: 4px 0 0;
+}
+.ws-cmd-work-first.is-quiet .ws-cmd-work-heading {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 900px) {
+  .ws-cmd-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  .ws-cmd-opmap.is-combined {
+    height: max(680px, 75vh);
+  }
+  .ws-cmd-detachment-host .ws-map-control-dock {
+    bottom: calc(var(--ori-launcher-clearance-y, 88px) + 16px);
+  }
+}
+@media (max-width: 640px) {
+  .ws-cmd-map-hq-station.has-visual {
+    --station-half-width: 55px;
+    width: 110px;
+    min-height: 92px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    justify-items: center;
+    gap: 4px;
+    padding: 8px;
+    text-align: center;
+  }
+  .ws-cmd-map-hq-station-visual {
+    grid-row: auto;
+    width: 64px;
+    height: 46px;
+  }
+  .ws-cmd-map-hq-station-visual .ws-cmd-map-station-art {
+    width: 60px;
+    height: 44px;
+  }
+  .ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-label {
+    overflow-wrap: anywhere;
+    letter-spacing: 0;
+  }
+}
+@media (max-width: 600px) {
+  .ws-cmd-add-workspace .ws-cmd-disclosure-body {
+    position: static;
+    width: 100%;
+  }
+}
+@media (max-width: 600px) {
+  .ws-cmd.ws-workspace-panels {
+    padding: 8px;
+  }
+  .ws-panels-dialog {
+    padding: 16px;
+    max-height: calc(100dvh - 16px);
   }
 }

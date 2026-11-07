@@ -485,7 +485,11 @@ export class WorkspaceDetailPage {
     this.stopTaskActivityTick();
     this.membersPanel?.destroy?.();
     const command = window.workspaceCommand;
-    if (command?.page === this) command.disposeNextAction?.();
+    if (command?.page === this) {
+      command.disposeNextAction?.();
+      command.workspacePanels?.destroy?.();
+      document.removeEventListener?.('ori:workspace-goal-state', command.boundGoalState);
+    }
     const janitor = window.FileJanitorConsole;
     if (janitor?.getActionState?.().workspaceId === this.workspaceId) janitor.dispose();
     for (const dispose of this._pageDisposers || []) dispose();
@@ -2215,6 +2219,7 @@ export class WorkspaceDetailPage {
     const key = String(field || '').trim();
     if (key !== 'name' && key !== 'description') return { changed: false };
 
+    const targetWorkspaceId = this.workspaceId;
     const newValue = String(value || '').trim();
     const hasCurrent = Object.prototype.hasOwnProperty.call(options, 'currentValue');
     const currentValue = hasCurrent ? String(options.currentValue || '').trim() : null;
@@ -2232,6 +2237,7 @@ export class WorkspaceDetailPage {
       } else {
         result = await this.updateWorkspace({ [key]: newValue });
       }
+      if (this.workspaceId !== targetWorkspaceId) return { changed: true, stale: true };
 
       const updatedWorkspace = result?.folder || result?.workspace || null;
       if (updatedWorkspace && typeof updatedWorkspace === 'object') {
@@ -2575,7 +2581,7 @@ export class WorkspaceDetailPage {
       this.renderGroupRequirementStatus();
       this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
-      this.renderWorkspaceSettings();
+      this.renderWorkspaceSettings({ preserveDraft: true });
       this.renderWorkspaceSkillBindings();
       this.renderWorkspacePluginBindings();
       this.renderAgentGroups();
@@ -2732,7 +2738,7 @@ export class WorkspaceDetailPage {
     }
 
     this.renderWorkspaceWorkflowLinks();
-    this.renderWorkspaceIntent();
+    this.renderWorkspaceIntent({ preserveDraft: true });
 
     // Update stats
     const agents = this.workspace.agent_instances || [];
@@ -3344,7 +3350,12 @@ export class WorkspaceDetailPage {
     };
   }
 
-  renderWorkspaceIntent() {
+  renderWorkspaceIntent({ preserveDraft = false } = {}) {
+    const form =
+      typeof document === 'undefined'
+        ? null
+        : document.getElementById?.('workspace-detail-intent-form');
+    if (preserveDraft && form?.dataset?.draftDirty === this.workspaceId) return;
     const intent = this.getWorkspaceIntentState();
     if (this.elements.intentDescriptionInput)
       this.elements.intentDescriptionInput.value = intent.description;
@@ -3442,6 +3453,11 @@ export class WorkspaceDetailPage {
         await this.loadNotes();
       }
 
+      const intentForm =
+        typeof document === 'undefined'
+          ? null
+          : document.getElementById?.('workspace-detail-intent-form');
+      if (intentForm?.dataset) delete intentForm.dataset.draftDirty;
       this.setWorkspaceIntentStatus('Workspace intent saved and canonical note synced.', 'success');
       if (!silent && window.Toast) {
         window.Toast.success('Workspace intent saved');
@@ -12625,7 +12641,12 @@ export class WorkspaceDetailPage {
     }
   }
 
-  renderWorkspaceSettings() {
+  renderWorkspaceSettings({ preserveDraft = false } = {}) {
+    const form =
+      typeof document === 'undefined'
+        ? null
+        : document.getElementById?.('workspace-detail-settings-form');
+    if (preserveDraft && form?.dataset?.draftDirty === this.workspaceId) return;
     const settings = this.normalizeWorkspaceSettings(
       this.workspaceSettings || this.getDefaultWorkspaceSettings()
     );
@@ -12716,6 +12737,11 @@ export class WorkspaceDetailPage {
         data?.task_markdown_status && typeof data.task_markdown_status === 'object'
           ? data.task_markdown_status
           : null;
+      const settingsForm =
+        typeof document === 'undefined'
+          ? null
+          : document.getElementById?.('workspace-detail-settings-form');
+      if (settingsForm?.dataset) delete settingsForm.dataset.draftDirty;
       this.renderWorkspaceSettings();
       await this.loadWorkspace();
 
@@ -15794,6 +15820,8 @@ export class WorkspaceDetailPage {
   async loadNotes() {
     const request = this.beginResourceRequest('notes');
     if (!request) return;
+    this.notesLoading = true;
+    this.notesLoadFailed = false;
     this.updateCopyNotesButtonState(true);
     if (this.elements.notesList) {
       this.elements.notesList.innerHTML =
@@ -15807,7 +15835,8 @@ export class WorkspaceDetailPage {
       );
       if (!this.isResourceRequestCurrent(request)) return;
       if (!response.ok) {
-        // Notes endpoint might return workspace notes differently
+        // Unavailable is not an empty notes collection.
+        this.notesLoadFailed = true;
         this.notes = [];
         this.renderNotes();
         this.refreshHomeAssistantQuickPrompts();
@@ -15822,11 +15851,15 @@ export class WorkspaceDetailPage {
     } catch (error) {
       if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load notes:', error);
+      this.notesLoadFailed = true;
       this.notes = [];
       this.renderNotes();
       this.refreshHomeAssistantQuickPrompts();
     } finally {
-      if (this.isResourceRequestCurrent(request)) window.workspaceCommand?.refresh();
+      if (this.isResourceRequestCurrent(request)) {
+        this.notesLoading = false;
+        window.workspaceCommand?.refresh();
+      }
     }
   }
 
@@ -16292,6 +16325,8 @@ export class WorkspaceDetailPage {
   async loadDirectories() {
     const request = this.beginResourceRequest('directories');
     if (!request) return;
+    this.directoriesLoading = true;
+    this.directoriesLoadFailed = false;
     if (this.elements.directoriesList) {
       this.elements.directoriesList.innerHTML =
         '<div class="workspace-detail-loading">Loading directories...</div>';
@@ -16310,6 +16345,7 @@ export class WorkspaceDetailPage {
         return;
       }
       if (!response.ok) {
+        this.directoriesLoadFailed = true;
         this.directories = [];
         this.renderDirectories();
         this.refreshHomeAssistantQuickPrompts();
@@ -16327,12 +16363,16 @@ export class WorkspaceDetailPage {
         return;
       }
       console.error('Failed to load directories:', error);
+      this.directoriesLoadFailed = true;
       this.directories = [];
       this.renderDirectories();
       this.syncProjectActionState();
       this.refreshHomeAssistantQuickPrompts();
     } finally {
-      if (this.isResourceRequestCurrent(request)) window.workspaceCommand?.refresh();
+      if (this.isResourceRequestCurrent(request)) {
+        this.directoriesLoading = false;
+        window.workspaceCommand?.refresh();
+      }
     }
   }
 
@@ -17409,7 +17449,8 @@ export class WorkspaceDetailPage {
       workspaceName: this.workspace?.name || '',
       agents: this.workspace?.agents || [],
       assignee: options?.assignee || '',
-      trigger: typeof document !== 'undefined' ? document.activeElement : null,
+      trigger:
+        options?.trigger || (typeof document !== 'undefined' ? document.activeElement : null),
       onSaved: () => this.loadTasks()
     });
   }

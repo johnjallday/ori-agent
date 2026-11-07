@@ -1,27 +1,30 @@
 import { test, expect } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 /**
  * End-to-end coverage for the primary workspace-backlog user flow (PRD
- * workspace-backlog FR19-22, 30-57): capture an idea in the Details Backlog
- * panel, edit and reorder it in the shared drawer, open that SAME drawer from
- * the Map's Backlog window, Promote to Ready, and verify the item leaves every
- * Backlog projection and appears in Active Tasks — all without a page reload.
+ * workspace-backlog FR19-22, 30-57): preserve legacy Backlog URL arrivals,
+ * capture/edit/reorder in the real shared drawer, arrive from an old Map URL,
+ * promote explicitly, and verify the canonical Tickets destination sees Ready.
  *
  * Self-seeds a workspace + entry agent via the API (so the workspace loads
  * Map-ready with no Commander setup prompt), then drives the real UI.
  */
 test.describe('Workspace Backlog', () => {
-  test('capture → edit/reorder → open from the Map Backlog window → promote → verify Active tickets', async ({
+  test('legacy arrival → capture/edit/reorder → Map arrival → promote → canonical Tickets', async ({
     page
   }) => {
     test.setTimeout(45000);
+    await installLocalCdn(page);
 
     const stamp = Date.now();
     const wsRes = await page.request.post('/api/workspaces', {
       data: { name: `Backlog E2E ${stamp}` }
     });
     expect(wsRes.ok()).toBeTruthy();
-    const workspaceId = (await wsRes.json()).folder.id as string;
+    const createdWorkspace = (await wsRes.json()).folder;
+    const workspaceId = createdWorkspace.id as string;
+    const workspaceSlug = createdWorkspace.folder_slug as string;
 
     const agentName = `Backlog E2E Commander ${stamp}`;
     const agentRes = await page.request.post('/api/agents', {
@@ -44,12 +47,12 @@ test.describe('Workspace Backlog', () => {
     });
 
     try {
-      await page.goto(`/workspaces/${encodeURIComponent(workspaceId)}`);
+      await page.goto(`/workspaces/${encodeURIComponent(workspaceSlug)}?panel=backlog`);
       await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
 
-      // --- 1. Capture in the Details Backlog panel (FR19-22) ---
+      // --- 1. Preserve the legacy Backlog arrival and capture owner ---
       const firstTitle = `Explore the new pricing model ${stamp}`;
-      await page.locator('[data-cmd-backlog-add]').click();
+      await page.locator('[data-cmd-backlog-quick-open]').click();
       const quickInput = page.locator('[data-cmd-backlog-quick-input]');
       await expect(quickInput).toBeVisible();
       await quickInput.fill(firstTitle);
@@ -97,20 +100,13 @@ test.describe('Workspace Backlog', () => {
       await page.locator('[data-cmd-drawer-close]').click();
       await expect(drawer).toBeHidden();
 
-      // --- 4. Open the SAME drawer from the Map's Backlog window (FR36, 52) ---
-      await page.getByRole('button', { name: /^map$/i }).click();
+      // --- 4. An old Map panel URL still opens that same real drawer. ---
+      await page.goto(`/workspaces/${encodeURIComponent(workspaceSlug)}?mode=map&panel=backlog`);
       await expect(page.locator('#workspaceCommandView .ws-cmd-opmap')).toBeVisible();
-      await page.locator('[data-cmd-map-window="backlog"]').click();
-      const questBoard = page.locator('.ws-cmd-map-window-backlog');
-      await expect(questBoard).toBeVisible();
-      await expect(questBoard).toContainText(firstTitle);
-      await expect(questBoard).toContainText(secondTitle);
-
-      await page.locator('.ws-cmd-map-window-backlog [data-cmd-open-backlog-drawer]').click();
       await expect(drawer).toBeVisible();
-      // The Map window closed in the same transition (FR52) so the two never stack.
-      await expect(page.locator('.ws-cmd-map-window-backlog')).toBeHidden();
       await expect(drawer).toContainText(firstTitle);
+      await expect(drawer).toContainText(secondTitle);
+      await expect(page.locator('.ws-cmd-map-window-backlog')).toHaveCount(0);
 
       // --- 5. Promote the first item to Ready (FR9-12, 31) ---
       // "Turn into Task" promotes atomically (still no auto-assignment) and
@@ -129,18 +125,14 @@ test.describe('Workspace Backlog', () => {
       await page.locator('#taskModalClose').click();
       await expect(taskModal).toBeHidden();
 
-      // --- 6. Verify it now appears in Active Tasks, without a page reload (FR47, 54) ---
-      await page.locator('[data-cmd-map-window="objectives"]').click();
-      const tasksWindow = page.locator('.ws-cmd-map-window-objectives');
-      await expect(tasksWindow).toBeVisible();
-      await expect(tasksWindow).toContainText(firstTitle);
-      // Still not run/assigned by promotion alone: a Start control is offered,
-      // not an in-progress/completed state.
-      await expect(
-        tasksWindow.locator('.ws-cmd-map-task-row-wrap', { hasText: firstTitle })
-      ).toContainText(/pending/i);
+      // --- 6. The canonical destination sees Ready, not an invented raw status. ---
+      await page.locator('[data-cmd-view-mode="tickets"]').click();
+      const card = page.locator('#hubTicketsList .ticket-card', { hasText: firstTitle });
+      await expect(card).toBeVisible();
+      await expect(card.locator('.ticket-state-chip')).toHaveText('Ready');
     } finally {
-      await page.request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      // Preserve a failed assertion rather than masking it with teardown timeout.
+      await page.request.delete(`/api/orchestration/workspace?id=${workspaceId}`).catch(() => {});
     }
   });
 });

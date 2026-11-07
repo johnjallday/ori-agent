@@ -272,6 +272,26 @@ test('a dismissed wizard does not auto-open, but its banner stays', async () => 
   assert.equal(elements.setupWizardBannerAction.textContent, 'Continue setup');
 });
 
+test('reopening a completed wizard defaults to its final summary without replaying setup', async () => {
+  const ready = status({
+    state: 'ready',
+    current_step_id: '',
+    steps: [
+      step({ status: 'complete' }),
+      step({ id: 'done', kind: 'summary', title: 'You are set up', status: 'complete' })
+    ]
+  });
+  const { api, elements, calls } = load({ status: ready });
+  await api.init();
+  api.open();
+  assert.equal(elements.setupWizardStepTitle.textContent, 'You are set up');
+  assert.equal(
+    calls.some(call => /\/(complete|action|skip)$/.test(call.key)),
+    false,
+    'opening summary is not setup execution'
+  );
+});
+
 test('the station chip carries the same state as the banner', async () => {
   const { api, elements } = load({
     status: status({ state: 'needs_attention', auto_open: false })

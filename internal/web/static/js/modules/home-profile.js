@@ -585,6 +585,11 @@ export class HomeProfilePanel {
     if (!panel) return;
     const card = profileView(this.view);
     panel.hidden = !card.visible;
+    const jump = document.getElementById('homeProfileJump');
+    if (jump) {
+      jump.hidden = !card.visible;
+      jump.textContent = card.visible ? `${card.title || 'Home profile'} ↓` : '';
+    }
     if (!card.visible) return;
     document.getElementById('homeProfileTitle').textContent = card.title;
     document.getElementById('homeProfileIntro').textContent = card.intro;
