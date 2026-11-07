@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -29,6 +30,10 @@ type Service struct {
 }
 
 type CreateRunRequest struct {
+	// HostRunID is reserved by a compiled owner before cross-store creation.
+	// It cannot be supplied by JSON. A retry must reconcile this exact ID,
+	// never allocate another attempt when the creation outcome is unknown.
+	HostRunID         string             `json:"-"`
 	ParentRunID       string             `json:"parent_run_id,omitempty"`
 	ProfileID         string             `json:"profile_id"`
 	Executor          Executor           `json:"executor"`
@@ -90,6 +95,11 @@ func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateR
 		return nil, err
 	}
 	defer release()
+	if req.HostRunID != "" {
+		if _, err := uuid.Parse(req.HostRunID); err != nil {
+			return nil, fmt.Errorf("invalid host-reserved run identity")
+		}
+	}
 	if s.store == nil {
 		return nil, fmt.Errorf("workspace run store is nil")
 	}
@@ -131,6 +141,7 @@ func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateR
 		scope.NetworkAllowlist = appendUniqueString(scope.NetworkAllowlist, allowlistHost)
 	}
 	run := &Run{
+		ID:                req.HostRunID,
 		WorkspaceID:       workspaceID,
 		ParentRunID:       req.ParentRunID,
 		OriginType:        req.OriginType,

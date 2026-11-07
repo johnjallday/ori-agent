@@ -272,6 +272,11 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 		if s.memoryContext != nil {
 			workspace.SetMemoryWriteObserver(nil)
 		}
+		// Learning's event worker can own a bounded provider call independently
+		// of the review request. Cancel and join it before stores close.
+		if s.Handlers != nil && s.Handlers.LearningMissions != nil {
+			s.Handlers.LearningMissions.milestones.Stop()
+		}
 		// Automatic plans dispatch through the task machinery, so stop them first.
 		if s.workspacePlanAuto != nil {
 			s.workspacePlanAuto.Stop()

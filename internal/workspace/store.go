@@ -1606,6 +1606,13 @@ func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
 		}
 	}
 
+	// Legacy imports, including children, must not carry a source-device
+	// learning claim or a saved single-use execution approval into this store.
+	if err := stripImportedLearningTree(targetPath); err != nil {
+		return nil, "", err
+	}
+	StripLearningImportAuthority(ws)
+
 	// Compute relative path for storage
 	relPath, err := filepath.Rel(s.basePath, targetPath)
 	if err != nil {

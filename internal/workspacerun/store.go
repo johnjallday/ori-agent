@@ -123,6 +123,13 @@ func (s *MemoryStore) UpdateStatus(_ context.Context, workspaceID, runID string,
 		return err
 	}
 	run.Status = status
+	now := time.Now()
+	if status == RunStatusExecuting && run.StartedAt == nil {
+		run.StartedAt = &now
+	}
+	if terminalRunStatus(status) && run.FinishedAt == nil {
+		run.FinishedAt = &now
+	}
 	if message != "" {
 		run.Error = message
 	}

@@ -1,0 +1,161 @@
+/* A quiet practice notebook within the existing Missions and Ticket surfaces.
+   Existing theme/type tokens keep it distinct from reward-bearing onboarding. */
+.learning-panel {
+  margin-block: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border-color);
+  border-inline-start: 3px solid var(--primary-color);
+  border-radius: 0.75rem;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  overflow-wrap: anywhere;
+}
+/* A tall sticky Ticket hero must not cover exact-result comparison or focus.
+   Ordinary Ticket pages retain their existing sticky header. */
+.workspace-task-page-shell:has(#learningTicketReview:not([hidden])) .workspace-task-page-hero {
+  position: relative;
+  top: auto;
+}
+.workspace-task-page-shell:has(#learningTicketReview:not([hidden])) .workspace-task-page-hero-copy {
+  min-inline-size: 0;
+}
+.workspace-task-page-shell:has(#learningTicketReview:not([hidden])) .workspace-task-page-subtitle {
+  overflow-wrap: anywhere;
+}
+.learning-panel a:not(.modern-btn) {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.learning-panel a:not(.modern-btn):hover {
+  text-decoration-thickness: 2px;
+}
+.learning-panel[hidden] {
+  display: none;
+}
+.learning-panel h3 {
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+  margin-block: 0 0.5rem;
+}
+.learning-panel h4 {
+  font-size: 1rem;
+  margin-block: 1rem 0.5rem;
+}
+.learning-panel p {
+  margin-block: 0.65rem;
+}
+.learning-caption {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+.learning-steps {
+  padding-inline-start: 1.5rem;
+  font-size: 0.9rem;
+  line-height: 1.8;
+}
+.learning-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-block: 1rem;
+}
+.learning-panel button {
+  white-space: normal;
+  text-align: start;
+  margin-block: 0.25rem;
+}
+.learning-form {
+  margin-block-start: 1rem;
+  padding-block-start: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+.learning-scopes {
+  border: 0;
+  border-block-start: 1px solid var(--border-color);
+  margin-block: 1.25rem;
+  padding: 0.75rem 0 0;
+  min-inline-size: 0;
+}
+.learning-scopes legend {
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding-inline-end: 0.5rem;
+}
+.learning-field {
+  display: grid;
+  gap: 0.4rem;
+  margin-block: 0.85rem;
+  font-size: 0.9rem;
+  width: 100%;
+}
+.learning-field :is(input, select, textarea) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+.learning-field textarea {
+  resize: vertical;
+}
+.learning-result {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 26rem;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.learning-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.learning-original,
+.learning-coaching {
+  margin-block: 1rem;
+  padding-block-start: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+.learning-coaching summary {
+  cursor: pointer;
+}
+.learning-field:has(input[type="checkbox"]) {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+@media (max-width: 1000px) {
+  .learning-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.learning-blocker {
+  border-inline-start: 2px solid var(--text-secondary);
+  padding-inline-start: 0.75rem;
+}
+.learning-message {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.learning-message:empty {
+  display: none;
+}
+.learning-panel :focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 3px;
+  scroll-margin-block: 0.5rem;
+}
+@media (max-width: 540px) {
+  .learning-panel {
+    padding: 0.9rem;
+  }
+  .learning-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

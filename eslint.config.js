@@ -244,6 +244,8 @@ export default defineConfig([
       'internal/web/static/js/modules/home-workspace-tree.js',
       'internal/web/static/js/modules/plugin-init-banner.js',
       'internal/web/static/js/modules/progression-widget.js',
+      'internal/web/static/js/modules/learning-missions.js',
+      'internal/web/static/js/modules/learning-mission-review.js',
       'internal/web/static/js/modules/renderer-connections.js',
       'internal/web/static/js/modules/renderer-nodes.js',
       'internal/web/static/js/modules/renderer-panels.js',
@@ -332,6 +334,9 @@ export default defineConfig([
   {
     files: [
       'scripts/demo-folder-first.mjs',
+      'scripts/learning-missions-demo.mjs',
+      'scripts/learning-missions-demo-control.mjs',
+      'scripts/learning-missions-demo.test.mjs',
       'scripts/demo-assistant-drawer.mjs',
       'tests/fixtures/assistant-folder-response*.js'
     ],

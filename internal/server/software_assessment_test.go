@@ -58,6 +58,9 @@ func (p *assessmentProvider) Name() string                            { return "
 func (p *assessmentProvider) Type() llm.ProviderType                  { return llm.ProviderTypeCloud }
 func (p *assessmentProvider) ValidateConfig(llm.ProviderConfig) error { return nil }
 func (p *assessmentProvider) DefaultModels() []string                 { return []string{"gpt-assess"} }
+func (p *assessmentProvider) BoundedTextConfiguration() string {
+	return learningDigest([]byte("controlled-provider"))
+}
 func (p *assessmentProvider) Capabilities() llm.ProviderCapabilities {
 	return llm.ProviderCapabilities{SupportsTools: true, SupportsSystemPrompt: true, SupportsIsolatedChat: true, MaxContextWindow: 200000}
 }

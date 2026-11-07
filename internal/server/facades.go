@@ -185,6 +185,7 @@ type HandlerFacade struct {
 	AutoClassify     *sessionhttp.AutoClassifyHandler
 	SmartInput       *sessionhttp.SmartInputHandler
 	Note             *notehttp.Handler
+	LearningMissions *learningMissionHandler
 	Progression      *progressionhttp.Handler
 	SessionFiles     *fileshttp.Handler
 	Review           *reviewhttp.Handler

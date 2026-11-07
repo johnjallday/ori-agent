@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -16,6 +17,15 @@ type TaskRunBridge struct {
 	store          Store
 	service        *Service
 	workspaceStore workspace.Store
+	reserveRun     func(context.Context, workspace.Task, string) error
+}
+
+// SetRunReservation installs a compiled owner's durable attempt admission.
+// Configure before execution. It runs before canonical Run creation, so an
+// interrupted cross-store write cannot later adopt an unrelated attempt.
+// Refusals create/execute nothing; ordinary owners can return nil unchanged.
+func (b *TaskRunBridge) SetRunReservation(fn func(context.Context, workspace.Task, string) error) {
+	b.reserveRun = fn
 }
 
 func NewTaskRunBridge(store Store, service *Service, workspaceStore workspace.Store) *TaskRunBridge {
@@ -65,7 +75,15 @@ func (b *TaskRunBridge) ExecuteTaskRun(ctx context.Context, agentName string, ta
 		policy.Mutation, policy.ExternalEffects = PolicyMutationDenied, PolicyExternalEffectsDenied
 		contextPlan = ContextPlan{Strategy: "host_recipe"}
 	}
+	reservedID := ""
+	if b.reserveRun != nil {
+		reservedID = uuid.NewString()
+		if err := b.reserveRun(ctx, task, reservedID); err != nil {
+			return workspace.TaskRunResult{}, err
+		}
+	}
 	run, err := b.service.CreateRun(ctx, task.WorkspaceID, CreateRunRequest{
+		HostRunID: reservedID,
 		ProfileID: ProfileGeneral,
 		Executor: Executor{
 			Kind:   ExecutorKindOriAgent,

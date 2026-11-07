@@ -43,6 +43,10 @@ type TicketHandler struct {
 	startClaims sync.Map
 	// startThisClaims holds when each ticket was last started by Start this.
 	startThisClaims sync.Map
+	// reviewStart checks the request before any lifecycle mutation and returns
+	// a commit closure, called only by the winning start claim. Duplicate clicks
+	// must not refresh an already consumed execution approval.
+	reviewStart func(*http.Request, string, string, string, string) (func() error, error)
 }
 
 // SetStarter wires how a create request's start intent begins a run.
@@ -51,6 +55,11 @@ func (th *TicketHandler) SetStarter(starter func(workspaceID, ticketID string) e
 		return
 	}
 	th.starter = starter
+}
+
+// SetStartReview installs the compiled recipe execution-review boundary.
+func (th *TicketHandler) SetStartReview(review func(*http.Request, string, string, string, string) (func() error, error)) {
+	th.reviewStart = review
 }
 
 // NewTicketHandler constructs a TicketHandler over the given service.
@@ -402,10 +411,21 @@ func (th *TicketHandler) TicketStartHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		Assignee string `json:"assignee"`
+		Assignee       string `json:"assignee"`
+		ExecutorDigest string `json:"executor_digest,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+	var approve func() error
+	if th.reviewStart != nil {
+		var err error
+		approve, err = th.reviewStart(r, studioID, ticketID, req.Assignee, req.ExecutorDigest)
+		if err != nil {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Error(w, "Ticket execution review unavailable or changed", http.StatusConflict)
+			return
+		}
 	}
 	ticket, err := th.service.PrepareStart(studioID, ticketID, workspace.TicketStartInput{
 		Assignee: req.Assignee,
@@ -415,7 +435,7 @@ func (th *TicketHandler) TicketStartHandler(w http.ResponseWriter, r *http.Reque
 		th.respondTicketError(w, "start ticket", studioID, ticketID, err)
 		return
 	}
-	_ = orihttp.RespondJSON(w, http.StatusOK, ticketCreateResponse{Ticket: ticket, Start: th.startThis(studioID, ticket)})
+	_ = orihttp.RespondJSON(w, http.StatusOK, ticketCreateResponse{Ticket: ticket, Start: th.startThis(studioID, ticket, approve)})
 }
 
 // startThisWindow is how long a Start this answers a repeat without starting
@@ -424,7 +444,7 @@ func (th *TicketHandler) TicketStartHandler(w http.ResponseWriter, r *http.Reque
 // that comes back to Ready later can be started again.
 const startThisWindow = 30 * time.Second
 
-func (th *TicketHandler) startThis(studioID string, ticket *workspace.Ticket) *ticketStartOutcome {
+func (th *TicketHandler) startThis(studioID string, ticket *workspace.Ticket, approve func() error) *ticketStartOutcome {
 	if th.starter == nil {
 		return &ticketStartOutcome{Error: "Starting work is not available right now."}
 	}
@@ -437,6 +457,12 @@ func (th *TicketHandler) startThis(studioID string, ticket *workspace.Ticket) *t
 		fresh := now.Sub(claimedAt) < startThisWindow && !movedSince(ticket, claimedAt)
 		if fresh || !th.startThisClaims.CompareAndSwap(ticketID, previous, now) {
 			return &ticketStartOutcome{Started: true}
+		}
+	}
+	if approve != nil {
+		if err := approve(); err != nil {
+			th.startThisClaims.Delete(ticketID)
+			return &ticketStartOutcome{Error: "Review the current Ticket executor and input before starting."}
 		}
 	}
 	if err := th.starter(studioID, ticketID); err != nil {

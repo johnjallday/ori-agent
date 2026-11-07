@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -149,10 +150,11 @@ const agentsRoute = "/agents"
 
 // recipeProvider is the one model a recipe run would use.
 type recipeProvider struct {
-	provider llm.Provider
-	name     string
-	model    string
-	effort   string
+	provider      llm.Provider
+	name          string
+	model         string
+	effort        string
+	configuration string // only cost-reserved learning drafts pin a destination
 }
 
 // resolveRecipeProvider reads which model the task's assistant would answer
@@ -202,6 +204,17 @@ func (h *LLMTaskHandler) resolveRecipeProvider(agentName string, task Task, reci
 	if err != nil || provider == nil {
 		return recipeProvider{}, unavailable
 	}
+	// Reject missing hard limits before probing CLI isolation capabilities;
+	// those probes can themselves launch a local metadata command.
+	configuration := ""
+	if recipe == LearningDraftRecipe {
+		bounded, ok := provider.(llm.BoundedTextProvider)
+		if !ok || bounded.BoundedTextConfiguration() == "" {
+			return recipeProvider{}, &TaskBlockedError{ReasonCode: RecipeModelUnsupported,
+				Reason: "This provider cannot guarantee the draft's output-token and single-attempt limits. Nothing was sent to a model."}
+		}
+		configuration = bounded.BoundedTextConfiguration()
+	}
 	// The restriction is the provider's to guarantee. One that cannot is not
 	// asked to run the call some other way.
 	if !provider.Capabilities().SupportsIsolatedChat {
@@ -209,6 +222,7 @@ func (h *LLMTaskHandler) resolveRecipeProvider(agentName string, task Task, reci
 	}
 	return recipeProvider{
 		provider: provider, name: name, model: h.normalizeModelForProvider(name, model), effort: ag.Settings.ReasoningEffort,
+		configuration: configuration,
 	}, nil
 }
 
@@ -367,8 +381,18 @@ func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, ta
 	}
 	current := recipeExecutor(task, agentName, chosen)
 	reviewed, _ := task.Context[TaskContextReviewedExecutor].(string)
-	if (recipe == FirstTaskRecipeFolderSummary || reviewed != "") && reviewed != current.Digest {
+	if (recipe == FirstTaskRecipeFolderSummary || recipe == LearningDraftRecipe || reviewed != "") && reviewed != current.Digest {
 		return "", &TaskBlockedError{ReasonCode: "execution_changed", Reason: "Review the current ticket executor, model and permitted file scope before starting this summary. Nothing was read or sent to a model."}
+	}
+	maxTokens := 0
+	if recipe == LearningDraftRecipe {
+		if err := h.consumeLearningReview(task, chosen); err != nil {
+			return "", &TaskBlockedError{ReasonCode: "execution_changed", Reason: "Review the current Ticket executor and input before starting this draft. Nothing was sent to a model."}
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		maxTokens = LearningDraftMaxTokens
 	}
 	runner := h.recipes[recipe]
 	window := llm.ResolveModelContextWindow(chosen.provider, chosen.model)
@@ -383,12 +407,15 @@ func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, ta
 		}))
 	}
 	response, err := chosen.provider.Chat(ctx, llm.ChatRequest{
-		Model:               chosen.model,
-		SystemPrompt:        brief.System,
-		Messages:            []llm.Message{llm.NewUserMessage(brief.User)},
-		ContextWindowTokens: window,
-		ReasoningEffort:     chosen.effort,
-		Isolated:            true,
+		Model:                 chosen.model,
+		SystemPrompt:          brief.System,
+		Messages:              []llm.Message{llm.NewUserMessage(brief.User)},
+		ContextWindowTokens:   window,
+		MaxTokens:             maxTokens,
+		SingleAttempt:         recipe == LearningDraftRecipe,
+		ProviderConfiguration: chosen.configuration,
+		ReasoningEffort:       chosen.effort,
+		Isolated:              true,
 	})
 	if errors.Is(err, llm.ErrIsolationUnsupported) {
 		return "", recipeModelUnsupported(agentName, " Nothing was sent to it.")
@@ -406,6 +433,9 @@ func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, ta
 			Reason:     "The model asked to use a tool, which a read-only assessment does not allow. Nothing was run, and its answer was discarded.",
 			Question:   "Try again, or choose another model for the assistant.",
 		}
+	}
+	if recipe == LearningDraftRecipe && (response.FinishReason != llm.FinishReasonStop || response.Usage.CompletionTokens > LearningDraftMaxTokens) {
+		return "", errors.New("the bounded draft did not return a complete response within its limits")
 	}
 	return runner.Finish(brief, response.Content)
 }
@@ -462,7 +492,7 @@ func withoutReservedTaskContext(context map[string]any) map[string]any {
 // ReservedTaskContextKey reports a context key only the server may write.
 func ReservedTaskContextKey(key string) bool {
 	switch strings.TrimSpace(key) {
-	case TaskContextFirstTaskRecipe, TaskContextFirstTaskRecipeVersion, TaskContextFirstTaskFailure, TaskContextFolderSummaryScope, TaskContextReviewedExecutor:
+	case TaskContextFirstTaskRecipe, TaskContextFirstTaskRecipeVersion, TaskContextFirstTaskFailure, TaskContextFolderSummaryScope, TaskContextReviewedExecutor, TaskContextLearning, TaskContextLearningOriginal, TaskContextLearningStart, TaskContextLearningObservation:
 		return true
 	}
 	return false

@@ -74,6 +74,15 @@ type ChatRequest struct {
 	// ErrIsolationUnsupported and run nothing; it must never run the call in a
 	// looser posture instead.
 	Isolated bool
+
+	// SingleAttempt prohibits provider-level format repair or automatic retries.
+	// Cost-reserved callers also require BoundedTextProvider; unsupported CLI
+	// implementations must not be assumed to enforce this or MaxTokens.
+	SingleAttempt bool
+
+	// ProviderConfiguration optionally pins BoundedTextConfiguration at the
+	// transport snapshot, so a destination change cannot race an owner review.
+	ProviderConfiguration string
 }
 
 // CLINetworkPosture describes what local connectivity a scoped CLI task needs.
