@@ -631,6 +631,19 @@ async function installFixtureRoutes(page: Page) {
       await json(route, workspaceUpdate(updateID));
       return;
     }
+    // Workspace Details asks whether the workspace is a Home's song (the Song
+    // card). No README workspace is one, so the card stays hidden.
+    const songCardID = /^\/api\/workspaces\/([^/]+)\/song-card$/.exec(url.pathname)?.[1];
+    if (
+      request.method() === 'GET' &&
+      songCardID &&
+      !url.search &&
+      (songCardID === README_SCENES.workspace_command.workspace_id ||
+        README_SCENES.workspaces.some(row => row.id === songCardID))
+    ) {
+      await json(route, { linked: false });
+      return;
+    }
     // The coordinate Workspace Map reads the current user's layout on mount
     // (#292). Fixturing it keeps the capture deterministic: without a saved
     // arrangement the three fictional workspaces would fall back to automatic

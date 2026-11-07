@@ -380,3 +380,25 @@ A fenced Home write replaces the folder mirror and then the primary. A library r
 A second source (a mission finding, a folder offer) reuses this by publishing its own path-free event, writing its own bounded receipt, and filing inert records that the same shelf-style surface and navigation-only entry points can show. Extract a shared package when that second source arrives (PRD open question 5).
 
 **Still not established.** A real-provider run (model quality and token accounting per provider), a settings-page control for the token budget (settings.json only), crash-atomic feedback counting (a crash between the Home write and the sidecar write loses one count), and cross-process freshness of the badge beyond the cockpit's event-driven reads.
+
+## Song card and roster projection
+
+A linked song's own pages read a projection of the Home library; nothing is
+read from disk and no model is called (`internal/projectlibrary/song_card.go`).
+
+- **Song card** (`GET /api/workspaces/{child}/song-card`): the child's own link
+  names its Home; the entry is shown only when the shelf itself would call it
+  `connected` (`projectSearchRow`, including `AssistantProjectLinkMirrorsAgree`).
+  It carries the entry's facts (only while the Home's song-details switch is on),
+  last save, the child's entry-agent name, its own Ticket counts and one status
+  line: facts; saved; the newest accepted recap's first sentence (dropped when it
+  names a file, path or link); open work. A broken or diverged link keeps the
+  card without facts or an entry link. Shown on Workspace Details and in the Home
+  map's selected context (`song-card.js`).
+- **Roster** (`GET /api/workspaces/{home}/assistant-program/library/roster`): the
+  same connected rows, ordered by last session, then last save, then name. Home
+  Details lists them under "Songs and assistants"; the map uses their facts for
+  each song tile's meta line. Only the keeper's name crosses the link.
+- Neither surface scans, toggles the switch or starts work. The facts-off card
+  links to the shelf's switch (`#projectLibrarySongDetails`), where the user
+  decides.

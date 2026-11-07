@@ -85,7 +85,12 @@ import {
   captureSuccessOutcome,
   captureShortcutSubmits,
   captureInitialFocus,
-  askTargetDescription
+  askTargetDescription,
+  SONG_CARD_MOUNT_HTML,
+  isHomeSong,
+  withSongCardMount,
+  songFactsSnapshot,
+  songRosterURL
 } from './home-workspace-cockpit.js';
 
 const cockpitCSS = readFileSync(
@@ -2303,4 +2308,45 @@ test('token counts are formatted the way a person reads them', () => {
   assert.equal(formatTokens(12500000), '13M');
   // A negative reading is nonsense, not a negative bar.
   assert.equal(formatTokens(-5), '0');
+});
+
+test('only a workspace directly under a managed Home gets a Song card mount', () => {
+  const home = { id: 'home', kind: 'group', group_template: { kind: 'managed_home' } };
+  const group = { id: 'team', kind: 'group' };
+  const all = [home, group];
+  assert.equal(isHomeSong({ id: 's', parent_id: 'home' }, all), true);
+  assert.equal(isHomeSong({ id: 'g', parent_id: 'team' }, all), false);
+  assert.equal(isHomeSong({ id: 'top' }, all), false);
+  assert.equal(isHomeSong({ id: 'sub', kind: 'group', parent_id: 'home' }, all), false);
+  assert.equal(isHomeSong(null, all), false);
+});
+
+test('the Song card mount sits at the top of the workspace context, after its header', () => {
+  const html = renderWorkspaceRailHTML(
+    workspaceRailView({ id: 's', name: 'Song 001', parent_id: 'home', agents: [] })
+  );
+  const mounted = withSongCardMount(html);
+  const header = mounted.indexOf('</header>') + '</header>'.length;
+  assert.equal(mounted.indexOf(SONG_CARD_MOUNT_HTML), header);
+  assert.equal(mounted.replace(SONG_CARD_MOUNT_HTML, ''), html);
+  assert.match(SONG_CARD_MOUNT_HTML, / hidden>/);
+  assert.equal(withSongCardMount('<p>x</p>'), SONG_CARD_MOUNT_HTML + '<p>x</p>');
+});
+
+test('tile facts come from each Home roster with the shelf wording', () => {
+  const snapshot = songFactsSnapshot({
+    home: [
+      { workspace_id: 'a', facts: { tempo_bpm: 92, length_seconds: 132, track_count: 6 } },
+      { workspace_id: 'b', facts: null },
+      { workspace_id: '', facts: { tempo_bpm: 100 } }
+    ],
+    other: [{ workspace_id: 'c', facts: { tempo_bpm: 96, tempo_varies: true } }]
+  });
+  assert.deepEqual(snapshot, { a: '92 BPM · 2:12', c: '96 BPM' });
+  // Only a track count known: the tile still says it.
+  assert.deepEqual(songFactsSnapshot({ h: [{ workspace_id: 'd', facts: { track_count: 3 } }] }), {
+    d: '3 tracks'
+  });
+  assert.deepEqual(songFactsSnapshot(null), {});
+  assert.equal(songRosterURL('h 1'), '/api/workspaces/h%201/assistant-program/library/roster');
 });

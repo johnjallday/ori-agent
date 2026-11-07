@@ -35,6 +35,7 @@ import { flattenWorkspaceTree, isGroupWorkspace } from './workspace-map-snapshot
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 import { openParcelByRef } from './parcel-open.js';
 import { taskCreateBody } from './quick-task.js';
+import { loadSongCard } from './song-card.js';
 // Importing this registers window.OriGiveWork, the flow every door opens.
 import './give-work.js';
 
@@ -465,6 +466,7 @@ export class WorkspaceDetailPage {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    clearTimeout(this.songWorkTimer);
     for (const resource of this._resourceRequests?.keys() || [])
       this.invalidateResourceRequest(resource);
     for (const unsubscribe of [
@@ -2569,6 +2571,7 @@ export class WorkspaceDetailPage {
       }
       await this.renderWorkspaceInfo(request);
       if (!this.isResourceRequestCurrent(request)) return;
+      void this.refreshSongCard();
       this.renderGroupRequirementStatus();
       this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
@@ -2632,6 +2635,31 @@ export class WorkspaceDetailPage {
     } finally {
       action.disabled = false;
     }
+  }
+
+  // The Song card above the Command view, only for a song linked to a Home
+  // library (song-card PRD FR8, FR12). Any other workspace answers
+  // linked:false and the mount stays hidden and empty.
+  // A card problem never fails the page load.
+  refreshSongCard() {
+    const mount =
+      typeof document?.getElementById === 'function'
+        ? document.getElementById('workspaceSongCardMount')
+        : null;
+    const id = String(this.workspace?.id || '').trim();
+    if (!mount || !id) return Promise.resolve(null);
+    return loadSongCard(mount, id);
+  }
+
+  // A burst of ticket events re-reads the card and a Home's roster once, a
+  // moment after the last one (song-card PRD FR21). No timer runs otherwise.
+  noteSongWorkChanged() {
+    clearTimeout(this.songWorkTimer);
+    this.songWorkTimer = setTimeout(() => {
+      this.songWorkTimer = null;
+      void this.refreshSongCard();
+      if (this.membersPanel?.active) void this.membersPanel.loadSongRoster?.();
+    }, 300);
   }
 
   renderGroupRequirementStatus() {
@@ -17036,7 +17064,11 @@ export class WorkspaceDetailPage {
     window.workspaceCommand?.handleActivityEvent?.(event);
     // A run moves its ticket with no click on this page, so the work tile and an
     // open board follow these events (PRD 760 FR-11).
-    if (TICKET_MOVING_EVENTS.has(event.type)) window.workspaceCommand?.noteTicketWorkChanged?.();
+    if (TICKET_MOVING_EVENTS.has(event.type)) {
+      window.workspaceCommand?.noteTicketWorkChanged?.();
+      // The Song card's status line and a Home's roster say open work too.
+      this.noteSongWorkChanged();
+    }
 
     switch (event.type) {
       case 'task_created':

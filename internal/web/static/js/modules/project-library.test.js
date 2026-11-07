@@ -1784,6 +1784,29 @@ test('arriving with the shelf hash focuses the suggestions heading once, after i
     once.focusArrival();
     assert.deepEqual(calls, []);
 
+    // A song card's "Turn on project details" lands on the switch, opening
+    // the management section it lives in; it never flips the switch.
+    const management = { open: false };
+    const toggle = { checked: false };
+    elements.projectLibraryManagement = management;
+    elements.projectLibrarySongDetails = { hidden: false };
+    elements.projectLibrarySongDetailsTitle = heading('song-details');
+    elements.projectLibrarySongDetailsSwitch = toggle;
+    globalThis.location = { hash: '#projectLibrarySongDetails' };
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, [
+      'song-details:tabindex=-1',
+      'song-details:scroll',
+      'song-details:focus:true'
+    ]);
+    assert.equal(management.open, true);
+    assert.equal(toggle.checked, false);
+    calls.length = 0;
+    elements.projectLibrarySongDetails.hidden = true; // read-only Home: no switch shown
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, ['library:tabindex=-1', 'library:scroll', 'library:focus:true']);
+    calls.length = 0;
+
     globalThis.location = { hash: '#somewhereElse' };
     new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
     globalThis.location = { hash: '' };

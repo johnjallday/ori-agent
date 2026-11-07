@@ -1358,3 +1358,182 @@ textarea.form-control:focus {
   outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
   outline-offset: 3px;
 }
+
+/* =============================================================================
+   SONG CARD (song-card.js): a linked song's read-only card above the Command
+   view on Workspace Details and at the top of the Home map's selected context.
+   Same family as the first-task banner; every row wraps, nothing scrolls
+   sideways at 360 px (song-card PRD FR14).
+   ============================================================================= */
+
+.song-card-mount[hidden] {
+  display: none;
+}
+
+.song-card {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--cozy-line, #cdbf9f);
+  border-left: 4px solid var(--cozy-moss, #4a6b4a);
+  border-radius: 10px;
+  background: var(--cozy-paper-raised, #fdfaf2);
+  color: var(--cozy-ink, #2b2417);
+  overflow-wrap: anywhere;
+}
+
+.song-card p {
+  margin: 0;
+}
+
+.song-card-head {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.song-card-eyebrow {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.song-card-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.song-card-home,
+.song-card-saved,
+.song-card-keeper,
+.song-card-facts-note {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.88rem;
+}
+
+.song-card-facts {
+  font-weight: 600;
+}
+
+.song-card-facts-note {
+  font-weight: 400;
+}
+
+.song-card-keeper-empty {
+  font-style: italic;
+}
+
+.song-card-status {
+  font-size: 0.9rem;
+}
+
+.song-card a {
+  color: var(--cozy-moss, #4a6b4a);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.song-card a:focus-visible {
+  outline: 2px solid var(--cozy-moss, #4a6b4a);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.song-card-open {
+  justify-self: start;
+  margin-top: 0.15rem;
+}
+
+/* Songs and assistants (home-song-roster.js): Home Details' read-only list of
+   linked songs. Each row wraps its parts; no horizontal scroll at 360 px. */
+.song-roster-mount[hidden] {
+  display: none;
+}
+
+.song-roster {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  /* Room for a link's focus ring inside the panel's clipping edge. */
+  padding-inline: 4px;
+  overflow-wrap: anywhere;
+}
+
+.song-roster-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.song-roster-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.song-roster-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--cozy-line, rgba(127, 127, 127, 0.25));
+}
+
+.song-roster-row:first-child {
+  border-top: 0;
+}
+
+.song-roster-song {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.song-roster-keeper,
+.song-roster-work {
+  font-size: 0.85rem;
+}
+
+.song-roster-session {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+
+.song-roster-muted,
+.song-roster-empty {
+  opacity: 0.75;
+}
+
+.song-roster-empty {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.song-roster a:focus-visible,
+.song-roster-show-all:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.song-roster-show-all {
+  justify-self: start;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}

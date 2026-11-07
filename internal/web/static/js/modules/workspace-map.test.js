@@ -2029,6 +2029,28 @@ test('tileHTML meta line reflects the agents and the server ticket counts', () =
   assert.match(empty, /ws-map-tile-meta">1 agent · No open work</);
 });
 
+test('a linked song tile appends its facts to the meta line; other tiles are unchanged', () => {
+  const map = loadOriWorkspaceMap();
+  const song = { id: 'song', name: 'Song 001', agent_count: 1, ticket_counts: { ready: 2 } };
+  const plain = { id: 'plain', name: 'Plain', agent_count: 1, ticket_counts: { ready: 2 } };
+  map.songFacts.setSnapshot({
+    song: '6 tracks · 92 BPM · 2:12',
+    plain: '   ',
+    long: '12 tracks · 128.5 BPM, varies · 1:02:05 · extra words here'
+  });
+  assert.match(
+    map.tileHTML({ ws: song, col: 0, row: 0 }),
+    /ws-map-tile-meta has-song-facts" title="1 agent · 2 ready · 6 tracks · 92 BPM · 2:12">1 agent · 2 ready · 6 tracks · 92 BPM · 2:12</
+  );
+  assert.match(map.tileHTML({ ws: plain, col: 0, row: 0 }), /ws-map-tile-meta">1 agent · 2 ready</);
+  const long = map.tileHTML({ ws: { id: 'long', name: 'Long', agent_count: 0 }, col: 0, row: 0 });
+  const meta = /ws-map-tile-meta has-song-facts"[^>]*>([^<]*)</.exec(long)[1];
+  assert.ok(meta.endsWith('…') && meta.length <= '0 agents · '.length + 40, meta);
+  // A host that passes no snapshot (every surface but Home) draws plain meta.
+  map.songFacts.setSnapshot(null);
+  assert.match(map.tileHTML({ ws: song, col: 0, row: 0 }), /ws-map-tile-meta">1 agent · 2 ready</);
+});
+
 test('tileHTML never reads open_task_count and leaves unreported counts out', () => {
   const { tileHTML } = loadOriWorkspaceMap();
   const html = tileHTML({

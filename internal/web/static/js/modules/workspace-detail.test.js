@@ -2495,3 +2495,127 @@ test('a start request that fails outright says so and can be pressed again', asy
     assert.deepEqual(controls().buttons, ['Start assessment']);
   }
 });
+
+// A text-only mount for the Song card; innerHTML throws.
+function songCardMount() {
+  const doc = {
+    createElement: tag => node(tag),
+    createTextNode: value => ({ textContent: String(value), children: [] })
+  };
+  function node(tag) {
+    const attributes = {};
+    return {
+      tagName: tag.toUpperCase(),
+      ownerDocument: doc,
+      children: [],
+      className: '',
+      hidden: true,
+      _text: '',
+      get textContent() {
+        return this.children.length ? this.children.map(c => c.textContent).join('') : this._text;
+      },
+      set textContent(value) {
+        this.children = [];
+        this._text = String(value);
+      },
+      set innerHTML(_value) {
+        throw new Error('innerHTML must not be used');
+      },
+      append(...nodes) {
+        this.children.push(...nodes);
+      },
+      replaceChildren(...nodes) {
+        this.children = nodes;
+      },
+      setAttribute(k, v) {
+        attributes[k] = String(v);
+      },
+      getAttribute(k) {
+        return attributes[k] ?? null;
+      }
+    };
+  }
+  return node('section');
+}
+
+async function withSongCardPage(payload, fn) {
+  const previousDocument = global.document;
+  const previousFetch = global.fetch;
+  const mount = songCardMount();
+  const asked = [];
+  global.document = {
+    ...previousDocument,
+    getElementById: id => (id === 'workspaceSongCardMount' ? mount : null)
+  };
+  global.fetch = async url => {
+    asked.push(url);
+    return { ok: true, json: async () => payload };
+  };
+  try {
+    await fn(mount, asked);
+  } finally {
+    global.document = previousDocument;
+    global.fetch = previousFetch;
+  }
+}
+
+test('a linked song shows the Song card above the Command view; other workspaces stay unchanged', async () => {
+  await withSongCardPage(
+    {
+      linked: true,
+      home_name: 'Music Production',
+      home_route: '/workspaces/music-home',
+      entry_id: 'entry-1',
+      title: 'Night Drive',
+      facts_state: 'on',
+      facts: { tempo_bpm: 92, track_count: 14 },
+      keeper_agent_name: 'Studio Keeper',
+      status_line: '14 tracks · 92 BPM; no open work',
+      home_entry_route: '/workspaces/music-home/assistant#projectLibraryPanel'
+    },
+    async (mount, asked) => {
+      const page = new WorkspaceDetailPage('night-drive-slug');
+      page.workspace = { id: 'ws-uuid-1', name: 'Night Drive' };
+      await page.refreshSongCard();
+      // The real ID, never the URL slug, names the workspace to the server.
+      assert.deepEqual(asked, ['/api/workspaces/ws-uuid-1/song-card']);
+      assert.equal(mount.hidden, false);
+      assert.match(mount.textContent, /Night Drive/);
+      assert.match(mount.textContent, /14 tracks · 92 BPM/);
+      assert.match(mount.textContent, /Kept by Studio Keeper/);
+    }
+  );
+  await withSongCardPage({ linked: false }, async mount => {
+    const page = new WorkspaceDetailPage('plain');
+    page.workspace = { id: 'plain-id' };
+    await page.refreshSongCard();
+    assert.equal(mount.hidden, true);
+    assert.equal(mount.children.length, 0);
+  });
+  await withSongCardPage({ linked: false }, async (_mount, asked) => {
+    // A burst of ticket events re-reads the card and a Home's roster once.
+    const page = new WorkspaceDetailPage('song');
+    page.workspace = { id: 'song-id' };
+    let rosterReads = 0;
+    page.membersPanel = { active: true, loadSongRoster: async () => rosterReads++ };
+    page.noteSongWorkChanged();
+    page.noteSongWorkChanged();
+    page.noteSongWorkChanged();
+    assert.deepEqual(asked, [], 'nothing is read before the burst settles');
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.deepEqual(asked, ['/api/workspaces/song-id/song-card']);
+    assert.equal(rosterReads, 1);
+    page.membersPanel.active = false;
+    page.noteSongWorkChanged();
+    page.destroy?.();
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.equal(asked.length, 1, 'a destroyed page reads nothing');
+  });
+  await withSongCardPage({ linked: true }, async (mount, asked) => {
+    const page = new WorkspaceDetailPage('loading');
+    page.workspace = null;
+    await page.refreshSongCard();
+    assert.deepEqual(asked, [], 'no request before the workspace has loaded');
+    assert.equal(mount.hidden, true);
+  });
+});

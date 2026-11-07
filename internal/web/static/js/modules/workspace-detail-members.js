@@ -15,6 +15,7 @@
  */
 
 import { openLibrarySheet } from './map-library-sheet.js';
+import { renderRoster, rosterURL, rosterView } from './home-song-roster.js';
 
 // --- Pure helpers (exported for unit testing) ----------------------------------
 
@@ -257,6 +258,8 @@ export class WorkspaceMembersPanel {
     this.taskFilters = { status: 'default', member: 'all', dateRange: 'any' };
     this.colorPopoverOpen = false;
     this.library = null; // { shelf, toSetUp } for a managed Home with projects waiting
+    this.songRosterRows = null; // connected songs of a managed Home, server order
+    this.songRosterExpanded = false;
   }
 
   // A managed Home's library summary, read with the tree (folder-to-map-handoff
@@ -272,6 +275,75 @@ export class WorkspaceMembersPanel {
       return libraryEmptyStateFromSummary(await res.json());
     } catch (_) {
       return null;
+    }
+  }
+
+  // "Songs and assistants" (song-card PRD FR15–FR20): a managed Home's
+  // connected songs with keeper, last session and open work, read with the
+  // tree. Never polls; an unreadable roster leaves the section hidden.
+  async loadSongRoster(signal, isCurrent = () => true) {
+    if (this.group?.group_template?.kind !== 'managed_home') {
+      this.songRosterRows = null;
+      this.renderSongRoster();
+      return;
+    }
+    let rows = null;
+    try {
+      const res = await fetch(rosterURL(this.workspaceId), {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        signal
+      });
+      if (res.ok) {
+        const body = await res.json();
+        rows = Array.isArray(body?.rows) ? body.rows : [];
+      }
+    } catch (_) {
+      rows = null;
+    }
+    if (!isCurrent()) return;
+    this.songRosterRows = rows;
+    this.renderSongRoster();
+  }
+
+  renderSongRoster() {
+    const mount = this.els.songRoster;
+    if (!mount) return;
+    if (!Array.isArray(this.songRosterRows)) {
+      renderRoster(mount, null);
+      return;
+    }
+    const slug = String(this.group?.folder_slug || '').trim();
+    const sheet = slug
+      ? { href: `/workspaces/${encodeURIComponent(slug)}/assistant#projectLibraryProposals` }
+      : null;
+    // A refresh replaces the rows; keep the keyboard on the song it was on.
+    const active = globalThis.document?.activeElement;
+    const focusedHref =
+      active && mount.contains?.(active) ? active.getAttribute?.('href') || '' : '';
+    renderRoster(
+      mount,
+      rosterView(this.songRosterRows, { expanded: this.songRosterExpanded, sheet }),
+      {
+        onShowAll: event => {
+          event?.stopPropagation?.();
+          this.songRosterExpanded = true;
+          this.renderSongRoster();
+          // Keep the keyboard where the button was: on the first newly shown song.
+          mount.querySelectorAll?.('.song-roster-song')?.[10]?.focus?.();
+        },
+        onOpenSheet: event => {
+          event?.preventDefault?.();
+          event?.stopPropagation?.();
+          this.openLibrarySheet(event?.currentTarget || null);
+        }
+      }
+    );
+    if (focusedHref) {
+      const again = Array.from(mount.querySelectorAll?.('a[href]') || []).find(
+        link => link.getAttribute('href') === focusedHref
+      );
+      again?.focus?.({ preventScroll: true });
     }
   }
 
@@ -309,6 +381,7 @@ export class WorkspaceMembersPanel {
       createBtn: document.getElementById('workspace-detail-create-member-btn'),
       picker: document.getElementById('workspace-detail-member-picker'),
       rollups: document.getElementById('workspace-detail-members-rollups'),
+      songRoster: document.getElementById('workspace-detail-song-roster'),
       // Header identity
       badge: document.getElementById('workspace-group-badge'),
       swatch: document.getElementById('workspace-group-color'),
@@ -396,6 +469,7 @@ export class WorkspaceMembersPanel {
       if (!isCurrent()) return;
       this.library = library;
       this.renderMembers();
+      void this.loadSongRoster(signal, isCurrent);
       this.applyHeaderIdentity();
       if (this.rollupsLoaded) {
         void this.loadRollups();

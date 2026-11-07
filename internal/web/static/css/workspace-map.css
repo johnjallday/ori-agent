@@ -2456,6 +2456,16 @@
   clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
 }
 
+/* A linked song's meta line carries its facts (song-card PRD FR10). Two lines
+   at most, so it never runs under the next tile's status flag. */
+.ws-map-tile-meta.has-song-facts {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
 /* Create pad. Since #367 the only pad rendered anywhere is the true-empty
    map's hero (.ws-map-pad--hero, in emptyCanvasHTML) — the ordinary in-world
    pad that used to stand among the buildings is gone, so these base rules

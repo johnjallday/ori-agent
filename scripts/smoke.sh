@@ -4201,6 +4201,58 @@ smoke_prettier_head() {
   done
 }
 
+# restart-sandbox rebuilds this worktree's server and runs it again, in the
+# foreground, on an existing demo sandbox (song card and roster, 2026-11-07):
+# the state a seeded demo took minutes to build survives a code change. It
+# stops only an ori-agent on that port, keeps HOME and the data dir inside the
+# sandbox, and passes the sandbox's staged plugin sources as the reviewed dev
+# sources when narrated-folder-demo.sh / reaper-demo.sh left them there.
+smoke_restart_sandbox() {
+  local sandbox="${2:-}" port="${3:-8952}" root
+  [[ -n "$sandbox" && -d "$sandbox" && "$sandbox" == *"/ori-demo."* ]] ||
+    fail "usage: $0 restart-sandbox <ori-demo-sandbox> [port]"
+  root="$(git rev-parse --show-toplevel)"
+  "$root/scripts/stop-demo-server.sh" "$port" || true
+  (cd "$root" && go build -o bin/ori-agent ./cmd/server) || fail "build failed"
+  local -a env=(HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1)
+  [[ -d "$sandbox/plugin-source/reaper-plugin" ]] &&
+    env+=(ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$sandbox/plugin-source/reaper-plugin")
+  [[ -d "$sandbox/plugin-source/music-project-management" ]] &&
+    env+=(ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE="$sandbox/plugin-source/music-project-management")
+  echo "restarting $root/bin/ori-agent on port $port in $sandbox"
+  cd "$sandbox" && exec env "${env[@]}" "$root/bin/ori-agent"
+}
+
+# seed-recap gives one Home library entry an accepted studio session with a
+# recap, through the same goal and recap review + commit the dialogs use.
+smoke_seed_recap() {
+  local base="${2:-}" home="${3:-}" entry="${4:-}" goal="${5:-}" recap="${6:-}"
+  [[ -n "$base" && -n "$home" && -n "$entry" && -n "$goal" && -n "$recap" ]] ||
+    fail "usage: $0 seed-recap <base-url> <home-id> <entry-id> <goal> <recap>"
+  python3 -I - "$base" "$home" "$entry" "$goal" "$recap" <<'PY'
+import json, sys, urllib.request
+base, home, entry, goal, recap = sys.argv[1:6]
+lib = f"{base}/api/workspaces/{home}/assistant-program/library/projects/{entry}"
+def call(method, url, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read() or b"{}")
+entry_rev = call("GET", lib)["entry_revision"]
+goal_body = {"if_entry_revision": entry_rev, "goal": {"goal": goal}}
+review = call("POST", f"{lib}/sessions/goals/review", goal_body)
+session = call("POST", f"{lib}/sessions/goals/commit", {**goal_body, "review_token": review["token"],
+               "idempotency_key": f"seed-goal-{entry}-{goal}", "confirm": True})
+session = session.get("session", session)
+body = {"if_session_revision": session["revision"], "if_fields_revision": call("GET", lib)["fields"].get("revision", 0),
+        "recap": {"recap": recap}}
+review = call("POST", f"{lib}/sessions/{session['id']}/recaps/review", body)
+done = call("POST", f"{lib}/sessions/{session['id']}/recaps/commit", {**body, "review_token": review["token"],
+            "idempotency_key": f"seed-recap-{entry}-{goal}", "confirm": True})
+print("ok   accepted session", done.get("session", {}).get("id", ""), "on entry", entry)
+PY
+}
+
 # agent_state_digest fingerprints every runtime state file under a sandbox.
 agent_state_digest() {
   local dir="$1/agent_state"
@@ -4279,6 +4331,8 @@ library-notifications) smoke_library_notifications "$@" ;;
 home-profile) smoke_home_profile "$@" ;;
 filetree) smoke_filetree "$@" ;;
 prettier-head) smoke_prettier_head "$@" ;;
+restart-sandbox) smoke_restart_sandbox "$@" ;;
+seed-recap) smoke_seed_recap "$@" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
@@ -4330,6 +4384,8 @@ prettier-head) smoke_prettier_head "$@" ;;
   echo "  $0 home-profile                          # Home profile card: browser acceptance on a free port with fixture applications (needs ORI_MUSIC_PLUGIN_SOURCE declaring home_profile; ORI_REAPER_PLUGIN_SOURCE adds the templates read)" >&2
   echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|chats|groups|narrow|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
   echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
+  echo "  $0 restart-sandbox <ori-demo-sandbox> [port]  # rebuild and rerun this worktree's server on an existing demo sandbox (foreground)" >&2
+  echo "  $0 seed-recap <base-url> <home> <entry> <goal> <recap>  # one accepted studio session with a recap on a library entry" >&2
   exit 2
   ;;
 esac
