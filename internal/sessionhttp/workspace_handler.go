@@ -443,6 +443,9 @@ func (req *createWorkspaceRequest) UnmarshalJSON(data []byte) error {
 // roleStaffingInput is one filled role in a create request.
 type roleStaffingInput struct {
 	RoleID string `json:"role_id"`
+	// Recommendation is a handle from server-held advice, never a source
+	// witness. Its presence requires the exact build-backed creation review.
+	Recommendation string `json:"recommendation,omitempty"`
 	// Mode is "create" (mint a new agent from the role's spec) or "assign"
 	// (attach one the user already has). It mirrors the staffing adapter's
 	// modes so there is one vocabulary end to end.
@@ -499,6 +502,9 @@ func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingIn
 		}
 		if item.Mode != roleStaffingModeCreate && item.Mode != roleStaffingModeAssign {
 			return nil, fmt.Errorf("role_staffing mode for %q must be create or assign", item.RoleID)
+		}
+		if item.Recommendation != "" && (item.Mode != roleStaffingModeAssign || len(item.Recommendation) > 128 || strings.ContainsAny(item.Recommendation, "/\\\r\n\t ")) {
+			return nil, fmt.Errorf("a staffing recommendation must name an assigned role")
 		}
 		// An assigned agent keeps its own definition entirely — accepting any of
 		// these would imply this request could rewrite an agent the user owns.
@@ -576,6 +582,10 @@ func (h *Handler) createFromTemplate(ctx context.Context, name, templateID strin
 func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req createWorkspaceRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if requestHasStaffingRecommendation(req) && (creationOperationFrom(r.Context()) == nil || req.BuildSessionID == "" || req.BuildReviewVersion < 1) {
+		respondStaffingReviewChanged(w)
 		return
 	}
 	groupIntent := req.GroupRequirementReview || req.GroupReviewToken != "" || req.IdempotencyKey != "" || req.GroupComposition != "" || req.CreateRequiredHome
@@ -803,6 +813,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		sourceDigest, sourceErr := h.creationSourceDigest(r.Context(), req, resolvedTemplate, templateResolved)
 		if sourceErr != nil || sourceDigest != operation.SourceDigest {
+			if requestHasStaffingRecommendation(req) {
+				respondStaffingReviewChanged(w)
+				return
+			}
 			if req.BuildReviewVersion != 0 {
 				creationOperationError(w, http.StatusConflict, "creation_build_changed", errCreationBuildChanged.Error())
 				return
@@ -911,6 +925,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		r = r.WithContext(withAssistantSetupCreation(r.Context(), descriptor))
 	}
+	selectedStaffing, staffingErr := h.reviewedCreationStaffing(r.Context(), req, resolvedTemplate)
+	if staffingErr != nil {
+		respondStaffingReviewChanged(w)
+		return
+	}
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
 	if assistantSetup, ok := assistantSetupCreationFromContext(r.Context()); ok {
 		// This server-only descriptor preallocates identity before any profile or
@@ -951,12 +970,16 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		markPersonalAssistantPresentation(ws, options)
 	}
 
-	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
+	if err := h.createWorkspaceWithStaffing(r.Context(), ws, selectedStaffing, req.TemplateID, seed.OwnedSources); err != nil {
 		logger.Error("Failed to create workspace", logger.Fields{"error": err})
 		// The roster was seeded before this point, so without cleanup the user
 		// is left with agents in Your Agents for a workspace that does not
 		// exist (FR71).
 		h.rollbackSeededAgents(seed)
+		if errors.Is(err, errStaffingReviewChanged) {
+			respondStaffingReviewChanged(w)
+			return
+		}
 		if errors.Is(err, session.ErrWorkspaceSlugConflict) {
 			parentDir := ""
 			if h.workspaceStore != nil {
@@ -2364,13 +2387,9 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 		}
 	}
 
-	// Capture the entry agent name before deletion so it can be cleaned up.
-	entryAgentName := ""
-	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
-		if folderWS, ferr := h.workspaceStore.Get(id); ferr == nil && folderWS != nil {
-			entryAgentName = strings.TrimSpace(folderWS.EntryAgentName())
-		}
-	}
+	// Capture verified creation/source evidence before removing the workspace.
+	// A reused or legacy entry name is not ownership and must survive cleanup.
+	entryCleanup := h.prepareEntryAgentCleanup(ctx, id)
 
 	// Handle session cleanup
 	if deleteSessions {
@@ -2403,47 +2422,13 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 			folderDeleteErr = h.workspaceStore.Delete(id)
 		}
 		if folderDeleteErr != nil {
+			entryCleanup = nil // The remaining folder still references its profile.
 			logger.Warn("Failed to delete workspace folder", logger.Fields{"id": id, "error": folderDeleteErr})
 			// Non-fatal: SQLite deletion succeeded
 		}
 	}
 
-	// Delete the workspace's entry agent so it no longer lingers in the agent
-	// store after its parent workspace is gone. Non-fatal on failure.
-	if entryAgentName != "" && h.agentStore != nil {
-		if _, exists := h.agentStore.GetAgent(entryAgentName); exists {
-			if err := h.agentStore.DeleteAgent(entryAgentName); err != nil {
-				logger.Warn("Failed to delete workspace entry agent", logger.Fields{
-					"workspace_id": id,
-					"agent":        entryAgentName,
-					"error":        err,
-				})
-			} else {
-				logger.Info("Deleted workspace entry agent", logger.Fields{
-					"workspace_id": id,
-					"agent":        entryAgentName,
-				})
-
-				// Purge any sessions that still reference the now-deleted entry
-				// agent so the UI cannot restore stale state that resolves to a
-				// 404 on /api/agents. Mirrors the DELETE /api/agents path.
-				// Non-fatal on failure.
-				if n, perr := h.store.DeleteSessionsByAgent(ctx, entryAgentName); perr != nil {
-					logger.Warn("Failed to purge sessions for deleted entry agent", logger.Fields{
-						"workspace_id": id,
-						"agent":        entryAgentName,
-						"error":        perr,
-					})
-				} else if n > 0 {
-					logger.Info("Purged sessions for deleted entry agent", logger.Fields{
-						"workspace_id": id,
-						"agent":        entryAgentName,
-						"count":        n,
-					})
-				}
-			}
-		}
-	}
+	h.cleanupEntryAgent(ctx, entryCleanup, id)
 
 	logger.Info("Workspace deleted", logger.Fields{"id": id, "delete_sessions": deleteSessions})
 

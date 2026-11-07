@@ -27,7 +27,7 @@ func ordinaryCreationBuildMatches(build *personalassistant.WorkspaceBuildSession
 		build.Version == req.BuildReviewVersion && build.Setup == nil && build.Preparation == nil && build.PlacementSource == nil &&
 		build.FolderRequestID == "" && build.LinkRequestID == "" && build.InferenceID == "" &&
 		(build.Proposal == nil || (build.Proposal.Status != "pending" && build.Proposal.Status != "running")) &&
-		(build.Folder != nil || build.Link != nil) &&
+		(build.Folder != nil || build.Link != nil || build.SelectedStaffing != nil) &&
 		(build.Folder == nil || (!build.Folder.Recognition.Recognized() && !isReviewedJanitorBlueprint(req.TemplateID)))
 }
 
@@ -52,6 +52,9 @@ func (h *Handler) checkCreationBuildFolder(ctx context.Context, owner string, bu
 
 func (h *Handler) creationSourceDigest(ctx context.Context, req createWorkspaceRequest, template projecttemplates.Template, resolved bool) (string, error) {
 	base, err := workspaceCreationSourceDigest(req, template, resolved)
+	if requestHasStaffingRecommendation(req) && req.BuildReviewVersion == 0 {
+		return "", errStaffingReviewChanged
+	}
 	if err != nil || req.BuildReviewVersion == 0 {
 		return base, err
 	}
@@ -65,7 +68,8 @@ func (h *Handler) creationSourceDigest(ctx context.Context, req createWorkspaceR
 		return "", errCreationBuildChanged
 	}
 	build := doc.Session(req.BuildSessionID)
-	if !ordinaryCreationBuildMatches(build, req) || h.checkCreationBuildFolder(ctx, owner, build) != nil {
+	if !ordinaryCreationBuildMatches(build, req) || h.checkCreationBuildFolder(ctx, owner, build) != nil ||
+		!selectedStaffingMatchesRequest(owner, build, req, template) || h.checkSelectedStaffingSources(ctx, build.SelectedStaffing) != nil {
 		return "", errCreationBuildChanged
 	}
 	witness, err := json.Marshal(struct {
@@ -74,7 +78,8 @@ func (h *Handler) creationSourceDigest(ctx context.Context, req createWorkspaceR
 		Version   int64
 		Folder    *personalassistant.BuildFolder
 		Link      *personalassistant.BuildLink
-	}{base, build.ID, build.Version, build.Folder, build.Link})
+		Staffing  *personalassistant.BuildStaffingSelection
+	}{base, build.ID, build.Version, build.Folder, build.Link, build.SelectedStaffing})
 	if err != nil {
 		return "", err
 	}
@@ -145,6 +150,12 @@ func (h *Handler) acceptCreationBuild(ctx context.Context, op *workspaceCreation
 		build := doc.Session(req.BuildSessionID)
 		if !ordinaryCreationBuildMatches(build, req) || h.checkCreationBuildFolder(ctx, op.Owner, build) != nil {
 			return errCreationBuildChanged
+		}
+		if build.SelectedStaffing != nil || requestHasStaffingRecommendation(req) {
+			template, err := h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
+			if err != nil || !selectedStaffingMatchesRequest(op.Owner, build, req, template) || h.checkSelectedStaffingSources(ctx, build.SelectedStaffing) != nil {
+				return errStaffingReviewChanged
+			}
 		}
 		if err := claim(); err != nil {
 			return err

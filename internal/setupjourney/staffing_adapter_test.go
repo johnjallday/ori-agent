@@ -45,6 +45,27 @@ func (s *staffingGrantStub) recordGrant(agentName, skillName string) error {
 	s.granted[agentName][skillName] = true
 	return nil
 }
+
+func (s *staffingGrantStub) PrepareStaffingGrants(name string, skills []string, personal bool) (func() error, error) {
+	return func() error {
+		for _, skill := range skills {
+			var err error
+			if personal {
+				err = s.GrantPersonal(name, skill)
+			} else {
+				err = s.Grant(name, skill)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
+}
+
+// This fixture models the production profile-owned skill collection.
+func (s *staffingGrantStub) GrantsStoredWithProfile() bool { return true }
+
 func (s *staffingGrantStub) Revoke(agentName, skillName string) error {
 	delete(s.granted[agentName], skillName)
 	return nil

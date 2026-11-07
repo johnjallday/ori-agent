@@ -233,6 +233,10 @@ func (h *Handler) reviewWorkspaceCreationOperation(w http.ResponseWriter, r *htt
 	}
 	sourceDigest, err := h.creationSourceDigest(r.Context(), request, template, resolved)
 	if err != nil {
+		if requestHasStaffingRecommendation(request) {
+			respondStaffingReviewChanged(w)
+			return
+		}
 		if request.BuildReviewVersion != 0 {
 			creationOperationError(w, http.StatusConflict, "creation_build_changed", errCreationBuildChanged.Error())
 			return

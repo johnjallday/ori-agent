@@ -149,6 +149,17 @@ func (s *AgentSnapshotStore) Update(wsID string, fn func(*Workspace) error) erro
 	return nil
 }
 
+// UpdateStaffingBindings updates attachments without this decorator's implicit
+// global-profile lookups. The staffing caller supplies the exact snapshots it
+// is binding while holding the profile source fence; re-entering that store
+// here would deadlock or replace a reviewed definition with a later lookup.
+func UpdateStaffingBindings(st Store, id string, mutate func(*Workspace) error) error {
+	if snapshots, ok := st.(*AgentSnapshotStore); ok {
+		return UpdateStaffingBindings(snapshots.Store, id, mutate)
+	}
+	return st.Update(id, mutate)
+}
+
 // SnapshotReferencedAgents backfills every missing referenced-agent snapshot
 // when a matching global definition exists. Exported so startup migration can
 // call it directly without re-saving the workspace.

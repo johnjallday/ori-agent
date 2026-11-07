@@ -9,6 +9,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/store"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -40,6 +41,10 @@ func (h *Handler) PutWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 	// the Create form's system prompt on the way through.
 	var request roleStaffingInput
 	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	if request.Recommendation != "" {
+		respondStaffingReviewChanged(w)
 		return
 	}
 	request.RoleID = roleID
@@ -149,31 +154,46 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 	}
 	spec := tpl.Agents[index]
 
+	snapshot := store.ReadStaffingSnapshot(context.Background(), h.agentStore)
 	_, exists := h.agentStore.GetAgent(requested.Name)
-	created := false
+	var seed seedAgentsResult
+	var sources []store.StaffingSelection
 	if requested.Mode == roleStaffingModeAssign {
 		if !exists {
 			return fmt.Errorf("the agent %q no longer exists", requested.Name)
+		}
+		for _, profile := range snapshot.Profiles {
+			if profile.Name == requested.Name {
+				sources = append(sources, store.StaffingSelection{Name: profile.Name, Witness: profile.Witness})
+				break
+			}
 		}
 	} else {
 		if exists {
 			return fmt.Errorf("you already have an agent named %q; rename this one or assign the agent you have", requested.Name)
 		}
 		config, _ := h.templateAgentCreateConfig(roleStaffedSpec(spec, requested))
-		if err := h.agentStore.CreateAgent(requested.Name, config); err != nil {
+		if err := h.createSeededProfile(context.Background(), &seed, requested.Name, config); err != nil {
+			h.rollbackSeededAgents(seed)
 			return fmt.Errorf("agent %q could not be created", requested.Name)
 		}
-		created = true
+		sources = seed.OwnedSources
 	}
 
 	source := agentworkspace.RoleSourceCreated
 	if requested.Mode == roleStaffingModeAssign {
 		source = agentworkspace.RoleSourceAssigned
 	}
-	err = h.workspaceTaskStore.Update(current.ID, func(ws *agentworkspace.Workspace) error {
+	err = h.updateOrdinaryRoleWithSources(context.Background(), current.ID, sources, func(ws *agentworkspace.Workspace) error {
+		if ws.OwnerUserID != current.OwnerUserID || currentRoleHolder(ws, requested.RoleID) != "" || ws.Status == agentworkspace.StatusTrashed || ws.Status == agentworkspace.StatusMissing {
+			return fmt.Errorf("this role changed; reload its current team")
+		}
 		instances := ws.GetAgentInstances()
 		for i := range instances {
 			if strings.EqualFold(strings.TrimSpace(instances[i].Name), requested.Name) {
+				if instances[i].RoleID != "" {
+					return fmt.Errorf("this agent already fills a role here")
+				}
 				instances[i].RoleID = requested.RoleID
 				instances[i].RoleSource = source
 				ws.AgentInstances = instances
@@ -195,9 +215,7 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 	if err != nil {
 		// Undo exactly what this request made. An assigned agent is the user's
 		// own and is never rolled back.
-		if created {
-			_ = h.agentStore.DeleteAgent(requested.Name)
-		}
+		h.rollbackSeededAgents(seed)
 		return fmt.Errorf("the role could not be filled")
 	}
 	return nil

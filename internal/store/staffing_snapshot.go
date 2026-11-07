@@ -67,12 +67,17 @@ type staffingSourceWitness struct {
 func (c *CompositeStore) ReadStaffingSnapshot(ctx context.Context) StaffingSnapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	result := ReadStaffingSnapshot(ctx, c.system)
+	return c.readStaffingSnapshotLocked(ctx, func(st Store) StaffingSnapshot { return ReadStaffingSnapshot(ctx, st) })
+}
+
+// Caller holds the composite root lock; read chooses the member locking policy.
+func (c *CompositeStore) readStaffingSnapshotLocked(ctx context.Context, read func(Store) StaffingSnapshot) StaffingSnapshot {
+	result := read(c.system)
 	allNames := append([]string(nil), result.sourceNames...)
 	if c.root == nil || inspectAgentRoot(c.rootPath) != "" {
 		result.Complete = false
 	} else {
-		root := c.root.ReadStaffingSnapshot(ctx)
+		root := read(c.root)
 		result.Complete = result.Complete && root.Complete
 		for i := range root.Profiles {
 			root.Profiles[i].Source = "root"
@@ -92,13 +97,18 @@ func (c *CompositeStore) ReadStaffingSnapshot(ctx context.Context) StaffingSnaps
 			result.Complete = false
 			continue
 		}
-		digest := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", c.staffingRootRevision, profile.Witness)))
-		profile.Witness = hex.EncodeToString(digest[:])
+		profile.Witness = compositeStaffingWitness(c.staffingRootRevision, profile.Witness)
 		kept = append(kept, profile)
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Name < kept[j].Name })
 	result.Profiles = kept
+	result.sourceNames = allNames
 	return result
+}
+
+func compositeStaffingWitness(revision uint64, witness string) string {
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", revision, witness)))
+	return hex.EncodeToString(digest[:])
 }
 
 // ReadStaffingSnapshot uses canonical loaded definitions under their mutation
@@ -107,6 +117,10 @@ func (c *CompositeStore) ReadStaffingSnapshot(ctx context.Context) StaffingSnaps
 func (s *fileStore) ReadStaffingSnapshot(ctx context.Context) StaffingSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.staffingSnapshotLocked(ctx)
+}
+
+func (s *fileStore) staffingSnapshotLocked(ctx context.Context) StaffingSnapshot {
 	result := StaffingSnapshot{Complete: len(s.unreadable) == 0}
 	for name := range s.agents {
 		result.sourceNames = append(result.sourceNames, name)

@@ -22,6 +22,10 @@ type anchorChangedOnCreateStore struct {
 	afterCreate func()
 }
 
+func (s anchorChangedOnCreateStore) HasWorkspaceAgentReference(ctx context.Context, name, excludingID string) (bool, error) {
+	return s.HybridStore.(session.AgentReferenceReader).HasWorkspaceAgentReference(ctx, name, excludingID)
+}
+
 func (s anchorChangedOnCreateStore) CreateWorkspace(ctx context.Context, ws *session.Workspace) error {
 	if err := s.HybridStore.CreateWorkspace(ctx, ws); err != nil {
 		return err

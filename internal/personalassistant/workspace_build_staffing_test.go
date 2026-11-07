@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/rosterstaffing"
@@ -52,7 +53,7 @@ func TestWorkspaceBuildStaffingLegacyCannotAcquireAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for version := 1; version < WorkspaceBuildSchemaVersion; version++ {
+	for version := 1; version < 6; version++ {
 		doc.SchemaVersion = version
 		doc.Open().Staffing = nil
 		data, _ := json.Marshal(doc)
@@ -65,6 +66,44 @@ func TestWorkspaceBuildStaffingLegacyCannotAcquireAuthority(t *testing.T) {
 		if _, err := decodeWorkspaceBuild(data, doc.Owner); !errors.Is(err, ErrKnowledgeCorrupt) {
 			t.Fatalf("legacy v%d acquired advice authority", version)
 		}
+	}
+}
+
+func TestWorkspaceBuildSelectedStaffingRoundTripAndLegacyRefusal(t *testing.T) {
+	store, _, now := newWorkspaceBuildStoreFixture(t)
+	doc, err := store.Mutate(context.Background(), "local", func(doc *WorkspaceBuildDocument) error {
+		build := openBuild("selected-staffing", *now)
+		build.Staffing = testBuildStaffing()
+		build.SelectedStaffing = &BuildStaffingSelection{Version: 1, OwnerUserID: "local", ContextDigest: strings.Repeat("a", 64), TemplateRevision: strings.Repeat("b", 64),
+			Choices: []BuildStaffingSelectedRole{{RoleID: "engineer", Scope: "workspace", Handle: "c_one", Name: "Scout", SourceWitness: "opaque-witness"}}}
+		doc.Add(build)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Read(context.Background(), "local")
+	if err != nil || loaded.Open().SelectedStaffing.Choices[0].SourceWitness != "opaque-witness" {
+		t.Fatal("selected source did not round-trip")
+	}
+	for version := 1; version < 7; version++ {
+		doc.SchemaVersion = version
+		doc.Open().Staffing = nil
+		data, _ := json.Marshal(doc)
+		if _, err := decodeWorkspaceBuild(data, doc.Owner); !errors.Is(err, ErrKnowledgeCorrupt) {
+			t.Fatalf("v%d acquired selection authority", version)
+		}
+	}
+	doc.SchemaVersion = 6
+	doc.Open().SelectedStaffing = nil
+	doc.Open().Staffing = testBuildStaffing()
+	data, _ := json.Marshal(doc)
+	if migrated, err := decodeWorkspaceBuild(data, doc.Owner); err != nil || migrated.Open().SelectedStaffing != nil || migrated.Open().Staffing == nil {
+		t.Fatal("genuine v6 advice did not migrate without selection authority")
+	}
+	loaded.Open().Settle()
+	if loaded.Open().SelectedStaffing != nil {
+		t.Fatal("settlement retained selected source")
 	}
 }
 

@@ -56,10 +56,10 @@ func TestInboxPlacementStore_V4BuildMigratesWithoutDiscardingEditFences(t *testi
 	doc.SchemaVersion, doc.Version, doc.Sessions = 4, 1, []WorkspaceBuildSession{build}
 	data, _ := json.Marshal(doc)
 	migrated, err := decodeWorkspaceBuild(data, doc.Owner)
-	if err != nil || migrated.SchemaVersion != 5 || migrated.Open().PlacementSource != nil || migrated.Open().InferenceID != "inference-a" || len(migrated.Open().EditedFields) != 1 {
+	if err != nil || migrated.SchemaVersion != WorkspaceBuildSchemaVersion || migrated.Open().PlacementSource != nil || migrated.Open().InferenceID != "inference-a" || len(migrated.Open().EditedFields) != 1 {
 		t.Fatalf("v4 altered inference or invented a handoff: %+v, %v", migrated, err)
 	}
-	for _, version := range []int{1, 2, 3, 4, 6} {
+	for _, version := range []int{1, 2, 3, 4, WorkspaceBuildSchemaVersion + 1} {
 		build := openBuild("build-a", *now)
 		build.Draft.TemplateID = "file-janitor"
 		build.PlacementSource = placementSourceFixture()

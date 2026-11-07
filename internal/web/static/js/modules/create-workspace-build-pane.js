@@ -344,6 +344,7 @@
     buildWithButton: null,
     assistant: null,
     session: null,
+    staffingRoster: null,
     localLines: [],
     lineSequence: 0,
     pendingText: '',
@@ -470,6 +471,23 @@
       if (index < view.firstVisible) return;
       els.log.appendChild(renderEntry(entry, index));
     });
+    if (state.staffingRoster?.roles?.length && window.WorkspaceRoleRoster?.render) {
+      const roster = document.createElement('li');
+      roster.className = 'workspace-build-staffing';
+      window.WorkspaceRoleRoster.render(roster, state.staffingRoster, {
+        title: 'Review your saved-agent choices',
+        showHeader: false,
+        compact: true,
+        onRecommend: view.busy
+          ? null
+          : (roleId, handle) => emit('workspace-build-staffing-select', { roleId, handle }),
+        onAssign: roleId => emit('workspace-build-staffing-manual', { roleId, action: 'assign' }),
+        onRequestCreate: roleId =>
+          emit('workspace-build-staffing-manual', { roleId, action: 'create' }),
+        onClear: roleId => emit('workspace-build-staffing-clear', { roleId })
+      });
+      els.log.appendChild(roster);
+    }
     els.showEarlier.hidden = view.hiddenCount === 0;
     const proposal = state.session?.proposal;
     const suggestion =
@@ -509,6 +527,13 @@
     renderPlan();
     if (els.transcript && typeof els.transcript.scrollHeight === 'number') {
       els.transcript.scrollTop = els.transcript.scrollHeight;
+      const staffing = els.log.querySelector?.('.workspace-build-staffing');
+      if (staffing && staffing.getBoundingClientRect().height > els.transcript.clientHeight) {
+        // Start a long choice at its role and limitations, not halfway through
+        // a candidate behind the sticky heading. The user can scroll for more.
+        els.transcript.scrollTop +=
+          staffing.getBoundingClientRect().top - els.transcript.getBoundingClientRect().top;
+      }
     }
   }
 
@@ -1383,6 +1408,7 @@
       options.buildWithButton || document.getElementById('workspaceBuildWithBtn');
     state.assistant = options.assistant || null;
     state.session = null;
+    state.staffingRoster = null;
     state.localLines = [];
     state.pendingText = '';
     state.expanded = false;
@@ -1933,7 +1959,10 @@
   function applySession(session) {
     const before = attachedFolder()?.id || '';
     const linkBefore = attachedLink()?.id || '';
-    if (state.session?.id !== session?.id) state.readinessStale = false;
+    if (state.session?.id !== session?.id) {
+      state.readinessStale = false;
+      state.staffingRoster = null;
+    }
     state.session = session && typeof session === 'object' ? session : null;
     if (state.session?.assistant) state.assistant = state.session.assistant;
     // A note is about the attachment it was written under; a new one, or
@@ -1942,6 +1971,13 @@
     if ((attachedLink()?.id || '') !== linkBefore) state.linkNote = '';
     // The server's own prerequisite replaces what the form's review said.
     if (state.session?.group_prerequisite) state.groupHint = null;
+    render();
+  }
+
+  // The controller supplies the same Team projection used by the manual
+  // wizard. This pane owns no second selected team or assignment mutation.
+  function setStaffingRoster(roster) {
+    state.staffingRoster = roster || null;
     render();
   }
 
@@ -2235,6 +2271,7 @@
     state.host = null;
     state.buildWithButton = null;
     state.session = null;
+    state.staffingRoster = null;
     state.localLines = [];
     state.pendingText = '';
     state.suggestion = null;
@@ -2263,6 +2300,7 @@
     VISIBLE_ENTRIES,
     mount,
     applySession,
+    setStaffingRoster,
     setSuggestion,
     setBusy,
     setReadinessStale,

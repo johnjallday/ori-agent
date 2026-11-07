@@ -166,6 +166,7 @@ func TestSeedTemplateAgentsStrictCreatesCompleteRoster(t *testing.T) {
 
 type failNthAgentCreateStore struct {
 	agentstore.Store
+	agentstore.StaffingSourceGuard
 	calls  int
 	failAt int
 }
@@ -176,6 +177,14 @@ func (s *failNthAgentCreateStore) CreateAgent(name string, config *agentstore.Cr
 		return errors.New("injected strict create failure")
 	}
 	return s.Store.CreateAgent(name, config)
+}
+
+func (s *failNthAgentCreateStore) CreateStaffingProfile(ctx context.Context, name string, config *agentstore.CreateAgentConfig) (agentstore.StaffingSelection, error) {
+	s.calls++
+	if s.calls == s.failAt {
+		return agentstore.StaffingSelection{}, errors.New("injected strict create failure")
+	}
+	return s.Store.(agentstore.StaffingProfileCreator).CreateStaffingProfile(ctx, name, config)
 }
 
 func TestCreateWorkspaceWithReviewedTemplateAgentIsAtomic(t *testing.T) {
@@ -509,7 +518,7 @@ func TestStrictTemplateAgentFailureAfterReuseNeverDeletesSavedDefinition(t *test
 	if err := base.CreateAgent("Saved", &agentstore.CreateAgentConfig{SystemPrompt: "keep"}); err != nil {
 		t.Fatalf("create saved agent: %v", err)
 	}
-	failing := &failNthAgentCreateStore{Store: base, failAt: 2}
+	failing := &failNthAgentCreateStore{Store: base, StaffingSourceGuard: base.(agentstore.StaffingSourceGuard), failAt: 2}
 	handler.SetAgentStore(failing)
 	tpl := rosterTemplate(
 		projecttemplates.AgentSpec{Name: "Saved"},
@@ -540,7 +549,7 @@ func TestStrictTemplateAgentFailureRollsBackEarlierDefinitions(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 	base := handler.agentStore
-	failing := &failNthAgentCreateStore{Store: base, failAt: 2}
+	failing := &failNthAgentCreateStore{Store: base, StaffingSourceGuard: base.(agentstore.StaffingSourceGuard), failAt: 2}
 	handler.SetAgentStore(failing)
 	tpl := rosterTemplate(
 		projecttemplates.AgentSpec{Name: "First"},

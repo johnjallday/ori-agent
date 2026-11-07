@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -53,6 +54,9 @@ func (h *Handler) workspaceBuildStaffing(ctx context.Context, owner string, sess
 		}
 		for _, declaration := range roles {
 			scope, purpose := "workspace", declaration.Label+". "+entry.Template.Description
+			if entry.Template.AssistantProject != nil || entry.Template.GroupRequirement != nil {
+				scope = "project"
+			}
 			if program := entry.Template.AssistantProgram; program != nil {
 				scope = "project"
 				for _, role := range program.Roles {
@@ -144,11 +148,64 @@ func finishBuildStaffing(session *personalassistant.WorkspaceBuildSession, outco
 		}
 		result.Roles = append(result.Roles, role)
 	}
+	keepStaffingAdviceSeparate(session)
+}
+
+// A model must not turn advice into a name-only TeamPatch assignment (including
+// legacy create-on-name-match normalization), bypassing explicit selection and
+// its source witness. Preserve the user's existing draft fills; the same Team
+// controls own a new choice. Other roles and manual legacy paths are unchanged.
+func keepStaffingAdviceSeparate(session *personalassistant.WorkspaceBuildSession) {
+	advised := map[string]bool{}
+	for _, role := range session.Staffing.Roles {
+		if role.Scope == "workspace" {
+			advised[role.RoleID] = len(role.Choices) > 0
+		}
+	}
+	if len(advised) == 0 {
+		return
+	}
+	var selected []roleStaffingInput
+	_ = json.Unmarshal(session.Draft.RoleStaffing, &selected)
+	chosen := map[string]bool{}
+	for _, role := range selected {
+		if role.Mode == "assign" || role.Mode == "create" {
+			chosen[role.RoleID] = true
+		}
+	}
+	for id := range advised {
+		if !chosen[id] {
+			session.Ready, session.CreateNow = false, false
+		}
+	}
+	if patch := session.TeamPatch; patch != nil {
+		kept := patch.Roles[:0]
+		for _, role := range patch.Roles {
+			hasChoices, hasAdvice := advised[role.RoleID]
+			// With no saved match the model may propose a genuinely new
+			// profile, but may not launder an assignment through legacy
+			// create-on-name-match conversion or replace an explicit fill.
+			if !hasAdvice || (!hasChoices && !chosen[role.RoleID] && role.Mode == "create") {
+				kept = append(kept, role)
+			}
+		}
+		patch.Roles = kept
+		if len(patch.Roles) == 0 && len(patch.SavedAgents) == 0 && patch.Mode != "agentless" {
+			session.TeamPatch = nil
+			applied := session.Applied[:0]
+			for _, field := range session.Applied {
+				if field != buildFieldTeam {
+					applied = append(applied, field)
+				}
+			}
+			session.Applied = applied
+		}
+	}
 }
 
 func buildStaffingInstructions(state *buildStaffingContext) string {
 	if state == nil {
 		return ""
 	}
-	return "\nStaffing is advisory and separate from patch.team. Before proposing a new agent, compare the eligible saved profiles below. In staffing.roles return only roles for the blueprint you choose (or the current blueprint when unchanged), using the opaque role handles in this data. target_id identifies its blueprint. Do not return roles for alternatives. A recommendation does not assign anyone: leave existing explicit team choices alone; the user must review the exact action. If the chosen blueprint has no supplied roles, return an empty staffing.roles and ask the user to review Team; do not invent a match. Return the staffing result INSIDE the ordinary build reply's staffing field, not a separate reply.\n" + strings.ReplaceAll(strings.ReplaceAll(state.prompt, "Return only", "The staffing field has shape"), "Return one entry per unoccupied role.", "Return one entry per supplied role of the chosen blueprint only.")
+	return "\nStaffing is advisory and separate from patch.team. Before proposing a new agent, compare the eligible saved profiles below. In staffing.roles return only roles for the blueprint you choose (or the current blueprint when unchanged), using the opaque role handles in this data. target_id identifies its blueprint. Do not return roles for alternatives. A recommendation does not assign anyone: leave existing explicit team choices alone; the user must review the exact action. For saved-profile proposals use staffing only, never a name-only patch.team assignment or an existing name labelled create; the inline Team controls collect the choice and its source evidence. With no saved match, patch.team may propose a genuinely new profile for an unfilled role. Never replace an explicit fill. Do not mark an undecided advised role ready or request create_now. If the chosen blueprint has no supplied roles, return an empty staffing.roles and ask the user to review Team; do not invent a match. Return the staffing result INSIDE the ordinary build reply's staffing field, not a separate reply.\n" + strings.ReplaceAll(strings.ReplaceAll(state.prompt, "Return only", "The staffing field has shape"), "Return one entry per unoccupied role.", "Return one entry per supplied role of the chosen blueprint only.")
 }

@@ -48,6 +48,71 @@ func staffingBuildFixture(t *testing.T) (*buildFixture, personalassistant.Worksp
 	return f, session, reply
 }
 
+func TestWorkspaceBuildStaffingCannotBecomeNameOnlyTeamPatch(t *testing.T) {
+	for _, adviceState := range []string{rosterstaffing.Recommended, rosterstaffing.NeedsChoice, rosterstaffing.NoSuitableMatch} {
+		for _, mode := range []string{"assign", "create"} {
+			t.Run(adviceState+"/"+mode, func(t *testing.T) {
+				f, session, reply := staffingBuildFixture(t)
+				reply.Staffing.Roles[0].State = adviceState
+				if adviceState != rosterstaffing.Recommended {
+					reply.Staffing.Roles[0].Choices = nil
+				}
+				if adviceState == rosterstaffing.NoSuitableMatch {
+					if _, err := store.MutateDefinition(f.handler.agentStore, "Scout", func(a *agent.Agent) error { a.Metadata.Description = "Records warehouse stocktakes"; return nil }); err != nil {
+						t.Fatal(err)
+					}
+				}
+				state := f.handler.workspaceBuildStaffing(t.Context(), "local", &session, f.catalog)
+				roleID := state.targets[reply.Staffing.Roles[0].RoleID].roleID
+				reply.Patch.Set = append(reply.Patch.Set, buildFieldTeam)
+				reply.Patch.Team.Roles = []buildReplyRole{{RoleID: roleID, Mode: mode, AgentName: "Scout"}}
+				reply.Ready, reply.CreateNow = true, true
+				encoded, _ := json.Marshal(reply)
+				f.provider.replies = []string{string(encoded)}
+				status, body := f.turn(t, session, map[string]any{"text": "Prepare software tools"})
+				if status != http.StatusOK {
+					t.Fatalf("turn: %d %v", status, body)
+				}
+				got := sessionOf(t, body)
+				if got.Staffing == nil || got.Staffing.State != adviceState || got.TeamPatch != nil || len(got.Draft.RoleStaffing) != 0 || got.Ready || got.CreateNow {
+					t.Fatalf("advice bypassed selection through %s: %+v", mode, got)
+				}
+				doc, _ := f.store.Read(t.Context(), "local")
+				if doc.Open().SelectedStaffing != nil {
+					t.Fatal("model acquired selection authority")
+				}
+			})
+		}
+	}
+}
+
+func TestWorkspaceBuildStaffingNoMatchAllowsOnlyAnUnchosenNewProposal(t *testing.T) {
+	for _, chosenMode := range []string{"", "assign", "create"} {
+		t.Run("chosen_"+chosenMode, func(t *testing.T) {
+			session := personalassistant.WorkspaceBuildSession{
+				Staffing:  &personalassistant.BuildStaffing{Roles: []personalassistant.BuildStaffingRole{{RoleID: "engineer", Scope: "workspace", State: rosterstaffing.NoSuitableMatch}}},
+				TeamPatch: &personalassistant.BuildTeamPatch{Roles: []personalassistant.BuildRole{{RoleID: "engineer", Mode: "create", AgentName: "Proposed new engineer"}}},
+				Ready:     true, CreateNow: true,
+			}
+			if chosenMode != "" {
+				session.Draft.RoleStaffing, _ = json.Marshal([]roleStaffingInput{{RoleID: "engineer", Mode: chosenMode, Name: "Explicit choice"}})
+			}
+			before := string(session.Draft.RoleStaffing)
+			keepStaffingAdviceSeparate(&session)
+			if chosenMode == "" {
+				if session.TeamPatch == nil || len(session.TeamPatch.Roles) != 1 || session.Ready || session.CreateNow {
+					t.Fatal("a new proposal must remain a proposal requiring user review")
+				}
+			} else if session.TeamPatch != nil {
+				t.Fatal("a no-match response overwrote explicit intent")
+			}
+			if string(session.Draft.RoleStaffing) != before || session.SelectedStaffing != nil {
+				t.Fatal("the model changed user intent or acquired authority")
+			}
+		})
+	}
+}
+
 func TestWorkspaceBuildStaffingOneTurnIsAdvisoryAndReadOnly(t *testing.T) {
 	f, session, reply := staffingBuildFixture(t)
 	encoded, _ := json.Marshal(reply)

@@ -42,6 +42,141 @@ function planAgent(name, overrides = {}) {
   };
 }
 
+function staffingAdviceFixture() {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:software',
+    planResponse([planAgent('Engineer')], { template_id: 'software' })
+  );
+  Draft.setSavedRosterReady(draft, [{ name: 'Scout' }, { name: 'Other scout' }]);
+  const advice = {
+    version: 1,
+    template_id: 'software',
+    state: 'recommended',
+    coverage: { complete: true, assignments_complete: false },
+    roles: [
+      {
+        role_id: 'engineer',
+        scope: 'workspace',
+        state: 'recommended',
+        choices: [
+          {
+            handle: 'c_scout',
+            name: 'Scout',
+            source: 'root',
+            configured: true,
+            reasons: [{ kind: 'declared_purpose', value: 'Reviews software tools.' }],
+            gaps: ['assignments_unknown'],
+            source_witness: 'PRIVATE_WITNESS_CANARY',
+            settings: { system_prompt: 'PRIVATE_PROMPT_CANARY' }
+          },
+          { handle: 'c_other', name: 'Other scout', source: 'legacy', configured: true }
+        ]
+      }
+    ]
+  };
+  return { draft, advice };
+}
+
+test('host staffing advice is bounded presentation data and changes no team intent', () => {
+  const { draft, advice } = staffingAdviceFixture();
+  const before = JSON.stringify(Draft.serialize(draft));
+  assert.equal(Draft.setStaffingAdvice(draft, advice), true);
+  assert.equal(JSON.stringify(Draft.serialize(draft)), before);
+  assert.equal(draft.roleFills.size, 0);
+  assert.equal(JSON.stringify(draft.staffingAdvice).includes('PRIVATE_'), false);
+  assert.equal(Draft.staffingRoleAdvice(draft, 'engineer').assignmentsComplete, false);
+});
+
+test('explicit recommendation selection retains only its handle through payload and resume', () => {
+  const { draft, advice } = staffingAdviceFixture();
+  Draft.setStaffingAdvice(draft, advice);
+  assert.equal(Draft.selectStaffingChoice(draft, 'engineer', 'c_other'), true);
+  assert.deepEqual(Draft.toCreatePayload(draft).role_staffing, [
+    { role_id: 'engineer', mode: 'assign', name: 'Other scout', recommendation: 'c_other' }
+  ]);
+  const resumed = staffingAdviceFixture().draft;
+  Draft.restore(resumed, Draft.serialize(draft));
+  assert.equal(Draft.getRoleFill(resumed, 'engineer').recommendation, 'c_other');
+  assert.equal(Draft.derive(resumed).roleRoster.roles[0].recommended, true);
+  Draft.clearRoleFill(resumed, 'engineer');
+  Draft.setRoleFill(resumed, 'engineer', { mode: 'assign', name: 'Scout' });
+  assert.equal(Draft.toCreatePayload(resumed).role_staffing[0].recommendation, undefined);
+});
+
+test('stale, unavailable, wrong-target and unconfigured advice cannot replace manual intent', () => {
+  for (const state of ['stale', 'unavailable', 'no_suitable_match']) {
+    const { draft, advice } = staffingAdviceFixture();
+    advice.state = state;
+    Draft.setStaffingAdvice(draft, advice);
+    assert.equal(Draft.selectStaffingChoice(draft, 'engineer', 'c_scout'), false, state);
+    assert.equal(draft.roleFills.size, 0);
+  }
+  for (const change of [
+    'template',
+    'scope',
+    'configuration',
+    'private',
+    'missing_handle',
+    'manual'
+  ]) {
+    const { draft, advice } = staffingAdviceFixture();
+    if (change === 'template') advice.template_id = 'other';
+    if (change === 'scope') advice.roles[0].scope = 'home';
+    if (change === 'configuration') advice.roles[0].choices[0].configured = false;
+    if (change === 'private') advice.roles[0].choices[0].source = 'workspace';
+    if (change === 'manual')
+      Draft.setRoleFill(draft, 'engineer', { mode: 'create', name: 'Deliberately new' });
+    Draft.setStaffingAdvice(draft, advice);
+    const before = JSON.stringify(Draft.serialize(draft));
+    assert.equal(
+      Draft.selectStaffingChoice(draft, 'engineer', change === 'missing_handle' ? '' : 'c_scout'),
+      false,
+      change
+    );
+    assert.equal(JSON.stringify(Draft.serialize(draft)), before);
+  }
+});
+
+test('a missing recommended source stays selected and stale rather than silently enabling autofill', () => {
+  const { draft, advice } = staffingAdviceFixture();
+  Draft.setStaffingAdvice(draft, advice);
+  Draft.selectStaffingChoice(draft, 'engineer', 'c_scout');
+  Draft.setSavedRosterReady(draft, []);
+  assert.equal(Draft.getRoleFill(draft, 'engineer').recommendation, 'c_scout');
+  assert.equal(Draft.derive(draft).roleRoster.roles[0].needs_clear, true);
+  assert.equal(Draft.toCreatePayload(draft).role_staffing[0].name, 'Scout');
+  const resumed = staffingAdviceFixture().draft;
+  Draft.setSavedRosterReady(resumed, []);
+  Draft.restore(resumed, Draft.serialize(draft));
+  assert.equal(Draft.getRoleFill(resumed, 'engineer').recommendation, 'c_scout');
+  assert.equal(Draft.derive(resumed).roleRoster.roles[0].needs_clear, true);
+  assert.equal(Draft.derive(resumed).canContinueFromTeam, false);
+});
+
+for (const mode of ['assign', 'create']) {
+  test(`roster changes and resume preserve an invalid explicit ${mode} rather than changing its action`, () => {
+    const { draft } = staffingAdviceFixture();
+    const name = mode === 'assign' ? 'Scout' : 'New engineer';
+    assert.equal(Draft.setRoleFill(draft, 'engineer', { mode, name }), true);
+    const snapshot = Draft.serialize(draft);
+    const changedRoster = mode === 'assign' ? [] : [{ name, appearance: { foreign: true } }];
+    Draft.setSavedRosterReady(draft, changedRoster);
+    assert.equal(Draft.getRoleFill(draft, 'engineer').mode, mode);
+    assert.equal(Draft.derive(draft).roleRoster.roles[0].needs_clear, true);
+    assert.equal(Draft.derive(draft).canContinueFromTeam, false);
+    const resumed = staffingAdviceFixture().draft;
+    Draft.setSavedRosterReady(resumed, changedRoster);
+    assert.equal(Draft.restore(resumed, snapshot), true);
+    assert.equal(Draft.getRoleFill(resumed, 'engineer').name, name);
+    assert.equal(Draft.toCreatePayload(resumed).role_staffing[0].mode, mode);
+    assert.equal(Draft.derive(resumed).canContinueFromTeam, false);
+    if (mode === 'create')
+      assert.equal(Draft.derive(resumed).roleRoster.roles[0].agent.appearance, null);
+  });
+}
+
 test('role review projects actual staged and saved models without changing either profile or assignment payload', () => {
   const draft = Draft.createDraft();
   Draft.setPlanReady(
@@ -560,7 +695,7 @@ test('an ordinary blueprint declares roles from its roster, entry agent first', 
   assert.deepEqual(view.payload.role_staffing, []);
 });
 
-test('a matching saved Downloads Curator is suggested without filling the role', () => {
+test('a matching name is not advice but can still be explicitly assigned', () => {
   const draft = readyDraft([
     planAgent('Downloads Curator', {
       entry_point: true,
@@ -575,10 +710,7 @@ test('a matching saved Downloads Curator is suggested without filling the role',
   let view = Draft.derive(draft);
   assert.equal(view.roleRoster.roles[0].state, 'empty');
   assert.equal(Draft.isActuallyIncluded(draft, 'Downloads Curator'), false);
-  assert.deepEqual(
-    view.recommendations.map(item => [item.roleId, item.agent.name, item.matchKind, item.reason]),
-    [['downloads-curator', 'Downloads Curator', 'exact-name', "Matches this role's name"]]
-  );
+  assert.deepEqual(view.recommendations, [], 'a name is not evidence of fit');
 
   assert.equal(
     Draft.setRoleFill(draft, 'downloads-curator', {
@@ -598,7 +730,7 @@ test('a matching saved Downloads Curator is suggested without filling the role',
   ]);
 });
 
-test('recommendations are ordered by role and exclude unavailable or included agents', () => {
+test('names and role labels never become a competing client-side ranker', () => {
   const program = assistantProgramPlan();
   program.roles.push({
     id: 'critic',
@@ -619,16 +751,7 @@ test('recommendations are ordered by role and exclude unavailable or included ag
   Draft.addSavedAgent(draft, 'Selected Critic');
 
   let recommendations = Draft.derive(draft).recommendations;
-  assert.deepEqual(
-    recommendations.map(item => [item.roleId, item.agent.name, item.matchKind]),
-    [
-      ['producer', 'Producer', 'exact-name'],
-      ['engineer', 'Mix Engineer', 'exact-name'],
-      ['engineer', 'Alternate Engineer', 'exact-role'],
-      ['critic', 'Review Partner', 'exact-role']
-    ],
-    'primary required, other required, then optional; exact names precede exact role labels'
-  );
+  assert.deepEqual(recommendations, [], 'without host evidence the manual roster is not ranked');
 
   Draft.setRoleFill(draft, 'producer', { mode: 'assign', name: 'Producer' });
   recommendations = Draft.derive(draft).recommendations;

@@ -355,6 +355,7 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 		userID := h.workspaceBuildUserID(ctx)
 		public := *session
 		public.Staffing = session.Staffing.Public()
+		public.SelectedStaffing = nil // private source witnesses never leave the host
 		built := buildSessionView{
 			WorkspaceBuildSession: &public,
 			Plan:                  h.workspaceBuildPlan(ctx, userID, nil, session),
@@ -603,6 +604,8 @@ func buildErrorText(code string) string {
 		return "This suggestion is no longer current. Review the attached folder, or retry its current suggestion."
 	case "selection":
 		return "The folder selection expired. Attach it again; your draft is kept."
+	case "staffing_review_changed":
+		return errStaffingReviewChanged.Error()
 	default:
 		return "The build could not continue."
 	}
@@ -1067,7 +1070,6 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 
 	reply := outcome.reply
 	result := applyBuildReply(session, reply.Patch, validation)
-	finishBuildStaffing(session, outcome, validation.staffing)
 	session.Rejections = result.rejections
 	session.Applied = result.applied
 	session.AskFolder = result.askFolder
@@ -1076,6 +1078,10 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	// the first turn, even when that first message says to create (the Ask
 	// tab's confirmation promises a check before anything is created).
 	session.CreateNow = reply.CreateNow && session.TurnCount > 1 && !validation.proposalOnly
+	finishBuildStaffing(session, outcome, validation.staffing)
+	if result.teamPatch != nil {
+		result.teamPatch = session.TeamPatch
+	}
 	session.Retry = nil
 	mergeBuildWhy(session, reply.Why)
 	session.Alternatives = buildAlternatives(reply.Alternatives, validation, session.Draft.TemplateID)

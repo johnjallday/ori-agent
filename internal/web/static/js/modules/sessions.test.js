@@ -2361,6 +2361,119 @@ function loadGuidedTeamManager(savedAgents) {
   return { manager, api, draft, events };
 }
 
+test('the Team controller explicitly selects a host recommendation without assigning or changing the saved profile', async () => {
+  const { manager, api, draft, events } = loadGuidedTeamManager([
+    { name: 'Mailroom', source: 'user' }
+  ]);
+  manager.workspaceCreatorContext = { generation: 2, mode: 'ordinary' };
+  manager.workspaceBuild = {
+    session: {
+      id: 'staffing-build',
+      staffing: {
+        version: 1,
+        template_id: 'email-ops',
+        state: 'recommended',
+        coverage: { complete: true },
+        roles: [
+          {
+            role_id: 'postmaster',
+            scope: 'workspace',
+            state: 'recommended',
+            choices: [
+              {
+                handle: 'c_mailroom',
+                name: 'Mailroom',
+                source: 'root',
+                configured: true,
+                reasons: [],
+                gaps: []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  };
+  manager.noteWorkspaceBuildRoleEdit = () => events.push('edited');
+  manager.announceWorkspaceRoleChange = () => {};
+  const savedBefore = JSON.stringify(draft.savedRoster);
+  manager.syncWorkspaceStaffingAdvice();
+  assert.equal(draft.roleFills.size, 0);
+  await manager.useWorkspaceStaffingRecommendation('postmaster', 'c_mailroom');
+  assert.equal(api.getRoleFill(draft, 'postmaster').recommendation, 'c_mailroom');
+  assert.equal(api.toCreatePayload(draft).role_staffing[0].recommendation, 'c_mailroom');
+  assert.equal(JSON.stringify(draft.savedRoster), savedBefore);
+  assert.ok(events.includes('edited'));
+  api.clearRoleFill(draft, 'postmaster');
+  manager.assignWorkspaceRole('postmaster', 'Mailroom');
+  assert.equal(api.getRoleFill(draft, 'postmaster').recommendation, undefined);
+  await manager.useWorkspaceStaffingRecommendation('postmaster', 'c_mailroom');
+  assert.equal(
+    api.getRoleFill(draft, 'postmaster').recommendation,
+    undefined,
+    'manual choice must win'
+  );
+});
+
+for (const intent of ['recommended', 'manual', 'created', 'cleared']) {
+  test(`resuming ${intent} staffing uses the public draft rather than older team state`, async () => {
+    const { manager, draft } = loadGuidedTeamManager([{ name: 'Mailroom', source: 'user' }]);
+    manager.workspaceBuild = { session: { id: 'staffing-build', version: 1 } };
+    let restored;
+    Object.assign(manager, {
+      workspaceBuildPane: () => ({ applySession() {} }),
+      workspaceBuildRevision: () => 1,
+      workspaceBuildCanApply: () => true,
+      rememberWorkspaceBuildSession() {},
+      workspaceBuildAssistantName: () => 'Ada',
+      applyBuildPatchToWizard: async () => {},
+      restoreWorkspaceBuildTeam: async state => {
+        restored = state;
+      },
+      advanceWorkspaceBuildWizard() {},
+      scheduleWorkspaceBuildDraft() {},
+      flushWorkspaceBuildDraft: async () => {}
+    });
+    const fills =
+      intent === 'cleared'
+        ? []
+        : [
+            {
+              role_id: 'postmaster',
+              mode: intent === 'created' ? 'create' : 'assign',
+              name: intent === 'created' ? 'New Mailroom' : 'Mailroom',
+              ...(intent === 'recommended' ? { recommendation: 'c_mailroom' } : {})
+            }
+          ];
+    await manager.applyWorkspaceBuildSession(
+      {
+        id: 'staffing-build',
+        version: 2,
+        draft: {
+          template_id: 'email-ops',
+          team_intent: { version: 1, mode: 'staffed' },
+          role_staffing: fills
+        },
+        team_state: {
+          agentless: true,
+          saved_selections: ['Old extra'],
+          explicit_primary: 'Old extra',
+          role_fills: [
+            { role_id: 'postmaster', mode: 'assign', name: 'Old guess', recommendation: 'c_old' }
+          ]
+        },
+        team_patch: { roles: [{ role_id: 'postmaster', mode: 'create', agent_name: 'Old guess' }] }
+      },
+      { resume: true }
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(restored.role_fills)), fills);
+    assert.equal(restored.saved_selections.length, 0);
+    assert.equal(restored.explicit_primary, '');
+    assert.equal(restored.agentless, false);
+    assert.equal(restored.blueprint_key, draft.plan.blueprintKey);
+  });
+}
+
 test('a guided Email Ops creator proposes its whole team once and keeps Inbox named and staffed', () => {
   const { manager, api, draft, events } = loadGuidedTeamManager([
     { name: 'Mailroom', source: 'user' }
@@ -7319,6 +7432,27 @@ test('Create posts the fixture wizard state as the expected workspace request', 
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, '/api/workspaces');
   assert.deepEqual(requests[0].body, expectedFixturePayload);
+});
+
+test('recommendation-only ordinary review carries the exact build version without an attached source', () => {
+  const requests = [];
+  const manager = loadPayloadFixtureManager(requests);
+  manager.workspaceCreatorContext.buildSession = { id: 'build-roster' };
+  manager.workspaceBuild = { session: { id: 'build-roster', version: 17, status: 'open' } };
+  const role = { role_id: 'lead', mode: 'assign', name: 'Luna', recommendation: 'c_luna' };
+  manager.teamView = () => ({ canContinueFromTeam: true, payload: { role_staffing: [role] } });
+  let payload = manager.collectCreatePayload().payload;
+  assert.equal(payload.build_session_id, 'build-roster');
+  assert.equal(payload.build_review_version, 17);
+  assert.equal(payload.role_staffing[0].recommendation, 'c_luna');
+  delete role.recommendation;
+  payload = manager.collectCreatePayload().payload;
+  assert.equal(
+    payload.build_review_version,
+    undefined,
+    'manual legacy request keeps its own contract'
+  );
+  assert.equal(requests.length, 0);
 });
 
 // ----- Build with your assistant: applying the assistant's work -----

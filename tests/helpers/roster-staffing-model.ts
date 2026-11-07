@@ -10,7 +10,9 @@ type Input = {
 // Synthetic provider boundary only. Ori's roster, builder, persistence and HTTP
 // routes remain real. Prompts are parsed in memory and never logged/retained.
 export async function startRosterStaffingModel(port = 8944) {
-  let mode: 'recommended' | 'needs_choice' | 'unavailable' = 'recommended';
+  let mode: 'recommended' | 'needs_choice' | 'no_suitable_match' | 'unavailable' = 'recommended';
+  let workspaceName = 'Synthetic Staffing Review';
+  let purpose = 'Builds and reviews software';
   let calls = 0;
   const server = createServer(async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
@@ -49,16 +51,19 @@ export async function startRosterStaffingModel(port = 8944) {
     const data = system.match(/<staffing_data>([\s\S]*?)<\/staffing_data>/)?.[1];
     const input: Input | undefined = data ? JSON.parse(data) : undefined;
     const candidate = input?.roster.candidates.find(c =>
-      c.evidence.some(e => e.value.includes('Builds and reviews software'))
+      c.evidence.some(e => e.value.includes(purpose))
     );
     const roles = input?.roles.filter(r => r.target_id === 'code-project') || [];
     const reply = {
-      say: 'Review the saved software specialist suggestion; nothing has been assigned.',
+      say:
+        mode === 'no_suitable_match'
+          ? 'No suitable saved match was found. Choose manually or deliberately create a new agent.'
+          : 'Review the saved software specialist suggestion; nothing has been assigned.',
       ask: { question: 'Would you like to review the team?', choices: [], allow_free_text: true },
       patch: {
         set: ['blueprint_id', 'name', 'description'],
         blueprint_id: 'code-project',
-        name: 'Synthetic Staffing Review',
+        name: workspaceName,
         description: 'Build and review software',
         goal: '',
         inputs: [],
@@ -73,18 +78,24 @@ export async function startRosterStaffingModel(port = 8944) {
       ready: false,
       create_now: false,
       staffing: {
-        roles: candidate
-          ? roles.map(r => ({
-              role_id: r.id,
-              state: mode,
-              choices: [
-                {
-                  candidate: candidate.handle,
-                  evidence: [candidate.evidence.find(e => e.kind === 'declared_purpose')!.id]
-                }
-              ]
-            }))
-          : []
+        roles:
+          candidate || mode === 'no_suitable_match'
+            ? roles.map(r => ({
+                role_id: r.id,
+                state: mode,
+                choices:
+                  mode === 'no_suitable_match'
+                    ? []
+                    : [
+                        {
+                          candidate: candidate!.handle,
+                          evidence: [
+                            candidate!.evidence.find(e => e.kind === 'declared_purpose')!.id
+                          ]
+                        }
+                      ]
+              }))
+            : []
       }
     };
     response.end(
@@ -115,6 +126,12 @@ export async function startRosterStaffingModel(port = 8944) {
   return {
     mode(value: typeof mode) {
       mode = value;
+    },
+    workspaceName(value: string) {
+      workspaceName = value;
+    },
+    candidatePurpose(value: string) {
+      purpose = value;
     },
     calls: () => calls,
     stop: () =>

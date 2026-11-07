@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -48,6 +49,9 @@ type seedAgentsResult struct {
 	// failed create by deleting it is the one unrecoverable failure this
 	// staffing path can cause (PRD FR51).
 	OwnedNames []string
+	// OwnedSources are captured by strict creation under the source fence.
+	// Names alone never authorize destructive rollback.
+	OwnedSources []store.StaffingSelection
 }
 
 type templateAgentPlan struct {
@@ -427,7 +431,7 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 		_, exists := h.agentStore.GetAgent(spec.Name)
 		if !exists {
 			cfg, _ := h.templateAgentCreateConfig(spec)
-			if err := h.agentStore.CreateAgent(spec.Name, cfg); err != nil {
+			if err := h.createTemplateSeededProfile(context.Background(), &result, tpl, spec.Name, cfg); err != nil {
 				if isEntry {
 					logger.Warn("Failed to seed template entry agent; falling back to entry-agent prompt",
 						logger.Fields{"workspace": ws.ID, "agent": spec.Name, "error": err})
@@ -441,9 +445,6 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 					fmt.Sprintf("Specialist agent %q could not be created and was skipped.", spec.Name))
 				continue
 			}
-			// Recorded immediately after the create succeeds, so a later failure
-			// can undo exactly this set.
-			result.OwnedNames = append(result.OwnedNames, spec.Name)
 		}
 
 		if exists {
@@ -477,8 +478,8 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 //
 // It deletes only names recorded in OwnedNames — definitions the request itself
 // created. Reused agents are never touched (FR73), and neither is an agent some
-// concurrent operation happens to have created under the same name, because that
-// name was never added to OwnedNames in the first place.
+// concurrent operation created/replaced or bound under the same name. The
+// captured source witness and current references are checked under its fence.
 //
 // Best-effort: the primary create failure remains authoritative, while cleanup
 // failures are returned separately so strict callers can report both causes.
@@ -488,7 +489,7 @@ func (h *Handler) rollbackSeededAgents(seed seedAgentsResult) []string {
 	}
 	var cleanupErrors []string
 	for _, name := range seed.OwnedNames {
-		if err := h.agentStore.DeleteAgent(name); err != nil {
+		if err := h.rollbackOwnedProfile(context.Background(), seed, name); err != nil {
 			logger.Warn("Failed to roll back a seeded agent after workspace creation failed",
 				logger.Fields{"agent": name, "error": err})
 			cleanupErrors = append(cleanupErrors, fmt.Sprintf("agent %q: %v", name, err))
