@@ -187,6 +187,7 @@ function lifecycleFixture(
         };
         return { ok: true, json: async () => ({ run_id: 'retry' }) };
       }
+      if (state instanceof Error) throw state;
       return { ok: true, json: async () => state };
     }
   });
@@ -200,6 +201,19 @@ function lifecycleFixture(
 }
 
 const flushLifecycle = () => new Promise(resolve => setImmediate(resolve));
+
+test('goal read failure remains unavailable through summary redraw until a successful read', async () => {
+  const f = lifecycleFixture(new Error('offline'));
+  await f.mission.reload();
+  assert.equal(f.mission.getSummary().unavailable, true);
+  assert.equal(f.mission.getSummary().canRun, false);
+  assert.match(f.mission.getSummary().text, /offline/);
+  f.mission.renderCommandSurfaces();
+  assert.equal(f.requests.filter(([, method]) => method === 'POST').length, 0);
+  f.setState({ mission: '' });
+  await f.mission.reload();
+  assert.equal(f.mission.getSummary().unavailable, undefined);
+});
 
 test('blocked pending reloads never recursively POST and explicit Run now retries after repair', async () => {
   const f = lifecycleFixture({ mission: 'Draft chapters', first_run_pending: true });

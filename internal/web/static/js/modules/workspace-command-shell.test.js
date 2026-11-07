@@ -111,7 +111,9 @@ test('every shared header has one real Give work door, Settings and literal iden
     assert.equal((html.match(/data-cmd-settings aria-haspopup/g) || []).length, 1);
     assert.match(html, /&lt;img src=x&gt;/);
     assert.doesNotMatch(html, /No description|No tags|ws-cmd-readout/);
-    assert.match(html, /data-cmd-resources aria-haspopup="dialog"/);
+    if (mode === 'map')
+      assert.match(view.renderMapToolTray(), /data-cmd-map-resources aria-haspopup="dialog"/);
+    else assert.match(html, /data-cmd-resources aria-haspopup="dialog"/);
   }
 });
 

@@ -382,6 +382,7 @@
   }
 
   let latestState = null;
+  let lastReadError = '';
 
   // Guards against overlapping runs and keeps the goal card's Run button
   // disabled while a run is in flight (see renderGoalCard).
@@ -761,7 +762,7 @@
     if (!el) return;
     const workflow = String(el.getAttribute('data-workflow-label') || '').trim();
     const summary = commandSummary(state);
-    const missionPart = summary.label ? `Goal · ${summary.label}` : '';
+    const missionPart = summary.mission && summary.label ? `Goal · ${summary.label}` : '';
     const text = [workflow, missionPart].filter(Boolean).join(' · ');
     el.textContent = text;
     el.hidden = !text;
@@ -1139,6 +1140,7 @@
     try {
       const state = await fetchMissionState();
       latestState = state;
+      lastReadError = '';
       lastRunOutcome = null;
       lastRunReport = null;
       renderReadOnly(state);
@@ -1147,8 +1149,11 @@
       setStatusText('');
       afterStateLoaded(state);
     } catch (e) {
-      renderGoalCardError(`Failed to load goal: ${e.message}`);
+      lastReadError = `Failed to load goal: ${e.message}`;
+      renderGoalCardError(lastReadError);
       setStatusText(`Failed to load goal settings: ${e.message}`, 'error');
+      if (typeof CustomEvent === 'function')
+        document.dispatchEvent?.(new CustomEvent('ori:workspace-goal-state'));
     }
   }
 
@@ -1628,7 +1633,20 @@
     if (typeof window === 'undefined') return;
     window.workspaceMission = Object.assign(window.workspaceMission || {}, {
       getState: () => latestState,
-      getSummary: () => (latestState ? commandSummary(latestState) : {}),
+      getSummary: () =>
+        lastReadError
+          ? {
+              ...(latestState ? commandSummary(latestState) : {}),
+              unavailable: true,
+              label: 'Unavailable',
+              title: 'Goal unavailable',
+              text: lastReadError,
+              className: 'is-error',
+              canRun: false
+            }
+          : latestState
+            ? commandSummary(latestState)
+            : {},
       // Pure renderers of a given state, for module tests.
       summarize: state => commandSummary(state || {}),
       runHistoryHTML,
@@ -1642,7 +1660,8 @@
       // Whether a goal run is executing, for the Backlog drawer (FR27).
       isRunning: () => runIsInFlight(latestState),
       renderCommandSurfaces: () => {
-        if (latestState) renderCommandPanel(latestState);
+        if (lastReadError) renderGoalCardError(lastReadError);
+        else if (latestState) renderCommandPanel(latestState);
       },
       openGoalModal,
       cardAction,

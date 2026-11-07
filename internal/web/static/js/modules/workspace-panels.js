@@ -1,5 +1,6 @@
 import { chromeText as text } from './workspace-command-chrome.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
+import { writeRailSection } from './workspace-command-rail.js';
 
 const SECTIONS = {
   settings: [
@@ -118,6 +119,7 @@ export class WorkspacePanels {
     this.kind = kind;
     this.id = this.command.workspaceId();
     this.section = section || SECTIONS[kind][0][0];
+    if (kind === 'resources') writeRailSection(this.command.railStorage(), this.id, this.section);
     this.trigger = trigger;
     this.dirty = false;
     this.dirtyFields.clear();
@@ -150,15 +152,24 @@ export class WorkspacePanels {
 
   close() {
     if (!this.confirmDiscard()) return false;
-    const selector = this.kind === 'resources' ? '[data-cmd-resources]' : '[data-cmd-settings]';
+    const selector =
+      this.kind === 'resources'
+        ? this.command.viewMode === 'map'
+          ? '[data-cmd-map-resources]'
+          : '[data-cmd-resources]'
+        : '[data-cmd-settings]';
     this.coordinator.close('workspace-panels');
     this.dirty = false;
     // kind was cleared by onClose; prefer the original door's identity.
+    const resource = this.trigger?.getAttribute('data-cmd-resource-section');
+    const replacement = resource
+      ? Array.from(
+          this.command.container?.querySelectorAll('[data-cmd-resource-section]') || []
+        ).find(node => node.getAttribute('data-cmd-resource-section') === resource)
+      : null;
     const door = this.trigger?.isConnected
       ? this.trigger
-      : this.command.container?.querySelector(
-          this.trigger?.hasAttribute('data-cmd-resources') ? '[data-cmd-resources]' : selector
-        );
+      : replacement || this.command.container?.querySelector(selector);
     door?.focus?.({ preventScroll: true });
     return true;
   }
@@ -369,6 +380,8 @@ export class WorkspacePanels {
     if (section) {
       if (!this.confirmDiscard()) return;
       this.section = section.getAttribute('data-panel-section');
+      if (this.kind === 'resources')
+        writeRailSection(this.command.railStorage(), this.id, this.section);
       this.dirty = false;
       this.dirtyFields.clear();
       this.render();

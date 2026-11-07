@@ -28,6 +28,17 @@ import {
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { workspaceNavigationHTML, workspaceSettingsHTML } from './workspace-command-chrome.js';
 import { WorkspacePanels } from './workspace-panels.js';
+import {
+  readTicketURLState,
+  writeTicketURLState,
+  ticketURLStatesEqual
+} from './workspace-ticket-url-state.js';
+import {
+  overviewHTML,
+  bindOverview,
+  captureOverview,
+  addWorkspaceMenuHTML
+} from './workspace-overview.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
@@ -425,6 +436,9 @@ export class WorkspaceCommandView {
     this.capabilityInspectorRequestId = 0;
     this.pendingCapabilityInspectorFocus = '';
     this.sharedSurfaceAnchors = {};
+    this.boundGoalState = () => {
+      if (this.active) this.render();
+    };
     this.boundGlobalKeydown = event => this.handleGlobalKeydown(event);
     this.boundPopState = event => this.handlePopState(event);
     this.boundWorkspacesChanged = event => void this.handleWorkspacesChanged(event);
@@ -516,11 +530,8 @@ export class WorkspaceCommandView {
     // Leaving Details closes the rail; coming back chooses its section afresh.
     this.activeRailSection = '';
     this.railSectionSettled = false;
-    if (nextMode === 'details') {
-      this.activeMapWindow = '';
-      this.mapInventoryOpen = false;
-      this.mapInventorySection = '';
-    }
+    // Map inspection is presentation state: hide it with the map, but retain
+    // the selected owner for the return trip. Explicit close still clears it.
     this.restoreSharedSurfaces();
     this.render();
     this.syncURLState();
@@ -555,6 +566,7 @@ export class WorkspaceCommandView {
     if (this.container) this.container.hidden = false;
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('keydown', this.boundGlobalKeydown);
+      document.addEventListener('ori:workspace-goal-state', this.boundGoalState);
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('popstate', this.boundPopState);
@@ -1125,9 +1137,9 @@ export class WorkspaceCommandView {
    */
   openTicketsFiltered(state) {
     const tickets = typeof window === 'undefined' ? null : window.WorkspaceHubTickets;
+    // Set the owning filter before the mode push: one user door, one entry.
+    tickets?.setFilterState?.(state);
     this.setCommandViewMode('tickets', { focus: false });
-    if (!tickets || typeof tickets.setFilterState !== 'function') return;
-    tickets.setFilterState(state);
   }
 
   /**
@@ -1205,6 +1217,7 @@ export class WorkspaceCommandView {
     if (state.agent) {
       this.selectedAgentKey = state.agent;
       this.agentSelectionInitialized = true;
+      if (effectiveMode === 'details') this.teamExpanded = true;
       this.persistAgentKey(state.agent);
     }
     if (state.panel === 'settings') {
@@ -1305,19 +1318,41 @@ export class WorkspaceCommandView {
     );
   }
 
-  /**
-   * Push or replace history for the current view state (FR86-FR88). No-op
-   * transitions never create a duplicate entry; the caller decides push vs
-   * replace (replace for normalization, push for a genuine user navigation).
-   */
+  /** Canonical Ticket IDs/filters come from their existing owning controller. */
+  currentTicketURLState() {
+    if (this.viewMode !== 'tickets' || typeof window === 'undefined') return {};
+    const owned = window.WorkspaceHubTickets?.getPresentationState?.();
+    if (owned) return owned;
+    const incoming = readTicketURLState(window.location?.search || '');
+    return incoming.ticket || incoming.tickets ? incoming : { tickets: 'all' };
+  }
+
+  /** One shared history entry; normalization replaces, genuine navigation pushes. */
   syncURLState({ replace = false } = {}) {
-    if (!this._urlSyncEnabled || typeof window === 'undefined' || !window.history) return;
+    if (
+      !this._urlSyncEnabled ||
+      (this._restoringHistory && !replace) ||
+      typeof window === 'undefined' ||
+      !window.history
+    )
+      return;
     const nextState = this.currentURLState();
-    if (urlStatesEqual(nextState, this._lastSyncedURLState)) return;
+    let ticketState = this.currentTicketURLState();
+    if (this.viewMode === 'tickets') this._ticketDeepLinkApplied = true;
+    const incoming = readTicketURLState(window.location.search || '');
+    // Initial legacy normalization must not consume another owner's arrival
+    // before the canonical Tickets surface has initialized.
+    if (replace && !this._ticketDeepLinkApplied && (incoming.ticket || incoming.tickets))
+      ticketState = incoming;
+    if (
+      urlStatesEqual(nextState, this._lastSyncedURLState) &&
+      ticketURLStatesEqual(ticketState, this._lastSyncedTicketURLState)
+    )
+      return;
     const url = buildWorkspaceURL(
       window.location.pathname,
       nextState,
-      window.location.search || '',
+      writeTicketURLState(window.location.search || '', ticketState),
       window.location.hash || ''
     );
     // Nothing to rewrite if the target URL already matches the address bar —
@@ -1326,6 +1361,7 @@ export class WorkspaceCommandView {
       window.location.pathname + (window.location.search || '') + (window.location.hash || '');
     if (url === currentUrl) {
       this._lastSyncedURLState = nextState;
+      this._lastSyncedTicketURLState = ticketState;
       return;
     }
     if (!replace) this.captureHistoryPresentationState();
@@ -1335,51 +1371,71 @@ export class WorkspaceCommandView {
     if (replace) window.history.replaceState(historyEntryState, '', url);
     else window.history.pushState(historyEntryState, '', url);
     this._lastSyncedURLState = nextState;
+    this._lastSyncedTicketURLState = ticketState;
   }
 
   /** Restore view state from Back/Forward navigation (FR88-FR89). */
   handlePopState(event) {
     if (!this._urlSyncEnabled) return;
-    const context = this.urlStateContext();
-    const { state } = sanitizeWorkspaceURLState(
-      parseWorkspaceURLState(window.location.search),
-      context
-    );
-    this._lastSyncedURLState = state;
+    const wasRestoring = this._restoringHistory;
+    this._restoringHistory = true;
+    try {
+      const ticketState = readTicketURLState(window.location.search);
+      this._lastSyncedTicketURLState = ticketState;
+      const context = this.urlStateContext();
+      const { state } = sanitizeWorkspaceURLState(
+        parseWorkspaceURLState(window.location.search),
+        context
+      );
+      this._lastSyncedURLState = state;
 
-    // A clean workspace URL is the canonical Details history entry. Initial
-    // boot may honor the saved preference, but popstate describes a concrete
-    // entry the user is returning to: resolving an absent mode through the
-    // current/persisted Map value made Back remove ?mode=map while leaving the
-    // rendered Map active.
-    const effectiveMode = this.normalizeCommandViewMode(
-      resolveEffectiveMode(state.mode, null, 'details')
-    );
-    if (
-      (effectiveMode !== 'map' || (state.agent && state.agent !== this.selectedAgentKey)) &&
-      this.capabilityInspector?.open
-    ) {
-      this.resetCapabilityInspector();
-    }
-    if (this.loadoutAddOpen) this.resetLoadoutPicker();
-    this.viewMode = effectiveMode;
-    if (state.agent) {
-      this.selectedAgentKey = state.agent;
-      this.agentSelectionInitialized = true;
-    }
-    const historyState = (event && event.state) || {};
-    this.trayCollapsed = Boolean(historyState.trayCollapsed);
-    if (state.run) this.trackAndShowTray(state.run);
-
-    this.render();
-    if (state.panel === 'tasks') this.openTicketsView(state.task || '');
-    if (
-      historyState.focusSelector &&
-      this.container &&
-      typeof this.container.querySelector === 'function'
-    ) {
-      const target = this.container.querySelector(historyState.focusSelector);
-      if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+      // A clean workspace URL is the canonical Details history entry. Initial
+      // boot may honor the saved preference, but popstate describes a concrete
+      // entry the user is returning to: resolving an absent mode through the
+      // current/persisted Map value made Back remove ?mode=map while leaving the
+      // rendered Map active.
+      const effectiveMode =
+        ticketState.ticket || ticketState.tickets
+          ? 'tickets'
+          : this.normalizeCommandViewMode(resolveEffectiveMode(state.mode, null, 'details'));
+      if (
+        (effectiveMode !== 'map' || (state.agent && state.agent !== this.selectedAgentKey)) &&
+        this.capabilityInspector?.open
+      ) {
+        this.resetCapabilityInspector();
+      }
+      if (this.loadoutAddOpen) this.resetLoadoutPicker();
+      this.viewMode = effectiveMode;
+      if (state.agent) {
+        this.selectedAgentKey = state.agent;
+        this.agentSelectionInitialized = true;
+      }
+      const historyState = (event && event.state) || {};
+      this.trayCollapsed = Boolean(historyState.trayCollapsed);
+      if (state.run) this.trackAndShowTray(state.run);
+      if (effectiveMode === 'tickets') {
+        this._ticketDeepLinkApplied = true;
+        const owner = window.WorkspaceHubTickets;
+        if (owner?.getPresentationState?.()) {
+          void Promise.resolve(owner.applyPresentationState?.(ticketState)).catch(error =>
+            console.warn('Ticket history restore failed:', error)
+          );
+        } else owner?.init?.();
+      }
+      this.render();
+      if (state.panel === 'tasks') this.openTicketsView(state.task || '');
+      if (
+        historyState.focusSelector &&
+        this.container &&
+        typeof this.container.querySelector === 'function'
+      ) {
+        const target = this.container.querySelector(historyState.focusSelector);
+        if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+      }
+      if (state.panel === 'tasks') this.syncURLState({ replace: true });
+      this._lastSyncedTicketURLState = readTicketURLState(window.location.search);
+    } finally {
+      this._restoringHistory = wasRestoring;
     }
   }
 
@@ -1387,7 +1443,12 @@ export class WorkspaceCommandView {
   taskHrefWithReturn(taskId) {
     const workspaceSlug = this.workspaceSlug();
     const base = workspacePageURL(workspaceSlug, ['task', taskId]);
-    const returnTarget = buildReturnTarget(workspaceSlug, this.currentURLState());
+    let returnTarget = buildReturnTarget(workspaceSlug, this.currentURLState());
+    if (returnTarget && this.viewMode === 'tickets') {
+      const [pathname, search = ''] = returnTarget.split('?');
+      const query = writeTicketURLState(search, this.currentTicketURLState());
+      returnTarget = pathname + (query ? '?' + query : '');
+    }
     return returnTarget ? base + '?return=' + encodeURIComponent(returnTarget) : base;
   }
 
@@ -1888,7 +1949,10 @@ export class WorkspaceCommandView {
       this.identityEditorHTML(name, description) +
       '<div class="ws-cmd-destinations">' +
       this.commandViewSwitchHTML() +
-      '<button type="button" class="ws-cmd-nav-btn" data-cmd-resources aria-haspopup="dialog">Resources</button></div>' +
+      (this.viewMode === 'map'
+        ? ''
+        : '<button type="button" class="ws-cmd-nav-btn" data-cmd-resources aria-haspopup="dialog">Resources</button>') +
+      '</div>' +
       // Keep safety/setup sources visible until their Group 2 replacements exist.
       '<div class="ws-cmd-header-status">' +
       this.groupTemplateStatusHTML({ quietSuccess: true }) +
@@ -2021,6 +2085,13 @@ export class WorkspaceCommandView {
     if (this.ticketChangeBound || typeof window === 'undefined') return;
     if (typeof window.addEventListener !== 'function') return;
     this.ticketChangeBound = true;
+    window.addEventListener('ori:ticket-view', event => {
+      if (
+        String(event.detail?.studioId || '') === this.workspaceId() &&
+        this.viewMode === 'tickets'
+      )
+        this.syncURLState();
+    });
     window.addEventListener('ori:tickets-changed', event => {
       const changed = String((event && event.detail && event.detail.studioId) || '');
       if (changed && changed !== this.workspaceId()) return;
@@ -2148,6 +2219,10 @@ export class WorkspaceCommandView {
   // prompt (or the loading line before the goal state arrives).
   renderMissionPanel() {
     const summary = this.missionSummary();
+    // Known, unconfigured optional goals live in Settings; unknown/error is
+    // not empty, and keeps the owning status visible.
+    if (summary.mission === '' && !summary.running && !summary.hasFindings && !summary.unavailable)
+      return '';
     const missionText = String(summary.mission || '').trim();
     const loaded = typeof summary.mission === 'string';
     const title = summary.title || missionText || 'Workspace goal';
@@ -2447,7 +2522,11 @@ export class WorkspaceCommandView {
         ? `<button type="button" id="workspaceNextAction" class="ws-cmd-agent-action is-primary" data-cmd-next-action="${escapeHtml(action.key)}" data-cmd-work-key="next"${taskAttrs}>${escapeHtml(action.label)}</button>`
         : '';
     return (
-      '<section id="workspaceNextActionRegion" class="ws-cmd-work-first" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
+      '<section id="workspaceNextActionRegion" class="ws-cmd-work-first' +
+      (this.viewMode === 'map' && action?.owner === 'workspace' && action.kind === 'create'
+        ? ' is-quiet'
+        : '') +
+      '" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
       '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
@@ -2752,6 +2831,7 @@ export class WorkspaceCommandView {
     this.workspacePanels?.syncIdentity();
     this.workspacePanels?.refreshResources();
     this.captureChromeState();
+    captureOverview(this);
     const workFocus =
       typeof document !== 'undefined'
         ? document.activeElement?.getAttribute?.('data-cmd-work-key')
@@ -2803,22 +2883,7 @@ export class WorkspaceCommandView {
           ? this.renderOperationsMap() + this.renderFollowUpsHost()
           : this.isPersonalHQ()
             ? this.renderHQDetails()
-            : '<div class="ws-cmd-layout">' +
-              '<main class="ws-cmd-main">' +
-              this.renderWorkFirst() +
-              this.renderUnstaffedBanner() +
-              this.renderMissionPanel() +
-              this.renderFollowUpsHost() +
-              '<section class="ws-cmd-garrison">' +
-              this.renderGarrison() +
-              '</section>' +
-              '</main>' +
-              '<aside class="ws-cmd-rail' +
-              (this.railPointerFocus ? ' is-pointer' : '') +
-              '">' +
-              this.renderRail() +
-              '</aside>' +
-              '</div>';
+            : overviewHTML(this);
 
     if (this.container.classList) {
       this.container.classList.toggle('is-settled', this.detailsViewSettled());
@@ -2829,6 +2894,10 @@ export class WorkspaceCommandView {
     // again below). The HQ's Notes panel is parked the same way.
     this.parkFollowUpsSurface();
     this.parkHQPanels();
+    const membersNode = this.sharedSurfaceAnchors?.members?.node;
+    const memberActive = typeof document === 'undefined' ? null : document.activeElement;
+    if (memberActive && membersNode?.contains?.(memberActive)) this.membersFocus = memberActive;
+    this.restoreSharedSurface('members');
     const hqDetails = this.viewMode === 'details' && this.isPersonalHQ();
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +
@@ -2839,6 +2908,7 @@ export class WorkspaceCommandView {
     this.bindChromeDisclosures();
     this.bindConfigDrafts();
     this.bindWorkFirst();
+    bindOverview(this);
     this.announceNextAction();
     if (workFocus) {
       const key = workFocus === 'next-pending' ? 'next' : workFocus;
@@ -2925,6 +2995,15 @@ export class WorkspaceCommandView {
   }
 
   openWorkspacePanel(kind, trigger, section = '') {
+    if (kind === 'resources' && !section) {
+      const saved = readRailSection(this.railStorage(), this.workspaceId());
+      section =
+        saved === 'folders'
+          ? 'files'
+          : ['notes', 'files', 'sessions', 'memory'].includes(saved)
+            ? saved
+            : '';
+    }
     if (!this.workspacePanels) this.workspacePanels = new WorkspacePanels(this);
     this.workspacePanels.open(kind, trigger, section);
   }
@@ -3336,6 +3415,10 @@ export class WorkspaceCommandView {
       id: 'workspace-command-manager',
       kind: 'modal',
       container: el,
+      // The coordinator releases body-level inertness before returning focus.
+      trigger: trigger
+        ? { focus: () => this.resolveStatModalTrigger(trigger)?.focus?.({ preventScroll: true }) }
+        : null,
       canEscape: () => this.canCloseStatModal(),
       onClose: info => {
         el.hidden = true;
@@ -3401,7 +3484,7 @@ export class WorkspaceCommandView {
     const station = this.mapStationRegistry().find(entry => entry.key === wasSection);
     if (station && typeof station.onPanelClosed === 'function') station.onPanelClosed();
     const opener = this.resolveStatModalTrigger(trigger);
-    if (opener && typeof opener.focus === 'function') opener.focus();
+    if (!coordinated && opener && typeof opener.focus === 'function') opener.focus();
   }
 
   // render() takes the open stat modal out of the container and puts it back,
@@ -4673,9 +4756,14 @@ export class WorkspaceCommandView {
     if (typeof document === 'undefined') return;
     const active = document.activeElement;
     if (!active || typeof active.closest !== 'function' || !this.container) return;
-    const building = active.closest('.ws-cmd-map-hq-station[data-cmd-hq-station]');
+    const building = active.closest(
+      '.ws-cmd-map-hq-station[data-cmd-hq-station], .ws-cmd-flow-node, .ws-cmd-flow-lead'
+    );
     if (building && this.container.contains(building)) {
-      this._mapStationFocus = building.getAttribute('data-cmd-hq-station') || '';
+      this._mapStationFocusAttribute = building.getAttribute('data-cmd-flow-node')
+        ? 'data-cmd-flow-node'
+        : 'data-cmd-hq-station';
+      this._mapStationFocus = building.getAttribute(this._mapStationFocusAttribute) || '';
     }
   }
 
@@ -4683,9 +4771,12 @@ export class WorkspaceCommandView {
     const key = this._mapStationFocus;
     this._mapStationFocus = '';
     if (!key || !this.container || typeof this.container.querySelectorAll !== 'function') return;
+    const attribute = this._mapStationFocusAttribute || 'data-cmd-hq-station';
     const building = Array.from(
-      this.container.querySelectorAll('.ws-cmd-map-hq-station[data-cmd-hq-station]')
-    ).find(node => node.getAttribute('data-cmd-hq-station') === key);
+      this.container.querySelectorAll(
+        '.ws-cmd-map-hq-station[data-cmd-hq-station], .ws-cmd-flow-node, .ws-cmd-flow-lead'
+      )
+    ).find(node => node.getAttribute(attribute) === key);
     if (building && document.activeElement !== building && typeof building.focus === 'function') {
       building.focus({ preventScroll: true });
     }
@@ -6407,32 +6498,7 @@ export class WorkspaceCommandView {
   }
 
   renderMapToolTray() {
-    return (
-      '<nav class="ws-cmd-map-belt" aria-label="Map windows">' +
-      this.mapWindowOptions()
-        .map(item => {
-          const active = this.activeMapWindow === item.key;
-          return (
-            '<button type="button" class="ws-cmd-map-belt-btn' +
-            (active ? ' is-active' : '') +
-            '" data-cmd-map-window="' +
-            escapeHtml(item.key) +
-            '" aria-label="' +
-            escapeHtml(item.label) +
-            '" aria-pressed="' +
-            (active ? 'true' : 'false') +
-            '" title="' +
-            escapeHtml(item.label) +
-            '"><i class="bi ' +
-            escapeHtml(item.icon) +
-            '" aria-hidden="true"></i><span class="sr-only">' +
-            escapeHtml(item.label) +
-            '</span></button>'
-          );
-        })
-        .join('') +
-      '</nav>'
-    );
+    return '<nav class="ws-cmd-map-toolbar" aria-label="Map resources"><button type="button" class="ws-cmd-nav-btn" data-cmd-map-resources aria-haspopup="dialog">Resources</button></nav>';
   }
 
   renderMapMissionPanel() {
@@ -12114,11 +12180,10 @@ export class WorkspaceCommandView {
       (hq ? ' is-hq' : '') +
       (flow ? ' is-flow' : '') +
       '">' +
+      this.renderMapToolTray() +
       '<div class="ws-cmd-opmap" role="region" aria-label="Workspace operations map">' +
       (hq ? this.mapArrangementRowHTML(flow) : '') +
-      (flow
-        ? this.renderHQFlow(agents)
-        : this.renderMapAgentsZone(agents) + this.renderMapToolTray()) +
+      (flow ? this.renderHQFlow(agents) : this.renderMapAgentsZone(agents)) +
       '</div>' +
       this.mapGiveWorkHTML() +
       this.renderMapWindow(selected) +
@@ -12438,8 +12503,8 @@ export class WorkspaceCommandView {
    * detachmentUnits). Only a state that needs an action — no agents, or no
    * Commander — docks as a command post card. Stations keep their saved
    * fractional spots in the same overlay layer the station drag measures
-   * against, and the Detachment toolbar sits between New Quest and the tool
-   * belt. The overlay layer passes pointer events through to the map except on
+   * against. The toolbar occupies its own row, never covering saved stations.
+   * The overlay layer passes pointer events through to the map except on
    * its own controls.
    */
   renderGroupOperationsMap(agents, selected) {
@@ -12453,14 +12518,13 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-shell is-group' +
       (this.isPersonalHQ() ? ' is-hq' : '') +
       '">' +
+      this.renderDetachmentToolbar() +
       '<div class="ws-cmd-opmap is-combined" role="region" aria-label="Group map">' +
       '<div class="ws-cmd-detachment-slot" data-cmd-detachment-slot></div>' +
       '<section class="ws-cmd-map-world is-overlay" data-map-zone="agents" aria-label="Agent units">' +
       (post ? '<div class="ws-cmd-map-command-post">' + post + '</div>' : '') +
       this.renderMapHQStations() +
       '</section>' +
-      this.renderDetachmentToolbar() +
-      this.renderMapToolTray() +
       '</div>' +
       this.mapGiveWorkHTML() +
       this.renderMapWindow(selected) +
@@ -12556,6 +12620,29 @@ export class WorkspaceCommandView {
         this.container
           ?.querySelector?.('.ws-cmd-map-window [data-cmd-hq-needs-action]')
           ?.focus?.({ preventScroll: true });
+        return;
+      }
+      const resources = event.target.closest('[data-cmd-map-resources]');
+      if (resources) {
+        this.openWorkspacePanel('resources', resources);
+        return;
+      }
+      const groupCreate = event.target.closest('[data-cmd-group-create]');
+      const groupLink = event.target.closest('[data-cmd-group-link]');
+      if (groupCreate || groupLink) {
+        const menu = (groupCreate || groupLink).closest('details');
+        const opener = menu.querySelector('summary');
+        menu.open = false;
+        if (groupCreate) this.openDetachmentBuild(opener);
+        else this.openDetachmentPicker();
+        return;
+      }
+      if (event.target.closest('[data-cmd-member-retry]')) {
+        const owner = this.page?.membersPanel;
+        if (owner?.reload)
+          void owner.reload().then(() => {
+            if (this.active) this.render();
+          });
         return;
       }
       const detachmentBuild = event.target.closest('[data-cmd-detachment-build]');
@@ -12683,6 +12770,7 @@ export class WorkspaceCommandView {
       if (agentTabBtn) {
         const encodedName = agentTabBtn.getAttribute('data-cmd-agent-name');
         if (encodedName) this.selectAgent(encodedName, { focus: false });
+        this.teamExpanded = true;
         this.setCommandViewMode('details', { focus: false });
         this.setActiveAgentTab(agentTabBtn.getAttribute('data-cmd-map-agent-tab'));
         return;
@@ -12780,7 +12868,33 @@ export class WorkspaceCommandView {
         );
       }
     });
+    if (this.overviewFocus?.menu)
+      root.querySelector('[data-cmd-add-workspace] summary')?.focus?.({ preventScroll: true });
+    else if (
+      ['data-cmd-group-create', 'data-cmd-group-link'].includes(this.overviewFocus?.attribute)
+    )
+      root
+        .querySelector('[' + this.overviewFocus.attribute + ']')
+        ?.focus?.({ preventScroll: true });
     root.addEventListener('keydown', event => {
+      const menu = event.target.closest?.('[data-cmd-add-workspace]');
+      if (event.key === 'Escape' && menu?.open) {
+        event.preventDefault();
+        event.stopPropagation();
+        menu.open = false;
+        menu.querySelector('summary').focus();
+        return;
+      }
+      if (
+        event.key === 'Escape' &&
+        this.detachmentPickerOpen &&
+        event.target.closest?.('[data-cmd-detachment-picker]')
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeDetachmentPicker();
+        return;
+      }
       if (this.handleLoadoutAddKeydown(event)) return;
       this.handleCapabilityInspectorKeydown(event);
     });
@@ -13535,19 +13649,25 @@ export class WorkspaceCommandView {
    */
   renderDetachmentToolbar() {
     if (!this.isGroupWorkspace()) return '';
-    const count = this.detachmentMemberCount();
+    const owner = this.page?.membersPanel;
+    const count = owner?.group && !owner.readFailed ? this.detachmentMemberCount() : null;
     return (
       '<div class="ws-cmd-map-group-bar' +
-      (count ? '' : ' is-empty') +
-      '" data-map-zone="detachment" role="toolbar" aria-label="Detachment">' +
-      '<span class="ws-cmd-map-group-bar-label" aria-hidden="true">Detachment</span>' +
+      (count === 0 ? ' is-empty' : '') +
+      '" data-map-zone="detachment" role="toolbar" aria-label="Group map controls">' +
+      '<button type="button" class="ws-cmd-nav-btn" data-cmd-map-resources aria-haspopup="dialog">Resources</button>' +
+      '<span class="ws-cmd-map-group-bar-label">Linked workspaces</span>' +
       '<span class="ws-cmd-map-zone-count" title="Members" aria-label="' +
-      count +
-      (count === 1 ? ' member' : ' members') +
+      (count === null
+        ? 'Workspace count unavailable'
+        : count + (count === 1 ? ' member' : ' members')) +
       '">' +
-      count +
+      (count === null ? '—' : count) +
       '</span>' +
-      this.detachmentZoneActionsHTML() +
+      addWorkspaceMenuHTML(this) +
+      (count === null
+        ? '<p class="ws-cmd-member-read-state" role="status">Workspace membership is loading or unavailable. <button type="button" class="ws-cmd-agent-action" data-cmd-member-retry>Retry membership</button></p>'
+        : '') +
       '<div class="ws-cmd-detachment-picker" data-cmd-detachment-picker' +
       (this.detachmentPickerOpen ? '' : ' hidden') +
       '></div>' +
@@ -13591,6 +13711,7 @@ export class WorkspaceCommandView {
     const manager = typeof window === 'undefined' ? null : window.sessionManager;
     if (!manager || typeof manager.showAddWorkspaceModal !== 'function') return false;
     const ws = (this.page && this.page.workspace) || {};
+    this.bindGroupCreatorReturn();
     manager.showAddWorkspaceModal({
       parentId: this.workspaceId(),
       parentName: String(ws.name || ''),
@@ -13604,6 +13725,36 @@ export class WorkspaceCommandView {
     return true;
   }
 
+  bindGroupCreatorReturn() {
+    if (typeof document === 'undefined') return;
+    const modal = document.getElementById?.('addFolderModal');
+    if (!modal?.addEventListener) return;
+    this.groupCreatorFocusCleanup?.();
+    const id = this.workspaceId();
+    const cleanup = () => {
+      modal.removeEventListener('hidden.bs.modal', closed);
+      this.groupCreatorFocusCleanup = null;
+    };
+    const closed = () => {
+      // Child agent setup and map placement are suspension, not cancellation.
+      if (modal.dataset?.suspendedForAgentSetup || modal.dataset?.suspendedForMapPlacement) return;
+      cleanup();
+      if (
+        !this.active ||
+        this.page?._destroyed ||
+        this.workspaceId() !== id ||
+        document.querySelector('.modal.show, dialog[open]') ||
+        workspaceOverlayCoordinator().activeModal?.()
+      )
+        return;
+      this.container
+        ?.querySelector('[data-cmd-add-workspace] > summary')
+        ?.focus?.({ preventScroll: true });
+    };
+    this.groupCreatorFocusCleanup = cleanup;
+    modal.addEventListener('hidden.bs.modal', closed);
+  }
+
   // Add existing: the members panel owns the eligible-target rule and the
   // membership PATCH, so the zone borrows its picker rather than writing a
   // second one (FR-24, FR-25).
@@ -13614,18 +13765,54 @@ export class WorkspaceCommandView {
         ? this.container.querySelector('[data-cmd-detachment-picker]')
         : null;
     if (!panel || !host || typeof panel.renderAddPickerInto !== 'function') return false;
+    const choice = host.querySelector?.('[data-member-add-select]');
+    const draft =
+      choice && typeof choice.value === 'string'
+        ? {
+            value: choice.value,
+            focused: typeof document !== 'undefined' && document.activeElement === choice
+          }
+        : this.detachmentPickerDraft;
+    if (focus) this.detachmentPickerEpoch = (this.detachmentPickerEpoch || 0) + 1;
+    const epoch = this.detachmentPickerEpoch;
+    const workspaceId = this.workspaceId();
+    const current = () =>
+      this.detachmentPickerOpen &&
+      epoch === this.detachmentPickerEpoch &&
+      workspaceId === this.workspaceId() &&
+      !this.page?._destroyed;
     this.detachmentPickerOpen = true;
     host.hidden = false;
     this.syncDetachmentAddExpanded();
     panel.renderAddPickerInto(host, {
       focus,
       onAdded: id => {
-        this.closeDetachmentPicker();
+        if (!current()) return;
+        this.closeDetachmentPicker({ restoreFocus: true });
         this.pendingDetachmentSelectionId = String(id || '');
         void this.handleWorkspacesChanged({ detail: { workspaceId: id } });
       },
-      onCancel: () => this.closeDetachmentPicker()
+      onCancel: () => {
+        if (current()) this.closeDetachmentPicker({ restoreFocus: true });
+      }
     });
+    const restored = host.querySelector?.('[data-member-add-select]');
+    if (draft && restored) {
+      restored.value = draft.value;
+      const confirm = host.querySelector('[data-member-add-confirm]');
+      if (!restored.value && confirm) {
+        confirm.disabled = true;
+        const notice = document.createElement('p');
+        notice.setAttribute('role', 'status');
+        notice.textContent = 'That workspace is no longer available. Choose another workspace.';
+        host.appendChild(notice);
+        restored.addEventListener('change', () => {
+          confirm.disabled = !restored.value;
+          if (restored.value) notice.remove();
+        });
+      }
+      if (!focus && draft.focused) restored.focus?.({ preventScroll: true });
+    }
     return true;
   }
 
@@ -13654,9 +13841,13 @@ export class WorkspaceCommandView {
       return rect && rect.width && rect.height ? rect : null;
     };
     const gap = 12;
-    const top = ['.ws-cmd-map-quest-fab', '.ws-cmd-map-group-bar', '.ws-cmd-map-belt']
+    const stations = Array.from(root.querySelectorAll?.('.ws-cmd-map-hq-station') || [])
+      .map(node => node.getBoundingClientRect())
+      .filter(rect => rect.height && rect.bottom - base.top <= base.height * 0.6);
+    const top = ['.ws-cmd-map-group-bar', '.ws-cmd-map-toolbar']
       .map(rectOf)
       .filter(Boolean)
+      .concat(stations)
       .reduce((lowest, rect) => Math.max(lowest, rect.bottom - base.top + gap), 0);
     const post = rectOf('.ws-cmd-map-command-post');
     const postRight = post ? post.right - base.left + gap : 0;
@@ -13668,16 +13859,23 @@ export class WorkspaceCommandView {
 
   // The toolbar button toggles, which is also the way out of the "No eligible
   // workspaces to add." message, which has no Cancel of its own.
-  closeDetachmentPicker() {
+  closeDetachmentPicker({ restoreFocus = false } = {}) {
     this.detachmentPickerOpen = false;
+    this.detachmentPickerEpoch = (this.detachmentPickerEpoch || 0) + 1;
+    this.detachmentPickerDraft = null;
     this.syncDetachmentAddExpanded();
     const host =
       this.container && typeof this.container.querySelector === 'function'
         ? this.container.querySelector('[data-cmd-detachment-picker]')
         : null;
     if (!host) return;
+    const hadFocus = typeof document !== 'undefined' && host.contains?.(document.activeElement);
     host.hidden = true;
     host.innerHTML = '';
+    if (restoreFocus || hadFocus)
+      this.container
+        .querySelector('[data-cmd-add-workspace] > summary')
+        ?.focus?.({ preventScroll: true });
   }
 
   // The rows the scoped map draws from: the members panel's tree, shaped the
@@ -13772,7 +13970,12 @@ export class WorkspaceCommandView {
     this.detachmentSongCardHidden = this.detachmentSongCardId || '';
     this.detachmentSongCardId = '';
     this.paintDetachmentSongCard();
-    this.container?.querySelector?.('[data-cmd-map-give-work]')?.focus?.({ preventScroll: true });
+    const tile = Array.from(
+      this.container?.querySelectorAll?.('.ws-cmd-detachment-host [data-ws-id]') || []
+    ).find(node => node.getAttribute('data-ws-id') === this.detachmentSongCardHidden);
+    (tile || this.container?.querySelector?.('[data-cmd-map-resources]'))?.focus?.({
+      preventScroll: true
+    });
   }
 
   async loadDetachmentSongCard(id) {
@@ -13985,6 +14188,14 @@ export class WorkspaceCommandView {
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (!map || typeof map.mount !== 'function') return;
     const { tree, workspaces, metadata } = this.detachmentSnapshot();
+    if (!workspaces.some(row => row.id === this.workspaceId())) {
+      // An unreadable tree is not a known empty group. Do not draw the empty lot.
+      if (this.detachmentMountedKey) map.unmount?.(host, { preservePresentation: true });
+      this.detachmentMountedKey = '';
+      host.innerHTML =
+        '<p class="ws-cmd-member-read-state" role="status">Workspace map is loading or unavailable.</p>';
+      return;
+    }
     const units = this.detachmentUnits();
     const key = this.detachmentMountKey(workspaces, units);
     const selectedId = this.pendingDetachmentSelectionId;
@@ -14194,7 +14405,7 @@ export class WorkspaceCommandView {
   unmountDetachmentMap() {
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (this.detachmentMapEl && map && typeof map.unmount === 'function') {
-      map.unmount(this.detachmentMapEl);
+      map.unmount(this.detachmentMapEl, { preservePresentation: true });
     }
     this.detachmentMountedKey = '';
     this.detachmentUnitsSignature = '';
@@ -16107,12 +16318,20 @@ export class WorkspaceCommandView {
   }
 
   async syncDetachmentSurface() {
-    if (!this.active || this.activeRailSection !== 'members') {
+    const overview = this.viewMode === 'details' && this.isGroupWorkspace() && !this.isPersonalHQ();
+    if (!this.active || (!overview && this.activeRailSection !== 'members')) {
       this.restoreSharedSurface('members');
       return;
     }
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    if (page && page.membersPanel && typeof page.membersPanel.syncWorkspace === 'function') {
+    // The page owns Overview's canonical tree load. Painting must not fetch it
+    // again (and must not trigger rollup reads just because the list is visible).
+    if (
+      !overview &&
+      page &&
+      page.membersPanel &&
+      typeof page.membersPanel.syncWorkspace === 'function'
+    ) {
       try {
         await page.membersPanel.syncWorkspace(page.workspace);
       } catch (err) {
@@ -16127,9 +16346,22 @@ export class WorkspaceCommandView {
       host.innerHTML = '<div class="ws-cmd-rail-empty">Members are unavailable.</div>';
       return;
     }
-    // The Detailed panel-expansion machinery that lazily loaded rollups is
-    // gone; the mounted panel is always "expanded" here, so load directly.
-    if (page && page.membersPanel && typeof page.membersPanel.loadRollups === 'function') {
+    if (overview) {
+      for (const attribute of ['role', 'tabindex', 'aria-haspopup', 'aria-expanded'])
+        members.removeAttribute?.(attribute);
+    }
+    if (this.membersFocus && members.contains?.(this.membersFocus)) {
+      this.membersFocus.focus?.({ preventScroll: true });
+      this.membersFocus = null;
+    }
+    // Legacy rail expansion requests rollups explicitly. The Overview's compact
+    // list reuses the page's already loaded members without starting new reads.
+    if (
+      !overview &&
+      page &&
+      page.membersPanel &&
+      typeof page.membersPanel.loadRollups === 'function'
+    ) {
       try {
         page.membersPanel.rollupsLoaded = true;
         void page.membersPanel.loadRollups();

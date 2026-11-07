@@ -308,6 +308,8 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-command.js',
       'internal/web/static/js/modules/workspace-command-chrome.js',
       'internal/web/static/js/modules/workspace-panels.js',
+      'internal/web/static/js/modules/workspace-overview.js',
+      'internal/web/static/js/modules/workspace-ticket-url-state.js',
       'internal/web/static/js/modules/workspace-command-rail.js',
       'internal/web/static/js/modules/workspace-execution-controller.js',
       'internal/web/static/js/modules/workspace-followups.js',
