@@ -707,6 +707,9 @@ func appendWorkspaceImportTree(result *[]workspaceImportItem, folderPath string,
 		ws.FolderSlug = filepath.Base(folderPath)
 	}
 	ws.ParentID = strings.TrimSpace(parentID)
+	// This tree is later saved after FileStore.Import. Do not restore the
+	// source's correlations/approvals over the destination's denied values.
+	agentworkspace.StripLearningImportAuthority(ws)
 	*result = append(*result, workspaceImportItem{
 		Workspace:  ws,
 		SourcePath: folderPath,

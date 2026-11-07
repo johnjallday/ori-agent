@@ -217,15 +217,12 @@ func ProjectContinuityWorkspace(record workspacecontinuity.Record, data []byte, 
 	result.PendingSetup = ws.PendingPlan != nil || len(ws.DynamicAgentRequests) != 0 || ws.SetupWizardProgress != nil
 	ws.PendingPlan, ws.DynamicAgentRequests, ws.SetupWizardProgress = nil, nil, nil
 	ws.NextMissionRunAt = nil
+	StripLearningImportAuthority(ws)
 	for i := range ws.Tasks {
 		task := &ws.Tasks[i]
 		task.CurrentRunID = ""         // old process/run handles never resume
 		task.AssistantOperationID = "" // operations belong to the source installation
 		task.AssistantOperationRun = nil
-		// The recipe remains restricted, but its source-device learning
-		// correlation cannot authorize a new local attempt or practice credit.
-		delete(task.Context, TaskContextLearning)
-		delete(task.Context, TaskContextReviewedExecutor)
 		task.NextRun = nil
 		task.WakeMacEnabled = false
 		if task.Status == TaskStatusInProgress || task.Status == TaskStatusWaitingForChoice || task.Status == TaskStatusAssigned {

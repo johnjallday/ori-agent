@@ -6,6 +6,21 @@ record and name the few places where a delivered decision supersedes them.
 Requirements: `tasks/prd-portable-workspace-continuity.md`, FR-01–FR-36.
 Source investigation baseline: `8e560c5e358e4d7dbfad2432865ee94ae87fe4e7`.
 
+## Adaptive learning boundary
+
+Adaptive learning's six SQLite domains, scope/observation/suggestion grants,
+review receipts and earned practice are installation-local; they are not
+continuity domains. Modern projection and legacy folder import (including
+children and the SQL mirror) strip learning correlations, reviewed Start tokens,
+ordinary-observation bindings and saved single-use executor approval. The
+bounded recipe and ordinary input/result history remain, but a destination
+needs its own explicit executor disclosure/review before a new run. A native
+reopen is not an import and does not manufacture a fresh approval. The copied
+physical source file can contain historical correlation spellings as private
+workspace data; their presence is never local authority and cannot recreate a
+source incarnation or consumed review. No learning enrollment, backfill or
+reward is inferred from imported actor/Done/history labels.
+
 ## Delivered composition
 
 **Source preparation.** `internal/continuityprep` composes every domain

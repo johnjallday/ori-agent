@@ -6,6 +6,44 @@ import (
 	"testing"
 )
 
+func TestLearningMissionsUpgradeFrom087PreservesOrdinaryRecordsWithoutEnrollment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	db, err := Open(t.Context(), &Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('retained','Existing work',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	// Reconstruct the immediately preceding schema only in this owned fixture.
+	for _, table := range []string{"learning_evidence", "learning_reviews", "learning_operations", "learning_instances", "learning_sources", "learning_owners"} {
+		if _, err := db.ExecContext(t.Context(), `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(t.Context(), `DELETE FROM schema_migrations WHERE version=88`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(t.Context(), &Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	var name string
+	if err := db.QueryRowContext(t.Context(), `SELECT name FROM workspaces WHERE id='retained'`).Scan(&name); err != nil || name != "Existing work" {
+		t.Fatal("upgrade changed ordinary records", name, err)
+	}
+	for _, table := range []string{"learning_owners", "learning_sources", "learning_instances", "learning_operations", "learning_reviews", "learning_evidence"} {
+		var count int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count != 0 {
+			t.Fatal("migration enrolled or backfilled learning", table, count, err)
+		}
+	}
+}
+
 func TestLearningMissionsMigration088InventoryAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "learning.db")
 	db, err := Open(t.Context(), &Config{Path: path})

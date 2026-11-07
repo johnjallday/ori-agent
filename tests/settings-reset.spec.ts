@@ -355,9 +355,9 @@ test.describe.serial('Settings reset on an owned installation', () => {
     page,
     request
   }) => {
-    // A domain-neutral plugin bundle in an external folder: installing it copies
-    // a skill into the owned HOME's shared skills directory and registers a
-    // namespaced MCP server. Nothing here is downloaded or executed.
+    // A domain-neutral linked plugin: its skill is read in place and its MCP
+    // server is namespaced. Reset removes installation registration, not the
+    // linked external bundle or personal skills. Nothing is downloaded/executed.
     const source = join(root, 'external', 'e2e-demo-plugin');
     mkdirSync(join(source, '.claude-plugin'), { recursive: true, mode: 0o750 });
     mkdirSync(join(source, 'skills', 'e2e-demo-skill'), { recursive: true, mode: 0o750 });
@@ -383,7 +383,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
     const sourceSentinel = join(source, '.claude-plugin', 'plugin.json');
     const beforeSource = digest(sourceSentinel);
 
-    // A personal skill Ori did not install, beside the copied one.
+    // A separate personal skill Ori did not install.
     const personalSkills = join(root, 'home', '.agents', 'skills');
     mkdirSync(join(personalSkills, 'e2e-user-skill'), { recursive: true, mode: 0o750 });
     const userSkill = join(personalSkills, 'e2e-user-skill', 'SKILL.md');
@@ -398,8 +398,9 @@ test.describe.serial('Settings reset on an owned installation', () => {
     const installed = (await install.json()).plugin;
     expect(installed.name).toBe('e2e-demo-plugin');
     expect(installed.skills).toEqual(['e2e-demo-skill']);
-    const copiedSkill = join(personalSkills, 'e2e-demo-skill', 'SKILL.md');
-    expect(readFileSync(copiedSkill, 'utf8')).toContain('e2e-demo-skill');
+    const bundledSkill = join(source, 'skills', 'e2e-demo-skill', 'SKILL.md');
+    expect(readFileSync(bundledSkill, 'utf8')).toContain('e2e-demo-skill');
+    expect(existsSync(join(personalSkills, 'e2e-demo-skill'))).toBe(false);
 
     const marketplacesBefore = await request.get(origin + '/api/plugins/marketplaces');
     expect(marketplacesBefore.ok()).toBeTruthy();
@@ -419,7 +420,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
     await expect(page.locator('#resetItemsList')).toContainText('linked source (kept)');
     await expect(page.locator('#resetItemsList')).toContainText('marketplaces.json');
     await cancelReviewDialog(page);
-    expect(readFileSync(copiedSkill, 'utf8')).toContain('e2e-demo-skill');
+    expect(readFileSync(bundledSkill, 'utf8')).toContain('e2e-demo-skill');
     expect((await (await request.get(origin + '/api/plugins')).json()).plugins?.length ?? 0).toBe(
       1
     );
@@ -436,7 +437,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
     const operationID = await page.evaluate(() => localStorage.getItem('ori.reset.operation_id'));
     expect(operationID).toBeTruthy();
     // Nothing is deleted by the accepting process.
-    expect(readFileSync(copiedSkill, 'utf8')).toContain('e2e-demo-skill');
+    expect(readFileSync(bundledSkill, 'utf8')).toContain('e2e-demo-skill');
 
     await stopServer();
     await startServer();
@@ -456,7 +457,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
     expect((await (await request.get(origin + '/api/plugins')).json()).plugins?.length ?? 0).toBe(
       0
     );
-    expect(() => readFileSync(copiedSkill)).toThrow();
+    expect(readFileSync(bundledSkill, 'utf8')).toContain('e2e-demo-skill');
     expect(digest(userSkill)).toBe(beforeUserSkill);
     expect(digest(sourceSentinel)).toBe(beforeSource);
     const marketplacesAfter = await request.get(origin + '/api/plugins/marketplaces');

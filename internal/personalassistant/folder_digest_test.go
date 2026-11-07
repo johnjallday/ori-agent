@@ -14,6 +14,19 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
+func TestFolderDigestResetFirstPromptBeforeHireIsAnInertNoOp(t *testing.T) {
+	f := newKnowledgeFixture(t)
+	service := NewFolderDigestService(NewFolderDigestStore(NewKnowledgeStore(f.resolver(), f.folder)), FolderDigestDeps{})
+	for range 2 {
+		if err := service.ClearFirstPrompt(t.Context(), "not-hired"); err != nil {
+			t.Fatal("Getting Started reset required a hired assistant", err)
+		}
+	}
+	if _, err := f.relationships.GetState(t.Context(), "not-hired"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("reset enrolled an absent relationship", err)
+	}
+}
+
 func folderdigestShape(s string) folderdigest.Shape { return folderdigest.Shape(s) }
 
 // folderDigestFixture is a hired, active relationship over a temporary HQ

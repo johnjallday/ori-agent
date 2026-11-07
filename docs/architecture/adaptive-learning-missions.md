@@ -86,7 +86,8 @@ Structure IDs: `delegate_inspect`, `improve_result`, `repeat_success`. Definitio
 are compiled, immutable and versioned at `1`. No arbitrary step composition.
 Each offer pins a structure, candidate, workspace, scope digest, permitted
 ordered step IDs and definition version. Acceptance freezes these and the
-visible goal, input and guidance. Changed copy/criteria is a separate offer
+visible goal, scope and guidance. The later reviewed execution input is pinned
+at Ticket preparation. Changed copy/criteria is a separate offer
 requiring acceptance, never an edit to active work.
 
 | Structure / ordered steps | Evidence required |
@@ -104,6 +105,22 @@ Decision reasons: `meets_scope`, `missing_detail`, `incorrect`, `not_useful`,
 `other`; `other` requires a note. Notes and comparison/input-change explanations
 are at most 500 Unicode code points. A revision/reuse record refers to its
 original receipt and exact original result, not a title similarity.
+
+The implemented original reader verifies one locally consumed receipt and its
+exact current canonical artifact; it does not recursively traverse an ancestral
+chain. Original inspection is an explicit read-only owner route and creates no
+nonce, credit or model call. Revision execution uses only a host-reserved
+same-workspace original reference plus the reviewed correction, with complete
+inline bytes disclosed before Start. It remains executable after learning is
+cleared when those ordinary work inputs still exist.
+
+Reuse candidates are currently plain supplied-text draft processes (delegate
+or prior repeat), not revision recipes whose original would otherwise be
+silently discarded. Whitespace-normalized input must differ and the owner must
+explain the material difference. A new revision may return identical bytes and
+still be evaluated: distinct execution identity, not a claimed quality increase,
+is required. A reuse decision other than `use` records evaluation practice only;
+the instance remains blocked as `result_not_useful` until explicitly stopped.
 
 ### Practice projection
 
@@ -123,11 +140,44 @@ share a transaction. No economy event is emitted.
   successfully**.
 - Unknown historical guidance stays unknown, never becomes independent.
 
+New host-issued definitions carry `support_version: 1`, copied into their
+immutable review and evidence records. Missing/future support versions remain
+unknown even when an old record says `guidance: basic`; no backfill turns that
+into independence. The metadata-only competency projection preserves earned
+facts when sources disappear and reports unknown/partial coverage explicitly.
+The existing Missions surface exposes **Recorded practice**, with explicit
+read-only inspection of a saved decision, canonical input/result, original
+comparison when applicable, and supporting Ticket. This GET issues no nonce,
+operation, decision or credit; inaccessible sources disclose no saved contents.
+
 Record guidance selection, host-rendered hint version, shown/used receipts and
 attempt identity. UI acknowledgements describe displayed support, not human
 attention. An opted-in ordinary-work review uses the same decision/evidence
 verifier without manufacturing a mission. Only work reviewed and observed after
-the relevant consent epoch qualifies; old Done/history cannot be backfilled.
+the relevant learning epoch **and observation revision** qualifies; old
+Done/history cannot be backfilled. The implemented ordinary path supports the
+compiled, separately reviewed **plain supplied-text bounded draft**. General
+agent executions and unlabeled historical assistance remain unknown; revision
+or reuse needs its own exact lineage contract, not an inferred similarity.
+
+The winning owner Start captures observation consent before execution approval,
+then mints a fresh nonportable Start token. An `observe` operation binds owner,
+local incarnation, learning epoch, observation revision, Ticket, input digest
+and the first reserved Run. Twenty pending observations is the admission cap;
+tracking failure never cancels ordinary execution. `observe_review` operations
+prepare/consume the same exact-result owner decision without a synthetic
+Instance. Preference revocation invalidates pending claims. Canonical metadata
+checks prioritize available existing reviews before new default suggestions;
+GET reads no Run payload/artifact bytes for that check. Consumed ordinary reviews
+can also supply a later explicitly selected improvement/reuse original; no
+ordinary input/result/title is added to the design prompt.
+
+New evidence has a secondary Ticket/input/competency identity: unchanged or
+whitespace-only ordinary retries cannot add practice or upgrade prior support.
+Legacy receipts retain exact-input deduplication. Ordinary support remains
+unknown even if the current preference says Basic. Earned review inspection
+continues after observation is revoked, while unfinished old grants cannot be
+revived by same-millisecond reapproval or history clear.
 No decay for inactivity, deferral, rejection, missing sources or coaching off.
 
 ## Eligible work and action authority
@@ -162,8 +212,13 @@ review from `GET /api/workspaces/{studioID}/tickets/{ticketID}/execution`.
 recipe version, assigned agent, provider/model and effort. Only the winning
 start claim records approval; duplicate clicks cannot renew consumed approval.
 The recipe consumes it before a single isolated call (1200 output tokens,
-30-second deadline). Edited text/model and automatic retries require fresh
-review. Import removes the approval while retaining the restrictive recipe.
+30-second deadline). Bounded learning calls additionally require
+`llm.BoundedTextProvider`, `SingleAttempt`, and a provider-configuration pin.
+API providers implement this contract; a CLI that ignores `MaxTokens` is
+unavailable even if it can isolate tools. Destination changes require fresh
+review, and partial/unknown-finish or over-budget replies are not completed
+results. Edited text/model and automatic retries require fresh review. Import
+removes the approval while retaining the restrictive recipe.
 These execution rules do not depend on the learning mission remaining active.
 
 ## Durable records and transitions
@@ -183,6 +238,8 @@ same change. No continuity collector/export/import registration.
 - `learning_operations`: owner + operation ID unique, kind, request digest,
   expected revision/epoch, persisted status, exact instance/Ticket/attempt links,
   provider fingerprint and bounded usage. One live generation claim per owner.
+  A `milestone` operation carries only a newly earned review/evidence identity,
+  exact scope/epoch/suggestion grant and deadline, never raw content.
 - `learning_reviews`: local nonce and receipt, owner/epoch, instance/version,
   exact workspace/Ticket/Run/artifact/digest, decision/reason/note, guidance,
   original receipt/correction/input lineage. Nonces expire and cannot be exported.
@@ -221,9 +278,12 @@ never adopts a later attempt. A later unrelated Run cannot fulfill the claim.
 After restart, reconcile persisted exact references without replaying execution.
 
 WorkGate permits cover every finite mutation and callback through persistence.
-History/preferences clear increments a durable owner epoch transactionally;
-provider replies/event handlers must match it. Never let a stale callback
-upsert a deleted owner. Workspace deletion/incarnation and scope revisions are
+History clear increments a durable owner epoch transactionally; provider replies
+and event handlers must match it. Preference changes advance the owner revision and
+invalidate pending offers/generation without rewriting accepted contracts.
+Revoked observation requires fresh scope consent; its host-owned observation
+revision distinguishes grants even within the same wall-clock millisecond.
+Never let a stale callback upsert a deleted owner. Workspace deletion/incarnation and scope revisions are
 checked before publishing and before actions. Use content-free blocker codes
 and never leak foreign record existence through errors.
 
@@ -235,13 +295,31 @@ and effort preferences are explicit; activity is an observation with coverage,
 not an inferred sensitive interest or permanent preference. Sharing workspace
 metadata for suggestion design does not grant source-file or execution access.
 
+Ongoing scopes bind exact local incarnations, not just portable workspace IDs.
+Only owned-metadata resolution during an explicit preference mutation can save
+these bindings; legacy/missing/reimported bindings cannot revive observation.
+Saving automatic mode requires the current Default-model fingerprint and
+separate consent, but is not itself a generation trigger. History clear retains
+only identities already covered by retained ongoing scope consent, while
+advancing the learning epoch and deleting unapproved historical identities.
+Preference clear revokes observation/automatic consent and exclusions, not earned
+practice or actual work.
+
+The host ranks eligible candidates before prose generation, using literal
+explicit-focus overlap, scoped local review-practice counts, effort and bounded
+recent repetition. Missing receipts leave coverage unknown, never zero ability.
+One selected candidate goes to the designer; compiled `host_signals` explain the
+actual basis separately from generated rationale. Defer/decline exclusions live
+in bounded preferences and survive history clear/reimport. Their topic is the
+normalized explicit-focus digest, not an inferred interest.
+
 Input is data-only JSON: bounded workspace display name, user-reviewed goal,
 explicit preferences, host candidate references/structure IDs, readiness,
 minimal recent outcome counts and practice state with unknown/partial markers.
 No directory paths, file contents, unrestricted chat/messages, raw results,
 secrets, internal feedback, arbitrary URLs or inherited assistant memory.
-Untrusted names/prose remain data. Model-authored fields are `goal`, `scope`,
-`why`, `guidance`; all are escaped plain text. Host alone renders labels,
+Untrusted names/prose remain data. Model-authored prose fields are `goal`, `scope`,
+`why`, `hints`; all are escaped plain text. Guidance mode remains host-owned. Host alone renders labels,
 actions, routes, cost disclosures, criteria, blockers and permission claims.
 
 Named defaults (implementation constants; raising them requires review):
@@ -260,22 +338,57 @@ Named defaults (implementation constants; raising them requires review):
 | explicit generation spacing / daily maximum | 30 seconds / 10 admitted calls per rolling 24 hours |
 | automatic generation spacing / daily maximum | 24 hours / 1 (also consumes the shared daily limit) |
 | offer / review nonce expiry | 24 hours / 10 minutes |
-| Not now cooldown / Not interested | 7 days / persistent topic + structure suppression until reset |
+| automatic milestone debounce / expiry | 2 seconds / 5 minutes; no restart catch-up |
+| Not now cooldown / Not interested | 7 days / persistent workspace + topic + structure suppression until reset |
+| durable exclusions / preferences record | 12 / 8 KiB including five scope bindings |
 | recent terminal proposals / non-evidence operations | 100 / 200 retained for at least 30 days |
-| full local review receipts | 1000; preserve active/recovery dependencies, compact old earned evidence to dedup tombstones |
-| dedup tombstones / total learning data | 10,000 / 16 MiB; refuse new admission at cap, never silently discard dedup authority |
+| full local review receipts | 1000 per owner; preserve active/recovery/original dependencies, compact eligible receipts older than 30 days to content-free replay metadata |
+| dedup evidence / total logical learning data | 10,000 per owner / 16 MiB per database; refuse new admission at cap, never silently discard dedup authority |
+
+Retention runs only within a new admitted mutation, in batches of at most 200
+per category, never on GET/visits or a background timer. Keep at least 30 days
+and the newest 100 terminal instances / 200 terminal operations. Live contracts,
+pending/unknown effects, retained original dependencies and current-epoch
+automatic candidate fingerprints are protected even if this exceeds those soft
+counts. Full receipts may compact only when unreferenced by retained instances
+or uncertain operations; the evidence keeps its exact key, secondary identity,
+support and competency. Minimal receipt replay metadata preserves legacy dedup
+and scoped counts but cannot authorize inspection, a new challenge or an
+original. Full content becomes explicitly unavailable; earned facts do not
+shrink. Durable exclusions never expire through retention (only explicit reset,
+or the documented defer deadline). If no safe compaction is possible, refuse
+admission rather than evict required evidence.
+
+The 16-MiB ceiling measures logical records, conservative key/row overhead and
+pending-publication reservations, not the SQLite file, WAL/freelist or actual
+Ticket/Run storage. Transactions check it under the same writer lock before
+commit. Each design admission reserves 32 KiB of publication space before its
+provider call; 256 KiB within the ceiling is withheld from ordinary admission
+for finishing existing effects and Stop/Off/clear. New receipts and evidence
+respect their own caps with atomic rollback. A distinct `storage_limit_reached`
+response points to explicit history clearing. History clear removes non-billing
+operation history and old design records beyond 30 days, while retaining recent
+known/unknown call accounting and advancing the epoch. No automatic deletion
+resets the rolling call budget.
 
 Generation selects only the configured Default provider/model/effort. Require
 `SupportsIsolatedChat`, then `ChatRequest.Isolated = true`, exactly host system
 instructions + one data message; no Tools, MCPServers, WorkspaceID/Dir,
 ExecutionScope, agent prompt/loadout, files or streams. Use ResponseSchema only
-when supported, and strictly validate the response regardless. Reject tool
+when supported, and strictly validate the response regardless. Require the
+bounded-text contract too; Ollama format downgrades are disabled for
+`SingleAttempt` calls, and no provider without an enforceable output cap is
+admitted. Resolve the configured provider directly, not through model catalog
+discovery (which may perform network I/O). Reject tool
 calls, unsupported IDs/steps, duplicate/extra JSON fields, trailing JSON,
 malformed/fabricated candidate references, action URLs/commands and scope
 expansion. Schema validity alone does not establish useful or safe prose.
 
 Persist claims before calls; include timeout/cancellation/unknown usage in
-accounting, with a reservation at the ceiling. Revalidate owner epoch, scope,
+accounting, reserving 17,584 tokens (16-KiB input ceiling plus 1200 output tokens)
+until complete usage is known. Failed/unknown calls and learning-history clear
+do not reset the rolling admission budget. Expired pending claims become unknown
+on an explicit mutation or startup/event reconciliation, never automatic replay. Revalidate owner epoch, scope,
 provider/model fingerprint and revision before publication. A changed configured
 provider/model/endpoint, narrower/wider selected scope or disclosure version
 requires fresh suggestion consent; do not keep automatic consent across changes.
@@ -287,6 +400,27 @@ catch up missed automatic suggestions. Milestones coalesce by durable candidate
 fingerprint; invalid/missing provider gives a clearly generic eligible offer or
 quiet unavailable state, never a claimed personalized success.
 
+The implemented v1 trigger is **new distinct credit from a consumed owner review**
+(mission or opted-in ordinary work), including informed rejection. Ticket Done,
+Run completion alone, imported labels and replayed reviews are not triggers.
+The same review transaction queues at most one pending event for the owner,
+using a durable event fingerprint and a separate host-owned suggestion grant
+revision/time. Automatic consent must precede that review; same-millisecond
+revocation/reapproval cannot adopt it. Legacy automatic preferences without the
+new grant remain paused until explicitly reapproved.
+
+A bounded worker coalesces for two seconds and drops events after five minutes.
+It revalidates the exact earned receipt, scope, consent, configured model and
+current work before durable generation admission. Candidate fingerprints prevent
+repeating an already-admitted automatic candidate; failed/unknown calls count.
+One automatic admission per rolling 24 hours also consumes the shared ten-call
+budget/30-second spacing and process-wide slot. Admission atomically consumes
+the event before the single model attempt. Publication rechecks grant/expiry as
+well as the existing revision/source/model snapshot. Owner decisions and
+preference changes retire queued/in-flight suggestions, not actual work.
+Startup retires pending milestones without dispatching; shutdown cancels and
+joins the owned worker/call. There is no polling timer or automatic repair loop.
+
 ## API and presentation
 
 Namespace `/api/learning-missions`; all replies no-store. Strict bounded JSON,
@@ -297,8 +431,11 @@ unavailable/foreign, 409 stale/unknown/replayed-different-content, 429 quota,
 
 - `GET /api/learning-missions`: saved active/featured/history/preferences,
   competencies and read-only availability. No mutations or generation.
-- `POST /api/learning-missions/proposals`: explicit selected scope +
-  `operation_id`, `expected_revision`, mode request/smaller/alternative.
+- `POST /api/learning-missions/proposals`: explicit selected `studio_id` +
+  `operation_id`, `expected_revision`; `personalize: true` additionally requires
+  `consent_version: 1` and the current disclosed `model_fingerprint`. This grants
+  one design call, not ongoing observation. Without personalization it remains
+  deterministic. Smaller/alternative requests use their separate model-free route.
 - `POST /api/learning-missions/instances/{id}/decisions`: accept/defer/decline/
   stop/replace, `operation_id`, expected instance and owner revisions.
 - `POST /api/learning-missions/instances/{id}/work`: reviewed bounded input,
@@ -307,11 +444,44 @@ unavailable/foreign, 409 stale/unknown/replayed-different-content, 429 quota,
   challenge or submit its exact nonce/decision/reason; never caller completion.
   Preparing a challenge returns the exact canonical `result_text` it binds;
   result bodies are not copied into learning receipts, status or diagnostics.
-- `POST /api/learning-missions/preferences`: scoped consent, mode, guidance,
-  explicit interests/effort; revocation fences in-flight writes.
-- `POST /api/learning-missions/clear`: explicit history/preferences/exclusions
-  scope; increments relevant epochs, leaves actual work intact.
+  Production instance availability additionally uses `InstanceStatusSource`,
+  scalar consumed-review references and `OutcomeMetadataReader` (including exact
+  artifact identity/count/length), not Run payloads, artifact bodies or notes.
+  Availability is not proof: canonical content verification stays in explicit
+  review/inspection and event reconciliation. Missing pinned sources redact
+  source details; an unavailable executor blocks new work, not reading owned
+  past evidence.
+- `POST /api/learning-missions/instances/{id}/alternatives`: explicit model-free
+  `kind: smaller|alternative`, owner/instance revisions, and optional explicitly
+  selected `studio_id` for an alternative. Smaller halves the supplied-input
+  byte ceiling down to 256, without lowering structure/evidence requirements or
+  promising lower provider charges. Alternative selects a different eligible
+  host reference, respects exclusions, and returns none for a thin candidate set.
+  One preview may coexist with the current active/blocked instance. Its immutable
+  `replaces_id`/`replaces_revision` pins what renewed acceptance will retire;
+  acceptance atomically stops old learning tracking and activates the new
+  definition, never cancels/edits actual work. A `discard` decision keeps the
+  current mission without adding an exclusion. Stopping the current mission
+  invalidates its pending preview; changed progress makes stale acceptance fail.
+  `input_limit` is enforced again during Ticket preparation, not only in prose.
+- `POST /api/learning-missions/observations/{id}/review`: explicit prepare/submit
+  of a saved post-opt-in ordinary Start/result, with `observed_revision` plus
+  owner revision/operation identity. No claim/start/result/actor overrides.
+  Read-only operation recovery can disclose the same still-current exact review
+  bytes without minting a new nonce. No mission enrollment or reward event.
+- `POST /api/learning-missions/preferences`: `workspace_ids`, mode, observation,
+  guidance, `full_guidance` override, explicit focus/effort and revision/operation identity. Automatic mode
+  additionally requires current model disclosure/consent. Scope incarnations and
+  observation revision/time are host-owned, never accepted from the client.
+  `reset_exclusions` explicitly resets saved defer/decline choices. Revocation
+  fences pending recommendations while keeping accepted contracts and work.
+- `POST /api/learning-missions/clear`: explicit `history` or `preferences` scope;
+  fences the relevant state, leaves actual work intact.
+- `GET /api/learning-missions/diagnostics`: explicit local aggregate inspection, without enrollment, source discovery, provider calls or outbound reporting. Last-30-day activity is capped at 200 rows per category, with explicit partial coverage. Shows created offers/their overlapping current outcomes, consumed decisions (including retries), admitted design calls/outcomes, known versus unknown reported usage, conservative reservations, and separately labelled retained per-competency practice. No prompt/result/notes or source identities; no claim about currency, provider billing, attention, retention or mastery. Actual Ticket execution calls are not included in design accounting. History clear removes practice/contracts/receipts but keeps recent design-call accounting; the UI requires separate unchecked confirmation.
 - `GET /api/learning-missions/operations/{id}`: exact operation recovery only.
+- `GET /api/learning-missions/evidence/{key}`: owner-requested inspection of one
+  earned practice receipt and its exact available canonical sources. No new
+  review nonce, decision, credit, enrollment or model call.
 
 The existing Missions flyout contains **Getting Started** (existing finite
 fraction/percentage and all optional starters) and **Learning** (one active
@@ -321,6 +491,18 @@ No extra mission board, duplicate Home recommendation or changing denominator.
 
 Basic guidance gives goal, host-owned criteria, permission/cost disclosure and
 one next action. Guided adds optional step help; users can turn coaching off.
+For new personalized offers, the host resolves `coaching_depth` and
+`max_coaching_hints` before the model call. Basic always permits zero hints.
+Guided normally permits at most one hint per compiled step; two distinct,
+current-support-version independent Ori-path records for both the selected
+structure's competency and evaluation in the selected current scope permit a
+brief one-hint allowance. Unknown/historical/future support, visits, arbitrary
+activity, incomplete coverage and other structures do not qualify. Explicit
+`full_guidance` keeps the full guided allowance. This is a bounded support
+policy, not an ability rating or an inference about help outside Ori. Brief
+remains Guided for evidence; every compiled criterion remains required. The
+model cannot expand the allowance, and changing preferences never rewrites an
+accepted contract. Automatic candidate fingerprints include resolved depth.
 Display why from actual signals, not inferred competence/interest. Active work
 wins priority; a smaller/alternative offer cannot overwrite it without explicit
 replacement. Start learning, Open Ticket, Review result, Make smaller,
@@ -336,13 +518,13 @@ provide labelled inputs/live status, and escape all model/workspace text.
 | Event | Learning behavior | Ordinary work / onboarding |
 | --- | --- | --- |
 | Getting Started reset | preserve learning | existing reset/reward semantics unchanged |
-| Learning-history clear | increment epoch; clear instances/receipts/credit/claims; no late resurrection | Tickets/Runs and Getting Started remain |
+| Learning-history clear | increment epoch; clear instances/receipts/credit; fence claims, retain minimal budget/idempotency records and explicitly retained ongoing scope identity; no late resurrection | Tickets/Runs and Getting Started remain |
 | Clear preferences | revoke scopes/observation/automatic consent; fence proposals; require fresh opt-in | preserve earned minimal aggregate and actual work |
 | Stop/coaching off | fence pending recommendations; stop learning tracking as selected | do not cancel Ticket/Run |
 | Delete/move/revoke workspace/source | invalidate new actions; redact inaccessible titles/text/links; show evidence unavailable | earned minimal aggregate remains until explicit clear |
 | Import/export | no learning records, consents, operations, grants or review authority travel | portable work stays ordinary inert history |
 | Full app-record reset | clear all learning tables/caches under established fence; new process required | existing full reset contract |
-| Unsupported definition/schema | read-only unavailable history, no execution/backfill | normal work unchanged |
+| Unsupported definition/schema | opaque unavailable history, no execution/backfill; explicit stop/dismiss or offer invalidation changes only state/revision/time, preserving raw future definition/progress bytes | normal work unchanged |
 
 Never keep copied prompts/results in evaluation analytics. Local diagnostics
 contain structure, state, competency, distinct attempt count, bounded timestamps,

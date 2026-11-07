@@ -38,6 +38,28 @@ cascades to it. A task an operation created or started is a workspace record
 and follows the workspace's own reset rules, not this table's. See
 [assistant operations](assistant-operations.md).
 
+## Adaptive learning amendment
+
+Learning is a separate device-local owner. Reset Getting Started touches its
+fixed progression state, not learning contracts, exact consumed decisions,
+practice evidence or learning consent. Explicit learning-history clear advances
+the learning epoch, removes contracts/receipts/practice and non-billing
+operation history, and fences late callbacks; it leaves actual Tickets/Runs and
+preferences intact, retaining only ongoing exact scope identity and recent
+suggestion-call accounting. Clearing learning preferences revokes observation
+and automatic grants/offers while preserving earned records and actual work;
+reapproval receives fresh grant identities.
+
+All six `learning_*` tables are explicit conversation/app-record reset domains,
+not portable workspace data. Existing WorkGate admission excludes reset over
+an in-flight design/effect. The learning milestone worker cancels and joins
+before stores close; a fresh process retires queued events without catch-up.
+The full app-record apply deletes these domains after the fence/drain boundary,
+not through a new live-deletion handler. Opaque unsupported definitions may be
+retired without rewriting future private fields. See
+[adaptive learning missions](adaptive-learning-missions.md) for retention and
+capacity controls and their verification limits.
+
 ## Evidence and isolation
 
 The approved contract is four distinct intents: Replay Setup, Reset Getting
