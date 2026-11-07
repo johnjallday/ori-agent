@@ -8,7 +8,16 @@ export function survivingAnchor(anchors, contains) {
   return anchors?.find(anchor => contains(anchor.row)) || null;
 }
 
-export function createTranscript({ pane, transcript, jump, announce, frame, cancel, isOpen }) {
+export function createTranscript({
+  pane,
+  transcript,
+  jump,
+  announce,
+  frame,
+  cancel,
+  isOpen,
+  onExposure = () => {}
+}) {
   let following = true;
   let hydrating = false;
   let anchors = [];
@@ -102,6 +111,7 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     userIntent = false;
     remember();
     updateUnread();
+    onExposure();
   };
   const changed = () => {
     dirty = true;
@@ -128,6 +138,7 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     target = null; // intentional reading overrides a queued automatic reveal
     remember();
     updateUnread();
+    onExposure();
   };
   const intent = () => {
     expectedTop = null;
@@ -297,7 +308,8 @@ function init() {
     announce: document.getElementById('personalAssistantReplyAnnouncement'),
     frame: callback => requestAnimationFrame(callback),
     cancel: id => cancelAnimationFrame(id),
-    isOpen: () => document.getElementById('personalAssistantPanel')?.hidden === false
+    isOpen: () => document.getElementById('personalAssistantPanel')?.hidden === false,
+    onExposure: () => document.dispatchEvent(new CustomEvent('personal-assistant:exposure'))
   });
   window.PersonalAssistantTranscript = owner;
   // Cached pre-mutation anchors handle independent Today/card polling and

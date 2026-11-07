@@ -1155,6 +1155,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// workspace can drop the record; best-effort, so it never fails a create.
 	h.finishWorkspaceBuild(r.Context(), req.BuildSessionID, ws.ID, createdBuildDraft(req))
 
+	if h.workspaceWelcomeCreated != nil {
+		if err := h.workspaceWelcomeCreated(r.Context(), ws.ID); err != nil {
+			// Provisioning already completed. Do not invite another create just
+			// because its local delivery bookkeeping could not be confirmed.
+			_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error":        "The workspace was created, but its welcome could not be registered. Open the existing workspace; do not create it again.",
+				"workspace_id": ws.ID,
+			})
+			return
+		}
+	}
+
 	response := map[string]any{
 		"success": true,
 		"folder":  ws,

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // This file joins the pieces into the two scan entry points the user has:
@@ -255,6 +256,17 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 			settings = fresh
 		}
 
+		// Capture inert batch provenance before scanning. A later install/root
+		// must not inherit this result in a saved-state update projection.
+		ws, scopeErr := s.readWorkspace(workspaceID)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		var installedAt *time.Time
+		if capability, ok := ws.GetInstalledCapability(workspace.CapabilityFileJanitor); ok {
+			at := capability.InstalledAt
+			installedAt = &at
+		}
 		result, scanErr := scanner.Scan(settings, *state, source)
 		if scanErr != nil {
 			return scanErr
@@ -284,6 +296,7 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 		batch := JanitorBatch{
 			ID: "batch-" + uuid.New().String(), WorkspaceID: workspaceID, Source: source,
 			StartedAt: result.ScannedAt, CompletedAt: result.ScannedAt, Ineligible: result.Ineligible,
+			RootID: settings.RootID, CapabilityInstalledAt: installedAt,
 		}
 		candidates := make([]JanitorCandidate, 0, len(result.Eligible))
 		for _, candidate := range result.Eligible {

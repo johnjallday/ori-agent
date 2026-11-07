@@ -23,6 +23,7 @@ http://localhost:8765/api
 - [Tags API](#tags-api)
 - [Tickets API](#tickets-api)
 - [Anchored Workspaces](#anchored-workspaces)
+- [Workspace Updates](#workspace-updates)
 - [Workspace Groups](#workspace-groups)
 - [Workspace Build Sessions API](#workspace-build-sessions-api)
 - [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
@@ -1747,6 +1748,57 @@ with an error sentence. Generic directory PUT cannot change an anchor path.
 
 See [Anchored folder architecture](../architecture/anchored-folder-workspace.md)
 for the single-binding rule, sidecar-only deletion/backup and no-migration policy.
+
+## Workspace Updates
+
+Quiet saved lead messages and File Janitor review counts are independent of ticket
+attention and library proposals. All three routes are trusted-current-owner scoped
+and return `Cache-Control: no-store`; callers cannot supply another owner.
+
+- **`GET /api/workspaces/{workspaceID}/updates`** accepts no query parameters.
+  Returns `workspace_id`, canonical `folder_slug`, `name`, `observed_at`, and
+  independent `welcome` / `review` objects. It neither delivers nor marks a message
+  seen, and never starts setup, scanning, inference, preview or filing.
+- **`GET /api/workspace-updates?after=<workspaceID>&limit=100`** returns
+  `{items, has_more, next_after?}`. `limit` is 1–100 (default 100); `after` is an
+  opaque workspace-ID keyset cursor, not an acknowledgement or delivery receipt.
+  Only these two singular query fields are accepted. Continue explicitly while
+  `has_more` is true; an empty raced page can still have a continuation. No page
+  implies all workspaces are clear unless coverage is complete.
+- **`POST /api/workspaces/{workspaceID}/updates/seen`** takes closed JSON, at most
+  1 KiB, with the exact delivered identity:
+
+  ```json
+  { "session_id": "saved-session-id", "message_id": "saved-message-id", "revision": 1 }
+  ```
+
+  Only revision 1 (introduction) or 2 (eligible later assessment) is valid. An
+  idempotent/monotonic server-time acknowledgement applies only to that current
+  saved message and returns the current summary. It never acknowledges later
+  messages or files. No query parameters, client timestamp, owner or seen cursor.
+  Clients send this only after actual qualified transcript exposure, not a GET,
+  page entry, hidden hydration or preview.
+
+`welcome.state` is `ready`, `not_applicable` or `unavailable`. Ready data includes
+safe lead/session identity, `unread_count`, and delivered `messages` with exact
+message ID/revision and delivery/seen times. These are host welcomes, not all chat
+replies. `review.state` also supports `unconfigured`; ready data includes
+`pending_count`, `needs_review_count`, safe capability/install/root/batch identity
+and observation/batch times. It uses current saved File Janitor authority, not
+conversation text. No filename, absolute path, file content, grant or approval
+token is included. One unavailable source does not hide another usable source.
+Unknown is not zero; retained last-known observations cannot authorize navigation.
+
+Responses: `200` success; `400` malformed/unsupported fields or invalid exact
+identity; `404` missing/foreign/inactive workspace (`updates_not_found`); `405`
+wrong method; `409` changed/stale saved identity (`update_changed`); `503` service,
+owner or canonical scope cannot be verified (`updates_unavailable`). Partial
+source failures can instead return `200` with that source `unavailable`.
+
+The existing `POST /api/workspaces/{workspaceID}/lead-conversation/open` remains
+the guarded quiet on-entry fallback for eligible legacy workspaces; it is not an
+updates GET or a seen acknowledgement. Historical messages are not unread-backfilled.
+See [Workspace updates architecture](../architecture/workspace-updates.md).
 
 ## Workspace Groups
 

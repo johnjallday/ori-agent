@@ -294,6 +294,7 @@
 /api/workspace-map/layout
 /api/workspace-map/parcels/open-by-ref
 /api/workspace-map/parcels/x/open
+/api/workspace-updates
 /api/workspaces
 /api/workspaces/build-sessions
 /api/workspaces/build-sessions/availability
@@ -475,3 +476,6 @@
 /api/workspaces/x/setup-wizard/steps/folder/skip
 /api/workspaces/x/plans/x/reconcile
 /api/workspaces/x/plan-diagnostics
+# Host-authored welcome updates: reads and exact-message exposure are separate.
+/api/workspaces/x/updates
+/api/workspaces/x/updates/seen

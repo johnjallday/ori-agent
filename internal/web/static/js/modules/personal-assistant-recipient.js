@@ -291,7 +291,11 @@ export function entrySessionRows(session) {
   const messages = Array.isArray(session?.messages) ? session.messages : [];
   return messages
     .filter(message => ['user', 'assistant'].includes(message?.role))
-    .map(message => ({ role: message.role, content: String(message.content ?? '') }))
+    .map(message => ({
+      ...(message.id ? { id: String(message.id) } : {}),
+      role: message.role,
+      content: String(message.content ?? '')
+    }))
     .filter(row => row.content.trim());
 }
 
@@ -304,7 +308,13 @@ export function entrySessionRows(session) {
  * conversation; `error` means the server could not be read, and the
  * remembered id (if any) is kept.
  */
-export async function loadEntrySession({ fetchImpl, workspaceId, agentName, storedId }) {
+export async function loadEntrySession({
+  fetchImpl,
+  workspaceId,
+  agentName,
+  storedId,
+  exact = false
+}) {
   const id = text(workspaceId);
   const agent = text(agentName);
   const read = async sessionId => {
@@ -318,11 +328,16 @@ export async function loadEntrySession({ fetchImpl, workspaceId, agentName, stor
   try {
     if (text(storedId)) {
       const stored = await read(text(storedId));
-      if (stored.session && sameName(stored.session.agent_name, agent)) {
+      if (
+        stored.session &&
+        text(stored.session.folder_id) === id &&
+        sameName(stored.session.agent_name, agent)
+      ) {
         return { session: stored.session, stored: true, error: false };
       }
-      if (stored.failed) return { session: null, stored: true, error: true };
+      if (stored.failed || exact) return { session: null, stored: true, error: true };
     }
+    if (exact) return { session: null, stored: true, error: true };
     const query = new URLSearchParams({
       folder_id: id,
       agent_name: agent,
@@ -336,7 +351,12 @@ export async function loadEntrySession({ fetchImpl, workspaceId, agentName, stor
     );
     if (!latest) return { session: null, stored: false, error: false };
     const full = await read(String(latest.id));
-    if (full.session) return { session: full.session, stored: false, error: false };
+    if (
+      full.session &&
+      text(full.session.folder_id) === id &&
+      sameName(full.session.agent_name, agent)
+    )
+      return { session: full.session, stored: false, error: false };
     return { session: null, stored: false, error: full.failed === true };
   } catch (_) {
     return { session: null, stored: Boolean(text(storedId)), error: true };
@@ -470,7 +490,7 @@ export function createRecipientController({
       title: session.workspaceId === page.workspaceId ? session.title : ''
     }),
     /** The entry agent's current session, with its messages (FR20). */
-    async loadSession() {
+    async loadSession({ exact = false } = {}) {
       const current = resolution.current;
       const workspaceId = page.workspaceId;
       if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || !current.available || !fetchImpl) {
@@ -482,7 +502,8 @@ export function createRecipientController({
         fetchImpl,
         workspaceId,
         agentName: current.name,
-        storedId: readEntrySession(workspaceId, storage)
+        storedId: readEntrySession(workspaceId, storage),
+        exact
       });
       // The tab moved on while the server answered; that answer is not ours.
       if (

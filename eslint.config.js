@@ -203,6 +203,8 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-model.js',
       'internal/web/static/js/modules/personal-assistant-recipient.js',
       'internal/web/static/js/modules/personal-assistant-lead-welcome.js',
+      'internal/web/static/js/modules/workspace-updates.js',
+      'internal/web/static/js/modules/workspace-update-signals.js',
       'internal/web/static/js/modules/personal-assistant-transcript.js',
       'internal/web/static/js/modules/personal-assistant-workspace-context.js',
       'internal/web/static/js/modules/personal-assistant-research.js',

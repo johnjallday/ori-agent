@@ -4925,6 +4925,41 @@ test('a failed canonical return keeps the descriptor and exposes a recoverable r
   assert.deepEqual(panel._selected(), ['c1']);
 });
 
+test('update navigation selects latest Review without scan, decisions, preview or apply', async t => {
+  const { state } = await protectionReview(t);
+  panel._setLinkedBatchForTest('old-preparation-batch');
+  state.calls.length = 0;
+  assert.equal(
+    panel.openLatestReview({ source: 'workspace-updates', batchId: state.batch.id }),
+    true
+  );
+  await settle();
+  assert.equal(panel.activeTab(), 'review');
+  assert.ok(state.calls.some(call => call.url.includes('/batches/latest')));
+  assert.ok(state.calls.every(call => !call.opts?.method || call.opts.method === 'GET'));
+  assert.ok(
+    state.calls.every(call => !/\/(scan|decisions|preview|apply|undo)(?:\?|$)/.test(call.url))
+  );
+});
+
+test('a different review cannot discard live choices; the same batch preserves them', async t => {
+  const { state } = await protectionReview(t);
+  panel._select('c1');
+  state.calls.length = 0;
+  assert.equal(
+    panel.openLatestReview({ source: 'workspace-updates', batchId: 'replacement' }),
+    false
+  );
+  assert.deepEqual(panel._selected(), ['c1']);
+  assert.equal(state.calls.length, 0);
+  assert.equal(
+    panel.openLatestReview({ source: 'workspace-updates', batchId: state.batch.id }),
+    true
+  );
+  await settle();
+  assert.deepEqual(panel._selected(), ['c1']);
+});
+
 for (const changed of ['root', 'batch', 'permission']) {
   test('return rejects changed ' + changed + ' without restoring old choices', async t => {
     const { doc, state } = await protectionReview(t);

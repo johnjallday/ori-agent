@@ -46,7 +46,7 @@ func TestCuratorWelcome_ReadsSavedBatchWithoutInspectingManagedFolder(t *testing
 	}
 	for range 2 {
 		got, err := s.ReadCuratorWelcome(t.Context(), "local", ws.ID, "curator")
-		if err != nil || !got.Configured || got.Pending != 2 || got.NeedsReview != 1 || got.BatchCompletedAt.IsZero() || got.ReadAt.IsZero() {
+		if err != nil || !got.Configured || !got.HasSavedScan || got.Pending != 2 || got.NeedsReview != 1 || got.BatchCompletedAt.IsZero() || got.ReadAt.IsZero() {
 			t.Fatalf("snapshot %+v %v", got, err)
 		}
 		raw, _ := json.Marshal(got)
@@ -69,6 +69,31 @@ func TestCuratorWelcome_ReadsSavedBatchWithoutInspectingManagedFolder(t *testing
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatal("welcome recreated the managed folder")
+	}
+}
+
+func TestCuratorWelcome_EmptyPreparationResultIsRootScoped(t *testing.T) {
+	s, ws, _ := curatorWelcomeFixture(t)
+	settings, err := s.store.LoadSettings(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{"", "old-root", settings.RootID} {
+		if _, err := s.store.UpdateScanState(ws.ID, func(state *ScanState) error {
+			state.Batches = nil
+			state.Candidates = nil
+			state.ScanOperations = nil
+			if root != "" {
+				state.ScanOperations = []ScanOperationReceipt{{OperationID: "setup-scan", RootID: root, PrivacyMode: ContentModeMetadataOnly, Outcome: ScanOutcomeNoEligible, CompletedAt: time.Now()}}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.ReadCuratorWelcome(t.Context(), "local", ws.ID, "curator")
+		if err != nil || got.HasSavedScan != (root == settings.RootID) || got.Pending != 0 {
+			t.Fatalf("root %q: %+v %v", root, got, err)
+		}
 	}
 }
 

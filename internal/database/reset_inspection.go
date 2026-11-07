@@ -52,7 +52,8 @@ func ResetRecordTables() []string {
 		"sample_library_collection_member", "sample_library_child_copy",
 		"sample_library_review_receipt", "sample_library_operation_receipt",
 		"group_requirement_reviews", "group_requirement_operations",
-		"workspace_lead_conversations",  // local welcome delivery; never replay deleted conversations
+		"workspace_lead_conversations",                                // local welcome delivery; never replay deleted conversations
+		"workspace_welcome_enrollments", "workspace_welcome_messages", // local delivery recovery and exact-message exposure
 		"workspace_creation_operations", // local reviewed-create delivery receipts; never inferred from portable workspaces
 		"agent_map_layouts", "agent_map_positions",
 		// The City Economy ledger is an app record: resetting app records

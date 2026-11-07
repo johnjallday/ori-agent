@@ -15,6 +15,7 @@ import (
 // No goal assessment is required to discuss a filing batch.
 type CuratorWelcome struct {
 	Configured       bool
+	HasSavedScan     bool // distinguishes a saved empty result from preparation still in flight
 	Pending          int
 	NeedsReview      int
 	BatchCompletedAt time.Time
@@ -53,24 +54,29 @@ func (s *Service) ReadCuratorWelcome(ctx context.Context, userID, workspaceID, i
 		return CuratorWelcome{}, errCuratorWelcomeUnavailable
 	}
 	if found {
-		if batch.WorkspaceID != workspaceID || len(candidates) != len(batch.CandidateIDs) {
+		out.HasSavedScan = true
+		install, _ := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
+		if !reviewBatchScope(batch, candidates, workspaceID, root.Generation, install) {
 			return CuratorWelcome{}, errCuratorWelcomeUnavailable
 		}
-		seen := make(map[string]bool)
-		for _, candidate := range candidates {
-			if candidate.WorkspaceID != workspaceID || candidate.BatchID != batch.ID || candidate.ID == "" || seen[candidate.ID] {
-				return CuratorWelcome{}, errCuratorWelcomeUnavailable
-			}
-			seen[candidate.ID] = true
-			if candidate.State != CandidatePending && candidate.State != CandidateApproved {
-				continue
-			}
-			out.Pending++
-			if candidate.NeedsReview {
-				out.NeedsReview++
+		batch = SummarizeBatch(batch, candidates)
+		out.Pending, out.NeedsReview = batch.Summary.Proposed, batch.Summary.NeedsReview
+		out.BatchCompletedAt = batch.CompletedAt
+	} else {
+		// A ready hook can precede the first scan. Absence is not an empty
+		// result and must not consume the welcome's later-assessment slot.
+		state, err := s.store.LoadScanState(workspaceID)
+		if err != nil {
+			return CuratorWelcome{}, errCuratorWelcomeUnavailable
+		}
+		// Successful zero-candidate preparation creates no batch. Its saved
+		// operation receipt, scoped to this root, is still a real result.
+		for _, receipt := range state.ScanOperations {
+			if receipt.RootID == root.Generation && !receipt.CompletedAt.IsZero() {
+				out.HasSavedScan = true
+				break
 			}
 		}
-		out.BatchCompletedAt = batch.CompletedAt
 	}
 	// Revocation, relinking, removal and changed associations cannot lend the
 	// old batch to a newly resolved root or Curator while this read is in flight.

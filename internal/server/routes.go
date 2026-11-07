@@ -921,6 +921,11 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 
 		// Generic assistant-program routes are explicit so they cannot be
 		// swallowed by the legacy workspace subtree router.
+		// Exact path handlers reject other methods themselves, rather than
+		// letting a wrong-method request fall into the legacy workspace router.
+		mux.HandleFunc("/api/workspace-updates", s.Handlers.Session.ListWorkspaceUpdates)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/updates", s.Handlers.Session.GetWorkspaceUpdates)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/updates/seen", s.Handlers.Session.AcknowledgeWorkspaceUpdate)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/group-template", s.Handlers.Session.GetGroupTemplateStatus)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
