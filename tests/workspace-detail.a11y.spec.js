@@ -198,8 +198,10 @@ for (const theme of ['light', 'dark']) {
       await expect(page.locator('body')).toHaveAttribute('data-hq-details', '1');
 
       const strip = page.locator('[data-cmd-hq-attention]');
-      // The fixture mounts other than the setup ones say nothing in the strip;
-      // the setup mounts would, so start with them hidden again.
+      // Hide only the synthetic setup inputs before exercising the first-task
+      // mount. Live owners may independently report real setup/unavailable
+      // attention, so do not pretend the whole HQ is clear. The known-empty
+      // strip contract is pinned in workspace-command.test.js (FR8/FR10).
       await page.evaluate(() => {
         for (const id of [
           'workspaceGroupRequirementStatus',
@@ -211,7 +213,7 @@ for (const theme of ['light', 'dark']) {
         }
         window.workspaceCommand.render();
       });
-      await expect(strip).toBeHidden();
+      await expect(strip).not.toContainText('Fixture mount');
       // A first-task banner is a setup line: the strip appears under the header.
       await page.evaluate(() => {
         const banner = document.getElementById('workspaceFirstTaskBanner');
