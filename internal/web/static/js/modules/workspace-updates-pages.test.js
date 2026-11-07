@@ -64,6 +64,56 @@ test('a partial/empty page never erases another page; complete first-page omissi
   assert.equal(updates.read('a').data, null);
 });
 
+test('off-page hints qualify cached observations without walking other pages; revisiting restores authority', async () => {
+  const calls = [];
+  let first = true;
+  const updates = createWorkspaceUpdates({
+    fetchImpl: async url => {
+      calls.push(url);
+      return response(
+        url.includes('after=')
+          ? page([summary('b')])
+          : page([summary('a', first ? 1 : 0)], true, 'a')
+      );
+    }
+  });
+  await updates.refreshPage();
+  await updates.refreshPage({ after: 'a' });
+  updates.invalidatePage('a');
+  assert.equal(updates.read('a').stale, true);
+  assert.equal(updates.read('a').data.review.pending_count, 10);
+  await settle();
+  assert.equal(calls.length, 3);
+  assert.ok(calls[2].includes('after=a'), 'only the selected page is read');
+  assert.equal(updates.read('a').state, 'unavailable');
+  first = false;
+  await updates.refreshPage();
+  assert.equal(updates.read('a').state, 'ready');
+  assert.equal(updates.read('a').stale, false);
+  assert.equal(updates.read('a').data.welcome.unread_count, 0);
+});
+
+test('a delayed acknowledgement cannot restore authority after an off-page invalidation hint', async () => {
+  const ack = deferred();
+  const updates = createWorkspaceUpdates({
+    fetchImpl: async (url, init) => {
+      if (init.method === 'POST') return ack.promise;
+      return response(
+        url.includes('after=') ? page([summary('b')]) : page([summary('a')], true, 'a')
+      );
+    }
+  });
+  await updates.refreshPage();
+  await updates.refreshPage({ after: 'a' });
+  const pending = updates.acknowledge('a', { session_id: 's', message_id: 'm', revision: 1 });
+  updates.invalidatePage('a');
+  ack.resolve(response(summary('a', 0)));
+  assert.equal(await pending, true, 'server committed, but the observation was superseded');
+  await settle();
+  assert.equal(updates.read('a').state, 'unavailable');
+  assert.equal(updates.read('a').stale, true);
+});
+
 test('an aggregate requested before an exact acknowledgement cannot restore its old unread count', async () => {
   const old = deferred();
   let reads = 0;

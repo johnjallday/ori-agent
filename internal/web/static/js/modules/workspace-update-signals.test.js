@@ -167,6 +167,18 @@ test('unknown and unavailable do not claim known zero, and removed authority car
   });
 });
 
+test('page coverage uses singular and plural without mixing workspace and file counts', () => {
+  for (const [ids, text] of [
+    [[], '0 workspaces'],
+    [['ws'], '1 workspace'],
+    [['ws', 'other'], '2 workspaces']
+  ]) {
+    const html = renderWorkspaceUpdateSection({ state: 'ready', ids }, () => fixture());
+    assert.ok(html.includes(`${text} in this page.`));
+    assert.ok(!html.includes('1 workspaces'));
+  }
+});
+
 test('canonical slug is required; URLs select navigation only and carry the exact saved welcome identity', () => {
   const data = fixture().data;
   const route = workspaceUpdateRoute(data, 'welcome');

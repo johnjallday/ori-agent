@@ -250,7 +250,15 @@ export function createWorkspaceUpdates({
     });
     return work;
   }
-  function invalidatePage() {
+  function invalidatePage(changedID) {
+    // A hint can concern a cached workspace outside the selected window. Keep
+    // its observation, but revoke its action authority without walking/fetching
+    // other pages. An older pending acknowledgement must not unqualify it.
+    const changed = typeof changedID === 'string' ? entries.get(changedID) : null;
+    if (changed?.view.data && !page.ids.includes(changedID)) {
+      changed.minimumVersion = changed.version = ++serial;
+      unavailable(changedID, changed);
+    }
     if (pageRead) pageInvalidated = true;
     else void refreshPage({ after: page.after });
   }
@@ -260,7 +268,8 @@ export function createWorkspaceUpdates({
     const prior = item.mutation || Promise.resolve();
     // Serialize exact-message mutations so old GETs or parallel acks cannot
     // repaint an older unread snapshot after a committed seen response.
-    item.version = ++serial;
+    const version = ++serial;
+    item.version = version;
     acknowledgementEpoch++;
     item.read = null;
     const work = prior.then(async () => {
@@ -277,7 +286,12 @@ export function createWorkspaceUpdates({
         });
         const data = response.ok ? await response.json() : null;
         if (scope !== generation) return false;
-        if (response.ok && accept(id, item, data)) {
+        if (
+          response.ok &&
+          data?.workspace_id === id &&
+          data.welcome?.state &&
+          (version < (item.minimumVersion || 0) || accept(id, item, data))
+        ) {
           for (const listener of committedListeners) {
             try {
               listener(id);
@@ -493,8 +507,9 @@ export function watchWorkspaceUpdatePage({
 } = {}) {
   let disposed = false;
   const signatures = new Map();
-  const refresh = () => {
-    if (!disposed && isActive() && doc?.visibilityState !== 'hidden') updates.invalidatePage();
+  const refresh = changedID => {
+    if (!disposed && isActive() && doc?.visibilityState !== 'hidden')
+      updates.invalidatePage(changedID);
   };
   const transport = workspaceUpdateHintTransport({
     updates,
@@ -525,7 +540,7 @@ export function watchWorkspaceUpdatePage({
     signatures.set(snapshot.workspaceId, signature);
     if (signatures.size > 100) signatures.delete(signatures.keys().next().value);
     transport.publish(snapshot.workspaceId);
-    refresh();
+    refresh(snapshot.workspaceId);
   };
   doc?.addEventListener('ori:file-janitor-changed', filingChanged);
   doc?.addEventListener('visibilitychange', refresh);

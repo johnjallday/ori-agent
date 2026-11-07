@@ -54,7 +54,7 @@ func TestSummary_IndependentGroupedSourcesAndSeenOnlyChangesWelcome(t *testing.T
 }
 
 func TestSummary_ReviewSurvivesMissingConversationOrLead(t *testing.T) {
-	for _, mode := range []string{"deleted conversation", "missing lead"} {
+	for _, mode := range []string{"deleted conversation", "missing lead", "replacement namesake", "duplicate names"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newRecoveryFixture(t)
 			f.create(false)
@@ -68,13 +68,39 @@ func TestSummary_ReviewSurvivesMissingConversationOrLead(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				if err := f.folders.Update("ws", func(ws *workspace.Workspace) error { ws.AgentInstances = nil; return nil }); err != nil {
+				if err := f.folders.Update("ws", func(ws *workspace.Workspace) error {
+					switch mode {
+					case "missing lead":
+						ws.AgentInstances = nil
+					case "replacement namesake":
+						ws.AgentInstances[0].ID = "new-instance-same-name"
+					case "duplicate names":
+						other := ws.AgentInstances[0]
+						other.ID = "duplicate-name"
+						ws.AgentInstances = append(ws.AgentInstances, other)
+					}
+					return nil
+				}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			got, err := f.service.Summary(t.Context(), "local", "ws")
 			if err != nil || got.Welcome.State == StateReady || got.Review.State != StateReady || got.Review.Pending != 10 {
 				t.Fatalf("chat hid filing: %+v %v", got, err)
+			}
+			old := delivery.Messages[0]
+			if _, err := f.service.Acknowledge(t.Context(), "local", "ws", session.WelcomeAcknowledgement{SessionID: delivery.SessionID, MessageID: old.MessageID, Revision: old.Revision}); err == nil {
+				t.Fatal("stale identity acknowledged old delivery")
+			}
+			f.assessed.Store(true)
+			if _, err := f.service.Reconcile(t.Context(), 0); err != nil {
+				t.Fatal(err)
+			}
+			if mode != "deleted conversation" {
+				stored, err := f.sessions.GetSession(t.Context(), delivery.SessionID)
+				if err != nil || len(stored.Messages) != 1 {
+					t.Fatalf("recovery adopted or rewrote the old conversation: %+v %v", stored, err)
+				}
 			}
 		})
 	}

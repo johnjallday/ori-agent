@@ -239,7 +239,7 @@ export function renderWorkspaceUpdateSection(page, read) {
   return (
     `<h3>Workspace messages &amp; filing</h3><p class="cockpit-workspace-update-status">${escape(status)}</p>` +
     (list ? `<ul class="cockpit-workspace-update-list">${list}</ul>` : '') +
-    `<p class="cockpit-workspace-update-coverage">${current.ids?.length || 0} workspaces in this page.${current.hasMore ? ' More workspaces have not been checked yet.' : current.after ? ' End of the workspace list. Earlier pages may still have updates.' : ''}</p>` +
+    `<p class="cockpit-workspace-update-coverage">${current.ids?.length || 0} ${current.ids?.length === 1 ? 'workspace' : 'workspaces'} in this page.${current.hasMore ? ' More workspaces have not been checked yet.' : current.after ? ' End of the workspace list. Earlier pages may still have updates.' : ''}</p>` +
     '<div class="cockpit-workspace-update-controls">' +
     `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-workspace-updates-refresh${busy ? ' aria-disabled="true"' : ''}>${current.state === 'unavailable' ? 'Retry updates' : 'Refresh updates'}</button>` +
     (current.hasMore
