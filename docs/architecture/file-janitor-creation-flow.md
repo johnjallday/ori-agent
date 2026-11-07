@@ -155,6 +155,26 @@ cannot apply grants or change monitoring. Manual settling offers **Scan again**;
 no hidden polling/rescan task. A historical result may be shown after later
 settings changes, but those changes prevent any further old-authority work.
 
+## Quiet follow-up and independent review
+
+Successful normal creation enrolls its exact lead for the host's saved welcome;
+a successful reviewed preparation re-evaluates canonical wizard readiness. That
+signal does not repeat setup, scan or inference. Delivery is quiet and idempotent,
+with at most the existing eligible later assessment. A user-opened Assistant
+stays in its own conversation; new delivery never retargets it or counts as seen.
+
+Workspace/Home/Map/Tree updates read current saved filing counts independently of
+that conversation. **Review files** opens the current Review without accepting any
+file decisions. Reading the welcome leaves review pending; partial filing leaves
+remaining work visible, and later scans never rewrite old chat. Removed/reinstalled
+capabilities and revoked/relinked roots invalidate old action authority. Existing
+legacy batches stay readable under the domain's compatibility rules; new scans
+also save optional root/install provenance.
+
+See [Workspace updates](workspace-updates.md) for receipt, exact exposure, source
+availability and cross-tab/restart boundaries. Attaching, opening an update or
+reading a summary still supplies no new consent or work authorization.
+
 ## Storage and compatibility
 
 Selected settings schema: **2 → 3** in the existing domain settings file.

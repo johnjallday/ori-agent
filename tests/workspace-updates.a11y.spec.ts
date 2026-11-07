@@ -145,142 +145,162 @@ for (const theme of ['light', 'dark']) {
     { name: 'small-phone', width: 320, height: 844, reduced: true, scale: 1 },
     { name: 'zoom-reflow', width: 720, height: 550, reduced: true, scale: 2 }
   ]) {
-    test(`Updates accessibility: ${theme} ${variant.name}`, async ({ page, request }, info) => {
-      await installLocalCdn(page);
-      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
-      await page.setViewportSize({ width: variant.width, height: variant.height });
-      if (variant.scale === 2) {
-        const client = await page.context().newCDPSession(page);
-        await client.send('Emulation.setDeviceMetricsOverride', {
-          width: variant.width,
-          height: variant.height,
-          deviceScaleFactor: 2,
-          mobile: false,
-          screenWidth: 1440,
-          screenHeight: 1100
+    test.describe(`${theme} ${variant.name}`, () => {
+      test.use({ hasTouch: variant.width <= 390 });
+      test(`Updates accessibility: ${theme} ${variant.name}`, async ({ page, request }, info) => {
+        await installLocalCdn(page);
+        await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+        await page.setViewportSize({ width: variant.width, height: variant.height });
+        if (variant.scale === 2) {
+          const client = await page.context().newCDPSession(page);
+          await client.send('Emulation.setDeviceMetricsOverride', {
+            width: variant.width,
+            height: variant.height,
+            deviceScaleFactor: 2,
+            mobile: false,
+            screenWidth: 1440,
+            screenHeight: 1100
+          });
+        }
+        await page.emulateMedia({
+          colorScheme: theme as 'light' | 'dark',
+          reducedMotion: variant.reduced ? 'reduce' : 'no-preference'
         });
-      }
-      if (variant.width <= 390) {
-        const client = await page.context().newCDPSession(page);
-        await client.send('Emulation.setTouchEmulationEnabled', { enabled: true });
-      }
-      await page.emulateMedia({
-        colorScheme: theme as 'light' | 'dark',
-        reducedMotion: variant.reduced ? 'reduce' : 'no-preference'
-      });
-      const execution: string[] = [];
-      page.on('request', req => {
-        const path = new URL(req.url()).pathname;
-        if (
-          req.method() !== 'GET' &&
-          /\/file-janitor\/(?:setup|scan|prepare-review|decisions|preview|apply|undo)$|^\/api\/chat$|\/tasks\/execute$/.test(
-            path
+        const execution: string[] = [];
+        page.on('request', req => {
+          const path = new URL(req.url()).pathname;
+          if (
+            req.method() !== 'GET' &&
+            /\/file-janitor\/(?:setup|scan|prepare-review|decisions|preview|apply|undo)$|^\/api\/chat$|\/tasks\/execute$/.test(
+              path
+            )
           )
-        )
-          execution.push(path);
-      });
-      await page.goto('/');
-      await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
-      await expect(page.locator('#cockpitEconomy')).toBeVisible();
-      await expect
-        .poll(() => page.evaluate(() => (window as any).OriWorkspaceMap?.getLayoutState?.().status))
-        .toBe('ready');
-      await page.addScriptTag({ content: axe });
-      const toggle = page.getByRole('button', { name: 'Show Updates', exact: true });
-      await toggle.focus();
-      await page.keyboard.press('Enter');
-      const section = page.locator('#cockpitWorkspaceUpdates');
-      await expect(section).toContainText('2 files to review');
-      await expect(section).toContainText('1 workspace in this page.');
-      await fits(section, variant.width);
-      await scan(page, '#cockpitWorkspaceUpdates');
-      const review = section.locator('[data-workspace-update="review"]');
-      await review.focus();
-      await expect(review).toHaveCSS('outline-style', 'solid');
-      await page.keyboard.press('Tab');
-      await expect(section.locator('[data-workspace-updates-refresh]')).toBeFocused();
-      const live = await page.locator('#cockpitRailLive').textContent();
-      await page.keyboard.press('Enter');
-      await expect(section.locator('[data-workspace-updates-refresh]')).not.toHaveAttribute(
-        'aria-disabled',
-        'true'
-      );
-      await expect(section.locator('[data-workspace-updates-refresh]')).toBeFocused();
-      expect(await page.locator('#cockpitRailLive').textContent()).toBe(live);
-      await section.screenshot({ path: info.outputPath('home-updates.png') });
-      await page.getByRole('button', { name: 'Close Updates', exact: true }).click();
-      const tile = page.locator(`#cockpitMap .ws-map-tile[data-ws-id="${ws.id}"]`);
-      await expect(tile).toHaveAttribute(
-        'aria-label',
-        /New message.*2 files to review.*Shift\+F10/
-      );
-      expect(await tile.locator('a, button').count()).toBe(0);
-      await tile.focus();
-      await page.keyboard.press('Shift+F10');
-      await expect(
-        page.getByRole('menuitem', { name: /Review.*files|files.*review/i })
-      ).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(tile).toBeFocused();
-      await scan(page, '#cockpitMap .ws-map-update-markers', true);
-      await page.locator('[data-cockpit-view="tree"]').click();
-      const row = page.locator(`#cockpitTreeNav [data-tree-row="${ws.id}"]`);
-      await row.focus();
-      await page.keyboard.press('Tab');
-      await expect(row.locator('[data-workspace-update="welcome"]')).toBeFocused();
-      await page.keyboard.press('Tab');
-      await expect(row.locator('[data-workspace-update="review"]')).toBeFocused();
-      await fits(row, variant.width);
-      if (variant.width <= 390) {
-        expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
-        expect(
-          (await row.locator('[data-workspace-update="review"]').boundingBox())!.height
-        ).toBeGreaterThanOrEqual(44);
-      }
-      await scan(page, '#cockpitTreeNav .workspace-update-signal');
-      await row.screenshot({ path: info.outputPath('tree-updates.png') });
-
-      await page.goto(`/workspaces/${ws.folder_slug}`);
-      await page.addScriptTag({ content: axe });
-      const card = page.locator('#workspaceNextActionRegion');
-      await expect(card).toContainText('2 files ready for review');
-      await expect(card).toContainText(lead);
-      await expect(page.locator('#personalAssistantPanel')).toBeHidden();
-      for (const mode of ['details', 'map']) {
-        await page.locator(`[data-cmd-view-mode="${mode}"]`).click();
-        await fits(card, variant.width);
-        const details = card.getByText('Source details', { exact: true });
-        await details.focus();
-        await page.keyboard.press('Enter');
-        await expect(card).toContainText('Batch completed');
-        await expect(card).toContainText('Review observed');
-        await expect(card.locator('[data-cmd-update-sources]')).toHaveAttribute('open', '');
-        await scan(page, '#workspaceNextActionRegion');
-        await page.evaluate(() => window.scrollTo(0, 0));
-        await page.screenshot({ path: info.outputPath(`card-${mode}.png`), fullPage: true });
-        await details.press('Enter');
-        const open = card.getByRole('button', { name: 'Review files', exact: true });
-        await open.focus();
-        await page.keyboard.press('Enter');
-        await expect(page.locator('#fileJanitorConsoleDialog')).toBeVisible();
+            execution.push(path);
+        });
+        await page.goto('/');
+        await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
+        await expect(page.locator('#cockpitEconomy')).toBeVisible();
         await expect
           .poll(() =>
-            page
-              .locator('#fileJanitorConsoleDialog')
-              .evaluate(node => node.contains(document.activeElement))
+            page.evaluate(() => (window as any).OriWorkspaceMap?.getLayoutState?.().status)
           )
-          .toBe(true);
-        // Actual owner repaint, not a detached test-only replacement button.
-        await page.evaluate(() => (window as any).workspaceCommand.render());
+          .toBe('ready');
+        await page.addScriptTag({ content: axe });
+        const toggle = page.getByRole('button', { name: 'Show Updates', exact: true });
+        await toggle.focus();
+        await page.keyboard.press('Enter');
+        const section = page.locator('#cockpitWorkspaceUpdates');
+        await expect(section).toContainText('2 files to review');
+        const pageCount = (await ok(await request.get('/api/workspace-updates'))).items.length;
+        await expect(section).toContainText(
+          `${pageCount} ${pageCount === 1 ? 'workspace' : 'workspaces'} in this page.`
+        );
+        await fits(section, variant.width);
+        await scan(page, '#cockpitWorkspaceUpdates');
+        const review = section.locator(
+          `[data-update-row="${ws.id}"] [data-workspace-update="review"]`
+        );
+        await review.focus();
+        await expect(review).toHaveCSS('outline-style', 'solid');
+        const refresh = section.locator('[data-workspace-updates-refresh]');
+        // Other specs can leave independent saved updates in this real sandbox.
+        // Follow native tab order through those rows, rather than assuming ours
+        // is the only (or last) workspace on the selected page.
+        const controls = await section.locator('a, button').count();
+        for (
+          let index = 0;
+          index < controls && !(await refresh.evaluate(el => el === document.activeElement));
+          index++
+        )
+          await page.keyboard.press('Tab');
+        await expect(refresh).toBeFocused();
+        const live = await page.locator('#cockpitRailLive').textContent();
+        await page.keyboard.press('Enter');
+        await expect(section.locator('[data-workspace-updates-refresh]')).not.toHaveAttribute(
+          'aria-disabled',
+          'true'
+        );
+        await expect(section.locator('[data-workspace-updates-refresh]')).toBeFocused();
+        expect(await page.locator('#cockpitRailLive').textContent()).toBe(live);
+        // Oversized element/full-page captures reset Chromium touch and DPR
+        // emulation. Capture the real viewport without changing input semantics.
+        await page.screenshot({ path: info.outputPath('home-updates.png') });
+        await page.getByRole('button', { name: 'Close Updates', exact: true }).click();
+        const tile = page.locator(`#cockpitMap .ws-map-tile[data-ws-id="${ws.id}"]`);
+        await expect(tile).toHaveAttribute(
+          'aria-label',
+          /New message.*2 files to review.*Shift\+F10/
+        );
+        expect(await tile.locator('a, button').count()).toBe(0);
+        await tile.focus();
+        await page.keyboard.press('Shift+F10');
+        await expect(
+          page.getByRole('menuitem', { name: /Review.*files|files.*review/i })
+        ).toBeVisible();
         await page.keyboard.press('Escape');
-        await expect(page.locator('#fileJanitorConsoleDialog')).toBeHidden();
-        await expect(card.getByRole('button', { name: 'Review files', exact: true })).toBeFocused();
-      }
-      expect(
-        (await ok(await request.get(`/api/workspaces/${ws.id}/updates`))).welcome.unread_count
-      ).toBeGreaterThan(0);
-      expect(execution).toEqual([]);
-      expect(modelCalls()).toBe(calls);
+        await expect(tile).toBeFocused();
+        await scan(page, '#cockpitMap .ws-map-update-markers', true);
+        await page.locator('[data-cockpit-view="tree"]').click();
+        const row = page.locator(`#cockpitTreeNav [data-tree-row="${ws.id}"]`);
+        await row.focus();
+        await page.keyboard.press('Tab');
+        await expect(row.locator('[data-workspace-update="welcome"]')).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(row.locator('[data-workspace-update="review"]')).toBeFocused();
+        await fits(row, variant.width);
+        if (variant.width <= 390) {
+          expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+          expect(
+            (await row.locator('[data-workspace-update="review"]').boundingBox())!.height
+          ).toBeGreaterThanOrEqual(44);
+        }
+        await scan(page, '#cockpitTreeNav .workspace-update-signal');
+        await page.screenshot({ path: info.outputPath('tree-updates.png') });
+
+        await page.goto(`/workspaces/${ws.folder_slug}`);
+        await page.addScriptTag({ content: axe });
+        const card = page.locator('#workspaceNextActionRegion');
+        await expect(card).toContainText('2 files ready for review');
+        await expect(card).toContainText(lead);
+        await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+        for (const mode of ['details', 'map']) {
+          await page.locator(`[data-cmd-view-mode="${mode}"]`).click();
+          await fits(card, variant.width);
+          const details = card.getByText('Source details', { exact: true });
+          await details.focus();
+          await page.keyboard.press('Enter');
+          await expect(card).toContainText('Batch completed');
+          await expect(card).toContainText('Review observed');
+          await expect(card.locator('[data-cmd-update-sources]')).toHaveAttribute('open', '');
+          await scan(page, '#workspaceNextActionRegion');
+          await card.scrollIntoViewIfNeeded();
+          await page.screenshot({ path: info.outputPath(`card-${mode}.png`) });
+          await details.press('Enter');
+          const open = card.getByRole('button', { name: 'Review files', exact: true });
+          await open.focus();
+          await page.keyboard.press('Enter');
+          await expect(page.locator('#fileJanitorConsoleDialog')).toBeVisible();
+          await expect
+            .poll(() =>
+              page
+                .locator('#fileJanitorConsoleDialog')
+                .evaluate(node => node.contains(document.activeElement))
+            )
+            .toBe(true);
+          // Actual owner repaint, not a detached test-only replacement button.
+          await page.evaluate(() => (window as any).workspaceCommand.render());
+          await page.keyboard.press('Escape');
+          await expect(page.locator('#fileJanitorConsoleDialog')).toBeHidden();
+          await expect(
+            card.getByRole('button', { name: 'Review files', exact: true })
+          ).toBeFocused();
+        }
+        expect(
+          (await ok(await request.get(`/api/workspaces/${ws.id}/updates`))).welcome.unread_count
+        ).toBeGreaterThan(0);
+        expect(execution).toEqual([]);
+        expect(modelCalls()).toBe(calls);
+      });
     });
   }
 }

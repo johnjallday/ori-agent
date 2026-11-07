@@ -3,6 +3,18 @@ import { installLocalCdn } from './helpers/offline-cdn';
 
 test.beforeEach(async ({ page }) => installLocalCdn(page));
 
+// Measure interaction invariants after the independent initial font/economy/
+// layout reads settle, not against the first partial bootstrap frame.
+async function settledHomeGeometry(page: Page) {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await expect(page.locator('#cockpitEconomy')).toBeVisible();
+  if (await page.locator('#cockpitMap').isVisible()) {
+    await expect
+      .poll(() => page.evaluate(() => (window as any).OriWorkspaceMap?.getLayoutState?.().status))
+      .toBe('ready');
+  }
+}
+
 /**
  * Behavior suite for the Map-first Home cockpit
  * (tasks/prd-home-workspace-cockpit.md).
@@ -491,7 +503,9 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
       'keeps that choice fixed'
     );
-    await page.locator('#folderNameInput').fill('Reviewed Tree Group');
+    await page
+      .locator('#folderNameInput')
+      .fill(`Reviewed Tree Group ${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     await page.locator('#wizardNextBtn').click();
     // The creator reviews the group's Manager before it will go on to Review.
     const creator = page.locator('#addFolderModal');
@@ -499,6 +513,9 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#addAgentModal')).toBeVisible();
     await page.locator('#createAgentBtn').click();
     await expect(page.locator('#addAgentModal')).toBeHidden();
+    // The nested agent dialog restores this Bootstrap owner asynchronously.
+    // Wait for its show transition so a fast successful create can hide it.
+    await expect(creator).toHaveCSS('opacity', '1');
     await creator.getByRole('button', { name: 'Review →' }).click();
     await expect(page.locator('#workspaceReviewSummary')).toContainText(
       'top-level workspace will move'
@@ -509,7 +526,9 @@ test.describe('Home workspace cockpit', () => {
         new URL(response.url()).pathname === '/api/workspaces'
     );
     await page.locator('#createFolderBtn').click();
-    const body = await (await groupCreated).json();
+    const createdResponse = await groupCreated;
+    expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy();
+    const body = await createdResponse.json();
     const groupID = body?.folder?.id as string;
     await expect(page.locator('#addFolderModal')).toBeHidden();
     await expect
@@ -708,6 +727,7 @@ test.describe('Home workspace cockpit', () => {
     await site.click();
     await expect(page.locator('[data-cockpit-rail-open]')).toBeVisible();
     expect(new URL(page.url()).pathname).toBe('/');
+    await expect(page.locator('#cockpitContextModal')).toHaveCSS('opacity', '1');
     await page.locator('#cockpitContextModal [data-bs-dismiss="modal"]').click();
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
 
@@ -1647,6 +1667,7 @@ test.describe('Header hierarchy', () => {
       await page.goto('/');
       await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
       await expect(page.locator('#cockpitQuestsToggle')).toContainText('Tier 10 · 3/12');
+      await settledHomeGeometry(page);
 
       const geometry = await headerGeometry(page);
       expect(geometry.overflow).toBeLessThanOrEqual(1);
@@ -1862,6 +1883,7 @@ test.describe('Quick Capture dialog', () => {
 
   /** Everything capture must not disturb. */
   async function mapState(page: Page, host = '#cockpitMap') {
+    await settledHomeGeometry(page);
     return {
       box: await page.locator(host).boundingBox(),
       ...(await page.evaluate(() => ({
@@ -1951,6 +1973,7 @@ test.describe('Quick Capture dialog', () => {
     await routeHQ(page, HQ_STATUS);
     await page.goto('/?view=tree');
     await page.locator('[data-tree-row]').first().waitFor();
+    await settledHomeGeometry(page);
     const before = await page.locator('#cockpitTree').boundingBox();
     await openCapture(page);
     const during = await page.locator('#cockpitTree').boundingBox();

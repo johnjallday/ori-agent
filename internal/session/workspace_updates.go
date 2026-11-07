@@ -96,7 +96,7 @@ func (h *hybridStore) PendingWelcomes(ctx context.Context, after int64, limit in
 // SettleWelcome retires only the original enrollment, including invalidated or
 // suppressed ones. It never deletes the receipt or rearms it on another identity.
 func (h *hybridStore) SettleWelcome(ctx context.Context, item WelcomeEnrollment) error {
-	if item.ID <= 0 || !item.WelcomeScope.valid() {
+	if item.ID <= 0 || !item.valid() {
 		return ErrInvalidID
 	}
 	_, err := h.sqlite.db.ExecContext(ctx, `UPDATE workspace_welcome_enrollments SET settled=1

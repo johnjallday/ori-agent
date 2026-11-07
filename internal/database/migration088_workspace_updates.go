@@ -10,10 +10,22 @@ import (
 // and legacy workspaces are not enrolled by opening an upgraded database.
 func (db *DB) migration088WorkspaceUpdates(ctx context.Context) error {
 	return db.InTransaction(ctx, func(tx *sql.Tx) error {
-		for _, statement := range []string{
-			`CREATE INDEX IF NOT EXISTS idx_workspaces_updates_owner_id
+		// Like the earlier additive workspace migrations, tolerate reduced
+		// historical schemas without inventing missing workspace authority.
+		// Full application schemas always receive the bounded-listing index.
+		var columns int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('workspaces')
+			WHERE name IN ('id', 'owner_user_id', 'status')`).Scan(&columns); err != nil {
+			return err
+		}
+		if columns == 3 {
+			if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_workspaces_updates_owner_id
 				ON workspaces(COALESCE(NULLIF(TRIM(owner_user_id), ''), 'local'), id)
-				WHERE COALESCE(status, '') NOT IN ('trashed','missing')`,
+				WHERE COALESCE(status, '') NOT IN ('trashed','missing')`); err != nil {
+				return err
+			}
+		}
+		for _, statement := range []string{
 			`CREATE TABLE IF NOT EXISTS workspace_welcome_enrollments (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id) ON DELETE CASCADE,

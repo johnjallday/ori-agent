@@ -238,6 +238,9 @@ test('Updates lifecycle: a deleted saved conversation makes an old destination u
       })
     )
   ).folder;
+  await expect
+    .poll(async () => (await updates(request, ws.id)).welcome.session_id || '')
+    .not.toBe('');
   const before = await updates(request, ws.id);
   const calls = modelCalls();
   const writes = operations(page);

@@ -338,7 +338,9 @@ test('Home updates: Tree keyboard navigation survives a qualified outage and ret
   failed = false;
   await page.locator('[data-workspace-updates-refresh]').click();
   await expect(
-    page.locator('#cockpitWorkspaceUpdates [data-workspace-update="review"]')
+    page.locator(
+      `#cockpitWorkspaceUpdates [data-update-row="${filing.id}"] [data-workspace-update="review"]`
+    )
   ).toHaveCount(1);
   await page.getByRole('button', { name: 'Hide Updates', exact: true }).click();
   await page.locator('[data-cockpit-view="tree"]').click();

@@ -6,6 +6,50 @@ import (
 	"testing"
 )
 
+func TestMigration088ReducedHistoricalSchemasKeepOptionalIndexConditional(t *testing.T) {
+	for _, fixture := range []struct {
+		name, schema string
+		wantIndex    int
+	}{
+		{name: "no workspace table"},
+		{name: "id only", schema: `CREATE TABLE workspaces(id TEXT PRIMARY KEY)`},
+		{name: "no owner", schema: `CREATE TABLE workspaces(id TEXT PRIMARY KEY, status TEXT)`},
+		{name: "no status", schema: `CREATE TABLE workspaces(id TEXT PRIMARY KEY, owner_user_id TEXT)`},
+		{name: "complete scope", schema: `CREATE TABLE workspaces(id TEXT PRIMARY KEY, owner_user_id TEXT, status TEXT)`, wantIndex: 1},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			ctx := t.Context()
+			raw, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "reduced.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = raw.Close() })
+			raw.SetMaxOpenConns(1)
+			if fixture.schema != "" {
+				if _, err := raw.ExecContext(ctx, fixture.schema); err != nil {
+					t.Fatal(err)
+				}
+			}
+			db := &DB{DB: raw}
+			for range 2 {
+				if err := db.migration088WorkspaceUpdates(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var indexes, messages, enrollments int
+			if err := raw.QueryRowContext(ctx, `SELECT
+				(SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_workspaces_updates_owner_id'),
+				(SELECT COUNT(*) FROM workspace_welcome_messages),
+				(SELECT COUNT(*) FROM workspace_welcome_enrollments)`).Scan(&indexes, &messages, &enrollments); err != nil {
+				t.Fatal(err)
+			}
+			if indexes != fixture.wantIndex || messages != 0 || enrollments != 0 {
+				t.Fatalf("index=%d want=%d messages=%d enrollments=%d", indexes, fixture.wantIndex, messages, enrollments)
+			}
+		})
+	}
+}
+
 func TestMigration088UpgradePreservesHistoryWithoutEnrollingOrUnreadBackfill(t *testing.T) {
 	ctx := t.Context()
 	cfg := &Config{Path: filepath.Join(t.TempDir(), "upstream-87.db"), BusyTimeout: 1000}
