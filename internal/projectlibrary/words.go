@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Where a Words value came from: the Home's pinned package declaration, or
@@ -62,6 +63,41 @@ func WordsFromDeclaration(card *projecttemplates.ProjectCardDeclaration) Words {
 		words.Facts = append(words.Facts, WordsFact{Kind: fact.Kind, Unit: fact.Unit, UnitOne: fact.UnitOne})
 	}
 	for _, field := range card.Fields {
+		words.Fields = append(words.Fields, WordsField{ID: field.ID, Label: field.Label, Kind: field.Kind})
+	}
+	return words
+}
+
+// WordsSnapshot is the Home's prompt snapshot of a declaration's words
+// (FR9); nil when the declaration has no section.
+func WordsSnapshot(pluginID, version string, card *projecttemplates.ProjectCardDeclaration) *workspace.ProjectCardWords {
+	if card == nil {
+		return nil
+	}
+	snapshot := &workspace.ProjectCardWords{PluginID: pluginID, Version: version, Noun: card.Noun,
+		NounPlural: card.NounPlural, RosterTitle: card.RosterTitle}
+	for _, fact := range card.Facts {
+		snapshot.Facts = append(snapshot.Facts, workspace.ProjectCardWordsFact{Kind: fact.Kind, Unit: fact.Unit, UnitOne: fact.UnitOne})
+	}
+	for _, field := range card.Fields {
+		snapshot.Fields = append(snapshot.Fields, workspace.ProjectCardWordsField{ID: field.ID, Label: field.Label, Kind: field.Kind})
+	}
+	return snapshot
+}
+
+// SnapshotWords are the words agent prompts and agent tools use: the Home's
+// snapshot when it is valid, the neutral words otherwise.
+func SnapshotWords(state *workspace.AssistantProgramState) Words {
+	if state == nil || !state.ProjectCardWords.Valid() {
+		return NeutralWords()
+	}
+	snapshot := state.ProjectCardWords
+	words := Words{Source: WordsSourcePackage, Noun: snapshot.Noun, NounPlural: snapshot.NounPlural,
+		RosterTitle: snapshot.RosterTitle, Facts: []WordsFact{}, Fields: []WordsField{}}
+	for _, fact := range snapshot.Facts {
+		words.Facts = append(words.Facts, WordsFact{Kind: fact.Kind, Unit: fact.Unit, UnitOne: fact.UnitOne})
+	}
+	for _, field := range snapshot.Fields {
 		words.Fields = append(words.Fields, WordsField{ID: field.ID, Label: field.Label, Kind: field.Kind})
 	}
 	return words

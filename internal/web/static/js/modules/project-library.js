@@ -14,6 +14,7 @@ import {
   songLineText
 } from './library-open.js';
 import { loadStaffingPlan, runSetup, staffingDisclosure } from './library-setup.js';
+import { acceptLines, suggestionRows } from './song-card-suggestions.js';
 import { setupQuestURL } from './setup-quest-links.js';
 import { folderPickCopy } from './folder-pick-copy.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
@@ -721,6 +722,18 @@ export function fieldsPatchLines(patch, words) {
     if (Array.isArray(value)) return [`${label(key)}: ${value.join('; ') || 'None'}`];
     return [`${label(key)}: ${String(value || 'Not set')}`];
   });
+}
+
+// fieldsSuggestionText is a fields suggestion in one line for the shelf's
+// suggestions list: "Next action → Send stems; Blockers → 2 lines (…)".
+export function fieldsSuggestionText(fields, words) {
+  return (
+    suggestionRows(fields, words)
+      .map(
+        row => `${row.label} → ${row.value}${row.lines?.length ? ` (${row.lines.join('; ')})` : ''}`
+      )
+      .join('; ') || 'No fields'
+  );
 }
 
 // extraFieldRows pairs each declared field's label with its stored lines, in
@@ -1655,6 +1668,7 @@ export class ProjectLibraryPanel {
       const sessionGoal = proposal.kind === 'session_goal';
       const sessionRecap = proposal.kind === 'session_recap';
       const rootReview = proposal.kind === 'root_review';
+      const fieldsKind = proposal.kind === 'fields';
       const card = node('article', 'project-library-resume-card');
       card.append(
         node('h4', '', row.name),
@@ -1669,7 +1683,9 @@ export class ProjectLibraryPanel {
                 ? `Suggested studio recap: ${proposal.recap}. This is not evidence that work happened, a run finished or a DAW ran. No recap was saved.`
                 : rootReview
                   ? 'Suggested navigation: inspect current discovery folder options. No folder was selected, approved or scanned.'
-                  : `Suggested next action: ${proposal.next_action}`
+                  : fieldsKind
+                    ? `Suggested notes: ${fieldsSuggestionText(proposal.proposed_fields, this.projectWords())}`
+                    : `Suggested next action: ${proposal.next_action}`
         ),
         node(
           'p',
@@ -1714,7 +1730,9 @@ export class ProjectLibraryPanel {
                 ? void this.editRecapProposal(row, button)
                 : rootReview
                   ? void this.viewRootProposal(row, button)
-                  : void this.reviewProposal(row, button)
+                  : fieldsKind
+                    ? void this.reviewFieldsProposal(row, button)
+                    : void this.reviewProposal(row, button)
         );
         card.append(button);
       }
@@ -1850,6 +1868,40 @@ export class ProjectLibraryPanel {
         this.sessionForm(detail, null, trigger, current.proposal.goal);
       }
     );
+  }
+
+  // reviewFieldsProposal is the shelf's Accept for a fields suggestion: the
+  // Home reviews the saved suggestion, the owner sees before and after per
+  // field, and a second confirmation commits (PRD #792 FR24, FR25).
+  async reviewFieldsProposal(row, trigger) {
+    await this.run(trigger, 'Checking this suggestion against the current Home…', async () => {
+      const path = `/proposals/${encodeURIComponent(row.proposal.id)}`;
+      const review = await this.post(`${path}/review`);
+      const lines = acceptLines(
+        review,
+        { fields: row.proposal.proposed_fields, reason: row.proposal.reason },
+        this.projectWords()
+      );
+      if (
+        !(await this.confirm(`Save the suggestion for ${row.name}?`, lines, 'Save notes', trigger))
+      ) {
+        await this.refresh();
+        this.status('Suggestion canceled. Saved Home notes are unchanged.');
+        return;
+      }
+      try {
+        await this.post(`${path}/commit`, {
+          review_token: review.token,
+          idempotency_key: operationKey('fields-suggestion'),
+          confirm: true
+        });
+      } catch (error) {
+        await this.refresh();
+        throw error;
+      }
+      await this.refresh();
+      this.status(`Saved the reviewed notes for ${row.name}. No project ticket was started.`);
+    });
   }
 
   async reviewProposal(row, trigger) {

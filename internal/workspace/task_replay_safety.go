@@ -156,6 +156,21 @@ var mutatingToolNames = map[string]struct{}{
 	"home_library_propose_session_goal":   {},
 	"home_library_propose_root_review":    {},
 	"home_library_propose_session_recap":  {},
+	"home_library_propose_fields":         {},
+	"project_card_propose_fields":         {},
+}
+
+// confirmToolNames are mutating tools whose effect is an inert suggestion or
+// draft the owner confirms; a replay must ask rather than repeat them.
+var confirmToolNames = map[string]struct{}{
+	"mail_draft_reply":                    {},
+	"home_library_propose_next_action":    {},
+	"home_library_propose_project_review": {},
+	"home_library_propose_session_goal":   {},
+	"home_library_propose_root_review":    {},
+	"home_library_propose_session_recap":  {},
+	"home_library_propose_fields":         {},
+	"project_card_propose_fields":         {},
 }
 
 // ClassifyToolSideEffect classifies a tool call for replay purposes. The
@@ -183,7 +198,7 @@ func ClassifyToolSideEffect(toolName string, declared SideEffect) ToolSideEffect
 		return ToolSideEffectRead
 	}
 	if _, ok := mutatingToolNames[name]; ok {
-		if name == "mail_draft_reply" || name == "home_library_propose_next_action" || name == "home_library_propose_project_review" || name == "home_library_propose_session_goal" || name == "home_library_propose_root_review" || name == "home_library_propose_session_recap" {
+		if _, confirm := confirmToolNames[name]; confirm {
 			return ToolSideEffectConfirm
 		}
 		return ToolSideEffectWrite

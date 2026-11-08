@@ -16,6 +16,7 @@
 
 import { stageLabel, statusLabel } from './field-labels.js';
 import { lastSavedLabel, lowerNoun, projectWords, songFactsLabel } from './library-open.js';
+import { renderSuggestions, suggestionHandlers, suggestionView } from './song-card-suggestions.js';
 
 export const FACTS_OFF_TEXT = 'Project details are off for this Home.';
 export const NOT_LINKED_TEXT = 'Not linked to a Home library entry';
@@ -128,7 +129,11 @@ export function songCardView(data, { now = new Date(), words } = {}) {
     // diverged link shows none); [] reads "No details yet."
     details: null,
     editDetails: null,
-    openInHome: null
+    openInHome: null,
+    // The Home the card's suggestions are answered on (PRD #792 FR24), and
+    // this song's waiting fields suggestions; none for a broken link.
+    homeID: text(data.home_id),
+    suggestions: []
   };
   if (!entryLinked) {
     view.factsNote = NOT_LINKED_TEXT;
@@ -137,6 +142,9 @@ export function songCardView(data, { now = new Date(), words } = {}) {
   if (data.fields && typeof data.fields === 'object') {
     view.details = songCardDetails(data.fields, resolvedWords, now);
   }
+  view.suggestions = (Array.isArray(data.suggestions) ? data.suggestions : [])
+    .map(suggestion => suggestionView(suggestion, resolvedWords, now))
+    .filter(suggestion => suggestion.id && suggestion.rows.length);
   view.savedText = lastSavedLabel(data.last_saved_at, now);
   if (data.facts_state === 'on') {
     view.factsText = songFactsLabel(data.facts, resolvedWords);
@@ -216,8 +224,10 @@ function anchor(doc, className, link) {
 /**
  * Renders the card into `container` (its children are replaced). A null view
  * empties and hides the container, so a non-song page is left as it was.
+ * `onAccept(suggestion, button)` and `onDismiss(suggestion, button)` give the
+ * suggestion block its two native buttons; without them it is read-only.
  */
-export function renderSongCard(container, view) {
+export function renderSongCard(container, view, { onAccept, onDismiss } = {}) {
   if (!container) return null;
   const doc = container.ownerDocument || globalThis.document;
   if (!view) {
@@ -267,6 +277,8 @@ export function renderSongCard(container, view) {
   );
   if (view.statusLine) card.append(element(doc, 'p', 'song-card-status', view.statusLine));
   if (Array.isArray(view.details)) card.append(renderDetails(doc, view));
+  const suggestions = renderSuggestions(doc, view.suggestions, { onAccept, onDismiss });
+  if (suggestions) card.append(suggestions);
   if (view.openInHome) card.append(anchor(doc, 'song-card-open', view.openInHome));
 
   container.replaceChildren(card);
@@ -274,11 +286,30 @@ export function renderSongCard(container, view) {
   return card;
 }
 
+/**
+ * Renders a card with working Accept and Dismiss: each answers on the card's
+ * Home and then calls `reload` (the mount re-fetches the card). Every mount
+ * uses this, so the three surfaces behave the same.
+ */
+export function renderInteractiveSongCard(
+  container,
+  view,
+  { reload, fetchImpl, confirm, onError } = {}
+) {
+  const handlers = suggestionHandlers(view, {
+    fetchImpl,
+    confirm,
+    onError,
+    onChanged: () => (typeof reload === 'function' ? reload() : undefined)
+  });
+  return renderSongCard(container, view, handlers);
+}
+
 /** Fetches and renders a workspace's card; any failure leaves the container hidden. */
 export async function loadSongCard(
   container,
   workspaceID,
-  { fetchImpl = globalThis.fetch, now } = {}
+  { fetchImpl = globalThis.fetch, now, confirm, onError } = {}
 ) {
   if (!container || !workspaceID || typeof fetchImpl !== 'function') return null;
   try {
@@ -287,7 +318,12 @@ export async function loadSongCard(
     });
     if (!response.ok) throw new Error(`song card ${response.status}`);
     const view = songCardView(await response.json(), now ? { now } : {});
-    renderSongCard(container, view);
+    renderInteractiveSongCard(container, view, {
+      fetchImpl,
+      confirm,
+      onError,
+      reload: () => loadSongCard(container, workspaceID, { fetchImpl, now, confirm, onError })
+    });
     return view;
   } catch {
     renderSongCard(container, null);

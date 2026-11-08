@@ -5,6 +5,7 @@ import {
   extraFieldRows,
   extraFieldValues,
   fieldsPatchLines,
+  fieldsSuggestionText,
   activationStateLabel,
   projectTeamURL,
   libraryDigestText,
@@ -1572,6 +1573,59 @@ test('plugin fields read under their declared labels in the confirm lines and th
       ['Reference tracks', []]
     ]
   );
+});
+
+test('a fields suggestion reads in one line and its Accept reviews, confirms before and after, then commits (PRD #792 FR24)', async () => {
+  const fields = {
+    next_action: 'Send stems',
+    blockers: ['Vocal comp'],
+    extra: { key: ['F minor'] }
+  };
+  assert.equal(
+    fieldsSuggestionText(fields, FIELD_WORDS),
+    'Next action → Send stems; Blockers → 1 line (Vocal comp); Key → F minor'
+  );
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  const calls = [];
+  panel.run = async (_, __, fn) => fn();
+  panel.summary = { words: FIELD_WORDS };
+  panel.refresh = async () => calls.push({ path: 'refresh' });
+  panel.status = () => {};
+  panel.post = async (path, body) => {
+    calls.push({ path, body });
+    return path.endsWith('/review')
+      ? { token: 'review-1', before: { next_action: '' }, after: { next_action: 'Send stems' } }
+      : {};
+  };
+  let lines = [];
+  panel.confirm = async (_title, shown) => {
+    lines = shown;
+    return false;
+  };
+  const row = {
+    name: 'Night Drive',
+    proposal: { id: 'p1', kind: 'fields', proposed_fields: fields, reason: 'Untrusted' }
+  };
+  await panel.reviewFieldsProposal(row);
+  assert.deepEqual(
+    calls.map(call => call.path),
+    ['/proposals/p1/review', 'refresh']
+  );
+  assert.equal(lines[0], 'Next action: Not set → Send stems');
+  assert.ok(lines.includes('Reason (untrusted note): Untrusted'));
+  calls.length = 0;
+  panel.confirm = async () => true;
+  await panel.reviewFieldsProposal(row);
+  assert.deepEqual(
+    calls.map(call => call.path),
+    ['/proposals/p1/review', '/proposals/p1/commit', 'refresh']
+  );
+  assert.deepEqual(Object.keys(calls[1].body).sort(), [
+    'confirm',
+    'idempotency_key',
+    'review_token'
+  ]);
+  assert.equal(calls[1].body.review_token, 'review-1');
 });
 
 test('the Edit dialog reads plugin field controls into the stored shape and refuses over-long values', () => {

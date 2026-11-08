@@ -326,9 +326,12 @@ type AssistantProgramState struct {
 	// HomeProfile is what the Home knows about where its owner works, under the
 	// rows its package declares. Written only from the owner's card or a setup
 	// card the owner pressed; never by an agent.
-	HomeProfile *HomeProfile            `json:"home_profile,omitempty"`
-	Topology    AssistantTopologyState  `json:"topology,omitempty"`
-	Migration   AssistantMigrationState `json:"migration,omitempty"`
+	HomeProfile *HomeProfile `json:"home_profile,omitempty"`
+	// ProjectCardWords is the snapshot of the pinned package's project-card
+	// words that agent prompts and agent tools read (PRD #792 FR9).
+	ProjectCardWords *ProjectCardWords       `json:"project_card_words,omitempty"`
+	Topology         AssistantTopologyState  `json:"topology,omitempty"`
+	Migration        AssistantMigrationState `json:"migration,omitempty"`
 	// GroupTemplate is inert creation provenance written only in the first
 	// Save of a Home created through a reviewed Group Template selection.
 	GroupTemplate *AssistantGroupTemplateProvenance `json:"group_template,omitempty"`
@@ -372,6 +375,7 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.ProjectStaffingConsent = source.ProjectStaffingConsent.Clone()
 	clone.SongDetailsConsent = source.SongDetailsConsent.Clone()
 	clone.HomeProfile = source.HomeProfile.Clone()
+	clone.ProjectCardWords = source.ProjectCardWords.Clone()
 	for i := range clone.ProjectLibraryInitReviews {
 		if source.ProjectLibraryInitReviews[i].ConsumedAt != nil {
 			value := *source.ProjectLibraryInitReviews[i].ConsumedAt

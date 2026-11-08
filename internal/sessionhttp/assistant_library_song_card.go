@@ -65,7 +65,11 @@ func (h *Handler) GetSongCard(w http.ResponseWriter, r *http.Request) {
 	key := state.Key.Normalize()
 	scope := projectlibrary.Scope{OwnerUserID: owner, HomeID: home.ID, ProviderID: key.PluginID, ProgramID: key.ProgramID}
 	words := h.projectCardWords(home)
-	card, err := projectlibrary.NewStore(h.workspaceTaskStore).SongCard(scope, child.ID, words)
+	// Provider evidence decides only whether a suggestion is still actionable
+	// (a read-only Home offers no Accept, PRD #792 FR32); the card itself
+	// never depends on it.
+	card, err := projectlibrary.NewStore(h.workspaceTaskStore).WithProviderEvidence(h.assistantLibraryProviderEvidence).
+		SongCard(scope, child.ID, words)
 	if errors.Is(err, projectlibrary.ErrConflict) {
 		card, err = fallback, nil
 		card.HomeID = home.ID

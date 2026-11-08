@@ -13,7 +13,7 @@ import (
 // Only the authenticated Home owner can see suggestions, obtain a real field
 // review, or confirm it. There is deliberately no agent-callable HTTP route.
 func (h *Handler) ListAssistantLibraryProposals(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := h.assistantLibraryScope(w, r)
+	scope, station, ok := h.assistantLibraryScope(w, r)
 	if !ok {
 		return
 	}
@@ -22,24 +22,39 @@ func (h *Handler) ListAssistantLibraryProposals(w http.ResponseWriter, r *http.R
 		respondLibraryReadError(w, err)
 		return
 	}
+	// A fields suggestion's plugin fields read only under ids the Home's
+	// words still declare (PRD #792 FR30).
+	words := h.projectCardWords(station)
+	for i := range page.Rows {
+		if proposed := page.Rows[i].Proposal.ProposedFields; proposed != nil {
+			shown := *proposed
+			shown.Extra = projectlibrary.ShownExtraFields(proposed.Extra, words)
+			page.Rows[i].Proposal.ProposedFields = &shown
+		}
+	}
 	_ = orihttp.RespondSuccess(w, page)
 }
 
+// ReviewAssistantLibraryProposal reviews a next-action or fields suggestion:
+// the patch always comes from the saved suggestion, routed by its kind.
 func (h *Handler) ReviewAssistantLibraryProposal(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := h.assistantLibraryScope(w, r)
+	scope, station, ok := h.assistantLibraryScope(w, r)
 	if !ok || !emptyLibraryAction(w, r) {
 		return
 	}
-	review, err := h.assistantLibraryStore().ReviewProposedNextAction(scope, r.PathValue("proposalID"), scope.OwnerUserID)
+	words := h.projectCardWords(station)
+	review, _, err := h.assistantLibraryStore().ReviewProposal(scope, r.PathValue("proposalID"), scope.OwnerUserID, words)
 	if err != nil {
 		respondLibraryActionError(w, err)
 		return
 	}
+	review.Before = projectlibrary.ShownFields(review.Before, words)
+	review.After = projectlibrary.ShownFields(review.After, words)
 	_ = orihttp.RespondSuccess(w, review)
 }
 
 func (h *Handler) CommitAssistantLibraryProposal(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := h.assistantLibraryScope(w, r)
+	scope, station, ok := h.assistantLibraryScope(w, r)
 	if !ok {
 		return
 	}
@@ -51,17 +66,18 @@ func (h *Handler) CommitAssistantLibraryProposal(w http.ResponseWriter, r *http.
 		_ = orihttp.RespondBadRequest(w, "Confirm the reviewed Home note")
 		return
 	}
-	entry, replay, err := h.assistantLibraryStore().CommitProposedNextAction(scope, r.PathValue("proposalID"),
-		request.ReviewToken, request.IdempotencyKey, scope.OwnerUserID)
+	words := h.projectCardWords(station)
+	entry, replay, kind, err := h.assistantLibraryStore().CommitProposal(scope, r.PathValue("proposalID"),
+		request.ReviewToken, request.IdempotencyKey, scope.OwnerUserID, words)
 	if err != nil {
 		respondLibraryActionError(w, err)
 		return
 	}
 	if !replay {
-		h.recordLibraryProposalFeedback(scope.HomeID, r.PathValue("proposalID"), "", "accepted")
+		h.recordLibraryProposalFeedback(scope.HomeID, r.PathValue("proposalID"), kind, "accepted")
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"entry_id": entry.ID,
-		"fields": projectlibrary.ShownFields(entry.Fields, projectlibrary.Words{}), "replay": replay})
+		"fields": projectlibrary.ShownFields(entry.Fields, words), "replay": replay})
 }
 
 type libraryDismissRequest struct {

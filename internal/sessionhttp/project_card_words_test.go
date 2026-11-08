@@ -58,6 +58,9 @@ func pinProjectCardPackage(t *testing.T, handler *Handler, store *workspace.InMe
 	if err := store.Update(home.ID, func(ws *workspace.Workspace) error {
 		state := ws.GetAssistantProgramState()
 		state.HomeProvider = &owner
+		// A Home created under a declaration with the section carries the
+		// words snapshot agents read (PRD #792 FR9).
+		state.ProjectCardWords = projectlibrary.WordsSnapshot(owner.PluginID, owner.PluginVersion, card)
 		ws.SetAssistantProgramState(state)
 		return nil
 	}); err != nil {

@@ -57,7 +57,11 @@ func (p *WorkspaceToolProvider) libraryReadEnabled() bool {
 // tokens. Reject unknown/oversized/trailing input rather than interpreting a
 // pasted project note as tool instructions.
 func decodeLibraryToolArgs(raw string, target any) error {
-	if len(raw) > 4096 {
+	return decodeLibraryToolArgsWithin(raw, target, 4096)
+}
+
+func decodeLibraryToolArgsWithin(raw string, target any, limit int) error {
+	if len(raw) > limit {
 		return fmt.Errorf("library query is too large")
 	}
 	decoder := json.NewDecoder(bytes.NewReader([]byte(raw)))

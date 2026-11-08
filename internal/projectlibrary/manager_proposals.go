@@ -40,6 +40,13 @@ type ManagerProposal struct {
 	// DismissedAt is set only by the owner's separate dismissal; it changes
 	// nothing else about the Home.
 	DismissedAt *time.Time `json:"dismissed_at,omitempty"`
+	// Kind "fields" only (PRD #792 FR17–FR22): the bounded patch, who proposed
+	// it (manager or keeper, and from which workspace), and when a newer
+	// suggestion from the same proposer kind for the same entry withdrew it.
+	ProposedFields      *ProposedFields `json:"proposed_fields,omitempty"`
+	ProposerKind        string          `json:"proposer_kind,omitempty"`
+	ProposerWorkspaceID string          `json:"proposer_workspace_id,omitempty"`
+	WithdrawnAt         *time.Time      `json:"withdrawn_at,omitempty"`
 }
 
 type ManagerProposalRow struct {
@@ -657,6 +664,9 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 	if proposal.DismissedAt != nil {
 		return "dismissed"
 	}
+	if proposal.WithdrawnAt != nil {
+		return "withdrawn"
+	}
 	if !proposal.ExpiresAt.After(s.now().UTC()) {
 		return "expired"
 	}
@@ -665,8 +675,7 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 	}
 	authority := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: proposal.AgentInstanceID,
 		AgentName: proposal.AgentName}
-	_, err := s.authorizeManager(authority)
-	if err != nil {
+	if !s.proposerAvailable(scope, proposal) {
 		return "unavailable"
 	}
 	state, getErr := s.workspaces.Get(scope.HomeID)
@@ -693,6 +702,11 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 	} else if proposal.Kind == "session_goal" {
 		if proposal.Goal == nil || proposal.Digest != sessionGoalProposalDigest(scope, authority, proposal.EntryID,
 			*proposal.Goal, proposal.Reason, proposal.EntryRevision, proposal.BindingRevision, proposal.GoalSessionCount) {
+			return "stale"
+		}
+	} else if proposal.Kind == ProposalKindFields {
+		if proposal.ProposedFields == nil || proposal.Digest != fieldsProposalDigest(scope, proposerOf(proposal),
+			proposal.EntryID, proposal.FieldsRevision, proposal.BindingRevision, *proposal.ProposedFields, proposal.Reason) {
 			return "stale"
 		}
 	} else if proposal.Digest != proposalDigest(scope, authority, proposal.EntryID, proposal.NextAction,

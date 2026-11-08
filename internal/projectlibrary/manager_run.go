@@ -58,14 +58,15 @@ var finishedRunReasons = map[string]bool{"": true, "proposal_limit": true, "time
 var skippedRunReasons = map[string]bool{"no_manager": true, "no_model": true, "provider_unavailable": true,
 	"unavailable": true, "superseded": true, "model_error": true, "time_limit": true, "interrupted": true}
 
-// The only tools a scan-review turn may call: four reads and five inert
+// The only tools a scan-review turn may call: four reads and six inert
 // proposal tools. Anything else the model names is refused unexecuted.
 var managerRunReadTools = map[string]bool{"home_library_search": true, "home_library_detail": true,
 	"home_library_sessions": true, "home_library_handoff_receipts": true}
 
 var managerRunProposalTools = map[string]bool{"home_library_propose_next_action": true,
 	"home_library_propose_project_review": true, "home_library_propose_session_goal": true,
-	"home_library_propose_root_review": true, "home_library_propose_session_recap": true}
+	"home_library_propose_root_review": true, "home_library_propose_session_recap": true,
+	"home_library_propose_fields": true}
 
 // ManagerRunContext marks proposals made during one scan-review turn. The
 // host sets it on the ManagerAuthority it hands to the turn's tools. Brief is

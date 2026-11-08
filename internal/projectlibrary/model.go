@@ -632,7 +632,15 @@ func (d Document) valid(scope Scope) bool {
 			(proposal.DismissedAt != nil && proposal.DismissedAt.Before(proposal.CreatedAt)) {
 			return false
 		}
+		if proposal.Kind != ProposalKindFields && (proposal.ProposedFields != nil || proposal.ProposerKind != "" ||
+			proposal.ProposerWorkspaceID != "" || proposal.WithdrawnAt != nil) {
+			return false
+		}
 		switch proposal.Kind {
+		case ProposalKindFields:
+			if !fieldsProposalShapeValid(proposal) {
+				return false
+			}
 		case "": // Existing saved next-action suggestions retain their original digest.
 			if proposal.SessionID != "" || proposal.SessionRevision != 0 || proposal.Recap != "" ||
 				proposal.RootSetDigest != "" || proposal.EntryRevision != 0 || proposal.Goal != nil || proposal.GoalSessionCount != 0 ||

@@ -176,6 +176,8 @@ var nativeToolSideEffects = map[string]SideEffect{
 	"home_library_propose_root_review":    SideEffectExternal,
 	"home_library_propose_session_goal":   SideEffectExternal,
 	"home_library_propose_project_review": SideEffectExternal,
+	"home_library_propose_fields":         SideEffectExternal,
+	"project_card_propose_fields":         SideEffectExternal,
 	"weather":                             SideEffectExternal,
 	"air_quality":                         SideEffectExternal,
 	"web_search":                          SideEffectExternal,

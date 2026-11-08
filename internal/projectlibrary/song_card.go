@@ -55,6 +55,41 @@ type SongCard struct {
 	// Fields are the connected entry's portfolio and plugin fields (PRD #792
 	// FR14). Nil for a broken, diverged or not yet adopted link.
 	Fields *SongCardFields `json:"fields,omitempty"`
+	// Suggestions are this entry's ready fields suggestions, newest first
+	// (PRD #792 FR24). Accept and Dismiss use the Home's proposal routes.
+	Suggestions []SongCardSuggestion `json:"suggestions,omitempty"`
+}
+
+// SongCardSuggestion is one waiting fields suggestion as the card shows it:
+// who, when, what would change and why. The reason is untrusted agent text.
+type SongCardSuggestion struct {
+	ID           string         `json:"id"`
+	AgentName    string         `json:"agent_name"`
+	ProposerKind string         `json:"proposer_kind"`
+	CreatedAt    time.Time      `json:"created_at"`
+	ExpiresAt    time.Time      `json:"expires_at"`
+	Fields       ProposedFields `json:"proposed_fields"`
+	Reason       string         `json:"reason,omitempty"`
+}
+
+// songCardSuggestions lists the entry's ready fields suggestions, newest
+// first, with plugin fields only under ids the words declare.
+func (s *Store) songCardSuggestions(scope Scope, doc Document, entryID string, words Words) []SongCardSuggestion {
+	var out []SongCardSuggestion
+	for i := len(doc.Proposals) - 1; i >= 0; i-- {
+		proposal := doc.Proposals[i]
+		if proposal.Kind != ProposalKindFields || proposal.EntryID != entryID || proposal.ProposedFields == nil ||
+			s.managerProposalStatus(scope, doc, proposal) != "ready" {
+			continue
+		}
+		if len(proposal.ProposedFields.Extra) > 0 && !DeclaredExtraFields(proposal.ProposedFields.Extra, words) {
+			continue // The review would refuse it: no Accept for a field the package no longer declares.
+		}
+		out = append(out, SongCardSuggestion{ID: proposal.ID, AgentName: proposal.AgentName,
+			ProposerKind: proposal.ProposerKind, CreatedAt: proposal.CreatedAt, ExpiresAt: proposal.ExpiresAt,
+			Fields: proposal.ProposedFields.clone(), Reason: proposal.Reason})
+	}
+	return out
 }
 
 // SongCardFields is what the card's details block shows. Extra holds only the
@@ -164,6 +199,7 @@ func (s *Store) SongCard(scope Scope, childID string, words Words) (SongCard, er
 		}
 		card.LastSession = lastAcceptedRecap(doc.Sessions, entry.ID)
 		card.Fields = songCardFields(entry.Fields, words)
+		card.Suggestions = s.songCardSuggestions(scope, doc, entry.ID, words)
 		return card, nil
 	}
 	return card, nil
