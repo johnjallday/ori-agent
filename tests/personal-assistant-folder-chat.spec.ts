@@ -2,7 +2,12 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { folderResponseFixtures } from './fixtures/assistant-folder-response.js';
-import { chooseAttach, chooseConversation, openAttachMenu } from './helpers/assistant-menus';
+import {
+  openFolderAttach,
+  chooseAttach,
+  chooseConversation,
+  openAttachMenu
+} from './helpers/assistant-menus';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 
 // Browser controller/ordering fixtures, not proof of model grounding. Hire/HQ
@@ -317,7 +322,7 @@ async function reopen(page: Page) {
   await page.keyboard.press('Escape');
 }
 async function choose(page: Page, name = 'Documents') {
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name, exact: true })
@@ -855,7 +860,7 @@ test('browser fixture: non-Home cancel/error/replacement retains drafts and late
   await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   await expect(page.locator('#personalAssistantAttachMenu')).toBeFocused();
   fixture.scan = 'delay';
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
@@ -882,30 +887,28 @@ for (const theme of ['light', 'dark']) {
     // Add folder, and Enter chooses it. Focus returned to Add folder lands on "+".
     const attach = page.locator('#personalAssistantAttachMenu');
     const chip = page.locator('#personalAssistantFolderChip');
-    let releaseChoices: (() => Promise<void>) | undefined;
-    await page.route(
-      '**/api/home-assistant/folder-context/choices',
-      route => {
-        releaseChoices = () =>
-          route.fulfill({ json: { chips: [{ id: 'documents', label: 'Documents' }] } });
-      },
-      { times: 1 }
-    );
     await attach.focus();
     await attach.press('Enter');
     await expect(chip).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.locator('#personalAssistantFolderChooserCancel')).toBeFocused();
+    // Add folder opens the chooser whose folder starts an agent on it, with
+    // focus inside; Esc puts it away and returns to "+".
+    const agentChooser = page.locator('#personalAssistantFolderChooser');
+    await expect(agentChooser).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Boolean(document.activeElement?.closest('#personalAssistantFolderChooser'))
+        )
+      )
+      .toBe(true);
     await page.keyboard.press('Escape');
-    await expect(attach).toBeFocused();
-    await expect.poll(() => Boolean(releaseChoices)).toBe(true);
-    await releaseChoices!();
-    await expect(page.locator('#personalAssistantContextChooser')).toBeHidden();
+    await expect(agentChooser).toBeHidden();
     await expect(attach).toBeFocused();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await attach.press('Enter');
-    await expect(chip).toBeFocused();
-    await page.keyboard.press('Enter');
+    // The conversation's attach flow (a pasted path's card, Re-pick) keeps
+    // its own keyboard path.
+    await openFolderAttach(page);
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })

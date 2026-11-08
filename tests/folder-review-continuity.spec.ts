@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
 import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach, chooseConversation } from './helpers/assistant-menus';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 import { finishPluginSetupWizard } from './helpers/plugin-setup-wizard';
 
@@ -343,7 +343,7 @@ test('an opened folder review survives a server restart without a new pick', asy
   }
   let state: { conversation: string; offer: string };
   if (seeding && !carried) {
-    await chooseAttach(page, '#personalAssistantFolderChip');
+    await openFolderAttach(page);
     const chooser = page.locator('#personalAssistantFolderChoices');
     await chooser.getByLabel('or paste a folder path').fill(join(sandbox!, 'Albums', 'Album-5'));
     const reviewed = page.waitForResponse(

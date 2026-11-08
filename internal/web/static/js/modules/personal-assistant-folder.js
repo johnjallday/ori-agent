@@ -6717,15 +6717,13 @@ function openHQCard() {
   return window.PersonalAssistantHQCard?.expand?.() === true;
 }
 
-// openChooser is the user asking to explore a folder: the chip above the
-// composer, Home's toolbar button, the `folder=show` link, the mission's
-// Start, or an offer's own "Show another folder". Every one of them starts
-// the same turn in the conversation, and the folder chosen there starts an
-// agent on it (one card for every folder). Existing reviewed offers retain
-// their legacy execution controls.
-// openChooser is Home's "Explore a folder": the chooser in the conversation,
-// whose choice starts an agent on the folder (folder-agent-card.js). The
-// composer's Add folder keeps attaching a folder to the conversation.
+// openChooser is the user asking to explore a folder: the composer's Add
+// folder, Home's toolbar button, the `folder=show` link, the mission's Start,
+// or an offer's own "Show another folder". Every one of them starts the same
+// turn in the conversation, and the folder chosen there starts an agent on it
+// (one card for every folder, folder-agent-card.js); the receipt and the
+// report follow in the conversation and the status line under it. Offers made
+// before this change keep their own controls until they are decided.
 function openChooser() {
   if (!state.available) {
     openHQCard();
@@ -6738,7 +6736,22 @@ function openChooser() {
   render();
   const els = elements();
   els?.root?.scrollIntoView?.({ block: 'nearest' });
-  els?.chips?.querySelector('button')?.focus?.();
+  // The first folder, or the typed path when there are none to offer.
+  const first = els?.chips?.querySelector('button') || els?.typedFolder?.querySelector('input');
+  first?.focus?.();
+}
+
+// closeChooser puts the chooser away (Esc) and returns focus to where the
+// folder was asked for.
+function closeChooser() {
+  state.chooserOpen = false;
+  showStatus('');
+  render();
+  const back = [
+    document.getElementById('personalAssistantAttachMenu'),
+    document.getElementById('personalAssistantInput')
+  ].find(node => node && !node.hidden && !node.disabled && node.offsetParent !== null);
+  back?.focus?.();
 }
 
 async function load() {
@@ -6867,7 +6880,7 @@ function renderFolderAgent(els) {
   host.replaceChildren(
     renderFolderAgentCard(card, document, {
       error,
-      onStart: (brief, button) => void startAgent(brief, button)
+      onStart: (brief, button, hire) => void startAgent(brief, button, hire)
     })
   );
 }
@@ -6912,14 +6925,16 @@ async function chooseForAgent(body) {
   }
 }
 
-async function startAgent(brief, button) {
+async function startAgent(brief, button, hire) {
   const card = state.agent.card;
   if (!card || state.agent.busy) return;
   state.agent.busy = true;
   if (button) button.disabled = true;
   try {
-    const result = await startFolderAgent(card.token, brief);
+    const result = await startFolderAgent(card.token, brief, globalThis.fetch, hire);
     if (result.error) {
+      // A refusal (a taken name, a model gone) redraws the card as typed.
+      card.brief = brief;
       state.agent.error = result.duplicate?.name
         ? `${result.error} Open ${result.duplicate.name} from the map.`
         : result.error;
@@ -7632,6 +7647,14 @@ function init() {
   els.brief?.addEventListener('input', () => {
     state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };
     els.brief.setCustomValidity(globalThis.OriFolderSetupVisual.briefError(els.brief.value));
+  });
+  // Esc closes the folder chooser without closing the drawer, and gives focus
+  // back to "+" (Add folder's menu) or the composer.
+  els.chooser?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !state.chooserOpen || state.busy) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeChooser();
   });
   window.PersonalAssistantFolder = {
     open: openChooser,

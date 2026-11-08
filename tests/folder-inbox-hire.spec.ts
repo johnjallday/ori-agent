@@ -6,7 +6,7 @@ import {
   inboxFirstBatchItems,
   type FirstBatchItem
 } from './helpers/folder-hire-report-cases';
-import { chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
 
 // Hire File Curator for an inbox folder (Downloads, Desktop, Documents and the
 // like), from the attach to the first batch's report, in a real browser against
@@ -58,7 +58,7 @@ async function openDrawer(page: Page) {
 async function attachFromComposer(page: Page, name: string) {
   await page.goto('/agents');
   await openDrawer(page);
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await page.locator('.personal-assistant-panel__chip', { hasText: name }).first().click();
 }
 

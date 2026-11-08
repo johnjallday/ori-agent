@@ -35,6 +35,15 @@ func TestStart_RefusesAPathField(t *testing.T) {
 	}
 }
 
+func TestStart_HireRefusesAPathFieldToo(t *testing.T) {
+	rec := httptest.NewRecorder()
+	handler().Start(rec, httptest.NewRequest(http.MethodPost, "/start",
+		strings.NewReader(`{"choice_token":"x","hire":{"name":"A","path":"/tmp"}}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
 func TestGet_AWorkspaceWithoutAFolderRecordHasNoReport(t *testing.T) {
 	dir := t.TempDir()
 	service := folderagent.NewService(folderagent.Deps{Store: folderagent.NewStore(func(string) (string, error) { return dir, nil })})
@@ -64,6 +73,9 @@ func TestWriteError_PlainSentences(t *testing.T) {
 		{&personalassistant.FolderRootError{Message: "Choose a folder outside the Workspace Directory."}, http.StatusBadRequest, "Choose a folder outside the Workspace Directory."},
 		{&folderagent.Refusal{Code: "anchor_already_owned", Message: `This folder already belongs to the workspace "Songs".`, Status: 409,
 			Duplicate: &folderagent.WorkspaceRef{ID: "ws-1", Name: "Songs"}}, http.StatusConflict, `This folder already belongs to the workspace "Songs".`},
+		{&folderagent.Refusal{Code: "agent_name_taken", Status: 409,
+			Message: "You already have an agent named Atlas. Choose it under One of your agents, or give this one another name."},
+			http.StatusConflict, "You already have an agent named Atlas. Choose it under One of your agents, or give this one another name."},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()

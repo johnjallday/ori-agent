@@ -2194,6 +2194,125 @@ manual consent, not just `paused:true` or missing approval data.
 See [reviewed creation architecture](../architecture/file-janitor-creation-flow.md)
 for persistence versions, dispatch/receipt refusal fences and lifecycle semantics.
 
+## Folder Agent API
+
+"Start an agent on <folder>" (`tasks/prd-folder-agent-evolution.md`). Every entry that shows a folder (Home's Explore a folder, the composer's Add folder, Create Workspace's assisted pane) shows the same card. Its Hire step names who is hired before anything exists. Hire & start then creates an anchored workspace on the folder, the hired agent in it, and its first ticket `Look around <folder>`. The agent then walks the folder (metadata only), takes one bounded look and reports. **No request carries a filesystem path.** The folder is chosen on the server, and Start names only the server's choice token. Bodies are capped at 8 KiB and refuse unknown fields with `400`. Every error is flat, `{"error": "<one sentence>"}`, and the card shows the sentence unchanged. Some errors add `code`, `duplicate` or `repair: "choose_folder"`. `503` means the feature is not wired.
+
+Base path: `/api/personal-assistant/folder-agent`.
+
+### Choose a Folder
+
+**Endpoint:** `POST /api/personal-assistant/folder-agent/choose`
+
+The body is one of `{ "chip": "downloads" }`, `{ "picker": true }` or `{ "selection_token": "<token from POST /api/folder-picker/select-path>" }`. Nothing is created and nothing is read. A cancelled dialog answers `{ "cancelled": true }`. Otherwise:
+
+```json
+{
+  "card": {
+    "choice_token": "…",
+    "folder_name": "Ori Music Demo",
+    "title": "Start an agent on Ori Music Demo",
+    "field": "What should it do?",
+    "brief": "Find out what's here and set it up",
+    "brief_max": 300,
+    "action": "Hire & start",
+    "note": "…",
+    "hire": {
+      "agent_name": "Ori Music Demo Manager",
+      "mandate": "",
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "models": [ { "provider": "claude", "model": "claude-sonnet-5-5", "label": "claude-sonnet-5-5 (claude)", "default": true } ],
+      "agents": [ { "name": "Journal", "model": "…" } ],
+      "existing": "",
+      "name_max": 60
+    }
+  }
+}
+```
+
+`hire` is the card's Hire step: who is hired before anything is created.
+- `models` lists the models a new agent can have. Only tool-capable providers are included. Cloud and CLI providers appear only with credentials. A local server appears only when the system model is on it.
+- `provider` and `model` are the system model (`default: true`). Both are empty when no system model is set; the card then preselects "No model yet".
+- `agents` lists the owner's own agents. The built-in assistant and agents that only a workspace holds are left out.
+- `existing` preselects a saved agent that already has the default name, so it is reused rather than hired twice.
+
+### Start (Hire & start)
+
+**Endpoint:** `POST /api/personal-assistant/folder-agent/start`
+
+```json
+{
+  "choice_token": "…",
+  "brief": "Find out what's here and set it up",
+  "hire": { "name": "Ori Music Demo Manager", "provider": "claude", "model": "claude-sonnet-5-5", "mandate": "Keep these songs moving" }
+}
+```
+
+or, to reuse one of the owner's agents, `"hire": { "existing": "Journal" }`.
+
+`201` with `{ "success": true, "folder_agent": <view> }` in state `looking`. The brief and the mandate must each be one line, without paths, under 300 characters (`400` otherwise). An empty mandate uses the brief. An empty model hires the agent without one, and the report still runs without a model.
+
+Hire refusals change nothing and keep the choice token:
+- `agent_name_taken` (`409`): a new name that an agent already has.
+- `agent_name_invalid` (`400`): longer than 60 characters, or contains a slash or a colon.
+- `agent_model_unknown` (`400`): a model the card did not offer.
+- `agent_unknown` (`400`): an `existing` agent that is not the owner's.
+
+A new agent is created with the role orchestrator, the chosen model, the mandate as its description, and the host's explorer prompt plus the mandate. A missing `hire` hires a new agent with the default name and no model.
+
+An expired token answers `410` with `repair: "choose_folder"`. A folder already inside a workspace's anchor is refused with `duplicate: { "name": "…" }`, so the card can point at that workspace instead.
+
+### The Report (view)
+
+**Endpoints:** `GET /api/personal-assistant/folder-agent` (every folder agent, `{ "folder_agents": [<view>…] }`, for the map's tile lines) and `GET /api/personal-assistant/folder-agent/{workspaceID}` (`{ "folder_agent": <view> }`). A workspace that was not started from a folder answers `{ "folder_agent": null }`.
+
+```json
+{
+  "workspace_id": "…", "workspace_name": "Ori Music Demo", "route": "/workspaces/ori-music-demo",
+  "folder_name": "Ori Music Demo", "agent_name": "Ori Music Demo Manager", "ticket_id": "…",
+  "brief": "…",
+  "state": "looking | reported | kept | setting_up | set_up | failed",
+  "receipt": "Looking around…",
+  "progress": { "entries": 412, "folders_left": 0 },
+  "progress_line": "Looking around · 412 entries · 3 folders left",
+  "facts_line": "8 songs across Albums and Picker Songs; Filed is empty",
+  "stage": "folder | tools | group | home",
+  "stage_line": "…",
+  "candidates": [ { "id": "…", "kind": "…", "name": "…", "source": "table | installed_app | installed | search", "action": "…", "why": "…", "required": false, "ranked": true, "…": "…" } ],
+  "next_folders": ["Albums"],
+  "what_it_is": "…", "suggested_goal": "…", "first_ticket": "…", "first_ticket_why": "…",
+  "question": "…", "ask_folders": [ { "name": "Albums", "…": "…" } ],
+  "model_sentence": "…", "tools_sentence": "…",
+  "actions": ["set_up", "keep", "look_further"],
+  "plan": { "stage": "tools", "lines": [ { "…": "…" } ], "digest": "…", "runnable": true, "unavailable": "", "selected": ["…"] },
+  "setup": { "stage": "tools", "lines": [ { "…": "…" } ], "status": "running | done | stopped", "stop_reason": "", "started_at": "…", "finished_at": "…" },
+  "next_ticket": { "id": "…", "title": "…", "started": false },
+  "left_out": { "<candidate id>": "<why it was left out>" },
+  "nested": { "id": "…", "name": "…" },
+  "failure": "",
+  "updated_at": "…"
+}
+```
+
+Fields with nothing to say are left out. `what_it_is`, `suggested_goal`, `first_ticket`, `question` and the ranked part of `candidates` come from the agent's turn. They carry provenance on the record (`source: first_look_model`, the model and the ticket id). Without a model the report keeps the host's walk and facts, and `model_sentence` says why. The turn's own receipt (`finished`, or `skipped(no_model | provider_unavailable | interrupted)`, with `step_limit`, `time_limit` or `token_limit` as the reason a finished turn stopped) is kept on the record. `receipt` is only the card's line while the agent looks. `actions` lists only what the report allows now. `start_next` comes first once Set it up has created the next ticket.
+
+### Report Actions
+
+All take the workspace id from the path and answer `{ "folder_agent": <view> }`. A report that has moved on answers `409` ("The report has moved on. Reload to see where it stands").
+
+- `POST …/{workspaceID}/keep`: puts the report aside (state `kept`).
+- `POST …/{workspaceID}/look-further` with `{ "folders": ["Albums"], "hint": "…" }`: starts a new walk and turn, looking at the named folders (from `next_folders` / `ask_folders`) first. `hint` is the owner's typed answer to the agent's question.
+- `POST …/{workspaceID}/plan` with `{ "selected": ["<candidate id>"] }`: answers `{ "plan": <plan> }` for the optional candidates left checked, with the `digest` that Set it up must confirm.
+- `POST …/{workspaceID}/setup` with `{ "plan_digest": "…", "selected": ["…"], "use_goal": true, "goal": "…" }`: runs the confirmed plan in the background (state `setting_up`, then `set_up`, or a stopped `setup` with Retry). A plan that changed since it was shown answers `409` with `plan_changed: true` and the current view. A stage that cannot be set up yet answers `409`.
+- `POST …/{workspaceID}/start-next`: starts the next ticket from the receipt (Start this). It never starts on its own.
+
+What Set it up runs depends on `stage`:
+
+- **tools**: installs or connects the checked tools and pins the agent's toolbox.
+- **home**: registers the folder as a root of the user's existing Home, runs the root scan, then commits scoped scans for the scopes the library itself issued, down the tree under the one consent. Scope ids never come from the client. The folder workspace moves into the Home.
+- **group**: promotes the workspace to a group in place and creates one anchored member workspace per project at any depth (at most 24), moving existing anchored subfolders in. Running work refuses the promotion.
+
 ## Personal Assistant Folder Digest API
 
 "Show me a folder" (`tasks/prd-show-me-a-folder.md`): the user points the personal assistant at a folder, the server looks at the folder's shape (names, dates, sizes, kinds, project markers — it never opens a file) and makes one explained offer. Every folder is chosen on the server, from a chip identifier or the native dialog. **No endpoint here accepts a filesystem path**: a body with any `path`- or `folder`-named field is refused with `400` before anything is looked at. Available only for an `active` or `paused` assistant with a built HQ (`409` otherwise); `503` when the feature is not wired. Bodies are capped at 4 KiB and must be one JSON object with only the fields named below.

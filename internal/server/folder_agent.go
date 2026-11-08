@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,12 +17,15 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
+	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // wireFolderAgent builds "Start an agent on <folder>" over the folder
@@ -42,6 +47,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Matches:    folderAgentMatches{builder: b},
 		Memory:     folderAgentMemory{store: workspace.NewMemoryStore(b.workspaceFileStore)},
 		Setups:     folderAgentSetups{builder: b},
+		Hiring:     folderAgentHiring{builder: b},
 	})
 	b.folderAgentService = service
 	b.folderAgentHandler = folderagenthttp.New(service, func(ctx context.Context) (string, error) {
@@ -110,6 +116,7 @@ func (w folderAgentWorkspaces) CreateAnchored(ctx context.Context, req folderage
 	}
 	created, err := b.sessionHandler.CreateFolderAgentWorkspace(ctx, sessionhttp.FolderAgentWorkspaceRequest{
 		Name: req.Name, AnchorPath: req.AnchorPath, Mission: req.Mission, AgentName: req.AgentName,
+		BindExisting: req.BindExisting, Provider: req.Provider, Model: req.Model, Mandate: req.Mandate,
 	})
 	var refusal *sessionhttp.FolderAgentRefusal
 	if errors.As(err, &refusal) {
@@ -203,6 +210,111 @@ func (w folderAgentWorkspaces) SetGoal(workspaceID, goal string) error {
 		ws.Mission = goal
 		return nil
 	})
+}
+
+// folderAgentHiring is the card's Hire section: the models a new agent can
+// have and the owner's own agents to reuse. Only tool-capable providers are
+// offered (the look calls tools). Cloud and CLI providers are registered only
+// with credentials, so they can run; local servers are always registered
+// whether or not they run, so a local model is offered only when the system
+// model is on that server. The system model comes first.
+type folderAgentHiring struct{ builder *ServerBuilder }
+
+const folderAgentHireModelsMax = 20
+
+// datedModelAlias matches a pinned snapshot ("…-20251101"): the undated name
+// beside it is the one to offer.
+var datedModelAlias = regexp.MustCompile(`-\d{8}$`)
+
+func (h folderAgentHiring) Models(context.Context) []folderagent.HireModel {
+	b := h.builder
+	if b.llmFactory == nil {
+		return nil
+	}
+	var out []folderagent.HireModel
+	seen := map[string]bool{}
+	add := func(provider, model string, isDefault bool) {
+		key := strings.ToLower(provider + "\x00" + model)
+		if provider == "" || model == "" || seen[key] || len(out) >= folderAgentHireModelsMax {
+			return
+		}
+		seen[key] = true
+		out = append(out, folderagent.HireModel{Provider: provider, Model: model, Label: model + " (" + provider + ")", Default: isDefault})
+	}
+	providers := b.llmFactory.ListProviders()
+	sort.Slice(providers, func(i, j int) bool { return providers[i].Name < providers[j].Name })
+	toolCapable := map[string]bool{}
+	for _, p := range providers {
+		toolCapable[strings.ToLower(p.Name)] = p.Capabilities.SupportsTools
+	}
+	systemProvider := ""
+	if b.configManager != nil && b.configManager.IsSystemModelConfigured() {
+		provider, model := b.configManager.GetSystemModel()
+		systemProvider = strings.ToLower(provider)
+		if toolCapable[systemProvider] {
+			add(systemProvider, model, true)
+		}
+	}
+	for _, p := range providers {
+		if !p.Capabilities.SupportsTools || (p.Type == llm.ProviderTypeLocal && strings.ToLower(p.Name) != systemProvider) {
+			continue
+		}
+		for _, model := range p.Models {
+			if datedModelAlias.MatchString(model) {
+				continue
+			}
+			add(strings.ToLower(p.Name), model, false)
+		}
+	}
+	return out
+}
+
+// Agents is the owner's own agents: the built-in assistant and agents that
+// only a workspace holds are never offered.
+func (h folderAgentHiring) Agents(context.Context, string) []folderagent.HireAgent {
+	st := h.builder.st
+	if st == nil {
+		return nil
+	}
+	root, hasRoot := st.(interface{ RootAgentFolder(string) (string, bool) })
+	var out []folderagent.HireAgent
+	for _, name := range st.ListAgents() {
+		if systemassistant.IsCanonicalName(name) {
+			continue
+		}
+		if hasRoot {
+			if _, ok := root.RootAgentFolder(name); !ok {
+				continue
+			}
+		}
+		agent, ok := st.GetAgent(name)
+		if !ok || agent == nil {
+			continue
+		}
+		// The personal assistant's own profile keeps its job; it is never a
+		// folder's agent.
+		if agent.Metadata != nil && personalassistant.ProfileProvenanceFromTags(name, agent.Metadata.Tags).AssistantID != "" {
+			continue
+		}
+		out = append(out, folderagent.HireAgent{Name: name, Model: agent.Settings.Model})
+	}
+	return out
+}
+
+func (h folderAgentHiring) AgentExists(name string) bool {
+	st := h.builder.st
+	if st == nil {
+		return false
+	}
+	if _, ok := st.GetAgent(name); ok {
+		return true
+	}
+	for _, existing := range st.ListAgents() {
+		if strings.EqualFold(existing, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // folderAgentTurns resolves the folder agent's model the way the Library
@@ -347,6 +459,31 @@ func (t folderAgentTickets) Start(workspaceID, ticketID string) error {
 
 type folderAgentSetups struct{ builder *ServerBuilder }
 
+// addFolderAgentFileCurator installs File Janitor in place on the folder's
+// workspace (the install writes its record only: no folder access, watcher or
+// schedule until its own setup) and adds File Curator as its companion. A
+// repeat is success: both steps are idempotent.
+func (b *ServerBuilder) addFolderAgentFileCurator(workspaceID string, set func(kind, state string)) error {
+	service := b.workspaceCapabilityService
+	if service == nil {
+		return errors.New("workspace capabilities are not wired")
+	}
+	set(folderagent.FolderPlanCapability, personalassistant.FolderLineWorking)
+	if _, err := service.Install(workspacecapability.InstallRequest{
+		WorkspaceID: workspaceID, CapabilityID: workspace.CapabilityFileJanitor, Source: workspace.InstallSourceInPlace,
+	}); err != nil {
+		return err
+	}
+	set(folderagent.FolderPlanCapability, personalassistant.FolderLineDone)
+	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking)
+	if _, err := service.AddCompanion(workspaceID, workspace.CapabilityFileJanitor); err != nil {
+		set(personalassistant.FolderPlanAgents, personalassistant.FolderLineFailed)
+		return err
+	}
+	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineDone)
+	return nil
+}
+
 func (s folderAgentSetups) Readiness(ctx context.Context, userID string) folderlook.Readiness {
 	b := s.builder
 	home, _ := os.UserHomeDir()
@@ -437,6 +574,11 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 				}
 			}
 			update(append([]personalassistant.FolderPlanLine(nil), lines...))
+			continue
+		case folderlook.KindFileCurator:
+			if err := b.addFolderAgentFileCurator(rec.WorkspaceID, set); err != nil {
+				return stop(folderagent.FolderPlanCapability, personalassistant.FolderStopFailed, err)
+			}
 			continue
 		case folderlook.KindIntegration:
 		default:

@@ -100,11 +100,23 @@ func (h *Handler) Choose(w http.ResponseWriter, r *http.Request) {
 }
 
 type startRequest struct {
-	ChoiceToken string `json:"choice_token"`
-	Brief       string `json:"brief"`
+	ChoiceToken string       `json:"choice_token"`
+	Brief       string       `json:"brief"`
+	Hire        *hireRequest `json:"hire"`
 }
 
-// Start creates the workspace, its agent and first ticket, and starts the walk.
+// hireRequest is the card's Hire section: {existing} reuses one of the owner's
+// agents; otherwise a new agent with {name, provider, model, mandate}.
+type hireRequest struct {
+	Existing string `json:"existing"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Mandate  string `json:"mandate"`
+}
+
+// Start hires the agent the card names, creates the workspace with it and its
+// first ticket, and starts the walk.
 func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.user(w, r)
 	if !ok {
@@ -114,7 +126,12 @@ func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	view, err := h.service.Start(r.Context(), userID, req.ChoiceToken, req.Brief)
+	var hire folderagent.Hire
+	if req.Hire != nil {
+		hire = folderagent.Hire{Existing: req.Hire.Existing, Name: req.Hire.Name, Provider: req.Hire.Provider,
+			Model: req.Hire.Model, Mandate: req.Hire.Mandate}
+	}
+	view, err := h.service.Start(r.Context(), userID, req.ChoiceToken, req.Brief, hire)
 	if err != nil {
 		writeError(w, err)
 		return

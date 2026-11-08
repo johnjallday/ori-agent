@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type Page, type TestInfo } from '
 import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
 import { stageReviewedFolderPackages } from './helpers/reviewed-folder-packages';
 import { watchFolderRequests, expectNoFolderExecution } from './helpers/folder-aware-collection';
 
@@ -87,7 +87,7 @@ async function attach(page: Page, name = 'Album-3', route = '/') {
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
   if (!(await page.locator('#personalAssistantPanel').isVisible()))
     await page.locator('#personalAssistantLauncher').click();
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await page.locator('#personalAssistantFolderChoices .folder-path-entry__input').fill(seed(name));
   await page.locator('#personalAssistantFolderChoices .folder-path-entry__use').click();
   await expect(page.locator('#personalAssistantActiveFolderName')).toHaveText(name);

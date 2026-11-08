@@ -10281,93 +10281,127 @@ test('a refused placement pick recovers only its attachment version and fences o
   }
 });
 
-test('attachment suggests once; cancelled picking restores its trigger without stealing later focus', async () => {
-  for (const [cancelled, movedFocus] of [
-    [false, false],
-    [true, false],
-    [true, true]
+// The pane's folder choice starts an agent on the folder (the one card every
+// entry shows): the build is never sent the folder and no suggestion runs.
+function prepareFolderAgentPane() {
+  const fixture = prepareProposalWizard();
+  const { manager, pane, nodes, window } = fixture;
+  const host = new BuildNode('section', 'workspaceBuildFolderAgent');
+  host.hidden = true;
+  nodes.set('workspaceBuildFolderAgent', host);
+  const statuses = [];
+  let closed = 0;
+  pane.folderChooserStatus = (message, failed = false) => statuses.push([message, failed]);
+  pane.closeFolderChooser = () => {
+    closed++;
+  };
+  pane.setFolderPathBusy = () => {};
+  manager.workspaceBuildApi = () => ({
+    folder: () => assert.fail('the folder must not be attached to the build')
+  });
+  manager.suggestWorkspaceBuildFolder = () => assert.fail('no folder suggestion runs');
+  const mounts = [];
+  const events = [];
+  window.dispatchEvent = event => events.push(event);
+  window.CustomEvent = class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  };
+  return { ...fixture, host, statuses, mounts, events, closedCount: () => closed };
+}
+
+test('a folder chosen in the pane shows the one folder card and never reaches the build', async () => {
+  for (const [detail, body] of [
+    [{ mode: 'chip', chip: 'downloads' }, { chip: 'downloads' }],
+    [{ mode: 'picker' }, { picker: true }],
+    [{ mode: 'path', path: '/Users/me/Songs' }, { selection_token: 'tok-1' }]
   ]) {
-    const { manager, pane, document, nameInput } = prepareProposalWizard();
-    let requests = 0,
-      suggestions = 0,
-      restored = 0;
-    pane.closeFolderChooser = () => {
-      restored++;
+    const fixture = prepareFolderAgentPane();
+    const { manager, window, host, mounts } = fixture;
+    manager.selectWorkspaceBuildFolderPath = async path => {
+      assert.equal(path, '/Users/me/Songs');
+      return 'tok-1';
     };
-    manager.workspaceBuild.session.proposal = null;
-    manager.workspaceBuildApi = () => ({
-      folder: async () => {
-        requests++;
-        if (movedFocus) document.activeElement = nameInput;
-        return { ok: true, body: { session: manager.workspaceBuild.session, cancelled } };
+    window.FolderAgentCard = {
+      mountFolderAgentChoice: async (target, sent) => {
+        mounts.push(sent);
+        assert.equal(target, host);
+        return { card: { title: 'Start an agent on Songs' } };
       }
-    });
-    manager.suggestWorkspaceBuildFolder = async () => {
-      suggestions++;
     };
-    const pending = manager.attachWorkspaceBuildFolder({ mode: 'picker' });
-    await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
-    await pending;
-    assert.equal(requests, 1);
-    assert.equal(suggestions, cancelled ? 0 : 1);
-    assert.equal(restored, cancelled && !movedFocus ? 1 : 0);
+    await manager.attachWorkspaceBuildFolder(detail);
+    assert.equal(JSON.stringify(mounts), JSON.stringify([body]));
+    assert.equal(fixture.closedCount(), 1);
+    assert.equal(manager.workspaceBuild.folderAgentPending, false);
+    assert.equal(manager.workspaceBuild.session.folder.observation.id, 'obs-1');
   }
 });
 
-test('a build re-pick redraws the same review without another model suggestion', async () => {
-  const { manager, nameInput } = prepareProposalWizard();
-  const build = manager.workspaceBuild;
-  build.session.proposal = null;
-  const draft = JSON.stringify(build.session.draft);
-  const folder = JSON.stringify(build.session.folder);
-  const name = nameInput.value;
-  manager.workspaceBuildApi = () => ({
-    folder: async () => ({
-      ok: true,
-      body: {
-        session: { ...build.session, version: build.session.version + 2 },
-        resumed_review: 'same-review'
-      }
-    })
-  });
-  manager.suggestWorkspaceBuildFolder = () =>
-    assert.fail('recovery must not admit another suggestion');
+test('one pane pick at a time; Start announces the new workspace to Home and the map', async () => {
+  const fixture = prepareFolderAgentPane();
+  const { manager, window, events } = fixture;
+  const choosing = deferredBuildResult();
+  let calls = 0;
+  window.FolderAgentCard = {
+    mountFolderAgentChoice: async (_host, _body, options) => {
+      calls++;
+      await choosing.promise;
+      options.onStarted({ workspace_id: 'ws-songs' });
+      return { card: {} };
+    }
+  };
+  const pending = manager.attachWorkspaceBuildFolder({ mode: 'picker' });
   await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
-  assert.equal(JSON.stringify(build.session.draft), draft);
-  assert.equal(JSON.stringify(build.session.folder), folder);
-  assert.equal(nameInput.value, name);
-  assert.equal(build.folderPending, false);
+  choosing.resolve();
+  await pending;
+  assert.equal(calls, 1);
+  assert.equal(manager.workspaceBuild.folderAgentStarted, true);
+  assert.deepEqual(
+    events.map(event => [event.type, event.detail?.workspaceID || event.detail?.workspaceId]),
+    [
+      ['ori:workspaces-changed', 'ws-songs'],
+      ['ori:folder-agent-started', 'ws-songs']
+    ]
+  );
 });
 
-test('attachment delivery during the hide transition cannot admit inference or revive the review', async () => {
-  const { manager } = prepareProposalWizard();
-  const build = manager.workspaceBuild;
-  build.session.proposal = null;
-  const started = deferredBuildResult(),
-    reply = deferredBuildResult();
-  let suggestions = 0;
-  manager.workspaceBuildApi = () => ({
-    folder: () => {
-      started.resolve();
-      return reply.promise;
-    }
-  });
-  manager.suggestWorkspaceBuildFolder = async () => {
-    suggestions++;
+test('a refused or cancelled pane pick says so on the chooser and draws nothing after close', async () => {
+  const refused = prepareFolderAgentPane();
+  refused.window.FolderAgentCard = {
+    mountFolderAgentChoice: async () => ({ error: 'That folder is not on this computer' })
   };
-  manager.hideWorkspaceCreatorModal = () => {}; // hidden.bs.modal has not torn down the client yet
-  const pending = manager.attachWorkspaceBuildFolder({ mode: 'picker' });
-  await started.promise;
-  await manager.guardWorkspaceBuildClose({ preventDefault() {} });
-  assert.equal(build.closeReady, true);
-  reply.resolve({
-    ok: true,
-    body: { session: { ...build.session, version: 9, proposal: { id: 'late', status: 'pending' } } }
-  });
+  await refused.manager.attachWorkspaceBuildFolder({ mode: 'chip', chip: 'desktop' });
+  assert.deepEqual(refused.statuses.at(-1), ['That folder is not on this computer', true]);
+  assert.equal(refused.closedCount(), 0);
+
+  const closing = prepareFolderAgentPane();
+  const reply = deferredBuildResult();
+  let active;
+  closing.window.FolderAgentCard = {
+    mountFolderAgentChoice: async (_host, _body, options) => {
+      await reply.promise;
+      active = options.isActive();
+      return { card: {} };
+    }
+  };
+  closing.manager.hideWorkspaceCreatorModal = () => {};
+  const pending = closing.manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+  await closing.manager.guardWorkspaceBuildClose({ preventDefault() {} });
+  closing.manager.workspaceBuild.closing = true;
+  reply.resolve();
   await pending;
-  assert.equal(build.session.version, 3);
-  assert.equal(suggestions, 0);
-  assert.equal(build.folderPending, false);
+  assert.equal(active, false);
+  assert.equal(closing.closedCount(), 0);
+});
+
+test('without the folder card module the pane says folders cannot be added', async () => {
+  const { manager, statuses } = prepareFolderAgentPane();
+  await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+  assert.deepEqual(statuses, [
+    ['Folders can’t be added right now. Your draft is unchanged.', true]
+  ]);
 });
 
 test('a proposal waiting for its draft flush cannot start after close is committed', async () => {

@@ -22,10 +22,18 @@ type FolderAgentWorkspaceRequest struct {
 	Name       string
 	AnchorPath string
 	Mission    string
-	// AgentName is "<folder name> Manager". A saved agent of exactly that name
-	// is bound (hire once, bind many); otherwise one is created. Empty creates
-	// a member workspace with no agent of its own (its group's manager leads).
-	AgentName string
+	// AgentName is the agent the owner hired on the card. With BindExisting it
+	// is one of their saved agents and is bound (hire once, bind many);
+	// otherwise it is created now with Provider, Model and Mandate, and a
+	// saved agent of that name is refused rather than silently bound. Empty
+	// creates a member workspace with no agent of its own (its group's
+	// manager leads).
+	AgentName    string
+	BindExisting bool
+	Provider     string
+	Model        string
+	// Mandate is the new agent's one-line mandate (its declared purpose).
+	Mandate string
 	// ParentID places the workspace inside a group (a promoted folder
 	// workspace's member).
 	ParentID string
@@ -65,6 +73,20 @@ func folderExplorerPrompt(folder string) string {
 		"After the owner sets the workspace up, you stay as its agent and help with its tickets.", strings.TrimSpace(folder))
 }
 
+// folderAgentConfig is the new agent the owner hired: the host's explorer
+// prompt plus their mandate, on the model they chose (empty: the default).
+func folderAgentConfig(folder string, req FolderAgentWorkspaceRequest) *store.CreateAgentConfig {
+	prompt := folderExplorerPrompt(folder)
+	mandate := strings.TrimSpace(req.Mandate)
+	if mandate != "" {
+		prompt += " The owner's mandate for you: " + mandate
+	}
+	return &store.CreateAgentConfig{
+		Role: types.RoleOrchestrator, SystemPrompt: prompt, Description: mandate,
+		Model: strings.TrimSpace(req.Model), LLMProvider: strings.TrimSpace(req.Provider),
+	}
+}
+
 // CreateFolderAgentWorkspace validates the anchor first, so a refusal leaves
 // nothing behind; then binds or creates the agent and creates the anchored
 // workspace through the ordinary creation pipeline with that agent as its
@@ -83,10 +105,18 @@ func (h *Handler) CreateFolderAgentWorkspace(ctx context.Context, req FolderAgen
 	}
 	result := FolderAgentWorkspace{AgentName: agentName, Nested: h.parentAnchorOwner(path)}
 	// A member (no agent name) gets no agent and no blueprint roster.
-	if _, exists := h.agentStore.GetAgent(agentName); agentName != "" && !exists {
-		if err := h.agentStore.CreateAgent(agentName, &store.CreateAgentConfig{
-			Role: types.RoleOrchestrator, SystemPrompt: folderExplorerPrompt(name),
-		}); err != nil {
+	_, exists := h.agentStore.GetAgent(agentName)
+	switch {
+	case agentName == "":
+	case req.BindExisting && !exists:
+		return FolderAgentWorkspace{}, &FolderAgentRefusal{Code: "agent_unknown", Status: http.StatusBadRequest,
+			Message: "That agent is no longer here. Choose another or hire a new one."}
+	case req.BindExisting:
+	case exists:
+		return FolderAgentWorkspace{}, &FolderAgentRefusal{Code: "agent_name_taken", Status: http.StatusConflict,
+			Message: "You already have an agent named " + agentName + ". Choose it under One of your agents, or give this one another name."}
+	default:
+		if err := h.agentStore.CreateAgent(agentName, folderAgentConfig(name, req)); err != nil {
 			return FolderAgentWorkspace{}, fmt.Errorf("create the folder's agent: %w", err)
 		}
 		result.AgentCreated = true

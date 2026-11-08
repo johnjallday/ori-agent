@@ -1367,8 +1367,8 @@ function setFolderBusy(busy, source = 'legacy') {
  * other page has no folder flow of its own, so it goes to Home's.
  */
 function exploreFolder() {
-  // Home starts an agent on the chosen folder; other pages attach a folder to
-  // the conversation as before.
+  // Every page's drawer starts an agent on the chosen folder (the one folder
+  // card); attaching remains only where the folder module is missing.
   const folder = window.PersonalAssistantFolder;
   if (folder && typeof folder.open === 'function') {
     folder.open();

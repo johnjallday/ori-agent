@@ -1024,6 +1024,8 @@ function syncNeedsYou(els = elements()) {
   const queued = syncNeedsQueue(els);
   const cards = Array.from(els.needsCards?.children || []).reduce((count, card) => {
     if (card.hidden || card.id === 'personalAssistantNeedsYouReports') return count;
+    // The folder agents' list holds one card per report, and none when empty.
+    if (card.id === 'personalAssistantNeedsYouFolderAgents') return count + card.childElementCount;
     // The unfinished-build list is one element holding one row per build.
     if (card.id === 'personalAssistantNeedsYouBuild') return count + card.childElementCount;
     return count + 1;

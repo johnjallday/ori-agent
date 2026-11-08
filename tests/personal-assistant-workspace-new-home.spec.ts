@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
 
 // Fresh isolated exact candidate; no existing Home, vendor model or live REAPER.
 test('declared new Home: explicit setup persists resulting parent and reload reuses outcome', async ({
@@ -65,7 +65,7 @@ test('declared new Home: explicit setup persists resulting parent and reload reu
   await page.goto('/');
   await page.locator('#personalAssistantLauncher').click();
   await page.locator('#personalAssistantInput').fill('Add this to my workspace');
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })

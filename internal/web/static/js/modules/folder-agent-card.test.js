@@ -5,10 +5,12 @@ import {
   chooseFolder,
   folderAgentActionPath,
   folderAgentCardView,
+  folderAgentHireChoice,
   folderAgentNeedsView,
   folderAgentReportView,
   folderAgentTileLine,
   mountWorkspaceFolderAgent,
+  mountFolderAgentChoice,
   mountFolderAgentReports,
   postFolderAgentAction,
   renderFolderAgentCard,
@@ -135,8 +137,20 @@ test('the card before Start reads the server card and refuses one without a toke
     field: 'What should it do?',
     brief: "Find out what's here and set it up",
     brief_max: 300,
-    action: 'Start',
-    note: 'It looks before it touches anything. You confirm every step after.'
+    action: 'Hire & start',
+    note: 'Nothing is created until you hire.',
+    hire: {
+      agent_name: 'Ori Music Demo Manager',
+      mandate: '',
+      provider: 'claude',
+      model: 'claude-sonnet-5-5',
+      models: [
+        { provider: 'claude', model: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5 (claude)' },
+        { provider: 'openai', model: 'gpt-x', label: 'gpt-x (openai)' }
+      ],
+      agents: [{ name: 'Atlas', model: 'claude-sonnet-5-5' }],
+      name_max: 60
+    }
   });
   assert.deepEqual(plain(view), {
     token: 'fa-1',
@@ -145,18 +159,99 @@ test('the card before Start reads the server card and refuses one without a toke
     field: 'What should it do?',
     brief: "Find out what's here and set it up",
     max: 300,
-    action: 'Start',
-    note: 'It looks before it touches anything. You confirm every step after.'
+    action: 'Hire & start',
+    note: 'Nothing is created until you hire.',
+    hire: {
+      name: 'Ori Music Demo Manager',
+      nameMax: 60,
+      mandate: '',
+      provider: 'claude',
+      model: 'claude-sonnet-5-5',
+      models: [
+        { provider: 'claude', model: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5 (claude)' },
+        { provider: 'openai', model: 'gpt-x', label: 'gpt-x (openai)' }
+      ],
+      agents: [{ name: 'Atlas', model: 'claude-sonnet-5-5' }],
+      existing: '',
+      mode: 'new'
+    }
   });
   const doc = stubDocument();
   let started = null;
-  const card = renderFolderAgentCard(view, doc, { onStart: brief => (started = brief) });
+  const card = renderFolderAgentCard(view, doc, {
+    onStart: (brief, _button, hire) => (started = { brief, hire })
+  });
   assert.equal(text(card, '.folder-agent-card__title'), 'Start an agent on Ori Music Demo');
+  assert.equal(text(card, '.folder-agent-card__start'), 'Hire & start');
+  assert.equal(text(card, '.folder-agent-card__hire-title'), 'Hire');
   const input = card.querySelector('.folder-agent-card__brief');
   assert.equal(input.maxLength, 300);
   input.value = 'Mix this song';
-  card.querySelector('button').listeners.click();
-  assert.equal(started, 'Mix this song');
+  // A new agent by default: rename it, pick another model, give it a role.
+  const name = card.querySelector('.folder-agent-card__hire-name');
+  assert.equal(name.value, 'Ori Music Demo Manager');
+  assert.equal(card.querySelector('.folder-agent-card__hire-agent').disabled, true);
+  name.value = 'Song Keeper';
+  name.listeners.input();
+  const model = card.querySelector('.folder-agent-card__hire-model');
+  model.value = 'openai\u0000gpt-x';
+  model.listeners.change();
+  const role = card.querySelector('.folder-agent-card__hire-mandate');
+  role.value = 'Keep my songs moving';
+  role.listeners.input();
+  card.querySelector('.folder-agent-card__start').listeners.click();
+  assert.deepEqual(plain(started), {
+    brief: 'Mix this song',
+    hire: {
+      name: 'Song Keeper',
+      mandate: 'Keep my songs moving',
+      provider: 'openai',
+      model: 'gpt-x'
+    }
+  });
+  // One of your agents instead: only its name is sent.
+  const reuse = card
+    .querySelectorAll('input')
+    .find(node => node.dataset.folderAgentHire === 'existing');
+  reuse.checked = true;
+  reuse.listeners.change();
+  assert.equal(name.disabled, true);
+  assert.equal(card.querySelector('.folder-agent-card__hire-agent').disabled, false);
+  card.querySelector('.folder-agent-card__start').listeners.click();
+  assert.deepEqual(plain(started.hire), { existing: 'Atlas' });
+});
+
+test('a saved manager is preselected, and no model still lets the agent be hired', () => {
+  const view = folderAgentCardView({
+    choice_token: 'fa-2',
+    folder_name: 'Songs',
+    hire: {
+      agent_name: 'Songs Manager',
+      models: [],
+      agents: [{ name: 'Songs Manager' }],
+      existing: 'Songs Manager'
+    }
+  });
+  assert.equal(view.hire.mode, 'existing');
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { existing: 'Songs Manager' });
+  const card = renderFolderAgentCard(view, stubDocument(), {});
+  assert.equal(card.querySelector('.folder-agent-card__hire-model'), null);
+  assert.match(text(card, '.folder-agent-card__hire-note'), /No model is set up yet/);
+  view.hire.mode = 'new';
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { name: 'Songs Manager', mandate: '' });
+
+  // Models but no system model: "No model yet" is preselected.
+  const unset = folderAgentCardView({
+    choice_token: 'fa-3',
+    folder_name: 'Songs',
+    hire: { models: [{ provider: 'claude_code', model: 'sonnet', label: 'sonnet (claude_code)' }] }
+  });
+  const picker = renderFolderAgentCard(unset, stubDocument(), {}).querySelector(
+    '.folder-agent-card__hire-model'
+  );
+  assert.equal(picker.children[0].textContent, 'No model yet');
+  assert.equal(unset.hire.model, '');
+  assert.equal(folderAgentHireChoice(unset.hire).model, undefined);
 });
 
 test('the receipt shows the progress line while the agent looks', () => {
@@ -528,6 +623,72 @@ test('after Set it up the receipt offers Start this for the first ticket', () =>
     folderAgentActionPath('ws-1', 'start_next'),
     '/api/personal-assistant/folder-agent/ws-1/start-next'
   );
+});
+
+test('Create Workspace mounts the same card, and Start swaps in the receipt', async () => {
+  const doc = stubDocument();
+  const host = doc.createElement('section');
+  host.hidden = true;
+  const sent = [];
+  const fetchImpl = async (url, init = {}) => {
+    sent.push([url, init.body ? JSON.parse(init.body) : null]);
+    const json = url.endsWith('/choose')
+      ? {
+          card: {
+            choice_token: 'tok',
+            folder_name: 'Songs',
+            title: 'Start an agent on Songs',
+            brief: "Find out what's here and set it up"
+          }
+        }
+      : url.endsWith('/start')
+        ? { folder_agent: reported({ workspace_id: 'ws-9', state: 'looking' }) }
+        : { folder_agent: reported({ workspace_id: 'ws-9' }) };
+    return { ok: true, status: url.endsWith('/start') ? 201 : 200, json: async () => json };
+  };
+  const started = [];
+  const result = await mountFolderAgentChoice(
+    host,
+    { chip: 'downloads' },
+    { doc, fetchImpl, onStarted: view => started.push(view.workspace_id) }
+  );
+  assert.equal(result.card.title, 'Start an agent on Songs');
+  assert.equal(host.hidden, false);
+  assert.equal(text(host, '.folder-agent-card__title'), 'Start an agent on Songs');
+  assert.equal(host.querySelector('textarea').value, "Find out what's here and set it up");
+  await host.querySelector('.folder-agent-card__start').listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(started, ['ws-9']);
+  assert.deepEqual(plain(sent.slice(0, 2)), [
+    ['/api/personal-assistant/folder-agent/choose', { chip: 'downloads' }],
+    [
+      '/api/personal-assistant/folder-agent/start',
+      {
+        choice_token: 'tok',
+        brief: "Find out what's here and set it up",
+        hire: { name: 'Songs Manager', mandate: '' }
+      }
+    ]
+  ]);
+  assert.equal(sent[2][0], '/api/personal-assistant/folder-agent/ws-9');
+  assert.equal(text(host, '.folder-agent-card__facts'), reported().facts_line);
+
+  const refused = doc.createElement('section');
+  refused.hidden = true;
+  const answer = await mountFolderAgentChoice(
+    refused,
+    { chip: 'desktop' },
+    {
+      doc,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'That folder is not on this computer' })
+      })
+    }
+  );
+  assert.deepEqual(answer, { error: 'That folder is not on this computer' });
+  assert.equal(refused.hidden, true);
 });
 
 test('the workspace page mount follows a look until the report arrives', async () => {

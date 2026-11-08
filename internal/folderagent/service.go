@@ -62,9 +62,14 @@ type CreateRequest struct {
 	Name        string
 	AnchorPath  string
 	Mission     string
-	// AgentName is "<folder name> Manager": a saved agent of that exact name
-	// is bound, otherwise one is created (orchestrator, default model).
-	AgentName string
+	// AgentName is the agent the owner hired on the card: one of their own
+	// agents (BindExisting), or a new one created with Provider, Model and
+	// Mandate (empty model: the store's default).
+	AgentName    string
+	BindExisting bool
+	Provider     string
+	Model        string
+	Mandate      string
 }
 
 // Created is what the creation made.
@@ -155,6 +160,7 @@ type Matches interface {
 
 // Deps wires a Service.
 type Deps struct {
+	Hiring     Hiring
 	Matches    Matches
 	Pins       Pins
 	Turns      Turns
@@ -203,6 +209,8 @@ type Chosen struct {
 	BriefMax   int    `json:"brief_max"`
 	Action     string `json:"action"`
 	Note       string `json:"note"`
+	// Hire is who the owner hires before anything is created.
+	Hire *HireOptions `json:"hire"`
 }
 
 // Choose resolves the folder and issues a token for Start. Nothing is
@@ -228,8 +236,9 @@ func (s *Service) Choose(ctx context.Context, userID string, c personalassistant
 	name := filepath.Base(path)
 	return &Chosen{
 		Token: token, FolderName: name, Title: "Start an agent on " + name, Field: "What should it do?",
-		Brief: DefaultBrief, BriefMax: personalassistant.BriefMaxRunes, Action: "Start",
-		Note: "It looks before it touches anything. You confirm every step after.",
+		Brief: DefaultBrief, BriefMax: personalassistant.BriefMaxRunes, Action: "Hire & start",
+		Note: "Nothing is created until you hire. It looks before it touches anything, and you confirm every step after.",
+		Hire: s.hireOptions(ctx, userID, name),
 	}, nil
 }
 
@@ -249,9 +258,10 @@ func (s *Service) dropChoice(token string) {
 	s.mu.Unlock()
 }
 
-// Start is the card's one action (PRD FR2): an anchored workspace on the
-// chosen folder, its agent, the first ticket, and the walk, started now.
-func (s *Service) Start(ctx context.Context, userID, token, brief string) (View, error) {
+// Start is the card's one action, Hire & start (PRD FR2): the agent the owner
+// hired on the card, an anchored workspace on the chosen folder with that
+// agent, the first ticket, and the walk, started now.
+func (s *Service) Start(ctx context.Context, userID, token, brief string, hire Hire) (View, error) {
 	if s == nil || s.deps.Store == nil || s.deps.Workspaces == nil || s.deps.Tickets == nil {
 		return View{}, ErrUnavailable
 	}
@@ -267,10 +277,12 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string) (View,
 		brief = DefaultBrief
 	}
 	folder := filepath.Base(path)
-	name := s.freeName(ctx, folder)
-	created, err := s.deps.Workspaces.CreateAnchored(ctx, CreateRequest{
-		OwnerUserID: userID, Name: name, AnchorPath: path, Mission: brief, AgentName: folder + " Manager",
-	})
+	req, err := s.resolveHire(ctx, userID, folder, brief, hire)
+	if err != nil {
+		return View{}, err
+	}
+	req.OwnerUserID, req.Name, req.AnchorPath, req.Mission = userID, s.freeName(ctx, folder), path, brief
+	created, err := s.deps.Workspaces.CreateAnchored(ctx, req)
 	if err != nil {
 		return View{}, err
 	}

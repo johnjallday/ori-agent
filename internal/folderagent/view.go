@@ -337,9 +337,17 @@ func BuildPlan(rec Record, selected []string) Plan {
 		case folderlook.KindHomeProvider:
 			plan.Lines = append(plan.Lines, homeLines(rec, c)...)
 		case folderlook.KindFileCurator:
-			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds File Curator", Detail: c.Detail})
-			runnable = false
-			plan.Unavailable = "Adding File Curator from a folder is not available yet."
+			// File Janitor goes into this workspace in place (the folder is
+			// already its anchor), and File Curator joins as its companion.
+			plan.Lines = append(plan.Lines,
+				personalassistant.FolderPlanLine{
+					Kind: FolderPlanCapability, Name: "Adds File Janitor to " + rec.WorkspaceName,
+					Detail: "Watching and the daily scan stay off until you turn them on in its setup.",
+				},
+				personalassistant.FolderPlanLine{
+					Kind: personalassistant.FolderPlanAgents, Name: "Adds File Curator",
+					Detail: "It explains proposed filing; you approve every move.",
+				})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
 			plan.Lines = append(plan.Lines, addOnLine(c, rec.WorkspaceName))
 		default:
@@ -364,6 +372,10 @@ func BuildPlan(rec Record, selected []string) Plan {
 
 // FolderPlanAddOn is the plan line kind of an add-on found by search.
 const FolderPlanAddOn = "add_on"
+
+// FolderPlanCapability is the plan line kind of a built-in capability
+// installed in place (File Janitor for a folder of loose files).
+const FolderPlanCapability = "capability"
 
 // addOnLine words one selected add-on: "Installs <plugin>", "Adds skill
 // <name>", "Adds <server>", each labelled "found by search" (PRD FR33).

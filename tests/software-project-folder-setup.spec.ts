@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { dirname, join, relative } from 'node:path';
-import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach, chooseConversation } from './helpers/assistant-menus';
 import { folderHireReportCases } from './helpers/folder-hire-report-cases';
 
 // A software project folder, from the first look to its first assessment, in a
@@ -399,7 +399,7 @@ async function attach(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
     (await fresh.isEnabled())
   )
     await chooseConversation(page, '#personalAssistantConversationNew');
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   return pickChip(page, chip);
 }
 
@@ -1223,7 +1223,7 @@ test.describe('a repository attached to the conversation', () => {
     await expect(page.locator('#personalAssistantLauncher')).toBeVisible({ timeout: 30_000 });
     if (!(await page.locator('#personalAssistantPanel').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
-    await chooseAttach(page, '#personalAssistantFolderChip');
+    await openFolderAttach(page);
     const attached = page.waitForResponse(
       response =>
         response.request().method() === 'POST' &&

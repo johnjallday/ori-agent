@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach, chooseConversation } from './helpers/assistant-menus';
 
 // Exact installed-candidate baseline regression, not release verification or a live model.
 // Run via reaper-demo.sh test --suite awareness with explicit clean sources.
@@ -97,7 +97,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
   });
   await page.goto(`/workspaces/${home.folder_slug}/assistant`);
   await page.locator('#personalAssistantLauncher').click();
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
@@ -317,7 +317,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
     const supportingBytes = 'Supporting-folder fixture: source must remain unchanged.';
     await writeFile(join(supportingRoot, 'references.md'), supportingBytes, { mode: 0o600 });
     const originalChild = await (await request.get(`/api/workspaces/${child.id}`)).json();
-    await chooseAttach(page, '#personalAssistantFolderChip');
+    await openFolderAttach(page);
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })

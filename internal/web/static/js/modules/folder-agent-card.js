@@ -36,9 +36,53 @@ export function folderAgentCardView(card) {
     field: String(card.field || 'What should it do?'),
     brief: String(card.brief || ''),
     max: Number(card.brief_max) > 0 ? Number(card.brief_max) : 300,
-    action: String(card.action || 'Start'),
-    note: String(card.note || '')
+    action: String(card.action || 'Hire & start'),
+    note: String(card.note || ''),
+    hire: folderAgentHireView(card.hire, card.folder_name)
   };
+}
+
+// folderAgentHireView is the card's Hire section: a new agent (name, model,
+// mandate) or one of the owner's own agents. Nothing is hired until Start.
+export function folderAgentHireView(hire, folderName = '') {
+  const source = hire && typeof hire === 'object' ? hire : {};
+  const models = (Array.isArray(source.models) ? source.models : [])
+    .filter(m => m && m.model)
+    .map(m => ({
+      provider: String(m.provider || ''),
+      model: String(m.model),
+      label: String(m.label || m.model)
+    }));
+  const agents = (Array.isArray(source.agents) ? source.agents : [])
+    .filter(a => a && a.name)
+    .map(a => ({ name: String(a.name), model: String(a.model || '') }));
+  const existing = agents.some(a => a.name === source.existing) ? String(source.existing) : '';
+  return {
+    name: String(source.agent_name || `${folderName || 'Folder'} Manager`),
+    nameMax: Number(source.name_max) > 0 ? Number(source.name_max) : 60,
+    mandate: String(source.mandate || ''),
+    provider: String(source.model ? source.provider || '' : ''),
+    model: String(source.model || ''),
+    models,
+    agents,
+    existing,
+    mode: existing ? 'existing' : 'new'
+  };
+}
+
+// folderAgentHireChoice is what Start sends for the Hire section.
+export function folderAgentHireChoice(hire) {
+  if (!hire) return undefined;
+  if (hire.mode === 'existing' && hire.existing) return { existing: hire.existing };
+  const choice = {
+    name: String(hire.name || '').trim(),
+    mandate: String(hire.mandate || '').trim()
+  };
+  if (hire.model) {
+    choice.provider = hire.provider;
+    choice.model = hire.model;
+  }
+  return choice;
 }
 
 export function folderAgentActionLabel(id) {
@@ -181,8 +225,134 @@ function el(doc, tag, className, text) {
   return node;
 }
 
-// renderFolderAgentCard draws the card before Start. onStart(brief, button)
-// posts Start; the caller swaps in the receipt.
+let hireSeq = 0;
+
+function hireField(doc, caption, control) {
+  const label = el(doc, 'label', 'folder-agent-card__hire-field');
+  label.append(el(doc, 'span', 'folder-agent-card__label', caption), control);
+  return label;
+}
+
+// renderHire draws the Hire section and keeps hire (the view's own object)
+// in step with what the owner picks.
+function renderHire(doc, hire) {
+  const group = `folder-agent-hire-${++hireSeq}`;
+  const box = el(doc, 'fieldset', 'folder-agent-card__hire');
+  box.append(el(doc, 'legend', 'folder-agent-card__hire-title', 'Hire'));
+  const radio = (mode, text) => {
+    const label = el(doc, 'label', 'folder-agent-card__hire-option');
+    const input = doc.createElement('input');
+    input.type = 'radio';
+    input.name = group;
+    input.value = mode;
+    input.checked = hire.mode === mode;
+    input.dataset.folderAgentHire = mode;
+    label.append(input, el(doc, 'span', 'folder-agent-card__hire-option-label', text));
+    return { label, input };
+  };
+
+  const fresh = radio('new', 'A new agent');
+  const freshFields = el(doc, 'div', 'folder-agent-card__hire-fields');
+  const name = doc.createElement('input');
+  name.type = 'text';
+  name.className = 'form-control form-control-sm folder-agent-card__hire-name';
+  name.maxLength = hire.nameMax;
+  name.value = hire.name;
+  name.autocomplete = 'off';
+  name.addEventListener('input', () => {
+    hire.name = String(name.value || '');
+  });
+  freshFields.append(hireField(doc, 'Name', name));
+  let model = null;
+  if (hire.models.length) {
+    model = doc.createElement('select');
+    model.className = 'form-select form-select-sm folder-agent-card__hire-model';
+    // Without a system model nothing is preselected: hired without a model,
+    // the agent still looks around and reports.
+    if (!hire.model) {
+      const none = doc.createElement('option');
+      none.value = '\u0000';
+      none.textContent = 'No model yet';
+      model.append(none);
+    }
+    hire.models.forEach(option => {
+      const item = doc.createElement('option');
+      item.value = `${option.provider}\u0000${option.model}`;
+      item.textContent = option.label;
+      model.append(item);
+    });
+    model.value = `${hire.provider}\u0000${hire.model}`;
+    model.addEventListener('change', () => {
+      const [provider, picked] = String(model.value || '').split('\u0000');
+      hire.provider = provider || '';
+      hire.model = picked || '';
+    });
+    freshFields.append(hireField(doc, 'Model', model));
+  } else {
+    freshFields.append(
+      el(
+        doc,
+        'p',
+        'folder-agent-card__hire-note',
+        'No model is set up yet. It still looks around and reports without one.'
+      )
+    );
+  }
+  const mandate = doc.createElement('input');
+  mandate.type = 'text';
+  mandate.className = 'form-control form-control-sm folder-agent-card__hire-mandate';
+  mandate.maxLength = 300;
+  mandate.value = hire.mandate;
+  mandate.placeholder = 'Same as what it should do';
+  mandate.autocomplete = 'off';
+  mandate.addEventListener('input', () => {
+    hire.mandate = String(mandate.value || '');
+  });
+  freshFields.append(hireField(doc, 'Role', mandate));
+  box.append(fresh.label, freshFields);
+
+  let reuse = null;
+  let agent = null;
+  if (hire.agents.length) {
+    reuse = radio('existing', 'One of your agents');
+    agent = doc.createElement('select');
+    agent.className = 'form-select form-select-sm folder-agent-card__hire-agent';
+    agent.setAttribute('aria-label', 'Your agent');
+    hire.agents.forEach(option => {
+      const item = doc.createElement('option');
+      item.value = option.name;
+      item.textContent = option.model ? `${option.name} · ${option.model}` : option.name;
+      agent.append(item);
+    });
+    if (!hire.existing) hire.existing = hire.agents[0].name;
+    agent.value = hire.existing;
+    agent.addEventListener('change', () => {
+      hire.existing = String(agent.value || '');
+    });
+    const reuseFields = el(doc, 'div', 'folder-agent-card__hire-fields');
+    reuseFields.append(agent);
+    box.append(reuse.label, reuseFields);
+  }
+
+  const sync = () => {
+    const isNew = hire.mode !== 'existing';
+    [name, model, mandate].forEach(control => {
+      if (control) control.disabled = !isNew;
+    });
+    if (agent) agent.disabled = isNew;
+  };
+  [fresh.input, reuse?.input].forEach(input => {
+    input?.addEventListener('change', () => {
+      if (input.checked) hire.mode = input.value;
+      sync();
+    });
+  });
+  sync();
+  return box;
+}
+
+// renderFolderAgentCard draws the card before Start. onStart(brief, button,
+// hire) posts Hire & start; the caller swaps in the receipt.
 export function renderFolderAgentCard(view, doc = document, { onStart, error = '' } = {}) {
   const card = el(doc, 'article', 'folder-agent-card');
   card.dataset.folderAgentCard = 'choose';
@@ -196,14 +366,19 @@ export function renderFolderAgentCard(view, doc = document, { onStart, error = '
   input.value = view.brief;
   input.setAttribute('aria-label', view.field);
   label.append(caption, input);
+  const hire = view.hire ? renderHire(doc, view.hire) : null;
   const note = el(doc, 'p', 'folder-agent-card__note', view.note);
   const actions = el(doc, 'div', 'folder-agent-card__actions');
   const start = el(doc, 'button', 'btn btn-primary folder-agent-card__start', view.action);
   start.type = 'button';
   start.dataset.folderAgentAction = 'start';
-  start.addEventListener('click', () => onStart?.(String(input.value || ''), start));
+  start.addEventListener('click', () =>
+    onStart?.(String(input.value || ''), start, folderAgentHireChoice(view.hire))
+  );
   actions.append(start);
-  card.append(title, label, note, actions);
+  card.append(title, label);
+  if (hire) card.append(hire);
+  card.append(note, actions);
   if (error) {
     const alert = el(doc, 'p', 'folder-agent-card__error', error);
     alert.setAttribute('role', 'alert');
@@ -498,12 +673,10 @@ export async function chooseFolder(body, fetchImpl = globalThis.fetch) {
   return { card: payload?.card || null };
 }
 
-export async function startFolderAgent(token, brief, fetchImpl = globalThis.fetch) {
-  const { ok, payload } = await post(
-    `${FOLDER_AGENT_ENDPOINT}/start`,
-    { choice_token: token, brief },
-    fetchImpl
-  );
+export async function startFolderAgent(token, brief, fetchImpl = globalThis.fetch, hire) {
+  const body = { choice_token: token, brief };
+  if (hire) body.hire = hire;
+  const { ok, payload } = await post(`${FOLDER_AGENT_ENDPOINT}/start`, body, fetchImpl);
   if (!ok) {
     return {
       error: String(payload?.error || 'The agent could not be started.'),
@@ -678,11 +851,68 @@ export async function mountWorkspaceFolderAgent(
   return raw;
 }
 
+// mountFolderAgentChoice is the whole card for an entry that is not Home's
+// conversation (Create Workspace's pane): the server chooses the folder from
+// body ({chip}, {picker:true} or {selection_token}), the card asks what the
+// agent should do, Start creates it, and the receipt then follows the look in
+// the same host. Resolves to {card} once the card is shown, {cancelled} for a
+// closed dialog, or {error} with the server's sentence; nothing is drawn for
+// the last two. onStarted(view) runs once Start succeeds.
+export async function mountFolderAgentChoice(
+  host,
+  body,
+  { doc = document, fetchImpl = globalThis.fetch, isActive = () => true, onStarted, pollMs } = {}
+) {
+  if (!host) return { error: 'That folder could not be chosen.' };
+  let chosen;
+  try {
+    chosen = await chooseFolder(body, fetchImpl);
+  } catch (_) {
+    chosen = { error: 'That folder could not be chosen right now.' };
+  }
+  if (!isActive()) return { cancelled: true };
+  if (chosen.error || chosen.cancelled || !chosen.card) {
+    return chosen.error ? { error: chosen.error } : { cancelled: true };
+  }
+  const card = folderAgentCardView(chosen.card);
+  let busy = false;
+  const draw = (error = '') => {
+    host.hidden = false;
+    host.replaceChildren(renderFolderAgentCard(card, doc, { error, onStart }));
+  };
+  const onStart = async (brief, button, hire) => {
+    if (busy) return;
+    busy = true;
+    if (button) button.disabled = true;
+    let result;
+    try {
+      result = await startFolderAgent(card.token, brief, fetchImpl, hire);
+    } catch (_) {
+      result = { error: 'The agent could not be started right now.' };
+    }
+    busy = false;
+    if (!isActive()) return;
+    if (result.error || !result.view?.workspace_id) {
+      card.brief = brief;
+      const error = result.error || 'The agent could not be started right now.';
+      draw(result.duplicate?.name ? `${error} Open ${result.duplicate.name} from the map.` : error);
+      return;
+    }
+    onStarted?.(result.view);
+    const options = { doc, fetchImpl, isActive };
+    if (pollMs) options.pollMs = pollMs;
+    await mountWorkspaceFolderAgent(host, result.view.workspace_id, options);
+  };
+  draw();
+  return { card };
+}
+
 if (typeof window !== 'undefined') {
   window.FolderAgentCard = {
     folderAgentReportView,
     folderAgentTileLine,
     listFolderAgents,
+    mountFolderAgentChoice,
     mountFolderAgentReports
   };
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -18,6 +19,7 @@ func TestCreateFolderAgentWorkspace_AnchorsTheFolderWithItsAgent(t *testing.T) {
 	}
 	created, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{
 		Name: "Ori Music Demo", AnchorPath: anchor, Mission: "Find out what's here and set it up", AgentName: "Ori Music Demo Manager",
+		Provider: "openai", Model: "gpt-4o-mini", Mandate: "Keep my songs moving",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -36,16 +38,29 @@ func TestCreateFolderAgentWorkspace_AnchorsTheFolderWithItsAgent(t *testing.T) {
 	if !ok || agent == nil {
 		t.Fatal("the folder's agent was not saved")
 	}
+	if agent.Settings.Model != "gpt-4o-mini" || agent.Settings.Provider != "openai" ||
+		agent.Metadata == nil || agent.Metadata.Description != "Keep my songs moving" ||
+		!strings.Contains(agent.Settings.SystemPrompt, "The owner's mandate for you: Keep my songs moving") {
+		t.Fatalf("hired agent settings = %+v metadata = %+v", agent.Settings, agent.Metadata)
+	}
 
-	// A second folder of the same name binds the saved agent instead of
-	// creating another (hire once, bind many); a nested folder is allowed and
-	// names its parent's workspace.
+	// A new hire never silently takes over a saved agent of the same name.
 	nested := filepath.Join(anchor, "Albums")
 	if err := os.MkdirAll(nested, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	second, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{
+	_, err = h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{
 		Name: "Albums", AnchorPath: nested, AgentName: "Ori Music Demo Manager",
+	})
+	var refusal *FolderAgentRefusal
+	if !errors.As(err, &refusal) || refusal.Code != "agent_name_taken" {
+		t.Fatalf("same-name new hire = %v", err)
+	}
+
+	// Reusing the saved agent binds it (hire once, bind many); a nested folder
+	// is allowed and names its parent's workspace.
+	second, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{
+		Name: "Albums", AnchorPath: nested, AgentName: "Ori Music Demo Manager", BindExisting: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +134,7 @@ func TestCreateFolderAgentWorkspace_RefusalLeavesNothingBehind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{Name: "Songs 2", AnchorPath: free, AgentName: "Songs Manager"})
+	_, err = h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{Name: "Songs 2", AnchorPath: free, AgentName: "Songs Manager", BindExisting: true})
 	if !errors.As(err, &refusal) || refusal.Code != "anchor_already_owned" || refusal.Duplicate == nil || refusal.Duplicate.WorkspaceID != first.ID {
 		t.Fatalf("duplicate = %v (%+v)", err, refusal)
 	}

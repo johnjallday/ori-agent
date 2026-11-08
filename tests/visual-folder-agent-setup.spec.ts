@@ -1,5 +1,5 @@
 import { test, expect, chromium, type Page, type Locator } from '@playwright/test';
-import { chooseAttach } from './helpers/assistant-menus';
+import { chooseAttach, openFolderAttach } from './helpers/assistant-menus';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 import { writeFile } from 'node:fs/promises';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
@@ -47,7 +47,7 @@ async function preview(page: Page, value = observation) {
     route.fulfill({ json: { observation: value, revision: '' } })
   );
   await page.goto('/?panel=today');
-  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Desktop', exact: true })

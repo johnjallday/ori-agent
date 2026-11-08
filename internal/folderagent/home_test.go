@@ -46,6 +46,24 @@ func TestBuildPlan_ExistingHomeIsJoinedNotCreated(t *testing.T) {
 	}
 }
 
+func TestBuildPlan_DumpAddsFileJanitorInPlaceWithFileCurator(t *testing.T) {
+	rec := Record{FolderName: "Messy", WorkspaceName: "Messy", AgentName: "Messy Manager", Stage: foldermap.StageTools,
+		Facts:      foldermap.Facts{Dump: true, RootLooseFiles: 40, RootLooseKinds: 6},
+		Candidates: folderlook.RequiredCandidates(foldermap.Facts{Dump: true}, folderlook.Readiness{})}
+	plan := BuildPlan(rec, nil)
+	var names []string
+	for _, l := range plan.Lines {
+		names = append(names, l.Name)
+	}
+	want := []string{"Adds File Janitor to Messy", "Adds File Curator", "Nothing is moved, copied or read"}
+	if !plan.Runnable || plan.Unavailable != "" || !reflect.DeepEqual(names, want) {
+		t.Fatalf("plan runnable=%v unavailable=%q lines=%v", plan.Runnable, plan.Unavailable, names)
+	}
+	if plan.Lines[0].Kind != FolderPlanCapability {
+		t.Fatalf("first line kind = %q", plan.Lines[0].Kind)
+	}
+}
+
 func TestNextScopes_WalksDownTheIssuedScopes(t *testing.T) {
 	needed := []string{"Albums", "Label/2025/Artist/Album/Disc"}
 	scanned := map[string]bool{}

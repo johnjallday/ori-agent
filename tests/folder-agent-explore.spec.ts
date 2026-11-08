@@ -62,14 +62,23 @@ test('Explore a folder starts an agent and reports what it found without a model
   await expect(host.locator('.folder-agent-card__brief')).toHaveValue(
     "Find out what's here and set it up"
   );
-  await expect(host).toContainText('It looks before it touches anything.');
+  await expect(host).toContainText('Nothing is created until you hire.');
+  // The Hire step: who is hired, before anything exists.
+  await expect(host.locator('.folder-agent-card__hire-title')).toHaveText('Hire');
+  await expect(host.locator('.folder-agent-card__hire-name')).toHaveValue('One Song Manager');
+  const before = await page.request.get('/api/personal-assistant/folder-agent');
+  expect((await before.json()).folder_agents).toHaveLength(0);
   await host.locator('.folder-agent-card__brief').fill('Help me finish this song');
-  await host.getByRole('button', { name: 'Start', exact: true }).click();
+  await host.locator('.folder-agent-card__hire-mandate').fill('Help me finish songs');
+  await host.getByRole('button', { name: 'Hire & start', exact: true }).click();
 
-  // Start sends the server's choice token and the brief, never the path.
+  // Hire & start sends the server's choice token, the brief and the hire,
+  // never the path.
   await expect.poll(() => starts.length).toBe(1);
-  expect(starts[0]).not.toContain('One Song');
-  expect(JSON.parse(starts[0]).brief).toBe('Help me finish this song');
+  expect(starts[0]).not.toContain(folder);
+  const sent = JSON.parse(starts[0]);
+  expect(sent.brief).toBe('Help me finish this song');
+  expect(sent.hire).toMatchObject({ name: 'One Song Manager', mandate: 'Help me finish songs' });
 
   const report = host.locator('.folder-agent-card--report');
   await expect(report.locator('.folder-agent-card__title')).toHaveText(

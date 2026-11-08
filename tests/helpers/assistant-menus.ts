@@ -28,6 +28,18 @@ export async function chooseAttach(page: Page, selector: string): Promise<void> 
   await (await attachItem(page, selector)).click();
 }
 
+/**
+ * Opens the conversation's attach chooser (a folder attached to the turn).
+ * Add folder in "+" now starts an agent on a folder instead
+ * (folder-agent-explore.spec.ts); the attach flow stays for a pasted path's
+ * card and Re-pick, so specs of that flow open it directly.
+ */
+export async function openFolderAttach(page: Page): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext?.open));
+  await page.evaluate(() => (window as any).PersonalAssistantFolderContext.open());
+  await expect(page.locator('#personalAssistantContextChooser')).toBeVisible();
+}
+
 /** Opens the header's conversation menu. */
 export async function openConversationMenu(page: Page): Promise<void> {
   await openMenu(page, '#personalAssistantConversationMenu', '#personalAssistantConversationItems');

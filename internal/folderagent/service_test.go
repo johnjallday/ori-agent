@@ -198,7 +198,7 @@ func (h *harness) start(t *testing.T, brief string) View {
 	if err != nil || chosen == nil {
 		t.Fatalf("choose: %v %v", chosen, err)
 	}
-	view, err := h.svc.Start(context.Background(), "u1", chosen.Token, brief)
+	view, err := h.svc.Start(context.Background(), "u1", chosen.Token, brief, Hire{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -212,10 +212,10 @@ func TestStart_DemoFolderCreatesWorkspaceAgentTicketAndReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chosen.Title != "Start an agent on Ori Music Demo" || chosen.Brief != DefaultBrief || chosen.Action != "Start" || chosen.BriefMax != personalassistant.BriefMaxRunes {
+	if chosen.Title != "Start an agent on Ori Music Demo" || chosen.Brief != DefaultBrief || chosen.Action != "Hire & start" || chosen.BriefMax != personalassistant.BriefMaxRunes {
 		t.Fatalf("card = %+v", chosen)
 	}
-	view, err := h.svc.Start(context.Background(), "u1", chosen.Token, "")
+	view, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,21 +289,26 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 	}
 }
 
-func TestStart_NotYetStagesRefuseSetUp(t *testing.T) {
+func TestStart_EveryStagePlanIsWorded(t *testing.T) {
 	var dump []string
 	for i, kind := range strings.Split(strings.Repeat("pdf jpg zip docx dmg ", 4), " ") {
 		if kind != "" {
 			dump = append(dump, fmt.Sprintf("file%02d.%s", i, kind))
 		}
 	}
+	// A folder of loose files: File Janitor in place with File Curator.
 	h := newHarness(t, build(t, dump...))
 	view := h.start(t, "")
 	report, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
-	if report.Plan.Runnable || report.Stage != foldermap.StageTools || report.Plan.Unavailable == "" {
-		t.Fatalf("File Curator from a folder is not runnable yet: %+v", report.Plan)
+	if !report.Plan.Runnable || report.Stage != foldermap.StageTools || report.Plan.Unavailable != "" {
+		t.Fatalf("File Curator plan: %+v", report.Plan)
 	}
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); !errors.Is(err, ErrStageNotYet) {
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); err != nil {
 		t.Fatalf("set up = %v", err)
+	}
+	h.svc.Wait()
+	if len(h.setups.runs) != 1 || h.setups.runs[0].Candidates[0].Kind != folderlook.KindFileCurator {
+		t.Fatalf("runs = %+v", h.setups.runs)
 	}
 	// The Home stage is runnable, with its own lines.
 	home := newHarness(t, demo(t))
@@ -335,7 +340,7 @@ func TestStart_RefusalsPassThroughAndNothingIsRecorded(t *testing.T) {
 	h.ws.refuse = &Refusal{Code: "anchor_already_owned", Message: `This folder already belongs to the workspace "Songs".`, Status: 409,
 		Duplicate: &WorkspaceRef{ID: "ws-x", Name: "Songs"}}
 	chosen, _ := h.svc.Choose(context.Background(), "u1", personalassistant.FolderChoice{Picker: true})
-	_, err := h.svc.Start(context.Background(), "u1", chosen.Token, "")
+	_, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{})
 	var refusal *Refusal
 	if !errors.As(err, &refusal) || refusal.Duplicate == nil || refusal.Code != "anchor_already_owned" {
 		t.Fatalf("err = %v", err)
@@ -345,7 +350,7 @@ func TestStart_RefusalsPassThroughAndNothingIsRecorded(t *testing.T) {
 	}
 	// The choice survives a refusal, so the card can try again.
 	h.ws.refuse = nil
-	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, ""); err != nil {
+	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{}); err != nil {
 		t.Fatalf("retry after refusal: %v", err)
 	}
 	h.svc.Wait()
@@ -354,14 +359,14 @@ func TestStart_RefusalsPassThroughAndNothingIsRecorded(t *testing.T) {
 func TestStart_ChoiceTokenIsOneUseAndPerUser(t *testing.T) {
 	h := newHarness(t, demo(t))
 	chosen, _ := h.svc.Choose(context.Background(), "u1", personalassistant.FolderChoice{Picker: true})
-	if _, err := h.svc.Start(context.Background(), "u2", chosen.Token, ""); !errors.Is(err, ErrChoiceLost) {
+	if _, err := h.svc.Start(context.Background(), "u2", chosen.Token, "", Hire{}); !errors.Is(err, ErrChoiceLost) {
 		t.Fatalf("other user = %v", err)
 	}
-	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, ""); err != nil {
+	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{}); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
-	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, ""); !errors.Is(err, ErrChoiceLost) {
+	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{}); !errors.Is(err, ErrChoiceLost) {
 		t.Fatalf("reused token = %v", err)
 	}
 	if c, err := newHarness(t, "").svc.Choose(context.Background(), "u1", personalassistant.FolderChoice{Picker: true}); c != nil || err != nil {
@@ -373,7 +378,7 @@ func TestStart_BriefWithAPathIsRefused(t *testing.T) {
 	h := newHarness(t, demo(t))
 	chosen, _ := h.svc.Choose(context.Background(), "u1", personalassistant.FolderChoice{Picker: true})
 	long := strings.Repeat("a", personalassistant.BriefMaxRunes+1)
-	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, long); !errors.Is(err, personalassistant.ErrValidation) {
+	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, long, Hire{}); !errors.Is(err, personalassistant.ErrValidation) {
 		t.Fatalf("long brief = %v", err)
 	}
 }
