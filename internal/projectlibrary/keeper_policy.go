@@ -1,8 +1,11 @@
 package projectlibrary
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -54,7 +57,9 @@ func (s *Store) authorizeKeeper(keeper KeeperAuthority) (keeperGrant, error) {
 		return keeperGrant{}, ErrUnavailable
 	}
 	state := home.GetAssistantProgramState()
-	if state == nil || state.Key.Normalize().OwnerUserID != child.OwnerUserID {
+	// A Home with no staffed roles takes no suggestions (proposeFields refuses
+	// it too), so the keeper is not offered a tool that can only refuse.
+	if state == nil || state.Key.Normalize().OwnerUserID != child.OwnerUserID || state.HomeBindings.StateRevision < 1 {
 		return keeperGrant{}, ErrUnavailable
 	}
 	key := state.Key.Normalize()
@@ -105,7 +110,7 @@ func keeperInstance(child *workspace.Workspace, keeper KeeperAuthority) bool {
 	}
 	matched := 0
 	ok := false
-	for _, instance := range child.AgentInstances {
+	for _, instance := range child.GetAgentInstances() {
 		if strings.TrimSpace(instance.Name) != entryName {
 			continue
 		}
@@ -122,19 +127,49 @@ func (s *Store) KeeperEnabled(keeper KeeperAuthority) bool {
 	return err == nil
 }
 
+// KeeperReceipt is everything the keeper path returns: the suggestion's id,
+// its expiry and whether this was an exact retry. No entry, revision, digest
+// or Home data travels back to the child (FR20).
+type KeeperReceipt struct {
+	ProposalID string
+	ExpiresAt  time.Time
+	Replay     bool
+}
+
+// keeperSavesPerDay bounds how many suggestions one song's keeper may save in
+// 24 hours, counted inside the fenced write, so a looping child cannot fill
+// the Home's proposal cap or its operation history, or keep invalidating the
+// owner's open reviews.
+const keeperSavesPerDay = 6
+
+// keeperRequestKey namespaces a keeper's request key under its song, so it can
+// neither take nor probe the Manager's or another song's keys.
+func keeperRequestKey(childID, requestKey string) string {
+	if requestKey == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(requestKey))
+	return "keeper:" + childID + ":" + hex.EncodeToString(sum[:])
+}
+
 // ProposeFieldsAsKeeper saves the keeper's fields suggestion for its own song
-// through the same fenced write as the Manager's (FR20, FR22). It returns the
-// proposal only to the tool, which passes on its id and expiry, never entry
-// data.
-func (s *Store) ProposeFieldsAsKeeper(keeper KeeperAuthority, proposed ProposedFields, reason, requestKey string) (ManagerProposal, bool, error) {
+// through the same fenced write as the Manager's (FR20, FR22).
+func (s *Store) ProposeFieldsAsKeeper(keeper KeeperAuthority, proposed ProposedFields, reason, requestKey string) (KeeperReceipt, error) {
 	grant, err := s.authorizeKeeper(keeper)
 	if err != nil {
-		return ManagerProposal{}, false, err
+		return KeeperReceipt{}, err
+	}
+	if !validText(requestKey, 160) || requestKey == "" {
+		return KeeperReceipt{}, ErrConflict
 	}
 	proposer := fieldsProposer{Kind: ProposerKeeper, WorkspaceID: grant.child.ID,
 		AgentInstanceID: keeper.AgentInstanceID, AgentName: keeper.AgentName}
-	return s.proposeFields(grant.scope, proposer, ManagerAuthority{}, grant.entry.ID, grant.entry.Fields.Revision,
-		proposed, reason, requestKey, keeperLivePolicy(grant.child.ID, grant.child.OwnerUserID))
+	saved, replay, err := s.proposeFields(grant.scope, proposer, ManagerAuthority{}, grant.entry.ID, grant.entry.Fields.Revision,
+		proposed, reason, keeperRequestKey(grant.child.ID, requestKey), keeperLivePolicy(grant.child.ID, grant.child.OwnerUserID))
+	if err != nil {
+		return KeeperReceipt{}, err
+	}
+	return KeeperReceipt{ProposalID: saved.ID, ExpiresAt: saved.ExpiresAt, Replay: replay}, nil
 }
 
 // keeperLivePolicy is the part of the keeper's authority checkable inside the

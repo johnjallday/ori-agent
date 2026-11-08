@@ -299,6 +299,12 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		}
 	}
 
+	// A linked song's keeper may suggest its own card's fields (PRD #792
+	// FR20, FR21); only that executing instance sees the tool.
+	if p.keeperEnabled() {
+		tools = append(tools, p.projectCardProposeFieldsTool())
+	}
+
 	// A song or the Studio itself may look up the Home's resource catalog
 	// when its executing role is bound there; each call checks again.
 	if p.resourceCatalogLookupEnabled() {

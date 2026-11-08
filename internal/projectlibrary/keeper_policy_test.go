@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -33,17 +34,27 @@ var keeperA = KeeperAuthority{ChildWorkspaceID: "child-a", AgentInstanceID: "kee
 func TestKeeperPolicy_ProposesOnlyOnItsOwnConnectedSong(t *testing.T) {
 	s, scope, _, _ := keeperFixture(t)
 	next := "Send stems to the mixer"
-	saved, replay, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next}, "Bounced stems", "keeper-1-key")
-	if err != nil || replay || saved.ProposerKind != ProposerKeeper || saved.ProposerWorkspaceID != "child-a" ||
-		saved.EntryID != "song-a" || saved.AgentInstanceID != "keeper-1" || saved.ScanID != "" {
-		t.Fatalf("keeper save: %+v %v %v", saved, replay, err)
+	receipt, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next}, "Bounced stems", "keeper-1-key")
+	if err != nil || receipt.Replay || receipt.ProposalID == "" || receipt.ExpiresAt.IsZero() {
+		t.Fatalf("keeper save: %+v %v", receipt, err)
 	}
-	if again, replay, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next}, "Bounced stems", "keeper-1-key"); err != nil || !replay || again.ID != saved.ID {
-		t.Fatalf("keeper replay: %+v %v %v", again, replay, err)
+	if again, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next}, "Bounced stems", "keeper-1-key"); err != nil || !again.Replay || again.ProposalID != receipt.ProposalID {
+		t.Fatalf("keeper replay: %+v %v", again, err)
 	}
 	doc, err := s.Read(scope)
 	if err != nil {
 		t.Fatal(err)
+	}
+	saved, _ := savedProposal(doc, receipt.ProposalID)
+	if saved.ProposerKind != ProposerKeeper || saved.ProposerWorkspaceID != "child-a" || saved.EntryID != "song-a" ||
+		saved.AgentInstanceID != "keeper-1" || saved.ScanID != "" {
+		t.Fatalf("saved keeper row: %+v", saved)
+	}
+	// The keeper's request key is namespaced under its song.
+	for _, op := range doc.Operations {
+		if op.ConsequenceID == saved.ID && !strings.HasPrefix(op.Key, "keeper:child-a:") {
+			t.Fatalf("keeper key not namespaced: %q", op.Key)
+		}
 	}
 	if status := s.managerProposalStatus(scope, doc, saved); status != "ready" {
 		t.Fatalf("keeper suggestion status = %s", status)
@@ -111,7 +122,7 @@ func TestKeeperPolicy_AuthorityMatrix(t *testing.T) {
 			if s.KeeperEnabled(tc.keeper) {
 				t.Fatal("the keeper is enabled")
 			}
-			if _, _, err := s.ProposeFieldsAsKeeper(tc.keeper, ProposedFields{NextAction: &next}, "", "matrix-"+strings.ReplaceAll(name, " ", "-")); !errors.Is(err, ErrUnavailable) {
+			if _, err := s.ProposeFieldsAsKeeper(tc.keeper, ProposedFields{NextAction: &next}, "", "matrix-"+strings.ReplaceAll(name, " ", "-")); !errors.Is(err, ErrUnavailable) {
 				t.Fatalf("err = %v, want ErrUnavailable", err)
 			}
 			if doc, err := s.Read(scope); err == nil && len(doc.Proposals) != 0 {
@@ -153,15 +164,29 @@ func updateChild(t *testing.T, file *workspace.FileStore, id string, change func
 func TestKeeperPolicy_ReplacementAndUnavailableAfterTheKeeperLeaves(t *testing.T) {
 	s, scope, file, _ := keeperFixture(t)
 	one, two := "One", "Two"
-	first, _, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &one}, "", "keeper-r1")
+	first, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &one}, "", "keeper-r1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &two}, "", "keeper-r2")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The Home Manager's suggestion for the same song is a different proposer
+	// kind: neither withdraws the other.
+	bindManagerOnHome := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: managerBinding.AgentInstanceID,
+		AgentName: managerBinding.AgentName}
 	doc, err := s.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	managerNext := "Manager's take"
+	manager, _, err := s.ProposeFieldsAsManager(bindManagerOnHome, "song-a", sessionEntry(doc, "song-a").Fields.Revision,
+		ProposedFields{NextAction: &managerNext}, "", "manager-coexist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &two}, "", "keeper-r2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err = s.Read(scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +194,7 @@ func TestKeeperPolicy_ReplacementAndUnavailableAfterTheKeeperLeaves(t *testing.T
 	for _, proposal := range doc.Proposals {
 		statuses[proposal.ID] = s.managerProposalStatus(scope, doc, proposal)
 	}
-	if statuses[first.ID] != "withdrawn" || statuses[second.ID] != "ready" {
+	if statuses[first.ProposalID] != "withdrawn" || statuses[second.ProposalID] != "ready" || statuses[manager.ID] != "ready" {
 		t.Fatalf("statuses: %+v", statuses)
 	}
 	// The keeper leaves the song: its waiting suggestion can no longer be accepted.
@@ -179,29 +204,72 @@ func TestKeeperPolicy_ReplacementAndUnavailableAfterTheKeeperLeaves(t *testing.T
 	})
 	doc, _ = s.Read(scope)
 	for _, proposal := range doc.Proposals {
-		if proposal.ID == second.ID {
+		if proposal.ID == second.ProposalID {
 			if status := s.managerProposalStatus(scope, doc, proposal); status != "unavailable" {
 				t.Fatalf("after the keeper left: %s", status)
 			}
 		}
 	}
-	if _, _, err := s.ReviewProposal(scope, second.ID, scope.OwnerUserID, NeutralWords()); !errors.Is(err, ErrConflict) {
+	if _, _, err := s.ReviewProposal(scope, second.ProposalID, scope.OwnerUserID, NeutralWords()); !errors.Is(err, ErrConflict) {
 		t.Fatalf("an unavailable keeper suggestion was reviewed: %v", err)
+	}
+}
+
+// A looping keeper is bounded per song per day, so it cannot fill the Home's
+// proposal cap; and its plugin fields are checked like the Manager's.
+func TestKeeperPolicy_DailyCapAndDeclaredFields(t *testing.T) {
+	s, scope, _, _ := keeperFixture(t)
+	for i := 0; i < keeperSavesPerDay; i++ {
+		next := "Try " + strings.Repeat("x", i+1)
+		if _, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next}, "", "loop-"+next); err != nil {
+			t.Fatalf("save %d: %v", i, err)
+		}
+	}
+	next := "One more"
+	if _, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next}, "", "loop-over"); !errors.Is(err, ErrLimit) {
+		t.Fatalf("the keeper went past its daily cap: %v", err)
+	}
+	doc, _ := s.Read(scope)
+	if len(doc.Proposals) != keeperSavesPerDay {
+		t.Fatalf("rows = %d", len(doc.Proposals))
+	}
+	// After a day the withdrawn rows expire and the keeper may suggest again.
+	s.now = func() time.Time { return time.Now().Add(25 * time.Hour) }
+	if _, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next}, "", "next-day"); err != nil {
+		t.Fatalf("next day: %v", err)
+	}
+	// Plugin fields: undeclared without a words snapshot, accepted with one.
+	s.now = time.Now
+	fresh, freshScope, freshFile, _ := keeperFixture(t)
+	if _, err := fresh.ProposeFieldsAsKeeper(keeperA, ProposedFields{Extra: map[string][]string{"key": {"F"}}}, "", "extra-undeclared"); !errors.Is(err, ErrUndeclaredField) {
+		t.Fatalf("an undeclared field was saved: %v", err)
+	}
+	if err := freshFile.Update(freshScope.HomeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.ProjectCardWords = &workspace.ProjectCardWords{Noun: "Song", NounPlural: "Songs", RosterTitle: "Songs",
+			Fields: []workspace.ProjectCardWordsField{{ID: "key", Label: "Key", Kind: "text"}}}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fresh.ProposeFieldsAsKeeper(keeperA, ProposedFields{Extra: map[string][]string{"key": {"F"}}}, "", "extra-declared"); err != nil {
+		t.Fatalf("a declared field was refused: %v", err)
 	}
 }
 
 func TestKeeperPolicy_AcceptedSuggestionIsTheOwnersNote(t *testing.T) {
 	s, scope, _, _ := keeperFixture(t)
 	next := "Print stems"
-	saved, _, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next, Deliverables: &[]string{"Stems v2"}}, "", "keeper-accept")
+	saved, err := s.ProposeFieldsAsKeeper(keeperA, ProposedFields{NextAction: &next, Deliverables: &[]string{"Stems v2"}}, "", "keeper-accept")
 	if err != nil {
 		t.Fatal(err)
 	}
-	review, kind, err := s.ReviewProposal(scope, saved.ID, scope.OwnerUserID, NeutralWords())
+	review, kind, err := s.ReviewProposal(scope, saved.ProposalID, scope.OwnerUserID, NeutralWords())
 	if err != nil || kind != ProposalKindFields || review.After.NextAction != next {
 		t.Fatalf("review: %+v %v", review, err)
 	}
-	entry, _, _, err := s.CommitProposal(scope, saved.ID, review.Token, "keeper-accept-commit", scope.OwnerUserID, NeutralWords())
+	entry, _, _, err := s.CommitProposal(scope, saved.ProposalID, review.Token, "keeper-accept-commit", scope.OwnerUserID, NeutralWords())
 	if err != nil || entry.Fields.NextAction != next || entry.Fields.Source != "reviewed_user" || entry.Fields.Author != scope.OwnerUserID {
 		t.Fatalf("commit: %+v %v", entry.Fields, err)
 	}

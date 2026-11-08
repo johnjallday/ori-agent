@@ -585,6 +585,9 @@ func buildAssistantProgramSnapshotLines(current *workspace.Workspace, store work
 			))
 		}
 	}
+	// What the Home calls one project, from its words snapshot (neutral
+	// "project" without one, PRD #792 FR9).
+	lines = append(lines, workspace.RenderProjectCardWordsPromptLines(state.ProjectCardWords)...)
 	// The Home's profile, under its package's own title. A linked project's
 	// agents get the same lines: the station above is their Home.
 	if profile := workspace.RenderHomeProfilePromptLines(state.GetHomeProfile()); len(profile) > 0 {

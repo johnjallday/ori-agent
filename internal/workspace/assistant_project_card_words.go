@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -90,6 +91,32 @@ func (w *ProjectCardWords) Valid() bool {
 		ids[field.ID] = true
 	}
 	return true
+}
+
+// PromptNoun is the noun and plural agent prompts use: the snapshot's when it
+// is valid, the neutral "project"/"projects" otherwise. Both lower case, for
+// running text.
+func (w *ProjectCardWords) PromptNoun() (string, string) {
+	if !w.Valid() {
+		return "project", "projects"
+	}
+	return strings.ToLower(w.Noun), strings.ToLower(w.NounPlural)
+}
+
+// RenderProjectCardWordsPromptLines are the Assistant Program context's lines
+// about what this Home calls one project and which plugin fields its card
+// declares (PRD #792 FR9). Words are package display data, quoted.
+func RenderProjectCardWordsPromptLines(w *ProjectCardWords) []string {
+	noun, plural := w.PromptNoun()
+	lines := []string{fmt.Sprintf("- One project of this Home is called a %q (plural %q).", noun, plural)}
+	if w.Valid() && len(w.Fields) > 0 {
+		fields := make([]string, 0, len(w.Fields))
+		for _, field := range w.Fields {
+			fields = append(fields, fmt.Sprintf("%s %q (%s)", field.ID, field.Label, field.Kind))
+		}
+		lines = append(lines, "- Plugin fields on the "+noun+" card (ids for suggestions): "+strings.Join(fields, ", "))
+	}
+	return lines
 }
 
 // Clone returns a deep copy.

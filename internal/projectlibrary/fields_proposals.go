@@ -257,6 +257,12 @@ func (s *Store) proposeFields(scope Scope, proposer fieldsProposer, authority Ma
 			if selected == nil || selected.Fields.Revision != fieldsRevision {
 				return "", ErrConflict
 			}
+			// A keeper's entry must still be its own song's (a relink in the
+			// gap leaves nothing to save).
+			if proposer.Kind == ProposerKeeper &&
+				(selected.Link == nil || selected.Link.WorkspaceID != proposer.WorkspaceID) {
+				return "", ErrUnavailable
+			}
 			kept := current.Proposals[:0]
 			for _, old := range current.Proposals {
 				if old.ExpiresAt.After(at) {
@@ -266,6 +272,18 @@ func (s *Store) proposeFields(scope Scope, proposer fieldsProposer, authority Ma
 			current.Proposals = kept
 			if len(current.Proposals) >= maxProposals {
 				return "", ErrLimit
+			}
+			if proposer.Kind == ProposerKeeper {
+				saves := 0
+				for _, old := range current.Proposals {
+					if old.Kind == ProposalKindFields && old.ProposerKind == ProposerKeeper &&
+						old.ProposerWorkspaceID == proposer.WorkspaceID {
+						saves++ // Live rows only: expired ones were pruned above.
+					}
+				}
+				if saves >= keeperSavesPerDay {
+					return "", ErrLimit
+				}
 			}
 			if err := admitRunProposal(current, &proposal, authority, at); err != nil {
 				return "", err

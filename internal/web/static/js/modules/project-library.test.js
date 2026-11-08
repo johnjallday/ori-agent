@@ -1770,6 +1770,11 @@ test('the Manager review line names skips, results and stop reasons without clai
   );
   assert.equal(proposalSourceLabel({}), 'From a Manager chat');
   assert.equal(proposalSourceLabel({ source: 'forged' }), 'From a Manager chat');
+  // A song keeper's card suggestion is never labeled as the Manager's (PRD #792).
+  assert.equal(
+    proposalSourceLabel({ proposer_kind: 'keeper', kind: 'fields' }),
+    'From the song’s assistant'
+  );
 });
 
 test('dismissal needs its own confirmation and a retry reuses the same key', async () => {

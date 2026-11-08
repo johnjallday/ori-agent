@@ -2,7 +2,9 @@ package chathttp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -36,6 +38,11 @@ func newFieldsToolFixture(t *testing.T) *fieldsToolFixture {
 	child.OwnerUserID = home.OwnerUserID
 	child.SetAssistantProjectLink(&workspace.AssistantProjectLink{ID: workspace.AssistantProjectLinkID(home.ID, child.ID),
 		SchemaVersion: 1, StationWorkspaceID: home.ID, Key: key, StateRevision: 1})
+	child.AgentInstances = []workspace.AgentInstance{{ID: "keeper-instance", Name: "Keeper", EntryPoint: true},
+		{ID: "helper-instance", Name: "Helper"}}
+	if err := child.SetEntryAgentName("Keeper"); err != nil {
+		t.Fatal(err)
+	}
 	if err := file.Save(child); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +91,83 @@ func (f *fieldsToolFixture) provider(agentName, instanceID string) *WorkspaceToo
 	provider.SetExecutingInstanceID(instanceID)
 	provider.SetProjectLibraryEvidence(func(projectlibrary.Scope, *workspace.Workspace) bool { return true })
 	return provider
+}
+
+func (f *fieldsToolFixture) songProvider(agentName, instanceID string) *WorkspaceToolProvider {
+	provider := NewWorkspaceToolProvider(nil, f.file, f.child.ID)
+	provider.SetExecutingAgent(agentName)
+	provider.SetExecutingInstanceID(instanceID)
+	provider.SetProjectLibraryEvidence(func(projectlibrary.Scope, *workspace.Workspace) bool { return true })
+	return provider
+}
+
+func TestProjectCardTool_OnlyTheSongsKeeperSuggestsAndLearnsNothingBack(t *testing.T) {
+	f := newFieldsToolFixture(t)
+	for name, provider := range map[string]*WorkspaceToolProvider{
+		"another song agent": f.songProvider("Helper", "helper-instance"),
+		"name only":          f.songProvider("Keeper", ""),
+		"forged instance":    f.songProvider("Keeper", "manager-instance"),
+		"the Home Manager":   f.provider("Manager", "manager-instance"),
+	} {
+		if findLibraryTool(provider.Tools(), "project_card_propose_fields") != nil {
+			t.Errorf("%s got the keeper tool", name)
+		}
+	}
+	tool := findLibraryTool(f.songProvider("Keeper", "keeper-instance").Tools(), "project_card_propose_fields")
+	if tool == nil {
+		t.Fatal("the song's keeper lacks the tool")
+	}
+	if !strings.Contains(tool.Definition().Description, "this song's card") {
+		t.Fatalf("the tool is not worded from the Home's words: %s", tool.Definition().Description)
+	}
+	out, err := tool.Call(context.Background(), `{"next_action":"Send stems","deliverables":["Stems v2"],"reason":"Bounced","request_key":"keeper-tool-1"}`)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, 0, len(result))
+	for key := range result {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if strings.Join(keys, ",") != "effect,expires_at,proposal_id,replay" ||
+		result["effect"] != "Suggestion saved only; the owner accepts or dismisses it on the song card." {
+		t.Fatalf("the keeper learned more than its receipt: %s", out)
+	}
+	for _, leak := range []string{f.entry.ID, f.home.ID, "fields_revision", "/workspaces/"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("result leaked %q: %s", leak, out)
+		}
+	}
+	doc, err := f.library.Read(f.scope)
+	if err != nil || len(doc.Proposals) != 1 || doc.Proposals[0].ProposerKind != "keeper" || doc.Proposals[0].EntryID != f.entry.ID {
+		t.Fatalf("saved: %+v %v", doc.Proposals, err)
+	}
+	// IDs and owner-only fields are refused; nothing more is saved.
+	for name, bad := range map[string]string{
+		"entry id":     `{"entry_id":"` + f.entry.ID + `","next_action":"x","request_key":"k1"}`,
+		"workspace id": `{"workspace_id":"` + f.home.ID + `","next_action":"x","request_key":"k2"}`,
+		"stage":        `{"stage":"mixing","request_key":"k3"}`,
+		"undeclared":   `{"extra":{"mood":["dark"]},"request_key":"k4"}`,
+	} {
+		if _, err := tool.Call(context.Background(), bad); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if _, err := tool.Call(context.Background(), `{"stage":"mixing","request_key":"k5"}`); err == nil ||
+		!strings.Contains(err.Error(), "stage cannot be suggested") {
+		t.Fatalf("stage refusal: %v", err)
+	}
+	if doc, _ := f.library.Read(f.scope); len(doc.Proposals) != 1 {
+		t.Fatalf("a refused call saved something: %d", len(doc.Proposals))
+	}
+	// A non-song workspace (the Home itself) never exposes it.
+	if findLibraryTool(f.provider("Keeper", "keeper-instance").Tools(), "project_card_propose_fields") != nil {
+		t.Fatal("the Home workspace exposed the keeper tool")
+	}
 }
 
 func TestHomeLibraryTools_ProposeFieldsForTheBoundManagerOnly(t *testing.T) {

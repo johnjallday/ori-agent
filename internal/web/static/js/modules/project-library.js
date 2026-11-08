@@ -539,6 +539,9 @@ export function libraryFeedbackText(feedback) {
 
 // A suggestion's origin: the bounded scan review, or a Manager chat.
 export function proposalSourceLabel(proposal) {
+  // A song keeper's card suggestion comes from a ticket or chat in its song
+  // (PRD #792 FR20), never from the Manager.
+  if (proposal?.proposer_kind === 'keeper') return 'From the song’s assistant';
   if (proposal?.source === 'manager_model') {
     const model = String(proposal.model || '').trim();
     return model ? `From the scan review · ${model}` : 'From the scan review';
@@ -1691,7 +1694,7 @@ export class ProjectLibraryPanel {
           'p',
           '',
           proposal.reason
-            ? `Manager's reason (untrusted note): ${proposal.reason}`
+            ? `${proposal.proposer_kind === 'keeper' ? 'Assistant' : 'Manager'}'s reason (untrusted note): ${proposal.reason}`
             : 'No reason provided.'
         ),
         node(

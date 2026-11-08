@@ -86,6 +86,85 @@ func fieldsPatchProperties() map[string]any {
 	}
 }
 
+// keeperAuthority is the executing song agent, from the provider's own
+// workspace and instance: the model supplies none of it.
+func (p *WorkspaceToolProvider) keeperAuthority() projectlibrary.KeeperAuthority {
+	return projectlibrary.KeeperAuthority{ChildWorkspaceID: p.workspaceID, AgentInstanceID: p.executingInstanceID,
+		AgentName: p.executingAgent}
+}
+
+// keeperEnabled is the keeper tool's exposure hint (FR21): this workspace is
+// a linked song and the executing instance is its keeper. The tool rechecks
+// the full policy at every call.
+func (p *WorkspaceToolProvider) keeperEnabled() bool {
+	return p != nil && p.workspaceStore != nil && p.projectLibraryEvidence != nil &&
+		p.libraryStore().KeeperEnabled(p.keeperAuthority())
+}
+
+// keeperNoun is the song's Home's noun for the tool's sentence, from the
+// Home's words snapshot (neutral "project" without one).
+func (p *WorkspaceToolProvider) keeperNoun() string {
+	if p == nil || p.workspaceStore == nil {
+		return "project"
+	}
+	song, err := p.workspaceStore.Get(p.workspaceID)
+	if err != nil || song == nil || song.GetAssistantProjectLink() == nil {
+		return "project"
+	}
+	home, err := p.workspaceStore.Get(song.GetAssistantProjectLink().StationWorkspaceID)
+	if err != nil || home == nil || home.GetAssistantProgramState() == nil {
+		return "project"
+	}
+	noun, _ := home.GetAssistantProgramState().ProjectCardWords.PromptNoun()
+	return noun
+}
+
+// projectCardProposeFieldsTool is the song keeper's card suggestion (FR20):
+// only the patch, a reason and a request key. The host resolves the song, its
+// Home and its entry from the executing instance; the result carries only the
+// suggestion's id, expiry and one sentence, never entry or Home data.
+func (p *WorkspaceToolProvider) projectCardProposeFieldsTool() toolapi.Tool {
+	properties := fieldsPatchProperties()
+	properties["reason"] = map[string]any{"type": "string", "description": "Optional short explanation of what the work changed (up to 500 bytes)."}
+	properties["request_key"] = map[string]any{"type": "string", "description": "Stable unique idempotency key for this exact suggestion (up to 160 bytes)."}
+	noun := p.keeperNoun()
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{Name: "project_card_propose_fields",
+			Description: fmt.Sprintf("Suggest updates to this %[1]s's card after work you did: its next action, blockers, deliverables, milestones or the package's declared fields. This saves an inert 24-hour suggestion for this %[1]s only; it changes nothing until the owner accepts it. Stage, status, priority, purpose, dates and archive state are the owner's and cannot be suggested. Call it once, only for fields your work changed. A newer suggestion replaces your waiting one.", noun),
+			Parameters:  map[string]any{"type": "object", "properties": properties, "required": []string{"request_key"}}},
+		call: func(_ context.Context, raw string) (string, error) {
+			if err := refuseOwnerOnlyFields(raw); err != nil {
+				return "", err
+			}
+			var input struct {
+				fieldsToolInput
+				Reason     string `json:"reason"`
+				RequestKey string `json:"request_key"`
+			}
+			if err := decodeLibraryToolArgsWithin(raw, &input, fieldsToolArgsLimit); err != nil {
+				return "", err
+			}
+			receipt, err := p.libraryStore().ProposeFieldsAsKeeper(p.keeperAuthority(), input.proposed(), input.Reason, input.RequestKey)
+			if err != nil {
+				if errors.Is(err, projectlibrary.ErrUnavailable) {
+					return "", fmt.Errorf("suggestion not saved: this %s's card is not available to you", noun)
+				}
+				if errors.Is(err, projectlibrary.ErrLimit) {
+					return "", fmt.Errorf("suggestion not saved: too many suggestions for this %s today", noun)
+				}
+				return "", fieldsSuggestionError(err)
+			}
+			encoded, err := json.Marshal(map[string]any{"proposal_id": receipt.ProposalID, "expires_at": receipt.ExpiresAt,
+				"replay": receipt.Replay,
+				"effect": fmt.Sprintf("Suggestion saved only; the owner accepts or dismisses it on the %s card.", noun)})
+			if err != nil || len(encoded) > 1024 {
+				return "", fmt.Errorf("suggestion result exceeded its limit")
+			}
+			return string(encoded), nil
+		},
+	}
+}
+
 // libraryProposeFieldsTool is the Home Manager's fields suggestion (FR19). It
 // is exposed with the other proposal tools and to Home ticket runs; policy is
 // rechecked at every call, so any other caller gets a refusal.
