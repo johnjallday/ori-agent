@@ -30,12 +30,18 @@ const downloads = join(sandbox, 'Downloads');
 const desktop = join(sandbox, 'Desktop');
 const panel = (page: Page) => page.locator('.personal-assistant-panel');
 
+// Home's own buttons now start an agent on a folder (folder-agent-explore);
+// the attach flow this spec covers is opened directly on Home.
 async function attachFromHome(page: Page, name: string) {
   await page.goto('/');
-  // The drawer stays open across pages; Home's own button is under it.
-  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.close));
-  await page.evaluate(() => (window as any).PersonalAssistantPanel.close());
-  await page.locator('#cockpitPrimaryActionBtn').click();
+  // Open the drawer as Home's button did, without unfolding Today.
+  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
+  await page.evaluate(() =>
+    (window as any).PersonalAssistantPanel.open(
+      document.getElementById('personalAssistantLauncher')
+    )
+  );
+  await openFolderAttach(page);
   await page.locator('.personal-assistant-panel__chip', { hasText: name }).first().click();
 }
 

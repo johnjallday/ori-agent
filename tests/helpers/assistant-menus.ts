@@ -36,8 +36,19 @@ export async function chooseAttach(page: Page, selector: string): Promise<void> 
  */
 export async function openFolderAttach(page: Page): Promise<void> {
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext?.open));
-  await page.evaluate(() => (window as any).PersonalAssistantFolderContext.open());
-  await expect(page.locator('#personalAssistantContextChooser')).toBeVisible();
+  // open() does nothing while a selection or a reply is still settling, as a
+  // click on a busy control would; ask again until the chooser shows.
+  const chooser = page.locator('#personalAssistantContextChooser');
+  await expect
+    .poll(
+      async () => {
+        if (await chooser.isVisible()) return true;
+        await page.evaluate(() => (window as any).PersonalAssistantFolderContext.open());
+        return chooser.isVisible();
+      },
+      { timeout: 15_000 }
+    )
+    .toBe(true);
 }
 
 /** Opens the header's conversation menu. */

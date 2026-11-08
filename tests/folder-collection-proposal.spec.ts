@@ -296,7 +296,10 @@ test.describe('[collection:home] the legacy collection explored from Home', () =
     const before = { hash: hashFolder(root), workspaces: (await workspaces(request)).length };
     const seen = watch(page);
 
-    await page.goto('/?panel=today&folder=show');
+    // folder=show now starts an agent on a folder; this attach flow is opened
+    // directly.
+    await page.goto('/?panel=today');
+    await openFolderAttach(page);
     const chooser = page.locator('#personalAssistantFolderChoices');
     await expect(chooser).toBeVisible({ timeout: 30_000 });
     const scanned = page.waitForResponse(

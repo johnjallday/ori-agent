@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { createServer } from 'node:http';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
 import { finishPluginSetupWizard } from './helpers/plugin-setup-wizard';
 
 // Real host/observation/review/packages/persistence; only the provider is scripted.
@@ -135,7 +135,7 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
     const before = summaryCalls().length;
     await page.setViewportSize({ width: 1440, height: 1200 });
     await page.goto('/?panel=today');
-    await chooseAttach(page, '#personalAssistantFolderChip:enabled');
+    await openFolderAttach(page);
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Desktop', exact: true })

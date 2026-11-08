@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:http';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 import { verifySavedFirstLook } from './helpers/folder-saved-report';
 import { stageReviewedFolderPackages } from './helpers/reviewed-folder-packages';
-import { chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
 
 // One card, one click: a recognized project folder shows its whole plan as a
 // hire, Hire & set up runs setup, and the same card ends on a receipt.
@@ -150,7 +150,7 @@ async function scan(page: Page, _request: APIRequestContext, chip: string) {
       document.getElementById('personalAssistantLauncher')
     )
   );
-  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
+  await openFolderAttach(page);
   const selected = page.waitForResponse(
     response =>
       response.request().method() === 'POST' &&
