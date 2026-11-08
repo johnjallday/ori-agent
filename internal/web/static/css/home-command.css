@@ -3718,8 +3718,15 @@ a.quest-title:focus-visible {
   gap: 8px;
 }
 
-.folder-agent-card__open {
+.folder-agent-card__open,
+.folder-agent-card__opening {
   font-size: 12px;
+}
+
+/* The place is about to open: the link's word, said rather than offered. */
+.folder-agent-card__opening {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
 }
 
 .folder-agent-card__what {

@@ -36,9 +36,11 @@ import {
   fetchFolderAgent,
   folderAgentCardView,
   folderAgentReportView,
+  openFolderAgentPlace,
   postFolderAgentAction,
   renderFolderAgentCard,
   renderFolderAgentReport,
+  setupFinished,
   startFolderAgent
 } from './folder-agent-card.js';
 import {
@@ -6872,6 +6874,7 @@ function renderFolderAgent(els) {
     host.replaceChildren(
       renderFolderAgentReport(shown, document, {
         error,
+        opening: Boolean(state.agent.opening),
         onAction: (action, button, extra) => void folderAgentAction(shown, action, button, extra)
       })
     );
@@ -6989,9 +6992,16 @@ function scheduleAgentPoll() {
     state.agent.poll = 0;
     const next = await fetchFolderAgent(view.workspace_id).catch(() => null);
     if (next && state.agent.view?.workspace_id === view.workspace_id) {
+      // A run watched to its end opens the place, as the card's link would;
+      // a card no longer on the page opens nothing.
+      const finished = setupFinished(view, next);
       state.agent.view = next;
+      state.agent.opening =
+        finished &&
+        document.getElementById('personalAssistantFolderAgent')?.isConnected !== false &&
+        openFolderAgentPlace(next);
       render();
-      if (next.state === 'reported') window.PersonalAssistantPanel?.refreshToday?.();
+      if (next.state === 'reported' || finished) window.PersonalAssistantPanel?.refreshToday?.();
     }
     scheduleAgentPoll();
   }, 1000);

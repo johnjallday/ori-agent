@@ -621,11 +621,12 @@ function runPhase(setup) {
 }
 
 // renderFolderAgentReport draws the receipt or the report. onAction(id,
-// button, extra) posts one action; the caller refreshes.
+// button, extra) posts one action; the caller refreshes. opening says the
+// page is about to open the place: the link gives way to that word.
 export function renderFolderAgentReport(
   view,
   doc = document,
-  { onAction, error = '', fetchImpl = globalThis.fetch } = {}
+  { onAction, error = '', fetchImpl = globalThis.fetch, opening = false } = {}
 ) {
   const card = el(doc, 'article', 'folder-agent-card folder-agent-card--report');
   card.dataset.folderAgentCard = view.state;
@@ -883,7 +884,11 @@ export function renderFolderAgentReport(
     });
     card.append(actions);
   }
-  if (view.route) {
+  if (opening && view.route) {
+    const status = el(doc, 'p', 'folder-agent-card__opening', `Opening ${view.workspace}…`);
+    status.setAttribute('role', 'status');
+    card.append(status);
+  } else if (view.route) {
     const open = el(doc, 'a', 'folder-agent-card__open', `Open ${view.workspace}`);
     open.href = view.route;
     card.append(open);
@@ -1034,45 +1039,162 @@ export async function postFolderAgentAction(
   return { view: payload?.folder_agent || null };
 }
 
+// setupFinished says whether next ends the run previous was in: the place is
+// set up and every step is done. A run that stopped is not finished.
+export function setupFinished(previous, next) {
+  return (
+    previous?.state === 'setting_up' && next?.state === 'set_up' && next?.setup?.status === 'done'
+  );
+}
+
+// openFolderAgentPlace takes the user to the folder's workspace, where the
+// card's "Open <name>" link goes, once a run they watched has set it up. The
+// beat before leaving lets the finished list be seen. navigate is the page's
+// own way there; the default is the link's. Returns whether it will go.
+export function openFolderAgentPlace(view, { navigate, delayMs = 900 } = {}) {
+  const route = String(view?.route || '');
+  if (!route) return false;
+  const go =
+    typeof navigate === 'function' ? navigate : target => globalThis.location?.assign?.(target);
+  if (delayMs > 0) setTimeout(() => go(route), delayMs);
+  else go(route);
+  return true;
+}
+
+// followFolderAgent polls one folder agent while it looks or sets up and hands
+// each fresh view to onView(next, finished), finished marking the end of a run
+// it watched. Returns a stop function.
+export function followFolderAgent(
+  view,
+  { fetchImpl = globalThis.fetch, isActive = () => true, pollMs = 1500, onView } = {}
+) {
+  let timer = 0;
+  let current = view;
+  const stop = () => {
+    if (timer) clearTimeout(timer);
+    timer = 0;
+  };
+  const tick = () => {
+    stop();
+    if (!current?.workspace_id || (current.state !== 'looking' && current.state !== 'setting_up'))
+      return;
+    timer = setTimeout(async () => {
+      timer = 0;
+      if (!isActive()) return;
+      const next = await fetchFolderAgent(current.workspace_id, fetchImpl).catch(() => null);
+      if (!next || !isActive()) return;
+      const finished = setupFinished(current, next);
+      current = next;
+      onView?.(next, finished);
+      tick();
+    }, pollMs);
+  };
+  tick();
+  return stop;
+}
+
+// Each Needs you host's follows, by workspace: a look or a run in progress is
+// polled until it is final, across the list's redraws.
+const reportFollows = new WeakMap();
+
 // mountFolderAgentReports draws every folder agent report among Today items
-// into host, wiring the actions. onDone runs after an action posted.
-export function mountFolderAgentReports(host, items, { doc = document, onDone, fetchImpl } = {}) {
+// into host, wiring the actions. onDone runs after an action posted and when
+// a followed look or run ends. A run watched to its end opens the place.
+export function mountFolderAgentReports(
+  host,
+  items,
+  { doc = document, onDone, fetchImpl, pollMs, navigate, openDelayMs } = {}
+) {
   if (!host) return 0;
-  const views = (Array.isArray(items) ? items : [])
+  const fetcher = fetchImpl || globalThis.fetch;
+  const entries = (Array.isArray(items) ? items : [])
     .filter(item => item?.kind === FOLDER_AGENT_REPORT_KIND)
-    .map(folderAgentNeedsView)
-    .filter(Boolean);
-  const draw = (view, error = '') =>
+    .map(item => ({ raw: item.folder_agent, view: folderAgentNeedsView(item) }))
+    .filter(entry => entry.view);
+  let follows = reportFollows.get(host);
+  if (!follows) {
+    follows = new Map();
+    reportFollows.set(host, follows);
+  }
+  // replaceCard swaps one workspace's card in place, wherever the list put it.
+  const replaceCard = (workspaceID, card) => {
+    const current = Array.from(host.children || []).find(
+      node => node?.dataset?.workspaceId === workspaceID
+    );
+    if (current) current.replaceWith(card);
+  };
+  const draw = (view, error = '', opening = false) =>
     renderFolderAgentReport(view, doc, {
       error,
+      opening,
       onAction: async (action, button, extra) => {
         button.disabled = true;
-        const result = await postFolderAgentAction(
-          view,
-          action,
-          fetchImpl || globalThis.fetch,
-          extra
-        );
+        const result = await postFolderAgentAction(view, action, fetcher, extra);
         if (result.error) {
           const next = result.view ? folderAgentReportView(result.view) : view;
           const card = draw(next, result.error);
           button.closest?.('.folder-agent-card')?.replaceWith?.(card);
           return;
         }
+        // Set it up starts a run: the card follows it here until it ends.
+        if (result.view) {
+          replaceCard(view.workspaceID, draw(folderAgentReportView(result.view)));
+          follow(result.view);
+        }
         onDone?.();
       }
     });
-  host.replaceChildren(...views.map(view => draw(view)));
-  return views.length;
+  const follow = raw => {
+    const id = String(raw?.workspace_id || '');
+    if (!id) return;
+    follows.get(id)?.();
+    follows.delete(id);
+    if (raw.state !== 'looking' && raw.state !== 'setting_up') return;
+    const options = {
+      fetchImpl: fetcher,
+      isActive: () => host.isConnected !== false,
+      onView: (next, finished) => {
+        let opening = false;
+        if (finished) {
+          const open = { navigate };
+          if (openDelayMs !== undefined) open.delayMs = openDelayMs;
+          opening = openFolderAgentPlace(next, open);
+        }
+        replaceCard(id, draw(folderAgentReportView(next), '', opening));
+        if (next.state === 'looking' || next.state === 'setting_up') return;
+        follows.delete(id);
+        // The list's counts follow, unless the page is about to leave.
+        if (!opening) onDone?.();
+      }
+    };
+    if (pollMs) options.pollMs = pollMs;
+    follows.set(id, followFolderAgent(raw, options));
+  };
+  // A listed agent's follow restarts from the list's own view, so a redraw
+  // never doubles one. A run that left the list (Today shows it among the
+  // working) is still followed to its end: the place opens all the same.
+  host.replaceChildren(...entries.map(entry => draw(entry.view)));
+  entries.forEach(entry => follow(entry.raw));
+  return entries.length;
 }
 
 // mountWorkspaceFolderAgent shows a folder workspace's own report on its
 // page: the receipt while the agent looks (polled), then the report and its
-// actions. A workspace not started from a folder leaves the host hidden.
+// actions. A run watched to its end opens the place (openPlace), the way the
+// card's link would; navigate is the page's own way there. A workspace not
+// started from a folder leaves the host hidden.
 export async function mountWorkspaceFolderAgent(
   host,
   workspaceID,
-  { doc = document, fetchImpl = globalThis.fetch, isActive = () => true, pollMs = 1500 } = {}
+  {
+    doc = document,
+    fetchImpl = globalThis.fetch,
+    isActive = () => true,
+    pollMs = 1500,
+    openPlace = true,
+    navigate,
+    openDelayMs
+  } = {}
 ) {
   if (!host || !workspaceID) return null;
   let raw;
@@ -1086,12 +1208,13 @@ export async function mountWorkspaceFolderAgent(
     host.hidden = true;
     return null;
   }
-  const draw = (current, error = '') => {
+  const draw = (current, error = '', opening = false) => {
     const view = folderAgentReportView(current);
     host.hidden = false;
     host.replaceChildren(
       renderFolderAgentReport(view, doc, {
         error,
+        opening,
         onAction: async (action, button, extra) => {
           if (button) button.disabled = true;
           const result = await postFolderAgentAction(view, action, fetchImpl, extra);
@@ -1101,19 +1224,23 @@ export async function mountWorkspaceFolderAgent(
       })
     );
   };
-  let timer = 0;
+  let stop = () => {};
   const follow = current => {
-    if (timer) clearTimeout(timer);
-    timer = 0;
-    if (current?.state !== 'looking' && current?.state !== 'setting_up') return;
-    timer = setTimeout(async () => {
-      if (!isActive()) return;
-      const next = await fetchFolderAgent(workspaceID, fetchImpl).catch(() => null);
-      if (next && isActive()) {
-        draw(next);
-        follow(next);
+    stop();
+    stop = followFolderAgent(current, {
+      fetchImpl,
+      isActive,
+      pollMs,
+      onView: (next, finished) => {
+        let opening = false;
+        if (finished && openPlace) {
+          const open = { navigate };
+          if (openDelayMs !== undefined) open.delayMs = openDelayMs;
+          opening = openFolderAgentPlace(next, open);
+        }
+        draw(next, '', opening);
       }
-    }, pollMs);
+    });
   };
   draw(raw);
   follow(raw);
@@ -1126,11 +1253,21 @@ export async function mountWorkspaceFolderAgent(
 // agent should do, Start creates it, and the receipt then follows the look in
 // the same host. Resolves to {card} once the card is shown, {cancelled} for a
 // closed dialog, or {error} with the server's sentence; nothing is drawn for
-// the last two. onStarted(view) runs once Start succeeds.
+// the last two. onStarted(view) runs once Start succeeds. A run watched to its
+// end opens the place unless openPlace is false; navigate is the page's way.
 export async function mountFolderAgentChoice(
   host,
   body,
-  { doc = document, fetchImpl = globalThis.fetch, isActive = () => true, onStarted, pollMs } = {}
+  {
+    doc = document,
+    fetchImpl = globalThis.fetch,
+    isActive = () => true,
+    onStarted,
+    pollMs,
+    openPlace,
+    navigate,
+    openDelayMs
+  } = {}
 ) {
   if (!host) return { error: 'That folder could not be chosen.' };
   let chosen;
@@ -1168,8 +1305,10 @@ export async function mountFolderAgentChoice(
       return;
     }
     onStarted?.(result.view);
-    const options = { doc, fetchImpl, isActive };
+    const options = { doc, fetchImpl, isActive, navigate };
     if (pollMs) options.pollMs = pollMs;
+    if (openPlace !== undefined) options.openPlace = openPlace;
+    if (openDelayMs !== undefined) options.openDelayMs = openDelayMs;
     await mountWorkspaceFolderAgent(host, result.view.workspace_id, options);
   };
   draw();

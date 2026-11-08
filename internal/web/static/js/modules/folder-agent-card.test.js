@@ -12,9 +12,11 @@ import {
   mountWorkspaceFolderAgent,
   mountFolderAgentChoice,
   mountFolderAgentReports,
+  openFolderAgentPlace,
   postFolderAgentAction,
   renderFolderAgentCard,
   renderFolderAgentReport,
+  setupFinished,
   startFolderAgent
 } from './folder-agent-card.js';
 
@@ -1060,4 +1062,169 @@ test('the workspace page mount follows a look until the report arrives', async (
     fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) })
   });
   assert.equal(none.hidden, true);
+});
+
+// A Set it up run in progress, and the same run finished.
+const settingUp = (overrides = {}) =>
+  reported({
+    state: 'setting_up',
+    actions: [],
+    plan: { digest: 'd1', runnable: true, selected: ['reaper-tools'], lines: [], steps: [] },
+    setup: {
+      status: 'running',
+      lines: [{ kind: 'integration', step: 'reaper-tools', name: 'REAPER tools', state: 'working' }]
+    },
+    ...overrides
+  });
+const setUp = (overrides = {}) =>
+  settingUp({
+    state: 'set_up',
+    setup: {
+      status: 'done',
+      finished_at: '2026-11-08T12:00:00Z',
+      lines: [{ kind: 'integration', step: 'reaper-tools', name: 'REAPER tools', state: 'done' }]
+    },
+    ...overrides
+  });
+const okJSON = body => ({ ok: true, status: 200, json: async () => body });
+const settle = () => new Promise(resolve => setTimeout(resolve, 25));
+
+test('a run watched to its end says it is opening the place and goes there; a stopped one stays', async () => {
+  assert.equal(setupFinished(settingUp(), setUp()), true);
+  assert.equal(
+    setupFinished(settingUp(), setUp({ setup: { status: 'stopped', lines: [] } })),
+    false
+  );
+  assert.equal(setupFinished(reported(), setUp()), false);
+  assert.equal(
+    openFolderAgentPlace({ route: '' }, { navigate: () => assert.fail('no route') }),
+    false
+  );
+
+  const doc = stubDocument();
+  const host = doc.createElement('section');
+  const states = [settingUp(), setUp()];
+  const went = [];
+  await mountWorkspaceFolderAgent(host, 'ws-1', {
+    doc,
+    fetchImpl: async () => okJSON({ folder_agent: states.shift() || null }),
+    pollMs: 1,
+    openDelayMs: 0,
+    navigate: route => went.push(route)
+  });
+  assert.equal(text(host, '.folder-agent-card__title'), 'Setting up Ori Music Demo');
+  assert.equal(text(host, '.folder-agent-card__open'), 'Open Ori Music Demo');
+  await settle();
+  assert.equal(text(host, '.folder-agent-card__title'), 'Ori Music Demo is set up');
+  assert.equal(text(host, '.folder-agent-card__opening'), 'Opening Ori Music Demo…');
+  assert.equal(host.querySelector('.folder-agent-card__opening').attributes.role, 'status');
+  assert.equal(host.querySelector('.folder-agent-card__open'), null);
+  assert.deepEqual(went, ['/workspaces/ori-music-demo']);
+
+  // A run that stopped keeps the card and its link; nothing opens.
+  const stopped = doc.createElement('section');
+  const halts = [settingUp(), setUp({ setup: { status: 'stopped', lines: [] } })];
+  const stayed = [];
+  await mountWorkspaceFolderAgent(stopped, 'ws-1', {
+    doc,
+    fetchImpl: async () => okJSON({ folder_agent: halts.shift() || null }),
+    pollMs: 1,
+    openDelayMs: 0,
+    navigate: route => stayed.push(route)
+  });
+  await settle();
+  assert.equal(text(stopped, '.folder-agent-card__open'), 'Open Ori Music Demo');
+  assert.equal(stopped.querySelector('.folder-agent-card__opening'), null);
+  assert.deepEqual(stayed, []);
+
+  // A page that wants to stay (openPlace: false) is left where it is.
+  const staying = doc.createElement('section');
+  const runs = [settingUp(), setUp()];
+  await mountWorkspaceFolderAgent(staying, 'ws-1', {
+    doc,
+    fetchImpl: async () => okJSON({ folder_agent: runs.shift() || null }),
+    pollMs: 1,
+    openPlace: false,
+    openDelayMs: 0,
+    navigate: () => assert.fail('the page asked to stay')
+  });
+  await settle();
+  assert.equal(text(staying, '.folder-agent-card__open'), 'Open Ori Music Demo');
+});
+
+test('Needs you follows a Set it up in place until it ends, then opens the place', async () => {
+  const doc = stubDocument();
+  const host = doc.createElement('div');
+  const polls = [setUp()];
+  const posts = [];
+  let done = 0;
+  const went = [];
+  const fetchImpl = async (url, init) => {
+    if (init?.method === 'POST') {
+      posts.push(url);
+      return okJSON({ folder_agent: settingUp() });
+    }
+    return okJSON({ folder_agent: polls.shift() || null });
+  };
+  const items = [
+    {
+      kind: 'folder_agent_report',
+      folder_agent: reported({
+        plan: { digest: 'd1', runnable: true, selected: [], lines: [], steps: [] }
+      })
+    }
+  ];
+  mountFolderAgentReports(host, items, {
+    doc,
+    fetchImpl,
+    pollMs: 1,
+    openDelayMs: 0,
+    navigate: route => went.push(route),
+    onDone: () => done++
+  });
+  const setUpButton = host
+    .querySelectorAll('button')
+    .find(button => button.dataset.folderAgentAction === 'set_up');
+  await setUpButton.listeners.click();
+  assert.deepEqual(posts, ['/api/personal-assistant/folder-agent/ws-1/setup']);
+  assert.equal(done, 1);
+  // The run replaced the report in place, and the card follows it.
+  assert.equal(host.children.length, 1);
+  assert.equal(text(host, '.folder-agent-card__title'), 'Setting up Ori Music Demo');
+  // Today's reload lists the run among the working, not the reports: the
+  // card leaves the list, the run is still watched, and the place opens.
+  assert.equal(
+    mountFolderAgentReports(host, [], {
+      doc,
+      fetchImpl,
+      pollMs: 1,
+      openDelayMs: 0,
+      navigate: route => went.push(route),
+      onDone: () => done++
+    }),
+    0
+  );
+  assert.equal(host.children.length, 0);
+  await settle();
+  assert.deepEqual(went, ['/workspaces/ori-music-demo']);
+  // Leaving the page, the list is not reloaded under the user.
+  assert.equal(done, 1);
+
+  // A report that stays listed is redrawn in place as its run ends.
+  const kept = doc.createElement('div');
+  const laterPolls = [settingUp(), setUp()];
+  const stayed = [];
+  mountFolderAgentReports(kept, [{ kind: 'folder_agent_report', folder_agent: settingUp() }], {
+    doc,
+    fetchImpl: async () => okJSON({ folder_agent: laterPolls.shift() || null }),
+    pollMs: 1,
+    openDelayMs: 0,
+    navigate: route => stayed.push(route),
+    onDone: () => done++
+  });
+  await settle();
+  assert.equal(kept.children.length, 1);
+  assert.equal(text(kept, '.folder-agent-card__title'), 'Ori Music Demo is set up');
+  assert.equal(text(kept, '.folder-agent-card__opening'), 'Opening Ori Music Demo…');
+  assert.deepEqual(stayed, ['/workspaces/ori-music-demo']);
 });
