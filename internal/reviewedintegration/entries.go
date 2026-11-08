@@ -32,20 +32,26 @@ var builtInEntries = mustRegistry([]Entry{
 // builtInHomeProviders are reviewed plugins that contribute only an independent
 // Assistant Program Home. Same floor rule as above; a content-only release has
 // no platform asset, so its fallback commit is verified against the published
-// tag alone. See docs/architecture/independent-program-homes.md for the v0.1.0
-// and v0.3.0 evidence.
+// tag alone. See docs/architecture/independent-program-homes.md for the v0.1.0,
+// v0.3.0 and v0.5.0 evidence.
 var builtInHomeProviders = mustHomeProviders([]HomeProvider{
 	{
-		Key: "music_project_management", PluginID: "music-project-management", MinimumVersion: "0.3.0",
+		Key: "music_project_management", PluginID: "music-project-management", MinimumVersion: "0.5.0",
 		DisplayName:      "Music Project Management",
 		SourceRepository: "https://github.com/johnjallday/music-project-management",
-		// v0.3.0: workspace-arrangement guidance in the skill and the Portfolio
-		// Manager prompt; requires the same two host features as 0.2.0.
-		FallbackCommit: "2d5f01e6daa24c77327a84376d8feb75b965d575", SourceFormat: reviewedClaudeFormat,
+		// v0.5.0: the Home's project_card words (Song, Songs and assistants,
+		// tracks/BPM/length) and the Key, Reference tracks and Mix notes card
+		// fields; requires 0.4.0's three host features plus project_card_words_v1.
+		FallbackCommit: "c420507da24c1fc007d794f3e8974231dd2c5d4a", SourceFormat: reviewedClaudeFormat,
 		PublisherLabel: "Ori", SourceLabel: "johnjallday/music-project-management",
 		ProgramID: "music-producer-assistant", HomeSchemaVersion: 1,
-		RequiredHostFeatures: []string{"independent_program_homes_v1", "home_profile_v1"},
-		ExpectedProtocol:     1,
-		ReleaseReady:         true,
+		RequiredHostFeatures: []string{
+			"independent_program_homes_v1",
+			"home_profile_v1",
+			"resource_workspaces_v1",
+			"project_card_words_v1",
+		},
+		ExpectedProtocol: 1,
+		ReleaseReady:     true,
 	},
 }, builtInEntries)

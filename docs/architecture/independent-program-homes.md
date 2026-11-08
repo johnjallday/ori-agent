@@ -552,16 +552,25 @@ just as a reviewed project integration does. A provider that is not on the list
 keeps the manual guidance: install it from the Plugins page, then return.
 
 The reviewed Home provider is Music Project Management with a floor of
-`0.3.0` and fallback commit `2d5f01e6daa24c77327a84376d8feb75b965d575`, the
-resolved commit of the `v0.3.0` tag, published 2026-10-18 (workspace-arrangement
-guidance in the skill and the Portfolio Manager prompt; the required host
-features are `independent_program_homes_v1` and `home_profile_v1`, the same two
-as 0.2.0). Earlier floors: `0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf`
-(`v0.1.0`, 2026-09-22). The release is content-only and has no platform
-artifact; its `git archive` tarball and checksum were downloaded and diffed
-against the tested candidate tree (`f43e7b39…`, identical). The fallback
-commit was checked by loading that exact commit and passing it through the
-same release check:
+`0.5.0` and fallback commit `c420507da24c1fc007d794f3e8974231dd2c5d4a`, the
+resolved commit of the `v0.5.0` tag, published 2026-11-08. That release adds
+the Home's `project_card` words ("Song", "Songs and assistants", and
+tracks/BPM/length) and the Key, Reference tracks and Mix notes card fields.
+Its required host features are `independent_program_homes_v1`,
+`home_profile_v1`, `resource_workspaces_v1` and `project_card_words_v1`.
+
+Earlier floors:
+
+- `0.3.0` at `2d5f01e6daa24c77327a84376d8feb75b965d575` (`v0.3.0`, 2026-10-18)
+- `0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf` (`v0.1.0`, 2026-09-22)
+
+`0.4.0` was never a floor.
+
+The release is content-only and has no platform artifact. Its `git archive`
+tarball passed its checksum and was diffed against the tested candidate tree
+(`396c3fa7…`, commit `76d59a7`): they are identical. The fallback commit was
+checked by loading that exact commit and passing it through the same release
+check:
 
 ```bash
 ORI_REVIEWED_HOME_PROVIDER_CANDIDATE=1 go test ./internal/reviewedintegration \
