@@ -31,6 +31,7 @@ type songCardBody struct {
 	HomeRoute        string                      `json:"home_route"`
 	HomeEntryRoute   string                      `json:"home_entry_route"`
 	FactsSwitchRoute string                      `json:"facts_switch_route"`
+	Words            *projectlibrary.Words       `json:"words"`
 }
 
 // countingPluginLister fails the test's "no provider check" assertion when
@@ -167,15 +168,21 @@ func TestSongCardHTTP_LinkedSongWithFacts(t *testing.T) {
 		body.OpenWork == nil || body.OpenWork.InProgress != 1 {
 		t.Fatalf("linked card: %+v", body)
 	}
-	if body.StatusLine != "14 tracks · 92 BPM · 3:41; saved 2 days ago; last session: Tracked the bass; 1 in progress" {
+	// No package is installed, so the card speaks the neutral words.
+	if body.StatusLine != "Tracks 14 · Tempo 92 · 3:41; saved 2 days ago; last session: Tracked the bass; 1 in progress" {
 		t.Fatalf("status line: %q", body.StatusLine)
+	}
+	if body.Words == nil || body.Words.Source != projectlibrary.WordsSourceNeutral || body.Words.Noun != "Project" {
+		t.Fatalf("words: %+v", body.Words)
 	}
 	if body.HomeRoute != "/workspaces/music-home" || body.HomeEntryRoute != "/workspaces/music-home/assistant#projectLibraryPanel" ||
 		body.FactsSwitchRoute != "" {
 		t.Fatalf("routes: %+v", body)
 	}
-	if lister.calls != 0 {
-		t.Fatalf("the card asked for the installed provider %d times", lister.calls)
+	// The card reads the installed package's words once and nothing else of
+	// the provider (PRD #792 FR5).
+	if lister.calls > 1 {
+		t.Fatalf("the card asked for the installed plugins %d times", lister.calls)
 	}
 	after, _ := store.Get(station.ID)
 	if after.Version != before.Version {
@@ -190,7 +197,7 @@ func TestSongCardHTTP_FactsOffLinksToTheSwitch(t *testing.T) {
 	body := decodeSongCard(t, songCardRequest(t, handler, project.ID, ""))
 	if body.FactsState != "off" || body.Facts != nil || body.LastSavedAt == nil ||
 		body.FactsSwitchRoute != "/workspaces/music-home/assistant#projectLibrarySongDetails" ||
-		strings.Contains(body.StatusLine, "BPM") {
+		strings.Contains(body.StatusLine, "Tempo") {
 		t.Fatalf("facts off: %+v", body)
 	}
 }
@@ -271,7 +278,7 @@ func TestSongCardHTTP_DivergedMirrorShowsNoFactsAndLeavesTheRoster(t *testing.T)
 	body := decodeSongCard(t, songCardRequest(t, handler, project.ID, ""))
 	if !body.Linked || body.EntryID != "" || body.Facts != nil || body.FactsState != "" || body.LastSavedAt != nil ||
 		body.HomeEntryRoute != "" || body.FactsSwitchRoute != "" || body.HomeRoute != "/workspaces/music-home" ||
-		strings.Contains(body.StatusLine, "BPM") || body.KeeperAgentName != "Studio Keeper" {
+		strings.Contains(body.StatusLine, "Tempo") || body.KeeperAgentName != "Studio Keeper" {
 		t.Fatalf("a diverged link must keep the card without facts or Open in Home: %+v", body)
 	}
 	roster := decodeRoster(t, rosterRequest(t, handler, station.ID, ""))

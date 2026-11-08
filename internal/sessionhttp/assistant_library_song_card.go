@@ -17,18 +17,21 @@ import (
 type songCardResponse struct {
 	Linked bool `json:"linked"`
 	*projectlibrary.SongCard
-	HomeName         string `json:"home_name,omitempty"`
-	StatusLine       string `json:"status_line,omitempty"`
-	HomeRoute        string `json:"home_route,omitempty"`
-	HomeEntryRoute   string `json:"home_entry_route,omitempty"`
-	FactsSwitchRoute string `json:"facts_switch_route,omitempty"`
+	// Words are the Home's package words for the card (neutral without one).
+	Words            *projectlibrary.Words `json:"words,omitempty"`
+	HomeName         string                `json:"home_name,omitempty"`
+	StatusLine       string                `json:"status_line,omitempty"`
+	HomeRoute        string                `json:"home_route,omitempty"`
+	HomeEntryRoute   string                `json:"home_entry_route,omitempty"`
+	FactsSwitchRoute string                `json:"facts_switch_route,omitempty"`
 }
 
 // GetSongCard is the read-only card for one song workspace: its Home, library
-// facts, last save, keeper, status line and open work. It reads stored Home
-// and child records only; it never scans, opens a project file, checks the
-// installed provider or calls a model. The child's own URL grants no wider
-// read of the Home's catalog than this one projection.
+// facts, last save, keeper, status line and open work, worded by the Home's
+// pinned package. It reads stored Home and child records and the installed
+// package's words only; it never scans, opens a project file, checks provider
+// availability or calls a model. The child's own URL grants no wider read of
+// the Home's catalog than this one projection.
 func (h *Handler) GetSongCard(w http.ResponseWriter, r *http.Request) {
 	child, owner, ok := h.ownedWorkspace(w, r)
 	if !ok {
@@ -54,13 +57,15 @@ func (h *Handler) GetSongCard(w http.ResponseWriter, r *http.Request) {
 		state = home.GetAssistantProgramState()
 	}
 	if state == nil || state.Key.Normalize().OwnerUserID != owner {
-		_ = orihttp.RespondSuccess(w, songCardResponse{Linked: true, SongCard: &fallback,
-			StatusLine: projectlibrary.StatusLine(fallback, now)})
+		neutral := projectlibrary.NeutralWords()
+		_ = orihttp.RespondSuccess(w, songCardResponse{Linked: true, SongCard: &fallback, Words: &neutral,
+			StatusLine: projectlibrary.StatusLine(fallback, neutral, now)})
 		return
 	}
 	key := state.Key.Normalize()
 	scope := projectlibrary.Scope{OwnerUserID: owner, HomeID: home.ID, ProviderID: key.PluginID, ProgramID: key.ProgramID}
-	card, err := projectlibrary.NewStore(h.workspaceTaskStore).SongCard(scope, child.ID)
+	words := h.projectCardWords(home)
+	card, err := projectlibrary.NewStore(h.workspaceTaskStore).SongCard(scope, child.ID, words)
 	if errors.Is(err, projectlibrary.ErrConflict) {
 		card, err = fallback, nil
 		card.HomeID = home.ID
@@ -69,8 +74,8 @@ func (h *Handler) GetSongCard(w http.ResponseWriter, r *http.Request) {
 		respondLibraryReadError(w, err)
 		return
 	}
-	response := songCardResponse{Linked: true, SongCard: &card, HomeName: home.Name,
-		StatusLine: projectlibrary.StatusLine(card, now)}
+	response := songCardResponse{Linked: true, SongCard: &card, Words: &words, HomeName: home.Name,
+		StatusLine: projectlibrary.StatusLine(card, words, now)}
 	if workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) {
 		base := "/workspaces/" + url.PathEscape(home.FolderSlug)
 		response.HomeRoute = base

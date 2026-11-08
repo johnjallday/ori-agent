@@ -8,11 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 type rosterBody struct {
-	Rows []struct {
+	Words projectlibrary.Words `json:"words"`
+	Rows  []struct {
 		WorkspaceID     string `json:"workspace_id"`
 		EntryID         string `json:"entry_id"`
 		Title           string `json:"title"`
@@ -77,8 +79,12 @@ func TestRosterHTTP_ListsTheConnectedSongWithKeeperSessionFactsAndRoute(t *testi
 			t.Fatalf("roster leaked %q: %s", leak, response.Body.String())
 		}
 	}
-	if lister.calls != 0 {
-		t.Fatalf("the roster asked for the installed provider %d times", lister.calls)
+	// The roster reads the installed package's words once (PRD #792 FR5).
+	if lister.calls > 1 {
+		t.Fatalf("the roster asked for the installed plugins %d times", lister.calls)
+	}
+	if body.Words.Source != "neutral" || body.Words.RosterTitle != "Projects and assistants" {
+		t.Fatalf("roster words: %+v", body.Words)
 	}
 }
 

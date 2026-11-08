@@ -1451,6 +1451,61 @@ textarea.form-control:focus {
   margin-top: 0.15rem;
 }
 
+/* The details block (PRD #792 FR12): label above value, each row wraps;
+   nothing scrolls sideways at 360 px. */
+.song-card-details {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--cozy-line, #cdbf9f);
+}
+
+.song-card-details-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.song-card-detail {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.song-card-detail-label {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.song-card-detail-value {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.song-card-detail-lines {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.song-card-detail-done {
+  color: var(--cozy-ink-dim, #5d5442);
+}
+
+.song-card-details-empty {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.88rem;
+  font-style: italic;
+}
+
+.song-card-edit {
+  justify-self: start;
+  font-size: 0.88rem;
+}
+
 /* Songs and assistants (home-song-roster.js): Home Details' read-only list of
    linked songs. Each row wraps its parts; no horizontal scroll at 360 px. */
 .song-roster-mount[hidden] {
@@ -1501,7 +1556,16 @@ textarea.form-control:focus {
 }
 
 .song-roster-keeper,
-.song-roster-work {
+.song-roster-work,
+.song-roster-stage {
+  font-size: 0.85rem;
+}
+
+/* Next action (PRD #792 FR15): already cut to 80 characters; wraps on its own
+   line under the title at 360 px. */
+.song-roster-next {
+  flex: 1 1 14rem;
+  min-width: 0;
   font-size: 0.85rem;
 }
 

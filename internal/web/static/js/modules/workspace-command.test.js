@@ -8593,7 +8593,20 @@ test('a Home’s own map shows its songs’ facts and the selected linked song�
         json: async () => ({
           rows: [
             { workspace_id: 'm1', facts: { tempo_bpm: 92, length_seconds: 221, track_count: 14 } }
-          ]
+          ],
+          // The Home's package words ride the roster response (PRD #792 FR7).
+          words: {
+            source: 'package',
+            noun: 'Song',
+            noun_plural: 'Songs',
+            roster_title: 'Songs and assistants',
+            facts: [
+              { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+              { kind: 'tempo', unit: 'BPM' },
+              { kind: 'length' }
+            ],
+            fields: []
+          }
         })
       };
     }

@@ -15,8 +15,9 @@ type rosterRowResponse struct {
 }
 
 type rosterResponse struct {
-	Rows  []rosterRowResponse `json:"rows"`
-	Total int                 `json:"total"`
+	Rows  []rosterRowResponse  `json:"rows"`
+	Total int                  `json:"total"`
+	Words projectlibrary.Words `json:"words"`
 }
 
 // GetAssistantLibraryRoster lists the Home's connected songs with each one's
@@ -25,7 +26,7 @@ type rosterResponse struct {
 // the keeper's name is the only thing read from a child's roster, and no
 // agent record, prompt or memory is copied into the Home.
 func (h *Handler) GetAssistantLibraryRoster(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := h.assistantLibraryScope(w, r)
+	scope, station, ok := h.assistantLibraryScope(w, r)
 	if !ok {
 		return
 	}
@@ -38,7 +39,8 @@ func (h *Handler) GetAssistantLibraryRoster(w http.ResponseWriter, r *http.Reque
 		respondLibraryReadError(w, err)
 		return
 	}
-	response := rosterResponse{Rows: make([]rosterRowResponse, 0, len(rows)), Total: len(rows)}
+	response := rosterResponse{Rows: make([]rosterRowResponse, 0, len(rows)), Total: len(rows),
+		Words: h.projectCardWords(station)}
 	for _, row := range rows {
 		item := rosterRowResponse{RosterRow: row}
 		if workspace.IsCanonicalWorkspaceSlug(row.FolderSlug) {

@@ -83,7 +83,7 @@ func validBulkFieldReceipts(receipts []BulkFieldReceipt) bool {
 func BulkPatchAllowed(p FieldsPatch) bool {
 	if p.DisplayName != nil || p.Purpose != nil || p.NextAction != nil || p.SessionDate != nil ||
 		p.ReleaseDate != nil || p.Milestones != nil || p.Blockers != nil || p.Deliverables != nil ||
-		p.ArchiveReviewState != nil {
+		p.ArchiveReviewState != nil || p.Extra != nil {
 		return false
 	}
 	return (p.Stage != nil || p.Status != nil || p.Priority != nil || p.ClearPriority) &&

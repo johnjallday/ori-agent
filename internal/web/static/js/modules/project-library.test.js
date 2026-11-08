@@ -3799,7 +3799,19 @@ test('Recently saved cards carry each song facts line; a song without facts show
   const rows = recentRows(3);
   rows[0].facts = { track_count: 6, tempo_bpm: 128.5, length_seconds: 3725 };
   rows[2].facts = {};
-  const view = recentlySavedView({ provider_read_only: false, rows }, recentNow);
+  const musicWords = {
+    source: 'package',
+    noun: 'Song',
+    noun_plural: 'Songs',
+    roster_title: 'Songs and assistants',
+    facts: [
+      { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+      { kind: 'tempo', unit: 'BPM' },
+      { kind: 'length' }
+    ],
+    fields: []
+  };
+  const view = recentlySavedView({ provider_read_only: false, rows }, recentNow, musicWords);
   assert.deepEqual(
     view.cards.map(card => [card.name, card.saved, card.facts]),
     [
@@ -3808,6 +3820,9 @@ test('Recently saved cards carry each song facts line; a song without facts show
       ['Song 3', 'Saved 2 days ago', '']
     ]
   );
+  // Without the Home's words the facts read neutral (PRD #792 FR6).
+  const neutral = recentlySavedView({ provider_read_only: false, rows }, recentNow);
+  assert.equal(neutral.cards[0].facts, 'Tracks 6 · Tempo 128.5 · 1:02:05');
 });
 
 test('a read-only Home still lists its recent songs, without Open', () => {

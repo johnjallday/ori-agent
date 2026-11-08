@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FACTS_ABSENT_TEXT,
+  factsAbsentText,
   FACTS_OFF_TEXT,
   NOT_LINKED_TEXT,
   NO_KEEPER_TEXT,
@@ -18,9 +18,25 @@ import {
 
 const NOW = new Date(2026, 5, 10, 12, 0, 0);
 
+// The words the Music Project Management 0.5.0 candidate declares; the server
+// sends them on the card response (PRD #792 FR7).
+const MUSIC_WORDS = {
+  source: 'package',
+  noun: 'Song',
+  noun_plural: 'Songs',
+  roster_title: 'Songs and assistants',
+  facts: [
+    { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+    { kind: 'tempo', unit: 'BPM' },
+    { kind: 'length' }
+  ],
+  fields: []
+};
+
 function linked(overrides = {}) {
   return {
     linked: true,
+    words: MUSIC_WORDS,
     home_id: 'home-1',
     home_name: 'Music Production',
     entry_id: 'entry-1',
@@ -196,9 +212,156 @@ test('facts absent says the song was not read yet, without a switch link', () =>
     linked({ facts: {}, facts_state: 'on' })
   ]) {
     const view = songCardView(data, { now: NOW });
-    assert.equal(view.factsNote, FACTS_ABSENT_TEXT);
+    assert.equal(view.factsNote, 'Project details not read yet for this song.');
+    assert.equal(view.factsNote, factsAbsentText(MUSIC_WORDS));
     assert.equal(view.factsSwitch, null);
   }
+});
+
+const WORDS_WITH_FIELDS = {
+  ...MUSIC_WORDS,
+  fields: [
+    { id: 'key', label: 'Key', kind: 'text' },
+    { id: 'references', label: 'Reference tracks', kind: 'list' }
+  ]
+};
+
+const FULL_FIELDS = {
+  stage: 'mixing',
+  status: 'on_hold',
+  next_action: 'Send stems to the mixer',
+  blockers: ['Vocal comp', 'Bass DI'],
+  deliverables: ['Stems v2'],
+  milestones: [
+    { id: 'm1', label: 'Mix approved', due_date: '2026-07-01', complete: false },
+    { id: 'm2', label: 'Rough mix', complete: true },
+    { id: 'm3', label: 'Master', due_date: '2027-01-15' }
+  ],
+  // Out of declared order on purpose; "retired" is not declared.
+  extra: { references: ['Song A', 'Song B'], key: ['F minor'], retired: ['ignored'] },
+  revision: 4
+};
+
+test('the details block lists every set field in the PRD order, then plugin fields as declared (PRD #792 FR12)', () => {
+  const view = songCardView(linked({ words: WORDS_WITH_FIELDS, fields: FULL_FIELDS }), {
+    now: NOW
+  });
+  assert.deepEqual(
+    view.details.map(row => [row.label, row.lines.map(line => line.text ?? line)]),
+    [
+      ['Stage', ['Mixing']],
+      ['Status', ['On hold']],
+      ['Next action', ['Send stems to the mixer']],
+      ['Blockers', ['Vocal comp', 'Bass DI']],
+      ['Deliverables', ['Stems v2']],
+      ['Milestones', ['Mix approved · due Jul 1', 'Rough mix · done', 'Master · due Jan 15, 2027']],
+      ['Key', ['F minor']],
+      ['Reference tracks', ['Song A', 'Song B']]
+    ]
+  );
+  assert.equal(view.details[5].lines[1].done, true);
+
+  const container = makeDocument().createElement('div');
+  renderSongCard(container, view);
+  const card = container.children[0];
+  assert.deepEqual(
+    card.children.map(child => child.className),
+    [
+      'song-card-head',
+      'song-card-facts',
+      'song-card-saved',
+      'song-card-keeper',
+      'song-card-status',
+      'song-card-details',
+      'song-card-open'
+    ]
+  );
+  const details = find(card, 'song-card-details');
+  assert.equal(tags(details, 'DT').length, 8);
+  assert.equal(
+    tags(details, 'LI').length,
+    8,
+    'blockers, deliverables, milestones and the list field'
+  );
+  assert.equal(find(details, 'song-card-detail-done').textContent, 'Rough mix · done');
+  assert.doesNotMatch(details.textContent, /ignored|retired/);
+  // FR13: one more navigation, Edit details, to the shelf entry; no buttons.
+  assert.deepEqual(
+    songCardLinks(view).map(link => link.label),
+    ['Music Production', 'Edit details', 'Open in Home']
+  );
+  assert.equal(find(details, 'song-card-edit').getAttribute('href'), linked().home_entry_route);
+  assert.equal(tags(card, 'BUTTON').length, 0);
+});
+
+test('unset rows are left out, and a card with no details says so in one line', () => {
+  const sparse = songCardView(
+    linked({ fields: { next_action: 'Mix', blockers: [], revision: 1 } })
+  );
+  assert.deepEqual(
+    sparse.details.map(row => row.label),
+    ['Next action']
+  );
+  const empty = songCardView(linked({ fields: { revision: 0 } }), { now: NOW });
+  assert.deepEqual(empty.details, []);
+  const container = makeDocument().createElement('div');
+  renderSongCard(container, empty);
+  assert.equal(find(container, 'song-card-details-empty').textContent, 'No details yet.');
+  // An unknown stage or status has no label and is left out.
+  assert.deepEqual(songCardView(linked({ fields: { stage: 'touring', status: 'x' } })).details, []);
+  // Plugin fields need the Home's words: neutral words declare none.
+  assert.deepEqual(
+    songCardView(linked({ words: undefined, fields: { extra: { key: ['F'] } } })).details,
+    []
+  );
+});
+
+test('a broken link shows no details block and no Edit details; four navigations at most', () => {
+  const broken = songCardView(linked({ entry_id: '', fields: FULL_FIELDS }), { now: NOW });
+  assert.equal(broken.details, null);
+  assert.equal(broken.editDetails, null);
+  const container = makeDocument().createElement('div');
+  renderSongCard(container, broken);
+  assert.equal(find(container, 'song-card-details'), null);
+  const all = songCardView(
+    linked({
+      words: WORDS_WITH_FIELDS,
+      fields: FULL_FIELDS,
+      facts: undefined,
+      facts_state: 'off',
+      facts_switch_route: '/workspaces/music-home/assistant#projectLibrarySongDetails'
+    })
+  );
+  assert.equal(songCardLinks(all).length, 4);
+});
+
+test('without package words the card reads the neutral Project words (PRD #792 FR6, FR8)', () => {
+  const data = linked({ words: undefined, title: '' });
+  const view = songCardView(data, { now: NOW });
+  assert.equal(view.noun, 'Project');
+  assert.equal(view.title, 'Untitled project');
+  assert.equal(view.factsText, 'Tracks 14 · Tempo 92 · 3:41');
+  assert.equal(
+    songCardView(linked({ words: { source: 'neutral' }, facts_state: 'absent' })).factsNote,
+    'Project details not read yet for this project.'
+  );
+  const container = makeDocument().createElement('div');
+  renderSongCard(container, songCardView(linked({ words: undefined }), { now: NOW }));
+  const card = container.children[0];
+  assert.equal(card.getAttribute('aria-label'), 'Project: Night Drive');
+  assert.equal(find(container, 'song-card-eyebrow').textContent, 'Project');
+  // FR11: nothing the card itself words names a song, BPM or tracks. (The
+  // status line is the server's and is checked in Go.)
+  const rendered = [
+    card.getAttribute('aria-label'),
+    find(container, 'song-card-eyebrow').textContent,
+    find(container, 'song-card-facts').textContent,
+    view.title,
+    songCardView(linked({ words: undefined, facts_state: 'absent' })).factsNote
+  ].join(' | ');
+  assert.equal(/\b(songs?|bpm)\b/i.test(rendered) || /\btracks?\b/.test(rendered), false, rendered);
+  // Words passed by a caller are used when the response carries none.
+  assert.equal(songCardView(linked({ words: undefined }), { words: MUSIC_WORDS }).noun, 'Song');
 });
 
 test('a broken or diverged link shows the card without facts or Open in Home', () => {

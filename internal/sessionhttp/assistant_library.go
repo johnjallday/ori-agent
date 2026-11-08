@@ -121,7 +121,8 @@ func (h *Handler) GetAssistantLibrarySummary(w http.ResponseWriter, r *http.Requ
 		projectlibrary.LibrarySummary
 		Route    string                                `json:"route"`
 		Feedback []workspace.AssistantProposalFeedback `json:"feedback,omitempty"`
-	}{summary, librarySuggestionsRoute(station), feedback})
+		Words    projectlibrary.Words                  `json:"words"`
+	}{summary, librarySuggestionsRoute(station), feedback, h.projectCardWords(station)})
 }
 
 // librarySuggestionsRoute is the Home's suggestions shelf, or "" when the

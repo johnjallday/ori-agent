@@ -6,6 +6,7 @@ import {
   libraryOpenRoute,
   libraryOpenedMessage,
   libraryRequestError,
+  projectWords,
   readLibraryPayload as payload,
   RECENT_SONGS_QUERY,
   recentSongs,
@@ -677,7 +678,7 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
 // up to six songs with a save time, each with Open where the Home can open it,
 // and its song facts when they are known. A read-only Home still shows its
 // songs, without Open. No dated song: hidden.
-export function recentlySavedView(page, now = new Date()) {
+export function recentlySavedView(page, now = new Date(), words = null) {
   const readOnly = page?.provider_read_only !== false;
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
   const picks = readOnly
@@ -689,7 +690,7 @@ export function recentlySavedView(page, now = new Date()) {
       row,
       name: String(row.name || '').trim() || 'This song',
       saved: lastSavedLabel(row.last_saved_at, now),
-      facts: songFactsLabel(row.facts),
+      facts: songFactsLabel(row.facts, words),
       open: libraryOpenAction(row, readOnly)
     }))
   };
@@ -1188,10 +1189,11 @@ export class ProjectLibraryPanel {
       this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
+      await this.loadSummary();
       await this.renderRecent();
       await this.renderResume();
       await this.renderPendingLinks();
-      await this.renderProposals();
+      await this.renderProposals({ loaded: true });
       await this.renderArrangementHistory();
       await this.renderCollections();
       await this.restoreBrowserResults();
@@ -1507,22 +1509,34 @@ export class ProjectLibraryPanel {
     }
   }
 
-  async renderProposals() {
+  // loadSummary reads the Home's library summary once per refresh: the digest,
+  // the freshness line and the Home's project words (PRD #792 FR7) all ride
+  // it. It runs before "Recently saved" so those facts use the Home's words.
+  async loadSummary() {
+    try {
+      this.summary = await this.request('/summary');
+    } catch (_) {
+      this.summary = null;
+    }
+    return this.summary;
+  }
+
+  /** The Home's project words from the summary; neutral until it is read. */
+  projectWords() {
+    return projectWords(this.summary?.words);
+  }
+
+  async renderProposals({ loaded = false } = {}) {
     const section = document.getElementById('projectLibraryProposals');
     const container = document.getElementById('projectLibraryProposalRows');
     if (!section || !container) return;
     container.replaceChildren();
     section.hidden = true;
     // The digest is a model-free summary of the last completed scan. It is
-    // shown even when the Manager has made no suggestions.
-    let summary = null;
-    try {
-      summary = await this.request('/summary');
-    } catch (_) {
-      summary = null;
-    }
-    // The freshness line rides this same read: no extra request on load.
-    this.summary = summary;
+    // shown even when the Manager has made no suggestions. A full refresh
+    // hands in the summary it already read; the freshness line rides the same
+    // read, so there is no extra request.
+    const summary = loaded ? this.summary : await this.loadSummary();
     this.renderFreshness();
     const digestText = libraryDigestText(summary?.digest, this.state?.roots);
     const digestLine = document.getElementById('projectLibraryDigest');
@@ -1833,7 +1847,11 @@ export class ProjectLibraryPanel {
     if (!section || !container) return;
     let view;
     try {
-      view = recentlySavedView(await this.request(`/projects?${RECENT_SONGS_QUERY}`));
+      view = recentlySavedView(
+        await this.request(`/projects?${RECENT_SONGS_QUERY}`),
+        new Date(),
+        this.projectWords()
+      );
     } catch (_) {
       view = { visible: false, cards: [] };
     }
@@ -3869,7 +3887,7 @@ export class ProjectLibraryPanel {
       ['Purpose', fields.purpose],
       ['Next action', fields.next_action],
       ['Last saved', lastSavedLabel(row.last_saved_at)],
-      ['Observed project details', songFactsLabel(row.facts)],
+      ['Observed project details', songFactsLabel(row.facts, this.projectWords())],
       ['Last scanned', savedMetadataTime(row.last_scanned_at)],
       ['Saved-note activity', savedMetadataTime(row.sourced_activity_at)]
     ]) {

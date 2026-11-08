@@ -13931,9 +13931,10 @@ export class WorkspaceCommandView {
         });
         if (!response.ok) return;
         const body = await response.json();
-        next = songFactsSnapshot({
-          [workspaceId]: Array.isArray(body?.rows) ? body.rows : []
-        });
+        next = songFactsSnapshot(
+          { [workspaceId]: Array.isArray(body?.rows) ? body.rows : [] },
+          { [workspaceId]: body?.words }
+        );
       } catch (err) {
         return;
       }

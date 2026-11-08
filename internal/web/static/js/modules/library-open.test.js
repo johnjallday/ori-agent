@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   lastSavedLabel,
   libraryOpenedMessage,
+  lowerNoun,
+  NEUTRAL_WORDS,
   openLibrarySong,
+  projectWords,
   RECENT_SONGS_QUERY,
   recentSongs,
   songFactsLabel,
@@ -137,19 +140,34 @@ test('any other failure carries the server message, or a plain one when there is
   );
 });
 
-test('song facts read as tracks, tempo and length, leaving out what is unknown', () => {
+// The words the Music Project Management 0.5.0 candidate declares.
+const MUSIC_WORDS = {
+  source: 'package',
+  noun: 'Song',
+  noun_plural: 'Songs',
+  roster_title: 'Songs and assistants',
+  facts: [
+    { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+    { kind: 'tempo', unit: 'BPM' },
+    { kind: 'length' }
+  ],
+  fields: []
+};
+
+test('song facts read as tracks, tempo and length under the package words, leaving out what is unknown', () => {
+  const label = facts => songFactsLabel(facts, MUSIC_WORDS);
   assert.equal(
-    songFactsLabel({ track_count: 14, tempo_bpm: 92, length_seconds: 221 }),
+    label({ track_count: 14, tempo_bpm: 92, length_seconds: 221 }),
     '14 tracks · 92 BPM · 3:41'
   );
-  assert.equal(songFactsLabel({ track_count: 1 }), '1 track');
-  assert.equal(songFactsLabel({ tempo_bpm: 92, tempo_varies: true }), '92 BPM, varies');
-  assert.equal(songFactsLabel({ tempo_bpm: 128.5 }), '128.5 BPM');
-  assert.equal(songFactsLabel({ length_seconds: 59.6 }), '1:00', 'rounded to the second');
-  assert.equal(songFactsLabel({ length_seconds: 3725.5 }), '1:02:06', 'h:mm:ss from an hour on');
-  assert.equal(songFactsLabel({ length_seconds: 3600 }), '1:00:00');
-  assert.equal(songFactsLabel({ length_seconds: 7 }), '0:07');
-  assert.equal(songFactsLabel({ tempo_bpm: 92, length_seconds: 200 }), '92 BPM · 3:20');
+  assert.equal(label({ track_count: 1 }), '1 track');
+  assert.equal(label({ tempo_bpm: 92, tempo_varies: true }), '92 BPM, varies');
+  assert.equal(label({ tempo_bpm: 128.5 }), '128.5 BPM');
+  assert.equal(label({ length_seconds: 59.6 }), '1:00', 'rounded to the second');
+  assert.equal(label({ length_seconds: 3725.5 }), '1:02:06', 'h:mm:ss from an hour on');
+  assert.equal(label({ length_seconds: 3600 }), '1:00:00');
+  assert.equal(label({ length_seconds: 7 }), '0:07');
+  assert.equal(label({ tempo_bpm: 92, length_seconds: 200 }), '92 BPM · 3:20');
   for (const none of [
     undefined,
     null,
@@ -162,8 +180,50 @@ test('song facts read as tracks, tempo and length, leaving out what is unknown',
     { length_seconds: 0.2 },
     { tempo_varies: true }
   ]) {
-    assert.equal(songFactsLabel(none), '', JSON.stringify(none));
+    assert.equal(songFactsLabel(none, MUSIC_WORDS), '', JSON.stringify(none));
+    assert.equal(songFactsLabel(none), '', `neutral ${JSON.stringify(none)}`);
   }
+});
+
+test('song facts under the neutral words are label-and-value pairs in the host order (PRD #792 FR6)', () => {
+  const facts = { track_count: 14, tempo_bpm: 92, length_seconds: 221 };
+  assert.equal(songFactsLabel(facts), 'Tracks 14 · Tempo 92 · 3:41');
+  assert.equal(songFactsLabel(facts, NEUTRAL_WORDS), 'Tracks 14 · Tempo 92 · 3:41');
+  assert.equal(songFactsLabel({ tempo_bpm: 92, tempo_varies: true }), 'Tempo 92, varies');
+  assert.equal(songFactsLabel({ track_count: 1 }), 'Tracks 1');
+  // Incomplete words fall back to neutral, never a blank.
+  assert.equal(songFactsLabel(facts, { noun: 'Song' }), 'Tracks 14 · Tempo 92 · 3:41');
+  // A package that declares the words but no facts gets the neutral facts.
+  assert.equal(songFactsLabel(facts, { ...MUSIC_WORDS, facts: [] }), 'Tracks 14 · Tempo 92 · 3:41');
+  // Declared order wins; a kind left out is not shown; unknown kinds are ignored.
+  assert.equal(
+    songFactsLabel(facts, {
+      ...MUSIC_WORDS,
+      facts: [{ kind: 'length' }, { kind: 'tempo', unit: 'bpm' }, { kind: 'key', unit: 'x' }]
+    }),
+    '3:41 · 92 bpm'
+  );
+  assert.equal(projectWords(null), NEUTRAL_WORDS);
+  assert.equal(projectWords(MUSIC_WORDS).noun, 'Song');
+  assert.equal(lowerNoun(MUSIC_WORDS, { plural: true }), 'songs');
+  assert.equal(lowerNoun(undefined), 'project');
+});
+
+// FR11: the card, roster, tile and status-line words carry no domain word
+// under the neutral words. "Tracks" is the host's label for the track_count
+// kind (FR6), so the lower-case unit words are what is checked for tracks.
+function hasDomainWord(text) {
+  return /\b(songs?|bpm)\b/i.test(text) || /\btracks?\b/.test(text);
+}
+
+test('neutral facts carry no domain word (PRD #792 FR11)', () => {
+  for (const facts of [
+    { track_count: 14, tempo_bpm: 92, length_seconds: 221 },
+    { track_count: 1, tempo_bpm: 92, tempo_varies: true }
+  ]) {
+    assert.equal(hasDomainWord(songFactsLabel(facts)), false, songFactsLabel(facts));
+  }
+  assert.equal(hasDomainWord(songFactsLabel({ track_count: 2 }, MUSIC_WORDS)), true);
 });
 
 test('a song line keeps each fact whole and wraps only between facts', () => {

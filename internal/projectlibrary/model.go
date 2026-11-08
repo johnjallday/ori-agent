@@ -230,10 +230,15 @@ type Fields struct {
 	Milestones         []Milestone `json:"milestones,omitempty"`
 	Blockers           []string    `json:"blockers,omitempty"`
 	Deliverables       []string    `json:"deliverables,omitempty"`
-	Revision           int64       `json:"revision"`
-	Author             string      `json:"author,omitempty"`
-	Source             string      `json:"source,omitempty"`
-	UpdatedAt          time.Time   `json:"updated_at,omitempty"`
+	// Extra holds the plugin-declared fields (PRD #792 FR28): declaration id →
+	// lines. The host never interprets them; whether an id is declared is
+	// checked where the declaration is known, so a package change never loses
+	// the owner's words.
+	Extra     map[string][]string `json:"extra,omitempty"`
+	Revision  int64               `json:"revision"`
+	Author    string              `json:"author,omitempty"`
+	Source    string              `json:"source,omitempty"`
+	UpdatedAt time.Time           `json:"updated_at,omitempty"`
 }
 
 type ExactLink struct {
@@ -450,6 +455,9 @@ func (f Fields) valid() bool {
 			return false
 		}
 		seenMilestones[milestone.ID] = true
+	}
+	if !validExtraFields(f.Extra) {
+		return false
 	}
 	for _, list := range [][]string{f.Blockers, f.Deliverables} {
 		for _, item := range list {

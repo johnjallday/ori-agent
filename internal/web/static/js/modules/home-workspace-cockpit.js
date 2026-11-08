@@ -4960,6 +4960,7 @@ import {
     songRostersAt = now;
     const homes = libraryHomeIds(state.flattened);
     const rosters = {};
+    const words = {};
     await Promise.all(
       homes.map(async id => {
         try {
@@ -4969,12 +4970,13 @@ import {
           if (!response.ok) return;
           const body = await response.json();
           rosters[id] = Array.isArray(body?.rows) ? body.rows : [];
+          if (body?.words) words[id] = body.words;
         } catch (err) {
           console.warn('home-workspace-cockpit: song roster unavailable', err);
         }
       })
     );
-    const next = songFactsSnapshot(rosters);
+    const next = songFactsSnapshot(rosters, words);
     if (JSON.stringify(next) === JSON.stringify(state.songFacts)) return;
     state.songFacts = next;
     mountMap();

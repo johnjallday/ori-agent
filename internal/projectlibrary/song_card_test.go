@@ -74,7 +74,10 @@ func songCardFixture(t *testing.T) (*Store, Scope, *workspace.FileStore, time.Ti
 			factsA := &ObservedFacts{SongFacts: SongFacts{TempoBPM: 92, LengthSeconds: 221, TrackCount: 14},
 				ReadFrom: FactsSource{File: "Song.rpp", Identity: "fixture:song-a", Size: 10, ModifiedAt: savedA}}
 			for _, entry := range []Entry{
-				{ID: "song-a", Revision: 1, Fields: Fields{DisplayName: "Song A"},
+				{ID: "song-a", Revision: 1, Fields: Fields{DisplayName: "Song A", Stage: "mixing", Status: "active",
+					NextAction: "Send stems to the mixer", Blockers: []string{"Vocal comp"}, Deliverables: []string{"Stems v2"},
+					Milestones: []Milestone{{ID: "m1", Label: "Mix approved", DueDate: "2026-07-01"}},
+					Purpose:    "Single", Extra: map[string][]string{"key": {"F minor"}, "retired": {"not declared"}}, Revision: 4},
 					Observations: []Observation{observed("song-a", savedA, factsA)}},
 				{ID: "song-b", Revision: 1, Observations: []Observation{observed("song-b", day.AddDate(0, 0, -1), nil)}},
 				{ID: "song-c", Revision: 1, Fields: Fields{DisplayName: "Song C"}},
@@ -118,7 +121,7 @@ func songCardFixture(t *testing.T) (*Store, Scope, *workspace.FileStore, time.Ti
 
 func TestSongCard_ProjectsFactsSaveKeeperSessionAndOpenWork(t *testing.T) {
 	s, scope, _, day := songCardFixture(t)
-	card, err := s.SongCard(scope, "child-a")
+	card, err := s.SongCard(scope, "child-a", musicWordsForTest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,15 +143,58 @@ func TestSongCard_ProjectsFactsSaveKeeperSessionAndOpenWork(t *testing.T) {
 	}
 }
 
+// PRD #792 FR14: a connected entry's card carries its fields; plugin fields
+// only under ids the words declare; a broken or stale link carries none.
+func TestSongCard_CarriesFieldsWithDeclaredExtrasOnly(t *testing.T) {
+	s, scope, file, _ := songCardFixture(t)
+	card, err := s.SongCard(scope, "child-a", musicWordsForTest())
+	if err != nil || card.Fields == nil {
+		t.Fatalf("card fields: %+v %v", card, err)
+	}
+	fields := card.Fields
+	if fields.Stage != "mixing" || fields.Status != "active" || fields.NextAction != "Send stems to the mixer" ||
+		len(fields.Blockers) != 1 || len(fields.Deliverables) != 1 || len(fields.Milestones) != 1 ||
+		fields.Milestones[0].DueDate != "2026-07-01" || fields.Revision != 4 {
+		t.Fatalf("fields: %+v", fields)
+	}
+	if len(fields.Extra) != 1 || fields.Extra["key"][0] != "F minor" {
+		t.Fatalf("extra must carry only declared ids: %+v", fields.Extra)
+	}
+	payload, _ := json.Marshal(card)
+	for _, leak := range []string{"retired", "not declared", "Single", "purpose"} {
+		if strings.Contains(string(payload), leak) {
+			t.Fatalf("card leaked %q: %s", leak, payload)
+		}
+	}
+	// Neutral words declare no plugin field.
+	if neutral, _ := s.SongCard(scope, "child-a", NeutralWords()); neutral.Fields == nil || neutral.Fields.Extra != nil {
+		t.Fatalf("neutral card fields: %+v", neutral.Fields)
+	}
+	if broken, _ := s.SongCard(scope, "child-c", musicWordsForTest()); broken.Fields != nil {
+		t.Fatalf("a broken link carries fields: %+v", broken.Fields)
+	}
+	if err := file.Update("child-a", func(child *workspace.Workspace) error {
+		link := child.GetAssistantProjectLink()
+		link.StateRevision = 2
+		child.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if stale, _ := s.SongCard(scope, "child-a", musicWordsForTest()); stale.Fields != nil {
+		t.Fatalf("a diverged link carries fields: %+v", stale.Fields)
+	}
+}
+
 func TestSongCard_FactsStateOffAndAbsent(t *testing.T) {
 	s, scope, file, _ := songCardFixture(t)
-	absent, err := s.SongCard(scope, "child-b")
+	absent, err := s.SongCard(scope, "child-b", musicWordsForTest())
 	if err != nil || absent.EntryID != "song-b" || absent.FactsState != FactsStateAbsent || absent.Facts != nil ||
 		absent.Title != "Song B" || absent.LastSession != nil || absent.KeeperAgentName != "" {
 		t.Fatalf("facts absent: %+v %v", absent, err)
 	}
 	switchSongDetailsOff(t, file, scope)
-	off, err := s.SongCard(scope, "child-a")
+	off, err := s.SongCard(scope, "child-a", musicWordsForTest())
 	if err != nil || off.FactsState != FactsStateOff || off.Facts != nil || off.LastSavedAt == nil {
 		t.Fatalf("facts off must hide facts but keep the save time: %+v %v", off, err)
 	}
@@ -156,7 +202,7 @@ func TestSongCard_FactsStateOffAndAbsent(t *testing.T) {
 
 func TestSongCard_BrokenLinkKeepsTheCardWithoutAnEntry(t *testing.T) {
 	s, scope, file, _ := songCardFixture(t)
-	card, err := s.SongCard(scope, "child-c")
+	card, err := s.SongCard(scope, "child-c", musicWordsForTest())
 	if err != nil || card.EntryID != "" || card.Facts != nil || card.FactsState != "" || card.LastSavedAt != nil ||
 		card.Title != "Song C" {
 		t.Fatalf("a link the Home does not list is not a library entry: %+v %v", card, err)
@@ -170,7 +216,7 @@ func TestSongCard_BrokenLinkKeepsTheCardWithoutAnEntry(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := s.SongCard(scope, "child-a")
+	stale, err := s.SongCard(scope, "child-a", musicWordsForTest())
 	if err != nil || stale.EntryID != "" || stale.Facts != nil || stale.Title != "Child A folder name" {
 		t.Fatalf("a stale link must not show facts: %+v %v", stale, err)
 	}
@@ -180,10 +226,10 @@ func TestSongCard_RefusesForeignAndNonSongWorkspaces(t *testing.T) {
 	s, scope, file, _ := songCardFixture(t)
 	foreign := scope
 	foreign.OwnerUserID = "someone-else"
-	if _, err := s.SongCard(foreign, "child-a"); !errors.Is(err, ErrConflict) {
+	if _, err := s.SongCard(foreign, "child-a", NeutralWords()); !errors.Is(err, ErrConflict) {
 		t.Fatalf("foreign owner: %v", err)
 	}
-	if _, err := s.SongCard(scope, scope.HomeID); !errors.Is(err, ErrUnavailable) {
+	if _, err := s.SongCard(scope, scope.HomeID, NeutralWords()); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("the Home itself is not a song: %v", err)
 	}
 	plain := &workspace.Workspace{ID: "plain", Name: "Plain", OwnerUserID: scope.OwnerUserID, Status: workspace.StatusActive,
@@ -191,7 +237,7 @@ func TestSongCard_RefusesForeignAndNonSongWorkspaces(t *testing.T) {
 	if err := file.Save(plain); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SongCard(scope, "plain"); !errors.Is(err, ErrConflict) {
+	if _, err := s.SongCard(scope, "plain", NeutralWords()); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a workspace without a link is not a song: %v", err)
 	}
 }
@@ -209,6 +255,11 @@ func TestRoster_ListsConnectedSongsBySessionThenSaveThenName(t *testing.T) {
 		rows[0].Facts == nil || rows[0].Facts.TrackCount != 14 ||
 		rows[1].Title != "Song B" || rows[1].LastSession != nil || rows[1].LastSavedAt == nil || rows[1].Facts != nil {
 		t.Fatalf("rows: %+v", rows)
+	}
+	// PRD #792 FR15: each row carries its stage and next action; unset is empty.
+	if rows[0].Stage != "mixing" || rows[0].NextAction != "Send stems to the mixer" ||
+		rows[1].Stage != "" || rows[1].NextAction != "" {
+		t.Fatalf("roster stage and next action: %+v", rows)
 	}
 	payload, _ := json.Marshal(rows)
 	if strings.Contains(string(payload), "folder_slug") || strings.Contains(string(payload), "FolderSlug") {
@@ -273,27 +324,13 @@ func TestStatusLine_OrderSkippingAndWording(t *testing.T) {
 		{"session without a save", SongCard{LastSession: session, OpenWork: workspace.TicketCounts{Ready: 1}},
 			"Last session: Tracked the bass; 1 ready"},
 	} {
-		if got := StatusLine(tc.card, now); got != tc.want {
+		if got := StatusLine(tc.card, musicWordsForTest(), now); got != tc.want {
 			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
 		}
 	}
-}
-
-func TestFactsLabel_MatchesTheShelfWording(t *testing.T) {
-	for _, tc := range []struct {
-		facts *SongFacts
-		want  string
-	}{
-		{nil, ""},
-		{&SongFacts{}, ""},
-		{&SongFacts{TrackCount: 1}, "1 track"},
-		{&SongFacts{TempoBPM: 96.25, TempoVaries: true}, "96.3 BPM, varies"},
-		{&SongFacts{TempoBPM: 120, LengthSeconds: 3725.4, TrackCount: 24}, "24 tracks · 120 BPM · 1:02:05"},
-		{&SongFacts{LengthSeconds: 0.4}, ""},
-	} {
-		if got := FactsLabel(tc.facts); got != tc.want {
-			t.Errorf("FactsLabel(%+v) = %q, want %q", tc.facts, got, tc.want)
-		}
+	neutral := StatusLine(SongCard{FactsState: FactsStateOn, Facts: facts, LastSavedAt: &saved}, NeutralWords(), now)
+	if want := "Tracks 14 · Tempo 92 · 3:41; saved 3 days ago; no open work"; neutral != want {
+		t.Errorf("neutral status line:\n got %q\nwant %q", neutral, want)
 	}
 }
 
@@ -346,7 +383,7 @@ func TestStatusLine_MakesNoProgressClaim(t *testing.T) {
 	now := time.Date(2026, time.June, 10, 12, 0, 0, 0, time.UTC)
 	saved := now.AddDate(0, 0, -1)
 	line := strings.ToLower(StatusLine(SongCard{FactsState: FactsStateOn, Facts: &SongFacts{TempoBPM: 100},
-		LastSavedAt: &saved}, now))
+		LastSavedAt: &saved}, musicWordsForTest(), now))
 	for _, claim := range []string{"done", "finished", "complete", "final", "quality", "progress"} {
 		if strings.Contains(line, claim) {
 			t.Fatalf("status line made a claim %q: %s", claim, line)

@@ -370,10 +370,21 @@ test('a managed Home lists its songs and assistants after the library section', 
             keeper_agent_name: 'REAPER Assistant',
             last_session: null,
             open_work_counts: { ready: 2 },
-            workspace_route: '/workspaces/song-001'
+            workspace_route: '/workspaces/song-001',
+            stage: 'mixing',
+            next_action: 'Send stems'
           }
         ],
-        total: 1
+        total: 1,
+        // The Home's package words ride the roster response (PRD #792 FR7).
+        words: {
+          source: 'package',
+          noun: 'Song',
+          noun_plural: 'Songs',
+          roster_title: 'Songs and assistants',
+          facts: [],
+          fields: []
+        }
       })
     };
   });
@@ -388,7 +399,10 @@ test('a managed Home lists its songs and assistants after the library section', 
   assert.deepEqual(asked, ['/api/workspaces/home-1/assistant-program/library/roster']);
   assert.equal(panel.els.songRoster.hidden, false);
   assert.match(panel.els.songRoster.textContent, /Songs and assistants/);
-  assert.match(panel.els.songRoster.textContent, /Song 001REAPER AssistantNo sessions yet2 ready/);
+  assert.match(
+    panel.els.songRoster.textContent,
+    /Song 001REAPER AssistantMixingSend stemsNo sessions yet2 ready/
+  );
   // The template places the mount after the member list, before the roll-ups.
   const template = readFileSync(
     new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
