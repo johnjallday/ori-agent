@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -75,6 +76,51 @@ func TestPinFolderAgentToolbox_NeedsTheAgentAndTheAnchorBinding(t *testing.T) {
 	if err := pinFolderAgentToolbox(ws, "Songs Manager", false); err != errFolderAgentNoAnchorBinding {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestPluginMatches_UsesNameDescriptionKeywordsAndTags(t *testing.T) {
+	entry := plugin.MarketplaceEntry{Name: "release-planner", Description: "Plan song releases", Keywords: []string{"Audio"}, Tags: []string{"music"}}
+	for _, word := range []string{"release", "SONG", "audio", "Music"} {
+		if !pluginMatches(entry, word) {
+			t.Errorf("%q should match", word)
+		}
+	}
+	for _, word := range []string{"", " ", "manuscript"} {
+		if pluginMatches(entry, word) {
+			t.Errorf("%q should not match", word)
+		}
+	}
+}
+
+func TestPinFolderAgentToolbox_ReleaseRemovesOnlyTheFirstLookPin(t *testing.T) {
+	ws := folderAgentPinWorkspace()
+	if err := pinFolderAgentToolbox(ws, "Songs Manager", true); err != nil {
+		t.Fatal(err)
+	}
+	store := &singleWorkspaceStore{ws: ws}
+	if err := (folderAgentPins{store: store}).Release(ws.ID, "Songs Manager"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ws.GetToolboxAssignment("inst-1"); ok {
+		t.Fatal("the first-look pin is still assigned")
+	}
+	if _, ok := ws.GetToolbox("folder-agent-inst-1"); !ok {
+		t.Fatal("the Toolbox's history must stay")
+	}
+	// Nothing to release is not an error.
+	if err := (folderAgentPins{store: store}).Release(ws.ID, "Songs Manager"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// singleWorkspaceStore is just enough workspace.Store for Update.
+type singleWorkspaceStore struct {
+	workspace.Store
+	ws *workspace.Workspace
+}
+
+func (s *singleWorkspaceStore) Update(id string, fn func(*workspace.Workspace) error) error {
+	return fn(s.ws)
 }
 
 func sameSet(a, b []string) bool {

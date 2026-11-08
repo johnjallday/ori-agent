@@ -376,11 +376,81 @@ test('the agent sections render as text, the goal travels with Set it up', () =>
   setUp().listeners.click();
   assert.deepEqual(plain(calls[0]), [
     'set_up',
-    { use_goal: true, goal: 'Finish two songs this month' }
+    { selected: [], use_goal: true, goal: 'Finish two songs this month' }
   ]);
   label.children[0].checked = false;
   setUp().listeners.click();
   assert.equal(calls[1][1].use_goal, false);
+});
+
+test('optional tools can be unticked; required are locked; the plan follows the selection', async () => {
+  const view = folderAgentReportView(
+    reported({
+      candidates: [
+        { id: 'integration:x', name: 'X tools', required: true, action: 'install' },
+        {
+          id: 'skill:a@b',
+          name: 'mix-notes',
+          source: 'search',
+          marketplace: 'skills.sh',
+          ranked: true,
+          action: 'add'
+        },
+        { id: 'mcp:notes', name: 'notes', ranked: true, action: 'already_here' }
+      ],
+      plan: {
+        digest: 'with-skill',
+        runnable: true,
+        selected: ['skill:a@b'],
+        lines: [{ kind: 'add_on', name: 'Adds skill mix-notes · found by search' }]
+      }
+    })
+  );
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push([url, JSON.parse(init.body)]);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan: {
+          digest: 'without',
+          runnable: true,
+          selected: [],
+          lines: [{ kind: 'folder', name: 'Nothing is moved, copied or read' }]
+        }
+      })
+    };
+  };
+  const calls = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    fetchImpl,
+    onAction: (action, _button, extra) => calls.push([action, extra])
+  });
+  const boxes = card.querySelectorAll('input').filter(box => box.dataset.toolId);
+  assert.deepEqual(
+    boxes.map(b => [b.dataset.toolId, b.checked, b.disabled]),
+    [
+      ['integration:x', true, true],
+      ['skill:a@b', true, false]
+    ]
+  );
+  boxes[1].checked = false;
+  await boxes[1].listeners.change();
+  assert.deepEqual(requests[0], [
+    '/api/personal-assistant/folder-agent/ws-1/plan',
+    { selected: [] }
+  ]);
+  assert.deepEqual(
+    card.querySelectorAll('.folder-agent-card__line-name').map(n => n.textContent),
+    ['Nothing is moved, copied or read']
+  );
+  card
+    .querySelectorAll('button')
+    .find(b => b.dataset.folderAgentAction === 'set_up')
+    .listeners.click();
+  assert.deepEqual(plain(calls[0]), ['set_up', { selected: [] }]);
+  assert.equal(view.plan.digest, 'without');
 });
 
 test('a left-out part shows one muted sentence in its place', () => {

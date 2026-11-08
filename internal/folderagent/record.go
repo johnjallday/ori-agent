@@ -115,8 +115,11 @@ type Record struct {
 	// NextTicketID is the agent's suggested first ticket, created when the
 	// Set it up run completed; NextStarted once the owner started it.
 	NextTicketID string `json:"next_ticket_id,omitempty"`
-	NextStarted  bool   `json:"next_started,omitempty"`
-	Setup        *Setup `json:"setup,omitempty"`
+	// Declined are optional candidates the owner unticked at Set it up; a
+	// later look does not propose them again (PRD FR22).
+	Declined    []string `json:"declined,omitempty"`
+	NextStarted bool     `json:"next_started,omitempty"`
+	Setup       *Setup   `json:"setup,omitempty"`
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
 

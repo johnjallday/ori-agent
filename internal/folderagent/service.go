@@ -124,6 +124,8 @@ type Setups interface {
 // chose Set it up or Look further (PRD FR9).
 type Pins interface {
 	Pin(workspaceID, agentName string, readContents bool) error
+	// Release removes the first-look pin once Set it up completed.
+	Release(workspaceID, agentName string) error
 }
 
 // Turns resolves the folder agent's tool-capable model for its bounded turn.
@@ -140,8 +142,17 @@ type Memory interface {
 	Remember(workspaceID, text, provenance string) error
 }
 
+// Matches is source (d) and (c) of the tool candidates: the existing
+// marketplace searches, called in process with the table's words, and what
+// the user already has.
+type Matches interface {
+	Search(ctx context.Context, words []string) []folderlook.SearchHit
+	Installed(ctx context.Context) folderlook.Installed
+}
+
 // Deps wires a Service.
 type Deps struct {
+	Matches    Matches
 	Pins       Pins
 	Turns      Turns
 	Memory     Memory
@@ -383,11 +394,27 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	}
 	facts := foldermap.FactsFrom(m)
 	candidates := folderlook.RequiredCandidates(facts, ready)
-	turn, sections := s.runTurn(ctx, rec, root, m, facts, candidates)
+	model := s.resolveModel(ctx, rec)
+	// Source (d), the marketplace search, runs only for a turn that can rank
+	// it (PRD FR23), with the table's own words.
+	var found []folderlook.Candidate
+	if model.chat != nil && s.deps.Matches != nil {
+		if words := folderlook.SearchWords(facts); len(words) > 0 {
+			declined := make(map[string]bool, len(rec.Declined))
+			for _, id := range rec.Declined {
+				declined[id] = true
+			}
+			found = folderlook.SearchCandidates(s.deps.Matches.Search(ctx, words), candidates,
+				s.deps.Matches.Installed(ctx), func(id string) bool { return declined[id] })
+		}
+	}
+	turn, sections := s.runTurn(ctx, rec, root, m, facts, append(append([]folderlook.Candidate(nil), candidates...), found...), model)
 	// The agent's looks may have found more: the facts are the host's again.
 	facts = foldermap.FactsFrom(m)
 	stage := foldermap.StageFor(facts)
-	candidates = applyRanking(folderlook.RequiredCandidates(facts, ready), sections)
+	required := folderlook.RequiredCandidates(facts, ready)
+	candidates = applyRanking(append(required, found...), sections)
+	candidates = keepShown(candidates)
 	var askFolders []folderlook.AskFolder
 	if sections != nil && sections.Question != "" {
 		askFolders = folderlook.AskFolders(facts)
@@ -417,22 +444,46 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 
 // runTurn runs the agent's one bounded turn over the map (PRD FR11). Its
 // looks write into m; its words come back parsed and gated by the host.
-func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *foldermap.Map, facts foldermap.Facts,
-	candidates []folderlook.Candidate) (*TurnReceipt, *folderlook.Sections) {
-	now := s.deps.Now().UTC()
-	skipped := func(reason, model string) (*TurnReceipt, *folderlook.Sections) {
-		return &TurnReceipt{Status: TurnSkipped, Reason: reason, Model: model, StartedAt: now, FinishedAt: s.deps.Now().UTC()}, nil
-	}
+// turnModel is the folder agent's resolved model, or why there is none.
+type turnModel struct {
+	chat   folderlook.Chat
+	name   string
+	reason string
+}
+
+func (s *Service) resolveModel(ctx context.Context, rec *Record) turnModel {
 	if s.deps.Turns == nil {
-		return skipped(SkipNoModel, "")
+		return turnModel{reason: SkipNoModel}
 	}
 	chat, model, err := s.deps.Turns.Model(ctx, rec.WorkspaceID, rec.AgentName)
 	if err != nil || chat == nil || strings.TrimSpace(model) == "" {
 		if err != nil && !errors.Is(err, folderlook.ErrNoModel) {
-			return skipped(SkipProviderUnavailable, model)
+			return turnModel{name: model, reason: SkipProviderUnavailable}
 		}
-		return skipped(SkipNoModel, "")
+		return turnModel{reason: SkipNoModel}
 	}
+	return turnModel{chat: chat, name: model}
+}
+
+// keepShown keeps what the report shows: required candidates, and the ones
+// the agent ranked. Unranked search hits are left out.
+func keepShown(candidates []folderlook.Candidate) []folderlook.Candidate {
+	var out []folderlook.Candidate
+	for _, c := range candidates {
+		if c.Required || c.Ranked {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *foldermap.Map, facts foldermap.Facts,
+	candidates []folderlook.Candidate, resolved turnModel) (*TurnReceipt, *folderlook.Sections) {
+	now := s.deps.Now().UTC()
+	if resolved.chat == nil {
+		return &TurnReceipt{Status: TurnSkipped, Reason: resolved.reason, Model: resolved.name, StartedAt: now, FinishedAt: s.deps.Now().UTC()}, nil
+	}
+	chat, model := resolved.chat, resolved.name
 	ask := folderlook.AskAllowed(facts)
 	reference := folderlook.BuildReference(folderlook.ReferenceInput{
 		FolderName: rec.FolderName, Brief: rec.Brief, Map: m, Facts: facts,
@@ -702,6 +753,9 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		r.State = StateSettingUp
 		r.Setup = &Setup{Stage: plan.Stage, Selected: plan.Selected, Lines: plan.Lines,
 			Status: personalassistant.FolderSetupRunning, StartedAt: s.deps.Now().UTC()}
+		if selected != nil {
+			r.Declined = appendDeclined(r.Declined, r.Candidates, plan.Selected)
+		}
 		return nil
 	})
 	if err != nil {
@@ -727,6 +781,13 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		nextID := ""
 		if status == personalassistant.FolderSetupDone {
 			nextID = s.createNextTicket(rec)
+			// The first look is over: the agent works with the workspace's
+			// tools, including any the run just added.
+			if s.deps.Pins != nil {
+				if err := s.deps.Pins.Release(workspaceID, rec.AgentName); err != nil {
+					logger.Warn("Folder agent could not release its first-look pin", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
+				}
+			}
 		}
 		_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 			if r.Setup != nil {
@@ -740,6 +801,38 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		})
 	}()
 	return s.viewOf(ctx, rec), nil
+}
+
+// appendDeclined records the ranked optional candidates the owner unticked.
+func appendDeclined(declined []string, candidates []folderlook.Candidate, selected []string) []string {
+	kept := make(map[string]bool, len(selected))
+	for _, id := range selected {
+		kept[id] = true
+	}
+	seen := make(map[string]bool, len(declined))
+	for _, id := range declined {
+		seen[id] = true
+	}
+	for _, c := range candidates {
+		if c.Required || !c.Ranked || c.Action == folderlook.ActionAlreadyHere || kept[c.ID] || seen[c.ID] {
+			continue
+		}
+		seen[c.ID] = true
+		declined = append(declined, c.ID)
+	}
+	return declined
+}
+
+// Plan returns the plan card for a selection of optional candidates, so the
+// card can show the lines and digest the owner will confirm.
+func (s *Service) Plan(userID, workspaceID string, selected []string) (PlanView, error) {
+	rec, err := s.Record(userID, workspaceID)
+	if err != nil {
+		return PlanView{}, err
+	}
+	plan := BuildPlan(*rec, selected)
+	return PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
+		Unavailable: plan.Unavailable, Selected: plan.Selected}, nil
 }
 
 // createNextTicket adds the agent's suggested first ticket to the backlog,

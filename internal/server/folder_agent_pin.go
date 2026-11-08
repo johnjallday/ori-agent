@@ -97,6 +97,23 @@ func pinReadsContents(def *workspace.ToolboxDefinition) bool {
 
 type folderAgentPins struct{ store workspace.Store }
 
+// Release removes the agent's first-look assignment so it works with the
+// workspace's tools, including those Set it up just added. The Toolbox
+// itself stays in the workspace's history.
+func (p folderAgentPins) Release(workspaceID, agentName string) error {
+	return p.store.Update(workspaceID, func(ws *workspace.Workspace) error {
+		instance, ok := ws.FindAgentInstance(agentName, "")
+		if !ok || instance == nil {
+			return nil
+		}
+		assignment, ok := ws.GetToolboxAssignment(instance.ID)
+		if !ok || assignment == nil || assignment.ToolboxID != "folder-agent-"+instance.ID {
+			return nil
+		}
+		return ws.DeleteToolboxAssignment(instance.ID)
+	})
+}
+
 func (p folderAgentPins) Pin(workspaceID, agentName string, readContents bool) error {
 	return p.store.Update(workspaceID, func(ws *workspace.Workspace) error {
 		return pinFolderAgentToolbox(ws, agentName, readContents)

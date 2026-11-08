@@ -37,6 +37,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Tickets:    folderAgentTickets{store: b.workspaceStore},
 		Pins:       folderAgentPins{store: b.workspaceStore},
 		Turns:      folderAgentTurns{builder: b},
+		Matches:    folderAgentMatches{builder: b},
 		Memory:     folderAgentMemory{store: workspace.NewMemoryStore(b.workspaceFileStore)},
 		Setups:     folderAgentSetups{builder: b},
 	})
@@ -356,8 +357,34 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 		logger.Warn("Folder agent setup stopped", fields)
 		return personalassistant.FolderSetupStopped, reason
 	}
+	setLine := func(name, state string) {
+		for i := range lines {
+			if lines[i].Name == name {
+				lines[i].State = state
+			}
+		}
+		update(append([]personalassistant.FolderPlanLine(nil), lines...))
+	}
 	for _, candidate := range plan.Candidates {
-		if candidate.Kind != folderlook.KindIntegration {
+		switch candidate.Kind {
+		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
+			line := ""
+			for _, l := range lines {
+				if l.Kind == folderagent.FolderPlanAddOn && strings.Contains(l.Name, candidate.Name) {
+					line = l.Name
+					break
+				}
+			}
+			setLine(line, personalassistant.FolderLineWorking)
+			if err := b.addFolderAgentAddOn(ctx, rec.WorkspaceID, candidate); err != nil {
+				setLine(line, personalassistant.FolderLineFailed)
+				logger.Warn("Folder agent setup stopped", logger.Fields{"workspace_id": rec.WorkspaceID, "add_on": candidate.ID, "error": err.Error()})
+				return personalassistant.FolderSetupStopped, personalassistant.FolderStopInstallFailed
+			}
+			setLine(line, personalassistant.FolderLineDone)
+			continue
+		case folderlook.KindIntegration:
+		default:
 			return stop(personalassistant.FolderPlanWorkspace, personalassistant.FolderStopPlanChanged, errors.New("candidate kind not runnable: "+candidate.Kind))
 		}
 		entry, ok := reviewedintegration.Get(candidate.IntegrationKey)

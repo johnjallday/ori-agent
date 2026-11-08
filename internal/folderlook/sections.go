@@ -184,7 +184,7 @@ func isHeadingLine(line string) bool {
 	return false
 }
 
-var toolLinePattern = regexp.MustCompile(`^\[?([a-z0-9][a-z0-9._:/-]*)\]?\s*(?:[—–:-]+\s*)?(.*)$`)
+var toolLinePattern = regexp.MustCompile(`^\[?([a-z0-9][a-z0-9._:/@-]*)\]?\s*(?:[—–:-]+\s*)?(.*)$`)
 
 // splitToolLine reads "id — why" / "id: why" / "[id] why".
 func splitToolLine(line string) (string, string) {

@@ -1356,6 +1356,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/look-further", s.Handlers.FolderAgent.LookFurther)
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/setup", s.Handlers.FolderAgent.SetUp)
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/start-next", s.Handlers.FolderAgent.StartNext)
+			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/plan", s.Handlers.FolderAgent.Plan)
 		}
 		// Show me a folder: chips and offer identifiers only, never a path.
 		const folderDigest = "/api/personal-assistant/folder-digest"

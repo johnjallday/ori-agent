@@ -88,6 +88,8 @@ type PlanView struct {
 	Runnable bool                               `json:"runnable"`
 	// Unavailable explains why a plan cannot run yet.
 	Unavailable string `json:"unavailable,omitempty"`
+	// Selected are the optional candidates this plan includes.
+	Selected []string `json:"selected,omitempty"`
 }
 
 func (s *Service) viewOf(_ context.Context, rec *Record) View {
@@ -122,7 +124,7 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		v.ToolsSentence = "Search for more tools needs a model"
 	}
 	plan := BuildPlan(*rec, nil)
-	v.Plan = &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable, Unavailable: plan.Unavailable}
+	v.Plan = &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable, Unavailable: plan.Unavailable, Selected: plan.Selected}
 	switch rec.State {
 	case StateReported:
 		v.Actions = []string{ActionSetUp, ActionKeep, ActionLookFurther}
@@ -265,7 +267,12 @@ func StageLine(f foldermap.Facts, stage foldermap.Stage, candidates []folderlook
 		if stage == foldermap.StageFolder {
 			return "Nothing to set up yet: Ori found no project it knows here."
 		}
-		return "Set it up keeps this workspace as it is."
+		for _, c := range candidates {
+			if !c.Required && c.Action != folderlook.ActionAlreadyHere {
+				return "Set it up: adds the tools you leave selected below"
+			}
+		}
+		return "Nothing to set up for this project yet."
 	}
 	return "Set it up: " + strings.Join(parts, ", ")
 }
@@ -285,15 +292,26 @@ type Plan struct {
 
 // BuildPlan lists every consequence of Set it up. Required candidates are
 // always in it; optional ones only when selected.
+//
+// selected nil means the default: every optional candidate the agent ranked,
+// except what is already here. An explicit list (even empty) replaces it;
+// ids that are not optional candidates are ignored.
 func BuildPlan(rec Record, selected []string) Plan {
 	plan := Plan{Stage: rec.Stage}
 	chosen := make(map[string]bool, len(selected))
+	if selected == nil {
+		for _, c := range rec.Candidates {
+			if !c.Required && c.Ranked && c.Action != folderlook.ActionAlreadyHere {
+				chosen[c.ID] = true
+			}
+		}
+	}
 	for _, id := range selected {
 		chosen[id] = true
 	}
 	runnable := rec.Stage == foldermap.StageTools
 	for _, c := range rec.Candidates {
-		if !c.Required && !chosen[c.ID] {
+		if !c.Required && (!chosen[c.ID] || c.Action == folderlook.ActionAlreadyHere) {
 			continue
 		}
 		plan.Candidates = append(plan.Candidates, c)
@@ -325,6 +343,8 @@ func BuildPlan(rec Record, selected []string) Plan {
 			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds File Curator", Detail: c.Detail})
 			runnable = false
 			plan.Unavailable = "Adding File Curator from a folder is not available yet."
+		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
+			plan.Lines = append(plan.Lines, addOnLine(c, rec.WorkspaceName))
 		default:
 			runnable = false
 		}
@@ -344,6 +364,31 @@ func BuildPlan(rec Record, selected []string) Plan {
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan
+}
+
+// FolderPlanAddOn is the plan line kind of an add-on found by search.
+const FolderPlanAddOn = "add_on"
+
+// addOnLine words one selected add-on: "Installs <plugin>", "Adds skill
+// <name>", "Adds <server>", each labelled "found by search" (PRD FR33).
+func addOnLine(c folderlook.Candidate, workspaceName string) personalassistant.FolderPlanLine {
+	name := c.Name
+	switch c.Kind {
+	case folderlook.KindPlugin:
+		name = "Installs " + name
+	case folderlook.KindSkill:
+		name = "Adds skill " + name
+	default:
+		name = "Adds " + name
+	}
+	if c.Source == folderlook.SourceSearch {
+		name += " · found by search"
+	}
+	detail := "For " + workspaceName + "."
+	if c.Marketplace != "" {
+		detail = "From " + c.Marketplace + ", for " + workspaceName + "."
+	}
+	return personalassistant.FolderPlanLine{Kind: FolderPlanAddOn, Name: name, Detail: detail}
 }
 
 func planDigest(plan Plan) string {

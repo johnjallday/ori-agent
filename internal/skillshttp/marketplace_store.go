@@ -155,6 +155,25 @@ func skillLocation(skillsDir, name string) string {
 	return filepath.Join(filepath.Base(filepath.Dir(skillsDir)), filepath.Base(skillsDir), name)
 }
 
+// InstallMarketplacePackage installs one skills.sh package ("owner/repo@skill")
+// in process, as POST /api/skills/marketplace/install does, and returns the
+// skill's name. A skill of that name already in the Skills folder is not an
+// error: its name is returned and nothing is changed.
+func (h *Handler) InstallMarketplacePackage(ctx context.Context, packageSpec string) (string, error) {
+	if h == nil {
+		return "", errors.New("skills are unavailable")
+	}
+	installed, _, err := h.installSkillPackage(ctx, packageSpec)
+	var taken *skillNameTakenError
+	if errors.As(err, &taken) {
+		return taken.Name, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return installed.Name, nil
+}
+
 // installSkillPackage downloads a package and moves its skill into the Skills
 // folder with a source file. A folder of that name already there is refused
 // and left untouched.

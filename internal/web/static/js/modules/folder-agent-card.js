@@ -142,17 +142,7 @@ export function folderAgentReportView(view) {
     .filter(id => ACTION_LABELS[id])
     .map(id => ({ id, label: ACTION_LABELS[id] }));
   if (view.plan) {
-    out.plan = {
-      digest: String(view.plan.digest || ''),
-      runnable: Boolean(view.plan.runnable),
-      unavailable: String(view.plan.unavailable || ''),
-      lines: (view.plan.lines || []).map(line => ({
-        kind: String(line.kind || ''),
-        name: String(line.name || ''),
-        detail: String(line.detail || ''),
-        state: String(line.state || '')
-      }))
-    };
+    out.plan = planView(view.plan);
     // Set it up waits for a plan that can run; the card says why it cannot.
     if (!out.plan.runnable) out.actions = out.actions.filter(a => a.id !== 'set_up');
   }
@@ -238,10 +228,25 @@ function renderLines(doc, lines, className) {
 
 // renderFolderAgentReport draws the receipt or the report. onAction(id,
 // button, extra) posts one action; the caller refreshes.
-export function renderFolderAgentReport(view, doc = document, { onAction, error = '' } = {}) {
+export function renderFolderAgentReport(
+  view,
+  doc = document,
+  { onAction, error = '', fetchImpl = globalThis.fetch } = {}
+) {
   const card = el(doc, 'article', 'folder-agent-card folder-agent-card--report');
   card.dataset.folderAgentCard = view.state;
   card.dataset.workspaceId = view.workspaceID;
+  // The optional tools left selected, and the plan they make: unticking one
+  // asks the server for the plan (and digest) without it.
+  const selecting = Boolean(view.plan?.runnable) && view.actions.some(a => a.id === 'set_up');
+  const selected = new Set(view.plan?.selected || []);
+  let planHost = null;
+  const refreshPlan = async () => {
+    const plan = await fetchFolderAgentPlan(view.workspaceID, [...selected], fetchImpl);
+    if (!plan) return;
+    view.plan = plan;
+    if (planHost) planHost.replaceChildren(renderLines(doc, plan.lines, 'folder-agent-card__plan'));
+  };
   card.append(el(doc, 'div', 'folder-agent-card__by', view.agent));
   card.append(el(doc, 'h3', 'folder-agent-card__title', view.title));
   if (view.state === 'looking') {
@@ -275,6 +280,25 @@ export function renderFolderAgentReport(view, doc = document, { onAction, error 
       const item = el(doc, 'li', 'folder-agent-card__tool');
       if (tool.greyed) item.dataset.greyed = 'true';
       if (tool.required) item.dataset.required = 'true';
+      // While Set it up is offered: required tools are checked and locked,
+      // optional ones can be unticked, "already here" ones have no box.
+      if (selecting && !tool.greyed) {
+        const box = doc.createElement('input');
+        box.type = 'checkbox';
+        box.className = 'folder-agent-card__tool-pick';
+        box.setAttribute('aria-label', `Include ${tool.name}`);
+        box.checked = tool.required || selected.has(tool.id);
+        box.disabled = tool.required;
+        box.dataset.toolId = tool.id;
+        if (!tool.required) {
+          box.addEventListener('change', () => {
+            if (box.checked) selected.add(tool.id);
+            else selected.delete(tool.id);
+            return refreshPlan();
+          });
+        }
+        item.append(box);
+      }
       item.append(el(doc, 'span', 'folder-agent-card__tool-name', tool.name));
       if (tool.detail) item.append(el(doc, 'span', 'folder-agent-card__tool-detail', tool.detail));
       if (tool.label) item.append(el(doc, 'span', 'folder-agent-card__tool-label', tool.label));
@@ -394,7 +418,9 @@ export function renderFolderAgentReport(view, doc = document, { onAction, error 
   }
   if (view.plan && !view.setup && view.state !== 'setting_up') {
     if (view.plan.runnable) {
-      card.append(renderLines(doc, view.plan.lines, 'folder-agent-card__plan'));
+      planHost = el(doc, 'div', 'folder-agent-card__plan-host');
+      planHost.append(renderLines(doc, view.plan.lines, 'folder-agent-card__plan'));
+      card.append(planHost);
     } else if (view.plan.unavailable) {
       card.append(el(doc, 'p', 'folder-agent-card__note', view.plan.unavailable));
     }
@@ -418,10 +444,14 @@ export function renderFolderAgentReport(view, doc = document, { onAction, error 
       button.dataset.folderAgentAction = action.id;
       button.addEventListener('click', () => {
         // Set it up carries the goal line as the owner left it.
-        const extra =
-          action.id === 'set_up' && goalInput
-            ? { use_goal: Boolean(goalUse?.checked), goal: String(goalInput.value || '') }
-            : undefined;
+        let extra;
+        if (action.id === 'set_up') {
+          extra = { selected: [...selected] };
+          if (goalInput) {
+            extra.use_goal = Boolean(goalUse?.checked);
+            extra.goal = String(goalInput.value || '');
+          }
+        }
         return onAction?.(action.id, button, extra);
       });
       actions.append(button);
@@ -489,6 +519,36 @@ export async function fetchFolderAgent(workspaceID, fetchImpl = globalThis.fetch
   });
   const payload = await readJSON(response);
   return response.ok ? payload?.folder_agent || null : null;
+}
+
+function planView(plan) {
+  return {
+    digest: String(plan.digest || ''),
+    runnable: Boolean(plan.runnable),
+    unavailable: String(plan.unavailable || ''),
+    selected: Array.isArray(plan.selected) ? plan.selected.map(String) : [],
+    lines: (plan.lines || []).map(line => ({
+      kind: String(line.kind || ''),
+      name: String(line.name || ''),
+      detail: String(line.detail || ''),
+      state: String(line.state || '')
+    }))
+  };
+}
+
+// fetchFolderAgentPlan asks for the plan of a selection of optional tools.
+export async function fetchFolderAgentPlan(workspaceID, selected, fetchImpl = globalThis.fetch) {
+  if (!workspaceID || typeof fetchImpl !== 'function') return null;
+  try {
+    const { ok, payload } = await post(
+      `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(workspaceID)}/plan`,
+      { selected },
+      fetchImpl
+    );
+    return ok && payload?.plan ? planView(payload.plan) : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 export async function listFolderAgents(fetchImpl = globalThis.fetch) {

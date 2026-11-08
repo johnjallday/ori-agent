@@ -3312,6 +3312,11 @@ a.quest-title:focus-visible {
   opacity: 0.6;
 }
 
+.folder-agent-card__tool-pick {
+  margin: 0 2px 0 0;
+  align-self: center;
+}
+
 .folder-agent-card__tool-name,
 .folder-agent-card__line-name {
   font-weight: 600;

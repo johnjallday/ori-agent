@@ -229,6 +229,32 @@ func setUpOf(req setUpRequest) folderagent.SetUpRequest {
 	return out
 }
 
+type planRequest struct {
+	Selected []string `json:"selected"`
+}
+
+// Plan returns the plan card for the optional candidates the owner left
+// selected, with the digest Set it up must confirm.
+func (h *Handler) Plan(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	var req planRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Selected == nil {
+		req.Selected = []string{}
+	}
+	plan, err := h.service.Plan(userID, r.PathValue("workspaceID"), req.Selected)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"plan": plan})
+}
+
 // StartNext starts the agent's first ticket from the receipt (Start this).
 func (h *Handler) StartNext(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.user(w, r)

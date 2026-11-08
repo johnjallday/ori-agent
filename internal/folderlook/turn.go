@@ -233,6 +233,7 @@ func SystemPrompt(agentName string, askAllowed bool) string {
 	b.WriteString("- Make the first ticket small and concrete about what this folder holds (for example its songs, drafts or projects by name).\n")
 	b.WriteString("- Use plain words; do not call anything \"ready\".\n")
 	b.WriteString("- Under Tools, choose at most 3 candidates, by the exact id from the candidate list, one line each: <id> — <why, under 120 characters>. Never name a tool that is not a candidate.\n")
+	b.WriteString("- Rank a search candidate only when its name and description clearly fit the projects in this folder; popularity is not a reason. Ranking none of them is fine.\n")
 	b.WriteString("- A work item is a ticket; never call it a task.\n\n")
 	b.WriteString("Answer in exactly these sections, nothing before them:\n")
 	b.WriteString("What it is: <one sentence, under 400 characters>\n")
