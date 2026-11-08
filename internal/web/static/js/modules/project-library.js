@@ -969,6 +969,11 @@ export class ProjectLibraryPanel {
     this.panel.hidden = false;
     const jump = document.getElementById('projectLibraryJump');
     if (jump) jump.hidden = false;
+    // A reviewed package upgrade may bring the package's words for the
+    // shelf's facts and plugin fields (PRD #792 FR10): read them again
+    // without a reload. The name is assistant-program.js's
+    // PROVIDER_UPGRADED_EVENT.
+    document.addEventListener?.('assistant-program:provider-upgraded', () => void this.refresh());
     document
       .getElementById('projectLibraryInitialize')
       ?.addEventListener('click', event => void this.initialize(event.currentTarget));

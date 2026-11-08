@@ -119,6 +119,15 @@ func RenderProjectCardWordsPromptLines(w *ProjectCardWords) []string {
 	return lines
 }
 
+// projectCardWordsForPin keeps a creation-time snapshot only when it belongs
+// to the provider the new Home is pinned to and is valid.
+func projectCardWordsForPin(owner *AssistantProgramHomeOwner, words *ProjectCardWords) *ProjectCardWords {
+	if owner == nil || !words.Valid() || !strings.EqualFold(words.PluginID, owner.PluginID) || words.Version != owner.PluginVersion {
+		return nil
+	}
+	return words.Clone()
+}
+
 // Clone returns a deep copy.
 func (w *ProjectCardWords) Clone() *ProjectCardWords {
 	if w == nil {

@@ -89,6 +89,18 @@ func TestResolveIndependentProgramHomeBindsExactTwoProviderEvidence(t *testing.T
 	if len(resolved.Declaration.Roles) != 1 || resolved.Declaration.Roles[0].Scope != workspace.AssistantRoleScopeHome {
 		t.Fatalf("Home roles = %#v", resolved.Declaration.Roles)
 	}
+	// A release without project_card gives a new Home no words snapshot; one
+	// with it gives the snapshot of that exact release (PRD #792 FR9).
+	if resolved.ProjectCardWords != nil {
+		t.Fatalf("words without a section: %+v", resolved.ProjectCardWords)
+	}
+	withWords, _ := splitProgramFixture()
+	withWords[0].WorkspaceSurfaces.AssistantProgramHomes[0].ProjectCard = &projecttemplates.ProjectCardDeclaration{
+		SchemaVersion: 1, Noun: "Song", NounPlural: "Songs", RosterTitle: "Songs and assistants"}
+	if worded, err := resolveIndependentProgramHome(withWords, "local", template, true); err != nil || worded.ProjectCardWords == nil ||
+		worded.ProjectCardWords.Noun != "Song" || worded.ProjectCardWords.Version != withWords[0].Version {
+		t.Fatalf("words with a section: %+v %v", worded.ProjectCardWords, err)
+	}
 	if !plugin.IndependentProviderEvidenceAvailable(installed, resolved.Owner, resolved.ProjectOwner) {
 		t.Fatal("fresh split-provider evidence was unavailable")
 	}

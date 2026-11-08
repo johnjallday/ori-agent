@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 const (
@@ -71,6 +73,23 @@ func (d *ProjectCardDeclaration) Clone() *ProjectCardDeclaration {
 	clone.Facts = append([]ProjectCardFact(nil), d.Facts...)
 	clone.Fields = append([]ProjectCardField(nil), d.Fields...)
 	return &clone
+}
+
+// Snapshot is the Home's prompt snapshot of these words (PRD #792 FR9); nil
+// when there is no section.
+func (d *ProjectCardDeclaration) Snapshot(pluginID, version string) *workspace.ProjectCardWords {
+	if d == nil {
+		return nil
+	}
+	snapshot := &workspace.ProjectCardWords{PluginID: pluginID, Version: version, Noun: d.Noun,
+		NounPlural: d.NounPlural, RosterTitle: d.RosterTitle}
+	for _, fact := range d.Facts {
+		snapshot.Facts = append(snapshot.Facts, workspace.ProjectCardWordsFact{Kind: fact.Kind, Unit: fact.Unit, UnitOne: fact.UnitOne})
+	}
+	for _, field := range d.Fields {
+		snapshot.Fields = append(snapshot.Fields, workspace.ProjectCardWordsField{ID: field.ID, Label: field.Label, Kind: field.Kind})
+	}
+	return snapshot
 }
 
 // Field returns the declared field with this id.

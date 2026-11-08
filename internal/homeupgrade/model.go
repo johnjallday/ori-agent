@@ -127,6 +127,14 @@ type PlanProgram struct {
 	// opens it.
 	AddsHomeProfile  bool   `json:"adds_home_profile,omitempty"`
 	HomeProfileTitle string `json:"home_profile_title,omitempty"`
+	// AddsProjectCard says the newer release adds the package's words for
+	// this Home's project card and roster (PRD #792 FR10); ProjectCardNoun and
+	// ProjectCardNounPlural are the declared words, and ProjectCardWords is the
+	// snapshot the commit writes on each Home with the pin.
+	AddsProjectCard       bool                        `json:"adds_project_card,omitempty"`
+	ProjectCardNoun       string                      `json:"project_card_noun,omitempty"`
+	ProjectCardNounPlural string                      `json:"project_card_noun_plural,omitempty"`
+	ProjectCardWords      *workspace.ProjectCardWords `json:"project_card_words,omitempty"`
 	// AddsResourceAttachments are resource workspaces the newer release lets
 	// this Home have. Nothing is created, staffed or read by the upgrade; the
 	// owner sets one up afterwards.

@@ -71,18 +71,7 @@ func WordsFromDeclaration(card *projecttemplates.ProjectCardDeclaration) Words {
 // WordsSnapshot is the Home's prompt snapshot of a declaration's words
 // (FR9); nil when the declaration has no section.
 func WordsSnapshot(pluginID, version string, card *projecttemplates.ProjectCardDeclaration) *workspace.ProjectCardWords {
-	if card == nil {
-		return nil
-	}
-	snapshot := &workspace.ProjectCardWords{PluginID: pluginID, Version: version, Noun: card.Noun,
-		NounPlural: card.NounPlural, RosterTitle: card.RosterTitle}
-	for _, fact := range card.Facts {
-		snapshot.Facts = append(snapshot.Facts, workspace.ProjectCardWordsFact{Kind: fact.Kind, Unit: fact.Unit, UnitOne: fact.UnitOne})
-	}
-	for _, field := range card.Fields {
-		snapshot.Fields = append(snapshot.Fields, workspace.ProjectCardWordsField{ID: field.ID, Label: field.Label, Kind: field.Kind})
-	}
-	return snapshot
+	return card.Snapshot(pluginID, version)
 }
 
 // SnapshotWords are the words agent prompts and agent tools use: the Home's

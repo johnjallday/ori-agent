@@ -111,6 +111,16 @@ func providerUpgradeProfileAddition(title string) string {
 	return "Adds " + article + " " + title + " card to this Home. Nothing is detected or read until you open it."
 }
 
+// providerUpgradeProjectCardAddition is the review's line for a release that
+// adds the package's project-card words (PRD #792 FR10).
+func providerUpgradeProjectCardAddition(plural string) string {
+	plural = strings.ToLower(strings.TrimSpace(plural))
+	if plural == "" {
+		plural = "projects"
+	}
+	return "Adds the package's words for the " + plural + " card and roster. Nothing else changes."
+}
+
 // providerUpgradeResourceAddition is the review's line for a release that lets
 // the Home have a resource workspace: the Home package's own label for it,
 // that the upgrade creates and reads nothing, and what will be shared once
@@ -270,6 +280,9 @@ func (h *Handler) respondProviderUpgradeReview(w http.ResponseWriter, r *http.Re
 		}
 		if program.AddsHomeProfile {
 			view.Additions = append(view.Additions, providerUpgradeProfileAddition(program.HomeProfileTitle))
+		}
+		if program.AddsProjectCard {
+			view.Additions = append(view.Additions, providerUpgradeProjectCardAddition(program.ProjectCardNounPlural))
 		}
 		for _, attachment := range program.AddsResourceAttachments {
 			view.Additions = append(view.Additions, providerUpgradeResourceAddition(attachment.Label))

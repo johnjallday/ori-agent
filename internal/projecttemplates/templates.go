@@ -359,6 +359,11 @@ type Template struct {
 	// It is mutually exclusive with PluginOwner and carries no project blueprint
 	// or skeleton authority.
 	ProgramHomeOwner *workspace.AssistantProgramHomeOwner `json:"program_home_owner,omitempty"`
+	// ProgramHomeWords is that Home declaration's project-card words snapshot
+	// (PRD #792 FR9), written once into a Home created from this template.
+	// Host-only: never serialized, so template digests and listings are
+	// unchanged.
+	ProgramHomeWords *workspace.ProjectCardWords `json:"-"`
 	// BuiltinVersion is the shipped revision of a built-in's manifest. When the
 	// embedded version exceeds the on-disk copy, EnsureLibrary refreshes the
 	// built-in's template.json so metadata changes (rosters, tags, …) reach

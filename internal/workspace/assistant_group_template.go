@@ -111,6 +111,19 @@ func (service *AssistantProgramStore) EnsureNamedStationWithProvenance(
 	name string,
 	provenance *AssistantGroupTemplateProvenance,
 ) (*Workspace, bool, error) {
+	return service.EnsureNamedStationWithProvenanceAndWords(key, declaration, name, provenance, nil)
+}
+
+// EnsureNamedStationWithProvenanceAndWords also records the pinned Home
+// declaration's project-card words snapshot in the first-creation write (PRD
+// #792 FR9).
+func (service *AssistantProgramStore) EnsureNamedStationWithProvenanceAndWords(
+	key AssistantProgramKey,
+	declaration *AssistantProgramDeclaration,
+	name string,
+	provenance *AssistantGroupTemplateProvenance,
+	words *ProjectCardWords,
+) (*Workspace, bool, error) {
 	if service == nil || service.store == nil || strings.TrimSpace(name) == "" {
 		return nil, false, ErrAssistantProgramUnavailable
 	}
@@ -123,5 +136,5 @@ func (service *AssistantProgramStore) EnsureNamedStationWithProvenance(
 	}
 	assistantProgramProvisionMu.Lock()
 	defer assistantProgramProvisionMu.Unlock()
-	return service.ensureStationWithOptionsLocked(key, declaration, strings.TrimSpace(name), record, record.ProgramHomeOwner)
+	return service.ensureStationWithOptionsLocked(key, declaration, strings.TrimSpace(name), record, record.ProgramHomeOwner, words)
 }

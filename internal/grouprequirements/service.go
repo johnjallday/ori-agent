@@ -101,6 +101,9 @@ type IndependentHomeResolution struct {
 	Declaration  *workspace.AssistantProgramDeclaration
 	Owner        *workspace.AssistantProgramHomeOwner
 	ProjectOwner *workspace.AssistantProjectProviderOwner
+	// ProjectCardWords is the resolved Home declaration's words snapshot (PRD
+	// #792 FR9); nil when its release declares no project_card.
+	ProjectCardWords *workspace.ProjectCardWords
 }
 
 type IndependentHomeResolver func(ownerUserID string, template projecttemplates.Template, requireHome bool) (IndependentHomeResolution, error)
@@ -140,6 +143,7 @@ type Evaluation struct {
 	DefinitionDigest    string                                   `json:"-"`
 	HomeDeclaration     *workspace.AssistantProgramDeclaration   `json:"-"`
 	HomeOwner           *workspace.AssistantProgramHomeOwner     `json:"-"`
+	HomeWords           *workspace.ProjectCardWords              `json:"-"`
 	ProjectOwner        *workspace.AssistantProjectProviderOwner `json:"-"`
 }
 
@@ -354,6 +358,7 @@ func (s *Service) Evaluate(input Input) Evaluation {
 		owner := resolved.Owner.Clone()
 		projectOwner := resolved.ProjectOwner.Clone()
 		evaluation.HomeOwner = &owner
+		evaluation.HomeWords = resolved.ProjectCardWords.Clone()
 		evaluation.ProjectOwner = &projectOwner
 		evaluation.DefinitionDigest = resolvedDefinitionDigest(template, &owner, &projectOwner)
 	} else {
@@ -366,6 +371,7 @@ func (s *Service) Evaluate(input Input) Evaluation {
 		if template.ProgramHomeOwner != nil {
 			owner := template.ProgramHomeOwner.Clone()
 			evaluation.HomeOwner = &owner
+			evaluation.HomeWords = template.ProgramHomeWords.Clone()
 			evaluation.DefinitionDigest = resolvedDefinitionDigest(template, &owner, nil)
 		}
 	}
@@ -798,9 +804,9 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 			var ensureErr error
 			programs := workspace.NewAssistantProgramStore(s.workspaces)
 			if receipt.GroupTemplateID != "" {
-				home, homeCreated, ensureErr = programs.EnsureNamedStationWithProvenance(key, current.HomeDeclaration, receipt.DefaultHomeName, groupTemplateProvenance(receipt, key, current.EffectiveTemplate, current.HomeOwner))
+				home, homeCreated, ensureErr = programs.EnsureNamedStationWithProvenanceAndWords(key, current.HomeDeclaration, receipt.DefaultHomeName, groupTemplateProvenance(receipt, key, current.EffectiveTemplate, current.HomeOwner), current.HomeWords)
 			} else if current.HomeOwner != nil {
-				home, homeCreated, ensureErr = programs.EnsureNamedIndependentStation(key, current.HomeDeclaration, receipt.DefaultHomeName, *current.HomeOwner)
+				home, homeCreated, ensureErr = programs.EnsureNamedIndependentStationWithWords(key, current.HomeDeclaration, receipt.DefaultHomeName, *current.HomeOwner, current.HomeWords)
 			} else {
 				home, homeCreated, ensureErr = programs.EnsureNamedStation(key, current.HomeDeclaration, receipt.DefaultHomeName)
 			}

@@ -72,6 +72,13 @@ func (owner AssistantProgramHomeOwner) Valid() bool {
 // key and snapshots provider evidence on first creation. Reuse never backfills
 // or replaces provenance.
 func (service *AssistantProgramStore) EnsureNamedIndependentStation(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string, owner AssistantProgramHomeOwner) (*Workspace, bool, error) {
+	return service.EnsureNamedIndependentStationWithWords(key, declaration, name, owner, nil)
+}
+
+// EnsureNamedIndependentStationWithWords is EnsureNamedIndependentStation
+// that also records the pinned declaration's project-card words snapshot in
+// the first-creation write (PRD #792 FR9); a reused Home is unchanged.
+func (service *AssistantProgramStore) EnsureNamedIndependentStationWithWords(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string, owner AssistantProgramHomeOwner, words *ProjectCardWords) (*Workspace, bool, error) {
 	if service == nil || service.store == nil || strings.TrimSpace(name) == "" || !owner.Valid() ||
 		owner.PluginID != key.Normalize().PluginID || owner.ProgramID != key.Normalize().ProgramID {
 		return nil, false, ErrAssistantProgramUnavailable
@@ -79,5 +86,5 @@ func (service *AssistantProgramStore) EnsureNamedIndependentStation(key Assistan
 	record := owner.Clone()
 	assistantProgramProvisionMu.Lock()
 	defer assistantProgramProvisionMu.Unlock()
-	return service.ensureStationWithOptionsLocked(key, declaration, strings.TrimSpace(name), nil, &record)
+	return service.ensureStationWithOptionsLocked(key, declaration, strings.TrimSpace(name), nil, &record, words)
 }

@@ -324,6 +324,7 @@ func AssistantProgramHomeTemplate(home AssistantProgramHome, owner workspace.Ass
 		ID:   "plugin-home:" + strings.ToLower(strings.TrimSpace(owner.PluginID)) + ":" + home.ID,
 		Name: home.StationName, Description: home.StationDescription, Revision: revision,
 		ProgramHomeOwner: &owner, AssistantProgram: home.AssistantProgram(),
+		ProgramHomeWords: home.ProjectCard.Snapshot(owner.PluginID, owner.PluginVersion),
 		GroupRequirement: &GroupRequirement{
 			SchemaVersion: GroupRequirementSchemaVersion, Policy: GroupPolicyRequired,
 			AssistantProgramID: home.ID, MissingHome: MissingHomeOfferCreate, DefaultHomeName: home.StationName,

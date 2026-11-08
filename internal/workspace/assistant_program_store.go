@@ -147,13 +147,14 @@ func (service *AssistantProgramStore) ensureStationLocked(key AssistantProgramKe
 }
 
 func (service *AssistantProgramStore) ensureStationNamedLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string) (*Workspace, bool, error) {
-	return service.ensureStationWithOptionsLocked(key, declaration, name, nil, nil)
+	return service.ensureStationWithOptionsLocked(key, declaration, name, nil, nil, nil)
 }
 
 // ensureStationWithOptionsLocked is the single first-creation write. Optional
-// Group Template provenance is part of that same Save and is never applied to
-// a reused Home.
-func (service *AssistantProgramStore) ensureStationWithOptionsLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string, groupTemplate *AssistantGroupTemplateProvenance, homeProvider *AssistantProgramHomeOwner) (*Workspace, bool, error) {
+// Group Template provenance and the pinned declaration's project-card words
+// snapshot (PRD #792 FR9) are part of that same Save and are never applied to
+// a reused Home: an older Home keeps no snapshot until a reviewed upgrade.
+func (service *AssistantProgramStore) ensureStationWithOptionsLocked(key AssistantProgramKey, declaration *AssistantProgramDeclaration, name string, groupTemplate *AssistantGroupTemplateProvenance, homeProvider *AssistantProgramHomeOwner, words *ProjectCardWords) (*Workspace, bool, error) {
 	key = key.Normalize()
 	if !key.Valid() || declaration == nil || strings.TrimSpace(declaration.ID) != key.ProgramID {
 		return nil, false, ErrAssistantProgramUnavailable
@@ -198,6 +199,8 @@ func (service *AssistantProgramStore) ensureStationWithOptionsLocked(key Assista
 		PluginAvailable: true,
 		GroupTemplate:   groupTemplate,
 		HomeProvider:    homeProvider,
+		// Only a Home pinned to a provider takes the words of that pin.
+		ProjectCardWords: projectCardWordsForPin(homeProvider, words),
 	})
 	if err := service.store.Save(station); err != nil {
 		return nil, false, fmt.Errorf("create assistant station: %w", err)
