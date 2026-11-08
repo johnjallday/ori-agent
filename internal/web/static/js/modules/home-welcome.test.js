@@ -12,6 +12,7 @@ import {
   rememberExplored,
   rescopeExplored,
   welcomeCardHTML,
+  welcomeOverlayPlacement,
   welcomeStage
 } from './home-welcome.js';
 
@@ -206,6 +207,71 @@ test('the card renders one primary, Explore first, and a journey marking the cur
   assert.match(html, /<li class="home-welcome-step is-current" aria-current="step">/);
   assert.equal(html.match(/aria-current="step"/g).length, 1);
   assert.equal(welcomeCardHTML({ show: false }), '');
+});
+
+test('the overlay floats the card above the HQ site, pointing down at it', () => {
+  const body = { left: 0, top: 100, width: 1400, height: 800 };
+  const site = { left: 640, top: 480, right: 760, bottom: 590 }; // centre x 700
+  const placement = welcomeOverlayPlacement({ body, card: { width: 520, height: 300 }, site });
+  assert.equal(placement.mode, 'overlay');
+  assert.equal(placement.pointer, 'down');
+  assert.equal(placement.left, 440, 'centred on the site');
+  assert.equal(placement.top, 380 - 14 - 300, 'bottom edge just above the site');
+  assert.equal(placement.pointerX, 260);
+  assert.deepEqual([placement.siteX, placement.siteY], [700, 435]);
+});
+
+test('on a laptop-height map the card floats beside the centred site, pointing at it', () => {
+  // 1440x900: about 690px of map, too short above or below a centred site.
+  const body = { left: 0, top: 0, width: 1400, height: 690 };
+  const site = { left: 640, top: 290, right: 760, bottom: 400 };
+  const placement = welcomeOverlayPlacement({ body, card: { width: 520, height: 300 }, site });
+  assert.deepEqual([placement.mode, placement.pointer], ['overlay', 'right']);
+  assert.equal(placement.left, 640 - 14 - 520, 'its right edge just short of the site');
+  assert.equal(placement.top, 195, 'level with the site');
+  assert.equal(placement.pointerY, 150);
+});
+
+test('a site the camera moved near the top-left gets the card to its right, pointing left', () => {
+  const body = { left: 0, top: 0, width: 1400, height: 800 };
+  const site = { left: 100, top: 60, right: 220, bottom: 170 };
+  const placement = welcomeOverlayPlacement({ body, card: { width: 520, height: 300 }, site });
+  assert.deepEqual([placement.mode, placement.pointer], ['overlay', 'left']);
+  assert.deepEqual([placement.left, placement.top], [234, 12]);
+  assert.equal(placement.pointerY, 103, 'the pointer still reaches the site');
+});
+
+test('with no room at the sides the card goes below a site near the top, pointing up', () => {
+  const body = { left: 0, top: 0, width: 600, height: 800 };
+  const site = { left: 240, top: 60, right: 360, bottom: 170 };
+  const placement = welcomeOverlayPlacement({ body, card: { width: 520, height: 300 }, site });
+  assert.deepEqual([placement.mode, placement.pointer], ['overlay', 'up']);
+  assert.deepEqual([placement.left, placement.top], [40, 184]);
+  assert.equal(placement.pointerX, 260);
+});
+
+test('a site panned out of view docks the card at the top without a pointer', () => {
+  const body = { left: 0, top: 0, width: 1400, height: 800 };
+  const site = { left: 2000, top: 300, right: 2120, bottom: 410 };
+  const placement = welcomeOverlayPlacement({ body, card: { width: 520, height: 300 }, site });
+  assert.deepEqual([placement.mode, placement.pointer, placement.top], ['overlay', 'none', 12]);
+});
+
+test('a short map area stacks the card above the map instead of covering the site', () => {
+  const site = { left: 135, top: 250, right: 255, bottom: 360 };
+  const phone = welcomeOverlayPlacement({
+    body: { left: 0, top: 0, width: 390, height: 520 },
+    card: { width: 358, height: 380 },
+    site
+  });
+  assert.equal(phone.mode, 'stacked');
+  for (const missing of [
+    { card: { width: 520, height: 300 } },
+    { body: { width: 1, height: 1 }, card: { width: 520, height: 300 } },
+    { body: { width: 1400, height: 800 }, site, card: { width: 0, height: 0 } }
+  ]) {
+    assert.equal(welcomeOverlayPlacement(missing).mode, 'stacked', JSON.stringify(missing));
+  }
 });
 
 test('the HQ-stage card names the assistant safely and marks Meet done', () => {

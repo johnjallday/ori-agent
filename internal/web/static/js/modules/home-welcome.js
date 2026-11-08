@@ -172,6 +172,96 @@ export function homeWelcomeView({
   };
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+// The first side of the site, in order of preference, where the card fits
+// without covering it: above (pointer down), to its left (pointer right), to
+// its right (pointer left), below (pointer up). Coordinates are relative to
+// the map area. Returns null when no side fits.
+function anchoredSide(area, card, site, gap, margin) {
+  const { width, height } = area;
+  const centreX = (site.left + site.right) / 2;
+  const centreY = (site.top + site.bottom) / 2;
+  const across = clamp(centreX - card.width / 2, margin, width - card.width - margin);
+  const level = clamp(centreY - card.height / 2, margin, height - card.height - margin);
+  const fitsAcross = card.width + 2 * margin <= width;
+  const fitsLevel = card.height + 2 * margin <= height;
+  if (fitsAcross && site.top - gap - card.height >= margin) {
+    return { left: across, top: site.top - gap - card.height, pointer: 'down' };
+  }
+  if (fitsLevel && site.left - gap - card.width >= margin) {
+    return { left: site.left - gap - card.width, top: level, pointer: 'right' };
+  }
+  if (fitsLevel && site.right + gap + card.width <= width - margin) {
+    return { left: site.right + gap, top: level, pointer: 'left' };
+  }
+  if (fitsAcross && site.bottom + gap + card.height <= height - margin) {
+    return { left: across, top: site.bottom + gap, pointer: 'up' };
+  }
+  return null;
+}
+
+/**
+ * Where the welcome card floats over the map (the overlay presentation).
+ *
+ * The card is anchored to the reserved HQ site, on the first side where it
+ * fits without covering the site, its pointer touching it — above, to the
+ * left, to the right, or below — and follows the site as the camera moves. The
+ * map stays usable underneath; nothing is blocked.
+ *
+ * Whether to float at all is decided where the camera first puts the site — in
+ * the middle of the area — not where it is now, so panning never flips the
+ * presentation. When no side fits there, the answer is 'stacked': the card
+ * goes above the map in the page flow, so it never covers what it points at.
+ * Floating, a site panned to where no side fits docks the card at the top with
+ * no pointer.
+ *
+ * @param {{body: {left, top, width, height}, card: {width, height},
+ *          site: {left, top, right, bottom}|null}} geometry  client rects
+ */
+export function welcomeOverlayPlacement({ body, card, site, gap = 14, margin = 12 } = {}) {
+  if (!body || !card || !site || !(card.width > 0) || !(card.height > 0)) {
+    return { mode: 'stacked' };
+  }
+  const siteWidth = Math.max(0, site.right - site.left);
+  const siteHeight = Math.max(0, site.bottom - site.top);
+  const centred = {
+    left: (body.width - siteWidth) / 2,
+    right: (body.width + siteWidth) / 2,
+    top: (body.height - siteHeight) / 2,
+    bottom: (body.height + siteHeight) / 2
+  };
+  if (!anchoredSide(body, card, centred, gap, margin)) return { mode: 'stacked' };
+  const actual = {
+    left: site.left - body.left,
+    right: site.right - body.left,
+    top: site.top - body.top,
+    bottom: site.bottom - body.top
+  };
+  const siteX = (actual.left + actual.right) / 2;
+  const siteY = (actual.top + actual.bottom) / 2;
+  const onScreen =
+    siteX >= 0 && siteX <= body.width && actual.bottom >= 0 && actual.top <= body.height;
+  const side = onScreen ? anchoredSide(body, card, actual, gap, margin) : null;
+  const placed = side || {
+    left: clamp(body.width / 2 - card.width / 2, margin, body.width - card.width - margin),
+    top: margin,
+    pointer: 'none'
+  };
+  return {
+    mode: 'overlay',
+    left: Math.round(placed.left),
+    top: Math.round(placed.top),
+    pointer: placed.pointer,
+    pointerX: Math.round(clamp(siteX - placed.left, 24, card.width - 24)),
+    pointerY: Math.round(clamp(siteY - placed.top, 24, card.height - 24)),
+    siteX: Math.round(siteX),
+    siteY: Math.round(siteY)
+  };
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(
     /[&<>"']/g,

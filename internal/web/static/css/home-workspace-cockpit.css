@@ -3643,32 +3643,157 @@ a.workspace-update-signal:focus-visible {
  * First-run welcome (assistant-hq-onboarding 1.3)
  *
  * Shown only on an authoritative empty Home before the Personal HQ exists.
- * The card stacks above the map rather than floating over it, so the reserved
- * HQ site sits directly below the card's pointer and is never covered. The
- * Map keeps its geometry, camera and selection: its center-keyed camera keeps
- * the site centered in whatever height is left.
+ *
+ * Overlay (default): the card floats over the map, anchored to the reserved HQ
+ * site with its pointer touching it, and follows the site as the camera moves
+ * (home-welcome.js welcomeOverlayPlacement). A soft tint fades the map but
+ * leaves a clear circle around the site. Nothing is blocked: the map, New
+ * Workspace and every header control stay usable, and focus is never trapped.
+ *
+ * Stacked (fallback, data-welcome-placement="stacked"): when the area is too
+ * short to hold the card beside the site, the card goes above the map in the
+ * page flow so it never covers what it points at. The Map keeps its geometry,
+ * camera and selection either way.
  * ----------------------------------------------------------------------- */
 .cockpit-welcome[hidden] {
   display: none;
 }
 
-.home-cockpit[data-first-run="welcome"] .cockpit-area-body {
+/* Overlay. */
+.cockpit-welcome {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+}
+
+/* The tint: soft over the map, clear around the HQ site. Decorative only. */
+.cockpit-welcome::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at var(--welcome-site-x, 50%) var(--welcome-site-y, 70%),
+    transparent 90px,
+    color-mix(in srgb, var(--hc-panel) 30%, transparent) 260px
+  );
+  pointer-events: none;
+}
+
+.cockpit-welcome:not([data-placed="true"]) .home-welcome {
+  visibility: hidden;
+}
+
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome {
+  position: absolute;
+  top: var(--welcome-top, 12px);
+  left: var(--welcome-left, 12px);
+  width: min(calc(100% - 24px), 520px);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 22%);
+  pointer-events: auto;
+}
+
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome::after {
+  left: var(--welcome-pointer-x, 50%);
+}
+
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome[data-pointer="up"]::after {
+  top: -9px;
+  bottom: auto;
+  transform: translateX(-50%) rotate(-135deg);
+}
+
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome[data-pointer="right"]::after,
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome[data-pointer="left"]::after {
+  top: var(--welcome-pointer-y, 50%);
+  bottom: auto;
+}
+
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome[data-pointer="right"]::after {
+  right: -9px;
+  left: auto;
+  transform: translateY(-50%) rotate(-45deg);
+}
+
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome[data-pointer="left"]::after {
+  left: -9px;
+  transform: translateY(-50%) rotate(135deg);
+}
+
+.home-cockpit[data-welcome-placement="overlay"] .home-welcome[data-pointer="none"]::after {
+  display: none;
+}
+
+/* Stacked. */
+.home-cockpit[data-welcome-placement="stacked"] .cockpit-area-body {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
 }
 
-.home-cockpit[data-first-run="welcome"] .cockpit-map {
+.home-cockpit[data-welcome-placement="stacked"] .cockpit-map {
   flex: 1 1 auto;
   height: auto;
   min-height: 300px;
 }
 
-.cockpit-welcome {
+.home-cockpit[data-welcome-placement="stacked"] .cockpit-welcome {
+  position: static;
   flex: none;
   display: flex;
   justify-content: center;
   padding: 18px 16px 4px;
+  pointer-events: auto;
+}
+
+.home-cockpit[data-welcome-placement="stacked"] .cockpit-welcome::before {
+  display: none;
+}
+
+/* Stacked happens only where nothing fits beside the site (phone widths). The
+   band takes the map's own surface and lines up with its frame, so it reads as
+   the top of the map, not a grey gap above it. Values mirror .ws-map's
+   theatre surface, which is scoped to the map. */
+.home-cockpit[data-welcome-placement="stacked"] .cockpit-welcome {
+  margin: 0 14px;
+  padding: 16px 12px 22px;
+  border: 1px solid #262931;
+  border-bottom: 0;
+  background:
+    radial-gradient(120% 100% at 30% 20%, rgb(255 255 255 / 2.5%), transparent 55%),
+    linear-gradient(180deg, #121419, #0d0e11);
+}
+
+[data-bs-theme="light"] .home-cockpit[data-welcome-placement="stacked"] .cockpit-welcome {
+  border-color: #c8cdd3;
+  background:
+    radial-gradient(120% 100% at 30% 20%, rgb(255 255 255 / 45%), transparent 55%),
+    linear-gradient(180deg, #f4f6f7, #e6eaee);
+}
+
+/* The compact card: chosen when the full one fits nowhere beside the site.
+   Narrower too, so it fits beside the site on a shorter, narrower map. */
+.home-cockpit .home-welcome[data-size="compact"] {
+  width: min(calc(100% - 24px), 420px);
+  padding: 16px 22px 14px;
+}
+
+.home-welcome[data-size="compact"] .home-welcome-avatar,
+.home-welcome[data-size="compact"] .home-welcome-journey {
+  display: none;
+}
+
+.home-welcome[data-size="compact"] .home-welcome-title {
+  font-size: 22px;
+}
+
+.home-welcome[data-size="compact"] .home-welcome-lead {
+  margin-top: 6px;
+  font-size: 14px;
+}
+
+.home-welcome[data-size="compact"] .home-welcome-actions {
+  margin-top: 10px;
 }
 
 .home-welcome {
@@ -3826,7 +3951,7 @@ a.workspace-update-signal:focus-visible {
 @container cockpit (max-width: 560px) {
   /* The map dock wraps to two rows here; keep enough map below the card for
      the HQ site to stay visible between the card and the dock. */
-  .home-cockpit[data-first-run="welcome"] .cockpit-map {
+  .home-cockpit[data-welcome-placement="stacked"] .cockpit-map {
     min-height: 420px;
   }
 

@@ -25,7 +25,8 @@ import {
   readExploredStage,
   rememberExplored,
   rescopeExplored,
-  welcomeCardHTML
+  welcomeCardHTML,
+  welcomeOverlayPlacement
 } from './home-welcome.js';
 import { workspacePageURL } from './workspace-routes.js';
 import { MEET_ASSISTANT_AGENTS_ROUTE } from './personal-assistant-hire.js';
@@ -2284,7 +2285,116 @@ import {
       els.welcomeHost.innerHTML = html;
     }
     els.welcomeHost.hidden = !welcome.show;
+    syncWelcomePlacement(welcome.show);
     return welcome;
+  }
+
+  // ---- the welcome card floats over the map (overlay presentation) ----
+  //
+  // The card is anchored to the HQ site and follows it as the camera pans or
+  // zooms; the map underneath stays usable. Too short an area stacks it above
+  // the map instead (welcomeOverlayPlacement). Only presentation changes here:
+  // no focus, no map state.
+  let welcomeWatch = null;
+  let welcomeFrame = 0;
+
+  function placeWelcome() {
+    welcomeFrame = 0;
+    const host = els.welcomeHost;
+    const card = host?.querySelector('[data-home-welcome]');
+    const body = host?.parentElement;
+    if (!card || !body || host.hidden) return;
+    const site = els.map?.querySelector('[data-hq-site]');
+    // Fit against the map the user can actually see: the map's box, cut to the
+    // container and the viewport. The card's coordinates stay relative to the
+    // container it is positioned in.
+    const rect = body.getBoundingClientRect();
+    const mapRect = els.map?.getBoundingClientRect() || rect;
+    const visibleLeft = Math.max(rect.left, mapRect.left, 0);
+    const visibleTop = Math.max(rect.top, mapRect.top, 0);
+    const visibleRight = Math.min(rect.right, mapRect.right, window.innerWidth);
+    const visibleBottom = Math.min(rect.bottom, mapRect.bottom, window.innerHeight);
+    const area = {
+      left: visibleLeft,
+      top: visibleTop,
+      width: Math.max(0, visibleRight - visibleLeft),
+      height: Math.max(0, visibleBottom - visibleTop)
+    };
+    const offsetX = visibleLeft - rect.left;
+    const offsetY = visibleTop - rect.top;
+    const siteRect = site ? site.getBoundingClientRect() : null;
+    // The full card first; if it fits nowhere beside the site, the compact one
+    // (no avatar, no step strip). Only when neither fits does the card stack
+    // above the map. Both sizes are measured in this frame.
+    const measure = size => {
+      card.dataset.size = size;
+      return { width: card.offsetWidth, height: card.offsetHeight };
+    };
+    let size = 'full';
+    let placement = welcomeOverlayPlacement({ body: area, card: measure('full'), site: siteRect });
+    if (placement.mode !== 'overlay') {
+      const compact = welcomeOverlayPlacement({
+        body: area,
+        card: measure('compact'),
+        site: siteRect
+      });
+      if (compact.mode === 'overlay') {
+        placement = compact;
+        size = 'compact';
+      }
+    }
+    card.dataset.size = size;
+    root.dataset.welcomePlacement = placement.mode;
+    if (placement.mode === 'overlay') {
+      card.style.setProperty('--welcome-left', `${placement.left + offsetX}px`);
+      card.style.setProperty('--welcome-top', `${placement.top + offsetY}px`);
+      card.style.setProperty('--welcome-pointer-x', `${placement.pointerX}px`);
+      card.style.setProperty('--welcome-pointer-y', `${placement.pointerY}px`);
+      card.dataset.pointer = placement.pointer;
+      host.style.setProperty('--welcome-site-x', `${placement.siteX + offsetX}px`);
+      host.style.setProperty('--welcome-site-y', `${placement.siteY + offsetY}px`);
+    } else {
+      delete card.dataset.pointer;
+    }
+    host.dataset.placed = 'true';
+  }
+
+  function scheduleWelcomePlacement() {
+    if (!welcomeFrame) welcomeFrame = window.requestAnimationFrame(placeWelcome);
+  }
+
+  function syncWelcomePlacement(show) {
+    if (!show) {
+      welcomeWatch?.disconnect();
+      welcomeWatch = null;
+      delete root.dataset.welcomePlacement;
+      if (els.welcomeHost) delete els.welcomeHost.dataset.placed;
+      return;
+    }
+    if (!welcomeWatch && typeof MutationObserver === 'function') {
+      // The camera moves the map by rewriting a layer's style; a remount
+      // replaces the map's children. Either can move the HQ site.
+      const mutations = new MutationObserver(scheduleWelcomePlacement);
+      if (els.map) {
+        mutations.observe(els.map, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['style', 'class']
+        });
+      }
+      const sizes =
+        typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleWelcomePlacement) : null;
+      if (sizes && els.welcomeHost?.parentElement) sizes.observe(els.welcomeHost.parentElement);
+      if (sizes && els.welcomeHost) sizes.observe(els.welcomeHost);
+      welcomeWatch = {
+        disconnect() {
+          mutations.disconnect();
+          sizes?.disconnect();
+        }
+      };
+    }
+    scheduleWelcomePlacement();
   }
 
   // ---- signal filters (FR31-FR34) ----
