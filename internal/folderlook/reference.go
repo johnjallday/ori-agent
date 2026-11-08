@@ -25,7 +25,10 @@ type ReferenceInput struct {
 	Brief      string
 	Map        *foldermap.Map
 	Facts      foldermap.Facts
+	// StageLine is Ori's default plan, in its words; Steps are the steps the
+	// agent may name in its own plan.
 	StageLine  string
+	Steps      []Step
 	Candidates []Candidate
 	AskAllowed bool
 	// Hint is the owner's typed answer to the previous turn's question.
@@ -50,8 +53,23 @@ func BuildReference(in ReferenceInput) string {
 		fmt.Fprintf(&b, "The owner answered your question: %s\n", clean(in.Hint))
 	}
 	fmt.Fprintf(&b, "Facts Ori found: %s\n", clean(foldermap.FactsLine(in.Facts)))
+	if len(in.Steps) == 0 {
+		b.WriteString("Steps Ori can run here: none. Say so under Plan and name no handle.\n")
+	} else {
+		b.WriteString("Steps Ori can run here (handle · what it does · why it is available). Name a step in your plan by its handle in square brackets; Ori runs only these:\n")
+		for _, s := range in.Steps {
+			notes := ""
+			if s.Default {
+				notes += " · in Ori's default plan"
+			}
+			if s.Excludes != "" {
+				notes += " · cannot run together with [" + s.Excludes + "]"
+			}
+			fmt.Fprintf(&b, "- [%s] · %s · %s%s\n", s.Handle, clean(s.Title), clean(s.Why), notes)
+		}
+	}
 	if in.StageLine != "" {
-		fmt.Fprintf(&b, "What Set it up would do (Ori decides this): %s\n", clean(in.StageLine))
+		fmt.Fprintf(&b, "Ori's default plan, used if you name no step: %s\n", clean(in.StageLine))
 	}
 	if in.Facts.Stopped != "" {
 		fmt.Fprintf(&b, "The walk stopped early (%s); folders marked unopened were not listed.\n", in.Facts.Stopped)

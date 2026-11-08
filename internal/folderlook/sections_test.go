@@ -76,6 +76,53 @@ func TestParse_ToolsOnlyFromCandidatesAtMostThree(t *testing.T) {
 	}
 }
 
+func TestParse_PlanNamesOfferedStepsInOrderAndKeepsTheRestAsWords(t *testing.T) {
+	opts := parseOpts
+	opts.Steps = map[string]bool{"music-production-home": true, "reaper-tools": true, "group": true}
+	reply := "What it is: Six finished sessions.\n" +
+		"Plan: Add the six sessions to the Music Home [music-production-home], then connect REAPER [reaper-tools].\n" +
+		"Later, consider splitting the Logic sketch out [later]. Then [reaper-tools] once more.\n" +
+		"Tools:\n- integration:demo — fits\n"
+	got := Parse(reply, opts)
+	if !reflect.DeepEqual(got.PlanSteps, []string{"music-production-home", "reaper-tools"}) {
+		t.Fatalf("plan steps = %v", got.PlanSteps)
+	}
+	// The words keep their handles; PlanWords reads each as its step's name.
+	if !strings.HasPrefix(got.Plan, "Add the six sessions to the Music Home [music-production-home], then connect REAPER [reaper-tools].") {
+		t.Fatalf("plan words = %q", got.Plan)
+	}
+	named := []Step{{Handle: "music-production-home", Name: "Music Production Home"}, {Handle: "reaper-tools", Name: "REAPER tools"}, {Handle: "group", Name: "a group"}}
+	if words := PlanWords(got.Plan, named); words != "Add the six sessions to the Music Home Music Production Home, then connect REAPER REAPER tools. Later, consider splitting the Logic sketch out. Then REAPER tools once more." {
+		t.Fatalf("plain words = %q", words)
+	}
+	// A handle named only to leave it out is a mention, not a choice.
+	mention := Parse("Plan: Connect [reaper-tools] first. I'm leaving out [group] because the songs belong on a shelf, and skipping [music-production-home] for now.", opts)
+	if !reflect.DeepEqual(mention.PlanSteps, []string{"reaper-tools"}) {
+		t.Fatalf("mention steps = %v", mention.PlanSteps)
+	}
+	if got.WhatItIs != "Six finished sessions." || len(got.Tools) != 1 {
+		t.Fatalf("other sections = %+v", got)
+	}
+	// A plan that names a path is dropped whole.
+	dropped := Parse("Plan: Put /Users/me/Music on the shelf [music-production-home].", opts)
+	if dropped.Plan != "" || len(dropped.PlanSteps) != 0 || !contains(dropped.Dropped, SectionPlan) {
+		t.Fatalf("path plan = %+v", dropped)
+	}
+	// Naming no step keeps the words and runs nothing; a trailing list of
+	// handles counts as naming them.
+	none := Parse("Plan: Nothing here needs Ori; leave it as it is.", opts)
+	if none.Plan != "Nothing here needs Ori; leave it as it is." || len(none.PlanSteps) != 0 {
+		t.Fatalf("no-step plan = %+v", none)
+	}
+	trailing := Parse("Plan: Shelve the songs, then the tools. Steps: [music-production-home] [reaper-tools]", opts)
+	if !reflect.DeepEqual(trailing.PlanSteps, []string{"music-production-home", "reaper-tools"}) {
+		t.Fatalf("trailing plan = %+v", trailing)
+	}
+	if words := PlanWords("Shelve them [music-production-home] [unknown] first.", []Step{{Handle: "music-production-home", Name: "Music Production Home"}}); words != "Shelve them Music Production Home first." {
+		t.Fatalf("unknown token = %q", words)
+	}
+}
+
 func TestParse_SentenceStartingWithAHeadingWordIsNotAHeading(t *testing.T) {
 	got := Parse("What it is: A mix folder.\nTools like these help, but none apply.\n", parseOpts)
 	if got.WhatItIs != "A mix folder. Tools like these help, but none apply." || len(got.Tools) != 0 {

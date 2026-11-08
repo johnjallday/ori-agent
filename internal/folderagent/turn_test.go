@@ -150,6 +150,57 @@ func TestTurn_ReportCarriesTheAgentsWordsAndProvenance(t *testing.T) {
 	}
 }
 
+func TestTurn_ThePlanInTheAgentsWordsNamesTheStepsOriRuns(t *testing.T) {
+	h := newHarness(t, demo(t))
+	reply := "What it is: Seven songs and a sketch.\n" +
+		"Plan: Put every song on the Music Production Home shelf [music-production-home] and connect REAPER tools [reaper-tools]. Keep the Logic sketch where it is.\n" +
+		"Suggested goal: Finish the album.\nSuggested first ticket: List the songs.\nBecause they are the work.\nNext: List the songs."
+	turns := &scriptedTurns{responses: []*llm.ChatResponse{{Content: reply}}}
+	withTurns(h, turns)
+	view := h.start(t, "")
+	report, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
+	plan := report.Plan
+	if plan == nil || plan.Source != PlanByAgent || plan.DefaultReason != "" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if plan.Words != "Put every song on the Music Production Home shelf Music Production Home and connect REAPER tools REAPER tools. Keep the Logic sketch where it is." ||
+		!strings.Contains(plan.WordsRaw, "[music-production-home]") {
+		t.Fatalf("words=%q raw=%q", plan.Words, plan.WordsRaw)
+	}
+	if strings.Join(plan.Selected, ",") != "music-production-home,reaper-tools" {
+		t.Fatalf("selected = %v", plan.Selected)
+	}
+	// The group was offered (eight projects below), not chosen.
+	offered := map[string]bool{}
+	for _, s := range plan.Steps {
+		offered[s.Handle] = s.Chosen
+	}
+	if chosen, ok := offered["group"]; !ok || chosen {
+		t.Fatalf("group step: offered=%v chosen=%v (%+v)", ok, chosen, plan.Steps)
+	}
+	if ref := turns.references[0]; !strings.Contains(ref, "Steps Ori can run here") || !strings.Contains(ref, "[music-production-home]") ||
+		!strings.Contains(ref, "[group]") || !strings.Contains(ref, "Ori's default plan, used if you name no step") {
+		t.Fatalf("reference = %s", ref)
+	}
+	// Set it up runs the agent's plan, Home and tools, as confirmed; the
+	// first step is working from the start.
+	started, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: plan.Digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Setup == nil || len(started.Setup.Lines) == 0 || started.Setup.Lines[0].State != personalassistant.FolderLineWorking {
+		t.Fatalf("first line at start = %+v", started.Setup)
+	}
+	h.svc.Wait()
+	run := h.setups.runs[0]
+	if run.Stage != foldermap.StageHome || len(run.Candidates) != 2 || run.Candidates[0].Kind != folderlook.KindHomeProvider || run.Candidates[1].Kind != folderlook.KindIntegration {
+		t.Fatalf("run = stage %q candidates %+v", run.Stage, run.Candidates)
+	}
+	if got := h.tickets.finished[view.TicketID]; !strings.Contains(got, "Plan: Put every song") {
+		t.Fatalf("ticket result = %q", got)
+	}
+}
+
 func TestTurn_TheOneQuestionWhenNothingIsRecognized(t *testing.T) {
 	var paths []string
 	for i := range 8 {

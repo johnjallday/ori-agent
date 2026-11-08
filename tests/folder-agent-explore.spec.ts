@@ -86,14 +86,21 @@ test('Explore a folder starts an agent and reports what it found without a model
     { timeout: 20_000 }
   );
   await expect(report.locator('.folder-agent-card__facts')).toHaveText('1 REAPER song');
-  await expect(report.locator('.folder-agent-card__stage')).toHaveText(
-    'Set it up: installs REAPER tools'
-  );
+  // The step list replaces Ori's one-line "Set it up: …" summary.
+  await expect(report.locator('.folder-agent-card__stage')).toHaveCount(0);
   await expect(report).toContainText(
     'No model is set up, so One Song Manager could not look itself.'
   );
   await expect(report).toContainText('Search for more tools needs a model');
-  await expect(report.locator('.folder-agent-card__tool-name')).toHaveText(['REAPER tools']);
+  // Without a model the steps are Ori's default: the one REAPER step, ticked,
+  // and no reason line (there was no agent plan to fall back from).
+  await expect(report.locator('.folder-agent-card__run').getByRole('heading')).toHaveText('Steps');
+  await expect(
+    report.locator('[data-step="reaper-tools"] .folder-agent-card__line-name')
+  ).toHaveText(/REAPER tools (to|and connect them to) One Song$/);
+  await expect(report.locator('[data-step="reaper-tools"] input')).toBeChecked();
+  await expect(report.locator('.folder-agent-card__run-head')).toHaveText('Plan · 1 step');
+  await expect(report.locator('.folder-agent-card__run')).not.toContainText("Ori's default plan");
   await expect(report.getByRole('button')).toHaveText([
     'Set it up',
     'Keep the folder as it is',

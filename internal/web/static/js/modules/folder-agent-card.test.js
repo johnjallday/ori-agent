@@ -462,7 +462,8 @@ test('the agent sections render as text, the goal travels with Set it up', () =>
   assert.equal(text(card, '.folder-agent-card__what'), view.whatItIs);
   assert.equal(text(card, '.folder-agent-card__ticket-title'), view.firstTicket);
   assert.equal(text(card, '.folder-agent-card__ticket-why'), view.firstTicketWhy);
-  const goal = card.querySelector('.folder-agent-card__goal');
+  // The goal is the first "After setup" row: its label, the input, Use this goal.
+  const goal = card.querySelector('.folder-agent-card__after-row');
   const [input, label] = goal.children.slice(1);
   assert.equal(input.value, 'Keep these songs moving toward release.');
   input.value = 'Finish two songs this month';
@@ -478,9 +479,11 @@ test('the agent sections render as text, the goal travels with Set it up', () =>
   assert.equal(calls[1][1].use_goal, false);
 });
 
-test('optional tools can be unticked; required are locked; the plan follows the selection', async () => {
+test('every offered step has a box; unticking one refreshes the plan and Set it up carries the handles', async () => {
   const view = folderAgentReportView(
     reported({
+      model_sentence: '',
+      tools_sentence: '',
       candidates: [
         { id: 'integration:x', name: 'X tools', required: true, action: 'install' },
         {
@@ -490,14 +493,35 @@ test('optional tools can be unticked; required are locked; the plan follows the 
           marketplace: 'skills.sh',
           ranked: true,
           action: 'add'
-        },
-        { id: 'mcp:notes', name: 'notes', ranked: true, action: 'already_here' }
+        }
       ],
       plan: {
         digest: 'with-skill',
         runnable: true,
-        selected: ['skill:a@b'],
-        lines: [{ kind: 'add_on', name: 'Adds skill mix-notes · found by search' }]
+        source: 'default',
+        selected: ['mix-notes', 'x-tools'],
+        steps: [
+          {
+            handle: 'x-tools',
+            kind: 'integration',
+            title: 'Install X tools and connect them to Ori Music Demo',
+            why: 'Lets the agent work with the songs here.',
+            chosen: true
+          },
+          {
+            handle: 'mix-notes',
+            kind: 'add_on',
+            title: 'Add the skill mix-notes',
+            label: 'Found by search · skills.sh',
+            chosen: true
+          }
+        ],
+        lines: [
+          { kind: 'integration', name: 'Installs X tools', step: 'x-tools' },
+          { kind: 'workspace', name: 'Connects X tools to Ori Music Demo', step: 'x-tools' },
+          { kind: 'add_on', name: 'Adds skill mix-notes · found by search', step: 'mix-notes' },
+          { kind: 'folder', name: 'Nothing is moved, copied or read' }
+        ]
       }
     })
   );
@@ -511,8 +535,21 @@ test('optional tools can be unticked; required are locked; the plan follows the 
         plan: {
           digest: 'without',
           runnable: true,
-          selected: [],
-          lines: [{ kind: 'folder', name: 'Nothing is moved, copied or read' }]
+          source: 'default',
+          selected: ['x-tools'],
+          steps: [
+            {
+              handle: 'x-tools',
+              title: 'Install X tools and connect them to Ori Music Demo',
+              chosen: true
+            },
+            { handle: 'mix-notes', title: 'Add the skill mix-notes', chosen: false }
+          ],
+          lines: [
+            { kind: 'integration', name: 'Installs X tools', step: 'x-tools' },
+            { kind: 'workspace', name: 'Connects X tools to Ori Music Demo', step: 'x-tools' },
+            { kind: 'folder', name: 'Nothing is moved, copied or read' }
+          ]
         }
       })
     };
@@ -522,30 +559,338 @@ test('optional tools can be unticked; required are locked; the plan follows the 
     fetchImpl,
     onAction: (action, _button, extra) => calls.push([action, extra])
   });
-  const boxes = card.querySelectorAll('input').filter(box => box.dataset.toolId);
+  assert.equal(text(card, '.folder-agent-card__heading'), 'Steps');
+  const boxes = card.querySelectorAll('input').filter(box => box.dataset.stepHandle);
   assert.deepEqual(
-    boxes.map(b => [b.dataset.toolId, b.checked, b.disabled]),
+    boxes.map(b => [b.dataset.stepHandle, b.checked, b.disabled]),
     [
-      ['integration:x', true, true],
-      ['skill:a@b', true, false]
+      ['x-tools', true, false],
+      ['mix-notes', true, false]
     ]
   );
+  assert.equal(text(card, '.folder-agent-card__tool-label'), 'Found by search · skills.sh');
   boxes[1].checked = false;
   await boxes[1].listeners.change();
   assert.deepEqual(requests[0], [
     '/api/personal-assistant/folder-agent/ws-1/plan',
-    { selected: [] }
+    { selected: ['x-tools'] }
   ]);
+  // One list: the chosen step with its actions under it, the unticked step
+  // after it, the assurance as a note.
   assert.deepEqual(
     card.querySelectorAll('.folder-agent-card__line-name').map(n => n.textContent),
-    ['Nothing is moved, copied or read']
+    [
+      'Install X tools and connect them to Ori Music Demo',
+      'Add the skill mix-notes',
+      'Nothing is moved, copied or read'
+    ]
+  );
+  assert.deepEqual(
+    card.querySelectorAll('.folder-agent-card__action').map(n => n.textContent),
+    ['Installs X tools', 'Connects X tools to Ori Music Demo']
+  );
+  // The redrawn list follows the server's answer.
+  const redrawn = card.querySelectorAll('input').filter(box => box.dataset.stepHandle);
+  assert.deepEqual(
+    redrawn.map(b => [b.dataset.stepHandle, b.checked]),
+    [
+      ['x-tools', true],
+      ['mix-notes', false]
+    ]
   );
   card
     .querySelectorAll('button')
     .find(b => b.dataset.folderAgentAction === 'set_up')
     .listeners.click();
-  assert.deepEqual(plain(calls[0]), ['set_up', { selected: [] }]);
+  assert.deepEqual(plain(calls[0]), ['set_up', { selected: ['x-tools'] }]);
   assert.equal(view.plan.digest, 'without');
+});
+
+test('the plan reads as numbered steps, the run says where it stands, the assurance is a note', () => {
+  const planned = folderAgentReportView(
+    reported({
+      plan: {
+        digest: 'p',
+        runnable: true,
+        lines: [
+          { kind: 'library', name: 'Adds Albums to your Music Production Home' },
+          {
+            kind: 'songs',
+            name: 'Lists 6 songs on its shelf',
+            detail: '6 songs listed on the shelf'
+          },
+          { kind: 'folder', name: 'Nothing is moved, copied or read' }
+        ]
+      }
+    })
+  );
+  const run = renderFolderAgentReport(planned, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(run.dataset.phase, 'plan');
+  assert.equal(text(run, '.folder-agent-card__run-head'), 'Plan · 2 steps');
+  assert.deepEqual(
+    run.querySelectorAll('.folder-agent-card__line-mark').map(m => m.textContent),
+    ['1', '2']
+  );
+  assert.equal(run.querySelectorAll('li').length, 2);
+  assert.equal(text(run, '.folder-agent-card__line-detail'), '6 songs listed on the shelf');
+  assert.equal(
+    text(run.querySelector('.folder-agent-card__line--note'), '.folder-agent-card__line-name'),
+    'Nothing is moved, copied or read'
+  );
+
+  const running = folderAgentReportView(
+    reported({
+      state: 'setting_up',
+      actions: [],
+      setup: {
+        status: 'running',
+        lines: [
+          { kind: 'library', name: 'A', state: 'done' },
+          { kind: 'songs', name: 'B', state: 'working' },
+          { kind: 'place', name: 'C', state: 'waiting' },
+          { kind: 'folder', name: 'Nothing is moved, copied or read', state: 'waiting' }
+        ]
+      }
+    })
+  );
+  const live = renderFolderAgentReport(running, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(live.dataset.phase, 'running');
+  assert.equal(text(live, '.folder-agent-card__run-head'), 'Setting up · 1 of 3 done');
+  assert.deepEqual(
+    live.querySelectorAll('li').map(li => [li.dataset.state, li.attributes.style]),
+    [
+      ['done', '--step:0'],
+      ['working', '--step:1'],
+      ['waiting', '--step:2']
+    ]
+  );
+  // The words stay for the ear: Done beside the check, Working beside the pulse.
+  assert.deepEqual(
+    live.querySelectorAll('.folder-agent-card__line-state').map(n => n.textContent),
+    ['Done', 'Working']
+  );
+
+  const stopped = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: ['set_up', 'look_further'],
+      setup: {
+        status: 'stopped',
+        lines: [
+          { name: 'A', state: 'done' },
+          { name: 'B', state: 'failed' },
+          { name: 'C', state: 'waiting' }
+        ]
+      }
+    })
+  );
+  const halted = renderFolderAgentReport(stopped, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(halted.dataset.phase, 'stopped');
+  assert.equal(text(halted, '.folder-agent-card__run-head'), 'Stopped at step 2 of 3');
+
+  const finished = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: ['look_further'],
+      setup: {
+        status: 'done',
+        lines: [
+          { name: 'A', state: 'done' },
+          { kind: 'folder', name: 'Nothing is moved, copied or read', state: 'done' }
+        ]
+      }
+    })
+  );
+  const doneRun = renderFolderAgentReport(finished, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(doneRun.dataset.phase, 'done');
+  assert.equal(text(doneRun, '.folder-agent-card__run-head'), 'All done · 1 step');
+});
+
+test('ticking a step that cannot run with a chosen one unticks the other before asking', async () => {
+  const steps = chosen => [
+    {
+      handle: 'music-production-home',
+      title: 'Add Ori Music Demo to your Music Production Home and list its 8 songs',
+      chosen: chosen === 'home',
+      excludes: 'group'
+    },
+    {
+      handle: 'group',
+      title: 'Turn Ori Music Demo into a group with one workspace per project (8)',
+      chosen: chosen === 'group',
+      excludes: 'music-production-home'
+    }
+  ];
+  const view = folderAgentReportView(
+    reported({
+      model_sentence: '',
+      tools_sentence: '',
+      plan: {
+        digest: 'p',
+        runnable: true,
+        source: 'agent',
+        words: 'Shelve the songs.',
+        selected: ['music-production-home'],
+        steps: steps('home'),
+        lines: [{ kind: 'library', name: 'Adds Ori Music Demo to your Music Production Home' }]
+      }
+    })
+  );
+  const requests = [];
+  const fetchImpl = async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan: {
+          digest: 'g',
+          runnable: true,
+          source: 'agent',
+          words: 'Shelve the songs.',
+          selected: ['group'],
+          steps: steps('group'),
+          lines: [{ kind: 'promote', name: 'Turns Ori Music Demo into a group' }]
+        }
+      })
+    };
+  };
+  const card = renderFolderAgentReport(view, stubDocument(), { fetchImpl });
+  const group = card.querySelectorAll('input').find(b => b.dataset.stepHandle === 'group');
+  group.checked = true;
+  await group.listeners.change();
+  assert.deepEqual(requests, [{ selected: ['group'] }]);
+  assert.deepEqual(
+    card
+      .querySelectorAll('input')
+      .filter(b => b.dataset.stepHandle)
+      .map(b => [b.dataset.stepHandle, b.checked]),
+    [
+      ['group', true],
+      ['music-production-home', false]
+    ]
+  );
+  assert.equal(text(card, '.folder-agent-card__line-name'), 'Turns Ori Music Demo into a group');
+});
+
+test("the agent's plan shows in its words; Ori's default says why", () => {
+  const steps = [
+    {
+      handle: 'reaper-tools',
+      name: 'REAPER tools',
+      title: 'Connect REAPER tools to Ori Music Demo',
+      chosen: true
+    },
+    {
+      handle: 'group',
+      name: 'a group',
+      title: 'Turn Ori Music Demo into a group with one workspace per project (8)',
+      chosen: false
+    }
+  ];
+  const agent = folderAgentReportView(
+    reported({
+      model_sentence: '',
+      tools_sentence: '',
+      plan: {
+        digest: 'p',
+        runnable: true,
+        source: 'agent',
+        selected: ['reaper-tools'],
+        words: 'Connect REAPER tools first. Leave the Logic sketch alone.',
+        words_raw: 'Connect [reaper-tools] first [later]. Leave the Logic sketch alone.',
+        steps,
+        lines: [
+          {
+            kind: 'workspace',
+            name: 'Connects REAPER tools to Ori Music Demo',
+            step: 'reaper-tools'
+          }
+        ]
+      }
+    })
+  );
+  const card = renderFolderAgentReport(agent, stubDocument(), {});
+  assert.equal(text(card, '.folder-agent-card__heading'), 'Ori Music Demo Manager recommends');
+  // The step the agent named reads as its name, as a chip; an unknown token
+  // is left out.
+  const words = card.querySelector('.folder-agent-card__words');
+  assert.deepEqual(
+    words.children.map(node => [node.className, node.textContent, node.dataset.step]),
+    [
+      ['folder-agent-card__words-text', 'Connect ', undefined],
+      ['folder-agent-card__step-chip', 'REAPER tools', 'reaper-tools'],
+      ['folder-agent-card__words-text', ' first ', undefined],
+      ['folder-agent-card__words-text', '. Leave the Logic sketch alone.', undefined]
+    ]
+  );
+  assert.equal(card.querySelector('.folder-agent-card__stage'), null);
+  assert.deepEqual(
+    card.querySelectorAll('.folder-agent-card__line').map(n => n.dataset.chosen),
+    ['true', 'false']
+  );
+  assert.equal(text(card, '.folder-agent-card__run-head'), 'Plan · 1 step');
+
+  const fallback = folderAgentReportView(
+    reported({
+      model_sentence: '',
+      tools_sentence: '',
+      plan: {
+        digest: 'd',
+        runnable: true,
+        source: 'default',
+        default_reason: "The agent named no step Ori can run, so this is Ori's default plan.",
+        words: 'Nothing needed.',
+        selected: ['reaper-tools'],
+        steps: steps.slice(0, 1),
+        lines: []
+      }
+    })
+  );
+  const plainCard = renderFolderAgentReport(fallback, stubDocument(), {});
+  const section = plainCard.querySelector('.folder-agent-card__run');
+  assert.equal(text(section, '.folder-agent-card__heading'), 'Steps');
+  assert.equal(
+    text(section, '.folder-agent-card__degraded'),
+    "The agent named no step Ori can run, so this is Ori's default plan."
+  );
+  // The step list replaces Ori's one-line summary.
+  assert.equal(plainCard.querySelector('.folder-agent-card__stage'), null);
+
+  // Once set up, the agent's words stay as the why; the boxes are gone.
+  const done = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: ['look_further'],
+      setup: {
+        status: 'done',
+        lines: [{ name: 'Connects REAPER tools to Ori Music Demo', state: 'done' }]
+      },
+      plan: {
+        digest: 'p',
+        runnable: true,
+        source: 'agent',
+        words: 'Connect REAPER first.',
+        steps,
+        lines: []
+      }
+    })
+  );
+  const after = renderFolderAgentReport(done, stubDocument(), {});
+  assert.equal(text(after, '.folder-agent-card__heading'), 'Ori Music Demo Manager recommended');
+  assert.deepEqual(
+    after.querySelector('.folder-agent-card__words').children.map(node => node.textContent),
+    ['Connect REAPER first.']
+  );
+  assert.equal(after.querySelector('.folder-agent-card__tool-pick'), null);
 });
 
 test('a left-out part shows one muted sentence in its place', () => {

@@ -196,6 +196,8 @@ export function folderAgentReportView(view) {
       status: String(view.setup.status || ''),
       stopReason: String(view.setup.stop_reason || ''),
       lines: (view.setup.lines || []).map(line => ({
+        kind: String(line.kind || ''),
+        step: String(line.step || ''),
         name: String(line.name || ''),
         detail: String(line.detail || ''),
         state: String(line.state || 'waiting')
@@ -387,18 +389,235 @@ export function renderFolderAgentCard(view, doc = document, { onStart, error = '
   return card;
 }
 
-function renderLines(doc, lines, className) {
-  const list = el(doc, 'ul', className);
+// The assurance line ("Nothing is moved, copied or read") is a note under
+// the steps, not a step of its own.
+const NOTE_LINE_KIND = 'folder';
+
+function plural(n, one, many) {
+  return n === 1 ? one : many;
+}
+
+// runHeadline says where the run stands, above the steps.
+function runHeadline(phase, done, failedAt, count) {
+  const steps = `${count} ${plural(count, 'step', 'steps')}`;
+  switch (phase) {
+    case 'running':
+      return `Setting up · ${done} of ${count} done`;
+    case 'done':
+      return `All done · ${steps}`;
+    case 'stopped':
+      return failedAt >= 0
+        ? `Stopped at step ${failedAt + 1} of ${count}`
+        : `Stopped · ${done} of ${count} done`;
+    default:
+      return `Plan · ${steps}`;
+  }
+}
+
+// groupActions turns the plan's lines into rows: one per step the lines came
+// from, in order of appearance, with the lines as its actions; a line with no
+// step stands as its own row; the assurance line is a note.
+function groupActions(lines, steps) {
+  const byHandle = new Map(steps.map(step => [step.handle, step]));
+  const rows = [];
+  const index = new Map();
+  const notes = [];
   lines.forEach(line => {
-    const item = el(doc, 'li', 'folder-agent-card__line');
-    if (line.state) item.dataset.state = line.state;
-    item.append(el(doc, 'span', 'folder-agent-card__line-name', line.name));
-    if (line.detail) item.append(el(doc, 'span', 'folder-agent-card__line-detail', line.detail));
-    const words = LINE_STATE_WORDS[line.state];
-    if (words) item.append(el(doc, 'span', 'folder-agent-card__line-state', words));
-    list.append(item);
+    if (line.kind === NOTE_LINE_KIND) {
+      notes.push(line);
+      return;
+    }
+    const key = line.step || `line:${rows.length}`;
+    let row = index.get(key);
+    if (!row) {
+      const step = line.step ? byHandle.get(line.step) : null;
+      row = {
+        handle: line.step || '',
+        title: step?.title || line.name,
+        label: step?.label || '',
+        excludes: step?.excludes || '',
+        detail: line.step ? '' : line.detail,
+        state: line.step ? '' : line.state || 'waiting',
+        actions: []
+      };
+      index.set(key, row);
+      rows.push(row);
+    }
+    if (line.step) row.actions.push(line);
   });
-  return list;
+  return { rows, notes };
+}
+
+// rowState is a step's state from its actions: failed if one failed, done
+// when all are, working once any has started.
+function rowState(row) {
+  if (!row.actions.length) return row.state || 'waiting';
+  const states = row.actions.map(action => action.state || 'waiting');
+  if (states.includes('failed')) return 'failed';
+  if (states.every(state => state === 'done')) return 'done';
+  if (states.some(state => state === 'working' || state === 'done')) return 'working';
+  return 'waiting';
+}
+
+// renderPlan draws the plan as one list the owner can follow: the agent's
+// words (or Ori's reason for its default), a headline for where things
+// stand, one numbered row per chosen step with its actions under it, the
+// steps offered but not chosen (while choosing, each with a box), and the
+// assurance as a note. phase is 'plan' (before Set it up), 'running', 'done'
+// or 'stopped'. The state words stay in the row for screen readers; the
+// marker and the action glyphs carry them for the eye.
+function renderPlan(doc, view, plan, lines, phase, { selecting = false, onTick } = {}) {
+  const section = el(doc, 'section', 'folder-agent-card__run');
+  section.dataset.phase = phase;
+  const steps = plan?.steps || [];
+  if (plan) {
+    section.dataset.planSource = plan.source;
+    if (plan.source === 'agent' && plan.words) {
+      const verb = phase === 'plan' ? 'recommends' : 'recommended';
+      section.append(el(doc, 'h4', 'folder-agent-card__heading', `${view.agent} ${verb}`));
+      section.append(renderWords(doc, plan));
+    } else if (phase === 'plan') {
+      section.append(el(doc, 'h4', 'folder-agent-card__heading', 'Steps'));
+      if (plan.defaultReason)
+        section.append(el(doc, 'p', 'folder-agent-card__degraded', plan.defaultReason));
+      if (plan.words) section.append(renderWords(doc, plan));
+    }
+  }
+  const { rows, notes } = groupActions(lines, steps);
+  const chosen = new Set(rows.map(row => row.handle).filter(Boolean));
+  // A chosen step whose lines carry no step yet still has its row.
+  steps.forEach(step => {
+    if (!step.chosen || chosen.has(step.handle)) return;
+    chosen.add(step.handle);
+    rows.push({
+      handle: step.handle,
+      title: step.title,
+      label: step.label,
+      excludes: step.excludes,
+      detail: '',
+      state: 'waiting',
+      actions: []
+    });
+  });
+  const offered = phase === 'plan' ? steps.filter(step => !chosen.has(step.handle)) : [];
+  const done = rows.filter(row => rowState(row) === 'done').length;
+  const failedAt = rows.findIndex(row => rowState(row) === 'failed');
+  const head = el(
+    doc,
+    'p',
+    'folder-agent-card__run-head',
+    runHeadline(phase, done, failedAt, rows.length)
+  );
+  head.setAttribute('role', 'status');
+  section.append(head);
+  const list = el(doc, 'ol', 'folder-agent-card__plan');
+  const renderRow = (row, index, isChosen) => {
+    const item = el(doc, 'li', 'folder-agent-card__line');
+    const state = isChosen ? rowState(row) : 'waiting';
+    item.dataset.state = state;
+    item.dataset.chosen = isChosen ? 'true' : 'false';
+    if (row.handle) item.dataset.step = row.handle;
+    // The final receipt reveals its checks one after another (CSS).
+    item.setAttribute('style', `--step:${Math.max(index, 0)}`);
+    if (selecting && row.handle) {
+      item.className += ' folder-agent-card__line--pick';
+      const box = doc.createElement('input');
+      box.type = 'checkbox';
+      box.className = 'folder-agent-card__tool-pick';
+      box.setAttribute('aria-label', `Include: ${row.title}`);
+      box.checked = isChosen;
+      box.dataset.stepHandle = row.handle;
+      box.addEventListener('change', () => onTick?.(row.handle, box.checked, row.excludes));
+      item.append(box);
+    }
+    const mark = el(doc, 'span', 'folder-agent-card__line-mark', isChosen ? String(index + 1) : '');
+    mark.setAttribute('aria-hidden', 'true');
+    const body = el(doc, 'span', 'folder-agent-card__line-body');
+    body.append(el(doc, 'span', 'folder-agent-card__line-name', row.title));
+    if (row.label) body.append(el(doc, 'span', 'folder-agent-card__tool-label', row.label));
+    if (row.actions.length) {
+      const actions = el(doc, 'span', 'folder-agent-card__actions-line');
+      row.actions.forEach((action, k) => {
+        if (k) actions.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
+        const act = el(doc, 'span', 'folder-agent-card__action', action.name);
+        act.dataset.state = action.state || 'waiting';
+        if (action.detail) act.setAttribute('title', action.detail);
+        actions.append(act);
+      });
+      body.append(actions);
+    } else if (row.detail) {
+      body.append(el(doc, 'span', 'folder-agent-card__line-detail', row.detail));
+    }
+    item.append(mark, body);
+    const words = isChosen ? LINE_STATE_WORDS[state] : '';
+    if (words) item.append(el(doc, 'span', 'folder-agent-card__line-state', words));
+    return item;
+  };
+  rows.forEach((row, index) => list.append(renderRow(row, index, true)));
+  offered.forEach(step =>
+    list.append(
+      renderRow(
+        {
+          handle: step.handle,
+          title: step.title,
+          label: step.label,
+          excludes: step.excludes,
+          detail: step.why,
+          actions: []
+        },
+        -1,
+        false
+      )
+    )
+  );
+  section.append(list);
+  notes.forEach(line => {
+    const note = el(doc, 'p', 'folder-agent-card__line folder-agent-card__line--note');
+    note.dataset.state = line.state || 'waiting';
+    note.dataset.kind = NOTE_LINE_KIND;
+    note.append(el(doc, 'span', 'folder-agent-card__line-name', line.name));
+    section.append(note);
+  });
+  if (plan?.excluded) section.append(el(doc, 'p', 'folder-agent-card__degraded', plan.excluded));
+  if (phase === 'plan' && view.toolsSentence)
+    section.append(el(doc, 'p', 'folder-agent-card__degraded', view.toolsSentence));
+  return section;
+}
+
+const HANDLE_PATTERN = /\[([a-z0-9][a-z0-9-]*)\]/g;
+
+// renderWords draws the agent's plan with each step it named as a chip
+// carrying the step's name, so the reader sees which words became steps.
+// Any other handle-shaped token is left out. prefix opens the paragraph
+// ("Albums Manager recommended: ").
+function renderWords(doc, plan, prefix = '') {
+  const words = el(doc, 'p', 'folder-agent-card__words');
+  const names = new Map(plan.steps.map(step => [step.handle, step.name || step.title]));
+  const text = run => {
+    if (run) words.append(el(doc, 'span', 'folder-agent-card__words-text', run));
+  };
+  text(prefix);
+  const raw = plan.wordsRaw || plan.words;
+  let last = 0;
+  for (const match of raw.matchAll(HANDLE_PATTERN)) {
+    text(raw.slice(last, match.index));
+    const name = names.get(match[1]);
+    if (name) {
+      const chip = el(doc, 'span', 'folder-agent-card__step-chip', name);
+      chip.dataset.step = match[1];
+      words.append(chip);
+    }
+    last = match.index + match[0].length;
+  }
+  text(raw.slice(last));
+  return words;
+}
+
+// runPhase is the setup run's phase for renderPlanSteps.
+function runPhase(setup) {
+  if (setup.status === 'running') return 'running';
+  if (setup.status === 'stopped') return 'stopped';
+  return 'done';
 }
 
 // renderFolderAgentReport draws the receipt or the report. onAction(id,
@@ -411,18 +630,34 @@ export function renderFolderAgentReport(
   const card = el(doc, 'article', 'folder-agent-card folder-agent-card--report');
   card.dataset.folderAgentCard = view.state;
   card.dataset.workspaceId = view.workspaceID;
-  // The optional tools left selected, and the plan they make: unticking one
-  // asks the server for the plan (and digest) without it.
+  // The steps left ticked, and the plan they make: a tick asks the server
+  // for the plan (and digest) with that choice.
   const selecting = Boolean(view.plan?.runnable) && view.actions.some(a => a.id === 'set_up');
   const selected = new Set(view.plan?.selected || []);
   let planHost = null;
+  let setUpButton = null;
+  const onTick = (handle, checked, excludes) => {
+    if (checked) {
+      selected.add(handle);
+      // The owner's latest tick wins over a step it cannot run with.
+      if (excludes) selected.delete(excludes);
+    } else selected.delete(handle);
+    return refreshPlan();
+  };
   const refreshPlan = async () => {
     const plan = await fetchFolderAgentPlan(view.workspaceID, [...selected], fetchImpl);
     if (!plan) return;
     view.plan = plan;
-    if (planHost) planHost.replaceChildren(renderLines(doc, plan.lines, 'folder-agent-card__plan'));
+    // The server may have set a step aside (two that cannot run together):
+    // the boxes follow its choice.
+    selected.clear();
+    plan.selected.forEach(handle => selected.add(handle));
+    if (planHost)
+      planHost.replaceChildren(
+        renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick })
+      );
+    if (setUpButton) setUpButton.disabled = !plan.runnable;
   };
-  card.append(el(doc, 'div', 'folder-agent-card__by', view.agent));
   card.append(el(doc, 'h3', 'folder-agent-card__title', view.title));
   if (view.state === 'looking') {
     const receipt = el(doc, 'p', 'folder-agent-card__receipt');
@@ -446,9 +681,40 @@ export function renderFolderAgentReport(
     ? el(doc, 'p', 'folder-agent-card__what', view.whatItIs)
     : leftOut('what_it_is');
   if (whatItIs) card.append(whatItIs);
-  if (view.facts) card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
-  // Once set up, the setup lines say what happened; the proposal is not repeated.
-  if ((view.tools.length || view.toolsSentence) && view.state !== 'set_up') {
+  // The host's facts line stands in for the agent's sentence when there is
+  // none; beside it, it would only repeat the counts.
+  if (view.facts && !view.whatItIs)
+    card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
+  // One list for the plan: while choosing, the plan's lines under their
+  // steps with a box each; from Set it up on, the run's lines in the same
+  // shape, with the agent's words above saying why.
+  if (view.setup) {
+    card.append(renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup)));
+    if (view.setup.status === 'stopped') {
+      card.append(
+        el(
+          doc,
+          'p',
+          'folder-agent-card__failure',
+          'A step did not finish. Set it up again carries on from there.'
+        )
+      );
+    }
+  } else if (view.plan && (view.plan.steps.length || view.plan.runnable)) {
+    planHost = el(doc, 'div', 'folder-agent-card__plan-host');
+    planHost.append(
+      renderPlan(doc, view, view.plan, view.plan.lines, 'plan', { selecting, onTick })
+    );
+    card.append(planHost);
+    if (!view.plan.runnable && view.plan.unavailable)
+      card.append(el(doc, 'p', 'folder-agent-card__note', view.plan.unavailable));
+  } else {
+    // No step list to show: Ori's one-line summary, and why it cannot run.
+    if (view.stage) card.append(el(doc, 'p', 'folder-agent-card__stage', view.stage));
+    if (view.plan?.unavailable)
+      card.append(el(doc, 'p', 'folder-agent-card__note', view.plan.unavailable));
+  }
+  if (!view.plan?.steps.length && (view.tools.length || view.toolsSentence) && !view.setup) {
     const tools = el(doc, 'section', 'folder-agent-card__tools');
     tools.append(el(doc, 'h4', 'folder-agent-card__heading', 'Tools'));
     const list = el(doc, 'ul', 'folder-agent-card__tool-list');
@@ -491,44 +757,50 @@ export function renderFolderAgentReport(
       el(doc, 'p', 'folder-agent-card__next', `Not opened yet: ${view.nextFolders.join(', ')}`)
     );
   }
-  // Suggested goal: an editable line with "Use this goal" checked while the
-  // report waits; plain text afterwards.
+  // After setup: the goal (an editable line with "Use this goal" checked
+  // while the report waits; plain text afterwards) and the first ticket, as
+  // two compact rows.
   let goalInput = null;
   let goalUse = null;
-  if (view.offersGoal) {
-    const goal = el(doc, 'section', 'folder-agent-card__goal');
-    goal.append(el(doc, 'h4', 'folder-agent-card__heading', 'Suggested goal'));
-    goalInput = doc.createElement('input');
-    goalInput.type = 'text';
-    goalInput.className = 'folder-agent-card__goal-input';
-    goalInput.maxLength = 300;
-    goalInput.value = view.suggestedGoal;
-    goalInput.setAttribute('aria-label', 'Suggested goal');
-    const label = el(doc, 'label', 'folder-agent-card__goal-use');
-    goalUse = doc.createElement('input');
-    goalUse.type = 'checkbox';
-    goalUse.checked = true;
-    label.append(goalUse, el(doc, 'span', '', 'Use this goal'));
-    goal.append(goalInput, label);
-    card.append(goal);
-  } else if (view.suggestedGoal) {
-    card.append(
-      el(doc, 'p', 'folder-agent-card__goal-text', `Suggested goal: ${view.suggestedGoal}`)
-    );
-  } else {
-    const missing = leftOut('suggested_goal');
-    if (missing) card.append(missing);
-  }
-  if (view.firstTicket) {
-    const ticket = el(doc, 'section', 'folder-agent-card__ticket');
-    ticket.append(el(doc, 'h4', 'folder-agent-card__heading', 'Suggested first ticket'));
-    ticket.append(el(doc, 'p', 'folder-agent-card__ticket-title', view.firstTicket));
-    if (view.firstTicketWhy)
-      ticket.append(el(doc, 'p', 'folder-agent-card__ticket-why', view.firstTicketWhy));
-    card.append(ticket);
-  } else {
-    const missing = leftOut('suggested_first_ticket');
-    if (missing) card.append(missing);
+  const goalMissing = view.offersGoal || view.suggestedGoal ? null : leftOut('suggested_goal');
+  const ticketMissing = view.firstTicket ? null : leftOut('suggested_first_ticket');
+  if (view.offersGoal || view.suggestedGoal || view.firstTicket || goalMissing || ticketMissing) {
+    const after = el(doc, 'section', 'folder-agent-card__after');
+    after.append(el(doc, 'h4', 'folder-agent-card__heading', 'After setup'));
+    const goalRow = el(doc, 'div', 'folder-agent-card__after-row');
+    goalRow.append(el(doc, 'span', 'folder-agent-card__after-label', 'Goal'));
+    if (view.offersGoal) {
+      goalInput = doc.createElement('input');
+      goalInput.type = 'text';
+      goalInput.className = 'folder-agent-card__goal-input';
+      goalInput.maxLength = 300;
+      goalInput.value = view.suggestedGoal;
+      goalInput.setAttribute('aria-label', 'Suggested goal');
+      const label = el(doc, 'label', 'folder-agent-card__goal-use');
+      goalUse = doc.createElement('input');
+      goalUse.type = 'checkbox';
+      goalUse.checked = true;
+      label.append(goalUse, el(doc, 'span', '', 'Use this goal'));
+      goalRow.append(goalInput, label);
+    } else if (view.suggestedGoal) {
+      goalRow.append(el(doc, 'span', 'folder-agent-card__goal-text', view.suggestedGoal));
+    } else if (goalMissing) {
+      goalRow.append(goalMissing);
+    }
+    if (goalRow.children?.length !== 1 || goalMissing) after.append(goalRow);
+    if (view.firstTicket) {
+      const ticketRow = el(doc, 'div', 'folder-agent-card__after-row');
+      ticketRow.append(el(doc, 'span', 'folder-agent-card__after-label', 'First ticket'));
+      const ticket = el(doc, 'span', 'folder-agent-card__ticket');
+      ticket.append(el(doc, 'span', 'folder-agent-card__ticket-title', view.firstTicket));
+      if (view.firstTicketWhy)
+        ticket.append(el(doc, 'span', 'folder-agent-card__ticket-why', view.firstTicketWhy));
+      ticketRow.append(ticket);
+      after.append(ticketRow);
+    } else if (ticketMissing) {
+      after.append(ticketMissing);
+    }
+    card.append(after);
   }
   // The one question, above the actions: pick a folder or answer in a line.
   if (view.question && view.actions.some(action => action.id === 'look_further')) {
@@ -577,30 +849,6 @@ export function renderFolderAgentReport(
       )
     );
   }
-  if (view.setup) {
-    card.append(renderLines(doc, view.setup.lines, 'folder-agent-card__plan'));
-    if (view.setup.status === 'stopped') {
-      card.append(
-        el(
-          doc,
-          'p',
-          'folder-agent-card__failure',
-          'A step did not finish. Set it up again carries on from there.'
-        )
-      );
-    }
-  } else if (view.stage) {
-    card.append(el(doc, 'p', 'folder-agent-card__stage', view.stage));
-  }
-  if (view.plan && !view.setup && view.state !== 'setting_up') {
-    if (view.plan.runnable) {
-      planHost = el(doc, 'div', 'folder-agent-card__plan-host');
-      planHost.append(renderLines(doc, view.plan.lines, 'folder-agent-card__plan'));
-      card.append(planHost);
-    } else if (view.plan.unavailable) {
-      card.append(el(doc, 'p', 'folder-agent-card__note', view.plan.unavailable));
-    }
-  }
   if (view.actions.length) {
     const actions = el(doc, 'div', 'folder-agent-card__actions');
     view.actions.forEach((action, index) => {
@@ -618,6 +866,7 @@ export function renderFolderAgentReport(
       );
       button.type = 'button';
       button.dataset.folderAgentAction = action.id;
+      if (action.id === 'set_up') setUpButton = button;
       button.addEventListener('click', () => {
         // Set it up carries the goal line as the owner left it.
         let extra;
@@ -703,10 +952,30 @@ function planView(plan) {
     selected: Array.isArray(plan.selected) ? plan.selected.map(String) : [],
     lines: (plan.lines || []).map(line => ({
       kind: String(line.kind || ''),
+      step: String(line.step || ''),
       name: String(line.name || ''),
       detail: String(line.detail || ''),
       state: String(line.state || '')
-    }))
+    })),
+    // Who chose the steps: the agent, in its own words, or Ori's default.
+    source: String(plan.source || 'default'),
+    words: String(plan.words || ''),
+    wordsRaw: String(plan.words_raw || ''),
+    excluded: String(plan.excluded || ''),
+    defaultReason: String(plan.default_reason || ''),
+    // Every step Ori offered, chosen or not; the owner can tick any of them.
+    steps: (Array.isArray(plan.steps) ? plan.steps : [])
+      .map(step => ({
+        handle: String(step.handle || ''),
+        kind: String(step.kind || ''),
+        name: String(step.name || ''),
+        title: String(step.title || ''),
+        why: String(step.why || ''),
+        label: String(step.label || ''),
+        chosen: Boolean(step.chosen),
+        excludes: String(step.excludes || '')
+      }))
+      .filter(step => step.handle)
   };
 }
 

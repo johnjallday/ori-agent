@@ -116,17 +116,19 @@ func TestMatch_RankedCandidatesArePreselectedAndInThePlan(t *testing.T) {
 	if !contains(lines, "Adds skill mix-notes · found by search") || contains(lines, "Adds notes-mcp · found by search") {
 		t.Fatalf("plan lines = %v", lines)
 	}
-	if strings.Join(report.Plan.Selected, ",") != "skill:acme/music@mix-notes" {
+	// The plan's steps by handle: the tools and the ranked skill.
+	if strings.Join(report.Plan.Selected, ",") != "mix-notes,reaper-tools" {
 		t.Fatalf("default selection = %v", report.Plan.Selected)
 	}
 
-	// Unticking the ranked skill: the plan has no add-on, and Set it up
-	// records the decline so a later look does not propose it again.
-	plain, err := h.svc.Plan("u1", view.WorkspaceID, []string{})
-	if err != nil || len(plain.Selected) != 0 || plain.Digest == report.Plan.Digest {
+	// Unticking the ranked skill: the owner's ticks name the tools only, the
+	// plan has no add-on, and Set it up records the decline so a later look
+	// does not propose it again.
+	plain, err := h.svc.Plan("u1", view.WorkspaceID, []string{"reaper-tools"})
+	if err != nil || strings.Join(plain.Selected, ",") != "reaper-tools" || plain.Digest == report.Plan.Digest {
 		t.Fatalf("plan without the skill = %+v %v", plain, err)
 	}
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: plain.Digest, Selected: []string{}}); err != nil {
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: plain.Digest, Selected: []string{"reaper-tools"}}); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()

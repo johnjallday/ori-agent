@@ -2285,7 +2285,15 @@ An expired token answers `410` with `repair: "choose_folder"`. A folder already 
   "question": "…", "ask_folders": [ { "name": "Albums", "…": "…" } ],
   "model_sentence": "…", "tools_sentence": "…",
   "actions": ["set_up", "keep", "look_further"],
-  "plan": { "stage": "tools", "lines": [ { "…": "…" } ], "digest": "…", "runnable": true, "unavailable": "", "selected": ["…"] },
+  "plan": {
+    "stage": "tools", "lines": [ { "kind": "workspace", "name": "Connects REAPER tools to Albums", "detail": "…", "step": "reaper-tools" } ],
+    "digest": "…", "runnable": true, "unavailable": "",
+    "source": "agent | default",
+    "words": "Put every song on the shelf and connect REAPER tools. Leave the Logic sketch where it is.",
+    "steps": [ { "handle": "reaper-tools", "kind": "integration", "title": "Connect REAPER tools to Albums", "why": "…", "label": "", "default": true, "chosen": true, "excludes": "" } ],
+    "selected": ["reaper-tools"],
+    "excluded": "", "default_reason": ""
+  },
   "setup": { "stage": "tools", "lines": [ { "…": "…" } ], "status": "running | done | stopped", "stop_reason": "", "started_at": "…", "finished_at": "…" },
   "next_ticket": { "id": "…", "title": "…", "started": false },
   "left_out": { "<candidate id>": "<why it was left out>" },
@@ -2303,11 +2311,13 @@ All take the workspace id from the path and answer `{ "folder_agent": <view> }`.
 
 - `POST …/{workspaceID}/keep`: puts the report aside (state `kept`).
 - `POST …/{workspaceID}/look-further` with `{ "folders": ["Albums"], "hint": "…" }`: starts a new walk and turn, looking at the named folders (from `next_folders` / `ask_folders`) first. `hint` is the owner's typed answer to the agent's question.
-- `POST …/{workspaceID}/plan` with `{ "selected": ["<candidate id>"] }`: answers `{ "plan": <plan> }` for the optional candidates left checked, with the `digest` that Set it up must confirm.
-- `POST …/{workspaceID}/setup` with `{ "plan_digest": "…", "selected": ["…"], "use_goal": true, "goal": "…" }`: runs the confirmed plan in the background (state `setting_up`, then `set_up`, or a stopped `setup` with Retry). A plan that changed since it was shown answers `409` with `plan_changed: true` and the current view. A stage that cannot be set up yet answers `409`.
+- `POST …/{workspaceID}/plan` with `{ "selected": ["<step handle>"] }`: answers `{ "plan": <plan> }` for the steps the owner left ticked (a candidate id is accepted in place of its handle), with the `digest` that Set it up must confirm.
+- `POST …/{workspaceID}/setup` with `{ "plan_digest": "…", "selected": ["…"], "use_goal": true, "goal": "…" }`: runs the confirmed plan in the background (state `setting_up`, then `set_up`, or a stopped `setup` with Retry). A plan that changed since it was shown answers `409` with `plan_changed: true` and the current view. A plan with nothing to run answers `409`.
 - `POST …/{workspaceID}/start-next`: starts the next ticket from the receipt (Start this). It never starts on its own.
 
-What Set it up runs depends on `stage`:
+**Who plans.** `plan.steps` is every step Ori can run for this folder, in the host's words, each with a short handle. The agent writes its plan freely (the `Plan:` section of its turn) and names a handle wherever it wants Ori to act. Ori keeps the handles it offered, in the agent's order (`source: "agent"`; `words` are the agent's sentences with the handles removed, and whatever in them is not a step is simply its words, never run), drops anything else, and sets aside the second of two steps that cannot run together (`excluded` says which; the card itself unticks the partner when the owner ticks the other). With no handle named, a dropped plan, or no model, Ori's own plan is shown (`source: "default"`, `default_reason` when a model ran). `selected` always lists the handles in effect; the owner can tick or untick any step. Each of `plan.lines` (and of `setup.lines` once Set it up runs) carries the `step` it belongs to, so the card shows the steps with their actions under them; the assurance line carries none.
+
+What Set it up runs depends on `stage`, which follows the chosen steps (a group step makes it `group`, a Home step `home`, anything else `tools`):
 
 - **tools**: installs or connects the checked tools and pins the agent's toolbox.
 - **home**: registers the folder as a root of the user's existing Home, runs the root scan, then commits scoped scans for the scopes the library itself issued, down the tree under the one consent. Scope ids never come from the client. The folder workspace moves into the Home.

@@ -21,6 +21,7 @@ const (
 	ToolWhyMaxRunes   = 120
 	QuestionMaxRunes  = 200
 	MaxRankedTools    = 3
+	PlanMaxRunes      = 600
 )
 
 // Section names, as the model writes them and the report records which were
@@ -32,6 +33,7 @@ const (
 	SectionTicket   = "suggested_first_ticket"
 	SectionNext     = "next"
 	SectionQuestion = "question"
+	SectionPlan     = "plan"
 )
 
 // RankedTool is one candidate the model ranked, by the host's id.
@@ -50,18 +52,26 @@ type Sections struct {
 	TicketWhy string       `json:"suggested_first_ticket_why,omitempty"`
 	Next      string       `json:"next,omitempty"`
 	Question  string       `json:"question,omitempty"`
-	Dropped   []string     `json:"dropped,omitempty"`
+	// Plan is the agent's plan in its own words, handles and all (PlanWords
+	// renders it); PlanSteps are the offered handles it named as steps to
+	// run, in its order, each once. A handle it names only to leave out
+	// ("leaving out [group]") is not one of them. Everything else in Plan is
+	// shown to the owner as the agent's words and never run.
+	Plan      string   `json:"plan,omitempty"`
+	PlanSteps []string `json:"plan_steps,omitempty"`
+	Dropped   []string `json:"dropped,omitempty"`
 	// Provenance of everything above (PRD FR11), set by the host.
 	Source   string `json:"source,omitempty"`
 	Model    string `json:"model,omitempty"`
 	TicketID string `json:"ticket_id,omitempty"`
 }
 
-var headingPattern = regexp.MustCompile(`(?i)^\s*(?:#{1,6}\s*)?\**\s*(what it is|tools|suggested goal|suggested first ticket|question|next)\s*\**\s*:?\s*\**\s*(.*)$`)
+var headingPattern = regexp.MustCompile(`(?i)^\s*(?:#{1,6}\s*)?\**\s*(what it is|tools|suggested goal|suggested first ticket|question|next|plan)\s*\**\s*:?\s*\**\s*(.*)$`)
 
 var headingKeys = map[string]string{
 	"what it is": SectionWhatItIs, "tools": SectionTools, "suggested goal": SectionGoal,
 	"suggested first ticket": SectionTicket, "question": SectionQuestion, "next": SectionNext,
+	"plan": SectionPlan,
 }
 
 // ParseOptions carries the host facts the parser checks the model's words
@@ -69,6 +79,8 @@ var headingKeys = map[string]string{
 type ParseOptions struct {
 	// Candidates are the host-issued tool ids the model may rank.
 	Candidates map[string]bool
+	// Steps are the handles of the steps the host offered for the plan.
+	Steps map[string]bool
 	// FolderPaths are the map's relative paths that contain a slash; a section
 	// quoting one names a path and is dropped.
 	FolderPaths []string
@@ -96,6 +108,13 @@ func Parse(reply string, opts ParseOptions) Sections {
 	out.Goal = keep(SectionGoal, raw[SectionGoal], GoalMaxRunes)
 	out.Question = keep(SectionQuestion, raw[SectionQuestion], QuestionMaxRunes)
 	out.Next = keep(SectionNext, raw[SectionNext], TicketMaxRunes)
+	if plan := oneLine(raw[SectionPlan]); plan != "" {
+		if utf8.RuneCountInString(plan) > PlanMaxRunes || namesPath(plan, opts.FolderPaths) {
+			drop(SectionPlan)
+		} else {
+			out.Plan, out.PlanSteps = parsePlan(plan, opts.Steps)
+		}
+	}
 
 	if ticket := strings.TrimSpace(raw[SectionTicket]); ticket != "" {
 		lines := nonEmptyLines(ticket)
@@ -240,6 +259,32 @@ func nonEmptyLines(text string) []string {
 		out = []string{""}
 	}
 	return out
+}
+
+var (
+	handlePattern    = regexp.MustCompile(`\[([a-z0-9][a-z0-9-]*)\]`)
+	spaceRun         = regexp.MustCompile(`\s+`)
+	spaceBeforePunct = regexp.MustCompile(`\s+([.,;:!?)])`)
+	// leftOutBefore matches the words right before a handle that name it
+	// only to leave it out.
+	leftOutBefore = regexp.MustCompile(`(?i)(?:leav(?:e|es|ing)\s+out|left\s+out|skip(?:s|ping)?|not|no|without|rather\s+than|instead\s+of|drop(?:s|ping)?)\s+(?:the\s+|a\s+|an\s+)?$`)
+)
+
+// parsePlan reads the agent's plan: its words as written, and the offered
+// handles it named as steps to run, in order and once each. The agent may
+// name a step inline or in a trailing list; a handle right after "leaving
+// out", "not", "skip" or the like is a mention, not a choice.
+func parsePlan(text string, steps map[string]bool) (words string, handles []string) {
+	seen := make(map[string]bool)
+	for _, loc := range handlePattern.FindAllStringSubmatchIndex(text, -1) {
+		handle := text[loc[2]:loc[3]]
+		if !steps[handle] || seen[handle] || leftOutBefore.MatchString(text[:loc[0]]) {
+			continue
+		}
+		seen[handle] = true
+		handles = append(handles, handle)
+	}
+	return text, handles
 }
 
 // splitFirstSentence splits "Do X. Because Y." into ("Do X.", "Because Y.").

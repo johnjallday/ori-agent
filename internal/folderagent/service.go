@@ -450,6 +450,9 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	s.remember(updated)
 	if updated.TicketID != "" {
 		result := foldermap.FactsLine(facts) + "\n" + StageLine(facts, stage, candidates)
+		if sections != nil && sections.Plan != "" {
+			result += "\nPlan: " + folderlook.PlanWords(sections.Plan, folderlook.Steps(updated.FolderName, facts, candidates))
+		}
 		if sections != nil && sections.WhatItIs != "" {
 			result = sections.WhatItIs + "\n" + result
 		}
@@ -532,9 +535,10 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 	}
 	chat, model := resolved.chat, resolved.name
 	ask := folderlook.AskAllowed(facts)
+	steps := folderlook.Steps(rec.FolderName, facts, candidates)
 	reference := folderlook.BuildReference(folderlook.ReferenceInput{
 		FolderName: rec.FolderName, Brief: rec.Brief, Map: m, Facts: facts,
-		StageLine: StageLine(facts, foldermap.StageFor(facts), candidates), Candidates: candidates,
+		StageLine: StageLine(facts, foldermap.StageFor(facts), candidates), Steps: steps, Candidates: candidates,
 		AskAllowed: ask, Hint: rec.Hint,
 	})
 	var mu sync.Mutex
@@ -570,7 +574,7 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 			nested = append(nested, f.Path)
 		}
 	}
-	parsed := folderlook.Parse(result.Reply, folderlook.ParseOptions{Candidates: ids, FolderPaths: nested})
+	parsed := folderlook.Parse(result.Reply, folderlook.ParseOptions{Candidates: ids, Steps: folderlook.StepHandles(steps), FolderPaths: nested})
 	if !ask {
 		// A question written when the facts are clear is not shown.
 		parsed.Question = ""
@@ -785,10 +789,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		return View{}, personalassistant.ErrFolderPlanChanged
 	}
 	if !plan.Runnable {
-		if plan.Stage == foldermap.StageFolder {
-			return View{}, ErrNothingToSet
-		}
-		return View{}, ErrStageNotYet
+		return View{}, ErrNothingToSet
 	}
 	if s.deps.Setups == nil {
 		return View{}, ErrUnavailable
@@ -798,10 +799,23 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 			return ErrWrongState
 		}
 		r.State = StateSettingUp
-		r.Setup = &Setup{Stage: plan.Stage, Selected: plan.Selected, Lines: plan.Lines,
+		// The first step is under way from this moment; the run marks each
+		// line as it reaches it.
+		lines := append([]personalassistant.FolderPlanLine(nil), plan.Lines...)
+		for i := range lines {
+			if lines[i].Kind != personalassistant.FolderPlanFolder {
+				lines[i].State = personalassistant.FolderLineWorking
+				break
+			}
+		}
+		r.Setup = &Setup{Stage: plan.Stage, Selected: plan.Selected, Lines: lines,
 			Status: personalassistant.FolderSetupRunning, StartedAt: s.deps.Now().UTC()}
 		if selected != nil {
-			r.Declined = appendDeclined(r.Declined, r.Candidates, plan.Selected)
+			kept := make([]string, 0, len(plan.Candidates))
+			for _, c := range plan.Candidates {
+				kept = append(kept, c.ID)
+			}
+			r.Declined = appendDeclined(r.Declined, r.Candidates, kept)
 		}
 		return nil
 	})
@@ -870,16 +884,14 @@ func appendDeclined(declined []string, candidates []folderlook.Candidate, select
 	return declined
 }
 
-// Plan returns the plan card for a selection of optional candidates, so the
-// card can show the lines and digest the owner will confirm.
+// Plan returns the plan card for the owner's own choice among the offered
+// steps, so the card can show the lines and digest the owner will confirm.
 func (s *Service) Plan(userID, workspaceID string, selected []string) (PlanView, error) {
 	rec, err := s.Record(userID, workspaceID)
 	if err != nil {
 		return PlanView{}, err
 	}
-	plan := BuildPlan(*rec, selected)
-	return PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
-		Unavailable: plan.Unavailable, Selected: plan.Selected}, nil
+	return *planViewOf(BuildPlan(*rec, selected)), nil
 }
 
 // createNextTicket adds the agent's suggested first ticket to the backlog,

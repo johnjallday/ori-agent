@@ -88,8 +88,30 @@ type PlanView struct {
 	Runnable bool                               `json:"runnable"`
 	// Unavailable explains why a plan cannot run yet.
 	Unavailable string `json:"unavailable,omitempty"`
-	// Selected are the optional candidates this plan includes.
+	// Selected are the handles of the steps this plan includes.
 	Selected []string `json:"selected,omitempty"`
+	// Source says who chose the steps: "agent" or "default" (Ori's own plan).
+	Source string `json:"source"`
+	// Words is the agent's plan in its own words, each handle read as its
+	// step's name; WordsRaw keeps the handles, for the card's chips.
+	Words    string `json:"words,omitempty"`
+	WordsRaw string `json:"words_raw,omitempty"`
+	// Steps is every step Ori offered, each marked chosen when in the plan.
+	Steps []folderlook.Step `json:"steps"`
+	// Excluded explains a named step set aside because another named step
+	// cannot run with it; DefaultReason says why Ori's own plan is shown.
+	Excluded      string `json:"excluded,omitempty"`
+	DefaultReason string `json:"default_reason,omitempty"`
+}
+
+func planViewOf(plan Plan) *PlanView {
+	steps := plan.Steps
+	if steps == nil {
+		steps = []folderlook.Step{}
+	}
+	return &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
+		Unavailable: plan.Unavailable, Selected: plan.Selected, Source: plan.Source, Words: plan.Words,
+		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason}
 }
 
 func (s *Service) viewOf(_ context.Context, rec *Record) View {
@@ -124,7 +146,7 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		v.ToolsSentence = "Search for more tools needs a model"
 	}
 	plan := BuildPlan(*rec, nil)
-	v.Plan = &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable, Unavailable: plan.Unavailable, Selected: plan.Selected}
+	v.Plan = planViewOf(plan)
 	switch rec.State {
 	case StateReported:
 		v.Actions = []string{ActionSetUp, ActionKeep, ActionLookFurther}
@@ -276,47 +298,138 @@ func StageLine(f foldermap.Facts, stage foldermap.Stage, candidates []folderlook
 	return "Set it up: " + strings.Join(parts, ", ")
 }
 
-// Plan is a Set it up plan: the host's lines for the stage and the selected
-// candidates.
+// Who chose a plan's steps.
+const (
+	PlanByAgent = "agent"
+	PlanByOri   = "default"
+)
+
+// Plan is a Set it up plan: the steps in effect, in order, and the host's
+// lines for them.
 type Plan struct {
 	Stage      foldermap.Stage
 	Lines      []personalassistant.FolderPlanLine
 	Candidates []folderlook.Candidate
-	Selected   []string
-	Digest     string
-	Runnable   bool
+	// Selected are the handles of the steps in the plan, sorted.
+	Selected []string
+	Digest   string
+	Runnable bool
 	// Unavailable is why the plan cannot run yet.
 	Unavailable string
+	// Source is PlanByAgent when the agent's plan named the steps, else
+	// PlanByOri (its default: the stage's required steps and ranked add-ons).
+	Source string
+	// Words is the agent's plan in its own words, each handle read as its
+	// step's name; WordsRaw keeps the handles.
+	Words    string
+	WordsRaw string
+	// Steps is the catalog Ori offered, each marked Chosen when in the plan.
+	Steps []folderlook.Step
+	// Excluded explains a named step set aside because another named step
+	// cannot run with it; DefaultReason says why Ori's own plan is shown.
+	Excluded      string
+	DefaultReason string
 }
 
-// BuildPlan lists every consequence of Set it up. Required candidates are
-// always in it; optional ones only when selected.
-//
-// selected nil means the default: every optional candidate the agent ranked,
-// except what is already here. An explicit list (even empty) replaces it;
-// ids that are not optional candidates are ignored.
+// BuildPlan lists every consequence of Set it up. The steps come from the
+// agent's plan (the handles it named, in its order), else from Ori's default
+// (the stage's required steps and the add-ons the agent ranked). selected,
+// when not nil, is the owner's own choice among the offered steps, by handle
+// (a candidate id is accepted too), and replaces both.
 func BuildPlan(rec Record, selected []string) Plan {
-	plan := Plan{Stage: rec.Stage}
-	chosen := make(map[string]bool, len(selected))
-	if selected == nil {
-		for _, c := range rec.Candidates {
-			if !c.Required && c.Ranked && c.Action != folderlook.ActionAlreadyHere {
-				chosen[c.ID] = true
+	plan := Plan{Stage: rec.Stage, Source: PlanByOri}
+	steps := folderlook.Steps(rec.FolderName, rec.Facts, rec.Candidates)
+	byHandle := make(map[string]int, len(steps))
+	handleOf := make(map[string]string, len(steps))
+	for i, s := range steps {
+		byHandle[s.Handle] = i
+		handleOf[s.Handle] = s.Handle
+		if s.CandidateID != "" {
+			handleOf[s.CandidateID] = s.Handle
+		}
+	}
+	var agentOrder []string
+	if rec.Sections != nil {
+		for _, h := range rec.Sections.PlanSteps {
+			if _, ok := byHandle[h]; ok {
+				agentOrder = append(agentOrder, h)
+			}
+		}
+		plan.WordsRaw = rec.Sections.Plan
+		plan.Words = folderlook.PlanWords(rec.Sections.Plan, steps)
+	}
+	var defaultOrder []string
+	for _, s := range steps {
+		if s.Default {
+			defaultOrder = append(defaultOrder, s.Handle)
+		}
+	}
+	base := defaultOrder
+	if len(agentOrder) > 0 {
+		base, plan.Source = agentOrder, PlanByAgent
+	} else {
+		plan.DefaultReason = defaultReason(rec)
+	}
+	order := base
+	if selected != nil {
+		ticked := make(map[string]bool, len(selected))
+		for _, id := range selected {
+			if h, ok := handleOf[strings.TrimSpace(id)]; ok {
+				ticked[h] = true
+			}
+		}
+		order = nil
+		for _, h := range base {
+			if ticked[h] {
+				order = append(order, h)
+				delete(ticked, h)
+			}
+		}
+		for _, s := range steps {
+			if ticked[s.Handle] {
+				order = append(order, s.Handle)
 			}
 		}
 	}
-	for _, id := range selected {
-		chosen[id] = true
+	order, plan.Excluded = applyExcludes(order, steps, byHandle)
+	chosen := make(map[string]bool, len(order))
+	for _, h := range order {
+		chosen[h] = true
 	}
-	runnable := rec.Stage == foldermap.StageTools || rec.Stage == foldermap.StageHome || rec.Stage == foldermap.StageGroup
+	plan.Steps = make([]folderlook.Step, len(steps))
+	for i, s := range steps {
+		s.Chosen = chosen[s.Handle]
+		plan.Steps[i] = s
+	}
+	candidates := make(map[string]folderlook.Candidate, len(rec.Candidates))
 	for _, c := range rec.Candidates {
-		if !c.Required && (!chosen[c.ID] || c.Action == folderlook.ActionAlreadyHere) {
+		candidates[c.ID] = c
+	}
+	stage := foldermap.Stage("")
+	type bound struct {
+		handle string
+		start  int
+	}
+	var bounds []bound
+	for _, h := range order {
+		step := steps[byHandle[h]]
+		plan.Selected = append(plan.Selected, h)
+		bounds = append(bounds, bound{handle: h, start: len(plan.Lines)})
+		if step.Kind == folderlook.StepGroup {
+			stage = foldermap.StageGroup
+			plan.Lines = append(plan.Lines, groupLines(rec)...)
 			continue
 		}
-		plan.Candidates = append(plan.Candidates, c)
-		if !c.Required {
-			plan.Selected = append(plan.Selected, c.ID)
+		c, ok := candidates[step.CandidateID]
+		if !ok {
+			continue
 		}
+		if step.Kind == folderlook.StepHome && stage != foldermap.StageGroup {
+			stage = foldermap.StageHome
+		} else if stage == "" {
+			stage = foldermap.StageTools
+		}
+		plan.Candidates = append(plan.Candidates, c)
 		switch c.Kind {
 		case folderlook.KindIntegration:
 			if c.Action != folderlook.ActionAlreadyHere {
@@ -350,24 +463,73 @@ func BuildPlan(rec Record, selected []string) Plan {
 				})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
 			plan.Lines = append(plan.Lines, addOnLine(c, rec.WorkspaceName))
-		default:
-			runnable = false
 		}
 	}
-	if rec.Stage == foldermap.StageGroup {
-		plan.Lines = append(groupLines(rec), plan.Lines...)
+	// Each line carries the step it came from, so the card can show the steps
+	// with their actions under them.
+	for i, b := range bounds {
+		end := len(plan.Lines)
+		if i+1 < len(bounds) {
+			end = bounds[i+1].start
+		}
+		for j := b.start; j < end; j++ {
+			plan.Lines[j].Step = b.handle
+		}
 	}
-	if len(plan.Lines) == 0 {
-		runnable = false
-		if plan.Unavailable == "" && rec.Stage == foldermap.StageFolder {
+	if stage != "" {
+		plan.Stage = stage
+	}
+	plan.Runnable = len(plan.Lines) > 0
+	if !plan.Runnable {
+		switch {
+		case len(steps) == 0:
 			plan.Unavailable = "Ori found nothing it knows how to set up here."
+		case selected != nil:
+			plan.Unavailable = "Nothing is selected to set up."
 		}
 	}
 	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Nothing is moved, copied or read"})
-	plan.Runnable = runnable && rec.Stage != foldermap.StageFolder
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan
+}
+
+// applyExcludes keeps the first of two steps that cannot run together (the
+// card unticks the other before asking, so this is the safety net) and says
+// which one was set aside.
+func applyExcludes(order []string, steps []folderlook.Step, byHandle map[string]int) ([]string, string) {
+	var kept []string
+	taken := make(map[string]bool, len(order))
+	excluded := ""
+	for _, h := range order {
+		step := steps[byHandle[h]]
+		if step.Excludes != "" && taken[step.Excludes] {
+			if excluded == "" {
+				other := steps[byHandle[step.Excludes]]
+				excluded = fmt.Sprintf("Ori can run one of these, not both. It keeps: %s. Set aside: %s.", other.Title, step.Title)
+			}
+			continue
+		}
+		taken[h] = true
+		kept = append(kept, h)
+	}
+	return kept, excluded
+}
+
+// defaultReason says why Ori's own plan is shown rather than the agent's.
+func defaultReason(rec Record) string {
+	if rec.Sections == nil {
+		return ""
+	}
+	for _, dropped := range rec.Sections.Dropped {
+		if dropped == folderlook.SectionPlan {
+			return "The agent's plan could not be shown (it named a path or ran too long), so this is Ori's default plan."
+		}
+	}
+	if rec.Sections.Plan != "" {
+		return "The agent named no step Ori can run, so this is Ori's default plan."
+	}
+	return "The agent did not write a plan, so this is Ori's default plan."
 }
 
 // FolderPlanAddOn is the plan line kind of an add-on found by search.
@@ -400,7 +562,7 @@ func addOnLine(c folderlook.Candidate, workspaceName string) personalassistant.F
 }
 
 func planDigest(plan Plan) string {
-	lines := append([]personalassistant.FolderPlanLine{{Kind: "stage", Name: string(plan.Stage)}}, plan.Lines...)
+	lines := append([]personalassistant.FolderPlanLine{{Kind: "stage", Name: string(plan.Stage)}, {Kind: "source", Name: plan.Source}}, plan.Lines...)
 	for _, id := range plan.Selected {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: "selected", Name: id})
 	}
