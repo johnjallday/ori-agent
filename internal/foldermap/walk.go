@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -252,9 +251,23 @@ func Continue(root string, m *Map, first []string, opts Options) error {
 		if err != nil {
 			return err
 		}
-		if f, ok := m.Folder(cleaned); ok && f.State == StateUnopened && !queued[cleaned] {
-			w.queue = append(w.queue, cleaned)
-			queued[cleaned] = true
+		f, ok := m.Folder(cleaned)
+		if !ok {
+			continue
+		}
+		if f.State == StateUnopened {
+			if !queued[cleaned] {
+				w.queue = append(w.queue, cleaned)
+				queued[cleaned] = true
+			}
+			continue
+		}
+		// A folder already listed: what is still unopened inside it goes first.
+		for _, rel := range m.Unopened() {
+			if (cleaned == "" || strings.HasPrefix(rel, cleaned+"/")) && !queued[rel] {
+				w.queue = append(w.queue, rel)
+				queued[rel] = true
+			}
 		}
 	}
 	for _, rel := range m.Unopened() {
@@ -486,6 +499,6 @@ func readDirBounded(dir string, limit int) ([]os.DirEntry, bool, error) {
 	if len(entries) > limit {
 		return nil, true, nil
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	sortEntries(entries)
 	return entries, false, nil
 }

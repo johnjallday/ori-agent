@@ -97,8 +97,8 @@ func RequiredCandidates(facts foldermap.Facts, ready Readiness) []Candidate {
 			out = append(out, integration)
 		}
 	}
-	if stage == foldermap.StageTools && facts.RootProject != nil {
-		if integration, ok := integrationFor(facts.RootProject, ready); ok {
+	if stage == foldermap.StageTools {
+		if integration, ok := integrationFor(facts.SoleProject(), ready); ok {
 			out = append(out, integration)
 		}
 	}

@@ -8,6 +8,7 @@ import {
   folderAgentNeedsView,
   folderAgentReportView,
   folderAgentTileLine,
+  mountWorkspaceFolderAgent,
   mountFolderAgentReports,
   postFolderAgentAction,
   renderFolderAgentCard,
@@ -340,4 +341,147 @@ test('Needs you mounts only folder agent reports and redraws an error in place',
   await keep.listeners.click();
   assert.equal(text(host, '.folder-agent-card__error'), 'The report has moved on.');
   assert.equal(done, 0);
+});
+
+test('the agent sections render as text, the goal travels with Set it up', () => {
+  const view = folderAgentReportView(
+    reported({
+      what_it_is: 'Seven songs and a sketch across two album folders.',
+      suggested_goal: 'Keep these songs moving toward release.',
+      first_ticket: 'List the five songs saved most recently.',
+      first_ticket_why: 'Seeing what moved last shows where to start.',
+      model_sentence: '',
+      tools_sentence: '',
+      plan: {
+        digest: 'd9',
+        runnable: true,
+        lines: [{ kind: 'folder', name: 'Nothing is moved, copied or read' }]
+      }
+    })
+  );
+  assert.equal(view.offersGoal, true);
+  const calls = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    onAction: (action, _button, extra) => calls.push([action, extra])
+  });
+  assert.equal(text(card, '.folder-agent-card__what'), view.whatItIs);
+  assert.equal(text(card, '.folder-agent-card__ticket-title'), view.firstTicket);
+  assert.equal(text(card, '.folder-agent-card__ticket-why'), view.firstTicketWhy);
+  const goal = card.querySelector('.folder-agent-card__goal');
+  const [input, label] = goal.children.slice(1);
+  assert.equal(input.value, 'Keep these songs moving toward release.');
+  input.value = 'Finish two songs this month';
+  const setUp = () =>
+    card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
+  setUp().listeners.click();
+  assert.deepEqual(plain(calls[0]), [
+    'set_up',
+    { use_goal: true, goal: 'Finish two songs this month' }
+  ]);
+  label.children[0].checked = false;
+  setUp().listeners.click();
+  assert.equal(calls[1][1].use_goal, false);
+});
+
+test('a left-out part shows one muted sentence in its place', () => {
+  const view = folderAgentReportView(
+    reported({
+      left_out: {
+        what_it_is: 'Demo Manager left this part out.',
+        suggested_goal: 'Demo Manager left this part out.'
+      }
+    })
+  );
+  const card = renderFolderAgentReport(view, stubDocument());
+  const muted = card
+    .querySelectorAll('.folder-agent-card__degraded')
+    .map(n => n.textContent)
+    .filter(t => t === 'Demo Manager left this part out.');
+  assert.equal(muted.length, 2);
+  assert.equal(card.querySelector('.folder-agent-card__what'), null);
+});
+
+test('the one question offers folder chips and a one-line answer, both looking further', () => {
+  const view = folderAgentReportView(
+    reported({
+      question: 'Which box should I open first?',
+      ask_folders: [
+        { name: 'Clients', ref: 'Boxes/Clients' },
+        { name: 'Archive', ref: 'Boxes/Archive' }
+      ]
+    })
+  );
+  const calls = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    onAction: (action, _button, extra) => calls.push([action, extra])
+  });
+  assert.equal(text(card, '.folder-agent-card__question-text'), 'Which box should I open first?');
+  const chips = card.querySelectorAll('button').filter(b => b.dataset.folderAgentChip);
+  assert.deepEqual(
+    chips.map(c => c.textContent),
+    ['Clients', 'Archive']
+  );
+  chips[0].listeners.click();
+  const answer = card.querySelector('.folder-agent-card__answer').children[0];
+  answer.value = 'Start with the clients';
+  card
+    .querySelectorAll('button')
+    .find(b => b.dataset.folderAgentAction === 'answer')
+    .listeners.click();
+  assert.deepEqual(plain(calls), [
+    ['look_further', { folders: ['Boxes/Clients'] }],
+    ['look_further', { hint: 'Start with the clients' }]
+  ]);
+  // Only names are ever shown, never the map's paths.
+  assert.ok(!JSON.stringify(card.all().map(n => n.textContent)).includes('Boxes/'));
+});
+
+test('after Set it up the receipt offers Start this for the first ticket', () => {
+  const view = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: ['start_next', 'look_further'],
+      next_ticket: { id: 't1', title: 'List the five songs saved most recently.', started: false },
+      setup: { status: 'done', lines: [{ name: 'Installs tools', state: 'done' }] }
+    })
+  );
+  assert.deepEqual(
+    view.actions.map(a => a.label),
+    ['Start this', 'Look further']
+  );
+  const card = renderFolderAgentReport(view, stubDocument());
+  assert.equal(
+    text(card, '.folder-agent-card__next-ticket'),
+    'First ticket: List the five songs saved most recently.'
+  );
+  assert.equal(
+    folderAgentActionPath('ws-1', 'start_next'),
+    '/api/personal-assistant/folder-agent/ws-1/start-next'
+  );
+});
+
+test('the workspace page mount follows a look until the report arrives', async () => {
+  const doc = stubDocument();
+  const host = doc.createElement('section');
+  host.hidden = true;
+  const states = [
+    reported({ state: 'looking', progress_line: 'Looking around · 3 entries' }),
+    reported()
+  ];
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ folder_agent: states.shift() || reported() })
+  });
+  await mountWorkspaceFolderAgent(host, 'ws-1', { doc, fetchImpl, pollMs: 1 });
+  assert.equal(host.hidden, false);
+  assert.equal(text(host, '.folder-agent-card__receipt'), 'Looking around · 3 entries');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(text(host, '.folder-agent-card__facts'), reported().facts_line);
+  const none = doc.createElement('section');
+  await mountWorkspaceFolderAgent(none, 'ws-2', {
+    doc,
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) })
+  });
+  assert.equal(none.hidden, true);
 });

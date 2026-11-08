@@ -6859,7 +6859,7 @@ function renderFolderAgent(els) {
     host.replaceChildren(
       renderFolderAgentReport(shown, document, {
         error,
-        onAction: (action, button) => void folderAgentAction(shown, action, button)
+        onAction: (action, button, extra) => void folderAgentAction(shown, action, button, extra)
       })
     );
     return;
@@ -6945,9 +6945,9 @@ async function startAgent(brief, button) {
   }
 }
 
-async function folderAgentAction(shown, action, button) {
+async function folderAgentAction(shown, action, button, extra) {
   if (button) button.disabled = true;
-  const result = await postFolderAgentAction(shown, action);
+  const result = await postFolderAgentAction(shown, action, globalThis.fetch, extra);
   state.agent.error = result.error || '';
   if (result.view) state.agent.view = result.view;
   render();

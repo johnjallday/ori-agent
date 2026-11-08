@@ -165,6 +165,8 @@ func (h *Handler) Keep(w http.ResponseWriter, r *http.Request) {
 
 type lookFurtherRequest struct {
 	Folders []string `json:"folders"`
+	// Hint is the owner's typed answer to the agent's question.
+	Hint string `json:"hint"`
 }
 
 // LookFurther continues the walk, the named folders (from the report) first.
@@ -177,7 +179,7 @@ func (h *Handler) LookFurther(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	view, err := h.service.LookFurther(r.Context(), userID, r.PathValue("workspaceID"), req.Folders)
+	view, err := h.service.LookFurther(r.Context(), userID, r.PathValue("workspaceID"), req.Folders, req.Hint)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -188,6 +190,9 @@ func (h *Handler) LookFurther(w http.ResponseWriter, r *http.Request) {
 type setUpRequest struct {
 	PlanDigest string   `json:"plan_digest"`
 	Selected   []string `json:"selected"`
+	// UseGoal is "Use this goal" checked; Goal the (possibly edited) line.
+	UseGoal bool   `json:"use_goal"`
+	Goal    string `json:"goal"`
 }
 
 // SetUp confirms the plan the card showed and runs it.
@@ -200,7 +205,7 @@ func (h *Handler) SetUp(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	view, err := h.service.SetUp(r.Context(), userID, r.PathValue("workspaceID"), req.PlanDigest, req.Selected)
+	view, err := h.service.SetUp(r.Context(), userID, r.PathValue("workspaceID"), setUpOf(req))
 	if err != nil {
 		if errors.Is(err, personalassistant.ErrFolderPlanChanged) {
 			current, _ := h.service.View(r.Context(), userID, r.PathValue("workspaceID"))
@@ -209,6 +214,29 @@ func (h *Handler) SetUp(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"folder_agent": view})
+}
+
+func setUpOf(req setUpRequest) folderagent.SetUpRequest {
+	out := folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected}
+	if req.UseGoal && strings.TrimSpace(req.Goal) != "" {
+		goal := req.Goal
+		out.Goal = &goal
+	}
+	return out
+}
+
+// StartNext starts the agent's first ticket from the receipt (Start this).
+func (h *Handler) StartNext(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	view, err := h.service.StartNext(r.Context(), userID, r.PathValue("workspaceID"))
+	if err != nil {
 		writeError(w, err)
 		return
 	}

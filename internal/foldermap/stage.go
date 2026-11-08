@@ -32,16 +32,32 @@ const (
 // Group wins over Tools only when the fed folder is not itself a project,
 // which the closed-project rule already guarantees (a project's insides are
 // never walked).
+//
+// A group needs at least GroupMinMembers projects; one project below the
+// fed folder makes the workspace that project's (the Tools stage).
 func StageFor(f Facts) Stage {
 	switch {
 	case f.Portfolio != nil:
 		return StageHome
-	case len(f.Members) > 0:
+	case len(f.Members) >= GroupMinMembers:
 		return StageGroup
-	case f.RootProject != nil, f.Dump:
+	case f.RootProject != nil, len(f.Members) == 1, f.Dump:
 		return StageTools
 	}
 	return StageFolder
+}
+
+// SoleProject is the one project the Tools stage is about: the project at
+// the fed folder, or the only project below it.
+func (f Facts) SoleProject() *Project {
+	if f.RootProject != nil {
+		return f.RootProject
+	}
+	if len(f.Members) == 1 {
+		p := f.Members[0]
+		return &p
+	}
+	return nil
 }
 
 // ShapesTie reports whether the two largest shapes have the same number of

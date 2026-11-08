@@ -31,6 +31,7 @@ type fakeWorkspaces struct {
 	anchors  map[string]string
 	taken    map[string]bool
 	refuse   error
+	goals    map[string]string
 }
 
 func (w *fakeWorkspaces) CreateAnchored(_ context.Context, req CreateRequest) (Created, error) {
@@ -69,11 +70,35 @@ func (w *fakeWorkspaces) IDs() ([]string, error) {
 }
 func (w *fakeWorkspaces) Exists(id string) bool  { _, err := w.AnchorRoot(id); return err == nil }
 func (w *fakeWorkspaces) Route(id string) string { return "/workspaces/" + id }
+func (w *fakeWorkspaces) SetGoal(id, goal string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.goals == nil {
+		w.goals = map[string]string{}
+	}
+	w.goals[id] = goal
+	return nil
+}
+
+func (t *fakeTickets) CreateBacklog(ws, title, details, agent string) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.backlog = append(t.backlog, title+" · "+agent)
+	return "next-" + ws, nil
+}
+func (t *fakeTickets) Start(ws, id string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.started = append(t.started, id)
+	return nil
+}
 
 type fakeTickets struct {
 	mu       sync.Mutex
 	opened   []string
 	finished map[string]string
+	backlog  []string
+	started  []string
 }
 
 func (t *fakeTickets) Open(ws, title, agent string) (string, error) {
@@ -234,10 +259,10 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 	if h.ws.created[0].Mission != "Mix this song" {
 		t.Fatalf("brief = %q", h.ws.created[0].Mission)
 	}
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, "stale", nil); !errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: "stale"}); !errors.Is(err, personalassistant.ErrFolderPlanChanged) {
 		t.Fatalf("stale digest = %v", err)
 	}
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, report.Plan.Digest, nil); err != nil {
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
@@ -245,7 +270,7 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 	if done.State != StateSetUp || done.Setup.Status != personalassistant.FolderSetupDone || len(h.setups.runs) != 1 {
 		t.Fatalf("after set up: %+v", done)
 	}
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, report.Plan.Digest, nil); !errors.Is(err, ErrWrongState) {
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); !errors.Is(err, ErrWrongState) {
 		t.Fatalf("second set up = %v", err)
 	}
 }
@@ -257,7 +282,7 @@ func TestStart_NotYetStagesRefuseSetUp(t *testing.T) {
 	if report.Plan.Runnable {
 		t.Fatal("the Home stage is not runnable in this slice")
 	}
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, report.Plan.Digest, nil); !errors.Is(err, ErrStageNotYet) {
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); !errors.Is(err, ErrStageNotYet) {
 		t.Fatalf("set up = %v", err)
 	}
 	empty := newHarness(t, build(t, "notes.txt"))
@@ -266,7 +291,7 @@ func TestStart_NotYetStagesRefuseSetUp(t *testing.T) {
 	if er.Stage != foldermap.StageFolder || er.StageLine != "Nothing to set up yet: Ori found no project it knows here." {
 		t.Fatalf("folder stage = %+v", er)
 	}
-	if _, err := empty.svc.SetUp(context.Background(), "u1", ev.WorkspaceID, er.Plan.Digest, nil); !errors.Is(err, ErrNothingToSet) {
+	if _, err := empty.svc.SetUp(context.Background(), "u1", ev.WorkspaceID, SetUpRequest{PlanDigest: er.Plan.Digest}); !errors.Is(err, ErrNothingToSet) {
 		t.Fatalf("set up = %v", err)
 	}
 }
@@ -356,16 +381,16 @@ func TestKeepAndLookFurther(t *testing.T) {
 	if _, err := h.svc.Keep(context.Background(), "u1", view.WorkspaceID); !errors.Is(err, ErrWrongState) {
 		t.Fatalf("second keep = %v", err)
 	}
-	if _, err := h.svc.LookFurther(context.Background(), "u1", view.WorkspaceID, []string{"../x"}); err == nil {
+	if _, err := h.svc.LookFurther(context.Background(), "u1", view.WorkspaceID, []string{"../x"}, ""); err == nil {
 		t.Fatal("an escaping folder must be refused")
 	}
 	h.svc.deps.Walk = foldermap.Options{}
-	if _, err := h.svc.LookFurther(context.Background(), "u1", view.WorkspaceID, []string{"Box 11"}); err != nil {
+	if _, err := h.svc.LookFurther(context.Background(), "u1", view.WorkspaceID, []string{"Box 11"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
 	after, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
-	if after.State != StateReported || after.Stage != foldermap.StageGroup || len(after.NextFolders) != 0 {
+	if after.State != StateReported || after.Stage != foldermap.StageTools || len(after.NextFolders) != 0 {
 		t.Fatalf("after look further: %+v", after)
 	}
 }
@@ -393,7 +418,7 @@ func TestLook_VanishedFolderFails(t *testing.T) {
 	h.ws.anchors[view.WorkspaceID] = filepath.Join(t.TempDir(), "missing")
 	h.ws.mu.Unlock()
 	_, _ = h.svc.deps.Store.Update(view.WorkspaceID, func(r *Record) error { r.Map = nil; return nil })
-	if _, err := h.svc.LookFurther(context.Background(), "u1", view.WorkspaceID, nil); err != nil {
+	if _, err := h.svc.LookFurther(context.Background(), "u1", view.WorkspaceID, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()

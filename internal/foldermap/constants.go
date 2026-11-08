@@ -36,6 +36,9 @@ const (
 	// PortfolioMinProjects is how many projects of one shape with a Home
 	// provider make a portfolio (the digest's own threshold).
 	PortfolioMinProjects = folderdigest.PortfolioMinProjects
+	// GroupMinMembers is how many projects below the fed folder make the
+	// workspace a group (the digest's collection threshold).
+	GroupMinMembers = folderdigest.CollectionMinProjects
 	// DumpMinLooseFiles and DumpMinKinds are the digest's dump thresholds,
 	// applied to the files sitting directly in the fed folder.
 	DumpMinLooseFiles = folderdigest.DumpMinLooseFiles

@@ -20,6 +20,7 @@ func TestStageFor_EachStage(t *testing.T) {
 		{"three drafts are a group", []string{"Drafts/A/outline.md", "Drafts/B/outline.md", "Drafts/C/main.tex"}, StageGroup},
 		{"four songs are a group, not a Home", []string{"a/Song.rpp", "b/Song.rpp", "c/Song.rpp", "d/Song.rpp"}, StageGroup},
 		{"a project at the fed folder is the Tools stage", []string{"go.mod", "cmd/main.go"}, StageTools},
+		{"one project deep below is the Tools stage, not a one-member group", []string{"Clients/Folder 40/Deep/repo/go.mod", "Clients/a.txt"}, StageTools},
 		{"a dump is the Tools stage", dump, StageTools},
 		{"nothing recognized stays a folder", []string{"notes.txt", "Photos/a.jpg"}, StageFolder},
 		{"an empty folder stays a folder", []string{"Empty/"}, StageFolder},

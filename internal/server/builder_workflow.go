@@ -85,7 +85,13 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 				provider.SetGitHubProposer(newGitHubProposer(b.githubHandler.Broker(), resolver))
 			}
 		}
-		return provider.Tools()
+		tools := provider.Tools()
+		// A workspace started from a folder gets folder_look: one more folder
+		// of its own map, through its own anchored folder.
+		if look := b.folderAgentService.LookTool(workspaceID); look != nil {
+			tools = append(tools, look)
+		}
+		return tools
 	}
 }
 

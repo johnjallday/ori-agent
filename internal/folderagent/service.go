@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
@@ -92,12 +94,20 @@ type Workspaces interface {
 	IDs() ([]string, error)
 	Exists(workspaceID string) bool
 	Route(workspaceID string) string
+	// SetGoal replaces the workspace goal (the one that drives Backlog
+	// suggestions).
+	SetGoal(workspaceID, goal string) error
 }
 
-// Tickets opens and closes the host-owned first ticket.
+// Tickets opens and closes the host-owned first ticket, and holds the
+// agent's suggested first ticket until the owner starts it.
 type Tickets interface {
 	Open(workspaceID, title, agentName string) (string, error)
 	Finish(workspaceID, ticketID, result string, failed bool) error
+	// CreateBacklog adds a backlog ticket assigned to nobody's run yet.
+	CreateBacklog(workspaceID, title, details, agentName string) (string, error)
+	// Start hands a backlog ticket to its agent (the confirmed start).
+	Start(workspaceID, ticketID string) error
 }
 
 // Setups is the server side of the tools a report proposes and the Set it up
@@ -109,8 +119,32 @@ type Setups interface {
 	Run(ctx context.Context, rec Record, plan Plan, update func([]personalassistant.FolderPlanLine)) (status, stopReason string)
 }
 
+// Pins narrows the folder agent's own Toolbox to the anchor's listing tools
+// during the first look, and widens it to the content tools once the owner
+// chose Set it up or Look further (PRD FR9).
+type Pins interface {
+	Pin(workspaceID, agentName string, readContents bool) error
+}
+
+// Turns resolves the folder agent's tool-capable model for its bounded turn.
+type Turns interface {
+	// Model returns folderlook.ErrNoModel when the agent has none.
+	Model(ctx context.Context, workspaceID, agentName string) (folderlook.Chat, string, error)
+	// TokenBudget is the configured first_look_token_budget (0 = default).
+	TokenBudget() int
+}
+
+// Memory writes the workspace's one "What this folder is" entry, replacing
+// an earlier one that carried a first-look provenance.
+type Memory interface {
+	Remember(workspaceID, text, provenance string) error
+}
+
 // Deps wires a Service.
 type Deps struct {
+	Pins       Pins
+	Turns      Turns
+	Memory     Memory
 	Store      *Store
 	Folders    Folders
 	Workspaces Workspaces
@@ -238,10 +272,22 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string) (View,
 	if err := s.deps.Store.Create(rec); err != nil {
 		return View{}, err
 	}
+	s.pin(created.ID, created.AgentName, false)
 	s.startLook(created.ID, nil)
 	view := s.viewOf(ctx, rec)
 	view.Nested = created.Nested
 	return view, nil
+}
+
+// pin applies the Toolbox pin; a failure is logged, never fatal: the binding
+// itself is read-only either way.
+func (s *Service) pin(workspaceID, agentName string, readContents bool) {
+	if s.deps.Pins == nil || agentName == "" {
+		return
+	}
+	if err := s.deps.Pins.Pin(workspaceID, agentName, readContents); err != nil {
+		logger.Warn("Folder agent could not pin its Toolbox", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
+	}
 }
 
 // freeName is the folder's name, with a numeric suffix when a workspace
@@ -331,16 +377,24 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		fail("Ori could not list this folder.", err)
 		return
 	}
-	facts := foldermap.FactsFrom(m)
-	stage := foldermap.StageFor(facts)
 	var ready folderlook.Readiness
 	if s.deps.Setups != nil {
 		ready = s.deps.Setups.Readiness(ctx, rec.OwnerUserID)
 	}
+	facts := foldermap.FactsFrom(m)
 	candidates := folderlook.RequiredCandidates(facts, ready)
-	turn := &TurnReceipt{Status: TurnSkipped, Reason: SkipNoModel, FinishedAt: s.deps.Now().UTC()}
+	turn, sections := s.runTurn(ctx, rec, root, m, facts, candidates)
+	// The agent's looks may have found more: the facts are the host's again.
+	facts = foldermap.FactsFrom(m)
+	stage := foldermap.StageFor(facts)
+	candidates = applyRanking(folderlook.RequiredCandidates(facts, ready), sections)
+	var askFolders []folderlook.AskFolder
+	if sections != nil && sections.Question != "" {
+		askFolders = folderlook.AskFolders(facts)
+	}
 	updated, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 		r.Map, r.Facts, r.Stage, r.Candidates, r.Turn = m, facts, stage, candidates, turn
+		r.Sections, r.AskFolders, r.Hint = sections, askFolders, ""
 		r.Progress = Progress{Entries: m.Entries, FoldersLeft: len(facts.Unopened)}
 		r.State, r.Failure = StateReported, ""
 		return nil
@@ -349,12 +403,157 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		logger.Warn("Folder agent could not save its look", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
 		return
 	}
+	s.remember(updated)
 	if updated.TicketID != "" {
 		result := foldermap.FactsLine(facts) + "\n" + StageLine(facts, stage, candidates)
+		if sections != nil && sections.WhatItIs != "" {
+			result = sections.WhatItIs + "\n" + result
+		}
 		if err := s.deps.Tickets.Finish(workspaceID, updated.TicketID, result, false); err != nil {
 			logger.Warn("Folder agent could not close its first ticket", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
 		}
 	}
+}
+
+// runTurn runs the agent's one bounded turn over the map (PRD FR11). Its
+// looks write into m; its words come back parsed and gated by the host.
+func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *foldermap.Map, facts foldermap.Facts,
+	candidates []folderlook.Candidate) (*TurnReceipt, *folderlook.Sections) {
+	now := s.deps.Now().UTC()
+	skipped := func(reason, model string) (*TurnReceipt, *folderlook.Sections) {
+		return &TurnReceipt{Status: TurnSkipped, Reason: reason, Model: model, StartedAt: now, FinishedAt: s.deps.Now().UTC()}, nil
+	}
+	if s.deps.Turns == nil {
+		return skipped(SkipNoModel, "")
+	}
+	chat, model, err := s.deps.Turns.Model(ctx, rec.WorkspaceID, rec.AgentName)
+	if err != nil || chat == nil || strings.TrimSpace(model) == "" {
+		if err != nil && !errors.Is(err, folderlook.ErrNoModel) {
+			return skipped(SkipProviderUnavailable, model)
+		}
+		return skipped(SkipNoModel, "")
+	}
+	ask := folderlook.AskAllowed(facts)
+	reference := folderlook.BuildReference(folderlook.ReferenceInput{
+		FolderName: rec.FolderName, Brief: rec.Brief, Map: m, Facts: facts,
+		StageLine: StageLine(facts, foldermap.StageFor(facts), candidates), Candidates: candidates,
+		AskAllowed: ask, Hint: rec.Hint,
+	})
+	var mu sync.Mutex
+	look := func(_ context.Context, folder string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		result, err := foldermap.Look(root, m, folder)
+		if err != nil {
+			if errors.Is(err, foldermap.ErrNotInMap) {
+				return "", errors.New("that folder is not in the map; open one the map lists")
+			}
+			return "", errors.New("that folder could not be listed")
+		}
+		raw, err := json.Marshal(result)
+		return string(raw), err
+	}
+	result := folderlook.RunTurn(ctx, folderlook.TurnInput{
+		Chat: chat, Model: model, AgentName: rec.AgentName, Reference: reference,
+		AskAllowed: ask, Look: look, TokenBudget: s.deps.Turns.TokenBudget(),
+	})
+	receipt := &TurnReceipt{Status: result.Status, Reason: result.Reason, Model: model, Tokens: result.Tokens,
+		ModelCalls: result.ModelCalls, ToolCalls: result.ToolCalls, Looks: result.Looks, StartedAt: now, FinishedAt: s.deps.Now().UTC()}
+	if result.Reply == "" {
+		return receipt, nil
+	}
+	ids := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		ids[c.ID] = true
+	}
+	var nested []string
+	for _, f := range m.Folders {
+		if strings.Contains(f.Path, "/") {
+			nested = append(nested, f.Path)
+		}
+	}
+	parsed := folderlook.Parse(result.Reply, folderlook.ParseOptions{Candidates: ids, FolderPaths: nested})
+	if !ask {
+		// A question written when the facts are clear is not shown.
+		parsed.Question = ""
+	}
+	parsed.Source, parsed.Model, parsed.TicketID = folderlook.SourceFirstLookModel, model, rec.TicketID
+	return receipt, &parsed
+}
+
+// applyRanking marks the candidates the agent ranked and gives them its why
+// line; ids it named that are not candidates were dropped by the parser.
+func applyRanking(candidates []folderlook.Candidate, sections *folderlook.Sections) []folderlook.Candidate {
+	if sections == nil {
+		return candidates
+	}
+	why := make(map[string]string, len(sections.Tools))
+	for _, tool := range sections.Tools {
+		why[tool.ID] = tool.Why
+	}
+	for i := range candidates {
+		if line, ok := why[candidates[i].ID]; ok {
+			candidates[i].Ranked = true
+			if line != "" {
+				candidates[i].Why = line
+			}
+		}
+	}
+	return candidates
+}
+
+// MemoryTitle opens the one memory entry a folder agent keeps.
+const MemoryTitle = "What this folder is:"
+
+// maxMemorySentences bounds the memory note (PRD FR30: at most three lines).
+const maxMemorySentences = 3
+
+// remember writes, or replaces, the workspace memory entry "What this
+// folder is" from the agent's sentence and the host's facts (PRD FR30). No
+// model words, no entry; one with a path is refused.
+func (s *Service) remember(rec *Record) {
+	if s.deps.Memory == nil || rec == nil || rec.Sections == nil || rec.Sections.WhatItIs == "" {
+		return
+	}
+	text := MemoryTitle + " " + rec.Sections.WhatItIs
+	if facts := foldermap.FactsLine(rec.Facts); facts != "" {
+		text += " Ori found: " + facts + "."
+	}
+	if sentences(text) > maxMemorySentences+1 || folderlook.NamesPath(text, nil) || utf8.RuneCountInString(text) > MemoryMaxRunes {
+		logger.Warn("Folder agent memory note refused", logger.Fields{"workspace_id": rec.WorkspaceID})
+		return
+	}
+	provenance := folderlook.SourceFirstLookModel + "/" + provenanceWord(rec.Sections.Model) + "/" + provenanceWord(rec.TicketID)
+	if err := s.deps.Memory.Remember(rec.WorkspaceID, text, provenance); err != nil {
+		logger.Warn("Folder agent could not write its memory note", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
+	}
+}
+
+// MemoryMaxRunes is workspace memory's own line cap.
+const MemoryMaxRunes = 500
+
+func sentences(text string) int {
+	n := 0
+	for i, r := range text {
+		if (r == '.' || r == '!' || r == '?') && (i+1 == len(text) || text[i+1] == ' ') {
+			n++
+		}
+	}
+	return n
+}
+
+// provenanceWord keeps a provenance part inside memory's provenance slot.
+func provenanceWord(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if r == ',' || r == ']' || r == '[' || r == '/' || r == ' ' {
+			return '-'
+		}
+		return r
+	}, strings.TrimSpace(text))
+	if text == "" {
+		return "unknown"
+	}
+	return text
 }
 
 // Record reads a user's record.
@@ -423,7 +622,7 @@ func (s *Service) Keep(ctx context.Context, userID, workspaceID string) (View, e
 
 // LookFurther continues the walk from the unopened folders under a fresh
 // budget, the named folders first (PRD FR18).
-func (s *Service) LookFurther(ctx context.Context, userID, workspaceID string, first []string) (View, error) {
+func (s *Service) LookFurther(ctx context.Context, userID, workspaceID string, first []string, hint string) (View, error) {
 	if _, err := s.Record(userID, workspaceID); err != nil {
 		return View{}, err
 	}
@@ -437,27 +636,51 @@ func (s *Service) LookFurther(ctx context.Context, userID, workspaceID string, f
 		}
 		first[i] = cleaned
 	}
+	// The owner's typed answer to the question: one line, no path, carried
+	// into the next turn once.
+	hint = strings.Join(strings.Fields(hint), " ")
+	if utf8.RuneCountInString(hint) > folderlook.HintMaxRunes || folderlook.NamesPath(hint, nil) {
+		return View{}, fmt.Errorf("%w: %s", personalassistant.ErrValidation, "answer in one line, without paths")
+	}
 	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 		if r.State != StateReported && r.State != StateKept && r.State != StateSetUp && r.State != StateFailed {
 			return ErrWrongState
 		}
-		r.State, r.Failure = StateLooking, ""
+		r.State, r.Failure, r.Hint = StateLooking, "", hint
 		return nil
 	})
 	if err != nil {
 		return View{}, err
 	}
+	s.pin(workspaceID, rec.AgentName, true)
 	s.startLook(workspaceID, first)
 	return s.viewOf(ctx, rec), nil
 }
 
-// SetUp confirms the plan and runs it in the background (PRD FR32). selected
-// are the optional candidates the user left selected; required ones always
-// run.
-func (s *Service) SetUp(ctx context.Context, userID, workspaceID, planDigest string, selected []string) (View, error) {
+// SetUpRequest is what the owner confirmed on the plan card.
+type SetUpRequest struct {
+	PlanDigest string
+	// Selected are the optional candidates left selected; required ones
+	// always run.
+	Selected []string
+	// Goal, when set, is the suggested goal line with "Use this goal"
+	// checked (possibly edited); it becomes the workspace goal (PRD FR28).
+	Goal *string
+}
+
+// SetUp confirms the plan and runs it in the background (PRD FR32).
+func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req SetUpRequest) (View, error) {
 	current, err := s.Record(userID, workspaceID)
 	if err != nil {
 		return View{}, err
+	}
+	selected, planDigest := req.Selected, req.PlanDigest
+	var goal string
+	if req.Goal != nil {
+		goal, err = personalassistant.NormalizeFolderBrief(*req.Goal)
+		if err != nil || folderlook.NamesPath(goal, nil) {
+			return View{}, fmt.Errorf("%w: %s", personalassistant.ErrValidation, "goal")
+		}
 	}
 	plan := BuildPlan(*current, selected)
 	if plan.Digest != planDigest {
@@ -484,6 +707,12 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID, planDigest str
 	if err != nil {
 		return View{}, err
 	}
+	s.pin(workspaceID, rec.AgentName, true)
+	if goal != "" {
+		if err := s.deps.Workspaces.SetGoal(workspaceID, goal); err != nil {
+			logger.Warn("Folder agent could not set the workspace goal", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
+		}
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -495,14 +724,58 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID, planDigest str
 				return nil
 			})
 		})
+		nextID := ""
+		if status == personalassistant.FolderSetupDone {
+			nextID = s.createNextTicket(rec)
+		}
 		_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 			if r.Setup != nil {
 				r.Setup.Status, r.Setup.StopReason, r.Setup.FinishedAt = status, reason, s.deps.Now().UTC()
+			}
+			if nextID != "" {
+				r.NextTicketID = nextID
 			}
 			r.State = StateSetUp
 			return nil
 		})
 	}()
+	return s.viewOf(ctx, rec), nil
+}
+
+// createNextTicket adds the agent's suggested first ticket to the backlog,
+// assigned to the folder's agent, once (PRD FR29). It never starts.
+func (s *Service) createNextTicket(rec *Record) string {
+	if rec.NextTicketID != "" || rec.Sections == nil || rec.Sections.Next == "" {
+		return rec.NextTicketID
+	}
+	id, err := s.deps.Tickets.CreateBacklog(rec.WorkspaceID, rec.Sections.Next, rec.Sections.TicketWhy, rec.AgentName)
+	if err != nil {
+		logger.Warn("Folder agent could not add its first ticket", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
+		return ""
+	}
+	return id
+}
+
+// StartNext is the receipt's Start this: the owner's confirmed start of the
+// agent's suggested first ticket.
+func (s *Service) StartNext(ctx context.Context, userID, workspaceID string) (View, error) {
+	current, err := s.Record(userID, workspaceID)
+	if err != nil {
+		return View{}, err
+	}
+	if current.NextTicketID == "" || current.NextStarted {
+		return View{}, ErrWrongState
+	}
+	if err := s.deps.Tickets.Start(workspaceID, current.NextTicketID); err != nil {
+		return View{}, err
+	}
+	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
+		r.NextStarted = true
+		return nil
+	})
+	if err != nil {
+		return View{}, err
+	}
 	return s.viewOf(ctx, rec), nil
 }
 

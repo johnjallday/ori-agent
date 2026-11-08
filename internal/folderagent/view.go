@@ -53,7 +53,32 @@ type View struct {
 	Failure       string                 `json:"failure,omitempty"`
 	Nested        *WorkspaceRef          `json:"nested,omitempty"`
 	UpdatedAt     time.Time              `json:"updated_at"`
+
+	// The agent's words (PRD FR24), shown as text, never executed.
+	WhatItIs       string `json:"what_it_is,omitempty"`
+	SuggestedGoal  string `json:"suggested_goal,omitempty"`
+	FirstTicket    string `json:"first_ticket,omitempty"`
+	FirstTicketWhy string `json:"first_ticket_why,omitempty"`
+	Question       string `json:"question,omitempty"`
+	// AskFolders are the question's pickable folder names.
+	AskFolders []folderlook.AskFolder `json:"ask_folders,omitempty"`
+	// LeftOut maps a section to the sentence shown in its place when the
+	// agent left it out or the host dropped it.
+	LeftOut map[string]string `json:"left_out,omitempty"`
+	// NextTicket is the agent's first ticket, created when Set it up
+	// finished; Start this starts it.
+	NextTicket *NextTicketView `json:"next_ticket,omitempty"`
 }
+
+// NextTicketView is the receipt's line for the agent's first ticket.
+type NextTicketView struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Started bool   `json:"started"`
+}
+
+// ActionStartNext starts the agent's first ticket from the receipt.
+const ActionStartNext = "start_next"
 
 // PlanView is the one-consent plan card's content.
 type PlanView struct {
@@ -92,6 +117,7 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	v.Candidates = rec.Candidates
 	v.NextFolders = nextFolders(rec.Facts)
 	v.ModelSentence = modelSentence(rec)
+	sectionsInto(&v, rec)
 	if rec.Turn == nil || rec.Turn.Status != TurnFinished {
 		v.ToolsSentence = "Search for more tools needs a model"
 	}
@@ -107,8 +133,58 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		if rec.Setup != nil && rec.Setup.Status == personalassistant.FolderSetupStopped {
 			v.Actions = []string{ActionSetUp, ActionLookFurther}
 		}
+		if rec.NextTicketID != "" && rec.Sections != nil {
+			v.NextTicket = &NextTicketView{ID: rec.NextTicketID, Title: rec.Sections.Next, Started: rec.NextStarted}
+			if !rec.NextStarted {
+				v.Actions = append([]string{ActionStartNext}, v.Actions...)
+			}
+		}
 	}
 	return v
+}
+
+// leftOutSections are the agent's parts the report shows, in order.
+var leftOutSections = []string{folderlook.SectionWhatItIs, folderlook.SectionGoal, folderlook.SectionTicket}
+
+// sectionsInto copies the agent's surviving words into the view, and puts
+// one muted sentence in place of a part it left out or the host dropped.
+func sectionsInto(v *View, rec *Record) {
+	finished := rec.Turn != nil && rec.Turn.Status == TurnFinished
+	agent := rec.AgentName
+	if agent == "" {
+		agent = "The agent"
+	}
+	if s := rec.Sections; s != nil {
+		v.WhatItIs, v.SuggestedGoal, v.Question = s.WhatItIs, s.Goal, s.Question
+		v.FirstTicket, v.FirstTicketWhy = s.Ticket, s.TicketWhy
+		if s.Question != "" {
+			v.AskFolders = rec.AskFolders
+		}
+	}
+	if !finished {
+		return
+	}
+	present := map[string]bool{
+		folderlook.SectionWhatItIs: v.WhatItIs != "",
+		folderlook.SectionGoal:     v.SuggestedGoal != "",
+		folderlook.SectionTicket:   v.FirstTicket != "",
+	}
+	sentence := agent + " left this part out."
+	switch rec.Turn.Reason {
+	case folderlook.ReasonTimeLimit:
+		sentence = agent + " ran out of time before this part."
+	case folderlook.ReasonStepLimit, folderlook.ReasonTokenLimit:
+		sentence = agent + " reached its limit for one look before this part."
+	}
+	for _, section := range leftOutSections {
+		if present[section] {
+			continue
+		}
+		if v.LeftOut == nil {
+			v.LeftOut = map[string]string{}
+		}
+		v.LeftOut[section] = sentence
+	}
 }
 
 // ProgressLine is the tile's and Needs you's line while the walk runs

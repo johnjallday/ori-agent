@@ -74,6 +74,7 @@ type Settings struct {
 
 	NativeMCPExecTimeoutSeconds int `json:"native_mcp_exec_timeout_seconds,omitempty"` // Optional timeout (seconds) for native-MCP CLI task runs; 0 uses the built-in default (300s)
 	LibraryManagerTokenBudget   int `json:"library_manager_token_budget,omitempty"`    // Optional token cap for one Manager scan-review turn; 0 or anything above the built-in default (20,000) uses the default
+	FirstLookTokenBudget        int `json:"first_look_token_budget,omitempty"`         // Optional token cap for one folder agent's first-look turn; 0 or anything above the built-in default (20,000) uses the default
 
 	// Multi-agent orchestration defaults
 	MultiAgentMode      string  `json:"multi_agent_mode,omitempty"`      // auto, force, off
@@ -1474,6 +1475,15 @@ func (m *Manager) GetLibraryManagerTokenBudget() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.settings.LibraryManagerTokenBudget
+}
+
+// GetFirstLookTokenBudget returns the configured token cap for one folder
+// agent's first-look turn. Zero means "use the built-in default"; the turn
+// never lets it exceed that default.
+func (m *Manager) GetFirstLookTokenBudget() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.FirstLookTokenBudget
 }
 
 // GetMultiAgentDefaults returns the default multi-agent mode and threshold.

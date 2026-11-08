@@ -105,7 +105,18 @@ type Record struct {
 	Candidates []folderlook.Candidate `json:"candidates,omitempty"`
 	Progress   Progress               `json:"progress"`
 	Turn       *TurnReceipt           `json:"turn,omitempty"`
-	Setup      *Setup                 `json:"setup,omitempty"`
+	// Sections are the agent's words that survived the host's parser, with
+	// the turn's provenance; nil when no turn produced any.
+	Sections *folderlook.Sections `json:"sections,omitempty"`
+	// AskFolders are the pickable answers to the agent's one question.
+	AskFolders []folderlook.AskFolder `json:"ask_folders,omitempty"`
+	// Hint is the owner's typed answer, carried into the next turn once.
+	Hint string `json:"hint,omitempty"`
+	// NextTicketID is the agent's suggested first ticket, created when the
+	// Set it up run completed; NextStarted once the owner started it.
+	NextTicketID string `json:"next_ticket_id,omitempty"`
+	NextStarted  bool   `json:"next_started,omitempty"`
+	Setup        *Setup `json:"setup,omitempty"`
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
 

@@ -35,6 +35,9 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Folders:    b.personalAssistantFolderDigest,
 		Workspaces: folderAgentWorkspaces{builder: b},
 		Tickets:    folderAgentTickets{store: b.workspaceStore},
+		Pins:       folderAgentPins{store: b.workspaceStore},
+		Turns:      folderAgentTurns{builder: b},
+		Memory:     folderAgentMemory{store: workspace.NewMemoryStore(b.workspaceFileStore)},
 		Setups:     folderAgentSetups{builder: b},
 	})
 	b.folderAgentService = service
@@ -161,6 +164,59 @@ func (w folderAgentWorkspaces) Route(workspaceID string) string {
 	return workspaceRoute(ws.FolderSlug)
 }
 
+// SetGoal replaces the workspace goal with the suggested goal the owner kept.
+func (w folderAgentWorkspaces) SetGoal(workspaceID, goal string) error {
+	return w.builder.workspaceStore.Update(workspaceID, func(ws *workspace.Workspace) error {
+		ws.Mission = goal
+		return nil
+	})
+}
+
+// folderAgentTurns resolves the folder agent's model the way the Library
+// Manager's turn does: the agent's own provider and model in this workspace,
+// tool-capable, or no model at all.
+type folderAgentTurns struct{ builder *ServerBuilder }
+
+func (t folderAgentTurns) Model(ctx context.Context, workspaceID, agentName string) (folderlook.Chat, string, error) {
+	chat, model, err := t.builder.libraryManagerModel(ctx, workspaceID, agentName)
+	if err != nil || chat == nil {
+		return nil, "", folderlook.ErrNoModel
+	}
+	return folderlook.Chat(chat), model, nil
+}
+
+func (t folderAgentTurns) TokenBudget() int {
+	if t.builder.configManager == nil {
+		return 0
+	}
+	return t.builder.configManager.GetFirstLookTokenBudget()
+}
+
+// folderAgentMemory keeps one "What this folder is" entry per workspace: a
+// later look replaces the earlier entry with a first-look provenance.
+type folderAgentMemory struct{ store *workspace.MemoryStore }
+
+func (m folderAgentMemory) Remember(workspaceID, text, provenance string) error {
+	clean, err := workspace.ValidateMemoryText(text)
+	if err != nil {
+		return err
+	}
+	doc, err := m.store.Read(workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, entry := range doc.Entries() {
+		if strings.HasPrefix(entry.Provenance, folderlook.SourceFirstLookModel) && strings.HasPrefix(entry.Text, folderagent.MemoryTitle) {
+			if _, err := m.store.RemoveByProvenance(workspaceID, entry.Provenance); err != nil && !errors.Is(err, workspace.ErrMemoryEntryNotFound) {
+				return err
+			}
+		}
+	}
+	return m.store.Append(workspaceID, workspace.MemoryEntry{
+		Type: workspace.MemoryTypeFact, Date: time.Now().Format("2006-01-02"), Provenance: provenance, Text: clean,
+	})
+}
+
 func workspaceRoute(slug string) string {
 	if strings.TrimSpace(slug) == "" {
 		return ""
@@ -217,6 +273,41 @@ func (t folderAgentTickets) Finish(workspaceID, ticketID, result string, failed 
 		}
 		now := time.Now()
 		updated.CompletedAt = &now
+		return ws.UpdateTask(updated)
+	})
+}
+
+// CreateBacklog adds the agent's suggested first ticket as a Ready ticket
+// assigned to the folder's agent. The executor runs only assigned tickets, so
+// it waits for the owner's Start this.
+func (t folderAgentTickets) CreateBacklog(workspaceID, title, details, agentName string) (string, error) {
+	var id string
+	err := t.store.Update(workspaceID, func(ws *workspace.Workspace) error {
+		task := workspace.Task{
+			From: agentName, To: agentName, Description: title, Details: details, Status: workspace.TaskStatusPending,
+			Context: map[string]any{folderAgentLookContextKey + "_next": true}, CreatedAt: time.Now(),
+		}
+		if err := ws.AddTask(task); err != nil {
+			return err
+		}
+		id = ws.Tasks[len(ws.Tasks)-1].ID
+		return nil
+	})
+	return id, err
+}
+
+// Start is the owner's confirmed start: the Ready ticket is assigned and the
+// executor picks it up.
+func (t folderAgentTickets) Start(workspaceID, ticketID string) error {
+	return t.store.Update(workspaceID, func(ws *workspace.Workspace) error {
+		task, err := ws.GetTask(ticketID)
+		if err != nil || task == nil {
+			return fmt.Errorf("the ticket is no longer here")
+		}
+		updated := *task
+		if err := updated.SetStatus(workspace.TaskStatusAssigned); err != nil {
+			return err
+		}
 		return ws.UpdateTask(updated)
 	})
 }

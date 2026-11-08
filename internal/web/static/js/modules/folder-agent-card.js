@@ -9,12 +9,18 @@ export const FOLDER_AGENT_LOOK_KIND = 'folder_agent_look';
 export const FOLDER_AGENT_REPORT_KIND = 'folder_agent_report';
 
 const ACTION_LABELS = {
+  start_next: 'Start this',
   set_up: 'Set it up',
   keep: 'Keep the folder as it is',
   look_further: 'Look further'
 };
 
-const ACTION_PATHS = { set_up: 'setup', keep: 'keep', look_further: 'look-further' };
+const ACTION_PATHS = {
+  start_next: 'start-next',
+  set_up: 'setup',
+  keep: 'keep',
+  look_further: 'look-further'
+};
 
 export function isFolderAgentKind(kind) {
   return kind === FOLDER_AGENT_LOOK_KIND || kind === FOLDER_AGENT_REPORT_KIND;
@@ -96,7 +102,22 @@ export function folderAgentReportView(view) {
     actions: [],
     plan: null,
     setup: null,
-    nested: view.nested?.name ? `Inside ${view.nested.name}'s folder` : ''
+    nested: view.nested?.name ? `Inside ${view.nested.name}'s folder` : '',
+    // The agent's words, as text (never markup), or the sentence in their place.
+    whatItIs: String(view.what_it_is || ''),
+    suggestedGoal: String(view.suggested_goal || ''),
+    firstTicket: String(view.first_ticket || ''),
+    firstTicketWhy: String(view.first_ticket_why || ''),
+    question: String(view.question || ''),
+    askFolders: (Array.isArray(view.ask_folders) ? view.ask_folders : [])
+      .filter(folder => folder?.name && folder?.ref)
+      .map(folder => ({ name: String(folder.name), ref: String(folder.ref) })),
+    leftOut: view.left_out && typeof view.left_out === 'object' ? { ...view.left_out } : {},
+    nextTicket: view.next_ticket?.title
+      ? { title: String(view.next_ticket.title), started: Boolean(view.next_ticket.started) }
+      : null,
+    // The goal is offered while the report waits for an answer.
+    offersGoal: false
   };
   if (out.state === 'looking') {
     out.title = `${agent} is looking around ${folder}`;
@@ -135,6 +156,7 @@ export function folderAgentReportView(view) {
     // Set it up waits for a plan that can run; the card says why it cannot.
     if (!out.plan.runnable) out.actions = out.actions.filter(a => a.id !== 'set_up');
   }
+  out.offersGoal = Boolean(out.suggestedGoal) && out.actions.some(action => action.id === 'set_up');
   if (view.setup) {
     out.setup = {
       status: String(view.setup.status || ''),
@@ -236,6 +258,14 @@ export function renderFolderAgentReport(view, doc = document, { onAction, error 
   if (view.failure) card.append(el(doc, 'p', 'folder-agent-card__failure', view.failure));
   if (view.modelSentence)
     card.append(el(doc, 'p', 'folder-agent-card__degraded', view.modelSentence));
+  const leftOut = section =>
+    view.leftOut[section]
+      ? el(doc, 'p', 'folder-agent-card__degraded', view.leftOut[section])
+      : null;
+  const whatItIs = view.whatItIs
+    ? el(doc, 'p', 'folder-agent-card__what', view.whatItIs)
+    : leftOut('what_it_is');
+  if (whatItIs) card.append(whatItIs);
   if (view.facts) card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
   if (view.tools.length || view.toolsSentence) {
     const tools = el(doc, 'section', 'folder-agent-card__tools');
@@ -259,6 +289,92 @@ export function renderFolderAgentReport(view, doc = document, { onAction, error 
   if (view.nextFolders.length) {
     card.append(
       el(doc, 'p', 'folder-agent-card__next', `Not opened yet: ${view.nextFolders.join(', ')}`)
+    );
+  }
+  // Suggested goal: an editable line with "Use this goal" checked while the
+  // report waits; plain text afterwards.
+  let goalInput = null;
+  let goalUse = null;
+  if (view.offersGoal) {
+    const goal = el(doc, 'section', 'folder-agent-card__goal');
+    goal.append(el(doc, 'h4', 'folder-agent-card__heading', 'Suggested goal'));
+    goalInput = doc.createElement('input');
+    goalInput.type = 'text';
+    goalInput.className = 'folder-agent-card__goal-input';
+    goalInput.maxLength = 300;
+    goalInput.value = view.suggestedGoal;
+    goalInput.setAttribute('aria-label', 'Suggested goal');
+    const label = el(doc, 'label', 'folder-agent-card__goal-use');
+    goalUse = doc.createElement('input');
+    goalUse.type = 'checkbox';
+    goalUse.checked = true;
+    label.append(goalUse, el(doc, 'span', '', 'Use this goal'));
+    goal.append(goalInput, label);
+    card.append(goal);
+  } else if (view.suggestedGoal) {
+    card.append(
+      el(doc, 'p', 'folder-agent-card__goal-text', `Suggested goal: ${view.suggestedGoal}`)
+    );
+  } else {
+    const missing = leftOut('suggested_goal');
+    if (missing) card.append(missing);
+  }
+  if (view.firstTicket) {
+    const ticket = el(doc, 'section', 'folder-agent-card__ticket');
+    ticket.append(el(doc, 'h4', 'folder-agent-card__heading', 'Suggested first ticket'));
+    ticket.append(el(doc, 'p', 'folder-agent-card__ticket-title', view.firstTicket));
+    if (view.firstTicketWhy)
+      ticket.append(el(doc, 'p', 'folder-agent-card__ticket-why', view.firstTicketWhy));
+    card.append(ticket);
+  } else {
+    const missing = leftOut('suggested_first_ticket');
+    if (missing) card.append(missing);
+  }
+  // The one question, above the actions: pick a folder or answer in a line.
+  if (view.question && view.actions.some(action => action.id === 'look_further')) {
+    const ask = el(doc, 'section', 'folder-agent-card__question');
+    ask.append(el(doc, 'p', 'folder-agent-card__question-text', view.question));
+    if (view.askFolders.length) {
+      const chips = el(doc, 'div', 'folder-agent-card__chips');
+      view.askFolders.forEach(folder => {
+        const chip = el(doc, 'button', 'btn btn-sm folder-agent-card__secondary', folder.name);
+        chip.type = 'button';
+        chip.dataset.folderAgentChip = folder.name;
+        chip.addEventListener('click', () =>
+          onAction?.('look_further', chip, { folders: [folder.ref] })
+        );
+        chips.append(chip);
+      });
+      ask.append(chips);
+    }
+    const row = el(doc, 'div', 'folder-agent-card__answer');
+    const answer = doc.createElement('input');
+    answer.type = 'text';
+    answer.maxLength = 200;
+    answer.className = 'folder-agent-card__answer-input';
+    answer.setAttribute('aria-label', 'Your answer');
+    answer.placeholder = 'Or answer in one line';
+    const send = el(doc, 'button', 'btn btn-sm folder-agent-card__secondary', 'Answer');
+    send.type = 'button';
+    send.dataset.folderAgentAction = 'answer';
+    send.addEventListener('click', () => {
+      const hint = String(answer.value || '').trim();
+      if (hint) onAction?.('look_further', send, { hint });
+    });
+    row.append(answer, send);
+    ask.append(row);
+    card.append(ask);
+  }
+  if (view.nextTicket) {
+    card.append(
+      el(
+        doc,
+        'p',
+        'folder-agent-card__next-ticket',
+        view.nextTicket.started
+          ? `Started: ${view.nextTicket.title}`
+          : `First ticket: ${view.nextTicket.title}`
+      )
     );
   }
   if (view.setup) {
@@ -291,14 +407,23 @@ export function renderFolderAgentReport(view, doc = document, { onAction, error 
         'button',
         // Only Set it up (or Look further on a look that failed) is primary:
         // putting a report aside is never the suggested answer.
-        action.id === 'set_up' || (view.state === 'failed' && index === 0)
+        action.id === 'set_up' ||
+          action.id === 'start_next' ||
+          (view.state === 'failed' && index === 0)
           ? 'btn btn-primary btn-sm'
           : 'btn btn-sm folder-agent-card__secondary',
         action.label
       );
       button.type = 'button';
       button.dataset.folderAgentAction = action.id;
-      button.addEventListener('click', () => onAction?.(action.id, button));
+      button.addEventListener('click', () => {
+        // Set it up carries the goal line as the owner left it.
+        const extra =
+          action.id === 'set_up' && goalInput
+            ? { use_goal: Boolean(goalUse?.checked), goal: String(goalInput.value || '') }
+            : undefined;
+        return onAction?.(action.id, button, extra);
+      });
       actions.append(button);
     });
     card.append(actions);
@@ -410,9 +535,14 @@ export function mountFolderAgentReports(host, items, { doc = document, onDone, f
   const draw = (view, error = '') =>
     renderFolderAgentReport(view, doc, {
       error,
-      onAction: async (action, button) => {
+      onAction: async (action, button, extra) => {
         button.disabled = true;
-        const result = await postFolderAgentAction(view, action, fetchImpl || globalThis.fetch);
+        const result = await postFolderAgentAction(
+          view,
+          action,
+          fetchImpl || globalThis.fetch,
+          extra
+        );
         if (result.error) {
           const next = result.view ? folderAgentReportView(result.view) : view;
           const card = draw(next, result.error);
@@ -424,6 +554,60 @@ export function mountFolderAgentReports(host, items, { doc = document, onDone, f
     });
   host.replaceChildren(...views.map(view => draw(view)));
   return views.length;
+}
+
+// mountWorkspaceFolderAgent shows a folder workspace's own report on its
+// page: the receipt while the agent looks (polled), then the report and its
+// actions. A workspace not started from a folder leaves the host hidden.
+export async function mountWorkspaceFolderAgent(
+  host,
+  workspaceID,
+  { doc = document, fetchImpl = globalThis.fetch, isActive = () => true, pollMs = 1500 } = {}
+) {
+  if (!host || !workspaceID) return null;
+  let raw;
+  try {
+    raw = await fetchFolderAgent(workspaceID, fetchImpl);
+  } catch (_) {
+    raw = null;
+  }
+  if (!isActive()) return null;
+  if (!raw) {
+    host.hidden = true;
+    return null;
+  }
+  const draw = (current, error = '') => {
+    const view = folderAgentReportView(current);
+    host.hidden = false;
+    host.replaceChildren(
+      renderFolderAgentReport(view, doc, {
+        error,
+        onAction: async (action, button, extra) => {
+          if (button) button.disabled = true;
+          const result = await postFolderAgentAction(view, action, fetchImpl, extra);
+          draw(result.view || current, result.error || '');
+          follow(result.view || current);
+        }
+      })
+    );
+  };
+  let timer = 0;
+  const follow = current => {
+    if (timer) clearTimeout(timer);
+    timer = 0;
+    if (current?.state !== 'looking' && current?.state !== 'setting_up') return;
+    timer = setTimeout(async () => {
+      if (!isActive()) return;
+      const next = await fetchFolderAgent(workspaceID, fetchImpl).catch(() => null);
+      if (next && isActive()) {
+        draw(next);
+        follow(next);
+      }
+    }, pollMs);
+  };
+  draw(raw);
+  follow(raw);
+  return raw;
 }
 
 if (typeof window !== 'undefined') {
