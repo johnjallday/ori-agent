@@ -487,6 +487,8 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	if b.sessionStore != nil {
 		todayService.SetHireRecordReader(personalassistant.NewSQLiteHireRecords(b.sessionStore.DB()), b.hireLookRunning)
 	}
+	// Read at call time: the folder agent is wired with the folder digest.
+	todayService.SetFolderAgentItems(b.folderAgentTodayItems)
 	// File Janitor's recent results join Today's Results section (starter
 	// missions FR36). The service is wired in Phase 17, before this runs.
 	if b.fileJanitorService != nil && b.workspaceFileStore != nil {

@@ -46,6 +46,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
+	"github.com/johnjallday/ori-agent/internal/folderagent"
+	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
@@ -380,7 +382,11 @@ type ServerBuilder struct {
 	// personalAssistantFolderDigest is "show me a folder": chooser, scan,
 	// offers, and decisions over the HQ sidecar.
 	personalAssistantFolderDigest *personalassistant.FolderDigestService
-	personalAssistantSecondBrain  *personalassistant.SecondBrainService
+	// folderAgentService is "Start an agent on <folder>": the anchored
+	// workspace, its agent, the walk, the report and Set it up.
+	folderAgentService           *folderagent.Service
+	folderAgentHandler           *folderagenthttp.Handler
+	personalAssistantSecondBrain *personalassistant.SecondBrainService
 	// personalAssistantSetupLearning lists and dismisses what a folder taught Ori.
 	personalAssistantSetupLearning *personalassistant.SetupLearningService
 	// folderSetupHost plans and runs the digest's one-card setups; its short
@@ -808,6 +814,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Skills:                b.skillsHandler,
 		User:                  b.userHandler,
 		PersonalAssistant:     b.personalAssistantHandler,
+		FolderAgent:           b.folderAgentHandler,
 		SetupJourney:          b.setupJourneyHandler,
 		SampleLibrary:         b.sampleLibraryHandler,
 		PersonalHQ:            b.personalHQHandler,

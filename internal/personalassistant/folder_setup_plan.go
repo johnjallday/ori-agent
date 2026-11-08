@@ -133,6 +133,9 @@ type FolderPlanLine struct {
 	Name   string `json:"name"`
 	Detail string `json:"detail,omitempty"`
 	State  string `json:"state,omitempty"`
+	// Step is the handle of the plan step this line carries out (the folder
+	// agent's plan groups its lines under their steps); empty elsewhere.
+	Step string `json:"step,omitempty"`
 }
 
 // Where an installable plugin stands, as the plan promised it.

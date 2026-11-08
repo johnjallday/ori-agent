@@ -1471,8 +1471,8 @@ test.describe('Header hierarchy', () => {
     ['repair_needed', 'Repair personal assistant', '/agents?quest=meet-assistant'],
     ['needs_hq', 'Build My HQ', '#personalAssistantHQCard'],
     ['provisioning_hq', 'Resume HQ setup', '#personalAssistantHQCard'],
-    ['active', 'Hire an agent', '#personalAssistantContextChooser'],
-    ['paused', 'Hire an agent', '#personalAssistantContextChooser']
+    ['active', 'Hire an agent', '#personalAssistantFolderChooser'],
+    ['paused', 'Hire an agent', '#personalAssistantFolderChooser']
   ] as const) {
     test(`a "${state}" assistant makes "${label}" the primary, and it opens that step`, async ({
       page

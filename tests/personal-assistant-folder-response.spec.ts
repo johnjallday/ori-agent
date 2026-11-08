@@ -5,7 +5,7 @@ import {
   syntheticFolderFiles,
   folderContentSentinel
 } from './fixtures/assistant-folder-response.js';
-import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach, chooseConversation } from './helpers/assistant-menus';
 
 // Real Ori selection -> Route/Ask -> canonical persistence -> replay. Only the
 // loopback provider's short prose is scripted: NOT vendor-model quality evidence.
@@ -94,7 +94,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     const protectedDraft = '  Keep my exact 🎼 draft\n';
     await page.locator('#personalAssistantInput').fill(protectedDraft);
     const beforeAttachment = (await audit()).requests;
-    await chooseAttach(page, '#personalAssistantFolderChip');
+    await openFolderAttach(page);
     const selected = page.waitForResponse(response =>
       response.url().endsWith('/folder-context/select')
     );

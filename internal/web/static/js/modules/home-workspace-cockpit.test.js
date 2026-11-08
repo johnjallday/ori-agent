@@ -2385,3 +2385,28 @@ test('tile facts come from each Home roster with the shelf wording', () => {
   assert.deepEqual(songFactsSnapshot(null), {});
   assert.equal(songRosterURL('h 1'), '/api/workspaces/h%201/assistant-program/library/roster');
 });
+
+test('a folder workspace that just became a group is framed as the setup sheet frames placed tiles', () => {
+  const source = readFileSync(new URL('./home-workspace-cockpit.js', import.meta.url), 'utf8');
+  const refresh = source.slice(
+    source.indexOf('async function refreshFolderAgentLines()'),
+    source.indexOf('async function refreshLibraryBadges(')
+  );
+  // A Group-stage setup whose finish this page has not seen yet lands, even
+  // when it finished faster than the poll; a page load never replays one.
+  assert.match(
+    refresh,
+    /folderAgentSetups &&\s*view\.state === 'set_up' &&\s*view\.stage === 'group'/
+  );
+  assert.match(refresh, /folderAgentSetups\[view\.workspace_id\] !== finished/);
+  assert.match(refresh, /void landPromotedGroup\(view\.workspace_id\)/);
+  assert.match(source, /let folderAgentSetups = null;/);
+  // Start and every report action reload the map the canonical way.
+  assert.match(source, /addEventListener\('ori:folder-agent-started', onFolderAgentChange\)/);
+  assert.match(source, /addEventListener\('ori:folder-agent-changed', onFolderAgentChange\)/);
+  assert.match(source, /refreshQuietly\(\)\)\.finally\(\(\) => void refreshFolderAgentLines\(\)\)/);
+  const land = source.slice(source.indexOf('async function landPromotedGroup('));
+  // Its members are its children now; the same frame and "just placed" mark.
+  assert.match(land, /row\.parent_id === groupId/);
+  assert.match(land, /await landSetUpProjects\(groupId, ids\)/);
+});

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach, chooseConversation } from './helpers/assistant-menus';
 import {
   collectionModel,
   existingCollectionHome,
@@ -159,7 +159,7 @@ async function attachFolder(page: Page, name: string) {
     await expect(page.locator('#personalAssistantLauncher')).toBeVisible({ timeout: 30_000 });
     await page.locator('#personalAssistantLauncher').click();
   }
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   const attached = page.waitForResponse(
     response =>
       response.request().method() === 'POST' &&
@@ -296,7 +296,10 @@ test.describe('[collection:home] the legacy collection explored from Home', () =
     const before = { hash: hashFolder(root), workspaces: (await workspaces(request)).length };
     const seen = watch(page);
 
-    await page.goto('/?panel=today&folder=show');
+    // folder=show now starts an agent on a folder; this attach flow is opened
+    // directly.
+    await page.goto('/?panel=today');
+    await openFolderAttach(page);
     const chooser = page.locator('#personalAssistantFolderChoices');
     await expect(chooser).toBeVisible({ timeout: 30_000 });
     const scanned = page.waitForResponse(
@@ -788,7 +791,7 @@ test.describe('[collection:pending-return] exact Albums beside an Album-5 review
       await page.locator('#personalAssistantLinkInput').fill('https://example.com');
       await page.locator('#personalAssistantLinkAttach').click();
       await expect(page.locator('#personalAssistantActiveLink')).toBeVisible({ timeout: 45_000 });
-      await chooseAttach(page, '#personalAssistantFolderChip');
+      await openFolderAttach(page);
       await page
         .locator('#personalAssistantFolderChoices')
         .getByRole('button', { name: 'Downloads', exact: true })

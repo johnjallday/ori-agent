@@ -420,17 +420,15 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
     await expect(attach).toHaveAttribute('aria-expanded', 'false');
 
-    // Opening the local chooser fabricates no user request or model answer.
-    const chooser = page.locator('#personalAssistantContextChooser');
+    // Add folder opens the chooser whose folder starts an agent on it; the
+    // first folder is focused and nothing is sent to a model.
+    const chooser = page.locator('#personalAssistantFolderChooser');
     const documents = page
-      .locator('#personalAssistantFolderChoices')
+      .locator('#personalAssistantFolderChips')
       .getByRole('button', { name: 'Documents', exact: true });
     await expect(chooser).toBeVisible();
     await expect(documents).toBeFocused();
-    await expect(chooser).toContainText('File contents are not read.');
-    await expect(chooser).toContainText(
-      'Send shares this metadata with your configured model; selecting stays local.'
-    );
+    await expect(chooser).toContainText('A read-only peek. Nothing moves.');
     await page.keyboard.press('Escape');
     await expect(chooser).toBeHidden();
     // Add folder is in the closed menu now, so focus returns to "+".

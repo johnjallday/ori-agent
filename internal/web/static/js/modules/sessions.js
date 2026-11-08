@@ -16752,6 +16752,16 @@ const sessionManager = {
     this.workspaceBuild?.setupReviewUI?.panel?.destroy();
     const setupHost = document.getElementById('workspaceBuildSetupReview');
     if (setupHost) setupHost.hidden = true;
+    // The folder card ends with the dialog; a started agent keeps going and
+    // its report is on Home and the map.
+    const folderAgentHost = document.getElementById('workspaceBuildFolderAgent');
+    if (folderAgentHost) {
+      folderAgentHost.hidden = true;
+      folderAgentHost.replaceChildren?.();
+    }
+    const folderAgentModal = document.getElementById('addFolderModal');
+    if (typeof folderAgentModal?.classList?.remove === 'function')
+      folderAgentModal.classList.remove('workspace-create-modal--folder-agent');
     const setupFooter = document.getElementById('workspaceBuildFolderReviewFooter');
     if (setupFooter) setupFooter.hidden = false;
     const placement = this.workspaceBuild?.placement;
@@ -17697,6 +17707,13 @@ const sessionManager = {
     if (!build?.session || !pane || this.workspaceBuildFolderLocked(build)) return;
     if (!this.workspaceBuildAssisted()) return;
     const mode = String(detail.mode || '').trim();
+    // A folder chosen here starts an agent on it, as on Home: one card for
+    // every folder, never a digest verdict. Only Home's inbox placement keeps
+    // its own folder review.
+    if (!build.placement) {
+      await this.startWorkspaceBuildFolderAgent(detail);
+      return;
+    }
     let body;
     if (mode === 'chip') {
       const chip = String(detail.chip || '').trim();
@@ -17823,6 +17840,82 @@ const sessionManager = {
         else if (attached) this.syncWorkspaceBuildPresentation();
       }
     }
+  },
+
+  // startWorkspaceBuildFolderAgent shows the one folder card under the pane:
+  // the server chooses the folder (chip, dialog, or a typed path's token), the
+  // card asks what the agent should do, and Start creates the workspace, its
+  // agent and first ticket. The receipt then follows the look in the dialog.
+  // The draft is left as it was; the folder never reaches the build.
+  async startWorkspaceBuildFolderAgent(detail = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    const host = document.getElementById('workspaceBuildFolderAgent');
+    const mount = window.FolderAgentCard?.mountFolderAgentChoice;
+    if (!build || !pane) return;
+    const mode = String(detail.mode || '').trim();
+    if (!host || typeof mount !== 'function') {
+      pane.folderChooserStatus('Folders can’t be added right now. Your draft is unchanged.', true);
+      return;
+    }
+    if (build.folderAgentPending) return;
+    let body;
+    if (mode === 'chip') {
+      const chip = String(detail.chip || '').trim();
+      if (!chip) return;
+      body = { chip };
+    } else if (mode === 'picker') {
+      body = { picker: true };
+    } else if (mode === 'path') {
+      pane.setFolderPathBusy(true);
+      let token = '';
+      try {
+        token = await this.selectWorkspaceBuildFolderPath(detail.path);
+      } finally {
+        if (this.workspaceBuild === build) pane.setFolderPathBusy(false);
+      }
+      if (this.workspaceBuild !== build || build.closing || !token) return;
+      body = { selection_token: token };
+    } else {
+      return;
+    }
+    build.folderAgentPending = true;
+    if (mode === 'picker') pane.folderChooserStatus('Choose a folder in the dialog…');
+    const active = () =>
+      this.workspaceBuild === build && !build.closing && host.isConnected !== false;
+    let result;
+    try {
+      result = await mount(host, body, {
+        isActive: active,
+        onStarted: view => {
+          build.folderAgentStarted = true;
+          this.notifyWorkspacesChanged({ workspaceId: view?.workspace_id, source: 'folder_agent' });
+          const Ctor = typeof window.CustomEvent === 'function' ? window.CustomEvent : null;
+          if (Ctor)
+            window.dispatchEvent?.(
+              new Ctor('ori:folder-agent-started', { detail: { workspaceID: view?.workspace_id } })
+            );
+        }
+      });
+    } finally {
+      if (this.workspaceBuild === build) build.folderAgentPending = false;
+    }
+    if (!active()) return;
+    if (result?.error) {
+      pane.folderChooserStatus(result.error, true);
+      return;
+    }
+    if (!result?.card) {
+      pane.folderChooserStatus('');
+      return;
+    }
+    pane.folderChooserStatus('');
+    pane.closeFolderChooser?.({ focus: false });
+    const modal = document.getElementById('addFolderModal');
+    if (typeof modal?.classList?.add === 'function')
+      modal.classList.add('workspace-create-modal--folder-agent');
+    host.scrollIntoView?.({ block: 'nearest' });
+    host.querySelector?.('textarea')?.focus?.();
   },
 
   // A typed path goes to the one endpoint every surface sends a path to; the

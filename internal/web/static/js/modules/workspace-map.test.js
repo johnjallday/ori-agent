@@ -2114,6 +2114,31 @@ test('a linked song tile appends its facts to the meta line; other tiles are unc
   assert.match(map.tileHTML({ ws: song, col: 0, row: 0 }), /ws-map-tile-meta">1 agent · 2 ready</);
 });
 
+test('a folder agent line takes the tile status slot while it looks; other tiles keep Idle/Working', () => {
+  const map = loadOriWorkspaceMap();
+  map.folderAgentLines.setSnapshot({
+    fed: 'Looking around · 240 entries · 3 folders left',
+    blank: '  ',
+    long: 'Looking around · 123456 entries · 98765 folders left and some more words here'
+  });
+  const fed = map.tileHTML({
+    ws: { id: 'fed', name: 'Ori Music Demo', agent_count: 1 },
+    col: 0,
+    row: 0
+  });
+  assert.match(
+    fed,
+    /ws-map-led is-working"><\/span>Looking around · 240 entries · 3 folders left</
+  );
+  assert.equal(map.folderAgentLines.statusText({ id: 'blank', active: false }), 'Idle');
+  assert.equal(map.folderAgentLines.statusText({ id: 'other', active: true }), 'Working');
+  const long = map.folderAgentLines.statusText({ id: 'long' });
+  assert.ok(long.endsWith('…') && long.length <= 60, long);
+  // Without a snapshot (every surface but Home) tiles read as before.
+  map.folderAgentLines.setSnapshot(null);
+  assert.equal(map.folderAgentLines.statusText({ id: 'fed', active: false }), 'Idle');
+});
+
 test('tileHTML never reads open_task_count and leaves unreported counts out', () => {
   const { tileHTML } = loadOriWorkspaceMap();
   const html = tileHTML({

@@ -431,7 +431,7 @@ test('fixture replacement, detach, New and a newer review revoke composer comple
   await expect(input).not.toHaveAttribute('placeholder', 'What would you like to do next?');
 });
 
-test('fixture ready setup has no task prompt/used attachment; a fresh attachment works normally', async ({
+test('fixture ready setup has no task prompt/used attachment; Add folder then starts an agent', async ({
   page
 }) => {
   const offer: any = completed();
@@ -449,48 +449,18 @@ test('fixture ready setup has no task prompt/used attachment; a fresh attachment
   await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 1100 });
   await evidence(page, '06-ready-no-task-or-attachment');
-  await page.route('**/api/home-assistant/folder-context/choices', route =>
-    route.fulfill({
-      json: { chips: [{ id: 'documents', label: 'Documents' }], picker_available: false }
-    })
-  );
   let selections = 0;
   await page.route('**/api/home-assistant/folder-context/select', route => {
     selections++;
-    return route.fulfill({
-      json: {
-        revision: 'fresh-revision',
-        observation: {
-          ...observation,
-          id: 'fresh-observation',
-          folder: 'Fresh folder',
-          projects: []
-        }
-      }
-    });
+    return route.fulfill({ status: 500, json: {} });
   });
+  // Add folder now starts an agent on a folder (the one folder card, covered
+  // by folder-agent-explore.spec.ts); the attach chooser no longer opens and
+  // nothing is attached to the conversation.
   await chooseAttach(page, '#personalAssistantFolderChip');
-  await page
-    .locator('#personalAssistantFolderChoices')
-    .getByRole('button', { name: 'Documents', exact: true })
-    .click();
-  await expect(page.locator('#personalAssistantActiveFolderName')).toHaveText('Fresh folder');
-  await expect(page.locator('#personalAssistantInput')).toHaveAttribute(
-    'placeholder',
-    'Explore this folder'
-  );
-  await page.evaluate(
-    offer =>
-      document.dispatchEvent(
-        new CustomEvent('personal-assistant:folder-offer', { detail: { offer } })
-      ),
-    offer
-  );
-  await expect(page.locator('#personalAssistantActiveFolder')).toBeVisible();
-  expect(
-    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().selection_id)
-  ).toBe('fresh-observation');
-  expect(selections).toBe(1);
+  await expect(page.locator('#personalAssistantContextChooser')).toBeHidden();
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  expect(selections).toBe(0);
   expect(effects).toEqual([]);
 });
 

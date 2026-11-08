@@ -530,6 +530,35 @@ func (s *run) installIntegration(ctx context.Context, intent personalassistant.F
 	return &stop{reason: personalassistant.FolderStopInstallFailed, detail: "the integration did not become ready"}
 }
 
+// InstallReviewedIntegration drives the host's install quest for one reviewed
+// integration through exactly the reviews its planned state needs (install,
+// enable or update), holding every review to the planned plugin and release.
+// It is the same driver a one-card project run uses, for a caller whose
+// workspace already exists (the folder agent's Tools stage).
+func InstallReviewedIntegration(ctx context.Context, install Journey, state, pluginID, version string) error {
+	if install == nil || installActions(state) == nil {
+		return errors.New("foldersetup: nothing to install")
+	}
+	s := &run{Runner: &Runner{Install: install, Progress: discardProgress{}}, cfg: Config{Plan: personalassistant.FolderSetupPlan{
+		Intent: personalassistant.FolderSetupIntent{Integration: state, IntegrationPlugin: pluginID, IntegrationVersion: version},
+	}}}
+	return s.installIntegration(ctx, s.cfg.Plan.Intent)
+}
+
+// StopReason reports the reason a runner step stopped with, or "" for an
+// error the runner did not choose.
+func StopReason(err error) string {
+	var stopped *stop
+	if errors.As(err, &stopped) {
+		return stopped.reason
+	}
+	return ""
+}
+
+type discardProgress struct{}
+
+func (discardProgress) Update(context.Context, Update) error { return nil }
+
 // integrationVersionMatches holds a review to the release the plan named: the
 // release an install or update would put in place, or the one an enable turns on.
 func integrationVersionMatches(shown *setupjourney.IntegrationProjection, action setupjourney.ActionID, planned string) bool {

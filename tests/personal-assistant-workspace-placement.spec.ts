@@ -1,7 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { attachItem, chooseAttach, chooseConversation } from './helpers/assistant-menus';
+import {
+  openFolderAttach,
+  attachItem,
+  chooseAttach,
+  chooseConversation
+} from './helpers/assistant-menus';
 import { talkToPersonalAssistant } from './helpers/assistant-recipient';
 
 // Production browser, Route/Ask/Review/Decide, Ollama adapter and canonical
@@ -101,7 +106,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
     await talkToPersonalAssistant(page);
   };
   const attachDocuments = async () => {
-    await chooseAttach(page, '#personalAssistantFolderChip');
+    await openFolderAttach(page);
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })

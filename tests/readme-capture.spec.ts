@@ -380,6 +380,20 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // The Workspace Map follows the folder agents' looks on their tiles. The
+    // README user has started no agent on a folder, so the tiles stay as
+    // photographed.
+    if (url.pathname === '/api/personal-assistant/folder-agent') {
+      await json(route, { folder_agents: [] });
+      return;
+    }
+    // A workspace page asks for its own folder agent report. The README
+    // workspace was not started from a folder, so there is none and the
+    // report's host stays hidden.
+    if (url.pathname.startsWith('/api/personal-assistant/folder-agent/')) {
+      await json(route, { folder_agent: null });
+      return;
+    }
     // "Connect your second brain" reads its ask for an active relationship.
     // The README user already answered it and keeps no notes folder, so no
     // ask joins the drawer and the scenes stay as photographed.

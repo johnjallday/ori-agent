@@ -334,10 +334,9 @@ test.describe('Home leads with the next hire-first step', () => {
     await waitForDrawerControllers(page);
     await primary.click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await expect(page.locator('#personalAssistantContextChooser')).toBeVisible();
-    await expect(
-      page.locator('#personalAssistantFolderChoices').getByRole('button').first()
-    ).toBeVisible();
+    // The chooser whose folder starts an agent on it (the one folder card).
+    await expect(page.locator('#personalAssistantFolderChooser')).toBeVisible();
+    await expect(page.locator('#personalAssistantFolderPathEntry input')).toBeVisible();
   });
 
   test('at phone width both header buttons fit without horizontal scroll', async ({ page }) => {

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
 
 // Findings-first baseline. Real host selection, review, Route/Ask and history;
 // no configured model or plugin. Provider-input characterization lives beside
@@ -58,7 +58,7 @@ test('baseline: canonical review survives chat; Set up is enabled until busy', a
   await page.goto('/');
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantWorkspaceContext')).toHaveText('Context · App-wide');
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })

@@ -3211,3 +3211,600 @@ a.quest-title:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/*
+ * Start an agent on <folder> (folder-agent-card.js): the card, the receipt
+ * and the folder agent's report. Same paper as the first-look report; the
+ * fallbacks keep it readable in the drawer on other pages.
+ */
+.folder-agent-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-radius: 10px;
+  background: var(--hc-panel, var(--cozy-paper));
+  color: var(--hc-ink, var(--cozy-ink));
+  overflow-wrap: anywhere;
+}
+
+.folder-agent-card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.folder-agent-card__by,
+.folder-agent-card__label,
+.folder-agent-card__note,
+.folder-agent-card__workspace {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__field {
+  display: grid;
+  gap: 4px;
+}
+
+.folder-agent-card__brief {
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-radius: 6px;
+  background: var(--hc-panel-raised, var(--cozy-paper-raised));
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
+/* Hire: who is hired before anything is created. */
+.folder-agent-card__hire {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--hc-line, var(--cozy-line));
+  border-radius: 6px;
+}
+
+.folder-agent-card__hire-title {
+  float: none;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.folder-agent-card__hire-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.folder-agent-card__hire-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px;
+  padding-left: 20px;
+}
+
+/* The role is a sentence: it takes the whole row. */
+.folder-agent-card__hire-field:has(.folder-agent-card__hire-mandate) {
+  grid-column: 1 / -1;
+}
+
+.folder-agent-card__hire-fields select {
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+
+.folder-agent-card__hire-field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.folder-agent-card__hire-fields :disabled {
+  opacity: 0.55;
+}
+
+.folder-agent-card__hire-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__receipt,
+.folder-agent-card__facts,
+.folder-agent-card__stage {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.folder-agent-card__facts,
+.folder-agent-card__degraded,
+.folder-agent-card__next {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__stage {
+  font-weight: 600;
+}
+
+/* The agent's plan, in its words; each step it named is a chip. */
+.folder-agent-card__words {
+  margin: 0;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--hc-signal, var(--cozy-moss));
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.folder-agent-card__step-chip {
+  display: inline-block;
+  padding: 0 7px;
+  border: 1px solid var(--hc-signal, var(--cozy-moss));
+  border-radius: 999px;
+  color: var(--hc-signal, var(--cozy-moss));
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.folder-agent-card__tool[data-chosen="false"] .folder-agent-card__tool-name {
+  font-weight: 500;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__heading {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__tool-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-agent-card__tool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+/* The plan as a numbered run: a marker per step, a line joining them, the
+   assurance as a note. */
+.folder-agent-card__run {
+  display: grid;
+  gap: 8px;
+}
+
+.folder-agent-card__run-head {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__plan {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-agent-card__line {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: start;
+  padding: 0 0 10px;
+  font-size: 13px;
+}
+
+/* While choosing, a box sits before the marker. */
+.folder-agent-card__line--pick {
+  grid-template-columns: 16px 20px minmax(0, 1fr) auto;
+}
+
+/* The box sits on the title line at the marker's size, whatever the page
+   gives form controls at phone width. */
+.folder-agent-card__line--pick .folder-agent-card__tool-pick,
+.folder-agent-card__goal-use input {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 2px 0 0;
+  align-self: start;
+}
+
+/* Two classes, so this wins over the base connector rule below. */
+.folder-agent-card__line.folder-agent-card__line--pick:not(:last-child)::before {
+  left: 35px;
+}
+
+.folder-agent-card__line:last-child {
+  padding-bottom: 0;
+}
+
+.folder-agent-card__line:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 20px;
+  bottom: -1px;
+  left: 9px;
+  width: 2px;
+  background: var(--hc-line, var(--cozy-line));
+}
+
+/* A step offered but not chosen: no number, muted, no connector of its own. */
+.folder-agent-card__line[data-chosen="false"] .folder-agent-card__line-mark {
+  border-style: dashed;
+  background: transparent;
+}
+
+.folder-agent-card__line[data-chosen="false"] .folder-agent-card__line-name {
+  font-weight: 500;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__line[data-chosen="false"]::before {
+  background: transparent;
+}
+
+/* A step's actions, on one muted line; each gets a glyph as it runs. */
+.folder-agent-card__actions-line {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.folder-agent-card__action[data-state="done"]::before {
+  content: "✓ ";
+  color: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__action[data-state="working"] {
+  color: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__action[data-state="working"]::before {
+  content: "◌ ";
+  animation: folder-agent-pulse 1.2s ease-in-out infinite;
+}
+
+.folder-agent-card__action[data-state="failed"] {
+  color: var(--hc-alert, var(--cozy-clay));
+}
+
+.folder-agent-card__action[data-state="failed"]::before {
+  content: "✕ ";
+}
+
+/* After setup: two compact rows. */
+.folder-agent-card__after {
+  display: grid;
+  gap: 6px;
+}
+
+.folder-agent-card__after-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.folder-agent-card__after-label {
+  min-width: 72px;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.folder-agent-card__after-row .folder-agent-card__goal-input {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.folder-agent-card__ticket-why {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__ticket-title + .folder-agent-card__ticket-why::before {
+  content: " — ";
+}
+
+.folder-agent-card__line[data-state="done"]:not(:last-child)::before {
+  background: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__line-mark {
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-radius: 50%;
+  background: var(--hc-panel, var(--cozy-paper));
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.folder-agent-card__line[data-state="done"] .folder-agent-card__line-mark {
+  border-color: var(--hc-signal, var(--cozy-moss));
+  background: var(--hc-signal, var(--cozy-moss));
+  color: transparent;
+}
+
+.folder-agent-card__line[data-state="done"] .folder-agent-card__line-mark::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.folder-agent-card__line[data-state="working"] .folder-agent-card__line-mark {
+  border-color: var(--hc-signal, var(--cozy-moss));
+  color: var(--hc-signal, var(--cozy-moss));
+  animation: folder-agent-pulse 1.2s ease-in-out infinite;
+}
+
+.folder-agent-card__line[data-state="failed"] .folder-agent-card__line-mark {
+  border-color: var(--hc-alert, var(--cozy-clay));
+  background: var(--hc-alert, var(--cozy-clay));
+  color: #fff;
+}
+
+.folder-agent-card__line-body {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.folder-agent-card__line-state {
+  padding-top: 2px;
+  white-space: nowrap;
+}
+
+/* Done needs no word beside a check; it stays for screen readers. */
+.folder-agent-card__line[data-state="done"] .folder-agent-card__line-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.folder-agent-card__line--note {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 0 30px;
+  padding: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__line--note .folder-agent-card__line-name {
+  font-weight: 500;
+}
+
+/* The final receipt reveals its checks one after another. */
+.folder-agent-card__run[data-phase="done"]
+  .folder-agent-card__line[data-state="done"]
+  .folder-agent-card__line-mark {
+  animation: folder-agent-fill 260ms ease-out backwards;
+  animation-delay: calc(var(--step, 0) * 110ms);
+}
+
+@keyframes folder-agent-fill {
+  from {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes folder-agent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-agent-card__line-mark {
+    animation: none !important;
+  }
+}
+
+.folder-agent-card__tool[data-greyed="true"] {
+  opacity: 0.6;
+}
+
+.folder-agent-card__tool-pick {
+  margin: 0 2px 0 0;
+  align-self: center;
+}
+
+.folder-agent-card__tool-name,
+.folder-agent-card__line-name {
+  font-weight: 600;
+}
+
+.folder-agent-card__tool-detail,
+.folder-agent-card__tool-why,
+.folder-agent-card__line-detail,
+.folder-agent-card__line-state {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__line[data-state="working"] .folder-agent-card__line-state {
+  color: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__tool-why {
+  flex-basis: 100%;
+}
+
+.folder-agent-card__tool-label {
+  padding: 0 6px;
+  border: 1px solid var(--hc-line, var(--cozy-line));
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.folder-agent-card__line[data-state="failed"] .folder-agent-card__line-state,
+.folder-agent-card__failure,
+.folder-agent-card__error {
+  color: var(--hc-alert, var(--cozy-clay));
+}
+
+.folder-agent-card__failure,
+.folder-agent-card__error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.folder-agent-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.folder-agent-card__open,
+.folder-agent-card__opening {
+  font-size: 12px;
+}
+
+/* The place is about to open: the link's word, said rather than offered. */
+.folder-agent-card__opening {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__what {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.folder-agent-card__goal,
+.folder-agent-card__ticket,
+.folder-agent-card__question {
+  display: grid;
+  gap: 6px;
+}
+
+.folder-agent-card__goal-input,
+.folder-agent-card__answer-input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-radius: 6px;
+  background: var(--hc-panel-raised, var(--cozy-paper-raised));
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.folder-agent-card__goal-use {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.folder-agent-card__ticket-title,
+.folder-agent-card__question-text,
+.folder-agent-card__goal-text,
+.folder-agent-card__next-ticket {
+  margin: 0;
+  font-size: 13px;
+}
+
+.folder-agent-card__ticket-why {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__question-text {
+  font-weight: 600;
+}
+
+.folder-agent-card__chips,
+.folder-agent-card__answer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.folder-agent-card__answer-input {
+  flex: 1 1 180px;
+}
+
+.folder-agent-host {
+  display: block;
+  margin: 0 0 12px;
+}
+
+/* Secondary actions read in the card's own ink in both themes. */
+.folder-agent-card__secondary {
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  background: transparent;
+  color: var(--hc-ink, var(--cozy-ink));
+}
+
+.folder-agent-card__secondary:hover,
+.folder-agent-card__secondary:focus-visible {
+  background: var(--hc-panel-raised, var(--cozy-paper-raised));
+  color: var(--hc-ink, var(--cozy-ink));
+}

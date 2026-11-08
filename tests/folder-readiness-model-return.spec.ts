@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type Locator } from '@playwright/
 import { createServer, type Server } from 'node:http';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
 import { stageReviewedFolderPackages } from './helpers/reviewed-folder-packages';
 
 // Real host + reviewed packages, explicitly controlled loopback provider. This
@@ -139,7 +139,7 @@ test('real model Settings return preserves the review and requires refreshed exp
   const draft = '  Keep 🎼 this exact\ndraft  ';
   const brief = '  Keep 🎼 this exact\nbrief  ';
   await page.locator('#personalAssistantInput').fill(draft);
-  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Desktop', exact: true })
@@ -283,7 +283,7 @@ test('a real shared agent retains its own configured model after the default cha
   );
   const draft = '  Bound 🎼 agent draft  ';
   await page.locator('#personalAssistantInput').fill(draft);
-  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
+  await openFolderAttach(page);
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })

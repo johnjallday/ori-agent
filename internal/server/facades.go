@@ -27,6 +27,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/externalmemoryhttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
+	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -241,8 +242,10 @@ type HandlerFacade struct {
 	PersonalAssistant   *personalassistanthttp.Handler
 	SetupJourney        *setupjourneyhttp.Handler
 	SampleLibrary       *samplelibraryhttp.Handler
-	PersonalHQ          *personalhqhttp.Handler
-	DailyBrief          *dailybriefhttp.Handler
+	// FolderAgent serves "Start an agent on <folder>".
+	FolderAgent *folderagenthttp.Handler
+	PersonalHQ  *personalhqhttp.Handler
+	DailyBrief  *dailybriefhttp.Handler
 	// OriGuide serves the setup-and-navigation guide. It is deliberately a
 	// separate handler from the Home work surface: its action type cannot
 	// express a mutation and it holds no dependency capable of performing one.

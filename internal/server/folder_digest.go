@@ -114,6 +114,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 	b.personalAssistantHandler.SetFirstBatchActions(service)
 	b.personalAssistantHandler.SetFolderHomeProvider(folderHomeProviderSetup{builder: b})
 	b.personalAssistantHandler.SetFolderProjectSelections(b.pathSelectionStore)
+	b.wireFolderAgent()
 }
 
 // folderOutcomeWorkspace reads where a resolved offer's workspace stands now. A

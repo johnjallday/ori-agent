@@ -26,6 +26,7 @@ import {
   firstTaskStartMessage,
   renderFirstTaskBanner
 } from './workspace-first-task-banner.js';
+import { mountWorkspaceFolderAgent } from './folder-agent-card.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
@@ -600,6 +601,12 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !startedSetupTask) {
       this.showFolderFirstTaskBanner();
     }
+    // A workspace started from a folder shows its agent's report here too.
+    mountWorkspaceFolderAgent(
+      document.getElementById('workspaceFolderAgentReport'),
+      this.workspaceId,
+      { isActive: () => !this._destroyed }
+    );
     // Give work… on the Agents page arrives here with the agent named; its
     // task form opens once nothing of the blueprint's own goes first.
     if (!restoredBlockedTask && !setupOwned && !startedSetupTask) {

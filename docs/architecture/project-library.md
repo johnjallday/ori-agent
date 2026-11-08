@@ -381,6 +381,27 @@ A second source (a mission finding, a folder offer) reuses this by publishing it
 
 **Still not established.** A real-provider run (model quality and token accounting per provider), a settings-page control for the token budget (settings.json only), crash-atomic feedback counting (a crash between the Home write and the sidecar write loses one count), and cross-process freshness of the badge beyond the cockpit's event-driven reads.
 
+### The folder agent's first look: the second instance (folder-agent-evolution)
+
+Feeding a folder to Ori ("Start an agent on <folder>", `internal/folderagent`) is the second source of the harness. It follows the same six points with its own records instead of a shared package: the extraction this section asked for is still open, because the two turns share the shape (caps, receipt, allowlist, provenance, truthful degradation) but not their stores or surfaces.
+
+1. **Signal:** the host's walk of the fed folder finishing (no event bus: the same background job runs the turn).
+2. **Bounded look:** one turn per look with the folder agent's own provider (resolved as the Manager's is), one tool (`folder_look`, one folder of the map, through the workspace's own anchor), and caps of 6 model calls, 12 tool calls, 8 looks, 90 seconds and `first_look_token_budget` (only ever lower than 20,000).
+3. **Inert words with provenance:** the agent writes fixed sections the host parses; anything naming a path or over its bound is dropped. Tools are chosen only among host-issued candidates. Everything carries `source: first_look_model`, the model and the ticket id.
+4. **One review surface:** the report item under Needs you and on the workspace page.
+5. **Truthful degradation:** the walk, the facts, the host's candidates and Set it up all run without a model; the receipt is `finished` / `step_limit` / `time_limit` / `token_limit` or `skipped(no_model | provider_unavailable | interrupted)`, and the report says what is missing.
+6. **Feedback:** an unticked candidate is recorded on the folder's record and not proposed again; nothing feeds back into the model.
+
+### Set it up consent covers the scopes the map named (folder-agent-evolution)
+
+Until now every scoped scan had its own owner review. When a fed folder's facts show a portfolio and the owner confirms **Set it up** (`Adds <folder> to your Music Production Home`, `Lists N songs on its shelf`, `Looks into N folders for songs`), that one consent covers, for that root only:
+
+- connecting the fed folder as a root through `PickFromPortfolio`, with the folder agent's own anchored folder as the resolver's answer (never a client path; the folder's live directory identity must match);
+- the whole-root listing;
+- scoped listings of scopes **the library itself issued** for that root, chosen to lead to the folders the host's walk found holding songs: for each such folder, its own scope or else the deepest issued scope above it, repeated as deeper scopes appear. Scope ids always come from the library's own scans; nothing a client or model supplies becomes a scope.
+
+The scan budgets are unchanged: each listing keeps the library's entry and time limits, a Set it up commits at most 48 scoped listings, and every review is taken against a freshly read library revision (a song-facts pass or the Manager's turn advances it after each scan; a conflict is reviewed again). The receipt says how many songs the shelf lists and how many folders holding songs no listing reached. No later scan runs without the owner: the folder agent does not rescan, and the Library Manager owns discovery under the root afterwards. Song workspaces are still created only when a song is opened.
+
 ## Song card and roster projection
 
 A linked song's own pages read a projection of the Home library; nothing is

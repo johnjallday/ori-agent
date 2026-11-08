@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { chooseAttach, openAttachMenu } from './helpers/assistant-menus';
+import { openFolderAttach, chooseAttach, openAttachMenu } from './helpers/assistant-menus';
 
 test('the assistant portrait explores only while a scan is in flight, then shows observed findings', async ({
   page,
@@ -226,7 +226,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   expect(transition).toBe('none');
   // Asking again reopens the chooser in the same turn.
   failNext = true;
-  await chooseAttach(page, '#personalAssistantFolderChip');
+  await openFolderAttach(page);
   await expect(chooser).toBeVisible();
   await page
     .locator('#personalAssistantFolderChoices')

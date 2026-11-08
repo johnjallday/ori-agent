@@ -1367,13 +1367,18 @@ function setFolderBusy(busy, source = 'legacy') {
  * other page has no folder flow of its own, so it goes to Home's.
  */
 function exploreFolder() {
+  // Every page's drawer starts an agent on the chosen folder (the one folder
+  // card); attaching remains only where the folder module is missing.
+  const folder = window.PersonalAssistantFolder;
+  if (folder && typeof folder.open === 'function') {
+    folder.open();
+    return;
+  }
   if (window.PersonalAssistantFolderContext?.open) {
     window.PersonalAssistantFolderContext.open();
     return;
   }
-  const folder = window.PersonalAssistantFolder;
-  if (folder && typeof folder.open === 'function') folder.open();
-  else window.location.assign(EXPLORE_FOLDER_URL);
+  window.location.assign(EXPLORE_FOLDER_URL);
 }
 
 function setMenuLink(link, route) {

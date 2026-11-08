@@ -52,6 +52,10 @@ var skippedFolders = map[string]bool{
 	".Trash":       true,
 }
 
+// IsSkippedFolder reports whether a folder name is one the scan never
+// descends into, so other host walks share the same list.
+func IsSkippedFolder(name string) bool { return skippedFolders[name] }
+
 // IsDataless reports whether a file's Lstat result is an evicted iCloud Drive
 // placeholder, whose contents only the cloud holds. Opening one would start a
 // download, so a reader that opens files skips it. Always false off macOS.
