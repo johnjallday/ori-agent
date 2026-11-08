@@ -73,7 +73,14 @@ test('a Home-pinned package is reviewed in place on Plugins and upgraded from it
     ? ''
     : homeDeclaration(UPGRADE_PATH).home_profile?.title || '';
   const addsProfile = profileTitle !== '';
-  expect(promptChanged || addsProfile).toBeTruthy();
+  // A release may also add the package's words for the project card and
+  // roster (PRD #792 FR10).
+  const projectCard = homeDeclaration(PLUGIN_PATH).project_card
+    ? null
+    : homeDeclaration(UPGRADE_PATH).project_card || null;
+  const addsWords = projectCard !== null;
+  const adds = addsProfile || addsWords;
+  expect(promptChanged || adds).toBeTruthy();
   await json(await request.post('/api/onboarding/skip'));
 
   // An ordinary staffed Music Home on the installed release.
@@ -107,6 +114,15 @@ test('a Home-pinned package is reviewed in place on Plugins and upgraded from it
     installed_version: VERSION,
     available: false
   });
+  const summaryURL = `${programURL}/library/summary`;
+  if (addsWords) {
+    // The installed release declares no words: the Home reads the neutral ones.
+    expect((await json(await request.get(summaryURL))).words).toMatchObject({
+      source: 'neutral',
+      noun: 'Project',
+      roster_title: 'Projects and assistants'
+    });
+  }
   const profileURL = `${programURL}/profile`;
   if (addsProfile) {
     // The installed release declares no card, so this Home has none.
@@ -160,13 +176,20 @@ test('a Home-pinned package is reviewed in place on Plugins and upgraded from it
     await expect(dialog.locator('pre')).toHaveCount(0);
     await expect(dialog).not.toContainText('gets the new guidance');
   }
-  if (addsProfile) {
-    // The review names the card the release adds, and does not call the
-    // upgrade guidance-only.
+  if (adds) {
+    // The review names what the release adds, and does not call the upgrade
+    // guidance-only.
     await expect(dialog).toContainText('What this release adds');
-    await expect(dialog).toContainText(
-      `Adds a ${profileTitle} card to this Home. Nothing is detected or read until you open it.`
-    );
+    if (addsProfile) {
+      await expect(dialog).toContainText(
+        `Adds a ${profileTitle} card to this Home. Nothing is detected or read until you open it.`
+      );
+    }
+    if (addsWords) {
+      await expect(dialog).toContainText(
+        `Adds the package's words for the ${String(projectCard.noun_plural).toLowerCase()} card and roster. Nothing else changes.`
+      );
+    }
     await expect(dialog).toContainText('adds what is listed below');
     await expect(dialog).not.toContainText('Only Home guidance changes');
   } else {
@@ -211,6 +234,16 @@ test('a Home-pinned package is reviewed in place on Plugins and upgraded from it
     expect(profile.templates.consented ?? false).toBe(false);
     await profilePanel.scrollIntoViewIfNeeded();
     await evidence(page, '04-profile-card-after-upgrade');
+  }
+
+  if (addsWords) {
+    // After the commit the Home reads the package's words on its next load.
+    expect((await json(await request.get(summaryURL))).words).toMatchObject({
+      source: 'package',
+      noun: projectCard.noun,
+      noun_plural: projectCard.noun_plural,
+      roster_title: projectCard.roster_title
+    });
   }
 
   expect(await installedVersion(request)).toBe(UPGRADE_VERSION);
