@@ -272,6 +272,71 @@ operations. Ori calls it through the service runtime as a machine-level call
 timeout class, output byte limit and output schema, and then bounds every value
 again. See `docs/reaper-integration.md`, "Templates on the Home profile".
 
+#### Optional `project_card` section (host feature `project_card_words_v1`)
+
+A Home declaration may add a second closed, optional section that gives the
+Home's project card, its roster, the map tile facts and the status line their
+words: what one project is called, what the roster is called, which stored
+facts show with which units, and up to eight extra fields the host stores but
+never interprets (`projecttemplates.ProjectCardDeclaration`, PRD #792).
+
+```json
+"project_card": {
+  "schema_version": 1,
+  "noun": "Song",
+  "noun_plural": "Songs",
+  "roster_title": "Songs and assistants",
+  "facts": [
+    { "kind": "track_count", "unit": "tracks", "unit_one": "track" },
+    { "kind": "tempo", "unit": "BPM" },
+    { "kind": "length" }
+  ],
+  "fields": [
+    { "id": "key", "label": "Key", "kind": "text" },
+    { "id": "references", "label": "Reference tracks", "kind": "list" }
+  ]
+}
+```
+
+- `schema_version` is exactly 1; `noun`, `noun_plural` and `roster_title` are
+  required. Every text value follows the `home_profile` rule: one line of valid
+  UTF-8, no `://`, no control character; `noun`, `noun_plural`, `unit`,
+  `unit_one` and `label` 1 to 40 characters, `roster_title` 1 to 60.
+- `facts` is optional. When present it has 1 to 3 entries, each `kind` one of
+  `tempo`, `length` or `track_count` at most once, in card order. `tempo` and
+  `track_count` require `unit`; `unit_one` is optional and replaces it for a
+  value of exactly 1. `length` takes no unit (it prints as `m:ss` or
+  `h:mm:ss`). An explicit empty list is refused: a package that wants the
+  neutral facts omits the key. The ", varies" note after a changing tempo is
+  host wording.
+- `fields` is optional, 0 to 8 entries: `id` (declaration id pattern, unique),
+  `label`, and `kind` `text` (one line) or `list` (up to 16 lines). Values
+  live in the library entry's `Fields.extra` (`project-library.md`).
+- An unknown key or any failed rule rejects the whole contribution. A manifest
+  whose Home declares the section must list `project_card_words_v1` in
+  `requires_host_features` (`internal/plugin/surface_descriptor.go`); an older
+  build rejects the package rather than registering it without the words.
+- Like `home_profile`, the section is part of the declaration digest and is not
+  copied into the durable `AssistantProgramDeclaration`. Readers resolve it
+  from the installed release the Home's pin names
+  (`plugin.PinnedHomeDeclaration`, through `sessionhttp.projectCardWords`); a
+  disabled package still answers. A Home whose pinned release has no section,
+  whose package is not installed, or that has no pin gets the neutral words
+  (`projectlibrary.NeutralWords`): "Project", "Projects", "Projects and
+  assistants", no fields, and neutral facts in the host's fixed order as label
+  and value ("Tracks 14 · Tempo 92 · 3:41"). Package facts read "14 tracks · 92
+  BPM · 3:41".
+- Agents never read the package. The Home stores a bounded snapshot,
+  `AssistantProgramState.project_card_words` (`workspace.ProjectCardWords`:
+  plugin ID and version, noun, plural, roster title, fact units, field IDs,
+  labels and kinds). It is written at two moments only: when a Home is created
+  under a declaration with the section (and only when the snapshot names the
+  pinned plugin and version), and when a reviewed upgrade that adds the section
+  commits (§6.1). It is never written on a read. The decoder is lenient: a
+  snapshot that does not decode or fails its own limits reads as absent, and
+  prompts, the closing step and the agent tools then use the neutral words
+  (`projectlibrary.SnapshotWords`).
+
 ### 3.3 Separate project-team declaration
 
 A project blueprint gains one optional closed `assistant_project` block:
@@ -487,16 +552,25 @@ just as a reviewed project integration does. A provider that is not on the list
 keeps the manual guidance: install it from the Plugins page, then return.
 
 The reviewed Home provider is Music Project Management with a floor of
-`0.3.0` and fallback commit `2d5f01e6daa24c77327a84376d8feb75b965d575`, the
-resolved commit of the `v0.3.0` tag, published 2026-10-18 (workspace-arrangement
-guidance in the skill and the Portfolio Manager prompt; the required host
-features are `independent_program_homes_v1` and `home_profile_v1`, the same two
-as 0.2.0). Earlier floors: `0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf`
-(`v0.1.0`, 2026-09-22). The release is content-only and has no platform
-artifact; its `git archive` tarball and checksum were downloaded and diffed
-against the tested candidate tree (`f43e7b39…`, identical). The fallback
-commit was checked by loading that exact commit and passing it through the
-same release check:
+`0.5.0` and fallback commit `c420507da24c1fc007d794f3e8974231dd2c5d4a`, the
+resolved commit of the `v0.5.0` tag, published 2026-11-08. That release adds
+the Home's `project_card` words ("Song", "Songs and assistants", and
+tracks/BPM/length) and the Key, Reference tracks and Mix notes card fields.
+Its required host features are `independent_program_homes_v1`,
+`home_profile_v1`, `resource_workspaces_v1` and `project_card_words_v1`.
+
+Earlier floors:
+
+- `0.3.0` at `2d5f01e6daa24c77327a84376d8feb75b965d575` (`v0.3.0`, 2026-10-18)
+- `0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf` (`v0.1.0`, 2026-09-22)
+
+`0.4.0` was never a floor.
+
+The release is content-only and has no platform artifact. Its `git archive`
+tarball passed its checksum and was diffed against the tested candidate tree
+(`396c3fa7…`, commit `76d59a7`): they are identical. The fallback commit was
+checked by loading that exact commit and passing it through the same release
+check:
 
 ```bash
 ORI_REVIEWED_HOME_PROVIDER_CANDIDATE=1 go test ./internal/reviewedintegration \
@@ -554,6 +628,25 @@ until the owner reviews them on the Home. No setup-card consent exists for a
 Home that was upgraded. The Home page announces a finished upgrade on the
 document (`assistant-program:provider-upgraded`), and the profile card reads
 again, so the new card appears without a reload.
+
+A third class, additive resource attachment, is described in
+`reaper-studio.md` §11.
+
+**Fourth accepted class: additive project-card words.** The newer release may
+add a `project_card` section (§3.2) to a Home declaration that has none, alone
+or together with guidance changes, a profile card or an appended resource
+attachment (`AcceptedHomeChange` sets the added section aside before the
+guidance-only comparison). Outside the Home declarations the release may start
+requiring `project_card_words_v1` only when it actually adds the section. A
+section that is changed, reduced or removed between two releases is refused
+(`home_upgrade_not_guidance_only`). The plan records `adds_project_card`,
+`project_card_noun`, `project_card_noun_plural` and the words snapshot per Home
+declaration; the review lists "Adds the package's words for the <plural, lower
+case> card and roster. Nothing else changes." under `additions`. The rebind
+step writes the Home's `project_card_words` snapshot together with the new
+`HomeProvider` pin in the same fenced write, so prompts change with the pin.
+Cards and the roster read the new words on their next load; the existing
+`assistant-program:provider-upgraded` event makes the open Home page read again.
 
 **Review** (installs and rebinds nothing; it records the review, and like every
 upgrade read it may first settle an operation a crash interrupted). It resolves

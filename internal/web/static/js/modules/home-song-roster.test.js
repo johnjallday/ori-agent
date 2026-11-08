@@ -5,17 +5,34 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   EMPTY_ACTION_TEXT,
-  EMPTY_TEXT,
+  emptyText,
   NO_KEEPER_TEXT,
   NO_SESSION_TEXT,
   ROSTER_VISIBLE_ROWS,
   renderRoster,
   rosterURL,
   rosterView,
-  sessionDate
+  cutOnWord,
+  sessionDate,
+  songFactsSnapshot
 } from './home-song-roster.js';
 
 const NOW = new Date(2026, 10, 7, 12, 0, 0);
+
+// The words the Music Project Management 0.5.0 candidate declares; the roster
+// response carries them (PRD #792 FR7).
+const MUSIC_WORDS = {
+  source: 'package',
+  noun: 'Song',
+  noun_plural: 'Songs',
+  roster_title: 'Songs and assistants',
+  facts: [
+    { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+    { kind: 'tempo', unit: 'BPM' },
+    { kind: 'length' }
+  ],
+  fields: []
+};
 
 function row(n, overrides = {}) {
   return {
@@ -90,12 +107,20 @@ function all(root, predicate, out = []) {
 }
 
 test('a row words keeper, last session and open work; the title links to the song', () => {
-  const view = rosterView([row(1)], { now: NOW });
+  const view = rosterView([row(1)], { now: NOW, words: MUSIC_WORDS });
   assert.equal(view.title, 'Songs and assistants');
   assert.equal(view.total, 1);
+  assert.equal(
+    rosterView([row(1, { title: '' })], { now: NOW, words: MUSIC_WORDS }).rows[0].title,
+    'Untitled song'
+  );
   assert.deepEqual(view.rows[0], {
     id: 'ws-1',
     title: 'Song 001',
+    stageText: '—',
+    stageLabel: 'Stage not set',
+    nextActionText: '—',
+    nextActionLabel: 'No next action',
     href: '/workspaces/song-1',
     keeperText: 'Studio Keeper',
     hasKeeper: true,
@@ -136,10 +161,11 @@ test('ten rows show in server order; Show all (N) expands in place', () => {
 test('an empty Home says so in one line linking to the library sheet', () => {
   const view = rosterView([], {
     now: NOW,
+    words: MUSIC_WORDS,
     sheet: { href: '/workspaces/home/assistant#projectLibraryPanel' }
   });
   assert.deepEqual(view.empty, {
-    text: EMPTY_TEXT,
+    text: emptyText(MUSIC_WORDS),
     action: { label: EMPTY_ACTION_TEXT, href: '/workspaces/home/assistant#projectLibraryPanel' }
   });
   const container = makeDocument().createElement('div');
@@ -153,6 +179,81 @@ test('an empty Home says so in one line linking to the library sheet', () => {
   );
   link.fire('click');
   assert.equal(opened, 1);
+});
+
+test('each row shows its stage label and next action, cut on a word at 80 characters (PRD #792 FR15)', () => {
+  const long =
+    'Send the stems to the mixer and ask for a second revision of the chorus vocal balance today please';
+  const view = rosterView([row(1, { stage: 'mixing', next_action: long })], { now: NOW });
+  const first = view.rows[0];
+  assert.equal(first.stageText, 'Mixing');
+  assert.equal(first.stageLabel, '');
+  assert.ok(first.nextActionText.endsWith('…'));
+  assert.ok([...first.nextActionText].length <= 80, first.nextActionText);
+  assert.ok(long.startsWith(first.nextActionText.slice(0, -1)), 'cut on a word');
+  assert.equal(cutOnWord('Mix'), 'Mix');
+  assert.equal(cutOnWord('a'.repeat(100)).length, 80);
+
+  const container = makeDocument().createElement('div');
+  renderRoster(
+    container,
+    rosterView([row(1), row(2, { stage: 'idea', next_action: 'Demo' })], { now: NOW })
+  );
+  const stages = all(container, n => String(n.className || '').startsWith('song-roster-stage'));
+  const nexts = all(container, n => String(n.className || '').startsWith('song-roster-next'));
+  assert.deepEqual(
+    stages.map(n => [n.textContent, n.getAttribute('aria-label')]),
+    [
+      ['—', 'Stage not set'],
+      ['Idea', null]
+    ]
+  );
+  assert.deepEqual(
+    nexts.map(n => [n.textContent, n.getAttribute('aria-label')]),
+    [
+      ['—', 'No next action'],
+      ['Demo', null]
+    ]
+  );
+  // An unknown stage is unset, never echoed.
+  assert.equal(rosterView([row(3, { stage: 'touring' })], { now: NOW }).rows[0].stageText, '—');
+});
+
+test('without package words the roster reads the neutral Project words (PRD #792 FR6, FR8, FR11)', () => {
+  const view = rosterView([row(1, { title: '' })], { now: NOW });
+  assert.equal(view.title, 'Projects and assistants');
+  assert.equal(view.rows[0].title, 'Untitled project');
+  const empty = rosterView([], { now: NOW });
+  assert.equal(empty.empty.text, 'No projects are linked yet.');
+  const container = makeDocument().createElement('div');
+  renderRoster(container, empty);
+  const section = container.children[0];
+  assert.equal(section.getAttribute('aria-label'), 'Projects and assistants');
+  const rendered = `${section.getAttribute('aria-label')} ${container.textContent} ${view.rows[0].title}`;
+  assert.equal(/\b(songs?|bpm)\b/i.test(rendered) || /\btracks?\b/.test(rendered), false, rendered);
+});
+
+test('tile facts use each Home’s own words, leaving out the track count and the varies note', () => {
+  const rosters = {
+    music: [
+      {
+        workspace_id: 'a',
+        facts: { tempo_bpm: 92, length_seconds: 132, track_count: 3, tempo_varies: true }
+      }
+    ],
+    plain: [{ workspace_id: 'b', facts: { tempo_bpm: 96, length_seconds: 61 } }],
+    tracksOnly: [{ workspace_id: 'c', facts: { track_count: 4 } }]
+  };
+  assert.deepEqual(songFactsSnapshot(rosters, { music: MUSIC_WORDS, tracksOnly: MUSIC_WORDS }), {
+    a: '92 BPM · 2:12',
+    b: 'Tempo 96 · 1:01',
+    c: '4 tracks'
+  });
+  assert.deepEqual(songFactsSnapshot(rosters), {
+    a: 'Tempo 92 · 2:12',
+    b: 'Tempo 96 · 1:01',
+    c: 'Tracks 4'
+  });
 });
 
 test('rendering uses a native link per song, keeper as text, and one Show all button', () => {

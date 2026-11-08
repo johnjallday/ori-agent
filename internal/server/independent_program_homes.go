@@ -109,6 +109,7 @@ func resolveIndependentProgramHome(installed []plugin.InstalledPlugin, ownerUser
 	resolution.Key = workspace.AssistantProgramKey{OwnerUserID: strings.TrimSpace(ownerUserID), PluginID: homeOwner.PluginID, ProgramID: homeOwner.ProgramID}.Normalize()
 	resolution.Declaration = homeDeclaration.AssistantProgram()
 	resolution.Owner = homeOwner
+	resolution.ProjectCardWords = homeDeclaration.ProjectCard.Snapshot(homeInstall.Name, homeInstall.Version)
 	return resolution, nil
 }
 

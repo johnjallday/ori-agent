@@ -4219,6 +4219,9 @@ smoke_restart_sandbox() {
     env+=(ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$sandbox/plugin-source/reaper-plugin")
   [[ -d "$sandbox/plugin-source/music-project-management" ]] &&
     env+=(ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE="$sandbox/plugin-source/music-project-management")
+  # A live check passes the real Codex home through (CODEX_HOME=~/.codex), as
+  # wt demo does, so the sandbox's codex provider runs on the owner's login.
+  [[ -n "${CODEX_HOME:-}" && -d "$CODEX_HOME" ]] && env+=(CODEX_HOME="$CODEX_HOME")
   echo "restarting $root/bin/ori-agent on port $port in $sandbox"
   cd "$sandbox" && exec env "${env[@]}" "$root/bin/ori-agent"
 }
@@ -4250,6 +4253,41 @@ review = call("POST", f"{lib}/sessions/{session['id']}/recaps/review", body)
 done = call("POST", f"{lib}/sessions/{session['id']}/recaps/commit", {**body, "review_token": review["token"],
             "idempotency_key": f"seed-recap-{entry}-{goal}", "confirm": True})
 print("ok   accepted session", done.get("session", {}).get("id", ""), "on entry", entry)
+PY
+}
+
+# propose-fields saves one fields suggestion (PRD #792) as an agent through
+# the direct /tool chat path, with no model: `home` as the Home's Manager
+# (home_library_propose_fields on <entry>, at its current fields revision) or
+# `keeper` as a song's keeper (project_card_propose_fields in <workspace>).
+# <fields-json> is the patch, e.g. '{"next_action":"Print stems"}'.
+smoke_propose_fields() {
+  local base="${2:-}" mode="${3:-}" workspace="${4:-}" agent="${5:-}" target="${6:-}" fields="${7:-}" key="${8:-}"
+  [[ -n "$base" && ( "$mode" == home || "$mode" == keeper ) && -n "$workspace" && -n "$agent" && -n "$fields" ]] ||
+    fail "usage: $0 propose-fields <base-url> home <home-id> <manager-name> <entry-id> <fields-json> [request-key]
+       $0 propose-fields <base-url> keeper <song-workspace-id> <keeper-name> - <fields-json> [request-key]"
+  python3 -I - "$base" "$mode" "$workspace" "$agent" "$target" "$fields" "$key" <<'PY'
+import json, sys, time, urllib.request
+base, mode, workspace, agent, target, fields, key = sys.argv[1:8]
+def call(method, url, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read() or b"{}")
+args = json.loads(fields)
+args["request_key"] = key or f"smoke-fields-{int(time.time() * 1000)}"
+if mode == "home":
+    detail = call("GET", f"{base}/api/workspaces/{workspace}/assistant-program/library/projects/{target}")
+    args["entry_id"], args["fields_revision"] = target, detail["row"]["fields_revision"]
+    tool = "home_library_propose_fields"
+else:
+    tool = "project_card_propose_fields"
+reply = call("POST", f"{base}/api/chat", {"agent_name": agent, "question": f"/tool {tool} {json.dumps(args)}",
+             "route_context": {"surface": "workspace_detail", "workspace_id": workspace}})
+text = json.dumps(reply)
+if '"proposal_id' not in text.replace('\\"', '"'):
+    sys.exit(f"FAIL {tool}: {text[:600]}")
+print("ok   saved", tool, "suggestion as", agent)
 PY
 }
 
@@ -4333,6 +4371,7 @@ filetree) smoke_filetree "$@" ;;
 prettier-head) smoke_prettier_head "$@" ;;
 restart-sandbox) smoke_restart_sandbox "$@" ;;
 seed-recap) smoke_seed_recap "$@" ;;
+propose-fields) smoke_propose_fields "$@" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2

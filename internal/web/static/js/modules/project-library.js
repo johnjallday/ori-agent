@@ -6,6 +6,7 @@ import {
   libraryOpenRoute,
   libraryOpenedMessage,
   libraryRequestError,
+  projectWords,
   readLibraryPayload as payload,
   RECENT_SONGS_QUERY,
   recentSongs,
@@ -13,6 +14,7 @@ import {
   songLineText
 } from './library-open.js';
 import { loadStaffingPlan, runSetup, staffingDisclosure } from './library-setup.js';
+import { acceptLines, suggestionRows } from './song-card-suggestions.js';
 import { setupQuestURL } from './setup-quest-links.js';
 import { folderPickCopy } from './folder-pick-copy.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
@@ -537,6 +539,9 @@ export function libraryFeedbackText(feedback) {
 
 // A suggestion's origin: the bounded scan review, or a Manager chat.
 export function proposalSourceLabel(proposal) {
+  // A song keeper's card suggestion comes from a ticket or chat in its song
+  // (PRD #792 FR20), never from the Manager.
+  if (proposal?.proposer_kind === 'keeper') return 'From the song’s assistant';
   if (proposal?.source === 'manager_model') {
     const model = String(proposal.model || '').trim();
     return model ? `From the scan review · ${model}` : 'From the scan review';
@@ -677,7 +682,7 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
 // up to six songs with a save time, each with Open where the Home can open it,
 // and its song facts when they are known. A read-only Home still shows its
 // songs, without Open. No dated song: hidden.
-export function recentlySavedView(page, now = new Date()) {
+export function recentlySavedView(page, now = new Date(), words = null) {
   const readOnly = page?.provider_read_only !== false;
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
   const picks = readOnly
@@ -689,10 +694,79 @@ export function recentlySavedView(page, now = new Date()) {
       row,
       name: String(row.name || '').trim() || 'This song',
       saved: lastSavedLabel(row.last_saved_at, now),
-      facts: songFactsLabel(row.facts),
+      facts: songFactsLabel(row.facts, words),
       open: libraryOpenAction(row, readOnly)
     }))
   };
+}
+
+// fieldsPatchLines words a fields patch for the confirm dialog, one line per
+// changed field. Plugin fields (`extra`) read under their declared labels
+// (PRD #792 FR29); a field the patch clears reads "None".
+export function fieldsPatchLines(patch, words) {
+  const declared = projectWords(words).fields;
+  return Object.entries(patch || {}).flatMap(([key, value]) => {
+    if (key === 'extra') {
+      const extra = value && typeof value === 'object' ? value : {};
+      return declared.map(
+        field => `${field.label}: ${(extra[field.id] || []).join('; ') || 'None'}`
+      );
+    }
+    if (key === 'clear_priority') return [`${label(key)}: Unset`];
+    if (key === 'milestones') {
+      const text = value
+        .map(
+          item =>
+            `${item.label}${item.due_date ? ` · ${item.due_date}` : ''} · ${item.complete ? 'complete' : 'open'}`
+        )
+        .join('; ');
+      return [`${label(key)}: ${text || 'None'}`];
+    }
+    if (Array.isArray(value)) return [`${label(key)}: ${value.join('; ') || 'None'}`];
+    return [`${label(key)}: ${String(value || 'Not set')}`];
+  });
+}
+
+// fieldsSuggestionText is a fields suggestion in one line for the shelf's
+// suggestions list: "Next action → Send stems; Blockers → 2 lines (…)".
+export function fieldsSuggestionText(fields, words) {
+  return (
+    suggestionRows(fields, words)
+      .map(
+        row => `${row.label} → ${row.value}${row.lines?.length ? ` (${row.lines.join('; ')})` : ''}`
+      )
+      .join('; ') || 'No fields'
+  );
+}
+
+// extraFieldRows pairs each declared field's label with its stored lines, in
+// declared order; a field with no value has no lines.
+export function extraFieldRows(extra, words) {
+  const stored = extra && typeof extra === 'object' ? extra : {};
+  return projectWords(words).fields.map(field => [
+    field.label,
+    (Array.isArray(stored[field.id]) ? stored[field.id] : []).filter(Boolean)
+  ]);
+}
+
+// extraFieldValues reads the Edit dialog's plugin-field controls into the
+// stored shape: a text field is one line, a list one line per entry; an
+// empty control is left out. Returns { extra, error } with the control that
+// broke a limit.
+export function extraFieldValues(controls) {
+  const extra = {};
+  for (const { field, input } of controls) {
+    const raw = String(input.value || '');
+    const lines = (field.kind === 'list' ? raw.split(/\r?\n/) : [raw])
+      .map(value => value.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    if (!lines.length) continue;
+    if (lines.length > 16 || lines.some(value => [...value].length > 240)) {
+      return { extra: null, error: input };
+    }
+    extra[field.id] = lines;
+  }
+  return { extra, error: null };
 }
 
 // savedLine is one song's muted line, "Saved … · 14 tracks · 92 BPM · 3:41",
@@ -895,6 +969,11 @@ export class ProjectLibraryPanel {
     this.panel.hidden = false;
     const jump = document.getElementById('projectLibraryJump');
     if (jump) jump.hidden = false;
+    // A reviewed package upgrade may bring the package's words for the
+    // shelf's facts and plugin fields (PRD #792 FR10): read them again
+    // without a reload. The name is assistant-program.js's
+    // PROVIDER_UPGRADED_EVENT.
+    document.addEventListener?.('assistant-program:provider-upgraded', () => void this.refresh());
     document
       .getElementById('projectLibraryInitialize')
       ?.addEventListener('click', event => void this.initialize(event.currentTarget));
@@ -1188,10 +1267,11 @@ export class ProjectLibraryPanel {
       this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
+      await this.loadSummary();
       await this.renderRecent();
       await this.renderResume();
       await this.renderPendingLinks();
-      await this.renderProposals();
+      await this.renderProposals({ loaded: true });
       await this.renderArrangementHistory();
       await this.renderCollections();
       await this.restoreBrowserResults();
@@ -1507,22 +1587,34 @@ export class ProjectLibraryPanel {
     }
   }
 
-  async renderProposals() {
+  // loadSummary reads the Home's library summary once per refresh: the digest,
+  // the freshness line and the Home's project words (PRD #792 FR7) all ride
+  // it. It runs before "Recently saved" so those facts use the Home's words.
+  async loadSummary() {
+    try {
+      this.summary = await this.request('/summary');
+    } catch (_) {
+      this.summary = null;
+    }
+    return this.summary;
+  }
+
+  /** The Home's project words from the summary; neutral until it is read. */
+  projectWords() {
+    return projectWords(this.summary?.words);
+  }
+
+  async renderProposals({ loaded = false } = {}) {
     const section = document.getElementById('projectLibraryProposals');
     const container = document.getElementById('projectLibraryProposalRows');
     if (!section || !container) return;
     container.replaceChildren();
     section.hidden = true;
     // The digest is a model-free summary of the last completed scan. It is
-    // shown even when the Manager has made no suggestions.
-    let summary = null;
-    try {
-      summary = await this.request('/summary');
-    } catch (_) {
-      summary = null;
-    }
-    // The freshness line rides this same read: no extra request on load.
-    this.summary = summary;
+    // shown even when the Manager has made no suggestions. A full refresh
+    // hands in the summary it already read; the freshness line rides the same
+    // read, so there is no extra request.
+    const summary = loaded ? this.summary : await this.loadSummary();
     this.renderFreshness();
     const digestText = libraryDigestText(summary?.digest, this.state?.roots);
     const digestLine = document.getElementById('projectLibraryDigest');
@@ -1584,6 +1676,7 @@ export class ProjectLibraryPanel {
       const sessionGoal = proposal.kind === 'session_goal';
       const sessionRecap = proposal.kind === 'session_recap';
       const rootReview = proposal.kind === 'root_review';
+      const fieldsKind = proposal.kind === 'fields';
       const card = node('article', 'project-library-resume-card');
       card.append(
         node('h4', '', row.name),
@@ -1598,13 +1691,15 @@ export class ProjectLibraryPanel {
                 ? `Suggested studio recap: ${proposal.recap}. This is not evidence that work happened, a run finished or a DAW ran. No recap was saved.`
                 : rootReview
                   ? 'Suggested navigation: inspect current discovery folder options. No folder was selected, approved or scanned.'
-                  : `Suggested next action: ${proposal.next_action}`
+                  : fieldsKind
+                    ? `Suggested notes: ${fieldsSuggestionText(proposal.proposed_fields, this.projectWords())}`
+                    : `Suggested next action: ${proposal.next_action}`
         ),
         node(
           'p',
           '',
           proposal.reason
-            ? `Manager's reason (untrusted note): ${proposal.reason}`
+            ? `${proposal.proposer_kind === 'keeper' ? 'Assistant' : 'Manager'}'s reason (untrusted note): ${proposal.reason}`
             : 'No reason provided.'
         ),
         node(
@@ -1643,7 +1738,9 @@ export class ProjectLibraryPanel {
                 ? void this.editRecapProposal(row, button)
                 : rootReview
                   ? void this.viewRootProposal(row, button)
-                  : void this.reviewProposal(row, button)
+                  : fieldsKind
+                    ? void this.reviewFieldsProposal(row, button)
+                    : void this.reviewProposal(row, button)
         );
         card.append(button);
       }
@@ -1781,6 +1878,40 @@ export class ProjectLibraryPanel {
     );
   }
 
+  // reviewFieldsProposal is the shelf's Accept for a fields suggestion: the
+  // Home reviews the saved suggestion, the owner sees before and after per
+  // field, and a second confirmation commits (PRD #792 FR24, FR25).
+  async reviewFieldsProposal(row, trigger) {
+    await this.run(trigger, 'Checking this suggestion against the current Home…', async () => {
+      const path = `/proposals/${encodeURIComponent(row.proposal.id)}`;
+      const review = await this.post(`${path}/review`);
+      const lines = acceptLines(
+        review,
+        { fields: row.proposal.proposed_fields, reason: row.proposal.reason },
+        this.projectWords()
+      );
+      if (
+        !(await this.confirm(`Save the suggestion for ${row.name}?`, lines, 'Save notes', trigger))
+      ) {
+        await this.refresh();
+        this.status('Suggestion canceled. Saved Home notes are unchanged.');
+        return;
+      }
+      try {
+        await this.post(`${path}/commit`, {
+          review_token: review.token,
+          idempotency_key: operationKey('fields-suggestion'),
+          confirm: true
+        });
+      } catch (error) {
+        await this.refresh();
+        throw error;
+      }
+      await this.refresh();
+      this.status(`Saved the reviewed notes for ${row.name}. No project ticket was started.`);
+    });
+  }
+
   async reviewProposal(row, trigger) {
     await this.run(
       trigger,
@@ -1833,7 +1964,11 @@ export class ProjectLibraryPanel {
     if (!section || !container) return;
     let view;
     try {
-      view = recentlySavedView(await this.request(`/projects?${RECENT_SONGS_QUERY}`));
+      view = recentlySavedView(
+        await this.request(`/projects?${RECENT_SONGS_QUERY}`),
+        new Date(),
+        this.projectWords()
+      );
     } catch (_) {
       view = { visible: false, cards: [] };
     }
@@ -3869,13 +4004,21 @@ export class ProjectLibraryPanel {
       ['Purpose', fields.purpose],
       ['Next action', fields.next_action],
       ['Last saved', lastSavedLabel(row.last_saved_at)],
-      ['Observed project details', songFactsLabel(row.facts)],
+      ['Observed project details', songFactsLabel(row.facts, this.projectWords())],
       ['Last scanned', savedMetadataTime(row.last_scanned_at)],
       ['Saved-note activity', savedMetadataTime(row.sourced_activity_at)]
     ]) {
       const shown = value && value !== 'unknown' ? label(value) : '';
       const description = node('dd', '', shown || '—');
       if (!shown) description.setAttribute('aria-label', `${name} not known or not set`);
+      summary.append(node('dt', '', name), description);
+    }
+    // Plugin-declared fields under their declared labels (PRD #792 FR29), as
+    // the owner typed them; a stored id the package no longer declares is not
+    // sent by the server.
+    for (const [name, lines] of extraFieldRows(fields.extra, this.projectWords())) {
+      const description = node('dd', '', lines.join('; ') || '—');
+      if (!lines.length) description.setAttribute('aria-label', `${name} not set`);
       summary.append(node('dt', '', name), description);
     }
     content.append(summary, node('h4', '', 'Saved source observations'));
@@ -4912,6 +5055,26 @@ export class ProjectLibraryPanel {
       fields.append(labelNode);
     }
     fields.append(milestones);
+    // One control per plugin-declared field, under its declared label (PRD
+    // #792 FR29): an input for text, a textarea for a list.
+    const savedExtra = detail.fields.extra || {};
+    const extraControls = this.projectWords().fields.map(field => {
+      const list = field.kind === 'list';
+      const input = node(list ? 'textarea' : 'input', 'form-control');
+      if (list) input.rows = 3;
+      input.maxLength = list ? 4096 : 240;
+      input.value = (savedExtra[field.id] || []).join(list ? '\n' : ' ');
+      input.dataset.extraField = field.id;
+      input.addEventListener('input', () => input.setCustomValidity(''));
+      const labelNode = node(
+        'label',
+        '',
+        list ? `${field.label} (one per line, up to 16)` : field.label
+      );
+      labelNode.append(input);
+      fields.append(labelNode);
+      return { field, input };
+    });
     const actions = node('div', 'assistant-program-dialog-actions');
     const cancel = node('button', 'modern-btn modern-btn-secondary', 'Cancel');
     cancel.type = 'button';
@@ -4988,6 +5151,22 @@ export class ProjectLibraryPanel {
       }));
       if (JSON.stringify(currentMilestones) !== JSON.stringify(normalizedMilestones))
         patch.milestones = currentMilestones;
+      if (extraControls.length) {
+        const { extra, error } = extraFieldValues(extraControls);
+        if (error) {
+          error.setCustomValidity('Use no more than 16 entries, each at most 240 characters.');
+          error.reportValidity();
+          return;
+        }
+        // The whole declared map is sent when anything in it changed; the
+        // server keeps any stored field the package no longer declares.
+        const before = Object.fromEntries(
+          extraControls
+            .filter(({ field }) => (savedExtra[field.id] || []).length)
+            .map(({ field }) => [field.id, savedExtra[field.id]])
+        );
+        if (JSON.stringify(extra) !== JSON.stringify(before)) patch.extra = extra;
+      }
       const beforePriority = detail.fields.priority == null ? '' : String(detail.fields.priority);
       if (priority.value !== beforePriority) {
         if (priority.value === '') patch.clear_priority = true;
@@ -5014,10 +5193,7 @@ export class ProjectLibraryPanel {
           'Save these project notes?',
           [
             detail.row.name,
-            ...Object.entries(patch).map(
-              ([key, value]) =>
-                `${label(key)}: ${key === 'clear_priority' ? 'Unset' : key === 'milestones' ? value.map(item => `${item.label}${item.due_date ? ` · ${item.due_date}` : ''} · ${item.complete ? 'complete' : 'open'}`).join('; ') || 'None' : Array.isArray(value) ? value.join('; ') || 'None' : String(value || 'Not set')}`
-            ),
+            ...fieldsPatchLines(patch, this.projectWords()),
             ...(patch.archive_review_state != null
               ? ['Archive review is a note, not a file move.']
               : [])

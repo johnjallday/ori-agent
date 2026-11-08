@@ -230,10 +230,15 @@ type Fields struct {
 	Milestones         []Milestone `json:"milestones,omitempty"`
 	Blockers           []string    `json:"blockers,omitempty"`
 	Deliverables       []string    `json:"deliverables,omitempty"`
-	Revision           int64       `json:"revision"`
-	Author             string      `json:"author,omitempty"`
-	Source             string      `json:"source,omitempty"`
-	UpdatedAt          time.Time   `json:"updated_at,omitempty"`
+	// Extra holds the plugin-declared fields (PRD #792 FR28): declaration id →
+	// lines. The host never interprets them; whether an id is declared is
+	// checked where the declaration is known, so a package change never loses
+	// the owner's words.
+	Extra     map[string][]string `json:"extra,omitempty"`
+	Revision  int64               `json:"revision"`
+	Author    string              `json:"author,omitempty"`
+	Source    string              `json:"source,omitempty"`
+	UpdatedAt time.Time           `json:"updated_at,omitempty"`
 }
 
 type ExactLink struct {
@@ -451,6 +456,9 @@ func (f Fields) valid() bool {
 		}
 		seenMilestones[milestone.ID] = true
 	}
+	if !validExtraFields(f.Extra) {
+		return false
+	}
 	for _, list := range [][]string{f.Blockers, f.Deliverables} {
 		for _, item := range list {
 			if item == "" || !validText(item, 240) {
@@ -624,7 +632,15 @@ func (d Document) valid(scope Scope) bool {
 			(proposal.DismissedAt != nil && proposal.DismissedAt.Before(proposal.CreatedAt)) {
 			return false
 		}
+		if proposal.Kind != ProposalKindFields && (proposal.ProposedFields != nil || proposal.ProposerKind != "" ||
+			proposal.ProposerWorkspaceID != "" || proposal.WithdrawnAt != nil) {
+			return false
+		}
 		switch proposal.Kind {
+		case ProposalKindFields:
+			if !fieldsProposalShapeValid(proposal) {
+				return false
+			}
 		case "": // Existing saved next-action suggestions retain their original digest.
 			if proposal.SessionID != "" || proposal.SessionRevision != 0 || proposal.Recap != "" ||
 				proposal.RootSetDigest != "" || proposal.EntryRevision != 0 || proposal.Goal != nil || proposal.GoalSessionCount != 0 ||

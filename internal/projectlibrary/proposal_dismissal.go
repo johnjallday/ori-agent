@@ -31,7 +31,7 @@ type ProposalDismissal struct {
 
 func knownProposalKind(kind string) bool {
 	switch kind {
-	case "", "root_review", "project_review", "session_goal", "session_recap":
+	case "", "root_review", "project_review", "session_goal", "session_recap", ProposalKindFields:
 		return true
 	}
 	return false
@@ -53,7 +53,8 @@ func dismissalsValid(dismissals []ProposalDismissal) bool {
 // proposalWaiting is a suggestion the owner could still act on, judged from
 // the document alone: not dismissed, not expired, not stale.
 func proposalWaiting(doc Document, proposal ManagerProposal, at time.Time) bool {
-	return proposal.DismissedAt == nil && proposal.ExpiresAt.After(at) && !proposalStaleInDocument(doc, proposal)
+	return proposal.DismissedAt == nil && proposal.WithdrawnAt == nil && proposal.ExpiresAt.After(at) &&
+		!proposalStaleInDocument(doc, proposal)
 }
 
 func recentlyDismissed(doc Document, entryID, kind string, at time.Time) bool {

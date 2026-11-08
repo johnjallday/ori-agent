@@ -1,26 +1,47 @@
 /*
- * home-song-roster.js — the "Songs and assistants" section of a program
- * Home's Details (song-card PRD FR15–FR20).
+ * home-song-roster.js — the projects-and-assistants section of a program
+ * Home's Details (song-card PRD FR15–FR20), titled with the Home's words
+ * ("Songs and assistants" under the Music package, "Projects and assistants"
+ * without one; PRD #792 FR8).
  *
- * One row per connected song, from
- * `GET /api/workspaces/{home}/assistant-program/library/roster`: the song
- * title (a link that opens the song), its keeper's name (text, never a link),
- * its last accepted session and its open work. The server orders the rows by
- * last session, then last save, then name. Ten rows show; "Show all (N)"
- * expands in place. Read-only: no chat, hire, pause or move here. Facts are
- * not repeated; the shelf shows them.
+ * One row per connected project, from
+ * `GET /api/workspaces/{home}/assistant-program/library/roster`: the title (a
+ * link that opens the project), its keeper's name (text, never a link), its
+ * last accepted session and its open work. The server orders the rows by last
+ * session, then last save, then name, and sends the Home's `words`. Ten rows
+ * show; "Show all (N)" expands in place. Read-only: no chat, hire, pause or
+ * move here. Facts are not repeated; the shelf shows them.
  */
 
+import { stageLabel } from './field-labels.js';
 import { format as openWorkLine } from './ticket-count-line.js';
-import { songFactsLabel } from './library-open.js';
-import { safeWorkspaceRoute } from './song-card.js';
+import { lowerNoun, projectWords, songFactsLabel } from './library-open.js';
+import { safeWorkspaceRoute, untitledText } from './song-card.js';
 
 export const ROSTER_VISIBLE_ROWS = 10;
-export const ROSTER_TITLE = 'Songs and assistants';
 export const NO_SESSION_TEXT = 'No sessions yet';
 export const NO_KEEPER_TEXT = 'No assistant yet';
-export const EMPTY_TEXT = 'No songs are linked yet.';
 export const EMPTY_ACTION_TEXT = 'Set up projects from the map’s library badge.';
+export const UNSET_CELL_TEXT = '—';
+export const NO_STAGE_LABEL = 'Stage not set';
+export const NO_NEXT_ACTION_LABEL = 'No next action';
+export const NEXT_ACTION_MAX = 80;
+
+/** At most `max` characters, cut on a word with "…" (PRD #792 FR15). */
+export function cutOnWord(value, max = NEXT_ACTION_MAX) {
+  const line = text(value).replace(/\s+/g, ' ');
+  const chars = [...line];
+  if (chars.length <= max) return line;
+  let cut = chars.slice(0, max - 1).join('');
+  const space = cut.lastIndexOf(' ');
+  if (space > max / 2) cut = cut.slice(0, space);
+  return `${cut.replace(/[\s,;:-]+$/, '')}…`;
+}
+
+/** "No songs are linked yet." under the Home's words. */
+export function emptyText(words) {
+  return `No ${lowerNoun(words, { plural: true })} are linked yet.`;
+}
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const text = value => (typeof value === 'string' ? value.trim() : '');
@@ -31,19 +52,22 @@ export function rosterURL(homeID) {
 
 /**
  * Workspace id → a map tile's facts text, from Home id → roster rows (song-card
- * PRD FR10). Both maps use it: Home's map and a Home's own page map.
+ * PRD FR10). Both maps use it: Home's map and a Home's own page map. `words`
+ * is Home id → that Home's roster `words`; a Home without them reads neutral.
  */
-export function songFactsSnapshot(rosters) {
+export function songFactsSnapshot(rosters, words = {}) {
   const snapshot = {};
-  for (const rows of Object.values(rosters || {})) {
+  for (const [homeID, rows] of Object.entries(rosters || {})) {
+    const homeWords = words && typeof words === 'object' ? words[homeID] : null;
     for (const row of Array.isArray(rows) ? rows : []) {
       const id = String(row?.workspace_id || '');
-      // The tile says tempo and length; the card and the tooltip keep the
-      // track count and "varies". A song with only a track count shows that.
+      // The tile shows the declared facts but the track count, and no
+      // "varies"; the card and the tooltip keep both. A project with only a
+      // track count shows that.
       const facts = row?.facts && typeof row.facts === 'object' ? row.facts : null;
       const label =
-        songFactsLabel(facts && { ...facts, track_count: 0, tempo_varies: false }) ||
-        songFactsLabel(facts);
+        songFactsLabel(facts && { ...facts, track_count: 0, tempo_varies: false }, homeWords) ||
+        songFactsLabel(facts, homeWords);
       if (id && label) snapshot[id] = label;
     }
   }
@@ -59,14 +83,21 @@ export function sessionDate(isoTime, now = new Date()) {
   return date.getFullYear() === now.getFullYear() ? day : `${day}, ${date.getFullYear()}`;
 }
 
-function rowView(row, now) {
+function rowView(row, now, words) {
   const session = row?.last_session;
   const sentence = text(session?.first_sentence);
   const date = sessionDate(session?.accepted_at, now);
   const keeper = text(row?.keeper_agent_name);
+  const stage = stageLabel(row?.stage);
+  const nextAction = cutOnWord(row?.next_action);
   return {
     id: text(row?.workspace_id),
-    title: text(row?.title) || 'Untitled song',
+    title: text(row?.title) || untitledText(words),
+    // An unset cell is "—" with a label a screen reader says instead.
+    stageText: stage || UNSET_CELL_TEXT,
+    stageLabel: stage ? '' : NO_STAGE_LABEL,
+    nextActionText: nextAction || UNSET_CELL_TEXT,
+    nextActionLabel: nextAction ? '' : NO_NEXT_ACTION_LABEL,
     href: safeWorkspaceRoute(row?.workspace_route),
     keeperText: keeper || NO_KEEPER_TEXT,
     hasKeeper: Boolean(keeper),
@@ -80,22 +111,27 @@ function rowView(row, now) {
 /**
  * The section's view model. `rows` is the server's ordered list; `expanded`
  * shows every row. `sheet` is the library setup sheet's link for the empty
- * line ({ href } or null).
+ * line ({ href } or null). `words` is the roster response's `words`.
  */
-export function rosterView(rows, { expanded = false, now = new Date(), sheet = null } = {}) {
+export function rosterView(
+  rows,
+  { expanded = false, now = new Date(), sheet = null, words = null } = {}
+) {
+  const resolvedWords = projectWords(words);
   const all = (Array.isArray(rows) ? rows : []).filter(row => row && text(row.workspace_id));
   const visible = expanded ? all : all.slice(0, ROSTER_VISIBLE_ROWS);
   const view = {
-    title: ROSTER_TITLE,
+    title: resolvedWords.roster_title,
+    words: resolvedWords,
     total: all.length,
-    rows: visible.map(row => rowView(row, now)),
+    rows: visible.map(row => rowView(row, now, resolvedWords)),
     showAll:
       !expanded && all.length > ROSTER_VISIBLE_ROWS ? { label: `Show all (${all.length})` } : null,
     empty: null
   };
   if (!all.length) {
     const href = sheet && typeof sheet.href === 'string' ? sheet.href : '';
-    view.empty = { text: EMPTY_TEXT, action: { label: EMPTY_ACTION_TEXT, href } };
+    view.empty = { text: emptyText(resolvedWords), action: { label: EMPTY_ACTION_TEXT, href } };
   }
   return view;
 }
@@ -157,6 +193,19 @@ export function renderRoster(container, view, { onShowAll, onOpenSheet } = {}) {
           row.keeperText
         )
       );
+      for (const [className, value, label] of [
+        ['song-roster-stage', row.stageText, row.stageLabel],
+        ['song-roster-next', row.nextActionText, row.nextActionLabel]
+      ]) {
+        const cell = element(
+          doc,
+          'span',
+          `${className}${label ? ' song-roster-muted' : ''}`,
+          value
+        );
+        if (label) cell.setAttribute('aria-label', label);
+        item.append(cell);
+      }
       item.append(
         element(
           doc,

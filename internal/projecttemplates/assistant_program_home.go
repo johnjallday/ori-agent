@@ -40,6 +40,11 @@ type AssistantProgramHome struct {
 	// it must require the home_profile_v1 host feature. It stays out of the
 	// durable declaration: readers take it from the installed package.
 	HomeProfile *HomeProfileDeclaration `json:"home_profile,omitempty"`
+	// ProjectCard is the package's words for the Home's project card, roster
+	// and facts line. A manifest that declares it must require the
+	// project_card_words_v1 host feature. Like HomeProfile it stays out of the
+	// durable declaration; it is part of the digest.
+	ProjectCard *ProjectCardDeclaration `json:"project_card,omitempty"`
 }
 
 // AssistantProgramHomeRole deliberately has no scope field: its component
@@ -156,6 +161,7 @@ func CloneAssistantProgramHome(source AssistantProgramHome) AssistantProgramHome
 	clone.Stages = append([]workspace.AssistantProgramStageSpec(nil), source.Stages...)
 	clone.AllowedProjectAttachments = append([]AssistantProgramAllowedProjectAttachment(nil), source.AllowedProjectAttachments...)
 	clone.HomeProfile = source.HomeProfile.Clone()
+	clone.ProjectCard = source.ProjectCard.Clone()
 	return clone
 }
 
@@ -255,7 +261,10 @@ func NormalizeAssistantProgramHome(home *AssistantProgramHome) error {
 			return err
 		}
 	}
-	return normalizeHomeProfileDeclaration(home.HomeProfile)
+	if err := normalizeHomeProfileDeclaration(home.HomeProfile); err != nil {
+		return err
+	}
+	return normalizeProjectCardDeclaration(home.ProjectCard)
 }
 
 func strictAssistantIDs(values []string, maximum int) bool {
@@ -315,6 +324,7 @@ func AssistantProgramHomeTemplate(home AssistantProgramHome, owner workspace.Ass
 		ID:   "plugin-home:" + strings.ToLower(strings.TrimSpace(owner.PluginID)) + ":" + home.ID,
 		Name: home.StationName, Description: home.StationDescription, Revision: revision,
 		ProgramHomeOwner: &owner, AssistantProgram: home.AssistantProgram(),
+		ProgramHomeWords: home.ProjectCard.Snapshot(owner.PluginID, owner.PluginVersion),
 		GroupRequirement: &GroupRequirement{
 			SchemaVersion: GroupRequirementSchemaVersion, Policy: GroupPolicyRequired,
 			AssistantProgramID: home.ID, MissingHome: MissingHomeOfferCreate, DefaultHomeName: home.StationName,

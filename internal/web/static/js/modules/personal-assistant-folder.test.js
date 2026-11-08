@@ -542,7 +542,20 @@ test('each song on the last screen carries its facts, and a song without facts n
   const rows = songRows(3);
   rows[0].facts = { track_count: 14, tempo_bpm: 92, tempo_varies: true, length_seconds: 221 };
   rows[1].facts = { track_count: 1 };
-  const view = setupModalView(homeRunOffer(), { songs: rows, total: 3, now: today });
+  // The Home's package words come from the library summary read (PRD #792 FR7).
+  const words = {
+    source: 'package',
+    noun: 'Song',
+    noun_plural: 'Songs',
+    roster_title: 'Songs and assistants',
+    facts: [
+      { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+      { kind: 'tempo', unit: 'BPM' },
+      { kind: 'length' }
+    ],
+    fields: []
+  };
+  const view = setupModalView(homeRunOffer(), { songs: rows, total: 3, now: today, words });
   assert.deepEqual(
     view.songs.map(song => [song.name, song.saved, song.facts]),
     [
@@ -552,6 +565,9 @@ test('each song on the last screen carries its facts, and a song without facts n
     ]
   );
   assert.doesNotMatch(JSON.stringify(view.songs), /tempo_bpm|track_count|unknown|progress/);
+  // Without words the facts read neutral.
+  const neutral = setupModalView(homeRunOffer(), { songs: rows, total: 3, now: today });
+  assert.equal(neutral.songs[1].facts, 'Tracks 1');
 });
 
 test('one song is counted as one song', () => {

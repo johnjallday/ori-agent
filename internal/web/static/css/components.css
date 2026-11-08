@@ -1451,6 +1451,136 @@ textarea.form-control:focus {
   margin-top: 0.15rem;
 }
 
+/* The details block (PRD #792 FR12): label above value, each row wraps;
+   nothing scrolls sideways at 360 px. */
+.song-card-details {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--cozy-line, #cdbf9f);
+}
+
+.song-card-details-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.song-card-detail {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.song-card-detail-label {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.song-card-detail-value {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.song-card-detail-lines {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.song-card-detail-done {
+  color: var(--cozy-ink-dim, #5d5442);
+}
+
+.song-card-details-empty {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.88rem;
+  font-style: italic;
+}
+
+.song-card-edit {
+  justify-self: start;
+  font-size: 0.88rem;
+}
+
+/* Fields suggestions (PRD #792 FR24): who and when, what would change, the
+   reason as an untrusted note, then Accept and Dismiss. Wraps at 360 px. */
+.song-card-suggestions {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.song-card-suggestion {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px dashed var(--cozy-line, #cdbf9f);
+  border-radius: 8px;
+  background: var(--cozy-paper, #f7f1e3);
+}
+
+.song-card-suggestion-by {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.song-card-suggestion-rows,
+.song-card-suggestion-lines {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+}
+
+.song-card-suggestion-reason {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.song-card-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.song-card-confirm {
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--cozy-line, #cdbf9f);
+  border-radius: 10px;
+  background: var(--cozy-paper-raised, #fdfaf2);
+  color: var(--cozy-ink, #2b2417);
+  overflow-wrap: anywhere;
+}
+
+.song-card-confirm::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.song-card-confirm-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.song-card-confirm-lines {
+  margin: 0 0 0.75rem;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.song-card-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 /* Songs and assistants (home-song-roster.js): Home Details' read-only list of
    linked songs. Each row wraps its parts; no horizontal scroll at 360 px. */
 .song-roster-mount[hidden] {
@@ -1501,7 +1631,16 @@ textarea.form-control:focus {
 }
 
 .song-roster-keeper,
-.song-roster-work {
+.song-roster-work,
+.song-roster-stage {
+  font-size: 0.85rem;
+}
+
+/* Next action (PRD #792 FR15): already cut to 80 characters; wraps on its own
+   line under the title at 360 px. */
+.song-roster-next {
+  flex: 1 1 14rem;
+  min-width: 0;
   font-size: 0.85rem;
 }
 

@@ -474,5 +474,6 @@ func cloneTemplate(source Template) Template {
 		owner := source.ProgramHomeOwner.Clone()
 		clone.ProgramHomeOwner = &owner
 	}
+	clone.ProgramHomeWords = source.ProgramHomeWords.Clone()
 	return clone
 }

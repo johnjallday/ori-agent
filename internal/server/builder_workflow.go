@@ -111,9 +111,14 @@ func (b *ServerBuilder) buildRuntimeTaskToolFactory() workspace.RuntimeTaskToolF
 		// The ordinary task factory only knows an agent name. It must not
 		// present a Home read through a global fallback; this runtime factory
 		// receives the exact task instance and reapplies policy at tool call.
+		// A Home ticket run by its bound Manager also gets the one fields
+		// suggestion tool (PRD #792 FR19), and a song ticket run by its keeper
+		// the keeper's (FR20); both are exposed only when their policy passes
+		// for this exact instance and recheck it at every call.
 		for _, candidate := range provider.Tools() {
 			switch candidate.Definition().Name {
-			case "home_library_search", "home_library_detail", "resource_catalog_search", "resource_catalog_detail":
+			case "home_library_search", "home_library_detail", "resource_catalog_search", "resource_catalog_detail",
+				"home_library_propose_fields", "project_card_propose_fields":
 				tools = append(tools, candidate)
 			}
 		}

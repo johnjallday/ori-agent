@@ -73,6 +73,11 @@ const (
 	// those fields strictly, so a release that uses them is refused before
 	// install and its resolver steps down to an older release.
 	HostFeatureResourceWorkspacesV1 = "resource_workspaces_v1"
+	// HostFeatureProjectCardWordsV1 gates a Home declaration's `project_card`
+	// section: the package's words for the project card, the Home roster and
+	// the facts line. An older host decodes the key strictly and rejects the
+	// whole package, so a release that declares it requires this feature.
+	HostFeatureProjectCardWordsV1 = "project_card_words_v1"
 )
 
 // hostFeatures is what this build advertises. It is the one list: a second copy
@@ -90,6 +95,7 @@ var hostFeatures = []string{
 	HostFeatureIndependentProgramHomesV1,
 	HostFeatureHomeProfileV1,
 	HostFeatureResourceWorkspacesV1,
+	HostFeatureProjectCardWordsV1,
 }
 
 // HostFeatures returns the features this build advertises, newest last.
@@ -449,6 +455,14 @@ func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures 
 		}
 		if _, declared := seenHostFeatures[HostFeatureHomeProfileV1]; !declared {
 			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "home_profile requires home_profile_v1", nil)
+		}
+	}
+	for index := range c.AssistantProgramHomes {
+		if c.AssistantProgramHomes[index].ProjectCard == nil {
+			continue
+		}
+		if _, declared := seenHostFeatures[HostFeatureProjectCardWordsV1]; !declared {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "project_card requires project_card_words_v1", nil)
 		}
 	}
 	if c.HomeProfileFacts != nil {

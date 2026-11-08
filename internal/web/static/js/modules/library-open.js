@@ -162,28 +162,116 @@ function songLength(seconds) {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${secs}` : `${minutes}:${secs}`;
 }
 
-// songFactsLabel words the three numbers read from a song's project file:
-// "14 tracks · 92 BPM · 3:41", "92 BPM, varies" when the tempo changes. A part
-// that is unknown is left out (never "0" or "unknown"); no facts is ''. These are
-// facts about the file, never a word on how far along the song is.
-export function songFactsLabel(facts) {
+/*
+ * Project words (PRD #792 FR6–FR8). A Home's pinned package names what one
+ * project is called, the roster's title, the facts' units and any extra
+ * fields; the server sends them as `words` on the song-card, roster and
+ * summary responses. Ori keeps no domain word for these surfaces: without
+ * words every caller gets the neutral "Project" words, never a blank.
+ */
+export const NEUTRAL_WORDS = Object.freeze({
+  source: 'neutral',
+  noun: 'Project',
+  noun_plural: 'Projects',
+  roster_title: 'Projects and assistants',
+  facts: Object.freeze([]),
+  fields: Object.freeze([])
+});
+
+const FACT_KINDS = new Set(['track_count', 'tempo', 'length']);
+const wordText = value => (typeof value === 'string' ? value.trim() : '');
+
+/** A complete words object: the given words where valid, neutral otherwise. */
+export function projectWords(words) {
+  if (!words || typeof words !== 'object') return NEUTRAL_WORDS;
+  const noun = wordText(words.noun);
+  const nounPlural = wordText(words.noun_plural);
+  const rosterTitle = wordText(words.roster_title);
+  if (!noun || !nounPlural || !rosterTitle) return NEUTRAL_WORDS;
+  const seen = new Set();
+  const facts = (Array.isArray(words.facts) ? words.facts : []).filter(fact => {
+    const kind = wordText(fact?.kind);
+    if (!FACT_KINDS.has(kind) || seen.has(kind)) return false;
+    seen.add(kind);
+    return true;
+  });
+  const fields = (Array.isArray(words.fields) ? words.fields : []).filter(
+    field => wordText(field?.id) && wordText(field?.label)
+  );
+  return {
+    source: words.source === 'package' ? 'package' : 'neutral',
+    noun,
+    noun_plural: nounPlural,
+    roster_title: rosterTitle,
+    facts,
+    fields
+  };
+}
+
+/** The noun in running text: "song", "projects". */
+export function lowerNoun(words, { plural: many = false } = {}) {
+  const resolved = projectWords(words);
+  return (many ? resolved.noun_plural : resolved.noun).toLowerCase();
+}
+
+// The host's own names for the three stored facts, used only without
+// package facts (neutral order: track count, tempo, length).
+const NEUTRAL_FACT_ORDER = ['track_count', 'tempo', 'length'];
+const NEUTRAL_FACT_LABEL = { track_count: 'Tracks', tempo: 'Tempo' };
+
+function factValue(facts, kind) {
+  if (kind === 'track_count') {
+    return positive(facts.track_count) && Number.isInteger(facts.track_count)
+      ? String(facts.track_count)
+      : '';
+  }
+  if (kind === 'tempo') {
+    return positive(facts.tempo_bpm) ? String(Math.round(facts.tempo_bpm * 10) / 10) : '';
+  }
+  if (kind === 'length') {
+    return positive(facts.length_seconds) && Math.round(facts.length_seconds) > 0
+      ? songLength(facts.length_seconds)
+      : '';
+  }
+  return '';
+}
+
+const variesNote = (facts, kind) =>
+  kind === 'tempo' && facts.tempo_varies === true ? ', varies' : '';
+
+// songFactsLabel words the three numbers read from a project file with the
+// Home's words: "14 tracks · 92 BPM · 3:41" and "92 BPM, varies" under the
+// Music package's words, "Tracks 14 · Tempo 92 · 3:41" under the neutral ones.
+// A part that is unknown is left out (never "0" or "unknown"); no facts is ''.
+// These are facts about the file, never a word on how far along the work is.
+// It matches the server's projectlibrary.FactsLabel.
+export function songFactsLabel(facts, words) {
   if (!facts || typeof facts !== 'object') return '';
+  const resolved = projectWords(words);
   const parts = [];
-  if (positive(facts.track_count) && Number.isInteger(facts.track_count)) {
-    parts.push(plural(facts.track_count, 'track'));
+  if (!resolved.facts.length) {
+    for (const kind of NEUTRAL_FACT_ORDER) {
+      const value = factValue(facts, kind);
+      if (!value) continue;
+      const label = NEUTRAL_FACT_LABEL[kind];
+      parts.push(`${label ? `${label} ${value}` : value}${variesNote(facts, kind)}`);
+    }
+    return parts.join(' · ');
   }
-  if (positive(facts.tempo_bpm)) {
-    const tempo = `${Math.round(facts.tempo_bpm * 10) / 10} BPM`;
-    parts.push(facts.tempo_varies === true ? `${tempo}, varies` : tempo);
-  }
-  if (positive(facts.length_seconds) && Math.round(facts.length_seconds) > 0) {
-    parts.push(songLength(facts.length_seconds));
+  for (const fact of resolved.facts) {
+    const kind = wordText(fact.kind);
+    const value = factValue(facts, kind);
+    if (!value) continue;
+    let unit = wordText(fact.unit);
+    if (unit && value === '1' && wordText(fact.unit_one)) unit = wordText(fact.unit_one);
+    parts.push(`${unit ? `${value} ${unit}` : value}${variesNote(facts, kind)}`);
   }
   return parts.join(' · ');
 }
 
-// songLineText is a song's one muted line, "Saved … · 14 tracks · 92 BPM ·
-// 3:41", with each fact kept on one line (non-breaking spaces inside a fact),
+// songLineText is a project's one muted line, "Saved … · 14 tracks · 92 BPM ·
+// 3:41" (facts already worded by songFactsLabel with the Home's words), with
+// each fact kept on one line (non-breaking spaces inside a fact),
 // so a narrow card wraps only between facts.
 export function songLineText(saved, facts) {
   const unbroken = String(facts || '')

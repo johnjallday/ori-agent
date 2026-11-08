@@ -2352,19 +2352,36 @@ test('the Song card mount sits at the top of the workspace context, after its he
 });
 
 test('tile facts come from each Home roster with the shelf wording', () => {
-  const snapshot = songFactsSnapshot({
-    home: [
-      { workspace_id: 'a', facts: { tempo_bpm: 92, length_seconds: 132, track_count: 6 } },
-      { workspace_id: 'b', facts: null },
-      { workspace_id: '', facts: { tempo_bpm: 100 } }
+  const music = {
+    source: 'package',
+    noun: 'Song',
+    noun_plural: 'Songs',
+    roster_title: 'Songs and assistants',
+    facts: [
+      { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+      { kind: 'tempo', unit: 'BPM' },
+      { kind: 'length' }
     ],
-    other: [{ workspace_id: 'c', facts: { tempo_bpm: 96, tempo_varies: true } }]
-  });
-  assert.deepEqual(snapshot, { a: '92 BPM · 2:12', c: '96 BPM' });
+    fields: []
+  };
+  const snapshot = songFactsSnapshot(
+    {
+      home: [
+        { workspace_id: 'a', facts: { tempo_bpm: 92, length_seconds: 132, track_count: 6 } },
+        { workspace_id: 'b', facts: null },
+        { workspace_id: '', facts: { tempo_bpm: 100 } }
+      ],
+      other: [{ workspace_id: 'c', facts: { tempo_bpm: 96, tempo_varies: true } }]
+    },
+    { home: music }
+  );
+  // Each Home's own words: the package's for one, neutral for the other.
+  assert.deepEqual(snapshot, { a: '92 BPM · 2:12', c: 'Tempo 96' });
   // Only a track count known: the tile still says it.
-  assert.deepEqual(songFactsSnapshot({ h: [{ workspace_id: 'd', facts: { track_count: 3 } }] }), {
-    d: '3 tracks'
-  });
+  assert.deepEqual(
+    songFactsSnapshot({ h: [{ workspace_id: 'd', facts: { track_count: 3 } }] }, { h: music }),
+    { d: '3 tracks' }
+  );
   assert.deepEqual(songFactsSnapshot(null), {});
   assert.equal(songRosterURL('h 1'), '/api/workspaces/h%201/assistant-program/library/roster');
 });

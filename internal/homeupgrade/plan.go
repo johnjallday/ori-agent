@@ -149,13 +149,14 @@ func guidanceOnlyPrograms(installed plugin.InstalledPlugin, target Target) ([]Pl
 		return nil, ErrNotGuidanceOnly
 	}
 	programs := make([]PlanProgram, 0, len(currentHomes))
-	addsProfile, addsResource := false, false
+	addsProfile, addsResource, addsProjectCard := false, false, false
 	for index := range currentHomes {
 		change, err := projecttemplates.AcceptedHomeChange(currentHomes[index], nextHomes[index])
 		if err != nil {
 			return nil, ErrNotGuidanceOnly
 		}
 		addsProfile = addsProfile || change.AddsHomeProfile
+		addsProjectCard = addsProjectCard || change.AddsProjectCard
 		addsResource = addsResource || len(change.AddedResourceAttachments) > 0
 		added := make([]PlanResourceAttachment, 0, len(change.AddedResourceAttachments))
 		for _, attachment := range change.AddedResourceAttachments {
@@ -165,7 +166,13 @@ func guidanceOnlyPrograms(installed plugin.InstalledPlugin, target Target) ([]Pl
 			})
 		}
 		home := currentHomes[index]
+		var words *workspace.ProjectCardWords
+		if change.AddsProjectCard {
+			words = nextHomes[index].ProjectCard.Snapshot(next.Name, next.Version)
+		}
 		programs = append(programs, PlanProgram{
+			AddsProjectCard: change.AddsProjectCard, ProjectCardNoun: change.ProjectCardNoun,
+			ProjectCardNounPlural: change.ProjectCardNounPlural, ProjectCardWords: words,
 			ProgramID: home.ID,
 			From: workspace.AssistantProgramHomeOwner{
 				PluginID: installed.Name, PluginVersion: installed.Version, ProgramID: home.ID,
@@ -201,6 +208,11 @@ func guidanceOnlyPrograms(installed plugin.InstalledPlugin, target Target) ([]Pl
 	if addsResource && !slices.Contains(installed.WorkspaceSurfaces.RequiresHostFeatures, plugin.HostFeatureResourceWorkspacesV1) {
 		setAside = append(setAside, plugin.HostFeatureResourceWorkspacesV1)
 	}
+	// project_card_words_v1 may start being required only by a release that
+	// actually adds the section (FR10).
+	if addsProjectCard && !slices.Contains(installed.WorkspaceSurfaces.RequiresHostFeatures, plugin.HostFeatureProjectCardWordsV1) {
+		setAside = append(setAside, plugin.HostFeatureProjectCardWordsV1)
+	}
 	candidate, err := withoutHomes(*next.WorkspaceSurfaces, setAside)
 	if err != nil || !bytes.Equal(current, candidate) {
 		return nil, ErrNotGuidanceOnly
@@ -223,7 +235,8 @@ func (p Plan) upgrade(programID, operationID string, generation uint64, at time.
 		for _, change := range program.RolePrompts {
 			prompts[change.RoleID] = workspace.HomeRolePromptChange{Old: change.Old, New: change.New}
 		}
-		return workspace.HomeProviderUpgrade{OperationID: operationID, From: program.From, To: to, RolePrompts: prompts, UpgradedAt: at.UTC()}, true
+		return workspace.HomeProviderUpgrade{OperationID: operationID, From: program.From, To: to, RolePrompts: prompts,
+			UpgradedAt: at.UTC(), ProjectCardWords: program.ProjectCardWords.Clone()}, true
 	}
 	return workspace.HomeProviderUpgrade{}, false
 }

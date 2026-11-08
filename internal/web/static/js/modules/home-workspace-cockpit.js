@@ -11,7 +11,7 @@ import {
   libraryShelfRoute
 } from './home-library-badges.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
-import { renderSongCard, songCardURL, songCardView } from './song-card.js';
+import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import { workspaceUpdates, watchWorkspaceUpdatePage } from './workspace-updates.js';
 import {
   workspaceUpdateSignals,
@@ -4163,9 +4163,17 @@ import {
     return els.railContext?.querySelector?.('[data-song-card-mount]') || null;
   }
 
+  // Accept and Dismiss answer on the card's Home, then this card reads again
+  // (PRD #792 FR24, FR33).
+  function paintSongCard(workspaceID, view) {
+    renderInteractiveSongCard(songCardMount(), view, {
+      reload: () => fillSongCard(workspaceID),
+      onError: err => console.warn('home-workspace-cockpit: suggestion answer failed', err)
+    });
+  }
+
   async function fillSongCard(workspaceID) {
-    if (songCardCache.has(workspaceID))
-      renderSongCard(songCardMount(), songCardCache.get(workspaceID));
+    if (songCardCache.has(workspaceID)) paintSongCard(workspaceID, songCardCache.get(workspaceID));
     let view = null;
     try {
       const response = await fetch(songCardURL(workspaceID), {
@@ -4179,7 +4187,7 @@ import {
     }
     songCardCache.set(workspaceID, view);
     // The selection may have moved on, or the context re-rendered, meanwhile.
-    if (state.selectedId === workspaceID) renderSongCard(songCardMount(), view);
+    if (state.selectedId === workspaceID) paintSongCard(workspaceID, view);
   }
 
   /** Replace content in the one stable modal body without changing visibility. */
@@ -5160,6 +5168,7 @@ import {
     songRostersAt = now;
     const homes = libraryHomeIds(state.flattened);
     const rosters = {};
+    const words = {};
     await Promise.all(
       homes.map(async id => {
         try {
@@ -5169,12 +5178,13 @@ import {
           if (!response.ok) return;
           const body = await response.json();
           rosters[id] = Array.isArray(body?.rows) ? body.rows : [];
+          if (body?.words) words[id] = body.words;
         } catch (err) {
           console.warn('home-workspace-cockpit: song roster unavailable', err);
         }
       })
     );
-    const next = songFactsSnapshot(rosters);
+    const next = songFactsSnapshot(rosters, words);
     if (JSON.stringify(next) === JSON.stringify(state.songFacts)) return;
     state.songFacts = next;
     mountMap();

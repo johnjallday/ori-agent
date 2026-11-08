@@ -71,7 +71,7 @@ import {
   isGroupWorkspace as isGroupRow
 } from './workspace-map-snapshot.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
-import { renderSongCard, songCardURL, songCardView } from './song-card.js';
+import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
   deleteWorkspaces as deleteWorkspacesAction,
@@ -13931,9 +13931,10 @@ export class WorkspaceCommandView {
         });
         if (!response.ok) return;
         const body = await response.json();
-        next = songFactsSnapshot({
-          [workspaceId]: Array.isArray(body?.rows) ? body.rows : []
-        });
+        next = songFactsSnapshot(
+          { [workspaceId]: Array.isArray(body?.rows) ? body.rows : [] },
+          { [workspaceId]: body?.words }
+        );
       } catch (err) {
         return;
       }
@@ -13963,7 +13964,7 @@ export class WorkspaceCommandView {
   }
 
   /**
-   * "Hide song card": the card can cover the songs on a small screen, so it
+   * "Hide <noun> card": the card can cover the songs on a small screen, so it
    * goes away until the next tile is chosen. The selection is left alone.
    */
   hideDetachmentSongCard() {
@@ -14003,14 +14004,20 @@ export class WorkspaceCommandView {
     if (!slot) return;
     const id = this.detachmentSongCardId || '';
     const cards = this.detachmentSongCards;
-    const card = renderSongCard(slot, id && cards && cards.has(id) ? cards.get(id) : null);
+    const view = id && cards && cards.has(id) ? cards.get(id) : null;
+    // Accept and Dismiss answer on the card's Home, then the card reads again
+    // (PRD #792 FR24, FR33).
+    const card = renderInteractiveSongCard(slot, view, {
+      reload: () => (id ? this.loadDetachmentSongCard(id) : undefined),
+      onError: err => console.warn('workspace-command: suggestion answer failed', err)
+    });
     if (!card) return;
     const doc = slot.ownerDocument || globalThis.document;
     const hide = doc.createElement('button');
     hide.type = 'button';
     hide.className = 'ws-cmd-map-song-card-hide';
     hide.setAttribute('data-cmd-song-card-hide', '');
-    hide.setAttribute('aria-label', 'Hide song card');
+    hide.setAttribute('aria-label', `Hide ${(view?.noun || 'Project').toLowerCase()} card`);
     hide.textContent = '×';
     slot.append(hide);
   }

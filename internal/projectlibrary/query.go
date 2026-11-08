@@ -165,7 +165,19 @@ func shownFacts(observed Observation, factsOn bool) *SongFacts {
 	return &facts
 }
 
+// Detail is one entry for its readers. It carries no plugin-declared field
+// values: only a reader that knows the Home's words may show them
+// (DetailWithWords), so a retired id is never sent (PRD #792 FR30).
 func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
+	return s.detail(scope, entryID, Words{})
+}
+
+// DetailWithWords is Detail with the plugin fields the words declare.
+func (s *Store) DetailWithWords(scope Scope, entryID string, words Words) (Detail, error) {
+	return s.detail(scope, entryID, words)
+}
+
+func (s *Store) detail(scope Scope, entryID string, words Words) (Detail, error) {
 	if entryID == "" || !validText(entryID, 160) {
 		return Detail{}, ErrConflict
 	}
@@ -194,7 +206,8 @@ func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
 		row.applySessionActivity(latestSessionActivity(doc.Sessions)[entry.ID])
 		row.Moved = moveNote(entry, newestCompleteScans(doc), roots, inactive, "")
 		result := Detail{Row: row,
-			EntryRevision: entry.Revision, Fields: entry.Fields, Revision: doc.Revision, ProviderReadOnly: !state.PluginAvailable}
+			EntryRevision: entry.Revision, Fields: ShownFields(entry.Fields, words), Revision: doc.Revision,
+			ProviderReadOnly: !state.PluginAvailable}
 		if row.Connection == "connected" && entry.Link != nil {
 			result.WorkspaceID = entry.Link.WorkspaceID
 		}

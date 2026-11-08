@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ProjectLibraryPanel,
+  extraFieldRows,
+  extraFieldValues,
+  fieldsPatchLines,
+  fieldsSuggestionText,
   activationStateLabel,
   projectTeamURL,
   libraryDigestText,
@@ -1537,6 +1541,109 @@ test('manual edit review cannot commit without a second user confirmation', asyn
   assert.deepEqual(calls, ['/projects/entry-1/fields/review']);
 });
 
+const FIELD_WORDS = {
+  source: 'package',
+  noun: 'Song',
+  noun_plural: 'Songs',
+  roster_title: 'Songs and assistants',
+  facts: [],
+  fields: [
+    { id: 'key', label: 'Key', kind: 'text' },
+    { id: 'references', label: 'Reference tracks', kind: 'list' }
+  ]
+};
+
+test('plugin fields read under their declared labels in the confirm lines and the Overview (PRD #792 FR29)', () => {
+  assert.deepEqual(
+    fieldsPatchLines(
+      { next_action: 'Mix', extra: { references: ['Song A', 'Song B'] } },
+      FIELD_WORDS
+    ),
+    ['next action: Mix', 'Key: None', 'Reference tracks: Song A; Song B']
+  );
+  assert.deepEqual(fieldsPatchLines({ clear_priority: true }, FIELD_WORDS), [
+    'clear priority: Unset'
+  ]);
+  // Without words no plugin field is worded.
+  assert.deepEqual(fieldsPatchLines({ extra: { key: ['F'] } }), []);
+  assert.deepEqual(
+    extraFieldRows({ key: ['F minor'], references: [], retired: ['x'] }, FIELD_WORDS),
+    [
+      ['Key', ['F minor']],
+      ['Reference tracks', []]
+    ]
+  );
+});
+
+test('a fields suggestion reads in one line and its Accept reviews, confirms before and after, then commits (PRD #792 FR24)', async () => {
+  const fields = {
+    next_action: 'Send stems',
+    blockers: ['Vocal comp'],
+    extra: { key: ['F minor'] }
+  };
+  assert.equal(
+    fieldsSuggestionText(fields, FIELD_WORDS),
+    'Next action → Send stems; Blockers → 1 line (Vocal comp); Key → F minor'
+  );
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  const calls = [];
+  panel.run = async (_, __, fn) => fn();
+  panel.summary = { words: FIELD_WORDS };
+  panel.refresh = async () => calls.push({ path: 'refresh' });
+  panel.status = () => {};
+  panel.post = async (path, body) => {
+    calls.push({ path, body });
+    return path.endsWith('/review')
+      ? { token: 'review-1', before: { next_action: '' }, after: { next_action: 'Send stems' } }
+      : {};
+  };
+  let lines = [];
+  panel.confirm = async (_title, shown) => {
+    lines = shown;
+    return false;
+  };
+  const row = {
+    name: 'Night Drive',
+    proposal: { id: 'p1', kind: 'fields', proposed_fields: fields, reason: 'Untrusted' }
+  };
+  await panel.reviewFieldsProposal(row);
+  assert.deepEqual(
+    calls.map(call => call.path),
+    ['/proposals/p1/review', 'refresh']
+  );
+  assert.equal(lines[0], 'Next action: Not set → Send stems');
+  assert.ok(lines.includes('Reason (untrusted note): Untrusted'));
+  calls.length = 0;
+  panel.confirm = async () => true;
+  await panel.reviewFieldsProposal(row);
+  assert.deepEqual(
+    calls.map(call => call.path),
+    ['/proposals/p1/review', '/proposals/p1/commit', 'refresh']
+  );
+  assert.deepEqual(Object.keys(calls[1].body).sort(), [
+    'confirm',
+    'idempotency_key',
+    'review_token'
+  ]);
+  assert.equal(calls[1].body.review_token, 'review-1');
+});
+
+test('the Edit dialog reads plugin field controls into the stored shape and refuses over-long values', () => {
+  const [key, references] = FIELD_WORDS.fields;
+  const read = (keyValue, referenceValue) =>
+    extraFieldValues([
+      { field: key, input: { value: keyValue } },
+      { field: references, input: { value: referenceValue } }
+    ]);
+  assert.deepEqual(read('  F   minor ', 'Song A\n\n Song B \n'), {
+    extra: { key: ['F minor'], references: ['Song A', 'Song B'] },
+    error: null
+  });
+  assert.deepEqual(read('', ''), { extra: {}, error: null }, 'empty controls clear the fields');
+  assert.equal(read('a'.repeat(241), '').error.value.length, 241);
+  assert.ok(read('', Array.from({ length: 17 }, (_, i) => `ref ${i}`).join('\n')).error);
+});
+
 const DIGEST = {
   scan_id: 'scan-1',
   root_id: 'root-1',
@@ -1663,6 +1770,11 @@ test('the Manager review line names skips, results and stop reasons without clai
   );
   assert.equal(proposalSourceLabel({}), 'From a Manager chat');
   assert.equal(proposalSourceLabel({ source: 'forged' }), 'From a Manager chat');
+  // A song keeper's card suggestion is never labeled as the Manager's (PRD #792).
+  assert.equal(
+    proposalSourceLabel({ proposer_kind: 'keeper', kind: 'fields' }),
+    'From the song’s assistant'
+  );
 });
 
 test('dismissal needs its own confirmation and a retry reuses the same key', async () => {
@@ -3799,7 +3911,19 @@ test('Recently saved cards carry each song facts line; a song without facts show
   const rows = recentRows(3);
   rows[0].facts = { track_count: 6, tempo_bpm: 128.5, length_seconds: 3725 };
   rows[2].facts = {};
-  const view = recentlySavedView({ provider_read_only: false, rows }, recentNow);
+  const musicWords = {
+    source: 'package',
+    noun: 'Song',
+    noun_plural: 'Songs',
+    roster_title: 'Songs and assistants',
+    facts: [
+      { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+      { kind: 'tempo', unit: 'BPM' },
+      { kind: 'length' }
+    ],
+    fields: []
+  };
+  const view = recentlySavedView({ provider_read_only: false, rows }, recentNow, musicWords);
   assert.deepEqual(
     view.cards.map(card => [card.name, card.saved, card.facts]),
     [
@@ -3808,6 +3932,9 @@ test('Recently saved cards carry each song facts line; a song without facts show
       ['Song 3', 'Saved 2 days ago', '']
     ]
   );
+  // Without the Home's words the facts read neutral (PRD #792 FR6).
+  const neutral = recentlySavedView({ provider_read_only: false, rows }, recentNow);
+  assert.equal(neutral.cards[0].facts, 'Tracks 6 · Tempo 128.5 · 1:02:05');
 });
 
 test('a read-only Home still lists its recent songs, without Open', () => {

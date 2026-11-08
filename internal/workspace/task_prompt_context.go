@@ -984,6 +984,11 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task,
 		tail.WriteString("\n\n")
 	}
 
+	// The card suggestion closing step (PRD #792 FR27): after the output
+	// format, before the time limit, only for a song's keeper or a Home's
+	// bound Manager.
+	tail.WriteString(h.taskClosingStep(task))
+
 	if task.Timeout > 0 {
 		fmt.Fprintf(&tail, "**Time Limit**: %v\n\n", task.Timeout)
 	}

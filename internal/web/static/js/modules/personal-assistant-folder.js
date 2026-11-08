@@ -855,7 +855,7 @@ function inboxConfirmView(offer, base, subject) {
 // shortcuts. It owns no modal, lifecycle, polling or confirmation.
 export function setupResultView(
   offer,
-  { songs = [], total = 0, now = new Date(), toSetUp = 0 } = {}
+  { songs = [], total = 0, now = new Date(), toSetUp = 0, words = null } = {}
 ) {
   if (!offer) return { visible: false };
   const receipt = folderReceiptView(offer);
@@ -932,7 +932,7 @@ export function setupResultView(
           id: String(row.id),
           name,
           saved: lastSavedLabel(row.last_saved_at, now),
-          facts: songFactsLabel(row.facts),
+          facts: songFactsLabel(row.facts, words),
           ariaLabel: libraryOpenAction({ ...row, name }, false).ariaLabel
         };
       }),
@@ -3232,6 +3232,7 @@ const runSongs = {
   rows: [],
   total: 0,
   toSetUp: 0, // projects the last scan found that are not on the map yet
+  words: null, // the Home's project words from the same summary read
   opening: '', // the song being opened; every Open waits for it
   message: '', // what the status line says while opening or choosing a file
   error: '',
@@ -3264,7 +3265,9 @@ async function loadRecentSongs(offerID, homeID) {
     if (!page || !Array.isArray(page.rows)) throw new Error('no library page');
     runSongs.rows = recentSongs(page.rows);
     runSongs.total = Number(page.total) || 0;
-    runSongs.toSetUp = await libraryToSetUp(homeID);
+    const summary = await librarySummaryForRun(homeID);
+    runSongs.toSetUp = summary.toSetUp;
+    runSongs.words = summary.words;
     if (runSongs.offerID !== offerID) return;
     runSongs.status = 'ready';
   } catch (_) {
@@ -3439,23 +3442,30 @@ function revealRunSurface() {
 
 // How many projects a Home's last scan found that are not on the map yet,
 // from the library summary (which already counts projects set up since the
-// scan as connected). 0 when the summary cannot be read: the done screen then
-// stays the one it always was.
-async function libraryToSetUp(homeID) {
+// scan as connected), and the Home's project words for the facts line (PRD
+// #792 FR7). 0 and no words when the summary cannot be read: the done screen
+// then stays the one it always was, with neutral facts.
+async function librarySummaryForRun(homeID) {
   try {
     const response = await fetch(
       `/api/workspaces/${encodeURIComponent(homeID)}/assistant-program/library/summary`,
       { headers: { Accept: 'application/json' }, cache: 'no-store' }
     );
-    if (!response.ok) return 0;
+    if (!response.ok) return { toSetUp: 0, words: null };
     const summary = await readJSON(response);
+    const words = summary?.words || null;
     const digest = summary?.digest;
-    if (!digest || digest.setup_note) return 0;
+    if (!digest || digest.setup_note) return { toSetUp: 0, words };
     const count = Number(digest.activatable);
-    return Number.isInteger(count) && count > 0 ? count : 0;
+    return { toSetUp: Number.isInteger(count) && count > 0 ? count : 0, words };
   } catch (_) {
-    return 0;
+    return { toSetUp: 0, words: null };
   }
+}
+
+// libraryToSetUp is the count alone, for callers that only route on it.
+async function libraryToSetUp(homeID) {
+  return (await librarySummaryForRun(homeID)).toSetUp;
 }
 
 function renderHomeSongs() {
@@ -3475,7 +3485,14 @@ function renderHomeSongs() {
   const listed = runSongs.offerID === offerID && runSongs.status === 'ready';
   const view = setupResultView(
     state.offer,
-    listed ? { songs: runSongs.rows, total: runSongs.total, toSetUp: runSongs.toSetUp } : {}
+    listed
+      ? {
+          songs: runSongs.rows,
+          total: runSongs.total,
+          toSetUp: runSongs.toSetUp,
+          words: runSongs.words
+        }
+      : {}
   );
   renderRunSongs({ songs }, view);
   // Reuse the canonical Home link instead of adding a duplicate library CTA.

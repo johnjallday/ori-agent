@@ -32,7 +32,8 @@
           "blueprint_intake_v1",
           "independent_program_homes_v1",
           "home_profile_v1",
-          "resource_workspaces_v1"
+          "resource_workspaces_v1",
+          "project_card_words_v1"
         ]
       }
     },
@@ -454,7 +455,49 @@
           "maxItems": 8,
           "items": { "$ref": "#/$defs/allowedProjectAttachment" }
         },
-        "home_profile": { "$ref": "#/$defs/homeProfile" }
+        "home_profile": { "$ref": "#/$defs/homeProfile" },
+        "project_card": { "$ref": "#/$defs/projectCard" }
+      }
+    },
+    "projectCard": {
+      "description": "The package's words for the Home's project card, roster and facts line: display words only. Requires the project_card_words_v1 host feature. Each fact kind may be declared once; length takes no unit.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "noun", "noun_plural", "roster_title"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "noun": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "noun_plural": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "roster_title": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "facts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": { "enum": ["tempo", "length", "track_count"] },
+              "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "unit_one": { "type": "string", "minLength": 1, "maxLength": 40 }
+            }
+          }
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label", "kind"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "kind": { "enum": ["text", "list"] }
+            }
+          }
+        }
       }
     },
     "homeProfile": {

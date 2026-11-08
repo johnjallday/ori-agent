@@ -27,6 +27,9 @@ type FieldsPatch struct {
 	Blockers           *[]string    `json:"blockers,omitempty"`
 	Deliverables       *[]string    `json:"deliverables,omitempty"`
 	ArchiveReviewState *string      `json:"archive_review_state,omitempty"`
+	// Extra replaces the whole plugin-field map when set; an empty map clears
+	// it. Ids are checked against the declaration by the caller.
+	Extra *map[string][]string `json:"extra,omitempty"`
 }
 
 func (p FieldsPatch) apply(previous Fields, author string, at time.Time) (Fields, error) {
@@ -34,10 +37,14 @@ func (p FieldsPatch) apply(previous Fields, author string, at time.Time) (Fields
 		p.DisplayName == nil && p.Purpose == nil && p.Stage == nil && p.Status == nil &&
 			p.NextAction == nil && p.Priority == nil && !p.ClearPriority && p.SessionDate == nil &&
 			p.ReleaseDate == nil && p.Milestones == nil && p.Blockers == nil && p.Deliverables == nil &&
-			p.ArchiveReviewState == nil || !validText(author, 160) || author == "" {
+			p.ArchiveReviewState == nil && p.Extra == nil || !validText(author, 160) || author == "" {
 		return Fields{}, ErrConflict
 	}
 	result := previous
+	result.Extra = cloneExtraFields(previous.Extra)
+	if p.Extra != nil {
+		result.Extra = cloneExtraFields(*p.Extra)
+	}
 	if p.DisplayName != nil {
 		result.DisplayName = *p.DisplayName
 	}

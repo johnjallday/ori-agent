@@ -38,6 +38,7 @@ type homeTarget struct {
 	key         workspace.AssistantProgramKey
 	declaration *workspace.AssistantProgramDeclaration
 	owner       *workspace.AssistantProgramHomeOwner
+	words       *workspace.ProjectCardWords
 }
 
 func homeKey(scope Scope) (workspace.AssistantProgramKey, error) {
@@ -81,7 +82,8 @@ func (s *Service) resolveHomeTarget(scope Scope) (homeTarget, error) {
 			return homeTarget{}, ErrUnavailable
 		}
 		owner := resolved.Owner.Clone()
-		return homeTarget{key: resolved.Key.Normalize(), declaration: resolved.Declaration, owner: &owner}, nil
+		return homeTarget{key: resolved.Key.Normalize(), declaration: resolved.Declaration, owner: &owner,
+			words: resolved.ProjectCardWords.Clone()}, nil
 	default:
 		return homeTarget{}, ErrUnavailable
 	}
@@ -158,7 +160,7 @@ func (s *Service) CreateHome(scope Scope, name string) (HomePreparation, error) 
 	if target.owner != nil {
 		// A split Home records the provider it came from; group-requirement
 		// evaluation later accepts only a Home with that exact provider.
-		home, created, err = programs.EnsureNamedIndependentStation(target.key, target.declaration, name, *target.owner)
+		home, created, err = programs.EnsureNamedIndependentStationWithWords(target.key, target.declaration, name, *target.owner, target.words)
 	} else {
 		home, created, err = programs.EnsureNamedStation(target.key, target.declaration, name)
 	}

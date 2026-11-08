@@ -51,6 +51,10 @@ type HomeProviderUpgrade struct {
 	To          AssistantProgramHomeOwner
 	RolePrompts map[string]HomeRolePromptChange
 	UpgradedAt  time.Time
+	// ProjectCardWords is the words snapshot an upgrade that adds a
+	// `project_card` section writes with the pin (PRD #792 FR9, FR10); nil
+	// leaves the Home's snapshot as it is.
+	ProjectCardWords *ProjectCardWords
 }
 
 func (u HomeProviderUpgrade) valid() bool {
@@ -124,6 +128,9 @@ func (u HomeProviderUpgrade) RebindHome(home *Workspace) (bool, error) {
 	to := u.To.Clone()
 	state.HomeProvider = &to
 	state.Declaration = after
+	if u.ProjectCardWords != nil {
+		state.ProjectCardWords = u.ProjectCardWords.Clone()
+	}
 	state.StateRevision++
 	state.ProviderUpgrades = append(state.ProviderUpgrades, AssistantHomeProviderUpgradeReceipt{
 		OperationID: u.OperationID, FromVersion: u.From.PluginVersion, ToVersion: u.To.PluginVersion,

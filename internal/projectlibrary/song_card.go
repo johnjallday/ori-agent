@@ -52,6 +52,65 @@ type SongCard struct {
 	KeeperAgentName string                 `json:"keeper_agent_name,omitempty"`
 	LastSession     *SongSession           `json:"last_session,omitempty"`
 	OpenWork        workspace.TicketCounts `json:"open_work_counts"`
+	// Fields are the connected entry's portfolio and plugin fields (PRD #792
+	// FR14). Nil for a broken, diverged or not yet adopted link.
+	Fields *SongCardFields `json:"fields,omitempty"`
+	// Suggestions are this entry's ready fields suggestions, newest first
+	// (PRD #792 FR24). Accept and Dismiss use the Home's proposal routes.
+	Suggestions []SongCardSuggestion `json:"suggestions,omitempty"`
+}
+
+// SongCardSuggestion is one waiting fields suggestion as the card shows it:
+// who, when, what would change and why. The reason is untrusted agent text.
+type SongCardSuggestion struct {
+	ID           string         `json:"id"`
+	AgentName    string         `json:"agent_name"`
+	ProposerKind string         `json:"proposer_kind"`
+	CreatedAt    time.Time      `json:"created_at"`
+	ExpiresAt    time.Time      `json:"expires_at"`
+	Fields       ProposedFields `json:"proposed_fields"`
+	Reason       string         `json:"reason,omitempty"`
+}
+
+// songCardSuggestions lists the entry's ready fields suggestions, newest
+// first, with plugin fields only under ids the words declare.
+func (s *Store) songCardSuggestions(scope Scope, doc Document, entryID string, words Words) []SongCardSuggestion {
+	var out []SongCardSuggestion
+	for i := len(doc.Proposals) - 1; i >= 0; i-- {
+		proposal := doc.Proposals[i]
+		if proposal.Kind != ProposalKindFields || proposal.EntryID != entryID || proposal.ProposedFields == nil ||
+			s.managerProposalStatus(scope, doc, proposal) != "ready" {
+			continue
+		}
+		if len(proposal.ProposedFields.Extra) > 0 && !DeclaredExtraFields(proposal.ProposedFields.Extra, words) {
+			continue // The review would refuse it: no Accept for a field the package no longer declares.
+		}
+		out = append(out, SongCardSuggestion{ID: proposal.ID, AgentName: proposal.AgentName,
+			ProposerKind: proposal.ProposerKind, CreatedAt: proposal.CreatedAt, ExpiresAt: proposal.ExpiresAt,
+			Fields: proposal.ProposedFields.clone(), Reason: proposal.Reason})
+	}
+	return out
+}
+
+// SongCardFields is what the card's details block shows. Extra holds only the
+// ids the Home's words declare; an undeclared stored id is never sent.
+type SongCardFields struct {
+	Stage        string              `json:"stage,omitempty"`
+	Status       string              `json:"status,omitempty"`
+	NextAction   string              `json:"next_action,omitempty"`
+	Blockers     []string            `json:"blockers,omitempty"`
+	Deliverables []string            `json:"deliverables,omitempty"`
+	Milestones   []Milestone         `json:"milestones,omitempty"`
+	Extra        map[string][]string `json:"extra,omitempty"`
+	Revision     int64               `json:"revision"`
+}
+
+func songCardFields(fields Fields, words Words) *SongCardFields {
+	return &SongCardFields{Stage: fields.Stage, Status: fields.Status, NextAction: fields.NextAction,
+		Blockers:     append([]string(nil), fields.Blockers...),
+		Deliverables: append([]string(nil), fields.Deliverables...),
+		Milestones:   append([]Milestone(nil), fields.Milestones...),
+		Extra:        ShownExtraFields(fields.Extra, words), Revision: fields.Revision}
 }
 
 // RosterRow is one connected song in the Home's "Songs and assistants" list.
@@ -68,6 +127,10 @@ type RosterRow struct {
 	// them (the shelf shows them). Nil when unknown or the switch is off.
 	Facts    *SongFacts             `json:"facts,omitempty"`
 	OpenWork workspace.TicketCounts `json:"open_work_counts"`
+	// Stage and NextAction are the entry's own fields for the roster's two
+	// columns (PRD #792 FR15); the browser words and cuts them.
+	Stage      string `json:"stage,omitempty"`
+	NextAction string `json:"next_action,omitempty"`
 	// FolderSlug lets the host build the child's page route; never sent.
 	FolderSlug string `json:"-"`
 }
@@ -96,8 +159,9 @@ func (s *Store) songChild(scope Scope, childID string) (*workspace.Workspace, er
 
 // SongCard projects one linked child. A broken or diverged link, or a Home
 // whose library is not set up, returns a card with the child's own name and
-// keeper but no entry, facts or save time (PRD FR4).
-func (s *Store) SongCard(scope Scope, childID string) (SongCard, error) {
+// keeper but no entry, facts, fields or save time (PRD FR4). words decide
+// which plugin fields the card may carry.
+func (s *Store) SongCard(scope Scope, childID string, words Words) (SongCard, error) {
 	child, err := s.songChild(scope, childID)
 	if err != nil {
 		return SongCard{}, err
@@ -134,6 +198,8 @@ func (s *Store) SongCard(scope Scope, childID string) (SongCard, error) {
 			card.FactsState = FactsStateOn
 		}
 		card.LastSession = lastAcceptedRecap(doc.Sessions, entry.ID)
+		card.Fields = songCardFields(entry.Fields, words)
+		card.Suggestions = s.songCardSuggestions(scope, doc, entry.ID, words)
 		return card, nil
 	}
 	return card, nil
@@ -166,7 +232,8 @@ func (s *Store) Roster(scope Scope) ([]RosterRow, error) {
 		}
 		rows = append(rows, RosterRow{WorkspaceID: child.ID, EntryID: entry.ID, Title: row.Name,
 			KeeperAgentName: child.EntryAgentName(), LastSession: lastAcceptedRecap(doc.Sessions, entry.ID),
-			LastSavedAt: row.LastSavedAt, Facts: row.Facts, OpenWork: child.TicketCounts(), FolderSlug: child.FolderSlug})
+			LastSavedAt: row.LastSavedAt, Facts: row.Facts, OpenWork: child.TicketCounts(), FolderSlug: child.FolderSlug,
+			Stage: entry.Fields.Stage, NextAction: entry.Fields.NextAction})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rosterLess(rows[i], rows[j]) })
 	return rows, nil
@@ -291,14 +358,14 @@ func cutRunes(text string, max int) string {
 	return strings.TrimRight(cut, " ,;:-") + "…"
 }
 
-// StatusLine is the song's one plain sentence, from stored data only, in this
-// order and skipping what is unknown: facts, "saved <relative>", "last
-// session: <first sentence>", open work. It never names a file, path or link
-// and makes no claim about how far along the song is.
-func StatusLine(card SongCard, now time.Time) string {
+// StatusLine is the project's one plain sentence, from stored data only, in
+// this order and skipping what is unknown: facts (worded by words), "saved
+// <relative>", "last session: <first sentence>", open work. It never names a
+// file, path or link and makes no claim about how far along the project is.
+func StatusLine(card SongCard, words Words, now time.Time) string {
 	parts := []string{}
 	if card.FactsState == FactsStateOn {
-		if facts := FactsLabel(card.Facts); facts != "" {
+		if facts := FactsLabel(card.Facts, words); facts != "" {
 			parts = append(parts, facts)
 		}
 	}
@@ -320,35 +387,6 @@ func StatusLine(card SongCard, now time.Time) string {
 		line = string(unicode.ToUpper(r)) + line[size:]
 	}
 	return line
-}
-
-// FactsLabel words the facts exactly as the shelf's songFactsLabel does
-// (library-open.js): "14 tracks · 92 BPM · 3:41", "92 BPM, varies". An unknown
-// part is left out; no facts is "".
-func FactsLabel(facts *SongFacts) string {
-	if facts == nil {
-		return ""
-	}
-	parts := []string{}
-	if facts.TrackCount > 0 {
-		parts = append(parts, pluralWord(facts.TrackCount, "track"))
-	}
-	if facts.TempoBPM > 0 {
-		tempo := strings.TrimSuffix(fmt.Sprintf("%.1f", math.Round(facts.TempoBPM*10)/10), ".0") + " BPM"
-		if facts.TempoVaries {
-			tempo += ", varies"
-		}
-		parts = append(parts, tempo)
-	}
-	if total := int(math.Round(facts.LengthSeconds)); facts.LengthSeconds > 0 && total > 0 {
-		hours, minutes, seconds := total/3600, (total%3600)/60, total%60
-		if hours > 0 {
-			parts = append(parts, fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds))
-		} else {
-			parts = append(parts, fmt.Sprintf("%d:%02d", minutes, seconds))
-		}
-	}
-	return strings.Join(parts, " · ")
 }
 
 // SavedLabel is the shelf's lastSavedLabel in the server's calendar days:

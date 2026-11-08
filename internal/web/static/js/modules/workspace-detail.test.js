@@ -2570,8 +2570,20 @@ test('a linked song shows the Song card above the Command view; other workspaces
       facts_state: 'on',
       facts: { tempo_bpm: 92, track_count: 14 },
       keeper_agent_name: 'Studio Keeper',
-      status_line: '14 tracks · 92 BPM; no open work',
-      home_entry_route: '/workspaces/music-home/assistant#projectLibraryPanel'
+      status_line: 'Saved today; no open work',
+      home_entry_route: '/workspaces/music-home/assistant#projectLibraryPanel',
+      // The Home's package words ride the card response (PRD #792 FR7).
+      words: {
+        source: 'package',
+        noun: 'Song',
+        noun_plural: 'Songs',
+        roster_title: 'Songs and assistants',
+        facts: [
+          { kind: 'track_count', unit: 'tracks', unit_one: 'track' },
+          { kind: 'tempo', unit: 'BPM' }
+        ],
+        fields: []
+      }
     },
     async (mount, asked) => {
       const page = new WorkspaceDetailPage('night-drive-slug');
@@ -2580,7 +2592,7 @@ test('a linked song shows the Song card above the Command view; other workspaces
       // The real ID, never the URL slug, names the workspace to the server.
       assert.deepEqual(asked, ['/api/workspaces/ws-uuid-1/song-card']);
       assert.equal(mount.hidden, false);
-      assert.match(mount.textContent, /Night Drive/);
+      assert.match(mount.textContent, /^SongNight Drive/);
       assert.match(mount.textContent, /14 tracks · 92 BPM/);
       assert.match(mount.textContent, /Kept by Studio Keeper/);
     }

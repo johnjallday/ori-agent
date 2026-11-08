@@ -2972,9 +2972,14 @@ No query string (any is `400`).
   "ready_proposals": 1,
   "proposal_run": { "scan_id": "…", "status": "skipped", "reason": "no_model", "proposals": 0, "started_at": "…", "finished_at": "…" },
   "feedback": [ { "kind": "next_action", "accepted": 1, "dismissed": 1, "updated_at": "…" } ],
-  "route": "/workspaces/music-production-home/assistant#projectLibraryProposals"
+  "route": "/workspaces/music-production-home/assistant#projectLibraryProposals",
+  "words": { "source": "package", "noun": "Song", "noun_plural": "Songs", "roster_title": "Songs and assistants",
+             "facts": [ { "kind": "track_count", "unit": "tracks", "unit_one": "track" } ],
+             "fields": [ { "id": "key", "label": "Key", "kind": "text" } ] }
 }
 ```
+
+`words` is always present: the Home's pinned package words from its `project_card` section (`source: "package"`), or `source: "neutral"` with "Project", "Projects", "Projects and assistants" and empty `facts` and `fields` (see "Song Card, Roster and Field Suggestions" below).
 
 An uninitialized library returns `{"initialized": false, "digest": null, "ready_proposals": 0, …}`. `digest` is the latest `complete` or `partial` scan's counts, or `null` when there is none or its folder was disconnected; it never carries a path or file name. When no single compatible installed integration can be checked, `activatable` and `unsupported_format` are `0` and `setup_note` names why (`setup_check_unavailable`, `home_provider_unavailable`, `project_provider_unavailable`, `provider_ambiguous`). `activatable` is guidance from saved state; a setup review repeats every check. `ready_proposals` counts ready suggestions among the shelf's newest 20. `proposal_run` is the Manager review receipt for the digest's scan: `started`, `finished` (reason empty or `proposal_limit`, `time_limit`, `token_limit`, `step_limit`, `model_error`) or `skipped` (`no_manager`, `no_model`, `provider_unavailable`, `unavailable`, `superseded`, `model_error`, `time_limit`, `interrupted`). `feedback` counts the owner's answers per suggestion kind; it is shown only and never reaches a prompt.
 
@@ -3012,7 +3017,7 @@ Owner only, strict JSON. `entries`: 1–100 unique songs, each with the fields r
 { "confirm": true, "idempotency_key": "…" }
 ```
 
-Strict JSON: exactly these fields, no duplicates. Marks one waiting suggestion dismissed and remembers its (project, kind) for seven days so a scan review does not suggest it again; nothing else changes. Allowed while the Home provider or Manager is unavailable (the suggestion then reads `unavailable`). Returns `{ "proposal_id", "dismissed_at", "replay" }`; repeating the same key replays. `400` without `confirm: true` or for any other body; `404` for an unknown suggestion; `409` when it is no longer waiting (already dismissed under another key, confirmed, stale or expired).
+Strict JSON: exactly these fields, no duplicates. Marks one waiting suggestion (any kind, including `fields`) dismissed and remembers its (project, kind) for seven days so a scan review does not suggest it again; nothing else changes. Allowed while the Home provider or Manager is unavailable (the suggestion then reads `unavailable`). Returns `{ "proposal_id", "dismissed_at", "replay" }`; repeating the same key replays. `400` without `confirm: true` or for any other body; `404` for an unknown suggestion; `409` when it is no longer waiting (already dismissed under another key, confirmed, stale or expired).
 
 ### List Home Library Cards
 
@@ -3123,6 +3128,51 @@ The same status and finish from a project's own workspace. The server resolves t
 ### Edits to the Shared Assistant
 
 `PATCH /api/agents/{name}` that changes the model, provider, reasoning effort, temperature, max tokens or system prompt is carried into every project copy the consent tracks for that agent, except a copy changed in its own project. The response then includes `carried: { updated: [{id, name}], customised: [{id, name}] }`. `GET /api/agents/{name}/detail` adds `workspace_count` and `workspaces`, and leaves copies that are still in step out of `origin.customised_in`. A chat answered by a workspace's own copy never writes that copy back to the user's agent.
+
+## Song Card, Roster and Field Suggestions
+
+A linked song's card, the Home's roster, and owner-reviewed field suggestions from the Home Manager or a song's keeper (PRD #792; contract in `docs/architecture/project-library.md`, "Song card and roster projection" and "Card fields and agent suggestions"; words in `docs/architecture/independent-program-homes.md` §3.2). Nothing here scans, reads a project file or calls a model, and no agent has an HTTP route: agents suggest only through the `home_library_propose_fields` and `project_card_propose_fields` tools. Every response's `words` has the shape shown under "Get the Library Summary"; plugin fields appear only under IDs those words declare, and a stored ID the package no longer declares is never sent.
+
+### Get a Song Card
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/song-card` (the song's own workspace; owner only, `404` otherwise; no query string)
+
+```json
+{
+  "linked": true, "home_id": "…", "entry_id": "…", "title": "Night Drive",
+  "facts": { "tempo_bpm": 92, "length_seconds": 221, "track_count": 14 }, "facts_state": "on",
+  "keeper_agent_name": "Song Assistant", "open_work_counts": { "…": 0 },
+  "fields": { "stage": "mixing", "status": "active", "next_action": "Print the vocal stems",
+              "blockers": ["Waiting on the bass take"], "deliverables": [], "milestones": [],
+              "extra": { "key": ["F minor"] }, "revision": 7 },
+  "suggestions": [ { "id": "…", "agent_name": "Song Assistant", "proposer_kind": "keeper",
+                     "created_at": "…", "expires_at": "…",
+                     "proposed_fields": { "next_action": "Comp the chorus vocal" }, "reason": "…" } ],
+  "words": { "source": "package", "noun": "Song", "…": "…" },
+  "home_name": "Music Production Home", "status_line": "14 tracks · 92 BPM · 3:41 · …",
+  "home_route": "/workspaces/{slug}", "home_entry_route": "/workspaces/{slug}/assistant#projectLibraryPanel"
+}
+```
+
+`{ "linked": false }` for a workspace that is not a Home's song. `fields` and `suggestions` appear only for a connected entry (none for a broken or diverged link). `suggestions` are the entry's `ready` `fields` suggestions, newest first; `reason` is untrusted agent text. A song whose Home is gone keeps a card with neutral `words`.
+
+### Get the Home Roster
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/assistant-program/library/roster` (Home owner only; no query string)
+
+Returns `{ rows, total, words }`. Each row: `workspace_id`, `entry_id`, `title`, `keeper_agent_name`, `last_session`, `last_saved_at`, `facts`, `open_work_counts`, `workspace_route`, and the entry's raw `stage` and `next_action` (omitted when unset; the browser labels and shortens them).
+
+### Suggestions: List, Review and Commit
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/assistant-program/library/proposals`
+
+`{ revision, rows: [{ proposal, name, status }], total, manager_label, brief? }`, newest 20. A `fields` row's `proposal` carries `kind: "fields"`, `proposed_fields` (`next_action`, `blockers`, `deliverables`, `milestones`, `extra`; only the named ones), `proposer_kind` (`manager` or `keeper`), `proposer_workspace_id`, `fields_revision` and, once replaced by a newer suggestion from the same proposer kind, `withdrawn_at`. `status` is `ready`, `stale`, `expired`, `dismissed`, `withdrawn` or `unavailable`; only `ready` offers Accept.
+
+**Endpoints:** `POST …/library/proposals/{proposalID}/review` (body `{}`), `POST …/library/proposals/{proposalID}/commit` (`{ "review_token", "idempotency_key", "confirm": true }`)
+
+Both route by the saved suggestion's kind (next action or `fields`; any other kind is `409`) and build the patch from the saved suggestion, never the request. Review returns the usual field review (`token`, `entry_id`, `before`, `after`, `expires_at`); commit returns `{ entry_id, fields, replay }`. The written fields are the owner's (`source: "reviewed_user"`). A `fields` suggestion naming a plugin field the Home's package no longer declares, or one that is not `ready`, is `409`. Accept and dismiss are counted in `feedback` under kind `fields`.
+
+**Endpoints:** `POST …/library/projects/{entryID}/fields/review` and `…/fields/commit` (the owner's own edit) accept `patch.extra`: declared IDs only, 1 to 16 lines of 1 to 240 characters each, one line for a `text` field (`409` otherwise). It replaces the declared map (`{}` clears it); stored IDs the package no longer declares are carried over unchanged. `GET …/library/projects/{entryID}` shows the declared extras in `fields.extra`.
 
 ## Home Profile API
 
@@ -3242,7 +3292,7 @@ Refusals are `409` with `code`: `not_attached`, `provider_unavailable`, `scope_r
 
 ## Home Package Upgrade API
 
-Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Three kinds of change are accepted: guidance (Home role prompts and packaged skill text), a release that adds a `home_profile` card to a Home that has none, and a release that appends a resource attachment (such as REAPER Studio, `docs/architecture/reaper-studio.md` §11) after the existing ones. The review lists either addition under `additions`; neither creates, staffs or reads anything. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source.
+Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Four kinds of change are accepted: guidance (Home role prompts and packaged skill text), a release that adds a `home_profile` card to a Home that has none, a release that appends a resource attachment (such as REAPER Studio, `docs/architecture/reaper-studio.md` §11) after the existing ones, and a release that adds a `project_card` section (and starts requiring `project_card_words_v1`) to a Home that has none. The review lists each addition under `additions` (for the last: "Adds the package's words for the <plural> card and roster. Nothing else changes."); none creates, staffs or reads anything. Commit writes the Home's `project_card_words` snapshot with the new pin. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source.
 
 The same service has two addresses, and both review and commit the plan for **every** Home the package backs:
 

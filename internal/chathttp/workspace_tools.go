@@ -291,12 +291,18 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	if p.libraryReadEnabled() {
 		tools = append(tools, p.librarySearchTool(), p.libraryDetailTool(), p.librarySessionsTool(), p.libraryHandoffReceiptsTool(),
 			p.libraryProposeNextActionTool(), p.libraryProposeProjectReviewTool(), p.libraryProposeSessionGoalTool(), p.libraryProposeRootReviewTool(), p.libraryProposeSessionRecapTool(),
-			p.homeProfileReadTool())
+			p.libraryProposeFieldsTool(), p.homeProfileReadTool())
 		// The brief tool exists only inside a scan-review turn of a Home that
 		// reads song details; a Manager chat never gets it.
 		if p.managerRun.ScanID != "" && p.managerRun.Brief {
 			tools = append(tools, p.librarySaveBriefTool())
 		}
+	}
+
+	// A linked song's keeper may suggest its own card's fields (PRD #792
+	// FR20, FR21); only that executing instance sees the tool.
+	if p.keeperEnabled() {
+		tools = append(tools, p.projectCardProposeFieldsTool())
 	}
 
 	// A song or the Studio itself may look up the Home's resource catalog

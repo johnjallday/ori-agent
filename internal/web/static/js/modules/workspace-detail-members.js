@@ -259,6 +259,7 @@ export class WorkspaceMembersPanel {
     this.colorPopoverOpen = false;
     this.library = null; // { shelf, toSetUp } for a managed Home with projects waiting
     this.songRosterRows = null; // connected songs of a managed Home, server order
+    this.songRosterWords = null; // the roster response's words (neutral when absent)
     this.songRosterExpanded = false;
   }
 
@@ -288,6 +289,7 @@ export class WorkspaceMembersPanel {
       return;
     }
     let rows = null;
+    let words = null;
     try {
       const res = await fetch(rosterURL(this.workspaceId), {
         headers: { Accept: 'application/json' },
@@ -297,12 +299,14 @@ export class WorkspaceMembersPanel {
       if (res.ok) {
         const body = await res.json();
         rows = Array.isArray(body?.rows) ? body.rows : [];
+        words = body?.words || null;
       }
     } catch (_) {
       rows = null;
     }
     if (!isCurrent()) return;
     this.songRosterRows = rows;
+    this.songRosterWords = words;
     this.renderSongRoster();
   }
 
@@ -323,7 +327,11 @@ export class WorkspaceMembersPanel {
       active && mount.contains?.(active) ? active.getAttribute?.('href') || '' : '';
     renderRoster(
       mount,
-      rosterView(this.songRosterRows, { expanded: this.songRosterExpanded, sheet }),
+      rosterView(this.songRosterRows, {
+        expanded: this.songRosterExpanded,
+        sheet,
+        words: this.songRosterWords
+      }),
       {
         onShowAll: event => {
           event?.stopPropagation?.();

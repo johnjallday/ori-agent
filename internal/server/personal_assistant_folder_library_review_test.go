@@ -13,7 +13,7 @@ import (
 
 func TestFolderLibraryReview_MissingProviderKeepsCanonicalPrerequisitesAndReload(t *testing.T) {
 	f := newDraftServerFixture(t)
-	f.builder.server.reviewedReleases = newHomeReleases(t, "0.4.0").updates()
+	f.builder.server.reviewedReleases = newHomeReleases(t, "0.6.0").updates()
 	root := seedAlbumsCollectionVariant(t, true)
 	hash := folderTreeHash(t, root)
 	before := len(f.builder.workspaceFileStore.CachedWorkspaces())
