@@ -708,6 +708,11 @@
   // FR10). Appended to that tile's meta line; every other tile is unchanged.
   var songFacts = Object.create(null);
   var SONG_FACTS_MAX = 40;
+  // A folder agent's live line ("Looking around · 240 entries · 3 folders
+  // left"), keyed by workspace id and worded by the server. It takes the
+  // tile's status slot while the look or a setup runs; no new map element.
+  var folderAgentLines = Object.create(null);
+  var FOLDER_AGENT_LINE_MAX = 60;
   var workspaceUpdateBadges = Object.create(null);
 
   function setWorkspaceUpdateBadges(snapshot) {
@@ -803,6 +808,25 @@
         count: Number.isInteger(badge.count) && badge.count > 0 ? badge.count : 0
       };
     });
+  }
+
+  function setFolderAgentLines(snapshot) {
+    folderAgentLines = Object.create(null);
+    if (!snapshot || typeof snapshot !== 'object') return;
+    Object.keys(snapshot).forEach(function (id) {
+      var text = typeof snapshot[id] === 'string' ? snapshot[id].replace(/\s+/g, ' ').trim() : '';
+      if (!id || !text) return;
+      folderAgentLines[id] =
+        text.length > FOLDER_AGENT_LINE_MAX
+          ? text.slice(0, FOLDER_AGENT_LINE_MAX - 1).trim() + '…'
+          : text;
+    });
+  }
+
+  function tileStatusText(ws) {
+    var line = ws && ws.id ? folderAgentLines[ws.id] : '';
+    if (line) return line;
+    return ws && ws.active ? 'Working' : 'Idle';
   }
 
   function setSongFacts(snapshot) {
@@ -2706,7 +2730,7 @@
    */
   function tileAccessibleName(ws, isSel, activity) {
     var working = activity ? !!activity.working : !!ws.active;
-    var statusText = working ? 'Working' : 'Idle';
+    var statusText = folderAgentLines[ws.id] || (working ? 'Working' : 'Idle');
     var agentsWorking = activity && activity.working && activity.agents ? activity.agents : [];
     if (agentsWorking.length) {
       statusText +=
@@ -2763,8 +2787,8 @@
   function tileHTML(tile, selectedId, index) {
     var ws = tile.ws || {};
     var pal = paletteFor(ws.id);
-    var active = !!ws.active;
-    var statusText = active ? 'Working' : 'Idle';
+    var active = !!ws.active || !!folderAgentLines[ws.id];
+    var statusText = tileStatusText(ws);
     var mode = opsModeLabel(ws.ops_mode);
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
     var isHQ = !!hqWorkspaceId && ws.id === hqWorkspaceId;
@@ -6714,7 +6738,9 @@
     var flag = el.querySelector('.ws-map-tile-flag');
     var led =
       flag && typeof flag.querySelector === 'function' ? flag.querySelector('.ws-map-led') : null;
-    var statusText = working ? 'Working' : 'Idle';
+    var agentLine = ws && ws.id ? folderAgentLines[ws.id] : '';
+    if (agentLine) working = true;
+    var statusText = agentLine || (working ? 'Working' : 'Idle');
     if (flag && led && led.classList && flag.lastChild) {
       led.classList.toggle('is-working', working);
       if (flag.lastChild !== led && flag.lastChild.textContent !== statusText) {
@@ -11293,6 +11319,7 @@
     setLibraryBadges(state && state.libraryBadges);
     // A host that passes none (every surface but Home) draws plain meta lines.
     setSongFacts(state && state.songFacts);
+    setFolderAgentLines(state && state.folderAgentLines);
     setWorkspaceUpdateBadges(state && state.workspaceUpdateBadges);
     setLibraryEmptyState(state && state.libraryEmptyState);
     var allWorkspaces = (state && state.workspaces) || [];
@@ -11645,6 +11672,11 @@
     // A linked song's facts on its tile's meta line (song-card PRD FR10).
     songFacts: {
       setSnapshot: setSongFacts
+    },
+    // A folder agent's live line in its tile's status slot.
+    folderAgentLines: {
+      setSnapshot: setFolderAgentLines,
+      statusText: tileStatusText
     },
     workspaceUpdates: {
       setSnapshot: setWorkspaceUpdateBadges,

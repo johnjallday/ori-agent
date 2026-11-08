@@ -1345,6 +1345,17 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-assistant/knowledge/{item_id}/copies", s.Handlers.PersonalAssistant.GetGlobalFactCopies)
 		mux.HandleFunc("DELETE /api/personal-assistant/knowledge/{item_id}/copies/{workspace_id}", s.Handlers.PersonalAssistant.RemoveGlobalFactCopy)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/{action}", s.Handlers.PersonalAssistant.MutateKnowledgeReview)
+		// Start an agent on <folder>: a server-held choice token, never a path.
+		if s.Handlers.FolderAgent != nil {
+			const folderAgent = "/api/personal-assistant/folder-agent"
+			mux.HandleFunc("GET "+folderAgent, s.Handlers.FolderAgent.List)
+			mux.HandleFunc("POST "+folderAgent+"/choose", s.Handlers.FolderAgent.Choose)
+			mux.HandleFunc("POST "+folderAgent+"/start", s.Handlers.FolderAgent.Start)
+			mux.HandleFunc("GET "+folderAgent+"/{workspaceID}", s.Handlers.FolderAgent.Get)
+			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/keep", s.Handlers.FolderAgent.Keep)
+			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/look-further", s.Handlers.FolderAgent.LookFurther)
+			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/setup", s.Handlers.FolderAgent.SetUp)
+		}
 		// Show me a folder: chips and offer identifiers only, never a path.
 		const folderDigest = "/api/personal-assistant/folder-digest"
 		mux.HandleFunc("GET "+folderDigest, s.Handlers.PersonalAssistant.GetFolderDigest)

@@ -1,0 +1,293 @@
+package folderagent
+
+import (
+	"context"
+	"fmt"
+	"path"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/johnjallday/ori-agent/internal/folderlook"
+	"github.com/johnjallday/ori-agent/internal/foldermap"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
+)
+
+// MaxNextFolders is how many unopened folder names a report lists.
+const MaxNextFolders = 5
+
+// Report actions.
+const (
+	ActionSetUp       = "set_up"
+	ActionKeep        = "keep"
+	ActionLookFurther = "look_further"
+)
+
+// View is what the card, Needs you, the tile and the workspace page show.
+// Every string names folders by name and never by path.
+type View struct {
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
+	Route         string `json:"route,omitempty"`
+	FolderName    string `json:"folder_name"`
+	AgentName     string `json:"agent_name"`
+	TicketID      string `json:"ticket_id,omitempty"`
+	Brief         string `json:"brief"`
+	State         State  `json:"state"`
+
+	// Receipt is the card's line right after Start.
+	Receipt      string   `json:"receipt,omitempty"`
+	Progress     Progress `json:"progress"`
+	ProgressLine string   `json:"progress_line,omitempty"`
+
+	FactsLine     string                 `json:"facts_line,omitempty"`
+	StageLine     string                 `json:"stage_line,omitempty"`
+	Stage         foldermap.Stage        `json:"stage,omitempty"`
+	Candidates    []folderlook.Candidate `json:"candidates,omitempty"`
+	NextFolders   []string               `json:"next_folders,omitempty"`
+	ModelSentence string                 `json:"model_sentence,omitempty"`
+	ToolsSentence string                 `json:"tools_sentence,omitempty"`
+	Actions       []string               `json:"actions,omitempty"`
+	Plan          *PlanView              `json:"plan,omitempty"`
+	Setup         *Setup                 `json:"setup,omitempty"`
+	Failure       string                 `json:"failure,omitempty"`
+	Nested        *WorkspaceRef          `json:"nested,omitempty"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+}
+
+// PlanView is the one-consent plan card's content.
+type PlanView struct {
+	Stage    foldermap.Stage                    `json:"stage"`
+	Lines    []personalassistant.FolderPlanLine `json:"lines"`
+	Digest   string                             `json:"digest"`
+	Runnable bool                               `json:"runnable"`
+	// Unavailable explains why a plan cannot run yet.
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+func (s *Service) viewOf(_ context.Context, rec *Record) View {
+	v := View{
+		WorkspaceID: rec.WorkspaceID, WorkspaceName: rec.WorkspaceName, FolderName: rec.FolderName,
+		AgentName: rec.AgentName, TicketID: rec.TicketID, Brief: rec.Brief, State: rec.State,
+		Progress: rec.Progress, Setup: rec.Setup, Failure: rec.Failure, UpdatedAt: rec.UpdatedAt,
+	}
+	if s.deps.Workspaces != nil {
+		v.Route = s.deps.Workspaces.Route(rec.WorkspaceID)
+	}
+	switch rec.State {
+	case StateLooking:
+		v.Receipt = "Looking around…"
+		v.ProgressLine = ProgressLine(rec.Progress)
+		return v
+	case StateFailed:
+		v.Actions = []string{ActionLookFurther}
+		return v
+	}
+	if rec.Map == nil {
+		return v
+	}
+	v.FactsLine = foldermap.FactsLine(rec.Facts)
+	v.Stage = rec.Stage
+	v.StageLine = StageLine(rec.Facts, rec.Stage, rec.Candidates)
+	v.Candidates = rec.Candidates
+	v.NextFolders = nextFolders(rec.Facts)
+	v.ModelSentence = modelSentence(rec)
+	if rec.Turn == nil || rec.Turn.Status != TurnFinished {
+		v.ToolsSentence = "Search for more tools needs a model"
+	}
+	plan := BuildPlan(*rec, nil)
+	v.Plan = &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable, Unavailable: plan.Unavailable}
+	switch rec.State {
+	case StateReported:
+		v.Actions = []string{ActionSetUp, ActionKeep, ActionLookFurther}
+	case StateKept:
+		v.Actions = []string{ActionSetUp, ActionLookFurther}
+	case StateSetUp:
+		v.Actions = []string{ActionLookFurther}
+		if rec.Setup != nil && rec.Setup.Status == personalassistant.FolderSetupStopped {
+			v.Actions = []string{ActionSetUp, ActionLookFurther}
+		}
+	}
+	return v
+}
+
+// ProgressLine is the tile's and Needs you's line while the walk runs
+// (PRD FR17): "Looking around · 240 entries · 3 folders left".
+func ProgressLine(p Progress) string {
+	if p.Entries == 0 {
+		return "Looking around…"
+	}
+	line := fmt.Sprintf("Looking around · %d %s", p.Entries, plural(p.Entries, "entry", "entries"))
+	if p.FoldersLeft > 0 {
+		line += fmt.Sprintf(" · %d %s left", p.FoldersLeft, plural(p.FoldersLeft, "folder", "folders"))
+	}
+	return line
+}
+
+func modelSentence(rec *Record) string {
+	if rec.Turn == nil || rec.Turn.Status == TurnFinished {
+		return ""
+	}
+	agent := rec.AgentName
+	if agent == "" {
+		agent = "The agent"
+	}
+	switch rec.Turn.Reason {
+	case SkipNoModel:
+		return "No model is set up, so " + agent + " could not look itself. This is what Ori found."
+	case SkipProviderUnavailable:
+		return agent + "'s model was unavailable, so it could not look itself. This is what Ori found."
+	case SkipInterrupted:
+		return agent + " was interrupted before it could look itself. This is what Ori found."
+	}
+	return agent + " could not look itself. This is what Ori found."
+}
+
+// nextFolders are the unopened and large folders' names, at most five.
+func nextFolders(f foldermap.Facts) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, rel := range append(append([]string(nil), f.Unopened...), f.Large...) {
+		name := path.Base(rel)
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+		if len(out) == MaxNextFolders {
+			break
+		}
+	}
+	return out
+}
+
+// StageLine says what Set it up would do, in the host's words (PRD FR24).
+func StageLine(f foldermap.Facts, stage foldermap.Stage, candidates []folderlook.Candidate) string {
+	var parts []string
+	for _, c := range candidates {
+		if !c.Required {
+			continue
+		}
+		switch c.Kind {
+		case folderlook.KindHomeProvider:
+			parts = append(parts, c.Detail)
+		case folderlook.KindIntegration:
+			if c.Action == folderlook.ActionAlreadyHere {
+				parts = append(parts, "connects "+c.Name)
+			} else {
+				parts = append(parts, "installs "+c.Name)
+			}
+		case folderlook.KindFileCurator:
+			parts = append(parts, "adds File Curator to keep the loose files tidy")
+		}
+	}
+	if stage == foldermap.StageGroup {
+		n := len(f.Members)
+		parts = append([]string{fmt.Sprintf("turns this workspace into a group with %d %s, one per project", n, plural(n, "workspace", "workspaces"))}, parts...)
+	}
+	if len(parts) == 0 {
+		if stage == foldermap.StageFolder {
+			return "Nothing to set up yet: Ori found no project it knows here."
+		}
+		return "Set it up keeps this workspace as it is."
+	}
+	return "Set it up: " + strings.Join(parts, ", ")
+}
+
+// Plan is a Set it up plan: the host's lines for the stage and the selected
+// candidates.
+type Plan struct {
+	Stage      foldermap.Stage
+	Lines      []personalassistant.FolderPlanLine
+	Candidates []folderlook.Candidate
+	Selected   []string
+	Digest     string
+	Runnable   bool
+	// Unavailable is why the plan cannot run yet.
+	Unavailable string
+}
+
+// BuildPlan lists every consequence of Set it up. Required candidates are
+// always in it; optional ones only when selected.
+func BuildPlan(rec Record, selected []string) Plan {
+	plan := Plan{Stage: rec.Stage}
+	chosen := make(map[string]bool, len(selected))
+	for _, id := range selected {
+		chosen[id] = true
+	}
+	runnable := rec.Stage == foldermap.StageTools
+	for _, c := range rec.Candidates {
+		if !c.Required && !chosen[c.ID] {
+			continue
+		}
+		plan.Candidates = append(plan.Candidates, c)
+		if !c.Required {
+			plan.Selected = append(plan.Selected, c.ID)
+		}
+		switch c.Kind {
+		case folderlook.KindIntegration:
+			if c.Action != folderlook.ActionAlreadyHere {
+				detail := ""
+				if c.Action == folderlook.ActionInstall && c.App != "" {
+					detail = c.App + " itself is not on this Mac yet."
+				} else if c.App != "" {
+					detail = c.App + " is installed on this Mac."
+				}
+				plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
+					Kind: personalassistant.FolderPlanIntegration, Name: "Installs " + c.Name, Detail: detail,
+				})
+			}
+			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
+				Kind: personalassistant.FolderPlanWorkspace, Name: "Connects " + c.Name + " to " + rec.WorkspaceName,
+				Detail: rec.AgentName + " can use them in this workspace.",
+			})
+		case folderlook.KindHomeProvider:
+			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: capitalize(c.Detail)})
+			runnable = false
+			plan.Unavailable = "Joining a Home from a folder is not available yet."
+		case folderlook.KindFileCurator:
+			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds File Curator", Detail: c.Detail})
+			runnable = false
+			plan.Unavailable = "Adding File Curator from a folder is not available yet."
+		default:
+			runnable = false
+		}
+	}
+	if rec.Stage == foldermap.StageGroup {
+		runnable = false
+		plan.Unavailable = "Turning a folder workspace into a group is not available yet."
+	}
+	if len(plan.Lines) == 0 {
+		runnable = false
+		if plan.Unavailable == "" && rec.Stage == foldermap.StageFolder {
+			plan.Unavailable = "Ori found nothing it knows how to set up here."
+		}
+	}
+	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Nothing is moved, copied or read"})
+	plan.Runnable = runnable && rec.Stage != foldermap.StageFolder
+	sort.Strings(plan.Selected)
+	plan.Digest = planDigest(plan)
+	return plan
+}
+
+func planDigest(plan Plan) string {
+	lines := append([]personalassistant.FolderPlanLine{{Kind: "stage", Name: string(plan.Stage)}}, plan.Lines...)
+	for _, id := range plan.Selected {
+		lines = append(lines, personalassistant.FolderPlanLine{Kind: "selected", Name: id})
+	}
+	return personalassistant.FolderPlanDigest(lines)
+}
+
+func capitalize(text string) string {
+	if text == "" {
+		return text
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}

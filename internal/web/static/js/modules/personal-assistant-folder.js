@@ -32,6 +32,16 @@ import {
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
 import {
+  chooseFolder,
+  fetchFolderAgent,
+  folderAgentCardView,
+  folderAgentReportView,
+  postFolderAgentAction,
+  renderFolderAgentCard,
+  renderFolderAgentReport,
+  startFolderAgent
+} from './folder-agent-card.js';
+import {
   isFileJanitorReviewRoute,
   mapPlacementView,
   renderMapPlacement,
@@ -2951,6 +2961,9 @@ export function folderProjectModalOptions(offer) {
 }
 
 const state = {
+  // Start an agent on <folder>: the chosen folder's card, then the folder
+  // agent's view (receipt, report) once Start went through.
+  agent: { card: null, view: null, error: '', busy: false, poll: 0 },
   reviewSlot: null,
   reviewGeneration: 0,
   workspaceName: '',
@@ -4504,6 +4517,7 @@ function render() {
   }
   renderChooser();
   renderOffer(state.reviewSlot ? 'thread' : place);
+  renderFolderAgent(els);
   renderScene();
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderHomeSongs();
@@ -6706,16 +6720,13 @@ function openHQCard() {
 // openChooser is the user asking to explore a folder: the chip above the
 // composer, Home's toolbar button, the `folder=show` link, the mission's
 // Start, or an offer's own "Show another folder". Every one of them starts
-// the same turn in the conversation.
-//
-// New selections use the same held attachment and explicit planning consent as
-// Add folder. Existing reviewed offers retain their legacy execution controls.
-// Older hosts without the attachment adapter retain the manual chooser.
+// the same turn in the conversation, and the folder chosen there starts an
+// agent on it (one card for every folder). Existing reviewed offers retain
+// their legacy execution controls.
+// openChooser is Home's "Explore a folder": the chooser in the conversation,
+// whose choice starts an agent on the folder (folder-agent-card.js). The
+// composer's Add folder keeps attaching a folder to the conversation.
 function openChooser() {
-  if (window.PersonalAssistantFolderContext?.open) {
-    window.PersonalAssistantFolderContext.open();
-    return;
-  }
   if (!state.available) {
     openHQCard();
     return;
@@ -6818,8 +6829,169 @@ async function showHomeReview(offerId, valid = () => true) {
   }
 }
 
+// The folder agent's place in the conversation: a host drawn just above the
+// offer card, so the chooser, the scene and the status line stay as they are.
+function folderAgentHost(els) {
+  if (!els?.offer?.parentNode) return null;
+  let host = document.getElementById('personalAssistantFolderAgent');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'personalAssistantFolderAgent';
+    host.className = 'pa-folder__agent';
+    els.offer.parentNode.insertBefore(host, els.offer);
+  }
+  return host;
+}
+
+function renderFolderAgent(els) {
+  const host = folderAgentHost(els);
+  if (!host) return;
+  const { card, view, error } = state.agent;
+  if (!card && !view) {
+    host.hidden = true;
+    host.replaceChildren();
+    return;
+  }
+  host.hidden = false;
+  if (els.offer) els.offer.hidden = true;
+  if (view) {
+    const shown = folderAgentReportView(view);
+    host.replaceChildren(
+      renderFolderAgentReport(shown, document, {
+        error,
+        onAction: (action, button) => void folderAgentAction(shown, action, button)
+      })
+    );
+    return;
+  }
+  host.replaceChildren(
+    renderFolderAgentCard(card, document, {
+      error,
+      onStart: (brief, button) => void startAgent(brief, button)
+    })
+  );
+}
+
+// chooseForAgent is the Explore entry's front door: the server chooses the
+// folder (dialog, known folder or typed path) and answers with the one card.
+async function chooseForAgent(body) {
+  if (state.busy) return;
+  enterThread({ byUser: !state.inThread });
+  if (body.picker) state.chooserOpen = true;
+  state.busy = true;
+  showError('');
+  showStatus(body.picker ? 'Choose a folder in the dialog…' : '');
+  render();
+  try {
+    const result = await chooseFolder(body);
+    if (result.error) {
+      showStatus(result.error);
+      return;
+    }
+    if (result.cancelled || !result.card) {
+      showStatus('');
+      return;
+    }
+    stopAgentPoll();
+    state.agent = {
+      card: folderAgentCardView(result.card),
+      view: null,
+      error: '',
+      busy: false,
+      poll: 0
+    };
+    state.offer = null;
+    state.chooserOpen = false;
+    showStatus('');
+  } catch (_) {
+    showStatus('That folder could not be chosen right now.');
+  } finally {
+    state.busy = false;
+    render();
+    document.getElementById('personalAssistantFolderAgent')?.scrollIntoView?.({ block: 'nearest' });
+  }
+}
+
+async function startAgent(brief, button) {
+  const card = state.agent.card;
+  if (!card || state.agent.busy) return;
+  state.agent.busy = true;
+  if (button) button.disabled = true;
+  try {
+    const result = await startFolderAgent(card.token, brief);
+    if (result.error) {
+      state.agent.error = result.duplicate?.name
+        ? `${result.error} Open ${result.duplicate.name} from the map.`
+        : result.error;
+      if (result.repick) state.agent.card = null;
+      if (result.repick) openChooser();
+      return;
+    }
+    state.agent = { card: null, view: result.view, error: '', busy: false, poll: 0 };
+    announceAgent(
+      `${result.view?.agent_name || 'The agent'} is looking around ${result.view?.folder_name || 'the folder'}.`
+    );
+    window.dispatchEvent?.(
+      new CustomEvent('ori:folder-agent-started', {
+        detail: { workspaceID: result.view?.workspace_id }
+      })
+    );
+    scheduleAgentPoll();
+  } catch (_) {
+    state.agent.error = 'The agent could not be started right now.';
+  } finally {
+    state.agent.busy = false;
+    render();
+  }
+}
+
+async function folderAgentAction(shown, action, button) {
+  if (button) button.disabled = true;
+  const result = await postFolderAgentAction(shown, action);
+  state.agent.error = result.error || '';
+  if (result.view) state.agent.view = result.view;
+  render();
+  scheduleAgentPoll();
+}
+
+function announceAgent(text) {
+  const els = elements();
+  if (els?.status) setText(els.status, text);
+}
+
+function stopAgentPoll() {
+  if (state.agent.poll) clearTimeout(state.agent.poll);
+  state.agent.poll = 0;
+}
+
+// The look and a setup run in the background; the card follows them until
+// the report or the receipt is final.
+function scheduleAgentPoll() {
+  stopAgentPoll();
+  const view = state.agent.view;
+  if (!view || (view.state !== 'looking' && view.state !== 'setting_up')) return;
+  state.agent.poll = setTimeout(async () => {
+    state.agent.poll = 0;
+    const next = await fetchFolderAgent(view.workspace_id).catch(() => null);
+    if (next && state.agent.view?.workspace_id === view.workspace_id) {
+      state.agent.view = next;
+      render();
+      if (next.state === 'reported') window.PersonalAssistantPanel?.refreshToday?.();
+    }
+    scheduleAgentPoll();
+  }, 1000);
+}
+
 async function scan(body) {
   if (state.busy) return;
+  // Explore a folder starts an agent on it; the digest is not called here.
+  // A picked file still goes to the digest until its entry moves too.
+  if (!body.file) {
+    await chooseForAgent(body);
+    return;
+  }
+  stopAgentPoll();
+  state.agent = { card: null, view: null, error: '', busy: false, poll: 0 };
   // Exploring happens in the conversation. A scan asked for from a card in
   // Needs you ("Pick it again") starts the turn there; one asked for from the
   // chooser is already in it. The dialog's own status line is in the chooser.

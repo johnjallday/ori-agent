@@ -3211,3 +3211,166 @@ a.quest-title:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/*
+ * Start an agent on <folder> (folder-agent-card.js): the card, the receipt
+ * and the folder agent's report. Same paper as the first-look report; the
+ * fallbacks keep it readable in the drawer on other pages.
+ */
+.folder-agent-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-radius: 10px;
+  background: var(--hc-panel, var(--cozy-paper));
+  color: var(--hc-ink, var(--cozy-ink));
+  overflow-wrap: anywhere;
+}
+
+.folder-agent-card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.folder-agent-card__by,
+.folder-agent-card__label,
+.folder-agent-card__note,
+.folder-agent-card__workspace {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__field {
+  display: grid;
+  gap: 4px;
+}
+
+.folder-agent-card__brief {
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-radius: 6px;
+  background: var(--hc-panel-raised, var(--cozy-paper-raised));
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
+.folder-agent-card__receipt,
+.folder-agent-card__facts,
+.folder-agent-card__stage {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.folder-agent-card__facts,
+.folder-agent-card__degraded,
+.folder-agent-card__next {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__stage {
+  font-weight: 600;
+}
+
+.folder-agent-card__heading {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__tool-list,
+.folder-agent-card__plan {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-agent-card__tool,
+.folder-agent-card__line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.folder-agent-card__tool[data-greyed="true"] {
+  opacity: 0.6;
+}
+
+.folder-agent-card__tool-name,
+.folder-agent-card__line-name {
+  font-weight: 600;
+}
+
+.folder-agent-card__tool-detail,
+.folder-agent-card__tool-why,
+.folder-agent-card__line-detail,
+.folder-agent-card__line-state {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__tool-why {
+  flex-basis: 100%;
+}
+
+.folder-agent-card__tool-label {
+  padding: 0 6px;
+  border: 1px solid var(--hc-line, var(--cozy-line));
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.folder-agent-card__line[data-state="done"] .folder-agent-card__line-state {
+  color: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__line[data-state="failed"] .folder-agent-card__line-state,
+.folder-agent-card__failure,
+.folder-agent-card__error {
+  color: var(--hc-alert, var(--cozy-clay));
+}
+
+.folder-agent-card__failure,
+.folder-agent-card__error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.folder-agent-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.folder-agent-card__open {
+  font-size: 12px;
+}
+
+/* Secondary actions read in the card's own ink in both themes. */
+.folder-agent-card__secondary {
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  background: transparent;
+  color: var(--hc-ink, var(--cozy-ink));
+}
+
+.folder-agent-card__secondary:hover,
+.folder-agent-card__secondary:focus-visible {
+  background: var(--hc-panel-raised, var(--cozy-paper-raised));
+  color: var(--hc-ink, var(--cozy-ink));
+}

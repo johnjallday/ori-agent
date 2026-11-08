@@ -82,6 +82,20 @@ type TodayItem struct {
 	// its setup's verified outcome; empty when the automatic layout placed it
 	// on its own. The report's "On the Map" row says it.
 	Home string `json:"home,omitempty"`
+	// FolderAgent is a folder agent's whole report view, for the item kinds
+	// folder_agent_look and folder_agent_report (package folderagent).
+	FolderAgent any `json:"folder_agent,omitempty"`
+}
+
+// FolderAgentItems lists a user's folder agent items for Today: the looks
+// under Working on, the reports under Needs you, the finished setups.
+type FolderAgentItems func(ctx context.Context, userID string) (needs, working, done []TodayItem)
+
+// SetFolderAgentItems wires the folder agent's Today items.
+func (s *TodayService) SetFolderAgentItems(items FolderAgentItems) {
+	if s != nil {
+		s.folderAgentItems = items
+	}
 }
 
 type TodaySection struct {
@@ -296,6 +310,7 @@ type TodayService struct {
 	workspaceBuilds    WorkspaceBuildReader
 	hires              HireRecordReader
 	hireLookRunning    func(workspaceID string) bool
+	folderAgentItems   FolderAgentItems
 	meetings           TodayMeetingReader
 	backups            dailybrief.BackupSource
 	backupCoverage     dailybrief.BackupCoverageSource

@@ -1132,6 +1132,59 @@ func (s *FolderDigestService) ScanSelection(ctx context.Context, userID, token s
 	return s.scanRoot(ctx, userID, path, "")
 }
 
+// FolderChoice is how a folder entry names the folder it wants: one of the
+// known chips, the native dialog, or a token the folder-picker endpoint issued
+// for a typed path. A path never arrives from the client.
+type FolderChoice struct {
+	Chip           string
+	Picker         bool
+	SelectionToken string
+}
+
+// ChooseFolder resolves a choice to the canonical folder the server holds,
+// without scanning it. A cancelled dialog returns chosen=false and no error.
+// It is the folder agent's front door; the digest is not called.
+func (s *FolderDigestService) ChooseFolder(ctx context.Context, userID string, choice FolderChoice) (string, bool, error) {
+	if s == nil || s.store == nil {
+		return "", false, ErrRepairNeeded
+	}
+	if _, err := s.store.Binding(ctx, userID); err != nil {
+		return "", false, err
+	}
+	var raw string
+	switch {
+	case choice.Picker:
+		if s.deps.Picker == nil || !s.deps.Picker.Available() {
+			return "", false, ErrFolderPickerUnavailable
+		}
+		path, chosen, err := s.deps.Picker.Choose(ctx, folderPickerPrompt)
+		if err != nil {
+			return "", false, fmt.Errorf("personal assistant: folder dialog: %w", err)
+		}
+		if !chosen {
+			return "", false, nil
+		}
+		raw = path
+	case strings.TrimSpace(choice.SelectionToken) != "":
+		path, err := s.selectionPath(choice.SelectionToken)
+		if err != nil {
+			return "", false, err
+		}
+		raw = path
+	default:
+		path, err := s.chipPath(choice.Chip)
+		if err != nil {
+			return "", false, err
+		}
+		raw = path
+	}
+	root, err := s.deps.ValidateRoot(raw)
+	if err != nil {
+		return "", false, err
+	}
+	return root, true, nil
+}
+
 // ScanPickedFile digests the parent of the file selected on the server. The
 // file is never opened, and its path is never sent to the browser or sidecar.
 func (s *FolderDigestService) ScanPickedFile(ctx context.Context, userID string) (*FolderOfferView, error) {

@@ -11,6 +11,7 @@ import {
   libraryShelfRoute
 } from './home-library-badges.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
+import { folderAgentTileLine, listFolderAgents } from './folder-agent-card.js';
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import { workspaceUpdates, watchWorkspaceUpdatePage } from './workspace-updates.js';
 import {
@@ -2129,6 +2130,9 @@ import {
     // A linked song's facts text keyed by workspace id, from each Home's
     // roster, for the tile meta line (song-card PRD FR10).
     songFacts: {},
+    // A folder agent's live line keyed by workspace id, while it looks around
+    // or sets up, for the tile's status slot.
+    folderAgentLines: {},
     workspaceUpdateBadges: {},
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
@@ -2471,6 +2475,7 @@ import {
       // ready to review. The click is handled below, never by the Map.
       libraryBadges: state.libraryBadges,
       songFacts: state.songFacts,
+      folderAgentLines: state.folderAgentLines,
       workspaceUpdateBadges: state.workspaceUpdateBadges,
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
@@ -5190,9 +5195,35 @@ import {
     mountMap();
   }
 
+  // The folder agents' tile lines follow their looks: polled every two
+  // seconds while one is looking or setting up, and once otherwise.
+  let folderAgentTimer = 0;
+  async function refreshFolderAgentLines() {
+    if (folderAgentTimer) clearTimeout(folderAgentTimer);
+    folderAgentTimer = 0;
+    if (!canHydrateWorkspaceData()) return;
+    const views = await listFolderAgents();
+    const next = {};
+    views.forEach(view => {
+      const line = folderAgentTileLine(view);
+      if (line && view.workspace_id) next[view.workspace_id] = line;
+    });
+    const changed = JSON.stringify(next) !== JSON.stringify(state.folderAgentLines);
+    const finished = Object.keys(state.folderAgentLines).some(id => !next[id]);
+    state.folderAgentLines = next;
+    if (changed) mountMap();
+    // A look that just finished may have changed what the workspace shows.
+    if (finished) void refresh();
+    if (Object.keys(next).length) folderAgentTimer = setTimeout(refreshFolderAgentLines, 2000);
+  }
+  // A new folder workspace: reload the tiles (it now has one), which also
+  // reads the folder agents' lines.
+  window.addEventListener('ori:folder-agent-started', () => void refresh());
+
   async function refreshLibraryBadges({ force = false } = {}) {
     if (!canHydrateWorkspaceData()) return;
     void refreshSongFacts({ force });
+    void refreshFolderAgentLines();
     let next;
     try {
       next = await libraryBadgeLoader.load(state.flattened, { force });

@@ -12,6 +12,7 @@ import {
 } from './daily-brief-station.js';
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
 import { isFirstLookReportKind, mountFirstLookReports } from './first-look-report.js';
+import { FOLDER_AGENT_REPORT_KIND, mountFolderAgentReports } from './folder-agent-card.js';
 import { reportRevealKey, takeNeedsReveal } from './personal-assistant-needs-reveal.js';
 import { resumeWorkspaceBuild } from './workspace-build-resume.js';
 
@@ -721,6 +722,15 @@ function renderFirstLookReports(els, items) {
   }
   placeFirstLookReports(els, list);
   mountFirstLookReports(list, items, { onDone: () => void loadToday() });
+  // A folder agent's report sits with the other reports, in its own list.
+  let agents = document.getElementById('personalAssistantNeedsYouFolderAgents');
+  if (!agents) {
+    agents = document.createElement('div');
+    agents.id = 'personalAssistantNeedsYouFolderAgents';
+    agents.className = 'personal-assistant-today__reports';
+  }
+  if (list.nextElementSibling !== agents) list.after(agents);
+  mountFolderAgentReports(agents, items, { onDone: () => void loadToday() });
   revealOwnReports(list);
 }
 
@@ -1266,7 +1276,10 @@ function renderToday(today) {
   renderCompactRows(
     els.needsItems,
     sections.needs.filter(
-      row => row.kind !== 'workspace_build' && !isFirstLookReportKind(row.kind)
+      row =>
+        row.kind !== 'workspace_build' &&
+        !isFirstLookReportKind(row.kind) &&
+        row.kind !== FOLDER_AGENT_REPORT_KIND
     ),
     true
   );
