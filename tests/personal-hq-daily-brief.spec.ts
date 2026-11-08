@@ -147,7 +147,8 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     const site = page.locator('[data-hq-site]');
     await expect(site).toBeVisible();
     await expect(site).toHaveClass(/is-selected/);
-    await expect(site).toContainText('Not created');
+    // A just-hired assistant's site says where the HQ begins, not an absence.
+    await expect(site).toContainText('Starts here');
 
     // ...and it must be reachable, not just present. The camera's first-paint
     // guard only counted workspaces and group districts as content, so a
@@ -216,11 +217,10 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
     // HQ is retired from the mission board. The hired assistant still offers
-    // its next mission without hiding the unbuilt Map site.
+    // its next mission without hiding the unbuilt Map site. Since notes became
+    // the primary onboarding journey (f37966fbd, #784) that mission is notes.
     await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
-    await expect(page.locator('[data-role="first-mission-title"]')).toHaveText(
-      'Show your assistant a folder'
-    );
+    await expect(page.locator('[data-role="first-mission-title"]')).toHaveText('Set up your notes');
     await expect(
       page.locator('[data-role="quests"] .quest-item').filter({ hasText: 'Build My HQ' })
     ).toHaveCount(0);

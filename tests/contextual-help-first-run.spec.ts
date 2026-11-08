@@ -31,11 +31,17 @@ test('real pre-hire, no-model Help and meet-assistant deferral remain independen
     .locator('#oriGuideWalkthroughs')
     .getByRole('link', { name: 'Meet your assistant', exact: true })
     .click();
-  const layer = page.locator('#oriSpotlight');
-  await expect(layer).toBeVisible();
+  // Meeting the assistant is direct: the walkthrough link opens the
+  // personal-assistant configuration itself, with no spotlight to click through.
+  const modal = page.locator('#addAgentModal');
+  await page.waitForURL(url => url.pathname === '/agents');
+  await expect(modal).toBeVisible();
+  await expect(modal).toHaveClass(/is-assistant-hire/);
+  await expect(page.locator('#oriSpotlight')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('help-real-meet-walkthrough.png') });
-  await layer.getByRole('button', { name: 'Not now', exact: true }).click();
-  await expect(layer).toHaveCount(0);
+  // Deferring is just closing it.
+  await page.locator('#cancelAgentBtn').click();
+  await expect(modal).toBeHidden();
   await page.locator('#oriGuideLauncher').click();
   await expect(page.locator('#oriGuideTitle')).toHaveText('Help');
   await expect(page.locator('#oriGuideQuestPortrait')).toBeHidden();
@@ -45,9 +51,10 @@ test('real pre-hire, no-model Help and meet-assistant deferral remain independen
     .locator('#oriGuideWalkthroughs')
     .getByRole('link', { name: 'Meet your assistant', exact: true })
     .click();
-  await expect(layer).toBeVisible();
-  await expect(layer).toContainText('Click Agents');
-  await layer.getByRole('button', { name: 'Not now', exact: true }).click();
+  await page.waitForURL(url => url.pathname === '/agents');
+  await expect(modal).toBeVisible();
+  await expect(page.locator('#cr-name')).toBeFocused();
+  await page.locator('#cancelAgentBtn').click();
   const after = (await (await page.request.get('/api/personal-assistant')).json())
     .personal_assistant;
   expect(after.state).toBe('needs_hire');

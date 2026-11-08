@@ -143,7 +143,9 @@ func (s *SecondBrainService) SkipProject(ctx context.Context, userID, requestID 
 		if connected.FillIn == nil {
 			connected.FillIn = &secondbrain.FillIn{}
 		}
-		if connected.FillIn.ProjectAsk == "" {
+		// Not asked yet (empty, or deferred by a setup without the question): an
+		// explicit skip now records it. An answer is never overwritten.
+		if ask := connected.FillIn.ProjectAsk; ask == "" || ask == secondbrain.ProjectDeferred {
 			at := s.deps.Now().UTC()
 			connected.FillIn.ProjectAsk, connected.FillIn.ProjectAskAt = secondbrain.ProjectSkipped, &at
 		}

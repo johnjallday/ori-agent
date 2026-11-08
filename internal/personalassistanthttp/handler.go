@@ -688,6 +688,17 @@ type hqSetupRequest struct {
 	SelectedWorkspaceIDs    []string `json:"selected_workspace_ids"`
 	IncludeFutureWorkspaces bool     `json:"include_future_workspaces"`
 	NotifyOnReady           bool     `json:"notify_on_ready"`
+	// Notes is the reviewed notes choice; absent (every older client) means no
+	// notes are authorized. A folder is named by the review witness or a
+	// picker selection token, never by a raw path the server trusts.
+	Notes *hqSetupNotesRequest `json:"notes,omitempty"`
+}
+
+type hqSetupNotesRequest struct {
+	Include        bool   `json:"include"`
+	Witness        string `json:"witness,omitempty"`
+	SelectionToken string `json:"selection_token,omitempty"`
+	Name           string `json:"name,omitempty"`
 }
 
 type hqSetupErrorResponse struct {
@@ -740,9 +751,13 @@ func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
 			ScheduleDays: body.ScheduleDays, ScheduleTime: body.ScheduleTime,
 			Scope: body.Scope, SelectedIDs: body.SelectedWorkspaceIDs,
 			IncludeFuture: body.IncludeFutureWorkspaces, NotifyOnReady: body.NotifyOnReady,
+			Notes: body.Notes.choice(),
 		})
 	}
 	if err != nil {
+		if writeHQNotesError(w, err) {
+			return
+		}
 		var partial *personalassistant.PartialHQSetupError
 		if errors.As(err, &partial) && (errors.Is(err, personalassistant.ErrConflict) || errors.Is(err, personalassistant.ErrRepairNeeded) || errors.Is(err, personalhq.ErrAssistantNameConflict)) {
 			writeHQSetupError(w, http.StatusConflict, "hq_setup_resume_blocked",
@@ -803,11 +818,47 @@ func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
 	response := responseFromResult(&personalassistant.HireResult{
 		State: result.State, BriefConfig: result.BriefConfig, Resumed: result.Resumed,
 	})
+	payload := map[string]any{"personal_assistant": response}
+	if result.Notes != nil {
+		// The notes half, independent of HQ: HQ is active whatever this says.
+		payload["notes_setup"] = result.Notes
+	}
 	if result.Resumed {
-		orihttp.Success(w, map[string]any{"personal_assistant": response})
+		orihttp.Success(w, payload)
 		return
 	}
-	orihttp.Created(w, map[string]any{"personal_assistant": response})
+	orihttp.Created(w, payload)
+}
+
+func (n *hqSetupNotesRequest) choice() *personalassistant.HQNotesChoice {
+	if n == nil {
+		return nil
+	}
+	return &personalassistant.HQNotesChoice{
+		Include: n.Include, Witness: n.Witness, SelectionToken: n.SelectionToken, Name: n.Name,
+	}
+}
+
+// writeHQNotesError answers a refusal about the reviewed notes, which happens
+// before any HQ effect. It reports whether it wrote a response.
+func writeHQNotesError(w http.ResponseWriter, err error) bool {
+	var folder *personalassistant.SecondBrainFolderError
+	switch {
+	case errors.Is(err, personalassistant.ErrSecondBrainDestinationChanged):
+		writeHQSetupError(w, http.StatusConflict, "notes_destination_changed",
+			"Where your notes would go has changed since you reviewed it. Review the new location, then build again. Nothing was created.", false, nil)
+	case errors.Is(err, personalassistant.ErrSecondBrainSelection):
+		writeHQSetupError(w, http.StatusConflict, "notes_selection_unavailable",
+			"The notes location you chose is no longer available. Choose it again, then build. Nothing was created.", false, nil)
+	case errors.As(err, &folder):
+		writeHQSetupError(w, http.StatusBadRequest, "notes_folder_invalid", folder.Message, false, nil)
+	case errors.Is(err, personalassistant.ErrSecondBrainUnavailable):
+		writeHQSetupError(w, http.StatusServiceUnavailable, "notes_unavailable",
+			"Notes can't be set up right now. Build without notes, or try again. Nothing was created.", true, nil)
+	default:
+		return false
+	}
+	return true
 }
 
 func writeHQSetupError(

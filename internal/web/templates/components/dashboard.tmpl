@@ -445,6 +445,11 @@
             <span aria-hidden="true">&times;</span>
           </button>
         </div>
+        <!-- The empty map's first-run welcome (home-welcome.js). Stacked above
+             the map so the reserved Personal HQ site sits directly under it;
+             the Map's own geometry, camera and selection are untouched. Hidden
+             until the relationship and an authoritative empty list are known. -->
+        <div id="cockpitWelcome" class="cockpit-welcome" hidden></div>
         <!-- Map and Tree occupy the SAME layout slot; activating one hides the
              other, never a drawer or overlay (FR18). -->
         <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" tabindex="-1" hidden></div>

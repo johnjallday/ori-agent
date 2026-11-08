@@ -138,6 +138,10 @@ func (f *fakeSecondBrain) People(context.Context, string) (personalassistant.Sec
 	return personalassistant.SecondBrainPeopleView{People: []personalassistant.SecondBrainPersonView{{Name: "Dana Lee", Kind: "person"}}}, f.record("people")
 }
 
+func (f *fakeSecondBrain) RetrySetup(context.Context, string) (personalassistant.SecondBrainSetupResult, error) {
+	return personalassistant.SecondBrainSetupResult{Status: personalassistant.SecondBrainSetupReady}, f.record("retry_setup")
+}
+
 func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	h := NewHandler(nil, userprofile.LocalUserProvider{})
 	h.SetSecondBrain(fake, connectionshttp.NewOriginGuard().Check)
@@ -163,6 +167,7 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("GET "+base+"/preview/{kind}/{name}", h.GetSecondBrainPreview)
 	mux.HandleFunc("GET "+base+"/people", h.GetSecondBrainPeople)
 	mux.HandleFunc("GET "+base+"/inbox", h.GetSecondBrainInbox)
+	mux.HandleFunc("POST "+base+"/setup/retry", h.RetrySecondBrainSetup)
 	mux.HandleFunc("POST "+base+"/disconnect", h.DisconnectSecondBrain)
 	return mux
 }

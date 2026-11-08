@@ -12,6 +12,18 @@ import {
   skipHQObjective
 } from './personal-hq-onboarding.js';
 import { JUST_HIRED_FLAG } from './personal-assistant-hire.js';
+import { FOLDER_PATH_ENDPOINT, folderDialogOffNote } from './folder-path-entry.js';
+import {
+  forgetFirstAction,
+  hqFirstActionView,
+  hqNotesOutcome,
+  hqNotesPayload,
+  hqNotesReviewView,
+  readFirstAction,
+  rememberFirstAction
+} from './personal-hq-notes-review.js';
+
+const NOTES_ENDPOINT = '/api/personal-assistant/second-brain';
 
 export function hqCardView(relationship, rootState, plan = {}) {
   const state = String(relationship?.state || '');
@@ -74,12 +86,254 @@ const plan = {
   collapsed: false,
   failed: false,
   receipt: [],
-  receiptWorkspaceID: ''
+  receiptWorkspaceID: '',
+  // The notes choice in this review: included by default, or a folder chosen
+  // through the trusted picker. Reset when the review is rebuilt.
+  notesInclude: true,
+  notesChosen: null,
+  // The notes half of the build just made in this tab, or of a recorded
+  // setup that has not finished; null when there is nothing to say.
+  notesOutcome: null,
+  justBuilt: false,
+  // The first step after a build (4.1): active while this browser's
+  // first-action record names the current HQ. `firstPhase` is 'choices',
+  // 'note' (the quick-note composer) or 'saved' (the receipt of a saved note).
+  firstAction: false,
+  firstPhase: 'choices',
+  saved: null,
+  noteError: ''
 };
-const state = { relationship: null, root: null, busy: false, sequence: 0, justHired: false };
+
+// The quick note's draft and its one request id, kept for this tab so Back,
+// a failure or a reload never loses the text, and a retry after a lost
+// response replays the same save instead of writing a second note.
+const NOTE_DRAFT_KEY = 'ori.hq.firstNote.v1';
+
+function newNoteRequestID() {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `hq-note-${Date.now().toString(36)}-${random}`;
+}
+
+function readNoteDraft() {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(NOTE_DRAFT_KEY) || 'null');
+    if (parsed && typeof parsed.text === 'string' && typeof parsed.requestId === 'string') {
+      return parsed;
+    }
+  } catch (_) {
+    // A draft is a convenience; a fresh one is fine.
+  }
+  return { text: '', requestId: newNoteRequestID() };
+}
+
+function writeNoteDraft(draft) {
+  try {
+    window.sessionStorage.setItem(NOTE_DRAFT_KEY, JSON.stringify(draft));
+  } catch (_) {
+    // Storage is optional.
+  }
+}
+
+function firstActionStorage() {
+  try {
+    return window.localStorage;
+  } catch (_) {
+    return null;
+  }
+}
+const state = {
+  relationship: null,
+  root: null,
+  notes: null,
+  busy: false,
+  sequence: 0,
+  justHired: false
+};
+
+function notesView() {
+  return hqNotesReviewView(state.notes, {
+    include: plan.notesInclude,
+    chosen: plan.notesChosen
+  });
+}
+
+async function readNotesStatus() {
+  try {
+    const response = await fetch(NOTES_ENDPOINT, { headers: { Accept: 'application/json' } });
+    if (!response.ok) return null;
+    const body = await response.json();
+    return body?.second_brain || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function renderNotes(view) {
+  const section = el('Notes');
+  if (!section) return;
+  const show = view.visible && !view.collapsed && !view.receipt && !view.paused;
+  section.hidden = !show;
+  if (show) {
+    const notes = notesView();
+    const create = notes.mode === 'create';
+    // The heading promises notes only when this build will make them.
+    el('NotesTitle').textContent = create && notes.include ? 'Notes, ready to use' : 'Notes';
+    el('NotesMessage').textContent = notes.message || '';
+    el('NotesMessage').hidden = !notes.message;
+    el('NotesLocation').hidden = !notes.path || (create && !notes.include);
+    el('NotesPath').textContent = notes.path;
+    el('NotesScope').textContent =
+      create && notes.include ? `${notes.scope} ${notes.seed}`.trim() : '';
+    el('NotesScope').hidden = !(create && notes.include);
+    el('NotesOptions').hidden = !create;
+    el('NotesInclude').checked = create && notes.include;
+    el('NotesInclude').disabled = state.busy;
+    el('NotesChoose').disabled = state.busy || !notes.include;
+  }
+  const result = el('NotesResult');
+  if (!result) return;
+  const outcome = plan.notesOutcome;
+  result.hidden = !outcome || !outcome.line || !view.receipt;
+  if (!result.hidden) {
+    el('NotesResultText').textContent = outcome.line;
+    el('NotesRetry').hidden = !outcome.canRetry;
+    el('NotesRetry').disabled = state.busy;
+  }
+}
 
 function el(id) {
   return document.getElementById(`personalAssistantHQ${id}`);
+}
+
+// Today lifts the card above its routine rows while the result is active, and
+// folds them; the notes card keeps its ask out of the way meanwhile. Sent only
+// when the answer changes, so status refreshes never move anything twice.
+let lastResultActive = null;
+function announceResult(active) {
+  if (lastResultActive === active) return;
+  lastResultActive = active;
+  document.dispatchEvent(
+    new CustomEvent('personal-assistant:setup-result', { detail: { active } })
+  );
+  // Now leading (Home has just moved it up): show it from its top, not at the
+  // drawer's restored scroll offset. No focus is taken by a load.
+  if (active) el('Card')?.scrollIntoView?.({ block: 'start' });
+}
+
+function hqRoute() {
+  return plan.receipt.find(row => row.kind === 'workspace')?.route || '';
+}
+
+function renderFirst(view, resultActive) {
+  const first = el('First');
+  if (!first) return;
+  first.hidden = !resultActive || !view.receipt || !plan.firstAction;
+  if (first.hidden) return;
+  const choicesView = hqFirstActionView(plan.notesOutcome, { hqRoute: hqRoute() });
+  const phase = plan.firstPhase;
+  const choosing = phase === 'choices';
+  el('FirstLead').textContent = choicesView.lead;
+  el('FirstLead').hidden = !choosing;
+  el('FirstNote').hidden = !choosing || !choicesView.note;
+  el('FirstOpenNotes').hidden = !choosing || !choicesView.openNotes;
+  if (choicesView.openNotes) el('FirstOpenNotes').href = choicesView.openNotes;
+  el('FirstSetupNotes').hidden = !choosing || !choicesView.setupNotes;
+  el('FirstFolder').hidden = !choosing;
+  el('FirstExplore').hidden = !choosing;
+  for (const id of ['FirstNote', 'FirstSetupNotes', 'FirstFolder', 'FirstExplore']) {
+    el(id).disabled = state.busy;
+  }
+  el('NoteForm').hidden = phase !== 'note';
+  el('NoteError').textContent = plan.noteError;
+  el('NoteError').hidden = !plan.noteError;
+  el('NoteSave').disabled = state.busy;
+  el('NoteSave').setAttribute('aria-busy', state.busy && phase === 'note' ? 'true' : 'false');
+  el('NoteBack').disabled = state.busy;
+  el('NoteSaved').hidden = phase !== 'saved' || !plan.saved;
+  if (phase === 'saved' && plan.saved) {
+    el('NoteSavedTitle').textContent = `✓ Saved to Notes · ${plan.saved.note}`;
+    el('NoteSavedText').textContent = plan.saved.text;
+  }
+}
+
+// Ends the first step. The HQ and notes stay exactly as they are; only this
+// browser's presentation record goes, so the card does not come back.
+function endFirstAction() {
+  forgetFirstAction(firstActionStorage());
+  plan.firstAction = false;
+  plan.firstPhase = 'choices';
+  plan.justBuilt = false;
+  render();
+  // The pressed control is gone with the card; hand focus to what leads now:
+  // Today's strip, else the composer.
+  const strip = document.getElementById('personalAssistantTodayStripToggle');
+  const next =
+    strip && strip.offsetParent !== null
+      ? strip
+      : document.getElementById('personalAssistantInput');
+  next?.focus?.({ preventScroll: true });
+}
+
+function openNoteComposer() {
+  plan.firstPhase = 'note';
+  plan.noteError = '';
+  render();
+  const text = el('NoteText');
+  text.value = readNoteDraft().text;
+  text.focus();
+}
+
+async function saveNote(event) {
+  event?.preventDefault?.();
+  if (state.busy) return;
+  const text = el('NoteText').value;
+  const draft = { ...readNoteDraft(), text };
+  writeNoteDraft(draft);
+  if (!text.trim()) {
+    plan.noteError = 'Write something to save, or go back.';
+    render();
+    el('NoteText').focus();
+    return;
+  }
+  state.busy = true;
+  plan.noteError = '';
+  render();
+  let uncertain = false;
+  try {
+    let response;
+    try {
+      response = await fetch(`${NOTES_ENDPOINT}/capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ text, request_id: draft.requestId })
+      });
+    } catch (_) {
+      uncertain = true;
+      throw new Error(
+        'Ori could not confirm the note was saved. Save again: the same note is never saved twice.'
+      );
+    }
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      // A 5xx may have written the note before failing; the same request id
+      // makes a second press replay it rather than write another.
+      uncertain = response.status >= 500;
+      throw new Error(body.error || 'Ori could not save the note. Your text is still here.');
+    }
+    const capture = body.capture || {};
+    plan.saved = { text: text.trim(), note: String(capture.note || capture.name || 'Inbox') };
+    // Saved: the next note is a new one.
+    writeNoteDraft({ text: '', requestId: newNoteRequestID() });
+    plan.firstPhase = 'saved';
+  } catch (cause) {
+    plan.noteError = cause?.message || 'Ori could not save the note. Your text is still here.';
+    if (!uncertain) writeNoteDraft(draft);
+  } finally {
+    state.busy = false;
+    render();
+    if (plan.firstPhase === 'saved') el('NoteSavedTitle')?.focus?.();
+    else el('NoteText')?.focus?.();
+  }
 }
 
 function error(message) {
@@ -114,8 +368,16 @@ function render() {
   const view = hqCardView(state.relationship, state.root, plan);
   // Once built, the compact canonical Done item owns the presentation. Keep
   // these server-observed rows for its receipt disclosure, not a second card
-  // under Needs you.
-  card.hidden = !view.visible || view.receipt;
+  // under Needs you — except for the build just made in this tab, and a notes
+  // setup that has not finished: their outcome and retry stay in view.
+  const notesNeedsYou =
+    !!plan.notesOutcome && ['failed', 'pending'].includes(plan.notesOutcome.status);
+  const resultActive = view.receipt && (plan.firstAction || notesNeedsYou);
+  card.hidden = !view.visible || (view.receipt && !resultActive);
+  card.dataset.result = resultActive ? 'active' : '';
+  renderNotes(view);
+  renderFirst(view, resultActive);
+  announceResult(resultActive && !card.hidden);
   if (!view.visible) return;
   el('Eyebrow').textContent = state.justHired ? '✓ Mission 01 complete' : 'Personal HQ';
   el('Headline').textContent = view.receipt
@@ -142,8 +404,9 @@ function render() {
   el('Adjust').hidden = view.collapsed || view.receipt;
   el('NotNow').hidden = view.collapsed || view.receipt;
   el('Change').hidden = view.paused;
-  el('Adjust').hidden = view.paused;
-  el('NotNow').hidden = view.paused;
+  // Build-time controls belong to the review, never to the built result.
+  el('Adjust').hidden = view.paused || view.collapsed || view.receipt;
+  el('NotNow').hidden = view.paused || view.collapsed || view.receipt;
   el('Change').disabled = state.busy || view.building;
   el('Adjust').disabled = state.busy || view.building;
   el('NotNow').disabled = state.busy || view.building;
@@ -165,9 +428,33 @@ async function load(relationship = null) {
       relationship || (await readJSON('/api/personal-assistant')).personal_assistant || null;
     const root = await loadHQWorkspaceRoot();
     const hq = await readJSON('/api/personal-hq/status');
+    // The notes status is read for the review, never the notes themselves. A
+    // failed read leaves notes out of the build rather than guessing.
+    const notes = await readNotesStatus();
     if (seq !== state.sequence) return;
     state.relationship = current;
     state.root = root;
+    state.notes = notes;
+    // The notes half from the record alone: an unfinished setup, else the
+    // connection, else nothing. HQ success never stands in for it.
+    if (notes?.setup) {
+      plan.notesOutcome = hqNotesOutcome(notes.setup);
+    } else if (notes?.source) {
+      plan.notesOutcome = hqNotesOutcome({
+        status: 'ready',
+        path: notes.source.path,
+        writable: notes.source.origin === 'created_by_ori' && notes.status === 'connected'
+      });
+    } else if (notes) {
+      plan.notesOutcome = null;
+    }
+    // The first step shows only for the HQ this browser just built.
+    const record = readFirstAction(firstActionStorage());
+    plan.firstAction =
+      current?.state === 'active' &&
+      !!hq?.status?.valid &&
+      !!record &&
+      record.workspaceId === String(hq.status.workspace?.id || hq.status.workspace_id || '');
     if (current?.state === 'active' && hq?.status?.valid) {
       // After a reload the HQ and its schedule are still canonical, but the
       // current workspace-root setting is not proof of the original directory.
@@ -244,6 +531,21 @@ async function build() {
     ) {
       throw new Error('The workspace directory or relationship changed. Check the plan and retry.');
     }
+    // Notes: re-read right before confirming. If what the review showed is no
+    // longer what a build would do — a folder got connected, or the place
+    // moved — show the new review instead of silently building something else.
+    const reviewed = notesView();
+    state.notes = await readNotesStatus();
+    const current = notesView();
+    if (
+      reviewed.mode !== current.mode ||
+      reviewed.path !== current.path ||
+      reviewed.include !== current.include
+    ) {
+      throw new Error(
+        'Your notes setup changed since you reviewed it. Check the plan and build again.'
+      );
+    }
     let timezone = 'UTC';
     try {
       timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -263,7 +565,8 @@ async function build() {
             schedule_time: plan.time,
             scope: 'all',
             include_future_workspaces: true,
-            notify_on_ready: false
+            notify_on_ready: false,
+            notes: hqNotesPayload(current)
           },
           hqRequestID(window.localStorage)
         )
@@ -278,6 +581,14 @@ async function build() {
     if (!rows.length) throw new Error('HQ was built. Reload to see its workspace.');
     plan.receipt = rows;
     plan.receiptWorkspaceID = hq?.workspace?.id || '';
+    // HQ is built whatever the notes half says; its outcome is shown on its own.
+    plan.notesOutcome = result.notes_setup ? hqNotesOutcome(result.notes_setup) : null;
+    plan.justBuilt = true;
+    // The first step belongs to this build: remembered for this HQ until the
+    // user leaves it, so a reload brings it back and a later visit does not.
+    rememberFirstAction(firstActionStorage(), hq?.workspace?.id || '');
+    plan.firstAction = true;
+    plan.firstPhase = 'choices';
     state.relationship = relationship;
     for (const name of [
       'ori:personal-hq-changed',
@@ -291,10 +602,102 @@ async function build() {
     await window.PersonalAssistantFolder?.reload?.();
   } catch (cause) {
     plan.failed = true;
+    // A refused notes review (the place moved, a folder got connected) shows
+    // the current review next to the message, so the user can confirm again.
+    state.notes = await readNotesStatus();
     error(cause?.message || 'Could not build Personal HQ. Retry the same request.');
   } finally {
     state.busy = false;
     render();
+    if (plan.justBuilt) focusResult();
+  }
+}
+
+// After a build the result is where the user is: its headline takes focus (so
+// the next Tab reaches the first choice) and comes into view whole, not at the
+// review's old scroll offset.
+function focusResult() {
+  const headline = el('Headline');
+  if (!headline || el('Card')?.hidden) return;
+  headline.tabIndex = -1;
+  el('Card').scrollIntoView?.({ block: 'start' });
+  headline.focus({ preventScroll: true });
+}
+
+// Choose another notes location through the trusted folder picker. The
+// selection token, not the path, is what the build sends.
+async function chooseNotesLocation() {
+  if (state.busy) return;
+  state.busy = true;
+  error('');
+  render();
+  try {
+    const response = await fetch(FOLDER_PATH_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ title: 'Choose where to set up your notes' })
+    });
+    const result = (await response.json().catch(() => ({}))) || {};
+    const off = folderDialogOffNote(result);
+    if (off) {
+      error(off);
+    } else if (response.ok && result.selected && result.selection_token) {
+      // The same folder name the default place uses, read from the server's
+      // own default rather than spelled here.
+      const defaultPath = String(state.notes?.setup_default?.path || '');
+      const name = defaultPath.split(/[\\/]/).filter(Boolean).pop() || plan.notesChosen?.name || '';
+      if (!name) throw new Error('Choose the notes location again.');
+      plan.notesChosen = {
+        selectionToken: result.selection_token,
+        path: String(result.path || ''),
+        name
+      };
+      plan.notesInclude = true;
+    } else if (!response.ok) {
+      error(result.error || 'The folder dialog could not open.');
+    }
+  } catch (_) {
+    error('The folder dialog could not open.');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+// Retry only the notes half of a build, exactly as it was reviewed. HQ, its
+// schedule and the assistant are never touched by this.
+async function retryNotes() {
+  if (state.busy) return;
+  state.busy = true;
+  render();
+  let retried = false;
+  try {
+    const body = await readJSON(`${NOTES_ENDPOINT}/setup/retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: '{}'
+    });
+    plan.notesOutcome = hqNotesOutcome(body.notes_setup);
+    state.notes = await readNotesStatus();
+    await window.PersonalAssistantToday?.refresh?.();
+    retried = true;
+  } catch (cause) {
+    plan.notesOutcome = {
+      ...(plan.notesOutcome || {}),
+      line: cause?.message || 'Notes could not be set up. Your HQ is ready.',
+      canRetry: true
+    };
+  } finally {
+    state.busy = false;
+    if (retried && plan.notesOutcome?.status === 'ready') {
+      // A success is shown, not just a card that disappears: the result stays
+      // with its next step until the user leaves it.
+      rememberFirstAction(firstActionStorage(), plan.receiptWorkspaceID);
+      plan.firstAction = true;
+      plan.firstPhase = 'choices';
+    }
+    render();
+    if (retried) el('NotesResultText')?.focus?.();
   }
 }
 
@@ -305,7 +708,11 @@ async function changeRoot() {
   render();
   try {
     const path = await chooseHQWorkspaceRoot();
-    if (path) state.root = await saveHQWorkspaceRoot(path);
+    if (path) {
+      state.root = await saveHQWorkspaceRoot(path);
+      // The default notes place follows the directory; review it again.
+      state.notes = await readNotesStatus();
+    }
   } catch (cause) {
     error(cause?.message || 'Could not choose the workspace directory.');
   } finally {
@@ -353,6 +760,45 @@ function init() {
   el('Change').addEventListener('click', changeRoot);
   el('Adjust').addEventListener('click', adjust);
   el('NotNow').addEventListener('click', notNow);
+  el('NotesInclude')?.addEventListener('change', event => {
+    plan.notesInclude = event.target.checked;
+    render();
+  });
+  el('NotesChoose')?.addEventListener('click', chooseNotesLocation);
+  el('NotesRetry')?.addEventListener('click', retryNotes);
+  // The first step after a build. Nothing here reads a folder or starts a
+  // setup until a choice is pressed.
+  el('FirstNote')?.addEventListener('click', openNoteComposer);
+  el('NoteForm')?.addEventListener('submit', saveNote);
+  el('NoteText')?.addEventListener('input', event => {
+    writeNoteDraft({ ...readNoteDraft(), text: event.target.value });
+  });
+  el('NoteBack')?.addEventListener('click', () => {
+    // The draft stays; Back only closes the composer.
+    plan.firstPhase = 'choices';
+    plan.noteError = '';
+    render();
+    el('FirstNote')?.focus?.();
+  });
+  el('NoteAnother')?.addEventListener('click', () => {
+    plan.saved = null;
+    openNoteComposer();
+  });
+  el('NoteDone')?.addEventListener('click', endFirstAction);
+  el('FirstExplore')?.addEventListener('click', endFirstAction);
+  el('FirstOpenNotes')?.addEventListener('click', () => {
+    forgetFirstAction(firstActionStorage());
+  });
+  el('FirstFolder')?.addEventListener('click', () => {
+    // The existing guarded folder chooser; it reads nothing until a folder is
+    // chosen and reviewed there.
+    endFirstAction();
+    window.PersonalAssistantFolder?.openChooser?.();
+  });
+  el('FirstSetupNotes')?.addEventListener('click', () => {
+    endFirstAction();
+    void window.PersonalAssistantSecondBrain?.openSetup?.();
+  });
   for (const [field, key] of [
     ['Name', 'name'],
     ['Time', 'time']

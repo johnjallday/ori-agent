@@ -93,9 +93,13 @@ test('each step opens on the field it asks for, and a review on its safe way out
     secondBrainFocusSelector({ phase: 'disconnect' }),
     '[data-second-brain-action="cancel"]'
   );
+  // Setup opens on the place step now (4.4): its one action takes focus.
+  assert.equal(
+    secondBrainFocusSelector({ phase: 'setup', setupStep: 'place' }),
+    '[data-second-brain-action="create"]'
+  );
   // Everything else: the step's first control.
   assert.equal(secondBrainFocusSelector({ phase: 'ask' }), '');
-  assert.equal(secondBrainFocusSelector({ phase: 'setup', setupStep: 'place' }), '');
 });
 
 test('a repaint finds the focused field or control again, and only safe selectors', () => {
@@ -146,13 +150,14 @@ test('a repaint finds the focused field or control again, and only safe selector
   assert.match(render, /else if \(open && \(state\.focusNext \|\| focusWithin\)\)/);
 });
 
-test('the setup says which of its two steps this is and why the project comes first', () => {
+test('setup starts at where the notes live; the project question is no longer a step before it', () => {
+  const place = secondBrainSetupStage('place');
+  assert.equal(place.label, 'Where your notes live');
+  assert.doesNotMatch(place.label, /Step \d of/);
+  assert.equal(place.why, 'Nothing is written until you press Set it up.');
+  // An older arrival that still asks the question keeps its own copy.
   const first = secondBrainSetupStage('project');
   assert.equal(first.label, 'Step 1 of 2 · Your first note');
-  assert.match(first.why, /You can skip this\./);
-  const second = secondBrainSetupStage('place');
-  assert.equal(second.label, 'Step 2 of 2 · Where your notes live');
-  assert.equal(second.why, 'Nothing is written until you press Set it up.');
 });
 
 test('the receipt names a first note only when the connection lists it as Ori’s', () => {
@@ -516,6 +521,17 @@ test('setup is the one primary action whether zero, one or several vaults were d
       assert.ok(view.existing.actions.every(action => action.style === 'outline'));
     }
   }
+});
+
+test('an unfinished Personal HQ notes setup owns the notes step, so the ask waits', () => {
+  for (const status of ['pending', 'failed', 'stopped']) {
+    const view = secondBrainAskView(
+      { ...detected, ask: { state: 'shown' }, setup: { status, path: '/n/Second Brain' } },
+      true
+    );
+    assert.equal(view.show, false, status);
+  }
+  assert.equal(secondBrainAskView({ ...detected, ask: { state: 'shown' } }, true).show, true);
 });
 
 test('the choice separates scope, title, benefit, and a read-only alternative', () => {
@@ -979,6 +995,12 @@ test('the first-week checklist ticks from the missions and asks the project only
   assert.equal(view.rows[1].href, '/?journal=1');
   const skipped = secondBrainChecklistView({ ...created, fill_in: { project_ask: 'skipped' } }, []);
   assert.ok(skipped.rows.some(row => row.id === 'project'));
+  // Not asked (a bundled or project-free setup) keeps the later, explicit row.
+  const deferred = secondBrainChecklistView(
+    { ...created, fill_in: { project_ask: 'deferred' } },
+    []
+  );
+  assert.ok(deferred.rows.some(row => row.id === 'project'));
   const answered = secondBrainChecklistView(
     { ...created, fill_in: { project_ask: 'answered' } },
     []
@@ -1466,6 +1488,8 @@ test('the project question belongs to a second brain that may keep project notes
     brain({ fill_in: { state: 'pending' } }),
     brain({ fill_in: { state: 'later' } }),
     brain({ fill_in: { state: 'allowed', project_ask: 'skipped' } }),
+    // Deferred by a setup without the question: it never opens on its own.
+    brain({ fill_in: { state: 'allowed', project_ask: 'deferred' } }),
     brain({ fill_in: { state: 'allowed', project_ask: 'answered' } }),
     brain({ projects: [{ name: 'Launch' }] }),
     brain({ source: { name: 'Vault', origin: 'connected' } }),

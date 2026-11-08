@@ -817,7 +817,15 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(name).toBeFocused();
     await expect(name).toHaveAttribute('maxlength', '100');
     await expect(name).toHaveAttribute('required', '');
-    await expect(page.getByRole('group', { name: 'What should they help with?' })).toBeVisible();
+    // Optional settings wait behind one native, named disclosure (group 2.2);
+    // their defaults are already set, and the keyboard opens it.
+    const focusGroup = page.getByRole('group', { name: 'What should they help with?' });
+    await expect(focusGroup).toBeHidden();
+    const more = page.locator('#cr-more > summary');
+    await expect(more).toHaveText('Appearance, focus and this week (optional)');
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(focusGroup).toBeVisible();
     await expect(page.getByLabel('Plan my day')).toBeChecked();
     const mandate = page.getByLabel('What would make them useful this week? (optional)');
     await expect(mandate).toHaveAttribute('maxlength', '1000');

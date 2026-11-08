@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
@@ -37,6 +39,30 @@ type HQSetupRequest struct {
 	SelectedIDs   []string
 	IncludeFuture bool
 	NotifyOnReady bool
+
+	// Notes is the reviewed notes choice (assistant-hq-onboarding 3.4). nil —
+	// every older client — authorizes nothing about notes; Include false is an
+	// explicit "set up later" and writes nothing.
+	Notes *HQNotesChoice
+}
+
+// HQNotesChoice is what the HQ review said about notes. Witness is the folder
+// the review showed for the default place; SelectionToken and Name name a
+// folder the user chose instead, through the trusted folder picker.
+type HQNotesChoice struct {
+	Include        bool
+	Witness        string
+	SelectionToken string
+	Name           string
+}
+
+// HQNotesSetup is the notes service, as the HQ coordinator uses it. It is bound
+// late: the notes service is built after the coordinator.
+type HQNotesSetup interface {
+	ResolveSetupDestination(witness, selectionToken, name string) (SecondBrainSetupDestination, error)
+	PrepareSetup(ctx context.Context, userID, operationID, hqRequestID string, dest SecondBrainSetupDestination) error
+	RunSetup(ctx context.Context, userID, operationID string) (SecondBrainSetupResult, error)
+	SetupStatus(ctx context.Context, userID string) (SecondBrainSetupResult, error)
 }
 
 // HQSetupResult is the canonical outcome of a completed setup.
@@ -46,6 +72,9 @@ type HQSetupResult struct {
 	// Resumed is true when this call finished (or re-returned) an operation that
 	// a previous attempt had already started.
 	Resumed bool
+	// Notes is the notes half, independent of HQ: nil when the request carried
+	// no notes choice. HQ is active whatever it says.
+	Notes *SecondBrainSetupResult
 }
 
 // PartialHQSetupError reports a durable partial result and the safe step a retry
@@ -87,6 +116,26 @@ type HQSetupCoordinator struct {
 	// once. Durable request IDs and workspace provenance still provide the
 	// restart-safe half of idempotency.
 	mu sync.Mutex
+
+	// notes is the late-bound notes service; nil until wired.
+	notesMu sync.RWMutex
+	notes   HQNotesSetup
+}
+
+// SetNotesSetup binds the notes service once it exists.
+func (c *HQSetupCoordinator) SetNotesSetup(notes HQNotesSetup) {
+	if c == nil {
+		return
+	}
+	c.notesMu.Lock()
+	c.notes = notes
+	c.notesMu.Unlock()
+}
+
+func (c *HQSetupCoordinator) notesSetup() HQNotesSetup {
+	c.notesMu.RLock()
+	defer c.notesMu.RUnlock()
+	return c.notes
 }
 
 // NewHQSetupCoordinator constructs the post-hire HQ setup coordinator.
@@ -117,8 +166,45 @@ type normalizedHQSetupRequest struct {
 	SelectedIDs   []string `json:"selected_workspace_ids"`
 	IncludeFuture bool     `json:"include_future_workspaces"`
 	NotifyOnReady bool     `json:"notify_on_ready"`
-	Hash          string   `json:"-"`
+	// Notes is omitted for a request without a notes choice, so every older
+	// payload keeps its exact bytes and hash and carries no notes effect.
+	Notes *normalizedHQNotes `json:"notes,omitempty"`
+	Hash  string             `json:"-"`
 }
+
+// normalizedHQNotes is the confirmed notes choice as journalled and hashed.
+// The resolved folder is recorded by the notes service before the claim, not
+// here, so a replay of the same request compares like with like.
+type normalizedHQNotes struct {
+	Include bool   `json:"include"`
+	Witness string `json:"witness,omitempty"`
+	Chosen  bool   `json:"chosen,omitempty"`
+	Name    string `json:"name,omitempty"`
+	// Parent and Folder are the reviewed folder, resolved once on the fresh
+	// claim and journalled with it, so a resume makes exactly that folder. They
+	// are not part of the request hash: a replay of the same confirmation
+	// compares the user's choice, not a resolution made later.
+	Parent string `json:"parent,omitempty"`
+	Folder string `json:"folder,omitempty"`
+}
+
+// canonicalHash is the hash of what the user confirmed: the journalled
+// payload without the server's resolution of the notes folder.
+func (r normalizedHQSetupRequest) canonicalHash() (string, error) {
+	copied := r
+	if r.Notes != nil {
+		notes := *r.Notes
+		notes.Parent, notes.Folder = "", ""
+		copied.Notes = &notes
+	}
+	payload, err := json.Marshal(copied)
+	if err != nil {
+		return "", err
+	}
+	return PayloadHash(payload), nil
+}
+
+func (r normalizedHQSetupRequest) wantsNotes() bool { return r.Notes != nil && r.Notes.Include }
 
 // Setup runs or resumes one confirmed HQ setup operation.
 func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request HQSetupRequest) (*HQSetupResult, error) {
@@ -137,7 +223,7 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	state, resumed, canonical, err := c.claim(ctx, userID, request.IfVersion, normalized)
+	state, resumed, canonical, err := c.claim(ctx, userID, request.IfVersion, normalized, request.Notes)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +232,10 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	// Already finished: return the canonical records rather than building again.
 	if state.Status == StatusActive || state.Status == StatusPaused {
 		config, _ := c.briefs.GetConfig(ctx, state.HQWorkspaceID)
-		return &HQSetupResult{State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: true}, nil
+		return &HQSetupResult{
+			State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: true,
+			Notes: c.runNotes(ctx, userID, normalized, request.Notes),
+		}, nil
 	}
 
 	recordEvent(EventHQSetupStarted, EventData{
@@ -187,6 +276,7 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	})
 	return &HQSetupResult{
 		State: updated.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: resumed,
+		Notes: c.runNotes(ctx, userID, normalized, request.Notes),
 	}, nil
 }
 
@@ -213,6 +303,7 @@ func (c *HQSetupCoordinator) Resume(ctx context.Context, userID string) (*HQSetu
 		ScheduleDays: stored.ScheduleDays, ScheduleTime: stored.ScheduleTime,
 		Scope: stored.Scope, SelectedIDs: stored.SelectedIDs,
 		IncludeFuture: stored.IncludeFuture, NotifyOnReady: stored.NotifyOnReady,
+		Notes: storedNotesChoice(stored.Notes),
 	})
 }
 
@@ -226,7 +317,7 @@ mid-creation recoverable: without it, a workspace could exist that no persisted
 state points at.
 */
 func (c *HQSetupCoordinator) claim(
-	ctx context.Context, userID string, ifVersion int64, request normalizedHQSetupRequest,
+	ctx context.Context, userID string, ifVersion int64, request normalizedHQSetupRequest, notesChoice *HQNotesChoice,
 ) (*State, bool, normalizedHQSetupRequest, error) {
 	state, err := c.store.GetState(ctx, userID)
 	if errors.Is(err, ErrNotFound) {
@@ -290,6 +381,20 @@ func (c *HQSetupCoordinator) claim(
 		return nil, false, request, fmt.Errorf("%w: stale relationship version", ErrConflict)
 	}
 
+	// A fresh claim with notes: fix the reviewed folder and record the notes
+	// operation BEFORE the claim, so nothing is created that a crash could
+	// leave unrecorded. Replays and resumes never get here, so a changed
+	// Workspace Directory or an expired selection cannot redirect them.
+	if request.wantsNotes() {
+		dest, err := c.resolveNotes(notesChoice)
+		if err != nil {
+			return nil, false, request, err
+		}
+		notes := *request.Notes
+		notes.Parent, notes.Folder = dest.Parent, dest.Name
+		request.Notes = &notes
+	}
+
 	payload, marshalErr := json.Marshal(request)
 	if marshalErr != nil {
 		return nil, false, request, marshalErr
@@ -305,6 +410,103 @@ func (c *HQSetupCoordinator) claim(
 		return nil, false, request, claimErr
 	}
 	return claimed, state.Status == StatusProvisioningHQ, request, nil
+}
+
+// storedNotesChoice rebuilds the journalled notes choice so a resume hashes
+// exactly as the confirmed request did. A resume takes the stored payload and
+// never resolves the destination again (the notes operation already holds
+// it), so the chosen-folder token is only a stand-in for "a folder was chosen".
+func storedNotesChoice(notes *normalizedHQNotes) *HQNotesChoice {
+	if notes == nil {
+		return nil
+	}
+	choice := &HQNotesChoice{Include: notes.Include, Witness: notes.Witness, Name: notes.Name}
+	if notes.Chosen {
+		choice.SelectionToken = "stored"
+	}
+	return choice
+}
+
+// resolveNotes fixes the reviewed notes folder before anything is claimed, so a
+// review that no longer holds is refused while nothing exists yet.
+func (c *HQSetupCoordinator) resolveNotes(choice *HQNotesChoice) (SecondBrainSetupDestination, error) {
+	notes := c.notesSetup()
+	if notes == nil {
+		return SecondBrainSetupDestination{}, ErrSecondBrainUnavailable
+	}
+	var witness, token, name string
+	if choice != nil {
+		witness, token, name = choice.Witness, choice.SelectionToken, choice.Name
+	}
+	return notes.ResolveSetupDestination(witness, token, name)
+}
+
+const hqNotesUnavailableMessage = "Your Personal HQ is ready. Notes couldn't be set up right now; try again from Notes."
+
+/*
+runNotes finishes the notes half once HQ is active — the first moment the notes
+record (stored with HQ) can be written. Its outcome is reported, never returned
+as an HQ error: a notes failure leaves HQ built and usable, with a notes-only
+retry.
+
+The folder is the one resolved and journalled on the fresh claim. A replay of a
+finished build no longer has that journal (it is reduced to its receipt on
+activation), so if no notes operation was ever recorded — a crash between
+activation and this step — the replay resolves the same review again: the
+reviewed place still holds, or the notes are refused with guidance. Nothing is
+ever built twice: the operation is idempotent by its id.
+*/
+func (c *HQSetupCoordinator) runNotes(
+	ctx context.Context, userID string, request normalizedHQSetupRequest, choice *HQNotesChoice,
+) *SecondBrainSetupResult {
+	if !request.wantsNotes() {
+		return nil
+	}
+	unavailable := &SecondBrainSetupResult{
+		Status: SecondBrainSetupFailed, Reason: secondbrain.SetupReasonUnavailable, Message: hqNotesUnavailableMessage,
+	}
+	notes := c.notesSetup()
+	if notes == nil {
+		return unavailable
+	}
+	opID := SecondBrainSetupOperationID(request.RequestID)
+	dest := SecondBrainSetupDestination{Parent: request.Notes.Parent, Name: request.Notes.Folder}
+	if dest.Parent == "" {
+		status, err := notes.SetupStatus(ctx, userID)
+		if err != nil {
+			return unavailable
+		}
+		switch {
+		case status.Status == SecondBrainSetupPending:
+			// Recorded but not finished: finish it below.
+		case status.Status != SecondBrainSetupNone:
+			return &status
+		default:
+			resolved, err := c.resolveNotes(choice)
+			if err != nil {
+				return &SecondBrainSetupResult{
+					Status: SecondBrainSetupFailed, Reason: secondbrain.SetupReasonUnavailable,
+					Message: "Your Personal HQ is ready. Notes were not set up because the reviewed location changed; set them up from Notes.",
+				}
+			}
+			dest = resolved
+		}
+	}
+	if dest.Parent != "" {
+		if err := notes.PrepareSetup(ctx, userID, opID, request.RequestID, dest); err != nil {
+			logger.Warn("A Personal HQ notes setup could not be recorded", logger.Fields{"error": err.Error()})
+			return unavailable
+		}
+	}
+	result, err := notes.RunSetup(ctx, userID, opID)
+	if err != nil {
+		logger.Warn("A Personal HQ notes setup did not finish", logger.Fields{"error": err.Error()})
+		if status, statusErr := notes.SetupStatus(ctx, userID); statusErr == nil && status.Status != SecondBrainSetupNone {
+			return &status
+		}
+		return unavailable
+	}
+	return &result
 }
 
 // validateOwnedProfile refuses to build a workspace around a profile this
@@ -444,12 +646,20 @@ func (c *HQSetupCoordinator) partial(
 
 func decodeStoredHQRequest(state *State) (normalizedHQSetupRequest, error) {
 	var request normalizedHQSetupRequest
-	if state == nil || state.HQPayloadJSON == "" ||
-		PayloadHash([]byte(state.HQPayloadJSON)) != state.HQPayloadHash {
+	if state == nil || state.HQPayloadJSON == "" {
 		return request, errors.New("personal assistant: invalid stored hq operation")
 	}
 	if err := json.Unmarshal([]byte(state.HQPayloadJSON), &request); err != nil {
 		return request, err
+	}
+	// Every payload without notes is hashed byte for byte, as it always was. A
+	// payload with notes also carries the resolved folder, which is outside the
+	// hash, so it is checked against the hash of what the user confirmed.
+	if PayloadHash([]byte(state.HQPayloadJSON)) != state.HQPayloadHash {
+		canonical, err := request.canonicalHash()
+		if err != nil || request.Notes == nil || canonical != state.HQPayloadHash {
+			return normalizedHQSetupRequest{}, errors.New("personal assistant: invalid stored hq operation")
+		}
 	}
 	request.Hash = state.HQPayloadHash
 	if request.RequestID != state.LastHQRequestID {
@@ -523,6 +733,23 @@ func normalizeHQSetupRequest(input HQSetupRequest) (normalizedHQSetupRequest, er
 	}
 	out.IncludeFuture = input.IncludeFuture
 	out.NotifyOnReady = input.NotifyOnReady
+	if notes := input.Notes; notes != nil {
+		out.Notes = &normalizedHQNotes{Include: notes.Include}
+		if notes.Include {
+			if strings.TrimSpace(notes.SelectionToken) != "" {
+				out.Notes.Chosen = true
+				out.Notes.Name = strings.TrimSpace(notes.Name)
+				if out.Notes.Name == "" || len(out.Notes.Name) > 255 {
+					return out, fmt.Errorf("%w: invalid notes folder name", ErrValidation)
+				}
+			} else {
+				out.Notes.Witness = strings.TrimSpace(notes.Witness)
+				if out.Notes.Witness == "" || len(out.Notes.Witness) > 4096 {
+					return out, fmt.Errorf("%w: the reviewed notes location is missing", ErrValidation)
+				}
+			}
+		}
+	}
 
 	// Validate the whole rhythm through the canonical validator before anything
 	// is claimed, so a bad schedule fails before a workspace exists.

@@ -182,8 +182,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
     await expect.poll(async () => (await secondBrain(request)).ask.state).toBe('pending');
     await openDrawer(page);
     await action(page, 'setup').click();
-    // The project question comes first (Issue 776); this case skips it.
-    await action(page, 'skip').click();
+    // Setup goes straight to where the notes live (assistant-hq-onboarding 4.4).
     await action(page, 'elsewhere').click();
     await card(page).getByLabel('or paste a folder path').fill(documents);
     await card(page).getByRole('button', { name: 'Use this path' }).click();
@@ -250,9 +249,10 @@ test.describe('the first week, in a second brain Ori set up', () => {
   }) => {
     const brain = await setUpViaApi(request, `Project Brain ${stamp}`);
     expect((await secondBrain(request)).fill_in?.state).toBe('allowed');
-    // A setup without a project records the question as skipped, so the drawer
-    // asks it on request: the Give Ori a project mission's own URL (Issue 776 FR20).
-    expect((await secondBrain(request)).fill_in?.project_ask).toBe('skipped');
+    // A setup without a project records the question as not asked (deferred, not
+    // skipped), and nothing opens it by itself; the drawer asks it on request:
+    // the Give Ori a project mission's own URL (Issue 776 FR20; 3.7).
+    expect((await secondBrain(request)).fill_in?.project_ask).toBe('deferred');
     await page.goto('/?quest=second-brain-project');
     // The arrival opens the drawer itself; openDrawer would load Home again.
     await expect(page.locator('#personalAssistantPanel')).toBeVisible({ timeout: 20_000 });

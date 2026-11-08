@@ -39,6 +39,9 @@ type SecondBrainService interface {
 	OpenFolder(ctx context.Context, userID, requestID string) error
 	Preview(ctx context.Context, userID, kind, name string) (personalassistant.SecondBrainPreviewView, error)
 	People(ctx context.Context, userID string) (personalassistant.SecondBrainPeopleView, error)
+	// RetrySetup re-runs the recorded notes setup from a Personal HQ build, exactly
+	// as it was reviewed. It never touches HQ (assistant-hq-onboarding 3.4).
+	RetrySetup(ctx context.Context, userID string) (personalassistant.SecondBrainSetupResult, error)
 }
 
 // SetSecondBrain adds the second-brain boundary. origin refuses a request that
@@ -310,8 +313,10 @@ type secondBrainCreateRequest struct {
 	Name           string `json:"name"`
 	RequestID      string `json:"request_id"`
 	// Project is the setup turn's project answer, a closed object of its own:
-	// name (one folder name) and answer (Issue 776 FR6). Absent means skipped.
-	Project json.RawMessage `json:"project"`
+	// name (one folder name) and answer (Issue 776 FR6). Absent means not
+	// asked, unless project_skipped says the user skipped it.
+	Project        json.RawMessage `json:"project"`
+	ProjectSkipped bool            `json:"project_skipped,omitempty"`
 }
 
 type secondBrainCreateProject struct {
@@ -352,7 +357,7 @@ func (h *Handler) CreateSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req secondBrainCreateRequest
-	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "selection_token", "name", "request_id", "project") {
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "selection_token", "name", "request_id", "project", "project_skipped") {
 		return
 	}
 	project, ok := decodeCreateProject(req.Project)
@@ -363,13 +368,38 @@ func (h *Handler) CreateSecondBrain(w http.ResponseWriter, r *http.Request) {
 	req.SelectionToken = strings.TrimSpace(req.SelectionToken)
 	view, err := h.secondBrain.Create(r.Context(), userID, personalassistant.SecondBrainCreateInput{
 		SelectionToken: req.SelectionToken, Name: strings.TrimSpace(req.Name), RequestID: strings.TrimSpace(req.RequestID),
-		Project: project,
+		Project:        project,
+		ProjectSkipped: req.ProjectSkipped && project == nil,
 	})
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return
 	}
 	orihttp.Success(w, map[string]any{"second_brain": view, "look_id": view.LookID})
+}
+
+// RetrySecondBrainSetup handles POST …/second-brain/setup/retry: the notes-only
+// retry after a Personal HQ build whose notes did not finish. It takes no
+// folder: the operation's reviewed folder is the only one it can make, and it
+// never rebuilds HQ, its schedule or the assistant.
+func (h *Handler) RetrySecondBrainSetup(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var req struct{}
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req) {
+		return
+	}
+	result, err := h.secondBrain.RetrySetup(r.Context(), userID)
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"notes_setup": result})
 }
 
 type secondBrainCaptureRequest struct {
@@ -702,6 +732,8 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		orihttp.Conflict(w, "Let Ori keep project notes in your notes folder first")
 	case errors.Is(err, personalassistant.ErrSecondBrainSeededItem):
 		orihttp.Conflict(w, "That item came from a follow-up you already have")
+	case errors.Is(err, personalassistant.ErrSecondBrainNoSetup):
+		orihttp.Conflict(w, "There is no notes setup to retry")
 	case errors.Is(err, personalassistant.ErrValidation):
 		orihttp.BadRequest(w, "The request is not valid")
 	case errors.Is(err, personalassistant.ErrNeedsHQ):

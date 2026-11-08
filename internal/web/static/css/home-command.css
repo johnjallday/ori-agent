@@ -959,6 +959,202 @@ body.home-command-page .home-command-bridge * {
   max-width: 100%;
 }
 
+/* Notes in the HQ review (assistant-hq-onboarding 3.5). */
+.pa-hq-card__notes {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--hc-line);
+}
+
+.pa-hq-card__notes[hidden],
+.pa-hq-card__notes-result[hidden],
+.pa-hq-card__notes [hidden] {
+  display: none;
+}
+
+.pa-hq-card__notes-title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.pa-hq-card__notes-message,
+.pa-hq-card__notes-scope,
+.pa-hq-card__notes-hint {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 0.85rem;
+}
+
+.pa-hq-card__notes-location {
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: var(--hc-panel-deep);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.pa-hq-card__notes-location span {
+  display: block;
+  color: var(--hc-ink-dim);
+  font-size: 0.78rem;
+}
+
+.pa-hq-card__notes-options {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.pa-hq-card__notes-options summary {
+  padding: 0.35rem 0;
+  color: var(--hc-ink);
+  cursor: pointer;
+}
+
+.pa-hq-card__notes-options[open] {
+  padding-bottom: 0.25rem;
+}
+
+.pa-hq-card__notes-include {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0.25rem 0;
+}
+
+.pa-hq-card__notes-result {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--hc-signal);
+  background: var(--hc-panel-deep);
+}
+
+.pa-hq-card__notes-result p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The receipt's links use Home's text-safe signal ink, not Bootstrap's blue
+   (3.9:1 on the card), now that the receipt stays on screen as the result. */
+.pa-hq-card #personalAssistantHQReceipt a {
+  color: var(--hc-signal);
+  text-decoration: underline;
+}
+
+/* The card's outline buttons (Change, Adjust…, Not now, Choose another
+   location…, Back, Done) read in Home's ink: Bootstrap's grey measured 3.48:1
+   in dark mode. */
+.pa-hq-card .btn-outline-secondary {
+  border-color: var(--hc-line-bright);
+  color: var(--hc-ink);
+}
+
+.pa-hq-card .btn-outline-secondary:hover,
+.pa-hq-card .btn-outline-secondary:focus-visible {
+  border-color: var(--hc-signal);
+  background: var(--hc-panel-deep);
+  color: var(--hc-ink);
+}
+
+/* A recovery action, not a full-width bar that reads as disabled. */
+.pa-hq-card__notes-retry {
+  justify-self: start;
+}
+
+/* The first step after a build (assistant-hq-onboarding 4.1–4.5). */
+.pa-hq-card__first,
+.pa-hq-card__note,
+.pa-hq-card__saved {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.pa-hq-card__first[hidden],
+.pa-hq-card__first [hidden] {
+  display: none;
+}
+
+.pa-hq-card__first-lead {
+  margin: 0;
+  color: var(--hc-ink-dim);
+}
+
+.pa-hq-card__choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.pa-hq-card__choice {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--hc-line);
+  border-radius: 8px;
+  background: var(--hc-panel);
+  color: var(--hc-ink);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pa-hq-card__choice:hover {
+  border-color: var(--hc-signal);
+  color: var(--hc-ink);
+}
+
+.pa-hq-card__choice:focus-visible,
+.pa-hq-card__explore:focus-visible,
+#personalAssistantHQHeadline:focus-visible,
+.pa-hq-card__saved-title:focus-visible,
+#personalAssistantHQNotesResultText:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+.pa-hq-card__choice span {
+  color: var(--hc-ink-dim);
+  font-size: 0.85rem;
+}
+
+.pa-hq-card__explore {
+  justify-self: start;
+  min-height: 44px;
+  padding-left: 0;
+  color: var(--hc-ink-dim);
+}
+
+.pa-hq-card__note label {
+  color: var(--hc-ink);
+  font-weight: 700;
+}
+
+.pa-hq-card__note-hint {
+  color: var(--hc-ink-dim);
+}
+
+.pa-hq-card__saved-title {
+  margin: 0;
+  color: var(--hc-signal);
+  font-weight: 700;
+}
+
+.pa-hq-card__saved-text {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--hc-signal);
+  background: var(--hc-panel-deep);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .pa-specialist-offer__headline {
   margin: 0;
   color: var(--hc-ink);

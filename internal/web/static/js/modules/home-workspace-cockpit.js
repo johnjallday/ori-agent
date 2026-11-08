@@ -19,11 +19,17 @@ import {
   renderWorkspaceUpdateSection
 } from './workspace-update-signals.js';
 import { openLibrarySheet } from './map-library-sheet.js';
-import { workspacePageURL } from './workspace-routes.js';
 import {
-  MEET_ASSISTANT_AGENTS_ROUTE,
-  MEET_ASSISTANT_QUEST_ROUTE
-} from './personal-assistant-hire.js';
+  hasHomeIntent,
+  homeWelcomeView,
+  readExploredStage,
+  rememberExplored,
+  rescopeExplored,
+  welcomeCardHTML,
+  welcomeOverlayPlacement
+} from './home-welcome.js';
+import { workspacePageURL } from './workspace-routes.js';
+import { MEET_ASSISTANT_AGENTS_ROUTE } from './personal-assistant-hire.js';
 import {
   normalizeKind,
   isGroupWorkspace,
@@ -97,11 +103,15 @@ export function formatCount(value) {
 // not-yet-loaded state shows no primary, and New Workspace is left to offer
 // creation on its own.
 const PRIMARY_ACTIONS = {
-  needs_hire: { label: 'Meet your assistant', kind: 'navigate', href: MEET_ASSISTANT_QUEST_ROUTE },
+  // Meeting the assistant is direct: straight to its configuration on the
+  // Agents page (assistant-hq-onboarding 2.2), not through Home's old
+  // spotlight on the Agents nav entry. /?quest=meet-assistant still resolves
+  // there for every older link.
+  needs_hire: { label: 'Meet your assistant', kind: 'navigate', href: MEET_ASSISTANT_AGENTS_ROUTE },
   hiring: {
     label: 'Resume meeting your assistant',
     kind: 'navigate',
-    href: MEET_ASSISTANT_QUEST_ROUTE
+    href: MEET_ASSISTANT_AGENTS_ROUTE
   },
   // The Ori guide's wording for the same state and route.
   repair_needed: {
@@ -120,6 +130,16 @@ export function cockpitPrimaryActionView(personalAssistant) {
   const action = Object.hasOwn(PRIMARY_ACTIONS, state) ? PRIMARY_ACTIONS[state] : null;
   if (!action) return { visible: false, label: '', kind: '', href: '' };
   return { visible: true, ...action };
+}
+
+// The header primary and the empty map's welcome card never offer the same
+// onboarding action twice: while the card is on screen it owns that action and
+// the header primary steps aside; otherwise the header primary is the compact
+// way back in, in Map and Tree alike (assistant-hq-onboarding 1.2).
+export function cockpitPrimaryPresentation(personalAssistant, welcome) {
+  const action = cockpitPrimaryActionView(personalAssistant);
+  const cardOwnsAction = !!(action.visible && welcome && welcome.show);
+  return { ...action, visible: action.visible && !cardOwnsAction, cardOwnsAction };
 }
 
 // The drawer-opening subset of the primary, which the /?folder=show deep link
@@ -1956,6 +1976,9 @@ import {
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
     primaryActionBtn: document.getElementById('cockpitPrimaryActionBtn'),
+    // The empty map's first-run welcome (home-welcome.js). Host-owned, over
+    // the map, so the Map's geometry, camera and selection stay its own.
+    welcomeHost: document.getElementById('cockpitWelcome'),
     // Updates: the header trigger keeps the retired "Today" toggle's id for
     // compatibility (PRD FR2); its flyout and body are new (Issue #334).
     railToggle: document.getElementById('cockpitRailToggle'),
@@ -2114,8 +2137,28 @@ import {
     },
     loading: true,
     error: null,
-    inFlight: null
+    inFlight: null,
+    // The assistant relationship as last read; null while unknown. The welcome
+    // card and the header primary both decide from it.
+    personalAssistant: null,
+    // An explicit Home intent on arrival (focus, create, setup, a quest, the
+    // drawer, the HQ card) wins over the unsolicited welcome for this visit.
+    welcomeIntent: hasHomeIntent(window.location.search)
   };
+
+  // ---- the first-run welcome's one preference (home-welcome.js) ----
+  //
+  // "Explore first" is presentation only, kept beside the Tree's own record in
+  // this browser. It survives a reload, never reaches the server, and is
+  // dropped when the relationship moves to a different stage.
+  const welcomeStorage = (() => {
+    try {
+      return window.localStorage || null;
+    } catch (_) {
+      return null;
+    }
+  })();
+  let welcomeHTML = '';
 
   // ---- what the Tree remembers between visits (home-file-tree FR68-FR70) ----
   //
@@ -2203,7 +2246,155 @@ import {
     if (els.map) els.map.hidden = state.view !== VIEW_MAP || !mapRenderable;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     currentInvitation();
+    renderWelcome(status);
     return status;
+  }
+
+  function currentWelcome(areaStatus = currentAreaState()) {
+    return homeWelcomeView({
+      relationshipState: state.personalAssistant?.state,
+      areaState: areaStatus.state,
+      hqStatus: state.hqStatus,
+      view: state.view === VIEW_TREE ? 'tree' : 'map',
+      intent: state.welcomeIntent,
+      exploredStage: readExploredStage(welcomeStorage),
+      modalOpen: !!(state.modalVisible || state.modalRequested),
+      drawerOpen: !!window.PersonalAssistantPanel?.isOpen?.()
+    });
+  }
+
+  /**
+   * Show, hide, or keep the welcome card, and step the header primary aside
+   * while the card owns the onboarding action. Markup is rewritten only when it
+   * changes, so a status refresh never rebuilds (or steals focus from) a
+   * button the user is on. Nothing here focuses anything.
+   */
+  function renderWelcome(areaStatus) {
+    const welcome = currentWelcome(areaStatus);
+    root.dataset.firstRun = welcome.show ? 'welcome' : '';
+    if (els.primaryActionBtn) {
+      const primary = cockpitPrimaryPresentation(state.personalAssistant, welcome);
+      els.primaryActionBtn.hidden = !primary.visible;
+    }
+    if (!els.welcomeHost) return welcome;
+    const html = welcomeCardHTML(welcome, {
+      assistantName: state.personalAssistant?.display_name || ''
+    });
+    if (html !== welcomeHTML) {
+      welcomeHTML = html;
+      els.welcomeHost.innerHTML = html;
+    }
+    els.welcomeHost.hidden = !welcome.show;
+    syncWelcomePlacement(welcome.show);
+    return welcome;
+  }
+
+  // ---- the welcome card floats over the map (overlay presentation) ----
+  //
+  // The card is anchored to the HQ site and follows it as the camera pans or
+  // zooms; the map underneath stays usable. Too short an area stacks it above
+  // the map instead (welcomeOverlayPlacement). Only presentation changes here:
+  // no focus, no map state.
+  let welcomeWatch = null;
+  let welcomeFrame = 0;
+
+  function placeWelcome() {
+    welcomeFrame = 0;
+    const host = els.welcomeHost;
+    const card = host?.querySelector('[data-home-welcome]');
+    const body = host?.parentElement;
+    if (!card || !body || host.hidden) return;
+    const site = els.map?.querySelector('[data-hq-site]');
+    // Fit against the map the user can actually see: the map's box, cut to the
+    // container and the viewport. The card's coordinates stay relative to the
+    // container it is positioned in.
+    const rect = body.getBoundingClientRect();
+    const mapRect = els.map?.getBoundingClientRect() || rect;
+    const visibleLeft = Math.max(rect.left, mapRect.left, 0);
+    const visibleTop = Math.max(rect.top, mapRect.top, 0);
+    const visibleRight = Math.min(rect.right, mapRect.right, window.innerWidth);
+    const visibleBottom = Math.min(rect.bottom, mapRect.bottom, window.innerHeight);
+    const area = {
+      left: visibleLeft,
+      top: visibleTop,
+      width: Math.max(0, visibleRight - visibleLeft),
+      height: Math.max(0, visibleBottom - visibleTop)
+    };
+    const offsetX = visibleLeft - rect.left;
+    const offsetY = visibleTop - rect.top;
+    const siteRect = site ? site.getBoundingClientRect() : null;
+    // The full card first; if it fits nowhere beside the site, the compact one
+    // (no avatar, no step strip). Only when neither fits does the card stack
+    // above the map. Both sizes are measured in this frame.
+    const measure = size => {
+      card.dataset.size = size;
+      return { width: card.offsetWidth, height: card.offsetHeight };
+    };
+    let size = 'full';
+    let placement = welcomeOverlayPlacement({ body: area, card: measure('full'), site: siteRect });
+    if (placement.mode !== 'overlay') {
+      const compact = welcomeOverlayPlacement({
+        body: area,
+        card: measure('compact'),
+        site: siteRect
+      });
+      if (compact.mode === 'overlay') {
+        placement = compact;
+        size = 'compact';
+      }
+    }
+    card.dataset.size = size;
+    root.dataset.welcomePlacement = placement.mode;
+    if (placement.mode === 'overlay') {
+      card.style.setProperty('--welcome-left', `${placement.left + offsetX}px`);
+      card.style.setProperty('--welcome-top', `${placement.top + offsetY}px`);
+      card.style.setProperty('--welcome-pointer-x', `${placement.pointerX}px`);
+      card.style.setProperty('--welcome-pointer-y', `${placement.pointerY}px`);
+      card.dataset.pointer = placement.pointer;
+      host.style.setProperty('--welcome-site-x', `${placement.siteX + offsetX}px`);
+      host.style.setProperty('--welcome-site-y', `${placement.siteY + offsetY}px`);
+    } else {
+      delete card.dataset.pointer;
+    }
+    host.dataset.placed = 'true';
+  }
+
+  function scheduleWelcomePlacement() {
+    if (!welcomeFrame) welcomeFrame = window.requestAnimationFrame(placeWelcome);
+  }
+
+  function syncWelcomePlacement(show) {
+    if (!show) {
+      welcomeWatch?.disconnect();
+      welcomeWatch = null;
+      delete root.dataset.welcomePlacement;
+      if (els.welcomeHost) delete els.welcomeHost.dataset.placed;
+      return;
+    }
+    if (!welcomeWatch && typeof MutationObserver === 'function') {
+      // The camera moves the map by rewriting a layer's style; a remount
+      // replaces the map's children. Either can move the HQ site.
+      const mutations = new MutationObserver(scheduleWelcomePlacement);
+      if (els.map) {
+        mutations.observe(els.map, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['style', 'class']
+        });
+      }
+      const sizes =
+        typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleWelcomePlacement) : null;
+      if (sizes && els.welcomeHost?.parentElement) sizes.observe(els.welcomeHost.parentElement);
+      if (sizes && els.welcomeHost) sizes.observe(els.welcomeHost);
+      welcomeWatch = {
+        disconnect() {
+          mutations.disconnect();
+          sizes?.disconnect();
+        }
+      };
+    }
+    scheduleWelcomePlacement();
   }
 
   // ---- signal filters (FR31-FR34) ----
@@ -3478,6 +3669,13 @@ import {
 
   /** Route the reserved Personal HQ landmark through the shared modal. */
   function selectHQSite(view, { openModal = true, invoker = null } = {}) {
+    // No assistant yet: the site is not a place to build anything. Pressing it
+    // goes straight to meeting the assistant. A selection that only follows a
+    // focus intent (openModal false) stays a selection.
+    if (view?.hireFirst && openModal) {
+      window.location.assign(MEET_ASSISTANT_AGENTS_ROUTE);
+      return;
+    }
     state.selectedId = HQ_SITE_ID;
     state.railState = RAIL_WORKSPACE;
     state.hqSiteView = view || null;
@@ -3678,6 +3876,8 @@ import {
   }
 
   function updateContextTrigger() {
+    // The context modal and the welcome card never cover each other.
+    renderWelcome();
     if (!els.summaryBtn) return;
     const summaryVisible =
       state.railState === RAIL_SUMMARY && (state.modalVisible || state.modalRequested);
@@ -5283,7 +5483,7 @@ import {
   // launcher, and the Map's empty hint. There is no second chooser here.
   let folderAction = { visible: false, target: '' };
   let primaryAction = cockpitPrimaryActionView(null);
-  function openHomeFolder() {
+  function openHomeFolder(invoker = els.primaryActionBtn) {
     if (!folderAction.visible) return false;
     // Module initialization and relationship status may race on a deep link.
     // Do not consume its intent until the actual card/chooser controller is
@@ -5291,7 +5491,7 @@ import {
     if (folderAction.target === 'folder' && !window.PersonalAssistantFolder?.openChooser)
       return false;
     if (folderAction.target === 'hq' && !window.PersonalAssistantHQCard?.show) return false;
-    const opened = window.PersonalAssistantPanel?.open?.(els.primaryActionBtn);
+    const opened = window.PersonalAssistantPanel?.open?.(invoker);
     if (!opened) return false;
     if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
     else window.PersonalAssistantFolder.openChooser();
@@ -5312,26 +5512,71 @@ import {
       window.setTimeout(consumeFolderDeepLink, 100);
     }
   }
-  window.OriHomeFolder = { open: openHomeFolder };
+  window.OriHomeFolder = { open: () => openHomeFolder() };
   // Mission 01's steps live on their own routes; the HQ card and the folder
   // chooser open in the drawer through the deep link's own guarded path.
-  function runPrimaryAction() {
+  function runPrimaryAction(invoker) {
     if (primaryAction.kind === 'navigate') {
       window.location.assign(primaryAction.href);
       return true;
     }
-    return openHomeFolder();
+    return openHomeFolder(invoker || els.primaryActionBtn);
   }
   // The label is plain visible text and not announced: the button is outside
-  // any live region, and it changes only when the relationship does.
+  // any live region, and it changes only when the relationship does. Whether
+  // it shows is renderWelcome's call: it steps aside while the welcome card
+  // owns the same action.
   function applyAssistantState(personalAssistant) {
     primaryAction = cockpitPrimaryActionView(personalAssistant);
     folderAction = cockpitFolderActionView(personalAssistant);
-    if (!els.primaryActionBtn) return;
-    if (primaryAction.visible) els.primaryActionBtn.textContent = primaryAction.label;
-    els.primaryActionBtn.hidden = !primaryAction.visible;
+    state.personalAssistant = personalAssistant || null;
+    rescopeExplored(welcomeStorage, state.personalAssistant?.state);
+    if (els.primaryActionBtn && primaryAction.visible) {
+      els.primaryActionBtn.textContent = primaryAction.label;
+    }
+    renderWelcome();
   }
-  els.primaryActionBtn?.addEventListener('click', runPrimaryAction);
+  // The welcome card's two buttons. Its primary reaches exactly the route or
+  // controller the header primary does. Explore first only records a
+  // presentation preference, then hands focus to the compact way back in so a
+  // keyboard user is not left on a removed button.
+  els.welcomeHost?.addEventListener('click', event => {
+    const button = event.target.closest('[data-home-welcome-action]');
+    if (!button || !els.welcomeHost.contains(button)) return;
+    const action = button.getAttribute('data-home-welcome-action');
+    if (action === 'primary') {
+      runPrimaryAction(button);
+      return;
+    }
+    if (action !== 'explore') return;
+    const welcome = currentWelcome();
+    rememberExplored(welcomeStorage, welcome.stage);
+    renderWelcome();
+    if (els.primaryActionBtn && !els.primaryActionBtn.hidden) {
+      els.primaryActionBtn.focus({ preventScroll: true });
+      announce(`${primaryAction.label} is in the workspace header whenever you are ready.`);
+    }
+  });
+  els.primaryActionBtn?.addEventListener('click', () => runPrimaryAction());
+  // The hire-first HQ site's one action, from its panel or its right-click
+  // menu: meet the assistant (personal-hq-onboarding.js ignores it).
+  window.addEventListener('ori:personal-hq-action', event => {
+    if (event?.detail?.action === 'meet') window.location.assign(MEET_ASSISTANT_AGENTS_ROUTE);
+  });
+  // The drawer and the welcome card take turns (home-welcome.js).
+  document.addEventListener('personal-assistant:opened', () => renderWelcome());
+  document.addEventListener('personal-assistant:closed', () => {
+    const welcome = renderWelcome();
+    // The drawer hands focus back to the card button that opened it, but that
+    // button was hidden while the drawer was open, so focus can fall to the
+    // page. Only then — never when the user is elsewhere — put it back.
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (welcome.show && lost) {
+      els.welcomeHost
+        ?.querySelector('[data-home-welcome-action="primary"]')
+        ?.focus({ preventScroll: true });
+    }
+  });
   document.addEventListener('personal-assistant:status', event => {
     applyAssistantState(event.detail?.personalAssistant);
     consumeFolderDeepLink();

@@ -630,7 +630,9 @@ const state = {
   // The item a reveal brought into view. Today redraws (an opening re-reads
   // it) can move or replace it for a moment afterwards, so until `until` each
   // redraw aligns to it again, found by its key when it was redrawn.
-  align: { key: '', item: null, until: 0 }
+  align: { key: '', item: null, until: 0 },
+  // A Personal HQ setup result is leading the drawer (4.1).
+  setupResultActive: false
 };
 
 // How long after a reveal (or the opening it waited for) Today redraws keep
@@ -1051,8 +1053,10 @@ function syncStrip(els = elements()) {
         ['partial', 'unavailable'].includes(state.today?.state)),
     expanded: state.stripExpanded
   });
-  const visible = strip.visible && !prerequisite;
-  const hidden = !state.sectionsAvailable || (!prerequisite && strip.sectionsHidden);
+  // An active setup result (4.1) leads alone: no strip, routine rows folded.
+  const leading = state.setupResultActive === true;
+  const visible = strip.visible && !prerequisite && !leading;
+  const hidden = !state.sectionsAvailable || (!prerequisite && (strip.sectionsHidden || leading));
   if (els.sections.hidden !== hidden) els.sections.hidden = hidden;
   if (!els.strip) return;
   if (els.strip.hidden !== !visible) els.strip.hidden = !visible;
@@ -1442,6 +1446,21 @@ function init() {
   // The folder flow is not placed here: it runs in the conversation.
   const hqCard = document.getElementById('personalAssistantHQCard');
   if (hqCard) needs?.append(hqCard);
+  // The setup result leads (assistant-hq-onboarding 4.1): while it is active
+  // the HQ card sits above the strip and the routine rows stay folded. Urgent
+  // banners above it are untouched, and nothing below is discarded. When it
+  // ends, the card goes back under Needs you and Today is as it was.
+  document.addEventListener('personal-assistant:setup-result', event => {
+    const active = event.detail?.active === true;
+    if (state.setupResultActive === active) return;
+    state.setupResultActive = active;
+    const strip = document.getElementById('personalAssistantTodayStrip');
+    if (hqCard && strip?.parentNode) {
+      if (active) strip.parentNode.insertBefore(hqCard, strip);
+      else needs?.append(hqCard);
+    }
+    syncStrip();
+  });
   ['personalAssistantSpecialistSetup', 'assistantLedSetup'].forEach(id => {
     const node = document.getElementById(id);
     if (node) document.getElementById('personalAssistantNeedsYouQueueCards')?.append(node);

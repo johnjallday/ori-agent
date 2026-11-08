@@ -223,6 +223,7 @@ write idempotent.
 | `POST /fill-in` | `{decision: allow\|later, request_id}` | status; the consent card's answer, second brain Ori set up only (see "Filling in after setup") |
 | `POST /project` | `{name, answer, request_id}`: `name` one folder name (no slash, not hidden), `answer` the user's own words, folded to one line and refused if empty or secret-like | `{project: {name, rel, link?}}`; writes `Projects/<name>/README.md` and records the question as answered ("The first week") |
 | `POST /project/skip` | `{request_id}` | status; records the project question as skipped, once |
+| `POST /setup/retry` | `{}` (closed, empty) | `{notes_setup: {status: ready\|pending\|failed\|stopped\|none, operation_id?, path?, reason?, message?, writable?}}`; re-runs only the notes operation a Personal HQ build recorded, exactly as reviewed; `409` when there is none ("Set up with Personal HQ") |
 | `POST /week/dismiss` | `{request_id}` | status; records that the first-week recap row was put away |
 | `POST /nudge/dismiss` | `{request_id}` | status; the stale-notes nudge's "Not now" (see "Coming back to the notes") |
 | `GET /look` | none | `{state: running\|finished\|failed\|none, look_id, result?}`; each item of a finished result carries `accepted` when a follow-up made from it exists, read fresh and never stored |
@@ -306,26 +307,28 @@ nobody seeds nothing. Seeded follow-ups and people carry `ori: seed`; the facts
 note carries `ori: facts` and is rendered exactly as the fill-in would render it,
 so the first sync adopts it and says nothing.
 
-**The project question comes first** (Issue 776). **Set up my notes** (from the
-ask, the chooser, the connection card) opens one card in two steps, each labelled
-(`secondBrainSetupStage`): "Step 1 of 2 · Your first note" with "Your notes start
-with a note about what you're working on, in your words. You can skip this.", and
-"Step 2 of 2 · Where your notes live" with "Nothing is written until you press Set
-it up." (pressing it saves the answer as a fact first, even if the place is then
-refused). Entering the question focuses its textarea; the name step focuses the
-name: "What's the
-main thing you're working on right now?" (the textarea, the folder suggestion
-when the interview has one, **Next**, **Skip**, then the existing "I'll call it
-{name}. OK?" step), and then the place card (**Set it up**, **Somewhere else…**,
-**Back**, which returns to the question with the answer kept, **Not now**). Before
-`/create`, the drawer saves the answer as the reviewed fact the user typed
-(`POST /api/personal-assistant/knowledge/explicit`, an exact duplicate counting as
-already held), then sends `project {name, answer}`. The creation writes
-`Projects/<name>/README.md` with the project question's renderer inside the same
-`creatorRun`, so a failure removes it with everything else, and records
-`fill_in.project_ask: answered`; a creation without `project` records `skipped`,
-so the drawer never asks it by itself again (the checklist row and the Give Ori a
-project mission still can).
+**No project interview before the notes** (assistant-hq-onboarding 4.4; this
+replaces Issue 776's "the project question comes first"). **Set up my notes**
+(from the ask, the chooser, the connection card) opens straight on the place card,
+labelled "Where your notes live" with "Nothing is written until you press Set it
+up." (`secondBrainSetupStage('place')`); **Set it up** takes focus. Its actions are
+**Set it up**, **Somewhere else…**, **Back** (leaves setup; nothing is written)
+and **Not now**. The project question — "What's the main thing you're working on
+right now?", the folder suggestion when the interview has one, **Next**, **Skip**,
+then "I'll call it {name}. OK?" — is a later, explicit choice: the first-week
+checklist row and the Give Ori a project mission (`/?quest=second-brain-project`)
+open it. An older client may still send `project {name, answer}` with `/create`
+(saved first as the reviewed fact the user typed); the creation then writes
+`Projects/<name>/README.md` inside the same `creatorRun` and records
+`fill_in.project_ask: answered`.
+
+`fill_in.project_ask` tells three ends apart: `answered`; `skipped`, an explicit
+skip (`project_skipped: true` on `/create`, or `POST /project/skip`); and
+`deferred`, **not asked** — a setup without the question (standalone, or bundled
+with Personal HQ). Neither `skipped` nor `deferred` opens the question by itself;
+both keep the checklist row. A later explicit skip turns `deferred` into
+`skipped`; an answer is never overwritten. Historical `answered`/`skipped` records
+decode unchanged.
 
 The place card's second line is computed from the status read's `setup_preview`
 (the counts `secondbrain.CountSeeds` gives for what Ori holds now, through the
@@ -390,6 +393,59 @@ nothing is created. The Profile's Disconnect opens the same review in the drawer
 the connection changes. New setups write
 `.obsidian/app.json` with `"propertiesInDocument": "hidden"`, so Obsidian shows
 the marker out of sight; existing setups are not touched.
+
+### Set up with Personal HQ (assistant-hq-onboarding)
+
+Build My HQ reviews notes with the HQ (`personal-hq-notes-review.js`): where the
+folder goes (the status read's `setup_default.path`), what Ori keeps up to date,
+and what it starts with (`setup_preview`). A new user's notes are included by
+default; **Notes options** defers them (nothing is written) or picks another
+parent through the folder picker (a selection token, never a raw path). An
+existing connection is shown as it is — Ori's, or the user's read-only folder —
+and a missing one is explained; the build never creates beside, replaces,
+disconnects or makes either writable. The status read works before HQ exists
+(nothing can be connected yet) so the review can show the default place.
+
+The HQ request carries `notes: {include, witness | selection_token + name}`.
+Absent (every older client and every stored older payload) authorizes no notes;
+`include: false` is journalled and does nothing. On a **fresh** claim only, the
+folder is resolved — the default place must still be the reviewed `witness` or
+the build is refused before any effect (`409 notes_destination_changed`); a
+chosen parent must still resolve — and journalled with the claim as
+`notes.parent`/`notes.folder`, outside the request hash (`canonicalHash`), so
+older payloads keep their bytes and hash and a resume makes exactly the reviewed
+folder even if the Workspace Directory moved.
+
+The notes record lives with HQ (its knowledge binding needs an active
+relationship), so the operation is recorded right after activation:
+`Record.setup = {operation_id: hq-notes-<hash>, parent, name, status}`, then run.
+HQ is active whatever happens; the response carries `notes_setup`
+(`ready | pending | failed | stopped | none`, `reason`, safe `message`, `path`,
+`writable`), and the status read carries `setup` while it is unfinished. A
+finished operation is cleared (the connection and its receipt are the record).
+`POST /second-brain/setup/retry` (origin-guarded, closed empty body) re-runs only
+that operation; it can never touch HQ, its schedule or the assistant.
+
+Recovery and races: the creator writes `.ori-notes-setup.json`
+(`{operation_id}`) before any note. An occupied target is finished only when its
+marker names this operation (`Creator.Recover` adds missing layout files, never
+overwrites, seeds nothing twice, refuses links); any other occupied path is
+`failed / occupied` and left alone. Something connected meanwhile makes the
+operation `stopped / current_source` without writing. A crash between activation
+and the notes record loses the notes intent (HQ active, notes `none`); a retried
+confirmation of the same request re-arms it from the same review, otherwise the
+user sets notes up from Notes. Nothing is duplicated.
+
+The setup receipt is the same rules-only `RunSetup` over Ori's new folder — no
+model, no read of any folder the user already had — and the project question is
+recorded `deferred`. After the build the HQ card leads the drawer with the
+result (Today's strip folds meanwhile and the notes ask waits): **Save a quick
+note** (writable notes; the existing `/capture` with one request id kept across
+retries, so a lost response never saves twice), **Open Notes** (a read-only or
+other connected folder), **Set up notes** (deferred), **Retry notes setup**
+(failed/pending), **Show me a project folder** (the existing chooser) and **I’ll
+explore for now**. Leaving it clears `ori.hq.firstAction.v1`, a per-browser
+presentation record set only by the build, so returning users never see it.
 
 ### What Ori writes, and when
 

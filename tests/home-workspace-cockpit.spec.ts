@@ -1466,8 +1466,8 @@ test.describe('Header hierarchy', () => {
   // One case per rung of the ladder. Mission 01's steps are routes; the HQ card
   // and the folder chooser open in the assistant drawer.
   for (const [state, label, opens] of [
-    ['needs_hire', 'Meet your assistant', '/?quest=meet-assistant'],
-    ['hiring', 'Resume meeting your assistant', '/?quest=meet-assistant'],
+    ['needs_hire', 'Meet your assistant', '/agents?quest=meet-assistant'],
+    ['hiring', 'Resume meeting your assistant', '/agents?quest=meet-assistant'],
     ['repair_needed', 'Repair personal assistant', '/agents?quest=meet-assistant'],
     ['needs_hq', 'Build My HQ', '#personalAssistantHQCard'],
     ['provisioning_hq', 'Resume HQ setup', '#personalAssistantHQCard'],

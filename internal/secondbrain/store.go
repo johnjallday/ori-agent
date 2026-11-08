@@ -115,6 +115,58 @@ type Record struct {
 	// NudgeDismissedAt is when the user put the stale-notes nudge away with
 	// "Not now". The nudge stays away until a look finishes after it.
 	NudgeDismissedAt *time.Time `json:"nudge_dismissed_at,omitempty"`
+	// Setup is a confirmed notes setup that has not finished: pending, failed or
+	// stopped. A finished one is cleared, since the connection it made (and its
+	// receipt) are the record from then on (assistant-hq-onboarding 3.3).
+	Setup *SetupOperation `json:"setup,omitempty"`
+}
+
+// Setup operation statuses.
+const (
+	SetupPending = "pending"
+	SetupFailed  = "failed"
+	SetupStopped = "stopped"
+)
+
+// Reasons a setup operation failed or stopped. Clients switch on these.
+const (
+	SetupReasonOccupied      = "occupied"
+	SetupReasonUnwritable    = "unwritable"
+	SetupReasonMissingParent = "missing_parent"
+	SetupReasonCurrentSource = "current_source"
+	SetupReasonUnavailable   = "unavailable"
+)
+
+// SetupOperation is one confirmed notes setup and its reviewed destination.
+// Parent and Name are fixed when the user confirms: a retry makes exactly this
+// folder, never one under a Workspace Directory chosen since.
+type SetupOperation struct {
+	OperationID string    `json:"operation_id"`
+	HQRequestID string    `json:"hq_request_id,omitempty"`
+	Parent      string    `json:"parent"`
+	Name        string    `json:"name"`
+	Status      string    `json:"status"`
+	Reason      string    `json:"reason,omitempty"`
+	Message     string    `json:"message,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Target is the folder this operation makes.
+func (o SetupOperation) Target() string { return filepath.Join(o.Parent, o.Name) }
+
+func validateSetup(op SetupOperation) error {
+	switch {
+	case !ValidRequestID(op.OperationID),
+		op.HQRequestID != "" && (len(op.HQRequestID) > 200 || !utf8.ValidString(op.HQRequestID)),
+		!filepath.IsAbs(op.Parent) || filepath.Clean(op.Parent) != op.Parent || strings.ContainsRune(op.Parent, 0),
+		!ValidFolderName(op.Name),
+		op.Status != SetupPending && op.Status != SetupFailed && op.Status != SetupStopped,
+		len(op.Reason) > 32, len(op.Message) > 300 || !utf8.ValidString(op.Message),
+		op.CreatedAt.IsZero(), op.UpdatedAt.IsZero():
+		return ErrInvalidRecord
+	}
+	return nil
 }
 
 // Source is the connected notes folder (FR15).
@@ -545,6 +597,11 @@ func (r Record) Validate() error {
 	}
 	if err := validateAsk(r.Ask); err != nil {
 		return err
+	}
+	if r.Setup != nil {
+		if err := validateSetup(*r.Setup); err != nil {
+			return err
+		}
 	}
 	for _, receipt := range r.Receipts {
 		if !ValidRequestID(receipt.RequestID) || receipt.Action == "" || len(receipt.Action) > 32 || receipt.Created < 0 || receipt.Skipped < 0 ||

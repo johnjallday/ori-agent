@@ -307,6 +307,9 @@ type SecondBrainView struct {
 	// Nudge says the notes deserve another look, by the same rule Today's
 	// Needs you row follows, so the Notes station never disagrees with it.
 	Nudge *SecondBrainNudgeView `json:"nudge,omitempty"`
+	// Setup is a Personal HQ notes setup that has not finished (pending, failed
+	// or stopped), so Notes and Today can say so and offer its retry.
+	Setup *SecondBrainSetupResult `json:"setup,omitempty"`
 }
 
 // SecondBrainNudgeView is why the notes deserve another look: the last look's
@@ -486,6 +489,12 @@ type SecondBrainAcceptInput struct {
 // Status reads the record and Obsidian's vault list.
 func (s *SecondBrainService) Status(ctx context.Context, userID string) (SecondBrainView, error) {
 	doc, err := s.read(ctx, userID)
+	if errors.Is(err, ErrNeedsHQ) {
+		// Before Personal HQ exists nothing can be connected, but the Build My
+		// HQ review still shows where notes would go and what they would start
+		// with (assistant-hq-onboarding 3.5). Nothing is read from any folder.
+		doc, err = SecondBrainDocument{}, nil
+	}
 	if err != nil {
 		return SecondBrainView{}, err
 	}
@@ -743,6 +752,10 @@ type SecondBrainCreateInput struct {
 	// working on?", written as the folder's first note; nil when skipped
 	// (Issue 776 FR6).
 	Project *SecondBrainCreateProject
+	// ProjectSkipped says the user explicitly skipped the project question. Without
+	// it, a setup with no project records the question as not asked (deferred),
+	// which nothing opens on its own (assistant-hq-onboarding 3.7, 4.4).
+	ProjectSkipped bool
 }
 
 // SecondBrainCreateProject is one project note for a new folder: a folder name
@@ -865,9 +878,12 @@ func (s *SecondBrainService) Create(ctx context.Context, userID string, input Se
 		// one needs no card (FR10).
 		consented := s.deps.Now().UTC()
 		connected.FillIn = &secondbrain.FillIn{Consent: secondbrain.ConsentAllowed, ConsentAt: &consented, ConsentRequestID: input.RequestID}
-		// The setup turn asked the project question first: answered or skipped,
-		// the drawer never asks it again (Issue 776 FR6).
-		connected.FillIn.ProjectAsk, connected.FillIn.ProjectAskAt = secondbrain.ProjectSkipped, &consented
+		// Answered, explicitly skipped, or not asked (deferred): none of them opens
+		// the drawer's question by itself afterwards (Issue 776 FR6; 3.7).
+		connected.FillIn.ProjectAsk, connected.FillIn.ProjectAskAt = secondbrain.ProjectDeferred, &consented
+		if input.ProjectSkipped {
+			connected.FillIn.ProjectAsk = secondbrain.ProjectSkipped
+		}
 		if creation.Project != "" {
 			connected.FillIn.ProjectAsk = secondbrain.ProjectAnswered
 			connected.FillIn.AddToReport(map[string]int{secondbrain.NoteKindProject: 1}, s.deps.Now())
@@ -1704,6 +1720,10 @@ func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
 		Detected: []SecondBrainDetected{},
 		Ask:      SecondBrainAskView{State: doc.Ask.State(), OfferAgain: doc.Ask.OfferAgain(s.deps.Now())},
 		Version:  doc.Version,
+	}
+	if doc.Setup != nil {
+		setup := s.setupResult(doc)
+		view.Setup = &setup
 	}
 	if s.deps.Vaults != nil {
 		for _, vault := range s.deps.Vaults.Vaults() {

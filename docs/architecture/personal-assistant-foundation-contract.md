@@ -275,37 +275,38 @@ attempt, and a request that names no model still hires, on the Default model in
 place or on none. The request ID is created once per attempt and kept in
 `localStorage` (`ori.personalAssistantHireRequestId`), and a relationship's own
 `hire_request_id` wins over it, so a retry replays the same request. Ori's
-deterministic walkthrough (`meet-assistant-quest.js`) points at each control and
-never acts on one. The Daily Brief rhythm is **not** collected here: it has no
+deterministic walkthrough (`meet-assistant-quest.js`), where it still runs,
+points at controls and never acts on one. The Daily Brief rhythm is **not** collected here: it has no
 canonical workspace to be written against until HQ exists, so it moves to the
 Map's HQ build form.
 
-The walkthrough has seven steps and is shown in Ori's own layer
-(`ori-spotlight.js`). A single-click step is a spotlight: the page is dimmed and
-blocked except for a hole cut over the one control, and Ori's callout says what
-to press. Step 1 is on Home, on the Agents nav entry
-(`meet-assistant-home-prompt.js`). Step 2 is New Agent on the Agents page. Steps
-3 to 7 (the name, the face, the focus, the model, Hire) are Ori's callout beside the form,
-pointing at each field, with nothing dimmed. The user presses and types
-everything; Not now (or Escape on a spotlight) always leaves, and nothing is
-skipped.
+**Meeting the assistant is direct** (assistant-hq-onboarding group 2; this
+replaces the seven-step spotlight walkthrough). The preset leads with the name
+and the model block; the suggested face, the focus areas and the mandate keep
+their defaults behind one native disclosure, "Appearance, focus and this week
+(optional)", which opens by itself only when a validation message is about its
+fields. `/agents?quest=meet-assistant` (`MEET_ASSISTANT_AGENTS_ROUTE`) opens the
+preset itself on arrival — or a repair's one-button view — with focus in the
+name; opening it creates nothing. Home's empty-map welcome card and header
+primary link there directly. `/?quest=meet-assistant` (`MEET_ASSISTANT_QUEST_ROUTE`,
+`progression.MeetAssistantActionURL`, still the mission's identity) is kept for
+every older link — the mission card, Today's `needs_hire` banner, Help, the retired
+`/?hire=1` — and replaces itself with the Agents route for `needs_hire`, `hiring`
+and `repair_needed`; on a hired install it does nothing. First-run onboarding's
+`/?quest=meet-assistant&briefing=1` stays on Home: the welcome card is the
+briefing, the URL is tidied, and no layer is dimmed. Ori's walkthrough
+(`meet-assistant-quest.js`) stands down on that direct arrival; a plain `/agents`
+visit before the hire still points at New Agent from Ori's docked panel, and its
+face and focus steps reveal the disclosure (presentation only). A plain Home visit
+shows nothing unsolicited beyond the welcome card and makes no request.
 
-First-run onboarding hands over to `/?quest=meet-assistant&briefing=1`
-(`MEET_ASSISTANT_BRIEFING_ROUTE`): Ori in the centre of a dimmed, inert Home
-with the Mission 01 card, its seven steps, its reward and what it unlocks, and
-Start mission or Not now. Start mission opens step 1. Every other entry starts
-at step 1 directly, `/?quest=meet-assistant` (`MEET_ASSISTANT_QUEST_ROUTE`,
-`progression.MeetAssistantActionURL`): Home's mission card, Today's `needs_hire`
-banner, Help's explicit setup transition, and the retired `/?hire=1`, which redirects there.
-Pressing Agents from step 1 sets `ori:meet-assistant-guided` in
-sessionStorage, so the Agents page carries on in the same layer. Entries already
-about the Agents page start at step 2, `/agents?quest=meet-assistant`
-(`MEET_ASSISTANT_AGENTS_ROUTE`): `/agents/create`'s pointer, the repair banners,
-and Help's explicit setup transition on `/agents`. A plain `/agents` visit before the hire
-also continues at step 2, in Ori's docked panel, and so does any step when there
-is no room beside the form (a phone-width sheet). A plain Home visit shows
-nothing and makes no request. `/?quest=meet-assistant` on an install that needs
-a repair goes to the Agents page; on a hired install it does nothing. A provable
+The empty Home map carries the first step (`home-welcome.js`): a welcome card
+over the reserved HQ site whose one action follows the relationship (Meet your
+assistant, Resume meeting your assistant, Build My HQ, Resume HQ setup), with the
+header primary hidden while it shows. Explore first is a stage-scoped
+presentation preference (`ori.home.welcome.v1`) that never writes a decision.
+Loading or failed reads, Tree, a populated Home, explicit intents, the context
+modal and the open drawer fall back to the compact header entry. A provable
 orphan identity (`relationship_recovery`) opens the same panel's reconnect view
 with one Reconnect button; `relationship_recovery_blocked` opens the fix view:
 what does not match, what Ori found, and the server's safe fixes (one Apply fix
@@ -355,6 +356,15 @@ confirmed request:
    against the real workspace ID;
 7. marks HQ onboarding completed, clears the provisional operation payload, and
    transitions the relationship to `active`.
+
+The card's request may also carry the reviewed notes choice (`notes`; absent
+from every older client and stored payload, which authorizes nothing). On a
+fresh claim the folder is resolved and journalled with the claim, outside the
+request hash; a review that no longer holds is refused before step 1. After
+step 7 the notes operation is recorded with the notes record and run on its own:
+HQ stays active whatever it reports (`notes_setup`), and only
+`POST /api/personal-assistant/second-brain/setup/retry` repeats it. See
+`docs/architecture/second-brain.md`, "Set up with Personal HQ".
 
 The first-assignment quest keeps its existing shape: its three category screens
 mutate only the browser draft; review persists the existing bounded preview

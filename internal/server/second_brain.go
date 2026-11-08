@@ -61,6 +61,10 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 	service.SetSeeds(secondBrainSeeds{builder: b}.Seeds)
 	service.SetHoldings(secondBrainSeeds{builder: b}.Holdings)
 	b.personalAssistantSecondBrain = service
+	// Build My HQ can include notes; the coordinator was built first.
+	if b.personalAssistantHQSetup != nil {
+		b.personalAssistantHQSetup.SetNotesSetup(service)
+	}
 	b.personalAssistantHandler.SetSecondBrain(service, connectionshttp.NewOriginGuard().Check)
 }
 

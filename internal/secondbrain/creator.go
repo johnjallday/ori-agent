@@ -1,6 +1,8 @@
 package secondbrain
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -165,8 +167,96 @@ func (c Creation) Undo() {
 
 // Creator makes a second brain's folder (FR5–FR8, FR11).
 type Creator struct {
+	// Provenance, when set, is the durable operation that is making the folder.
+	// It is written first, as SetupMarkerName, so a retry after a crash between
+	// making the folder and recording the connection can recognize the folder as
+	// its own — and only its own (assistant-hq-onboarding 3.3).
+	Provenance string
 	// beforeWrite sees every path about to be written, so tests can fail one.
 	beforeWrite func(rel string) error
+}
+
+// SetupMarkerName is the hidden provenance file a setup operation writes at the
+// top of the folder it makes.
+const SetupMarkerName = ".ori-notes-setup.json"
+
+const maxSetupMarkerBytes = 1024
+
+// ErrNotOwnSetup refuses to recover a folder that does not carry this
+// operation's provenance marker: an occupied path is never adopted.
+var ErrNotOwnSetup = errors.New("secondbrain: that folder was not made by this setup")
+
+type setupMarker struct {
+	OperationID string `json:"operation_id"`
+}
+
+func setupMarkerContent(operationID string) []byte {
+	data, _ := json.Marshal(setupMarker{OperationID: operationID})
+	return append(data, '\n')
+}
+
+// readSetupMarker reads the operation id from a folder's marker, or "".
+func readSetupMarker(target *os.Root) string {
+	info, err := target.Lstat(SetupMarkerName)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxSetupMarkerBytes {
+		return ""
+	}
+	data, err := target.ReadFile(SetupMarkerName)
+	if err != nil {
+		return ""
+	}
+	var marker setupMarker
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&marker) != nil || !ValidRequestID(marker.OperationID) {
+		return ""
+	}
+	return marker.OperationID
+}
+
+// Recover finishes a folder that this operation started and a crash left
+// unrecorded: <parent>/<name> must be a real folder (never a link) whose marker
+// names operationID. Missing layout folders and READMEs are added; nothing that
+// exists is overwritten, read, moved or removed, and no seeds are copied a
+// second time. Anything else is ErrNotOwnSetup.
+func (c Creator) Recover(parent, name, operationID string) (Creation, error) {
+	if !ValidFolderName(name) {
+		return Creation{}, ErrInvalidFolderName
+	}
+	if !ValidRequestID(operationID) {
+		return Creation{}, ErrNotOwnSetup
+	}
+	parentRoot, err := pinFolder(parent)
+	if err != nil {
+		return Creation{}, err
+	}
+	defer func() { _ = parentRoot.Close() }()
+	info, err := parentRoot.Lstat(name)
+	if err != nil {
+		return Creation{}, err
+	}
+	if !info.IsDir() {
+		return Creation{}, ErrNotOwnSetup
+	}
+	target, err := parentRoot.OpenRoot(name)
+	if err != nil {
+		return Creation{}, err
+	}
+	defer func() { _ = target.Close() }()
+	if readSetupMarker(target) != operationID {
+		return Creation{}, ErrNotOwnSetup
+	}
+	run := &creatorRun{root: target, before: c.beforeWrite, keepExisting: true}
+	creation, err := run.populate(Seeds{})
+	if err != nil {
+		// Only what this recovery added goes; the folder and its marker stay
+		// for the next attempt.
+		run.rollback()
+		return Creation{}, fmt.Errorf("secondbrain: finishing the folder: %w", err)
+	}
+	creation.Path = filepath.Join(filepath.Clean(parent), name)
+	creation.parent, creation.name, creation.made = filepath.Clean(parent), name, run.made
+	return creation, nil
 }
 
 // ValidFolderName reports whether name is one plain, visible folder name. It
@@ -210,6 +300,23 @@ func (c Creator) Create(parent, name string, seeds Seeds) (Creation, error) {
 	defer func() { _ = target.Close() }()
 
 	run := &creatorRun{root: target, before: c.beforeWrite}
+	if c.Provenance != "" {
+		if !ValidRequestID(c.Provenance) {
+			if madeTarget {
+				_ = parentRoot.Remove(name)
+			}
+			return Creation{}, fmt.Errorf("secondbrain: invalid setup provenance")
+		}
+		// First, before any note: a crash after this leaves a folder this
+		// operation can recognize and finish, instead of an anonymous one.
+		if err := run.write(SetupMarkerName, setupMarkerContent(c.Provenance)); err != nil {
+			run.rollback()
+			if madeTarget {
+				_ = parentRoot.Remove(name)
+			}
+			return Creation{}, fmt.Errorf("secondbrain: creating the folder: %w", err)
+		}
+	}
 	creation, err := run.populate(seeds)
 	if err != nil {
 		run.rollback()
@@ -266,6 +373,9 @@ type creatorRun struct {
 	before func(rel string) error
 	made   []string
 	names  map[string]bool
+	// keepExisting is Recover's mode: a folder or file that is already there
+	// is left exactly as it is and not counted as made.
+	keepExisting bool
 }
 
 func (r *creatorRun) populate(seeds Seeds) (Creation, error) {
@@ -395,6 +505,13 @@ func (r *creatorRun) mkdir(rel string) error {
 		}
 	}
 	if err := r.root.Mkdir(rel, noteFolderMode); err != nil {
+		if r.keepExisting && errors.Is(err, fs.ErrExist) {
+			// Only a real folder counts as already there; a file or link in its
+			// place is something the user put there, so stop.
+			if info, statErr := r.root.Lstat(rel); statErr == nil && info.IsDir() {
+				return nil
+			}
+		}
 		return err
 	}
 	r.made = append(r.made, rel)
@@ -413,6 +530,10 @@ func (r *creatorRun) write(rel string, content []byte) error {
 	}
 	file, err := r.root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, noteFileMode) // #nosec G302 -- plain notes the user owns and reads in any editor (FR13)
 	if err != nil {
+		if r.keepExisting && errors.Is(err, fs.ErrExist) {
+			// Already there — perhaps edited since: never overwritten.
+			return nil
+		}
 		return err
 	}
 	r.made = append(r.made, rel)

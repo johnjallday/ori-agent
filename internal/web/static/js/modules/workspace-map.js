@@ -981,8 +981,32 @@
       // during the guided stage below, where importing a workspace would
       // silently rebind an existing one as the hired assistant's HQ.
       showImport: !resumable,
-      assistantName: ''
+      assistantName: '',
+      // The accessible status; the visible flag stays short.
+      statusText: resumable ? 'Setup paused' : repair ? 'Needs repair' : 'Not created'
     };
+
+    // A new user has nothing to have "not created" yet. Before the HQ exists
+    // and while the assistant is still being met or has just been hired, the
+    // site says where the HQ begins instead of naming an absence
+    // (assistant-hq-onboarding 1.3). Repair, paused setup, an unknown
+    // relationship and every later state keep their existing label.
+    if (!resumable && !repair && personalAssistantIsNew()) {
+      view.statusLabel = 'Starts here';
+      view.statusText = 'Your Personal HQ starts here';
+    }
+
+    // Before an assistant is hired there is no HQ to build here: the HQ is the
+    // assistant's home base, so the site offers only meeting the assistant.
+    // Build, Import and Not now return once the assistant is hired.
+    if (!resumable && !repair && personalAssistantHiring()) {
+      view.hireFirst = true;
+      view.title = 'Your Personal HQ starts here';
+      view.detail =
+        'Meet your assistant first. Your HQ is their home base, and you build it together next.';
+      view.showImport = false;
+      view.showSkip = false;
+    }
 
     // A hired assistant with no home base yet. The site names its subject and
     // offers only the safe build path. Every other state — repair, import,
@@ -991,7 +1015,6 @@
       var who = String((personalAssistant && personalAssistant.displayName) || '').trim();
       view.guided = true;
       view.assistantName = who;
-      view.statusLabel = 'Not created';
       view.title = who ? 'Build ' + who + '’s Personal HQ' : 'Build your assistant’s Personal HQ';
       view.detail = who
         ? who +
@@ -1014,6 +1037,17 @@
   function personalAssistantNeedsHQ() {
     if (!personalAssistant) return false;
     return personalAssistant.state === 'needs_hq' || personalAssistant.state === 'provisioning_hq';
+  }
+
+  function personalAssistantHiring() {
+    if (!personalAssistant) return false;
+    return personalAssistant.state === 'needs_hire' || personalAssistant.state === 'hiring';
+  }
+
+  function personalAssistantIsNew() {
+    if (!personalAssistant) return false;
+    var s = personalAssistant.state;
+    return s === 'needs_hire' || s === 'hiring' || s === 'needs_hq';
   }
 
   function setPersonalAssistant(relationship) {
@@ -2889,10 +2923,14 @@
     var left = Number(cell && cell.left) || 0;
     var top = Number(cell && cell.top) || 0;
     var status = view.statusLabel || 'Not created';
+    var spoken = view.statusText || status;
     return (
       '<button type="button" class="ws-map-tile ws-map-hq-site' +
       (isSelected ? ' is-selected' : '') +
       (view.repair ? ' is-repair' : '') +
+      // A new user's site already says "Starts here" in its caption and name;
+      // the short corner flag would only collide with the pin and badge.
+      (view.statusText === 'Your Personal HQ starts here' ? ' is-new' : '') +
       '" ' +
       'data-hq-site aria-pressed="' +
       (isSelected ? 'true' : 'false') +
@@ -2905,8 +2943,8 @@
       (index || 0) +
       '" ' +
       'aria-label="Personal HQ site, ' +
-      escapeHtml(status) +
-      '. Activate to view setup options">' +
+      escapeHtml(spoken) +
+      (view.hireFirst ? '. Opens assistant setup">' : '. Activate to view setup options">') +
       '<span class="ws-map-tile-flag"><span class="ws-map-led"></span>' +
       escapeHtml(status) +
       '</span>' +
@@ -3863,6 +3901,27 @@
   }
 
   function hqOverviewHTML(view) {
+    if (view.hireFirst) {
+      // No assistant yet: the one way forward is meeting them.
+      return (
+        '<div class="ws-map-ov-hero ws-map-hq-site-hero">' +
+        '<span class="ws-map-ov-ic ws-map-hq-site-icon">HQ</span>' +
+        '<div class="ws-map-ov-herometa"><div class="ws-map-ov-name">Personal HQ</div>' +
+        '<div class="ws-map-ov-tag">' +
+        escapeHtml(view.statusLabel) +
+        '</div></div>' +
+        '</div>' +
+        '<h4 class="ws-map-hq-site-title">' +
+        escapeHtml(view.title) +
+        '</h4>' +
+        '<p class="ws-map-ov-desc ws-map-hq-site-desc">' +
+        escapeHtml(view.detail) +
+        '</p>' +
+        '<div class="ws-map-hq-actions">' +
+        '<button type="button" class="ws-map-hq-action ws-map-hq-action-primary" data-hq-action="meet">Meet your assistant ▸</button>' +
+        '</div>'
+      );
+    }
     var primaryLabel = view.resumable
       ? 'Resume setup'
       : view.repair
@@ -4907,6 +4966,8 @@
   // mutually exclusive.
   function hqMenuItems(view) {
     var site = view || {};
+    // No assistant yet: meeting them is the only HQ step there is.
+    if (site.hireFirst) return [{ label: 'Meet your assistant', action: 'hq-meet' }];
     var items = [
       {
         label: site.resumable
@@ -5379,6 +5440,7 @@
       case 'hq-import':
       case 'hq-clear':
       case 'hq-skip':
+      case 'hq-meet':
         announce(container, 'Personal HQ: ' + (context.label || action.slice(3)));
         dispatchHQAction(action.slice(3));
         break;
@@ -11829,6 +11891,7 @@
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
     hqSiteHTML: hqSiteHTML,
+    hqMenuItems: hqMenuItems,
     hqOverviewHTML: hqOverviewHTML,
     setHQStatus: setHQStatus,
     // Bounded relationship facts so the reserved site can name the hired

@@ -207,14 +207,13 @@ test('a hired or repair-needed relationship has no walkthrough, even when asked 
   }
 });
 
-test('the quest param is read at load and stripped on start without a history entry', async () => {
+test('the quest param is read at load and left for the roster to consume', async () => {
+  // The roster opens the configuration from ?quest= on DOMContentLoaded; a
+  // walkthrough that stripped it first would leave the user on a bare page.
   const { quest, calls } = load({ search: '?quest=meet-assistant&view=list' });
   assert.equal(quest.requestedAtLoad(), true);
   await settle();
-  assert.equal(calls.replaced.length, 1);
-  assert.equal(calls.replaced[0].url, '/agents?view=list');
-  // The roster's own history state is kept, not replaced with null.
-  assert.deepEqual(calls.replaced[0].stateObj, { agent: null });
+  assert.deepEqual(calls.replaced, []);
 });
 
 test('the walkthrough never asks /api/ori-guide or any model', async () => {
@@ -422,8 +421,21 @@ test('the walkthrough is inert when the guide is not on the page', async () => {
 const GUIDED = { 'ori:meet-assistant-guided': '1' };
 const layerSteps = calls => calls.layer.map(entry => `${entry.kind}:${entry.index}`);
 
-test('arriving from the Home step lights New Agent, with Ori’s panel left closed', async () => {
-  for (const arrival of [{ session: GUIDED }, { search: '?quest=meet-assistant' }]) {
+// The mission's own link now opens the configuration directly (agents-roster.js),
+// so the walkthrough stands down rather than drawing callouts over that form.
+test('the direct mission arrival presents nothing over the opened configuration', async () => {
+  const loaded = load({ layer: true, search: '?quest=meet-assistant' });
+  await settle();
+  assert.equal(loaded.quest.isActive(), false);
+  assert.deepEqual(loaded.calls.layer, []);
+  assert.deepEqual(loaded.calls.presented, []);
+  assert.equal(loaded.calls.opened, 0, 'Ori’s panel was opened');
+  loaded.openCreate();
+  assert.deepEqual(loaded.calls.layer, [], 'a callout competed with the configuration');
+});
+
+test('a legacy guided arrival still lights New Agent, with Ori’s panel left closed', async () => {
+  for (const arrival of [{ session: GUIDED }]) {
     const loaded = load({ layer: true, ...arrival });
     await settle();
     assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2']);
