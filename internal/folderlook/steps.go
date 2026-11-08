@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 )
 
@@ -59,6 +60,7 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 	handles := newHandles()
 	var out []Step
 	homeHandle := ""
+	homeDefault := false
 	for _, c := range candidates {
 		if c.Action == ActionAlreadyHere && !c.Required {
 			continue
@@ -73,11 +75,17 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 				songs = facts.Portfolio.Count
 				noun = foldermap.ShapeNoun(facts.Portfolio.Shape, songs)
 			}
+			// A Home the owner already has is joined by default; a new Home is
+			// offered, for the agent to recommend, never built from a first
+			// folder on its own.
+			step.Default = c.Action == ActionAlreadyHere
 			if c.Action == ActionAlreadyHere {
-				step.Title = fmt.Sprintf("Add %s to your %s and list its %d %s", folderName, c.Name, songs, noun)
+				step.Title = fmt.Sprintf("Add %s to your %s and list its %d %s on the shelf", folderName, c.Name, songs, noun)
 			} else {
-				step.Title = fmt.Sprintf("Create your %s, add %s and list its %d %s", c.Name, folderName, songs, noun)
+				step.Title = fmt.Sprintf("Create your %s and put %s on its shelf (%d %s)", c.Name, folderName, songs, noun)
+				step.Why = strings.TrimSpace(step.Why + " One shelf for every " + foldermap.ShapeNoun(facts.Portfolio.Shape, 1) + " across your folders; worth it once there are several.")
 			}
+			homeDefault = step.Default
 		case KindIntegration:
 			step.Kind = StepIntegration
 			if c.Action == ActionInstall {
@@ -115,10 +123,14 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 		out = append(out, step)
 	}
 	if n := len(facts.Members); n >= foldermap.GroupMinMembers {
+		// The folder becomes a place with its projects inside: the default
+		// whenever no Home takes it (the Group stage, or a portfolio without a
+		// Home yet).
+		noun := memberNoun(facts)
 		step := Step{
-			Handle: HandleGroup, Kind: StepGroup, Name: "a group", Default: stage == foldermap.StageGroup,
-			Title: fmt.Sprintf("Turn %s into a group with one workspace per project (%d)", folderName, n),
-			Why:   fmt.Sprintf("%d projects sit in their own folders here.", n),
+			Handle: HandleGroup, Kind: StepGroup, Name: "a group", Default: stage == foldermap.StageGroup || !homeDefault,
+			Title: fmt.Sprintf("Turn %s into a group with one workspace per %s (%d)", folderName, noun, n),
+			Why:   fmt.Sprintf("%d %s sit in their own folders here.", n, foldermap.ShapeNoun(memberShape(facts), n)),
 		}
 		if homeHandle != "" {
 			step.Excludes = homeHandle
@@ -128,9 +140,59 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 				}
 			}
 		}
-		out = append(out, step)
+		// The place comes first in the plan, then what goes into it; as an
+		// alternative to the Home it is listed last.
+		if step.Default {
+			out = append([]Step{step}, out...)
+		} else {
+			out = append(out, step)
+		}
 	}
 	return out
+}
+
+// memberShape is the one shape every member shares, or "" when they differ.
+func memberShape(facts foldermap.Facts) folderdigest.Shape {
+	shape := folderdigest.Shape("")
+	for i, p := range facts.Members {
+		if i == 0 {
+			shape = p.Shape
+		} else if p.Shape != shape {
+			return ""
+		}
+	}
+	return shape
+}
+
+// memberNoun names one member: "song", "draft", or "project" for a mix.
+func memberNoun(facts foldermap.Facts) string {
+	if shape := memberShape(facts); shape != "" {
+		return foldermap.ShapeNoun(shape, 1)
+	}
+	return "project"
+}
+
+// DefaultLine is Ori's default plan in one line, from the catalog's default
+// steps: what Set it up would do if the agent named nothing.
+func DefaultLine(steps []Step) string {
+	var titles []string
+	optional := false
+	for _, s := range steps {
+		if s.Default {
+			titles = append(titles, s.Title)
+		} else if s.Kind == StepAddOn {
+			optional = true
+		}
+	}
+	switch {
+	case len(titles) > 0:
+		return "Set it up: " + strings.Join(titles, " · ")
+	case len(steps) == 0:
+		return "Nothing to set up yet: Ori found no project it knows here."
+	case optional:
+		return "Set it up: adds the tools you leave selected below"
+	}
+	return "Nothing is set up by default here; the steps below are offered."
 }
 
 // StepHandles is the set of handles the parser accepts.

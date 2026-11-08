@@ -36,7 +36,7 @@ func TestGroupStage_PlanIncludesExistingMembersAndCreatesTheRest(t *testing.T) {
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("lines:\n%s", strings.Join(lines, "\n"))
 	}
-	if report.StageLine != "Set it up: turns this workspace into a group with 3 workspaces, one per project" {
+	if report.StageLine != "Set it up: Turn Ori Music Demo into a group with one workspace per manuscript (3)" {
 		t.Fatalf("stage line = %q", report.StageLine)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"path"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
-	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
@@ -78,10 +77,4 @@ func groupLines(rec Record) []personalassistant.FolderPlanLine {
 			Name: fmt.Sprintf("%d more, add them later", more)})
 	}
 	return lines
-}
-
-// groupStageLine is the Group stage's part of the stage line.
-func groupStageLine(f foldermap.Facts) string {
-	n := min(len(f.Members), GroupMaxMembers)
-	return fmt.Sprintf("turns this workspace into a group with %d %s, one per project", n, plural(n, "workspace", "workspaces"))
 }

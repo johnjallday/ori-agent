@@ -179,11 +179,16 @@ func TestMatch_SelectedAddOnRunsThroughSetUp(t *testing.T) {
 
 func TestStageLine_ToolsStageWithoutARequiredTool(t *testing.T) {
 	facts := foldermap.Facts{RootProject: &foldermap.Project{Shape: "manuscript", Marker: "main.tex"}}
-	optional := []folderlook.Candidate{{ID: "skill:a@b", Kind: folderlook.KindSkill, Ranked: true, Action: folderlook.ActionAdd}}
-	if got := StageLine(facts, foldermap.StageTools, optional); got != "Set it up: adds the tools you leave selected below" {
+	optional := []folderlook.Candidate{{ID: "skill:a@b", Kind: folderlook.KindSkill, Name: "Cite", Action: folderlook.ActionAdd}}
+	if got := StageLine("Thesis", facts, optional); got != "Set it up: adds the tools you leave selected below" {
 		t.Fatalf("with an optional tool = %q", got)
 	}
-	if got := StageLine(facts, foldermap.StageTools, nil); got != "Nothing to set up for this project yet." {
+	// Ranked by the agent, the add-on is in Ori's default plan.
+	optional[0].Ranked = true
+	if got := StageLine("Thesis", facts, optional); got != "Set it up: Add the skill Cite" {
+		t.Fatalf("with a ranked tool = %q", got)
+	}
+	if got := StageLine("Thesis", facts, nil); got != "Nothing to set up for this project yet." {
 		t.Fatalf("without = %q", got)
 	}
 }

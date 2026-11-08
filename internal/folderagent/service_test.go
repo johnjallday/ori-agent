@@ -240,7 +240,8 @@ func TestStart_DemoFolderCreatesWorkspaceAgentTicketAndReport(t *testing.T) {
 	if report.FactsLine != "7 REAPER songs · 1 Logic Pro song · 2 folders with songs · 1 empty folder" {
 		t.Fatalf("facts line = %q", report.FactsLine)
 	}
-	if report.StageLine != "Set it up: creates your Music Production Home, installs REAPER tools" {
+	// No Home yet: the folder becomes a place by default; the Home is offered.
+	if report.StageLine != "Set it up: Turn Ori Music Demo into a group with one workspace per song (8) · Install REAPER tools and connect them to Ori Music Demo" {
 		t.Fatalf("stage line = %q", report.StageLine)
 	}
 	if !strings.HasPrefix(report.ModelSentence, "No model is set up, so Ori Music Demo Manager could not look itself.") ||
@@ -267,7 +268,7 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 	if report.Stage != foldermap.StageTools || report.Plan == nil || !report.Plan.Runnable {
 		t.Fatalf("report = %+v plan %+v", report, report.Plan)
 	}
-	if report.StageLine != "Set it up: installs REAPER tools" {
+	if report.StageLine != "Set it up: Install REAPER tools and connect them to Ori Music Demo" {
 		t.Fatalf("stage line = %q", report.StageLine)
 	}
 	if h.ws.created[0].Mission != "Mix this song" {
@@ -310,7 +311,8 @@ func TestStart_EveryStagePlanIsWorded(t *testing.T) {
 	if len(h.setups.runs) != 1 || h.setups.runs[0].Candidates[0].Kind != folderlook.KindFileCurator {
 		t.Fatalf("runs = %+v", h.setups.runs)
 	}
-	// The Home stage is runnable, with its own lines.
+	// A portfolio without a Home yet becomes a place by default: a group of
+	// its songs, with its tools. The Home is offered, not chosen.
 	home := newHarness(t, demo(t))
 	hv := home.start(t, "")
 	hr, _ := home.svc.View(context.Background(), "u1", hv.WorkspaceID)
@@ -318,11 +320,22 @@ func TestStart_EveryStagePlanIsWorded(t *testing.T) {
 	for _, l := range hr.Plan.Lines {
 		lines = append(lines, l.Name)
 	}
-	want := []string{"Creates your Music Production Home", "Adds Ori Music Demo to your Music Production Home",
-		"Lists 8 songs on its shelf", "Looks into 2 folders for songs", "Places Ori Music Demo inside your Music Production Home",
+	want := []string{"Turns Ori Music Demo into a group",
+		"Creates Album-1, linked to its own folder", "Creates Album-2, linked to its own folder", "Creates Album-3, linked to its own folder",
+		"Creates Album-4, linked to its own folder", "Creates Album-5, linked to its own folder", "Creates Logic Sketch, linked to its own folder",
+		"Creates Track-1, linked to its own folder", "Creates Track-2, linked to its own folder",
 		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing is moved, copied or read"}
-	if !hr.Plan.Runnable || strings.Join(lines, "|") != strings.Join(want, "|") {
-		t.Fatalf("home plan runnable=%v lines=%v", hr.Plan.Runnable, lines)
+	if !hr.Plan.Runnable || hr.Plan.Stage != foldermap.StageGroup || strings.Join(lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("default plan stage=%q runnable=%v lines=%v", hr.Plan.Stage, hr.Plan.Runnable, lines)
+	}
+	offeredHome := false
+	for _, s := range hr.Plan.Steps {
+		if s.Kind == folderlook.StepHome {
+			offeredHome = !s.Chosen && !s.Default
+		}
+	}
+	if !offeredHome {
+		t.Fatalf("the Home must be offered, unchosen: %+v", hr.Plan.Steps)
 	}
 	empty := newHarness(t, build(t, "notes.txt"))
 	ev := empty.start(t, "")

@@ -2317,6 +2317,8 @@ All take the workspace id from the path and answer `{ "folder_agent": <view> }`.
 
 **Who plans.** `plan.steps` is every step Ori can run for this folder, in the host's words, each with a short handle. The agent writes its plan freely (the `Plan:` section of its turn) and names a handle wherever it wants Ori to act. Ori keeps the handles it offered, in the agent's order (`source: "agent"`; `words` are the agent's sentences with the handles removed, and whatever in them is not a step is simply its words, never run), drops anything else, and sets aside the second of two steps that cannot run together (`excluded` says which; the card itself unticks the partner when the owner ticks the other). With no handle named, a dropped plan, or no model, Ori's own plan is shown (`source: "default"`, `default_reason` when a model ran). `selected` always lists the handles in effect; the owner can tick or untick any step. Each of `plan.lines` (and of `setup.lines` once Set it up runs) carries the `step` it belongs to, so the card shows the steps with their actions under them; the assurance line carries none.
 
+**Defaults.** A step marked `default` is in Ori's own plan: the project's tools; a group whenever several projects sit in their own folders and no Home takes them (so a first folder of songs becomes a place with its songs inside, listed first); an existing Home for a portfolio; add-ons the agent ranked. A Home the owner does not have yet is offered, never built by default; the agent may recommend it.
+
 What Set it up runs depends on `stage`, which follows the chosen steps (a group step makes it `group`, a Home step `home`, anything else `tools`):
 
 - **tools**: installs or connects the checked tools and pins the agent's toolbox.

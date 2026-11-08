@@ -3445,7 +3445,8 @@ a.quest-title:focus-visible {
   align-self: start;
 }
 
-.folder-agent-card__line--pick:not(:last-child)::before {
+/* Two classes, so this wins over the base connector rule below. */
+.folder-agent-card__line.folder-agent-card__line--pick:not(:last-child)::before {
   left: 35px;
 }
 

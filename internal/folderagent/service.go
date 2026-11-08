@@ -449,7 +449,7 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	}
 	s.remember(updated)
 	if updated.TicketID != "" {
-		result := foldermap.FactsLine(facts) + "\n" + StageLine(facts, stage, candidates)
+		result := foldermap.FactsLine(facts) + "\n" + StageLine(updated.FolderName, facts, candidates)
 		if sections != nil && sections.Plan != "" {
 			result += "\nPlan: " + folderlook.PlanWords(sections.Plan, folderlook.Steps(updated.FolderName, facts, candidates))
 		}
@@ -538,7 +538,7 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 	steps := folderlook.Steps(rec.FolderName, facts, candidates)
 	reference := folderlook.BuildReference(folderlook.ReferenceInput{
 		FolderName: rec.FolderName, Brief: rec.Brief, Map: m, Facts: facts,
-		StageLine: StageLine(facts, foldermap.StageFor(facts), candidates), Steps: steps, Candidates: candidates,
+		StageLine: StageLine(rec.FolderName, facts, candidates), Steps: steps, Candidates: candidates,
 		AskAllowed: ask, Hint: rec.Hint,
 	})
 	var mu sync.Mutex

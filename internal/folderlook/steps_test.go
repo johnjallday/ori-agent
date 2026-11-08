@@ -42,7 +42,7 @@ func TestSteps_CatalogAcrossStagesWithReadableHandles(t *testing.T) {
 		t.Fatalf("defaults = %v", defaults)
 	}
 	songs := foldermap.ShapeNoun("audio", 6)
-	if steps[0].Title != "Add Albums to your Music Production Home and list its 6 "+songs || steps[0].Excludes != "group" {
+	if steps[0].Title != "Add Albums to your Music Production Home and list its 6 "+songs+" on the shelf" || steps[0].Excludes != "group" {
 		t.Fatalf("home step = %+v", steps[0])
 	}
 	if steps[0].Name != "Music Production Home" || steps[4].Name != "a group" {
@@ -55,12 +55,33 @@ func TestSteps_CatalogAcrossStagesWithReadableHandles(t *testing.T) {
 		t.Fatalf("add-on step = %+v", steps[2])
 	}
 	group := steps[4]
+	song := foldermap.ShapeNoun("audio", 1)
 	if group.Kind != StepGroup || group.Excludes != "music-production-home" || group.Default ||
-		group.Title != "Turn Albums into a group with one workspace per project (6)" || group.Why != "6 projects sit in their own folders here." {
+		group.Title != "Turn Albums into a group with one workspace per "+song+" (6)" || group.Why != "6 "+songs+" sit in their own folders here." {
 		t.Fatalf("group step = %+v", group)
 	}
 	if got := StepHandles(steps); len(got) != 5 || !got["group"] {
 		t.Fatalf("handles set = %v", got)
+	}
+	if line := DefaultLine(steps); line != "Set it up: "+steps[0].Title+" · "+steps[1].Title+" · "+steps[2].Title {
+		t.Fatalf("default line = %q", line)
+	}
+
+	// Without the Home yet, the folder becomes a group by default and the Home
+	// is offered for the agent to recommend.
+	fresh := append([]Candidate(nil), candidates...)
+	fresh[0].Action = ActionInstall
+	offered := Steps("Albums", portfolioFacts(), fresh)
+	// The group leads the plan; the Home is offered after it.
+	if offered[0].Handle != "group" || !offered[0].Default || offered[1].Default ||
+		offered[1].Title != "Create your Music Production Home and put Albums on its shelf (6 "+songs+")" {
+		t.Fatalf("no-home steps = %+v / %+v", offered[0], offered[1])
+	}
+	if line := DefaultLine(offered); line != "Set it up: "+offered[0].Title+" · "+offered[2].Title+" · "+offered[3].Title {
+		t.Fatalf("no-home default line = %q", line)
+	}
+	if line := DefaultLine(nil); line != "Nothing to set up yet: Ori found no project it knows here." {
+		t.Fatalf("empty default line = %q", line)
 	}
 }
 

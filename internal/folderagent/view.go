@@ -137,7 +137,7 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	}
 	v.FactsLine = foldermap.FactsLine(rec.Facts)
 	v.Stage = rec.Stage
-	v.StageLine = StageLine(rec.Facts, rec.Stage, rec.Candidates)
+	v.StageLine = StageLine(rec.FolderName, rec.Facts, rec.Candidates)
 	v.Candidates = rec.Candidates
 	v.NextFolders = nextFolders(rec.Facts)
 	v.ModelSentence = modelSentence(rec)
@@ -261,41 +261,14 @@ func nextFolders(f foldermap.Facts) []string {
 	return out
 }
 
-// StageLine says what Set it up would do, in the host's words (PRD FR24).
-func StageLine(f foldermap.Facts, stage foldermap.Stage, candidates []folderlook.Candidate) string {
-	var parts []string
-	for _, c := range candidates {
-		if !c.Required {
-			continue
-		}
-		switch c.Kind {
-		case folderlook.KindHomeProvider:
-			parts = append(parts, c.Detail)
-		case folderlook.KindIntegration:
-			if c.Action == folderlook.ActionAlreadyHere {
-				parts = append(parts, "connects "+c.Name)
-			} else {
-				parts = append(parts, "installs "+c.Name)
-			}
-		case folderlook.KindFileCurator:
-			parts = append(parts, "adds File Curator to keep the loose files tidy")
-		}
-	}
-	if stage == foldermap.StageGroup {
-		parts = append([]string{groupStageLine(f)}, parts...)
-	}
-	if len(parts) == 0 {
-		if stage == foldermap.StageFolder {
-			return "Nothing to set up yet: Ori found no project it knows here."
-		}
-		for _, c := range candidates {
-			if !c.Required && c.Action != folderlook.ActionAlreadyHere {
-				return "Set it up: adds the tools you leave selected below"
-			}
-		}
+// StageLine says what Set it up would do by default, in the host's words
+// (PRD FR24): the catalog's default steps, or why there is nothing.
+func StageLine(folderName string, f foldermap.Facts, candidates []folderlook.Candidate) string {
+	steps := folderlook.Steps(folderName, f, candidates)
+	if len(steps) == 0 && f.Recognized() {
 		return "Nothing to set up for this project yet."
 	}
-	return "Set it up: " + strings.Join(parts, ", ")
+	return folderlook.DefaultLine(steps)
 }
 
 // Who chose a plan's steps.
