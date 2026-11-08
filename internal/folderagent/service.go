@@ -831,7 +831,9 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		status, reason := s.deps.Setups.Run(context.Background(), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
+		// The run outlives the request that confirmed it: the request's values
+		// travel with it, its cancellation does not.
+		status, reason := s.deps.Setups.Run(context.WithoutCancel(ctx), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
 			_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 				if r.Setup != nil {
 					r.Setup.Lines = lines
