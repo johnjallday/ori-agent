@@ -67,6 +67,43 @@ func ShownExtraFields(extra map[string][]string, words Words) map[string][]strin
 	return shown
 }
 
+// ShownFields is fields as a client may see them: plugin fields only under
+// ids the words declare. Every response carrying Fields goes through it.
+func ShownFields(fields Fields, words Words) Fields {
+	fields.Extra = ShownExtraFields(fields.Extra, words)
+	return fields
+}
+
+// OwnerExtraPatch is the owner's plugin-field edit as it is stored: every id
+// in the browser's map must be declared (and a text field one line), and the
+// entry's stored ids the words no longer declare are carried over unchanged,
+// so a package change never loses the owner's words (FR29, FR30). Review and
+// commit both call it on the same entry revision, so they digest the same
+// patch. A patch without extra is returned as it is.
+func OwnerExtraPatch(patch FieldsPatch, stored Fields, words Words) (FieldsPatch, error) {
+	if patch.Extra == nil {
+		return patch, nil
+	}
+	if !DeclaredExtraFields(*patch.Extra, words) {
+		return FieldsPatch{}, ErrConflict
+	}
+	merged := cloneExtraFields(*patch.Extra)
+	for id, lines := range stored.Extra {
+		if _, declared := words.Field(id); declared {
+			continue
+		}
+		if merged == nil {
+			merged = map[string][]string{}
+		}
+		merged[id] = append([]string(nil), lines...)
+	}
+	if merged == nil {
+		merged = map[string][]string{}
+	}
+	patch.Extra = &merged
+	return patch, nil
+}
+
 // cloneExtraFields copies the map and its lines; empty is nil.
 func cloneExtraFields(extra map[string][]string) map[string][]string {
 	if len(extra) == 0 {

@@ -566,7 +566,8 @@ func (h *Handler) GetAssistantLibraryProject(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	detail, err := h.assistantLibraryStore().Detail(scope, r.PathValue("entryID"))
+	// The shelf's own read shows the plugin fields the Home's words declare.
+	detail, err := h.assistantLibraryStore().DetailWithWords(scope, r.PathValue("entryID"), h.projectCardWords(station))
 	if err != nil {
 		if errors.Is(err, projectlibrary.ErrConflict) {
 			_ = orihttp.RespondNotFound(w, "Library project not found")

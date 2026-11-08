@@ -60,7 +60,8 @@ func (h *Handler) CommitAssistantLibraryProposal(w http.ResponseWriter, r *http.
 	if !replay {
 		h.recordLibraryProposalFeedback(scope.HomeID, r.PathValue("proposalID"), "", "accepted")
 	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"entry_id": entry.ID, "fields": entry.Fields, "replay": replay})
+	_ = orihttp.RespondSuccess(w, map[string]any{"entry_id": entry.ID,
+		"fields": projectlibrary.ShownFields(entry.Fields, projectlibrary.Words{}), "replay": replay})
 }
 
 type libraryDismissRequest struct {

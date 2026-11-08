@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ProjectLibraryPanel,
+  extraFieldRows,
+  extraFieldValues,
+  fieldsPatchLines,
   activationStateLabel,
   projectTeamURL,
   libraryDigestText,
@@ -1535,6 +1538,56 @@ test('manual edit review cannot commit without a second user confirmation', asyn
     null
   );
   assert.deepEqual(calls, ['/projects/entry-1/fields/review']);
+});
+
+const FIELD_WORDS = {
+  source: 'package',
+  noun: 'Song',
+  noun_plural: 'Songs',
+  roster_title: 'Songs and assistants',
+  facts: [],
+  fields: [
+    { id: 'key', label: 'Key', kind: 'text' },
+    { id: 'references', label: 'Reference tracks', kind: 'list' }
+  ]
+};
+
+test('plugin fields read under their declared labels in the confirm lines and the Overview (PRD #792 FR29)', () => {
+  assert.deepEqual(
+    fieldsPatchLines(
+      { next_action: 'Mix', extra: { references: ['Song A', 'Song B'] } },
+      FIELD_WORDS
+    ),
+    ['next action: Mix', 'Key: None', 'Reference tracks: Song A; Song B']
+  );
+  assert.deepEqual(fieldsPatchLines({ clear_priority: true }, FIELD_WORDS), [
+    'clear priority: Unset'
+  ]);
+  // Without words no plugin field is worded.
+  assert.deepEqual(fieldsPatchLines({ extra: { key: ['F'] } }), []);
+  assert.deepEqual(
+    extraFieldRows({ key: ['F minor'], references: [], retired: ['x'] }, FIELD_WORDS),
+    [
+      ['Key', ['F minor']],
+      ['Reference tracks', []]
+    ]
+  );
+});
+
+test('the Edit dialog reads plugin field controls into the stored shape and refuses over-long values', () => {
+  const [key, references] = FIELD_WORDS.fields;
+  const read = (keyValue, referenceValue) =>
+    extraFieldValues([
+      { field: key, input: { value: keyValue } },
+      { field: references, input: { value: referenceValue } }
+    ]);
+  assert.deepEqual(read('  F   minor ', 'Song A\n\n Song B \n'), {
+    extra: { key: ['F minor'], references: ['Song A', 'Song B'] },
+    error: null
+  });
+  assert.deepEqual(read('', ''), { extra: {}, error: null }, 'empty controls clear the fields');
+  assert.equal(read('a'.repeat(241), '').error.value.length, 241);
+  assert.ok(read('', Array.from({ length: 17 }, (_, i) => `ref ${i}`).join('\n')).error);
 });
 
 const DIGEST = {

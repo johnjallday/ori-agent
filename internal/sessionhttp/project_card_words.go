@@ -21,3 +21,29 @@ func (h *Handler) projectCardWords(home *workspace.Workspace) projectlibrary.Wor
 	}
 	return projectlibrary.WordsFromDeclaration(declaration.ProjectCard)
 }
+
+// ownerFieldsPatch is the owner's fields patch as review and commit store it:
+// plugin-field ids are checked against the Home's words and stored ids the
+// words no longer declare are carried over (PRD #792 FR29, FR30). It reads the
+// entry's current fields; a missing entry leaves the patch to the store's own
+// conflict.
+func (h *Handler) ownerFieldsPatch(scope projectlibrary.Scope, home *workspace.Workspace, entryID string,
+	patch projectlibrary.FieldsPatch) (projectlibrary.FieldsPatch, projectlibrary.Words, error) {
+	words := h.projectCardWords(home)
+	if patch.Extra == nil {
+		return patch, words, nil
+	}
+	doc, err := h.assistantLibraryStore().Read(scope)
+	if err != nil {
+		return projectlibrary.FieldsPatch{}, words, err
+	}
+	var stored projectlibrary.Fields
+	for _, entry := range doc.Entries {
+		if entry.ID == entryID {
+			stored = entry.Fields
+			break
+		}
+	}
+	merged, err := projectlibrary.OwnerExtraPatch(patch, stored, words)
+	return merged, words, err
+}

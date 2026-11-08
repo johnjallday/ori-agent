@@ -696,6 +696,63 @@ export function recentlySavedView(page, now = new Date(), words = null) {
   };
 }
 
+// fieldsPatchLines words a fields patch for the confirm dialog, one line per
+// changed field. Plugin fields (`extra`) read under their declared labels
+// (PRD #792 FR29); a field the patch clears reads "None".
+export function fieldsPatchLines(patch, words) {
+  const declared = projectWords(words).fields;
+  return Object.entries(patch || {}).flatMap(([key, value]) => {
+    if (key === 'extra') {
+      const extra = value && typeof value === 'object' ? value : {};
+      return declared.map(
+        field => `${field.label}: ${(extra[field.id] || []).join('; ') || 'None'}`
+      );
+    }
+    if (key === 'clear_priority') return [`${label(key)}: Unset`];
+    if (key === 'milestones') {
+      const text = value
+        .map(
+          item =>
+            `${item.label}${item.due_date ? ` · ${item.due_date}` : ''} · ${item.complete ? 'complete' : 'open'}`
+        )
+        .join('; ');
+      return [`${label(key)}: ${text || 'None'}`];
+    }
+    if (Array.isArray(value)) return [`${label(key)}: ${value.join('; ') || 'None'}`];
+    return [`${label(key)}: ${String(value || 'Not set')}`];
+  });
+}
+
+// extraFieldRows pairs each declared field's label with its stored lines, in
+// declared order; a field with no value has no lines.
+export function extraFieldRows(extra, words) {
+  const stored = extra && typeof extra === 'object' ? extra : {};
+  return projectWords(words).fields.map(field => [
+    field.label,
+    (Array.isArray(stored[field.id]) ? stored[field.id] : []).filter(Boolean)
+  ]);
+}
+
+// extraFieldValues reads the Edit dialog's plugin-field controls into the
+// stored shape: a text field is one line, a list one line per entry; an
+// empty control is left out. Returns { extra, error } with the control that
+// broke a limit.
+export function extraFieldValues(controls) {
+  const extra = {};
+  for (const { field, input } of controls) {
+    const raw = String(input.value || '');
+    const lines = (field.kind === 'list' ? raw.split(/\r?\n/) : [raw])
+      .map(value => value.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    if (!lines.length) continue;
+    if (lines.length > 16 || lines.some(value => [...value].length > 240)) {
+      return { extra: null, error: input };
+    }
+    extra[field.id] = lines;
+  }
+  return { extra, error: null };
+}
+
 // savedLine is one song's muted line, "Saved … · 14 tracks · 92 BPM · 3:41",
 // with the facts half on data-song-facts for tests and styling.
 function savedLine(className, saved, facts) {
@@ -3896,6 +3953,14 @@ export class ProjectLibraryPanel {
       if (!shown) description.setAttribute('aria-label', `${name} not known or not set`);
       summary.append(node('dt', '', name), description);
     }
+    // Plugin-declared fields under their declared labels (PRD #792 FR29), as
+    // the owner typed them; a stored id the package no longer declares is not
+    // sent by the server.
+    for (const [name, lines] of extraFieldRows(fields.extra, this.projectWords())) {
+      const description = node('dd', '', lines.join('; ') || '—');
+      if (!lines.length) description.setAttribute('aria-label', `${name} not set`);
+      summary.append(node('dt', '', name), description);
+    }
     content.append(summary, node('h4', '', 'Saved source observations'));
     const sources = node('ul');
     for (const source of detail.sources || []) {
@@ -4930,6 +4995,26 @@ export class ProjectLibraryPanel {
       fields.append(labelNode);
     }
     fields.append(milestones);
+    // One control per plugin-declared field, under its declared label (PRD
+    // #792 FR29): an input for text, a textarea for a list.
+    const savedExtra = detail.fields.extra || {};
+    const extraControls = this.projectWords().fields.map(field => {
+      const list = field.kind === 'list';
+      const input = node(list ? 'textarea' : 'input', 'form-control');
+      if (list) input.rows = 3;
+      input.maxLength = list ? 4096 : 240;
+      input.value = (savedExtra[field.id] || []).join(list ? '\n' : ' ');
+      input.dataset.extraField = field.id;
+      input.addEventListener('input', () => input.setCustomValidity(''));
+      const labelNode = node(
+        'label',
+        '',
+        list ? `${field.label} (one per line, up to 16)` : field.label
+      );
+      labelNode.append(input);
+      fields.append(labelNode);
+      return { field, input };
+    });
     const actions = node('div', 'assistant-program-dialog-actions');
     const cancel = node('button', 'modern-btn modern-btn-secondary', 'Cancel');
     cancel.type = 'button';
@@ -5006,6 +5091,22 @@ export class ProjectLibraryPanel {
       }));
       if (JSON.stringify(currentMilestones) !== JSON.stringify(normalizedMilestones))
         patch.milestones = currentMilestones;
+      if (extraControls.length) {
+        const { extra, error } = extraFieldValues(extraControls);
+        if (error) {
+          error.setCustomValidity('Use no more than 16 entries, each at most 240 characters.');
+          error.reportValidity();
+          return;
+        }
+        // The whole declared map is sent when anything in it changed; the
+        // server keeps any stored field the package no longer declares.
+        const before = Object.fromEntries(
+          extraControls
+            .filter(({ field }) => (savedExtra[field.id] || []).length)
+            .map(({ field }) => [field.id, savedExtra[field.id]])
+        );
+        if (JSON.stringify(extra) !== JSON.stringify(before)) patch.extra = extra;
+      }
       const beforePriority = detail.fields.priority == null ? '' : String(detail.fields.priority);
       if (priority.value !== beforePriority) {
         if (priority.value === '') patch.clear_priority = true;
@@ -5032,10 +5133,7 @@ export class ProjectLibraryPanel {
           'Save these project notes?',
           [
             detail.row.name,
-            ...Object.entries(patch).map(
-              ([key, value]) =>
-                `${label(key)}: ${key === 'clear_priority' ? 'Unset' : key === 'milestones' ? value.map(item => `${item.label}${item.due_date ? ` · ${item.due_date}` : ''} · ${item.complete ? 'complete' : 'open'}`).join('; ') || 'None' : Array.isArray(value) ? value.join('; ') || 'None' : String(value || 'Not set')}`
-            ),
+            ...fieldsPatchLines(patch, this.projectWords()),
             ...(patch.archive_review_state != null
               ? ['Archive review is a note, not a file move.']
               : [])

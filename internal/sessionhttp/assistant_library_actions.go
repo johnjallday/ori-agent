@@ -417,7 +417,7 @@ type libraryFieldsCommitRequest struct {
 }
 
 func (h *Handler) ReviewAssistantLibraryFields(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := h.assistantLibraryScope(w, r)
+	scope, station, ok := h.assistantLibraryScope(w, r)
 	if !ok {
 		return
 	}
@@ -429,16 +429,23 @@ func (h *Handler) ReviewAssistantLibraryFields(w http.ResponseWriter, r *http.Re
 	if !h.libraryEntryExists(w, scope, entryID) {
 		return
 	}
-	review, err := h.assistantLibraryStore().ReviewFields(scope, entryID, request.IfFieldsRevision, request.Patch, scope.OwnerUserID)
+	patch, words, err := h.ownerFieldsPatch(scope, station, entryID, request.Patch)
 	if err != nil {
 		respondLibraryActionError(w, err)
 		return
 	}
+	review, err := h.assistantLibraryStore().ReviewFields(scope, entryID, request.IfFieldsRevision, patch, scope.OwnerUserID)
+	if err != nil {
+		respondLibraryActionError(w, err)
+		return
+	}
+	review.Before = projectlibrary.ShownFields(review.Before, words)
+	review.After = projectlibrary.ShownFields(review.After, words)
 	_ = orihttp.RespondSuccess(w, review)
 }
 
 func (h *Handler) CommitAssistantLibraryFields(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := h.assistantLibraryScope(w, r)
+	scope, station, ok := h.assistantLibraryScope(w, r)
 	if !ok {
 		return
 	}
@@ -454,13 +461,19 @@ func (h *Handler) CommitAssistantLibraryFields(w http.ResponseWriter, r *http.Re
 	if !h.libraryEntryExists(w, scope, entryID) {
 		return
 	}
-	entry, replay, err := h.assistantLibraryStore().CommitFields(scope, entryID,
-		request.ReviewToken, request.IdempotencyKey, request.IfFieldsRevision, request.Patch, scope.OwnerUserID)
+	patch, words, err := h.ownerFieldsPatch(scope, station, entryID, request.Patch)
 	if err != nil {
 		respondLibraryActionError(w, err)
 		return
 	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"entry_id": entry.ID, "fields": entry.Fields, "replay": replay})
+	entry, replay, err := h.assistantLibraryStore().CommitFields(scope, entryID,
+		request.ReviewToken, request.IdempotencyKey, request.IfFieldsRevision, patch, scope.OwnerUserID)
+	if err != nil {
+		respondLibraryActionError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"entry_id": entry.ID,
+		"fields": projectlibrary.ShownFields(entry.Fields, words), "replay": replay})
 }
 
 type libraryBulkFieldsRequest struct {
@@ -506,6 +519,10 @@ func (h *Handler) CommitAssistantLibraryBulkFields(w http.ResponseWriter, r *htt
 	if err != nil {
 		respondLibraryActionError(w, err)
 		return
+	}
+	// A bulk edit never touches plugin fields; its answer carries none.
+	for i := range result.Updated {
+		result.Updated[i].Fields = projectlibrary.ShownFields(result.Updated[i].Fields, projectlibrary.Words{})
 	}
 	_ = orihttp.RespondSuccess(w, result)
 }

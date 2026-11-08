@@ -206,6 +206,83 @@ func TestSongCardHTTP_FieldsAndRosterValues(t *testing.T) {
 	}
 }
 
+// PRD #792 FR29, FR30: the owner edits declared plugin fields on the shelf;
+// a stored id the package no longer declares is kept, never shown, never
+// editable, and the patch is checked against the declaration.
+func TestLibraryFieldsHTTP_OwnerEditsDeclaredExtrasAndKeepsRetiredOnes(t *testing.T) {
+	handler, store, station, project, scope, _ := songCardHTTPFixture(t)
+	initializeSongCardLibrary(t, store, scope)
+	pinProjectCardPackage(t, handler, store, station, musicProjectCard())
+	setLinkedEntryFields(t, store, scope, project.ID, projectlibrary.Fields{
+		Extra: map[string][]string{"key": {"F minor"}, "retired": {"old words"}}, Revision: 2})
+	doc, err := projectlibrary.NewStore(store).Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryID := ""
+	for _, entry := range doc.Entries {
+		if entry.Link != nil && entry.Link.WorkspaceID == project.ID {
+			entryID = entry.ID
+		}
+	}
+	call := func(action func(http.ResponseWriter, *http.Request), body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := assistantProgramRequest(http.MethodPost, "/library/fields", station.ID, body)
+		request.SetPathValue("entryID", entryID)
+		recorder := httptest.NewRecorder()
+		action(recorder, request)
+		return recorder
+	}
+
+	// The shelf's detail shows the declared field only.
+	detailRequest := assistantProgramRequest(http.MethodGet, "/library/projects/x", station.ID, "")
+	detailRequest.SetPathValue("entryID", entryID)
+	detail := httptest.NewRecorder()
+	handler.GetAssistantLibraryProject(detail, detailRequest)
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"key":["F minor"]`) ||
+		strings.Contains(detail.Body.String(), "retired") {
+		t.Fatalf("detail: %d %s", detail.Code, detail.Body.String())
+	}
+
+	patch := `{"extra":{"key":["G minor"]}}`
+	review := call(handler.ReviewAssistantLibraryFields, `{"if_fields_revision":2,"patch":`+patch+`}`)
+	if review.Code != http.StatusOK || !strings.Contains(review.Body.String(), `"G minor"`) ||
+		strings.Contains(review.Body.String(), "retired") {
+		t.Fatalf("review: %d %s", review.Code, review.Body.String())
+	}
+	var reviewed struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(review.Body.Bytes(), &reviewed); err != nil {
+		t.Fatal(err)
+	}
+	commitBody := `{"if_fields_revision":2,"patch":` + patch + `,"review_token":"` + reviewed.Token +
+		`","idempotency_key":"extra-http","confirm":true}`
+	for i := 0; i < 2; i++ {
+		commit := call(handler.CommitAssistantLibraryFields, commitBody)
+		if commit.Code != http.StatusOK || !strings.Contains(commit.Body.String(), `"G minor"`) ||
+			strings.Contains(commit.Body.String(), "retired") {
+			t.Fatalf("commit %d: %d %s", i, commit.Code, commit.Body.String())
+		}
+	}
+	after, err := projectlibrary.NewStore(store).Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range after.Entries {
+		if entry.ID == entryID && (entry.Fields.Extra["key"][0] != "G minor" || entry.Fields.Extra["retired"][0] != "old words") {
+			t.Fatalf("stored extra: %+v", entry.Fields.Extra)
+		}
+	}
+
+	// Undeclared ids and a second line on a text field are refused.
+	for _, bad := range []string{`{"extra":{"retired":["new"]}}`, `{"extra":{"mood":["dark"]}}`, `{"extra":{"key":["F","G"]}}`} {
+		if response := call(handler.ReviewAssistantLibraryFields, `{"if_fields_revision":3,"patch":`+bad+`}`); response.Code == http.StatusOK {
+			t.Fatalf("%s accepted: %s", bad, response.Body.String())
+		}
+	}
+}
+
 func librarySummaryWords(t *testing.T, handler *Handler, homeID string) projectlibrary.Words {
 	t.Helper()
 	response := httptest.NewRecorder()
