@@ -50,8 +50,34 @@
       <label for="personalAssistantHQTime">Daily Brief time (weekdays)</label>
       <input id="personalAssistantHQTime" type="time" class="modern-input" value="08:00">
       <p id="personalAssistantHQScope">All workspaces, including future ones.</p>
+      <!-- Notes are part of the HQ review (assistant-hq-onboarding 3.5). The
+           review shows where they go and what Ori keeps up to date before
+           anything is written; an existing folder is shown as it is and never
+           replaced. personal-hq-notes-review.js decides what is shown. -->
+      <section id="personalAssistantHQNotes" class="pa-hq-card__notes" aria-labelledby="personalAssistantHQNotesTitle" hidden>
+        <h5 id="personalAssistantHQNotesTitle" class="pa-hq-card__notes-title">Notes, ready to use</h5>
+        <p id="personalAssistantHQNotesMessage" class="pa-hq-card__notes-message"></p>
+        <div id="personalAssistantHQNotesLocation" class="pa-hq-card__notes-location">
+          <span>Notes location</span>
+          <b id="personalAssistantHQNotesPath"></b>
+        </div>
+        <p id="personalAssistantHQNotesScope" class="pa-hq-card__notes-scope"></p>
+        <details id="personalAssistantHQNotesOptions" class="pa-hq-card__notes-options">
+          <summary>Notes options</summary>
+          <label class="form-check pa-hq-card__notes-include">
+            <input type="checkbox" class="form-check-input" id="personalAssistantHQNotesInclude" checked>
+            <span class="form-check-label">Create a new notes folder with my HQ</span>
+          </label>
+          <button type="button" id="personalAssistantHQNotesChoose" class="btn btn-sm btn-outline-secondary">Choose another location…</button>
+          <p class="pa-hq-card__notes-hint">Already have notes? Leave this unchecked and connect your folder from Notes later.</p>
+        </details>
+      </section>
     </div>
     <ul id="personalAssistantHQReceipt" hidden></ul>
+    <div id="personalAssistantHQNotesResult" class="pa-hq-card__notes-result" hidden>
+      <p id="personalAssistantHQNotesResultText" role="status" aria-live="polite"></p>
+      <button type="button" id="personalAssistantHQNotesRetry" class="btn btn-sm btn-primary pa-hq-card__notes-retry" hidden>Retry notes setup</button>
+    </div>
     <div class="pa-specialist-offer__actions">
       <button type="button" id="personalAssistantHQBuild" class="btn btn-sm btn-primary" disabled>Build</button>
       <button type="button" id="personalAssistantHQAdjust" class="btn btn-sm btn-outline-secondary">Adjust…</button>

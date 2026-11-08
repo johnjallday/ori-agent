@@ -308,7 +308,8 @@ test('a Notes entry while the manager is replying changes nothing and says how t
     ).PersonalAssistantSecondBrain.openSetup()
   );
   await expect(title(page)).toHaveText('Atlas');
-  await expect(card(page)).toContainText("What's the main thing you're working on right now?");
+  // Setup opens on where the notes live, with no project question first.
+  await expect(card(page).locator('[data-second-brain-stage="place"]')).toBeVisible();
 });
 
 const action = (page: Page, id: string) => card(page).locator(`[data-second-brain-action="${id}"]`);
@@ -426,6 +427,8 @@ for (const theme of ['light', 'dark']) {
       expect(violations).toEqual([]);
       mkdirSync(EVIDENCE, { recursive: true });
       await card(page).screenshot({ path: join(EVIDENCE, `spec-choice-${width}-${theme}.png`) });
+      // Other status reads (the HQ card's too) may still be in flight.
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
     });
   }
 }
@@ -457,22 +460,10 @@ test('Notes card styles stay on the Notes card', async ({ page }) => {
   expect(colors.otherLink).toBe('rgb(13, 110, 253)');
 });
 
-test('keyboard alone: set up, answer, go back, confirm, open the first note, keep the caret', async ({
+test('keyboard alone: set up with no project question, then a reviewed disconnect', async ({
   page,
   request
 }) => {
-  // The interview's suggestion arrives while the user is typing.
-  let releaseInterview = () => {};
-  const held = new Promise<void>(resolve => {
-    releaseInterview = resolve;
-  });
-  await page.route('**/api/personal-assistant/knowledge/interview', async route => {
-    const response = await route.fetch();
-    const body = await response.json().catch(() => ({}));
-    await held;
-    body.suggestion = { text: 'Album launch', folder: 'Album Launch' };
-    await route.fulfill({ response, json: body });
-  });
   await openHome(page);
   await openAsk(page);
   await expect(action(page, 'setup')).toBeFocused();
@@ -489,48 +480,16 @@ test('keyboard alone: set up, answer, go back, confirm, open the first note, kee
   await page.keyboard.press('Shift+Tab');
   await expect(action(page, 'setup')).toBeFocused();
   await page.keyboard.press('Enter');
-  // Explicitly entering the question focuses its answer.
-  const answer = card(page).locator('[data-project-answer]');
-  await expect(answer).toBeFocused();
-  await page.keyboard.type('Finishing the spring mix');
-  for (let i = 0; i < 3; i += 1) await page.keyboard.press('ArrowLeft');
-  releaseInterview();
-  await expect(action(page, 'suggestion')).toBeVisible();
-  // The repaint kept the field, its text and its caret.
-  await expect(answer).toBeFocused();
-  await expect(answer).toHaveValue('Finishing the spring mix');
-  const caret = await answer.evaluate(node => (node as HTMLTextAreaElement).selectionStart);
-  expect(caret).toBe('Finishing the spring mix'.length - 3);
-
-  await tabTo(page, action(page, 'save'));
-  await page.keyboard.press('Enter');
-  const name = card(page).locator('[data-project-name]');
-  await expect(name).toBeFocused();
-  // Back returns to the answer, kept.
-  await tabTo(page, action(page, 'back'));
-  await page.keyboard.press('Enter');
-  await expect(answer).toBeFocused();
-  await expect(answer).toHaveValue('Finishing the spring mix');
-  await tabTo(page, action(page, 'save'));
-  await page.keyboard.press('Enter');
-  await expect(name).toBeFocused();
-  await page.keyboard.press('ControlOrMeta+A');
-  await page.keyboard.type('Spring Mix');
-  await tabTo(page, action(page, 'confirm'));
-  await page.keyboard.press('Enter');
+  // Setup goes straight to where the notes live (assistant-hq-onboarding 4.4).
   await expect(card(page).locator('[data-second-brain-stage="place"]')).toBeVisible();
+  await expect(card(page).locator('[data-project-answer]')).toHaveCount(0);
   await tabTo(page, action(page, 'create'));
   await page.keyboard.press('Enter');
-
-  const first = card(page).locator('[data-second-brain-first-note]');
-  await expect(first).toContainText('Spring Mix', { timeout: 75_000 });
-  const open = card(page).getByRole('button', { name: 'Open Spring Mix' });
-  await tabTo(page, open, 40);
-  await page.keyboard.press('Enter');
-  await expect(card(page).locator('.pa-second-brain__preview')).toContainText(
-    'Finishing the spring mix'
-  );
-  expect((await secondBrain(request)).status).toBe('connected');
+  await expect
+    .poll(async () => (await secondBrain(request)).status, { timeout: 75_000 })
+    .toBe('connected');
+  // The project question is a later, explicit choice now (4.4); the first-week
+  // and setup specs drive it from its own link.
 
   // Disconnect, reviewed, from the keyboard: the safe way out has focus.
   await page.evaluate(() =>

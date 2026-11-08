@@ -217,11 +217,10 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
     // HQ is retired from the mission board. The hired assistant still offers
-    // its next mission without hiding the unbuilt Map site.
+    // its next mission without hiding the unbuilt Map site. Since notes became
+    // the primary onboarding journey (f37966fbd, #784) that mission is notes.
     await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
-    await expect(page.locator('[data-role="first-mission-title"]')).toHaveText(
-      'Show your assistant a folder'
-    );
+    await expect(page.locator('[data-role="first-mission-title"]')).toHaveText('Set up your notes');
     await expect(
       page.locator('[data-role="quests"] .quest-item').filter({ hasText: 'Build My HQ' })
     ).toHaveCount(0);

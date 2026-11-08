@@ -236,9 +236,27 @@ func TestSecondBrainCreate_WritesTheProjectAsTheFirstNoteAndNamesIt(t *testing.T
 	}
 }
 
-func TestSecondBrainCreate_WithoutAProjectRecordsTheQuestionSkipped(t *testing.T) {
+// Project state tells not asked from an explicit skip (assistant-hq-onboarding
+// 3.7): a project-free setup is deferred; only an explicit skip says skipped.
+func TestSecondBrainCreate_WithoutAProjectRecordsTheQuestionNotAsked(t *testing.T) {
 	h := newSecondBrainHarness(t)
 	if _, err := h.create(t, "My Brain"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := h.service.Status(context.Background(), "local")
+	if err != nil || status.FillIn == nil || status.FillIn.ProjectAsk != secondbrain.ProjectDeferred {
+		t.Fatalf("fill_in = %+v, %v", status.FillIn, err)
+	}
+}
+
+func TestSecondBrainCreate_AnExplicitSkipIsStillRecordedAsSkipped(t *testing.T) {
+	h := newSecondBrainHarness(t)
+	h.tokens["documents"] = h.documents()
+	_, err := h.service.Create(context.Background(), "local", SecondBrainCreateInput{
+		SelectionToken: "documents", Name: "My Brain", RequestID: "create-skip", ProjectSkipped: true,
+	})
+	h.service.Wait()
+	if err != nil {
 		t.Fatal(err)
 	}
 	status, err := h.service.Status(context.Background(), "local")

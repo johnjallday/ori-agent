@@ -193,7 +193,9 @@ export function secondBrainChecklistView(secondBrain, missions) {
   const projectAsk = secondBrain?.fill_in?.project_ask || '';
   const rows = FIRST_WEEK_CHECKLIST.filter(
     row =>
-      row.id !== 'project' || ((!projectAsk || projectAsk === 'skipped') && !done.has(row.mission))
+      row.id !== 'project' ||
+      ((!projectAsk || projectAsk === 'skipped' || projectAsk === 'deferred') &&
+        !done.has(row.mission))
   ).map(row => ({ ...row, done: done.has(row.mission) }));
   return { show: true, rows };
 }
@@ -377,8 +379,10 @@ export function secondBrainSetupStage(step) {
       why: "Your notes start with a note about what you're working on, in your words. You can skip this."
     };
   }
+  // Setup starts here now: no project question first (assistant-hq-onboarding
+  // 4.4). Telling Ori a project stays a later, explicit action.
   return {
-    label: 'Step 2 of 2 · Where your notes live',
+    label: 'Where your notes live',
     why: 'Nothing is written until you press Set it up.'
   };
 }
@@ -961,6 +965,9 @@ export function secondBrainFocusSelector({
   if (asking && projectStatus === 'ask') return '[data-project-answer]';
   if (asking && projectStatus === 'name') return '[data-project-name]';
   if (phase === 'setup' && setupStep === 'place' && hasParent) return '[data-second-brain-name]';
+  // Setup opens here now (4.4): its one action, Set it up, takes focus. Without
+  // a default place there is no such button and the first control does.
+  if (phase === 'setup' && setupStep === 'place') return '[data-second-brain-action="create"]';
   if (phase === 'disconnect') return '[data-second-brain-action="cancel"]';
   return '';
 }
@@ -2238,8 +2245,12 @@ async function capture() {
 function startSetup() {
   // One request id for the whole attempt: a retry after a lost answer replays
   // the first call on the server instead of making a second folder.
+  // Setup goes straight to where the notes live (assistant-hq-onboarding 4.4):
+  // the project question is no longer a prerequisite, and the server records
+  // it as not asked. The question remains reachable from the checklist row and
+  // the Give Ori a project mission.
   state.setup = {
-    step: 'project',
+    step: 'place',
     project: null,
     parent: null,
     name: DEFAULT_SECOND_BRAIN_NAME,
@@ -2338,12 +2349,18 @@ function skipSetupProject() {
   render();
 }
 
-// backToSetupProject returns from the place card to the question, answer kept.
+// backToSetupProject leaves the place card. A setup that began at the project
+// question (an older arrival) returns to it, answer kept; one that began at the
+// place goes back to wherever setup was opened from, nothing written.
 function backToSetupProject() {
-  state.setup.step = 'project';
   state.setup.message = '';
-  state.project.status = 'ask';
-  render();
+  if (state.setup.project) {
+    state.setup.step = 'project';
+    state.project.status = 'ask';
+    render();
+    return;
+  }
+  back();
 }
 
 // renderSetupStage says which of the two setup steps this is and why it comes.

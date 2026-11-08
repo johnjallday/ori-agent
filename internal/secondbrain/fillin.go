@@ -39,6 +39,12 @@ const (
 	// How the drawer's project question ended.
 	ProjectAnswered = "answered"
 	ProjectSkipped  = "skipped"
+	// ProjectDeferred means the question was not asked: the notes were set up
+	// without it (a bundled Personal HQ setup, or a project-free Set up my
+	// notes). It is distinct from an explicit skip, and it does not open the
+	// drawer's question by itself; the question stays a later, explicit action
+	// (assistant-hq-onboarding 3.7).
+	ProjectDeferred = "deferred"
 
 	// FillInAskAgainAfter is how long Not now waits before the card comes back,
 	// as the ask's does.
@@ -280,7 +286,7 @@ func validateFillIn(fillIn FillIn) error {
 		fillIn.ConsentRequestID != "" && !ValidRequestID(fillIn.ConsentRequestID) {
 		return ErrInvalidRecord
 	}
-	if fillIn.ProjectAsk != "" && fillIn.ProjectAsk != ProjectAnswered && fillIn.ProjectAsk != ProjectSkipped ||
+	if fillIn.ProjectAsk != "" && fillIn.ProjectAsk != ProjectAnswered && fillIn.ProjectAsk != ProjectSkipped && fillIn.ProjectAsk != ProjectDeferred ||
 		(fillIn.ProjectAsk == "") != (fillIn.ProjectAskAt == nil) {
 		return ErrInvalidRecord
 	}
