@@ -350,7 +350,7 @@ The Home map draws a navigation-only badge on a program Home's district header w
 
 - **Trigger.** Only `library.scan_completed`, delivered in-process. The event is a notification, never authority; the run re-reads the Home.
 - **Authority.** The runtime-resolved local instance bound to the Home's required primary Home-scope role (`ManagerAuthority`, `boundManager`), live installed-provider evidence and mirror agreement — checked at run start and again by every tool call through the existing `authorizeManager`. The optional Sample Manager, an unbound or disabled instance, a global agent with the same name, or a foreign Home never qualifies.
-- **Tool allowlist.** Exactly the four reads (`home_library_search`, `home_library_detail`, `home_library_sessions`, `home_library_handoff_receipts`) and the five inert proposal tools, built by the host's instance-bearing factory for that exact instance. Any other tool name returned by the model is refused without execution. There is no confirm, commit, scan, grant, activation, staffing, workspace, file or external tool.
+- **Tool allowlist.** Exactly the four reads (`home_library_search`, `home_library_detail`, `home_library_sessions`, `home_library_handoff_receipts`) and the six inert proposal tools (the sixth, `home_library_propose_fields`, since PRD #792), built by the host's instance-bearing factory for that exact instance. Any other tool name returned by the model is refused without execution. There is no confirm, commit, scan, grant, activation, staffing, workspace, file or external tool.
 - **Caps.** At most 3 proposals per scan (enforced inside the proposal's own fenced write, not only by the loop), a 60-second wall clock for the whole turn, a token budget (`library_manager_token_budget` in settings; default and maximum 20,000 — settings can only lower it), at most 6 model calls and 12 tool calls. Exceeding any cap ends the turn; proposals already saved remain.
 - **Once per scan.** `proposal_runs[scan_id]` in the Home document is claimed through the fence with a deterministic operation key, so two events — including from two processes — produce exactly one receipt and at most one turn. Receipt states: `started`; `finished` (reason empty, `proposal_limit`, `time_limit`, `token_limit`, `step_limit` or `model_error` after a saved proposal); `skipped(<reason>)` for `no_manager`, `no_model`, `provider_unavailable`, `unavailable`, `superseded`, `model_error`, `time_limit` or `interrupted`. A skip is recorded before any model call. A run left `started` is closed as `skipped(interrupted)` by the startup sweep once it is older than the turn's deadline plus margin, and is never rerun automatically.
 - **Prompt.** A fixed system instruction plus the digest counts only — no paths, file names or project titles. Everything the tools return stays untrusted data. (A Home whose song-details switch is on gets the brief turn instead: the collection summary, which names the six most recently saved songs, and the brief tool in place of the proposal tools; see "Song facts and the collection brief".)
@@ -362,7 +362,7 @@ The Home map draws a navigation-only badge on a program Home's district header w
 
 ### Dismissal, memory and feedback (implemented)
 
-`POST …/library/proposals/{id}/dismiss` (strict JSON, `confirm`, idempotency key) marks one waiting suggestion dismissed and appends to `proposal_dismissals`, a list bounded to 256 and pruned past seven days, because the suggestion itself expires after a day. Dismissal is reductive and is allowed after provider or Manager loss (`unavailable`), but not once a suggestion was confirmed, went stale or expired. A scan-review proposal for a (project, kind) dismissed within seven days is refused with `ErrRecentlyDismissed`, which the model sees as the tool result. The owner's answers are counted per kind on the Home's assistant learning sidecar (`proposal_feedback`, once per suggestion via a bounded ID list) after the Home write that recorded them; counting is best effort and never becomes a prompt, toolbox change or learning candidate. Only next-action suggestions have a suggestion-specific confirm route, so "accepted" counts those only.
+`POST …/library/proposals/{id}/dismiss` (strict JSON, `confirm`, idempotency key) marks one waiting suggestion dismissed and appends to `proposal_dismissals`, a list bounded to 256 and pruned past seven days, because the suggestion itself expires after a day. Dismissal is reductive and is allowed after provider or Manager loss (`unavailable`), but not once a suggestion was confirmed, went stale or expired. A scan-review proposal for a (project, kind) dismissed within seven days is refused with `ErrRecentlyDismissed`, which the model sees as the tool result. The owner's answers are counted per kind on the Home's assistant learning sidecar (`proposal_feedback`, once per suggestion via a bounded ID list) after the Home write that recorded them; counting is best effort and never becomes a prompt, toolbox change or learning candidate. Only next-action and `fields` suggestions have a suggestion-specific confirm route, so "accepted" counts those only.
 
 ### Reads during an in-flight write (implemented)
 
@@ -393,12 +393,99 @@ read from disk and no model is called (`internal/projectlibrary/song_card.go`).
   last save, the child's entry-agent name, its own Ticket counts and one status
   line: facts; saved; the newest accepted recap's first sentence (dropped when it
   names a file, path or link); open work. A broken or diverged link keeps the
-  card without facts or an entry link. Shown on Workspace Details and in the Home
-  map's selected context (`song-card.js`).
+  card without facts or an entry link. Shown on Workspace Details, in the
+  top-level Home map's selected context and on a Home's own map (`song-card.js`).
+- **Words.** The card, the roster and the summary carry the Home's `words`
+  (`independent-program-homes.md` §3.2, `project_card`): the eyebrow, untitled
+  and empty sentences, the roster title and the facts formatter
+  (`songFactsLabel` in the browser, `projectlibrary.FactsLabel` for the status
+  line) are built from them. Ori holds no "song", "BPM" or "track" literal for
+  these surfaces; without a declaration they read "Project".
+- **Details block.** For a connected entry the card carries `fields` (stage,
+  status, next action, blockers, deliverables, milestones, the declared
+  `extra` ids, revision) and shows them under the status line, then each
+  declared field under its label. Unset rows are omitted; all unset reads "No
+  details yet." Stage and status use the shelf's labels. "Edit details" opens
+  the shelf at the entry (`home_entry_route`); the card never edits a field.
+  A broken or diverged link carries no `fields` and no suggestions.
+- **Suggestions.** The card lists the entry's `ready` `fields` suggestions,
+  newest first (who, when, the proposed fields, the reason as an untrusted
+  note); one naming a plugin field the package no longer declares is left out.
+  Accept and Dismiss call the Home's existing proposal routes (below) and then
+  re-fetch the card.
 - **Roster** (`GET /api/workspaces/{home}/assistant-program/library/roster`): the
   same connected rows, ordered by last session, then last save, then name. Home
-  Details lists them under "Songs and assistants"; the map uses their facts for
-  each song tile's meta line. Only the keeper's name crosses the link.
+  Details lists them under the declared roster title; the map uses their facts
+  for each song tile's meta line. Each row also carries the entry's `stage` and
+  `next_action`; the browser labels the stage and cuts the next action to 80
+  characters on a word, with "—" and an accessible label when unset. Only the
+  keeper's name crosses the link.
 - Neither surface scans, toggles the switch or starts work. The facts-off card
   links to the shelf's switch (`#projectLibrarySongDetails`), where the user
   decides.
+
+## Card fields and agent suggestions (PRD #792)
+
+**Plugin fields (`Fields.extra`).** `Fields` gains `extra`: declared field ID
+→ lines, at most 8 IDs of the declaration pattern, each 1 to 16 lines of 1 to
+240 characters (`fields_extra.go`, enforced in `Fields.valid()` without the
+declaration). Whether an ID is declared, and that a `text` field holds exactly
+one line, is checked where the words are known: the owner's edit, a suggestion
+save, its review and its commit. `FieldsPatch.extra` replaces the whole map
+(nil leaves it alone, `{}` clears it). The owner edits declared fields in the
+shelf's Edit dialog; `OwnerExtraPatch` carries over any stored ID the package
+no longer declares, so a package change never loses the owner's words. Such an
+ID is kept on disk but never sent to a client and never editable: every
+response passes through `ShownFields`, and `Store.Detail` strips extras unless
+the caller uses `DetailWithWords` (the shelf's detail route does). Bulk edit
+never touches `extra`.
+
+**The `fields` proposal.** A sixth proposal kind (`ManagerProposal.kind:
+"fields"`, `fields_proposals.go`) beside next action (empty kind),
+`root_review`, `project_review`, `session_goal` and `session_recap`. `proposed_fields` is a sparse patch of only `next_action` (1 to
+240), `blockers` and `deliverables` (up to 16 lines, replacing the list),
+`milestones` (up to 16, replacing the list) and `extra` (declared IDs only,
+merged per ID into the stored map). At least one field is required. Stage,
+status, priority, purpose, dates and archive state are not in the type; a tool call naming one is refused with a message that says so. A row
+records `proposer_kind` (`manager` or `keeper`), `proposer_workspace_id` (the
+Home or the song), the agent, entry, `fields_revision`, binding revision,
+reason (up to 500) and a 24-hour expiry; the digest covers proposer and patch.
+Saving withdraws the waiting `fields` suggestion from the same proposer kind
+for the same entry in the same fenced write (`withdrawn_at`, status
+`withdrawn`; not a dismissal, not actionable). Statuses are `ready`, `stale`
+(fields or binding revision moved), `expired`, `dismissed`, `withdrawn` and
+`unavailable` (the proposer can no longer be authorized). Review and commit
+route by kind (`ReviewProposal`, `CommitProposal`) and derive the patch from
+the **saved** suggestion, never the browser; a plugin field no longer declared
+is a `409`. The written fields are the owner's (`source: reviewed_user`, the
+owner as author). Feedback counts accepts and dismisses under kind `fields`.
+
+**Manager path.** `home_library_propose_fields` (entry ID, fields revision,
+patch, reason, request key) is restricted to the Home's bound Manager like the
+other proposal tools, and is offered in chat, in the post-scan turn (where the
+cap of 3 and the entry-and-kind dedupe apply) and in Home ticket runs
+(`builder_workflow.go`). Plugin fields are checked against the Home's words
+snapshot.
+
+**Keeper path.** `project_card_propose_fields` takes only the patch, a reason
+and a request key; the host resolves the song, Home and entry from the
+executing instance (`keeper_policy.go`). It passes only for the song's entry
+agent (the one instance with `EntryAgentName()`, not disabled) on the owner's
+live, non-resource song whose link mirrors agree, whose reciprocal entry is
+`connected`, on a staffed Home with a writable provider. It is offered only to
+that instance, in the song's chat and ticket runs, and rechecks everything at
+each call. Its result is only the suggestion's ID, expiry, replay flag and one
+sentence: no entry, revision or Home data travels back. Request keys are
+namespaced per song (`keeper:<child>:<sha256>`), so a keeper cannot take or
+probe another caller's keys, and a song's keeper may hold at most 6 live
+suggestions (24 hours) at once, counted inside the write. Both tools are
+mutating confirm-class tools (`task_replay_safety.go`,
+`tool_classification.go`: `SideEffectExternal`).
+
+**Closing step.** The protected tail of a task prompt gains one "Before You
+Finish" instruction in exactly two cases: a song task run by its keeper, or a
+Home task run by its bound Manager (`task_closing_step.go`). Worded from the
+Home's snapshot, it asks for one call only when the work changed what the
+project needs next, what blocks it or what it will deliver, and says the owner
+accepts suggestions. It is a hint, not authority, and adds no run or schedule;
+the post-scan turn's prompt is unchanged.

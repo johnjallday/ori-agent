@@ -4219,6 +4219,9 @@ smoke_restart_sandbox() {
     env+=(ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$sandbox/plugin-source/reaper-plugin")
   [[ -d "$sandbox/plugin-source/music-project-management" ]] &&
     env+=(ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE="$sandbox/plugin-source/music-project-management")
+  # A live check passes the real Codex home through (CODEX_HOME=~/.codex), as
+  # wt demo does, so the sandbox's codex provider runs on the owner's login.
+  [[ -n "${CODEX_HOME:-}" && -d "$CODEX_HOME" ]] && env+=(CODEX_HOME="$CODEX_HOME")
   echo "restarting $root/bin/ori-agent on port $port in $sandbox"
   cd "$sandbox" && exec env "${env[@]}" "$root/bin/ori-agent"
 }
