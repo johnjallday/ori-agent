@@ -132,6 +132,9 @@ func (m folderAgentMatches) Installed(context.Context) folderlook.Installed {
 // workspace, the way the Find tools panel's Add selected does.
 func (b *ServerBuilder) addFolderAgentAddOn(ctx context.Context, workspaceID string, c folderlook.Candidate) error {
 	_, id, ok := strings.Cut(c.ID, ":")
+	if c.Ref != "" {
+		id = c.Ref
+	}
 	if !ok || id == "" {
 		return fmt.Errorf("unknown add-on %q", c.ID)
 	}
@@ -168,7 +171,7 @@ func (b *ServerBuilder) addFolderAgentAddOn(ctx context.Context, workspaceID str
 		if b.skillsHandler == nil {
 			return errors.New("skills are unavailable")
 		}
-		skillName, err := b.skillsHandler.InstallMarketplacePackage(ctx, c.ID[len(folderlook.KindSkill)+1:])
+		skillName, err := b.skillsHandler.InstallMarketplacePackage(ctx, id)
 		if err != nil {
 			return err
 		}

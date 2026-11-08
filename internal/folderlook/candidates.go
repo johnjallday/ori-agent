@@ -56,6 +56,8 @@ type Candidate struct {
 	IntegrationKey  string `json:"integration_key,omitempty"`
 	HomeProviderKey string `json:"home_provider_key,omitempty"`
 	App             string `json:"app,omitempty"`
+	// Ref is a search hit's own marketplace id, case kept, for the install.
+	Ref string `json:"ref,omitempty"`
 }
 
 // Readiness tells the candidate builder what the user already has.

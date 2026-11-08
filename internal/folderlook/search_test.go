@@ -60,6 +60,9 @@ func TestSearchCandidates_DedupeInstalledDeclinedAndCap(t *testing.T) {
 	if strings.Join(ids, ",") != "plugin:release-planner/add,skill:mixing-notes/add,mcp:reaper-mcp/already_here" {
 		t.Fatalf("candidates = %v", ids)
 	}
+	if got[1].Ref != "Mixing-Notes" {
+		t.Fatalf("the install needs the marketplace's own id, case kept: %q", got[1].Ref)
+	}
 	if got[1].Source != SourceSearch || got[1].Marketplace != "Ori Skills" || got[1].Detail != "Keeps mix notes per song." {
 		t.Fatalf("search candidate = %+v", got[1])
 	}

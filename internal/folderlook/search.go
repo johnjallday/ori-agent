@@ -95,7 +95,7 @@ func SearchCandidates(hits []SearchHit, existing []Candidate, installed Installe
 		}
 		seen[id] = true
 		c := Candidate{
-			ID: id, Kind: hit.Kind, Name: oneLine(hit.Name), Source: SourceSearch, Action: ActionAdd,
+			ID: id, Ref: strings.TrimSpace(hit.ID), Kind: hit.Kind, Name: oneLine(hit.Name), Source: SourceSearch, Action: ActionAdd,
 			Detail: clip(oneLine(hit.Description), maxCandidateDetail), Marketplace: oneLine(hit.Marketplace),
 		}
 		if installed != nil && installed(hit.Kind, hit.ID) {
