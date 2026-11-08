@@ -13,7 +13,7 @@ func TestFolderSetupReadinessPreservesIndependentRequirements(t *testing.T) {
 	for _, which := range []string{"integration", "provider", "neither"} {
 		t.Run(which, func(t *testing.T) {
 			f := newDraftServerFixture(t)
-			releases := newHomeReleases(t, "0.4.0")
+			releases := newHomeReleases(t, "0.6.0")
 			if which == "provider" {
 				releases.inspectErr[releases.candidates[0].Source] = errors.New("release unavailable")
 			}

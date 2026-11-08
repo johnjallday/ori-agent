@@ -36,7 +36,7 @@ func TestFolderRecommendation_CanonicalLocalDestinationAndProviderStates(t *test
 	if got.State != "absent" || got.Readiness != "provider_missing" {
 		t.Fatalf("namesake adopted or absence concealed: %+v", got)
 	}
-	owner := workspace.AssistantProgramHomeOwner{PluginID: provider.PluginID, PluginVersion: "0.4.0", ProgramID: provider.ProgramID, HomeSchemaVersion: 1, HomeVersion: 1, DeclarationDigest: strings.Repeat("a", 64), PluginGeneration: 2, ComponentFingerprint: strings.Repeat("b", 64)}
+	owner := workspace.AssistantProgramHomeOwner{PluginID: provider.PluginID, PluginVersion: "0.6.0", ProgramID: provider.ProgramID, HomeSchemaVersion: 1, HomeVersion: 1, DeclarationDigest: strings.Repeat("a", 64), PluginGeneration: 2, ComponentFingerprint: strings.Repeat("b", 64)}
 	decl := &workspace.AssistantProgramDeclaration{SchemaVersion: workspace.AssistantProgramSchemaVersion, ID: provider.ProgramID, StationName: "My Music", Roles: []workspace.AssistantProgramRoleSpec{{ID: "producer", Label: "Producer", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true, SystemPrompt: "Coordinate reviewed music work."}}}
 	home, _, err := workspace.NewAssistantProgramStore(files).EnsureNamedIndependentStation(workspace.AssistantProgramKey{OwnerUserID: "local", PluginID: provider.PluginID, ProgramID: provider.ProgramID}, decl, "My Music", owner)
 	if err != nil {
@@ -47,9 +47,9 @@ func TestFolderRecommendation_CanonicalLocalDestinationAndProviderStates(t *test
 		enabled bool
 		want    string
 	}{
-		{"0.4.0", false, "provider_disabled"},
+		{"0.6.0", false, "provider_disabled"},
 		{"0.0.1", true, "provider_outdated"},
-		{"0.4.0", true, "destination_incompatible"}, // version alone is not compatible contribution evidence
+		{"0.6.0", true, "destination_incompatible"}, // version alone is not compatible contribution evidence
 	} {
 		if err := store.Put(plugin.InstalledPlugin{Name: provider.PluginID, Version: tc.version, Enabled: tc.enabled}); err != nil {
 			t.Fatal(err)
