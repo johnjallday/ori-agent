@@ -105,8 +105,8 @@ const cockpitCSS = readFileSync(
 
 test('Home primary action follows each step of the assistant relationship', () => {
   const ladder = [
-    ['needs_hire', 'Meet your assistant', 'navigate', '/?quest=meet-assistant'],
-    ['hiring', 'Resume meeting your assistant', 'navigate', '/?quest=meet-assistant'],
+    ['needs_hire', 'Meet your assistant', 'navigate', '/agents?quest=meet-assistant'],
+    ['hiring', 'Resume meeting your assistant', 'navigate', '/agents?quest=meet-assistant'],
     ['repair_needed', 'Repair personal assistant', 'navigate', '/agents?quest=meet-assistant'],
     ['needs_hq', 'Build My HQ', 'hq', ''],
     ['provisioning_hq', 'Resume HQ setup', 'hq', ''],

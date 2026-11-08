@@ -120,7 +120,8 @@ test('Explore first hides the card for its own stage only', () => {
 
 test('hasHomeIntent recognizes every explicit Home intent and ignores plain visits', () => {
   for (const search of [
-    '?quest=meet-assistant',
+    '?quest=build-hq',
+    '?quest=meet-assistant&focus=personal-hq',
     '?focus=personal-hq',
     '?create=1',
     '?setup=notes',
@@ -130,7 +131,16 @@ test('hasHomeIntent recognizes every explicit Home intent and ignores plain visi
   ]) {
     assert.equal(hasHomeIntent(search), true, search);
   }
-  for (const search of ['', '?', '?view=map', '?view=tree', '?select=ws-1']) {
+  // Mission 01's own link — onboarding's hand-over above all — is the welcome.
+  for (const search of [
+    '',
+    '?',
+    '?view=map',
+    '?view=tree',
+    '?select=ws-1',
+    '?quest=meet-assistant',
+    '?quest=meet-assistant&briefing=1'
+  ]) {
     assert.equal(hasHomeIntent(search), false, search);
   }
 });

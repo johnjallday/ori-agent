@@ -54,11 +54,18 @@ export function welcomeStage(relationshipState) {
   return Object.hasOwn(STAGES, key) ? STAGES[key].stage : '';
 }
 
-/** Does this URL query carry an explicit Home intent? */
+/**
+ * Does this URL query carry an explicit Home intent? Mission 01's own link is
+ * not one: the welcome card IS Mission 01's Home step. Onboarding's hand-over
+ * (?quest=meet-assistant&briefing=1) lands here and should see the card; the
+ * plain link leaves for the configuration before the card would matter.
+ */
 export function hasHomeIntent(search) {
   try {
     const params = new URLSearchParams(search || '');
-    return WELCOME_INTENT_PARAMS.some(name => params.has(name));
+    return WELCOME_INTENT_PARAMS.some(
+      name => params.has(name) && !(name === 'quest' && params.get('quest') === 'meet-assistant')
+    );
   } catch (_) {
     return false;
   }

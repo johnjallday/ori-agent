@@ -75,6 +75,19 @@ async function expectWelcome(page: Page, title: string, action: string) {
   return card;
 }
 
+// Meet lands in the personal-assistant configuration itself (group 2): the
+// Agents page with its hire preset already open, name focused, model visible,
+// and no walkthrough callout over it.
+async function expectAssistantConfiguration(page: Page) {
+  await page.waitForURL(url => url.pathname === '/agents');
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  await expect(page.locator('#addAgentModal')).toHaveClass(/is-assistant-hire/);
+  await expect(page.locator('#cr-name')).toBeFocused();
+  await expect(page.locator('#cr-model-group')).toBeVisible();
+  await expect(page.locator('#cr-more')).not.toHaveAttribute('open', '');
+  await expect(page.locator('#oriSpotlight .ori-spotlight__callout')).toHaveCount(0);
+}
+
 // Every request this page makes that could change something. Showing the
 // welcome, choosing Explore first and reloading must make none.
 function recordWrites(page: Page) {
@@ -162,19 +175,31 @@ test.describe('Home leads with the next hire-first step', () => {
     await expect(page.locator('#oriSpotlight')).toBeHidden();
     expect(writes).toEqual([]);
 
-    // The compact entry starts the same walkthrough the card would.
+    // The compact entry opens the same configuration the card would.
     await primary.click();
-    await page.waitForURL(url => url.pathname === '/' && url.search === '?quest=meet-assistant');
-    const callout = page.locator('#oriSpotlight .ori-spotlight__callout');
-    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Click Agents');
+    await expectAssistantConfiguration(page);
   });
 
-  test('before the hire: the card itself starts Mission 01', async ({ page }) => {
+  test('before the hire: the card itself opens the assistant configuration', async ({
+    page,
+    request
+  }) => {
     await page.goto('/');
     await page.evaluate(() => localStorage.removeItem('ori.home.welcome.v1'));
     const card = await expectWelcome(page, 'Meet your assistant.', 'Meet your assistant');
     await card.locator('[data-home-welcome-action="primary"]').click();
-    await page.waitForURL(url => url.pathname === '/' && url.search === '?quest=meet-assistant');
+    await expectAssistantConfiguration(page);
+    // Opening it created nothing. Cancel leaves the relationship as it was.
+    await page.locator('#addAgentModal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    expect((await relationship(request)).state).toBe('needs_hire');
+    // Older links still reach it: Home's own Mission 01 link goes straight there.
+    await page.goto('/?quest=meet-assistant');
+    await expectAssistantConfiguration(page);
+    await page.goto('/?quest=meet-assistant&briefing=1');
+    await expect(page.locator('#cockpitWelcome [data-home-welcome]')).toBeVisible();
+    await expect(page).toHaveURL(url => url.search === '');
+    await expect(page.locator('#oriSpotlight')).toHaveCount(0);
   });
 
   test('before the hire: unknown, failed or explicit states never show the welcome', async ({

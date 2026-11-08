@@ -217,10 +217,15 @@
     var arrivedToHire = arrival.get('hire') === '1';
     var arrivalBrief = String(arrival.get('brief') || '').trim();
     loadAssistantState().then(function () {
-      // A repair or a partial hire has nothing to walk through: the arrival
-      // opens its one-button view directly, where the link promised it.
+      // Meeting the assistant is direct (assistant-hq-onboarding group 2): the
+      // mission's arrival opens the personal-assistant configuration itself —
+      // the hire preset, or a repair's one-button view — with no New Agent or
+      // Hire to find first. Opening it creates nothing; Hire assistant does.
       var mode = assistantPresetView().mode;
-      if (arrivedForMission && (mode === 'reconnect' || mode === 'blocked' || mode === 'resume')) {
+      if (
+        arrivedForMission &&
+        (mode === 'form' || mode === 'reconnect' || mode === 'blocked' || mode === 'resume')
+      ) {
         renderCreate('assistant');
         return;
       }
@@ -3115,6 +3120,24 @@
       api.ASSISTANT_NAME_MAX_LENGTH +
       '" required autocomplete="off" spellcheck="false">' +
       '</div>' +
+      // The model the assistant thinks with, which the hire saves as Ori's
+      // Default model. Second, beside the name: whether the assistant can
+      // think at all is the one thing a hire must make clear up front
+      // (assistant-hq-onboarding 2.2).
+      '<fieldset class="mb-3 create-preset__model" id="cr-model-group">' +
+      '<legend class="form-label" id="cr-model-heading">' +
+      esc(assistantModelHeading(name)) +
+      '</legend>' +
+      '<div id="cr-model-host"></div>' +
+      '<p class="form-helper create-preset__model-scope" id="cr-model-scope">' +
+      esc(assistantModelScope(name)) +
+      '</p>' +
+      '</fieldset>' +
+      // Everything else already has a usable default — a suggested face and
+      // three focus areas ticked — so it waits behind one disclosure.
+      '<details class="mb-3 create-preset__more" id="cr-more">' +
+      '<summary class="create-preset__more-summary">Appearance, focus and this week (optional)</summary>' +
+      '<div class="create-preset__more-body">' +
       // The same Appearance editor as the ordinary form, with a face already
       // suggested for an orchestrator. No upload: the hire takes one request.
       '<div class="mb-3" id="cr-appearance-host"></div>' +
@@ -3133,17 +3156,7 @@
       esc(current.mandate || '') +
       '</textarea>' +
       '</div>' +
-      // The model the assistant thinks with, which the hire saves as Ori's
-      // Default model. Last, where the recommended default rarely needs a touch.
-      '<fieldset class="mb-3 create-preset__model" id="cr-model-group">' +
-      '<legend class="form-label" id="cr-model-heading">' +
-      esc(assistantModelHeading(name)) +
-      '</legend>' +
-      '<div id="cr-model-host"></div>' +
-      '<p class="form-helper create-preset__model-scope" id="cr-model-scope">' +
-      esc(assistantModelScope(name)) +
-      '</p>' +
-      '</fieldset>' +
+      '</div></details>' +
       '<p class="form-helper create-preset__boundary">' +
       esc(api.HIRE_BOUNDARY_COPY) +
       '</p>' +
@@ -3470,6 +3483,10 @@
     );
     var mandate = val('cr-mandate').trim();
     if (!focusAreas.length && !mandate) {
+      // The fields are behind the optional disclosure; open it so the message
+      // points at something the user can see.
+      var more = document.getElementById('cr-more');
+      if (more) more.open = true;
       showCreateError('Tick at least one thing they should help with, or describe it below.');
       return;
     }

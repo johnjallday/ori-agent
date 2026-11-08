@@ -463,45 +463,23 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect.poll(() => onboardingComplete).toBe(true);
     expect(hireCalls).toBe(0);
 
-    // The modal hands over to Ori's Mission 01 briefing, in the middle of a
-    // dimmed Home.
+    // The modal hands over to Home itself: no dimmed briefing or seven-click
+    // walkthrough. The empty map's welcome card carries Mission 01's one step
+    // (assistant-hq-onboarding 1.3, 2.4).
     const layer = page.locator('#oriSpotlight');
-    const briefing = layer.locator('.ori-spotlight__briefing');
-    await expect(briefing).toBeVisible();
-    await expect(briefing.locator('.ori-spotlight__greeting')).toContainText(
-      'let’s meet your assistant'
-    );
-    await expect(briefing.locator('.ori-spotlight__step')).toHaveCount(7);
-    await expect(briefing.locator('[data-ori-spotlight="start"]')).toBeFocused();
-    await expect(page.locator('#oriGuidePanel')).toBeHidden();
-    await briefing.locator('[data-ori-spotlight="start"]').click();
-
-    // Step 1: the page is dimmed around the Agents nav entry, which the user
-    // presses themselves. The navbar wraps on a phone, so Agents is in reach.
-    const callout = layer.locator('.ori-spotlight__callout');
-    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
-    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 1 of 7');
-    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Click Agents');
-    await expect(page.locator('#navAgentsLink')).toHaveClass(/is-ori-coachmark/);
-    await page.locator('#navAgentsLink').click();
-    await page.waitForURL(url => url.pathname === '/agents');
-
-    // Step 2: the same spotlight, on New Agent.
-    await expect(layer).toHaveAttribute('data-mode', 'spotlight');
-    await expect(callout.locator('.ori-spotlight__callout-step')).toHaveText('Step 2 of 7');
-    await expect(page.locator('#newAgentBtn')).toHaveClass(/is-ori-coachmark/);
-    await page.locator('#newAgentBtn').click();
-
-    // The form's steps on a phone: the Create Agent modal fills the width, with
-    // no room beside it for Ori's callout, so the walkthrough carries on in
-    // Ori's panel (under the modal), and the form alone moves it on, one step
-    // per signal.
-    const reply = page.locator('#oriGuideReply');
-    const step = reply.locator('.ori-guide__quest-step');
-    await expect(step).toHaveText('Step 3 of 7');
+    await expect(page).toHaveURL(url => !url.search.includes('quest='));
+    const welcome = page.locator('#cockpitWelcome [data-home-welcome]');
+    await expect(welcome).toBeVisible();
     await expect(layer).toHaveCount(0);
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await welcome.locator('[data-home-welcome-action="primary"]').click();
+
+    // Meet opens the personal-assistant configuration directly: no Agents nav
+    // entry, New Agent or Hire to find first, and no callout over the form.
+    await page.waitForURL(url => url.pathname === '/agents');
+    await expect(page.locator('#addAgentModal')).toBeVisible();
     await expect(page.locator('#cr-name')).toBeFocused();
-    await expect(page.locator('#cr-name')).toHaveClass(/is-ori-coachmark/);
+    await expect(page.locator('#oriSpotlight .ori-spotlight__callout')).toHaveCount(0);
     for (const absent of ['#cr-role', '#cr-description']) {
       await expect(page.locator(absent)).toHaveCount(0);
     }
@@ -510,21 +488,19 @@ test.describe('Personal Assistant Foundation first value', () => {
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth
       )
     ).toBe(false);
-    await page.locator('#cr-name').fill('Atlas');
-    await page.locator('#cr-name').press('Tab');
-    await expect(step).toHaveText('Step 4 of 7');
-    await expect(page.locator('#cr-appearance-host')).toHaveClass(/is-ori-coachmark/);
-    await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
-    await expect(step).toHaveText('Step 5 of 7');
-    await expect(page.locator('#cr-focus-group')).toHaveClass(/is-ori-coachmark/);
-    await page.locator('#cr-mandate').fill('Keep the week realistic.');
-    await page.locator('#cr-mandate').press('Tab');
-    await expect(step).toHaveText('Step 6 of 7');
-    await expect(page.locator('#cr-model-group')).toHaveClass(/is-ori-coachmark/);
+    // Name and model lead; the model's readiness is visible without opening
+    // anything. Appearance and focus wait behind one disclosure, defaults set.
+    await expect(page.locator('#cr-model')).toBeVisible();
     await expect(page.locator('#cr-model')).toHaveValue('gpt-small');
+    const more = page.locator('#cr-more');
+    await expect(more).not.toHaveAttribute('open', '');
+    await expect(page.locator('#cr-focus-group')).toBeHidden();
+    await page.locator('#cr-name').fill('Atlas');
+    await more.locator('summary').click();
+    await expect(page.locator('#cr-focus-group')).toBeVisible();
+    await page.locator('#cr-focus-group input[value="prepare_for_meetings"]').check();
+    await page.locator('#cr-mandate').fill('Keep the week realistic.');
     await page.locator('#cr-model').selectOption('gpt-small');
-    await expect(step).toHaveText('Step 7 of 7');
-    await expect(page.locator('#createSubmit')).toHaveClass(/is-ori-coachmark/);
     expect(hireCalls).toBe(0);
     await page.locator('#createSubmit').click();
 

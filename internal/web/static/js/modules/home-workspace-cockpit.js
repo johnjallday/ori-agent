@@ -28,10 +28,7 @@ import {
   welcomeCardHTML
 } from './home-welcome.js';
 import { workspacePageURL } from './workspace-routes.js';
-import {
-  MEET_ASSISTANT_AGENTS_ROUTE,
-  MEET_ASSISTANT_QUEST_ROUTE
-} from './personal-assistant-hire.js';
+import { MEET_ASSISTANT_AGENTS_ROUTE } from './personal-assistant-hire.js';
 import {
   normalizeKind,
   isGroupWorkspace,
@@ -105,11 +102,15 @@ export function formatCount(value) {
 // not-yet-loaded state shows no primary, and New Workspace is left to offer
 // creation on its own.
 const PRIMARY_ACTIONS = {
-  needs_hire: { label: 'Meet your assistant', kind: 'navigate', href: MEET_ASSISTANT_QUEST_ROUTE },
+  // Meeting the assistant is direct: straight to its configuration on the
+  // Agents page (assistant-hq-onboarding 2.2), not through Home's old
+  // spotlight on the Agents nav entry. /?quest=meet-assistant still resolves
+  // there for every older link.
+  needs_hire: { label: 'Meet your assistant', kind: 'navigate', href: MEET_ASSISTANT_AGENTS_ROUTE },
   hiring: {
     label: 'Resume meeting your assistant',
     kind: 'navigate',
-    href: MEET_ASSISTANT_QUEST_ROUTE
+    href: MEET_ASSISTANT_AGENTS_ROUTE
   },
   // The Ori guide's wording for the same state and route.
   repair_needed: {

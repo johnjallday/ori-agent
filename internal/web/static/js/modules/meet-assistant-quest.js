@@ -174,10 +174,18 @@
       return { answer: 'Give them a name. You can change it later.', note: '' };
     }
     if (step === STEP_FACE) {
-      return { answer: 'A face is already suggested. Keep it, or pick another.', note: '' };
+      return {
+        answer:
+          'A face is already suggested. Keep it, or open Appearance, focus and this week to pick another.',
+        note: ''
+      };
     }
     if (step === STEP_FOCUS) {
-      return { answer: 'What should they help with this week? Tick what fits.', note: '' };
+      return {
+        answer:
+          'Three focus areas are already ticked. Keep them, or change them under Appearance, focus and this week.',
+        note: ''
+      };
     }
     if (step === STEP_MODEL) {
       return {
@@ -203,12 +211,15 @@
     }
     if (step === STEP_NAME) return { title: 'Give them a name', body: 'You can change it later.' };
     if (step === STEP_FACE) {
-      return { title: 'Pick a face', body: 'One is already suggested. Keep it, or pick another.' };
+      return {
+        title: 'Pick a face',
+        body: 'One is already suggested. Keep it, or pick another under Appearance, focus and this week.'
+      };
     }
     if (step === STEP_FOCUS) {
       return {
         title: 'Choose their focus',
-        body: 'What should they help with this week? Tick what fits.'
+        body: 'Three are already ticked. Keep them, or change them under Appearance, focus and this week.'
       };
     }
     if (step === STEP_MODEL) {
@@ -324,6 +335,10 @@
   function present(step, focus) {
     state.step = step;
     if (state.paused || state.detoured) return false;
+    // Face and focus sit behind the preset's optional disclosure. A step that
+    // is about them reveals it, so the mark and the focus land on a control the
+    // user can see. Presentation only: nothing is chosen or changed.
+    if (step === STEP_FACE || step === STEP_FOCUS) revealOptionalSettings();
     if (state.spotlight && presentInLayer(step, focus)) return true;
     var g = guide();
     if (!g || typeof g.presentQuestStep !== 'function') return false;
@@ -339,6 +354,12 @@
       focus: focus !== false
     });
     return !!(result && result.rendered);
+  }
+
+  function revealOptionalSettings() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+    var more = document.getElementById('cr-more');
+    if (more && !more.open) more.open = true;
   }
 
   // Re-marking is how the walkthrough survives the create panel re-rendering:
@@ -374,6 +395,13 @@
 
   async function start() {
     if (state.active) return true;
+    // The mission's own link opens the configuration directly on arrival
+    // (agents-roster.js), with name and model first and nothing to find. A
+    // field-by-field callout over that form would only compete with it, so the
+    // walkthrough stands down for this arrival (assistant-hq-onboarding 2.4).
+    // The URL is left alone: the roster reads ?quest= on DOMContentLoaded to
+    // open the configuration, and its own URL sync drops the parameter after.
+    if (requestedAtLoad) return false;
     if (!(await eligible())) return false;
 
     state.active = true;

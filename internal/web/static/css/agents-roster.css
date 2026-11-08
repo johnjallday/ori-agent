@@ -3174,6 +3174,26 @@ body.inspector-sheet-open {
   padding: 0;
   min-width: 0;
 }
+/* The hire's optional settings: one native disclosure under Name and model. */
+.create-preset__more {
+  border-top: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
+  padding-top: 4px;
+}
+.create-preset__more-summary {
+  /* Padding, not flex: a flex summary loses its native disclosure marker. */
+  padding: 11px 0;
+  color: var(--text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+.create-preset__more-summary:focus-visible {
+  outline: 2px solid var(--primary-color, currentColor);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.create-preset__more-body {
+  padding-top: 8px;
+}
 .create-preset__focus-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
