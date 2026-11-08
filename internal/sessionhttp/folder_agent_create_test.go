@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestCreateFolderAgentWorkspace_AnchorsTheFolderWithItsAgent(t *testing.T) {
@@ -50,6 +52,46 @@ func TestCreateFolderAgentWorkspace_AnchorsTheFolderWithItsAgent(t *testing.T) {
 	}
 	if second.AgentCreated || second.Nested == nil || second.Nested.WorkspaceID != created.ID {
 		t.Fatalf("second = %+v", second)
+	}
+}
+
+func TestCreateFolderAgentWorkspace_MemberUnderAGroupHasNoAgent(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	root := filepath.Join(canonicalAnchorTestDir(t), "Three Drafts")
+	member := filepath.Join(root, "Drafts", "Night Train")
+	if err := os.MkdirAll(member, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	group, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{Name: "Three Drafts", AnchorPath: root, AgentName: "Three Drafts Manager"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The group is a promoted folder workspace; members need a group parent.
+	if err := h.workspaceStore.Update(group.ID, func(ws *agentworkspace.Workspace) error { ws.Kind = "group"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	row, err := h.store.GetWorkspace(t.Context(), group.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Kind = "group"
+	if err := h.store.UpdateWorkspace(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	created, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{Name: "Night Train", AnchorPath: member, ParentID: group.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := h.workspaceStore.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.ParentID != group.ID || !ws.IsAnchored() || len(ws.GetAgentInstances()) != 0 || created.AgentCreated {
+		t.Fatalf("member parent=%q anchored=%v agents=%d", ws.ParentID, ws.IsAnchored(), len(ws.GetAgentInstances()))
+	}
+	if created.Nested == nil || created.Nested.WorkspaceID != group.ID {
+		t.Fatalf("nested hint = %+v", created.Nested)
 	}
 }
 

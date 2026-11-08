@@ -115,6 +115,9 @@ type Record struct {
 	// NextTicketID is the agent's suggested first ticket, created when the
 	// Set it up run completed; NextStarted once the owner started it.
 	NextTicketID string `json:"next_ticket_id,omitempty"`
+	// ExistingMembers are project folders (relative) that a workspace already
+	// anchors; the Group stage includes them instead of creating them twice.
+	ExistingMembers map[string]WorkspaceRef `json:"existing_members,omitempty"`
 	// Declined are optional candidates the owner unticked at Set it up; a
 	// later look does not propose them again (PRD FR22).
 	Declined    []string `json:"declined,omitempty"`

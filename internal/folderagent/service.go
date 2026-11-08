@@ -97,6 +97,9 @@ type Workspaces interface {
 	// SetGoal replaces the workspace goal (the one that drives Backlog
 	// suggestions).
 	SetGoal(workspaceID, goal string) error
+	// AnchorOwners maps each absolute folder that another workspace (not
+	// exclude) is anchored to onto that workspace.
+	AnchorOwners(folders []string, exclude string) map[string]WorkspaceRef
 }
 
 // Tickets opens and closes the host-owned first ticket, and holds the
@@ -415,6 +418,7 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	required := folderlook.RequiredCandidates(facts, ready)
 	candidates = applyRanking(append(required, found...), sections)
 	candidates = keepShown(candidates)
+	existing := s.existingMembers(rec.WorkspaceID, root, stage, facts)
 	var askFolders []folderlook.AskFolder
 	if sections != nil && sections.Question != "" {
 		askFolders = folderlook.AskFolders(facts)
@@ -422,6 +426,7 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	updated, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 		r.Map, r.Facts, r.Stage, r.Candidates, r.Turn = m, facts, stage, candidates, turn
 		r.Sections, r.AskFolders, r.Hint = sections, askFolders, ""
+		r.ExistingMembers = existing
 		r.Progress = Progress{Entries: m.Entries, FoldersLeft: len(facts.Unopened)}
 		r.State, r.Failure = StateReported, ""
 		return nil
@@ -440,6 +445,36 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 			logger.Warn("Folder agent could not close its first ticket", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
 		}
 	}
+}
+
+// existingMembers finds, for the Group stage, the project folders another
+// workspace is already anchored to (PRD FR36): they are included as members,
+// never created twice.
+func (s *Service) existingMembers(workspaceID, root string, stage foldermap.Stage, facts foldermap.Facts) map[string]WorkspaceRef {
+	if stage != foldermap.StageGroup || s.deps.Workspaces == nil {
+		return nil
+	}
+	byFolder := make(map[string]string)
+	var folders []string
+	for i, p := range facts.Members {
+		if i == GroupMaxMembers {
+			break
+		}
+		abs := filepath.Join(root, filepath.FromSlash(p.Path))
+		byFolder[abs] = p.Path
+		folders = append(folders, abs)
+	}
+	owners := s.deps.Workspaces.AnchorOwners(folders, workspaceID)
+	if len(owners) == 0 {
+		return nil
+	}
+	out := make(map[string]WorkspaceRef, len(owners))
+	for abs, ref := range owners {
+		if rel, ok := byFolder[abs]; ok {
+			out[rel] = ref
+		}
+	}
+	return out
 }
 
 // runTurn runs the agent's one bounded turn over the map (PRD FR11). Its

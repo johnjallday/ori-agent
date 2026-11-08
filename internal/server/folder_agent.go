@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
+	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -163,6 +165,36 @@ func (w folderAgentWorkspaces) Route(workspaceID string) string {
 		return ""
 	}
 	return workspaceRoute(ws.FolderSlug)
+}
+
+// AnchorOwners finds the workspaces (other than exclude) anchored to exactly
+// one of folders, from each workspace's own anchor reference.
+func (w folderAgentWorkspaces) AnchorOwners(folders []string, exclude string) map[string]folderagent.WorkspaceRef {
+	want := make(map[string]bool, len(folders))
+	for _, folder := range folders {
+		want[filepath.Clean(folder)] = true
+	}
+	out := map[string]folderagent.WorkspaceRef{}
+	ids, err := w.builder.workspaceStore.List()
+	if err != nil {
+		return out
+	}
+	for _, id := range ids {
+		if id == exclude {
+			continue
+		}
+		ws, err := w.builder.workspaceStore.Get(id)
+		if err != nil || ws == nil || ws.GetStatus() == workspace.StatusTrashed {
+			continue
+		}
+		anchorID := ws.AnchorDirectoryReferenceID()
+		for _, ref := range ws.DirectoryReferences {
+			if anchorID != "" && ref.ID == anchorID && want[filepath.Clean(ref.Path)] {
+				out[filepath.Clean(ref.Path)] = folderagent.WorkspaceRef{ID: ws.ID, Name: ws.Name, Route: workspaceRoute(ws.FolderSlug)}
+			}
+		}
+	}
+	return out
 }
 
 // SetGoal replaces the workspace goal with the suggested goal the owner kept.
@@ -364,6 +396,12 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 			}
 		}
 		update(append([]personalassistant.FolderPlanLine(nil), lines...))
+	}
+	if plan.Stage == foldermap.StageGroup {
+		if reason, err := b.runFolderAgentGroup(ctx, rec, lines, setLine); err != nil {
+			logger.Warn("Folder agent group setup stopped", logger.Fields{"workspace_id": rec.WorkspaceID, "reason": reason, "error": err.Error()})
+			return personalassistant.FolderSetupStopped, reason
+		}
 	}
 	for _, candidate := range plan.Candidates {
 		switch candidate.Kind {

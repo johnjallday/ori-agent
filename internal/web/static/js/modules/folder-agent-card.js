@@ -582,6 +582,13 @@ export async function postFolderAgentAction(
       view: payload?.folder_agent || null
     };
   }
+  // Home's map follows: a Set it up can turn a tile into a district or move
+  // it into a Home.
+  globalThis.window?.dispatchEvent?.(
+    new globalThis.CustomEvent('ori:folder-agent-changed', {
+      detail: { workspaceID: view.workspaceID, action }
+    })
+  );
   return { view: payload?.folder_agent || null };
 }
 

@@ -23,8 +23,12 @@ type FolderAgentWorkspaceRequest struct {
 	AnchorPath string
 	Mission    string
 	// AgentName is "<folder name> Manager". A saved agent of exactly that name
-	// is bound (hire once, bind many); otherwise one is created.
+	// is bound (hire once, bind many); otherwise one is created. Empty creates
+	// a member workspace with no agent of its own (its group's manager leads).
 	AgentName string
+	// ParentID places the workspace inside a group (a promoted folder
+	// workspace's member).
+	ParentID string
 }
 
 // FolderAgentWorkspace is what the creation made.
@@ -70,7 +74,7 @@ func (h *Handler) CreateFolderAgentWorkspace(ctx context.Context, req FolderAgen
 		return FolderAgentWorkspace{}, errors.New("workspace creation is unavailable")
 	}
 	name, agentName := strings.TrimSpace(req.Name), strings.TrimSpace(req.AgentName)
-	if name == "" || agentName == "" || strings.TrimSpace(req.AnchorPath) == "" {
+	if name == "" || strings.TrimSpace(req.AnchorPath) == "" || (agentName == "" && req.ParentID == "") {
 		return FolderAgentWorkspace{}, errors.New("a folder agent workspace needs a name, a folder and an agent")
 	}
 	path, anchorErr := h.validateAnchorPath(req.AnchorPath, "")
@@ -78,7 +82,8 @@ func (h *Handler) CreateFolderAgentWorkspace(ctx context.Context, req FolderAgen
 		return FolderAgentWorkspace{}, &FolderAgentRefusal{Code: anchorErr.Code, Message: anchorErr.Message, Status: anchorErr.status, Duplicate: anchorErr.Duplicate}
 	}
 	result := FolderAgentWorkspace{AgentName: agentName, Nested: h.parentAnchorOwner(path)}
-	if _, exists := h.agentStore.GetAgent(agentName); !exists {
+	// A member (no agent name) gets no agent and no blueprint roster.
+	if _, exists := h.agentStore.GetAgent(agentName); agentName != "" && !exists {
 		if err := h.agentStore.CreateAgent(agentName, &store.CreateAgentConfig{
 			Role: types.RoleOrchestrator, SystemPrompt: folderExplorerPrompt(name),
 		}); err != nil {
@@ -93,7 +98,11 @@ func (h *Handler) CreateFolderAgentWorkspace(ctx context.Context, req FolderAgen
 			}
 		}
 	}
-	create := createWorkspaceRequest{Name: name, AnchorPath: path, EntryAgentName: agentName}
+	create := createWorkspaceRequest{Name: name, AnchorPath: path, EntryAgentName: agentName, ParentID: strings.TrimSpace(req.ParentID)}
+	if agentName == "" {
+		noAgents := false
+		create.CreateTemplateAgents = &noAgents
+	}
 	if mission := strings.TrimSpace(req.Mission); mission != "" {
 		create.Mission = &mission
 	}

@@ -56,7 +56,9 @@ func (s *FileBacklogSynchronizer) resolve(workspaceID string) (path string, ws *
 	if err != nil {
 		return "", nil, false, err
 	}
-	isGroup := ws.Kind == groupWorkspaceKind
+	// An anchored workspace promoted to a group keeps its sidecar shape: no
+	// files/ root, its BACKLOG.md where anchored creation wrote it.
+	isGroup := ws.Kind == groupWorkspaceKind && !ws.IsAnchored()
 	return BacklogMarkdownPath(folder, isGroup), ws, true, nil
 }
 

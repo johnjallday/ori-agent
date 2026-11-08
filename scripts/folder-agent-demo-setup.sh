@@ -41,7 +41,7 @@ if [[ "$(curl -sS "$url/api/personal-assistant" | json 'd["personal_assistant"].
 fi
 post /api/personal-assistant/hq "{\"request_id\":\"fa-demo-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\"}" >/dev/null || true
 post /api/settings/system-model "{\"provider\":\"$provider\",\"model\":\"$model\"}" >/dev/null || true
-for folder in "${folders[@]}"; do
+for folder in ${folders[@]+"${folders[@]}"}; do
 	code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$url/api/agents" -H 'Content-Type: application/json' \
 		-d "{\"name\":\"$folder Manager\",\"role\":\"orchestrator\",\"model\":\"$model\",\"llm_provider\":\"$provider\"}")"
 	echo "agent \"$folder Manager\" ($provider/$model): $code"

@@ -70,6 +70,20 @@ func (w *fakeWorkspaces) IDs() ([]string, error) {
 }
 func (w *fakeWorkspaces) Exists(id string) bool  { _, err := w.AnchorRoot(id); return err == nil }
 func (w *fakeWorkspaces) Route(id string) string { return "/workspaces/" + id }
+func (w *fakeWorkspaces) AnchorOwners(folders []string, exclude string) map[string]WorkspaceRef {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := map[string]WorkspaceRef{}
+	for _, folder := range folders {
+		for id, anchor := range w.anchors {
+			if id != exclude && anchor == folder {
+				out[folder] = WorkspaceRef{ID: id, Name: id}
+			}
+		}
+	}
+	return out
+}
+
 func (w *fakeWorkspaces) SetGoal(id, goal string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -276,11 +290,17 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 }
 
 func TestStart_NotYetStagesRefuseSetUp(t *testing.T) {
-	h := newHarness(t, build(t, "Drafts/A/outline.md", "Drafts/B/outline.md"))
+	var dump []string
+	for i, kind := range strings.Split(strings.Repeat("pdf jpg zip docx dmg ", 4), " ") {
+		if kind != "" {
+			dump = append(dump, fmt.Sprintf("file%02d.%s", i, kind))
+		}
+	}
+	h := newHarness(t, build(t, dump...))
 	view := h.start(t, "")
 	report, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
-	if report.Plan.Runnable || report.Stage != foldermap.StageGroup {
-		t.Fatalf("the Group stage is not runnable in this slice: %+v", report.Plan)
+	if report.Plan.Runnable || report.Stage != foldermap.StageTools || report.Plan.Unavailable == "" {
+		t.Fatalf("File Curator from a folder is not runnable yet: %+v", report.Plan)
 	}
 	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); !errors.Is(err, ErrStageNotYet) {
 		t.Fatalf("set up = %v", err)

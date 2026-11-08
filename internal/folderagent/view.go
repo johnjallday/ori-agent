@@ -260,8 +260,7 @@ func StageLine(f foldermap.Facts, stage foldermap.Stage, candidates []folderlook
 		}
 	}
 	if stage == foldermap.StageGroup {
-		n := len(f.Members)
-		parts = append([]string{fmt.Sprintf("turns this workspace into a group with %d %s, one per project", n, plural(n, "workspace", "workspaces"))}, parts...)
+		parts = append([]string{groupStageLine(f)}, parts...)
 	}
 	if len(parts) == 0 {
 		if stage == foldermap.StageFolder {
@@ -309,7 +308,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 	for _, id := range selected {
 		chosen[id] = true
 	}
-	runnable := rec.Stage == foldermap.StageTools || rec.Stage == foldermap.StageHome
+	runnable := rec.Stage == foldermap.StageTools || rec.Stage == foldermap.StageHome || rec.Stage == foldermap.StageGroup
 	for _, c := range rec.Candidates {
 		if !c.Required && (!chosen[c.ID] || c.Action == folderlook.ActionAlreadyHere) {
 			continue
@@ -348,8 +347,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 		}
 	}
 	if rec.Stage == foldermap.StageGroup {
-		runnable = false
-		plan.Unavailable = "Turning a folder workspace into a group is not available yet."
+		plan.Lines = append(groupLines(rec), plan.Lines...)
 	}
 	if len(plan.Lines) == 0 {
 		runnable = false

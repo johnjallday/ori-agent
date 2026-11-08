@@ -5142,6 +5142,16 @@ import {
    * the Home's district and refresh the badge so a count now at 0 disappears
    * (FR-16, FR-18).
    */
+  // landPromotedGroup frames a folder workspace promoted to a group: same
+  // place on the map, now a district holding its members.
+  async function landPromotedGroup(groupId) {
+    await refreshQuietly();
+    const ids = (state.flattened || [])
+      .filter(row => row && row.parent_id === groupId)
+      .map(row => row.id);
+    await landSetUpProjects(groupId, ids);
+  }
+
   async function landSetUpProjects(groupId, workspaceIds) {
     const ids = (Array.isArray(workspaceIds) ? workspaceIds : []).filter(Boolean);
     await refreshQuietly();
@@ -5198,6 +5208,10 @@ import {
   // The folder agents' tile lines follow their looks: polled every two
   // seconds while one is looking or setting up, and once otherwise.
   let folderAgentTimer = 0;
+  // Each folder workspace's last finished setup this page has seen; a group
+  // setup newer than that lands its members (null until the first read, so a
+  // page load never replays an old one).
+  let folderAgentSetups = null;
   async function refreshFolderAgentLines() {
     if (folderAgentTimer) clearTimeout(folderAgentTimer);
     folderAgentTimer = 0;
@@ -5207,18 +5221,38 @@ import {
     views.forEach(view => {
       const line = folderAgentTileLine(view);
       if (line && view.workspace_id) next[view.workspace_id] = line;
+      // A folder workspace that just became a group: its tile is now a
+      // district; frame its new members the way the setup sheet does.
+      const finished = view.setup?.finished_at || '';
+      if (
+        folderAgentSetups &&
+        view.state === 'set_up' &&
+        view.stage === 'group' &&
+        finished &&
+        folderAgentSetups[view.workspace_id] !== finished
+      ) {
+        void landPromotedGroup(view.workspace_id);
+      }
     });
+    folderAgentSetups = Object.fromEntries(
+      views.map(view => [view.workspace_id, view.setup?.finished_at || ''])
+    );
     const changed = JSON.stringify(next) !== JSON.stringify(state.folderAgentLines);
     const finished = Object.keys(state.folderAgentLines).some(id => !next[id]);
     state.folderAgentLines = next;
     if (changed) mountMap();
     // A look that just finished may have changed what the workspace shows.
-    if (finished) void refresh();
+    if (finished) void refreshQuietly();
     if (Object.keys(next).length) folderAgentTimer = setTimeout(refreshFolderAgentLines, 2000);
   }
-  // A new folder workspace: reload the tiles (it now has one), which also
-  // reads the folder agents' lines.
-  window.addEventListener('ori:folder-agent-started', () => void refresh());
+  // A new folder workspace (Start) or a report action (Set it up, Look
+  // further): reload the tiles the canonical way, then follow the agents.
+  const onFolderAgentChange = () => {
+    if (!canHydrateWorkspaceData()) return;
+    void Promise.resolve(refreshQuietly()).finally(() => void refreshFolderAgentLines());
+  };
+  window.addEventListener('ori:folder-agent-started', onFolderAgentChange);
+  window.addEventListener('ori:folder-agent-changed', onFolderAgentChange);
 
   async function refreshLibraryBadges({ force = false } = {}) {
     if (!canHydrateWorkspaceData()) return;
