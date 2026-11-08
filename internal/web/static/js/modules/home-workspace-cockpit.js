@@ -3669,6 +3669,13 @@ import {
 
   /** Route the reserved Personal HQ landmark through the shared modal. */
   function selectHQSite(view, { openModal = true, invoker = null } = {}) {
+    // No assistant yet: the site is not a place to build anything. Pressing it
+    // goes straight to meeting the assistant. A selection that only follows a
+    // focus intent (openModal false) stays a selection.
+    if (view?.hireFirst && openModal) {
+      window.location.assign(MEET_ASSISTANT_AGENTS_ROUTE);
+      return;
+    }
     state.selectedId = HQ_SITE_ID;
     state.railState = RAIL_WORKSPACE;
     state.hqSiteView = view || null;
@@ -5551,6 +5558,11 @@ import {
     }
   });
   els.primaryActionBtn?.addEventListener('click', () => runPrimaryAction());
+  // The hire-first HQ site's one action, from its panel or its right-click
+  // menu: meet the assistant (personal-hq-onboarding.js ignores it).
+  window.addEventListener('ori:personal-hq-action', event => {
+    if (event?.detail?.action === 'meet') window.location.assign(MEET_ASSISTANT_AGENTS_ROUTE);
+  });
   // The drawer and the welcome card take turns (home-welcome.js).
   document.addEventListener('personal-assistant:opened', () => renderWelcome());
   document.addEventListener('personal-assistant:closed', () => {

@@ -1934,13 +1934,43 @@ test('the reserved site keeps its existing copy outside the guided stage', () =>
   assert.match(map.hqOverviewHTML(generic), /data-hq-action="import"/);
   assert.match(map.hqOverviewHTML(generic), /Not now/);
 
-  for (const state of ['active', 'needs_hire', 'hiring', 'repair_needed']) {
+  for (const state of ['active', 'repair_needed']) {
     map.setPersonalAssistant({ state, display_name: 'Atlas' });
     const view = map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' });
     assert.equal(view.guided, undefined, `${state} was treated as the guided stage`);
     assert.equal(view.title, 'Personal HQ has not been created');
     assert.match(map.hqOverviewHTML(view), /data-hq-action="import"/);
   }
+});
+
+test('before a hire the empty HQ site offers only meeting the assistant', () => {
+  for (const state of ['needs_hire', 'hiring']) {
+    const map = loadOriWorkspaceMap();
+    map.setPersonalAssistant({ state, display_name: '' });
+    const view = map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' });
+    assert.equal(view.hireFirst, true, state);
+    assert.equal(view.showImport, false);
+    assert.equal(view.showSkip, false);
+    const html = map.hqOverviewHTML(view);
+    assert.match(html, /data-hq-action="meet"/);
+    assert.match(html, /Meet your assistant/);
+    assert.doesNotMatch(html, /data-hq-action="(build|import|skip|clear)"/);
+    assert.equal(
+      JSON.stringify(map.hqMenuItems(view)),
+      JSON.stringify([{ label: 'Meet your assistant', action: 'hq-meet' }])
+    );
+    assert.match(map.hqSiteHTML({ left: 0, top: 0 }, '', 0, view), /Opens assistant setup/);
+  }
+  // Once hired, Build My HQ is the step again.
+  const hired = loadOriWorkspaceMap();
+  hired.setPersonalAssistant({ state: 'needs_hq', display_name: 'Atlas' });
+  const view = hired.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' });
+  assert.equal(view.hireFirst, undefined);
+  assert.match(hired.hqOverviewHTML(view), /data-hq-action="build"/);
+  // Repair and a paused setup are never hire-first.
+  const repair = loadOriWorkspaceMap();
+  repair.setPersonalAssistant({ state: 'needs_hire' });
+  assert.equal(repair.hqSiteView({ valid: false, workspace_id: 'gone' }).hireFirst, undefined);
 });
 
 test('a new user sees where the Personal HQ starts, not an unexplained absence', () => {

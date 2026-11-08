@@ -234,6 +234,17 @@ test.describe('Home leads with the next hire-first step', () => {
     await page.goto('/?focus=personal-hq');
     await expect(page.locator('[data-hq-site]')).toHaveClass(/is-selected/);
     await expect(page.locator('#cockpitWelcome')).toBeHidden();
+    // Before a hire the empty site builds nothing: pressing it goes straight to
+    // meeting the assistant, and its menu offers only that.
+    await page.goto('/');
+    await expect(page.locator('#cockpitWelcome [data-home-welcome]')).toBeVisible();
+    await page.locator('[data-hq-site]').click({ button: 'right' });
+    await expect(
+      page.locator('[data-ws-map-menu] [role="menuitem"], .ws-map-menu [role="menuitem"]')
+    ).toHaveText(['Meet your assistant']);
+    await page.keyboard.press('Escape');
+    await page.locator('[data-hq-site]').click();
+    await expectAssistantConfiguration(page);
 
     // Existing workspaces are never covered by the full card: compact only.
     const created = await ok(

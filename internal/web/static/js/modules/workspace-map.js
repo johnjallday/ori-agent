@@ -996,6 +996,18 @@
       view.statusText = 'Your Personal HQ starts here';
     }
 
+    // Before an assistant is hired there is no HQ to build here: the HQ is the
+    // assistant's home base, so the site offers only meeting the assistant.
+    // Build, Import and Not now return once the assistant is hired.
+    if (!resumable && !repair && personalAssistantHiring()) {
+      view.hireFirst = true;
+      view.title = 'Your Personal HQ starts here';
+      view.detail =
+        'Meet your assistant first. Your HQ is their home base, and you build it together next.';
+      view.showImport = false;
+      view.showSkip = false;
+    }
+
     // A hired assistant with no home base yet. The site names its subject and
     // offers only the safe build path. Every other state — repair, import,
     // legacy, skipped outside this stage — keeps its existing copy exactly.
@@ -1025,6 +1037,11 @@
   function personalAssistantNeedsHQ() {
     if (!personalAssistant) return false;
     return personalAssistant.state === 'needs_hq' || personalAssistant.state === 'provisioning_hq';
+  }
+
+  function personalAssistantHiring() {
+    if (!personalAssistant) return false;
+    return personalAssistant.state === 'needs_hire' || personalAssistant.state === 'hiring';
   }
 
   function personalAssistantIsNew() {
@@ -2927,7 +2944,7 @@
       '" ' +
       'aria-label="Personal HQ site, ' +
       escapeHtml(spoken) +
-      '. Activate to view setup options">' +
+      (view.hireFirst ? '. Opens assistant setup">' : '. Activate to view setup options">') +
       '<span class="ws-map-tile-flag"><span class="ws-map-led"></span>' +
       escapeHtml(status) +
       '</span>' +
@@ -3884,6 +3901,27 @@
   }
 
   function hqOverviewHTML(view) {
+    if (view.hireFirst) {
+      // No assistant yet: the one way forward is meeting them.
+      return (
+        '<div class="ws-map-ov-hero ws-map-hq-site-hero">' +
+        '<span class="ws-map-ov-ic ws-map-hq-site-icon">HQ</span>' +
+        '<div class="ws-map-ov-herometa"><div class="ws-map-ov-name">Personal HQ</div>' +
+        '<div class="ws-map-ov-tag">' +
+        escapeHtml(view.statusLabel) +
+        '</div></div>' +
+        '</div>' +
+        '<h4 class="ws-map-hq-site-title">' +
+        escapeHtml(view.title) +
+        '</h4>' +
+        '<p class="ws-map-ov-desc ws-map-hq-site-desc">' +
+        escapeHtml(view.detail) +
+        '</p>' +
+        '<div class="ws-map-hq-actions">' +
+        '<button type="button" class="ws-map-hq-action ws-map-hq-action-primary" data-hq-action="meet">Meet your assistant ▸</button>' +
+        '</div>'
+      );
+    }
     var primaryLabel = view.resumable
       ? 'Resume setup'
       : view.repair
@@ -4928,6 +4966,8 @@
   // mutually exclusive.
   function hqMenuItems(view) {
     var site = view || {};
+    // No assistant yet: meeting them is the only HQ step there is.
+    if (site.hireFirst) return [{ label: 'Meet your assistant', action: 'hq-meet' }];
     var items = [
       {
         label: site.resumable
@@ -5400,6 +5440,7 @@
       case 'hq-import':
       case 'hq-clear':
       case 'hq-skip':
+      case 'hq-meet':
         announce(container, 'Personal HQ: ' + (context.label || action.slice(3)));
         dispatchHQAction(action.slice(3));
         break;
@@ -11850,6 +11891,7 @@
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
     hqSiteHTML: hqSiteHTML,
+    hqMenuItems: hqMenuItems,
     hqOverviewHTML: hqOverviewHTML,
     setHQStatus: setHQStatus,
     // Bounded relationship facts so the reserved site can name the hired
