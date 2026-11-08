@@ -272,7 +272,8 @@ export function renderFolderAgentReport(
     : leftOut('what_it_is');
   if (whatItIs) card.append(whatItIs);
   if (view.facts) card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
-  if (view.tools.length || view.toolsSentence) {
+  // Once set up, the setup lines say what happened; the proposal is not repeated.
+  if ((view.tools.length || view.toolsSentence) && view.state !== 'set_up') {
     const tools = el(doc, 'section', 'folder-agent-card__tools');
     tools.append(el(doc, 'h4', 'folder-agent-card__heading', 'Tools'));
     const list = el(doc, 'ul', 'folder-agent-card__tool-list');

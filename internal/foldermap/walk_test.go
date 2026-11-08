@@ -154,6 +154,10 @@ func TestWalk_DepthSixLayoutHasNoDepthLimit(t *testing.T) {
 	if facts.Portfolio == nil || facts.Portfolio.Count != 6 {
 		t.Fatalf("portfolio = %+v", facts.Portfolio)
 	}
+	// The folders that hold the songs, as the Home's listings reach them.
+	if len(facts.ProjectAreas) != 3 || !strings.HasPrefix(FactsLine(facts), "5 REAPER songs · 1 Ableton Live song · 3 folders with songs") {
+		t.Fatalf("areas = %v, facts line = %q", facts.ProjectAreas, FactsLine(facts))
+	}
 }
 
 func TestWalk_BudgetTripRecordsUnopenedFolders(t *testing.T) {

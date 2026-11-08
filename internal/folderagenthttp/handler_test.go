@@ -35,6 +35,19 @@ func TestStart_RefusesAPathField(t *testing.T) {
 	}
 }
 
+func TestGet_AWorkspaceWithoutAFolderRecordHasNoReport(t *testing.T) {
+	dir := t.TempDir()
+	service := folderagent.NewService(folderagent.Deps{Store: folderagent.NewStore(func(string) (string, error) { return dir, nil })})
+	h := New(service, func(context.Context) (string, error) { return "u1", nil })
+	req := httptest.NewRequest(http.MethodGet, "/folder-agent/ws-1", nil)
+	req.SetPathValue("workspaceID", "ws-1")
+	rec := httptest.NewRecorder()
+	h.Get(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"folder_agent":null`) {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWriteError_PlainSentences(t *testing.T) {
 	cases := []struct {
 		err    error

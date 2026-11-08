@@ -383,6 +383,23 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 			}
 			setLine(line, personalassistant.FolderLineDone)
 			continue
+		case folderlook.KindHomeProvider:
+			receipt, err := b.runFolderAgentHome(ctx, rec, candidate, lines, setLine)
+			var stopped *homeStageStop
+			if errors.As(err, &stopped) {
+				logger.Warn("Folder agent Home setup stopped", logger.Fields{"workspace_id": rec.WorkspaceID, "reason": stopped.reason, "error": stopped.cause.Error()})
+				return personalassistant.FolderSetupStopped, stopped.reason
+			}
+			if err != nil {
+				return personalassistant.FolderSetupStopped, personalassistant.FolderStopFailed
+			}
+			for i := range lines {
+				if lines[i].Kind == personalassistant.FolderPlanSongs {
+					lines[i].Detail = folderagent.HomeReceiptLine(receipt.listed, receipt.unreached, rec.Facts)
+				}
+			}
+			update(append([]personalassistant.FolderPlanLine(nil), lines...))
+			continue
 		case folderlook.KindIntegration:
 		default:
 			return stop(personalassistant.FolderPlanWorkspace, personalassistant.FolderStopPlanChanged, errors.New("candidate kind not runnable: "+candidate.Kind))

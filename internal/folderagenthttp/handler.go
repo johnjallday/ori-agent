@@ -142,6 +142,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view, err := h.service.View(r.Context(), userID, r.PathValue("workspaceID"))
+	if errors.Is(err, folderagent.ErrNoRecord) {
+		// Any workspace page asks; one not started from a folder simply
+		// has no report.
+		orihttp.Success(w, map[string]any{"folder_agent": nil})
+		return
+	}
 	if err != nil {
 		writeError(w, err)
 		return

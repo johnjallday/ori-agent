@@ -99,6 +99,47 @@ assistant setup with no selected folder are not converted. Blueprint agents,
 capabilities and tools still install; an explicit anchor skips the blueprint's
 second managed project-folder skeleton.
 
+## Created from a feed: Start an agent on a folder
+
+Home's Explore a folder (and, as the other entries move, every folder entry)
+shows one card for every folder: **Start an agent on <folder>**, one field
+**What should it do?**, and **Start** (`internal/folderagent`,
+`POST /api/personal-assistant/folder-agent/start`). No request carries a path:
+the server chooses the folder (dialog, known folder or a typed path's
+selection token) and Start names only the server's short-lived choice token.
+
+- **Creation.** Start creates an anchored workspace on the folder through the
+  ordinary pipeline (`sessionhttp.CreateFolderAgentWorkspace`): the anchor is
+  validated first, so a refusal (inside the Workspace Directory, a symlink, a
+  folder already owned, a folder holding `workspace.json`) leaves no agent or
+  workspace behind and is shown in its existing sentence. The workspace gets
+  one agent, `<folder> Manager` (orchestrator, the user's default model; a
+  saved agent of that exact name is bound instead), the brief as its goal, and
+  a host-owned first ticket, `Look around <folder>`.
+- **The walk** (`internal/foldermap`) starts immediately in the server, with no
+  model: breadth-first, metadata only (names, kinds, sizes, dates), never a
+  symbolic link, the digest's skipped folders and hidden/cloud placeholders
+  left out. A folder with a project marker directly inside is recorded and
+  closed. There is no depth limit: one walk is bounded by 2,000 entries or
+  20 seconds, a folder above 5,000 entries is recorded as large and not
+  opened, and the folders left unopened are recorded for Look further.
+- **The record.** The folder map (relative paths only, at most 20,000 folders),
+  the facts and the report live in one file in the workspace's own sidecar,
+  `.ori/folder-agent-v1.json`. It never holds the anchor's absolute path;
+  that stays in the directory reference. Trashing the workspace takes the
+  record with the sidecar. The first ticket's result carries the facts line.
+- **The agent's first look.** After the walk the agent may take one bounded
+  turn (6 model calls, 12 tool calls, 8 `folder_look` calls, 90 seconds, a
+  token budget `first_look_token_budget` can only lower). `folder_look` lists
+  one folder the map already records, through this workspace's own anchor,
+  at most 500 entries, never a client- or model-supplied path.
+- **The pin.** While the first look runs, the agent's own Toolbox is pinned to
+  the anchor binding's listing tools (`list_directory`,
+  `list_directory_with_sizes`, `directory_tree`, `search_files`,
+  `get_file_info`, `list_allowed_directories`). Set it up or Look further adds
+  the content tools to the pin; a completed Set it up releases it. The binding
+  itself never changes: the pin is what narrows.
+
 ## Lifecycle and recovery
 
 - Rename and group nesting move only the sidecar. Anchor IDs, paths and bindings

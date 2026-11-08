@@ -309,7 +309,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 	for _, id := range selected {
 		chosen[id] = true
 	}
-	runnable := rec.Stage == foldermap.StageTools
+	runnable := rec.Stage == foldermap.StageTools || rec.Stage == foldermap.StageHome
 	for _, c := range rec.Candidates {
 		if !c.Required && (!chosen[c.ID] || c.Action == folderlook.ActionAlreadyHere) {
 			continue
@@ -336,9 +336,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 				Detail: rec.AgentName + " can use them in this workspace.",
 			})
 		case folderlook.KindHomeProvider:
-			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: capitalize(c.Detail)})
-			runnable = false
-			plan.Unavailable = "Joining a Home from a folder is not available yet."
+			plan.Lines = append(plan.Lines, homeLines(rec, c)...)
 		case folderlook.KindFileCurator:
 			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds File Curator", Detail: c.Detail})
 			runnable = false
@@ -397,13 +395,6 @@ func planDigest(plan Plan) string {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: "selected", Name: id})
 	}
 	return personalassistant.FolderPlanDigest(lines)
-}
-
-func capitalize(text string) string {
-	if text == "" {
-		return text
-	}
-	return strings.ToUpper(text[:1]) + text[1:]
 }
 
 func plural(n int, one, many string) string {

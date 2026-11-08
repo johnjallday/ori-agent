@@ -276,14 +276,28 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 }
 
 func TestStart_NotYetStagesRefuseSetUp(t *testing.T) {
-	h := newHarness(t, demo(t))
+	h := newHarness(t, build(t, "Drafts/A/outline.md", "Drafts/B/outline.md"))
 	view := h.start(t, "")
 	report, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
-	if report.Plan.Runnable {
-		t.Fatal("the Home stage is not runnable in this slice")
+	if report.Plan.Runnable || report.Stage != foldermap.StageGroup {
+		t.Fatalf("the Group stage is not runnable in this slice: %+v", report.Plan)
 	}
 	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); !errors.Is(err, ErrStageNotYet) {
 		t.Fatalf("set up = %v", err)
+	}
+	// The Home stage is runnable, with its own lines.
+	home := newHarness(t, demo(t))
+	hv := home.start(t, "")
+	hr, _ := home.svc.View(context.Background(), "u1", hv.WorkspaceID)
+	var lines []string
+	for _, l := range hr.Plan.Lines {
+		lines = append(lines, l.Name)
+	}
+	want := []string{"Creates your Music Production Home", "Adds Ori Music Demo to your Music Production Home",
+		"Lists 8 songs on its shelf", "Looks into 2 folders for songs", "Places Ori Music Demo inside your Music Production Home",
+		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing is moved, copied or read"}
+	if !hr.Plan.Runnable || strings.Join(lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("home plan runnable=%v lines=%v", hr.Plan.Runnable, lines)
 	}
 	empty := newHarness(t, build(t, "notes.txt"))
 	ev := empty.start(t, "")

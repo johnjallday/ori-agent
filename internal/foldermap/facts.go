@@ -1,8 +1,8 @@
 package foldermap
 
 import (
+	"path"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -50,8 +50,9 @@ type Facts struct {
 	// Portfolio is the largest shape with a Home provider and enough
 	// projects (the Home stage).
 	Portfolio *Portfolio `json:"portfolio,omitempty"`
-	// ProjectAreas are the distinct top-level folders that hold member
-	// projects deeper down ("Albums", "Picker Songs").
+	// ProjectAreas are the distinct folders that directly hold member
+	// projects two or more folders down ("Albums", "Picker Songs"): the
+	// folders a Home's scoped listings reach them through.
 	ProjectAreas []string `json:"project_areas,omitempty"`
 	// Dump applies the digest's thresholds to the fed folder's own files.
 	Dump           bool `json:"dump,omitempty"`
@@ -125,7 +126,7 @@ func FactsFrom(m *Map) Facts {
 		} else {
 			facts.Members = append(facts.Members, p)
 			if p.Depth >= 2 {
-				areas[strings.SplitN(p.Path, "/", 2)[0]] = true
+				areas[path.Dir(p.Path)] = true
 			}
 		}
 		key := ShapeCount{Shape: f.Shape, Format: f.Format}
