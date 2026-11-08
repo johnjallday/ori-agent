@@ -1046,6 +1046,21 @@ body.home-command-page .home-command-bridge * {
   text-decoration: underline;
 }
 
+/* The card's outline buttons (Change, Adjust…, Not now, Choose another
+   location…, Back, Done) read in Home's ink: Bootstrap's grey measured 3.48:1
+   in dark mode. */
+.pa-hq-card .btn-outline-secondary {
+  border-color: var(--hc-line-bright);
+  color: var(--hc-ink);
+}
+
+.pa-hq-card .btn-outline-secondary:hover,
+.pa-hq-card .btn-outline-secondary:focus-visible {
+  border-color: var(--hc-signal);
+  background: var(--hc-panel-deep);
+  color: var(--hc-ink);
+}
+
 /* A recovery action, not a full-width bar that reads as disabled. */
 .pa-hq-card__notes-retry {
   justify-self: start;

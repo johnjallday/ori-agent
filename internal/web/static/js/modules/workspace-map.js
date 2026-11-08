@@ -2911,6 +2911,9 @@
       '<button type="button" class="ws-map-tile ws-map-hq-site' +
       (isSelected ? ' is-selected' : '') +
       (view.repair ? ' is-repair' : '') +
+      // A new user's site already says "Starts here" in its caption and name;
+      // the short corner flag would only collide with the pin and badge.
+      (view.statusText === 'Your Personal HQ starts here' ? ' is-new' : '') +
       '" ' +
       'data-hq-site aria-pressed="' +
       (isSelected ? 'true' : 'false') +

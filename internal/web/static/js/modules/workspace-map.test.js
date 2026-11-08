@@ -1952,7 +1952,12 @@ test('a new user sees where the Personal HQ starts, not an unexplained absence',
     assert.equal(view.statusText, 'Your Personal HQ starts here');
     const html = map.hqSiteHTML({ left: 0, top: 0 }, '', 0, view);
     assert.match(html, /aria-label="Personal HQ site, Your Personal HQ starts here\./);
-    assert.match(html, /ws-map-tile-flag">.*Starts here/);
+    assert.match(
+      html,
+      /ws-map-hq-site[^"]* is-new/,
+      'the duplicate corner flag is hidden by class'
+    );
+    assert.match(html, /ws-map-tile-meta">Starts here</);
     assert.doesNotMatch(html, /Not created/);
   }
 });

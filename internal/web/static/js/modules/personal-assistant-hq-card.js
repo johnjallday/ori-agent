@@ -215,6 +215,9 @@ function announceResult(active) {
   document.dispatchEvent(
     new CustomEvent('personal-assistant:setup-result', { detail: { active } })
   );
+  // Now leading (Home has just moved it up): show it from its top, not at the
+  // drawer's restored scroll offset. No focus is taken by a load.
+  if (active) el('Card')?.scrollIntoView?.({ block: 'start' });
 }
 
 function hqRoute() {

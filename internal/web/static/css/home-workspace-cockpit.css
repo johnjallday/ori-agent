@@ -978,6 +978,12 @@
   left: 0;
 }
 
+/* A new user's site says "Starts here" in its caption; the corner flag with
+   the same words overlapped the pin and the HQ site badge. */
+.cockpit-map .ws-map-hq-site.is-new .ws-map-tile-flag {
+  display: none;
+}
+
 /* On a narrow screen, the HQ landmark, creation group, and two map-control
    clusters cannot truthfully share a 320px canvas without covering each other.
    Give this one first-run state vertical room instead of shrinking controls or
