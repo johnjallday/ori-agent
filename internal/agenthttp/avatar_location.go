@@ -48,8 +48,12 @@ func avatarOwner(st store.Store, filename string) string {
 		return ""
 	}
 	for _, name := range st.ListAgents() {
-		ag, ok := st.GetAgent(name)
-		if ok && ag != nil && ag.Appearance != nil && ag.Appearance.UploadedImage() == filename {
+		// GetAgent returns a live record; an unrelated definition PATCH can
+		// replace its Appearance pointer after the lookup lock is released.
+		// Inspect the detached library definition cloned under that same lock.
+		record := store.LibraryDefinition(st, name)
+		ag := record.Definition
+		if record.State == store.LibraryPresent && ag != nil && ag.Appearance != nil && ag.Appearance.UploadedImage() == filename {
 			return name
 		}
 	}

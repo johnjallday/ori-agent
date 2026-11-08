@@ -47,11 +47,7 @@ func LibraryDefinition(st Store, name string) LibraryRecord {
 	case *fileStore:
 		// AGENT_STORE_PATH keeps every agent here: a user agent may carry an
 		// assistant-like name, so ask the record, not the name.
-		owner := LibraryOwnerLibrary
-		if isSystemRecord(s, name) {
-			owner = LibraryOwnerSystem
-		}
-		return s.libraryRecord(name, owner)
+		return s.libraryRecord(name, true)
 	}
 	ag, ok := st.GetAgent(name)
 	if !ok || ag == nil {
@@ -75,12 +71,12 @@ func (c *CompositeStore) libraryDefinition(name string) LibraryRecord {
 		}
 		return LibraryRecord{State: LibraryAbsent}
 	}
+	if fs, ok := owner.(*fileStore); ok {
+		return fs.libraryRecord(name, owner == c.system)
+	}
 	label := LibraryOwnerLibrary
 	if owner == c.system && isSystemRecord(owner, name) {
 		label = LibraryOwnerSystem
-	}
-	if fs, ok := owner.(*fileStore); ok {
-		return fs.libraryRecord(name, label)
 	}
 	ag, ok := owner.GetAgent(name)
 	if !ok || ag == nil {
@@ -104,9 +100,15 @@ func inspectionClone(src *agent.Agent) *agent.Agent {
 
 // libraryRecord clones name's definition under the store lock, the same lock
 // MutateAgentDefinition holds while it adopts an edit into the live record.
-func (s *fileStore) libraryRecord(name, owner string) LibraryRecord {
+func (s *fileStore) libraryRecord(name string, classifySystem bool) LibraryRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Ownership classification also inspects mutable Metadata. Keep it under
+	// the definition lock instead of calling GetAgent before cloning.
+	owner := LibraryOwnerLibrary
+	if classifySystem && (systemassistant.IsCanonicalName(name) || isMarkedSystemAgent(s.agents[name])) {
+		owner = LibraryOwnerSystem
+	}
 	if s.unreadableErrorUnlocked(name) != nil {
 		return LibraryRecord{State: LibraryUnreadable, Owner: owner}
 	}
