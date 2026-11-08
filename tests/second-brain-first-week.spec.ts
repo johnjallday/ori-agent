@@ -182,8 +182,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
     await expect.poll(async () => (await secondBrain(request)).ask.state).toBe('pending');
     await openDrawer(page);
     await action(page, 'setup').click();
-    // The project question comes first (Issue 776); this case skips it.
-    await action(page, 'skip').click();
+    // Setup goes straight to where the notes live (assistant-hq-onboarding 4.4).
     await action(page, 'elsewhere').click();
     await card(page).getByLabel('or paste a folder path').fill(documents);
     await card(page).getByRole('button', { name: 'Use this path' }).click();

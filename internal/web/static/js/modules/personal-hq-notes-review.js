@@ -122,6 +122,90 @@ export function hqNotesPayload(view) {
   return { include: true, witness: view.witness };
 }
 
+// The first-action record (assistant-hq-onboarding 4.1): set when this browser
+// builds a Personal HQ, cleared when the user leaves the first action. It is
+// presentation only; HQ and notes records stay the truth. An HQ built before
+// this existed never has one, so returning users never see the result card.
+export const FIRST_ACTION_KEY = 'ori.hq.firstAction.v1';
+
+export function readFirstAction(storage) {
+  try {
+    const parsed = JSON.parse(storage?.getItem(FIRST_ACTION_KEY) || 'null');
+    const workspaceId = String(parsed?.workspaceId || '');
+    return workspaceId ? { workspaceId } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function rememberFirstAction(storage, workspaceId) {
+  const id = String(workspaceId || '').trim();
+  if (!storage || !id) return false;
+  try {
+    storage.setItem(FIRST_ACTION_KEY, JSON.stringify({ workspaceId: id }));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+export function forgetFirstAction(storage) {
+  try {
+    storage?.removeItem(FIRST_ACTION_KEY);
+  } catch (_) {
+    // Storage is optional; the card simply ends for this page.
+  }
+}
+
+/**
+ * The result card's first step, from canonical states only.
+ * @param {{status: string, writable?: boolean}|null} notes hqNotesOutcome, or null
+ * @param {{hqRoute?: string}} options
+ * @returns {{lead: string, note: boolean, openNotes: string, setupNotes: boolean,
+ *            retry: boolean, folder: boolean, explore: boolean}}
+ */
+export function hqFirstActionView(notes, { hqRoute = '' } = {}) {
+  const status = String(notes?.status || 'none');
+  const notesRoute = hqRoute ? `${hqRoute}?station=second-brain` : '';
+  const base = {
+    note: false,
+    openNotes: '',
+    setupNotes: false,
+    retry: false,
+    folder: true,
+    explore: true
+  };
+  if (status === 'ready' && notes.writable) {
+    return {
+      ...base,
+      lead: 'Your notes have a home. No setup questions left: start with whatever is on your mind.',
+      note: true
+    };
+  }
+  if (status === 'ready') {
+    return {
+      ...base,
+      lead: 'Your notes stay connected as they are. Ori reads them and never writes to them.',
+      openNotes: notesRoute
+    };
+  }
+  if (status === 'failed' || status === 'pending') {
+    return { ...base, lead: 'Your HQ is ready. Notes still need one step.', retry: true };
+  }
+  if (status === 'stopped') {
+    return {
+      ...base,
+      lead: 'Your HQ is ready. Your notes stay as they are.',
+      openNotes: notesRoute
+    };
+  }
+  return {
+    ...base,
+    lead: 'Make yourself at home. Start wherever you like; you can set up notes later.',
+    setupNotes: true
+  };
+}
+
 /** What a build's notes result means for the receipt and the retry. */
 export function hqNotesOutcome(result) {
   const status = String(result?.status || '');

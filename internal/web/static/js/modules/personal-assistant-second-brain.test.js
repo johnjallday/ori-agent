@@ -523,6 +523,17 @@ test('setup is the one primary action whether zero, one or several vaults were d
   }
 });
 
+test('an unfinished Personal HQ notes setup owns the notes step, so the ask waits', () => {
+  for (const status of ['pending', 'failed', 'stopped']) {
+    const view = secondBrainAskView(
+      { ...detected, ask: { state: 'shown' }, setup: { status, path: '/n/Second Brain' } },
+      true
+    );
+    assert.equal(view.show, false, status);
+  }
+  assert.equal(secondBrainAskView({ ...detected, ask: { state: 'shown' } }, true).show, true);
+});
+
 test('the choice separates scope, title, benefit, and a read-only alternative', () => {
   const view = secondBrainAskView({ ...detected, detected: [] }, true);
   assert.equal(view.scope, 'Personal notes · Personal HQ');

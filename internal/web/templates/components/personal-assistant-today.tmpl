@@ -75,8 +75,48 @@
     </div>
     <ul id="personalAssistantHQReceipt" hidden></ul>
     <div id="personalAssistantHQNotesResult" class="pa-hq-card__notes-result" hidden>
-      <p id="personalAssistantHQNotesResultText" role="status" aria-live="polite"></p>
+      <p id="personalAssistantHQNotesResultText" role="status" aria-live="polite" tabindex="-1"></p>
       <button type="button" id="personalAssistantHQNotesRetry" class="btn btn-sm btn-primary pa-hq-card__notes-retry" hidden>Retry notes setup</button>
+    </div>
+    <!-- The first step after a build (assistant-hq-onboarding 4.1–4.5). Every
+         choice is optional; nothing here reads a folder or starts setup until
+         it is pressed. hqFirstActionView decides which choices show. -->
+    <div id="personalAssistantHQFirst" class="pa-hq-card__first" hidden>
+      <p id="personalAssistantHQFirstLead" class="pa-hq-card__first-lead"></p>
+      <div class="pa-hq-card__choices">
+        <button type="button" id="personalAssistantHQFirstNote" class="pa-hq-card__choice" hidden>
+          <strong>Save a quick note</strong><span>An idea, a reminder, anything.</span>
+        </button>
+        <a id="personalAssistantHQFirstOpenNotes" class="pa-hq-card__choice" href="#" hidden>
+          <strong>Open Notes</strong><span>See your notes in your HQ.</span>
+        </a>
+        <button type="button" id="personalAssistantHQFirstSetupNotes" class="pa-hq-card__choice" hidden>
+          <strong>Set up notes</strong><span>Choose where your notes live, whenever you like.</span>
+        </button>
+        <button type="button" id="personalAssistantHQFirstFolder" class="pa-hq-card__choice">
+          <strong>Show me a project folder</strong><span>Start with something you already have.</span>
+        </button>
+      </div>
+      <button type="button" id="personalAssistantHQFirstExplore" class="btn btn-sm btn-link pa-hq-card__explore">I’ll explore for now</button>
+      <form id="personalAssistantHQNoteForm" class="pa-hq-card__note" hidden>
+        <label for="personalAssistantHQNoteText">Anything worth keeping?</label>
+        <textarea id="personalAssistantHQNoteText" class="modern-input w-100" rows="4" maxlength="4000"
+                  placeholder="I had an idea…"></textarea>
+        <small class="pa-hq-card__note-hint">Saves to your Notes inbox.</small>
+        <p id="personalAssistantHQNoteError" class="pa-specialist-offer__error" role="alert" hidden></p>
+        <div class="pa-specialist-offer__actions">
+          <button type="submit" id="personalAssistantHQNoteSave" class="btn btn-sm btn-primary">Save note</button>
+          <button type="button" id="personalAssistantHQNoteBack" class="btn btn-sm btn-outline-secondary">Back</button>
+        </div>
+      </form>
+      <div id="personalAssistantHQNoteSaved" class="pa-hq-card__saved" hidden>
+        <p id="personalAssistantHQNoteSavedTitle" class="pa-hq-card__saved-title" role="status" aria-live="polite" tabindex="-1"></p>
+        <blockquote id="personalAssistantHQNoteSavedText" class="pa-hq-card__saved-text"></blockquote>
+        <div class="pa-specialist-offer__actions">
+          <button type="button" id="personalAssistantHQNoteAnother" class="btn btn-sm btn-primary">Add another note</button>
+          <button type="button" id="personalAssistantHQNoteDone" class="btn btn-sm btn-outline-secondary">Done</button>
+        </div>
+      </div>
     </div>
     <div class="pa-specialist-offer__actions">
       <button type="button" id="personalAssistantHQBuild" class="btn btn-sm btn-primary" disabled>Build</button>

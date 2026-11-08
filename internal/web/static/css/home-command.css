@@ -1039,9 +1039,105 @@ body.home-command-page .home-command-bridge * {
   overflow-wrap: anywhere;
 }
 
+/* The receipt's links use Home's text-safe signal ink, not Bootstrap's blue
+   (3.9:1 on the card), now that the receipt stays on screen as the result. */
+.pa-hq-card #personalAssistantHQReceipt a {
+  color: var(--hc-signal);
+  text-decoration: underline;
+}
+
 /* A recovery action, not a full-width bar that reads as disabled. */
 .pa-hq-card__notes-retry {
   justify-self: start;
+}
+
+/* The first step after a build (assistant-hq-onboarding 4.1–4.5). */
+.pa-hq-card__first,
+.pa-hq-card__note,
+.pa-hq-card__saved {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.pa-hq-card__first[hidden],
+.pa-hq-card__first [hidden] {
+  display: none;
+}
+
+.pa-hq-card__first-lead {
+  margin: 0;
+  color: var(--hc-ink-dim);
+}
+
+.pa-hq-card__choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.pa-hq-card__choice {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--hc-line);
+  border-radius: 8px;
+  background: var(--hc-panel);
+  color: var(--hc-ink);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pa-hq-card__choice:hover {
+  border-color: var(--hc-signal);
+  color: var(--hc-ink);
+}
+
+.pa-hq-card__choice:focus-visible,
+.pa-hq-card__explore:focus-visible,
+#personalAssistantHQHeadline:focus-visible,
+.pa-hq-card__saved-title:focus-visible,
+#personalAssistantHQNotesResultText:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+.pa-hq-card__choice span {
+  color: var(--hc-ink-dim);
+  font-size: 0.85rem;
+}
+
+.pa-hq-card__explore {
+  justify-self: start;
+  min-height: 44px;
+  padding-left: 0;
+  color: var(--hc-ink-dim);
+}
+
+.pa-hq-card__note label {
+  color: var(--hc-ink);
+  font-weight: 700;
+}
+
+.pa-hq-card__note-hint {
+  color: var(--hc-ink-dim);
+}
+
+.pa-hq-card__saved-title {
+  margin: 0;
+  color: var(--hc-signal);
+  font-weight: 700;
+}
+
+.pa-hq-card__saved-text {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--hc-signal);
+  background: var(--hc-panel-deep);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .pa-specialist-offer__headline {

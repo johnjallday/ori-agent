@@ -4,7 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  FIRST_ACTION_KEY,
   NOTES_SCOPE_SENTENCE,
+  forgetFirstAction,
+  hqFirstActionView,
+  readFirstAction,
+  rememberFirstAction,
   hqNotesOutcome,
   hqNotesPayload,
   hqNotesReviewView,
@@ -104,4 +109,56 @@ test('build outcomes separate ready, pending, failed and stopped notes', () => {
   assert.equal(stopped.canRetry, false, 'a source race is not retried blindly');
   assert.equal(hqNotesOutcome({ status: 'pending' }).canRetry, true);
   assert.equal(hqNotesOutcome(null).status, 'none');
+});
+
+test('the first step follows canonical notes states, never treating HQ success as notes', () => {
+  const route = '/workspaces/my-hq';
+  const writable = hqFirstActionView({ status: 'ready', writable: true }, { hqRoute: route });
+  assert.deepEqual(
+    [writable.note, writable.openNotes, writable.setupNotes, writable.retry],
+    [true, '', false, false]
+  );
+  assert.match(writable.lead, /No setup questions left/);
+  const readOnly = hqFirstActionView({ status: 'ready', writable: false }, { hqRoute: route });
+  assert.deepEqual(
+    [readOnly.note, readOnly.openNotes],
+    [false, '/workspaces/my-hq?station=second-brain']
+  );
+  const deferred = hqFirstActionView(null, { hqRoute: route });
+  assert.deepEqual([deferred.note, deferred.setupNotes], [false, true]);
+  assert.doesNotMatch(deferred.lead, /notes have a home/);
+  for (const status of ['failed', 'pending']) {
+    const pending = hqFirstActionView({ status }, { hqRoute: route });
+    assert.deepEqual([pending.note, pending.retry], [false, true], status);
+  }
+  const stopped = hqFirstActionView({ status: 'stopped' }, { hqRoute: route });
+  assert.deepEqual([stopped.note, stopped.retry, stopped.openNotes !== ''], [false, false, true]);
+  for (const view of [writable, readOnly, deferred, stopped]) {
+    assert.equal(view.folder, true, 'a project folder is always offered');
+    assert.equal(view.explore, true, 'exploring is always possible');
+  }
+});
+
+test('the first-action record is per HQ, survives a reload, and is forgotten on leaving', () => {
+  const data = new Map();
+  const storage = {
+    getItem: key => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => data.set(key, value),
+    removeItem: key => data.delete(key)
+  };
+  assert.equal(readFirstAction(storage), null);
+  assert.equal(rememberFirstAction(storage, ''), false);
+  assert.equal(rememberFirstAction(storage, 'hq-1'), true);
+  assert.deepEqual(readFirstAction(storage), { workspaceId: 'hq-1' });
+  forgetFirstAction(storage);
+  assert.equal(readFirstAction(storage), null);
+  data.set(FIRST_ACTION_KEY, '{junk');
+  assert.equal(readFirstAction(storage), null);
+  const throwing = {
+    getItem() {
+      throw new Error('denied');
+    }
+  };
+  assert.equal(readFirstAction(throwing), null);
+  assert.doesNotThrow(() => forgetFirstAction(throwing));
 });

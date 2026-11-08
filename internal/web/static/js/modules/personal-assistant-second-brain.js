@@ -108,9 +108,12 @@ export function secondBrainChoiceView(secondBrain, { prompt = false, reoffer = f
 export function secondBrainAskView(secondBrain, available) {
   const askState = secondBrain?.ask?.state;
   const reoffer = askState === 'deferred' && secondBrain?.ask?.offer_again === true;
+  // A Personal HQ notes setup that has not finished owns the notes step: the
+  // HQ card says what happened and offers its retry (assistant-hq-onboarding 4.1).
   const show =
     available === true &&
     secondBrain?.status === 'not_connected' &&
+    !secondBrain?.setup &&
     (askState === 'pending' || askState === 'shown' || reoffer);
   return { show, reoffer, ...secondBrainChoiceView(secondBrain, { prompt: true, reoffer }) };
 }
@@ -1016,6 +1019,8 @@ export function newRequestID(prefix = 'sb') {
 
 const state = {
   available: false,
+  // A Personal HQ setup result is leading the drawer (4.1).
+  hqResultActive: false,
   // The drawer talks to the hired assistant (not a workspace's own agent).
   personal: true,
   secondBrain: null,
@@ -3208,7 +3213,8 @@ async function load() {
     const { ok, payload } = await request('');
     if (!ok) return;
     state.secondBrain = payload.second_brain || null;
-    const ask = secondBrainAskView(state.secondBrain, state.available);
+    // While a Personal HQ setup result leads the drawer, the ask waits.
+    const ask = secondBrainAskView(state.secondBrain, state.available && !state.hqResultActive);
     if (ask.show && state.phase === 'idle') {
       // The assistant speaks first: the ask is the conversation's first message
       // the first time; later it waits under Needs you until it is answered.
@@ -3336,6 +3342,14 @@ function init() {
   document.addEventListener('personal-assistant:status', event =>
     onStatus(event.detail?.personalAssistant)
   );
+  // A Personal HQ setup result leads the drawer (assistant-hq-onboarding 4.1):
+  // the ask that showed itself steps back meanwhile. Anything the user opened
+  // on purpose stays.
+  document.addEventListener('personal-assistant:setup-result', event => {
+    state.hqResultActive = event.detail?.active === true;
+    if (state.hqResultActive && state.phase === 'ask' && !state.busy)
+      setPhase('idle', { focus: false });
+  });
   state.personal = secondBrainRecipientPersonal(window.PersonalAssistantRecipient?.current?.());
   document.addEventListener('personal-assistant:recipient', event =>
     onRecipient(event.detail?.recipient)
