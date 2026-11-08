@@ -131,21 +131,22 @@ func TestFolderHandoff_PlanOnTheRealHost(t *testing.T) {
 		plan.Lines[6].Name != "Creates a REAPER song workspace named Album-5 as a separate project in new Home “Music Production Home”" {
 		t.Fatalf("lines = %+v", plan.Lines)
 	}
-	// The Default-model sentence is on the Home's agents line only.
-	if !strings.Contains(plan.Lines[3].Detail, "openai · gpt-5-mini") || strings.Contains(plan.Lines[9].Detail, "Default model") {
+	// A default for new agents is not a team selection or a saved agent's
+	// model. The Home starts undecided; project sharing keeps its disclosure.
+	if !strings.Contains(plan.Lines[3].Detail, "Choose the exact saved or new agent") || strings.Contains(plan.Lines[3].Detail, "gpt-5-mini") || strings.Contains(plan.Lines[9].Detail, "Default model") {
 		t.Fatalf("model sentence = %q / %q", plan.Lines[3].Detail, plan.Lines[9].Detail)
 	}
 	intent := plan.Intent
 	if !intent.Portfolio || strings.Join(intent.OpensProjects, ",") != "Album-5" || !intent.CreatesHome || !intent.StaffsHome ||
-		intent.Model == nil || intent.Model.Source != "system" || intent.Model.Model != "gpt-5-mini" ||
-		plan.Destination == nil || plan.Destination.Status != "new" || plan.Digest == "" {
+		intent.Model != nil || !intent.RequiresHomeStaffing || intent.HomeStaffing != nil || plan.HomeStaffing == nil || len(plan.HomeStaffing.Roles) != 1 ||
+		plan.Destination == nil || plan.Destination.Status != "new" || plan.Digest != "" {
 		t.Fatalf("intent = %+v destination = %+v", intent, plan.Destination)
 	}
 	if plan.Hire == nil || plan.BriefDefault == "" {
 		t.Fatalf("the hire card lost its hire or brief: %+v %q", plan.Hire, plan.BriefDefault)
 	}
-	if err := host.validateSetupModel(personalassistant.FolderSetupRequest{Plan: plan}); err != nil {
-		t.Fatalf("the bound model is refused: %v", err)
+	if err := host.checkFolderHomeTeam(t.Context(), personalassistant.FolderSetupRequest{Plan: plan}, nil); err == nil {
+		t.Fatal("undecided Home team was accepted")
 	}
 	// With the Home there (not yet staffed), nothing is created for it and the
 	// song joins it.
@@ -166,7 +167,7 @@ func TestFolderHandoff_PlanOnTheRealHost(t *testing.T) {
 	}
 	if existing.Intent.CreatesHome || !existing.Intent.StaffsHome || existing.Destination == nil || existing.Destination.Status != "existing" ||
 		existing.Lines[5].Name != "Creates a REAPER song workspace named Album-5 as a separate project in Home “Music Production Home”" ||
-		existing.Digest == plan.Digest {
+		existing.Digest != "" || !existing.Intent.RequiresHomeStaffing || existing.HomeStaffing == nil {
 		t.Fatalf("existing Home = %+v %+v", existing.Intent, existing.Lines)
 	}
 	// A Home not yet staffed is set up from the assistant's card; only a ready

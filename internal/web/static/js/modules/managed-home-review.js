@@ -12,7 +12,8 @@ export function managedHomeReviewKey(manager, creator) {
   const entry = creator.selectedManaged(context);
   return JSON.stringify([
     context?.generation,
-    creator.reviewRequest(entry, document.getElementById('folderNameInput')?.value),
+    creator.currentReviewRequest?.(manager) ||
+      creator.reviewRequest(entry, document.getElementById('folderNameInput')?.value),
     state?.review?.data?.review_token,
     creator.staffingPlan(manager)
   ]);
@@ -55,11 +56,7 @@ function forgetReference(ui) {
   ui.reference = null;
 }
 
-function savedReference() {
-  const raw = window.localStorage.getItem(REFERENCE_KEY);
-  if (!raw) return null;
-  const value = JSON.parse(raw);
-  const request = value?.request;
+export function managedHomeLookupRequest(request) {
   if (
     !request ||
     ['group_template_id', 'revision', 'name', 'group_review_token', 'idempotency_key'].some(
@@ -70,15 +67,93 @@ function savedReference() {
       'The saved Home reference is unreadable. Do not submit a replacement creation.'
     );
   }
-  // Only the original strict lookup fields are ever sent to the read owner.
-  return {
-    ...value,
-    request: Object.fromEntries(
-      ['group_template_id', 'revision', 'name', 'group_review_token', 'idempotency_key'].map(
-        key => [key, request[key]]
-      )
+  const lookup = Object.fromEntries(
+    ['group_template_id', 'revision', 'name', 'group_review_token', 'idempotency_key'].map(key => [
+      key,
+      request[key]
+    ])
+  );
+  // Exact public team material is needed to verify the original V2 digest.
+  // This reference is sent only to observe, never restored into editable fills
+  // or a pending executable commit. Private witness/prompt fields are refused.
+  if (request.role_staffing !== undefined) {
+    const fields = [
+      'role_id',
+      'mode',
+      'name',
+      'recommendation',
+      'provider',
+      'model',
+      'reasoning_effort',
+      'appearance'
+    ];
+    if (
+      !Array.isArray(request.role_staffing) ||
+      !request.role_staffing.length ||
+      request.role_staffing.length > 16 ||
+      JSON.stringify(request.role_staffing).length > 24 * 1024
     )
-  };
+      throw new Error('The saved Home team reference is unreadable. Reading it resumed nothing.');
+    lookup.role_staffing = request.role_staffing.map(role => {
+      if (
+        !role ||
+        Object.keys(role).some(key => !fields.includes(key)) ||
+        !['assign', 'create'].includes(role.mode) ||
+        typeof role.role_id !== 'string' ||
+        typeof role.name !== 'string'
+      )
+        throw new Error('The saved Home team reference contains unsupported fields.');
+      for (const key of fields.filter(key => key !== 'appearance')) {
+        if (role[key] !== undefined && (typeof role[key] !== 'string' || role[key].length > 512))
+          throw new Error('The saved Home team reference is unreadable.');
+      }
+      if (role.appearance) {
+        const appearance = role.appearance;
+        const object = value => value && typeof value === 'object' && !Array.isArray(value);
+        if (
+          !object(appearance) ||
+          !['generated', 'character'].includes(appearance.mode) ||
+          Object.keys(appearance).some(key => !['mode', 'generated', 'character'].includes(key)) ||
+          (appearance.generated &&
+            (!object(appearance.generated) ||
+              Object.keys(appearance.generated).some(key => key !== 'color') ||
+              (appearance.generated.color !== undefined &&
+                (typeof appearance.generated.color !== 'string' ||
+                  appearance.generated.color.length > 32)))) ||
+          (appearance.character &&
+            (!object(appearance.character) ||
+              Object.keys(appearance.character).some(
+                key => !['catalog_id', 'catalog_version'].includes(key)
+              ) ||
+              (appearance.character.catalog_id !== undefined &&
+                (typeof appearance.character.catalog_id !== 'string' ||
+                  appearance.character.catalog_id.length > 128)) ||
+              (appearance.character.catalog_version !== undefined &&
+                (!Number.isSafeInteger(appearance.character.catalog_version) ||
+                  appearance.character.catalog_version < 0))))
+        )
+          throw new Error('The saved Home appearance reference is unreadable.');
+      }
+      return JSON.parse(JSON.stringify(role));
+    });
+  }
+  if (request.staffing_advice_token !== undefined) {
+    if (
+      typeof request.staffing_advice_token !== 'string' ||
+      !request.staffing_advice_token ||
+      request.staffing_advice_token.length > 128
+    )
+      throw new Error('The saved recommendation reference is unreadable.');
+    lookup.staffing_advice_token = request.staffing_advice_token;
+  }
+  return lookup;
+}
+
+function savedReference() {
+  const raw = window.localStorage.getItem(REFERENCE_KEY);
+  if (!raw) return null;
+  const value = JSON.parse(raw);
+  return { ...value, request: managedHomeLookupRequest(value?.request) };
 }
 
 async function canonicalHome(result) {

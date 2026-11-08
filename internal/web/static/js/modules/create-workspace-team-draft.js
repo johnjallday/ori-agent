@@ -344,8 +344,12 @@
     const name = text(fill.name);
     if (!name) return null;
     // An assigned agent keeps its own definition entirely, so a fill that binds
-    // one carries nothing but its name.
-    if (mode === FILL_ASSIGN) return { mode, name };
+    // one carries only its name and, when explicitly selected, a public advice
+    // handle. The server retains and verifies the actual source witness.
+    if (mode === FILL_ASSIGN) {
+      const recommendation = text(fill.recommendation);
+      return { mode, name, ...(recommendation ? { recommendation } : {}) };
+    }
     const normalized = {
       mode,
       name,
@@ -369,7 +373,7 @@
   // fill becomes a request only at submit. Every precondition is rechecked at
   // action time so a stale suggestion cannot move an agent, replace a role, or
   // bind a declaration that changed after it was rendered.
-  function setRoleFill(draft, roleId, fill) {
+  function setRoleFill(draft, roleId, fill, { restoreIntent = false } = {}) {
     const id = text(roleId);
     const normalized = normalizeFill(fill);
     if (!draft || !id || !normalized) return false;
@@ -389,11 +393,12 @@
     ) {
       return false;
     }
-    if (normalized.mode === FILL_CREATE && findSavedAgent(draft, normalized.name)) return false;
+    if (normalized.mode === FILL_CREATE && findSavedAgent(draft, normalized.name) && !restoreIntent)
+      return false;
     if (normalized.mode === FILL_ASSIGN) {
       const saved = findSavedAgent(draft, normalized.name);
-      if (!saved || !isAttachableSavedAgent(saved)) return false;
-      normalized.name = text(saved.name);
+      if ((!saved || !isAttachableSavedAgent(saved)) && !restoreIntent) return false;
+      if (saved && !normalized.recommendation) normalized.name = text(saved.name);
       // A role-specific action deliberately converts an extra teammate into a
       // role holder. Keeping both would attach the same definition twice.
       draft.savedSelections = (draft.savedSelections || []).filter(
@@ -404,6 +409,97 @@
     draft.agentless = false;
     clearResolvedReadinessConflict(draft);
     return true;
+  }
+
+  // Host advice is presentation data, never a filled role or assignment. Keep
+  // only its public, bounded facts; source witnesses never belong in the UI.
+  function normalizeStaffingAdvice(advice) {
+    if (!advice || ![1, 2].includes(advice.version)) return null;
+    const states = ['recommended', 'needs_choice', 'no_suitable_match', 'unavailable', 'stale'];
+    return {
+      templateId: text(advice.template_id),
+      templateRevision: text(advice.template_revision),
+      state: states.includes(advice.state) ? advice.state : 'unavailable',
+      complete: advice.coverage?.complete === true,
+      assignmentsComplete: advice.coverage?.assignments_complete === true,
+      roles: (Array.isArray(advice.roles) ? advice.roles : [])
+        .filter(role => role && typeof role === 'object')
+        .slice(0, 16)
+        .map(role => ({
+          roleId: text(role.role_id),
+          scope: text(role.scope),
+          state: states.includes(role.state) ? role.state : 'unavailable',
+          choices: (Array.isArray(role.choices) ? role.choices : [])
+            .filter(choice => choice && typeof choice === 'object')
+            .slice(0, 4)
+            .map(choice => ({
+              handle: text(choice.handle),
+              name: Array.from(text(choice.name)).slice(0, 120).join(''),
+              source: ['root', 'legacy'].includes(choice.source) ? choice.source : 'unavailable',
+              configured: choice.configured === true,
+              reasons: (Array.isArray(choice.reasons) ? choice.reasons : [])
+                .filter(reason => reason && typeof reason === 'object')
+                .slice(0, 8)
+                .map(reason => ({
+                  kind: text(reason.kind),
+                  value: text(reason.value).slice(0, 400)
+                })),
+              assignments: (Array.isArray(choice.assignments) ? choice.assignments : [])
+                .filter(fact => fact && fact.kind === 'current_assignment')
+                .slice(0, 8)
+                .map(fact => ({
+                  kind: 'current_assignment',
+                  value: text(fact.value).slice(0, 400)
+                })),
+              gaps: (Array.isArray(choice.gaps) ? choice.gaps : [])
+                .slice(0, 8)
+                .map(gap => text(gap).slice(0, 80))
+            }))
+        }))
+    };
+  }
+
+  function setStaffingAdvice(draft, advice) {
+    if (!draft) return false;
+    // The ordinary persisted builder retains its original V1 contract.
+    draft.staffingAdvice = advice?.version === 1 ? normalizeStaffingAdvice(advice) : null;
+    return Boolean(draft.staffingAdvice);
+  }
+
+  function staffingRoleAdvice(draft, roleId) {
+    const advice = draft?.staffingAdvice;
+    if (
+      !advice ||
+      advice.templateId !== draft.plan?.data?.templateId ||
+      draft.plan.data?.assistantProgram ||
+      draft.plan.data?.groupRoster
+    )
+      return null;
+    const role = advice.roles.find(
+      item => item.roleId === text(roleId) && item.scope === 'workspace'
+    );
+    return role
+      ? {
+          ...role,
+          state: ['recommended', 'needs_choice'].includes(advice.state) ? role.state : advice.state,
+          complete: advice.complete,
+          assignmentsComplete: advice.assignmentsComplete
+        }
+      : null;
+  }
+
+  function selectStaffingChoice(draft, roleId, handle) {
+    const advice = staffingRoleAdvice(draft, roleId);
+    if (!advice || !text(handle) || !['recommended', 'needs_choice'].includes(advice.state))
+      return false;
+    const choice = advice.choices.find(item => item.handle === text(handle));
+    if (!choice || !choice.configured || !['root', 'legacy'].includes(choice.source)) return false;
+    // No implicit clear: an explicit Assign/Create selection always wins.
+    return setRoleFill(draft, roleId, {
+      mode: FILL_ASSIGN,
+      name: choice.name,
+      recommendation: choice.handle
+    });
   }
 
   function setAgentless(draft, enabled) {
@@ -438,7 +534,12 @@
   function clearRoleFill(draft, roleId) {
     const id = text(roleId);
     if (!draft || !id || !draft.roleFills) return false;
-    return draft.roleFills.delete(id);
+    const cleared = draft.roleFills.delete(id);
+    if (cleared && draft.staffingAdvice) {
+      const advice = draft.staffingAdvice.roles.find(role => role.roleId === id);
+      if (advice) advice.state = 'stale';
+    }
+    return cleared;
   }
 
   function getRoleFill(draft, roleId) {
@@ -475,6 +576,7 @@
       // Which declared roles the user has chosen to fill. Empty is the correct
       // starting state and a valid end state (FR7, FR11).
       roleFills: new Map(),
+      staffingAdvice: null,
       savedSelections: [],
       savedRoster: { status: PLAN_IDLE, agents: [], error: '' },
       explicitPrimary: '',
@@ -508,6 +610,7 @@
     // Role ids belong to the blueprint that declared them, so a different
     // blueprint's fills would bind to slots that no longer exist.
     draft.roleFills = new Map();
+    draft.staffingAdvice = null;
     draft.includeBlueprintTeam = true;
     draft.agentless = false;
     if (draft.explicitPrimary && !isSelected(draft, draft.explicitPrimary)) {
@@ -904,77 +1007,6 @@
     return Boolean(isSelected(draft, name) || roleFilledBy(draft, name));
   }
 
-  function matchText(value) {
-    return text(value)
-      .toLocaleLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim()
-      .replace(/\s+/g, ' ');
-  }
-
-  function recommendationMatch(agent, role) {
-    const label = matchText(role && role.label);
-    const name = matchText(agent && agent.name);
-    const savedRole = matchText(agent && agent.role);
-    if (!label || !name) return null;
-    if (name === label) return { rank: 0, kind: 'exact-name', reason: "Matches this role's name" };
-    if (savedRole && savedRole === label) {
-      return { rank: 1, kind: 'exact-role', reason: "Matches this saved agent's role label" };
-    }
-    if (name.includes(label) || label.includes(name)) {
-      return { rank: 2, kind: 'name-text', reason: "Matches text in this role's name" };
-    }
-    if (savedRole && (savedRole.includes(label) || label.includes(savedRole))) {
-      return {
-        rank: 3,
-        kind: 'role-text',
-        reason: "Matches text in this saved agent's role label"
-      };
-    }
-    return null;
-  }
-
-  // Pure recommendation projection. It owns no mutable roster and makes no
-  // request: suggestions are a role/name view over the current declarations,
-  // fills, explicit extras, and attachable saved definitions.
-  function recommendSavedAgents(source, roster) {
-    const roles = (roster?.roles || [])
-      .map((role, index) => ({ ...role, declarationIndex: index }))
-      .filter(role => role.state !== 'filled' && !role.read_only)
-      .sort((left, right) => {
-        const bucket = role => (role.primary ? 0 : role.required ? 1 : 2);
-        return bucket(left) - bucket(right) || left.declarationIndex - right.declarationIndex;
-      });
-    const agents = ((source.savedRoster && source.savedRoster.agents) || []).filter(
-      agent => isAttachableSavedAgent(agent) && !isActuallyIncluded(source, agent.name)
-    );
-    const out = [];
-    for (const role of roles) {
-      const matches = agents
-        .map(agent => ({ agent, match: recommendationMatch(agent, role) }))
-        .filter(item => item.match)
-        .sort(
-          (left, right) =>
-            left.match.rank - right.match.rank ||
-            text(left.agent.name).localeCompare(text(right.agent.name), undefined, {
-              sensitivity: 'base'
-            })
-        );
-      for (const item of matches) {
-        out.push({
-          roleId: role.role_id,
-          roleLabel: role.label,
-          roleRequired: Boolean(role.required),
-          rolePrimary: Boolean(role.primary),
-          agent: item.agent,
-          matchKind: item.match.kind,
-          reason: item.match.reason
-        });
-      }
-    }
-    return out;
-  }
-
   function setSavedRosterLoading(draft) {
     draft.savedRoster = { status: PLAN_LOADING, agents: draft.savedRoster.agents || [], error: '' };
     return draft;
@@ -983,11 +1015,8 @@
   function setSavedRosterReady(draft, agents) {
     const list = (Array.isArray(agents) ? agents : []).filter(agent => text(agent && agent.name));
     draft.savedRoster = { status: PLAN_READY, agents: list, error: '' };
-    for (const [roleID, fill] of draft.roleFills || []) {
-      if (fill.mode !== FILL_ASSIGN) continue;
-      const saved = findSavedAgent(draft, fill.name);
-      if (!saved || !isAttachableSavedAgent(saved)) draft.roleFills.delete(roleID);
-    }
+    // A changed roster is not a user clear. Keep explicit fills visible and
+    // block invalid ones in the role projection instead of reviving autofill.
     return draft;
   }
 
@@ -1312,6 +1341,8 @@
       // Only an empty role has anything left to propose. Assistant-program
       // roles carry none: that declaration's prompts stay server-side.
       if (role.proposed) item.proposed = role.proposed;
+      const advice = staffingRoleAdvice(source, role.roleId);
+      if (advice) item.staffing = advice;
       // Every group-scoped role is read-only here: an existing holder is
       // reported, while a vacancy remains an actionable blocker owned by the
       // group workspace rather than an impossible project-side field (D2).
@@ -1332,18 +1363,26 @@
         const saved = savedAgentsByKey.get(agentKey(fill.name));
         item.state = 'filled';
         item.source = fill.mode === FILL_ASSIGN ? SOURCE_ASSIGNED_WIRE : SOURCE_CREATED_WIRE;
+        if (fill.recommendation) item.recommended = true;
+        item.needs_clear =
+          fill.mode === FILL_CREATE
+            ? Boolean(saved)
+            : !saved ||
+              !isAttachableSavedAgent(saved) ||
+              (Boolean(fill.recommendation) && text(saved.name) !== fill.name);
         // A Create fill's staged face shows on the row before anything is
         // created; an assigned agent wears its own.
         item.agent = {
           name: fill.name,
-          role: saved ? text(saved.role) : '',
+          role: fill.mode === FILL_ASSIGN && saved ? text(saved.role) : '',
           ...(text(fill.mode === FILL_ASSIGN ? saved?.model : fill.model)
             ? { model: text(fill.mode === FILL_ASSIGN ? saved?.model : fill.model) }
             : {}),
           ...(text(fill.mode === FILL_ASSIGN ? saved?.provider : fill.provider)
             ? { provider: text(fill.mode === FILL_ASSIGN ? saved?.provider : fill.provider) }
             : {}),
-          appearance: (saved && saved.appearance) || fill.appearance || null
+          appearance:
+            fill.mode === FILL_ASSIGN ? saved?.appearance || null : fill.appearance || null
         };
         // A filled role has nothing left to propose.
         delete item.proposed;
@@ -1507,7 +1546,10 @@
     const roleSummary = agentless
       ? 'No agents will be created or attached.'
       : roleStaffingSummary(roleRoster);
-    const recommendations = agentless ? [] : recommendSavedAgents(source, roleRoster);
+    // Advice now belongs to its role and comes only from the host's bounded
+    // evidence contract. Keep this old list empty for existing presenters:
+    // matching names/role labels are not a second recommendation engine.
+    const recommendations = [];
 
     const rosterPrimaryName = resolvePrimaryName(source, blueprintEntries, savedEntries);
     const primaryKey = agentKey(rosterPrimaryName);
@@ -1699,6 +1741,16 @@
         anchor: 'saved-agent-picker'
       });
     }
+    for (const role of roleRoster.roles.filter(role => role.needs_clear)) {
+      issues.push({
+        id: `role-choice-unavailable-${role.role_id}`,
+        severity: 'blocking',
+        message: `${role.agent.name} is no longer available for this choice. Clear ${role.label} and choose again.`,
+        recovery: ['fill-required-role'],
+        anchor: `workspace-role-${role.role_id}`,
+        roleId: role.role_id
+      });
+    }
     const missingRequired = roleRoster.roles
       .filter(role => role.required && role.state !== 'filled')
       // Group prerequisites must be recoverable before project-local staffing.
@@ -1780,6 +1832,8 @@
         .map(role => {
           const fill = source.roleFills.get(role.role_id);
           const item = { role_id: role.role_id, mode: fill.mode, name: fill.name };
+          if (fill.mode === FILL_ASSIGN && fill.recommendation)
+            item.recommendation = fill.recommendation;
           if (fill.mode === FILL_CREATE) {
             if (fill.provider) item.provider = fill.provider;
             if (fill.model) item.model = fill.model;
@@ -2020,7 +2074,7 @@
     for (const entry of Array.isArray(state.role_fills) ? state.role_fills : []) {
       const roleId = text(entry && entry.role_id);
       if (!roleId || getRoleFill(draft, roleId)) continue;
-      setRoleFill(draft, roleId, entry);
+      setRoleFill(draft, roleId, entry, { restoreIntent: true });
     }
     for (const name of Array.isArray(state.saved_selections) ? state.saved_selections : []) {
       addSavedAgent(draft, text(name));
@@ -2053,6 +2107,10 @@
     setIncludeBlueprintTeam,
     setAssistantHire,
     setRoleFill,
+    normalizeStaffingAdvice,
+    setStaffingAdvice,
+    staffingRoleAdvice,
+    selectStaffingChoice,
     clearRoleFill,
     setAgentless,
     getRoleFill,
@@ -2080,8 +2138,6 @@
     isSelected,
     isBlueprintOwned,
     isActuallyIncluded,
-    recommendSavedAgents,
-    recommendationMatch,
     isAttachableSavedAgent,
     findSavedAgent,
     identityFrom,

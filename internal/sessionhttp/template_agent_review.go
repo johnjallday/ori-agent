@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -294,7 +295,7 @@ func (h *Handler) seedTemplateAgentsStrict(ws *session.Workspace, tpl projecttem
 		}
 		if !exists {
 			cfg, _ := h.templateAgentCreateConfig(spec)
-			if err := h.agentStore.CreateAgent(spec.Name, cfg); err != nil {
+			if err := h.createTemplateSeededProfile(context.Background(), &result, tpl, spec.Name, cfg); err != nil {
 				return result, &strictTemplateAgentSeedError{
 					Index: index,
 					Name:  spec.Name,
@@ -302,7 +303,6 @@ func (h *Handler) seedTemplateAgentsStrict(ws *session.Workspace, tpl projecttem
 					Cause: err,
 				}
 			}
-			result.OwnedNames = append(result.OwnedNames, spec.Name)
 			if !spec.Tools.IsEmpty() {
 				result.Created = append(result.Created, createdAgent{Name: spec.Name, Tools: spec.Tools})
 			}

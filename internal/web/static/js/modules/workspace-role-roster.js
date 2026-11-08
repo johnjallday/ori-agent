@@ -59,7 +59,19 @@
     openEditor: 'Open in Agents',
     emptyRoster: 'This blueprint declares no roles.',
     alsoHere: 'Also in this workspace',
-    giveRole: 'Give a role…'
+    giveRole: 'Give a role…',
+    useRecommended: 'Use recommended',
+    chooseAnother: 'Choose another',
+    createNew: 'Create new',
+    staffingRecommended: 'A fit from your saved agents',
+    staffingChoice: 'Choose a saved agent — the evidence is not decisive.',
+    staffingNoMatch:
+      'No suitable saved match was found. You can choose manually or create a new agent.',
+    staffingUnavailable: 'Recommendations are unavailable. Choose manually or create a new agent.',
+    staffingStale: 'This advice has changed. Ask your assistant to refresh it, or choose manually.',
+    staffingPartial: 'Only part of the roster could be assessed.',
+    staffingAssignmentsUnknown: 'Current assignments could not be fully verified.',
+    staffingPreserved: 'Reuses the saved profile. Its settings stay as they are.'
   };
 
   // Display order (FR40). The primary slot leads whatever its state, because it
@@ -128,6 +140,8 @@
           // show the instructions the agent would actually get rather than an
           // empty box that hides them.
           proposed: (role && role.proposed) || null,
+          recommended: Boolean(role && role.recommended),
+          staffing: (role && role.staffing) || null,
           declarationIndex: index
         };
         // A role can only be filled by an agent; a projection claiming otherwise
@@ -143,10 +157,21 @@
           : COPY.specialist;
         normalized.scopeLine = scopeLine(normalized.scope);
         normalized.tag = normalized.needsClear
-          ? { key: 'stale', label: COPY.needsClear }
+          ? {
+              key: 'stale',
+              label: [text(normalized.agent && normalized.agent.name), COPY.needsClear]
+                .filter(Boolean)
+                .join(' · ')
+            }
           : stateTag(normalized);
         normalized.sourceLabel =
-          normalized.state === STATE_FILLED ? sourceLabel(normalized.source) : '';
+          normalized.state === STATE_FILLED
+            ? normalized.needsClear
+              ? 'Review this choice'
+              : normalized.recommended
+                ? 'Recommended · saved agent'
+                : sourceLabel(normalized.source)
+            : '';
         normalized.quiet = normalized.state === STATE_EMPTY && !normalized.required;
         normalized.bucket = sortBucket(normalized);
         return normalized;
@@ -221,6 +246,107 @@
   // SUSPENDS itself, shows the agent modal, and restores on close. That swap is
   // the established pattern in this step, which is why "never open a dialog"
   // does not apply — nothing is ever stacked on the full-screen surface.
+  function renderStaffingAdvice(row, options) {
+    var advice = row.staffing;
+    var panel = element('div', 'ws-role-advice');
+    panel.setAttribute('aria-label', 'Saved-agent advice for ' + row.label);
+    var states = {
+      recommended: COPY.staffingRecommended,
+      needs_choice: COPY.staffingChoice,
+      no_suitable_match: COPY.staffingNoMatch,
+      unavailable: COPY.staffingUnavailable,
+      stale: COPY.staffingStale
+    };
+    var status = element(
+      'p',
+      'ws-role-advice__status',
+      (states[advice.state] || COPY.staffingUnavailable) +
+        (options.compact && !advice.assignmentsComplete
+          ? ' ' + COPY.staffingAssignmentsUnknown
+          : '')
+    );
+    status.setAttribute('role', 'status');
+    panel.append(status);
+    if (!advice.complete) panel.append(element('p', 'ws-role-advice__note', COPY.staffingPartial));
+    if (!options.compact && !advice.assignmentsComplete)
+      panel.append(element('p', 'ws-role-advice__note', COPY.staffingAssignmentsUnknown));
+    if (!['recommended', 'needs_choice'].includes(advice.state)) return panel;
+    var choices = Array.isArray(advice.choices) ? advice.choices.slice(0, 4) : [];
+    function choiceCard(choice, index) {
+      var card = element('div', 'ws-role-advice__choice');
+      card.append(element('strong', 'ws-role-advice__name', text(choice.name)));
+      var readiness = choice.configured
+        ? 'Model configured; not live-tested.'
+        : 'Configure this saved agent before reuse.';
+      card.append(
+        element(
+          'p',
+          'ws-role-advice__note',
+          COPY.staffingPreserved + (options.compact ? ' ' + readiness : '')
+        )
+      );
+      if (!options.compact) card.append(element('p', 'ws-role-advice__note', readiness));
+      var reasons = element('ul', 'ws-role-advice__reasons');
+      var labels = {
+        declared_purpose: 'Declared purpose',
+        declared_role: 'Declared role',
+        declared_capability: 'Declared capability',
+        enabled_skill: 'Enabled skill (collection membership)',
+        current_assignment: 'Current assignment'
+      };
+      (choice.reasons || []).slice(0, 3).forEach(function (reason) {
+        if (labels[reason.kind])
+          reasons.append(element('li', '', labels[reason.kind] + ': ' + text(reason.value)));
+      });
+      card.append(reasons);
+      var assignments = element('ul', 'ws-role-advice__assignments');
+      (Array.isArray(choice.assignments) ? choice.assignments : [])
+        .slice(0, 8)
+        .forEach(function (fact) {
+          if (fact && fact.kind === 'current_assignment')
+            assignments.append(element('li', '', 'Verified current role: ' + text(fact.value)));
+        });
+      if (assignments.children.length) card.append(assignments);
+      var gaps = {
+        configuration_unavailable: 'This saved agent needs configuration before reuse.',
+        purpose_unknown: 'No declared purpose is available.',
+        capability_metadata_partial: 'Capability details are incomplete.',
+        skill_metadata_unknown: 'Required skill membership could not be fully verified.',
+        assignment_metadata_partial: 'Only some assignments are shown.'
+      };
+      (choice.gaps || []).forEach(function (gap) {
+        if (gaps[gap]) card.append(element('p', 'ws-role-advice__note', gaps[gap]));
+      });
+      var button = actionButton(
+        index === 0 && advice.state === 'recommended' ? COPY.useRecommended : 'Use this agent',
+        'Use ' + text(choice.name) + ' for ' + row.label,
+        'btn btn-sm btn-primary'
+      );
+      button.disabled =
+        !choice.configured ||
+        !text(choice.handle) ||
+        !['root', 'legacy'].includes(choice.source) ||
+        typeof options.onRecommend !== 'function';
+      button.addEventListener('click', function () {
+        if (!button.disabled) options.onRecommend(row.roleId, choice.handle, row);
+      });
+      card.append(button);
+      return card;
+    }
+    if (choices.length) panel.append(choiceCard(choices[0], 0));
+    if (choices.length > 1) {
+      var alternatives = element('details', 'ws-role-advice__alternatives');
+      alternatives.append(
+        element('summary', '', 'Other suggested agents (' + (choices.length - 1) + ')')
+      );
+      choices.slice(1).forEach(function (choice, index) {
+        alternatives.append(choiceCard(choice, index + 1));
+      });
+      panel.append(alternatives);
+    }
+    return panel;
+  }
+
   function renderRow(row, options) {
     var item = element('li', 'ws-role-row');
     item.dataset.roleId = row.roleId;
@@ -253,10 +379,12 @@
     head.append(tag);
     item.append(head);
 
-    var meta = element('p', 'ws-role-row__meta', row.scopeLine);
-    item.append(meta);
-    if (row.description) {
-      item.append(element('p', 'ws-role-row__description', row.description));
+    // The ordinary assistant pane already names the workspace/blueprint and
+    // needs room for the choice itself. Keep full target context in Team and
+    // for Home/project-scoped roles, where it distinguishes the binding owner.
+    if (!(options.compact && row.staffing?.scope === 'workspace')) {
+      item.append(element('p', 'ws-role-row__meta', row.scopeLine));
+      if (row.description) item.append(element('p', 'ws-role-row__description', row.description));
     }
 
     if (row.readOnly) {
@@ -306,6 +434,9 @@
       return item;
     }
 
+    if (row.staffing && (row.state !== STATE_FILLED || row.auto)) {
+      item.append(renderStaffingAdvice(row, options));
+    }
     var actions = element('div', 'ws-role-row__actions');
     if (row.state === STATE_FILLED && !row.auto) {
       if (typeof options.agentHref === 'function') {
@@ -353,15 +484,15 @@
       // On a role Ori fills by itself these are a way to choose someone else,
       // so neither is the row's primary action.
       var create = actionButton(
-        COPY.create,
+        row.staffing ? COPY.createNew : COPY.create,
         'Create an agent for ' + row.label,
-        row.auto ? 'btn btn-sm btn-outline-secondary' : 'btn btn-sm btn-primary'
+        row.auto || row.staffing ? 'btn btn-sm btn-outline-secondary' : 'btn btn-sm btn-primary'
       );
       create.addEventListener('click', function () {
         options.onRequestCreate(row.roleId, row);
       });
       var assign = actionButton(
-        COPY.assign,
+        row.staffing ? COPY.chooseAnother : COPY.assign,
         'Assign an agent to ' + row.label,
         'btn btn-sm btn-outline-secondary'
       );
@@ -431,6 +562,7 @@
       // modal for it. This component never collects the values itself.
       onRequestCreate: given.onRequestCreate || noop,
       onAssign: given.onAssign || noop,
+      onRecommend: typeof given.onRecommend === 'function' ? given.onRecommend : null,
       onClear: given.onClear || noop,
       // Optional: only a host that stages fills offers Edit on a filled row.
       onEdit: typeof given.onEdit === 'function' ? given.onEdit : null,
@@ -442,7 +574,8 @@
       // Optional: when absent, unbound agents are listed without an action,
       // which is the right answer for the wizard where none exist yet.
       onAssignExisting: given.onAssignExisting,
-      showHeader: given.showHeader !== false
+      showHeader: given.showHeader !== false,
+      compact: given.compact === true
     };
   }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -103,6 +104,11 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 		} else if req.Monitoring != nil {
 			return errBuildTurn{http.StatusBadRequest, "placement_only"}
 		}
+		selected, selectionErr := h.selectBuildStaffing(ctx, userID, session, draft, validation)
+		if selectionErr != nil || (req.Sync && !reflect.DeepEqual(selected, session.SelectedStaffing)) {
+			return errBuildTurn{http.StatusConflict, "staffing_review_changed"}
+		}
+		session.SelectedStaffing = selected
 		now := deps.Store.Now()
 		before := session.Draft
 		var lines []string
@@ -117,6 +123,14 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 			}
 			for _, field := range fields {
 				session.EditedFields[field] = session.Version + 1
+				switch field {
+				case "team":
+					staleBuildStaffingTeamEdits(session.Staffing, before, draft)
+				case "blueprint_id", "description", "goal", "inputs", "parent_id":
+					if session.Staffing != nil {
+						session.Staffing.State = "stale"
+					}
+				}
 			}
 			session.CreateNow = false
 			lines = describeFormEdit(before, draft, validation)

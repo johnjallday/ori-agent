@@ -238,15 +238,11 @@ func (h *Handler) deleteGroupWithContents(w http.ResponseWriter, ctx context.Con
 		}
 	}
 
-	// Remove every member (sessions, entry agent, SQLite row). The group's own
-	// folder removal below also clears the on-disk tree in one shot.
+	// Keep creation witnesses until both rows and folders have been removed.
+	// Never clean a profile while a surviving/restorable member still uses it.
+	entryCleanups := make(map[string]*entryAgentCleanup, len(descendants)+1)
 	for _, memberID := range descendants {
-		entryAgent := ""
-		if member, mErr := h.store.GetWorkspace(ctx, memberID); mErr == nil && !member.IsGroup() && h.workspaceStore != nil {
-			if fws, ferr := h.workspaceStore.Get(memberID); ferr == nil && fws != nil {
-				entryAgent = strings.TrimSpace(fws.EntryAgentName())
-			}
-		}
+		candidate := h.prepareEntryAgentCleanup(ctx, memberID)
 		if deleteSessions {
 			_ = h.store.DeleteSessionsByWorkspace(ctx, memberID)
 		} else {
@@ -254,17 +250,13 @@ func (h *Handler) deleteGroupWithContents(w http.ResponseWriter, ctx context.Con
 		}
 		if err := h.store.DeleteWorkspace(ctx, memberID); err != nil {
 			logger.Warn("Failed to delete group member", logger.Fields{"id": memberID, "error": err})
+		} else {
+			entryCleanups[memberID] = candidate
 		}
-		h.cleanupEntryAgent(entryAgent, memberID)
 	}
 
 	// Handle the group's own sessions and entry agent, then its SQLite row.
-	groupEntryAgent := ""
-	if h.workspaceStore != nil {
-		if fws, ferr := h.workspaceStore.Get(ws.ID); ferr == nil && fws != nil {
-			groupEntryAgent = strings.TrimSpace(fws.EntryAgentName())
-		}
-	}
+	entryCleanups[ws.ID] = h.prepareEntryAgentCleanup(ctx, ws.ID)
 	if deleteSessions {
 		_ = h.store.DeleteSessionsByWorkspace(ctx, ws.ID)
 	} else {
@@ -279,10 +271,13 @@ func (h *Handler) deleteGroupWithContents(w http.ResponseWriter, ctx context.Con
 	// Remove the whole folder tree from disk + cache in one call.
 	if h.workspaceStore != nil {
 		if err := h.workspaceStore.Delete(ws.ID); err != nil {
+			entryCleanups = nil
 			logger.Warn("Failed to delete group folder tree", logger.Fields{"id": ws.ID, "error": err})
 		}
 	}
-	h.cleanupEntryAgent(groupEntryAgent, ws.ID)
+	for id, candidate := range entryCleanups {
+		h.cleanupEntryAgent(ctx, candidate, id)
+	}
 
 	logger.Info("Group deleted with contents", logger.Fields{"id": ws.ID, "members": len(descendants)})
 	orihttp.RespondNoContent(w)
@@ -350,13 +345,8 @@ func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws
 	}
 
 	// Permanent removal: delete or unlink the group's own sessions, clean up
-	// its entry agent, then drop the SQLite row + folder.
-	groupEntryAgent := ""
-	if h.workspaceStore != nil {
-		if fws, ferr := h.workspaceStore.Get(ws.ID); ferr == nil && fws != nil {
-			groupEntryAgent = strings.TrimSpace(fws.EntryAgentName())
-		}
-	}
+	// its verified owned entry agent, then drop the SQLite row + folder.
+	entryCleanup := h.prepareEntryAgentCleanup(ctx, ws.ID)
 	if deleteSessions {
 		_ = h.store.DeleteSessionsByWorkspace(ctx, ws.ID)
 	} else {
@@ -369,10 +359,11 @@ func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws
 	}
 	if h.workspaceStore != nil {
 		if err := h.workspaceStore.Delete(ws.ID); err != nil {
+			entryCleanup = nil
 			logger.Warn("Failed to delete group folder", logger.Fields{"id": ws.ID, "error": err})
 		}
 	}
-	h.cleanupEntryAgent(groupEntryAgent, ws.ID)
+	h.cleanupEntryAgent(ctx, entryCleanup, ws.ID)
 
 	logger.Info("Group deleted (members un-nested to root)", logger.Fields{"id": ws.ID})
 	orihttp.RespondNoContent(w)
@@ -393,20 +384,6 @@ func (h *Handler) directChildIDs(ctx context.Context, parentID string) []string 
 		}
 	}
 	return direct
-}
-
-// cleanupEntryAgent deletes a workspace's entry agent from the global agent
-// store, if present. Non-fatal.
-func (h *Handler) cleanupEntryAgent(name, workspaceID string) {
-	name = strings.TrimSpace(name)
-	if name == "" || h.agentStore == nil {
-		return
-	}
-	if _, exists := h.agentStore.GetAgent(name); exists {
-		if err := h.agentStore.DeleteAgent(name); err != nil {
-			logger.Warn("Failed to delete workspace entry agent", logger.Fields{"workspace_id": workspaceID, "agent": name, "error": err})
-		}
-	}
 }
 
 // trashWorkspace moves a workspace's folder to the system trash and marks the

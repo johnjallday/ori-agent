@@ -87,12 +87,9 @@ func (h *Handler) seedRoleStaffedAgents(
 			if provenance := assistantSetupAgentProvenance(ctx, requested.Name); provenance != nil {
 				config.AssistantSetup = provenance
 			}
-			if err := h.agentStore.CreateAgent(requested.Name, config); err != nil {
+			if err := h.createSeededProfile(ctx, &result, requested.Name, config); err != nil {
 				return result, fmt.Errorf("agent %q could not be created: %w", requested.Name, err)
 			}
-			// Recorded immediately after the create succeeds, so a later
-			// failure undoes exactly this set and nothing the user owned.
-			result.OwnedNames = append(result.OwnedNames, requested.Name)
 			if !spec.Tools.IsEmpty() {
 				result.Created = append(result.Created, createdAgent{Name: requested.Name, Tools: spec.Tools})
 			}

@@ -85,7 +85,7 @@ chmod 0755 "$root/artifacts/reaper-plugin-darwin-arm64"
         (self.music / ".ori-plugin/plugin.json").write_text(json.dumps({"version": version}))
         (self.music / "skills/music-project-management/SKILL.md").write_text(skill + "\n")
 
-    def run_demo(self, paired, ref):
+    def run_demo(self, paired, ref, suite=None, provider=None):
         sandbox = self.root / ("paired" if paired else "standalone")
         barrier = self.root / "build-barrier"
         env = dict(os.environ, HOME=str(self.root), TMPDIR=str(self.root / "tmp"),
@@ -98,8 +98,12 @@ chmod 0755 "$root/artifacts/reaper-plugin-darwin-arm64"
             args = ["reaper-demo.sh", "serve", "--reaper-source", str(self.reaper), "--music-source", str(self.music)]
             ref_flag = "--music-ref"
         else:
-            args = ["music-home-demo.sh", "serve", "--source", str(self.music)]
+            args = ["music-home-demo.sh", "test" if suite else "serve", "--source", str(self.music)]
             ref_flag = "--source-ref"
+        if suite:
+            args += ["--suite", suite]
+        if provider:
+            args += ["--provider", provider]
         if ref is not None:
             args += [ref_flag, ref]
         args += ["--sandbox", str(sandbox)]
@@ -127,6 +131,40 @@ chmod 0755 "$root/artifacts/reaper-plugin-darwin-arm64"
                     export = sandbox / "plugin-source/music-project-management"
                     self.assertEqual(json.loads((export / ".ori-plugin/plugin.json").read_text())["version"], version)
                     self.assert_unchanged()
+
+    def test_roster_suite_accepts_only_disposable_exact_local_candidate(self):
+        for suite in ("roster-staffing", "roster-folder", "roster-folder-recovery", "roster-folder-song"):
+            with self.subTest(suite=suite):
+                result, sandbox, barrier = self.run_demo(False, "reviewed-candidate", suite=suite)
+                self.assertEqual(result.returncode, 73, result.stdout + result.stderr)
+                self.assertTrue(barrier.is_file())
+                self.assertEqual((sandbox / "evidence/candidate-revision.txt").read_text().strip(), self.reviewed)
+                self.assert_unchanged()
+
+    def test_roster_suite_cannot_claim_reviewed_release_acceptance(self):
+        for suite in ("roster-staffing", "roster-folder", "roster-folder-recovery", "roster-folder-song"):
+            with self.subTest(suite=suite):
+                result, sandbox, barrier = self.run_demo(False, "reviewed-candidate", suite=suite, provider="reviewed")
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("other suites require local", result.stderr)
+                self.assertFalse(barrier.exists())
+                self.assertFalse(sandbox.exists())
+                self.assert_unchanged()
+
+    def test_reviewed_roster_suite_requires_published_provider_mode(self):
+        result, sandbox, barrier = self.run_demo(False, "reviewed-candidate", suite="roster-folder-reviewed")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("require test --provider reviewed", result.stderr)
+        self.assertFalse(barrier.exists())
+        self.assertFalse(sandbox.exists())
+        self.assert_unchanged()
+
+    def test_reviewed_roster_suite_keeps_candidate_validation_read_only(self):
+        result, sandbox, barrier = self.run_demo(False, "reviewed-candidate", suite="roster-folder-reviewed", provider="reviewed")
+        self.assertEqual(result.returncode, 73, result.stdout + result.stderr)
+        self.assertTrue(barrier.is_file())
+        self.assertEqual((sandbox / "evidence/candidate-revision.txt").read_text().strip(), self.reviewed)
+        self.assert_unchanged()
 
     def test_unknown_or_option_like_ref_fails_before_build_or_sandbox(self):
         for paired, ref in ((False, "missing-commit"), (True, "--not-an-option")):

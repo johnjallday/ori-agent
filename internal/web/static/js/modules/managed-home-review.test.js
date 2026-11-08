@@ -3,8 +3,67 @@ import assert from 'node:assert/strict';
 import {
   managedHomeReviewKey,
   forgetManagedHomeReference,
-  managedHomeLauncherLanding
+  managedHomeLauncherLanding,
+  managedHomeLookupRequest
 } from './managed-home-review.js';
+
+test('read-only recovery retains exact public team material and refuses private witness injection', () => {
+  const request = {
+    group_template_id: 'home-template',
+    revision: 'revision',
+    name: 'Collection',
+    group_review_token: 'team-review',
+    idempotency_key: 'operation',
+    staffing_advice_token: 'advice-review',
+    role_staffing: [
+      { role_id: 'manager', mode: 'assign', name: 'Aster', recommendation: 'candidate' }
+    ]
+  };
+  assert.deepEqual(managedHomeLookupRequest(request), request);
+  const copy = managedHomeLookupRequest(request);
+  copy.role_staffing[0].name = 'Changed';
+  assert.equal(request.role_staffing[0].name, 'Aster');
+  assert.throws(
+    () =>
+      managedHomeLookupRequest({
+        ...request,
+        role_staffing: [{ ...request.role_staffing[0], source_witness: 'private' }]
+      }),
+    /unsupported/
+  );
+  assert.throws(() => managedHomeLookupRequest({ ...request, role_staffing: [] }), /unreadable/);
+  for (const appearance of [
+    { mode: 'generated', generated: { private_prompt: 'private' } },
+    { mode: 'character', character: { source_witness: 'private' } },
+    { mode: 'uploaded', uploaded: { image: '/private/path' } },
+    { mode: 'generated', generated: ['private'] }
+  ]) {
+    assert.throws(
+      () =>
+        managedHomeLookupRequest({
+          ...request,
+          role_staffing: [{ role_id: 'manager', mode: 'create', name: 'New', appearance }]
+        }),
+      /appearance.*unreadable/
+    );
+  }
+  const create = {
+    ...request,
+    role_staffing: [
+      {
+        role_id: 'manager',
+        mode: 'create',
+        name: 'New',
+        appearance: {
+          mode: 'character',
+          generated: { color: '#123456' },
+          character: { catalog_id: 'guide', catalog_version: 1 }
+        }
+      }
+    ]
+  };
+  assert.deepEqual(managedHomeLookupRequest(create), create);
+});
 
 test('a launcher landing survives the shared result only when nothing needs the group notice', () => {
   const landing = '/assistant?folder_offer_id=offer-1';

@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -42,6 +43,9 @@ type buildSetupRequest struct {
 	// with the folder; it becomes the workspace goal. Empty takes the plan's
 	// default. A Retry continues with the brief the run started with.
 	Brief string `json:"brief,omitempty"`
+	// A bounded draft action, not consent to start setup. Raw JSON preserves
+	// explicit null/unknown-field rejection instead of falling into execution.
+	HomeStaffing json.RawMessage `json:"home_staffing,omitempty"`
 }
 
 // Fixed host lines for a setup run.
@@ -125,6 +129,9 @@ func (h *Handler) workspaceBuildReviewGuard(ctx context.Context, offer personala
 	session := doc.Session(sessionID)
 	if session == nil || (session.Status != personalassistant.WorkspaceBuildOpen && session.Status != personalassistant.WorkspaceBuildPreparing) ||
 		session.Folder == nil || session.Folder.Observation.ID != review.ObservationID {
+		return personalassistant.ErrBuildSetupNotOwned
+	}
+	if fence, ok := ctx.Value(buildHomeStaffingFenceKey{}).(buildHomeStaffingFence); ok && !fence.matches(session) {
 		return personalassistant.ErrBuildSetupNotOwned
 	}
 	projection, err := deps.Assistant(ctx, userID)
@@ -211,10 +218,19 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 	if !decodeBuildBody(w, r, &req) {
 		return
 	}
+	if len(req.HomeStaffing) > 0 {
+		h.postWorkspaceBuildHomeStaffing(w, r, id, req)
+		return
+	}
+	release, ok := h.acquirePlacementBuild(w, r, id, "setup")
+	if !ok {
+		return
+	}
+	defer release()
 	req.PlanDigest, req.EntryName = strings.TrimSpace(req.PlanDigest), strings.TrimSpace(req.EntryName)
 	ctx := r.Context()
 	userID := h.workspaceBuildUserID(ctx)
-	readiness := h.workspaceBuildReadiness(ctx, userID)
+	readiness := h.workspaceBuildSetupReadiness(ctx, userID)
 	if !readiness.available {
 		respondBuildUnavailable(w, readiness.reason)
 		return

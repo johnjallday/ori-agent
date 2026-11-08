@@ -392,6 +392,30 @@ test('source owners can label a later goal or omit an irrelevant goal without ch
   );
 });
 
+test('folder final review names exact Home reuse, creation and existing holders', () => {
+  const material = setupCreationReviewMaterial({
+    plan: {
+      home_staffing: {
+        roles: [
+          { role_id: 'manager', label: 'Manager' },
+          { role_id: 'helper', label: 'Helper' },
+          { role_id: 'held', label: 'Held', held_name: 'Existing' }
+        ],
+        choices: [
+          { role_id: 'manager', mode: 'assign', name: '<Aster>' },
+          { role_id: 'helper', mode: 'create', name: 'Cedar', provider: 'fixture', model: 'model' }
+        ]
+      }
+    }
+  });
+  assert.equal(material.rows[0].value, '<Aster> · Reuse saved agent');
+  assert.match(material.rows[0].detail, /No new skill or access grants/);
+  assert.equal(material.rows[1].value, 'Cedar · Create new agent');
+  assert.equal(material.rows[2].value, 'Existing · Already present');
+  const html = workspaceCreationReviewHTML({ ...blank, ...material });
+  assert.ok(html.includes('&lt;Aster&gt;') && !html.includes('<Aster>'));
+});
+
 test('the navigation shared with File Janitor preserves its distinct disclosure without baking it into Blank', () => {
   const html = creationReviewNavigationHTML({
     ...blank,

@@ -84,7 +84,7 @@ func (h *Handler) refuseClaimedBuildCreate(ctx context.Context, id string) error
 		if build.Preparation != nil || build.PlacementSource != nil {
 			return errors.New("creation belongs to reviewed preparation")
 		}
-		if build.Folder != nil || build.Link != nil {
+		if build.Folder != nil || build.Link != nil || build.SelectedStaffing != nil {
 			op := creationOperationFrom(ctx)
 			var request createWorkspaceRequest
 			if op == nil || json.Unmarshal([]byte(op.Request), &request) != nil || request.BuildReviewVersion < 1 {

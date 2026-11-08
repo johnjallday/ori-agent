@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/rosterstaffing"
 )
 
 // The model's reply to one build turn (FR14). Strict structured output needs
@@ -24,13 +25,14 @@ import (
 // question". The host validates everything here before any of it reaches the
 // session (FR15); the model has no other way to change the form.
 type buildReply struct {
-	Say          string                `json:"say" jsonschema_description:"What you say to the user now, plain text, at most 600 characters. Describe what you just did on the form."`
-	Ask          buildReplyAsk         `json:"ask" jsonschema_description:"One clear question, or an empty question when you are not asking anything."`
-	Patch        buildReplyPatch       `json:"patch" jsonschema_description:"The form fields this reply sets. List each one you set in patch.set."`
-	Why          []buildReplyWhy       `json:"why" jsonschema_description:"One short reason per section you changed."`
-	Alternatives []buildReplyAlternate `json:"alternatives" jsonschema_description:"Up to two other blueprints that could fit, or an empty list."`
-	Ready        bool                  `json:"ready" jsonschema_description:"Ready to create when blueprint, name, description and team are all decided; not operational readiness or folder consent."`
-	CreateNow    bool                  `json:"create_now" jsonschema_description:"True only when the user has just told you to create the workspace."`
+	Staffing     rosterstaffing.Proposal `json:"staffing" jsonschema_description:"Advisory roster matches for the chosen blueprint only, using supplied opaque role, candidate and evidence handles. Never an assignment. Empty roles when unavailable."`
+	Say          string                  `json:"say" jsonschema_description:"What you say to the user now, plain text, at most 600 characters. Describe what you just did on the form."`
+	Ask          buildReplyAsk           `json:"ask" jsonschema_description:"One clear question, or an empty question when you are not asking anything."`
+	Patch        buildReplyPatch         `json:"patch" jsonschema_description:"The form fields this reply sets. List each one you set in patch.set."`
+	Why          []buildReplyWhy         `json:"why" jsonschema_description:"One short reason per section you changed."`
+	Alternatives []buildReplyAlternate   `json:"alternatives" jsonschema_description:"Up to two other blueprints that could fit, or an empty list."`
+	Ready        bool                    `json:"ready" jsonschema_description:"Ready to create when blueprint, name, description and team are all decided; not operational readiness or folder consent."`
+	CreateNow    bool                    `json:"create_now" jsonschema_description:"True only when the user has just told you to create the workspace."`
 }
 
 type buildReplyAsk struct {
@@ -182,6 +184,7 @@ type buildPromptInput struct {
 	Groups        []buildGroup
 	Nudge         bool
 	ProposalOnly  bool
+	Staffing      *buildStaffingContext
 	// Plan is the host's ready setup plan for a recognized folder, when there
 	// is one: the model narrates it and sets only what it leaves open.
 	Plan *personalassistant.BuildFolderPlan
@@ -417,6 +420,7 @@ func buildSystemPrompt(input buildPromptInput) string {
 		writeBuildRules(&b)
 		fmt.Fprintf(&b, "Blueprints (id \"\" is Blank):\n%s\n\n", catalogJSON)
 	}
+	b.WriteString(buildStaffingInstructions(input.Staffing))
 	fmt.Fprintf(&b, "The user's saved agents:\n%s\n\n", agentsJSON)
 	fmt.Fprintf(&b, "The user's groups:\n%s\n\n", groupsJSON)
 	fmt.Fprintf(&b, "The form now:\n%s\n\n", draftJSON)
@@ -650,10 +654,27 @@ func buildPromptDraft(session *personalassistant.WorkspaceBuildSession) map[stri
 		out["explicitly_edited_fields"] = session.EditedFields
 	}
 	if team := session.TeamPatch; team != nil {
-		out["team"] = team
+		roles := make([]buildReplyRole, 0, len(team.Roles))
+		for _, role := range team.Roles {
+			roles = append(roles, buildReplyRole{RoleID: role.RoleID, Mode: role.Mode, AgentName: role.AgentName})
+		}
+		out["team"] = struct {
+			Mode        string           `json:"mode"`
+			Roles       []buildReplyRole `json:"roles"`
+			SavedAgents []string         `json:"saved_agents"`
+		}{team.Mode, roles, team.SavedAgents}
 	}
 	if len(draft.RoleStaffing) > 0 {
-		out["role_staffing"] = json.RawMessage(draft.RoleStaffing)
+		// A manual create can carry private instructions and appearance/config
+		// references. Only the selected role/action/name belongs in inference.
+		var roles []struct {
+			RoleID string `json:"role_id"`
+			Mode   string `json:"mode"`
+			Name   string `json:"name"`
+		}
+		if json.Unmarshal(draft.RoleStaffing, &roles) == nil {
+			out["role_staffing"] = roles
+		}
 	}
 	if len(draft.ExistingAgentNames) > 0 {
 		out["saved_agents"] = draft.ExistingAgentNames
@@ -713,14 +734,14 @@ func buildMessages(session *personalassistant.WorkspaceBuildSession) []llm.Messa
 // callBuildModel runs one model call with the structured-output path when the
 // provider has it, and a JSON-only chat otherwise (FR31). The reply is decoded
 // strictly: an unknown field is a failed reply, not a partial one.
-func callBuildModel(ctx context.Context, model WorkspaceBuildModel, system string, messages []llm.Message) (buildReply, error) {
+func callBuildModel(ctx context.Context, model WorkspaceBuildModel, system string, messages []llm.Message, isolated bool) (buildReply, error) {
 	if model.Provider == nil {
 		return buildReply{}, ErrWorkspaceBuildNoModel
 	}
 	ctx, cancel := context.WithTimeout(ctx, workspaceBuildModelTimeout)
 	defer cancel()
 	var content string
-	if structured, ok := model.Provider.(llm.StructuredOutputProvider); ok {
+	if structured, ok := model.Provider.(llm.StructuredOutputProvider); ok && !isolated {
 		resp, err := structured.ChatWithStructuredOutput(ctx, llm.StructuredOutputRequest{
 			Model:        model.Model,
 			Messages:     messages,
@@ -739,6 +760,7 @@ func callBuildModel(ctx context.Context, model WorkspaceBuildModel, system strin
 			SystemPrompt: system + buildJSONInstruction,
 			Temperature:  0.2,
 			MaxTokens:    2000,
+			Isolated:     isolated,
 		})
 		if err != nil {
 			return buildReply{}, err
@@ -754,12 +776,14 @@ Reply with one JSON object only, no prose around it, with exactly these keys:
 {"say":"","ask":{"question":"","choices":[{"id":"","label":""}],"allow_free_text":true},
 "patch":{"set":[],"blueprint_id":"","name":"","description":"","goal":"","inputs":[{"id":"","value":""}],"parent_id":"","ask_folder":false,
 "team":{"mode":"","agents":[{"name":"","action":"","rename":"","model":"","provider":"","system_prompt":""}],"roles":[{"role_id":"","mode":"","agent_name":""}],"saved_agents":[]},
-"tags":[],"color":""},"why":[{"section":"","text":""}],"alternatives":[{"blueprint_id":"","reason":""}],"ready":false,"create_now":false}`
+"tags":[],"color":""},"why":[{"section":"","text":""}],"alternatives":[{"blueprint_id":"","reason":""}],"ready":false,"create_now":false,
+"staffing":{"roles":[{"role_id":"","state":"","choices":[{"candidate":"","evidence":[]}]}]}}
+Use an empty staffing.roles list when staffing data is unavailable.`
 
 func decodeBuildReply(content string) (buildReply, error) {
 	payload := strings.TrimSpace(llm.StripCodeFence(content))
-	if payload == "" {
-		return buildReply{}, errors.New("workspace build: empty model reply")
+	if payload == "" || len(payload) > 64*1024 {
+		return buildReply{}, errors.New("workspace build: empty or oversized model reply")
 	}
 	var reply buildReply
 	decoder := json.NewDecoder(bytes.NewReader([]byte(payload)))

@@ -20,7 +20,7 @@ import (
 // draft is exactly the create request the wizard submits; nothing here
 // creates, installs, or attaches anything.
 const (
-	WorkspaceBuildSchemaVersion = 5
+	WorkspaceBuildSchemaVersion = 7
 	workspaceBuildFileName      = "workspace-build-v1.json"
 	workspaceBuildLockName      = "workspace-build-v1.lock"
 	workspaceBuildMaxBytes      = 512 * 1024
@@ -322,25 +322,27 @@ func (d BuildDraft) HasBlueprint() bool {
 
 // WorkspaceBuildSession is one build (FR11).
 type WorkspaceBuildSession struct {
-	PlacementSource     *InboxPlacementSource  `json:"placement_source,omitempty"`
-	PlacementMonitoring bool                   `json:"placement_monitoring,omitempty"`
-	ID                  string                 `json:"id"`
-	Status              WorkspaceBuildStatus   `json:"status"`
-	Version             int64                  `json:"version"`
-	CreatedAt           time.Time              `json:"created_at"`
-	UpdatedAt           time.Time              `json:"updated_at"`
-	EntryPoint          string                 `json:"entry_point"`
-	Assistant           BuildAssistant         `json:"assistant"`
-	Draft               BuildDraft             `json:"draft"`
-	TeamState           json.RawMessage        `json:"team_state,omitempty"`
-	TeamPatch           *BuildTeamPatch        `json:"team_patch,omitempty"`
-	Transcript          []BuildTranscriptEntry `json:"transcript"`
-	PendingQuestion     *BuildQuestion         `json:"pending_question"`
-	Why                 []BuildWhy             `json:"why,omitempty"`
-	Alternatives        []BuildAlternative     `json:"alternatives,omitempty"`
-	Rejections          []BuildRejection       `json:"rejections,omitempty"`
-	NeedsHome           *BuildNeedsHome        `json:"needs_home"`
-	FurthestStep        int                    `json:"furthest_step"`
+	PlacementSource     *InboxPlacementSource   `json:"placement_source,omitempty"`
+	PlacementMonitoring bool                    `json:"placement_monitoring,omitempty"`
+	ID                  string                  `json:"id"`
+	Status              WorkspaceBuildStatus    `json:"status"`
+	Version             int64                   `json:"version"`
+	CreatedAt           time.Time               `json:"created_at"`
+	UpdatedAt           time.Time               `json:"updated_at"`
+	EntryPoint          string                  `json:"entry_point"`
+	Assistant           BuildAssistant          `json:"assistant"`
+	Draft               BuildDraft              `json:"draft"`
+	TeamState           json.RawMessage         `json:"team_state,omitempty"`
+	TeamPatch           *BuildTeamPatch         `json:"team_patch,omitempty"`
+	Staffing            *BuildStaffing          `json:"staffing,omitempty"`
+	SelectedStaffing    *BuildStaffingSelection `json:"selected_staffing,omitempty"`
+	Transcript          []BuildTranscriptEntry  `json:"transcript"`
+	PendingQuestion     *BuildQuestion          `json:"pending_question"`
+	Why                 []BuildWhy              `json:"why,omitempty"`
+	Alternatives        []BuildAlternative      `json:"alternatives,omitempty"`
+	Rejections          []BuildRejection        `json:"rejections,omitempty"`
+	NeedsHome           *BuildNeedsHome         `json:"needs_home"`
+	FurthestStep        int                     `json:"furthest_step"`
 	// Applied lists the draft fields the last assistant turn set, so the
 	// wizard applies (and animates) only those.
 	Applied   []string `json:"applied,omitempty"`
@@ -450,6 +452,8 @@ func (s *WorkspaceBuildSession) Settle() {
 	s.Transcript = []BuildTranscriptEntry{}
 	s.TeamState = nil
 	s.TeamPatch = nil
+	s.Staffing = nil
+	s.SelectedStaffing = nil
 	s.PendingQuestion = nil
 	s.Why = nil
 	s.Alternatives = nil
@@ -570,6 +574,12 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 }
 
 func validateBuildSession(session WorkspaceBuildSession) error {
+	if err := session.Staffing.validate(session.ContextVersion); err != nil {
+		return err
+	}
+	if err := session.SelectedStaffing.validate(); err != nil {
+		return err
+	}
 	if err := session.PlacementSource.validate(); err != nil {
 		return err
 	}

@@ -415,6 +415,9 @@ func (h *folderSetupHost) forgetAll() {
 // shows them. Every string is plain text and names no path.
 func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.FolderSetupRequest) (personalassistant.FolderSetupPlan, error) {
 	plan, err := h.plan(ctx, req)
+	if err == nil {
+		plan, err = h.withFolderHomeStaffingReview(ctx, req, plan)
+	}
 	h.notePlan(req.UserID, err)
 	return plan, err
 }

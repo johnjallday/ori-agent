@@ -63,6 +63,23 @@ func TestPluginSkillsAreReadFromTheInstallFolder(t *testing.T) {
 	}
 }
 
+func TestSkillMetadataResolutionOmitsPromptsAndKeepsSourceConflicts(t *testing.T) {
+	f := newPluginSkillsFixture(t)
+	f.install(t, "music", "catalog")
+	for _, resolve := range []func(string) (*Skill, bool, error){f.manager.ResolveSkillMetadataByName, f.manager.ResolvePluginSkillMetadataByName} {
+		skill, found, err := resolve("catalog")
+		if err != nil || !found || skill.Prompt != "" || skill.Source != SourcePlugin {
+			t.Fatal("metadata lookup included prompt or lost source", err)
+		}
+	}
+	writeTestSkill(t, filepath.Join(f.base, "Ori Workspaces", "Skills", "catalog"), "catalog", "Local copy", "Private local prompt")
+	for _, resolve := range []func(string) (*Skill, bool, error){f.manager.ResolveSkillMetadataByName, f.manager.ResolvePluginSkillMetadataByName} {
+		if _, found, err := resolve("catalog"); found || !errors.Is(err, ErrSkillSourceConflict) {
+			t.Fatal("metadata lookup bypassed source conflict", err)
+		}
+	}
+}
+
 func TestAPluginSkillDisappearsWhenTheProviderStopsListingIt(t *testing.T) {
 	f := newPluginSkillsFixture(t)
 	f.install(t, "reaper", "reaper-mixing")

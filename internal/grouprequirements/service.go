@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/rosterstaffing"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -91,6 +92,11 @@ type Input struct {
 	// inert Group Template provenance in the same write as the Home.
 	GroupTemplateID       string
 	GroupTemplateRevision string
+	// HomeStaffing is compiled, private material for the later canonical role
+	// owner. Claim still prepares only the Home; it never staffs these roles.
+	HomeStaffing *rosterstaffing.TeamIntent
+	// HomeAdvice is an inert shared-contract recommendation, never a selection.
+	HomeAdvice *rosterstaffing.Advice
 	// replayChildWorkspaceID is the child an idempotent replay already made.
 	// It is that operation's own resource workspace, never a second one.
 	replayChildWorkspaceID string
@@ -184,6 +190,8 @@ type Receipt struct {
 	TargetWorkspaceID       string                                   `json:"target_workspace_id,omitempty"`
 	GroupTemplateID         string                                   `json:"group_template_id,omitempty"`
 	GroupTemplateRev        string                                   `json:"group_template_revision,omitempty"`
+	HomeStaffing            *rosterstaffing.TeamIntent               `json:"home_staffing,omitempty"`
+	HomeAdvice              *rosterstaffing.Advice                   `json:"home_advice,omitempty"`
 	HomeProvider            *workspace.AssistantProgramHomeOwner     `json:"home_provider,omitempty"`
 	ProjectProvider         *workspace.AssistantProjectProviderOwner `json:"project_provider,omitempty"`
 	DeleteSessions          bool                                     `json:"delete_sessions,omitempty"`
@@ -467,6 +475,9 @@ func (s *Service) bindStandaloneProjectEvidence(ownerUserID string, template pro
 
 func (s *Service) Review(ctx context.Context, input Input) (Review, error) {
 	evaluation := s.Evaluate(input)
+	if err := validateHomeStaffingIntent(input, evaluation); err != nil {
+		return Review{}, err
+	}
 	if evaluation.State == StateLegacy {
 		return Review{Evaluation: evaluation}, nil
 	}
@@ -485,6 +496,7 @@ func (s *Service) Review(ctx context.Context, input Input) (Review, error) {
 		RequestedParentID: strings.TrimSpace(input.RequestedParentID), TargetWorkspaceID: strings.TrimSpace(input.TargetWorkspaceID),
 		GroupTemplateID: strings.TrimSpace(input.GroupTemplateID), GroupTemplateRev: strings.TrimSpace(input.GroupTemplateRevision),
 		HomeProvider: evaluation.HomeOwner, ProjectProvider: evaluation.ProjectOwner,
+		HomeStaffing: input.HomeStaffing.Clone(), HomeAdvice: input.HomeAdvice.Clone(),
 		CreatedAt: now, ExpiresAt: now.Add(ReviewTTL),
 	}
 	if (receipt.GroupTemplateID != "" || receipt.GroupTemplateRev != "") &&
@@ -739,7 +751,8 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 		}
 		return Claim{}, ErrUnavailable
 	}
-	if receipt.OwnerUserID != strings.TrimSpace(input.OwnerUserID) || receipt.OperationKind != input.OperationKind ||
+	if receipt.ReviewDigest != receiptDigest(receipt) ||
+		receipt.OwnerUserID != strings.TrimSpace(input.OwnerUserID) || receipt.OperationKind != input.OperationKind ||
 		receipt.InputDigest != strings.ToLower(strings.TrimSpace(input.InputDigest)) {
 		return Claim{}, ErrReviewStale
 	}
@@ -839,6 +852,9 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 // deterministic child ID; this method re-evaluates canonical owner/Home state
 // and returns the same snapshot shape as the native receipt path.
 func (s *Service) CommitReviewed(input Input, childWorkspaceID, reviewDigest, operationDigest string) (projecttemplates.Template, string, *workspace.GroupRequirementSnapshot, error) {
+	if input.HomeStaffing != nil || input.HomeAdvice != nil {
+		return projecttemplates.Template{}, "", nil, ErrReviewRequired
+	}
 	if s == nil || s.workspaces == nil || strings.TrimSpace(childWorkspaceID) == "" ||
 		!validDigest(reviewDigest) || !validDigest(operationDigest) {
 		return projecttemplates.Template{}, "", nil, ErrUnavailable
@@ -899,6 +915,9 @@ func (s *Service) Mark(ctx context.Context, operation Operation, status Operatio
 }
 
 func receiptMatches(receipt Receipt, input Input, current Evaluation) error {
+	if validateHomeStaffingIntent(input, current) != nil || digestJSON(receipt.HomeStaffing) != digestJSON(input.HomeStaffing) {
+		return ErrReviewStale
+	}
 	template := input.Template
 	if current.State != StateReadyGrouped && current.State != StateReadyStandalone {
 		return ErrReviewStale

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
@@ -84,6 +85,9 @@ var (
 )
 
 type Manager struct {
+	// Resolve source directories before taking this lock: a staffing source
+	// fence may then hold a registry read guard through its canonical bind.
+	registryMu        sync.RWMutex
 	agentStorePath    string
 	personalSkillsDir func() string
 	externalAgents    *externalagents.Cache
@@ -223,14 +227,24 @@ func (m *Manager) ListEnabledSkillsWithPrompts(agentName string) ([]Skill, error
 // and returns it with its full prompt content loaded. This is used by workspace
 // skill bindings to resolve skills by name at runtime.
 func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
+	return m.resolveSkillByName(skillName, true)
+}
+
+// ResolveSkillMetadataByName applies the same source policy without loading
+// prompt bodies into the result. It does not initialize profile skill state.
+func (m *Manager) ResolveSkillMetadataByName(skillName string) (*Skill, bool, error) {
+	return m.resolveSkillByName(skillName, false)
+}
+
+func (m *Manager) resolveSkillByName(skillName string, includePrompt bool) (*Skill, bool, error) {
 	target := strings.ToLower(strings.TrimSpace(skillName))
 	if target == "" {
 		return nil, false, nil
 	}
 
-	pluginSkill := m.findPluginSkill(target, true)
+	pluginSkill := m.findPluginSkill(target, includePrompt)
 	for _, loadFn := range []func(bool) ([]Skill, error){m.loadRepoSkills, m.loadCompatSkills, m.loadPersonalSkills} {
-		skills, loadErr := loadFn(true)
+		skills, loadErr := loadFn(includePrompt)
 		if loadErr != nil {
 			return nil, false, loadErr
 		}
@@ -256,7 +270,7 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 					s := Skill{
 						Name:        ext.Name,
 						Description: ext.Description,
-						Prompt:      ext.SystemPrompt,
+						Prompt:      optionalSkillPrompt(ext.SystemPrompt, includePrompt),
 						Source:      SourceClaude,
 						Model:       ext.Model,
 						Color:       ext.Color,
@@ -273,7 +287,7 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 					s := Skill{
 						Name:        ext.Name,
 						Description: ext.Description,
-						Prompt:      ext.SystemPrompt,
+						Prompt:      optionalSkillPrompt(ext.SystemPrompt, includePrompt),
 						Source:      SourceCodex,
 						Enabled:     true,
 						Trusted:     true,
@@ -292,11 +306,21 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 // role setup uses this path so a repository, .agents, or Skills folder copy
 // with the same name cannot silently replace the reviewed packaged source.
 func (m *Manager) ResolvePluginSkillByName(skillName string) (*Skill, bool, error) {
+	return m.resolvePluginSkillByName(skillName, true)
+}
+
+// ResolvePluginSkillMetadataByName retains packaged-source conflict rules while
+// omitting private prompt content from the metadata result.
+func (m *Manager) ResolvePluginSkillMetadataByName(skillName string) (*Skill, bool, error) {
+	return m.resolvePluginSkillByName(skillName, false)
+}
+
+func (m *Manager) resolvePluginSkillByName(skillName string, includePrompt bool) (*Skill, bool, error) {
 	target := strings.ToLower(strings.TrimSpace(skillName))
 	if target == "" {
 		return nil, false, nil
 	}
-	pluginSkill := m.findPluginSkill(target, true)
+	pluginSkill := m.findPluginSkill(target, includePrompt)
 	if pluginSkill == nil {
 		return nil, false, nil
 	}
@@ -312,6 +336,13 @@ func (m *Manager) ResolvePluginSkillByName(skillName string) (*Skill, bool, erro
 		}
 	}
 	return pluginSkill, true, nil
+}
+
+func optionalSkillPrompt(prompt string, include bool) string {
+	if include {
+		return prompt
+	}
+	return ""
 }
 
 // findPluginSkill returns the enabled plugin skill named target (lower case),

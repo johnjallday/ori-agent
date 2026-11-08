@@ -87,6 +87,7 @@ type Handler struct {
 	// route derives Home/project authority from its target, while final project
 	// creation may commit several already-reviewed project roles together.
 	assistantWorkspaceRoleStaffer func(context.Context, string, []RoleStaffingFill) error
+	staffingSkillReader           StaffingSkillReader
 	// projectStaffing decides how an opened library song's roles share the
 	// Home's assistant; staffingModelReady says a new agent would have a model.
 	projectStaffing    *projectstaffing.Service
@@ -335,12 +336,17 @@ func (h *Handler) SetAssistantReviewedStaffer(staff func(context.Context, string
 // RoleStaffingFill is one role the user chose to fill, as handed to the
 // assistant role staffer. Mode is "create" or "assign".
 type RoleStaffingFill struct {
-	RoleID          string
-	Mode            string
-	Name            string
-	Provider        string
-	Model           string
-	ReasoningEffort string
+	// Private evidence from an existing host review, never role-endpoint JSON.
+	SourceWitness        string `json:"-"`
+	CapabilityWitness    string `json:"-"`
+	ChoiceDigest         string `json:"-"`
+	PreviousChoiceDigest string `json:"-"`
+	RoleID               string
+	Mode                 string
+	Name                 string
+	Provider             string
+	Model                string
+	ReasoningEffort      string
 	// Appearance is the validated face staged for a create; nil for an assign.
 	Appearance *types.AgentAppearance
 }

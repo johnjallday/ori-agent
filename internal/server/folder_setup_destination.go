@@ -188,5 +188,5 @@ func (h *folderSetupHost) ValidateSetupDestination(ctx context.Context, req pers
 	if *actual != *expected {
 		return personalassistant.ErrFolderPlanChanged
 	}
-	return nil
+	return h.checkFolderHomeTeam(ctx, req, home)
 }

@@ -25,6 +25,10 @@ func (s failingWorkspaceCreateStore) CreateWorkspace(ctx context.Context, ws *se
 	return s.err
 }
 
+func (s failingWorkspaceCreateStore) HasWorkspaceAgentReference(ctx context.Context, name, excludingID string) (bool, error) {
+	return s.HybridStore.(session.AgentReferenceReader).HasWorkspaceAgentReference(ctx, name, excludingID)
+}
+
 // writeRosterTemplate installs a metadata-only template declaring the given
 // agent roster, and returns its template id.
 func writeRosterTemplate(t *testing.T, handler *Handler, id string, manifest string) string {

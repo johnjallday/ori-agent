@@ -219,6 +219,9 @@ function loadPane(extras = {}) {
   const events = [];
   for (const type of [
     'workspace-build-turn',
+    'workspace-build-staffing-select',
+    'workspace-build-staffing-manual',
+    'workspace-build-staffing-clear',
     'workspace-build-collapse',
     'workspace-build-expand',
     'workspace-build-start-over',
@@ -242,8 +245,51 @@ function loadPane(extras = {}) {
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
-  return { pane: window.WorkspaceBuildPane, document, root, modal, buildWith, events };
+  return { pane: window.WorkspaceBuildPane, document, root, modal, buildWith, events, window };
 }
+
+test('the assistant pane uses the shared Team projection and emits choices without assigning', () => {
+  const { pane, window, events, root } = loadPane();
+  let rendered;
+  window.WorkspaceRoleRoster = {
+    render(host, roster, options) {
+      rendered = { host, roster, options };
+    }
+  };
+  pane.mount({ assistant: { display_name: 'Luna' } });
+  pane.applySession({ id: 'build-a', transcript: [], draft: {} });
+  const roster = {
+    roles: [{ role_id: 'engineer', state: 'empty', staffing: { state: 'recommended' } }]
+  };
+  pane.setStaffingRoster(roster);
+  assert.equal(rendered.roster, roster);
+  assert.equal(rendered.options.compact, true);
+  assert.equal(events.length, 0);
+  rendered.options.onRecommend('engineer', 'c_scout');
+  rendered.options.onAssign('engineer');
+  rendered.options.onRequestCreate('engineer');
+  rendered.options.onClear('engineer');
+  assert.deepEqual(
+    events.map(event => event.type),
+    [
+      'workspace-build-staffing-select',
+      'workspace-build-staffing-manual',
+      'workspace-build-staffing-manual',
+      'workspace-build-staffing-clear'
+    ]
+  );
+  assert.equal(events[0].detail.handle, 'c_scout');
+  assert.equal(events[1].detail.action, 'assign');
+  assert.equal(events[2].detail.action, 'create');
+  pane.setBusy(true);
+  assert.equal(rendered.options.onRecommend, null);
+  pane.applySession({ id: 'build-b', transcript: [], draft: {} });
+  assert.equal(
+    entries(root).some(node => node.className === 'workspace-build-staffing'),
+    false
+  );
+  pane.destroy();
+});
 
 const assistant = { display_name: 'Luna', appearance: {} };
 

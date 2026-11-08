@@ -584,6 +584,9 @@ type FolderDigestService struct {
 	paths    map[string]string // offer id → canonical root; memory only (FR27)
 	scanning map[string]bool   // user id → a scan is in flight
 	running  map[string]bool   // offer id → a one-card setup is running in this process
+	// Explicit recommendation calls only; manual edits remain available while
+	// inference runs. This ephemeral gate grants no persisted authority.
+	staffingRecommendations map[string]bool
 	// offer id → what a software review copied out of the project; memory only
 	evidence map[string]FolderSoftwareEvidence
 	// setupObservers hear when a one-card setup run stops, finishes or is
@@ -758,8 +761,9 @@ type FolderOfferView struct {
 	Needs       []BuildFolderNeed       `json:"needs,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
-	Plan                   *FolderSetupPlan `json:"plan,omitempty"`
-	SetupUnavailableReason string           `json:"setup_unavailable_reason,omitempty"`
+	Plan                   *FolderSetupPlan        `json:"plan,omitempty"`
+	HomeStaffing           *FolderHomeStaffingView `json:"home_staffing,omitempty"`
+	SetupUnavailableReason string                  `json:"setup_unavailable_reason,omitempty"`
 	// SetupUnavailableMessage is the host's own words for a refusal it can
 	// explain (File Janitor's message for a root it will not take).
 	SetupUnavailableMessage string `json:"setup_unavailable_message,omitempty"`
@@ -2735,6 +2739,9 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 		v.CandidateID = offer.ConversationReview.CandidateID
 		v.RequestedDestinationID = offer.ConversationReview.DestinationID
 		v.Lead = offer.ConversationReview.Lead.clone()
+	}
+	if offer.Setup == nil {
+		v.HomeStaffing = folderHomeStaffingFallback(offer.HomeStaffingReview)
 	}
 	v.Remember = folderOfferRemembers(offer, paused)
 	if offer.Verdict == string(folderdigest.KindProject) && offer.Subject.Kind == FolderChoiceProject &&

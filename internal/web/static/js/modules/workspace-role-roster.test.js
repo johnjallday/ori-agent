@@ -13,8 +13,8 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('./workspace-role-roster.js', import.meta.url), 'utf8');
 
-function load() {
-  const sandbox = { window: {}, Object, Array, String, Number, Boolean, JSON };
+function load(document) {
+  const sandbox = { window: {}, document, Object, Array, String, Number, Boolean, JSON };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
@@ -44,6 +44,159 @@ function filled(overrides = {}) {
     ...overrides
   });
 }
+
+class AdviceNode {
+  constructor(tag) {
+    this.tag = tag;
+    this.children = [];
+    this.dataset = {};
+    this.listeners = {};
+    this.attributes = {};
+    this.classList = { add() {} };
+  }
+  set textContent(value) {
+    this.text = String(value);
+  }
+  get textContent() {
+    return (this.text || '') + this.children.map(child => child.textContent).join(' ');
+  }
+  set innerHTML(_value) {
+    throw new Error('advice must never use HTML insertion');
+  }
+  append(...children) {
+    this.children.push(...children);
+  }
+  replaceChildren(...children) {
+    this.children = children;
+  }
+  setAttribute(key, value) {
+    this.attributes[key] = value;
+  }
+  addEventListener(type, handler) {
+    this.listeners[type] = handler;
+  }
+  click() {
+    this.listeners.click?.({ target: this });
+  }
+}
+
+function adviceDOM(state = 'recommended', configured = true, compact = false, scope = 'workspace') {
+  const document = {
+    createElement: tag => new AdviceNode(tag),
+    createTextNode: text => {
+      const node = new AdviceNode('text');
+      node.textContent = text;
+      return node;
+    }
+  };
+  const api = load(document);
+  const container = new AdviceNode('section');
+  const calls = [];
+  const candidate = {
+    handle: 'c_scout',
+    name: '<img src=x onerror=evil>',
+    source: 'root',
+    configured,
+    reasons: [{ kind: 'declared_purpose', value: '<script>not executable</script>' }],
+    assignments: [
+      { kind: 'current_assignment', value: 'home-lead — <script>Reviewed collection</script>' }
+    ],
+    gaps: []
+  };
+  api.render(
+    container,
+    {
+      roles: [
+        role({
+          staffing: {
+            state,
+            scope,
+            complete: true,
+            assignmentsComplete: false,
+            choices: [candidate, { ...candidate, handle: 'c_other', name: 'Other' }]
+          }
+        })
+      ]
+    },
+    {
+      compact,
+      onRecommend: (id, handle) => calls.push(['recommend', id, handle]),
+      onAssign: id => calls.push(['assign', id]),
+      onRequestCreate: id => calls.push(['create', id])
+    }
+  );
+  const all = node => [node, ...node.children.flatMap(all)];
+  const nodes = all(container);
+  return { container, calls, nodes, buttons: nodes.filter(node => node.tag === 'button') };
+}
+
+test('saved advice uses text-only reasons and reports explicit recommended and alternative choices', () => {
+  const { container, calls, nodes, buttons } = adviceDOM();
+  assert.equal(calls.length, 0, 'render must not select or assign');
+  assert.ok(container.textContent.includes('<script>not executable</script>'));
+  assert.ok(container.textContent.includes('Current assignments could not be fully verified'));
+  assert.ok(
+    container.textContent.includes(
+      'Verified current role: home-lead — <script>Reviewed collection</script>'
+    )
+  );
+  assert.equal(
+    nodes.some(node => node.tag === 'script' || node.tag === 'img'),
+    false
+  );
+  buttons.find(button => button.textContent === 'Use recommended').click();
+  buttons.find(button => button.textContent === 'Use this agent').click();
+  assert.deepEqual(calls, [
+    ['recommend', 'mix-engineer', 'c_scout'],
+    ['recommend', 'mix-engineer', 'c_other']
+  ]);
+  assert.ok(buttons[0].attributes['aria-label'].includes('Mix Engineer'));
+});
+
+test('compact ordinary advice keeps evidence and limitations while Team and scoped roles retain target details', () => {
+  const compact = adviceDOM('recommended', true, true);
+  for (const copy of [
+    'Current assignments could not be fully verified',
+    'Model configured; not live-tested.',
+    'Its settings stay as they are.'
+  ]) {
+    assert.ok(compact.container.textContent.includes(copy));
+  }
+  assert.equal(compact.container.textContent.includes('You balance the mix.'), false);
+  assert.ok(adviceDOM().container.textContent.includes('You balance the mix.'));
+  assert.ok(
+    adviceDOM('recommended', true, true, 'project').container.textContent.includes(
+      'You balance the mix.'
+    )
+  );
+  assert.equal(compact.calls.length, 0);
+});
+
+test('unavailable, no-fit and stale advice keep manual Assign/Create actions', () => {
+  for (const state of ['unavailable', 'no_suitable_match', 'stale']) {
+    const { buttons, calls } = adviceDOM(state);
+    assert.equal(
+      buttons.some(button => button.textContent === 'Use recommended'),
+      false
+    );
+    buttons.find(button => button.textContent === 'Choose another').click();
+    buttons.find(button => button.textContent === 'Create new').click();
+    assert.deepEqual(calls, [
+      ['assign', 'mix-engineer'],
+      ['create', 'mix-engineer']
+    ]);
+  }
+});
+
+test('unconfigured choices are disabled without claiming the role is filled', () => {
+  const { buttons, calls, container } = adviceDOM('recommended', false);
+  const button = buttons.find(item => item.textContent === 'Use recommended');
+  assert.equal(button.disabled, true);
+  button.click();
+  assert.equal(calls.length, 0);
+  assert.ok(container.textContent.includes('0 of 1 role filled'));
+  assert.ok(container.textContent.includes('Configure this saved agent before reuse.'));
+});
 
 test('an empty required role reads Missing, and an empty optional role reads Optional', () => {
   const rows = Roster.rowsFrom({

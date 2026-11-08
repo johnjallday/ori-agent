@@ -81,6 +81,9 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 			_, ok := workspaceBuildModelFor(b.llmFactory, provider, model)
 			return ok
 		},
+		ProfileModelConfigured: func(provider, model string) bool {
+			return workspaceStaffingProfileConfigured(b.llmFactory, provider, model)
+		},
 	}
 	if b.userProvider != nil {
 		deps.CurrentUserID = b.userProvider.CurrentUserID
@@ -307,6 +310,23 @@ func workspaceBuildProviderName(factory *llm.Factory, provider, model string) st
 		return llm.FindLocalProviderByModel(factory, model)
 	}
 	return ""
+}
+
+// workspaceStaffingProfileConfigured inspects only the local provider registry.
+// DefaultModels/HasModel may issue HTTP requests; neither belongs in a roster
+// recommendation. This deliberately says configured, not live-tested/available.
+func workspaceStaffingProfileConfigured(factory *llm.Factory, provider, model string) bool {
+	provider, model = strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(model)
+	if factory == nil || model == "" {
+		return false
+	}
+	if provider == "anthropic" || (provider == "" && strings.HasPrefix(model, "claude-")) {
+		provider = "claude"
+	}
+	if provider == "" && strings.HasPrefix(model, "gemini-") {
+		provider = "gemini"
+	}
+	return provider != "" && factory.HasProvider(provider)
 }
 
 // workspaceBuildModelFor resolves one provider/model pair the way the system

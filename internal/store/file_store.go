@@ -52,6 +52,9 @@ type fileStore struct {
 	// only runtime state, so the definition file is left alone.
 	knownDefinitions map[string][]byte
 
+	// staffingWitnesses are process-local read witnesses, not persisted agent IDs.
+	staffingWitnesses map[string]staffingSourceWitness
+
 	// state keeps status, statistics, and evolution out of the definition file.
 	// Nil means "derive it from the agents folder" (see stateStore).
 	state *RuntimeStateStore
@@ -187,8 +190,15 @@ func (s *fileStore) ListAgents() (names []string) {
 func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createAgentUnlocked(name, config, false)
+}
+
+func (s *fileStore) createAgentUnlocked(name string, config *CreateAgentConfig, strict bool) error {
 	if err := s.unreadableErrorUnlocked(name); err != nil {
 		return err
+	}
+	if _, exists := s.agents[name]; exists && strict {
+		return ErrStaffingNameTaken
 	}
 	if _, exists := s.agents[name]; !exists {
 		// A definition that appeared on disk since the store loaded is an
@@ -198,6 +208,9 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			return err
 		}
 		if changed {
+			if strict {
+				return ErrStaffingNameTaken
+			}
 			if err := s.reloadAgentUnlocked(name); err != nil {
 				return err
 			}
@@ -249,6 +262,9 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			Capabilities: []string{}, // Empty capabilities by default
 			Settings:     defaultSettings,
 			Status:       types.AgentStatusActive, // New agents start as active
+		}
+		if config != nil && strings.TrimSpace(config.Description) != "" {
+			newAgent.Metadata = &types.AgentMetadata{Description: strings.TrimSpace(config.Description)}
 		}
 		if config != nil && config.Appearance != nil {
 			newAgent.Appearance = config.Appearance.Clone()
@@ -354,6 +370,10 @@ func (s *fileStore) initializeMissingAgentSkillsStateUnlocked() error {
 func (s *fileStore) DeleteAgent(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.deleteAgentUnlocked(name)
+}
+
+func (s *fileStore) deleteAgentUnlocked(name string) error {
 	// Never remove the folder of an agent whose file could not be read: the
 	// user fixes that file, Ori does not throw it away.
 	if err := s.unreadableErrorUnlocked(name); err != nil {

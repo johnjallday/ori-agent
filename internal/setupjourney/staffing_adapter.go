@@ -119,8 +119,12 @@ const (
 )
 
 type staffingRoleInput struct {
-	RoleID string `json:"role_id"`
-	Name   string `json:"name"`
+	RoleID               string `json:"role_id"`
+	SourceWitness        string `json:"-"` // supplied only by compiled reviewed callers
+	CapabilityWitness    string `json:"-"`
+	ChoiceDigest         string `json:"-"`
+	PreviousChoiceDigest string `json:"-"`
+	Name                 string `json:"name"`
 	// Mode is "create" or "bind". Absent means "create".
 	//
 	// decodeStaffingInput normalizes an explicit "create" back to the empty
@@ -262,7 +266,7 @@ func (a *AssistantStaffingAdapter) reviewMaterial(scope ReadScope, commit Action
 	}, nil
 }
 
-func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, action ActionID, raw json.RawMessage, reviewed ActionReviewMaterial) (CanonicalResult, error) {
+func (a *AssistantStaffingAdapter) Commit(ctx context.Context, scope ReadScope, action ActionID, raw json.RawMessage, reviewed ActionReviewMaterial) (CanonicalResult, error) {
 	targetScope, ok := staffingScopeForCommit(action)
 	if !ok || reviewed.CommitAction != action || reviewed.Staffing == nil {
 		return CanonicalResult{}, ErrInvalid
@@ -277,14 +281,17 @@ func (a *AssistantStaffingAdapter) Commit(_ context.Context, scope ReadScope, ac
 	if err != nil {
 		return CanonicalResult{}, ErrConflict
 	}
-	return a.commitReviewedRoles(scope, owner, targetScope, action, input, reviewed)
+	if err := applyStaffingRoleSources(ctx, &input); err != nil {
+		return CanonicalResult{}, err
+	}
+	return a.commitReviewedRoles(ctx, scope, owner, targetScope, action, input, reviewed)
 }
 
 // commitReviewedRoles applies one already-reviewed scope while the caller holds
 // a.mu. Keeping this single mutation path lets the setup journey and the live
 // workspace-role endpoint resolve different owners without duplicating the
 // binding, rollback, or revision rules.
-func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *staffingOwner, targetScope workspace.AssistantRoleScope, action ActionID, input staffingInput, reviewed ActionReviewMaterial) (CanonicalResult, error) {
+func (a *AssistantStaffingAdapter) commitReviewedRoles(ctx context.Context, scope ReadScope, owner *staffingOwner, targetScope workspace.AssistantRoleScope, action ActionID, input staffingInput, reviewed ActionReviewMaterial) (CanonicalResult, error) {
 	projection, err := a.reviewProjection(scope, owner, targetScope, input, action == ActionAddOptionalHomeStaffing)
 	// An agent assigned at review time and deleted before commit is a specific,
 	// explainable situation — say which one went away rather than "reload and
@@ -295,30 +302,42 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 	if err != nil || !equalStaffingProjection(projection, reviewed.Staffing) {
 		return CanonicalResult{}, ErrConflict
 	}
+	selected, err := a.staffingSources(ctx, input)
+	if err != nil {
+		return CanonicalResult{}, err
+	}
+	fenced := make(map[string]bool, len(selected))
+	for _, source := range selected {
+		fenced[source.Name] = true
+	}
 	target := owner.station
 	if targetScope == workspace.AssistantRoleScopeProject {
 		target = owner.project
+	}
+	targetIdentity := staffingTargetIdentity(target)
+	if targetIdentity == "" {
+		return CanonicalResult{}, ErrConflict
+	}
+	if targetScope == workspace.AssistantRoleScopeHome {
+		state := target.GetAssistantProgramState()
+		if state == nil || state.Declaration == nil || (!state.Hired && len(state.Declaration.Stages) == 0) {
+			return CanonicalResult{}, ErrInvalid
+		}
 	}
 	rolesByID := make(map[string]workspace.AssistantProgramRoleSpec, len(owner.declaration.Roles))
 	for _, role := range owner.declaration.Roles {
 		rolesByID[role.ID] = role
 	}
-	// createdNames records only definitions THIS commit brought into existence.
-	// A bound agent is the user's own and must never enter this list: rollback
-	// deletes exactly what is in it, and deleting an agent the user already had
-	// is the one unrecoverable failure this feature can cause (FR51).
-	createdNames := make([]string, 0, len(input.Roles))
-	granted := make(map[string][]string, len(input.Roles))
-	rollback := func() {
-		for name, skills := range granted {
-			for _, skill := range skills {
-				_ = a.grants.Revoke(name, skill)
-			}
-		}
-		for index := len(createdNames) - 1; index >= 0; index-- {
-			_ = a.profiles.DeleteAgent(createdNames[index])
-		}
+	capabilityGuard, err := a.staffingCapabilities(target, targetScope, input, rolesByID)
+	if err != nil {
+		return CanonicalResult{}, err
 	}
+	// Only strict creation can prove rollback ownership. A saved/assigned
+	// profile never enters this list; changed/shared/unknown sources survive.
+	createdSources := make([]store.StaffingSelection, 0, len(input.Roles))
+	granted := make(map[string][]string, len(input.Roles))
+	preparedGrants := make(map[string]func() error)
+	rollback := func() { a.rollbackStaffingProfiles(context.WithoutCancel(ctx), createdSources, granted) }
 	instances := make([]workspace.AgentInstance, 0, len(input.Roles))
 	bindings := make([]workspace.AssistantRoleBinding, 0, len(input.Roles))
 	for _, requested := range input.Roles {
@@ -336,25 +355,37 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 			}
 		} else {
 			// The store keeps the effort only when this provider/model accepts it.
-			if err := a.profiles.CreateAgent(requested.Name, &store.CreateAgentConfig{
+			created, createErr := a.createStaffingProfile(ctx, requested.Name, &store.CreateAgentConfig{
 				Role: types.AgentRole(role.Role), Model: requested.Model,
 				LLMProvider: requested.Provider, SystemPrompt: role.SystemPrompt,
+				// Keep the declaration's public purpose discoverable if this
+				// definition is retained. Never mine its private system prompt.
+				Description:     role.Description,
 				ReasoningEffort: requested.ReasoningEffort,
 				Appearance:      requested.Appearance.Clone(),
-			}); err != nil {
+			})
+			if created.Name != "" {
+				createdSources = append(createdSources, created)
+			}
+			if createErr != nil {
 				rollback()
 				return CanonicalResult{}, ErrConflict
 			}
-			createdNames = append(createdNames, requested.Name)
+			if created.Witness != "" {
+				selected = append(selected, created)
+				fenced[created.Name] = true
+			}
 		}
 		profile, found := a.profiles.GetAgent(requested.Name)
 		if !found || profile == nil {
 			rollback()
 			return CanonicalResult{}, ErrConflict
 		}
-		if err := a.workspaces.SaveWorkspaceAgent(target.ID, requested.Name, profile); err != nil {
-			rollback()
-			return CanonicalResult{}, ErrConflict
+		if !fenced[requested.Name] {
+			if err := a.workspaces.SaveWorkspaceAgent(target.ID, requested.Name, profile); err != nil {
+				rollback()
+				return CanonicalResult{}, ErrConflict
+			}
 		}
 		// Skills are granted only to definitions this commit created. A bound
 		// agent keeps exactly the tools it had — the same contract the roster
@@ -362,7 +393,23 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 		// revoke without guessing what the user had granted themselves.
 		if !requested.binds() {
 			requirePersonal := splitRoleRequiresPersonalSource(target, targetScope)
+			if fenced[requested.Name] && len(role.Skills) > 0 {
+				preparer, ok := a.grants.(PreparedStaffingToolGrants)
+				if !ok {
+					rollback()
+					return CanonicalResult{}, ErrConflict
+				}
+				apply, err := preparer.PrepareStaffingGrants(requested.Name, role.Skills, requirePersonal)
+				if err != nil || apply == nil {
+					rollback()
+					return CanonicalResult{}, ErrConflict
+				}
+				preparedGrants[requested.Name] = apply
+			}
 			for _, skill := range role.Skills {
+				if fenced[requested.Name] {
+					continue
+				}
 				var grantErr error
 				if requirePersonal {
 					personal, ok := a.grants.(PersonalStaffingToolGrants)
@@ -394,7 +441,10 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 		bindings = append(bindings, workspace.AssistantRoleBinding{RoleID: role.ID, AgentInstanceID: instance.ID, AgentName: instance.Name})
 	}
 	expectedRevision := projection.Scopes[0].BindingRevision
-	err = a.workspaces.Update(target.ID, func(current *workspace.Workspace) error {
+	err = a.updateStaffingBindings(ctx, target.ID, selected, capabilityGuard, func(current *workspace.Workspace) error {
+		if staffingTargetIdentity(current) != targetIdentity {
+			return ErrConflict
+		}
 		for _, existing := range current.GetAgentInstances() {
 			for _, instance := range instances {
 				if existing.ID == instance.ID || strings.EqualFold(existing.Name, instance.Name) {
@@ -408,8 +458,16 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 			if state == nil || state.HomeBindings.StateRevision != expectedRevision {
 				return workspace.ErrAssistantBindingVersionConflict
 			}
+			for i, role := range input.Roles {
+				if err := recordHomeStaffingChoice(state, role, bindings[i]); err != nil {
+					return err
+				}
+			}
 			state.HomeBindings = workspace.AssistantRoleBindingSet{StateRevision: expectedRevision + 1, Bindings: append(state.HomeBindings.Bindings, bindings...)}
 			if !state.Hired {
+				if state.Declaration == nil || len(state.Declaration.Stages) == 0 {
+					return ErrInvalid
+				}
 				now := time.Now().UTC()
 				state.Hired = true
 				state.HiredAt = &now
@@ -440,6 +498,18 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 				}
 			}
 			current.SetAssistantProjectLink(link)
+		}
+		for name, apply := range preparedGrants {
+			// Record even a partial failed grant so rollback requires an
+			// owner that knows these records belong to the exact definition.
+			for _, requested := range input.Roles {
+				if requested.Name == name {
+					granted[name] = rolesByID[requested.RoleID].Skills
+				}
+			}
+			if err := apply(); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -531,12 +601,20 @@ func (a *AssistantStaffingAdapter) StaffFromReviewedWorkspaceSetup(ctx context.C
 // RoleFill is one role the user chose to fill on the Create Workspace step.
 // Mode is StaffingModeCreate or StaffingModeBind.
 type RoleFill struct {
-	RoleID          string
-	Mode            string
-	Name            string
-	Provider        string
-	Model           string
-	ReasoningEffort string
+	// SourceWitness is private evidence supplied by an already reviewed host
+	// plan. It is never accepted from role-endpoint JSON or model output.
+	SourceWitness     string `json:"-"`
+	CapabilityWitness string `json:"-"`
+	// ChoiceDigest and its predecessor are supplied only by an existing
+	// reviewed Home/folder owner, never accepted as role-endpoint authority.
+	ChoiceDigest         string `json:"-"`
+	PreviousChoiceDigest string `json:"-"`
+	RoleID               string
+	Mode                 string
+	Name                 string
+	Provider             string
+	Model                string
+	ReasoningEffort      string
 	// Appearance is the staged face for a create; ignored for a bind.
 	Appearance *types.AgentAppearance
 }
@@ -546,7 +624,7 @@ type RoleFill struct {
 // project role. This target-derived authority is deliberately narrower than
 // the Create Workspace helper below, which may coordinate both scopes from a
 // reviewed project draft.
-func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(_ context.Context, workspaceID string, fills []RoleFill) error {
+func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(ctx context.Context, workspaceID string, fills []RoleFill) error {
 	if len(fills) != 1 {
 		return ErrInvalid
 	}
@@ -587,6 +665,18 @@ func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(_ context.Context, works
 	if err != nil {
 		return err
 	}
+	input.Roles[0].SourceWitness = requested.SourceWitness
+	input.Roles[0].CapabilityWitness = requested.CapabilityWitness
+	input.Roles[0].ChoiceDigest = requested.ChoiceDigest
+	input.Roles[0].PreviousChoiceDigest = requested.PreviousChoiceDigest
+	if requested.ChoiceDigest != "" || requested.PreviousChoiceDigest != "" {
+		if targetScope != workspace.AssistantRoleScopeHome {
+			return ErrInvalid
+		}
+		if completed, err := reviewedHomeStaffingReplay(owner.station, input.Roles[0]); err != nil || completed {
+			return err
+		}
+	}
 	commitAction := ActionAddHomeStaffing
 	if targetScope == workspace.AssistantRoleScopeProject {
 		commitAction = ActionAddProjectStaffing
@@ -606,7 +696,7 @@ func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(_ context.Context, works
 		return err
 	}
 	reviewed := ActionReviewMaterial{CommitAction: commitAction, Staffing: projection}
-	_, err = a.commitReviewedRoles(scope, owner, targetScope, commitAction, input, reviewed)
+	_, err = a.commitReviewedRoles(ctx, scope, owner, targetScope, commitAction, input, reviewed)
 	return err
 }
 
@@ -662,6 +752,13 @@ func (a *AssistantStaffingAdapter) workspaceRoleOwner(targetID string) (*staffin
 // goes through the adapter's ordinary Review/Commit pair rather than around it,
 // so there is exactly one code path that binds a role (FR54).
 func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx context.Context, projectID string, fills []RoleFill) error {
+	for _, fill := range fills {
+		if fill.ChoiceDigest != "" || fill.PreviousChoiceDigest != "" || fill.CapabilityWitness != "" {
+			// A Home-only reviewed step must not be laundered through the
+			// older cross-scope batch contract.
+			return ErrInvalid
+		}
+	}
 	if len(fills) == 0 {
 		return nil
 	}
@@ -711,7 +808,7 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 				}
 				role := staffingRoleInput{
 					RoleID: fill.RoleID, Name: fill.Name, Provider: fill.Provider, Model: fill.Model,
-					ReasoningEffort: fill.ReasoningEffort, Appearance: fill.Appearance,
+					ReasoningEffort: fill.ReasoningEffort, Appearance: fill.Appearance, SourceWitness: fill.SourceWitness,
 				}
 				if fill.Mode == StaffingModeBind {
 					role.Mode = StaffingModeBind
@@ -737,7 +834,7 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 			if reviewErr != nil {
 				return reviewErr
 			}
-			if _, commitErr := a.Commit(ctx, scope, commitAction, raw, review); commitErr != nil {
+			if _, commitErr := a.Commit(withStaffingRoleSources(ctx, input), scope, commitAction, raw, review); commitErr != nil {
 				return commitErr
 			}
 		}

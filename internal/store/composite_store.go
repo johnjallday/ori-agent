@@ -49,6 +49,8 @@ type CompositeStore struct {
 	rootPath  string     // the workspace root, not its Agents folder
 	stateRoot string     // <data dir>/agent_state
 	defaults  types.Settings
+	// Invalidates advisory source witnesses even when switching away and back.
+	staffingRootRevision uint64
 
 	// legacyWrites sends new agents to the system store for this session.
 	// Set when the migration could not move agents into the root (a workspace
@@ -87,6 +89,7 @@ func NewCompositeStore(system Store, root, stateRoot string, defaults types.Sett
 func (c *CompositeStore) SetRoot(root string) {
 	c.mu.Lock()
 	c.rootPath = root
+	c.staffingRootRevision++
 	c.root = nil
 	c.legacyWrites = false
 	c.migration = nil

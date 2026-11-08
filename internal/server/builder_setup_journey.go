@@ -227,7 +227,8 @@ func (b *ServerBuilder) initializeSetupJourney() {
 					roles = append(roles, setupjourney.RoleFill{
 						RoleID: fill.RoleID, Mode: mode, Name: fill.Name,
 						Provider: fill.Provider, Model: fill.Model, ReasoningEffort: fill.ReasoningEffort,
-						Appearance: fill.Appearance,
+						Appearance: fill.Appearance, SourceWitness: fill.SourceWitness, CapabilityWitness: fill.CapabilityWitness,
+						ChoiceDigest: fill.ChoiceDigest, PreviousChoiceDigest: fill.PreviousChoiceDigest,
 					})
 				}
 				return roles
@@ -243,6 +244,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 				},
 			)
 			b.sessionHandler.SetAssistantRoleUnstaffer(staffingAdapter.UnstaffRoleFromWorkspace)
+			b.sessionHandler.SetStaffingSkillReader(serverStaffingToolGrants{builder: b}.ReadStaffingSkills)
 		}
 	}
 	registry, err := setupjourney.NewReaderRegistry(readers)
@@ -443,6 +445,26 @@ func (g serverStaffingToolGrants) GrantPersonal(agentName, skillName string) err
 	}
 	return g.builder.skillsManager.SetSkillEnabled(agentName, skillName, true)
 }
+
+func (g serverStaffingToolGrants) PrepareStaffingGrants(agentName string, names []string, personal bool) (func() error, error) {
+	if g.builder == nil || g.builder.skillsManager == nil {
+		return nil, fmt.Errorf("staffing tool grant is unavailable")
+	}
+	for _, name := range names {
+		available := g.Available(name)
+		if personal {
+			available = g.AvailablePersonal(name)
+		}
+		if !available {
+			return nil, fmt.Errorf("staffing tool grant is unavailable")
+		}
+	}
+	return g.builder.skillsManager.PrepareProfileSkillEnable(agentName, names)
+}
+
+// The skills manager stores this collection state in the agent's own
+// skills_state.json, removed with a source-verified profile rollback.
+func (g serverStaffingToolGrants) GrantsStoredWithProfile() bool { return true }
 
 func (g serverStaffingToolGrants) Revoke(agentName, skillName string) error {
 	if g.builder == nil || g.builder.skillsManager == nil {

@@ -31,17 +31,18 @@ type BuildFolderPlan struct {
 	// software assessment and optional summaries are seeded but not started.
 	// SoftwareReview identifies the existing evidence-reviewed software owner;
 	// deferred summaries alone do not authorize its names-only adjustment API.
-	SoftwareReview    bool               `json:"software_review,omitempty"`
-	FirstTaskDeferred bool               `json:"first_task_deferred,omitempty"`
-	Visual            *FolderSetupVisual `json:"visual,omitempty"`
-	Readiness         *FolderSetupVisual `json:"readiness,omitempty"`
-	Lines             []FolderPlanLine   `json:"lines"`
-	Digest            string             `json:"digest,omitempty"`
-	EntryName         string             `json:"entry_name,omitempty"`
-	EntryCandidates   []string           `json:"entry_candidates,omitempty"`
-	Needs             []BuildFolderNeed  `json:"needs,omitempty"`
-	Home              *BuildFolderHome   `json:"home,omitempty"`
-	Placement         string             `json:"placement,omitempty"`
+	SoftwareReview    bool                    `json:"software_review,omitempty"`
+	FirstTaskDeferred bool                    `json:"first_task_deferred,omitempty"`
+	Visual            *FolderSetupVisual      `json:"visual,omitempty"`
+	HomeStaffing      *FolderHomeStaffingView `json:"home_staffing,omitempty"`
+	Readiness         *FolderSetupVisual      `json:"readiness,omitempty"`
+	Lines             []FolderPlanLine        `json:"lines"`
+	Digest            string                  `json:"digest,omitempty"`
+	EntryName         string                  `json:"entry_name,omitempty"`
+	EntryCandidates   []string                `json:"entry_candidates,omitempty"`
+	Needs             []BuildFolderNeed       `json:"needs,omitempty"`
+	Home              *BuildFolderHome        `json:"home,omitempty"`
+	Placement         string                  `json:"placement,omitempty"`
 	// Evidence is the digest's own reason for the suggestion, the "Why this
 	// suggestion?" line: what it saw, never a path.
 	Evidence string `json:"evidence,omitempty"`
@@ -93,7 +94,9 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 			review.ObservationID == observationID && review.CandidateID == candidateID &&
 			prior.FolderKey == offer.FolderKey && prior.RootIdentity == offer.RootIdentity &&
 			prior.Subject.Key == offer.Subject.Key && review.CandidateIdentity == offer.ConversationReview.CandidateIdentity {
+			offer.ID = prior.ID
 			offer.EntryName = prior.EntryName
+			offer.HomeStaffingReview = prior.HomeStaffingReview.Clone()
 			break
 		}
 	}
@@ -141,6 +144,13 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 		}
 		plan.Evidence = view.Reason
 		plan.Readiness = CloneFolderSetupVisual(view.Readiness)
+		plan.HomeStaffing = view.HomeStaffing.Clone()
+		if view.Plan != nil && view.Plan.HomeStaffing != nil {
+			plan.HomeStaffing = view.Plan.HomeStaffing.Clone()
+			plan.Lines = append([]FolderPlanLine(nil), view.Plan.Lines...)
+			plan.Visual = CloneFolderSetupVisual(view.Plan.Visual)
+			plan.Placement = view.Plan.Intent.Placement
+		}
 		return plan, nil
 	}
 	plan := &BuildFolderPlan{
@@ -149,8 +159,9 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 		Lines:             append([]FolderPlanLine(nil), view.Plan.Lines...), Digest: view.Plan.Digest,
 		Placement: view.Plan.Intent.Placement, Evidence: view.Reason, Ready: true,
 		EntryName: view.Plan.EntryName, EntryCandidates: append([]string(nil), view.Plan.EntryCandidates...),
-		Needs:  folderPlanNeeds(offer.Subject, view.Plan.Intent),
-		Visual: CloneFolderSetupVisual(view.Plan.Visual),
+		Needs:        folderPlanNeeds(offer.Subject, view.Plan.Intent),
+		Visual:       CloneFolderSetupVisual(view.Plan.Visual),
+		HomeStaffing: view.HomeStaffing.Clone(),
 	}
 	if hire := view.Plan.Hire; hire != nil {
 		copied := *hire

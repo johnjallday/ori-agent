@@ -17,7 +17,7 @@ import (
 // the knowledge sidecar under <HQ>/.ori/ and is written with the same
 // discipline. It stores folder keys and base names only, never full paths.
 const (
-	FolderDigestSchemaVersion = 2
+	FolderDigestSchemaVersion = 3
 	folderDigestFileName      = "folder-digest-v1.json"
 	folderDigestLockName      = "folder-digest-v1.lock"
 	folderPathsFileName       = "folder-paths-v1.json"
@@ -212,6 +212,9 @@ type FolderOffer struct {
 	// what an explicit inspection read, and the user's changes to the suggested
 	// names. Nil until the user asks for a review.
 	SoftwareReview *FolderSoftwareReview `json:"software_review,omitempty"`
+	// HomeStaffingReview is private advice/explicit choices for this offer's
+	// existing setup review. It grants no run authority on its own.
+	HomeStaffingReview *FolderHomeStaffingReview `json:"home_staffing_review,omitempty"`
 	// The proactive capability decision is frozen when this scan is offered.
 	CapabilitySuppressed bool `json:"capability_suppressed,omitempty"`
 	// CapabilityHiddenAt is when the user said no to the kind of work a
@@ -471,6 +474,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		if err := validateSoftwareReview(offer.SoftwareReview); err != nil {
 			return err
 		}
+		if err := offer.HomeStaffingReview.validate(); err != nil {
+			return fmt.Errorf("%w: home staffing review", errFolderDigestInvalid)
+		}
 		if offer.NeedsCandidate && len(offer.Queue) == 0 && (offer.Status == FolderOfferPending || offer.Status == FolderOfferLater) {
 			return fmt.Errorf("%w: candidate choice", errFolderDigestInvalid)
 		}
@@ -513,6 +519,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		if offer.Setup != nil {
 			if err := validateFolderSetupRun(*offer.Setup); err != nil {
 				return err
+			}
+			if intent := offer.Setup.Intent; intent.HomeStaffing != nil && intent.Destination.OwnerUserID != doc.Owner.UserID {
+				return fmt.Errorf("%w: Home staffing owner", errFolderDigestInvalid)
 			}
 			if witness := offer.Setup.HomeOperation; witness != nil && (witness.OfferID != offer.ID || witness.RequestID != offer.RequestID) {
 				return fmt.Errorf("%w: Home operation offer", errFolderDigestInvalid)

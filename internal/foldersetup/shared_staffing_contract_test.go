@@ -60,6 +60,26 @@ func (g *grantRecorder) Grant(agent, skill string) error {
 func (g *grantRecorder) GrantPersonal(agent, skill string) error { return g.Grant(agent, skill) }
 func (g *grantRecorder) Revoke(string, string) error             { return nil }
 
+// Match the production prepared-grant boundary: the fenced callback only
+// records this fixture's grant, never resolving/re-entering a profile store.
+func (g *grantRecorder) PrepareStaffingGrants(name string, skills []string, personal bool) (func() error, error) {
+	prepared := append([]string(nil), skills...)
+	return func() error {
+		for _, skill := range prepared {
+			var err error
+			if personal {
+				err = g.GrantPersonal(name, skill)
+			} else {
+				err = g.Grant(name, skill)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
+}
+
 type sharedFixture struct {
 	workspaces workspace.Store
 	profiles   agentstore.Store

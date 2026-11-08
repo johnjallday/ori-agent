@@ -62,12 +62,21 @@ func normalizeSkillKey(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-func (m *Manager) getSkillRegistry(agentName string) (SkillRegistry, string, error) {
+func (m *Manager) profileRegistryPath(agentName string) (string, error) {
 	dir, err := m.agentDir(agentName)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, skillStateFileName), nil
+}
+
+func (m *Manager) getSkillRegistry(agentName string) (SkillRegistry, string, error) {
+	path, err := m.profileRegistryPath(agentName)
 	if err != nil {
 		return SkillRegistry{}, "", err
 	}
-	path := filepath.Join(dir, skillStateFileName)
+	m.registryMu.RLock()
+	defer m.registryMu.RUnlock()
 	registry, err := loadSkillRegistry(path)
 	if err != nil {
 		return SkillRegistry{}, "", err
@@ -84,7 +93,13 @@ func (m *Manager) updateSkillState(agentName, skillName string, updateFn func(*S
 		return fmt.Errorf("skill name is required")
 	}
 
-	registry, path, err := m.getSkillRegistry(agentName)
+	path, err := m.profileRegistryPath(agentName)
+	if err != nil {
+		return err
+	}
+	m.registryMu.Lock()
+	defer m.registryMu.Unlock()
+	registry, err := loadSkillRegistry(path)
 	if err != nil {
 		return err
 	}
@@ -130,6 +145,41 @@ func (m *Manager) SetSkillEnabled(agentName, skillName string, enabled bool) err
 	})
 }
 
+// PrepareProfileSkillEnable resolves the profile directory before the caller
+// acquires its source fence. The returned short callback touches only the
+// captured registry; it never resolves an agent or calls back into its store.
+// The caller MUST verify that exact profile's source under a mutation fence
+// before invoking it. This is not standalone grant or ownership authority.
+func (m *Manager) PrepareProfileSkillEnable(agentName string, skillNames []string) (func() error, error) {
+	dir, err := m.agentDir(agentName)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(skillNames))
+	for _, name := range skillNames {
+		key := normalizeSkillKey(name)
+		if key == "" || key == "*" {
+			return nil, fmt.Errorf("a declared named skill is required")
+		}
+		keys = append(keys, key)
+	}
+	path := filepath.Join(dir, skillStateFileName)
+	return func() error {
+		m.registryMu.Lock()
+		defer m.registryMu.Unlock()
+		registry, err := loadSkillRegistry(path)
+		if err != nil {
+			return err
+		}
+		for _, key := range keys {
+			state := registry.Skills[key]
+			state.Enabled, state.UpdatedAt = true, time.Now().UTC()
+			registry.Skills[key] = state
+		}
+		return saveSkillRegistry(path, registry)
+	}, nil
+}
+
 func (m *Manager) ClearSkillState(agentName, skillName string) error {
 	if agentName == "" {
 		return fmt.Errorf("agent name is required")
@@ -139,7 +189,13 @@ func (m *Manager) ClearSkillState(agentName, skillName string) error {
 		return fmt.Errorf("skill name is required")
 	}
 
-	registry, path, err := m.getSkillRegistry(agentName)
+	path, err := m.profileRegistryPath(agentName)
+	if err != nil {
+		return err
+	}
+	m.registryMu.Lock()
+	defer m.registryMu.Unlock()
+	registry, err := loadSkillRegistry(path)
 	if err != nil {
 		return err
 	}

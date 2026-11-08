@@ -9,6 +9,15 @@ import (
 // runner's existing material-witness guard. It never refreshes an accepted
 // plan or replaces its brief/model with newly read facts.
 func (h *folderSetupHost) validateSetupModel(req personalassistant.FolderSetupRequest) error {
+	if req.Plan.Intent.HomeStaffing != nil {
+		// Per-action model/source checks follow exact destination validation.
+		// An assigned profile never depends on the current new-agent default,
+		// and a completed role remains observable after configuration changes.
+		if req.Plan.Digest == "" || req.Plan.Stamped().Digest != req.Plan.Digest {
+			return personalassistant.ErrFolderPlanChanged
+		}
+		return nil
+	}
 	expected := req.Plan.Intent.Model
 	if expected == nil {
 		return nil // legacy/pending blueprint retains its existing recovery

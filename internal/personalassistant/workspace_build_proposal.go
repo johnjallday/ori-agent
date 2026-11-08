@@ -63,6 +63,7 @@ func (s *WorkspaceBuildSession) ProtectLegacyBuildDraft() {
 // InvalidateBuildInference fences late replies without discarding the draft.
 // Lifecycle/purpose/real-turn changes also fence outstanding picker/fetch work.
 func (s *WorkspaceBuildSession) InvalidateBuildInference(cancelAttachments bool) {
+	s.Staffing.invalidate()
 	s.ContextVersion++
 	s.InferenceID = ""
 	s.CreateNow, s.Ready = false, false

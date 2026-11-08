@@ -7973,8 +7973,11 @@ const sessionManager = {
   renderWorkspaceRoleRoster(view) {
     const container = document.getElementById('workspaceRoleRoster');
     const component = window.WorkspaceRoleRoster;
-    if (!container || !component) return;
     const roster = view && view.roleRoster;
+    this.workspaceBuildPane()?.setStaffingRoster?.({
+      roles: (roster?.roles || []).filter(role => role.staffing || role.recommended)
+    });
+    if (!container || !component) return;
     const active = Boolean(roster && roster.total_count > 0 && !view.agentless);
     container.hidden = !active;
     if (!active) {
@@ -7999,8 +8002,43 @@ const sessionManager = {
         : null,
       onRequestCreate: (roleId, row) => this.openWorkspaceRoleSetup(roleId, row),
       onAssign: (roleId, row) => this.openWorkspaceRoleAssignPicker(roleId, row),
+      onRecommend: (roleId, handle) => this.useWorkspaceStaffingRecommendation(roleId, handle),
       onClear: (roleId, row) => this.clearWorkspaceRole(roleId, row)
     });
+  },
+
+  syncWorkspaceStaffingAdvice(session = this.workspaceBuild?.session) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.teamDraft;
+    if (!draft || !api?.setStaffingAdvice) return;
+    api.setStaffingAdvice(draft, session?.staffing || null);
+    this.refreshWorkspaceReview();
+  },
+
+  async useWorkspaceStaffingRecommendation(roleId, handle) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const build = this.workspaceBuild;
+    if (!draft || !api?.staffingRoleAdvice || !build?.session?.id) return;
+    if (draft.savedRoster.status !== api.PLAN_READY) await this.loadExistingAgentRoster();
+    if (this.teamDraft !== draft || this.workspaceBuild !== build) return;
+    const choice = api
+      .staffingRoleAdvice(draft, roleId)
+      ?.choices.find(item => item.handle === handle);
+    if (!choice) return;
+    this.assignWorkspaceRole(roleId, choice.name, handle);
+  },
+
+  openWorkspaceStaffingManualChoice(roleId, action) {
+    const row = window.WorkspaceRoleRoster?.rowsFrom(this.teamView()?.roleRoster).find(
+      item => item.roleId === roleId
+    );
+    if (!row || row.readOnly) return;
+    this.collapseWorkspaceBuild({ focus: false });
+    this.goToWizardStep(3, { focus: false });
+    if (this.wizardStep !== 3) return;
+    if (action === 'create') this.openWorkspaceRoleSetup(roleId, row);
+    else this.openWorkspaceRoleAssignPicker(roleId, row);
   },
 
   async openWorkspaceGroupRoleSetup(opener, requestedRoleID = '') {
@@ -8879,7 +8917,7 @@ const sessionManager = {
     context.blueprintRolesStaged = true;
   },
 
-  assignWorkspaceRole(roleId, name) {
+  assignWorkspaceRole(roleId, name, recommendation = '') {
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
     if (!draft || !api) return;
@@ -8894,7 +8932,10 @@ const sessionManager = {
       this.refuseLockedWorkspaceRoleChange(roleId, lockRefusal);
       return;
     }
-    if (!api.setRoleFill(draft, roleId, { mode: api.FILL_ASSIGN, name: canonical })) {
+    const selected = recommendation
+      ? api.selectStaffingChoice(draft, roleId, recommendation)
+      : api.setRoleFill(draft, roleId, { mode: api.FILL_ASSIGN, name: canonical });
+    if (!selected) {
       this.refreshWorkspaceReview();
       this.renderExistingAgentRoster();
       this.announceWorkspaceTeamChange(
@@ -8951,8 +8992,8 @@ const sessionManager = {
   // A managed Group Template stages its Home role fills in
   // GroupTemplateCreator. This controller owns only the Create modal and the
   // saved-agent picker those fills are edited through. Nothing here persists:
-  // the fills are sent only after the Home-only commit succeeds, and a program
-  // Home role never collects a prompt (its instructions are applied by Ori).
+  // the fills enter the existing exact Home review/commit, and a program Home
+  // role never collects a prompt (creation instructions are applied by Ori).
 
   groupTemplateRoleAssigning: '',
   groupTemplateRoleSetup: null,
@@ -9287,6 +9328,11 @@ const sessionManager = {
 
   focusWorkspaceRoleRow(roleId) {
     if (!roleId || !window.WorkspaceRoleRoster) return false;
+    if (
+      this.workspaceBuildAssisted() &&
+      window.WorkspaceRoleRoster.focusRole(document.getElementById('workspaceBuildPane'), roleId)
+    )
+      return true;
     return window.WorkspaceRoleRoster.focusRole(
       document.getElementById('workspaceRoleRoster'),
       roleId
@@ -13540,8 +13586,9 @@ const sessionManager = {
 
   workspaceBuildApi() {
     if (this.workspaceBuildTransport) return this.workspaceBuildTransport;
-    const call = async (method, url, body) => {
+    const call = async (method, url, body, requestOptions = {}) => {
       const options = { method, headers: { Accept: 'application/json' } };
+      if (requestOptions.signal) options.signal = requestOptions.signal;
       if (body !== undefined) {
         options.headers['Content-Type'] = 'application/json';
         options.body = JSON.stringify(body);
@@ -13573,7 +13620,7 @@ const sessionManager = {
           'GET',
           `${base}/${encodeURIComponent(String(id || ''))}${recheck ? '?recheck=1' : ''}`
         ),
-      setup: (id, body) => call('POST', sessionURL(id, 'setup'), body),
+      setup: (id, body, options) => call('POST', sessionURL(id, 'setup'), body, options),
       entry: (id, body) => call('POST', sessionURL(id, 'entry'), body),
       softwareReview: (id, body) => call('POST', sessionURL(id, 'software-review'), body),
       homeProvider: (id, body) => call('POST', sessionURL(id, 'home-provider'), body),
@@ -13902,6 +13949,15 @@ const sessionManager = {
     if (!modal?.addEventListener) return;
     modal.addEventListener('workspace-build-turn', event => {
       void this.sendWorkspaceBuildTurn(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-staffing-select', event => {
+      void this.useWorkspaceStaffingRecommendation(event?.detail?.roleId, event?.detail?.handle);
+    });
+    modal.addEventListener('workspace-build-staffing-manual', event => {
+      this.openWorkspaceStaffingManualChoice(event?.detail?.roleId, event?.detail?.action);
+    });
+    modal.addEventListener('workspace-build-staffing-clear', event => {
+      this.clearWorkspaceRole(event?.detail?.roleId);
     });
     modal.addEventListener('workspace-build-review', event => {
       void this.reviewWorkspaceBuildPreparation(event?.detail || {});
@@ -15301,7 +15357,39 @@ const sessionManager = {
     const name = this.workspaceBuildAssistantName();
     await this.applyBuildPatchToWizard(patch, name, { animate: !resume, current });
     if (!current()) return;
-    if (resume && session.team_state) {
+    if (resume && Array.isArray(session.draft?.role_staffing)) {
+      // The public draft is the server's exact selected intent, including an
+      // explicit clear. Older team_state/team_patch must neither drop a handle
+      // nor resurrect a cleared recommendation or an earlier model guess.
+      await this.restoreWorkspaceBuildTeam(
+        {
+          ...(session.team_state || {}),
+          version: 1,
+          blueprint_key: this.teamDraft?.plan?.blueprintKey || '',
+          saved_selections: session.draft.existing_agent_names || [],
+          explicit_primary: session.draft.entry_agent_name || '',
+          agentless: session.draft.team_intent
+            ? session.draft.team_intent.mode === 'agentless'
+            : session.draft.role_staffing.length === 0 && Boolean(session.team_state?.agentless),
+          role_fills: session.draft.role_staffing
+            .filter(role => role && typeof role === 'object')
+            .map(role => ({
+              role_id: role.role_id,
+              mode: role.mode,
+              name: role.name,
+              recommendation: role.recommendation,
+              provider: role.provider,
+              model: role.model,
+              systemPrompt: role.system_prompt,
+              reasoningEffort: role.reasoning_effort,
+              appearance: role.appearance
+            }))
+        },
+        session.team_patch,
+        name,
+        { current }
+      );
+    } else if (resume && session.team_state) {
       // The serialized team holds the user's own team edits too.
       await this.restoreWorkspaceBuildTeam(session.team_state, session.team_patch, name, {
         current
@@ -15329,6 +15417,7 @@ const sessionManager = {
       });
     }
     if (!current()) return;
+    this.syncWorkspaceStaffingAdvice(session);
     this.advanceWorkspaceBuildWizard(session, { resume });
     // The session learns what applying the turn did to the form (the team
     // keys the Team step derived, the step reached) without calling it the
@@ -16198,8 +16287,8 @@ const sessionManager = {
       }
     );
     const list = document.getElementById('workspaceBuildPlanReviewLines');
-    if (list) list.hidden = !planReady;
-    if (planReady && shared && list) {
+    if (list) list.hidden = !planReady && !plan.home_staffing;
+    if ((planReady || plan.home_staffing) && shared && list) {
       // A plugin the plan reports as ready is checked off, as in the pane.
       const satisfied = shared.satisfiedLinesView || (lines => lines);
       shared.renderSetupLines(
@@ -16230,9 +16319,13 @@ const sessionManager = {
     if (!session) return;
     const planReady = this.workspaceBuildPlanReady();
     const recognized = planReady || session.folder?.recognition?.verdict === 'project';
-    const prerequisite = session.plan?.unavailable_subject
-      ? `${session.plan.unavailable_subject} is required before this recognized setup can run.`
-      : 'Ori cannot prepare a supported setup plan yet. Review prerequisites or change folder.';
+    const homeTeam = session.plan?.home_staffing;
+    const prerequisite = homeTeam
+      ? homeTeam.problem ||
+        'Choose the required Home roles below. Recommendations are optional; saved profiles stay unchanged.'
+      : session.plan?.unavailable_subject
+        ? `${session.plan.unavailable_subject} is required before this recognized setup can run.`
+        : 'Ori cannot prepare a supported setup plan yet. Review prerequisites or change folder.';
     const setText = (id, value) => {
       const node = document.getElementById(id);
       if (node && node.textContent !== String(value || '')) node.textContent = String(value || '');
@@ -16316,7 +16409,14 @@ const sessionManager = {
     setText(
       'workspaceBuildFolderTeam',
       recognized
-        ? 'The recognized setup defines the team; these roles cannot be replaced by a suggestion.'
+        ? homeTeam
+          ? (homeTeam.choices || [])
+              .map(
+                choice =>
+                  `${choice.name} · ${choice.mode === 'assign' ? 'Reuse saved agent' : 'Create new agent'}`
+              )
+              .join(' · ') || 'Choose the Home team below. No agent is selected automatically.'
+          : 'The recognized setup defines the team; these roles cannot be replaced by a suggestion.'
         : team?.planStatus !== 'ready'
           ? 'Checking the effective team…'
           : members.length
@@ -16598,6 +16698,7 @@ const sessionManager = {
     if (title) title.textContent = planReady ? 'Plan so far' : 'Draft so far';
     this.syncWorkspaceBuildPlanReview(planReady);
     if (folderReview) this.syncWorkspaceBuildFolderReview();
+    this.syncWorkspaceBuildHomeStaffing();
     const text = document.getElementById('workspaceBuildDraftText');
     if (text && planReady) {
       text.textContent = this.workspaceBuildPlanLine();
@@ -17352,6 +17453,7 @@ const sessionManager = {
       build.draftError = false;
       build.session = session;
       build.lastDraftKey = key;
+      this.syncWorkspaceStaffingAdvice(session);
       this.rememberWorkspaceBuildSession(session);
       this.workspaceBuildPane()?.applySession(session);
       this.syncWorkspaceBuildPresentation();
@@ -18145,6 +18247,76 @@ const sessionManager = {
       if (this.workspaceBuild === build) {
         build.setupBusy = false;
         pane.setBusy?.(false, { focus: false });
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
+  },
+
+  syncWorkspaceBuildHomeStaffing() {
+    const build = this.workspaceBuild;
+    for (const id of ['workspaceBuildHomeStaffing', 'workspaceBuildPlanReviewHomeStaffing']) {
+      const host = document.getElementById(id);
+      if (!host) continue;
+      window.FolderHomeStaffing?.mount(host, {
+        owner: `${this.workspaceBuildGeneration}:${build?.session?.id || ''}`,
+        view: build?.session?.setup ? null : build?.session?.plan?.home_staffing,
+        disabled: Boolean(
+          build?.busy || build?.setupBusy || build?.readinessBusy || build?.closing
+        ),
+        onAction: (input, options) => this.reviewWorkspaceBuildHomeStaffing(input, options)
+      });
+    }
+  },
+
+  async reviewWorkspaceBuildHomeStaffing(input, { signal } = {}) {
+    const build = this.workspaceBuild;
+    if (
+      !build?.session ||
+      build.busy ||
+      build.setupBusy ||
+      build.readinessBusy ||
+      build.session.setup
+    )
+      throw new Error('Finish the current draft action before reviewing this Home team.');
+    const sessionID = build.session.id;
+    const generation = this.workspaceBuildGeneration;
+    const current = () =>
+      this.workspaceBuild === build &&
+      build.session?.id === sessionID &&
+      generation === this.workspaceBuildGeneration;
+    const mutation = input.action !== 'recommend_staffing';
+    if (mutation) {
+      build.setupBusy = true;
+      this.syncWorkspaceBuildPresentation();
+    }
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (!current()) throw new DOMException('The build changed', 'AbortError');
+      if (build.draftError || build.draftConflict || build.draftUser !== undefined)
+        throw new Error(
+          'Save the current draft before reviewing its Home team. Your choices are kept.'
+        );
+      const result = await this.workspaceBuildApi().setup(
+        sessionID,
+        {
+          version: Number(build.session.version) || 0,
+          home_staffing: { ...input, request_id: crypto.randomUUID() }
+        },
+        { signal }
+      );
+      if (!current()) throw new DOMException('The build changed', 'AbortError');
+      if (result.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+      if (!result.ok) {
+        if (result.status === 409) await this.reloadWorkspaceBuildSession();
+        throw new Error(
+          result.body?.error ||
+            'The Home team changed. Review it and try again; no setup was started.'
+        );
+      }
+      return build.session.plan?.home_staffing;
+    } finally {
+      if (current()) {
+        if (mutation) build.setupBusy = false;
         this.syncWorkspaceBuildPresentation();
       }
     }
@@ -19231,7 +19403,9 @@ const sessionManager = {
         const build = this.workspaceBuild?.session;
         if (
           build?.id === buildSessionID &&
-          (build.folder || build.link) &&
+          (build.folder ||
+            build.link ||
+            payload.role_staffing?.some(fill => fill.recommendation)) &&
           this.ordinaryBuildReviewEligible()
         ) {
           payload.build_review_version = build.version;

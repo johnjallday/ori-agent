@@ -6123,6 +6123,39 @@ body.chat-panel-open .chat-panel-backdrop {
    the two — a solid border and full-strength ink — while Optional
    recedes; the difference is emphasis, never alarm.
    ============================================================ */
+.folder-home-staffing {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  margin-block: 1rem;
+}
+
+.folder-home-staffing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.folder-home-staffing__editor {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  background: var(--bg-secondary);
+}
+
+.folder-home-staffing__editor[hidden] {
+  display: none;
+}
+
+.folder-home-staffing__editor .workspace-existing-agent-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
 .ws-role-roster__count {
   margin: 0 0 0.5rem;
   color: var(--text-secondary);
@@ -6234,6 +6267,90 @@ body.chat-panel-open .chat-panel-backdrop {
   font-size: 0.75rem;
 }
 
+/* Saved-roster advice stays inside its role, distinct from a filled binding. */
+.ws-role-advice {
+  margin-top: 0.75rem;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--accent-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The assistant transcript can be shorter than a role's evidence. Keep the
+   role visible while its choice and reasons scroll, including keyboard focus. */
+.workspace-build-staffing .ws-role-row__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-block: 0.25rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ws-role-advice .btn-primary {
+  --bs-btn-color: var(--bg-primary);
+  --bs-btn-bg: var(--text-primary);
+  --bs-btn-border-color: var(--text-primary);
+  --bs-btn-hover-color: var(--bg-primary);
+  --bs-btn-hover-bg: var(--text-secondary);
+  --bs-btn-hover-border-color: var(--text-secondary);
+  --bs-btn-active-color: var(--bg-primary);
+  --bs-btn-active-bg: var(--text-primary);
+  --bs-btn-active-border-color: var(--text-primary);
+}
+
+.ws-role-advice button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.ws-role-advice__status {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.ws-role-advice__choice {
+  margin-top: 0.75rem;
+}
+
+.ws-role-advice__name {
+  display: block;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.ws-role-advice__note,
+.ws-role-advice__reasons,
+.ws-role-advice__assignments {
+  margin: 0.3rem 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.ws-role-advice__reasons,
+.ws-role-advice__assignments {
+  padding-inline-start: 1rem;
+}
+
+.ws-role-advice__alternatives {
+  margin-top: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.ws-role-advice__alternatives summary {
+  cursor: pointer;
+}
+
+.ws-role-advice__alternatives summary:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 3px;
+}
+
 /* ---- State tags ---------------------------------------------------------- */
 .ws-role-tag {
   display: inline-flex;
@@ -6282,7 +6399,7 @@ body.chat-panel-open .chat-panel-backdrop {
 }
 
 .ws-role-tag__source {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .ws-role-tag__source::before {

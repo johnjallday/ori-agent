@@ -386,8 +386,8 @@ func (p *portfolioHomes) Commit(ctx context.Context, review foldersetup.HomeRevi
 	return p.host.builder.sessionHandler.CommitPortfolioHome(ctx, reviewed, key)
 }
 
-// portfolioHomeStaffing fills the Home's required roles through the one
-// staffing seam (StaffRoleOnWorkspace), creating new agents only.
+// portfolioHomeStaffing uses the canonical staffing seam. Missing/ModelReady/
+// Staff preserve legacy create-only plans; StaffReviewed consumes exact plans.
 type portfolioHomeStaffing struct {
 	builder *ServerBuilder
 	model   *personalassistant.FolderSetupModelIntent
@@ -609,14 +609,23 @@ func (r portfolioReceipts) Receipt(_ context.Context, homeID string, facts folde
 		Kind: "home", Name: home.Name, Detail: detail, Operation: operation,
 		Route: "/workspaces/" + url.PathEscape(home.FolderSlug) + "/assistant#projectLibraryPanel",
 	}}
-	added := map[string]bool{}
-	for _, name := range facts.AddedAgents {
-		added[strings.ToLower(name)] = true
-	}
-	for _, instance := range home.GetAgentInstances() {
-		if facts.HomeCreated || added[strings.ToLower(instance.Name)] {
-			_, model, _ := b.sessionHandler.SavedAgentModel(instance.Name)
-			rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: instance.Name, Detail: receiptAgentDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model)})
+	if len(facts.HomeRoles) > 0 {
+		for _, role := range facts.HomeRoles {
+			if !folderHomeRolePresent(home, role) {
+				role.Outcome = "not_completed"
+			}
+			rows = append(rows, foldersetup.HomeRoleReceipt(role))
+		}
+	} else {
+		added := map[string]bool{}
+		for _, name := range facts.AddedAgents {
+			added[strings.ToLower(name)] = true
+		}
+		for _, instance := range home.GetAgentInstances() {
+			if facts.HomeCreated || added[strings.ToLower(instance.Name)] {
+				_, model, _ := b.sessionHandler.SavedAgentModel(instance.Name)
+				rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: instance.Name, Detail: receiptAgentDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model)})
+			}
 		}
 	}
 	noun := strings.TrimSpace(r.noun)

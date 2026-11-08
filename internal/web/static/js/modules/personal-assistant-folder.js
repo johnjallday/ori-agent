@@ -1355,6 +1355,14 @@ export function blockedFolderSetupAction(offer) {
 // the link reviews the other hire in place; nothing is created.
 export function folderOfferView(offer, options = {}) {
   const view = folderOfferViewWithoutLead(offer, options);
+  const homeTeam = offer?.home_staffing || offer?.plan?.home_staffing;
+  if (homeTeam && !offer?.setup && homeTeam.state !== 'ready') {
+    view.actions = (view.actions || []).map(action =>
+      action.oneCard || action.id === 'setup'
+        ? { ...action, disabled: true, label: 'Choose the Home team first' }
+        : action
+    );
+  }
   const homeID = folderHomeMapTarget(offer);
   if (view.visible && homeID && offer.setup?.status !== 'running') {
     view.actions = [
@@ -3191,6 +3199,7 @@ function elements() {
     map: document.getElementById('personalAssistantFolderMap'),
     result: document.getElementById('personalAssistantFolderFirstLookResult'),
     plan: document.getElementById('personalAssistantFolderPlan'),
+    homeStaffing: document.getElementById('personalAssistantFolderHomeStaffing'),
     lookNote: document.getElementById('personalAssistantFolderLookNote'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
@@ -4215,6 +4224,15 @@ function renderOffer(place) {
     els.result.append(document.createElement('br'), label, result.next);
     els.result.hidden = false;
   }
+  if (els.homeStaffing)
+    window.FolderHomeStaffing?.mount(els.homeStaffing, {
+      owner: `${state.reviewGeneration}:${state.offer?.id || ''}`,
+      view: state.offer?.setup
+        ? null
+        : state.offer?.home_staffing || state.offer?.plan?.home_staffing,
+      disabled: actionBusy,
+      onAction: reviewFolderHomeStaffing
+    });
   if (els.plan) {
     // After a hire, its agent's first look follows the receipt as two lines.
     const look = !view.setup && !view.plan && receipt.visible ? receipt.hireLook : null;
@@ -4359,10 +4377,10 @@ function renderOffer(place) {
               : 'btn btn-sm btn-link';
         button.dataset.folderAction = action.id;
         button.textContent =
-          musicSetupOffer(state.offer) && action.oneCard && !state.offer.setup
+          !action.disabled && musicSetupOffer(state.offer) && action.oneCard && !state.offer.setup
             ? 'Return to setup review'
             : action.label;
-        button.disabled = actionBusy;
+        button.disabled = actionBusy || action.disabled === true;
         button.addEventListener('click', () => runAction(action));
         // Remove sits beside the headline, where a way out is looked for; the
         // row below keeps the way forward. Its confirm returns to the row.
@@ -5099,6 +5117,10 @@ async function openMusicSetupReview(trigger) {
     return false;
   }
   if (musicSummary) musicSummary.querySelector('[role="status"]').textContent = '';
+  void window.FolderHomeStaffing?.suggest(
+    elements()?.homeStaffing,
+    () => musicDialogCurrent(ref) && musicSetupDialog().owns(ref)
+  );
   if (
     musicSetupNeedsConfirmation(state.offer) &&
     state.offer.plan?.digest &&
@@ -6846,13 +6868,14 @@ async function scan(body) {
 
 // postOffer sends one offer action (decide or resolve) and returns the
 // response, updating the shown offer on success.
-async function postOffer(offerId, action, body) {
+async function postOffer(offerId, action, body, { signal } = {}) {
   const generation = state.reviewGeneration;
   const response = await fetch(
     `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offerId)}/${action}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      signal,
       // Choosing is a plan-fenced edit, not a recorded setup decision.
       body: JSON.stringify(
         action === 'entry' ? body : { ...body, request_id: body?.request_id || requestId() }
@@ -6864,7 +6887,10 @@ async function postOffer(offerId, action, body) {
     (response.ok || response.status === 409) &&
     payload?.offer?.id === offerId &&
     generation === state.reviewGeneration &&
-    state.offer?.id === offerId
+    state.offer?.id === offerId &&
+    (!body?.home_staffing ||
+      Number(payload.offer.home_staffing?.revision || 0) >=
+        Number(state.offer.home_staffing?.revision || 0))
   ) {
     state.offer = payload.offer;
     state.confirm = '';
@@ -6920,6 +6946,49 @@ function inOfferActions(node) {
   return Boolean(
     node && (elements()?.actions?.contains(node) || offerHeadActions()?.contains(node))
   );
+}
+
+// Home staffing is a bounded edit on this same offer, never Set up. Ranking
+// leaves manual controls available; ordinary mutations use the card's busy gate.
+async function reviewFolderHomeStaffing(input, { signal } = {}) {
+  const offerID = state.offer?.id;
+  const generation = state.reviewGeneration;
+  const current = () => generation === state.reviewGeneration && state.offer?.id === offerID;
+  if (!offerID || state.busy || input.action === 'prepare_staffing')
+    throw new Error('Reopen the current Home review before choosing its team.');
+  const mutation = input.action !== 'recommend_staffing';
+  if (mutation) {
+    state.busy = true;
+    render();
+  }
+  try {
+    const { ok, payload } = await postOffer(
+      offerID,
+      mutation ? 'adjust' : 'review',
+      { home_staffing: input },
+      { signal }
+    );
+    if (!current()) throw new DOMException('The review changed', 'AbortError');
+    if (!ok) {
+      const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(offerID)}`, {
+        signal,
+        headers: { Accept: 'application/json' }
+      });
+      const refreshed = response.ok ? await readJSON(response) : null;
+      if (current() && refreshed?.folder_digest?.offer?.id === offerID)
+        state.offer = refreshed.folder_digest.offer;
+      throw new Error(
+        payload?.error || 'The Home team changed. Check the current review and try again.'
+      );
+    }
+    render();
+    return state.offer.home_staffing || state.offer.plan?.home_staffing;
+  } finally {
+    if (current()) {
+      if (mutation) state.busy = false;
+      render();
+    }
+  }
 }
 
 // reviewSoftware is the click on Review setup (or Review again). It is the one
