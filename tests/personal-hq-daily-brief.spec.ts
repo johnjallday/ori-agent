@@ -147,7 +147,8 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     const site = page.locator('[data-hq-site]');
     await expect(site).toBeVisible();
     await expect(site).toHaveClass(/is-selected/);
-    await expect(site).toContainText('Not created');
+    // A just-hired assistant's site says where the HQ begins, not an absence.
+    await expect(site).toContainText('Starts here');
 
     // ...and it must be reachable, not just present. The camera's first-paint
     // guard only counted workspaces and group districts as content, so a

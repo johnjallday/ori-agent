@@ -19,6 +19,14 @@ import {
   renderWorkspaceUpdateSection
 } from './workspace-update-signals.js';
 import { openLibrarySheet } from './map-library-sheet.js';
+import {
+  hasHomeIntent,
+  homeWelcomeView,
+  readExploredStage,
+  rememberExplored,
+  rescopeExplored,
+  welcomeCardHTML
+} from './home-welcome.js';
 import { workspacePageURL } from './workspace-routes.js';
 import {
   MEET_ASSISTANT_AGENTS_ROUTE,
@@ -120,6 +128,16 @@ export function cockpitPrimaryActionView(personalAssistant) {
   const action = Object.hasOwn(PRIMARY_ACTIONS, state) ? PRIMARY_ACTIONS[state] : null;
   if (!action) return { visible: false, label: '', kind: '', href: '' };
   return { visible: true, ...action };
+}
+
+// The header primary and the empty map's welcome card never offer the same
+// onboarding action twice: while the card is on screen it owns that action and
+// the header primary steps aside; otherwise the header primary is the compact
+// way back in, in Map and Tree alike (assistant-hq-onboarding 1.2).
+export function cockpitPrimaryPresentation(personalAssistant, welcome) {
+  const action = cockpitPrimaryActionView(personalAssistant);
+  const cardOwnsAction = !!(action.visible && welcome && welcome.show);
+  return { ...action, visible: action.visible && !cardOwnsAction, cardOwnsAction };
 }
 
 // The drawer-opening subset of the primary, which the /?folder=show deep link
@@ -1956,6 +1974,9 @@ import {
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
     primaryActionBtn: document.getElementById('cockpitPrimaryActionBtn'),
+    // The empty map's first-run welcome (home-welcome.js). Host-owned, over
+    // the map, so the Map's geometry, camera and selection stay its own.
+    welcomeHost: document.getElementById('cockpitWelcome'),
     // Updates: the header trigger keeps the retired "Today" toggle's id for
     // compatibility (PRD FR2); its flyout and body are new (Issue #334).
     railToggle: document.getElementById('cockpitRailToggle'),
@@ -2114,8 +2135,28 @@ import {
     },
     loading: true,
     error: null,
-    inFlight: null
+    inFlight: null,
+    // The assistant relationship as last read; null while unknown. The welcome
+    // card and the header primary both decide from it.
+    personalAssistant: null,
+    // An explicit Home intent on arrival (focus, create, setup, a quest, the
+    // drawer, the HQ card) wins over the unsolicited welcome for this visit.
+    welcomeIntent: hasHomeIntent(window.location.search)
   };
+
+  // ---- the first-run welcome's one preference (home-welcome.js) ----
+  //
+  // "Explore first" is presentation only, kept beside the Tree's own record in
+  // this browser. It survives a reload, never reaches the server, and is
+  // dropped when the relationship moves to a different stage.
+  const welcomeStorage = (() => {
+    try {
+      return window.localStorage || null;
+    } catch (_) {
+      return null;
+    }
+  })();
+  let welcomeHTML = '';
 
   // ---- what the Tree remembers between visits (home-file-tree FR68-FR70) ----
   //
@@ -2203,7 +2244,46 @@ import {
     if (els.map) els.map.hidden = state.view !== VIEW_MAP || !mapRenderable;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     currentInvitation();
+    renderWelcome(status);
     return status;
+  }
+
+  function currentWelcome(areaStatus = currentAreaState()) {
+    return homeWelcomeView({
+      relationshipState: state.personalAssistant?.state,
+      areaState: areaStatus.state,
+      hqStatus: state.hqStatus,
+      view: state.view === VIEW_TREE ? 'tree' : 'map',
+      intent: state.welcomeIntent,
+      exploredStage: readExploredStage(welcomeStorage),
+      modalOpen: !!(state.modalVisible || state.modalRequested),
+      drawerOpen: !!window.PersonalAssistantPanel?.isOpen?.()
+    });
+  }
+
+  /**
+   * Show, hide, or keep the welcome card, and step the header primary aside
+   * while the card owns the onboarding action. Markup is rewritten only when it
+   * changes, so a status refresh never rebuilds (or steals focus from) a
+   * button the user is on. Nothing here focuses anything.
+   */
+  function renderWelcome(areaStatus) {
+    const welcome = currentWelcome(areaStatus);
+    root.dataset.firstRun = welcome.show ? 'welcome' : '';
+    if (els.primaryActionBtn) {
+      const primary = cockpitPrimaryPresentation(state.personalAssistant, welcome);
+      els.primaryActionBtn.hidden = !primary.visible;
+    }
+    if (!els.welcomeHost) return welcome;
+    const html = welcomeCardHTML(welcome, {
+      assistantName: state.personalAssistant?.display_name || ''
+    });
+    if (html !== welcomeHTML) {
+      welcomeHTML = html;
+      els.welcomeHost.innerHTML = html;
+    }
+    els.welcomeHost.hidden = !welcome.show;
+    return welcome;
   }
 
   // ---- signal filters (FR31-FR34) ----
@@ -3678,6 +3758,8 @@ import {
   }
 
   function updateContextTrigger() {
+    // The context modal and the welcome card never cover each other.
+    renderWelcome();
     if (!els.summaryBtn) return;
     const summaryVisible =
       state.railState === RAIL_SUMMARY && (state.modalVisible || state.modalRequested);
@@ -5283,7 +5365,7 @@ import {
   // launcher, and the Map's empty hint. There is no second chooser here.
   let folderAction = { visible: false, target: '' };
   let primaryAction = cockpitPrimaryActionView(null);
-  function openHomeFolder() {
+  function openHomeFolder(invoker = els.primaryActionBtn) {
     if (!folderAction.visible) return false;
     // Module initialization and relationship status may race on a deep link.
     // Do not consume its intent until the actual card/chooser controller is
@@ -5291,7 +5373,7 @@ import {
     if (folderAction.target === 'folder' && !window.PersonalAssistantFolder?.openChooser)
       return false;
     if (folderAction.target === 'hq' && !window.PersonalAssistantHQCard?.show) return false;
-    const opened = window.PersonalAssistantPanel?.open?.(els.primaryActionBtn);
+    const opened = window.PersonalAssistantPanel?.open?.(invoker);
     if (!opened) return false;
     if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
     else window.PersonalAssistantFolder.openChooser();
@@ -5312,26 +5394,66 @@ import {
       window.setTimeout(consumeFolderDeepLink, 100);
     }
   }
-  window.OriHomeFolder = { open: openHomeFolder };
+  window.OriHomeFolder = { open: () => openHomeFolder() };
   // Mission 01's steps live on their own routes; the HQ card and the folder
   // chooser open in the drawer through the deep link's own guarded path.
-  function runPrimaryAction() {
+  function runPrimaryAction(invoker) {
     if (primaryAction.kind === 'navigate') {
       window.location.assign(primaryAction.href);
       return true;
     }
-    return openHomeFolder();
+    return openHomeFolder(invoker || els.primaryActionBtn);
   }
   // The label is plain visible text and not announced: the button is outside
-  // any live region, and it changes only when the relationship does.
+  // any live region, and it changes only when the relationship does. Whether
+  // it shows is renderWelcome's call: it steps aside while the welcome card
+  // owns the same action.
   function applyAssistantState(personalAssistant) {
     primaryAction = cockpitPrimaryActionView(personalAssistant);
     folderAction = cockpitFolderActionView(personalAssistant);
-    if (!els.primaryActionBtn) return;
-    if (primaryAction.visible) els.primaryActionBtn.textContent = primaryAction.label;
-    els.primaryActionBtn.hidden = !primaryAction.visible;
+    state.personalAssistant = personalAssistant || null;
+    rescopeExplored(welcomeStorage, state.personalAssistant?.state);
+    if (els.primaryActionBtn && primaryAction.visible) {
+      els.primaryActionBtn.textContent = primaryAction.label;
+    }
+    renderWelcome();
   }
-  els.primaryActionBtn?.addEventListener('click', runPrimaryAction);
+  // The welcome card's two buttons. Its primary reaches exactly the route or
+  // controller the header primary does. Explore first only records a
+  // presentation preference, then hands focus to the compact way back in so a
+  // keyboard user is not left on a removed button.
+  els.welcomeHost?.addEventListener('click', event => {
+    const button = event.target.closest('[data-home-welcome-action]');
+    if (!button || !els.welcomeHost.contains(button)) return;
+    const action = button.getAttribute('data-home-welcome-action');
+    if (action === 'primary') {
+      runPrimaryAction(button);
+      return;
+    }
+    if (action !== 'explore') return;
+    const welcome = currentWelcome();
+    rememberExplored(welcomeStorage, welcome.stage);
+    renderWelcome();
+    if (els.primaryActionBtn && !els.primaryActionBtn.hidden) {
+      els.primaryActionBtn.focus({ preventScroll: true });
+      announce(`${primaryAction.label} is in the workspace header whenever you are ready.`);
+    }
+  });
+  els.primaryActionBtn?.addEventListener('click', () => runPrimaryAction());
+  // The drawer and the welcome card take turns (home-welcome.js).
+  document.addEventListener('personal-assistant:opened', () => renderWelcome());
+  document.addEventListener('personal-assistant:closed', () => {
+    const welcome = renderWelcome();
+    // The drawer hands focus back to the card button that opened it, but that
+    // button was hidden while the drawer was open, so focus can fall to the
+    // page. Only then — never when the user is elsewhere — put it back.
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (welcome.show && lost) {
+      els.welcomeHost
+        ?.querySelector('[data-home-welcome-action="primary"]')
+        ?.focus({ preventScroll: true });
+    }
+  });
   document.addEventListener('personal-assistant:status', event => {
     applyAssistantState(event.detail?.personalAssistant);
     consumeFolderDeepLink();

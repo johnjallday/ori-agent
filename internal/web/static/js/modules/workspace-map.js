@@ -981,8 +981,20 @@
       // during the guided stage below, where importing a workspace would
       // silently rebind an existing one as the hired assistant's HQ.
       showImport: !resumable,
-      assistantName: ''
+      assistantName: '',
+      // The accessible status; the visible flag stays short.
+      statusText: resumable ? 'Setup paused' : repair ? 'Needs repair' : 'Not created'
     };
+
+    // A new user has nothing to have "not created" yet. Before the HQ exists
+    // and while the assistant is still being met or has just been hired, the
+    // site says where the HQ begins instead of naming an absence
+    // (assistant-hq-onboarding 1.3). Repair, paused setup, an unknown
+    // relationship and every later state keep their existing label.
+    if (!resumable && !repair && personalAssistantIsNew()) {
+      view.statusLabel = 'Starts here';
+      view.statusText = 'Your Personal HQ starts here';
+    }
 
     // A hired assistant with no home base yet. The site names its subject and
     // offers only the safe build path. Every other state — repair, import,
@@ -991,7 +1003,6 @@
       var who = String((personalAssistant && personalAssistant.displayName) || '').trim();
       view.guided = true;
       view.assistantName = who;
-      view.statusLabel = 'Not created';
       view.title = who ? 'Build ' + who + '’s Personal HQ' : 'Build your assistant’s Personal HQ';
       view.detail = who
         ? who +
@@ -1014,6 +1025,12 @@
   function personalAssistantNeedsHQ() {
     if (!personalAssistant) return false;
     return personalAssistant.state === 'needs_hq' || personalAssistant.state === 'provisioning_hq';
+  }
+
+  function personalAssistantIsNew() {
+    if (!personalAssistant) return false;
+    var s = personalAssistant.state;
+    return s === 'needs_hire' || s === 'hiring' || s === 'needs_hq';
   }
 
   function setPersonalAssistant(relationship) {
@@ -2889,6 +2906,7 @@
     var left = Number(cell && cell.left) || 0;
     var top = Number(cell && cell.top) || 0;
     var status = view.statusLabel || 'Not created';
+    var spoken = view.statusText || status;
     return (
       '<button type="button" class="ws-map-tile ws-map-hq-site' +
       (isSelected ? ' is-selected' : '') +
@@ -2905,7 +2923,7 @@
       (index || 0) +
       '" ' +
       'aria-label="Personal HQ site, ' +
-      escapeHtml(status) +
+      escapeHtml(spoken) +
       '. Activate to view setup options">' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led"></span>' +
       escapeHtml(status) +

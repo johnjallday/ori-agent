@@ -1943,6 +1943,34 @@ test('the reserved site keeps its existing copy outside the guided stage', () =>
   }
 });
 
+test('a new user sees where the Personal HQ starts, not an unexplained absence', () => {
+  for (const state of ['needs_hire', 'hiring', 'needs_hq']) {
+    const map = loadOriWorkspaceMap();
+    map.setPersonalAssistant({ state, display_name: 'Atlas' });
+    const view = map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' });
+    assert.equal(view.statusLabel, 'Starts here', state);
+    assert.equal(view.statusText, 'Your Personal HQ starts here');
+    const html = map.hqSiteHTML({ left: 0, top: 0 }, '', 0, view);
+    assert.match(html, /aria-label="Personal HQ site, Your Personal HQ starts here\./);
+    assert.match(html, /ws-map-tile-flag">.*Starts here/);
+    assert.doesNotMatch(html, /Not created/);
+  }
+});
+
+test('repair, paused setup, an unknown relationship and later states keep their labels', () => {
+  const unknown = loadOriWorkspaceMap();
+  assert.equal(unknown.hqSiteView({ valid: false }).statusLabel, 'Not created');
+  const map = loadOriWorkspaceMap();
+  map.setPersonalAssistant({ state: 'needs_hq', display_name: 'Atlas' });
+  assert.equal(map.hqSiteView({ valid: false, workspace_id: 'gone' }).statusLabel, 'Needs repair');
+  map.setPersonalAssistant({ state: 'provisioning_hq', display_name: 'Atlas' });
+  assert.equal(map.hqSiteView({ valid: false }).statusLabel, 'Setup paused');
+  for (const state of ['active', 'paused', 'repair_needed']) {
+    map.setPersonalAssistant({ state, display_name: 'Atlas' });
+    assert.equal(map.hqSiteView({ valid: false }).statusLabel, 'Not created', state);
+  }
+});
+
 test('a broken HQ keeps repair copy even for a hired assistant', () => {
   // Repair is a different problem from "never built", and the guided stage must
   // not paper over it with build-a-home-base copy.

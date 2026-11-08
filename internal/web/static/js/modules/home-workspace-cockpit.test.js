@@ -24,6 +24,7 @@ import {
   contextModalShouldShow,
   cockpitFolderActionView,
   cockpitPrimaryActionView,
+  cockpitPrimaryPresentation,
   parseViewFromQuery,
   moveDeepLinkTarget,
   showMapDeepLinkTarget,
@@ -137,6 +138,23 @@ test('Home primary action stays hidden until a known relationship state arrives'
   ]) {
     assert.deepEqual(cockpitPrimaryActionView(input), hidden, JSON.stringify(input));
   }
+});
+
+test('the header primary steps aside while the welcome card owns the same action', () => {
+  const owned = cockpitPrimaryPresentation({ state: 'needs_hire' }, { show: true });
+  assert.equal(owned.visible, false, 'one focusable onboarding CTA, not two');
+  assert.equal(owned.cardOwnsAction, true);
+  assert.equal(owned.label, 'Meet your assistant', 'the label is still known for re-entry');
+  for (const welcome of [{ show: false, compact: true }, null, undefined]) {
+    const compact = cockpitPrimaryPresentation({ state: 'needs_hq' }, welcome);
+    assert.equal(compact.visible, true, 'compact re-entry when the card is off');
+    assert.equal(compact.label, 'Build My HQ');
+  }
+  // Unknown relationship: nothing to own and nothing to show.
+  const unknown = cockpitPrimaryPresentation(null, { show: true });
+  assert.deepEqual([unknown.visible, unknown.cardOwnsAction], [false, false]);
+  // A ready assistant's primary is unaffected by a stale welcome object.
+  assert.equal(cockpitPrimaryPresentation({ state: 'active' }, { show: false }).visible, true);
 });
 
 test('Home folder action appears after hire and opens the right existing card', () => {
