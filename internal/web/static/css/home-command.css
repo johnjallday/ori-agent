@@ -3981,3 +3981,33 @@ a.quest-title:focus-visible {
   background: var(--hc-panel-raised, var(--cozy-paper-raised));
   color: var(--hc-ink, var(--cozy-ink));
 }
+
+/* The shrunk card while the Commander speaks on the map (FR13, FR15): one
+   line in its voice with one action. */
+.folder-agent-card--line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.folder-agent-card__line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-agent-card__line-action {
+  flex: 0 0 auto;
+}
+
+/* Inside the balloon the card is compact: its gaps tighten. */
+.folder-agent-card--compact {
+  gap: 8px;
+  padding: 10px 12px 12px;
+}

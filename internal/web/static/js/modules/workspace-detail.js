@@ -27,6 +27,8 @@ import {
   renderFirstTaskBanner
 } from './workspace-first-task-banner.js';
 import { mountWorkspaceFolderAgent } from './folder-agent-card.js';
+import { commanderPresenter, workspaceCommanderMap } from './commander-map.js';
+import { answerTicket, commanderTicketItems } from './commander-tickets.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
@@ -467,6 +469,8 @@ export class WorkspaceDetailPage {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    this.commanderPresenter?.dispose();
+    this.commanderPresenter = null;
     clearTimeout(this.songWorkTimer);
     for (const resource of this._resourceRequests?.keys() || [])
       this.invalidateResourceRequest(resource);
@@ -601,11 +605,17 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !startedSetupTask) {
       this.showFolderFirstTaskBanner();
     }
-    // A workspace started from a folder shows its agent's report here too.
+    // A workspace started from a folder shows its agent's report here too;
+    // on the Map tab its Commander presents it in a balloon on the map and
+    // this card shrinks to one line.
+    this.commanderPresenter?.dispose();
+    this.commanderPresenter = commanderPresenter(workspaceCommanderMap(this.workspaceId), {
+      ticketItems: activity => this.commanderTicketItems(activity)
+    });
     mountWorkspaceFolderAgent(
       document.getElementById('workspaceFolderAgentReport'),
       this.workspaceId,
-      { isActive: () => !this._destroyed }
+      { isActive: () => !this._destroyed, presenter: this.commanderPresenter }
     );
     // Give work… on the Agents page arrives here with the agent named; its
     // task form opens once nothing of the blueprint's own goes first.
@@ -619,6 +629,42 @@ export class WorkspaceDetailPage {
    * agent-give-task.js) and open the task form with that agent chosen.
    * The parameter is removed so a reload does not open it again.
    */
+  // commanderTicketItems turns the Commander's ticket activity into its
+  // balloon's items: a waiting ticket answered through the ticket page's own
+  // assist endpoint, a run's lines, and a finished result to open or dismiss.
+  commanderTicketItems(activity) {
+    this.commanderTicketState ||= { dismissed: new Set(), errors: {} };
+    const { dismissed, errors } = this.commanderTicketState;
+    const taskOf = id => (Array.isArray(this.tasks) ? this.tasks : []).find(t => t?.id === id);
+    const retick = () => this.commanderPresenter?.retick();
+    return commanderTicketItems(activity, {
+      titleOf: id => String(taskOf(id)?.title || ''),
+      taskOf,
+      dismissed,
+      errors,
+      actions: {
+        open: id => this.openTaskAssistModal(id),
+        answer: async (wait, payload, button) => {
+          if (button) button.disabled = true;
+          const result = await answerTicket(wait, payload);
+          errors[wait.taskId] = result.ok ? '' : result.error;
+          if (!result.ok && button) button.disabled = false;
+          if (result.ok) void this.loadTasks?.();
+          retick();
+        },
+        openResult: result => {
+          dismissed.add(result.parcelId);
+          activity?.openResult?.(result.parcelId);
+          retick();
+        },
+        dismiss: result => {
+          dismissed.add(result.parcelId);
+          retick();
+        }
+      }
+    });
+  }
+
   checkAutoOpenNewTaskFor() {
     const params = new URLSearchParams(window.location.search);
     const agentName = String(params.get('newTaskFor') || '').trim();
@@ -3605,6 +3651,8 @@ export class WorkspaceDetailPage {
       });
       if (!this.isResourceRequestCurrent(request)) return;
       this.tasks = snapshot.tasks;
+      // A waiting ticket's question and choices arrive with the tickets.
+      this.commanderPresenter?.retick();
       if (this.currentView === 'board' && this.boardConfig) {
         this.renderBoard();
       }

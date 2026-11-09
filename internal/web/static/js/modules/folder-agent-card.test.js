@@ -1402,6 +1402,70 @@ test('the workspace page mount follows a look until the report arrives', async (
   assert.equal(none.hidden, true);
 });
 
+test('the compact card drops its title and keeps the plan, goal and actions with their handlers', () => {
+  const view = folderAgentReportView(
+    reported({
+      suggested_goal: 'Finish one song a week',
+      plan: { digest: 'd1', runnable: true, selected: [], lines: [], steps: [] }
+    })
+  );
+  const actions = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    compact: true,
+    onAction: id => actions.push(id)
+  });
+  assert.ok(card.className.includes('folder-agent-card--compact'));
+  assert.equal(card.querySelector('.folder-agent-card__title'), null);
+  assert.equal(
+    card.querySelector('.folder-agent-card__goal-input').value,
+    'Finish one song a week'
+  );
+  const buttons = card.querySelectorAll('button').filter(b => b.dataset.folderAgentAction);
+  assert.deepEqual(
+    buttons.map(b => b.dataset.folderAgentAction),
+    ['set_up', 'keep', 'look_further'].filter(id => view.actions.some(a => a.id === id))
+  );
+  buttons[buttons.length - 1].listeners.click();
+  assert.equal(actions.length, 1);
+  const full = renderFolderAgentReport(view, stubDocument());
+  assert.ok(full.querySelector('.folder-agent-card__title'));
+  // While it looks, the balloon's header carries the line: no receipt.
+  const looking = renderFolderAgentReport(
+    folderAgentReportView(
+      reported({ state: 'looking', progress_line: 'Looking around · 3 entries' })
+    ),
+    stubDocument(),
+    { compact: true }
+  );
+  assert.equal(looking.querySelector('.folder-agent-card__receipt'), null);
+  assert.equal(text(looking, '.folder-agent-card__workspace'), 'Workspace Ori Music Demo');
+});
+
+test('the workspace page mount hands each view to a presenter that may draw the host', async () => {
+  const doc = stubDocument();
+  const host = doc.createElement('section');
+  const seen = [];
+  const presenter = {
+    present(args) {
+      seen.push(args && { state: args.view.state, previous: args.previous?.state || '' });
+      if (!args) return false;
+      args.host.replaceChildren(args.card(true));
+      return true;
+    }
+  };
+  const states = [reported({ state: 'looking' }), reported()];
+  const fetchImpl = async () => okJSONBody({ folder_agent: states.shift() || reported() });
+  await mountWorkspaceFolderAgent(host, 'ws-1', { doc, fetchImpl, pollMs: 1, presenter });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(seen.slice(0, 2), [
+    { state: 'looking', previous: '' },
+    { state: 'reported', previous: 'looking' }
+  ]);
+  assert.ok(host.children[0].className.includes('folder-agent-card--compact'));
+});
+
+const okJSONBody = body => ({ ok: true, status: 200, json: async () => body });
+
 // A Set it up run in progress, and the same run finished.
 const settingUp = (overrides = {}) =>
   reported({

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
@@ -46,9 +47,46 @@ const (
 )
 
 // Progress is the walk's live count, shown on the tile and the Needs you row.
+// Opened, Folder and Turn carry the Commander's narration on the map: how many
+// folders it has opened, the base name of the one it is in (never a path, see
+// ProgressFolder), and whether the agent's own turn has begun (Folder is then
+// the folder its look tool last opened).
 type Progress struct {
-	Entries     int `json:"entries"`
-	FoldersLeft int `json:"folders_left"`
+	Entries     int    `json:"entries"`
+	FoldersLeft int    `json:"folders_left"`
+	Opened      int    `json:"opened,omitempty"`
+	Folder      string `json:"folder,omitempty"`
+	Turn        bool   `json:"turn,omitempty"`
+}
+
+// progressFolderMax caps the narrated folder name, in runes.
+const progressFolderMax = 80
+
+// ProgressFolder bounds a folder for the narration: its base name only, with
+// control characters dropped and at most progressFolderMax runes. The fed
+// folder itself ("" or ".") is the record's own name, passed as fallback.
+func ProgressFolder(rel, fallback string) string {
+	name := strings.TrimSpace(rel)
+	if name == "" || name == "." || name == "/" {
+		name = fallback
+	}
+	name = filepath.Base(filepath.FromSlash(strings.ReplaceAll(name, "\\", "/")))
+	if name == "." || name == string(filepath.Separator) {
+		return ""
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if n == progressFolderMax {
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // TurnReceipt says how the agent's turn over the map ended (PRD FR11):

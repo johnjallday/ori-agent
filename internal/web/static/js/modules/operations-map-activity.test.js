@@ -494,3 +494,37 @@ test('a deleted task clears its unit and its parcel', async () => {
   assert.equal(h.unit('Theo').classList.contains('is-activity-working'), false);
   assert.equal(h.world().querySelector('[data-cmd-map-parcel]'), null);
 });
+
+test("the Commander's lines go to its balloon; the other agents keep their bubbles (FR21, FR24)", async () => {
+  const h = harness({ snapshot: { running: [], parcels: [parcel({ agent_name: 'Theo' })] } });
+  const said = [];
+  h.doc.dispatchEvent = event => said.push(event.detail);
+  h.layer.commanderSpeaks = () => true;
+  await h.layer.loadParcels();
+  h.layer.handleRealtimeEvent(realtime('task.started', { task_id: 't1', agent: 'Theo' }));
+  h.layer.handleRealtimeEvent(realtime('task.started', { task_id: 't2', agent: 'Ada' }));
+  // Theo is the command node: no plain bubble, but the pose still shows.
+  assert.equal(bubbleOf(h.unit('Theo')), null);
+  assert.equal(h.unit('Theo').classList.contains('is-activity-working'), true);
+  assert.equal(bubbleOf(h.unit('Ada')).textContent, 'On it.');
+  const last = said[said.length - 1];
+  assert.equal(last.workspaceId, 'ws-1');
+  assert.equal(last.agent, 'Theo');
+  assert.equal(last.line, 'On it.');
+  assert.equal(last.taskId, 't1');
+  assert.equal(last.parcel.title, parcel().title);
+  assert.equal(typeof last.openResult, 'function');
+  // A waiting ticket says so; an unchanged repaint says nothing new.
+  h.advance(3000);
+  h.layer.handleRealtimeEvent(realtime('task.blocked', { task_id: 't1', agent: 'Theo' }));
+  assert.equal(said[said.length - 1].blocked, true);
+  const count = said.length;
+  h.rerender();
+  assert.equal(said.length, count);
+});
+
+test('without a balloon the Commander keeps its plain bubble', () => {
+  const h = harness();
+  h.layer.handleRealtimeEvent(realtime('task.started', { task_id: 't1', agent: 'Theo' }));
+  assert.equal(bubbleOf(h.unit('Theo')).textContent, 'On it.');
+});

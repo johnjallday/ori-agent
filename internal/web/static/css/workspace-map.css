@@ -4310,3 +4310,320 @@
     animation: none;
   }
 }
+
+/* ── The Commander speaks on the map (commander-balloon.js) ──
+   A screen-size layer inside the map's viewport: it never scales with the
+   camera. The collapsed line wears the activity bubble's look; the expanded
+   balloon hosts the folder agent card's own styles inside the same frame. */
+.commander-balloon-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.commander-balloon-line,
+.commander-balloon {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.commander-balloon-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(46ch, calc(100% - 16px));
+  padding: 2px 10px 2px 3px;
+  color: var(--cozy-ink);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: commander-balloon-in 180ms ease-out both;
+}
+
+.commander-balloon-line-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.commander-balloon-line::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: var(--cozy-border) solid var(--cozy-line);
+  border-bottom: var(--cozy-border) solid var(--cozy-line);
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.commander-balloon-line.is-below::after {
+  top: -5px;
+  bottom: auto;
+  transform: translateX(-50%) rotate(225deg);
+}
+
+.commander-balloon-line:focus-visible,
+.commander-balloon button:focus-visible {
+  outline: 2px solid var(--cozy-accent, #4e95e0);
+  outline-offset: 2px;
+}
+
+/* The collapsed line follows the activity bubbles' zoom rule; the expanded
+   balloon does not (FR8). */
+.ws-map-canvas.is-activity-far .commander-balloon-line {
+  display: none;
+}
+
+.commander-balloon-line[hidden],
+.commander-balloon[hidden] {
+  display: none;
+}
+
+.commander-balloon-face {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--cozy-accent-soft, rgba(78, 149, 224, 0.18));
+  color: var(--cozy-ink);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.commander-balloon {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: calc(100% - 16px);
+  color: var(--cozy-ink);
+  box-shadow: var(--cozy-shadow, 0 12px 32px rgba(0, 0, 0, 0.28));
+  animation: commander-balloon-in 160ms ease-out both;
+}
+
+.commander-balloon__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px 8px 12px;
+  border-bottom: 1px solid var(--cozy-line);
+}
+
+.commander-balloon__face {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+
+.commander-balloon__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.commander-balloon__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.commander-balloon__role {
+  color: var(--cozy-ink-soft, var(--cozy-ink));
+  font-weight: 500;
+}
+
+.commander-balloon__headline {
+  margin: 2px 0 0;
+  color: var(--cozy-ink-soft, var(--cozy-ink));
+  font-size: 12px;
+}
+
+.commander-balloon__headline[hidden] {
+  display: none;
+}
+
+.commander-balloon__close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.commander-balloon__close:hover {
+  background: var(--cozy-paper, rgba(127, 127, 127, 0.14));
+}
+
+.commander-balloon__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* The card inside drops its own frame: the balloon is the frame. */
+.commander-balloon__body .folder-agent-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.commander-balloon__more {
+  margin: 0 12px 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cozy-accent, #4e95e0);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.commander-balloon__more[hidden],
+.commander-balloon__dock[hidden],
+.commander-balloon__tail[hidden] {
+  display: none;
+}
+
+/* The tail points at the Commander from whichever side the balloon took. */
+.commander-balloon__tail {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-right: var(--cozy-border) solid var(--cozy-line);
+  border-bottom: var(--cozy-border) solid var(--cozy-line);
+  background: var(--cozy-paper-raised);
+  transform: translate(-50%, -50%) rotate(45deg);
+  transition:
+    left 120ms ease-out,
+    top 120ms ease-out;
+}
+
+.commander-balloon[data-side="below"] .commander-balloon__tail {
+  transform: translate(-50%, -50%) rotate(225deg);
+}
+
+.commander-balloon[data-side="right"] .commander-balloon__tail {
+  transform: translate(-50%, -50%) rotate(135deg);
+}
+
+.commander-balloon[data-side="left"] .commander-balloon__tail {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+/* Docked at an edge (FR11): an arrow toward the Commander and Show. */
+.commander-balloon__dock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--cozy-line);
+  font-size: 12px;
+}
+
+.commander-balloon__arrow::before {
+  content: "↑";
+  display: inline-block;
+  font-weight: 700;
+}
+
+.commander-balloon[data-dock="bottom"] .commander-balloon__arrow::before {
+  content: "↓";
+}
+
+.commander-balloon[data-dock="left"] .commander-balloon__arrow::before {
+  content: "←";
+}
+
+.commander-balloon[data-dock="right"] .commander-balloon__arrow::before {
+  content: "→";
+}
+
+/* The Commander's tickets in its balloon (commander-tickets.js). */
+.commander-ticket {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  font-size: 13px;
+}
+
+.commander-ticket__title {
+  margin: 0;
+  color: var(--cozy-ink-soft, var(--cozy-ink));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.commander-ticket__question,
+.commander-ticket__line,
+.commander-ticket__result {
+  margin: 0;
+}
+
+.commander-ticket__question {
+  font-weight: 600;
+}
+
+.commander-ticket__choices,
+.commander-ticket__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.commander-ticket__answer {
+  display: flex;
+  gap: 6px;
+}
+
+.commander-ticket__answer-input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.commander-ticket__open {
+  justify-self: start;
+  padding: 0;
+}
+
+@keyframes commander-balloon-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.commander-balloon-line.is-settled,
+.commander-balloon.is-settled {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .commander-balloon-line,
+  .commander-balloon {
+    animation: none;
+  }
+
+  .commander-balloon__tail {
+    transition: none;
+  }
+}

@@ -2479,6 +2479,17 @@
     // The resize overlay is screen-space, so the camera moving under it is
     // exactly when it has to be re-placed (#346 FR-55).
     positionResizeOverlay(container);
+    // Screen-space overlays drawn by others (the Commander's balloon) follow
+    // the camera from this event on the viewport.
+    announceMapEvent(canvas, 'ori:map-camera');
+  }
+
+  // announceMapEvent dispatches a bubbling map event on node, where the page
+  // has CustomEvent (never in the test sandboxes that lack it).
+  function announceMapEvent(node, type) {
+    if (!node || typeof node.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
+    node.dispatchEvent(new CustomEvent(type, { bubbles: true }));
   }
 
   // scheduleCameraSave persists the settled camera, debounced. A pan is
@@ -11713,6 +11724,9 @@
     // listing, so whatever is running is painted back onto them in place.
     connectActivityFeed();
     paintAllActivity(container);
+    // The rebuilt viewport is new DOM: overlays drawn by others (the
+    // Commander's balloon) attach to it again from this event.
+    announceMapEvent(container, 'ori:map-mounted');
   }
 
   /** Tear down the map view (called when switching away). */
