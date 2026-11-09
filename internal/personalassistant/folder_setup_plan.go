@@ -136,8 +136,8 @@ type FolderPlanLine struct {
 	// Step is the handle of the plan step this line carries out (the folder
 	// agent's plan groups its lines under their steps); empty elsewhere.
 	Step string `json:"step,omitempty"`
-	// Progress is the runner's live words for this line ("Downloading Ori
-	// REAPER Plugin 0.9.0" while working, the receipt words once done). Like
+	// Progress is the runner's live words for this line ("Downloading <plugin>
+	// <version>" while working, the receipt words once done). Like
 	// State and the timestamps it is not part of the plan's identity.
 	Progress string `json:"progress,omitempty"`
 	// StartedAt is when the line first became working; FinishedAt when it

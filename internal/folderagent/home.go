@@ -116,13 +116,12 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 	name := homeName(home)
 	var lines []personalassistant.FolderPlanLine
 	facts := home.Home
-	switch {
-	case facts == nil:
+	if facts == nil {
 		if home.Action != folderlook.ActionAlreadyHere {
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name,
 				Detail: "Its provider is checked against the reviewed release, and its roles are filled."})
 		}
-	default:
+	} else {
 		if !facts.ProviderReady {
 			provider := facts.ProviderName
 			if provider == "" {
@@ -134,12 +133,11 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 		if !facts.HomeExists {
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name})
 		}
-		switch {
-		case facts.RolesKnown:
+		if facts.RolesKnown {
 			for _, role := range facts.MissingRoles {
 				lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: "Hires " + role})
 			}
-		default:
+		} else {
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: HomeRolesLine,
 				Detail: "Each role is named as it is hired."})
 		}

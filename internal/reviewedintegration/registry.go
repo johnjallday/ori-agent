@@ -58,9 +58,9 @@ type Entry struct {
 	ReleaseReady            bool
 }
 
-// PluginName is the plugin's own name for receipts and progress words ("Ori
-// REAPER Plugin"), taken from the reviewed InstallTitle ("Install <name>").
-// DisplayName names what the plugin connects ("REAPER"), so it is the fallback.
+// PluginName is the plugin's own name for receipts and progress words, taken
+// from the reviewed InstallTitle ("Install <name>"). DisplayName names the
+// application the plugin connects, so it is the fallback.
 func (entry Entry) PluginName() string {
 	if name, ok := strings.CutPrefix(entry.InstallTitle, "Install "); ok && strings.TrimSpace(name) != "" {
 		return strings.TrimSpace(name)
