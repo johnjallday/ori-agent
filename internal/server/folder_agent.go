@@ -322,12 +322,15 @@ func (h folderAgentHiring) AgentExists(name string) bool {
 // tool-capable, or no model at all.
 type folderAgentTurns struct{ builder *ServerBuilder }
 
-func (t folderAgentTurns) Model(ctx context.Context, workspaceID, agentName string) (folderlook.Chat, string, error) {
-	chat, model, err := t.builder.libraryManagerModel(ctx, workspaceID, agentName)
-	if err != nil || chat == nil {
-		return nil, "", folderlook.ErrNoModel
+func (t folderAgentTurns) Model(_ context.Context, workspaceID, agentName string) (folderlook.Chat, folderlook.ModelRef, error) {
+	chat, ref, err := t.builder.agentToolModel(workspaceID, agentName)
+	if err != nil {
+		return nil, ref, err
 	}
-	return folderlook.Chat(chat), model, nil
+	if chat == nil {
+		return nil, ref, folderlook.ErrNoModel
+	}
+	return folderlook.Chat(chat), ref, nil
 }
 
 func (t folderAgentTurns) TokenBudget() int {

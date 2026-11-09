@@ -244,7 +244,8 @@ func TestStart_DemoFolderCreatesWorkspaceAgentTicketAndReport(t *testing.T) {
 	if report.StageLine != "Set it up: Turn Ori Music Demo into a group with one workspace per song (8) · Install REAPER tools and connect them to Ori Music Demo" {
 		t.Fatalf("stage line = %q", report.StageLine)
 	}
-	if !strings.HasPrefix(report.ModelSentence, "No model is set up, so Ori Music Demo Manager could not look itself.") ||
+	if report.ModelSentence != "Ori Music Demo Manager could not look itself: No model is set for Ori Music Demo Manager. "+
+		"Fix it and press Look further. This is what Ori found." ||
 		report.ToolsSentence != "Search for more tools needs a model" {
 		t.Fatalf("degraded sentences = %q / %q", report.ModelSentence, report.ToolsSentence)
 	}

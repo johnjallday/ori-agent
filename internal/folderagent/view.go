@@ -232,6 +232,14 @@ func modelSentence(rec *Record) string {
 	if agent == "" {
 		agent = "The agent"
 	}
+	// The host's cause sentence names the provider and model (PRD FR22).
+	if cause := rec.Turn.Cause; cause != "" && rec.Turn.Reason != SkipInterrupted {
+		sentence := agent + " could not look itself: " + cause
+		if rec.Turn.CauseFixable {
+			sentence += " Fix it and press Look further."
+		}
+		return sentence + " This is what Ori found."
+	}
 	switch rec.Turn.Reason {
 	case SkipNoModel:
 		return "No model is set up, so " + agent + " could not look itself. This is what Ori found."

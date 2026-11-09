@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +64,12 @@ type TurnReceipt struct {
 	Looks      int       `json:"looks,omitempty"`
 	StartedAt  time.Time `json:"started_at,omitzero"`
 	FinishedAt time.Time `json:"finished_at,omitzero"`
+	// Cause is the host's one sentence for why a skipped turn could not look
+	// ("No API key is set for Anthropic."), from folderlook.CauseSentence;
+	// CauseFixable says the owner can fix it before Look further (PRD FR21,
+	// FR25). Never the provider's raw words.
+	Cause        string `json:"cause,omitempty"`
+	CauseFixable bool   `json:"cause_fixable,omitempty"`
 }
 
 // Turn receipt statuses and skip reasons.
@@ -140,7 +147,17 @@ func (r *Record) validate() error {
 			return err
 		}
 	}
+	if r.Turn != nil && !validCause(r.Turn.Cause) {
+		return errors.New("folderagent: invalid turn cause")
+	}
 	return nil
+}
+
+// validCause keeps a stored cause sentence bounded and on one line. The
+// sentence is composed only from the host's fixed words and the provider and
+// model names (a model name may hold a "/", as "meta-llama/…" does).
+func validCause(text string) bool {
+	return len(text) <= folderlook.MaxCauseText && !strings.ContainsAny(text, "\x00\r\n")
 }
 
 // ErrNoRecord means the workspace was not started from a folder.

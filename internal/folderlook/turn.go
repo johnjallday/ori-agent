@@ -51,8 +51,11 @@ type LookFunc func(ctx context.Context, folder string) (string, error)
 // TurnInput is everything one turn needs. Reference is the host's material
 // (BuildReference); nothing read from the folder goes anywhere else.
 type TurnInput struct {
-	Chat        Chat
-	Model       string
+	Chat  Chat
+	Model string
+	// Provider is the model's provider by its display name ("Anthropic"),
+	// for the cause a failed call records.
+	Provider    string
 	AgentName   string
 	Reference   string
 	AskAllowed  bool
@@ -70,6 +73,133 @@ type TurnResult struct {
 	ModelCalls int
 	ToolCalls  int
 	Looks      int
+	// Cause says why a skipped turn could not call the model; nil otherwise.
+	Cause *Cause
+	// Err is the first chat error, for the host's log only: never stored or
+	// shown, since it may carry the provider's raw words.
+	Err error
+}
+
+// Cause kinds: why a look could not run (PRD FR21, FR24).
+const (
+	CauseNoModel       = "no_model"
+	CauseNotConfigured = "not_configured"
+	CauseNotSignedIn   = "not_signed_in"
+	CauseNotAvailable  = "not_available"
+	CauseNoTools       = "no_tools"
+	CauseCallFailed    = "call_failed"
+)
+
+// Cause is a bounded reason a look could not run: a kind, for a failed call
+// the error class, and the provider and model by name. Never the provider's
+// raw message.
+type Cause struct {
+	Kind     string
+	Category llm.ErrorCategory
+	Provider string
+	Model    string
+}
+
+// ModelRef names the model a turn runs on: the model id and its provider's
+// display name ("Anthropic").
+type ModelRef struct {
+	Provider string
+	Model    string
+}
+
+// ModelError is how a host reports why the folder's agent has no usable
+// model: a cause kind with the names, wrapping the underlying error for the log.
+type ModelError struct {
+	Cause Cause
+	Err   error
+}
+
+func (e *ModelError) Error() string {
+	if e.Err != nil {
+		return "folderlook: " + e.Cause.Kind + ": " + e.Err.Error()
+	}
+	return "folderlook: " + e.Cause.Kind
+}
+
+func (e *ModelError) Unwrap() error { return e.Err }
+
+// shownClasses are the error classes a cause names (PRD FR21).
+var shownClasses = map[llm.ErrorCategory]string{
+	llm.CategoryRateLimited:    "rate limited",
+	llm.CategoryAuthentication: "the key was refused",
+	llm.CategoryInvalidModel:   "model not found",
+	llm.CategoryNetwork:        "network error",
+}
+
+// callCause classifies a failed chat call. A Claude 404 that names a
+// workspace (an SDK profile's workspace id) is not a missing model, so it is
+// worded as a plain error.
+func callCause(provider, model string, err error) *Cause {
+	// A host that knows better (a CLI provider that is not signed in) says so.
+	var known *ModelError
+	if errors.As(err, &known) {
+		named := known.Cause
+		if named.Provider == "" {
+			named.Provider = provider
+		}
+		if named.Model == "" {
+			named.Model = model
+		}
+		return &named
+	}
+	cause := &Cause{Kind: CauseCallFailed, Provider: provider, Model: model}
+	if classified := llm.ClassifyProviderError(provider, err, 0, ""); classified != nil {
+		cause.Category = classified.Category
+	}
+	if cause.Category == llm.CategoryInvalidModel && err != nil && strings.Contains(strings.ToLower(err.Error()), "workspace") {
+		cause.Category = llm.CategoryProviderError
+	}
+	return cause
+}
+
+// Bounds of a cause sentence (validated like other record text).
+const MaxCauseText = 200
+
+// CauseSentence words a cause in the host's fixed sentences (PRD FR21) and
+// says whether the owner can fix it before pressing Look further (FR25).
+func CauseSentence(c Cause, agent string) (string, bool) {
+	provider := strings.TrimSpace(c.Provider)
+	if provider == "" {
+		provider = "The provider"
+	}
+	model := strings.TrimSpace(c.Model)
+	if model == "" {
+		model = "its model"
+	}
+	if strings.TrimSpace(agent) == "" {
+		agent = "the agent"
+	}
+	var sentence string
+	fixable := false
+	switch c.Kind {
+	case CauseNoModel:
+		sentence, fixable = "No model is set for "+agent+".", true
+	case CauseNotConfigured:
+		sentence, fixable = "No API key is set for "+provider+".", true
+	case CauseNotSignedIn:
+		sentence, fixable = provider+" is not signed in.", true
+	case CauseNotAvailable:
+		sentence, fixable = provider+" is not available on this Mac.", true
+	case CauseNoTools:
+		sentence = model + " on " + provider + " cannot use tools, which the look needs."
+	case CauseCallFailed:
+		sentence = provider + " returned an error for " + model
+		if class, ok := shownClasses[c.Category]; ok {
+			sentence += " (" + class + ")"
+		}
+		sentence += "."
+	default:
+		return "", false
+	}
+	if len(sentence) > MaxCauseText || strings.ContainsAny(sentence, "\x00\r\n") {
+		return "", false
+	}
+	return sentence, fixable
 }
 
 // TokenBudget is the effective budget: settings can only lower the default.
@@ -137,11 +267,18 @@ func RunTurn(parent context.Context, in TurnInput) TurnResult {
 		response, err := in.Chat(ctx, request)
 		result.ModelCalls++
 		if err != nil || response == nil {
+			if err == nil {
+				err = errors.New("the provider returned no response")
+			}
+			if result.Err == nil {
+				result.Err = err
+			}
 			if ctx.Err() != nil {
 				return finish(ReasonTimeLimit)
 			}
 			if result.Reply == "" {
 				result.Status, result.Reason = StatusSkipped, ReasonProviderUnavailable
+				result.Cause = callCause(in.Provider, in.Model, err)
 				return result
 			}
 			return finish(ReasonStepLimit)
