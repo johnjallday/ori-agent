@@ -829,6 +829,41 @@ test('a running setup shows the working action with its words and time, and a do
   );
 });
 
+test('a run counts only the steps it runs, not a step the plan still marks chosen', () => {
+  // The agent recommended the group; the owner ticked the Home instead. The
+  // view's plan still marks the group chosen, but the run carries no lines for it.
+  const view = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: [],
+      plan: {
+        digest: 'p',
+        runnable: true,
+        lines: [],
+        steps: [
+          { handle: 'group', title: 'Turn Albums into a group', chosen: true },
+          { handle: 'home', title: 'Create your Music Production Home', chosen: false }
+        ]
+      },
+      setup: {
+        status: 'done',
+        lines: [
+          { kind: 'home', step: 'home', name: 'Creates your Music Production Home', state: 'done' },
+          { kind: 'folder', name: 'Nothing in Albums is moved, copied or read', state: 'done' }
+        ]
+      }
+    })
+  );
+  const run = renderFolderAgentReport(view, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(text(run, '.folder-agent-card__run-head'), 'All done · 1 step');
+  assert.deepEqual(
+    run.querySelectorAll('li').map(li => li.dataset.step),
+    ['home']
+  );
+});
+
 test('a done action shows its duration; one under a second reads <1 s; no bar once the run ends', () => {
   const t0 = Date.parse('2026-11-09T10:00:00Z');
   const iso = ms => new Date(ms).toISOString();

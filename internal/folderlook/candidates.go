@@ -58,6 +58,66 @@ type Candidate struct {
 	App             string `json:"app,omitempty"`
 	// Ref is a search hit's own marketplace id, case kept, for the install.
 	Ref string `json:"ref,omitempty"`
+	// Home is what the host knew about a Home provider's candidate when it
+	// looked: the plan words one line per action from it.
+	Home *HomeFacts `json:"home,omitempty"`
+}
+
+// HomeFacts are what the host knows about a Home provider and the owner's
+// Home of it: plain names and a version, never a path or an id.
+type HomeFacts struct {
+	// ProviderName is the reviewed provider's display name; ProviderVersion
+	// the reviewed release a Set it up would put in place.
+	ProviderName    string `json:"provider_name,omitempty"`
+	ProviderVersion string `json:"provider_version,omitempty"`
+	// ProviderReady is true when that release is installed and enabled.
+	ProviderReady bool `json:"provider_ready,omitempty"`
+	// HomeExists is true when the owner already has this provider's Home.
+	HomeExists bool `json:"home_exists,omitempty"`
+	// MissingRoles are the agents the Home still needs, by the names they
+	// would be hired under. RolesKnown is false when the host cannot know
+	// them before the Home exists; the plan then says "Fills the Home's roles".
+	MissingRoles []string `json:"missing_roles,omitempty"`
+	RolesKnown   bool     `json:"roles_known,omitempty"`
+}
+
+// Bounds of HomeFacts: a Home declares a handful of roles.
+const (
+	maxHomeRoles    = 8
+	maxHomeFactText = 100
+)
+
+// homeFactText keeps one name or version: trimmed, one line, short, and not
+// shaped like a path.
+func homeFactText(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) > maxHomeFactText || strings.ContainsAny(text, "\x00\r\n/\\") || strings.HasPrefix(text, "~") {
+		return ""
+	}
+	return text
+}
+
+// cleanHomeFacts bounds what a host reported. A role name that does not pass
+// leaves the roles unknown rather than silently short.
+func cleanHomeFacts(in HomeFacts) *HomeFacts {
+	out := HomeFacts{
+		ProviderName:    homeFactText(in.ProviderName),
+		ProviderVersion: homeFactText(in.ProviderVersion),
+		ProviderReady:   in.ProviderReady,
+		HomeExists:      in.HomeExists,
+		RolesKnown:      in.RolesKnown && len(in.MissingRoles) <= maxHomeRoles,
+	}
+	if out.RolesKnown {
+		for _, role := range in.MissingRoles {
+			name := homeFactText(role)
+			if name == "" {
+				out.RolesKnown, out.MissingRoles = false, nil
+				break
+			}
+			out.MissingRoles = append(out.MissingRoles, name)
+		}
+	}
+	return &out
 }
 
 // Readiness tells the candidate builder what the user already has.
@@ -69,6 +129,10 @@ type Readiness struct {
 	IntegrationReady func(key string) bool
 	// HomeExists says the user already has the Home a provider supplies.
 	HomeExists func(providerKey string) bool
+	// Home reports a provider's install state and the owner's Home of it;
+	// false when the host could not tell (the plan then keeps its generic
+	// lines). Nil asks nothing.
+	Home func(providerKey string) (HomeFacts, bool)
 }
 
 // RequiredCandidates are the candidates the stage needs (FR20): the
@@ -90,7 +154,17 @@ func RequiredCandidates(facts foldermap.Facts, ready Readiness) []Candidate {
 			Detail: "creates your " + home,
 			Why:    "Keeps every " + foldermap.ShapeNoun(p.Shape, 1) + " here on one shelf, at any depth.",
 		}
-		if ready.HomeExists != nil && ready.HomeExists(p.HomeProviderKey) {
+		exists := false
+		if ready.Home != nil {
+			if facts, ok := ready.Home(p.HomeProviderKey); ok {
+				c.Home = cleanHomeFacts(facts)
+				exists = c.Home.HomeExists
+			}
+		}
+		if c.Home == nil && ready.HomeExists != nil {
+			exists = ready.HomeExists(p.HomeProviderKey)
+		}
+		if exists {
 			c.Action, c.Detail = ActionAlreadyHere, "adds this folder to your "+home
 		}
 		out = append(out, c)

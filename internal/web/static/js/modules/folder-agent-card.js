@@ -604,9 +604,11 @@ function renderPlan(
   }
   const { rows, notes } = groupActions(lines, steps);
   const chosen = new Set(rows.map(row => row.handle).filter(Boolean));
-  // A chosen step whose lines carry no step yet still has its row.
+  // While choosing, a chosen step whose lines carry no step yet still has its
+  // row. From Set it up on, the run's own lines are the steps: the plan's
+  // current choice may differ from the one the run was confirmed on.
   steps.forEach(step => {
-    if (!step.chosen || chosen.has(step.handle)) return;
+    if (phase !== 'plan' || !step.chosen || chosen.has(step.handle)) return;
     chosen.add(step.handle);
     rows.push({
       handle: step.handle,

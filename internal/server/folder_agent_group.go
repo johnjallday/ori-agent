@@ -31,7 +31,8 @@ func (b *ServerBuilder) runFolderAgentGroup(ctx context.Context, rec folderagent
 		return ""
 	}
 	promoteLine := line(folderagent.FolderPlanPromote)
-	setLine(promoteLine, personalassistant.FolderLineWorking, "")
+	members, _ := folderagent.GroupMembers(rec)
+	setLine(promoteLine, personalassistant.FolderLineWorking, "Turning "+rec.FolderName+" into a group")
 	store, ok := b.workspaceStore.(workspace.PromoteStore)
 	mover, movable := b.workspaceStore.(interface {
 		MoveWorkspaceFolder(string, string) ([]workspace.MovedWorkspace, error)
@@ -44,35 +45,34 @@ func (b *ServerBuilder) runFolderAgentGroup(ctx context.Context, rec folderagent
 		setLine(promoteLine, personalassistant.FolderLineFailed, "")
 		return personalassistant.FolderStopFailed, err
 	}
-	setLine(promoteLine, personalassistant.FolderLineDone, "")
+	setLine(promoteLine, personalassistant.FolderLineDone, fmt.Sprintf("Turned %s into a group of %d %s", rec.FolderName, len(members), pluralWord(len(members), "workspace", "workspaces")))
 
 	root, err := folderAgentWorkspaces{builder: b}.AnchorRoot(rec.WorkspaceID)
 	if err != nil {
 		return personalassistant.FolderStopNeedsPick, err
 	}
-	members, _ := folderagent.GroupMembers(rec)
 	failed := 0
 	for _, member := range members {
 		if member.Existing != nil {
-			setLine(member.Existing.Name, personalassistant.FolderLineWorking, "")
+			setLine(member.Existing.Name, personalassistant.FolderLineWorking, "Moving "+member.Existing.Name+" into the group")
 			if err := b.moveIntoGroup(mover, member.Existing.ID, rec.WorkspaceID); err != nil {
 				failed++
 				setLine(member.Existing.Name, personalassistant.FolderLineFailed, "")
 				logger.Warn("Folder agent could not include a member", logger.Fields{"workspace_id": rec.WorkspaceID, "member": member.Existing.ID, "error": err.Error()})
 				continue
 			}
-			setLine(member.Existing.Name, personalassistant.FolderLineDone, "")
+			setLine(member.Existing.Name, personalassistant.FolderLineDone, "Included "+member.Existing.Name)
 			continue
 		}
 		name := "Creates " + member.Name + ", linked to its own folder"
-		setLine(name, personalassistant.FolderLineWorking, "")
+		setLine(name, personalassistant.FolderLineWorking, "Creating "+member.Name)
 		if err := b.createGroupMember(ctx, mover, rec.WorkspaceID, filepath.Join(root, filepath.FromSlash(member.Path)), member.Name); err != nil {
 			failed++
 			setLine(name, personalassistant.FolderLineFailed, "")
 			logger.Warn("Folder agent could not create a member", logger.Fields{"workspace_id": rec.WorkspaceID, "member": member.Path, "error": err.Error()})
 			continue
 		}
-		setLine(name, personalassistant.FolderLineDone, "")
+		setLine(name, personalassistant.FolderLineDone, "Created "+member.Name+", linked to its own folder")
 	}
 	setLine(line(folderagent.FolderPlanSoftware), personalassistant.FolderLineDone, "")
 	setLine(line(folderagent.FolderPlanMore), personalassistant.FolderLineDone, "")

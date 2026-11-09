@@ -500,6 +500,9 @@ func (s folderAgentSetups) Readiness(ctx context.Context, userID string) folderl
 		exists, err := reviewedHomeExists(b, userID, providerKey)
 		return err == nil && exists
 	}
+	ready.Home = func(providerKey string) (folderlook.HomeFacts, bool) {
+		return folderAgentHomeFacts(ctx, b, userID, providerKey)
+	}
 	return ready
 }
 
