@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   agentQuestion,
+  firstLine,
   answerTicket,
   commanderTicketItems,
   ticketWaitView
@@ -307,4 +308,85 @@ test('what the Commander is doing now leads a waiting plan; a waiting ticket lea
     { kind: 'ticket_waiting', id: 'ask' }
   ]);
   assert.deepEqual([r.first.id, ...r.rest.map(i => i.id)], ['ask', 'run', 'work']);
+});
+
+test("a result's first line drops the agent's markdown", () => {
+  assert.equal(
+    firstLine('I picked **Album-3**, the `newest` one.\nMore'),
+    'I picked Album-3, the newest one.'
+  );
+  assert.equal(firstLine('\n\n## Summary\nrest'), 'Summary');
+  assert.equal(firstLine('- first point'), 'first point');
+});
+
+test("the folder agent's own look ticket stays out; a new report phase starts from the top", () => {
+  let activityFn = null;
+  const balloon = {
+    content: null,
+    update(content) {
+      this.content = content;
+    },
+    expand() {},
+    collapse() {},
+    focusFirst() {}
+  };
+  const map = {
+    balloon,
+    attach: () => true,
+    visible: () => true,
+    narrow: () => false,
+    reveal() {},
+    onChange: () => () => {},
+    onActivity: fn => ((activityFn = fn), () => {})
+  };
+  const presenter = commanderPresenter(map, {
+    ticketItems: activity => commanderTicketItems(activity, { titleOf: () => 'Ticket' })
+  });
+  const doc = fakeDocument();
+  const present = raw =>
+    presenter.present({
+      view: folderAgentReportView(raw),
+      raw,
+      previous: null,
+      followed: false,
+      error: '',
+      opening: false,
+      host: { replaceChildren() {} },
+      doc,
+      card: () => doc.createElement('article')
+    });
+  const reported = {
+    workspace_id: 'ws-1',
+    workspace_name: 'Picker Songs',
+    folder_name: 'Picker Songs',
+    agent_name: 'Picker Songs Manager',
+    ticket_id: 'look-1',
+    state: 'reported',
+    actions: ['set_up']
+  };
+  present(reported);
+  // The look ticket's stale "On it." never reaches the balloon.
+  activityFn({
+    workspaceId: 'ws-1',
+    agent: 'Picker Songs Manager',
+    line: 'On it.',
+    taskId: 'look-1'
+  });
+  assert.equal(balloon.content.line, 'I have a plan for Picker Songs · Review');
+  assert.equal(balloon.content.more, null);
+  // Another ticket at work leads; the owner steps to the plan with "and 1 more".
+  activityFn({ workspaceId: 'ws-1', agent: 'Picker Songs Manager', line: 'On it.', taskId: 't2' });
+  assert.match(balloon.content.line, /^Working on: Ticket/);
+  balloon.content.onMore();
+  assert.equal(balloon.content.line, 'I have a plan for Picker Songs · Review');
+  // Set it up: the run leads again, not the ticket the owner had stepped past.
+  present({
+    ...reported,
+    state: 'setting_up',
+    setup: {
+      status: 'running',
+      lines: [{ step: 'tools', name: 'Installs REAPER tools', state: 'working' }]
+    }
+  });
+  assert.match(balloon.content.line, /^Setting up Picker Songs/);
 });

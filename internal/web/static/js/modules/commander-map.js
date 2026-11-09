@@ -469,6 +469,7 @@ export function commanderPresenter(
   let tickets = [];
   let activity = null;
   let shift = 0;
+  let lastPhase = '';
   let hostMode = '';
   let pendingOpen = '';
 
@@ -478,7 +479,10 @@ export function commanderPresenter(
     const items = [];
     const speech = last ? commanderSpeech(last.view) : null;
     if (speech) items.push({ kind: REPORT_KIND[speech.phase] || 'working', report: true, speech });
-    items.push(...tickets);
+    // The folder agent's own look ticket is the report's work, narrated by
+    // the report itself; its ticket line (often stuck at "On it.") stays out.
+    const lookTicket = String(last?.raw?.ticket_id || '');
+    items.push(...tickets.filter(item => !lookTicket || item.taskId !== lookTicket));
     const { first, rest } = commanderQueue(items);
     return first ? [first, ...rest] : [];
   };
@@ -608,6 +612,12 @@ export function commanderPresenter(
   };
   return {
     present(args) {
+      // A report that changed phase (the plan became the run, the run the
+      // receipt) shows from the most urgent item again, not from where the
+      // owner had stepped with "and N more".
+      const phase = args ? commanderSpeech(args.view)?.phase || '' : '';
+      if (phase !== lastPhase) shift = 0;
+      lastPhase = phase;
       last = args;
       return draw({ report: true });
     },

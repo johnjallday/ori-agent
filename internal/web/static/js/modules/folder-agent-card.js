@@ -995,10 +995,20 @@ export function renderFolderAgentReport(
     // the boxes follow its choice.
     selected.clear();
     plan.selected.forEach(handle => selected.add(handle));
-    if (planHost)
+    if (planHost) {
+      // The box the owner just ticked keeps focus through the redraw (a
+      // keyboard user would otherwise be dropped on the page body).
+      const focused = doc.activeElement?.dataset?.stepHandle || '';
       planHost.replaceChildren(
         renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick })
       );
+      if (focused) {
+        const again = Array.from(planHost.querySelectorAll?.('input[type="checkbox"]') || []).find(
+          box => box.dataset?.stepHandle === focused
+        );
+        again?.focus?.({ preventScroll: true });
+      }
+    }
     if (setUpButton) setUpButton.disabled = !plan.runnable;
   };
   if (!compact) card.append(el(doc, 'h3', 'folder-agent-card__title', view.title));

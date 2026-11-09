@@ -189,8 +189,22 @@ export function renderTicketResult(doc, result, { onOpen, onDismiss } = {}) {
   return box;
 }
 
-function firstLine(value) {
-  return text(String(value || '').split('\n')[0]).slice(0, 200);
+// firstLine is a result's first non-empty line as plain words: the agent's
+// markdown marks (**bold**, `code`, # headings, list bullets) are dropped.
+export function firstLine(value) {
+  const line =
+    String(value || '')
+      .split('\n')
+      .map(part => part.trim())
+      .find(Boolean) || '';
+  return text(
+    line
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^(?:[-*•]|\d{1,2}[.)])\s+/, '')
+      .replace(/(\*\*|__)(.+?)\1/g, '$2')
+      .replace(/(\*|_)(\S.*?\S|\S)\1/g, '$2')
+      .replace(/`([^`]+)`/g, '$1')
+  ).slice(0, 200);
 }
 
 // commanderTicketItems turns the Commander's activity into balloon items.
@@ -232,6 +246,7 @@ export function commanderTicketItems(
     const asking = wait.question ? `I need your input: ${wait.question}` : 'I need your input';
     items.push({
       kind: 'ticket_waiting',
+      taskId,
       agent,
       line: 'I need your input · Answer',
       headline: wait.title || title || '',
@@ -251,6 +266,7 @@ export function commanderTicketItems(
     const line = activity.line === 'On it.' && title ? `Working on: ${title}` : activity.line;
     items.push({
       kind: 'ticket_working',
+      taskId,
       agent,
       line,
       headline: title ? `Working on: ${title}` : '',
@@ -276,6 +292,7 @@ export function commanderTicketItems(
   } else if (activity.line && activity.finishing) {
     items.push({
       kind: 'ticket_working',
+      taskId,
       agent,
       line: activity.line,
       headline: title,

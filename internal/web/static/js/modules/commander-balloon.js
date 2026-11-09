@@ -581,6 +581,8 @@ class CommanderBalloon {
     const first =
       (!nodes.dock.hidden && nodes.show) || firstFocusable(nodes.body) || nodes.close || null;
     first?.focus?.({ preventScroll: true });
+    // Inside the balloon's own scroll, the focused control comes into view.
+    first?.scrollIntoView?.({ block: 'nearest' });
   }
 
   // collapse closes the balloon; returnFocus sends focus back to the unit.
