@@ -8549,6 +8549,106 @@ test('an unreadable group tree is unavailable, not a zero-member map', () => {
   }
 });
 
+test('a Home with members sets up its shelf projects from its own map', () => {
+  const c = detachmentCommandView('group', [{ id: 'albums', name: 'Albums' }]);
+  c.groupTemplateStatus = { kind: 'managed_home' };
+  // Nothing waiting on the shelf: an empty slot, but the menu still offers it.
+  let toolbar = c.renderDetachmentToolbar();
+  assert.match(toolbar, /data-cmd-setup-projects-slot><\/span>/);
+  assert.match(toolbar, /data-cmd-setup-projects>Set up projects from the shelf…/);
+  c.libraryEmptyState = { shelf: 6, toSetUp: 4 };
+  toolbar = c.renderDetachmentToolbar();
+  assert.match(toolbar, /<b>4<\/b> to set up · Set up projects…/);
+
+  // The count arriving later fills the slot in place.
+  const slot = { innerHTML: '' };
+  c.container = {
+    querySelector: selector => (selector === '[data-cmd-setup-projects-slot]' ? slot : null)
+  };
+  c.libraryEmptyState = { shelf: 6, toSetUp: 2 };
+  c.syncSetupProjectsChip();
+  assert.match(slot.innerHTML, /<b>2<\/b> to set up/);
+  c.libraryEmptyState = null;
+  c.syncSetupProjectsChip();
+  assert.equal(slot.innerHTML, '');
+
+  // A button already shown keeps its element; only its number changes, so a
+  // sheet placed beside it and focus stay where they are.
+  const number = { textContent: '5' };
+  const kept = {
+    innerHTML: 'untouched',
+    querySelector: selector => (selector === '[data-cmd-setup-projects] b' ? number : null)
+  };
+  c.container = {
+    querySelector: selector => (selector === '[data-cmd-setup-projects-slot]' ? kept : null)
+  };
+  c.libraryEmptyState = { shelf: 6, toSetUp: 1 };
+  c.syncSetupProjectsChip();
+  assert.equal(number.textContent, '1');
+  assert.equal(kept.innerHTML, 'untouched');
+
+  // After a run the members count follows in place.
+  const badge = {
+    textContent: '1',
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    }
+  };
+  const removed = [];
+  const bar = {
+    classList: { remove: name => removed.push(name) },
+    querySelector: selector => (selector === '.ws-cmd-map-zone-count' ? badge : null)
+  };
+  c.container = {
+    querySelector: selector => (selector === '[data-map-zone="detachment"]' ? bar : null)
+  };
+  c.page.membersPanel.group.children.push(
+    { id: 'a1', name: 'Album-1' },
+    { id: 'a2', name: 'Album-2' }
+  );
+  c.syncDetachmentToolbarCount();
+  assert.equal(badge.textContent, '3');
+  assert.equal(badge.attributes['aria-label'], '3 members');
+  assert.deepEqual(removed, ['is-empty']);
+
+  // Either control opens the same setup sheet, closing the menu it sat in.
+  const opened = [];
+  const root = makeListenerRoot();
+  c.container = { querySelector: selector => (selector === '.ws-cmd-map-shell' ? root : null) };
+  c.syncDetachmentMap = () => {};
+  c.bindStationDrag = () => {};
+  c.openLibrarySetupSheet = (element, beside) => opened.push([element, beside]);
+  c.bindOperationsMap();
+  const toolbarRow = { name: 'toolbar row' };
+  const summary = { name: 'summary' };
+  const menu = { open: true, querySelector: () => summary };
+  const inMenu = {
+    closest: selector =>
+      selector === 'details'
+        ? menu
+        : selector === '[data-map-zone="detachment"]'
+          ? toolbarRow
+          : null
+  };
+  root.listener({
+    target: { closest: selector => (selector === '[data-cmd-setup-projects]' ? inMenu : null) }
+  });
+  assert.equal(menu.open, false);
+  const chip = {
+    closest: selector => (selector === '[data-map-zone="detachment"]' ? toolbarRow : null)
+  };
+  root.listener({
+    target: { closest: selector => (selector === '[data-cmd-setup-projects]' ? chip : null) }
+  });
+  // Focus returns to what opened it; the sheet sits beside the toolbar row,
+  // which a run leaves in place.
+  assert.deepEqual(opened, [
+    [summary, toolbarRow],
+    [chip, toolbarRow]
+  ]);
+});
+
 test('a Home’s own map shows its songs’ facts and the selected linked song’s card', async () => {
   const commandView = detachmentCommandView('group', [
     { id: 'm1', name: 'Night Drive' },

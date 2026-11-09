@@ -367,12 +367,17 @@ export function sheetPosition(anchorRect, sheetSize, viewport) {
   const topGutter = 72;
   const gap = 12;
   const width = Math.min(sheetSize.width, viewport.width - gutter * 2);
-  const height = Math.min(sheetSize.height, viewport.height - topGutter - gutter);
+  let height = Math.min(sheetSize.height, viewport.height - topGutter - gutter);
   let left = anchorRect.right + gap;
   let top = anchorRect.top;
   if (left + width > viewport.width - gutter) {
     left = anchorRect.left;
     top = anchorRect.bottom + 8;
+    // Below its control (a wide toolbar has no room beside it): the sheet fits
+    // the space under the control, so the control and its counts stay in
+    // sight, as long as that leaves a usable sheet; else it moves up as before.
+    const room = viewport.height - gutter - top;
+    if (room >= 320 && room < height) height = room;
   }
   left = Math.max(gutter, Math.min(left, viewport.width - gutter - width));
   top = Math.max(topGutter, Math.min(top, viewport.height - gutter - height));
@@ -506,15 +511,18 @@ export function openLibrarySheet({
     const view = { width: globalThis.innerWidth || 1280, height: globalThis.innerHeight || 800 };
     // Beside the district (so it never covers the district's own header), at
     // the height of the control that opened it.
-    const near = beside || anchor;
-    const rect =
-      near && typeof near.getBoundingClientRect === 'function'
-        ? near.getBoundingClientRect()
-        : { left: view.width / 2 - 220, right: view.width / 2 + 220, top: 80, bottom: 120 };
-    const anchorRect =
-      anchor && typeof anchor.getBoundingClientRect === 'function'
-        ? anchor.getBoundingClientRect()
-        : rect;
+    // A control the page redrew while the sheet was open (a count that
+    // changed after a run) is no longer on the page: it has no place, so the
+    // sheet keeps to the one that still is.
+    const live = node =>
+      Boolean(node) &&
+      typeof node.getBoundingClientRect === 'function' &&
+      node.isConnected !== false;
+    const near = live(beside) ? beside : live(anchor) ? anchor : null;
+    const rect = near
+      ? near.getBoundingClientRect()
+      : { left: view.width / 2 - 220, right: view.width / 2 + 220, top: 80, bottom: 120 };
+    const anchorRect = live(anchor) ? anchor.getBoundingClientRect() : rect;
     const size = { width: 440, height: 640 };
     const pos = sheetPosition(
       { left: rect.left, right: rect.right, top: anchorRect.top, bottom: rect.bottom },
