@@ -170,6 +170,9 @@ type Runner struct {
 	// ValidateDestination freshly checks the material witness before each
 	// owner review/commit. It is read-only and never grants another scope.
 	ValidateDestination func(context.Context) error
+	// IntegrationPhase, when set, hears each boundary an integration install
+	// crosses (checking, downloading, enabling, verifying). Nil hears nothing.
+	IntegrationPhase func(IntegrationPhase)
 }
 
 // stop ends a run on purpose with a reason the card can explain. detail is for
@@ -473,6 +476,7 @@ func (s *run) installIntegration(ctx context.Context, intent personalassistant.F
 	}
 	allowed := installActions(intent.Integration)
 	runID := ""
+	s.integrationPhase(IntegrationChecking)
 	for pass := 0; pass < 6; pass++ {
 		journey, err := s.Install.Read(ctx, runID)
 		if err != nil {
@@ -523,11 +527,38 @@ func (s *run) installIntegration(ctx context.Context, intent personalassistant.F
 		if shown == nil || shown.PluginID != intent.IntegrationPlugin || !integrationVersionMatches(shown, action, intent.IntegrationVersion) {
 			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the integration review differs from the plan"}
 		}
+		if action == setupjourney.ActionReviewEnable {
+			s.integrationPhase(IntegrationEnabling)
+		} else {
+			s.integrationPhase(IntegrationDownloading)
+		}
 		if err := s.commitOn(ctx, s.Install, runID, journey.StateRevision, review, nil); err != nil {
 			return &stop{reason: personalassistant.FolderStopInstallFailed, detail: err.Error()}
 		}
+		s.integrationPhase(IntegrationVerifying)
 	}
 	return &stop{reason: personalassistant.FolderStopInstallFailed, detail: "the integration did not become ready"}
+}
+
+// IntegrationPhase is the boundary an integration install has reached, for
+// the caller's live words. It carries no text of its own.
+type IntegrationPhase string
+
+const (
+	// IntegrationChecking: reading the install quest and reviewing the release.
+	IntegrationChecking IntegrationPhase = "checking"
+	// IntegrationDownloading: committing an install or update of the release.
+	IntegrationDownloading IntegrationPhase = "downloading"
+	// IntegrationEnabling: committing the enable of an installed release.
+	IntegrationEnabling IntegrationPhase = "enabling"
+	// IntegrationVerifying: reading the quest back after a commit.
+	IntegrationVerifying IntegrationPhase = "verifying"
+)
+
+func (s *run) integrationPhase(phase IntegrationPhase) {
+	if s.Runner != nil && s.IntegrationPhase != nil {
+		s.IntegrationPhase(phase)
+	}
 }
 
 // InstallReviewedIntegration drives the host's install quest for one reviewed
@@ -535,11 +566,13 @@ func (s *run) installIntegration(ctx context.Context, intent personalassistant.F
 // enable or update), holding every review to the planned plugin and release.
 // It is the same driver a one-card project run uses, for a caller whose
 // workspace already exists (the folder agent's Tools stage).
-func InstallReviewedIntegration(ctx context.Context, install Journey, state, pluginID, version string) error {
+// phase, when set, hears each boundary the install crosses so the caller can
+// word it live.
+func InstallReviewedIntegration(ctx context.Context, install Journey, state, pluginID, version string, phase func(IntegrationPhase)) error {
 	if install == nil || installActions(state) == nil {
 		return errors.New("foldersetup: nothing to install")
 	}
-	s := &run{Runner: &Runner{Install: install, Progress: discardProgress{}}, cfg: Config{Plan: personalassistant.FolderSetupPlan{
+	s := &run{Runner: &Runner{Install: install, Progress: discardProgress{}, IntegrationPhase: phase}, cfg: Config{Plan: personalassistant.FolderSetupPlan{
 		Intent: personalassistant.FolderSetupIntent{Integration: state, IntegrationPlugin: pluginID, IntegrationVersion: version},
 	}}}
 	return s.installIntegration(ctx, s.cfg.Plan.Intent)

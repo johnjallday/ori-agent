@@ -324,7 +324,7 @@ func TestStart_EveryStagePlanIsWorded(t *testing.T) {
 		"Creates Album-1, linked to its own folder", "Creates Album-2, linked to its own folder", "Creates Album-3, linked to its own folder",
 		"Creates Album-4, linked to its own folder", "Creates Album-5, linked to its own folder", "Creates Logic Sketch, linked to its own folder",
 		"Creates Track-1, linked to its own folder", "Creates Track-2, linked to its own folder",
-		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing is moved, copied or read"}
+		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing in Ori Music Demo is moved, copied or read"}
 	if !hr.Plan.Runnable || hr.Plan.Stage != foldermap.StageGroup || strings.Join(lines, "|") != strings.Join(want, "|") {
 		t.Fatalf("default plan stage=%q runnable=%v lines=%v", hr.Plan.Stage, hr.Plan.Runnable, lines)
 	}

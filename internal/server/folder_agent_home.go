@@ -58,7 +58,7 @@ func (s *homeStageStop) Error() string { return s.reason + ": " + s.cause.Error(
 // songs, and finally the workspace placed inside the Home. setLine reports
 // each plan line.
 func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.Record, home folderlook.Candidate,
-	lines []personalassistant.FolderPlanLine, setLine func(name, state string)) (homeReceipt, error) {
+	lines []personalassistant.FolderPlanLine, setLine func(name, state, progress string)) (homeReceipt, error) {
 	var receipt homeReceipt
 	stop := func(reason string, cause error) (homeReceipt, error) {
 		return receipt, &homeStageStop{reason: reason, cause: cause}
@@ -87,22 +87,22 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 
 	// The Home: the user's one Home of this provider, or a new one.
 	createLine := line(personalassistant.FolderPlanHome)
-	setLine(createLine, personalassistant.FolderLineWorking)
+	setLine(createLine, personalassistant.FolderLineWorking, "")
 	setup := folderHomeProviderSetup{builder: b}
 	preview, err := setup.Preview(ctx, provider.Key)
 	if err != nil {
-		setLine(createLine, personalassistant.FolderLineFailed)
+		setLine(createLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopInstallFailed, err)
 	}
 	if !preview.Ready {
 		if _, err := setup.Install(ctx, provider.Key, preview.Version); err != nil {
-			setLine(createLine, personalassistant.FolderLineFailed)
+			setLine(createLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopInstallFailed, err)
 		}
 	}
 	station, err := b.folderSetupHost.station(owner, provider)
 	if err != nil {
-		setLine(createLine, personalassistant.FolderLineFailed)
+		setLine(createLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
 	}
 	homeID := ""
@@ -111,45 +111,45 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	} else {
 		review, err := b.sessionHandler.ReviewPortfolioHome(ctx, provider.PluginID)
 		if err != nil {
-			setLine(createLine, personalassistant.FolderLineFailed)
+			setLine(createLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopFailed, err)
 		}
 		if review.Reuse && review.HomeID != "" {
 			homeID = review.HomeID
 		} else if homeID, err = b.sessionHandler.CommitPortfolioHome(ctx, review, key+"-home"); err != nil {
-			setLine(createLine, personalassistant.FolderLineFailed)
+			setLine(createLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopFailed, err)
 		}
 	}
 	staffing := portfolioHomeStaffing{builder: b}
 	missing, err := staffing.Missing(ctx, homeID)
 	if err != nil {
-		setLine(createLine, personalassistant.FolderLineFailed)
+		setLine(createLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
 	}
 	if len(missing) > 0 && !staffing.ModelReady(ctx) {
-		setLine(createLine, personalassistant.FolderLineFailed)
+		setLine(createLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopNeedsModel, errors.New("the Home's roles need a model"))
 	}
 	for _, role := range missing {
 		if err := staffing.Staff(ctx, homeID, role); err != nil {
-			setLine(createLine, personalassistant.FolderLineFailed)
+			setLine(createLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopFailed, err)
 		}
 	}
-	setLine(createLine, personalassistant.FolderLineDone)
+	setLine(createLine, personalassistant.FolderLineDone, "")
 
 	// The fed folder as a root of the Home's library.
 	rootLine := line(personalassistant.FolderPlanLibrary)
-	setLine(rootLine, personalassistant.FolderLineWorking)
+	setLine(rootLine, personalassistant.FolderLineWorking, "")
 	folder, err := folderAgentWorkspaces{builder: b}.AnchorRoot(rec.WorkspaceID)
 	if err != nil {
-		setLine(rootLine, personalassistant.FolderLineFailed)
+		setLine(rootLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopNeedsPick, err)
 	}
 	state, err := b.sessionHandler.PortfolioLibraryState(owner, homeID, folder)
 	if err != nil {
-		setLine(rootLine, personalassistant.FolderLineFailed)
+		setLine(rootLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
 	}
 	if !state.Initialized {
@@ -158,7 +158,7 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 			err = b.sessionHandler.CommitPortfolioLibrary(owner, homeID, token, key+"-library")
 		}
 		if err != nil {
-			setLine(rootLine, personalassistant.FolderLineFailed)
+			setLine(rootLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopFailed, err)
 		}
 	}
@@ -169,25 +169,25 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 			rootID, err = b.sessionHandler.CommitPortfolioRoot(owner, homeID, token, key+"-root")
 		}
 		if err != nil {
-			setLine(rootLine, personalassistant.FolderLineFailed)
+			setLine(rootLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopFailed, err)
 		}
 	}
-	setLine(rootLine, personalassistant.FolderLineDone)
+	setLine(rootLine, personalassistant.FolderLineDone, "")
 
 	// The listings: the root, then the scopes leading to the songs.
 	songsLine, scopesLine := line(personalassistant.FolderPlanSongs), line(folderagent.FolderPlanScopes)
-	setLine(songsLine, personalassistant.FolderLineWorking)
+	setLine(songsLine, personalassistant.FolderLineWorking, "")
 	listed, _, err := b.sessionHandler.ScanFolderAgentRoot(ctx, owner, homeID, rootID, key+"-scan")
 	if err != nil {
-		setLine(songsLine, personalassistant.FolderLineFailed)
+		setLine(songsLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
 	}
 	needed := folderagent.ProjectParents(rec.Facts)
 	scanned, skipped, failures := map[string]bool{}, map[string]bool{}, map[string]int{}
 	scans := 0
 	if len(needed) > 0 {
-		setLine(scopesLine, personalassistant.FolderLineWorking)
+		setLine(scopesLine, personalassistant.FolderLineWorking, "")
 	}
 	for scans < folderagent.MaxScopedScans {
 		issued, err := b.sessionHandler.FolderAgentScopes(owner, homeID, rootID)
@@ -235,31 +235,31 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		if len(unreached) > 0 {
 			state = personalassistant.FolderLineFailed
 		}
-		setLine(scopesLine, state)
+		setLine(scopesLine, state, "")
 	}
-	setLine(songsLine, personalassistant.FolderLineDone)
+	setLine(songsLine, personalassistant.FolderLineDone, "")
 	receipt = homeReceipt{listed: listed, unreached: len(unreached), homeID: homeID}
 
 	// Placement: the workspace inside the Home's district, its goal the
 	// Home's; its agent stays.
 	placeLine := line(folderagent.FolderPlanPlace)
-	setLine(placeLine, personalassistant.FolderLineWorking)
+	setLine(placeLine, personalassistant.FolderLineWorking, "")
 	mover, ok := b.workspaceStore.(interface {
 		MoveWorkspaceFolder(string, string) ([]workspace.MovedWorkspace, error)
 	})
 	if !ok {
-		setLine(placeLine, personalassistant.FolderLineFailed)
+		setLine(placeLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, errors.New("the workspace cannot be moved"))
 	}
 	if current, err := b.workspaceStore.Get(rec.WorkspaceID); err == nil && current != nil && current.ParentID != homeID {
 		if _, err := mover.MoveWorkspaceFolder(rec.WorkspaceID, homeID); err != nil {
-			setLine(placeLine, personalassistant.FolderLineFailed)
+			setLine(placeLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopFailed, err)
 		}
 	}
 	if err := (folderAgentWorkspaces{builder: b}).SetGoal(rec.WorkspaceID, folderagent.HomeGoal); err != nil {
 		logger.Warn("Folder agent could not set the Home goal", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
 	}
-	setLine(placeLine, personalassistant.FolderLineDone)
+	setLine(placeLine, personalassistant.FolderLineDone, "")
 	return receipt, nil
 }

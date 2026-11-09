@@ -463,24 +463,24 @@ type folderAgentSetups struct{ builder *ServerBuilder }
 // workspace (the install writes its record only: no folder access, watcher or
 // schedule until its own setup) and adds File Curator as its companion. A
 // repeat is success: both steps are idempotent.
-func (b *ServerBuilder) addFolderAgentFileCurator(workspaceID string, set func(kind, state string)) error {
+func (b *ServerBuilder) addFolderAgentFileCurator(workspaceID string, set func(kind, state, progress string)) error {
 	service := b.workspaceCapabilityService
 	if service == nil {
 		return errors.New("workspace capabilities are not wired")
 	}
-	set(folderagent.FolderPlanCapability, personalassistant.FolderLineWorking)
+	set(folderagent.FolderPlanCapability, personalassistant.FolderLineWorking, "")
 	if _, err := service.Install(workspacecapability.InstallRequest{
 		WorkspaceID: workspaceID, CapabilityID: workspace.CapabilityFileJanitor, Source: workspace.InstallSourceInPlace,
 	}); err != nil {
 		return err
 	}
-	set(folderagent.FolderPlanCapability, personalassistant.FolderLineDone)
-	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking)
+	set(folderagent.FolderPlanCapability, personalassistant.FolderLineDone, "")
+	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking, "")
 	if _, err := service.AddCompanion(workspaceID, workspace.CapabilityFileJanitor); err != nil {
-		set(personalassistant.FolderPlanAgents, personalassistant.FolderLineFailed)
+		set(personalassistant.FolderPlanAgents, personalassistant.FolderLineFailed, "")
 		return err
 	}
-	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineDone)
+	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineDone, "")
 	return nil
 }
 
@@ -509,16 +509,20 @@ func (s folderAgentSetups) Readiness(ctx context.Context, userID string) folderl
 func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan folderagent.Plan, update func([]personalassistant.FolderPlanLine)) (string, string) {
 	b := s.builder
 	lines := append([]personalassistant.FolderPlanLine(nil), plan.Lines...)
-	set := func(kind, state string) {
+	// set moves every unfinished line of a kind; setLine one line by name. Each
+	// carries the runner's words for the line (empty keeps working words, and
+	// clears them on done) and stamps its start and finish times.
+	set := func(kind, state, progress string) {
+		now := time.Now().UTC()
 		for i := range lines {
 			if lines[i].Kind == kind && lines[i].State != personalassistant.FolderLineDone {
-				lines[i].State = state
+				lines[i].Mark(state, progress, now)
 			}
 		}
 		update(append([]personalassistant.FolderPlanLine(nil), lines...))
 	}
 	stop := func(kind, reason string, cause error) (string, string) {
-		set(kind, personalassistant.FolderLineFailed)
+		set(kind, personalassistant.FolderLineFailed, "")
 		fields := logger.Fields{"workspace_id": rec.WorkspaceID, "reason": reason}
 		if cause != nil {
 			fields["error"] = cause.Error()
@@ -526,10 +530,11 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 		logger.Warn("Folder agent setup stopped", fields)
 		return personalassistant.FolderSetupStopped, reason
 	}
-	setLine := func(name, state string) {
+	setLine := func(name, state, progress string) {
+		now := time.Now().UTC()
 		for i := range lines {
 			if lines[i].Name == name {
-				lines[i].State = state
+				lines[i].Mark(state, progress, now)
 			}
 		}
 		update(append([]personalassistant.FolderPlanLine(nil), lines...))
@@ -550,13 +555,13 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 					break
 				}
 			}
-			setLine(line, personalassistant.FolderLineWorking)
+			setLine(line, personalassistant.FolderLineWorking, "")
 			if err := b.addFolderAgentAddOn(ctx, rec.WorkspaceID, candidate); err != nil {
-				setLine(line, personalassistant.FolderLineFailed)
+				setLine(line, personalassistant.FolderLineFailed, "")
 				logger.Warn("Folder agent setup stopped", logger.Fields{"workspace_id": rec.WorkspaceID, "add_on": candidate.ID, "error": err.Error()})
 				return personalassistant.FolderSetupStopped, personalassistant.FolderStopInstallFailed
 			}
-			setLine(line, personalassistant.FolderLineDone)
+			setLine(line, personalassistant.FolderLineDone, "")
 			continue
 		case folderlook.KindHomeProvider:
 			receipt, err := b.runFolderAgentHome(ctx, rec, candidate, lines, setLine)
@@ -588,44 +593,122 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 		if !ok || b.folderSetupHost == nil {
 			return stop(personalassistant.FolderPlanIntegration, personalassistant.FolderStopInstallFailed, errors.New("unknown integration"))
 		}
-		facts, err := b.folderSetupHost.integrationFacts(ctx, rec.OwnerUserID, entry)
-		if err != nil {
-			return stop(personalassistant.FolderPlanIntegration, personalassistant.FolderStopInstallFailed, err)
-		}
-		if facts.State != personalassistant.FolderInstallReady {
-			set(personalassistant.FolderPlanIntegration, personalassistant.FolderLineWorking)
-			if b.setupJourneyService == nil {
-				return stop(personalassistant.FolderPlanIntegration, personalassistant.FolderStopInstallFailed, errors.New("no setup journey service"))
-			}
-			install, err := b.setupJourneyService.ForHostQuest(ctx, rec.OwnerUserID, entry.InstallQuestID())
-			if err != nil {
-				return stop(personalassistant.FolderPlanIntegration, personalassistant.FolderStopInstallFailed, err)
-			}
-			if err := foldersetup.InstallReviewedIntegration(ctx, scopedJourney{service: install, userID: rec.OwnerUserID},
-				facts.State, facts.PluginID, facts.Version); err != nil {
-				reason := foldersetup.StopReason(err)
-				if reason == "" {
-					reason = personalassistant.FolderStopInstallFailed
+		step := folderAgentIntegration{
+			words: integrationWords{plugin: entry.PluginName(), tools: entry.DisplayName, workspace: rec.WorkspaceName},
+			facts: func(ctx context.Context) (foldersetup.Plugin, error) {
+				return b.folderSetupHost.integrationFacts(ctx, rec.OwnerUserID, entry)
+			},
+			install: func(ctx context.Context) (foldersetup.Journey, error) {
+				if b.setupJourneyService == nil {
+					return nil, errors.New("no setup journey service")
 				}
-				return stop(personalassistant.FolderPlanIntegration, reason, err)
-			}
+				install, err := b.setupJourneyService.ForHostQuest(ctx, rec.OwnerUserID, entry.InstallQuestID())
+				if err != nil {
+					return nil, err
+				}
+				return scopedJourney{service: install, userID: rec.OwnerUserID}, nil
+			},
+			connect: func() error {
+				if b.pluginHandler == nil {
+					return errors.New("no plugin manager")
+				}
+				result, err := pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore).Reconcile(pluginworkspace.Request{
+					WorkspaceID: rec.WorkspaceID, Plugins: []string{entry.PluginID},
+				})
+				if err == nil && result.SaveErr != nil {
+					err = result.SaveErr
+				}
+				return err
+			},
 		}
-		set(personalassistant.FolderPlanIntegration, personalassistant.FolderLineDone)
-		set(personalassistant.FolderPlanWorkspace, personalassistant.FolderLineWorking)
-		if b.pluginHandler == nil {
-			return stop(personalassistant.FolderPlanWorkspace, personalassistant.FolderStopFailed, errors.New("no plugin manager"))
+		if kind, reason, err := runFolderAgentIntegration(ctx, step, set); err != nil {
+			return stop(kind, reason, err)
 		}
-		result, err := pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore).Reconcile(pluginworkspace.Request{
-			WorkspaceID: rec.WorkspaceID, Plugins: []string{entry.PluginID},
-		})
-		if err == nil && result.SaveErr != nil {
-			err = result.SaveErr
-		}
-		if err != nil {
-			return stop(personalassistant.FolderPlanWorkspace, personalassistant.FolderStopFailed, err)
-		}
-		set(personalassistant.FolderPlanWorkspace, personalassistant.FolderLineDone)
 	}
-	set(personalassistant.FolderPlanFolder, personalassistant.FolderLineDone)
+	set(personalassistant.FolderPlanFolder, personalassistant.FolderLineDone, "")
 	return personalassistant.FolderSetupDone, ""
+}
+
+// folderAgentIntegration is what one reviewed integration's step needs from
+// the host: its words, its install facts, its install quest and the connect.
+type folderAgentIntegration struct {
+	words   integrationWords
+	facts   func(context.Context) (foldersetup.Plugin, error)
+	install func(context.Context) (foldersetup.Journey, error)
+	connect func() error
+}
+
+// runFolderAgentIntegration installs the integration when the facts say it
+// is not ready, then connects its tools to the workspace. Each boundary moves
+// its line with live words; done lines carry the receipt words. A failure
+// returns the line kind that failed and the stop reason.
+func runFolderAgentIntegration(ctx context.Context, step folderAgentIntegration, set func(kind, state, progress string)) (string, string, error) {
+	words := step.words
+	set(personalassistant.FolderPlanIntegration, personalassistant.FolderLineWorking, words.phase(foldersetup.IntegrationChecking))
+	facts, err := step.facts(ctx)
+	if err != nil {
+		return personalassistant.FolderPlanIntegration, personalassistant.FolderStopInstallFailed, err
+	}
+	words.version = facts.Version
+	installed := ""
+	if facts.State != personalassistant.FolderInstallReady {
+		install, err := step.install(ctx)
+		if err != nil {
+			return personalassistant.FolderPlanIntegration, personalassistant.FolderStopInstallFailed, err
+		}
+		if err := foldersetup.InstallReviewedIntegration(ctx, install, facts.State, facts.PluginID, facts.Version,
+			func(phase foldersetup.IntegrationPhase) {
+				set(personalassistant.FolderPlanIntegration, personalassistant.FolderLineWorking, words.phase(phase))
+			}); err != nil {
+			reason := foldersetup.StopReason(err)
+			if reason == "" {
+				reason = personalassistant.FolderStopInstallFailed
+			}
+			return personalassistant.FolderPlanIntegration, reason, err
+		}
+		installed = words.installed()
+	}
+	set(personalassistant.FolderPlanIntegration, personalassistant.FolderLineDone, installed)
+	set(personalassistant.FolderPlanWorkspace, personalassistant.FolderLineWorking, words.enabling())
+	if err := step.connect(); err != nil {
+		return personalassistant.FolderPlanWorkspace, personalassistant.FolderStopFailed, err
+	}
+	set(personalassistant.FolderPlanWorkspace, personalassistant.FolderLineDone, words.connected())
+	return "", "", nil
+}
+
+// integrationWords are the live and receipt words of one reviewed
+// integration's lines (PRD FR6, FR10). Names come from the reviewed entry and
+// the version from the host's facts, never from the plugin's own text.
+type integrationWords struct {
+	plugin, tools, workspace, version string
+}
+
+func (w integrationWords) release() string {
+	if w.version == "" {
+		return w.plugin
+	}
+	return w.plugin + " " + w.version
+}
+
+func (w integrationWords) phase(phase foldersetup.IntegrationPhase) string {
+	switch phase {
+	case foldersetup.IntegrationChecking:
+		return "Checking the reviewed release"
+	case foldersetup.IntegrationDownloading:
+		return "Downloading " + w.release()
+	case foldersetup.IntegrationVerifying:
+		return "Verifying " + w.release()
+	case foldersetup.IntegrationEnabling:
+		return "Enabling " + w.release()
+	}
+	return ""
+}
+
+func (w integrationWords) enabling() string { return "Enabling it in " + w.workspace }
+
+func (w integrationWords) installed() string { return "Installed " + w.release() }
+
+func (w integrationWords) connected() string {
+	return "Connected " + w.tools + " tools to " + w.workspace
 }

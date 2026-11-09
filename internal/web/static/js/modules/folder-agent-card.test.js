@@ -6,7 +6,11 @@ import {
   folderAgentActionPath,
   folderAgentCardView,
   folderAgentHireChoice,
+  folderAgentLineTime,
   folderAgentNeedsView,
+  formatFolderAgentClock,
+  formatFolderAgentDuration,
+  tickFolderAgentClocks,
   folderAgentReportView,
   folderAgentTileLine,
   mountWorkspaceFolderAgent,
@@ -588,7 +592,7 @@ test('every offered step has a box; unticking one refreshes the plan and Set it 
     ]
   );
   assert.deepEqual(
-    card.querySelectorAll('.folder-agent-card__action').map(n => n.textContent),
+    card.querySelectorAll('.folder-agent-card__action-name').map(n => n.textContent),
     ['Installs X tools', 'Connects X tools to Ori Music Demo']
   );
   // The redrawn list follows the server's answer.
@@ -661,7 +665,8 @@ test('the plan reads as numbered steps, the run says where it stands, the assura
     '.folder-agent-card__run'
   );
   assert.equal(live.dataset.phase, 'running');
-  assert.equal(text(live, '.folder-agent-card__run-head'), 'Setting up · 1 of 3 done');
+  assert.equal(text(live, '.folder-agent-card__run-head-text'), 'Setting up · step 2 of 3 · B');
+  assert.equal(live.querySelector('.folder-agent-card__run-head').attributes.role, 'status');
   assert.deepEqual(
     live.querySelectorAll('li').map(li => [li.dataset.state, li.attributes.style]),
     [
@@ -714,6 +719,146 @@ test('the plan reads as numbered steps, the run says where it stands, the assura
   );
   assert.equal(doneRun.dataset.phase, 'done');
   assert.equal(text(doneRun, '.folder-agent-card__run-head'), 'All done · 1 step');
+});
+
+test('durations read <1 s, seconds, then m:ss; a line times itself from the server', () => {
+  assert.equal(formatFolderAgentDuration(0), '<1 s');
+  assert.equal(formatFolderAgentDuration(999), '<1 s');
+  assert.equal(formatFolderAgentDuration(6400), '6 s');
+  assert.equal(formatFolderAgentDuration(65000), '1:05');
+  assert.equal(formatFolderAgentDuration(-50), '<1 s');
+  assert.equal(formatFolderAgentClock(14000), '0:14');
+  assert.equal(formatFolderAgentClock(125000), '2:05');
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  assert.equal(folderAgentLineTime({ state: 'waiting' }, t0), null);
+  assert.equal(folderAgentLineTime({ state: 'working', startedAt: t0 }, t0 + 4200), 4200);
+  // A client clock behind the server never shows a negative time.
+  assert.equal(folderAgentLineTime({ state: 'working', startedAt: t0 }, t0 - 900), 0);
+  assert.equal(
+    folderAgentLineTime({ state: 'done', startedAt: t0, finishedAt: t0 + 6000 }, t0 + 99999),
+    6000
+  );
+});
+
+test('a running setup shows the working action with its words and time, and a done one with its receipt', () => {
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  const iso = ms => new Date(ms).toISOString();
+  const running = folderAgentReportView(
+    reported({
+      state: 'setting_up',
+      actions: [],
+      setup: {
+        status: 'running',
+        started_at: iso(t0),
+        lines: [
+          {
+            kind: 'integration',
+            step: 'tools',
+            name: 'Installs REAPER tools',
+            state: 'done',
+            progress: 'Installed Ori REAPER Plugin 0.9.0',
+            started_at: iso(t0),
+            finished_at: iso(t0 + 6000)
+          },
+          {
+            kind: 'workspace',
+            step: 'tools',
+            name: 'Connects REAPER tools to One Song',
+            state: 'working',
+            progress: 'Enabling it in One Song',
+            started_at: iso(t0 + 6000)
+          },
+          { kind: 'capability', step: 'curator', name: 'Adds File Janitor', state: 'waiting' },
+          { kind: 'folder', name: 'Nothing in One Song is moved, copied or read', state: 'waiting' }
+        ]
+      }
+    })
+  );
+  const card = renderFolderAgentReport(running, stubDocument(), { now: t0 + 9400 });
+  const run = card.querySelector('.folder-agent-card__run');
+  assert.equal(
+    text(run, '.folder-agent-card__run-head-text'),
+    'Setting up · step 1 of 2 · Enabling it in One Song'
+  );
+  const clock = run.querySelector('.folder-agent-card__run-clock');
+  assert.equal(clock.textContent, '0:09');
+  assert.equal(clock.attributes['aria-hidden'], 'true');
+  assert.equal(clock.dataset.startedAt, String(t0));
+
+  const [installed, connecting, queued] = run.querySelectorAll('.folder-agent-card__action');
+  assert.equal(installed.dataset.state, 'done');
+  assert.equal(
+    text(installed, '.folder-agent-card__action-name'),
+    'Installed Ori REAPER Plugin 0.9.0'
+  );
+  assert.equal(text(installed, '.folder-agent-card__action-time'), '6 s');
+  assert.equal(installed.querySelector('.folder-agent-card__spinner'), null);
+  assert.equal(connecting.dataset.state, 'working');
+  assert.ok(connecting.querySelector('.folder-agent-card__spinner'));
+  assert.equal(
+    text(connecting, '.folder-agent-card__action-name'),
+    'Connects REAPER tools to One Song'
+  );
+  assert.equal(text(connecting, '.folder-agent-card__action-progress'), 'Enabling it in One Song');
+  const ticking = connecting.querySelector('.folder-agent-card__action-time');
+  assert.equal(ticking.textContent, '3 s');
+  assert.equal(ticking.dataset.startedAt, String(t0 + 6000));
+  assert.equal(queued.dataset.state, 'waiting');
+  assert.equal(queued.querySelector('.folder-agent-card__action-time'), null);
+  assert.equal(queued.querySelector('.folder-agent-card__action-progress'), null);
+
+  // One of three actions done.
+  const bar = run.querySelector('.folder-agent-card__progress');
+  assert.equal(bar.attributes.role, 'progressbar');
+  assert.deepEqual([bar.attributes['aria-valuenow'], bar.attributes['aria-valuemax']], ['1', '3']);
+  assert.equal(
+    run.querySelector('.folder-agent-card__progress-fill').attributes.style,
+    'width:33%'
+  );
+
+  // The clock moves between polls.
+  tickFolderAgentClocks(run, t0 + 12100);
+  assert.equal(ticking.textContent, '6 s');
+  assert.equal(clock.textContent, '0:12');
+  assert.equal(text(installed, '.folder-agent-card__action-time'), '6 s');
+
+  // State words stay for screen readers.
+  assert.deepEqual(
+    run.querySelectorAll('.folder-agent-card__line-state').map(n => n.textContent),
+    ['Working']
+  );
+});
+
+test('a done action shows its duration; one under a second reads <1 s; no bar once the run ends', () => {
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  const iso = ms => new Date(ms).toISOString();
+  const finished = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: [],
+      setup: {
+        status: 'done',
+        started_at: iso(t0),
+        lines: [
+          {
+            kind: 'workspace',
+            step: 'tools',
+            name: 'Connects REAPER tools to One Song',
+            state: 'done',
+            progress: 'Connected REAPER tools to One Song',
+            started_at: iso(t0),
+            finished_at: iso(t0 + 300)
+          }
+        ]
+      }
+    })
+  );
+  const run = renderFolderAgentReport(finished, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(text(run, '.folder-agent-card__action-time'), '<1 s');
+  assert.equal(run.querySelector('.folder-agent-card__progress'), null);
+  assert.equal(run.querySelector('.folder-agent-card__run-clock'), null);
 });
 
 test('ticking a step that cannot run with a chosen one unticks the other before asking', async () => {

@@ -31,7 +31,7 @@ func TestGroupStage_PlanIncludesExistingMembersAndCreatesTheRest(t *testing.T) {
 		"Creates Night Train, linked to its own folder|",
 		"ws-existing|already a workspace · included as a member",
 		"Creates The Orchard, linked to its own folder|",
-		"Nothing is moved, copied or read|",
+		"Nothing in Ori Music Demo is moved, copied or read|",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("lines:\n%s", strings.Join(lines, "\n"))

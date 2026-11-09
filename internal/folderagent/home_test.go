@@ -37,7 +37,7 @@ func TestBuildPlan_ExistingHomeIsJoinedNotCreated(t *testing.T) {
 		names = append(names, l.Name)
 	}
 	want := []string{"Adds Label 2026 to your Music Production Home", "Lists 5 songs on its shelf",
-		"Looks into 3 folders for songs", "Places Label 2026 inside your Music Production Home", "Nothing is moved, copied or read"}
+		"Looks into 3 folders for songs", "Places Label 2026 inside your Music Production Home", "Nothing in Label 2026 is moved, copied or read"}
 	if !plan.Runnable || !reflect.DeepEqual(names, want) {
 		t.Fatalf("plan runnable=%v lines=%v", plan.Runnable, names)
 	}
@@ -55,7 +55,7 @@ func TestBuildPlan_DumpAddsFileJanitorInPlaceWithFileCurator(t *testing.T) {
 	for _, l := range plan.Lines {
 		names = append(names, l.Name)
 	}
-	want := []string{"Adds File Janitor to Messy", "Adds File Curator", "Nothing is moved, copied or read"}
+	want := []string{"Adds File Janitor to Messy", "Adds File Curator", "Nothing in Messy is moved, copied or read"}
 	if !plan.Runnable || plan.Unavailable != "" || !reflect.DeepEqual(names, want) {
 		t.Fatalf("plan runnable=%v unavailable=%q lines=%v", plan.Runnable, plan.Unavailable, names)
 	}

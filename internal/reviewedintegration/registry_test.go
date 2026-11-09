@@ -79,6 +79,12 @@ func TestBuiltInRegistryCarriesInstallQuestCopy(t *testing.T) {
 	if entry.DisplayName != "REAPER" || entry.InstallTitle != "Install Ori REAPER Plugin" || entry.InstallDescription != explanation {
 		t.Fatalf("install copy = %q / %q / %q", entry.DisplayName, entry.InstallTitle, entry.InstallDescription)
 	}
+	if got := entry.PluginName(); got != "Ori REAPER Plugin" {
+		t.Fatalf("plugin name = %q", got)
+	}
+	if got := (Entry{DisplayName: "Thing", InstallTitle: "Set up Thing"}).PluginName(); got != "Thing" {
+		t.Fatalf("plugin name without an Install title = %q", got)
+	}
 }
 
 func TestRegistryNormalizationRejectsUnsafeDisplayCopy(t *testing.T) {

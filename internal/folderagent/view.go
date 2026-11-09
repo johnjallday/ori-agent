@@ -461,7 +461,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 			plan.Unavailable = "Nothing is selected to set up."
 		}
 	}
-	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Nothing is moved, copied or read"})
+	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: assuranceLine(rec)})
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan
@@ -487,6 +487,16 @@ func applyExcludes(order []string, steps []folderlook.Step, byHandle map[string]
 		kept = append(kept, h)
 	}
 	return kept, excluded
+}
+
+// assuranceLine is the note under every phase of the plan (PRD FR13). It names
+// the folder (its base name, never a path) so the promise is concrete.
+func assuranceLine(rec Record) string {
+	folder := strings.TrimSpace(rec.FolderName)
+	if folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n") {
+		return "Nothing is moved, copied or read"
+	}
+	return "Nothing in " + folder + " is moved, copied or read"
 }
 
 // defaultReason says why Ori's own plan is shown rather than the agent's.
