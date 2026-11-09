@@ -703,7 +703,7 @@ function renderPlan(
   plan,
   lines,
   phase,
-  { selecting = false, onTick, now = Date.now() } = {}
+  { selecting = false, onTick, now = Date.now(), headFirst = false } = {}
 ) {
   const section = el(doc, 'section', 'folder-agent-card__run');
   section.dataset.phase = phase;
@@ -781,6 +781,8 @@ function renderPlan(
     );
     bar.append(fill);
     section.append(bar);
+    // In the balloon the run's headline and bar lead, above the agent's words.
+    if (headFirst && typeof section.prepend === 'function') section.prepend(head, bar);
     startRunClock(section);
   } else {
     let words = runHeadline(phase, done, failedAt, rows.length);
@@ -789,6 +791,8 @@ function renderPlan(
       words += ` · ${formatFolderAgentDuration(setup.finishedAt - setup.startedAt)}`;
     head.textContent = words;
     section.append(head);
+    if (headFirst && phase !== 'plan' && typeof section.prepend === 'function')
+      section.prepend(head);
   }
   // Once the run ends, what it made, with a link to check each: a stopped
   // run shows what finished above the line that failed.
@@ -1033,7 +1037,14 @@ export function renderFolderAgentReport(
   // steps with a box each; from Set it up on, the run's lines in the same
   // shape, with the agent's words above saying why.
   if (view.setup) {
-    card.append(renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup), { now }));
+    const run = renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup), {
+      now,
+      headFirst: compact
+    });
+    // In the balloon the run leads (its headline is where the owner looks);
+    // the agent's words follow it.
+    if (compact && typeof card.prepend === 'function') card.prepend(run);
+    else card.append(run);
     if (view.setup.status === 'stopped') {
       card.append(
         el(

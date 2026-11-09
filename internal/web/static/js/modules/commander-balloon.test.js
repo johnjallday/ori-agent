@@ -196,6 +196,72 @@ test('an anchor outside the visible area docks at the nearest edge (FR11)', () =
   }
 });
 
+test('above its anchor a balloon hangs from its bottom edge; elsewhere it never passes the bottom', () => {
+  const above = placeBalloon({
+    anchor: { left: 480, top: 500, width: 40, height: 40 },
+    area,
+    height: 300
+  });
+  assert.equal(above.side, 'above');
+  assert.equal(above.bottomEdge, 500 - 14, 'a taller body grows up, away from the anchor');
+  const beside = placeBalloon({
+    anchor: { left: 40, top: 600, width: 40, height: 40 },
+    area,
+    height: 650
+  });
+  assert.equal(beside.side, 'right');
+  assert.equal(beside.bottomEdge, null);
+  assert.ok(beside.top + beside.maxHeight <= 700 - 8, 'capped to the room below its top');
+  const below = placeBalloon({
+    anchor: { left: 480, top: 40, width: 40, height: 40 },
+    area,
+    height: 900
+  });
+  assert.notEqual(below.side, 'above');
+  assert.ok(below.top + below.maxHeight <= 700 - 8);
+});
+
+test('on a short map the balloon goes beside its anchor, narrower, not squashed', () => {
+  // 768-wide window: a 700 x 300 map area, the tile in the middle.
+  const short = { left: 0, top: 300, width: 700, height: 300 };
+  const p = placeBalloon({
+    anchor: { left: 330, top: 420, width: 60, height: 60 },
+    area: short,
+    height: 600
+  });
+  assert.ok(p.side === 'right' || p.side === 'left');
+  assert.ok(p.width >= 300 && p.width <= 440);
+  assert.equal(p.maxHeight, 300 - 16, 'the full height of the area');
+  assert.ok(p.left >= 0 && p.left + p.width <= 700);
+  assert.ok(p.left >= 390 + 14 || p.left + p.width <= 330 - 14, 'beside, not over, the anchor');
+});
+
+test('a docked balloon steps aside from an anchor half under the drawer', () => {
+  // Visible area 0–612; the Commander spans 520–720, its centre (620) hidden.
+  const visible = { left: 0, top: 0, width: 612, height: 700 };
+  const anchor = { left: 520, top: 300, width: 200, height: 200 };
+  const p = placeBalloon({ anchor, area: visible, height: 300 });
+  assert.equal(p.side, 'dock');
+  assert.equal(p.dock, 'right');
+  assert.ok(p.left + p.width <= anchor.left, 'ends before the visible part of the anchor');
+});
+
+test('a new phase starts the balloon body at its top; the same phase keeps its scroll', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const balloon = commanderBalloon('ws:scroll', { doc, now: () => 0, setTimer: () => 1 });
+  balloon.attach(root, { anchor: () => unit, narrow: () => false });
+  balloon.update({ ...reportContent(doc), scrollKey: 'report|report' });
+  balloon.expand();
+  balloon.nodes.body.scrollTop = 200;
+  balloon.nodes.body.dispatch('scroll');
+  balloon.update({ ...reportContent(doc, 'plan, ticked'), scrollKey: 'report|report' });
+  assert.equal(balloon.nodes.body.scrollTop, 200, 'same phase: kept');
+  balloon.update({ ...reportContent(doc, 'Setting up'), scrollKey: 'report|running' });
+  assert.equal(balloon.nodes.body.scrollTop, 0, 'the run starts at its headline');
+});
+
 test('the drawer-narrowed area keeps the balloon out from under the drawer', () => {
   const visible = { left: 0, top: 0, width: 600, height: 700 }; // drawer covers 600–1000
   const p = placeBalloon({

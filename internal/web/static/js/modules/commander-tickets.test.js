@@ -205,4 +205,32 @@ test('a waiting ticket comes before a waiting report, with "and 1 more" opening 
   assert.equal(balloon.content.line, 'I have a plan for Albums · Review');
   assert.equal(balloon.content.more, null);
   assert.equal(typeof fire, 'function');
+  // A setup run in progress outranks the ticket line the same work makes.
+  const running = {
+    ...raw,
+    state: 'setting_up',
+    setup: {
+      status: 'running',
+      lines: [{ step: 'tools', name: 'Installs REAPER tools', state: 'working' }]
+    }
+  };
+  presenter.present({
+    view: folderAgentReportView(running),
+    raw: running,
+    previous: folderAgentReportView(raw),
+    followed: false,
+    error: '',
+    opening: false,
+    host,
+    doc,
+    card: () => doc.createElement('article')
+  });
+  activityFn({
+    workspaceId: 'ws-1',
+    agent: 'Albums Manager',
+    line: 'Thinking it through…',
+    taskId: 't9'
+  });
+  assert.match(balloon.content.line, /^Setting up Albums/);
+  assert.equal(balloon.content.scrollKey, 'report|running');
 });

@@ -506,7 +506,7 @@ func TestProgressFolder_BaseNameOnlyBoundedAndClean(t *testing.T) {
 		{"", "", ""},
 		{"/Users/someone/Music/Albums/Song", "", "Song"},
 		{`Old\Takes`, "", "Takes"},
-		{"Bad\x00Na‮me\n", "", "BadName"},
+		{"Bad\x00Na" + string(rune(0x202e)) + "me\n", "", "BadName"},
 		{long, "", strings.Repeat("é", progressFolderMax)},
 	}
 	for _, c := range cases {

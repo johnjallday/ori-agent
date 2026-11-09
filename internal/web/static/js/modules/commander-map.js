@@ -78,7 +78,7 @@ export function workspaceCommanderMap(
         visibleArea: () =>
           visibleMapArea(
             root()?.getBoundingClientRect?.(),
-            pageObstacles(doc, win),
+            pageObstacles(doc, win).concat(mapObstacles(root())),
             windowRect(win)
           )
       });
@@ -215,6 +215,41 @@ export function scrollClear(
   if (by) win.scrollBy({ top: by, behavior: 'smooth' });
 }
 
+// mapObstacles are a map's own floating controls (zoom, Fit all, Arrange,
+// the dock tools and the compass).
+// They float beside the viewport, not inside it, so they are found from the
+// map's own container (Home's #cockpitMap, a group page's detachment host).
+export function mapObstacles(root) {
+  const container =
+    root?.closest?.('#cockpitMap, .ws-cmd-detachment-host, [data-ws-map-root]') ||
+    root?.parentElement ||
+    root;
+  return Array.from(
+    container?.querySelectorAll?.('.ws-map-controls, .ws-map-dock-tools, .ws-map-compass') || []
+  )
+    .filter(node => !node.hidden)
+    .map(node => node.getBoundingClientRect?.())
+    .filter(rect => rect && rect.width > 0 && rect.height > 0);
+}
+
+// showTile answers a docked balloon's Show (FR11): the map reveals the tile,
+// then the camera moves once more so the tile sits in the middle of the part
+// of the map the owner can see, not under the drawer.
+export function showTile(workspaceID, anchor, visibleArea, win = globalThis.window) {
+  const map = win?.OriWorkspaceMap;
+  if (!map?.reveal) return false;
+  map.reveal(workspaceID);
+  const at = anchor()?.getBoundingClientRect?.();
+  const area = visibleArea();
+  if (at && area && typeof map.panBy === 'function') {
+    map.panBy(
+      at.left + at.width / 2 - (area.left + area.width / 2),
+      at.top + at.height / 2 - (area.top + area.height / 2)
+    );
+  }
+  return true;
+}
+
 // windowRect is the browser window, for keeping a balloon above the fold.
 export function windowRect(win = globalThis.window) {
   const width = Number(win?.innerWidth) || 0;
@@ -254,6 +289,12 @@ export function homeCommanderMap(
     return width > 0 && width < BALLOON_NARROW_PX;
   };
   const anchor = () => homeTileAnchor(root(), workspaceID);
+  const visibleArea = () =>
+    visibleMapArea(
+      root()?.getBoundingClientRect?.(),
+      pageObstacles(doc, win).concat(mapObstacles(root())),
+      windowRect(win)
+    );
   return {
     balloon,
     narrow,
@@ -277,14 +318,9 @@ export function homeCommanderMap(
         anchor,
         narrow,
         onNarrow,
-        visibleArea: () =>
-          visibleMapArea(
-            root()?.getBoundingClientRect?.(),
-            pageObstacles(doc, win),
-            windowRect(win)
-          ),
+        visibleArea,
         // Show pans the camera to the tile; the camera never moves by itself.
-        onShow: () => win?.OriWorkspaceMap?.reveal?.(workspaceID)
+        onShow: () => showTile(workspaceID, anchor, visibleArea, win)
       });
       return true;
     },
@@ -428,9 +464,12 @@ export function commanderPresenter(
   let pendingOpen = '';
 
   const queue = () => {
-    const items = [...tickets];
+    // The report goes first among equals: a look or a setup run in progress
+    // outranks the ticket line the same work produces ("Thinking it through…").
+    const items = [];
     const speech = last ? commanderSpeech(last.view) : null;
     if (speech) items.push({ kind: REPORT_KIND[speech.phase] || 'working', report: true, speech });
+    items.push(...tickets);
     const { first, rest } = commanderQueue(items);
     return first ? [first, ...rest] : [];
   };
@@ -456,6 +495,9 @@ export function commanderPresenter(
         headline: item.speech.headline,
         announce: item.speech.announce,
         signature: `report|${JSON.stringify(raw)}|${error}|${opening}|${index}`,
+        // A new phase (the plan becoming the run, the run the receipt)
+        // starts at its top, not at the old scroll position.
+        scrollKey: `report|${item.speech.phase}`,
         body: () => card(true),
         more,
         onMore
@@ -467,6 +509,7 @@ export function commanderPresenter(
       headline: item.headline,
       announce: item.announce,
       signature: `${item.signature}|${index}`,
+      scrollKey: `${item.kind}|${index}`,
       body: doc => item.body(doc),
       more,
       onMore
@@ -509,7 +552,10 @@ export function commanderPresenter(
       else if (pendingOpen !== view.state) pendingOpen = '';
     }
     if (onMap) {
-      if (pendingOpen && pendingOpen === view.state) {
+      // ...and for the anchor to be in view: a balloon opened for a map below
+      // the fold would dock with nothing of it showing.
+      const inView = map.balloon.anchorInView ? map.balloon.anchorInView() : true;
+      if (pendingOpen && pendingOpen === view.state && inView) {
         pendingOpen = '';
         // Opening by itself never takes focus from where the owner is.
         map.balloon.expand({ focus: false });

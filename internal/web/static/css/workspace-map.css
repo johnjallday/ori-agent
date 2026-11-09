@@ -4325,7 +4325,13 @@
 .commander-balloon-line,
 .commander-balloon {
   position: absolute;
+  z-index: 1;
   pointer-events: auto;
+}
+
+/* An open balloon sits above every other Commander's collapsed line. */
+.commander-balloon {
+  z-index: 2;
 }
 
 .commander-balloon-line {

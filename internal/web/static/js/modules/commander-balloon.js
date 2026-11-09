@@ -15,6 +15,10 @@ export const BALLOON_MIN_WIDTH = 360;
 export const BALLOON_MAX_WIDTH = 440;
 export const BALLOON_GAP = 14;
 export const BALLOON_PAD = 8;
+// Below this much room above or below, a balloon goes beside its anchor at a
+// tighter width (never under BALLOON_TIGHT_WIDTH) rather than squashed.
+export const BALLOON_USEFUL_HEIGHT = 240;
+export const BALLOON_TIGHT_WIDTH = 300;
 // Below this width no balloon expands: the host shows the full card (FR17).
 export const BALLOON_NARROW_PX = 720;
 // The collapsed line speaks at most once per Commander every 10 s (FR27).
@@ -95,7 +99,38 @@ export function placeBalloon({ anchor, area, height, gap = BALLOON_GAP, pad = BA
     if (edge === 'bottom') top = inner.bottom - h;
     if (edge === 'left') left = inner.left;
     if (edge === 'right') left = inner.right - width;
-    return { side: 'dock', dock: edge, left, top, width, maxHeight, tail: null };
+    // An anchor partly in view (half under the drawer) is not covered: the
+    // docked balloon steps away from it along the edge when there is room.
+    if (a) {
+      const overlapsX = left < a.right && left + width > a.left;
+      const overlapsY = top < a.bottom && top + h > a.top;
+      if (overlapsX && overlapsY) {
+        if (edge === 'left' || edge === 'right') {
+          const before = a.left - gap - width;
+          const after = a.right + gap;
+          if (edge === 'right' && before >= inner.left) left = before;
+          else if (edge === 'left' && after + width <= inner.right) left = after;
+        } else {
+          const above = a.top - gap - h;
+          const below = a.bottom + gap;
+          if (edge === 'bottom' && above >= inner.top) top = above;
+          else if (edge === 'top' && below + h <= inner.bottom) top = below;
+        }
+      }
+    }
+    // A balloon at the bottom (or stepped above its anchor) hangs from its
+    // bottom edge, so a taller body grows up, never past the fold.
+    const hangs = edge === 'bottom' || (a && top + h <= a.top);
+    return {
+      side: 'dock',
+      dock: edge,
+      left,
+      top,
+      width,
+      maxHeight: hangs ? top + h - inner.top : inner.bottom - top,
+      bottomEdge: hangs ? top + h : null,
+      tail: null
+    };
   }
   const room = {
     above: a.top - gap - inner.top,
@@ -108,24 +143,50 @@ export function placeBalloon({ anchor, area, height, gap = BALLOON_GAP, pad = BA
   const roomFor = side =>
     vertical(side) ? room[side] : fitsAcross(side) ? inner.bottom - inner.top : -1;
   let side = SIDES.find(s => fitsAcross(s) && roomFor(s) >= wanted);
-  if (!side) side = SIDES.reduce((best, s) => (roomFor(s) > roomFor(best) ? s : best), 'above');
-  const maxHeight = Math.max(0, roomFor(side));
+  let w = width;
+  if (!side) {
+    side = SIDES.reduce((best, s) => (roomFor(s) > roomFor(best) ? s : best), 'above');
+    // A short map (a narrow window): a sliver above or below is no place to
+    // read a plan. Beside the anchor at a narrower width, full height, is.
+    const across = room.right >= room.left ? 'right' : 'left';
+    if (
+      roomFor(side) < Math.min(wanted, BALLOON_USEFUL_HEIGHT) &&
+      room[across] >= BALLOON_TIGHT_WIDTH
+    ) {
+      side = across;
+      w = Math.min(width, room[across]);
+    }
+  }
+  const maxHeight = Math.max(0, vertical(side) ? room[side] : inner.bottom - inner.top);
   const h = Math.min(wanted, maxHeight);
   const cx = a.left + a.width / 2;
   const cy = a.top + a.height / 2;
   let left;
   let top;
   if (vertical(side)) {
-    left = clamp(cx - width / 2, inner.left, inner.right - width);
+    left = clamp(cx - w / 2, inner.left, inner.right - w);
     top = side === 'above' ? a.top - gap - h : a.bottom + gap;
   } else {
     top = clamp(cy - h / 2, inner.top, inner.bottom - h);
-    left = side === 'right' ? a.right + gap : a.left - gap - width;
+    left = side === 'right' ? a.right + gap : a.left - gap - w;
   }
   const tail = vertical(side)
-    ? { x: clamp(cx - left, 18, width - 18), y: side === 'above' ? h : 0 }
-    : { x: side === 'right' ? 0 : width, y: clamp(cy - top, 18, Math.max(18, h - 18)) };
-  return { side, dock: '', left, top, width, maxHeight, tail };
+    ? { x: clamp(cx - left, 18, w - 18), y: side === 'above' ? h : 0 }
+    : { x: side === 'right' ? 0 : w, y: clamp(cy - top, 18, Math.max(18, h - 18)) };
+  // Above its anchor the balloon hangs from its bottom edge (a body that
+  // grows never covers the anchor); elsewhere it never runs past the area's
+  // bottom, whatever the measured height said.
+  const above = side === 'above';
+  return {
+    side,
+    dock: '',
+    left,
+    top,
+    width: w,
+    maxHeight: above ? maxHeight : Math.max(0, Math.min(maxHeight, inner.bottom - top)),
+    bottomEdge: above ? a.top - gap : null,
+    tail
+  };
 }
 
 // placeLine sets the collapsed speech line centred over its anchor, inside
@@ -400,6 +461,18 @@ class CommanderBalloon {
       this.lastFocused.focus?.({ preventScroll: true });
   }
 
+  // anchorInView says whether the anchor's centre is in the visible area:
+  // the balloon would point at it rather than dock.
+  anchorInView() {
+    if (!this.root) return false;
+    const value = this.anchorOf?.();
+    if (!value) return false;
+    const rect =
+      typeof value.getBoundingClientRect === 'function' ? value.getBoundingClientRect() : value;
+    const areaValue = typeof this.areaOf === 'function' ? this.areaOf() : this.areaOf;
+    return anchorVisible(rect, areaValue || this.rootRect());
+  }
+
   anchorElement() {
     const value = this.anchorOf?.();
     return value && typeof value.getBoundingClientRect === 'function' ? value : null;
@@ -432,6 +505,11 @@ class CommanderBalloon {
     nodes.more.textContent = content.more?.label || '';
     nodes.more.hidden = !content.more?.label;
     const signature = String(content.signature ?? content.line ?? '');
+    const scrollKey = String(content.scrollKey ?? '');
+    if (scrollKey !== this.scrollKey) {
+      this.scrollKey = scrollKey;
+      this.scrollTop = 0;
+    }
     if (signature !== previous || !nodes.body.children?.length) {
       this.signature = signature;
       const active = this.doc?.activeElement;
@@ -590,7 +668,13 @@ class CommanderBalloon {
     const place = placeBalloon({ anchor: anchorRect, area, height });
     const at = local(place, place.left, place.top);
     nodes.box.style.left = `${Math.round(at.left)}px`;
-    nodes.box.style.top = `${Math.round(at.top)}px`;
+    if (place.bottomEdge != null) {
+      nodes.box.style.top = 'auto';
+      nodes.box.style.bottom = `${Math.round(origin.top + origin.height - place.bottomEdge)}px`;
+    } else {
+      nodes.box.style.bottom = 'auto';
+      nodes.box.style.top = `${Math.round(at.top)}px`;
+    }
     nodes.box.style.width = `${Math.round(place.width)}px`;
     nodes.box.style.maxHeight = `${Math.round(place.maxHeight)}px`;
     nodes.box.dataset.side = place.side;
@@ -599,7 +683,8 @@ class CommanderBalloon {
     nodes.tail.hidden = !place.tail;
     if (place.tail) {
       nodes.tail.style.left = `${Math.round(place.tail.x)}px`;
-      nodes.tail.style.top = `${Math.round(place.tail.y)}px`;
+      // Above its anchor the tail sits on the bottom edge, wherever it is.
+      nodes.tail.style.top = place.side === 'above' ? '100%' : `${Math.round(place.tail.y)}px`;
     }
   }
 
