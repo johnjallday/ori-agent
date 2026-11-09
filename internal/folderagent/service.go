@@ -123,8 +123,17 @@ type Tickets interface {
 type Setups interface {
 	Readiness(ctx context.Context, userID string) folderlook.Readiness
 	// Run carries out the confirmed lines for one record. It reports each
-	// line through update and returns the final status and stop reason.
-	Run(ctx context.Context, rec Record, plan Plan, update func([]personalassistant.FolderPlanLine)) (status, stopReason string)
+	// line through update and returns the final status, stop reason and what
+	// the run made.
+	Run(ctx context.Context, rec Record, plan Plan, update func([]personalassistant.FolderPlanLine)) RunResult
+}
+
+// RunResult is how a Set it up run ended and what it made (its receipt,
+// partial when it stopped).
+type RunResult struct {
+	Status     string
+	StopReason string
+	Receipt    *SetupReceipt
 }
 
 // Pins narrows the folder agent's own Toolbox to the anchor's listing tools
@@ -885,7 +894,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		defer s.wg.Done()
 		// The run outlives the request that confirmed it: the request's values
 		// travel with it, its cancellation does not.
-		status, reason := s.deps.Setups.Run(context.WithoutCancel(ctx), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
+		result := s.deps.Setups.Run(context.WithoutCancel(ctx), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
 			_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 				if r.Setup != nil {
 					r.Setup.Lines = lines
@@ -893,6 +902,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 				return nil
 			})
 		})
+		status, reason := result.Status, result.StopReason
 		nextID := ""
 		if status == personalassistant.FolderSetupDone {
 			nextID = s.createNextTicket(rec)
@@ -907,6 +917,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 			if r.Setup != nil {
 				r.Setup.Status, r.Setup.StopReason, r.Setup.FinishedAt = status, reason, s.deps.Now().UTC()
+				r.Setup.Receipt = result.Receipt.Clean()
 			}
 			if nextID != "" {
 				r.NextTicketID = nextID

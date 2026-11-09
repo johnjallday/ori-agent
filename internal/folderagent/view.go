@@ -145,7 +145,13 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	if rec.Turn == nil || rec.Turn.Status != TurnFinished {
 		v.ToolsSentence = "Search for more tools needs a model"
 	}
-	plan := BuildPlan(*rec, nil)
+	// Once a run exists the plan shown is the one it was confirmed on, not
+	// the agent's recommendation (a stopped run carries on with it).
+	var selected []string
+	if rec.Setup != nil && len(rec.Setup.Selected) > 0 {
+		selected = rec.Setup.Selected
+	}
+	plan := BuildPlan(*rec, selected)
 	v.Plan = planViewOf(plan)
 	switch rec.State {
 	case StateReported:

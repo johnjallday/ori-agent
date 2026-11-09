@@ -8,6 +8,7 @@ import {
   folderAgentHireChoice,
   folderAgentLineTime,
   folderAgentNeedsView,
+  folderAgentReceiptRows,
   formatFolderAgentClock,
   formatFolderAgentDuration,
   tickFolderAgentClocks,
@@ -827,6 +828,159 @@ test('a running setup shows the working action with its words and time, and a do
     run.querySelectorAll('.folder-agent-card__line-state').map(n => n.textContent),
     ['Working']
   );
+});
+
+test('a finished run shows its receipt with links, leaves out empty rows and collapses its steps', () => {
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  const iso = ms => new Date(ms).toISOString();
+  const view = folderAgentReportView(
+    reported({
+      workspace_name: 'Albums',
+      route: '/workspaces/albums',
+      state: 'set_up',
+      actions: [],
+      setup: {
+        status: 'done',
+        started_at: iso(t0),
+        finished_at: iso(t0 + 41000),
+        receipt: {
+          installed: ['Music Project Management 0.5.0', 'Ori REAPER Plugin 0.9.0'],
+          home: { name: 'Music Production Home', route: '/workspaces/music-production-home' },
+          home_created: true,
+          hired: ['Portfolio Manager', 'Library Manager'],
+          listed: 6,
+          listed_noun: 'songs'
+        },
+        lines: [
+          {
+            kind: 'provider',
+            step: 'home',
+            name: 'Installs Music Project Management',
+            state: 'done',
+            progress: 'Installed Music Project Management 0.5.0',
+            started_at: iso(t0),
+            finished_at: iso(t0 + 6000)
+          },
+          {
+            kind: 'place',
+            step: 'home',
+            name: 'Places Albums inside your Music Production Home',
+            state: 'done',
+            started_at: iso(t0 + 6000),
+            finished_at: iso(t0 + 9000)
+          },
+          { kind: 'folder', name: 'Nothing in Albums is moved, copied or read', state: 'done' }
+        ]
+      }
+    })
+  );
+  const card = renderFolderAgentReport(view, stubDocument(), {});
+  const run = card.querySelector('.folder-agent-card__run');
+  assert.equal(text(run, '.folder-agent-card__run-head'), 'All done · 1 step · 41 s');
+  const rows = run
+    .querySelectorAll('.folder-agent-card__receipt-row')
+    .map(row => [
+      row.dataset.kind,
+      text(row, '.folder-agent-card__receipt-text'),
+      row.querySelector('.folder-agent-card__receipt-link')?.textContent || '',
+      row.querySelector('.folder-agent-card__receipt-link')?.href || ''
+    ]);
+  assert.deepEqual(rows, [
+    [
+      'installed',
+      'Music Project Management 0.5.0 · Ori REAPER Plugin 0.9.0',
+      'Plugins',
+      '/plugins'
+    ],
+    ['created', 'Music Production Home', 'Open', '/workspaces/music-production-home'],
+    ['hired', 'Portfolio Manager · Library Manager', 'Agents', '/agents'],
+    ['listed', '6 songs on the shelf', '', ''],
+    ['placed', 'Albums inside your Music Production Home', 'Open Albums', '/workspaces/albums']
+  ]);
+  // The Placed row opens the place; no second link at the bottom.
+  assert.equal(card.querySelector('.folder-agent-card__open'), null);
+
+  // The step collapses to its title and time; a click shows its actions.
+  const step = run.querySelector('li');
+  const toggle = step.querySelector('.folder-agent-card__line-toggle');
+  assert.equal(step.dataset.collapsed, 'true');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  assert.equal(text(step, '.folder-agent-card__step-time'), '9 s');
+  toggle.listeners.click();
+  assert.equal(step.dataset.collapsed, 'false');
+  assert.equal(toggle.attributes['aria-expanded'], 'true');
+});
+
+test('a Group run receipt counts its members; a stopped run shows only what finished', () => {
+  const group = folderAgentReportView(
+    reported({
+      workspace_name: 'Three Drafts',
+      route: '/workspaces/three-drafts',
+      state: 'set_up',
+      actions: [],
+      setup: {
+        status: 'done',
+        receipt: {
+          group: true,
+          members: [
+            { name: 'Draft A', route: '/workspaces/draft-a' },
+            { name: 'Draft B', route: '/workspaces/draft-b' },
+            { name: 'Draft C', route: 'https://elsewhere.example/x' }
+          ]
+        },
+        lines: [
+          { kind: 'promote', step: 'group', name: 'Turns Three Drafts into a group', state: 'done' }
+        ]
+      }
+    })
+  );
+  const rows = folderAgentReceiptRows(group).map(row => [row.label, row.words]);
+  assert.deepEqual(rows, [
+    ['Created', '3 workspaces in Three Drafts'],
+    ['Placed', 'Three Drafts is now a group with 3 workspaces']
+  ]);
+  // A route that is not one of the app's workspace pages is never linked.
+  assert.deepEqual(
+    group.setup.receipt.members.map(m => m.route),
+    ['/workspaces/draft-a', '/workspaces/draft-b', '']
+  );
+
+  const stopped = folderAgentReportView(
+    reported({
+      workspace_name: 'Albums',
+      route: '/workspaces/albums',
+      state: 'set_up',
+      actions: ['set_up'],
+      setup: {
+        status: 'stopped',
+        receipt: { installed: ['Music Project Management 0.5.0'] },
+        lines: [
+          {
+            kind: 'provider',
+            step: 'home',
+            name: 'Installs Music Project Management',
+            state: 'done'
+          },
+          {
+            kind: 'home',
+            step: 'home',
+            name: 'Creates your Music Production Home',
+            state: 'failed'
+          }
+        ]
+      }
+    })
+  );
+  const run = renderFolderAgentReport(stopped, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(text(run, '.folder-agent-card__run-head'), 'Stopped at step 1 of 1');
+  assert.deepEqual(
+    run.querySelectorAll('.folder-agent-card__receipt-row').map(row => row.dataset.kind),
+    ['installed']
+  );
+  // A stopped run's steps stay open to show which action failed.
+  assert.equal(run.querySelector('li').dataset.collapsed, undefined);
 });
 
 test('a run counts only the steps it runs, not a step the plan still marks chosen', () => {

@@ -512,7 +512,59 @@ func (s folderAgentSetups) Readiness(ctx context.Context, userID string) folderl
 // Run carries out a Tools-stage plan: each selected integration is installed
 // (or enabled, or updated) through the host's install quest, then its
 // components are attached to this workspace. Nothing else is touched.
-func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan folderagent.Plan, update func([]personalassistant.FolderPlanLine)) (string, string) {
+// It reports what the run made (partial when it stopped) for the card's
+// receipt: plugins from the install lines' receipt words, the Home and its
+// hires from the Home stage, a group's members from the store.
+func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan folderagent.Plan, update func([]personalassistant.FolderPlanLine)) folderagent.RunResult {
+	receipt := &folderagent.SetupReceipt{}
+	var last []personalassistant.FolderPlanLine
+	status, reason := s.run(ctx, rec, plan, func(lines []personalassistant.FolderPlanLine) {
+		last = lines
+		update(lines)
+	}, receipt)
+	receipt.Installed = installedFrom(last)
+	return folderagent.RunResult{Status: status, StopReason: reason, Receipt: receipt}
+}
+
+// installedFrom are the plugins a run's done install lines name
+// ("Installed <name> <version>").
+func installedFrom(lines []personalassistant.FolderPlanLine) []string {
+	var out []string
+	for _, line := range lines {
+		if line.State != personalassistant.FolderLineDone {
+			continue
+		}
+		if line.Kind != personalassistant.FolderPlanIntegration && line.Kind != personalassistant.FolderPlanProvider &&
+			line.Kind != personalassistant.FolderPlanHome {
+			continue
+		}
+		if name, ok := strings.CutPrefix(line.Progress, "Installed "); ok && name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// groupMembers are the workspaces now inside the group, by name and route.
+func (b *ServerBuilder) groupMembers(groupID string) []folderagent.WorkspaceRef {
+	ids, err := b.workspaceStore.List()
+	if err != nil {
+		return nil
+	}
+	var out []folderagent.WorkspaceRef
+	for _, id := range ids {
+		ws, err := b.workspaceStore.Get(id)
+		if err != nil || ws == nil || ws.ParentID != groupID || ws.GetStatus() == workspace.StatusTrashed {
+			continue
+		}
+		out = append(out, folderagent.WorkspaceRef{ID: ws.ID, Name: ws.Name, Route: workspaceRoute(ws.FolderSlug)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (s folderAgentSetups) run(ctx context.Context, rec folderagent.Record, plan folderagent.Plan,
+	update func([]personalassistant.FolderPlanLine), made *folderagent.SetupReceipt) (string, string) {
 	b := s.builder
 	lines := append([]personalassistant.FolderPlanLine(nil), plan.Lines...)
 	// set moves every unfinished line of a kind; setLine one line by name. Each
@@ -546,7 +598,14 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 		update(append([]personalassistant.FolderPlanLine(nil), lines...))
 	}
 	if plan.Stage == foldermap.StageGroup {
-		if reason, err := b.runFolderAgentGroup(ctx, rec, lines, setLine); err != nil {
+		reason, err := b.runFolderAgentGroup(ctx, rec, lines, setLine)
+		for _, l := range lines {
+			if l.Kind == folderagent.FolderPlanPromote && l.State == personalassistant.FolderLineDone {
+				made.Group = true
+				made.Members = b.groupMembers(rec.WorkspaceID)
+			}
+		}
+		if err != nil {
 			logger.Warn("Folder agent group setup stopped", logger.Fields{"workspace_id": rec.WorkspaceID, "reason": reason, "error": err.Error()})
 			return personalassistant.FolderSetupStopped, reason
 		}
@@ -571,6 +630,13 @@ func (s folderAgentSetups) Run(ctx context.Context, rec folderagent.Record, plan
 			continue
 		case folderlook.KindHomeProvider:
 			receipt, err := b.runFolderAgentHome(ctx, rec, candidate, lines, setLine)
+			if receipt.homeID != "" {
+				made.Home = &folderagent.WorkspaceRef{ID: receipt.homeID, Name: receipt.homeName,
+					Route: folderAgentWorkspaces{builder: b}.Route(receipt.homeID)}
+				made.HomeCreated = receipt.created
+			}
+			made.Hired = append(made.Hired, receipt.hired...)
+			made.Listed, made.ListedNoun, made.Unreached = receipt.listed, receipt.listedNoun, receipt.unreached
 			var stopped *homeStageStop
 			if errors.As(err, &stopped) {
 				logger.Warn("Folder agent Home setup stopped", logger.Fields{"workspace_id": rec.WorkspaceID, "reason": stopped.reason, "error": stopped.cause.Error()})

@@ -129,14 +129,15 @@ func (t *fakeTickets) Finish(ws, id, result string, failed bool) error {
 }
 
 type fakeSetups struct {
-	mu   sync.Mutex
-	runs []Plan
+	mu      sync.Mutex
+	runs    []Plan
+	receipt *SetupReceipt
 }
 
 func (f *fakeSetups) Readiness(context.Context, string) folderlook.Readiness {
 	return folderlook.Readiness{}
 }
-func (f *fakeSetups) Run(_ context.Context, _ Record, plan Plan, update func([]personalassistant.FolderPlanLine)) (string, string) {
+func (f *fakeSetups) Run(_ context.Context, _ Record, plan Plan, update func([]personalassistant.FolderPlanLine)) RunResult {
 	f.mu.Lock()
 	f.runs = append(f.runs, plan)
 	f.mu.Unlock()
@@ -145,7 +146,7 @@ func (f *fakeSetups) Run(_ context.Context, _ Record, plan Plan, update func([]p
 		lines[i].State = personalassistant.FolderLineDone
 	}
 	update(lines)
-	return personalassistant.FolderSetupDone, ""
+	return RunResult{Status: personalassistant.FolderSetupDone, Receipt: f.receipt}
 }
 
 type harness struct {

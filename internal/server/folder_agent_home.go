@@ -43,9 +43,13 @@ func (r folderAgentRootResolver) PortfolioRoot(_ context.Context, _, _, _ string
 // library lists under the root, and how many folders holding songs no
 // listing reached.
 type homeReceipt struct {
-	listed    int
-	unreached int
-	homeID    string
+	listed     int
+	listedNoun string
+	unreached  int
+	homeID     string
+	homeName   string
+	created    bool
+	hired      []string
 }
 
 type homeStageStop struct {
@@ -164,6 +168,7 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		}
 		created = true
 	}
+	receipt.homeID, receipt.homeName, receipt.created = homeID, homeName, created
 	if createLine != "" {
 		words := ""
 		if created {
@@ -184,9 +189,11 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		setLine(first(append(hireLines, rootLine)...), personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopNeedsModel, errors.New("the Home's roles need a model"))
 	}
-	if err := hireFolderAgentRoles(missing, hireLines, rootLine, setLine, func(role foldersetup.HomeRole) error {
+	hired, err := hireFolderAgentRoles(missing, hireLines, rootLine, setLine, func(role foldersetup.HomeRole) error {
 		return staffing.Staff(ctx, homeID, role)
-	}); err != nil {
+	})
+	receipt.hired = hired
+	if err != nil {
 		return stop(personalassistant.FolderStopFailed, err)
 	}
 
@@ -298,7 +305,7 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		setLine(scopesLine, state, words)
 	}
 	setLine(songsLine, personalassistant.FolderLineDone, fmt.Sprintf("Listed %d %s on the shelf", listed, foldermap.ShapeNoun(shape, listed)))
-	receipt = homeReceipt{listed: listed, unreached: len(unreached), homeID: homeID}
+	receipt.listed, receipt.listedNoun, receipt.unreached = listed, foldermap.ShapeNoun(shape, listed), len(unreached)
 
 	// Placement: the workspace inside the Home's district, its goal the
 	// Home's; its agent stays.
@@ -329,12 +336,13 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 // each is hired), else the next open hire line (a name taken meanwhile), else
 // fallback. A hire line left with nothing to hire is done without words.
 func hireFolderAgentRoles(roles []foldersetup.HomeRole, hireLines []string, fallback string,
-	setLine func(name, state, progress string), staff func(foldersetup.HomeRole) error) error {
+	setLine func(name, state, progress string), staff func(foldersetup.HomeRole) error) ([]string, error) {
 	pending := append([]string(nil), hireLines...)
 	generic := false
 	for _, name := range hireLines {
 		generic = generic || name == folderagent.HomeRolesLine
 	}
+	var names []string
 	hired := map[string][]string{}
 	for _, role := range roles {
 		target := ""
@@ -357,9 +365,10 @@ func hireFolderAgentRoles(roles []foldersetup.HomeRole, hireLines []string, fall
 		setLine(target, personalassistant.FolderLineWorking, "Hiring "+role.Name)
 		if err := staff(role); err != nil {
 			setLine(target, personalassistant.FolderLineFailed, "")
-			return err
+			return names, err
 		}
 		hired[target] = append(hired[target], role.Name)
+		names = append(names, role.Name)
 		if target != folderagent.HomeRolesLine && target != fallback {
 			setLine(target, personalassistant.FolderLineDone, "Hired "+role.Name)
 		}
@@ -377,7 +386,7 @@ func hireFolderAgentRoles(roles []foldersetup.HomeRole, hireLines []string, fall
 			setLine(name, personalassistant.FolderLineDone, "")
 		}
 	}
-	return nil
+	return names, nil
 }
 
 func pluralWord(n int, one, many string) string {

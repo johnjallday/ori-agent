@@ -57,7 +57,7 @@ func roles(names ...string) []foldersetup.HomeRole {
 func TestHireFolderAgentRoles_EachNamedRoleIsItsOwnLine(t *testing.T) {
 	run := newHireRun("Hires Portfolio Manager", "Hires Library Manager")
 	var staffed []string
-	err := hireFolderAgentRoles(roles("Portfolio Manager", "Library Manager"), run.order, "Adds Albums", run.setLine,
+	_, err := hireFolderAgentRoles(roles("Portfolio Manager", "Library Manager"), run.order, "Adds Albums", run.setLine,
 		func(role foldersetup.HomeRole) error { staffed = append(staffed, role.Name); return nil })
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestHireFolderAgentRoles_EachNamedRoleIsItsOwnLine(t *testing.T) {
 
 func TestHireFolderAgentRoles_TheGenericLineNamesEachRoleAsItHires(t *testing.T) {
 	run := newHireRun(folderagent.HomeRolesLine)
-	if err := hireFolderAgentRoles(roles("Portfolio Manager", "Library Manager"), run.order, "Adds Albums", run.setLine,
+	if _, err := hireFolderAgentRoles(roles("Portfolio Manager", "Library Manager"), run.order, "Adds Albums", run.setLine,
 		func(foldersetup.HomeRole) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestHireFolderAgentRoles_ARenamedOrFilledRoleStillEndsEveryLine(t *testing.
 	// "Library Manager" was taken meanwhile, so the role is hired as
 	// "Library Manager 2"; "Portfolio Manager" was filled meanwhile.
 	run := newHireRun("Hires Portfolio Manager", "Hires Library Manager")
-	if err := hireFolderAgentRoles(roles("Library Manager 2"), run.order, "Adds Albums", run.setLine,
+	if _, err := hireFolderAgentRoles(roles("Library Manager 2"), run.order, "Adds Albums", run.setLine,
 		func(foldersetup.HomeRole) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestHireFolderAgentRoles_ARenamedOrFilledRoleStillEndsEveryLine(t *testing.
 
 func TestHireFolderAgentRoles_AFailedHireMarksOnlyItsLine(t *testing.T) {
 	run := newHireRun("Hires Portfolio Manager", "Hires Library Manager")
-	err := hireFolderAgentRoles(roles("Portfolio Manager", "Library Manager"), run.order, "Adds Albums", run.setLine,
+	_, err := hireFolderAgentRoles(roles("Portfolio Manager", "Library Manager"), run.order, "Adds Albums", run.setLine,
 		func(role foldersetup.HomeRole) error {
 			if role.Name == "Library Manager" {
 				return errors.New("no model")

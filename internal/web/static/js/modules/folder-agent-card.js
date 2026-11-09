@@ -197,10 +197,98 @@ export function folderAgentReportView(view) {
       stopReason: String(view.setup.stop_reason || ''),
       startedAt: timeOf(view.setup.started_at),
       finishedAt: timeOf(view.setup.finished_at),
-      lines: (view.setup.lines || []).map(line => lineView(line, 'waiting'))
+      lines: (view.setup.lines || []).map(line => lineView(line, 'waiting')),
+      receipt: receiptView(view.setup.receipt)
     };
   }
   return out;
+}
+
+// A workspace route the receipt may link: the app's own workspace pages only.
+function workspaceRoute(route) {
+  const value = String(route || '');
+  return value.startsWith('/workspaces/') && !value.includes('//') ? value : '';
+}
+
+function refView(ref) {
+  return ref?.name ? { name: String(ref.name), route: workspaceRoute(ref.route) } : null;
+}
+
+// receiptView is what a run made, as the host reported it: plugins with
+// versions, the Home, a group's members, the agents hired, the songs listed.
+function receiptView(receipt) {
+  if (!receipt || typeof receipt !== 'object') return null;
+  const strings = list => (Array.isArray(list) ? list.map(String).filter(Boolean) : []);
+  return {
+    installed: strings(receipt.installed),
+    home: refView(receipt.home),
+    homeCreated: Boolean(receipt.home_created),
+    group: Boolean(receipt.group),
+    members: (Array.isArray(receipt.members) ? receipt.members : []).map(refView).filter(Boolean),
+    hired: strings(receipt.hired),
+    listed: Math.max(0, Number(receipt.listed) || 0),
+    listedNoun: String(receipt.listed_noun || ''),
+    unreached: Math.max(0, Number(receipt.unreached) || 0)
+  };
+}
+
+// folderAgentReceiptRows are the receipt's rows (PRD FR10), each left out when
+// empty: what was installed, created, hired, listed and where the folder now
+// sits, each with the one link where the owner can check it.
+export function folderAgentReceiptRows(view) {
+  const receipt = view?.setup?.receipt;
+  if (!receipt) return [];
+  const rows = [];
+  const row = (label, words, link) => {
+    if (words) rows.push({ label, words, link: link?.href ? link : null });
+  };
+  row('Installed', receipt.installed.join(' · '), { text: 'Plugins', href: '/plugins' });
+  const created = [];
+  if (receipt.home && receipt.homeCreated) created.push(receipt.home.name);
+  if (receipt.group && receipt.members.length)
+    created.push(
+      `${receipt.members.length} ${plural(receipt.members.length, 'workspace', 'workspaces')} in ${view.workspace}`
+    );
+  row(
+    'Created',
+    created.join(' · '),
+    receipt.home && receipt.homeCreated ? { text: 'Open', href: receipt.home.route } : null
+  );
+  row('Hired', receipt.hired.join(' · '), { text: 'Agents', href: '/agents' });
+  if (receipt.listed || receipt.unreached) {
+    const noun = receipt.listedNoun || plural(receipt.listed, 'song', 'songs');
+    const words = [`${receipt.listed} ${noun} on the shelf`];
+    if (receipt.unreached)
+      words.push(
+        `${receipt.unreached} ${plural(receipt.unreached, 'folder', 'folders')} not reached yet`
+      );
+    row('Listed', words.join(' · '));
+  }
+  let placed = '';
+  if (receipt.home) placed = `${view.workspace} inside your ${receipt.home.name}`;
+  else if (receipt.group)
+    placed = `${view.workspace} is now a group with ${receipt.members.length} ${plural(receipt.members.length, 'workspace', 'workspaces')}`;
+  row('Placed', placed, view.route ? { text: `Open ${view.workspace}`, href: view.route } : null);
+  return rows;
+}
+
+// renderReceipt draws the receipt rows as a list of label, words and link.
+function renderReceipt(doc, rows) {
+  const list = el(doc, 'dl', 'folder-agent-card__receipt-rows');
+  rows.forEach(row => {
+    const item = el(doc, 'div', 'folder-agent-card__receipt-row');
+    item.dataset.kind = row.label.toLowerCase();
+    const words = el(doc, 'dd', 'folder-agent-card__receipt-words');
+    words.append(el(doc, 'span', 'folder-agent-card__receipt-text', row.words));
+    if (row.link) {
+      const link = el(doc, 'a', 'folder-agent-card__receipt-link', row.link.text);
+      link.href = row.link.href;
+      words.append(link);
+    }
+    item.append(el(doc, 'dt', 'folder-agent-card__receipt-label', row.label), words);
+    list.append(item);
+  });
+  return list;
 }
 
 // timeOf reads a server timestamp as epoch milliseconds; 0 when absent.
@@ -671,8 +759,18 @@ function renderPlan(
     section.append(bar);
     startRunClock(section);
   } else {
-    head.textContent = runHeadline(phase, done, failedAt, rows.length);
+    let words = runHeadline(phase, done, failedAt, rows.length);
+    const setup = view.setup;
+    if (phase === 'done' && setup?.startedAt && setup?.finishedAt)
+      words += ` · ${formatFolderAgentDuration(setup.finishedAt - setup.startedAt)}`;
+    head.textContent = words;
     section.append(head);
+  }
+  // Once the run ends, what it made, with a link to check each: a stopped
+  // run shows what finished above the line that failed.
+  if (phase === 'done' || phase === 'stopped') {
+    const receiptRows = folderAgentReceiptRows(view);
+    if (receiptRows.length) section.append(renderReceipt(doc, receiptRows));
   }
   const list = el(doc, 'ol', 'folder-agent-card__plan');
   const renderRow = (row, index, isChosen) => {
@@ -697,7 +795,39 @@ function renderPlan(
     const mark = el(doc, 'span', 'folder-agent-card__line-mark', isChosen ? String(index + 1) : '');
     mark.setAttribute('aria-hidden', 'true');
     const body = el(doc, 'span', 'folder-agent-card__line-body');
-    body.append(el(doc, 'span', 'folder-agent-card__line-name', row.title));
+    // A finished run's steps collapse to their titles with their time; a
+    // click shows what each step did.
+    const collapsible = phase === 'done' && isChosen && row.actions.length > 0;
+    if (collapsible) {
+      item.dataset.collapsed = 'true';
+      const toggle = el(
+        doc,
+        'button',
+        'folder-agent-card__line-name folder-agent-card__line-toggle',
+        row.title
+      );
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.addEventListener('click', () => {
+        const open = item.dataset.collapsed === 'true';
+        item.dataset.collapsed = open ? 'false' : 'true';
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      // The title and its time share one line.
+      const stepHead = el(doc, 'span', 'folder-agent-card__step-head');
+      stepHead.append(toggle);
+      const units = rowUnits(row).filter(unit => unit.startedAt && unit.finishedAt);
+      if (units.length) {
+        const start = Math.min(...units.map(unit => unit.startedAt));
+        const end = Math.max(...units.map(unit => unit.finishedAt));
+        stepHead.append(
+          el(doc, 'span', 'folder-agent-card__step-time', formatFolderAgentDuration(end - start))
+        );
+      }
+      body.append(stepHead);
+    } else {
+      body.append(el(doc, 'span', 'folder-agent-card__line-name', row.title));
+    }
     if (row.label) body.append(el(doc, 'span', 'folder-agent-card__tool-label', row.label));
     if (row.actions.length) {
       const actions = el(doc, 'span', 'folder-agent-card__actions-line');
@@ -1058,7 +1188,11 @@ export function renderFolderAgentReport(
     const status = el(doc, 'p', 'folder-agent-card__opening', `Opening ${view.workspace}…`);
     status.setAttribute('role', 'status');
     card.append(status);
-  } else if (view.route) {
+  } else if (
+    view.route &&
+    !(view.setup && folderAgentReceiptRows(view).some(row => row.link?.href === view.route))
+  ) {
+    // The receipt's Placed row already opens the place.
     const open = el(doc, 'a', 'folder-agent-card__open', `Open ${view.workspace}`);
     open.href = view.route;
     card.append(open);
