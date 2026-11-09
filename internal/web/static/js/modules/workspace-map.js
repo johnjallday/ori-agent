@@ -11298,8 +11298,225 @@
     });
   }
 
+  // Placement motion (visible-folder-setup FR15–FR18). A host that re-mounts
+  // with `animate: true` (Home, while a folder setup it follows places a
+  // workspace) sees each tile or district that moved slide from where it was
+  // to where it is now, and each one that is new grow in. The camera,
+  // selection, placement preview and scoped views are untouched: only the
+  // rebuilt elements move, and only for a moment. Reduced motion, or a DOM
+  // without layout (tests), draws the final state at once.
+  var MOTION_SLIDE_MS = 450;
+  var MOTION_GROW_MS = 350;
+  var MOTION_SELECTOR = '.ws-map-tile[data-ws-id], .ws-map-district[data-group-id]';
+  var motionEndsAt = 0;
+  // The motion now playing: where everything was, when it began, how long.
+  var activeMotion = null;
+
+  function motionKey(el) {
+    if (!el || typeof el.getAttribute !== 'function' || !el.classList) return '';
+    if (el.classList.contains('ws-map-district')) {
+      var group = el.getAttribute('data-group-id');
+      return group ? 'district:' + group : '';
+    }
+    var ws = el.getAttribute('data-ws-id');
+    return ws && el.classList.contains('ws-map-tile') ? 'ws:' + ws : '';
+  }
+
+  // snapshotPlaces is where each tile and district sits in the world, from
+  // layout (offsets ignore the camera's transform), with a district's count.
+  function snapshotPlaces(container) {
+    var places = Object.create(null);
+    if (!container || typeof container.querySelectorAll !== 'function') return places;
+    Array.prototype.forEach.call(container.querySelectorAll(MOTION_SELECTOR), function (el) {
+      var key = motionKey(el);
+      if (!key || typeof el.offsetLeft !== 'number') return;
+      var count = el.querySelector ? el.querySelector('.ws-map-district-count') : null;
+      // The layout's own numbers are the inline style; offsets are the
+      // fallback (they count borders in the size).
+      var inline = function (prop, fallback) {
+        var value = parseFloat(el.style && el.style[prop]);
+        return isFinite(value) ? value : fallback;
+      };
+      places[key] = {
+        left: inline('left', el.offsetLeft),
+        top: inline('top', el.offsetTop),
+        width: inline('width', el.offsetWidth),
+        height: inline('height', el.offsetHeight),
+        count: count ? count.textContent : ''
+      };
+    });
+    return places;
+  }
+
+  // planMapMotion compares two snapshots: what moved or changed size (with
+  // the offset back to where it was), and what is new.
+  function planMapMotion(before, after) {
+    var moved = [];
+    var added = [];
+    Object.keys(after || {}).forEach(function (key) {
+      var was = before && before[key];
+      var now = after[key];
+      if (!was) {
+        added.push(key);
+        return;
+      }
+      var dx = was.left - now.left;
+      var dy = was.top - now.top;
+      if (dx || dy || was.width !== now.width || was.height !== now.height) {
+        moved.push({ key: key, dx: dx, dy: dy, from: was, to: now });
+      }
+    });
+    return { moved: moved, added: added };
+  }
+
+  function prefersReducedMotion() {
+    return (
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
+  }
+
+  function placeStyle(el, place) {
+    el.style.left = place.left + 'px';
+    el.style.top = place.top + 'px';
+    el.style.width = place.width + 'px';
+    el.style.height = place.height + 'px';
+  }
+
+  // playMapMotion runs the slide and grow-in after a re-mount. A district
+  // keeps its old count until the slide into it ends (FR17).
+  //
+  // Other refreshes land while it plays (the cockpit re-mounts for the next
+  // poll, a filter, a badge), and each one rebuilds the DOM the motion runs
+  // on. A mount inside the carry window therefore replays the same motion,
+  // from the same "before", on what it rebuilt, for what is left of it.
+  function playMapMotion(container, before, carried) {
+    if (!before || prefersReducedMotion() || typeof requestAnimationFrame !== 'function') return;
+    // A first draw (nothing was on screen) never animates every building in.
+    if (!Object.keys(before).length) return;
+    var after = snapshotPlaces(container);
+    var plan = planMapMotion(before, after);
+    if (!plan.moved.length && !plan.added.length) {
+      if (!carried) {
+        activeMotion = null;
+        motionEndsAt = 0;
+      }
+      return;
+    }
+    var fullDuration = Math.max(
+      plan.moved.length ? MOTION_SLIDE_MS : 0,
+      plan.added.length ? MOTION_GROW_MS : 0
+    );
+    if (!carried) activeMotion = { before: before, startedAt: Date.now(), duration: fullDuration };
+    // What is left of the motion: all of it for a new one.
+    var duration = carried
+      ? Math.max(120, activeMotion.startedAt + activeMotion.duration - Date.now())
+      : fullDuration;
+    var byKey = Object.create(null);
+    Array.prototype.forEach.call(container.querySelectorAll(MOTION_SELECTOR), function (el) {
+      byKey[motionKey(el)] = el;
+    });
+    var restore = [];
+    plan.moved.forEach(function (move) {
+      var el = byKey[move.key];
+      if (!el || !el.style) return;
+      el.style.transition = 'none';
+      if (move.key.indexOf('district:') === 0) {
+        placeStyle(el, move.from);
+        var count = el.querySelector('.ws-map-district-count');
+        if (count && move.from.count && move.from.count !== move.to.count) {
+          count.textContent = move.from.count;
+          restore.push(function () {
+            count.textContent = move.to.count;
+          });
+        }
+      } else {
+        el.style.transform = 'translate(' + move.dx + 'px, ' + move.dy + 'px)';
+      }
+    });
+    plan.added.forEach(function (key) {
+      var el = byKey[key];
+      if (el && el.classList) el.classList.add('is-growing-in');
+    });
+    // Commit the starting positions before the transition begins.
+    void container.offsetWidth;
+    requestAnimationFrame(function () {
+      plan.moved.forEach(function (move) {
+        var el = byKey[move.key];
+        if (!el || !el.style) return;
+        if (move.key.indexOf('district:') === 0) {
+          el.style.transition = ['left', 'top', 'width', 'height']
+            .map(function (prop) {
+              return prop + ' ' + Math.min(duration, MOTION_SLIDE_MS) + 'ms ease';
+            })
+            .join(', ');
+          placeStyle(el, move.to);
+        } else {
+          el.style.transition = 'transform ' + Math.min(duration, MOTION_SLIDE_MS) + 'ms ease';
+          el.style.transform = '';
+        }
+      });
+    });
+    motionEndsAt = Date.now() + duration + 40;
+    setTimeout(function () {
+      plan.moved.forEach(function (move) {
+        var el = byKey[move.key];
+        if (el && el.style) el.style.transition = '';
+      });
+      plan.added.forEach(function (key) {
+        var el = byKey[key];
+        if (el && el.classList) el.classList.remove('is-growing-in');
+      });
+      restore.forEach(function (fn) {
+        fn();
+      });
+    }, duration + 40);
+  }
+
+  // startMapMotion is read before a mount rebuilds the DOM. An animated mount
+  // snapshots where everything is now; a mount that lands while that motion
+  // plays carries it on from the same "before"; any other mount has none.
+  function startMapMotion(container, animate) {
+    if (animate) return { before: snapshotPlaces(container), carried: false };
+    if (activeMotion && Date.now() - activeMotion.startedAt < activeMotion.duration + 40) {
+      return { before: activeMotion.before, carried: true };
+    }
+    return { before: null, carried: false };
+  }
+
+  // expectMotion reserves the next ms as "moving": a host that knows a
+  // placement just happened calls it before the refresh that draws the
+  // placement has landed, so whenMotionSettled already waits. The motion
+  // itself replaces the reservation with its real end; one that never comes
+  // lapses on its own.
+  function expectMotion(ms) {
+    motionEndsAt = Math.max(motionEndsAt, Date.now() + Math.max(0, Number(ms) || 0));
+  }
+
+  // whenMotionSettled resolves once the running placement motion ends, or
+  // after maxMs, whichever is first; at once when nothing moves.
+  // It re-reads the motion's end as it waits: a reservation made before the
+  // placement was drawn gives way to the real, usually earlier, end.
+  function whenMotionSettled(maxMs) {
+    var deadline = Date.now() + (maxMs === undefined ? Infinity : maxMs);
+    return new Promise(function (resolve) {
+      (function check() {
+        var now = Date.now();
+        if (motionEndsAt <= now || deadline <= now) {
+          resolve();
+          return;
+        }
+        setTimeout(check, Math.min(50, motionEndsAt - now, deadline - now));
+      })();
+    });
+  }
+
   function mount(container, state) {
     if (!container) return;
+    var motion = startMapMotion(container, !!(state && state.animate));
+    var placesBefore = motion.before;
+    var carriedMotion = motion.carried;
     // Start the layout load before anything is drawn so the first settled paint
     // shows saved coordinates rather than fallback placement that then jumps
     // (FR-16). Whichever surface mounts first pays for the request; the other
@@ -11447,6 +11664,7 @@
     bindPlacementControls(container);
     bindHomeDock(container);
     restoreDockFocus(container, dockFocus);
+    if (placesBefore) playMapMotion(container, placesBefore, carriedMotion);
     if (canvasHadFocus) {
       var canvasAfter = container.querySelector('[data-ws-map-viewport]');
       if (canvasAfter && canvasAfter.focus) canvasAfter.focus();
@@ -11555,6 +11773,15 @@
   window.OriWorkspaceMap = {
     mount: mount,
     unmount: unmount,
+    // Placement motion: the before/after bookkeeping (for tests) and the
+    // moment the running motion ends (Home waits on it before it opens the
+    // place a folder setup built).
+    planMapMotion: planMapMotion,
+    // The motion's steps, for tests: what a mount reads before it rebuilds,
+    // and what it plays after.
+    placementMotion: { start: startMapMotion, play: playMapMotion, snapshot: snapshotPlaces },
+    expectMotion: expectMotion,
+    whenMotionSettled: whenMotionSettled,
     // The map resolves the effective selection during mount (an item may have
     // been deleted since the caller's snapshot). The cockpit reads it back so
     // its shared selection state and context modal cannot drift (FR57, FR73).

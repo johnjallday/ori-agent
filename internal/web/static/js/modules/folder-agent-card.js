@@ -1349,13 +1349,55 @@ export function setupFinished(previous, next) {
 // card's "Open <name>" link goes, once a run they watched has set it up. The
 // beat before leaving lets the finished list be seen. navigate is the page's
 // own way there; the default is the link's. Returns whether it will go.
-export function openFolderAgentPlace(view, { navigate, delayMs = 900 } = {}) {
+// On Home it also waits for the map behind the card to finish building the
+// place, or one second, whichever is first (PRD FR20).
+export function openFolderAgentPlace(
+  view,
+  { navigate, delayMs = 900, motion = globalThis.window?.OriWorkspaceMap } = {}
+) {
   const route = String(view?.route || '');
   if (!route) return false;
   const go =
     typeof navigate === 'function' ? navigate : target => globalThis.location?.assign?.(target);
-  if (delayMs > 0) setTimeout(() => go(route), delayMs);
-  else go(route);
+  const settled =
+    typeof motion?.whenMotionSettled === 'function' ? motion.whenMotionSettled(1000) : null;
+  if (!settled && delayMs <= 0) {
+    go(route);
+    return true;
+  }
+  const beat = new Promise(resolve => (delayMs > 0 ? setTimeout(resolve, delayMs) : resolve()));
+  Promise.all([beat, settled ? settled.catch(() => {}) : null]).then(() => go(route));
+  return true;
+}
+
+// The lines whose finish changes what Home's map draws: a Home created, the
+// workspace placed, the folder turned into a group, a member made or moved in.
+const PLACEMENT_LINE_KINDS = new Set(['home', 'place', 'promote', 'member', 'existing_member']);
+
+// placementLinesDone says whether next shows a placement line done that was
+// not done in previous.
+export function placementLinesDone(previous, next) {
+  const before = new Map((previous?.setup?.lines || []).map(line => [line.name, line.state]));
+  return (next?.setup?.lines || []).some(
+    line =>
+      PLACEMENT_LINE_KINDS.has(line.kind) &&
+      line.state === 'done' &&
+      before.get(line.name) !== 'done'
+  );
+}
+
+// notifyPlacement tells Home's map to build the place when a poll shows a
+// placement line newly done. Every follower of a run calls it with each pair
+// of views (this module's own loop and the Home drawer's), before it opens
+// the place, so the map is already expecting its motion. Returns whether it
+// fired.
+export function notifyPlacement(previous, next) {
+  if (!placementLinesDone(previous, next)) return false;
+  globalThis.window?.dispatchEvent?.(
+    new globalThis.CustomEvent('ori:folder-agent-changed', {
+      detail: { workspaceID: String(next?.workspace_id || ''), placement: true }
+    })
+  );
   return true;
 }
 
@@ -1382,6 +1424,9 @@ export function followFolderAgent(
       const next = await fetchFolderAgent(current.workspace_id, fetchImpl).catch(() => null);
       if (!next || !isActive()) return;
       const finished = setupFinished(current, next);
+      // Home's map builds the place behind the card as it is made: it
+      // refreshes, animated, on placement lines only, never on every poll.
+      notifyPlacement(current, next);
       current = next;
       onView?.(next, finished);
       tick();

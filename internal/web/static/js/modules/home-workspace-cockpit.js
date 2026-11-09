@@ -2459,11 +2459,16 @@ import {
   }
 
   let mapMenuSelectionInProgress = false;
+  // Set when a followed folder setup placed something (a Home created, the
+  // workspace placed, a group made): the refresh that fetches the new rows
+  // mounts the map with the move animated, once.
+  let animatePlacement = false;
 
-  function mountMap() {
+  function mountMap({ animate = false } = {}) {
     if (!els.map || state.view !== VIEW_MAP) return;
     if (!window.OriWorkspaceMap) return;
     window.OriWorkspaceMap.mount(els.map, {
+      animate,
       workspaces: state.flattened,
       tree: state.tree,
       selectedId: state.selectedId,
@@ -5247,8 +5252,25 @@ import {
   }
   // A new folder workspace (Start) or a report action (Set it up, Look
   // further): reload the tiles the canonical way, then follow the agents.
-  const onFolderAgentChange = () => {
+  // A placement (detail.placement) re-mounts the map once with the move
+  // animated: the Home growing in, the folder sliding inside it.
+  const onFolderAgentChange = event => {
     if (!canHydrateWorkspaceData()) return;
+    if (event?.detail?.placement) {
+      // The place is about to be drawn: whoever opens it next (the end of a
+      // watched run) waits for that, not for a map that has not moved yet.
+      window.OriWorkspaceMap?.expectMotion?.(1000);
+      // A refresh already in flight may predate the placement: wait for it,
+      // then fetch the rows the placement made.
+      void Promise.resolve(state.inFlight)
+        .catch(() => null)
+        .then(() => {
+          animatePlacement = true;
+          return refreshQuietly();
+        })
+        .finally(() => void refreshFolderAgentLines());
+      return;
+    }
     void Promise.resolve(refreshQuietly()).finally(() => void refreshFolderAgentLines());
   };
   window.addEventListener('ori:folder-agent-started', onFolderAgentChange);
@@ -5345,7 +5367,11 @@ import {
     if (state.inFlight) return state.inFlight;
     const railScroll = els.railContext ? els.railContext.scrollTop : 0;
     const updatesScroll = els.updatesBody ? els.updatesBody.scrollTop : 0;
+    // This refresh's mount animates a placement asked for before it started.
+    const animate = animatePlacement;
+    animatePlacement = false;
     state.inFlight = (async () => {
+      let fresh = false;
       try {
         const response = await fetch('/api/workspaces?tree=true');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -5359,6 +5385,7 @@ import {
         state.error = null;
         state.refreshError = false;
         pruneTreeTabs();
+        fresh = true;
         return true;
       } catch (err) {
         state.refreshError = true;
@@ -5370,7 +5397,7 @@ import {
         state.inFlight = null;
         renderAreaStatus();
         renderFilters();
-        mountMap();
+        mountMap({ animate: animate && fresh });
         mountTreeView();
         mountPaneView();
         renderToday();

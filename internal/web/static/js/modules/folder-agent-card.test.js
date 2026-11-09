@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   chooseFolder,
@@ -9,6 +10,9 @@ import {
   folderAgentLineTime,
   folderAgentNeedsView,
   folderAgentReceiptRows,
+  followFolderAgent,
+  notifyPlacement,
+  placementLinesDone,
   formatFolderAgentClock,
   formatFolderAgentDuration,
   tickFolderAgentClocks,
@@ -1422,6 +1426,137 @@ const setUp = (overrides = {}) =>
   });
 const okJSON = body => ({ ok: true, status: 200, json: async () => body });
 const settle = () => new Promise(resolve => setTimeout(resolve, 25));
+
+test('a placement line newly done tells Home to build the place; other polls do not', async () => {
+  const lines = (...states) =>
+    [
+      { kind: 'provider', name: 'Installs Music Project Management' },
+      { kind: 'home', name: 'Creates your Music Production Home' },
+      { kind: 'place', name: 'Places Albums inside your Music Production Home' }
+    ].map((line, i) => ({ ...line, state: states[i] || 'waiting' }));
+  const view = (...states) => ({ setup: { lines: lines(...states) } });
+  assert.equal(
+    placementLinesDone(view('working'), view('done')),
+    false,
+    'an install is no placement'
+  );
+  assert.equal(placementLinesDone(view('done', 'working'), view('done', 'done')), true);
+  assert.equal(placementLinesDone(view('done', 'done'), view('done', 'done', 'working')), false);
+  assert.equal(
+    placementLinesDone(view('done', 'done', 'working'), view('done', 'done', 'done')),
+    true
+  );
+  assert.equal(placementLinesDone(null, view('done', 'done')), true);
+
+  // Followed through polls: one event per placement, carrying the flag.
+  const events = [];
+  const previousWindow = globalThis.window;
+  const previousEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  };
+  globalThis.window = { dispatchEvent: event => events.push(event) };
+  try {
+    const polls = [
+      { ...settingUp(), ...view('done', 'working') },
+      { ...settingUp(), ...view('done', 'done', 'working') },
+      { ...settingUp(), ...view('done', 'done', 'working') },
+      { ...setUp(), ...view('done', 'done', 'done') }
+    ];
+    const stop = followFolderAgent(
+      { ...settingUp(), ...view('working') },
+      { fetchImpl: async () => okJSON({ folder_agent: polls.shift() || null }), pollMs: 1 }
+    );
+    await settle();
+    stop();
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.CustomEvent = previousEvent;
+  }
+  assert.deepEqual(
+    events.map(event => [event.type, event.detail.placement]),
+    [
+      ['ori:folder-agent-changed', true],
+      ['ori:folder-agent-changed', true]
+    ]
+  );
+});
+
+test('every follower of a run announces a placement through one helper, before it opens the place', async () => {
+  const events = [];
+  const previousWindow = globalThis.window;
+  const previousEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  };
+  globalThis.window = { dispatchEvent: event => events.push(event) };
+  try {
+    const was = {
+      workspace_id: 'ws-1',
+      setup: { lines: [{ kind: 'place', name: 'P', state: 'working' }] }
+    };
+    const now = {
+      workspace_id: 'ws-1',
+      setup: { lines: [{ kind: 'place', name: 'P', state: 'done' }] }
+    };
+    assert.equal(notifyPlacement(was, was), false);
+    assert.equal(notifyPlacement(was, now), true);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.CustomEvent = previousEvent;
+  }
+  assert.deepEqual(
+    events.map(event => [event.type, event.detail]),
+    [['ori:folder-agent-changed', { workspaceID: 'ws-1', placement: true }]]
+  );
+
+  // The Home drawer follows its own poll; it must announce the same way, and
+  // before its run's end opens the place, so the open waits for the motion.
+  const drawer = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  const poll = drawer.slice(drawer.indexOf('function scheduleAgentPoll()'));
+  assert.match(poll, /notifyPlacement\(view, next\);/);
+  assert.ok(
+    poll.indexOf('notifyPlacement(view, next)') < poll.indexOf('openFolderAgentPlace(next)'),
+    'the map is told before the place is opened'
+  );
+});
+
+test('opening the place waits for Home to finish building it, or one second', async () => {
+  const went = [];
+  let release;
+  const motion = {
+    whenMotionSettled: maxMs => {
+      assert.equal(maxMs, 1000);
+      return new Promise(resolve => (release = resolve));
+    }
+  };
+  assert.equal(
+    openFolderAgentPlace(
+      { route: '/workspaces/albums' },
+      { navigate: route => went.push(route), delayMs: 0, motion }
+    ),
+    true
+  );
+  await settle();
+  assert.deepEqual(went, [], 'it does not leave while the map still moves');
+  release();
+  await settle();
+  assert.deepEqual(went, ['/workspaces/albums']);
+
+  // Without a map (the workspace page), it goes on its own beat.
+  const direct = [];
+  openFolderAgentPlace(
+    { route: '/workspaces/albums' },
+    { navigate: r => direct.push(r), delayMs: 0, motion: null }
+  );
+  assert.deepEqual(direct, ['/workspaces/albums']);
+});
 
 test('a run watched to its end says it is opening the place and goes there; a stopped one stays', async () => {
   assert.equal(setupFinished(settingUp(), setUp()), true);
