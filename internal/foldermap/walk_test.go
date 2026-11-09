@@ -74,6 +74,41 @@ func walk(t *testing.T, root string) (*Map, Facts) {
 	return m, FactsFrom(m)
 }
 
+func TestWalk_ProgressNamesEachListedFolderAndCountsOpened(t *testing.T) {
+	root := demoLayout(t)
+	var reports []WalkProgress
+	m, err := Walk(root, Options{Progress: func(p WalkProgress) { reports = append(reports, p) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) == 0 {
+		t.Fatal("no progress reported")
+	}
+	seen := map[string]bool{}
+	for i, p := range reports {
+		seen[p.Folder] = true
+		if p.Folder == "" {
+			t.Fatalf("report %d names the fed folder; the walk lists it before reporting", i)
+		}
+		if i > 0 && p.Opened != reports[i-1].Opened+1 {
+			t.Fatalf("opened did not count up: %+v then %+v", reports[i-1], p)
+		}
+	}
+	if !seen["Albums/Album-3"] {
+		t.Fatalf("Album-3 never reported: %v", seen)
+	}
+	last := reports[len(reports)-1]
+	opened := 0
+	for _, f := range m.Folders {
+		if f.State != StateUnopened {
+			opened++
+		}
+	}
+	if last.Opened != opened {
+		t.Fatalf("last opened = %d, map has %d opened", last.Opened, opened)
+	}
+}
+
 func TestWalk_DemoLayoutFindsEveryNestedSong(t *testing.T) {
 	m, facts := walk(t, demoLayout(t))
 	if facts.RootProject != nil {

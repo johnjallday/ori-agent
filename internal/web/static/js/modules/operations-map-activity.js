@@ -145,6 +145,21 @@ export class OperationsMapActivity {
     this.lineFor = options.lineFor || defaultLineFor;
     this.document = options.document || (typeof document !== 'undefined' ? document : null);
     this.resultCards = options.resultCards || null;
+    // When set, the Commander (the command node) speaks in its balloon: its
+    // unit gets no plain bubble and its line, ticket and newest result go out
+    // as one 'ori:commander-activity' event (commander-tickets.js).
+    this.commanderSpeaks = options.commanderSpeaks || null;
+    this.commanderSignature = '';
+    // A balloon that starts listening later (the page's own setup after a
+    // reload) asks for what the Commander is saying now.
+    if (this.commanderSpeaks && typeof this.document?.addEventListener === 'function') {
+      this.document.addEventListener('ori:commander-activity-request', event => {
+        const wanted = String(event?.detail?.workspaceId || '');
+        if (wanted && wanted !== String(this.workspaceIdFn() || '')) return;
+        this.commanderSignature = '';
+        this.paint();
+      });
+    }
 
     this.units = new Map(); // agent key -> what that unit is showing
     this.taskAgents = new Map(); // task id -> agent name, for events that omit it
@@ -409,6 +424,52 @@ export class OperationsMapActivity {
     if (!world || typeof world.querySelectorAll !== 'function') return;
     this.paintBubbles(world, elements);
     this.paintParcels(world, elements);
+    this.announceCommander(elements);
+  }
+
+  speaksInBalloon(el) {
+    return Boolean(
+      this.commanderSpeaks && this.commanderSpeaks() && el?.classList?.contains?.('is-command-node')
+    );
+  }
+
+  /** What the Commander is saying, for its balloon; sent when it changes. */
+  commanderActivity(elements) {
+    const commander = elements.find(el => this.speaksInBalloon(el));
+    if (!commander) return null;
+    const key = unitKeyOf(commander);
+    const unit = this.units.get(key) || null;
+    const parcel = (this.parcelsByAgent().get(key) || [])[0] || null;
+    return {
+      workspaceId: this.workspaceIdFn(),
+      agent: unit?.agent || decodeName(commander.getAttribute('data-cmd-map-select-agent')),
+      line: unit?.line || '',
+      blocked: Boolean(unit?.blocked),
+      finishing: Boolean(unit?.finishing),
+      taskId: unit?.taskId || '',
+      parcel: parcel
+        ? {
+            id: parcel.id,
+            title: text(parcel.title),
+            summary: text(parcel.summary),
+            outcome: text(parcel.outcome),
+            kind: text(parcel.kind),
+            ref_id: text(parcel.ref_id)
+          }
+        : null
+    };
+  }
+
+  announceCommander(elements) {
+    if (!this.commanderSpeaks || !this.document) return;
+    const activity = this.commanderActivity(elements);
+    const signature = JSON.stringify(activity);
+    if (signature === this.commanderSignature) return;
+    this.commanderSignature = signature;
+    if (typeof CustomEvent !== 'function' || typeof this.document.dispatchEvent !== 'function')
+      return;
+    const detail = activity ? { ...activity, openResult: id => this.openParcel(id) } : null;
+    this.document.dispatchEvent(new CustomEvent('ori:commander-activity', { detail }));
   }
 
   // A unit card clips everything inside it, so its bubble lives in the map
@@ -424,7 +485,7 @@ export class OperationsMapActivity {
       const unit = this.units.get(key);
       const existing = shown.get(key) || null;
       shown.delete(key);
-      if (!unit || !unit.line || !this.document) {
+      if (!unit || !unit.line || !this.document || this.speaksInBalloon(el)) {
         if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
         return;
       }

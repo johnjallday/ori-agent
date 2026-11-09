@@ -11,7 +11,23 @@ import {
   libraryShelfRoute
 } from './home-library-badges.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
-import { folderAgentTileLine, listFolderAgents } from './folder-agent-card.js';
+import {
+  folderAgentReportView,
+  folderAgentTileLine,
+  listFolderAgents,
+  postFolderAgentAction,
+  renderFolderAgentReport
+} from './folder-agent-card.js';
+import { homeCommanders } from './commander-map.js';
+
+// The folder agents whose Commander speaks on Home's map without the drawer:
+// one looking, setting up, or with a report or a cause waiting. A finished
+// setup's receipt is the drawer's to show; old ones stay quiet.
+const SPEAKING_STATES = new Set(['looking', 'setting_up', 'reported', 'failed']);
+
+export function speakingFolderAgents(views) {
+  return (Array.isArray(views) ? views : []).filter(view => SPEAKING_STATES.has(view?.state));
+}
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import { workspaceUpdates, watchWorkspaceUpdatePage } from './workspace-updates.js';
 import {
@@ -3614,6 +3630,11 @@ import {
     // place on view changes without changing modal visibility.
     if (state.railState === RAIL_GROUP) renderRail({ announceChange: false });
     updateContextTrigger();
+    // Whoever speaks over the map (the Commander's balloon, the drawer's
+    // shrunk card) follows Map and Tree from here.
+    document.dispatchEvent(
+      new CustomEvent('ori:home-view-changed', { detail: { view: state.view } })
+    );
   }
 
   // ---- selection + context modal ----
@@ -5213,6 +5234,18 @@ import {
   // The folder agents' tile lines follow their looks: polled every two
   // seconds while one is looking or setting up, and once otherwise.
   let folderAgentTimer = 0;
+  const mapCommanders = homeCommanders({
+    reportView: folderAgentReportView,
+    renderCard: (view, options) => renderFolderAgentReport(view, document, options),
+    act: async (view, action, extra) => {
+      const result = await postFolderAgentAction(view, action, globalThis.fetch, extra);
+      // The tiles and the follow loop pick the change up the canonical way.
+      window.dispatchEvent(
+        new CustomEvent('ori:folder-agent-changed', { detail: { workspaceID: view.workspaceID } })
+      );
+      return result;
+    }
+  });
   // Each folder workspace's last finished setup this page has seen; a group
   // setup newer than that lands its members (null until the first read, so a
   // page load never replays an old one).
@@ -5242,6 +5275,12 @@ import {
     folderAgentSetups = Object.fromEntries(
       views.map(view => [view.workspace_id, view.setup?.finished_at || ''])
     );
+    // Each Commander with something to say speaks from its tile; the one the
+    // drawer follows is the drawer's (it may open by itself).
+    const owned =
+      document.querySelector('#personalAssistantFolderAgent [data-workspace-id]')?.dataset
+        ?.workspaceId || '';
+    mapCommanders.sync(speakingFolderAgents(views), owned);
     const changed = JSON.stringify(next) !== JSON.stringify(state.folderAgentLines);
     const finished = Object.keys(state.folderAgentLines).some(id => !next[id]);
     state.folderAgentLines = next;

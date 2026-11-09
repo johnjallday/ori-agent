@@ -27,6 +27,8 @@ import {
   renderFirstTaskBanner
 } from './workspace-first-task-banner.js';
 import { mountWorkspaceFolderAgent } from './folder-agent-card.js';
+import { commanderPresenter, workspaceCommanderMap } from './commander-map.js';
+import { answerTicket, commanderTicketItems } from './commander-tickets.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
@@ -467,6 +469,8 @@ export class WorkspaceDetailPage {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    this.commanderPresenter?.dispose();
+    this.commanderPresenter = null;
     clearTimeout(this.songWorkTimer);
     for (const resource of this._resourceRequests?.keys() || [])
       this.invalidateResourceRequest(resource);
@@ -601,11 +605,17 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !startedSetupTask) {
       this.showFolderFirstTaskBanner();
     }
-    // A workspace started from a folder shows its agent's report here too.
+    // A workspace started from a folder shows its agent's report here too;
+    // on the Map tab its Commander presents it in a balloon on the map and
+    // this card shrinks to one line.
+    this.commanderPresenter?.dispose();
+    this.commanderPresenter = commanderPresenter(workspaceCommanderMap(this.workspaceId), {
+      ticketItems: activity => this.commanderTicketItems(activity)
+    });
     mountWorkspaceFolderAgent(
       document.getElementById('workspaceFolderAgentReport'),
       this.workspaceId,
-      { isActive: () => !this._destroyed }
+      { isActive: () => !this._destroyed, presenter: this.commanderPresenter }
     );
     // Give work… on the Agents page arrives here with the agent named; its
     // task form opens once nothing of the blueprint's own goes first.
@@ -619,6 +629,97 @@ export class WorkspaceDetailPage {
    * agent-give-task.js) and open the task form with that agent chosen.
    * The parameter is removed so a reload does not open it again.
    */
+  // commanderTicketItems turns the Commander's ticket activity into its
+  // balloon's items: a waiting ticket answered through the ticket page's own
+  // assist endpoint, a run's lines, and a finished result to open or dismiss.
+  commanderTicketItems(activity) {
+    const storageKey = `ori.commander.dismissed.${this.workspaceId}`;
+    if (!this.commanderTicketState) {
+      // Results the owner opened or dismissed stay quiet across reloads (a
+      // per-viewer convenience; nothing breaks without storage).
+      let saved = [];
+      try {
+        saved = JSON.parse(window.localStorage.getItem(storageKey) || '[]');
+      } catch (_) {
+        saved = [];
+      }
+      this.commanderTicketState = {
+        dismissed: new Set(Array.isArray(saved) ? saved.map(String) : []),
+        errors: {},
+        answered: new Set(),
+        requested: new Set()
+      };
+    }
+    const { dismissed, errors, answered, requested } = this.commanderTicketState;
+    const remember = parcelId => {
+      dismissed.add(parcelId);
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify([...dismissed].slice(-50)));
+      } catch (_) {
+        /* storage unavailable: dismissed for this page only */
+      }
+    };
+    // An answer counts until the ticket stops waiting on the stream.
+    if (activity && !activity.blocked) answered.clear();
+    const taskOf = id => (Array.isArray(this.tasks) ? this.tasks : []).find(t => t?.id === id);
+    // A ticket started a moment ago (or just finished) is not in the page's
+    // list yet: load the tickets once for it; their arrival redraws.
+    const want = (id, field) => {
+      const task = id ? taskOf(id) : null;
+      if (!id || (task && (!field || task[field])) || requested.has(`${id}|${field}`)) return;
+      requested.add(`${id}|${field}`);
+      void this.loadTasks?.();
+    };
+    // A ticket's title is its own title, else its description's first line.
+    const titleText = task =>
+      String(task?.title || String(task?.description || '').split('\n')[0] || '').trim();
+    // A parcel names its ticket by title only: the newest ticket with that
+    // title carries the result.
+    const taskForParcel = parcel => {
+      const title = String(parcel?.title || '').trim();
+      const list = Array.isArray(this.tasks) ? this.tasks : [];
+      return title ? [...list].reverse().find(task => titleText(task) === title) : null;
+    };
+    want(activity?.taskId, 'description');
+    const parcel = activity?.parcel;
+    if (parcel?.id && !dismissed.has(parcel.id) && !taskForParcel(parcel)?.result) {
+      if (!requested.has(`parcel|${parcel.id}`)) {
+        requested.add(`parcel|${parcel.id}`);
+        void this.loadTasks?.();
+      }
+    }
+    const retick = () => this.commanderPresenter?.retick();
+    return commanderTicketItems(activity, {
+      titleOf: id => titleText(taskOf(id)),
+      resultOf: found => taskForParcel(found)?.result || '',
+      taskOf,
+      dismissed,
+      errors,
+      answered,
+      actions: {
+        open: id => this.openTaskAssistModal(id),
+        answer: async (wait, payload, button) => {
+          if (button) button.disabled = true;
+          const result = await answerTicket(wait, payload);
+          errors[wait.taskId] = result.ok ? '' : result.error;
+          if (result.ok) answered.add(wait.taskId);
+          if (!result.ok && button) button.disabled = false;
+          if (result.ok) void this.loadTasks?.();
+          retick();
+        },
+        openResult: result => {
+          remember(result.parcelId);
+          activity?.openResult?.(result.parcelId);
+          retick();
+        },
+        dismiss: result => {
+          remember(result.parcelId);
+          retick();
+        }
+      }
+    });
+  }
+
   checkAutoOpenNewTaskFor() {
     const params = new URLSearchParams(window.location.search);
     const agentName = String(params.get('newTaskFor') || '').trim();
@@ -3605,6 +3706,8 @@ export class WorkspaceDetailPage {
       });
       if (!this.isResourceRequestCurrent(request)) return;
       this.tasks = snapshot.tasks;
+      // A waiting ticket's question and choices arrive with the tickets.
+      this.commanderPresenter?.retick();
       if (this.currentView === 'board' && this.boardConfig) {
         this.renderBoard();
       }

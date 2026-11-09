@@ -196,9 +196,19 @@ type Options struct {
 	Budget     time.Duration
 	// Now supplies the clock, for tests that exercise the time budget.
 	Now func() time.Time
-	// Progress, when set, is told after each folder how many entries the
-	// map holds and how many found folders are still queued.
-	Progress func(entries, foldersLeft int)
+	// Progress, when set, is told after each folder what the walk has done
+	// so far and which folder it just listed.
+	Progress func(WalkProgress)
+}
+
+// WalkProgress is one Progress report: how many entries the map holds, how
+// many found folders are still queued, how many folders are opened, and the
+// map-relative path of the folder just listed ("" for the fed folder).
+type WalkProgress struct {
+	Entries     int
+	FoldersLeft int
+	Opened      int
+	Folder      string
 }
 
 func (o Options) withDefaults() Options {
@@ -300,6 +310,7 @@ type walker struct {
 	opts     Options
 	start    time.Time
 	listed   int
+	opened   int
 	queue    []string
 	stopped  string
 	rankByID map[string]int
@@ -308,6 +319,11 @@ type walker struct {
 func newWalker(root string, m *Map, opts Options) *walker {
 	opts = opts.withDefaults()
 	w := &walker{root: root, m: m, opts: opts, start: opts.Now()}
+	for _, f := range m.Folders {
+		if f.State != StateUnopened {
+			w.opened++
+		}
+	}
 	return w
 }
 
@@ -317,6 +333,7 @@ func (w *walker) listRoot() error {
 		return err
 	}
 	w.m.put(f)
+	w.opened++
 	return nil
 }
 
@@ -334,8 +351,9 @@ func (w *walker) run() {
 			f = Folder{Path: rel, State: StateUnreadable}
 		}
 		w.m.put(f)
+		w.opened++
 		if w.opts.Progress != nil {
-			w.opts.Progress(w.m.Entries, len(w.queue))
+			w.opts.Progress(WalkProgress{Entries: w.m.Entries, FoldersLeft: len(w.queue), Opened: w.opened, Folder: rel})
 		}
 		if w.stopped != "" {
 			break

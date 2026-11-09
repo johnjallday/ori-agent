@@ -396,11 +396,12 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	}
 	opts := s.deps.Walk
 	var last time.Time
-	opts.Progress = func(entries, left int) {
+	opts.Progress = func(p foldermap.WalkProgress) {
 		if now := time.Now(); now.Sub(last) >= progressEvery {
 			last = now
+			folder := ProgressFolder(p.Folder, rec.FolderName)
 			_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
-				r.Progress = Progress{Entries: entries, FoldersLeft: left}
+				r.Progress = Progress{Entries: p.Entries, FoldersLeft: p.FoldersLeft, Opened: p.Opened, Folder: folder}
 				return nil
 			})
 		}
@@ -415,6 +416,19 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		fail("Ori could not list this folder.", err)
 		return
 	}
+	// The walk is done; the search and the turn come next. Until the turn
+	// begins, the line says where the look stands as a whole.
+	opened := 0
+	for _, f := range m.Folders {
+		if f.State != foldermap.StateUnopened {
+			opened++
+		}
+	}
+	whole := ProgressFolder("", rec.FolderName)
+	_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
+		r.Progress = Progress{Entries: m.Entries, FoldersLeft: len(m.Unopened()), Opened: opened, Folder: whole}
+		return nil
+	})
 	var ready folderlook.Readiness
 	if s.deps.Setups != nil {
 		ready = s.deps.Setups.Readiness(ctx, rec.OwnerUserID)
@@ -580,6 +594,15 @@ func keepShown(candidates []folderlook.Candidate) []folderlook.Candidate {
 	return out
 }
 
+// narrate marks the agent's turn in the live progress and names the folder its
+// look tool opens ("" between looks), for the Commander's line on the map.
+func (s *Service) narrate(workspaceID, folder string) {
+	_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
+		r.Progress.Turn, r.Progress.Folder = true, folder
+		return nil
+	})
+}
+
 func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *foldermap.Map, facts foldermap.Facts,
 	candidates []folderlook.Candidate, resolved turnModel) (*TurnReceipt, *folderlook.Sections) {
 	now := s.deps.Now().UTC()
@@ -589,6 +612,7 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 		return receipt, nil
 	}
 	chat, model := resolved.chat, resolved.name
+	s.narrate(rec.WorkspaceID, "")
 	ask := folderlook.AskAllowed(facts)
 	steps := folderlook.Steps(rec.FolderName, facts, candidates)
 	reference := folderlook.BuildReference(folderlook.ReferenceInput{
@@ -600,6 +624,7 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 	look := func(_ context.Context, folder string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
+		s.narrate(rec.WorkspaceID, ProgressFolder(folder, rec.FolderName))
 		result, err := foldermap.Look(root, m, folder)
 		if err != nil {
 			if errors.Is(err, foldermap.ErrNotInMap) {
@@ -810,6 +835,7 @@ func (s *Service) LookFurther(ctx context.Context, userID, workspaceID string, f
 			return ErrWrongState
 		}
 		r.State, r.Failure, r.Hint = StateLooking, "", hint
+		r.Progress.Turn, r.Progress.Folder = false, ""
 		return nil
 	})
 	if err != nil {

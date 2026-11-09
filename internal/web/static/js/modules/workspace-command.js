@@ -981,7 +981,10 @@ export class WorkspaceCommandView {
         workspaceId: () => this.workspaceId(),
         workspaceName: () =>
           String((this.page && this.page.workspace && this.page.workspace.name) || ''),
-        onOpenResult: payload => this.followMapParcel(payload && payload.parcel)
+        onOpenResult: payload => this.followMapParcel(payload && payload.parcel),
+        // The Commander narrates its tickets in its balloon on this map
+        // (commander-map.js), never in a plain bubble.
+        commanderSpeaks: () => true
       });
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         // Parcels are placed from measured unit positions.
@@ -1038,6 +1041,17 @@ export class WorkspaceCommandView {
     this.noteMemoryStationActivity(event);
     if (this.isGroupWorkspace()) return false;
     return this.mapActivityLayer().handleRealtimeEvent(event);
+  }
+
+  // announceMapRendered tells whoever draws over the map (the Commander's
+  // balloon) that the Map tab was rebuilt, so it can attach again.
+  announceMapRendered() {
+    if (typeof document === 'undefined' || typeof CustomEvent !== 'function') return;
+    document.dispatchEvent?.(
+      new CustomEvent('ori:workspace-map-rendered', {
+        detail: { workspaceId: this.workspaceId() }
+      })
+    );
   }
 
   paintMapActivity() {
@@ -2929,6 +2943,7 @@ export class WorkspaceCommandView {
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
       this.paintMapActivity();
+      this.announceMapRendered();
     } else {
       // Leaving Map mode takes the map's listeners and timers with it (FR-6).
       this.unmountDetachmentMap();

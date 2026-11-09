@@ -130,8 +130,17 @@ export function folderAgentReportView(view) {
   const out = {
     workspaceID: String(view.workspace_id),
     workspace: String(view.workspace_name || folder),
+    folder,
     route: String(view.route || ''),
     agent,
+    // The walk's narration (base names only, bounded by the server): the
+    // folder it is in, how many it has opened, and whether the agent's own
+    // turn has begun.
+    look: {
+      folder: String(view.progress?.folder || ''),
+      opened: Math.max(0, Number(view.progress?.opened) || 0),
+      turn: Boolean(view.progress?.turn)
+    },
     state: String(view.state || ''),
     title: '',
     receipt: '',
@@ -599,6 +608,28 @@ function rowUnits(row) {
   return row.line ? [row.line] : [];
 }
 
+// runStepOf is where a run stands: the step in hand (1-based) of all steps,
+// and the working action's live words (its name until it has some).
+function runStepOf(rows) {
+  const units = rows.flatMap(rowUnits);
+  const at = rows.findIndex(row => rowState(row) !== 'done');
+  const working = units.find(unit => unit.state === 'working');
+  const waiting = at >= 0 ? rowUnits(rows[at]).find(unit => unit.state !== 'done') : null;
+  const current = working || waiting;
+  return {
+    step: at >= 0 ? at + 1 : rows.length,
+    count: rows.length,
+    words: current ? current.progress || current.name : ''
+  };
+}
+
+// folderAgentRunStep is runStepOf for a report view's setup run, for the
+// Commander's line on the map; null when no run is recorded.
+export function folderAgentRunStep(view) {
+  if (!view?.setup) return null;
+  return runStepOf(groupActions(view.setup.lines || [], view.plan?.steps || []).rows);
+}
+
 // actionTime is the " · 6 s" part of a started action; a working one carries
 // its server start so the clock can tick between polls.
 function actionTime(doc, line, now) {
@@ -672,7 +703,7 @@ function renderPlan(
   plan,
   lines,
   phase,
-  { selecting = false, onTick, now = Date.now() } = {}
+  { selecting = false, onTick, now = Date.now(), headFirst = false } = {}
 ) {
   const section = el(doc, 'section', 'folder-agent-card__run');
   section.dataset.phase = phase;
@@ -719,15 +750,8 @@ function renderPlan(
     // and the run's clock. The clock is hidden from the status region so it
     // is not announced every second; the words are.
     const units = rows.flatMap(rowUnits);
-    const at = rows.findIndex(row => rowState(row) !== 'done');
-    const working = units.find(unit => unit.state === 'working');
-    const waiting = at >= 0 ? rowUnits(rows[at]).find(unit => unit.state !== 'done') : null;
-    const current = working || waiting;
-    const words = [
-      'Setting up',
-      `step ${at >= 0 ? at + 1 : rows.length} of ${rows.length}`,
-      current ? current.progress || current.name : ''
-    ].filter(Boolean);
+    const step = runStepOf(rows);
+    const words = ['Setting up', `step ${step.step} of ${step.count}`, step.words].filter(Boolean);
     head.append(el(doc, 'span', 'folder-agent-card__run-head-text', words.join(' · ')));
     const started = view.setup?.startedAt || 0;
     if (started) {
@@ -757,6 +781,8 @@ function renderPlan(
     );
     bar.append(fill);
     section.append(bar);
+    // In the balloon the run's headline and bar lead, above the agent's words.
+    if (headFirst && typeof section.prepend === 'function') section.prepend(head, bar);
     startRunClock(section);
   } else {
     let words = runHeadline(phase, done, failedAt, rows.length);
@@ -765,6 +791,8 @@ function renderPlan(
       words += ` · ${formatFolderAgentDuration(setup.finishedAt - setup.startedAt)}`;
     head.textContent = words;
     section.append(head);
+    if (headFirst && phase !== 'plan' && typeof section.prepend === 'function')
+      section.prepend(head);
   }
   // Once the run ends, what it made, with a link to check each: a stopped
   // run shows what finished above the line that failed.
@@ -926,9 +954,23 @@ function runPhase(setup) {
 export function renderFolderAgentReport(
   view,
   doc = document,
-  { onAction, error = '', fetchImpl = globalThis.fetch, opening = false, now = Date.now() } = {}
+  {
+    onAction,
+    error = '',
+    fetchImpl = globalThis.fetch,
+    opening = false,
+    now = Date.now(),
+    compact = false
+  } = {}
 ) {
-  const card = el(doc, 'article', 'folder-agent-card folder-agent-card--report');
+  // compact is the Commander's balloon on the map: its header names the
+  // speaker and carries the live line, so the card drops its title and the
+  // looking receipt (one renderer, two shells).
+  const card = el(
+    doc,
+    'article',
+    'folder-agent-card folder-agent-card--report' + (compact ? ' folder-agent-card--compact' : '')
+  );
   card.dataset.folderAgentCard = view.state;
   card.dataset.workspaceId = view.workspaceID;
   // The steps left ticked, and the plan they make: a tick asks the server
@@ -953,13 +995,28 @@ export function renderFolderAgentReport(
     // the boxes follow its choice.
     selected.clear();
     plan.selected.forEach(handle => selected.add(handle));
-    if (planHost)
+    if (planHost) {
+      // The box the owner just ticked keeps focus through the redraw (a
+      // keyboard user would otherwise be dropped on the page body).
+      const focused = doc.activeElement?.dataset?.stepHandle || '';
       planHost.replaceChildren(
         renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick })
       );
+      if (focused) {
+        const again = Array.from(planHost.querySelectorAll?.('input[type="checkbox"]') || []).find(
+          box => box.dataset?.stepHandle === focused
+        );
+        again?.focus?.({ preventScroll: true });
+      }
+    }
     if (setUpButton) setUpButton.disabled = !plan.runnable;
   };
-  card.append(el(doc, 'h3', 'folder-agent-card__title', view.title));
+  if (!compact) card.append(el(doc, 'h3', 'folder-agent-card__title', view.title));
+  if (view.state === 'looking' && compact) {
+    card.append(el(doc, 'p', 'folder-agent-card__workspace', `Workspace ${view.workspace}`));
+    if (view.nested) card.append(el(doc, 'p', 'folder-agent-card__note', view.nested));
+    return card;
+  }
   if (view.state === 'looking') {
     const receipt = el(doc, 'p', 'folder-agent-card__receipt');
     receipt.setAttribute('role', 'status');
@@ -990,7 +1047,14 @@ export function renderFolderAgentReport(
   // steps with a box each; from Set it up on, the run's lines in the same
   // shape, with the agent's words above saying why.
   if (view.setup) {
-    card.append(renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup), { now }));
+    const run = renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup), {
+      now,
+      headFirst: compact
+    });
+    // In the balloon the run leads (its headline is where the owner looks);
+    // the agent's words follow it.
+    if (compact && typeof card.prepend === 'function') card.prepend(run);
+    else card.append(run);
     if (view.setup.status === 'stopped') {
       card.append(
         el(
@@ -1536,7 +1600,8 @@ export async function mountWorkspaceFolderAgent(
     pollMs = 1500,
     openPlace = true,
     navigate,
-    openDelayMs
+    openDelayMs,
+    presenter
   } = {}
 ) {
   if (!host || !workspaceID) return null;
@@ -1549,23 +1614,41 @@ export async function mountWorkspaceFolderAgent(
   if (!isActive()) return null;
   if (!raw) {
     host.hidden = true;
+    presenter?.present(null);
     return null;
   }
+  // previous and followed feed the map presenter's auto-open rule: what the
+  // last view said, and whether the owner acted on this page.
+  let previous = null;
+  let followed = false;
   const draw = (current, error = '', opening = false) => {
     const view = folderAgentReportView(current);
+    const onAction = async (action, button, extra) => {
+      if (button) button.disabled = true;
+      if (action === 'set_up' || action === 'look_further' || action === 'start_next')
+        followed = true;
+      const result = await postFolderAgentAction(view, action, fetchImpl, extra);
+      draw(result.view || current, result.error || '');
+      follow(result.view || current);
+    };
+    const card = compact =>
+      renderFolderAgentReport(view, doc, { error, opening, onAction, compact });
     host.hidden = false;
-    host.replaceChildren(
-      renderFolderAgentReport(view, doc, {
-        error,
-        opening,
-        onAction: async (action, button, extra) => {
-          if (button) button.disabled = true;
-          const result = await postFolderAgentAction(view, action, fetchImpl, extra);
-          draw(result.view || current, result.error || '');
-          follow(result.view || current);
-        }
-      })
-    );
+    // A presenter (the Map tab's Commander) may draw the card in its balloon
+    // and shrink this host to one line; otherwise the full card shows here.
+    const shown = presenter?.present({
+      view,
+      raw: current,
+      previous,
+      followed,
+      error,
+      opening,
+      host,
+      doc,
+      card
+    });
+    if (!shown) host.replaceChildren(card(false));
+    previous = view;
   };
   let stop = () => {};
   const follow = current => {

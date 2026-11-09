@@ -31,6 +31,7 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
+import { commanderPresenter, homeCommanderMap } from './commander-map.js';
 import {
   chooseFolder,
   fetchFolderAgent,
@@ -6859,11 +6860,27 @@ function folderAgentHost(els) {
   return host;
 }
 
+// The drawer's one followed folder agent, presented on Home's map: one
+// presenter at a time, replaced when the drawer follows another workspace.
+let mapPresenter = null;
+function folderAgentPresenter(workspaceID) {
+  if (mapPresenter && mapPresenter.workspaceID === workspaceID) return mapPresenter.presenter;
+  mapPresenter?.presenter.dispose();
+  mapPresenter = null;
+  if (!workspaceID || !document.getElementById('cockpitMap')) return null;
+  mapPresenter = {
+    workspaceID,
+    presenter: commanderPresenter(homeCommanderMap(workspaceID), { action: 'Show on map' })
+  };
+  return mapPresenter.presenter;
+}
+
 function renderFolderAgent(els) {
   const host = folderAgentHost(els);
   if (!host) return;
   const { card, view, error } = state.agent;
   if (!card && !view) {
+    folderAgentPresenter('');
     host.hidden = true;
     host.replaceChildren();
     return;
@@ -6872,15 +6889,33 @@ function renderFolderAgent(els) {
   if (els.offer) els.offer.hidden = true;
   if (view) {
     const shown = folderAgentReportView(view);
-    host.replaceChildren(
+    const opening = Boolean(state.agent.opening);
+    const card = compact =>
       renderFolderAgentReport(shown, document, {
         error,
-        opening: Boolean(state.agent.opening),
+        opening,
+        compact,
         onAction: (action, button, extra) => void folderAgentAction(shown, action, button, extra)
-      })
-    );
+      });
+    // While the folder's tile is on Home's map, its Commander speaks there
+    // and this card shrinks to one line with Show on map (FR15).
+    const presenter = folderAgentPresenter(shown.workspaceID);
+    const drawn = presenter?.present({
+      view: shown,
+      raw: view,
+      previous: state.agent.shown || null,
+      followed: true,
+      error,
+      opening,
+      host,
+      doc: document,
+      card
+    });
+    state.agent.shown = shown;
+    if (!drawn) host.replaceChildren(card(false));
     return;
   }
+  folderAgentPresenter('');
   host.replaceChildren(
     renderFolderAgentCard(card, document, {
       error,

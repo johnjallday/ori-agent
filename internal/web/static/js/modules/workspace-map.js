@@ -2479,6 +2479,17 @@
     // The resize overlay is screen-space, so the camera moving under it is
     // exactly when it has to be re-placed (#346 FR-55).
     positionResizeOverlay(container);
+    // Screen-space overlays drawn by others (the Commander's balloon) follow
+    // the camera from this event on the viewport.
+    announceMapEvent(canvas, 'ori:map-camera');
+  }
+
+  // announceMapEvent dispatches a bubbling map event on node, where the page
+  // has CustomEvent (never in the test sandboxes that lack it).
+  function announceMapEvent(node, type) {
+    if (!node || typeof node.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
+    node.dispatchEvent(new CustomEvent(type, { bubbles: true }));
   }
 
   // scheduleCameraSave persists the settled camera, debounced. A pan is
@@ -10715,6 +10726,23 @@
     if (canvas.focus) canvas.focus();
   }
 
+  function panBy(dx, dy) {
+    var container = lastMount && lastMount.container;
+    var x = Number(dx) || 0;
+    var y = Number(dy) || 0;
+    if (!container || !cameraReady || (!x && !y)) return false;
+    setCamera(
+      {
+        centerX: camera.centerX + x / camera.zoom,
+        centerY: camera.centerY + y / camera.zoom,
+        zoom: camera.zoom
+      },
+      container,
+      { persist: false }
+    );
+    return true;
+  }
+
   // Reveal a real building or district (including an empty/collapsed Home).
   // Navigation is not a layout write, nor consent to complete a move.
   function reveal(workspaceId, options) {
@@ -11713,6 +11741,9 @@
     // listing, so whatever is running is painted back onto them in place.
     connectActivityFeed();
     paintAllActivity(container);
+    // The rebuilt viewport is new DOM: overlays drawn by others (the
+    // Commander's balloon) attach to it again from this event.
+    announceMapEvent(container, 'ori:map-mounted');
   }
 
   /** Tear down the map view (called when switching away). */
@@ -11874,6 +11905,10 @@
     // Arrow keys move it and Enter saves; Escape or leaving writes nothing.
     beginMove: beginMove,
     reveal: reveal,
+    // panBy moves the camera by screen pixels, for an overlay that must bring
+    // a building into the part of the map it can see (the Commander's Show).
+    // Navigation only: nothing is selected and the camera is not saved.
+    panBy: panBy,
     // Frame workspaces that were just put on the map and mark their tiles for
     // a moment (map-library-setup FR-17). placedBounds is its pure half.
     framePlaced: framePlaced,

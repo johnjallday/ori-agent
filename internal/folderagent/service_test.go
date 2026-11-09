@@ -2,6 +2,7 @@ package folderagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -492,6 +493,44 @@ func TestSweepInterrupted(t *testing.T) {
 	after, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
 	if after.State != StateReported || !strings.Contains(after.ModelSentence, "interrupted") {
 		t.Fatalf("after sweep: %+v", after)
+	}
+}
+
+func TestProgressFolder_BaseNameOnlyBoundedAndClean(t *testing.T) {
+	long := strings.Repeat("é", 120)
+	cases := []struct{ rel, fallback, want string }{
+		{"Album-3", "Albums", "Album-3"},
+		{"Album-3/Stems/Drums", "Albums", "Drums"},
+		{"", "Albums", "Albums"},
+		{".", "Albums", "Albums"},
+		{"", "", ""},
+		{"/Users/someone/Music/Albums/Song", "", "Song"},
+		{`Old\Takes`, "", "Takes"},
+		{"Bad\x00Na" + string(rune(0x202e)) + "me\n", "", "BadName"},
+		{long, "", strings.Repeat("é", progressFolderMax)},
+	}
+	for _, c := range cases {
+		got := ProgressFolder(c.rel, c.fallback)
+		if got != c.want {
+			t.Errorf("ProgressFolder(%q, %q) = %q, want %q", c.rel, c.fallback, got, c.want)
+		}
+		if strings.ContainsAny(got, `/\`) {
+			t.Errorf("ProgressFolder(%q) kept a path: %q", c.rel, got)
+		}
+	}
+}
+
+func TestProgress_FolderOmittedWhenEmpty(t *testing.T) {
+	raw, err := json.Marshal(Progress{Entries: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "folder\"") || strings.Contains(string(raw), "turn") {
+		t.Fatalf("empty narration leaked: %s", raw)
+	}
+	raw, _ = json.Marshal(Progress{Entries: 3, Opened: 2, Folder: "Album-3", Turn: true})
+	if !strings.Contains(string(raw), `"folder":"Album-3"`) || !strings.Contains(string(raw), `"opened":2`) || !strings.Contains(string(raw), `"turn":true`) {
+		t.Fatalf("narration missing: %s", raw)
 	}
 }
 

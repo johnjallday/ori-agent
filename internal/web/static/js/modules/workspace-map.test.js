@@ -2896,6 +2896,55 @@ function loadMapForMount() {
   return window.OriWorkspaceMap;
 }
 
+test('each mount announces itself so overlays (the Commander balloon) attach again', () => {
+  const window = { addEventListener() {} };
+  class CustomEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.bubbles = Boolean(init.bubbles);
+    }
+  }
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document: { getElementById: () => null },
+      setTimeout,
+      clearTimeout,
+      fetch: () => new Promise(() => {}),
+      CustomEvent
+    },
+    { filename: 'workspace-map.js' }
+  );
+  const map = window.OriWorkspaceMap;
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const events = [];
+  container.dispatchEvent = event => events.push(event);
+  for (let i = 0; i < 3; i += 1) {
+    map.mount(container, {
+      workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+      hideChrome: true,
+      selectOnly: true,
+      noAutoSelect: true
+    });
+  }
+  const mounted = events.filter(event => event.type === 'ori:map-mounted');
+  assert.equal(mounted.length, 3);
+  assert.ok(
+    mounted.every(event => event.bubbles),
+    'bubbles to the page'
+  );
+});
+
+test('the camera event is dispatched on the viewport from applyCamera', () => {
+  assert.match(source, /announceMapEvent\(canvas, 'ori:map-camera'\)/);
+  const apply = source.slice(
+    source.indexOf('function applyCamera('),
+    source.indexOf('function announceMapEvent(')
+  );
+  assert.match(apply, /announceMapEvent\(canvas, 'ori:map-camera'\)/);
+});
+
 test('cockpit mode renders no second topbar or overview panel (FR15)', () => {
   const map = loadMapForMount();
   const { container } = createMapHarness({ tiles: ['ws-1'] });
