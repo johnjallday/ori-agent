@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { answerTicket, commanderTicketItems, ticketWaitView } from './commander-tickets.js';
+import {
+  agentQuestion,
+  answerTicket,
+  commanderTicketItems,
+  ticketWaitView
+} from './commander-tickets.js';
+import { commanderQueue } from './commander-speech.js';
 import { commanderPresenter } from './commander-map.js';
 import { fakeDocument } from './commander-balloon.test.js';
 import { folderAgentReportView } from './folder-agent-card.js';
@@ -90,7 +96,7 @@ test('the balloon items: working, waiting with choices, done with its result', (
     { agent: 'Albums Manager', line: 'On it.', taskId: 't1' },
     { titleOf, actions }
   );
-  assert.equal(working[0].kind, 'working');
+  assert.equal(working[0].kind, 'ticket_working');
   assert.equal(working[0].line, 'Working on: List the five songs saved most recently');
   const step = commanderTicketItems(
     { agent: 'Albums Manager', line: 'Thinking it through…', taskId: 't1' },
@@ -233,4 +239,72 @@ test('a waiting ticket comes before a waiting report, with "and 1 more" opening 
   });
   assert.match(balloon.content.line, /^Setting up Albums/);
   assert.equal(balloon.content.scrollKey, 'report|running');
+});
+
+test("the question is the agent's own words before its options, the host's only as a fallback", () => {
+  assert.equal(
+    agentQuestion(
+      'I need clarification before I can complete this task. Choose one of the following:\n1. Album-1\n2. Album-3'
+    ),
+    'I need clarification before I can complete this task. Choose one of the following:'
+  );
+  assert.equal(agentQuestion('1. Album-1\n2. Album-3'), '');
+  assert.ok(agentQuestion('x'.repeat(400)).length <= 240);
+  const task = waitingTask();
+  task.context.human_loop.question = 'I still need confirmation to continue.';
+  task.context.human_loop.agent_response = 'Which album first?\n1. Album-1\n2. Album-3';
+  assert.equal(ticketWaitView(task).question, 'Which album first?');
+  task.context.human_loop.agent_response = '';
+  assert.equal(ticketWaitView(task).question, 'I still need confirmation to continue.');
+});
+
+test('a ticket answered here says "Back to it." until the stream catches up, no stale controls', () => {
+  const doc = fakeDocument();
+  const items = commanderTicketItems(
+    { agent: 'Albums Manager', line: 'I need your input.', blocked: true, taskId: 't1' },
+    { taskOf: () => waitingTask(), titleOf: () => 'Pick an album', answered: new Set(['t1']) }
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, 'ticket_working');
+  assert.equal(items[0].line, 'Back to it.');
+  const body = items[0].body(doc);
+  assert.equal(
+    body.all().some(n => n.dataset?.commanderChoice),
+    false,
+    'no choice buttons left'
+  );
+});
+
+test("a finished result's first line comes from the ticket's own result", () => {
+  const items = commanderTicketItems(
+    {
+      agent: 'Albums Manager',
+      line: '',
+      parcel: { id: 'p1', title: 'Pick an album', summary: '', ref_id: 't1', outcome: 'succeeded' }
+    },
+    {
+      taskOf: id => (id === 't1' ? { id: 't1', result: 'You picked Album-3.\nMore detail' } : null)
+    }
+  );
+  const doc = fakeDocument();
+  const body = items[0].body(doc);
+  assert.equal(
+    body.all().find(n => n.className === 'commander-ticket__result').textContent,
+    'You picked Album-3.'
+  );
+});
+
+test('what the Commander is doing now leads a waiting plan; a waiting ticket leads both (FR9, FR25)', () => {
+  const q = commanderQueue([
+    { kind: 'report', id: 'plan' },
+    { kind: 'ticket_working', id: 'work' },
+    { kind: 'result', id: 'done' }
+  ]);
+  assert.deepEqual([q.first.id, ...q.rest.map(i => i.id)], ['work', 'plan', 'done']);
+  const r = commanderQueue([
+    { kind: 'ticket_working', id: 'work' },
+    { kind: 'live', id: 'run' },
+    { kind: 'ticket_waiting', id: 'ask' }
+  ]);
+  assert.deepEqual([r.first.id, ...r.rest.map(i => i.id)], ['ask', 'run', 'work']);
 });

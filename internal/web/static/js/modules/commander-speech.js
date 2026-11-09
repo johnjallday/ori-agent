@@ -192,12 +192,23 @@ export function commanderAutoOpen({ previous, next, followed = false, onMap = fa
   return false;
 }
 
-// URGENCY orders what waits (FR25): a ticket waiting for the owner, then a
-// waiting report, then a finished result; work in progress after those.
-const URGENCY = { ticket_waiting: 0, report: 1, cause: 1, stopped: 1, result: 2, done: 2 };
+// URGENCY orders what the Commander says (FR25): a ticket waiting for the
+// owner, then what it is doing right now (a look or setup run, then a ticket
+// in progress — the live line while working, FR9), then a waiting report,
+// then a finished result. Anything else comes last.
+const URGENCY = {
+  ticket_waiting: 0,
+  live: 1,
+  ticket_working: 2,
+  report: 3,
+  cause: 3,
+  stopped: 3,
+  result: 4,
+  done: 4
+};
 
 function urgencyOf(item) {
-  return URGENCY[item?.kind] ?? 3;
+  return URGENCY[item?.kind] ?? 5;
 }
 
 // commanderQueue sorts what the Commander has to say, most urgent first (a

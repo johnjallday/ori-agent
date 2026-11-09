@@ -97,6 +97,15 @@ export function workspaceCommanderMap(
         fn(detail);
       };
       doc?.addEventListener?.(COMMANDER_ACTIVITY_EVENT, handler);
+      // The map may have spoken before this balloon listened (a reload while
+      // a ticket waits): ask it to say it again.
+      if (typeof CustomEvent === 'function') {
+        doc?.dispatchEvent?.(
+          new CustomEvent(`${COMMANDER_ACTIVITY_EVENT}-request`, {
+            detail: { workspaceId: workspaceID }
+          })
+        );
+      }
       return () => doc?.removeEventListener?.(COMMANDER_ACTIVITY_EVENT, handler);
     },
     // onChange runs fn after a Map render, a map mount or a tab change.
@@ -445,8 +454,8 @@ const REPORT_KIND = {
   cause: 'cause',
   stopped: 'stopped',
   done: 'done',
-  running: 'working',
-  looking: 'working'
+  running: 'live',
+  looking: 'live'
 };
 
 // ticketItems(activity) turns the Commander's ticket activity (the

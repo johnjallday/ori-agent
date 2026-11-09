@@ -16,6 +16,24 @@ function text(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const OPTION_LINE = /^\s*(?:[-*•]|\(?[0-9]{1,2}[.)]|\(?[A-Za-z][.)])\s+/;
+const QUESTION_MAX = 240;
+
+// agentQuestion is the agent's own ask in its reply: the lines before its
+// listed options, as one sentence, bounded. '' when it has none.
+export function agentQuestion(response) {
+  const lines = String(response || '')
+    .split(/\r?\n/)
+    .map(line => line.trim());
+  const ask = [];
+  for (const line of lines) {
+    if (OPTION_LINE.test(line)) break;
+    if (line) ask.push(line);
+  }
+  const words = ask.join(' ').replace(/\s+/g, ' ').trim();
+  return words.length > QUESTION_MAX ? `${words.slice(0, QUESTION_MAX - 1)}…` : words;
+}
+
 // ticketWaitView reads what a waiting ticket asks (task.context.human_loop):
 // the question, the listed choices, and whether a one-line answer is taken.
 // A form (several fields) is answered on the ticket itself.
@@ -43,7 +61,10 @@ export function ticketWaitView(task) {
     taskId: text(task.id),
     title: text(task.title) || text(task.description).split('\n')[0],
     blockId: text(loop.block_id),
+    // The agent's own words come first; the host's generic question is the
+    // fallback ("I still need confirmation to continue…").
     question:
+      agentQuestion(loop.agent_response) ||
       text(loop.question) ||
       text(step?.title) ||
       text(loop.reason) ||
@@ -179,13 +200,25 @@ function firstLine(value) {
 // dismiss, refresh}.
 export function commanderTicketItems(
   activity,
-  { titleOf = () => '', taskOf = () => null, dismissed = new Set(), actions = {}, errors = {} } = {}
+  {
+    titleOf = () => '',
+    taskOf = () => null,
+    resultOf = parcel => (parcel?.ref_id ? taskOf(parcel.ref_id)?.result : ''),
+    dismissed = new Set(),
+    answered = new Set(),
+    actions = {},
+    errors = {}
+  } = {}
 ) {
   if (!activity) return [];
   const items = [];
   const agent = text(activity.agent);
   const taskId = text(activity.taskId);
   const title = taskId ? text(titleOf(taskId)) : '';
+  // Answered here, not yet resumed on the stream: the question is gone, the
+  // Commander is getting back to it (no stale controls in between).
+  const resuming = activity.blocked && taskId && answered.has(taskId);
+  if (resuming) activity = { ...activity, blocked: false, line: 'Back to it.' };
   if (activity.blocked && taskId) {
     const wait = ticketWaitView(taskOf(taskId)) || {
       taskId,
@@ -217,7 +250,7 @@ export function commanderTicketItems(
     // A run starting says what it works on; then its step lines.
     const line = activity.line === 'On it.' && title ? `Working on: ${title}` : activity.line;
     items.push({
-      kind: 'working',
+      kind: 'ticket_working',
       agent,
       line,
       headline: title ? `Working on: ${title}` : '',
@@ -242,7 +275,7 @@ export function commanderTicketItems(
     });
   } else if (activity.line && activity.finishing) {
     items.push({
-      kind: 'working',
+      kind: 'ticket_working',
       agent,
       line: activity.line,
       headline: title,
@@ -256,7 +289,7 @@ export function commanderTicketItems(
     const done = {
       parcelId: parcel.id,
       title: text(parcel.title),
-      firstLine: firstLine(parcel.summary || parcel.preview || ''),
+      firstLine: firstLine(parcel.summary || resultOf(parcel) || ''),
       failed: parcel.outcome === 'failed' || parcel.outcome === 'timeout'
     };
     const label = done.failed ? 'This one didn’t work out' : 'Done';
@@ -266,7 +299,7 @@ export function commanderTicketItems(
       line: done.title ? `${label}: ${done.title}` : label,
       headline: done.title,
       announce: done.title ? `${label}: ${done.title}` : label,
-      signature: `done|${parcel.id}`,
+      signature: `done|${parcel.id}|${done.firstLine}`,
       body: doc =>
         renderTicketResult(doc, done, {
           onOpen: result => actions.openResult?.(result),

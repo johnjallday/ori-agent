@@ -150,6 +150,16 @@ export class OperationsMapActivity {
     // as one 'ori:commander-activity' event (commander-tickets.js).
     this.commanderSpeaks = options.commanderSpeaks || null;
     this.commanderSignature = '';
+    // A balloon that starts listening later (the page's own setup after a
+    // reload) asks for what the Commander is saying now.
+    if (this.commanderSpeaks && typeof this.document?.addEventListener === 'function') {
+      this.document.addEventListener('ori:commander-activity-request', event => {
+        const wanted = String(event?.detail?.workspaceId || '');
+        if (wanted && wanted !== String(this.workspaceIdFn() || '')) return;
+        this.commanderSignature = '';
+        this.paint();
+      });
+    }
 
     this.units = new Map(); // agent key -> what that unit is showing
     this.taskAgents = new Map(); // task id -> agent name, for events that omit it

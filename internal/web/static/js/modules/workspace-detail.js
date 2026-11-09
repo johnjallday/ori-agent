@@ -633,32 +633,87 @@ export class WorkspaceDetailPage {
   // balloon's items: a waiting ticket answered through the ticket page's own
   // assist endpoint, a run's lines, and a finished result to open or dismiss.
   commanderTicketItems(activity) {
-    this.commanderTicketState ||= { dismissed: new Set(), errors: {} };
-    const { dismissed, errors } = this.commanderTicketState;
+    const storageKey = `ori.commander.dismissed.${this.workspaceId}`;
+    if (!this.commanderTicketState) {
+      // Results the owner opened or dismissed stay quiet across reloads (a
+      // per-viewer convenience; nothing breaks without storage).
+      let saved = [];
+      try {
+        saved = JSON.parse(window.localStorage.getItem(storageKey) || '[]');
+      } catch (_) {
+        saved = [];
+      }
+      this.commanderTicketState = {
+        dismissed: new Set(Array.isArray(saved) ? saved.map(String) : []),
+        errors: {},
+        answered: new Set(),
+        requested: new Set()
+      };
+    }
+    const { dismissed, errors, answered, requested } = this.commanderTicketState;
+    const remember = parcelId => {
+      dismissed.add(parcelId);
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify([...dismissed].slice(-50)));
+      } catch (_) {
+        /* storage unavailable: dismissed for this page only */
+      }
+    };
+    // An answer counts until the ticket stops waiting on the stream.
+    if (activity && !activity.blocked) answered.clear();
     const taskOf = id => (Array.isArray(this.tasks) ? this.tasks : []).find(t => t?.id === id);
+    // A ticket started a moment ago (or just finished) is not in the page's
+    // list yet: load the tickets once for it; their arrival redraws.
+    const want = (id, field) => {
+      const task = id ? taskOf(id) : null;
+      if (!id || (task && (!field || task[field])) || requested.has(`${id}|${field}`)) return;
+      requested.add(`${id}|${field}`);
+      void this.loadTasks?.();
+    };
+    // A ticket's title is its own title, else its description's first line.
+    const titleText = task =>
+      String(task?.title || String(task?.description || '').split('\n')[0] || '').trim();
+    // A parcel names its ticket by title only: the newest ticket with that
+    // title carries the result.
+    const taskForParcel = parcel => {
+      const title = String(parcel?.title || '').trim();
+      const list = Array.isArray(this.tasks) ? this.tasks : [];
+      return title ? [...list].reverse().find(task => titleText(task) === title) : null;
+    };
+    want(activity?.taskId, 'description');
+    const parcel = activity?.parcel;
+    if (parcel?.id && !dismissed.has(parcel.id) && !taskForParcel(parcel)?.result) {
+      if (!requested.has(`parcel|${parcel.id}`)) {
+        requested.add(`parcel|${parcel.id}`);
+        void this.loadTasks?.();
+      }
+    }
     const retick = () => this.commanderPresenter?.retick();
     return commanderTicketItems(activity, {
-      titleOf: id => String(taskOf(id)?.title || ''),
+      titleOf: id => titleText(taskOf(id)),
+      resultOf: found => taskForParcel(found)?.result || '',
       taskOf,
       dismissed,
       errors,
+      answered,
       actions: {
         open: id => this.openTaskAssistModal(id),
         answer: async (wait, payload, button) => {
           if (button) button.disabled = true;
           const result = await answerTicket(wait, payload);
           errors[wait.taskId] = result.ok ? '' : result.error;
+          if (result.ok) answered.add(wait.taskId);
           if (!result.ok && button) button.disabled = false;
           if (result.ok) void this.loadTasks?.();
           retick();
         },
         openResult: result => {
-          dismissed.add(result.parcelId);
+          remember(result.parcelId);
           activity?.openResult?.(result.parcelId);
           retick();
         },
         dismiss: result => {
-          dismissed.add(result.parcelId);
+          remember(result.parcelId);
           retick();
         }
       }
