@@ -13116,3 +13116,269 @@ test('placedBounds frames only the drawn tiles that were just set up (map-librar
     'without a mounted map nothing moves and nothing is marked'
   );
 });
+
+test('placement motion: what moved slides back from where it was, what is new grows in', () => {
+  const map = loadOriWorkspaceMap();
+  const before = {
+    'ws:albums': { left: 100, top: 100, width: 152, height: 120, count: '' },
+    'ws:one-song': { left: 400, top: 100, width: 152, height: 120, count: '' },
+    'district:other': { left: 600, top: 300, width: 400, height: 300, count: '2 workspaces' }
+  };
+  const after = {
+    // Albums slid into the new Home's district.
+    'ws:albums': { left: 920, top: 640, width: 152, height: 120, count: '' },
+    'ws:one-song': { left: 400, top: 100, width: 152, height: 120, count: '' },
+    // An existing district grew to hold a new member.
+    'district:other': { left: 600, top: 300, width: 400, height: 460, count: '3 workspaces' },
+    'district:home': { left: 880, top: 600, width: 420, height: 320, count: '1 workspace' },
+    'ws:draft-a': { left: 620, top: 600, width: 152, height: 120, count: '' }
+  };
+  const plan = map.planMapMotion(before, after);
+  assert.deepEqual(JSON.parse(JSON.stringify(plan.moved.map(m => [m.key, m.dx, m.dy]))), [
+    ['ws:albums', -820, -540],
+    ['district:other', 0, 0]
+  ]);
+  assert.deepEqual([...plan.added], ['district:home', 'ws:draft-a']);
+  // The district keeps its old count until the slide ends.
+  assert.equal(plan.moved[1].from.count, '2 workspaces');
+  assert.equal(plan.moved[1].to.count, '3 workspaces');
+
+  // Nothing moved: nothing to play.
+  const still = map.planMapMotion(after, after);
+  assert.equal(still.moved.length + still.added.length, 0);
+  // A first mount (no snapshot) treats nothing as moved.
+  assert.equal(map.planMapMotion(null, before).moved.length, 0);
+});
+
+// A map in a sandbox with a controllable clock and animation frames, and
+// fake buildings carrying just what the motion reads and writes.
+function loadMotionMap({ reduced = false } = {}) {
+  const clock = { now: 1_000_000, frames: [], timers: [] };
+  class FakeDate extends Date {
+    static now() {
+      return clock.now;
+    }
+  }
+  const window = {
+    OriTicketCounts: TicketCounts,
+    OriWorkspaceUpdateSignals: updateSignalBridge,
+    matchMedia: query => ({ matches: reduced && /reduce/.test(query) })
+  };
+  const sandbox = {
+    window,
+    document: {},
+    Date: FakeDate,
+    requestAnimationFrame: fn => clock.frames.push(fn),
+    setTimeout: (fn, ms) => clock.timers.push({ fn, at: clock.now + ms }),
+    clearTimeout() {}
+  };
+  vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
+  vm.runInNewContext(buildingArtSource, sandbox, { filename: 'workspace-building-art.js' });
+  vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
+  clock.advance = ms => {
+    clock.now += ms;
+    clock.frames.splice(0).forEach(fn => fn());
+    const due = clock.timers.filter(timer => timer.at <= clock.now);
+    clock.timers = clock.timers.filter(timer => timer.at > clock.now);
+    due.forEach(timer => timer.fn());
+  };
+  return { map: window.OriWorkspaceMap, clock };
+}
+
+function fakeBuilding(kind, id, rect, count = '') {
+  const classes = new Set([kind === 'district' ? 'ws-map-district' : 'ws-map-tile']);
+  const countNode = { textContent: count };
+  return {
+    classes,
+    // Layout, as a browser reports it (the snapshot skips elements without).
+    offsetLeft: rect.left,
+    offsetTop: rect.top,
+    offsetWidth: rect.width,
+    offsetHeight: rect.height,
+    classList: {
+      add: name => classes.add(name),
+      remove: name => classes.delete(name),
+      contains: name => classes.has(name)
+    },
+    style: {
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      transition: '',
+      transform: ''
+    },
+    getAttribute: name =>
+      name === (kind === 'district' ? 'data-group-id' : 'data-ws-id') ? id : null,
+    querySelector: selector => (selector === '.ws-map-district-count' ? countNode : null),
+    countNode
+  };
+}
+
+function fakeMap(...buildings) {
+  return {
+    offsetWidth: 800,
+    querySelectorAll: () => buildings
+  };
+}
+
+const rectOf = (left, top, width = 152, height = 120) => ({ left, top, width, height });
+
+test('placement motion survives the refreshes that land while it plays, then lets go', () => {
+  const { map, clock } = loadMotionMap();
+  const { start, play } = map.placementMotion;
+  const albumsBefore = fakeBuilding('tile', 'albums', rectOf(100, 100));
+  const container = fakeMap(albumsBefore);
+
+  // The animated mount reads where things are, rebuilds, and plays the move.
+  const first = start(container, true);
+  assert.equal(first.carried, false);
+  const albums = fakeBuilding('tile', 'albums', rectOf(920, 640));
+  const home = fakeBuilding('district', 'home', rectOf(880, 600, 420, 320), '1 workspace');
+  const rebuilt = fakeMap(albums, home);
+  play(rebuilt, first.before, false);
+  assert.equal(albums.style.transform, 'translate(-820px, -540px)');
+  assert.ok(home.classes.has('is-growing-in'));
+  clock.advance(0);
+  assert.equal(albums.style.transition, 'transform 450ms ease');
+  assert.equal(albums.style.transform, '');
+
+  // 40 ms later another refresh rebuilds everything without asking for
+  // motion: it carries the same move onto what it built.
+  clock.advance(40);
+  const second = start(fakeMap(), false);
+  assert.equal(second.carried, true);
+  assert.equal(second.before, first.before);
+  const albums2 = fakeBuilding('tile', 'albums', rectOf(920, 640));
+  const home2 = fakeBuilding('district', 'home', rectOf(880, 600, 420, 320), '1 workspace');
+  play(fakeMap(albums2, home2), second.before, true);
+  assert.equal(albums2.style.transform, 'translate(-820px, -540px)', 'it starts from where it was');
+  assert.ok(home2.classes.has('is-growing-in'));
+  clock.advance(0);
+  assert.match(albums2.style.transition, /^transform (4[0-4]\d|[1-3]\d\d|\d\d)ms ease$/);
+
+  // The motion ends and cleans up what the carried mount drew.
+  clock.advance(500);
+  assert.equal(albums2.style.transition, '');
+  assert.ok(!home2.classes.has('is-growing-in'));
+  // A mount after it has ended is an ordinary one.
+  assert.deepEqual({ ...start(fakeMap(), false) }, { before: null, carried: false });
+});
+
+test('placement motion keeps a district at its old size and count until its slide ends', () => {
+  const { map, clock } = loadMotionMap();
+  const { play } = map.placementMotion;
+  const before = {
+    'district:home': { left: 600, top: 300, width: 400, height: 300, count: '1 workspace' }
+  };
+  const home = fakeBuilding('district', 'home', rectOf(600, 300, 400, 460), '2 workspaces');
+  play(fakeMap(home), before, false);
+  assert.equal(home.style.height, '300px');
+  assert.equal(home.countNode.textContent, '1 workspace');
+  clock.advance(0);
+  assert.equal(home.style.height, '460px');
+  assert.match(home.style.transition, /height 450ms ease/);
+  clock.advance(500);
+  assert.equal(home.countNode.textContent, '2 workspaces');
+});
+
+test('placement motion draws the final state at once under reduced motion, and never animates a first draw', () => {
+  const reduced = loadMotionMap({ reduced: true });
+  const albums = fakeBuilding('tile', 'albums', rectOf(920, 640));
+  reduced.map.placementMotion.play(fakeMap(albums), { 'ws:albums': rectOf(100, 100) }, false);
+  assert.equal(albums.style.transform, '');
+  assert.equal(albums.style.transition, '');
+  assert.deepEqual(
+    { ...reduced.map.placementMotion.start(fakeMap(), false) },
+    {
+      before: null,
+      carried: false
+    }
+  );
+
+  const normal = loadMotionMap();
+  const tile = fakeBuilding('tile', 'albums', rectOf(920, 640));
+  normal.map.placementMotion.play(fakeMap(tile), {}, false);
+  assert.ok(!tile.classes.has('is-growing-in'), 'nothing was on screen before, so nothing grows');
+});
+
+// Steps the fake clock a tick at a time, letting promise callbacks run between.
+async function stepClock(clock, totalMs, stepMs = 50) {
+  for (let elapsed = 0; elapsed < totalMs; elapsed += stepMs) {
+    clock.advance(stepMs);
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  }
+}
+
+test('a host that expects a placement makes the open wait, and the wait is capped', async () => {
+  const { map, clock } = loadMotionMap();
+  let settled = false;
+  map.expectMotion(1000);
+  map.whenMotionSettled(300).then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  await stepClock(clock, 250);
+  assert.equal(settled, false, 'it waits while the placement is expected');
+  await stepClock(clock, 100);
+  assert.equal(settled, true, 'it never waits longer than the cap');
+});
+
+test('the open stops waiting when the real motion ends, before the reservation would', async () => {
+  const { map, clock } = loadMotionMap();
+  map.expectMotion(1000);
+  let settled = false;
+  map.whenMotionSettled(1000).then(() => {
+    settled = true;
+  });
+  // The placement is drawn: a 450 ms slide replaces the 1000 ms reservation.
+  const before = { 'ws:albums': rectOf(100, 100) };
+  map.placementMotion.play(
+    fakeMap(fakeBuilding('tile', 'albums', rectOf(920, 640))),
+    before,
+    false
+  );
+  await stepClock(clock, 400);
+  assert.equal(settled, false, 'the slide is still playing');
+  await stepClock(clock, 150);
+  assert.equal(settled, true, 'it went on at the slide’s end, not the reservation’s');
+});
+
+test('nothing is expected and nothing moves: the open does not wait at all', async () => {
+  const { map } = loadMotionMap();
+  let settled = false;
+  map.whenMotionSettled(1000).then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  assert.equal(settled, true);
+});
+
+test('placement motion is off by default and a DOM without layout draws the final state at once', async () => {
+  const map = loadOriWorkspaceMap();
+  const harness = createCameraHarness({ districts: ['g'] });
+  const state = {
+    workspaces: [
+      { id: 'g', kind: 'group', name: 'Music Home' },
+      { id: 'albums', name: 'Albums', parent_id: 'g' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  };
+  map.mount(harness.container, state);
+  map.mount(harness.container, { ...state, animate: true });
+  assert.doesNotMatch(harness.container.innerHTML, /is-growing-in/);
+  // Nothing is playing, so a host waiting on it goes on at once.
+  let settled = false;
+  await map.whenMotionSettled(1000).then(() => {
+    settled = true;
+  });
+  assert.equal(settled, true);
+  assert.match(mapCSS, /@keyframes ws-map-grow-in/);
+  assert.match(
+    mapCSS,
+    /prefers-reduced-motion: reduce\)\s*\{\s*\.ws-map-tile\.is-growing-in,\s*\.ws-map-district\.is-growing-in\s*\{\s*animation: none;/
+  );
+});

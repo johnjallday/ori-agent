@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +64,12 @@ type TurnReceipt struct {
 	Looks      int       `json:"looks,omitempty"`
 	StartedAt  time.Time `json:"started_at,omitzero"`
 	FinishedAt time.Time `json:"finished_at,omitzero"`
+	// Cause is the host's one sentence for why a skipped turn could not look
+	// ("No API key is set for Anthropic."), from folderlook.CauseSentence;
+	// CauseFixable says the owner can fix it before Look further (PRD FR21,
+	// FR25). Never the provider's raw words.
+	Cause        string `json:"cause,omitempty"`
+	CauseFixable bool   `json:"cause_fixable,omitempty"`
 }
 
 // Turn receipt statuses and skip reasons.
@@ -85,6 +92,84 @@ type Setup struct {
 	StopReason string                             `json:"stop_reason,omitempty"`
 	StartedAt  time.Time                          `json:"started_at"`
 	FinishedAt time.Time                          `json:"finished_at,omitzero"`
+	// Receipt is what the run made, as the host reported it (PRD FR10, FR11);
+	// a stopped run's receipt holds what finished before the stop.
+	Receipt *SetupReceipt `json:"receipt,omitempty"`
+}
+
+// SetupReceipt is what a Set it up run made: names, versions, counts and the
+// app's own workspace routes. Never a path. It lives on the card only.
+type SetupReceipt struct {
+	// Installed are the plugins installed, each "<name> <version>".
+	Installed []string `json:"installed,omitempty"`
+	// Home is the Home the folder joined; HomeCreated when this run made it.
+	Home        *WorkspaceRef `json:"home,omitempty"`
+	HomeCreated bool          `json:"home_created,omitempty"`
+	// Group is set when the folder became a group; Members are its workspaces.
+	Group   bool           `json:"group,omitempty"`
+	Members []WorkspaceRef `json:"members,omitempty"`
+	// Hired are the agents the run hired, by name.
+	Hired []string `json:"hired,omitempty"`
+	// Listed songs on the Home's shelf, the noun for them, and the folders
+	// holding songs no listing reached.
+	Listed     int    `json:"listed,omitempty"`
+	ListedNoun string `json:"listed_noun,omitempty"`
+	Unreached  int    `json:"unreached,omitempty"`
+}
+
+// Bounds of a receipt: a run installs a few plugins and hires a few agents;
+// a group has at most GroupMaxMembers members.
+const (
+	maxReceiptItems = 16
+	maxReceiptText  = 200
+)
+
+// Clean bounds the receipt a host reported: short single-line names, routes
+// to the app's own workspace pages only, at most a handful of each.
+func (r *SetupReceipt) Clean() *SetupReceipt {
+	if r == nil {
+		return nil
+	}
+	text := func(s string) string {
+		s = strings.TrimSpace(s)
+		if len(s) > maxReceiptText || strings.ContainsAny(s, "\x00\r\n") {
+			return ""
+		}
+		return s
+	}
+	texts := func(in []string) []string {
+		var out []string
+		for _, s := range in {
+			if s = text(s); s != "" && len(out) < maxReceiptItems {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	ref := func(in WorkspaceRef) (WorkspaceRef, bool) {
+		name := text(in.Name)
+		if name == "" {
+			return WorkspaceRef{}, false
+		}
+		route := in.Route
+		if !strings.HasPrefix(route, "/workspaces/") || strings.Contains(route, "//") || len(route) > 512 {
+			route = ""
+		}
+		return WorkspaceRef{ID: text(in.ID), Name: name, Route: route}, true
+	}
+	out := &SetupReceipt{Installed: texts(r.Installed), Hired: texts(r.Hired), Group: r.Group,
+		Listed: max(r.Listed, 0), ListedNoun: text(r.ListedNoun), Unreached: max(r.Unreached, 0)}
+	if r.Home != nil {
+		if home, ok := ref(*r.Home); ok {
+			out.Home, out.HomeCreated = &home, r.HomeCreated
+		}
+	}
+	for _, m := range r.Members {
+		if member, ok := ref(m); ok && len(out.Members) < GroupMaxMembers {
+			out.Members = append(out.Members, member)
+		}
+	}
+	return out
 }
 
 // Record is one folder workspace's state.
@@ -140,7 +225,17 @@ func (r *Record) validate() error {
 			return err
 		}
 	}
+	if r.Turn != nil && !validCause(r.Turn.Cause) {
+		return errors.New("folderagent: invalid turn cause")
+	}
 	return nil
+}
+
+// validCause keeps a stored cause sentence bounded and on one line. The
+// sentence is composed only from the host's fixed words and the provider and
+// model names (a model name may hold a "/", as "meta-llama/…" does).
+func validCause(text string) bool {
+	return len(text) <= folderlook.MaxCauseText && !strings.ContainsAny(text, "\x00\r\n")
 }
 
 // ErrNoRecord means the workspace was not started from a folder.

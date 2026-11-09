@@ -136,6 +136,57 @@ type FolderPlanLine struct {
 	// Step is the handle of the plan step this line carries out (the folder
 	// agent's plan groups its lines under their steps); empty elsewhere.
 	Step string `json:"step,omitempty"`
+	// Progress is the runner's live words for this line ("Downloading <plugin>
+	// <version>" while working, the receipt words once done). Like
+	// State and the timestamps it is not part of the plan's identity.
+	Progress string `json:"progress,omitempty"`
+	// StartedAt is when the line first became working; FinishedAt when it
+	// became done or failed.
+	StartedAt  time.Time `json:"started_at,omitzero"`
+	FinishedAt time.Time `json:"finished_at,omitzero"`
+}
+
+// Mark moves the line to state with the runner's words for it. It stamps
+// StartedAt on the first move to working and FinishedAt on done or failed (a
+// line that finishes without working first starts and finishes at once). A
+// done line with no words drops its working words; failed keeps the last ones.
+// Words that would not pass ValidateFolderPlanLine are dropped, never stored.
+func (l *FolderPlanLine) Mark(state, progress string, now time.Time) {
+	l.State = state
+	switch state {
+	case FolderLineWorking:
+		if l.StartedAt.IsZero() {
+			l.StartedAt = now
+		}
+		l.FinishedAt = time.Time{}
+	case FolderLineDone, FolderLineFailed:
+		if l.StartedAt.IsZero() {
+			l.StartedAt = now
+		}
+		l.FinishedAt = now
+	}
+	candidate := *l
+	candidate.Progress = progress
+	switch {
+	case progress != "" && ValidateFolderPlanLine(candidate) == nil:
+		l.Progress = progress
+	case state == FolderLineDone:
+		l.Progress = ""
+	}
+}
+
+// ValidateFolderPlanLine keeps one line bounded and path-free: a kind, and
+// name, detail and progress as single-line plain text under the cap.
+func ValidateFolderPlanLine(line FolderPlanLine) error {
+	if line.Kind == "" {
+		return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
+	}
+	for _, text := range []string{line.Name, line.Detail, line.Progress} {
+		if len(text) > folderSetupMaxText || strings.ContainsAny(text, "\x00\r\n") || looksLikeFilesystemPath(text) {
+			return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
+		}
+	}
+	return nil
 }
 
 // Where an installable plugin stands, as the plan promised it.
@@ -478,8 +529,9 @@ type FolderPrerequisite struct {
 	Route string `json:"route,omitempty"`
 }
 
-// FolderPlanDigest is the SHA-256 of the lines' canonical JSON with State
-// excluded, so progress on a line never changes what was consented to.
+// FolderPlanDigest is the SHA-256 of the lines' canonical JSON: Kind, Name and
+// Detail only. State, Progress and the timestamps are excluded, so progress on
+// a line never changes what was consented to.
 func FolderPlanDigest(lines []FolderPlanLine) string {
 	canonical := make([]FolderPlanLine, len(lines))
 	for i, line := range lines {
@@ -768,9 +820,8 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 		return fmt.Errorf("%w: setup limits", errFolderDigestInvalid)
 	}
 	for _, line := range run.Lines {
-		if line.Kind == "" || len(line.Name) > folderSetupMaxText || len(line.Detail) > folderSetupMaxText ||
-			strings.ContainsAny(line.Name+line.Detail, "\x00\r\n") || looksLikeFilesystemPath(line.Name) || looksLikeFilesystemPath(line.Detail) {
-			return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
+		if err := ValidateFolderPlanLine(line); err != nil {
+			return err
 		}
 	}
 	intent := run.Intent

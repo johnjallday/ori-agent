@@ -32,7 +32,7 @@ func TestFolderAgentFileCurator_InstallsFileJanitorInPlaceWithItsCompanion(t *te
 	}
 	before := count()
 	states := map[string]string{}
-	set := func(kind, state string) { states[kind] = state }
+	set := func(kind, state, _ string) { states[kind] = state }
 	for run := 0; run < 2; run++ {
 		if err := builder.addFolderAgentFileCurator(workspaceID, set); err != nil {
 			t.Fatalf("run %d: %v", run, err)

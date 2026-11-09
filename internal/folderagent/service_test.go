@@ -129,14 +129,15 @@ func (t *fakeTickets) Finish(ws, id, result string, failed bool) error {
 }
 
 type fakeSetups struct {
-	mu   sync.Mutex
-	runs []Plan
+	mu      sync.Mutex
+	runs    []Plan
+	receipt *SetupReceipt
 }
 
 func (f *fakeSetups) Readiness(context.Context, string) folderlook.Readiness {
 	return folderlook.Readiness{}
 }
-func (f *fakeSetups) Run(_ context.Context, _ Record, plan Plan, update func([]personalassistant.FolderPlanLine)) (string, string) {
+func (f *fakeSetups) Run(_ context.Context, _ Record, plan Plan, update func([]personalassistant.FolderPlanLine)) RunResult {
 	f.mu.Lock()
 	f.runs = append(f.runs, plan)
 	f.mu.Unlock()
@@ -145,7 +146,7 @@ func (f *fakeSetups) Run(_ context.Context, _ Record, plan Plan, update func([]p
 		lines[i].State = personalassistant.FolderLineDone
 	}
 	update(lines)
-	return personalassistant.FolderSetupDone, ""
+	return RunResult{Status: personalassistant.FolderSetupDone, Receipt: f.receipt}
 }
 
 type harness struct {
@@ -244,7 +245,8 @@ func TestStart_DemoFolderCreatesWorkspaceAgentTicketAndReport(t *testing.T) {
 	if report.StageLine != "Set it up: Turn Ori Music Demo into a group with one workspace per song (8) · Install REAPER tools and connect them to Ori Music Demo" {
 		t.Fatalf("stage line = %q", report.StageLine)
 	}
-	if !strings.HasPrefix(report.ModelSentence, "No model is set up, so Ori Music Demo Manager could not look itself.") ||
+	if report.ModelSentence != "Ori Music Demo Manager could not look itself: No model is set for Ori Music Demo Manager. "+
+		"Fix it and press Look further. This is what Ori found." ||
 		report.ToolsSentence != "Search for more tools needs a model" {
 		t.Fatalf("degraded sentences = %q / %q", report.ModelSentence, report.ToolsSentence)
 	}
@@ -324,7 +326,7 @@ func TestStart_EveryStagePlanIsWorded(t *testing.T) {
 		"Creates Album-1, linked to its own folder", "Creates Album-2, linked to its own folder", "Creates Album-3, linked to its own folder",
 		"Creates Album-4, linked to its own folder", "Creates Album-5, linked to its own folder", "Creates Logic Sketch, linked to its own folder",
 		"Creates Track-1, linked to its own folder", "Creates Track-2, linked to its own folder",
-		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing is moved, copied or read"}
+		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing in Ori Music Demo is moved, copied or read"}
 	if !hr.Plan.Runnable || hr.Plan.Stage != foldermap.StageGroup || strings.Join(lines, "|") != strings.Join(want, "|") {
 		t.Fatalf("default plan stage=%q runnable=%v lines=%v", hr.Plan.Stage, hr.Plan.Runnable, lines)
 	}

@@ -4,7 +4,8 @@ import {
   compactTeamHTML,
   linkedWorkspacesHTML,
   resourceAccessHTML,
-  bindOverview
+  bindOverview,
+  setupProjectsChipHTML
 } from './workspace-overview.js';
 import { WorkspaceCommandView } from './workspace-command.js';
 
@@ -69,6 +70,28 @@ test('only a group gets linked-workspace controls, backed by the existing member
   assert.match(html, /data-cmd-members-host/);
   assert.match(html, /data-cmd-group-create>Create new/);
   assert.match(html, /data-cmd-group-link>Add existing/);
+});
+
+test('a managed Home adds workspaces from its own shelf; a plain group does not', () => {
+  const c = view();
+  c.page.workspace.kind = 'group';
+  assert.doesNotMatch(linkedWorkspacesHTML(c), /data-cmd-setup-projects/);
+  c.groupTemplateStatus = { kind: 'managed_home' };
+  assert.match(
+    linkedWorkspacesHTML(c),
+    /data-cmd-setup-projects>Set up projects from the shelf…<\/button>/
+  );
+});
+
+test('the Home map’s “to set up” button shows only with members and projects waiting', () => {
+  assert.equal(setupProjectsChipHTML(null, 3), '');
+  assert.equal(setupProjectsChipHTML({ toSetUp: 4 }, 0), '', 'an empty Home’s lot has the button');
+  assert.equal(setupProjectsChipHTML({ toSetUp: 0 }, 3), '');
+  assert.equal(setupProjectsChipHTML({ toSetUp: 1.5 }, 3), '');
+  assert.match(
+    setupProjectsChipHTML({ shelf: 6, toSetUp: 4 }, 1),
+    /data-cmd-setup-projects><b>4<\/b> to set up · Set up projects…<\/button>/
+  );
 });
 
 test('opening a team row chooses the same agent and exposes its real controls', () => {

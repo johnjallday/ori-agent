@@ -195,16 +195,148 @@ export function folderAgentReportView(view) {
     out.setup = {
       status: String(view.setup.status || ''),
       stopReason: String(view.setup.stop_reason || ''),
-      lines: (view.setup.lines || []).map(line => ({
-        kind: String(line.kind || ''),
-        step: String(line.step || ''),
-        name: String(line.name || ''),
-        detail: String(line.detail || ''),
-        state: String(line.state || 'waiting')
-      }))
+      startedAt: timeOf(view.setup.started_at),
+      finishedAt: timeOf(view.setup.finished_at),
+      lines: (view.setup.lines || []).map(line => lineView(line, 'waiting')),
+      receipt: receiptView(view.setup.receipt)
     };
   }
   return out;
+}
+
+// A workspace route the receipt may link: the app's own workspace pages only.
+function workspaceRoute(route) {
+  const value = String(route || '');
+  return value.startsWith('/workspaces/') && !value.includes('//') ? value : '';
+}
+
+function refView(ref) {
+  return ref?.name ? { name: String(ref.name), route: workspaceRoute(ref.route) } : null;
+}
+
+// receiptView is what a run made, as the host reported it: plugins with
+// versions, the Home, a group's members, the agents hired, the songs listed.
+function receiptView(receipt) {
+  if (!receipt || typeof receipt !== 'object') return null;
+  const strings = list => (Array.isArray(list) ? list.map(String).filter(Boolean) : []);
+  return {
+    installed: strings(receipt.installed),
+    home: refView(receipt.home),
+    homeCreated: Boolean(receipt.home_created),
+    group: Boolean(receipt.group),
+    members: (Array.isArray(receipt.members) ? receipt.members : []).map(refView).filter(Boolean),
+    hired: strings(receipt.hired),
+    listed: Math.max(0, Number(receipt.listed) || 0),
+    listedNoun: String(receipt.listed_noun || ''),
+    unreached: Math.max(0, Number(receipt.unreached) || 0)
+  };
+}
+
+// folderAgentReceiptRows are the receipt's rows (PRD FR10), each left out when
+// empty: what was installed, created, hired, listed and where the folder now
+// sits, each with the one link where the owner can check it.
+export function folderAgentReceiptRows(view) {
+  const receipt = view?.setup?.receipt;
+  if (!receipt) return [];
+  const rows = [];
+  const row = (label, words, link) => {
+    if (words) rows.push({ label, words, link: link?.href ? link : null });
+  };
+  row('Installed', receipt.installed.join(' · '), { text: 'Plugins', href: '/plugins' });
+  const created = [];
+  if (receipt.home && receipt.homeCreated) created.push(receipt.home.name);
+  if (receipt.group && receipt.members.length)
+    created.push(
+      `${receipt.members.length} ${plural(receipt.members.length, 'workspace', 'workspaces')} in ${view.workspace}`
+    );
+  row(
+    'Created',
+    created.join(' · '),
+    receipt.home && receipt.homeCreated ? { text: 'Open', href: receipt.home.route } : null
+  );
+  row('Hired', receipt.hired.join(' · '), { text: 'Agents', href: '/agents' });
+  if (receipt.listed || receipt.unreached) {
+    const noun = receipt.listedNoun || plural(receipt.listed, 'song', 'songs');
+    const words = [`${receipt.listed} ${noun} on the shelf`];
+    if (receipt.unreached)
+      words.push(
+        `${receipt.unreached} ${plural(receipt.unreached, 'folder', 'folders')} not reached yet`
+      );
+    row('Listed', words.join(' · '));
+  }
+  let placed = '';
+  if (receipt.home) placed = `${view.workspace} inside your ${receipt.home.name}`;
+  else if (receipt.group)
+    placed = `${view.workspace} is now a group with ${receipt.members.length} ${plural(receipt.members.length, 'workspace', 'workspaces')}`;
+  row('Placed', placed, view.route ? { text: `Open ${view.workspace}`, href: view.route } : null);
+  return rows;
+}
+
+// renderReceipt draws the receipt rows as a list of label, words and link.
+function renderReceipt(doc, rows) {
+  const list = el(doc, 'dl', 'folder-agent-card__receipt-rows');
+  rows.forEach(row => {
+    const item = el(doc, 'div', 'folder-agent-card__receipt-row');
+    item.dataset.kind = row.label.toLowerCase();
+    const words = el(doc, 'dd', 'folder-agent-card__receipt-words');
+    words.append(el(doc, 'span', 'folder-agent-card__receipt-text', row.words));
+    if (row.link) {
+      const link = el(doc, 'a', 'folder-agent-card__receipt-link', row.link.text);
+      link.href = row.link.href;
+      words.append(link);
+    }
+    item.append(el(doc, 'dt', 'folder-agent-card__receipt-label', row.label), words);
+    list.append(item);
+  });
+  return list;
+}
+
+// timeOf reads a server timestamp as epoch milliseconds; 0 when absent.
+function timeOf(value) {
+  const ms = Date.parse(String(value || ''));
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+// lineView is one plan or run line: what it does, and while a run is in
+// progress, its state, the runner's words for it and when it started and
+// finished (server times).
+function lineView(line, defaultState = '') {
+  return {
+    kind: String(line.kind || ''),
+    step: String(line.step || ''),
+    name: String(line.name || ''),
+    detail: String(line.detail || ''),
+    state: String(line.state || defaultState),
+    progress: String(line.progress || ''),
+    startedAt: timeOf(line.started_at),
+    finishedAt: timeOf(line.finished_at)
+  };
+}
+
+// formatFolderAgentDuration words an action's time: "<1 s", "6 s", "1:05".
+export function formatFolderAgentDuration(ms) {
+  const value = Math.max(0, Number(ms) || 0);
+  if (value < 1000) return '<1 s';
+  const seconds = Math.floor(value / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  return formatFolderAgentClock(value);
+}
+
+// formatFolderAgentClock words a run's time as m:ss.
+export function formatFolderAgentClock(ms) {
+  const seconds = Math.floor(Math.max(0, Number(ms) || 0) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+// folderAgentLineTime is how long a line has taken: a working line against
+// the client clock (now) from its server start, a finished one by the
+// server's own start and finish. null for a line that has not started.
+export function folderAgentLineTime(line, now = Date.now()) {
+  if (!line?.startedAt) return null;
+  if (line.state === 'working') return Math.max(0, now - line.startedAt);
+  if ((line.state === 'done' || line.state === 'failed') && line.finishedAt)
+    return Math.max(0, line.finishedAt - line.startedAt);
+  return null;
 }
 
 // folderAgentNeedsView reads a Today item of a folder agent kind.
@@ -397,12 +529,11 @@ function plural(n, one, many) {
   return n === 1 ? one : many;
 }
 
-// runHeadline says where the run stands, above the steps.
+// runHeadline says where a run that is not in progress stands, above the
+// steps (renderPlan words the running headline itself).
 function runHeadline(phase, done, failedAt, count) {
   const steps = `${count} ${plural(count, 'step', 'steps')}`;
   switch (phase) {
-    case 'running':
-      return `Setting up · ${done} of ${count} done`;
     case 'done':
       return `All done · ${steps}`;
     case 'stopped':
@@ -438,6 +569,8 @@ function groupActions(lines, steps) {
         excludes: step?.excludes || '',
         detail: line.step ? '' : line.detail,
         state: line.step ? '' : line.state || 'waiting',
+        // A line with no step is its own row and its own action.
+        line: line.step ? null : line,
         actions: []
       };
       index.set(key, row);
@@ -459,6 +592,73 @@ function rowState(row) {
   return 'waiting';
 }
 
+// rowUnits are a row's actions, or the row's own line when it has none: the
+// units the progress bar and the running headline count.
+function rowUnits(row) {
+  if (row.actions.length) return row.actions;
+  return row.line ? [row.line] : [];
+}
+
+// actionTime is the " · 6 s" part of a started action; a working one carries
+// its server start so the clock can tick between polls.
+function actionTime(doc, line, now) {
+  const ms = folderAgentLineTime(line, now);
+  if (ms === null) return null;
+  const time = el(doc, 'span', 'folder-agent-card__action-time', formatFolderAgentDuration(ms));
+  if (line.state === 'working') time.dataset.startedAt = String(line.startedAt);
+  return time;
+}
+
+// renderAction draws one action: a spinner while it works, its name (or,
+// once done, the runner's receipt words), the live words after the name, and
+// the time last.
+function renderAction(doc, action, now) {
+  const state = action.state || 'waiting';
+  const act = el(doc, 'span', 'folder-agent-card__action');
+  act.dataset.state = state;
+  if (action.detail) act.setAttribute('title', action.detail);
+  if (state === 'working') {
+    const spinner = el(doc, 'span', 'folder-agent-card__spinner');
+    spinner.setAttribute('aria-hidden', 'true');
+    act.append(spinner);
+  }
+  const receipt = state === 'done' && action.progress;
+  act.append(
+    el(doc, 'span', 'folder-agent-card__action-name', receipt ? action.progress : action.name)
+  );
+  if (!receipt && action.progress && (state === 'working' || state === 'failed'))
+    act.append(el(doc, 'span', 'folder-agent-card__action-progress', action.progress));
+  const time = actionTime(doc, action, now);
+  if (time) act.append(time);
+  return act;
+}
+
+// tickFolderAgentClocks moves every working action's time and the running
+// headline's clock to now, between polls.
+export function tickFolderAgentClocks(root, now = Date.now()) {
+  const nodes = selector => Array.from(root?.querySelectorAll?.(selector) || []);
+  nodes('.folder-agent-card__action-time').forEach(node => {
+    const started = Number(node.dataset?.startedAt);
+    if (started) node.textContent = formatFolderAgentDuration(now - started);
+  });
+  nodes('.folder-agent-card__run-clock').forEach(node => {
+    const started = Number(node.dataset?.startedAt);
+    if (started) node.textContent = formatFolderAgentClock(now - started);
+  });
+}
+
+// startRunClock ticks a running section every second while it is on the
+// page; each poll draws a fresh card, so the old one's clock stops at its
+// next tick. A stub DOM (no isConnected) starts no clock.
+function startRunClock(section) {
+  if (typeof section.isConnected !== 'boolean' || typeof setInterval !== 'function') return;
+  const timer = setInterval(() => {
+    if (section.isConnected) tickFolderAgentClocks(section);
+    else clearInterval(timer);
+  }, 1000);
+  timer?.unref?.();
+}
+
 // renderPlan draws the plan as one list the owner can follow: the agent's
 // words (or Ori's reason for its default), a headline for where things
 // stand, one numbered row per chosen step with its actions under it, the
@@ -466,7 +666,14 @@ function rowState(row) {
 // assurance as a note. phase is 'plan' (before Set it up), 'running', 'done'
 // or 'stopped'. The state words stay in the row for screen readers; the
 // marker and the action glyphs carry them for the eye.
-function renderPlan(doc, view, plan, lines, phase, { selecting = false, onTick } = {}) {
+function renderPlan(
+  doc,
+  view,
+  plan,
+  lines,
+  phase,
+  { selecting = false, onTick, now = Date.now() } = {}
+) {
   const section = el(doc, 'section', 'folder-agent-card__run');
   section.dataset.phase = phase;
   const steps = plan?.steps || [];
@@ -485,9 +692,11 @@ function renderPlan(doc, view, plan, lines, phase, { selecting = false, onTick }
   }
   const { rows, notes } = groupActions(lines, steps);
   const chosen = new Set(rows.map(row => row.handle).filter(Boolean));
-  // A chosen step whose lines carry no step yet still has its row.
+  // While choosing, a chosen step whose lines carry no step yet still has its
+  // row. From Set it up on, the run's own lines are the steps: the plan's
+  // current choice may differ from the one the run was confirmed on.
   steps.forEach(step => {
-    if (!step.chosen || chosen.has(step.handle)) return;
+    if (phase !== 'plan' || !step.chosen || chosen.has(step.handle)) return;
     chosen.add(step.handle);
     rows.push({
       handle: step.handle,
@@ -502,14 +711,67 @@ function renderPlan(doc, view, plan, lines, phase, { selecting = false, onTick }
   const offered = phase === 'plan' ? steps.filter(step => !chosen.has(step.handle)) : [];
   const done = rows.filter(row => rowState(row) === 'done').length;
   const failedAt = rows.findIndex(row => rowState(row) === 'failed');
-  const head = el(
-    doc,
-    'p',
-    'folder-agent-card__run-head',
-    runHeadline(phase, done, failedAt, rows.length)
-  );
+  const head = el(doc, 'p', 'folder-agent-card__run-head');
   head.setAttribute('role', 'status');
-  section.append(head);
+  if (phase === 'running') {
+    // "Setting up · step X of Y · <what is happening> · m:ss": the step in
+    // hand, the working action's live words (its name until it has some),
+    // and the run's clock. The clock is hidden from the status region so it
+    // is not announced every second; the words are.
+    const units = rows.flatMap(rowUnits);
+    const at = rows.findIndex(row => rowState(row) !== 'done');
+    const working = units.find(unit => unit.state === 'working');
+    const waiting = at >= 0 ? rowUnits(rows[at]).find(unit => unit.state !== 'done') : null;
+    const current = working || waiting;
+    const words = [
+      'Setting up',
+      `step ${at >= 0 ? at + 1 : rows.length} of ${rows.length}`,
+      current ? current.progress || current.name : ''
+    ].filter(Boolean);
+    head.append(el(doc, 'span', 'folder-agent-card__run-head-text', words.join(' · ')));
+    const started = view.setup?.startedAt || 0;
+    if (started) {
+      const clock = el(
+        doc,
+        'span',
+        'folder-agent-card__run-clock',
+        formatFolderAgentClock(now - started)
+      );
+      clock.dataset.startedAt = String(started);
+      clock.setAttribute('aria-hidden', 'true');
+      head.append(clock);
+    }
+    section.append(head);
+    // A thin bar: done actions over all actions.
+    const finished = units.filter(unit => unit.state === 'done').length;
+    const bar = el(doc, 'div', 'folder-agent-card__progress');
+    bar.setAttribute('role', 'progressbar');
+    bar.setAttribute('aria-label', 'Setup progress');
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', String(units.length));
+    bar.setAttribute('aria-valuenow', String(finished));
+    const fill = el(doc, 'span', 'folder-agent-card__progress-fill');
+    fill.setAttribute(
+      'style',
+      `width:${units.length ? Math.round((finished / units.length) * 100) : 0}%`
+    );
+    bar.append(fill);
+    section.append(bar);
+    startRunClock(section);
+  } else {
+    let words = runHeadline(phase, done, failedAt, rows.length);
+    const setup = view.setup;
+    if (phase === 'done' && setup?.startedAt && setup?.finishedAt)
+      words += ` · ${formatFolderAgentDuration(setup.finishedAt - setup.startedAt)}`;
+    head.textContent = words;
+    section.append(head);
+  }
+  // Once the run ends, what it made, with a link to check each: a stopped
+  // run shows what finished above the line that failed.
+  if (phase === 'done' || phase === 'stopped') {
+    const receiptRows = folderAgentReceiptRows(view);
+    if (receiptRows.length) section.append(renderReceipt(doc, receiptRows));
+  }
   const list = el(doc, 'ol', 'folder-agent-card__plan');
   const renderRow = (row, index, isChosen) => {
     const item = el(doc, 'li', 'folder-agent-card__line');
@@ -533,20 +795,58 @@ function renderPlan(doc, view, plan, lines, phase, { selecting = false, onTick }
     const mark = el(doc, 'span', 'folder-agent-card__line-mark', isChosen ? String(index + 1) : '');
     mark.setAttribute('aria-hidden', 'true');
     const body = el(doc, 'span', 'folder-agent-card__line-body');
-    body.append(el(doc, 'span', 'folder-agent-card__line-name', row.title));
+    // A finished run's steps collapse to their titles with their time; a
+    // click shows what each step did.
+    const collapsible = phase === 'done' && isChosen && row.actions.length > 0;
+    if (collapsible) {
+      item.dataset.collapsed = 'true';
+      const toggle = el(
+        doc,
+        'button',
+        'folder-agent-card__line-name folder-agent-card__line-toggle',
+        row.title
+      );
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.addEventListener('click', () => {
+        const open = item.dataset.collapsed === 'true';
+        item.dataset.collapsed = open ? 'false' : 'true';
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      // The title and its time share one line.
+      const stepHead = el(doc, 'span', 'folder-agent-card__step-head');
+      stepHead.append(toggle);
+      const units = rowUnits(row).filter(unit => unit.startedAt && unit.finishedAt);
+      if (units.length) {
+        const start = Math.min(...units.map(unit => unit.startedAt));
+        const end = Math.max(...units.map(unit => unit.finishedAt));
+        stepHead.append(
+          el(doc, 'span', 'folder-agent-card__step-time', formatFolderAgentDuration(end - start))
+        );
+      }
+      body.append(stepHead);
+    } else {
+      body.append(el(doc, 'span', 'folder-agent-card__line-name', row.title));
+    }
     if (row.label) body.append(el(doc, 'span', 'folder-agent-card__tool-label', row.label));
     if (row.actions.length) {
       const actions = el(doc, 'span', 'folder-agent-card__actions-line');
       row.actions.forEach((action, k) => {
         if (k) actions.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
-        const act = el(doc, 'span', 'folder-agent-card__action', action.name);
-        act.dataset.state = action.state || 'waiting';
-        if (action.detail) act.setAttribute('title', action.detail);
-        actions.append(act);
+        actions.append(renderAction(doc, action, now));
       });
       body.append(actions);
-    } else if (row.detail) {
-      body.append(el(doc, 'span', 'folder-agent-card__line-detail', row.detail));
+    } else {
+      if (row.detail) body.append(el(doc, 'span', 'folder-agent-card__line-detail', row.detail));
+      // A row that is its own action shows its live words and time too.
+      if (row.line && phase !== 'plan') {
+        const live = el(doc, 'span', 'folder-agent-card__line-live');
+        if (row.line.progress && row.line.state !== 'waiting')
+          live.append(el(doc, 'span', 'folder-agent-card__action-progress', row.line.progress));
+        const time = actionTime(doc, row.line, now);
+        if (time) live.append(time);
+        if (live.children?.length) body.append(live);
+      }
     }
     item.append(mark, body);
     const words = isChosen ? LINE_STATE_WORDS[state] : '';
@@ -626,7 +926,7 @@ function runPhase(setup) {
 export function renderFolderAgentReport(
   view,
   doc = document,
-  { onAction, error = '', fetchImpl = globalThis.fetch, opening = false } = {}
+  { onAction, error = '', fetchImpl = globalThis.fetch, opening = false, now = Date.now() } = {}
 ) {
   const card = el(doc, 'article', 'folder-agent-card folder-agent-card--report');
   card.dataset.folderAgentCard = view.state;
@@ -690,7 +990,7 @@ export function renderFolderAgentReport(
   // steps with a box each; from Set it up on, the run's lines in the same
   // shape, with the agent's words above saying why.
   if (view.setup) {
-    card.append(renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup)));
+    card.append(renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup), { now }));
     if (view.setup.status === 'stopped') {
       card.append(
         el(
@@ -888,7 +1188,11 @@ export function renderFolderAgentReport(
     const status = el(doc, 'p', 'folder-agent-card__opening', `Opening ${view.workspace}…`);
     status.setAttribute('role', 'status');
     card.append(status);
-  } else if (view.route) {
+  } else if (
+    view.route &&
+    !(view.setup && folderAgentReceiptRows(view).some(row => row.link?.href === view.route))
+  ) {
+    // The receipt's Placed row already opens the place.
     const open = el(doc, 'a', 'folder-agent-card__open', `Open ${view.workspace}`);
     open.href = view.route;
     card.append(open);
@@ -955,13 +1259,7 @@ function planView(plan) {
     runnable: Boolean(plan.runnable),
     unavailable: String(plan.unavailable || ''),
     selected: Array.isArray(plan.selected) ? plan.selected.map(String) : [],
-    lines: (plan.lines || []).map(line => ({
-      kind: String(line.kind || ''),
-      step: String(line.step || ''),
-      name: String(line.name || ''),
-      detail: String(line.detail || ''),
-      state: String(line.state || '')
-    })),
+    lines: (plan.lines || []).map(line => lineView(line)),
     // Who chose the steps: the agent, in its own words, or Ori's default.
     source: String(plan.source || 'default'),
     words: String(plan.words || ''),
@@ -1051,13 +1349,55 @@ export function setupFinished(previous, next) {
 // card's "Open <name>" link goes, once a run they watched has set it up. The
 // beat before leaving lets the finished list be seen. navigate is the page's
 // own way there; the default is the link's. Returns whether it will go.
-export function openFolderAgentPlace(view, { navigate, delayMs = 900 } = {}) {
+// On Home it also waits for the map behind the card to finish building the
+// place, or one second, whichever is first (PRD FR20).
+export function openFolderAgentPlace(
+  view,
+  { navigate, delayMs = 900, motion = globalThis.window?.OriWorkspaceMap } = {}
+) {
   const route = String(view?.route || '');
   if (!route) return false;
   const go =
     typeof navigate === 'function' ? navigate : target => globalThis.location?.assign?.(target);
-  if (delayMs > 0) setTimeout(() => go(route), delayMs);
-  else go(route);
+  const settled =
+    typeof motion?.whenMotionSettled === 'function' ? motion.whenMotionSettled(1000) : null;
+  if (!settled && delayMs <= 0) {
+    go(route);
+    return true;
+  }
+  const beat = new Promise(resolve => (delayMs > 0 ? setTimeout(resolve, delayMs) : resolve()));
+  Promise.all([beat, settled ? settled.catch(() => {}) : null]).then(() => go(route));
+  return true;
+}
+
+// The lines whose finish changes what Home's map draws: a Home created, the
+// workspace placed, the folder turned into a group, a member made or moved in.
+const PLACEMENT_LINE_KINDS = new Set(['home', 'place', 'promote', 'member', 'existing_member']);
+
+// placementLinesDone says whether next shows a placement line done that was
+// not done in previous.
+export function placementLinesDone(previous, next) {
+  const before = new Map((previous?.setup?.lines || []).map(line => [line.name, line.state]));
+  return (next?.setup?.lines || []).some(
+    line =>
+      PLACEMENT_LINE_KINDS.has(line.kind) &&
+      line.state === 'done' &&
+      before.get(line.name) !== 'done'
+  );
+}
+
+// notifyPlacement tells Home's map to build the place when a poll shows a
+// placement line newly done. Every follower of a run calls it with each pair
+// of views (this module's own loop and the Home drawer's), before it opens
+// the place, so the map is already expecting its motion. Returns whether it
+// fired.
+export function notifyPlacement(previous, next) {
+  if (!placementLinesDone(previous, next)) return false;
+  globalThis.window?.dispatchEvent?.(
+    new globalThis.CustomEvent('ori:folder-agent-changed', {
+      detail: { workspaceID: String(next?.workspace_id || ''), placement: true }
+    })
+  );
   return true;
 }
 
@@ -1084,6 +1424,9 @@ export function followFolderAgent(
       const next = await fetchFolderAgent(current.workspace_id, fetchImpl).catch(() => null);
       if (!next || !isActive()) return;
       const finished = setupFinished(current, next);
+      // Home's map builds the place behind the card as it is made: it
+      // refreshes, animated, on placement lines only, never on every poll.
+      notifyPlacement(current, next);
       current = next;
       onView?.(next, finished);
       tick();

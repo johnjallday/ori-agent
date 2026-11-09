@@ -37,7 +37,8 @@ import {
   overviewHTML,
   bindOverview,
   captureOverview,
-  addWorkspaceMenuHTML
+  addWorkspaceMenuHTML,
+  setupProjectsChipHTML
 } from './workspace-overview.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 import { resolveWorkspaceNextAction } from './workspace-next-action.js';
@@ -12627,6 +12628,18 @@ export class WorkspaceCommandView {
         this.openWorkspacePanel('resources', resources);
         return;
       }
+      const setupProjects = event.target.closest('[data-cmd-setup-projects]');
+      if (setupProjects) {
+        const menu = setupProjects.closest('details');
+        if (menu) menu.open = false;
+        // The sheet sits beside the toolbar row, which a run leaves in place;
+        // focus returns to the control that opened it.
+        this.openLibrarySetupSheet(
+          menu?.querySelector('summary') || setupProjects,
+          setupProjects.closest('[data-map-zone="detachment"]') || null
+        );
+        return;
+      }
       const groupCreate = event.target.closest('[data-cmd-group-create]');
       const groupLink = event.target.closest('[data-cmd-group-link]');
       if (groupCreate || groupLink) {
@@ -13664,6 +13677,11 @@ export class WorkspaceCommandView {
       '">' +
       (count === null ? '—' : count) +
       '</span>' +
+      // Projects on the Home's shelf not on the map yet: set up from here.
+      // Its own slot, refreshed in place when the count arrives.
+      '<span class="ws-cmd-map-setup-slot" data-cmd-setup-projects-slot>' +
+      setupProjectsChipHTML(this.libraryEmptyState, count) +
+      '</span>' +
       addWorkspaceMenuHTML(this) +
       (count === null
         ? '<p class="ws-cmd-member-read-state" role="status">Workspace membership is loading or unavailable. <button type="button" class="ws-cmd-agent-action" data-cmd-member-retry>Retry membership</button></p>'
@@ -14055,7 +14073,36 @@ export class WorkspaceCommandView {
     if (this.workspaceId() !== workspaceId) return;
     if (JSON.stringify(next) === JSON.stringify(this.libraryEmptyState || null)) return;
     this.libraryEmptyState = next;
+    this.syncSetupProjectsChip();
     if (this.active) this.syncDetachmentMap();
+  }
+
+  // The toolbar's "N to set up" follows the shelf count in place, so an open
+  // picker or menu beside it is left as it is.
+  syncSetupProjectsChip() {
+    const slot = this.container?.querySelector?.('[data-cmd-setup-projects-slot]');
+    if (!slot) return;
+    const owner = this.page?.membersPanel;
+    const count = owner?.group && !owner.readFailed ? this.detachmentMemberCount() : 0;
+    const html = setupProjectsChipHTML(this.libraryEmptyState, count);
+    // A button already there keeps its element (and so its focus, and a sheet
+    // placed beside it): only its number changes.
+    const number = html && slot.querySelector?.('[data-cmd-setup-projects] b');
+    if (number) number.textContent = String(this.libraryEmptyState.toSetUp);
+    else slot.innerHTML = html;
+  }
+
+  // The toolbar's members count follows the members in place after a run
+  // added some (a re-render would drop an open picker or sheet beside it).
+  syncDetachmentToolbarCount() {
+    const bar = this.container?.querySelector?.('[data-map-zone="detachment"]');
+    const badge = bar?.querySelector?.('.ws-cmd-map-zone-count');
+    const owner = this.page?.membersPanel;
+    if (!badge || !owner?.group || owner.readFailed) return;
+    const count = this.detachmentMemberCount();
+    badge.textContent = String(count);
+    badge.setAttribute?.('aria-label', count + (count === 1 ? ' member' : ' members'));
+    if (count > 0) bar.classList?.remove?.('is-empty');
   }
 
   /**
@@ -14064,7 +14111,7 @@ export class WorkspaceCommandView {
    * FR-6). After a run the members reload, the lot gives way to the new
    * tiles, and the camera frames them.
    */
-  openLibrarySetupSheet(element) {
+  openLibrarySetupSheet(element, beside = null) {
     const homeID = this.workspaceId();
     if (!homeID) return false;
     const host = this.ensureDetachmentHost();
@@ -14073,7 +14120,7 @@ export class WorkspaceCommandView {
       homeID,
       homeName: String(this.page?.workspace?.name || '').trim() || 'this Home',
       anchor: element || null,
-      beside: element || null,
+      beside: beside || element || null,
       tokensFrom: (host && (host.querySelector('.ws-map') || host)) || null,
       shelfRoute: slug
         ? `/workspaces/${encodeURIComponent(slug)}/assistant#projectLibraryProposals`
@@ -14093,7 +14140,9 @@ export class WorkspaceCommandView {
         /* the map below still re-syncs from whatever the panel holds */
       }
     }
+    this.syncDetachmentToolbarCount();
     await this.loadLibraryEmptyState();
+    this.syncSetupProjectsChip();
     this.syncDetachmentMap();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (ids.length && map && typeof map.framePlaced === 'function') {

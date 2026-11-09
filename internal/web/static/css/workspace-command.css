@@ -852,6 +852,27 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   border-color: var(--ws-group-accent-line, var(--ws-line-bright));
   color: var(--ws-group-accent, var(--ws-faction));
 }
+/* A Home's shelf projects not on the map yet: a one-click way to set them up
+   from the Home's own map. Empty slot when there are none. */
+.ws-cmd-map-setup-slot:empty {
+  display: none;
+}
+.ws-cmd-map-group-bar .ws-cmd-map-setup-projects {
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 1px solid var(--ws-group-accent-line, var(--ws-line-bright));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ws-group-accent, var(--ws-faction));
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ws-cmd-map-group-bar .ws-cmd-map-setup-projects:hover,
+.ws-cmd-map-group-bar .ws-cmd-map-setup-projects:focus-visible {
+  border-color: var(--ws-group-accent, var(--ws-faction));
+}
 /* With no members the two actions are the point of the map (FR-27). */
 .ws-cmd-map-group-bar.is-empty .ws-cmd-map-zone-action {
   border-color: var(--ws-group-accent-line, var(--ws-line-bright));

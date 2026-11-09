@@ -36,6 +36,7 @@ import {
   fetchFolderAgent,
   folderAgentCardView,
   folderAgentReportView,
+  notifyPlacement,
   openFolderAgentPlace,
   postFolderAgentAction,
   renderFolderAgentCard,
@@ -6992,6 +6993,9 @@ function scheduleAgentPoll() {
     state.agent.poll = 0;
     const next = await fetchFolderAgent(view.workspace_id).catch(() => null);
     if (next && state.agent.view?.workspace_id === view.workspace_id) {
+      // The map behind the drawer builds the place as it is made, before the
+      // run's end opens it, so the open waits for that motion.
+      notifyPlacement(view, next);
       // A run watched to its end opens the place, as the card's link would;
       // a card no longer on the page opens nothing.
       const finished = setupFinished(view, next);

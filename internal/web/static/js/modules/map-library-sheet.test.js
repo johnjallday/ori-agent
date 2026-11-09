@@ -465,6 +465,17 @@ test('sheetPosition sits beside the anchor, falls below when there is no room, a
   });
   assert.equal(short.top, 72, 'a short window keeps the title clear of the top bar');
   assert.equal(short.maxHeight, 560 - 72 - 16);
+
+  // A full-width toolbar row (a Home's own map) has no room beside it: the
+  // sheet goes under it and fits the space there, leaving the row in sight.
+  const tall = { width: 440, height: 640 };
+  const screen = { width: 1440, height: 900 };
+  const underRow = sheetPosition({ left: 32, right: 1408, top: 340, bottom: 395 }, tall, screen);
+  assert.deepEqual(underRow, { left: 32, top: 403, width: 440, maxHeight: 900 - 16 - 403 });
+  // Too little room under it for a usable sheet: it moves up, as before.
+  const lowRow = sheetPosition({ left: 32, right: 1408, top: 560, bottom: 615 }, tall, screen);
+  assert.equal(lowRow.maxHeight, 640);
+  assert.equal(lowRow.top, 900 - 16 - 640);
 });
 
 test('openLibrarySheet refuses without a document or Home id', () => {

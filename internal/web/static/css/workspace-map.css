@@ -4281,3 +4281,32 @@
     animation: ws-map-tile-placed 2.6s ease-out both;
   }
 }
+
+/* A place a folder setup just built grows in behind its card (Home re-mounts
+   with animate; workspace-map.js adds and removes the class). Moved tiles and
+   districts slide by inline transitions the script sets and clears. */
+@keyframes ws-map-grow-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-tile.is-growing-in,
+  .ws-map-district.is-growing-in {
+    animation: ws-map-grow-in 350ms ease-out both;
+    transform-origin: 50% 60%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-tile.is-growing-in,
+  .ws-map-district.is-growing-in {
+    animation: none;
+  }
+}

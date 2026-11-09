@@ -2386,6 +2386,35 @@ test('tile facts come from each Home roster with the shelf wording', () => {
   assert.equal(songRosterURL('h 1'), '/api/workspaces/h%201/assistant-program/library/roster');
 });
 
+test('a followed placement re-mounts the map once, animated, from the rows it made', () => {
+  const source = readFileSync(new URL('./home-workspace-cockpit.js', import.meta.url), 'utf8');
+  const handler = source.slice(
+    source.indexOf('const onFolderAgentChange = event =>'),
+    source.indexOf("window.addEventListener('ori:folder-agent-started'")
+  );
+  // Only a placement asks for motion, after any refresh already in flight.
+  assert.match(handler, /if \(event\?\.detail\?\.placement\) \{/);
+  assert.match(handler, /expectMotion\?\.\(1000\)/);
+  assert.match(handler, /Promise\.resolve\(state\.inFlight\)/);
+  assert.match(handler, /animatePlacement = true;\s*return refreshQuietly\(\);/);
+  const quiet = source.slice(
+    source.indexOf('async function refreshQuietly()'),
+    source.indexOf('async function refreshQuietly()') + 3000
+  );
+  // The flag is taken by the refresh that fetches the new rows, once, and
+  // only a successful fetch animates.
+  assert.match(quiet, /const animate = animatePlacement;\s*animatePlacement = false;/);
+  assert.match(quiet, /mountMap\(\{ animate: animate && fresh \}\)/);
+  // Every other mount (polls, selection, filters) draws without motion.
+  const mount = source.slice(
+    source.indexOf('function mountMap('),
+    source.indexOf('function mountMap(') + 400
+  );
+  assert.match(mount, /function mountMap\(\{ animate = false \} = \{\}\)/);
+  assert.match(mount, /window\.OriWorkspaceMap\.mount\(els\.map, \{\s*animate,/);
+  assert.equal((source.match(/mountMap\(\{ animate: /g) || []).length, 1);
+});
+
 test('a folder workspace that just became a group is framed as the setup sheet frames placed tiles', () => {
   const source = readFileSync(new URL('./home-workspace-cockpit.js', import.meta.url), 'utf8');
   const refresh = source.slice(

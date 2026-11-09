@@ -356,6 +356,31 @@ func TestRunNamesTheHomeThatBlocksTheProviderUpdate(t *testing.T) {
 	}
 }
 
+func TestInstallReviewedIntegration_ReportsEachBoundary(t *testing.T) {
+	var calls []string
+	install := newFakeInstall(&calls)
+	var phases []IntegrationPhase
+	err := InstallReviewedIntegration(context.Background(), install, personalassistant.FolderInstallInstall, "reaper-plugin", "0.9.0",
+		func(phase IntegrationPhase) { phases = append(phases, phase) })
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	want := []IntegrationPhase{IntegrationChecking, IntegrationDownloading, IntegrationVerifying, IntegrationEnabling, IntegrationVerifying}
+	if len(phases) != len(want) {
+		t.Fatalf("phases = %v, want %v", phases, want)
+	}
+	for i := range want {
+		if phases[i] != want[i] {
+			t.Fatalf("phases = %v, want %v", phases, want)
+		}
+	}
+	// A nil listener is allowed.
+	calls = nil
+	if err := InstallReviewedIntegration(context.Background(), newFakeInstall(&calls), personalassistant.FolderInstallInstall, "reaper-plugin", "0.9.0", nil); err != nil {
+		t.Fatalf("install without a listener: %v", err)
+	}
+}
+
 func TestRunStopsWhenTheInstalledPluginHasNoQuest(t *testing.T) {
 	h := newInstallHarness()
 	h.install.installed, h.install.enabled, h.provider.ready = true, true, true

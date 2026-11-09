@@ -57,12 +57,35 @@ export function compactTeamHTML(c) {
 
 export function addWorkspaceMenuHTML(c) {
   if (!c.isGroupWorkspace()) return '';
+  // A managed Home also adds workspaces from its own shelf, from here, without
+  // going back to Home's map. Always offered for a Home: the same sheet gives
+  // projects already on the map the Home's assistant.
+  const fromShelf =
+    c.groupTemplateStatus?.kind === 'managed_home'
+      ? '<button type="button" class="ws-cmd-view-btn" data-cmd-setup-projects>Set up projects from the shelf…</button>'
+      : '';
   return (
     '<details class="ws-cmd-disclosure ws-cmd-add-workspace" data-cmd-add-workspace' +
     (c.addWorkspaceOpen ? ' open' : '') +
     '><summary class="ws-cmd-nav-btn">Add workspace</summary>' +
     '<div class="ws-cmd-disclosure-body"><button type="button" class="ws-cmd-view-btn" data-cmd-group-create>Create new</button>' +
-    '<button type="button" class="ws-cmd-view-btn" data-cmd-group-link>Add existing</button></div></details>'
+    '<button type="button" class="ws-cmd-view-btn" data-cmd-group-link>Add existing</button>' +
+    fromShelf +
+    '</div></details>'
+  );
+}
+
+// setupProjectsChipHTML is the Home map's "N to set up" button: shown once the
+// Home has members (an empty Home's lot carries the same button) and its shelf
+// has projects that are not on the map yet.
+export function setupProjectsChipHTML(state, memberCount) {
+  const toSetUp = Number(state?.toSetUp);
+  if (!memberCount || !Number.isInteger(toSetUp) || toSetUp < 1) return '';
+  return (
+    '<button type="button" class="ws-cmd-map-setup-projects" data-cmd-setup-projects>' +
+    '<b>' +
+    toSetUp +
+    '</b> to set up · Set up projects…</button>'
   );
 }
 

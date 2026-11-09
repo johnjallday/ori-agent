@@ -103,16 +103,44 @@ func HomeReceiptLine(listed, unreached int, facts foldermap.Facts) string {
 	return line
 }
 
-// homeLines are the Home stage's plan lines (PRD FR37, FR38).
+// HomeRolesLine is the one hire line of a plan that cannot name the Home's
+// roles before the Home exists (PRD FR5); the run names each role as it hires.
+const HomeRolesLine = "Fills the Home's roles"
+
+// homeLines are the Home stage's plan lines (PRD FR1, FR37, FR38), one per
+// action the run takes: the provider's install when it is not ready, the
+// Home's creation when there is none, a hire per role the Home still lacks,
+// then the folder, its listing and the placement. A record looked at before
+// the host reported Home facts keeps the generic creation line.
 func homeLines(rec Record, home folderlook.Candidate) []personalassistant.FolderPlanLine {
-	name := home.Name
-	if name == "" {
-		name = "Home"
-	}
+	name := homeName(home)
 	var lines []personalassistant.FolderPlanLine
-	if home.Action != folderlook.ActionAlreadyHere {
-		lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name,
-			Detail: "Its provider is checked against the reviewed release, and its roles are filled."})
+	facts := home.Home
+	if facts == nil {
+		if home.Action != folderlook.ActionAlreadyHere {
+			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name,
+				Detail: "Its provider is checked against the reviewed release, and its roles are filled."})
+		}
+	} else {
+		if !facts.ProviderReady {
+			provider := facts.ProviderName
+			if provider == "" {
+				provider = "the " + name + "'s plugin"
+			}
+			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanProvider, Name: "Installs " + provider,
+				Detail: "The reviewed release, checked before it is installed."})
+		}
+		if !facts.HomeExists {
+			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name})
+		}
+		if facts.RolesKnown {
+			for _, role := range facts.MissingRoles {
+				lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: "Hires " + role})
+			}
+		} else {
+			lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: HomeRolesLine,
+				Detail: "Each role is named as it is hired."})
+		}
 	}
 	lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanLibrary,
 		Name: "Adds " + rec.FolderName + " to your " + name})
@@ -137,6 +165,14 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 	return lines
 }
 
+// homeName is the Home's name as the plan words it.
+func homeName(home folderlook.Candidate) string {
+	if home.Name == "" {
+		return "Home"
+	}
+	return home.Name
+}
+
 func shapeOf(rec Record) string {
 	if rec.Facts.Portfolio != nil {
 		return string(rec.Facts.Portfolio.Shape)
@@ -148,4 +184,6 @@ func shapeOf(rec Record) string {
 const (
 	FolderPlanScopes = "scopes"
 	FolderPlanPlace  = "place"
+	// FolderPlanHire is a hire line: "Hires <role>" or HomeRolesLine.
+	FolderPlanHire = "hire"
 )

@@ -1,12 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   chooseFolder,
   folderAgentActionPath,
   folderAgentCardView,
   folderAgentHireChoice,
+  folderAgentLineTime,
   folderAgentNeedsView,
+  folderAgentReceiptRows,
+  followFolderAgent,
+  notifyPlacement,
+  placementLinesDone,
+  formatFolderAgentClock,
+  formatFolderAgentDuration,
+  tickFolderAgentClocks,
   folderAgentReportView,
   folderAgentTileLine,
   mountWorkspaceFolderAgent,
@@ -588,7 +597,7 @@ test('every offered step has a box; unticking one refreshes the plan and Set it 
     ]
   );
   assert.deepEqual(
-    card.querySelectorAll('.folder-agent-card__action').map(n => n.textContent),
+    card.querySelectorAll('.folder-agent-card__action-name').map(n => n.textContent),
     ['Installs X tools', 'Connects X tools to Ori Music Demo']
   );
   // The redrawn list follows the server's answer.
@@ -661,7 +670,8 @@ test('the plan reads as numbered steps, the run says where it stands, the assura
     '.folder-agent-card__run'
   );
   assert.equal(live.dataset.phase, 'running');
-  assert.equal(text(live, '.folder-agent-card__run-head'), 'Setting up · 1 of 3 done');
+  assert.equal(text(live, '.folder-agent-card__run-head-text'), 'Setting up · step 2 of 3 · B');
+  assert.equal(live.querySelector('.folder-agent-card__run-head').attributes.role, 'status');
   assert.deepEqual(
     live.querySelectorAll('li').map(li => [li.dataset.state, li.attributes.style]),
     [
@@ -714,6 +724,334 @@ test('the plan reads as numbered steps, the run says where it stands, the assura
   );
   assert.equal(doneRun.dataset.phase, 'done');
   assert.equal(text(doneRun, '.folder-agent-card__run-head'), 'All done · 1 step');
+});
+
+test('durations read <1 s, seconds, then m:ss; a line times itself from the server', () => {
+  assert.equal(formatFolderAgentDuration(0), '<1 s');
+  assert.equal(formatFolderAgentDuration(999), '<1 s');
+  assert.equal(formatFolderAgentDuration(6400), '6 s');
+  assert.equal(formatFolderAgentDuration(65000), '1:05');
+  assert.equal(formatFolderAgentDuration(-50), '<1 s');
+  assert.equal(formatFolderAgentClock(14000), '0:14');
+  assert.equal(formatFolderAgentClock(125000), '2:05');
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  assert.equal(folderAgentLineTime({ state: 'waiting' }, t0), null);
+  assert.equal(folderAgentLineTime({ state: 'working', startedAt: t0 }, t0 + 4200), 4200);
+  // A client clock behind the server never shows a negative time.
+  assert.equal(folderAgentLineTime({ state: 'working', startedAt: t0 }, t0 - 900), 0);
+  assert.equal(
+    folderAgentLineTime({ state: 'done', startedAt: t0, finishedAt: t0 + 6000 }, t0 + 99999),
+    6000
+  );
+});
+
+test('a running setup shows the working action with its words and time, and a done one with its receipt', () => {
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  const iso = ms => new Date(ms).toISOString();
+  const running = folderAgentReportView(
+    reported({
+      state: 'setting_up',
+      actions: [],
+      setup: {
+        status: 'running',
+        started_at: iso(t0),
+        lines: [
+          {
+            kind: 'integration',
+            step: 'tools',
+            name: 'Installs REAPER tools',
+            state: 'done',
+            progress: 'Installed Ori REAPER Plugin 0.9.0',
+            started_at: iso(t0),
+            finished_at: iso(t0 + 6000)
+          },
+          {
+            kind: 'workspace',
+            step: 'tools',
+            name: 'Connects REAPER tools to One Song',
+            state: 'working',
+            progress: 'Enabling it in One Song',
+            started_at: iso(t0 + 6000)
+          },
+          { kind: 'capability', step: 'curator', name: 'Adds File Janitor', state: 'waiting' },
+          { kind: 'folder', name: 'Nothing in One Song is moved, copied or read', state: 'waiting' }
+        ]
+      }
+    })
+  );
+  const card = renderFolderAgentReport(running, stubDocument(), { now: t0 + 9400 });
+  const run = card.querySelector('.folder-agent-card__run');
+  assert.equal(
+    text(run, '.folder-agent-card__run-head-text'),
+    'Setting up · step 1 of 2 · Enabling it in One Song'
+  );
+  const clock = run.querySelector('.folder-agent-card__run-clock');
+  assert.equal(clock.textContent, '0:09');
+  assert.equal(clock.attributes['aria-hidden'], 'true');
+  assert.equal(clock.dataset.startedAt, String(t0));
+
+  const [installed, connecting, queued] = run.querySelectorAll('.folder-agent-card__action');
+  assert.equal(installed.dataset.state, 'done');
+  assert.equal(
+    text(installed, '.folder-agent-card__action-name'),
+    'Installed Ori REAPER Plugin 0.9.0'
+  );
+  assert.equal(text(installed, '.folder-agent-card__action-time'), '6 s');
+  assert.equal(installed.querySelector('.folder-agent-card__spinner'), null);
+  assert.equal(connecting.dataset.state, 'working');
+  assert.ok(connecting.querySelector('.folder-agent-card__spinner'));
+  assert.equal(
+    text(connecting, '.folder-agent-card__action-name'),
+    'Connects REAPER tools to One Song'
+  );
+  assert.equal(text(connecting, '.folder-agent-card__action-progress'), 'Enabling it in One Song');
+  const ticking = connecting.querySelector('.folder-agent-card__action-time');
+  assert.equal(ticking.textContent, '3 s');
+  assert.equal(ticking.dataset.startedAt, String(t0 + 6000));
+  assert.equal(queued.dataset.state, 'waiting');
+  assert.equal(queued.querySelector('.folder-agent-card__action-time'), null);
+  assert.equal(queued.querySelector('.folder-agent-card__action-progress'), null);
+
+  // One of three actions done.
+  const bar = run.querySelector('.folder-agent-card__progress');
+  assert.equal(bar.attributes.role, 'progressbar');
+  assert.deepEqual([bar.attributes['aria-valuenow'], bar.attributes['aria-valuemax']], ['1', '3']);
+  assert.equal(
+    run.querySelector('.folder-agent-card__progress-fill').attributes.style,
+    'width:33%'
+  );
+
+  // The clock moves between polls.
+  tickFolderAgentClocks(run, t0 + 12100);
+  assert.equal(ticking.textContent, '6 s');
+  assert.equal(clock.textContent, '0:12');
+  assert.equal(text(installed, '.folder-agent-card__action-time'), '6 s');
+
+  // State words stay for screen readers.
+  assert.deepEqual(
+    run.querySelectorAll('.folder-agent-card__line-state').map(n => n.textContent),
+    ['Working']
+  );
+});
+
+test('a finished run shows its receipt with links, leaves out empty rows and collapses its steps', () => {
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  const iso = ms => new Date(ms).toISOString();
+  const view = folderAgentReportView(
+    reported({
+      workspace_name: 'Albums',
+      route: '/workspaces/albums',
+      state: 'set_up',
+      actions: [],
+      setup: {
+        status: 'done',
+        started_at: iso(t0),
+        finished_at: iso(t0 + 41000),
+        receipt: {
+          installed: ['Music Project Management 0.5.0', 'Ori REAPER Plugin 0.9.0'],
+          home: { name: 'Music Production Home', route: '/workspaces/music-production-home' },
+          home_created: true,
+          hired: ['Portfolio Manager', 'Library Manager'],
+          listed: 6,
+          listed_noun: 'songs'
+        },
+        lines: [
+          {
+            kind: 'provider',
+            step: 'home',
+            name: 'Installs Music Project Management',
+            state: 'done',
+            progress: 'Installed Music Project Management 0.5.0',
+            started_at: iso(t0),
+            finished_at: iso(t0 + 6000)
+          },
+          {
+            kind: 'place',
+            step: 'home',
+            name: 'Places Albums inside your Music Production Home',
+            state: 'done',
+            started_at: iso(t0 + 6000),
+            finished_at: iso(t0 + 9000)
+          },
+          { kind: 'folder', name: 'Nothing in Albums is moved, copied or read', state: 'done' }
+        ]
+      }
+    })
+  );
+  const card = renderFolderAgentReport(view, stubDocument(), {});
+  const run = card.querySelector('.folder-agent-card__run');
+  assert.equal(text(run, '.folder-agent-card__run-head'), 'All done · 1 step · 41 s');
+  const rows = run
+    .querySelectorAll('.folder-agent-card__receipt-row')
+    .map(row => [
+      row.dataset.kind,
+      text(row, '.folder-agent-card__receipt-text'),
+      row.querySelector('.folder-agent-card__receipt-link')?.textContent || '',
+      row.querySelector('.folder-agent-card__receipt-link')?.href || ''
+    ]);
+  assert.deepEqual(rows, [
+    [
+      'installed',
+      'Music Project Management 0.5.0 · Ori REAPER Plugin 0.9.0',
+      'Plugins',
+      '/plugins'
+    ],
+    ['created', 'Music Production Home', 'Open', '/workspaces/music-production-home'],
+    ['hired', 'Portfolio Manager · Library Manager', 'Agents', '/agents'],
+    ['listed', '6 songs on the shelf', '', ''],
+    ['placed', 'Albums inside your Music Production Home', 'Open Albums', '/workspaces/albums']
+  ]);
+  // The Placed row opens the place; no second link at the bottom.
+  assert.equal(card.querySelector('.folder-agent-card__open'), null);
+
+  // The step collapses to its title and time; a click shows its actions.
+  const step = run.querySelector('li');
+  const toggle = step.querySelector('.folder-agent-card__line-toggle');
+  assert.equal(step.dataset.collapsed, 'true');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  assert.equal(text(step, '.folder-agent-card__step-time'), '9 s');
+  toggle.listeners.click();
+  assert.equal(step.dataset.collapsed, 'false');
+  assert.equal(toggle.attributes['aria-expanded'], 'true');
+});
+
+test('a Group run receipt counts its members; a stopped run shows only what finished', () => {
+  const group = folderAgentReportView(
+    reported({
+      workspace_name: 'Three Drafts',
+      route: '/workspaces/three-drafts',
+      state: 'set_up',
+      actions: [],
+      setup: {
+        status: 'done',
+        receipt: {
+          group: true,
+          members: [
+            { name: 'Draft A', route: '/workspaces/draft-a' },
+            { name: 'Draft B', route: '/workspaces/draft-b' },
+            { name: 'Draft C', route: 'https://elsewhere.example/x' }
+          ]
+        },
+        lines: [
+          { kind: 'promote', step: 'group', name: 'Turns Three Drafts into a group', state: 'done' }
+        ]
+      }
+    })
+  );
+  const rows = folderAgentReceiptRows(group).map(row => [row.label, row.words]);
+  assert.deepEqual(rows, [
+    ['Created', '3 workspaces in Three Drafts'],
+    ['Placed', 'Three Drafts is now a group with 3 workspaces']
+  ]);
+  // A route that is not one of the app's workspace pages is never linked.
+  assert.deepEqual(
+    group.setup.receipt.members.map(m => m.route),
+    ['/workspaces/draft-a', '/workspaces/draft-b', '']
+  );
+
+  const stopped = folderAgentReportView(
+    reported({
+      workspace_name: 'Albums',
+      route: '/workspaces/albums',
+      state: 'set_up',
+      actions: ['set_up'],
+      setup: {
+        status: 'stopped',
+        receipt: { installed: ['Music Project Management 0.5.0'] },
+        lines: [
+          {
+            kind: 'provider',
+            step: 'home',
+            name: 'Installs Music Project Management',
+            state: 'done'
+          },
+          {
+            kind: 'home',
+            step: 'home',
+            name: 'Creates your Music Production Home',
+            state: 'failed'
+          }
+        ]
+      }
+    })
+  );
+  const run = renderFolderAgentReport(stopped, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(text(run, '.folder-agent-card__run-head'), 'Stopped at step 1 of 1');
+  assert.deepEqual(
+    run.querySelectorAll('.folder-agent-card__receipt-row').map(row => row.dataset.kind),
+    ['installed']
+  );
+  // A stopped run's steps stay open to show which action failed.
+  assert.equal(run.querySelector('li').dataset.collapsed, undefined);
+});
+
+test('a run counts only the steps it runs, not a step the plan still marks chosen', () => {
+  // The agent recommended the group; the owner ticked the Home instead. The
+  // view's plan still marks the group chosen, but the run carries no lines for it.
+  const view = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: [],
+      plan: {
+        digest: 'p',
+        runnable: true,
+        lines: [],
+        steps: [
+          { handle: 'group', title: 'Turn Albums into a group', chosen: true },
+          { handle: 'home', title: 'Create your Music Production Home', chosen: false }
+        ]
+      },
+      setup: {
+        status: 'done',
+        lines: [
+          { kind: 'home', step: 'home', name: 'Creates your Music Production Home', state: 'done' },
+          { kind: 'folder', name: 'Nothing in Albums is moved, copied or read', state: 'done' }
+        ]
+      }
+    })
+  );
+  const run = renderFolderAgentReport(view, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(text(run, '.folder-agent-card__run-head'), 'All done · 1 step');
+  assert.deepEqual(
+    run.querySelectorAll('li').map(li => li.dataset.step),
+    ['home']
+  );
+});
+
+test('a done action shows its duration; one under a second reads <1 s; no bar once the run ends', () => {
+  const t0 = Date.parse('2026-11-09T10:00:00Z');
+  const iso = ms => new Date(ms).toISOString();
+  const finished = folderAgentReportView(
+    reported({
+      state: 'set_up',
+      actions: [],
+      setup: {
+        status: 'done',
+        started_at: iso(t0),
+        lines: [
+          {
+            kind: 'workspace',
+            step: 'tools',
+            name: 'Connects REAPER tools to One Song',
+            state: 'done',
+            progress: 'Connected REAPER tools to One Song',
+            started_at: iso(t0),
+            finished_at: iso(t0 + 300)
+          }
+        ]
+      }
+    })
+  );
+  const run = renderFolderAgentReport(finished, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.equal(text(run, '.folder-agent-card__action-time'), '<1 s');
+  assert.equal(run.querySelector('.folder-agent-card__progress'), null);
+  assert.equal(run.querySelector('.folder-agent-card__run-clock'), null);
 });
 
 test('ticking a step that cannot run with a chosen one unticks the other before asking', async () => {
@@ -1088,6 +1426,137 @@ const setUp = (overrides = {}) =>
   });
 const okJSON = body => ({ ok: true, status: 200, json: async () => body });
 const settle = () => new Promise(resolve => setTimeout(resolve, 25));
+
+test('a placement line newly done tells Home to build the place; other polls do not', async () => {
+  const lines = (...states) =>
+    [
+      { kind: 'provider', name: 'Installs Music Project Management' },
+      { kind: 'home', name: 'Creates your Music Production Home' },
+      { kind: 'place', name: 'Places Albums inside your Music Production Home' }
+    ].map((line, i) => ({ ...line, state: states[i] || 'waiting' }));
+  const view = (...states) => ({ setup: { lines: lines(...states) } });
+  assert.equal(
+    placementLinesDone(view('working'), view('done')),
+    false,
+    'an install is no placement'
+  );
+  assert.equal(placementLinesDone(view('done', 'working'), view('done', 'done')), true);
+  assert.equal(placementLinesDone(view('done', 'done'), view('done', 'done', 'working')), false);
+  assert.equal(
+    placementLinesDone(view('done', 'done', 'working'), view('done', 'done', 'done')),
+    true
+  );
+  assert.equal(placementLinesDone(null, view('done', 'done')), true);
+
+  // Followed through polls: one event per placement, carrying the flag.
+  const events = [];
+  const previousWindow = globalThis.window;
+  const previousEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  };
+  globalThis.window = { dispatchEvent: event => events.push(event) };
+  try {
+    const polls = [
+      { ...settingUp(), ...view('done', 'working') },
+      { ...settingUp(), ...view('done', 'done', 'working') },
+      { ...settingUp(), ...view('done', 'done', 'working') },
+      { ...setUp(), ...view('done', 'done', 'done') }
+    ];
+    const stop = followFolderAgent(
+      { ...settingUp(), ...view('working') },
+      { fetchImpl: async () => okJSON({ folder_agent: polls.shift() || null }), pollMs: 1 }
+    );
+    await settle();
+    stop();
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.CustomEvent = previousEvent;
+  }
+  assert.deepEqual(
+    events.map(event => [event.type, event.detail.placement]),
+    [
+      ['ori:folder-agent-changed', true],
+      ['ori:folder-agent-changed', true]
+    ]
+  );
+});
+
+test('every follower of a run announces a placement through one helper, before it opens the place', async () => {
+  const events = [];
+  const previousWindow = globalThis.window;
+  const previousEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  };
+  globalThis.window = { dispatchEvent: event => events.push(event) };
+  try {
+    const was = {
+      workspace_id: 'ws-1',
+      setup: { lines: [{ kind: 'place', name: 'P', state: 'working' }] }
+    };
+    const now = {
+      workspace_id: 'ws-1',
+      setup: { lines: [{ kind: 'place', name: 'P', state: 'done' }] }
+    };
+    assert.equal(notifyPlacement(was, was), false);
+    assert.equal(notifyPlacement(was, now), true);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.CustomEvent = previousEvent;
+  }
+  assert.deepEqual(
+    events.map(event => [event.type, event.detail]),
+    [['ori:folder-agent-changed', { workspaceID: 'ws-1', placement: true }]]
+  );
+
+  // The Home drawer follows its own poll; it must announce the same way, and
+  // before its run's end opens the place, so the open waits for the motion.
+  const drawer = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  const poll = drawer.slice(drawer.indexOf('function scheduleAgentPoll()'));
+  assert.match(poll, /notifyPlacement\(view, next\);/);
+  assert.ok(
+    poll.indexOf('notifyPlacement(view, next)') < poll.indexOf('openFolderAgentPlace(next)'),
+    'the map is told before the place is opened'
+  );
+});
+
+test('opening the place waits for Home to finish building it, or one second', async () => {
+  const went = [];
+  let release;
+  const motion = {
+    whenMotionSettled: maxMs => {
+      assert.equal(maxMs, 1000);
+      return new Promise(resolve => (release = resolve));
+    }
+  };
+  assert.equal(
+    openFolderAgentPlace(
+      { route: '/workspaces/albums' },
+      { navigate: route => went.push(route), delayMs: 0, motion }
+    ),
+    true
+  );
+  await settle();
+  assert.deepEqual(went, [], 'it does not leave while the map still moves');
+  release();
+  await settle();
+  assert.deepEqual(went, ['/workspaces/albums']);
+
+  // Without a map (the workspace page), it goes on its own beat.
+  const direct = [];
+  openFolderAgentPlace(
+    { route: '/workspaces/albums' },
+    { navigate: r => direct.push(r), delayMs: 0, motion: null }
+  );
+  assert.deepEqual(direct, ['/workspaces/albums']);
+});
 
 test('a run watched to its end says it is opening the place and goes there; a stopped one stays', async () => {
   assert.equal(setupFinished(settingUp(), setUp()), true);

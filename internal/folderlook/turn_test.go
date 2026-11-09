@@ -81,6 +81,90 @@ func TestRunTurn_SkipReasons(t *testing.T) {
 	}
 }
 
+func TestRunTurn_AFailedCallRecordsItsClassifiedCause(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		category llm.ErrorCategory
+		sentence string
+	}{{
+		name:     "rate limit",
+		err:      llm.NewProviderError("Anthropic", llm.CategoryRateLimited, errors.New("429 slow down, key sk-secret")),
+		category: llm.CategoryRateLimited,
+		sentence: "Anthropic returned an error for claude-x (rate limited).",
+	}, {
+		name:     "authentication",
+		err:      llm.NewProviderError("Anthropic", llm.CategoryAuthentication, errors.New("401 invalid x-api-key")),
+		category: llm.CategoryAuthentication,
+		sentence: "Anthropic returned an error for claude-x (the key was refused).",
+	}, {
+		name:     "a model that is not there",
+		err:      llm.NewProviderError("Anthropic", llm.CategoryInvalidModel, errors.New("404 model: claude-x not found")),
+		category: llm.CategoryInvalidModel,
+		sentence: "Anthropic returned an error for claude-x (model not found).",
+	}, {
+		// The local trap: an SDK profile's workspace id makes Claude answer 404
+		// "Workspace … not found", which is not a missing model.
+		name:     "a Claude workspace 404",
+		err:      llm.NewProviderError("Anthropic", llm.CategoryInvalidModel, errors.New(`404 {"type":"not_found_error","message":"Workspace wrkspc_123 not found"}`)),
+		category: llm.CategoryProviderError,
+		sentence: "Anthropic returned an error for claude-x.",
+	}, {
+		name:     "an unclassified error",
+		err:      errors.New("something odd at https://api.example.com/v1"),
+		category: llm.CategoryUnknown,
+		sentence: "Anthropic returned an error for claude-x.",
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			failing := func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) { return nil, tc.err }
+			got := RunTurn(context.Background(), TurnInput{Chat: failing, Model: "claude-x", Provider: "Anthropic"})
+			if got.Status != StatusSkipped || got.Reason != ReasonProviderUnavailable || got.Cause == nil {
+				t.Fatalf("result = %+v", got)
+			}
+			if got.Cause.Kind != CauseCallFailed || got.Cause.Category != tc.category || got.Cause.Provider != "Anthropic" || got.Cause.Model != "claude-x" {
+				t.Fatalf("cause = %+v", got.Cause)
+			}
+			if !errors.Is(got.Err, tc.err) {
+				t.Fatalf("the underlying error was not kept for the log: %v", got.Err)
+			}
+			sentence, fixable := CauseSentence(*got.Cause, "Albums Manager")
+			if sentence != tc.sentence || fixable {
+				t.Fatalf("sentence = %q fixable=%v", sentence, fixable)
+			}
+			if strings.Contains(sentence, "sk-") || strings.Contains(sentence, "http") || strings.Contains(sentence, "wrkspc") {
+				t.Fatalf("the sentence carries raw provider words: %q", sentence)
+			}
+		})
+	}
+}
+
+func TestCauseSentence_EveryResolveCause(t *testing.T) {
+	cases := []struct {
+		cause    Cause
+		sentence string
+		fixable  bool
+	}{
+		{Cause{Kind: CauseNoModel}, "No model is set for Albums Manager.", true},
+		{Cause{Kind: CauseNotConfigured, Provider: "Anthropic"}, "No API key is set for Anthropic.", true},
+		{Cause{Kind: CauseNotSignedIn, Provider: "Codex"}, "Codex is not signed in.", true},
+		{Cause{Kind: CauseNotAvailable, Provider: "Claude Code"}, "Claude Code is not available on this Mac.", true},
+		{Cause{Kind: CauseNoTools, Provider: "Ollama", Model: "tiny"}, "tiny on Ollama cannot use tools, which the look needs.", false},
+	}
+	for _, tc := range cases {
+		sentence, fixable := CauseSentence(tc.cause, "Albums Manager")
+		if sentence != tc.sentence || fixable != tc.fixable {
+			t.Errorf("%s: %q fixable=%v", tc.cause.Kind, sentence, fixable)
+		}
+	}
+	if sentence, _ := CauseSentence(Cause{Kind: "other"}, "x"); sentence != "" {
+		t.Fatalf("an unknown kind was worded: %q", sentence)
+	}
+	if sentence, _ := CauseSentence(Cause{Kind: CauseNoTools, Provider: "P", Model: strings.Repeat("m", 300)}, "x"); sentence != "" {
+		t.Fatalf("an overlong sentence was kept: %q", sentence)
+	}
+}
+
 func TestRunTurn_TimeLimit(t *testing.T) {
 	blocking := func(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
 		<-ctx.Done()

@@ -123,8 +123,17 @@ type Tickets interface {
 type Setups interface {
 	Readiness(ctx context.Context, userID string) folderlook.Readiness
 	// Run carries out the confirmed lines for one record. It reports each
-	// line through update and returns the final status and stop reason.
-	Run(ctx context.Context, rec Record, plan Plan, update func([]personalassistant.FolderPlanLine)) (status, stopReason string)
+	// line through update and returns the final status, stop reason and what
+	// the run made.
+	Run(ctx context.Context, rec Record, plan Plan, update func([]personalassistant.FolderPlanLine)) RunResult
+}
+
+// RunResult is how a Set it up run ended and what it made (its receipt,
+// partial when it stopped).
+type RunResult struct {
+	Status     string
+	StopReason string
+	Receipt    *SetupReceipt
 }
 
 // Pins narrows the folder agent's own Toolbox to the anchor's listing tools
@@ -138,8 +147,11 @@ type Pins interface {
 
 // Turns resolves the folder agent's tool-capable model for its bounded turn.
 type Turns interface {
-	// Model returns folderlook.ErrNoModel when the agent has none.
-	Model(ctx context.Context, workspaceID, agentName string) (folderlook.Chat, string, error)
+	// Model returns the chat and the model by name with its provider's
+	// display name. It returns a *folderlook.ModelError naming why there is no
+	// usable model (no model chosen, provider not configured or signed in,
+	// provider missing, model not tool-capable), or folderlook.ErrNoModel.
+	Model(ctx context.Context, workspaceID, agentName string) (folderlook.Chat, folderlook.ModelRef, error)
 	// TokenBudget is the configured first_look_token_budget (0 = default).
 	TokenBudget() int
 }
@@ -496,23 +508,64 @@ func (s *Service) existingMembers(workspaceID, root string, stage foldermap.Stag
 // looks write into m; its words come back parsed and gated by the host.
 // turnModel is the folder agent's resolved model, or why there is none.
 type turnModel struct {
-	chat   folderlook.Chat
-	name   string
-	reason string
+	chat     folderlook.Chat
+	name     string
+	provider string
+	reason   string
+	// cause is why there is no usable model, when the host could say.
+	cause *folderlook.Cause
 }
 
+// resolveModel asks the host for the agent's model. A resolve failure is
+// reported before any call (PRD FR24): no model chosen is no_model; a provider
+// that is not configured, not signed in, missing or not tool-capable is
+// provider_unavailable, each with its own cause. The underlying error is
+// logged once, never stored.
 func (s *Service) resolveModel(ctx context.Context, rec *Record) turnModel {
 	if s.deps.Turns == nil {
-		return turnModel{reason: SkipNoModel}
+		return turnModel{reason: SkipNoModel, cause: &folderlook.Cause{Kind: folderlook.CauseNoModel}}
 	}
-	chat, model, err := s.deps.Turns.Model(ctx, rec.WorkspaceID, rec.AgentName)
-	if err != nil || chat == nil || strings.TrimSpace(model) == "" {
-		if err != nil && !errors.Is(err, folderlook.ErrNoModel) {
-			return turnModel{name: model, reason: SkipProviderUnavailable}
+	chat, ref, err := s.deps.Turns.Model(ctx, rec.WorkspaceID, rec.AgentName)
+	if err == nil && chat != nil && strings.TrimSpace(ref.Model) != "" {
+		return turnModel{chat: chat, name: ref.Model, provider: ref.Provider}
+	}
+	var failed *folderlook.ModelError
+	switch {
+	case errors.As(err, &failed):
+		resolved := turnModel{name: failed.Cause.Model, provider: failed.Cause.Provider, reason: SkipProviderUnavailable, cause: &failed.Cause}
+		if failed.Cause.Kind == folderlook.CauseNoModel {
+			resolved.reason = SkipNoModel
 		}
-		return turnModel{reason: SkipNoModel}
+		s.logSkippedLook(rec, resolved, err)
+		return resolved
+	case err != nil && !errors.Is(err, folderlook.ErrNoModel):
+		resolved := turnModel{name: ref.Model, provider: ref.Provider, reason: SkipProviderUnavailable}
+		s.logSkippedLook(rec, resolved, err)
+		return resolved
 	}
-	return turnModel{chat: chat, name: model}
+	resolved := turnModel{reason: SkipNoModel, cause: &folderlook.Cause{Kind: folderlook.CauseNoModel}}
+	if err != nil {
+		s.logSkippedLook(rec, resolved, err)
+	}
+	return resolved
+}
+
+// logSkippedLook records a look that could not run, once, with the underlying
+// error the card never shows (PRD FR23).
+func (s *Service) logSkippedLook(rec *Record, model turnModel, err error) {
+	fields := logger.Fields{"workspace_id": rec.WorkspaceID, "provider": model.provider, "model": model.name, "reason": model.reason}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	logger.Warn("Folder agent look skipped", fields)
+}
+
+// causeOf words a cause for the turn receipt; an empty sentence when none.
+func causeOf(cause *folderlook.Cause, agent string) (string, bool) {
+	if cause == nil {
+		return "", false
+	}
+	return folderlook.CauseSentence(*cause, agent)
 }
 
 // keepShown keeps what the report shows: required candidates, and the ones
@@ -531,7 +584,9 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 	candidates []folderlook.Candidate, resolved turnModel) (*TurnReceipt, *folderlook.Sections) {
 	now := s.deps.Now().UTC()
 	if resolved.chat == nil {
-		return &TurnReceipt{Status: TurnSkipped, Reason: resolved.reason, Model: resolved.name, StartedAt: now, FinishedAt: s.deps.Now().UTC()}, nil
+		receipt := &TurnReceipt{Status: TurnSkipped, Reason: resolved.reason, Model: resolved.name, StartedAt: now, FinishedAt: s.deps.Now().UTC()}
+		receipt.Cause, receipt.CauseFixable = causeOf(resolved.cause, rec.AgentName)
+		return receipt, nil
 	}
 	chat, model := resolved.chat, resolved.name
 	ask := folderlook.AskAllowed(facts)
@@ -556,11 +611,17 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 		return string(raw), err
 	}
 	result := folderlook.RunTurn(ctx, folderlook.TurnInput{
-		Chat: chat, Model: model, AgentName: rec.AgentName, Reference: reference,
+		Chat: chat, Model: model, Provider: resolved.provider, AgentName: rec.AgentName, Reference: reference,
 		AskAllowed: ask, Look: look, TokenBudget: s.deps.Turns.TokenBudget(),
 	})
 	receipt := &TurnReceipt{Status: result.Status, Reason: result.Reason, Model: model, Tokens: result.Tokens,
 		ModelCalls: result.ModelCalls, ToolCalls: result.ToolCalls, Looks: result.Looks, StartedAt: now, FinishedAt: s.deps.Now().UTC()}
+	if result.Status == TurnSkipped {
+		receipt.Cause, receipt.CauseFixable = causeOf(result.Cause, rec.AgentName)
+		if result.Err != nil {
+			s.logSkippedLook(rec, turnModel{name: model, provider: resolved.provider, reason: result.Reason}, result.Err)
+		}
+	}
 	if result.Reply == "" {
 		return receipt, nil
 	}
@@ -833,7 +894,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		defer s.wg.Done()
 		// The run outlives the request that confirmed it: the request's values
 		// travel with it, its cancellation does not.
-		status, reason := s.deps.Setups.Run(context.WithoutCancel(ctx), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
+		result := s.deps.Setups.Run(context.WithoutCancel(ctx), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
 			_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 				if r.Setup != nil {
 					r.Setup.Lines = lines
@@ -841,6 +902,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 				return nil
 			})
 		})
+		status, reason := result.Status, result.StopReason
 		nextID := ""
 		if status == personalassistant.FolderSetupDone {
 			nextID = s.createNextTicket(rec)
@@ -855,6 +917,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 			if r.Setup != nil {
 				r.Setup.Status, r.Setup.StopReason, r.Setup.FinishedAt = status, reason, s.deps.Now().UTC()
+				r.Setup.Receipt = result.Receipt.Clean()
 			}
 			if nextID != "" {
 				r.NextTicketID = nextID

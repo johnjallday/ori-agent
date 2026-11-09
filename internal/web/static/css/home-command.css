@@ -3491,13 +3491,24 @@ a.quest-title:focus-visible {
   color: var(--hc-signal, var(--cozy-moss));
 }
 
+/* The working action is the one to read: full-contrast ink, a spinner in
+   place of a glyph, its live words after its name and its time last. */
 .folder-agent-card__action[data-state="working"] {
-  color: var(--hc-signal, var(--cozy-moss));
+  color: var(--hc-ink, var(--cozy-ink));
+  font-weight: 600;
 }
 
-.folder-agent-card__action[data-state="working"]::before {
-  content: "◌ ";
-  animation: folder-agent-pulse 1.2s ease-in-out infinite;
+.folder-agent-card__spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border: 2px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-top-color: var(--hc-signal, var(--cozy-moss));
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: folder-agent-spin 0.8s linear infinite;
 }
 
 .folder-agent-card__action[data-state="failed"] {
@@ -3506,6 +3517,168 @@ a.quest-title:focus-visible {
 
 .folder-agent-card__action[data-state="failed"]::before {
   content: "✕ ";
+}
+
+.folder-agent-card__action-progress,
+.folder-agent-card__action-time {
+  font-weight: 400;
+}
+
+.folder-agent-card__action-progress::before,
+.folder-agent-card__action-time::before {
+  content: " · ";
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__line-live .folder-agent-card__action-progress:first-child::before,
+.folder-agent-card__line-live .folder-agent-card__action-time:first-child::before {
+  content: "";
+}
+
+/* A time never splits from its unit on a narrow card ("<1" / "s"). */
+.folder-agent-card__action-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+/* From Set it up on, each action is its own line, so the working one and
+   its words never run into the next; queued actions stay dim. */
+.folder-agent-card__run:not([data-phase="plan"]) .folder-agent-card__action {
+  display: block;
+}
+
+.folder-agent-card__run:not([data-phase="plan"]) .folder-agent-card__action-sep {
+  display: none;
+}
+
+.folder-agent-card__run[data-phase="running"] .folder-agent-card__action[data-state="waiting"] {
+  opacity: 0.7;
+}
+
+.folder-agent-card__run-clock {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-agent-card__run-clock::before {
+  content: " · ";
+}
+
+/* Done actions over all actions, under the headline. */
+.folder-agent-card__progress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hc-line-bright, var(--cozy-line-strong));
+}
+
+.folder-agent-card__progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hc-signal, var(--cozy-moss));
+  transition: width 300ms ease-out;
+}
+
+/* The receipt: one row per kind of thing the run made, its link last. The
+   words wrap and the link wraps under them on a narrow card. */
+.folder-agent-card__receipt-rows {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.folder-agent-card__receipt-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.folder-agent-card__receipt-label {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.folder-agent-card__receipt-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-agent-card__receipt-link {
+  color: var(--hc-signal, var(--cozy-moss));
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.folder-agent-card__receipt-link::before {
+  content: "→ ";
+}
+
+/* A finished step shows its title and time; its actions on a click. */
+.folder-agent-card__line[data-collapsed="true"] .folder-agent-card__actions-line {
+  display: none;
+}
+
+.folder-agent-card__line-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-agent-card__line-toggle::after {
+  content: " ▸";
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-weight: 400;
+}
+
+.folder-agent-card__line[data-collapsed="false"] .folder-agent-card__line-toggle::after {
+  content: " ▾";
+}
+
+.folder-agent-card__step-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.folder-agent-card__step-time {
+  white-space: nowrap;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes folder-agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-agent-card__spinner {
+    animation: none;
+    border-color: var(--hc-signal, var(--cozy-moss));
+  }
+
+  .folder-agent-card__progress-fill {
+    transition: none;
+  }
 }
 
 /* After setup: two compact rows. */

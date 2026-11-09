@@ -19,17 +19,21 @@ import (
 type scriptedTurns struct {
 	mu         sync.Mutex
 	err        error
+	chatErr    error
 	responses  []*llm.ChatResponse
 	references []string
 }
 
-func (s *scriptedTurns) Model(context.Context, string, string) (folderlook.Chat, string, error) {
+func (s *scriptedTurns) Model(context.Context, string, string) (folderlook.Chat, folderlook.ModelRef, error) {
 	if s.err != nil {
-		return nil, "", s.err
+		return nil, folderlook.ModelRef{}, s.err
 	}
 	return func(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		if s.chatErr != nil {
+			return nil, s.chatErr
+		}
 		if len(req.Messages) == 1 {
 			s.references = append(s.references, req.Messages[0].Content)
 		}
@@ -39,7 +43,7 @@ func (s *scriptedTurns) Model(context.Context, string, string) (folderlook.Chat,
 		next := s.responses[0]
 		s.responses = s.responses[1:]
 		return next, nil
-	}, "luna-test", nil
+	}, folderlook.ModelRef{Provider: "Anthropic", Model: "luna-test"}, nil
 }
 
 func (s *scriptedTurns) TokenBudget() int { return 0 }

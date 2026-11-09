@@ -59,7 +59,7 @@ func TestBuildPlan_TheAgentsOrderWinsAndTheSecondOfAPairIsSetAside(t *testing.T)
 	names := lineNames(plan)
 	// The agent's order: REAPER before the group; the assurance line last.
 	if names[0] != "Installs REAPER tools" || names[1] != "Connects REAPER tools to Albums" || names[2] != "Turns Albums into a group" ||
-		names[3] != "Creates Album-1, linked to its own folder" || names[len(names)-1] != "Nothing is moved, copied or read" {
+		names[3] != "Creates Album-1, linked to its own folder" || names[len(names)-1] != "Nothing in Albums is moved, copied or read" {
 		t.Fatalf("lines = %v", names)
 	}
 	if plan.Words != rec.Sections.Plan || plan.DefaultReason != "" {
