@@ -270,6 +270,13 @@ func (s *Store) scanStatePath(workspaceID string) (string, error) {
 //
 // A record belonging to a different workspace is an error, never served.
 func (s *Store) LoadScanState(workspaceID string) (ScanState, error) {
+	return s.loadScanState(workspaceID, false)
+}
+
+// loadScanState's strict mode distinguishes unavailable/corrupt saved reviews
+// from a known empty scan record. Legacy callers retain their rescan fallback;
+// new read-only review projections must not present corrupt data as success.
+func (s *Store) loadScanState(workspaceID string, strict bool) (ScanState, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	path, err := s.scanStatePath(workspaceID)
 	if err != nil {
@@ -285,7 +292,13 @@ func (s *Store) LoadScanState(workspaceID string) (ScanState, error) {
 	}
 	var stored ScanState
 	if err := json.Unmarshal(data, &stored); err != nil {
+		if strict {
+			return ScanState{}, ErrReviewUnavailable
+		}
 		return newScanState(workspaceID), nil
+	}
+	if strict && (stored.SchemaVersion < 0 || stored.SchemaVersion > ScanStateSchemaVersion) {
+		return ScanState{}, ErrReviewUnavailable
 	}
 	if id := strings.TrimSpace(stored.WorkspaceID); id != "" && id != workspaceID {
 		return ScanState{}, fmt.Errorf("%w: scan state is for %s", ErrWorkspaceMismatch, id)

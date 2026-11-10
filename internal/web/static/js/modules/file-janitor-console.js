@@ -48,6 +48,22 @@
   let receiptLoaded = false;
   let lastBatch = null;
   let lastCandidates = [];
+  let reviewView = 'groups';
+  let locatedCandidateID = '';
+  let groupReview = null;
+  let groupsLoadState = 'idle';
+  let groupsRequest = 0;
+  let activeGroupID = '';
+  let groupMembers = [];
+  let groupMemberTotal = 0;
+  let groupOffset = 0;
+  let groupMemberLoadState = 'idle';
+  let groupMemberRequest = 0;
+  let savedBatches = [];
+  let savedBatchOffset = 0;
+  let savedBatchTotal = 0;
+  let savedBatchLoadState = 'idle';
+  let savedBatchRequest = 0;
   // Assistant-led setup may link to the exact first-review batch. Keep that
   // immutable identity until the user explicitly starts another scan.
   let linkedBatchID = (() => {
@@ -157,6 +173,14 @@
     setupReviewRequest++;
     lastBatch = null;
     lastCandidates = [];
+    resetGroupReview();
+    reviewView = 'groups';
+    locatedCandidateID = '';
+    savedBatches = [];
+    savedBatchOffset = 0;
+    savedBatchTotal = 0;
+    savedBatchLoadState = 'idle';
+    savedBatchRequest++;
     categories = [];
     selected = new Set();
     trashMarked = new Set();
@@ -963,7 +987,16 @@
     [
       ['Type', candidate.extension || candidate.mime_type || 'Unknown'],
       ['Size', formatSize(candidate.size)],
-      ['Modified', formatWhen(candidate.modified_at) || 'Unknown']
+      ['Modified', formatWhen(candidate.modified_at) || 'Unknown'],
+      [
+        'Classification',
+        {
+          metadata: 'Saved metadata classification',
+          model: 'Saved model classification',
+          content: 'Saved opted-in content classification',
+          fallback: 'Unresolved fallback'
+        }[candidate.classifier] || 'Provenance not recorded'
+      ]
     ].forEach(([label, value]) => {
       const item = el('div', 'fj-file-detail');
       item.appendChild(el('dt', 'fj-file-detail-label', label));
@@ -1051,6 +1084,16 @@
     reasonCell.setAttribute('role', 'cell');
     reasonCell.appendChild(el('span', 'fj-cell-mobile-label', 'Why / Status'));
     reasonCell.appendChild(el('span', 'fj-reason', candidate.reason || 'No rationale available.'));
+    const cautionLabels = {
+      sensitive: 'Sensitive-looking name',
+      versions: 'Possible copy/version',
+      audio: 'Audio or related material',
+      unresolved: 'Category needs review',
+      unmatched: 'Unmatched proposal'
+    };
+    const cautions = (candidate.cautions || []).map(code => cautionLabels[code]).filter(Boolean);
+    if (cautions.length)
+      reasonCell.appendChild(el('span', 'fj-state-reason', cautions.join(' · ')));
     if (candidate.confidence) {
       const confidence = el(
         'span',
@@ -1238,7 +1281,391 @@
     void loadBatch();
   }
 
-  function reviewTable() {
+  function resetGroupReview() {
+    groupsRequest++;
+    groupMemberRequest++;
+    groupReview = null;
+    groupsLoadState = 'idle';
+    activeGroupID = '';
+    groupMembers = [];
+    groupMemberTotal = 0;
+    groupOffset = 0;
+    groupMemberLoadState = 'idle';
+  }
+
+  async function loadReviewGroups() {
+    const scope = requestScope();
+    const batchID = lastBatch?.id;
+    if (!scope.id || !batchID) return;
+    const sequence = ++groupsRequest;
+    const current = () =>
+      scopeCurrent(scope) && sequence === groupsRequest && lastBatch?.id === batchID;
+    groupsLoadState = 'loading';
+    try {
+      const response = await fetch(
+        apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID) + '/groups'
+      );
+      const body = await response.json();
+      if (!current()) return;
+      const review = body.review;
+      if (
+        !response.ok ||
+        review?.batch_id !== batchID ||
+        typeof review.revision !== 'string' ||
+        !Array.isArray(review.groups) ||
+        review.groups.length > 13 ||
+        !Number.isSafeInteger(review.counts?.candidates)
+      )
+        throw new Error('Saved groups unavailable');
+      groupReview = review;
+      groupsLoadState = 'loaded';
+      if (activeGroupID && review.groups.some(group => group.id === activeGroupID)) {
+        await loadGroupMembers(activeGroupID, groupOffset);
+      } else {
+        activeGroupID = '';
+        groupMembers = [];
+      }
+    } catch (_) {
+      if (!current()) return;
+      groupsLoadState = 'error';
+      groupMemberRequest++;
+      groupMembers = [];
+      groupMemberLoadState = 'error';
+    }
+    if (current()) renderBatch();
+  }
+
+  async function loadGroupMembers(groupID, offset = 0) {
+    const scope = requestScope();
+    const batchID = lastBatch?.id;
+    const revision = groupReview?.revision;
+    if (!scope.id || !batchID || !revision || groupsLoadState !== 'loaded') return;
+    const sequence = ++groupMemberRequest;
+    const current = () =>
+      scopeCurrent(scope) &&
+      sequence === groupMemberRequest &&
+      lastBatch?.id === batchID &&
+      groupReview?.revision === revision;
+    activeGroupID = groupID;
+    groupOffset = offset;
+    groupMemberLoadState = 'loading';
+    groupMembers = [];
+    renderBatch();
+    try {
+      const response = await fetch(
+        apiBase(scope.id) +
+          '/batches/' +
+          encodeURIComponent(batchID) +
+          '/groups/' +
+          encodeURIComponent(groupID) +
+          '/members?limit=' +
+          PAGE_SIZE +
+          '&offset=' +
+          offset +
+          '&revision=' +
+          encodeURIComponent(revision)
+      );
+      const body = await response.json();
+      if (!current()) return;
+      if (
+        !response.ok ||
+        body.batch_id !== batchID ||
+        body.group_id !== groupID ||
+        body.revision !== revision ||
+        !Array.isArray(body.candidates) ||
+        body.candidates.length > PAGE_SIZE ||
+        !Number.isSafeInteger(body.total) ||
+        body.total < 0
+      )
+        throw new Error('Group members unavailable');
+      groupMembers = body.candidates;
+      groupMemberTotal = body.total;
+      groupMemberLoadState = 'loaded';
+    } catch (_) {
+      if (!current()) return;
+      groupMemberLoadState = 'error';
+    }
+    if (current()) {
+      renderBatch();
+      const panel = document.getElementById('fileJanitorGroup-details');
+      panel?.focus?.({ preventScroll: true });
+      panel?.scrollIntoView?.({ block: 'start' });
+    }
+  }
+
+  async function loadSavedBatches() {
+    const scope = requestScope();
+    const sequence = ++savedBatchRequest;
+    savedBatchLoadState = 'loading';
+    try {
+      const response = await fetch(
+        apiBase(scope.id) + '/batches?summary_only=true&limit=20&offset=' + savedBatchOffset
+      );
+      const body = await response.json();
+      if (!scopeCurrent(scope) || sequence !== savedBatchRequest) return;
+      if (!response.ok || !Array.isArray(body.batches) || body.batches.length > 20)
+        throw new Error('Saved reviews unavailable');
+      savedBatches = body.batches;
+      savedBatchTotal = Number(body.total) || 0;
+      savedBatchLoadState = 'loaded';
+    } catch (_) {
+      if (!scopeCurrent(scope) || sequence !== savedBatchRequest) return;
+      savedBatchLoadState = 'error';
+    }
+  }
+
+  function savedBatchPicker() {
+    const wrap = el('div', 'fj-saved-batches');
+    const label = el('label', 'fj-label', 'Saved review batch');
+    label.setAttribute('for', 'fileJanitorBatchChoice');
+    wrap.appendChild(label);
+    const select = document.createElement('select');
+    select.id = 'fileJanitorBatchChoice';
+    select.className = 'fj-input';
+    select.disabled = !batchActionsAvailable() || Boolean(pendingPreview);
+    const choices = savedBatches.some(batch => batch.id === lastBatch.id)
+      ? savedBatches
+      : [lastBatch, ...savedBatches];
+    choices.forEach(batch => {
+      const option = document.createElement('option');
+      option.value = batch.id;
+      option.selected = batch.id === lastBatch.id;
+      option.textContent =
+        (formatWhen(batch.completed_at || batch.started_at) || batch.id) +
+        ' · ' +
+        formatCount(batch.summary?.proposed || 0) +
+        ' pending · ' +
+        (batch.state === 'resolved' ? 'recorded outcomes' : 'saved review');
+      select.appendChild(option);
+    });
+    select.addEventListener('change', () => {
+      if (select.value === lastBatch.id) return;
+      discardProtectionApproval();
+      linkedBatchID = select.value;
+      consoleItem = '';
+      pageOffset = 0;
+      filter = '';
+      resetGroupReview();
+      void loadBatch();
+    });
+    wrap.appendChild(select);
+    if (savedBatchLoadState === 'error') {
+      wrap.appendChild(
+        el('p', 'fj-muted', 'Other saved reviews are unavailable, not necessarily empty.')
+      );
+      wrap.appendChild(
+        button('Retry saved reviews', 'fj-btn', async () => {
+          await loadSavedBatches();
+          renderBatch();
+        })
+      );
+    }
+    if (savedBatchTotal > 20) {
+      const pages = el('div', 'fj-actions');
+      for (const [label, offset, disabled] of [
+        ['Newer reviews', Math.max(0, savedBatchOffset - 20), savedBatchOffset === 0],
+        ['Older reviews', savedBatchOffset + 20, savedBatchOffset + 20 >= savedBatchTotal]
+      ]) {
+        const control = button(label, 'fj-btn', async () => {
+          savedBatchOffset = offset;
+          await loadSavedBatches();
+          renderBatch();
+        });
+        control.disabled = disabled || savedBatchLoadState === 'loading';
+        pages.appendChild(control);
+      }
+      wrap.appendChild(pages);
+    }
+    return wrap;
+  }
+
+  function reviewViewSwitch() {
+    const bar = el('div', 'fj-filters');
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', 'Review view');
+    for (const [view, label] of [
+      ['groups', 'Groups'],
+      ['all', 'All files']
+    ]) {
+      const control = button(label, 'fj-filter', () => {
+        reviewView = view;
+        renderBatch();
+        document.getElementById('fileJanitorView-' + view)?.focus?.();
+      });
+      control.id = 'fileJanitorView-' + view;
+      control.setAttribute('aria-pressed', reviewView === view ? 'true' : 'false');
+      bar.appendChild(control);
+    }
+    return bar;
+  }
+
+  function renderReviewGroups() {
+    const section = el('section', 'fj-groups');
+    section.setAttribute('aria-label', 'Grouped proposals for this saved batch');
+    if (groupsLoadState !== 'loaded' || groupReview?.batch_id !== lastBatch?.id) {
+      const failed = groupsLoadState === 'error';
+      const notice = el(
+        'p',
+        'fj-empty-copy',
+        failed
+          ? 'Grouped proposals are unavailable. No files are selected by opening this view. Retry, or use All files.'
+          : 'Loading saved grouped proposals…'
+      );
+      notice.setAttribute('role', failed ? 'alert' : 'status');
+      section.appendChild(notice);
+      if (failed)
+        section.appendChild(button('Retry groups', 'fj-btn', () => void loadReviewGroups()));
+      return section;
+    }
+    const counts = groupReview.counts;
+    section.appendChild(
+      el(
+        'p',
+        'fj-group-accounting',
+        formatCount(counts.candidates) +
+          ' candidates in this saved batch · ' +
+          formatCount(counts.filing) +
+          ' suggested for filing · ' +
+          formatCount(counts.questions) +
+          ' need a decision.'
+      )
+    );
+    const other = [
+      ['kept', 'kept here'],
+      ['applied', 'applied'],
+      ['stale', 'stale'],
+      ['failed', 'failed'],
+      ['applying', 'in progress'],
+      ['unknown', 'unavailable state'],
+      ['ineligible', 'ineligible scan observations (not candidates)']
+    ]
+      .filter(([key]) => counts[key])
+      .map(([key, label]) => formatCount(counts[key]) + ' ' + label);
+    if (other.length)
+      section.appendChild(
+        el('p', 'fj-muted', other.join(' · ') + '. See All files or History for recorded outcomes.')
+      );
+    section.appendChild(
+      el(
+        'p',
+        'fj-sub',
+        'These are saved proposals, not a folder inventory. Grouping uses names and saved metadata; file details show the actual classification provenance.'
+      )
+    );
+    const grid = el('div', 'fj-group-grid');
+    for (const group of groupReview.groups) {
+      const card = el(
+        'article',
+        'fj-group-card' + (group.kind === 'question' ? ' fj-group-question' : '')
+      );
+      card.setAttribute('data-fj-group', group.id);
+      card.appendChild(
+        el('p', 'fj-group-kind', group.kind === 'question' ? 'Your decision' : 'Suggested filing')
+      );
+      card.appendChild(el('h3', 'fj-group-title', group.label));
+      card.appendChild(el('p', 'fj-group-count', formatCount(group.count) + ' files'));
+      if (group.destination) card.appendChild(el('p', 'fj-destination', group.destination));
+      card.appendChild(el('p', 'fj-group-reason', group.reason));
+      const samples = el('ul', 'fj-group-samples');
+      for (const name of (group.samples || []).slice(0, 3))
+        samples.appendChild(el('li', '', safeName(name)));
+      card.appendChild(samples);
+      const details = button(
+        'See files',
+        'fj-btn fj-btn-secondary',
+        () => void loadGroupMembers(group.id)
+      );
+      details.id = 'fileJanitorGroup-' + group.id;
+      details.disabled = batchLoadState !== 'loaded';
+      details.setAttribute(
+        'aria-label',
+        'See ' + formatCount(group.count) + ' files in ' + group.label
+      );
+      details.setAttribute('aria-expanded', activeGroupID === group.id ? 'true' : 'false');
+      details.setAttribute('aria-controls', 'fileJanitorGroup-details');
+      card.appendChild(details);
+      grid.appendChild(card);
+    }
+    section.appendChild(grid);
+    if (!groupReview.groups.length)
+      section.appendChild(
+        el(
+          'p',
+          'fj-empty-copy',
+          'No pending proposal groups in this saved batch. Recorded outcomes remain in All files and History.'
+        )
+      );
+    if (activeGroupID) {
+      const group = groupReview.groups.find(group => group.id === activeGroupID);
+      const panel = el('section', 'fj-group-details');
+      panel.id = 'fileJanitorGroup-details';
+      panel.setAttribute('tabindex', '-1');
+      panel.setAttribute('aria-label', 'Files in ' + (group?.label || 'this group'));
+      panel.appendChild(el('h3', 'fj-group-title', group?.label || 'Group files'));
+      panel.appendChild(
+        button('Close file list', 'fj-btn', () => {
+          const previous = activeGroupID;
+          activeGroupID = '';
+          groupMemberRequest++;
+          renderBatch();
+          document.getElementById('fileJanitorGroup-' + previous)?.focus?.();
+        })
+      );
+      if (groupMemberLoadState === 'loaded') {
+        panel.appendChild(
+          el(
+            'p',
+            'fj-sub',
+            'Showing ' +
+              (groupMembers.length ? groupOffset + 1 : 0) +
+              '–' +
+              (groupOffset + groupMembers.length) +
+              ' of ' +
+              formatCount(groupMemberTotal) +
+              ' files in this group.'
+          )
+        );
+        const scroller = el('div', 'fj-table-scroll');
+        scroller.appendChild(reviewTable(groupMembers));
+        panel.appendChild(scroller);
+        const nav = el('nav', 'fj-actions');
+        nav.setAttribute('aria-label', 'Group member pages');
+        for (const [label, offset, disabled] of [
+          ['Previous group files', Math.max(0, groupOffset - PAGE_SIZE), groupOffset === 0],
+          [
+            'Next group files',
+            groupOffset + PAGE_SIZE,
+            groupOffset + groupMembers.length >= groupMemberTotal
+          ]
+        ]) {
+          const control = button(
+            label,
+            'fj-btn',
+            () => void loadGroupMembers(activeGroupID, offset)
+          );
+          control.disabled = disabled;
+          nav.appendChild(control);
+        }
+        panel.appendChild(nav);
+      } else {
+        panel.appendChild(
+          el(
+            'p',
+            'fj-empty-copy',
+            groupMemberLoadState === 'error'
+              ? 'Group files are unavailable or changed. Reload these proposals before continuing.'
+              : 'Loading group files…'
+          )
+        );
+        if (groupMemberLoadState === 'error')
+          panel.appendChild(button('Reload proposals', 'fj-btn', () => void loadReviewGroups()));
+      }
+      section.appendChild(panel);
+    }
+    return section;
+  }
+
+  function reviewTable(candidates = visibleCandidates()) {
     const table = el('table', 'fj-table');
     table.setAttribute('role', 'table');
     table.setAttribute('aria-label', 'Files proposed for filing');
@@ -1268,7 +1695,7 @@
     const body = document.createElement('tbody');
     body.className = 'fj-tbody';
     body.setAttribute('role', 'rowgroup');
-    visibleCandidates().forEach(candidate => body.appendChild(candidateRow(candidate)));
+    candidates.forEach(candidate => body.appendChild(candidateRow(candidate)));
     table.appendChild(body);
     return table;
   }
@@ -1410,12 +1837,20 @@
     }
 
     const protection = protectionPrompt();
-    if (protection) container.appendChild(protection);
+    if (protection && reviewView !== 'groups') container.appendChild(protection);
     container.appendChild(batchProgress(lastBatch));
     const summary = el('p', 'fj-batch-summary', batchSummaryLine(lastBatch));
     summary.setAttribute('role', 'status');
     summary.setAttribute('aria-live', 'polite');
     container.appendChild(summary);
+    container.appendChild(savedBatchPicker());
+    container.appendChild(reviewViewSwitch());
+    if (reviewView === 'groups') {
+      container.appendChild(renderReviewGroups());
+      if (protection) container.appendChild(protection);
+      appendReviewFooter(container, focusedReviewControlID);
+      return;
+    }
     container.appendChild(filterBar());
 
     const rows = visibleCandidates();
@@ -1441,6 +1876,10 @@
     const pageControls = pager();
     if (pageControls) container.appendChild(pageControls);
 
+    appendReviewFooter(container, focusedReviewControlID);
+  }
+
+  function appendReviewFooter(container, focusedReviewControlID) {
     const footer = el('div', 'fj-footer');
     const selection = el('p', 'fj-selection');
     selection.id = 'fileJanitorSelection';
@@ -1459,7 +1898,9 @@
 
     updateSelectionSummary();
     if (
-      /^fileJanitor(?:Select|Category|FileDetailsToggle|Trash|Skip)-/.test(focusedReviewControlID)
+      /^fileJanitor(?:Select|Category|FileDetailsToggle|Trash|Skip|Group)-/.test(
+        focusedReviewControlID
+      )
     ) {
       document.getElementById(focusedReviewControlID)?.focus?.();
     }
@@ -3168,7 +3609,15 @@
     // batch — the confirmation step and the report of what just happened.
     // Applying every file empties the batch; the account of the user's own
     // files must not be swept away with the table it came from.
-    host.appendChild(readinessRows(status));
+    if (reviewView === 'groups') {
+      const disclosure = el('details', 'fj-review-health');
+      disclosure.open = (status.readiness?.checks || []).some(check => check.status === 'failed');
+      disclosure.appendChild(el('summary', 'fj-label', 'Folder access and scan status'));
+      disclosure.appendChild(readinessRows(status));
+      host.appendChild(disclosure);
+    } else {
+      host.appendChild(readinessRows(status));
+    }
     const repair = repairAction(status);
     if (repair) host.appendChild(repair);
     const batchHost = el('div', 'fj-batch');
@@ -3324,6 +3773,12 @@
     consoleTrigger = options.trigger || consoleTrigger || activeElement();
     consoleTab = chooseTab(options.tab);
     consoleItem = String(options.item || '');
+    if (consoleItem && consoleTab === 'review') {
+      reviewView = 'all';
+      locatedCandidateID = '';
+      filter = '';
+      pageOffset = 0;
+    }
     if (consoleTab === 'history' && consoleItem) {
       // A result link names an actual receipt, not whichever filter was last used.
       historyFilter = '';
@@ -3785,6 +4240,13 @@
       // on Settings (FR-124).
       consoleTab = tab || 'review';
       consoleItem = item;
+      if (item && consoleTab === 'review') {
+        reviewView = 'all';
+        locatedCandidateID = '';
+        filter = '';
+        pageOffset = 0;
+        void loadBatch();
+      }
       renderConsole();
       return;
     }
@@ -4562,7 +5024,10 @@
         PAGE_SIZE +
         '&offset=' +
         pageOffset +
-        (filter ? '&filter=' + encodeURIComponent(filter) : '');
+        (filter ? '&filter=' + encodeURIComponent(filter) : '') +
+        (consoleItem && consoleItem !== locatedCandidateID
+          ? '&candidate_id=' + encodeURIComponent(consoleItem)
+          : '');
       const batchPath = linkedBatchID
         ? '/batches/' + encodeURIComponent(linkedBatchID)
         : '/batches/latest';
@@ -4576,6 +5041,13 @@
       batchTotal = Number(body.total) || 0;
       filteredTotal = Number(body.filtered_total) || 0;
       filterCounts = body.counts || {};
+      if (consoleItem && consoleItem !== locatedCandidateID) {
+        if (Number.isSafeInteger(body.offset) && body.offset >= 0) pageOffset = body.offset;
+        locatedCandidateID = consoleItem;
+        if (body.linked_candidate_found === false)
+          reviewStatusMessage =
+            'That linked file is no longer in this saved review. Other files remain available.';
+      }
       batchLoadState = 'loaded';
       batchLoaded = true;
 
@@ -4604,6 +5076,7 @@
 
     // A different batch invalidates every decision made against the old one.
     if ((lastBatch && lastBatch.id) !== previousBatchID) {
+      resetGroupReview();
       selected = new Set();
       trashMarked = new Set();
       expandedCandidates = new Set();
@@ -4630,7 +5103,17 @@
       }
     }
 
+    if (lastBatch) {
+      // Resolve latest only once. A later scan is discoverable in the saved
+      // batch picker, never an implicit replacement of the review in progress.
+      if (!linkedBatchID) linkedBatchID = lastBatch.id;
+      await Promise.all([loadReviewGroups(), loadSavedBatches()]);
+      if (!current()) return;
+    } else {
+      resetGroupReview();
+    }
     renderBatch();
+    if (consoleOpen && consoleItem) focusRequestedItem();
     refreshStats();
     // Status arrives before the paged batch on a cold workspace load. Once the
     // queue count is known, promote Watching to Review ready on the compact
@@ -5179,6 +5662,9 @@
     _setBatch: (batch, candidates, cats) => {
       const changed = (lastBatch && lastBatch.id) !== (batch && batch.id);
       lastBatch = batch;
+      // Existing fixture callers exercise the detailed All files path. New
+      // group tests explicitly select Groups, matching the production default.
+      reviewView = 'all';
       lastCandidates = candidates || [];
       batchLoadState = 'loaded';
       batchLoaded = true;
@@ -5194,6 +5680,11 @@
       filter = '';
     },
     _selected: () => Array.from(selected),
+    _reviewView: view => {
+      reviewView = view === 'all' ? 'all' : 'groups';
+      renderBatch();
+    },
+    _loadReviewGroups: loadReviewGroups,
     _setFilter: next => selectFilter(next),
     _reloadBatch: () => loadBatch(),
     _reloadHistory: () => loadHistory(),
@@ -5270,6 +5761,15 @@
       lastStatus = null;
       lastBatch = null;
       lastCandidates = [];
+      resetGroupReview();
+      reviewView = 'groups';
+      locatedCandidateID = '';
+      savedBatches = [];
+      savedBatchOffset = 0;
+      savedBatchTotal = 0;
+      savedBatchLoadState = 'idle';
+      savedBatchRequest++;
+      linkedBatchID = '';
       expandedCandidates = new Set();
       setupReview = null;
       setupReviewRequest++;

@@ -464,6 +464,7 @@ func (s *Service) ApplyDecisions(workspaceID string, updates []DecisionUpdate) (
 		}
 		for batchID := range touchedBatches {
 			resummarizeBatch(state, batchID)
+			invalidateBatchApprovals(state, batchID)
 		}
 		return nil
 	})

@@ -145,6 +145,12 @@ class FakeDocument {
   addEventListener() {}
 }
 
+// Review pins a concrete batch after resolving latest. Detail mocks answer both
+// forms, but not the distinct /groups or summary-only batch-list endpoints.
+function isBatchDetailRequest(url) {
+  return /\/batches\/[^/?]+(?:\?|$)/.test(String(url));
+}
+
 function setup() {
   const doc = new FakeDocument();
   // The global goes first: registering a node attaches it, and attachment
@@ -966,7 +972,7 @@ test('a filter asks the server for that filter, starting at the first page', asy
   const asked = [];
   globalThis.fetch = async url => {
     const target = String(url);
-    if (target.includes('/batches/latest')) {
+    if (isBatchDetailRequest(target)) {
       asked.push(target);
       return {
         ok: true,
@@ -1003,7 +1009,7 @@ test('filter labels carry whole-batch counts, not the page count', async () => {
   renderReview(doc);
 
   globalThis.fetch = async url =>
-    String(url).includes('/batches/latest')
+    isBatchDetailRequest(url)
       ? {
           ok: true,
           json: async () => ({
@@ -3311,7 +3317,7 @@ test('a batch loaded after status refreshes the compact review action', async ()
 
   globalThis.fetch = async url => {
     const target = String(url);
-    if (target.includes('/batches/latest')) {
+    if (isBatchDetailRequest(target)) {
       return {
         ok: true,
         json: async () => ({
@@ -3513,7 +3519,7 @@ function pagedFetch(total, pageSize = 50) {
   }));
   return async url => {
     const target = String(url);
-    if (!target.includes('/batches/latest')) {
+    if (!isBatchDetailRequest(target)) {
       return { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
     }
     const params = new URLSearchParams(target.split('?')[1] || '');
@@ -3635,7 +3641,7 @@ test('a shrunken last page refetches the real final page instead of stranding an
   const offsets = [];
   const shrunkFetch = pagedFetch(75);
   globalThis.fetch = async url => {
-    if (String(url).includes('/batches/latest')) {
+    if (isBatchDetailRequest(url)) {
       const params = new URLSearchParams(String(url).split('?')[1] || '');
       offsets.push(Number(params.get('offset')) || 0);
     }
@@ -3691,7 +3697,7 @@ test('a selection that is no longer eligible is dropped on refresh', async () =>
 
   const resolved = candidatesFixture().map(c => ({ ...c, state: 'skipped' }));
   globalThis.fetch = async url =>
-    String(url).includes('/batches/latest')
+    isBatchDetailRequest(url)
       ? {
           ok: true,
           json: async () => ({
@@ -3719,7 +3725,7 @@ test('a new batch clears selections from the old one', async () => {
   panel._select('c1');
 
   globalThis.fetch = async url =>
-    String(url).includes('/batches/latest')
+    isBatchDetailRequest(url)
       ? {
           ok: true,
           json: async () => ({
@@ -3740,7 +3746,7 @@ test('the pager states how much a filter hides', async () => {
   const doc = setup();
   renderReview(doc);
   globalThis.fetch = async url =>
-    String(url).includes('/batches/latest')
+    isBatchDetailRequest(url)
       ? {
           ok: true,
           json: async () => ({
@@ -4715,6 +4721,143 @@ test('scan completion publishes its new batch and end state without hiding pendi
   assert.ok(
     seen.some(state => state.scanning && state.batch.state === 'ready' && state.pendingCount === 2)
   );
+});
+
+async function groupedReviewFixture(count = 206) {
+  const doc = setup();
+  const calls = [];
+  const batch = batchFixture({ summary: { total: count, proposed: count } });
+  const candidates = Array.from({ length: count }, (_, i) => ({
+    ...candidatesFixture()[0],
+    id: 'group-member-' + i,
+    name: 'image-' + i + '.png',
+    category: 'images',
+    destination: 'Filed/Images'
+  }));
+  const review = {
+    batch_id: batch.id,
+    revision: 'a'.repeat(64),
+    rule_version: 1,
+    counts: { candidates: count, filing: count, questions: 0 },
+    groups: [
+      {
+        id: 'group-images',
+        kind: 'filing',
+        label: 'Images',
+        count,
+        category: 'images',
+        destination: 'Filed/Images',
+        reason: 'Saved proposed image category',
+        samples: ['<img onerror=alert(1)>.png', 'image-1.png', 'image-2.png']
+      }
+    ]
+  };
+  const state = { review, failGroups: false, batch, batches: [batch] };
+  globalThis.fetch = async (url, options) => {
+    const target = String(url);
+    calls.push({ target, options });
+    const reply = body => ({ ok: true, json: async () => body });
+    if (target.endsWith('/groups'))
+      return state.failGroups
+        ? { ok: false, json: async () => ({}) }
+        : reply({ review: state.review });
+    if (target.includes('/members?')) {
+      const offset = Number(new URLSearchParams(target.split('?')[1]).get('offset'));
+      return reply({
+        batch_id: batch.id,
+        group_id: 'group-images',
+        revision: review.revision,
+        candidates: candidates.slice(offset, offset + 50),
+        total: count
+      });
+    }
+    if (target.includes('/batches?'))
+      return reply({ batches: state.batches, total: state.batches.length });
+    if (isBatchDetailRequest(target))
+      return reply({
+        batch: state.batch,
+        candidates: candidates.slice(0, 50),
+        total: count,
+        filtered_total: count,
+        counts: { all: count, pending: count }
+      });
+    return reply({ status: statusFixture(), categories: CATEGORIES });
+  };
+  panel.render(statusFixture());
+  panel.open({ source: 'folder-preparation', tab: 'review' });
+  await panel._reloadBatch();
+  return { doc, calls, state, candidates };
+}
+
+test('grouped entry is the default, shows complete bounded counts, and selects nothing', async () => {
+  const { doc, calls } = await groupedReviewFixture();
+  assert.equal(doc.getElementById('fileJanitorView-groups').getAttribute('aria-pressed'), 'true');
+  assert.match(surface(doc).textContent, /206 candidates in this saved batch/);
+  assert.match(surface(doc).textContent, /206 files/);
+  assert.match(surface(doc).textContent, /<img onerror=alert\(1\)>/);
+  assert.equal(rowsIn(surface(doc)).length, 0, 'entry must not render all members');
+  assert.deepEqual(panel._selected(), []);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  assert.ok(calls.every(call => !call.options?.method || call.options.method === 'GET'));
+  assert.ok(calls.every(call => !/curator|agent|scan|preview|apply/.test(call.target)));
+});
+
+test('group details page independently, reuse existing controls and return focus', async () => {
+  const { doc, calls } = await groupedReviewFixture();
+  doc.getElementById('fileJanitorGroup-group-images').click();
+  await settle();
+  assert.equal(rowsIn(surface(doc)).length, 50);
+  assert.match(surface(doc).textContent, /Showing 1–50 of 206/);
+  assert.ok(surface(doc).all(node => node.className === 'fj-category').length);
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Next group files')[0]
+    .click();
+  await settle();
+  assert.match(surface(doc).textContent, /Showing 51–100 of 206/);
+  assert.ok(calls.some(call => call.target.includes('offset=50&revision=')));
+  doc.getElementById('fileJanitorView-all').click();
+  assert.equal(rowsIn(surface(doc)).length, 50);
+  doc.getElementById('fileJanitorView-groups').click();
+  assert.match(surface(doc).textContent, /Showing 51–100 of 206/);
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Close file list')[0]
+    .click();
+  assert.equal(doc.activeElement.id, 'fileJanitorGroup-group-images');
+  assert.equal(rowsIn(surface(doc)).length, 0);
+});
+
+test('group unavailable is distinct from no pending groups and can retry without writes', async () => {
+  const { doc, calls, state } = await groupedReviewFixture();
+  state.failGroups = true;
+  await panel._loadReviewGroups();
+  assert.match(surface(doc).textContent, /Grouped proposals are unavailable/);
+  assert.doesNotMatch(surface(doc).textContent, /No pending proposal groups/);
+  state.failGroups = false;
+  state.review = {
+    ...state.review,
+    groups: [],
+    counts: { candidates: 206, filing: 0, questions: 0, kept: 206 }
+  };
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry groups')[0]
+    .click();
+  await settle();
+  assert.match(surface(doc).textContent, /No pending proposal groups/);
+  assert.match(surface(doc).textContent, /206 kept here/);
+  assert.ok(calls.every(call => !call.options?.method || call.options.method === 'GET'));
+});
+
+test('a resolved concrete batch stays pinned and newer saved batches remain discoverable', async () => {
+  const { doc, calls, state } = await groupedReviewFixture();
+  state.batches = [batchFixture({ id: 'batch-new' }), state.batch];
+  calls.length = 0;
+  await panel._reloadBatch();
+  assert.ok(calls.some(call => /\/batches\/batch-1\?/.test(call.target)));
+  assert.ok(!calls.some(call => call.target.includes('/batches/latest')));
+  const picker = doc.getElementById('fileJanitorBatchChoice');
+  assert.ok(picker.children.some(option => option.value === 'batch-new'));
+  assert.ok(picker.children.some(option => option.value === 'batch-1' && option.selected));
+  assert.deepEqual(panel._selected(), []);
 });
 
 async function protectionReview(t, count = 3) {

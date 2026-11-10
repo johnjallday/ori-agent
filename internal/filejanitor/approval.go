@@ -163,6 +163,21 @@ func pruneApprovals(approvals []ApprovalRecord, now time.Time) []ApprovalRecord 
 	return kept
 }
 
+// invalidateBatchApprovals revokes outstanding previews when saved review
+// intent changes. PayloadHash alone cannot detect a deselection if an old
+// client submits the preview's explicit category again. Consumed records stay
+// available for idempotent replay; unrelated batches retain their authority.
+// Call only inside the canonical scan-state transaction.
+func invalidateBatchApprovals(state *ScanState, batchID string) {
+	kept := make([]ApprovalRecord, 0, len(state.Approvals))
+	for _, approval := range state.Approvals {
+		if approval.BatchID != batchID || approval.Consumed() {
+			kept = append(kept, approval)
+		}
+	}
+	state.Approvals = kept
+}
+
 // ---------------------------------------------------------------- collisions
 
 // resolveAvailableName returns a name that does not already exist in dir,

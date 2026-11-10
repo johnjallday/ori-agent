@@ -106,9 +106,22 @@ func (h *Handler) ListBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	end := min(offset+limit, total)
 
+	var page any = batches[offset:end]
+	if r.URL.Query().Get("summary_only") == "true" {
+		// The grouped-review batch chooser needs navigation/counts, not every
+		// candidate ID or ineligible filename from every retained scan.
+		summaries := make([]map[string]any, 0, end-offset)
+		for _, batch := range batches[offset:end] {
+			summaries = append(summaries, map[string]any{
+				"id": batch.ID, "state": batch.State, "summary": batch.Summary,
+				"started_at": batch.StartedAt, "completed_at": batch.CompletedAt,
+			})
+		}
+		page = summaries
+	}
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success": true,
-		"batches": batches[offset:end],
+		"batches": page,
 		"total":   total,
 		"limit":   limit,
 		"offset":  offset,
@@ -200,6 +213,18 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 	counts := candidateCounts(candidates)
 	matching := filterCandidates(candidates, filter)
 	filteredTotal := len(matching)
+	linkedFound := false
+	if candidateID := strings.TrimSpace(r.URL.Query().Get("candidate_id")); candidateID != "" {
+		// A candidate deep link locates its bounded page server-side, without
+		// fetching every page or exposing candidates from another batch.
+		for i, candidate := range matching {
+			if candidate.ID == candidateID {
+				offset = (i / limit) * limit
+				linkedFound = true
+				break
+			}
+		}
+	}
 	if offset > filteredTotal {
 		offset = filteredTotal
 	}
@@ -213,12 +238,13 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 		// The counts describe the WHOLE batch, not the page. A review surface
 		// that reported "3 files" because three fit on a page would be lying
 		// about how much work is waiting (FR-109).
-		"total":          len(candidates),
-		"filtered_total": filteredTotal,
-		"counts":         counts,
-		"filter":         filter,
-		"limit":          limit,
-		"offset":         offset,
+		"total":                  len(candidates),
+		"filtered_total":         filteredTotal,
+		"linked_candidate_found": linkedFound,
+		"counts":                 counts,
+		"filter":                 filter,
+		"limit":                  limit,
+		"offset":                 offset,
 	})
 }
 

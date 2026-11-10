@@ -8,6 +8,95 @@
   display: none;
 }
 
+/* Saved proposals: compact plan cards inside the existing review console. */
+.fj-saved-batches {
+  margin-block: 1rem;
+}
+
+.fj-saved-batches .fj-input {
+  max-width: 100%;
+  min-height: 44px;
+}
+
+.fj-groups {
+  margin-block: 1rem;
+}
+
+.fj-group-accounting {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.85rem;
+  margin-block: 1rem;
+}
+
+.fj-group-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+  border-radius: 10px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  overflow-wrap: anywhere;
+}
+
+.fj-group-question {
+  border-inline-start: 3px solid var(--warning-color, #b26a00);
+}
+
+.fj-group-kind {
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.45rem;
+}
+
+.fj-group-title {
+  color: var(--text-primary, #e8e8e8);
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+
+.fj-group-count {
+  color: var(--text-primary, #e8e8e8);
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0.25rem 0;
+}
+
+.fj-group-reason,
+.fj-group-samples {
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.fj-group-samples {
+  padding-inline-start: 1.15rem;
+}
+
+.fj-group-card .fj-btn,
+.fj-group-details .fj-btn {
+  min-height: 44px;
+}
+
+.fj-group-details {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+}
+
+.fj-group-details:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 3px;
+}
+
 /* Quiet, optional advice: a margin note rather than a filing gate. */
 .fj-protection {
   border-inline-start: 2px solid var(--border-subtle, #697078);

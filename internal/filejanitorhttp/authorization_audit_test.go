@@ -163,6 +163,8 @@ func TestEveryRouteRefusesAnotherUsersWorkspace(t *testing.T) {
 		{http.MethodGet, "/categories"},
 		{http.MethodGet, "/batches"},
 		{http.MethodGet, "/batches/latest"},
+		{http.MethodGet, "/batches/latest/groups"},
+		{http.MethodGet, "/batches/latest/groups/group-1/members"},
 		{http.MethodPost, "/test-scan"},
 		{http.MethodPost, "/scan"},
 		{http.MethodPost, "/decisions"},
