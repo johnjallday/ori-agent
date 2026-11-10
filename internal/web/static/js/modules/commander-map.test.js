@@ -263,6 +263,43 @@ test("Home's anchor is the district header once the folder is a district, else i
   assert.equal(homeTileAnchor(root([]), 'bad"id'), null, 'an unsafe id never reaches a selector');
 });
 
+test('a folder district inside its Home speaks from its own header, not the Home’s (nest-songs FR13)', async () => {
+  // The real map markup: the Home's district, then Albums drawn inside it.
+  const { readFileSync } = await import('node:fs');
+  const vm = await import('node:vm');
+  const window = {};
+  vm.runInNewContext(readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8'), {
+    window,
+    document: {}
+  });
+  const layout = window.OriWorkspaceMap.computeWorldLayout(
+    [
+      { id: 'home', kind: 'group', name: 'Music Production Home' },
+      {
+        id: 'albums',
+        kind: 'group',
+        parent_id: 'home',
+        name: 'Albums',
+        entry_agent_name: 'Albums Manager'
+      },
+      { id: 'album-1', parent_id: 'albums', name: 'Album-1' }
+    ],
+    {}
+  );
+  const albums = layout.districts.find(d => d.id === 'albums');
+  assert.equal(albums.parentId, 'home', 'Albums is a district inside the Home');
+  const header = { id: 'albums-header' };
+  const homeHeader = { id: 'home-header' };
+  const root = {
+    querySelector: selector =>
+      ({
+        '.ws-map-district[data-group-id="albums"] .ws-map-district-header': header,
+        '.ws-map-district[data-group-id="home"] .ws-map-district-header': homeHeader
+      })[selector] || null
+  };
+  assert.equal(homeTileAnchor(root, 'albums'), header);
+});
+
 test('an opening the rules call for waits until the tile is drawn', () => {
   const map = fakeMap({ visible: false });
   const host = fakeHost();

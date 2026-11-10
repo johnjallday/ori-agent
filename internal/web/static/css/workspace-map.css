@@ -1101,6 +1101,55 @@
   opacity: 0.72;
   font-size: 9px;
 }
+/* A folder district inside its Home names its Commander: bounded and quiet
+   like the count, truncated before it can displace the name. */
+.ws-map-district-commander {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 18ch;
+  opacity: 0.86;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A district inside another draws its header INSIDE its own frame, in the
+   band the layout reserves above its first row (workspace-map.js
+   nestedHeaderBand), so it never lands on its parent's header or on the
+   building above it. Ink rather than accent text keeps the name readable on
+   the light theme's pale ground. */
+.ws-map-district.is-nested .ws-map-district-header {
+  top: 6px;
+  bottom: auto;
+  left: 8px;
+  right: 6px;
+  align-items: center;
+  padding-bottom: 0;
+}
+.ws-map-district.is-nested .ws-map-district-tag {
+  color: var(--ws-ink);
+}
+.ws-map-district.is-nested .ws-map-district-name {
+  max-width: 100%;
+}
+/* Narrower than name, count, Commander and three controls: the tag takes the
+   first row (name and count, then the Commander) and the controls the next. */
+.ws-map-district.is-nested.is-narrow .ws-map-district-header {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.ws-map-district.is-nested.is-narrow .ws-map-district-tag {
+  flex: 0 0 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.ws-map-district.is-nested.is-narrow .ws-map-district-name {
+  flex: 1 1 0;
+}
+.ws-map-district.is-nested.is-narrow .ws-map-district-commander {
+  flex: 0 0 100%;
+  max-width: 100%;
+}
 /* A program Home's template type: bounded and truncated like the name, and
    quieter, so it never displaces the name or the header controls. */
 .ws-map-district-type {
