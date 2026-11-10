@@ -140,6 +140,11 @@ func TestFolderHoldingHomeSongs_RefusesRemovalInPlainWords(t *testing.T) {
 		if recorder.Code != http.StatusConflict || failure.Code != assistantRemovalReviewRequired || failure.Message != want {
 			t.Fatalf("delete%s = %d %+v, want %q", query, recorder.Code, failure, want)
 		}
+		// Not "Review disconnect": the client shows this as a plain notice
+		// instead of starting a guided disconnect of one song.
+		if details, ok := failure.Details.(map[string]any); !ok || details["review_action"] != folderHoldsSongsReviewAction {
+			t.Fatalf("delete%s details = %#v", query, failure.Details)
+		}
 	}
 	recorder := f.request(t, http.MethodPatch, "/api/workspaces/"+f.albumsID, map[string]any{"parent_id": ""})
 	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), want) {

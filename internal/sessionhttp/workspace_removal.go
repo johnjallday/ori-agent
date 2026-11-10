@@ -14,6 +14,10 @@ import (
 
 const assistantRemovalReviewRequired = "assistant_program_review_required"
 
+// folderHoldsSongsReviewAction names the refusal of a folder workspace that
+// still holds its Home's songs; clients show it as a plain notice.
+const folderHoldsSongsReviewAction = "Remove songs from the map"
+
 // allowWorkspaceRemoval is shared by all generic delete modes, before they
 // unlink sessions, un-nest children, or touch disk. Both stores are evidence:
 // neither a DB-only Home nor a folder-only link may bypass the review gate.
@@ -43,7 +47,10 @@ func (h *Handler) allowWorkspaceRemoval(w http.ResponseWriter, r *http.Request, 
 	home, err := h.store.GetWorkspace(r.Context(), homeID)
 	if folderMessage, ok := h.folderHoldsHomeSongsMessage(r.Context(), root.ID, root.Name, root.ParentID, blocked.ID, state); ok {
 		// A folder workspace inside the Home that holds its songs: one plain
-		// sentence, the same refusal code and the same review destination.
+		// sentence, the same refusal code and the same Home destination. Its
+		// action is not "Review disconnect": the clients' guided disconnect would
+		// unlink one song and retry, while the songs leave the map from the Home.
+		details["review_action"] = folderHoldsSongsReviewAction
 		if err == nil && workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) && home.Status == session.WorkspaceStatusActive {
 			details["review_home_slug"] = home.FolderSlug
 		}
