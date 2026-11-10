@@ -1118,7 +1118,12 @@ export function renderFolderAgentReport(
   if (view.exploreFolder) {
     // The normal chooser performs a new explicit selection; opening it neither
     // reanchors this workspace nor consents to a look or structural setup.
-    const explore = el(doc, 'a', 'folder-agent-card__open', 'Explore a project folder…');
+    const explore = el(
+      doc,
+      'a',
+      'folder-agent-card__open folder-agent-card__explore',
+      'Explore a project folder…'
+    );
     explore.href = '/?panel=today&folder=show';
     card.append(explore);
   }

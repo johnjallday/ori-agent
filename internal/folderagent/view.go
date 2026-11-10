@@ -208,7 +208,7 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	v.NextFolders = nextFolders(rec.Facts)
 	v.ModelSentence = modelSentence(rec)
 	sectionsInto(&v, rec)
-	if rec.Turn == nil || rec.Turn.Status != TurnFinished {
+	if rec.RootPolicy == folderlook.RootOrdinary && (rec.Turn == nil || rec.Turn.Status != TurnFinished) {
 		v.ToolsSentence = "Search for more tools needs a model"
 	}
 	// Once a run exists the plan shown is the one it was confirmed on, not
@@ -222,6 +222,9 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		// A completed card is a receipt, not a newly generated offer catalog.
 		// Retain the confirmed lines and omit alternatives it never ran.
 		plan.Lines = rec.Setup.Lines
+		plan.Stage, v.Stage = rec.Setup.Stage, rec.Setup.Stage
+		plan.Runnable = false
+		v.StageLine = "Set up as confirmed. Nothing in the source folder was moved."
 		var ran []folderlook.Step
 		for _, step := range plan.Steps {
 			if step.Chosen {
