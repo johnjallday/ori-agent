@@ -13,7 +13,7 @@ import (
 )
 
 // ReviewGroupRuleVersion changes whenever primary membership rules change.
-const ReviewGroupRuleVersion = 2
+const ReviewGroupRuleVersion = 3
 const ReviewGroupSampleLimit = 3
 
 // ReviewGroup is a bounded saved proposal, never a filesystem inventory or an
@@ -76,7 +76,7 @@ type groupDefinition struct {
 var questionGroups = []groupDefinition{
 	{"sensitive", "Sensitive-looking names", "A filename contains a sensitive-looking word. This is not a sensitivity check; decide where these files belong.", ""},
 	{"versions", "Possible copies or versions", "An explicit copy/version suffix shares a name stem and extension with another saved candidate. Contents and newest versions have not been compared.", ""},
-	{"audio", "Audio and related material", "Audio metadata, a music-project extension, or an archive/document sharing a saved audio filename stem suggests a question. These are not verified projects or duplicates; archives were not opened.", ""},
+	{"audio", "Audio and related material", "Audio metadata, a music-project extension, or another file sharing a saved audio filename stem suggests a question. These are not verified projects or duplicates; archives were not opened.", ""},
 	{"unresolved", "Choose a filing category", "The saved classification needs review. Choose a category explicitly before filing; the proposal is not a verified content description.", ""},
 	{"unmatched", "Other pending files", "These saved proposals lack a supported category or usable bounded name metadata. Review individual details rather than guessing a destination.", ""},
 }
@@ -291,11 +291,7 @@ func relatedAudioCandidate(candidate JanitorCandidate, stems map[string]bool) bo
 	if stem := reviewNameStem(candidate.Name); stem == "" || !stems[stem] {
 		return false
 	}
-	switch strings.ToLower(filepath.Ext(candidate.Name)) {
-	case ".zip", ".7z", ".rar", ".tar", ".pdf", ".txt", ".md", ".rtf", ".doc", ".docx":
-		return true
-	}
-	return false
+	return true // exact saved stem only; no project-format or archive knowledge
 }
 
 func audioReviewCandidate(candidate JanitorCandidate) bool {
@@ -303,7 +299,7 @@ func audioReviewCandidate(candidate JanitorCandidate) bool {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(candidate.Name)) {
-	case ".als", ".rpp", ".logicx", ".band", ".flp", ".ptx", ".aup", ".aup3", ".cue":
+	case ".als", ".logicx", ".band", ".flp", ".ptx", ".aup", ".aup3", ".cue":
 		return true
 	}
 	return false

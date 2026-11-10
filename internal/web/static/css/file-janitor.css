@@ -742,10 +742,6 @@
   background: color-mix(in srgb, var(--warning-color, #b26a00) 8%, transparent);
 }
 
-.fj-row-state-skipped {
-  opacity: 0.65;
-}
-
 .fj-state-reason {
   display: block;
   font-size: 0.72rem;
@@ -1286,6 +1282,22 @@
   border: 1px solid var(--border-color, #2f2f2f);
   border-radius: 12px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+/* Bring supporting copy toward the theme's own foreground on elevated cards. */
+.fj-console
+  :is(.fj-sub, .fj-muted, .fj-group-kind, .fj-group-reason, .fj-group-samples, .fj-destination) {
+  color: color-mix(in srgb, var(--text-secondary, #9aa0a6) 80%, var(--text-primary, #e8e8e8));
+}
+
+/* Preserve the existing accent while keeping white action text readable.
+   Disabled buttons are still distinguished independently by state. */
+.fj-console .fj-btn-primary {
+  background: color-mix(in srgb, var(--accent-color, #3b7dd8) 85%, #000);
+}
+
+.fj-console .fj-btn-primary.fj-btn-destructive {
+  background: color-mix(in srgb, var(--danger-color, #c5442e) 85%, #000);
 }
 
 /* The header carries the title, the folder, the status, and the actions that

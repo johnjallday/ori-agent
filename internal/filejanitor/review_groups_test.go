@@ -105,7 +105,8 @@ func TestReviewGroups_ConservativeNameRules(t *testing.T) {
 		{"PHOTO.png", "photo.png", "filing-images"}, // case alone is not copy evidence
 		{"素材-v2.pdf", "素材.pdf", "versions"},
 		{"song.wav", "", "audio"},
-		{"song.rpp", "", "audio"},
+		{"song.als", "", "audio"},
+		{"unknown-project.rpp", "", "unresolved"},
 		{"bundle.zip", "bundle.pdf", "filing-archives"}, // not an expendable duplicate
 		{"unknown.zzzzz", "", "unresolved"},
 	} {

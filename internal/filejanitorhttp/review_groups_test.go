@@ -131,6 +131,27 @@ func TestReviewGroupReads_RejectInvalidPagesForeignIDsAndRevisions(t *testing.T)
 	}
 }
 
+func TestReviewGroupReads_PageSizeBoundaries(t *testing.T) {
+	for _, count := range []int{1, 50, 51, 200} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			h, _ := groupHandler(t, count)
+			review, card := readGroupCard(t, h)
+			if card["count"] != float64(count) || len(card["samples"].([]any)) != min(count, 3) {
+				t.Fatal("whole count/sample bound disagrees", card)
+			}
+			path := pathFor("file-janitor", "ws-1", "/batches/"+review["batch_id"].(string)+"/groups/"+card["id"].(string)+"/members")
+			rec, first := serve(t, h, http.MethodGet, path, "")
+			if rec.Code != http.StatusOK || len(first["candidates"].([]any)) != min(count, 50) || first["total"] != float64(count) {
+				t.Fatal("default page incomplete", first)
+			}
+			_, next := serve(t, h, http.MethodGet, path+"?offset=50", "")
+			if len(next["candidates"].([]any)) != min(max(count-50, 0), 50) {
+				t.Fatal("boundary page lost members", next)
+			}
+		})
+	}
+}
+
 func TestReviewBatchNavigation_BoundedSummariesAndOffPageCandidate(t *testing.T) {
 	h, _ := groupHandler(t, 206)
 	for _, prefix := range routePrefixPair {

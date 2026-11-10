@@ -6,7 +6,8 @@ import {
   existsSync,
   mkdirSync,
   realpathSync,
-  chmodSync
+  chmodSync,
+  symlinkSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,11 +48,23 @@ async function workspace(request: APIRequestContext, label = 'Group review') {
   return { id: folder.id as string, slug: folder.folder_slug as string };
 }
 
-async function manualReview(request: APIRequestContext, names: string[], label?: string) {
+async function manualReview(
+  request: APIRequestContext,
+  names: string[],
+  label?: string,
+  useAlias = false
+) {
   const ws = await workspace(request, label);
   const root = syntheticRoot(names);
+  const referencePath = useAlias
+    ? join(
+        realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'ori-group-alias-'))),
+        'approved-inbox'
+      )
+    : root;
+  if (useAlias) symlinkSync(root, referencePath, 'dir');
   const link = await request.post(`/api/workspaces/${ws.id}/directories`, {
-    data: { name: 'Synthetic group inbox', path: root }
+    data: { name: 'Synthetic group inbox', path: referencePath }
   });
   expect(link.ok(), await link.text()).toBeTruthy();
   const ref = (await link.json()).directory.id;
@@ -69,7 +82,7 @@ async function manualReview(request: APIRequestContext, names: string[], label?:
   const status = (await (await request.get(base)).json()).status;
   expect(status.settings.setup_decision.mode).toBe('manual');
   expect(status.settings.paused).toBe(true);
-  return { ...ws, root, base };
+  return { ...ws, root, base, referencePath };
 }
 
 async function openReview(page: Page, slug: string, extra = '') {
@@ -202,8 +215,11 @@ test('two group choices stage 49 exact moves and stay pinned when a newer review
   await group('Images').click();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
   await expect(console.locator('#fileJanitorApprove')).toHaveText('Review 49 moves');
+  await expect(console.locator('#fileJanitorApprove')).toBeEnabled();
   mkdirSync(evidence, { recursive: true });
-  await console.locator('.fj-group-plan-layout').scrollIntoViewIfNeeded();
+  await console
+    .locator('.fj-group-plan-layout')
+    .evaluate(node => node.scrollIntoView({ block: 'start' }));
   await page.screenshot({ path: `${evidence}/02-group-selection.png`, fullPage: true });
   const batchID = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
     .batch_id;
@@ -609,7 +625,7 @@ test('real filesystem partial failure requires a new unselected retry review, an
   await page.screenshot({ path: `${evidence}/04-stale-or-partial.png`, fullPage: true });
 });
 
-test('real protection chooser returns to the pinned older batch and current canonical choices without replay', async ({
+test('real protection departure returns to the pinned older batch and current canonical choices without replay', async ({
   page,
   request
 }) => {
@@ -620,8 +636,15 @@ test('real protection chooser returns to the pinned older batch and current cano
   await console.getByRole('button', { name: 'Select all filing groups', exact: true }).click();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
   await console.locator('#fileJanitorApprove').click();
+  const protection = await (await request.get(`${ws.base}/protection`)).json();
   await console.locator('#fileJanitorCheckProtection').click();
-  await expect(page.locator('#protectFoldersChooser')).toBeVisible();
+  const returning =
+    protection.destination.kind === 'chooser'
+      ? page.locator('#protectFoldersCancel')
+      : page
+          .locator('#backupRecoveryConsole')
+          .getByRole('button', { name: 'Return to filing review', exact: true });
+  await expect(returning).toBeVisible();
   const saved = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
   const exclude = await request.post(`${ws.base}/batches/${batchID}/draft`, {
     data: {
@@ -639,7 +662,7 @@ test('real protection chooser returns to the pinned older batch and current cano
   const latest = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
     .batch_id;
   expect(latest).not.toBe(batchID);
-  await page.locator('#protectFoldersCancel').click();
+  await returning.click();
   await expect(console).toBeVisible();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
   await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
@@ -653,6 +676,155 @@ test('real protection chooser returns to the pinned older batch and current cano
     expect(existsSync(join(ws.root, name))).toBe(true);
   expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
 });
+
+test('explicit setup of an adopted alias keeps saved group scope without probing or widening reference paths', async ({
+  page,
+  request
+}) => {
+  const ws = await manualReview(request, ['alias.png'], 'Approved alias reference', true);
+  const status = (await (await request.get(ws.base)).json()).status;
+  expect(status.settings.root_path).toBe(ws.root);
+  expect(status.settings.approved_reference.path).toBe(ws.referencePath);
+  const response = await request.get(`${ws.base}/batches/latest/groups`);
+  expect(response.ok(), await response.text()).toBe(true);
+  const review = (await response.json()).review;
+  expect(review.counts).toMatchObject({ candidates: 1, filing: 1 });
+  const console = await openReview(page, ws.slug);
+  await console
+    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
+    .click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await page.reload();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  expect(existsSync(join(ws.root, 'alias.png'))).toBe(true);
+});
+
+test('1000 saved candidates keep bounded cards, paged DOM and one exact selection request', async ({
+  page,
+  request
+}) => {
+  test.setTimeout(90_000);
+  const ws = await manualReview(
+    request,
+    Array.from({ length: 1000 }, (_, i) => `scale-${String(i).padStart(4, '0')}.png`),
+    'Bounded 1000 review'
+  );
+  const raw = await (await request.get(`${ws.base}/batches/latest/groups`)).text();
+  expect(Buffer.byteLength(raw)).toBeLessThan(4000);
+  const review = JSON.parse(raw).review;
+  expect(review.counts).toMatchObject({ candidates: 1000, filing: 1000, questions: 0 });
+  expect(review.groups).toHaveLength(1);
+  expect(review.groups[0].samples).toHaveLength(3);
+  const console = await openReview(page, ws.slug);
+  const posts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && req.url().includes('/file-janitor')) posts.push(req.url());
+  });
+  const started = Date.now();
+  await console
+    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
+    .click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1000 files selected.', {
+    timeout: 20_000
+  });
+  const elapsed = Date.now() - started;
+  expect(posts.filter(url => url.endsWith('/draft'))).toHaveLength(1);
+  expect(posts).toHaveLength(1);
+  expect(await console.locator('.fj-row-item').count()).toBe(0);
+  await console.getByRole('button', { name: 'See 1,000 files in Images', exact: true }).click();
+  await expect(console.locator('.fj-row-item')).toHaveCount(50);
+  const draftText = await (await request.get(`${ws.base}/batches/${review.batch_id}/draft`)).text();
+  expect(Buffer.byteLength(draftText)).toBeLessThan(256 * 1024);
+  expect(JSON.parse(draftText).draft.choices).toHaveLength(1000);
+  await console.locator('#fileJanitorApprove').click();
+  await expect(console.locator('.fj-confirm-item')).toHaveCount(50);
+  await expect(console.locator('.fj-confirm')).toContainText('of 1000 exact selected operations');
+  globalThis.console.info(
+    `Grouped review scale: 1000 candidates, card JSON ${Buffer.byteLength(raw)} bytes, draft JSON ${Buffer.byteLength(draftText)} bytes, select-and-save ${elapsed}ms, 1 POST, 50 member/preview rows (local Chromium sandbox).`
+  );
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`grouped review keyboard, partial selection, 390px, zoom and reduced motion (${theme})`, async ({
+    page,
+    request
+  }) => {
+    test.setTimeout(90_000);
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const ws = await manualReview(
+      request,
+      ['first.png', 'second.png', 'third.png', 'tax-record.pdf'],
+      `Keyboard ${theme}`
+    );
+    const console = await openReview(page, ws.slug);
+    const tabTo = async (target: ReturnType<Page['locator']>, reverse = false) => {
+      for (let i = 0; i < 350; i++) {
+        if (await target.evaluate(node => node === document.activeElement).catch(() => false))
+          return;
+        await page.keyboard.press(reverse ? 'Shift+Tab' : 'Tab');
+      }
+      throw new Error('Keyboard target unreachable');
+    };
+    const select = console.getByRole('checkbox', {
+      name: 'Select filing proposals in Images',
+      exact: true
+    });
+    await tabTo(select);
+    await page.keyboard.press('Space');
+    await expect(console.locator('#fileJanitorSelection')).toHaveText('3 files selected.');
+    const details = console.getByRole('button', { name: 'See 3 files in Images', exact: true });
+    await tabTo(details);
+    await page.keyboard.press('Enter');
+    await expect(console.locator('.fj-row-item')).toHaveCount(3);
+    const file = console.getByRole('checkbox', { name: 'Select first.png', exact: true });
+    await tabTo(file);
+    await page.keyboard.press('Space');
+    await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+    const close = console.getByRole('button', { name: 'Close file list', exact: true });
+    await tabTo(close, true);
+    await page.keyboard.press('Enter');
+    await expect(select).toHaveJSProperty('indeterminate', true);
+    await tabTo(console.locator('#fileJanitorApprove'));
+    await page.keyboard.press('Enter');
+    await expect(console.locator('#fileJanitorConfirmApply')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    await expect(console.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+    await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+    await expect(console.locator('#fileJanitorApprove')).toBeFocused();
+    expect(await console.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await console
+      .locator('.fj-group-grid')
+      .evaluate(node => node.scrollIntoView({ block: 'start' }));
+    await page.screenshot({ path: `${evidence}/05-${theme}-390.png`, fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '200%';
+    });
+    const bounds = await console.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1441);
+    expect(await console.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: `${evidence}/05-${theme}-zoom.png`, fullPage: true });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '';
+    });
+    await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+    const violations = await page.evaluate(
+      async () =>
+        (
+          await (
+            window as unknown as {
+              axe: { run: (scope: string, options: object) => Promise<{ violations: unknown[] }> };
+            }
+          ).axe.run('#fileJanitorConsole', { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa'] })
+        ).violations
+    );
+    expect(violations).toEqual([]);
+  });
+}
 
 test('installed setup-required entry is not an empty saved review', async ({ page, request }) => {
   const ws = await workspace(request);

@@ -50,7 +50,7 @@ and per-file exceptions. Saved choices are not proof of successful filing.
 Explain the actual saved metadata reason and classifier provenance. A
 sensitive-looking word is not a verified sensitivity finding. Similar copy or
 version names are not verified duplicates or evidence of which is newest.
-Audio and documents/archives sharing a saved audio name stem are only a broad
+Audio and other files sharing a saved audio name stem are only a broad
 question, not a verified project. No archive contents were compared. Do not
 recommend discarding originals based on these heuristics.
 

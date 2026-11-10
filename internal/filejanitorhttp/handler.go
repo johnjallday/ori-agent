@@ -253,6 +253,7 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 	// The assisted response returns stable permission identity and readiness, not
 	// the raw path resolved from the native picker token.
 	status.Settings.RootPath = ""
+	status.Settings.ApprovedReference = nil
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status, "setup": projection})
 }
 

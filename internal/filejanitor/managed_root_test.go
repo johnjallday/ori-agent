@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,80 @@ func TestStoredManagedRootRejectsStaleFallbackGrant(t *testing.T) {
 	s.workspaces = unreadableRootWorkspace{s.workspaces}
 	if _, err := s.StoredManagedRoot("local", ws.ID); err != ErrManagedRootUnavailable {
 		t.Fatal("unreadable canonical metadata fell back to an older grant", err)
+	}
+}
+
+func TestStoredManagedRoot_ApprovedAliasProofIsSavedOnlyAndGenerationBound(t *testing.T) {
+	s, ws, settings := storedRootFixture(t)
+	alias := "/Invented/unmounted-alias"
+	ws.DirectoryReferences[0].Path = alias
+	if _, err := s.StoredManagedRoot("local", ws.ID); err == nil {
+		t.Fatal("legacy alias invented approval proof")
+	}
+	settings.ApprovedReference = &ApprovedReferenceSpelling{RootID: settings.RootID, ReferenceID: settings.DirectoryReferenceID, Path: alias}
+	if err := s.store.SaveSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	if root, err := s.StoredManagedRoot("local", ws.ID); err != nil || root.Path != settings.RootPath {
+		t.Fatal("saved alias proof probed a nonexistent folder", root, err)
+	}
+	for _, mode := range []string{"root", "reference", "spelling"} {
+		copy := settings
+		proof := *settings.ApprovedReference
+		copy.ApprovedReference = &proof
+		switch mode {
+		case "root":
+			proof.RootID = "other"
+		case "reference":
+			proof.ReferenceID = "other"
+		case "spelling":
+			proof.Path = "/Invented/other"
+		}
+		if err := s.store.SaveSettings(copy); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.StoredManagedRoot("local", ws.ID); err == nil {
+			t.Fatal("foreign alias proof accepted", mode)
+		}
+	}
+}
+
+func TestStoredManagedRoot_ExplicitGrantCapturesAliasWithoutMigratingLegacyProof(t *testing.T) {
+	s, batch, _ := draftServiceFixture(t, "one.png")
+	settings, _ := s.store.LoadSettings("ws-1")
+	ws, _ := s.workspaces.Get("ws-1")
+	alias := filepath.Join(t.TempDir(), "approved-alias")
+	if err := os.Symlink(settings.RootPath, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	ref, err := ws.GetDirectoryReference(settings.DirectoryReferenceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref.Path = alias
+	if err := ws.UpdateDirectoryReference(*ref); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StoredManagedRoot("local", "ws-1"); err == nil {
+		t.Fatal("reference edit inferred alias permission")
+	}
+	paused := true
+	status, err := s.ConfirmSetup(SetupRequest{WorkspaceID: "ws-1", Path: alias, DirectoryReferenceID: ref.ID, Paused: &paused})
+	if err != nil || status.Settings.ApprovedReference == nil || status.Settings.ApprovedReference.Path != alias {
+		t.Fatalf("explicit alias grant did not capture proof: %+v %v", status.Settings.ApprovedReference, err)
+	}
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadReviewGroups(t.Context(), "local", "ws-1", batch.ID); err != nil {
+		t.Fatal("pure saved grouping resolved the alias", err)
+	}
+	before, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditReviewDraft("local", "ws-1", batch.ID, ReviewDraftEdit{ExpectedRevision: before.Revision, ExpectedGroupRevision: before.GroupRevision, Action: "select_filing_groups"}); err == nil {
+		t.Fatal("missing physical alias permitted selection")
 	}
 }
 

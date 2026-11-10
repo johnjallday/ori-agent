@@ -246,7 +246,7 @@ func reconcileLegacyDraftDecision(state *ScanState, previous, candidate JanitorC
 			// Current disk state is revalidated by draft reads and preview; this
 			// legacy metadata-only edit never probes a revoked/unavailable root.
 			valid := proposalPending(previous) && choice.FingerprintKey == previous.Fingerprint.Key() &&
-				!(choice.Operation == OperationMove && previous.NeedsReview && (previous.DecisionCategory == "" || previous.DecisionGroupID != ""))
+				(choice.Operation != OperationMove || !previous.NeedsReview || (previous.DecisionCategory != "" && previous.DecisionGroupID == ""))
 			if !valid {
 				draft.RemovedStale++
 				continue

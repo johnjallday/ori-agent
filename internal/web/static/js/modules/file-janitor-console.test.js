@@ -5051,6 +5051,19 @@ test('canonical protection return restores a pinned older batch from winning ser
   assert.ok(!calls.some(call => call.options?.method === 'POST'));
 });
 
+test('unsupported saved lifecycle states are visible, not completed or fake all-clear', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.review.groups = [];
+  state.review.counts = { candidates: 3, filing: 0, questions: 0, unknown: 3 };
+  state.batch.state = 'resolved';
+  state.batch.summary.proposed = 0;
+  await panel._reloadBatch();
+  assert.match(surface(doc).textContent, /unsupported saved state/);
+  assert.match(surface(doc).textContent, /3 unavailable state/);
+  assert.doesNotMatch(surface(doc).textContent, /Review complete|All clear/);
+  assert.deepEqual(panel._selected(), []);
+});
+
 test('Not now only de-emphasizes a pending question and reopens without a write', async () => {
   const { doc, calls, state } = await groupedReviewFixture(3);
   state.review.groups[0].kind = 'question';

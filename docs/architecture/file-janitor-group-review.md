@@ -50,9 +50,10 @@ medical, tax, confidential), not arbitrary substrings such as “taxi”. Possib
 version/copy rules require an explicit bounded suffix (`(2)`, `copy`, `v2`,
 `version 2`) and another same-stem/same-extension candidate; ordinary numeric
 sequences such as `photo-001` are not version evidence. No newest/signed/
-redundant verdict. Rule version **2** also groups audio metadata/project
-extensions and bounded archive/document names sharing an exact normalized saved
-audio stem. These are broad questions, not verified shared projects; unrelated
+redundant verdict. Rule version **3** groups audio metadata/project extensions
+and other bounded filenames sharing an exact normalized saved audio stem.
+There is no REAPER-specific project-format recognizer in this host capability;
+unknown standalone project files retain the classifier's unresolved question. These are broad questions, not verified shared projects; unrelated
 documents do not join by proximity or a guessed project name. Archives are not
 opened or compared. Overlong legacy names route to the unmatched metadata
 question, never a fabricated sensitive-word finding. Unrecognized types remain
@@ -181,6 +182,26 @@ foreign, malformed, orphaned, stale, or mismatched choice references never expan
 to all members of a group with a similar label. Failed persistence leaves the
 previous durable state unchanged; UI shows unsaved and cannot preview.
 
+### Approved alias-reference compatibility
+
+Delivery characterization found that existing setup canonicalizes `RootPath`
+but intentionally preserves an adopted directory reference's alias spelling.
+Strict saved-only scope comparison must not guess that arbitrary spellings
+identify the same root or resolve symlinks during a group GET.
+
+Settings schema remains **3**, with additive optional `approved_reference`:
+`root_id`, `reference_id`, and the exact server-observed `path`. This is metadata
+proof captured **only at an explicit successful folder grant**, after resolving
+the current reference to the reviewed canonical root. It is not another root,
+a new filesystem permission or an editable destination. Saved-only readers
+accept the existing canonical spelling or this exact generation/reference-bound
+proof. Execution still resolves and validates the current physical root.
+Legacy missing proof is never inferred or migrated from an alias; canonical
+legacy references remain compatible, while an unproven alias needs explicit
+folder review/regrant. Mismatched proof, changed reference, revoked access or
+reinstall cannot widen it. Older readers may ignore/drop the optional metadata;
+that loses alias readability on re-upgrade rather than broadening permission.
+
 ## Keep here, Not now, and Review again
 
 Typed edits `keep_group` and `keep_files` resolve exact displayed IDs under the
@@ -262,25 +283,26 @@ recheck the saved protection binding and consume the navigation correlation.
 They neither require that batch to remain latest nor replay browser choice IDs;
 partly completed/other-tab edits are reconciled normally.
 
-## Characterized current behavior and required changes
+## Pre-feature characterization
 
-- Category picker sends legacy `DecisionMove` while checkbox selection lives in
-  a separate in-memory Set. Restart restores destinations but no selections.
+These observations describe base `48d8e5392`, not the new grouped path:
+
+- Category picker sent legacy `DecisionMove` while checkbox selection lived in
+  a separate in-memory Set. Restart restored destinations but no selections.
 - Existing candidate endpoints already page at 50/200 and return whole-batch
   counts, but serialize the full batch including candidate IDs. New group reads
   use a bounded batch summary shape instead.
 - Batch provenance is captured by scans, and saved review projections already
   reject foreign scope without probing the managed folder. Reuse these seams.
-- Protection departure saves ID-only choices, invalidates local approval, and
-  waits for category writes; return pages through every candidate and currently
-  requires the batch to still be latest. Replace latest-only matching with the
-  pinned concrete batch and canonical draft reconciliation, not replay of a
-  browser selection snapshot. Active concrete batch identity is now encoded in
+- Protection departure saved ID-only choices and invalidated local approval;
+  return enumerated every candidate and required the batch to remain latest.
+  The grouped path replaces this with pinned canonical draft reconciliation,
+  not replay of a browser selection snapshot. Active concrete batch identity is now encoded in
   the review URL; scanning announces newer work without replacing an open or
   selected review. Reload restores that pinned batch, never confirmation.
 - Store locking and atomic rename already serialize canonical scan writes.
-  Raw scan schema is currently normalized unconditionally; the draft migration
-  must preserve unsupported-schema evidence before any write.
+  Raw scan schema was normalized unconditionally; the draft migration now
+  preserves unsupported-schema evidence and refuses unsupported writes.
 - No new plugin/provider/devtools release or connector protocol is required.
 
 ## Non-goals

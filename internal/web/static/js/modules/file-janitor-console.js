@@ -1780,7 +1780,9 @@
     const plan = el('aside', 'fj-review-plan');
     plan.setAttribute('aria-label', 'Saved review plan');
     plan.appendChild(el('h3', 'fj-group-title', 'Your selected changes'));
-    plan.appendChild(el('p', 'fj-group-count', selected.size + ' moves'));
+    plan.appendChild(
+      el('p', 'fj-group-count', selected.size + (selected.size === 1 ? ' move' : ' moves'))
+    );
     plan.appendChild(el('p', 'fj-sub', trashMarked.size + ' explicitly marked for Trash'));
     const destinations = new Map();
     for (const choice of reviewDraft?.choices || []) {
@@ -2472,7 +2474,15 @@
 
     const protection = protectionPrompt();
     if (protection && reviewView !== 'groups') container.appendChild(protection);
-    container.appendChild(batchProgress(lastBatch));
+    if (groupReview?.batch_id === lastBatch.id && groupReview.counts.unknown > 0) {
+      const unknown = el(
+        'p',
+        'fj-batch-load-notice',
+        'Some candidates have an unsupported saved state. They were not counted as completed; inspect All files before continuing.'
+      );
+      unknown.setAttribute('role', 'alert');
+      container.appendChild(unknown);
+    } else container.appendChild(batchProgress(lastBatch));
     const summary = el('p', 'fj-batch-summary', batchSummaryLine(lastBatch));
     summary.setAttribute('role', 'status');
     summary.setAttribute('aria-live', 'polite');

@@ -66,7 +66,9 @@ func (s *Service) StoredManagedRoot(owner, workspaceID string) (ManagedRoot, err
 			continue
 		}
 		refs++
-		if ref.WorkspaceID != workspaceID || ref.Purpose != "" || ref.Path != settings.RootPath {
+		proof := settings.ApprovedReference
+		approvedSpelling := proof != nil && proof.RootID == settings.RootID && proof.ReferenceID == ref.ID && proof.Path == ref.Path && filepath.IsAbs(proof.Path)
+		if ref.WorkspaceID != workspaceID || ref.Purpose != "" || (ref.Path != settings.RootPath && !approvedSpelling) {
 			return unavailable()
 		}
 	}
