@@ -50,9 +50,13 @@ medical, tax, confidential), not arbitrary substrings such as “taxi”. Possib
 version/copy rules require an explicit bounded suffix (`(2)`, `copy`, `v2`,
 `version 2`) and another same-stem/same-extension candidate; ordinary numeric
 sequences such as `photo-001` are not version evidence. No newest/signed/
-redundant verdict. Audio questions group by existing audio metadata and explicit
-music-project extensions; they do not assert a shared project. Archives are not
-opened or compared. Unrecognized types remain reachable, not guessed safe.
+redundant verdict. Rule version **2** also groups audio metadata/project
+extensions and bounded archive/document names sharing an exact normalized saved
+audio stem. These are broad questions, not verified shared projects; unrelated
+documents do not join by proximity or a guessed project name. Archives are not
+opened or compared. Overlong legacy names route to the unmatched metadata
+question, never a fabricated sensitive-word finding. Unrecognized types remain
+reachable, not guessed safe.
 
 Cards state the rule and its uncertainty. Classification reasons/provenance
 remain the saved actual values (`metadata`, `model`, `content`, `fallback`);
@@ -65,7 +69,7 @@ saved candidates were classified without content access.
   whole-batch `counts`, and fixed-vocabulary `groups`. `latest` is a navigation
   convenience only; edits always name the resolved concrete batch ID.
 - Each card: opaque `id`, `kind` (`filing` or `question`), fixed `label`,
-  `reason`, proposed `category`/relative destination where applicable, whole
+  `reason`, optional fixed `question`, proposed `category`/relative destination where applicable, whole
   member `count`, and at most **3** safe display-name samples. Do not serialize
   all member IDs, batch `candidate_ids`, ineligible names, paths, or tokens.
 - `GET /batches/{batchID}/groups/{groupID}/members?limit=50&offset=0`:
@@ -179,17 +183,23 @@ previous durable state unchanged; UI shows unsaved and cannot preview.
 
 ## Keep here, Not now, and Review again
 
-Keep here records existing exact fingerprint skips, marks those candidates
+Typed edits `keep_group` and `keep_files` resolve exact displayed IDs under the
+same draft/group CAS and root → scan-state lock. Each current regular-file
+fingerprint is checked; a changed member rejects the entire edit. Keep here
+records existing exact fingerprint skips, marks those candidates
 skipped, clears only their staged choices, and invalidates matching unspent
 preview authority in one transaction. It changes no managed file. Existing skip
 retention remains 2,000 newest skips, no age expiry: disclose that changed files
 may be proposed again and old skips can age out by the retention cap.
 
-Review again accepts candidate IDs (never client-supplied fingerprint keys),
+The typed `reconsider_files` edit accepts candidate IDs (never client-supplied fingerprint keys),
 derives each requested skip server-side, and clears only those skip records.
 The old candidate stays skipped/resolved. Offer an explicit **Scan now**; do not
 silently scan, select a replacement, restore old approval, or resurrect the old
-candidate. Existing whole-skip-reset endpoint stays compatible. Not now is only
+candidate. All-files reads derive `skip_remembered` for kept candidates from the
+canonical skip records, rather than a second remembered-state field. Kept access
+and the saved-batch picker remain available after all candidates are resolved.
+Existing whole-skip-reset endpoint stays compatible. Not now is only
 an accessible collapsed/de-emphasized question in this console: it stays pending
 and reopenable, grants nothing, and sets no timer. Use the same semantics for
 music and versions; do not label it “for now”.

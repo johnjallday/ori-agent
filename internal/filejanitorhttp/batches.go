@@ -45,6 +45,7 @@ type candidateDTO struct {
 	Decision          string `json:"decision,omitempty"`
 	DecisionCategory  string `json:"decision_category,omitempty"`
 	DecisionFromGroup bool   `json:"decision_from_group,omitempty"`
+	SkipRemembered    *bool  `json:"skip_remembered,omitempty"`
 }
 
 func toCandidateDTO(candidate filejanitor.JanitorCandidate, filingRootName string) candidateDTO {
@@ -239,10 +240,28 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 	end := min(offset+limit, filteredTotal)
 	page := matching[offset:end]
 
+	dtos := candidateDTOs(page, settings.Settings.FilingRootName)
+	if counts["skipped"] > 0 {
+		skips, err := h.service.ListSkipped(workspaceID)
+		if err != nil {
+			h.respondError(w, err, "Failed to read saved Keep here choices")
+			return
+		}
+		remembered := make(map[string]bool, len(skips))
+		for _, skip := range skips {
+			remembered[skip.Key] = true
+		}
+		for i, candidate := range page {
+			if candidate.State == filejanitor.CandidateSkipped {
+				active := remembered[candidate.Fingerprint.Key()]
+				dtos[i].SkipRemembered = &active
+			}
+		}
+	}
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success":    true,
 		"batch":      batch,
-		"candidates": candidateDTOs(page, settings.Settings.FilingRootName),
+		"candidates": dtos,
 		// The counts describe the WHOLE batch, not the page. A review surface
 		// that reported "3 files" because three fit on a page would be lying
 		// about how much work is waiting (FR-109).

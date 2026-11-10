@@ -13,7 +13,7 @@ import (
 )
 
 // ReviewGroupRuleVersion changes whenever primary membership rules change.
-const ReviewGroupRuleVersion = 1
+const ReviewGroupRuleVersion = 2
 const ReviewGroupSampleLimit = 3
 
 // ReviewGroup is a bounded saved proposal, never a filesystem inventory or an
@@ -23,6 +23,7 @@ type ReviewGroup struct {
 	Kind        string   `json:"kind"`
 	Label       string   `json:"label"`
 	Reason      string   `json:"reason"`
+	Question    string   `json:"question,omitempty"`
 	Category    Category `json:"category,omitempty"`
 	Destination string   `json:"destination,omitempty"`
 	Count       int      `json:"count"`
@@ -75,9 +76,9 @@ type groupDefinition struct {
 var questionGroups = []groupDefinition{
 	{"sensitive", "Sensitive-looking names", "A filename contains a sensitive-looking word. This is not a sensitivity check; decide where these files belong.", ""},
 	{"versions", "Possible copies or versions", "An explicit copy/version suffix shares a name stem and extension with another saved candidate. Contents and newest versions have not been compared.", ""},
-	{"audio", "Audio and related material", "Audio metadata or a music-project extension suggests reviewing these files together. They are not verified to belong to one project.", ""},
+	{"audio", "Audio and related material", "Audio metadata, a music-project extension, or an archive/document sharing a saved audio filename stem suggests a question. These are not verified projects or duplicates; archives were not opened.", ""},
 	{"unresolved", "Choose a filing category", "The saved classification needs review. Choose a category explicitly before filing; the proposal is not a verified content description.", ""},
-	{"unmatched", "Other pending files", "These saved proposals have no supported filing category. Review the individual files rather than guessing a destination.", ""},
+	{"unmatched", "Other pending files", "These saved proposals lack a supported category or usable bounded name metadata. Review individual details rather than guessing a destination.", ""},
 }
 
 // GroupReview projects one complete canonical saved batch with no IO. scope is
@@ -94,6 +95,7 @@ func GroupReview(batch JanitorBatch, candidates []JanitorCandidate, scope string
 	}
 	byID := make(map[string]JanitorCandidate, len(candidates))
 	families := make(map[string]versionEvidence, len(candidates))
+	audioStems := make(map[string]bool, len(candidates))
 	for _, candidate := range candidates {
 		if err := candidate.Validate(); err != nil {
 			return ReviewGroups{}, ErrReviewUnavailable
@@ -106,6 +108,11 @@ func GroupReview(batch JanitorBatch, candidates []JanitorCandidate, scope string
 		}
 		byID[candidate.ID] = candidate
 		if proposalPending(candidate) {
+			if audioReviewCandidate(candidate) && len(candidate.Name) <= 1024 {
+				if stem := reviewNameStem(candidate.Name); stem != "" {
+					audioStems[stem] = true
+				}
+			}
 			if family, marked := versionFamily(candidate.Name); family != "" {
 				evidence := families[family]
 				evidence.count++
@@ -137,6 +144,7 @@ func GroupReview(batch JanitorBatch, candidates []JanitorCandidate, scope string
 			category, _ := LookupCategory(string(definition.category))
 			card.Destination = path.Join(DefaultFilingRootName, category.FolderName)
 		}
+		card.Question = reviewQuestion(definition.key)
 		cards[definition.key] = card
 	}
 	seen := make(map[string]bool, len(candidates))
@@ -146,7 +154,7 @@ func GroupReview(batch JanitorBatch, candidates []JanitorCandidate, scope string
 			return ReviewGroups{}, ErrReviewUnavailable
 		}
 		seen[id] = true
-		key, cautions := primaryReviewGroup(candidate, families)
+		key, cautions := primaryReviewGroup(candidate, families, audioStems)
 		if err := encode.Encode([]any{candidate.ID, candidate.Fingerprint.Key(), candidate.Category, candidate.NeedsReview, candidate.Confidence, candidate.Classifier, candidate.State, candidate.Decision == DecisionTrash, key, cautions}); err != nil {
 			return ReviewGroups{}, fmt.Errorf("encode group revision: %w", err)
 		}
@@ -198,12 +206,31 @@ func reviewGroupID(key string) string {
 	return "group-" + hex.EncodeToString(sum[:12])
 }
 
+func reviewQuestion(key string) string {
+	switch key {
+	case "sensitive":
+		return "Where should these sensitive-looking files go?"
+	case "versions":
+		return "Which possible copies or versions do you want to file?"
+	case "audio":
+		return "Keep this audio and related material here?"
+	case "unresolved":
+		return "Where should these uncertain files go?"
+	case "unmatched":
+		return "How should these unmatched files be handled?"
+	}
+	return ""
+}
+
 type versionEvidence struct {
 	count  int
 	marked bool
 }
 
-func primaryReviewGroup(candidate JanitorCandidate, families map[string]versionEvidence) (string, []string) {
+func primaryReviewGroup(candidate JanitorCandidate, families map[string]versionEvidence, audioStems map[string]bool) (string, []string) {
+	if len(candidate.Name) > 1024 {
+		return "unmatched", []string{"unmatched"}
+	}
 	var cautions []string
 	if sensitiveReviewName(candidate.Name) {
 		cautions = append(cautions, "sensitive")
@@ -211,7 +238,7 @@ func primaryReviewGroup(candidate JanitorCandidate, families map[string]versionE
 	if family, _ := versionFamily(candidate.Name); family != "" && families[family].count > 1 && families[family].marked {
 		cautions = append(cautions, "versions")
 	}
-	if audioReviewCandidate(candidate) {
+	if audioReviewCandidate(candidate) || relatedAudioCandidate(candidate, audioStems) {
 		cautions = append(cautions, "audio")
 	}
 	definition, categoryErr := LookupCategory(string(candidate.Category))
@@ -228,11 +255,6 @@ func primaryReviewGroup(candidate JanitorCandidate, families map[string]versionE
 }
 
 func sensitiveReviewName(name string) bool {
-	// Bound rule work even for malformed legacy state. Such a name is a
-	// question rather than an ordinary proposal; no contents are inspected.
-	if len(name) > 1024 {
-		return true
-	}
 	for _, token := range strings.FieldsFunc(strings.ToLower(name), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
 		switch token {
 		case "passport", "password", "passwords", "medical", "tax", "confidential", "ssn", "secret", "secrets":
@@ -258,6 +280,22 @@ func versionFamily(name string) (string, bool) {
 		return "", false
 	}
 	return base + "\x00" + extension, marked
+}
+
+func reviewNameStem(name string) string {
+	stem := strings.TrimSuffix(strings.ToLower(name), strings.ToLower(filepath.Ext(name)))
+	return strings.TrimSpace(versionSuffix.ReplaceAllString(stem, ""))
+}
+
+func relatedAudioCandidate(candidate JanitorCandidate, stems map[string]bool) bool {
+	if stem := reviewNameStem(candidate.Name); stem == "" || !stems[stem] {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(candidate.Name)) {
+	case ".zip", ".7z", ".rar", ".tar", ".pdf", ".txt", ".md", ".rtf", ".doc", ".docx":
+		return true
+	}
+	return false
 }
 
 func audioReviewCandidate(candidate JanitorCandidate) bool {

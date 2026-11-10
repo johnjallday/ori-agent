@@ -41,6 +41,10 @@ func (r ReviewDraftEdit) validate() error {
 	switch r.Action {
 	case "select_group":
 		valid = group && !files
+	case "keep_group":
+		valid = group && !files && !category
+	case "keep_files", "reconsider_files":
+		valid = files && !group && !category
 	case "select_filing_groups", "clear_all":
 		valid = !group && !files && !category
 	case "select_files":
@@ -247,8 +251,16 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			}
 		}
 		for _, id := range request.CandidateIDs {
-			if index, found := byID[id]; !found || !proposalPending(state.Candidates[index]) {
+			index, found := byID[id]
+			if !found {
 				return ErrCandidateNotFound
+			}
+			if request.Action == "reconsider_files" {
+				if state.Candidates[index].State != CandidateSkipped {
+					return ErrCandidateNotActionable
+				}
+			} else if !proposalPending(state.Candidates[index]) {
+				return ErrCandidateNotActionable
 			}
 		}
 		switch request.Action {
@@ -305,6 +317,46 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 				if choices[member.Candidate.ID].Operation == OperationMove {
 					delete(choices, member.Candidate.ID)
 				}
+			}
+		case "keep_group", "keep_files":
+			ids := request.CandidateIDs
+			if request.Action == "keep_group" {
+				members, _ := groups.Members(targetGroup.ID)
+				ids = make([]string, 0, len(members))
+				for _, member := range members {
+					ids = append(ids, member.Candidate.ID)
+				}
+			}
+			if len(ids) > MaxReviewChoicesPerBatch {
+				return ErrReviewBounds
+			}
+			settings, err := s.store.LoadSettings(workspaceID)
+			if err != nil {
+				return err
+			}
+			resolved, err := s.scannerFor().ResolveRoot(settings)
+			if err != nil || resolved != root.Path || settings.RootID != root.Generation {
+				return ErrReviewUnavailable
+			}
+			for _, id := range ids {
+				candidate := &state.Candidates[byID[id]]
+				current, err := currentFingerprint(resolved, candidate.Name)
+				if err != nil || !candidate.Fingerprint.Matches(current) || candidate.Fingerprint.Key() == "" {
+					return ErrCandidateNotActionable
+				}
+				candidate.State, candidate.Decision, candidate.DecidedAt = CandidateSkipped, DecisionSkip, s.clock()
+				candidate.DecisionCategory, candidate.DecisionGroupID = "", ""
+				candidate.StateReason = "Kept here by your choice. Changed files may be proposed again."
+				MarkSkipped(state, candidate.Fingerprint, s.clock())
+				delete(choices, id)
+			}
+		case "reconsider_files":
+			for _, id := range request.CandidateIDs {
+				key := state.Candidates[byID[id]].Fingerprint.Key()
+				if key == "" {
+					return ErrReviewDraftInvalid
+				} // empty is the legacy reset-all sentinel
+				ClearSkipped(state, key)
 			}
 		case "clear_all":
 			clear(choices)

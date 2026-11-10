@@ -61,6 +61,7 @@
   let groupsRequest = 0;
   let activeGroupID = '';
   let groupMembers = [];
+  const deferredQuestions = new Set();
   let groupMemberTotal = 0;
   let groupOffset = 0;
   let groupMemberLoadState = 'idle';
@@ -1152,7 +1153,15 @@
       reasonCell.appendChild(confidence);
     }
     reasonCell.appendChild(
-      el('span', 'fj-state', STATE_ROW_LABELS[candidate.state] || candidate.state || 'Unknown')
+      el(
+        'span',
+        'fj-state',
+        (draftEnabled && candidate.state === 'skipped'
+          ? 'Kept in this saved batch'
+          : STATE_ROW_LABELS[candidate.state]) ||
+          candidate.state ||
+          'Unknown'
+      )
     );
     if (candidate.state_reason) {
       reasonCell.appendChild(el('span', 'fj-state-reason', candidate.state_reason));
@@ -1197,14 +1206,34 @@
         (marked ? 'Unmark' : 'Mark') + ' ' + displayName(candidate) + ' for Trash'
       );
       actionCell.appendChild(trashToggle);
-      const skip = button('Skip', 'fj-btn fj-btn-quiet', () => {
-        void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
+      const skip = button(draftEnabled ? 'Keep here' : 'Skip', 'fj-btn fj-btn-quiet', () => {
+        if (draftEnabled)
+          void submitReviewEdit('keep_files', { candidate_ids: [candidate.id] }, null, editBinding);
+        else void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
       });
       skip.id = 'fileJanitorSkip-' + token;
       skip.disabled = !reviewEditsAvailable();
       actionCell.appendChild(skip);
     } else if (candidate.state === 'skipped') {
-      actionCell.appendChild(el('span', 'fj-muted', 'Dismissed'));
+      if (draftEnabled && candidate.skip_remembered === true) {
+        const reconsider = button(
+          'Review again',
+          'fj-btn fj-btn-secondary',
+          reviewEditCallback('reconsider_files', { candidate_ids: [candidate.id] })
+        );
+        reconsider.disabled = !reviewEditsAvailable();
+        reconsider.setAttribute('aria-label', 'Review ' + displayName(candidate) + ' again');
+        actionCell.appendChild(reconsider);
+      } else
+        actionCell.appendChild(
+          el(
+            'span',
+            'fj-muted',
+            draftEnabled
+              ? 'No active skip. Choose Scan now for fresh proposals; this old candidate stays inactive.'
+              : 'Dismissed'
+          )
+        );
     }
     row.appendChild(actionCell);
 
@@ -1251,7 +1280,7 @@
     { id: '', label: 'All' },
     { id: 'needs_review', label: 'Needs review' },
     { id: 'pending', label: 'Pending' },
-    { id: 'skipped', label: 'Skipped' }
+    { id: 'skipped', label: draftEnabled ? 'Kept here' : 'Skipped' }
   ];
 
   function filterBar() {
@@ -1494,6 +1523,12 @@
           throw error;
         }
         applyReviewDraft(body.draft);
+        if (request.action === 'reconsider_files')
+          reviewStatusMessage =
+            'Only the requested skip choices were forgotten. Nothing scanned or selected. Choose Scan now explicitly for fresh proposals; old kept candidates remain inactive.';
+        if (request.action === 'keep_group' || request.action === 'keep_files')
+          reviewStatusMessage =
+            'Kept here without moving or opening contents. Changed files may be proposed again; existing skip retention applies.';
         showError('');
         await loadBatch();
         return true;
@@ -1517,7 +1552,13 @@
           (request.group_id &&
             document.getElementById('fileJanitorGroup-select-' + request.group_id));
         if (target && !target.disabled) target.focus?.();
-        else document.getElementById('fileJanitorDraftStatus')?.querySelector('button')?.focus?.();
+        else {
+          const fallback =
+            document.getElementById('fileJanitorDraftStatus')?.querySelector('button') ||
+            document.getElementById('fileJanitorKept') ||
+            document.getElementById('fileJanitorView-groups');
+          fallback?.focus?.();
+        }
       }
     };
     void write.then(finished, finished);
@@ -1702,6 +1743,7 @@
   }
 
   function resetGroupReview() {
+    deferredQuestions.clear();
     groupsRequest++;
     groupMemberRequest++;
     groupReview = null;
@@ -1852,13 +1894,21 @@
       Boolean(pendingPreview) ||
       pendingDecisionWrites.size > 0 ||
       Boolean(failedDraftEdit);
-    const choices = savedBatches.some(batch => batch.id === lastBatch.id)
-      ? savedBatches
-      : [lastBatch, ...savedBatches];
+    if (!lastBatch) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Choose a saved review';
+      placeholder.selected = true;
+      select.appendChild(placeholder);
+    }
+    const choices =
+      !lastBatch || savedBatches.some(batch => batch.id === lastBatch.id)
+        ? savedBatches
+        : [lastBatch, ...savedBatches];
     choices.forEach(batch => {
       const option = document.createElement('option');
       option.value = batch.id;
-      option.selected = batch.id === lastBatch.id;
+      option.selected = batch.id === lastBatch?.id;
       option.textContent =
         (formatWhen(batch.completed_at || batch.started_at) || batch.id) +
         ' · ' +
@@ -1868,7 +1918,7 @@
       select.appendChild(option);
     });
     select.addEventListener('change', () => {
-      if (select.value === lastBatch.id) return;
+      if (!select.value || select.value === lastBatch?.id) return;
       discardProtectionApproval();
       linkedBatchID = select.value;
       consoleItem = '';
@@ -1974,6 +2024,17 @@
       section.appendChild(
         el('p', 'fj-muted', other.join(' · ') + '. See All files or History for recorded outcomes.')
       );
+    if (counts.kept > 0) {
+      const kept = button('See kept files', 'fj-btn fj-btn-secondary', () => {
+        reviewView = 'all';
+        filter = 'skipped';
+        pageOffset = 0;
+        void loadBatch();
+      });
+      kept.id = 'fileJanitorKept';
+      kept.disabled = !batchActionsAvailable() || busy;
+      section.appendChild(kept);
+    }
     section.appendChild(
       el(
         'p',
@@ -1982,6 +2043,13 @@
       )
     );
     if (draftEnabled) {
+      section.appendChild(
+        el(
+          'p',
+          'fj-sub',
+          'Keep here leaves files untouched, remembers these exact file states, and cancels their saved changes. Changed files may return; existing skip retention applies. Not now leaves questions pending, with no timer.'
+        )
+      );
       const selectAll = button(
         'Select all filing groups',
         'fj-btn fj-btn-secondary',
@@ -2009,7 +2077,35 @@
         el('p', 'fj-group-kind', group.kind === 'question' ? 'Your decision' : 'Suggested filing')
       );
       card.appendChild(el('h3', 'fj-group-title', group.label));
-      card.appendChild(el('p', 'fj-group-count', formatCount(group.count) + ' files'));
+      card.appendChild(
+        el(
+          'p',
+          'fj-group-count',
+          formatCount(group.count) + (group.count === 1 ? ' file' : ' files')
+        )
+      );
+      if (group.kind === 'question' && deferredQuestions.has(group.id)) {
+        const state = reviewDraft?.groups.find(item => item.id === group.id);
+        card.appendChild(
+          el(
+            'p',
+            'fj-group-reason',
+            'Still pending. Not now changed no choices and sets no timer.' +
+              (state?.selected || state?.trash ? ' Saved choices remain in the review plan.' : '')
+          )
+        );
+        const reopen = button('Reopen question', 'fj-btn fj-btn-secondary', () => {
+          deferredQuestions.delete(group.id);
+          renderBatch();
+          document.getElementById('fileJanitorGroup-' + group.id)?.focus?.();
+        });
+        reopen.id = 'fileJanitorGroup-reopen-' + group.id;
+        reopen.setAttribute('aria-label', 'Reopen question: ' + group.label);
+        card.appendChild(reopen);
+        grid.appendChild(card);
+        continue;
+      }
+      if (group.question) card.appendChild(el('p', 'fj-question-prompt', group.question));
       if (group.kind === 'filing') card.appendChild(groupSelectionControls(group));
       if (group.destination)
         card.appendChild(el('p', 'fj-destination', 'Proposed: ' + group.destination));
@@ -2032,6 +2128,31 @@
       details.setAttribute('aria-expanded', activeGroupID === group.id ? 'true' : 'false');
       details.setAttribute('aria-controls', 'fileJanitorGroup-details');
       card.appendChild(details);
+      if (draftEnabled) {
+        const keep = button(
+          'Keep here',
+          'fj-btn fj-btn-secondary',
+          reviewEditCallback('keep_group', { group_id: group.id })
+        );
+        keep.disabled = !reviewEditsAvailable();
+        keep.setAttribute('aria-label', 'Keep ' + group.label + ' here');
+        card.appendChild(keep);
+      }
+      if (group.kind === 'question') {
+        const binding = reviewEditBinding();
+        const defer = button('Not now', 'fj-btn fj-btn-quiet', () => {
+          if (!scopeCurrent(binding.scope) || binding.batchID !== lastBatch?.id) return;
+          deferredQuestions.add(group.id);
+          if (activeGroupID === group.id) {
+            activeGroupID = '';
+            groupMemberRequest++;
+          }
+          renderBatch();
+          document.getElementById('fileJanitorGroup-reopen-' + group.id)?.focus?.();
+        });
+        defer.setAttribute('aria-label', 'Not now: ' + group.label);
+        card.appendChild(defer);
+      }
       grid.appendChild(card);
     }
     layout.appendChild(grid);
@@ -2281,6 +2402,8 @@
         );
       }
       container.appendChild(empty);
+      if (savedBatches.length || savedBatchLoadState === 'error')
+        container.appendChild(savedBatchPicker());
       return;
     }
 
@@ -5609,6 +5732,8 @@
       if (!current()) return;
     } else {
       resetGroupReview();
+      await loadSavedBatches();
+      if (!current()) return;
     }
     renderBatch();
     if (consoleOpen && consoleItem) focusRequestedItem();

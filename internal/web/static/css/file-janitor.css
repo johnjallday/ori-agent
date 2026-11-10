@@ -131,6 +131,11 @@
   margin: 0.25rem 0;
 }
 
+.fj-question-prompt {
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 .fj-group-reason,
 .fj-group-samples {
   color: var(--text-secondary, #9aa0a6);

@@ -369,6 +369,126 @@ test('injected save failure is unsaved and two real tabs resolve a canonical con
   await other.close();
 });
 
+test('real focused questions keep exact music states and reconsider only one item before explicit scan', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const hostile = 'tax-<img onerror=alert(1)>.csv';
+  const names = [
+    'song.wav',
+    'song.zip',
+    'song.pdf',
+    'song.rpp',
+    'notes-v1.pdf',
+    'notes-v2.pdf',
+    hostile,
+    'photo.png',
+    'mystery.zzzz'
+  ];
+  const ws = await manualReview(request, names, 'Focused questions');
+  const review = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review;
+  expect(review.counts).toMatchObject({ candidates: 9, filing: 1, questions: 8 });
+  const batchID = review.batch_id;
+  const console = await openReview(page, ws.slug);
+  const card = (label: string) =>
+    console
+      .locator('.fj-group-card')
+      .filter({ has: page.getByRole('heading', { name: label, exact: true }) });
+  const posts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && req.url().includes('/file-janitor')) posts.push(req.url());
+  });
+  await console.getByRole('button', { name: 'Select all filing groups', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  const versions = card('Possible copies or versions');
+  await versions
+    .getByRole('button', { name: 'Not now: Possible copies or versions', exact: true })
+    .click();
+  await expect(versions).toContainText('Still pending');
+  await expect(console.locator('.fj-group-accounting')).toContainText('8 need a decision');
+  expect(posts).toHaveLength(1);
+  await versions
+    .getByRole('button', { name: 'Reopen question: Possible copies or versions', exact: true })
+    .click();
+  await expect(versions).toContainText('not been compared');
+  await card('Sensitive-looking names')
+    .getByRole('button', { name: /See .* files in Sensitive-looking names/ })
+    .click();
+  await expect(console.locator('#fileJanitorGroup-details')).toContainText(hostile);
+  expect(await console.locator('#fileJanitorGroup-details img').count()).toBe(0);
+  await console
+    .locator('#fileJanitorGroup-details')
+    .getByRole('button', { name: `Show file details for ${hostile}`, exact: true })
+    .click();
+  await expect(console.locator('#fileJanitorGroup-details')).toContainText(
+    'Saved metadata classification'
+  );
+  mkdirSync(evidence, { recursive: true });
+  await console.locator('.fj-group-grid').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/03-focused-questions.png`, fullPage: true });
+  const music = card('Audio and related material');
+  await expect(music).toContainText('4 files');
+  await expect(music).toContainText('not verified projects or duplicates');
+  await music.getByRole('button', { name: /See .* files in Audio and related material/ }).click();
+  await console.getByRole('checkbox', { name: 'Select song.wav', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+  await console.getByRole('button', { name: 'Mark song.rpp for Trash', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toContainText('1 file marked for Trash');
+  await music
+    .getByRole('button', { name: 'Keep Audio and related material here', exact: true })
+    .click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await expect(console.locator('.fj-groups')).toContainText('4 kept here');
+  await expect(music).toHaveCount(0);
+  const skips = (await (await request.get(`${ws.base}/skipped`)).json()).skipped;
+  expect(skips.map((item: { name: string }) => item.name).sort()).toEqual([
+    'song.pdf',
+    'song.rpp',
+    'song.wav',
+    'song.zip'
+  ]);
+  await console.getByRole('button', { name: 'See kept files', exact: true }).click();
+  await expect(console.locator('.fj-row-item')).toHaveCount(4);
+  await console.getByRole('button', { name: 'Review song.wav again', exact: true }).click();
+  await expect(console.locator('.fj-batch-scan-status')).toContainText(
+    'Nothing scanned or selected'
+  );
+  await expect(
+    console.getByRole('button', { name: 'Review song.wav again', exact: true })
+  ).toHaveCount(0);
+  await expect(
+    console.getByRole('button', { name: 'Review song.zip again', exact: true })
+  ).toBeVisible();
+  expect((await (await request.get(`${ws.base}/skipped`)).json()).skipped).toHaveLength(3);
+  const oldBatch = await (await request.get(`${ws.base}/batches/${batchID}?filter=skipped`)).json();
+  expect(oldBatch.candidates).toHaveLength(4);
+  expect(oldBatch.candidates.every((item: { state: string }) => item.state === 'skipped')).toBe(
+    true
+  );
+  expect(posts.every(url => url.endsWith('/draft'))).toBe(true);
+  await console
+    .locator('.fj-batch-scan-status')
+    .evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/03-kept-and-reconsider.png`, fullPage: true });
+  await console.getByRole('button', { name: 'Scan now', exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review.batch_id
+    )
+    .not.toBe(batchID);
+  const fresh = (await (await request.get(`${ws.base}/batches/latest`)).json()).batch;
+  const freshBody = await (await request.get(`${ws.base}/batches/${fresh.id}`)).json();
+  expect(freshBody.candidates.map((item: { name: string }) => item.name)).toEqual(['song.wav']);
+  expect(
+    (await (await request.get(`${ws.base}/batches/${fresh.id}/draft`)).json()).draft.choices
+  ).toEqual([]);
+  for (const name of names) expect(existsSync(join(ws.root, name))).toBe(true);
+  const history = await (await request.get(`${ws.base}/history`)).json();
+  expect(history.total).toBe(0);
+});
+
 test('installed setup-required entry is not an empty saved review', async ({ page, request }) => {
   const ws = await workspace(request);
   const console = await openReview(page, ws.slug);

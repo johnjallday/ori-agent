@@ -4856,6 +4856,31 @@ async function groupedReviewFixture(count = 206) {
           for (const [id, choice] of chosen)
             if (choice.source_group_id === request.group_id) chosen.delete(id);
           break;
+        case 'keep_group':
+        case 'keep_files': {
+          const ids =
+            request.action === 'keep_group'
+              ? candidates
+                  .filter(candidate => candidate.state === 'pending')
+                  .map(candidate => candidate.id)
+              : request.candidate_ids;
+          for (const candidate of candidates)
+            if (ids.includes(candidate.id)) {
+              candidate.state = 'skipped';
+              candidate.skip_remembered = true;
+              chosen.delete(candidate.id);
+            }
+          const pending = candidates.filter(candidate => candidate.state === 'pending').length;
+          state.review.counts.kept = count - pending;
+          state.review.counts.filing = state.review.groups[0]?.kind === 'question' ? 0 : pending;
+          state.review.counts.questions = state.review.groups[0]?.kind === 'question' ? pending : 0;
+          state.review.groups = pending ? [{ ...state.review.groups[0], count: pending }] : [];
+          break;
+        }
+        case 'reconsider_files':
+          for (const candidate of candidates)
+            if (request.candidate_ids.includes(candidate.id)) candidate.skip_remembered = false;
+          break;
         case 'clear_all':
           chosen.clear();
           break;
@@ -4916,14 +4941,23 @@ async function groupedReviewFixture(count = 206) {
     }
     if (target.includes('/batches?'))
       return reply({ batches: state.batches, total: state.batches.length });
-    if (isBatchDetailRequest(target))
+    if (isBatchDetailRequest(target)) {
+      const filter = new URLSearchParams(target.split('?')[1]).get('filter');
+      const matching = filter
+        ? candidates.filter(candidate => candidate.state === filter)
+        : candidates;
       return reply({
         batch: state.batch,
-        candidates: candidates.slice(0, 50),
+        candidates: matching.slice(0, 50),
         total: count,
-        filtered_total: count,
-        counts: { all: count, pending: count }
+        filtered_total: matching.length,
+        counts: {
+          all: count,
+          pending: candidates.filter(candidate => candidate.state === 'pending').length,
+          skipped: candidates.filter(candidate => candidate.state === 'skipped').length
+        }
       });
+    }
     return reply({ status: statusFixture(), categories: CATEGORIES });
   };
   panel.render(statusFixture());
@@ -4931,6 +4965,69 @@ async function groupedReviewFixture(count = 206) {
   await panel._reloadBatch();
   return { doc, calls, state, candidates, draftView };
 }
+
+test('Not now only de-emphasizes a pending question and reopens without a write', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(3);
+  state.review.groups[0].kind = 'question';
+  state.review.groups[0].label = 'Possible copies or versions';
+  state.review.groups[0].question = 'Which possible versions do you want to file?';
+  state.review.counts.filing = 0;
+  state.review.counts.questions = 3;
+  await panel._reloadBatch();
+  const before = calls.filter(call => call.options?.method === 'POST').length;
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Not now')[0]
+    .click();
+  assert.match(surface(doc).textContent, /Still pending/);
+  assert.match(surface(doc).textContent, /3 need a decision/);
+  assert.equal(doc.getElementById('fileJanitorGroup-group-images'), null);
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Reopen question')[0]
+    .click();
+  assert.ok(doc.getElementById('fileJanitorGroup-group-images'));
+  assert.match(surface(doc).textContent, /Which possible versions/);
+  assert.equal(calls.filter(call => call.options?.method === 'POST').length, before);
+  assert.deepEqual(panel._selected(), []);
+});
+
+test('Keep here clears exact intent and targeted Review again only offers a fresh explicit scan', async () => {
+  const { doc, calls, state, candidates } = await groupedReviewFixture(3);
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  surface(doc)
+    .all(
+      node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Keep Images here'
+    )[0]
+    .click();
+  await settle();
+  assert.deepEqual(panel._selected(), []);
+  assert.match(surface(doc).textContent, /3 kept here/);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  doc.getElementById('fileJanitorKept').click();
+  await settle();
+  const again = surface(doc).all(
+    node =>
+      node.tagName === 'BUTTON' &&
+      String(node.getAttribute('aria-label')).startsWith('Review image-0.png again')
+  )[0];
+  assert.ok(again);
+  again.click();
+  await settle();
+  assert.equal(candidates[0].skip_remembered, false);
+  assert.equal(candidates[1].skip_remembered, true);
+  assert.equal(candidates[0].state, 'skipped');
+  assert.match(surface(doc).textContent, /Choose Scan now explicitly/);
+  assert.deepEqual(state.choices, []);
+  const posts = calls.filter(call => call.options?.method === 'POST');
+  assert.deepEqual(
+    posts.map(call => JSON.parse(call.options.body).action),
+    ['select_group', 'keep_group', 'reconsider_files']
+  );
+  assert.ok(
+    posts.every(call => call.target.endsWith('/draft')),
+    'no scan, preview or file operation is implicit'
+  );
+});
 
 test('grouped entry is the default, shows complete bounded counts, and selects nothing', async () => {
   const { doc, calls } = await groupedReviewFixture();
