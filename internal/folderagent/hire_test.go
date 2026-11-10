@@ -127,4 +127,6 @@ func TestHire_RefusalsCreateNothingAndKeepTheChoice(t *testing.T) {
 	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{Existing: "Atlas"}); err != nil {
 		t.Fatalf("after refusals: %v", err)
 	}
+	// That Start began a look; let it finish before the temp folder goes.
+	h.svc.Wait()
 }
