@@ -43,7 +43,7 @@ func (r ReviewDraftEdit) validate() error {
 		valid = group && !files
 	case "keep_group":
 		valid = group && !files && !category
-	case "keep_files", "reconsider_files":
+	case "keep_files", "reconsider_files", "retry_files":
 		valid = files && !group && !category
 	case "select_filing_groups", "clear_all":
 		valid = !group && !files && !category
@@ -255,7 +255,11 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			if !found {
 				return ErrCandidateNotFound
 			}
-			if request.Action == "reconsider_files" {
+			if request.Action == "retry_files" {
+				if state.Candidates[index].State != CandidateFailed {
+					return ErrCandidateNotActionable
+				}
+			} else if request.Action == "reconsider_files" {
 				if state.Candidates[index].State != CandidateSkipped {
 					return ErrCandidateNotActionable
 				}
@@ -317,6 +321,24 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 				if choices[member.Candidate.ID].Operation == OperationMove {
 					delete(choices, member.Candidate.ID)
 				}
+			}
+		case "retry_files":
+			settings, err := s.store.LoadSettings(workspaceID)
+			if err != nil {
+				return err
+			}
+			resolved, err := s.scannerFor().ResolveRoot(settings)
+			if err != nil || resolved != root.Path || settings.RootID != root.Generation {
+				return ErrReviewUnavailable
+			}
+			for _, id := range request.CandidateIDs {
+				candidate := &state.Candidates[byID[id]]
+				current, err := currentFingerprint(resolved, candidate.Name)
+				if err != nil || !candidate.Fingerprint.Matches(current) || state.IsSkipped(candidate.Fingerprint) {
+					return ErrCandidateNotActionable
+				}
+				candidate.State, candidate.StateReason = CandidatePending, "Retry review requested. Select explicitly and obtain a fresh preview; no operation was replayed."
+				delete(choices, id)
 			}
 		case "keep_group", "keep_files":
 			ids := request.CandidateIDs

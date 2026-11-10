@@ -4736,6 +4736,8 @@ test('scan completion publishes its new batch and end state without hiding pendi
 
 async function groupedReviewFixture(count = 206) {
   const doc = setup();
+  const status = statusFixture();
+  status.settings.root_id = 'root-one';
   const calls = [];
   const batch = batchFixture({ summary: { total: count, proposed: count } });
   const candidates = Array.from({ length: count }, (_, i) => ({
@@ -4958,13 +4960,96 @@ async function groupedReviewFixture(count = 206) {
         }
       });
     }
-    return reply({ status: statusFixture(), categories: CATEGORIES });
+    return reply({ status, categories: CATEGORIES });
   };
-  panel.render(statusFixture());
+  panel.render(status);
   panel.open({ source: 'folder-preparation', tab: 'review' });
   await panel._reloadBatch();
   return { doc, calls, state, candidates, draftView };
 }
+
+test('exact preview pages 206 saved operations without expanding the DOM or losing intent on cancel', async () => {
+  const { doc } = await groupedReviewFixture();
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  doc.getElementById('fileJanitorApprove').click();
+  await settle();
+  const host = doc.getElementById('fileJanitorConfirmHost');
+  const entries = () =>
+    host.all(node => String(node.className).split(' ').includes('fj-confirm-item'));
+  assert.equal(entries().length, 50);
+  assert.match(host.textContent, /of 206 exact selected operations/);
+  host
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Next preview files')[0]
+    .click();
+  assert.equal(entries().length, 50);
+  assert.match(host.textContent, /51–100/);
+  const oldApply = doc.getElementById('fileJanitorConfirmApply');
+  host.all(node => node.tagName === 'BUTTON' && node.textContent === 'Cancel')[0].click();
+  oldApply.click();
+  await settle();
+  assert.equal(panel._selected().length, 206);
+  assert.equal(doc.getElementById('fileJanitorConfirmApply'), null);
+});
+
+test('canonical protection return restores a pinned older batch from winning server intent, never browser selections', async t => {
+  const { doc, state, calls } = await groupedReviewFixture(3);
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  state.choices = [{ candidate_id: 'group-member-2', operation: 'move', source_group_id: '' }];
+  state.generation++;
+  state.batches.unshift({ ...state.batch, id: 'newer-batch' });
+  const trip = {
+    nonce: 'return-one',
+    workspaceId: 'ws-1',
+    rootGeneration: 'root-one',
+    bindingId: 'a'.repeat(64),
+    batchId: state.batch.id,
+    moves: ['group-member-0'],
+    trash: [],
+    filter: '',
+    page: 0
+  };
+  let current = trip;
+  window.FileJanitorProtection = {
+    read: () => current,
+    consume: nonce => {
+      if (current?.nonce !== nonce) return null;
+      const saved = current;
+      current = null;
+      return saved;
+    },
+    scrub() {},
+    isDismissed: () => true,
+    sentence: protectionSentence
+  };
+  t.after(() => {
+    delete window.FileJanitorProtection;
+  });
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, opts) =>
+    String(url).endsWith('/protection')
+      ? {
+          ok: true,
+          json: async () => ({
+            workspace_id: 'ws-1',
+            root_generation: 'root-one',
+            binding_id: 'a'.repeat(64),
+            state: 'unknown',
+            destination: { kind: 'chooser' }
+          })
+        }
+      : original(url, opts);
+  calls.length = 0;
+  await panel.restoreProtectionTrip(trip);
+  await settle();
+  assert.deepEqual(panel._selected(), ['group-member-2']);
+  assert.equal(doc.getElementById('fileJanitorConfirmApply'), null);
+  assert.match(surface(doc).textContent, /No old selections or approval were replayed/);
+  assert.equal(current, null);
+  assert.ok(!calls.some(call => call.target.includes('/batches/latest')));
+  assert.ok(!calls.some(call => call.options?.method === 'POST'));
+});
 
 test('Not now only de-emphasizes a pending question and reopens without a write', async () => {
   const { doc, calls, state } = await groupedReviewFixture(3);

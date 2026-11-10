@@ -233,6 +233,10 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 		return ItemOutcome{CandidateID: item.CandidateID, Result: ResultFailed, Message: "That file is no longer in this batch."}
 	}
 
+	if err := s.validateExecutionScope(settings, root, approval); err != nil || state.IsSkipped(candidate.Fingerprint) || !validExecutionCandidate(candidate, item, approval, false) {
+		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultStale, Message: "The folder, access or saved review changed. Nothing was moved; request a fresh review."}
+	}
+
 	// 1-2. The source is derived from the stored candidate and revalidated
 	// against the filesystem immediately before the mutation. This is the check
 	// that actually protects the file: everything earlier can go stale.
@@ -282,10 +286,15 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultFailed, Message: "Ori could not record this action, so it did not perform it."}
 	}
 	action = action.MarkApplying(now)
-	if err := s.appendAction(settings.WorkspaceID, action, CandidateApplying); err != nil {
+	if err := s.appendApprovedAction(settings, root, approval, item, action); err != nil {
 		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultFailed, Message: "Ori could not record this action, so it did not perform it."}
 	}
 
+	if err := s.executionHandoff(settings, root, approval, item); err != nil {
+		action = action.MarkStale("The folder, access or file changed before execution. Nothing was moved; request a fresh review.", s.clock())
+		_ = s.updateAction(settings.WorkspaceID, action, CandidateStale)
+		return outcomeFor(action)
+	}
 	// 5. Mutate, then verify. The tool's own report is not the answer.
 	moveErr := s.mover.Move(ctx, settings.WorkspaceID, sourcePath, destinationPath)
 	applied, verifyErr := verifyMove(sourcePath, destinationPath, finalName)

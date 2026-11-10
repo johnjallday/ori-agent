@@ -238,7 +238,29 @@ sources do not move. Collisions may be re-resolved at apply time under the
 existing never-overwrite policy. Cancellation discards local authority, not
 saved intent. Neither reload nor protection return restores a confirmation or
 Trash acknowledgement. Applied/stale/failed intent is reconciled against actual
-results, never replayed automatically. Retrying requires fresh explicit review.
+results, never replayed automatically. Typed `retry_files` revalidates an
+unchanged failed source and returns it to an **unselected** review; it requires
+explicit selection and a fresh preview. Changed sources instead require a fresh
+scan. Existing fresh legacy per-file retry previews remain compatible.
+
+Execution rechecks settings/root and immutable approval scope before preparing
+each destination, inside the atomic applying-journal write, and immediately
+before the existing move/Trash handoff. It validates that exact candidate's
+batch, operation/category and fingerprint; a canonical skip prevents execution
+through another old candidate. It does not compare the original whole-draft
+revision after each item, because preceding successful items legitimately
+change the batch. A handoff already admitted cannot be retroactively undone by
+later revocation; every following item has its own admission. No new executor,
+connector protocol, background continuation or filesystem enumeration is added.
+
+The final preview shows whole-operation/destination totals and a bounded
+50-operation detail page (no mandatory row tour), preserving separate fresh
+Trash acknowledgement. Cancellation and failed confirmation discard captured
+local authority while leaving canonical choices to be reconciled. Canonical
+protection returns pin the concrete batch, reload its winning server draft,
+recheck the saved protection binding and consume the navigation correlation.
+They neither require that batch to remain latest nor replay browser choice IDs;
+partly completed/other-tab edits are reconciled normally.
 
 ## Characterized current behavior and required changes
 

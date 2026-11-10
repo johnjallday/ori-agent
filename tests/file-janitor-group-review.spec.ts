@@ -5,7 +5,8 @@ import {
   utimesSync,
   existsSync,
   mkdirSync,
-  realpathSync
+  realpathSync,
+  chmodSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -487,6 +488,170 @@ test('real focused questions keep exact music states and reconsider only one ite
   for (const name of names) expect(existsSync(join(ws.root, name))).toBe(true);
   const history = await (await request.get(`${ws.base}/history`)).json();
   expect(history.total).toBe(0);
+});
+
+test('real exact grouped confirmation moves 49 chosen files through MCP, preserves an exclusion, and supports replay and Undo', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const names = [
+    ...Array.from({ length: 18 }, (_, i) => `installer-${i}.dmg`),
+    ...Array.from({ length: 31 }, (_, i) => `image-${i}.png`),
+    'leave.png'
+  ];
+  const ws = await manualReview(request, names, 'Exact grouped execution');
+  mkdirSync(join(ws.root, 'Filed', 'Images'), { recursive: true });
+  writeFileSync(join(ws.root, 'Filed', 'Images', 'image-0.png'), 'Existing synthetic collision', {
+    mode: 0o600
+  });
+  const console = await openReview(page, ws.slug);
+  await console
+    .getByRole('checkbox', { name: 'Select filing proposals in Installers', exact: true })
+    .click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('18 files selected.');
+  await console
+    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
+    .click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('50 files selected.');
+  await console.getByRole('button', { name: 'See 32 files in Images', exact: true }).click();
+  await console.getByRole('checkbox', { name: 'Select leave.png', exact: true }).uncheck();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
+  await console.locator('#fileJanitorApprove').click();
+  await expect(console.locator('.fj-confirm-lead')).toContainText('move 49 files');
+  await expect(console.locator('.fj-confirm-list')).toContainText('image-0 (2).png');
+  for (const name of names) expect(existsSync(join(ws.root, name))).toBe(true);
+  await console.locator('.fj-confirm').getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
+  await console.locator('#fileJanitorApprove').click();
+  await console.locator('.fj-confirm').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/04-final-preview.png`, fullPage: true });
+  const sent = page.waitForRequest(
+    req => req.method() === 'POST' && req.url() === new URL(`${ws.base}/apply`, page.url()).href
+  );
+  await console.locator('#fileJanitorConfirmApply').click();
+  const applyRequest = await sent;
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('49 files filed.', {
+    timeout: 60_000
+  });
+  expect(existsSync(join(ws.root, 'leave.png'))).toBe(true);
+  for (const name of names.filter(name => name !== 'leave.png'))
+    expect(existsSync(join(ws.root, name))).toBe(false);
+  expect(existsSync(join(ws.root, 'Filed', 'Images', 'image-0 (2).png'))).toBe(true);
+  const history = await (await request.get(`${ws.base}/history?limit=100`)).json();
+  expect(history.total).toBe(49);
+  expect(history.actions.every((item: { result: string }) => item.result === 'applied')).toBe(true);
+  const replay = await request.post(`${ws.base}/apply`, { data: applyRequest.postDataJSON() });
+  expect(replay.ok(), await replay.text()).toBe(true);
+  expect((await replay.json()).result).toMatchObject({ replayed: true, applied: 49 });
+  await console.locator('.fj-results').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/04-actual-results.png`, fullPage: true });
+  await console.getByRole('tab', { name: 'History', exact: true }).click();
+  const first = console.locator('.fj-history-item').first();
+  const restoredName = await first.locator('.fj-history-name').textContent();
+  await first.getByRole('button', { name: 'Undo move', exact: true }).click();
+  await expect(console.locator('#fileJanitorHistoryStatus')).toContainText('Put back', {
+    timeout: 30_000
+  });
+  expect(existsSync(join(ws.root, restoredName!))).toBe(true);
+});
+
+test('real filesystem partial failure requires a new unselected retry review, and changed input refuses old confirmation', async ({
+  page,
+  request
+}) => {
+  test.skip(process.platform === 'win32', 'POSIX directory-mode failure fixture');
+  const ws = await manualReview(request, ['first.dmg', 'second.png'], 'Partial grouped execution');
+  const console = await openReview(page, ws.slug);
+  await console.getByRole('button', { name: 'Select all filing groups', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+  await console.locator('#fileJanitorApprove').click();
+  const destination = join(ws.root, 'Filed', 'Images');
+  mkdirSync(destination, { recursive: true });
+  chmodSync(destination, 0o500);
+  try {
+    await console.locator('#fileJanitorConfirmApply').click();
+    await expect(console.locator('#fileJanitorResultsSummary')).toContainText('1 file filed', {
+      timeout: 60_000
+    });
+    await expect(console.locator('#fileJanitorResultsSummary')).toContainText(
+      '1 could not be moved'
+    );
+    expect(existsSync(join(ws.root, 'first.dmg'))).toBe(false);
+    expect(existsSync(join(ws.root, 'second.png'))).toBe(true);
+    await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  } finally {
+    chmodSync(destination, 0o750);
+  }
+  await console.locator('#fileJanitorView-all').click();
+  await console.getByRole('button', { name: 'Review retry for second.png', exact: true }).click();
+  await expect(
+    console.getByRole('checkbox', { name: 'Select second.png', exact: true })
+  ).toBeEnabled();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await console.getByRole('checkbox', { name: 'Select second.png', exact: true }).check();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await console.locator('#fileJanitorApprove').click();
+  await expect(console.locator('#fileJanitorConfirmApply')).toBeVisible();
+  writeFileSync(join(ws.root, 'second.png'), 'Changed synthetic input after the fresh preview', {
+    mode: 0o600
+  });
+  await console.locator('#fileJanitorConfirmApply').click();
+  await expect(console.locator('#fileJanitorError')).not.toHaveText('');
+  await expect(console.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  expect(existsSync(join(ws.root, 'second.png'))).toBe(true);
+  const history = await (await request.get(`${ws.base}/history`)).json();
+  expect(history.total).toBe(2);
+  await console
+    .locator('#fileJanitorError')
+    .evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/04-stale-or-partial.png`, fullPage: true });
+});
+
+test('real protection chooser returns to the pinned older batch and current canonical choices without replay', async ({
+  page,
+  request
+}) => {
+  const ws = await manualReview(request, ['one.png', 'two.png'], 'Pinned protection return');
+  const review = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review;
+  const batchID = review.batch_id;
+  const console = await openReview(page, ws.slug);
+  await console.getByRole('button', { name: 'Select all filing groups', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+  await console.locator('#fileJanitorApprove').click();
+  await console.locator('#fileJanitorCheckProtection').click();
+  await expect(page.locator('#protectFoldersChooser')).toBeVisible();
+  const saved = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
+  const exclude = await request.post(`${ws.base}/batches/${batchID}/draft`, {
+    data: {
+      action: 'exclude_files',
+      candidate_ids: [saved.choices[0].candidate_id],
+      expected_revision: saved.revision,
+      expected_group_revision: saved.group_revision
+    }
+  });
+  expect(exclude.ok(), await exclude.text()).toBe(true);
+  writeFileSync(join(ws.root, 'later.png'), 'Synthetic later arrival', { mode: 0o600 });
+  utimesSync(join(ws.root, 'later.png'), old, old);
+  const scan = await request.post(`${ws.base}/scan`);
+  expect(scan.ok(), await scan.text()).toBe(true);
+  const latest = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
+    .batch_id;
+  expect(latest).not.toBe(batchID);
+  await page.locator('#protectFoldersCancel').click();
+  await expect(console).toBeVisible();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
+  await expect(console.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await expect(console.locator('.fj-batch-scan-status')).toContainText(
+    'No old selections or approval were replayed'
+  );
+  await console.locator('#fileJanitorApprove').click();
+  await expect(console.locator('.fj-confirm-lead')).toContainText('move 1 file');
+  for (const name of ['one.png', 'two.png', 'later.png'])
+    expect(existsSync(join(ws.root, name))).toBe(true);
+  expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
 });
 
 test('installed setup-required entry is not an empty saved review', async ({ page, request }) => {

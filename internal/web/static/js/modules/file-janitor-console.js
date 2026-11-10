@@ -433,6 +433,52 @@
           'The approved folder or its access changed. Old choices cannot be restored. Review the current folder.'
         );
       }
+      if (draftEnabled) {
+        // A return is navigation, not a replay of browser-held selections. The
+        // canonical draft may have changed in another tab or partly completed.
+        const batchResponse = await fetch(
+          apiBase(scope.id) + '/batches/' + encodeURIComponent(trip.batchId) + '?limit=1'
+        );
+        if (!batchResponse.ok)
+          throw new Error(
+            'Could not reload the saved batch. Retry returning; no choices were replayed.'
+          );
+        const saved = await batchResponse.json();
+        if (!scopeCurrent(scope)) return;
+        if (saved.batch?.id !== trip.batchId) {
+          stale = true;
+          throw new Error('The saved review is unavailable. No old choices were replayed.');
+        }
+        linkedBatchID = trip.batchId;
+        filter = trip.filter;
+        pageOffset = trip.page;
+        failedDraftEdit = null;
+        draftLoadState = 'idle';
+        await loadBatch();
+        if (!scopeCurrent(scope)) return;
+        if (batchLoadState !== 'loaded' || draftLoadState !== 'saved')
+          throw new Error(
+            'Could not reconcile saved review choices. Retry returning; nothing was filed.'
+          );
+        const finalResponse = await fetch(apiBase(scope.id) + '/protection');
+        const finalFact = finalResponse.ok ? await finalResponse.json() : null;
+        if (!scopeCurrent(scope)) return;
+        if (
+          finalFact?.workspace_id !== trip.workspaceId ||
+          finalFact?.binding_id !== trip.bindingId ||
+          finalFact?.root_generation !== trip.rootGeneration
+        ) {
+          stale = true;
+          throw new Error('Folder access changed while returning. No old choices were replayed.');
+        }
+        if (!trips.consume(trip.nonce))
+          throw new Error('Could not consume this return safely. Retry returning.');
+        protectionFact = finalFact;
+        reviewStatusMessage =
+          'Current saved choices were reconciled for this exact batch, including changes made elsewhere. No old selections or approval were replayed. Request a fresh preview and confirmation; Trash needs a new acknowledgement.';
+        open({ source: 'protection-return', tab: 'review' });
+        return;
+      }
       const latestResponse = await fetch(apiBase(scope.id) + '/batches/latest?limit=1');
       if (!latestResponse.ok)
         throw new Error(
@@ -524,6 +570,7 @@
       open({ source: 'protection-return', tab: 'review' });
       document.getElementById('fileJanitorCheckProtection')?.focus?.();
     } catch (error) {
+      if (!scopeCurrent(scope)) return;
       if (stale) {
         trips.consume(trip.nonce);
         trips.scrub();
@@ -1214,6 +1261,22 @@
       skip.id = 'fileJanitorSkip-' + token;
       skip.disabled = !reviewEditsAvailable();
       actionCell.appendChild(skip);
+    } else if (candidate.state === 'failed' && draftEnabled) {
+      const retry = button(
+        'Review retry',
+        'fj-btn fj-btn-secondary',
+        reviewEditCallback('retry_files', { candidate_ids: [candidate.id] })
+      );
+      retry.disabled = !reviewEditsAvailable();
+      retry.setAttribute('aria-label', 'Review retry for ' + displayName(candidate));
+      actionCell.appendChild(retry);
+      actionCell.appendChild(
+        el(
+          'span',
+          'fj-muted',
+          'Revalidates this file for a new unselected review. Nothing runs again automatically.'
+        )
+      );
     } else if (candidate.state === 'skipped') {
       if (draftEnabled && candidate.skip_remembered === true) {
         const reconsider = button(
@@ -2523,28 +2586,84 @@
     lead.setAttribute('role', 'status');
     panel.appendChild(lead);
 
+    const items = previewResult.items || [];
+    const destinations = new Map();
+    for (const item of items) {
+      const target =
+        item.operation === 'trash'
+          ? 'Trash (separate acknowledgement)'
+          : String(item.destination || '')
+              .split('/')
+              .slice(0, -1)
+              .join('/') || 'Destination unavailable';
+      destinations.set(target, (destinations.get(target) || 0) + 1);
+    }
+    const totals = el('ul', 'fj-confirm-totals');
+    for (const [target, count] of destinations)
+      totals.appendChild(el('li', '', count + ' → ' + target));
+    panel.appendChild(totals);
+    panel.appendChild(
+      el(
+        'p',
+        'fj-sub',
+        'Only these exact selected operations are authorized. Other saved batch candidates are unchanged. Collision names may be re-resolved to avoid overwriting.'
+      )
+    );
     const list = el('ul', 'fj-confirm-list');
-    (previewResult.items || []).forEach(item => {
-      const isTrash = item.operation === 'trash';
-      const entry = el('li', 'fj-confirm-item' + (isTrash ? ' fj-confirm-trash' : ''));
-      entry.appendChild(el('span', 'fj-confirm-name', displayName(item)));
-      entry.appendChild(el('span', 'fj-confirm-arrow', ' → '));
-      entry.appendChild(
-        el('span', 'fj-confirm-destination', isTrash ? 'Trash (restorable)' : item.destination)
-      );
-      if (item.renamed) {
-        // Ori never overwrites, so a taken name means a new one. Saying so here
-        // is the difference between a surprise and an informed choice.
-        const note = el(
-          'span',
-          'fj-confirm-renamed',
-          ' (renamed — a file with that name is already there)'
-        );
-        entry.appendChild(note);
-      }
-      list.appendChild(entry);
+    let offset = 0;
+    const pageStatus = el('p', 'fj-sub');
+    pageStatus.setAttribute('role', 'status');
+    const pages = el('nav', 'fj-actions');
+    pages.setAttribute('aria-label', 'Exact preview file pages');
+    const previous = button('Previous preview files', 'fj-btn', () => {
+      offset = Math.max(0, offset - PAGE_SIZE);
+      paintItems();
     });
+    const next = button('Next preview files', 'fj-btn', () => {
+      offset += PAGE_SIZE;
+      paintItems();
+    });
+    function paintItems() {
+      clear(list);
+      items.slice(offset, offset + PAGE_SIZE).forEach(item => {
+        const isTrash = item.operation === 'trash';
+        const entry = el('li', 'fj-confirm-item' + (isTrash ? ' fj-confirm-trash' : ''));
+        entry.appendChild(el('span', 'fj-confirm-name', displayName(item)));
+        entry.appendChild(el('span', 'fj-confirm-arrow', ' → '));
+        entry.appendChild(
+          el('span', 'fj-confirm-destination', isTrash ? 'Trash (restorable)' : item.destination)
+        );
+        if (item.renamed) {
+          // Ori never overwrites, so a taken name means a new one. Saying so here
+          // is the difference between a surprise and an informed choice.
+          const note = el(
+            'span',
+            'fj-confirm-renamed',
+            ' (renamed — a file with that name is already there)'
+          );
+          entry.appendChild(note);
+        }
+        list.appendChild(entry);
+      });
+      pageStatus.textContent =
+        'Showing ' +
+        (items.length ? offset + 1 : 0) +
+        '–' +
+        Math.min(offset + PAGE_SIZE, items.length) +
+        ' of ' +
+        items.length +
+        ' exact selected operations.';
+      previous.disabled = offset === 0;
+      next.disabled = offset + PAGE_SIZE >= items.length;
+    }
+    paintItems();
+    panel.appendChild(pageStatus);
     panel.appendChild(list);
+    if (items.length > PAGE_SIZE) {
+      pages.appendChild(previous);
+      pages.appendChild(next);
+      panel.appendChild(pages);
+    }
 
     const actions = el('div', 'fj-actions');
     const confirm = button(
@@ -2595,6 +2714,7 @@
       button('Cancel', 'fj-btn fj-btn-secondary', () => {
         // Cancelling abandons the approval; the decisions themselves are still
         // recorded, so nothing the user chose is lost.
+        approvalGeneration++;
         pendingPreview = null;
         clear(host);
         // Destroying the panel would otherwise drop focus to the body, leaving
@@ -3792,7 +3912,9 @@
       await loadHistory();
     } catch (error) {
       if (!scopeCurrent(scope)) return;
+      approvalGeneration++;
       pendingPreview = null;
+      clear(document.getElementById('fileJanitorConfirmHost'));
       showError(error.message || 'Ori could not apply these moves.');
       await loadBatch();
     } finally {
