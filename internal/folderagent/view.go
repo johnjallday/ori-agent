@@ -379,6 +379,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 		}
 	}
 	order, plan.Excluded = applyExcludes(order, steps, byHandle)
+	order = toolsBeforeHome(order, steps, byHandle)
 	chosen := make(map[string]bool, len(order))
 	for _, h := range order {
 		chosen[h] = true
@@ -501,6 +502,35 @@ func applyExcludes(order []string, steps []folderlook.Step, byHandle map[string]
 		kept = append(kept, h)
 	}
 	return kept, excluded
+}
+
+// toolsBeforeHome moves the tools steps ahead of the Home step, keeping every
+// other step where it was. The Home step's listing records which projects can
+// be set up from the tools installed at that moment, and nothing refreshes it
+// when the run ends; with the tools after it, a run that installs them still
+// leaves the Home saying none can be set up.
+func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[string]int) []string {
+	home := -1
+	for i, h := range order {
+		if steps[byHandle[h]].Kind == folderlook.StepHome {
+			home = i
+			break
+		}
+	}
+	if home < 0 {
+		return order
+	}
+	out := make([]string, 0, len(order))
+	out = append(out, order[:home]...)
+	var later []string
+	for _, h := range order[home:] {
+		if steps[byHandle[h]].Kind == folderlook.StepIntegration {
+			out = append(out, h)
+		} else {
+			later = append(later, h)
+		}
+	}
+	return append(out, later...)
 }
 
 // assuranceLine is the note under every phase of the plan (PRD FR13). It names

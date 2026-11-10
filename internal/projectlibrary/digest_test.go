@@ -268,6 +268,73 @@ func TestDigest_MissingSetupEvidenceCountsProjectsOnly(t *testing.T) {
 	})
 }
 
+// A scan made before the project tools were installed keeps its note (it was
+// true then), but the summary counts what can be set up with the tools
+// installed now, over every connected root: the map's chip and badge read that
+// count, and it is what the projects sheet offers. Nothing is rescanned.
+func TestSummary_CountsWhatCanBeSetUpWithTheToolsInstalledNow(t *testing.T) {
+	_, scope, roots, file, _, installed := activationFixture(t)
+	roots.library = NewStore(file).WithProviderEvidence(alwaysProviderEvidence).WithInstalledPlugins(installed[:1])
+	doc, err := roots.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanRoot(t, roots, scope, doc.Roots[0].ID, "before-tools-scan")
+	before, err := roots.library.Summary(scope)
+	if err != nil || before.ToSetUp == nil || *before.ToSetUp != 0 || before.Digest == nil ||
+		before.Digest.SetupNote != setupNoteProjectProviderMissing {
+		t.Fatalf("without the tools: %+v %v", before, err)
+	}
+
+	withTools := NewStore(file).WithProviderEvidence(alwaysProviderEvidence).WithInstalledPlugins(installed)
+	after, err := withTools.Summary(scope)
+	if err != nil || after.ToSetUp == nil || after.NeedsFileChoice == nil {
+		t.Fatalf("with the tools: %+v %v", after, err)
+	}
+	// Single and Alternates carry .rpp files; Alternates needs a file choice.
+	if *after.ToSetUp != 2 || *after.NeedsFileChoice != 1 {
+		t.Fatalf("to set up = %d (file choice %d), want 2 (1)", *after.ToSetUp, *after.NeedsFileChoice)
+	}
+	if after.Digest == nil || after.Digest.SetupNote != setupNoteProjectProviderMissing || after.Revision != before.Revision {
+		t.Fatalf("the summary changed the stored digest or the Home: %+v", after)
+	}
+
+	// No installed source: nothing is claimed, the client keeps the digest.
+	if unchecked, err := NewStore(file).WithProviderEvidence(alwaysProviderEvidence).Summary(scope); err != nil ||
+		unchecked.ToSetUp != nil || unchecked.NeedsFileChoice != nil {
+		t.Fatalf("unchecked: %+v %v", unchecked, err)
+	}
+}
+
+func TestShelfToSetUp_SkipsLinkedUnavailableUnsupportedAndDisconnected(t *testing.T) {
+	obs := func(root, availability, alternate string) Observation {
+		return Observation{RootID: root, ScanID: "s", Availability: availability, Alternates: []string{alternate}}
+	}
+	doc := Document{
+		Roots: []Root{{ID: "a"}, {ID: "b"}, {ID: "gone", RevokedAt: &time.Time{}}},
+		Entries: []Entry{
+			{ID: "ready", Observations: []Observation{obs("a", "available", "Song.rpp")}},
+			{ID: "two roots", Observations: []Observation{obs("a", "available", "Song.rpp"), obs("b", "available", "Song.rpp")}},
+			{ID: "choose", Observations: []Observation{obs("b", "ambiguous", "Song.rpp")}},
+			{ID: "linked", Link: &ExactLink{}, Observations: []Observation{obs("a", "available", "Song.rpp")}},
+			{ID: "logic", Observations: []Observation{obs("a", "available", "Song.logicx")}},
+			{ID: "missing", Observations: []Observation{obs("a", "unavailable", "Song.rpp")}},
+			{ID: "revoked root", Observations: []Observation{obs("gone", "available", "Song.rpp")}},
+		},
+	}
+	evidence := setupEvidence{extensions: []string{".rpp"}}
+	if ready, choice := shelfToSetUp(doc, nil, evidence); ready != 3 || choice != 1 {
+		t.Fatalf("ready=%d choice=%d, want 3 and 1", ready, choice)
+	}
+	inactive := &workspace.AssistantProgramState{ProjectLibraryInactiveRoots: []string{"b"}}
+	if ready, choice := shelfToSetUp(doc, inactive, evidence); ready != 2 || choice != 0 {
+		t.Fatalf("with b inactive: ready=%d choice=%d, want 2 and 0", ready, choice)
+	}
+	if ready, _ := shelfToSetUp(doc, nil, setupEvidence{note: setupNoteProjectProviderMissing}); ready != 0 {
+		t.Fatalf("a true note still counted %d", ready)
+	}
+}
+
 // Each song found by a scan lands in exactly one bucket, so the counts never
 // double-count a connected song as also "can be set up", and a file choice is a
 // subset of "can be set up" rather than another bucket.

@@ -28,6 +28,7 @@ import {
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { workspaceNavigationHTML, workspaceSettingsHTML } from './workspace-command-chrome.js';
 import { WorkspacePanels } from './workspace-panels.js';
+import { libraryToSetUp } from './home-library-badges.js';
 import {
   readTicketURLState,
   writeTicketURLState,
@@ -14075,10 +14076,10 @@ export class WorkspaceCommandView {
         );
         if (response.ok) {
           const summary = await response.json();
-          const digest = summary && summary.digest;
-          const toSetUp = digest && !digest.setup_note ? Number(digest.activatable) : 0;
-          if (Number.isInteger(toSetUp) && toSetUp > 0) {
-            next = { shelf: Number(digest.projects) || toSetUp, toSetUp };
+          // The outer map's badge reads the same count (home-library-badges.js).
+          const toSetUp = libraryToSetUp(summary);
+          if (toSetUp > 0) {
+            next = { shelf: Number(summary.digest.projects) || toSetUp, toSetUp };
           }
         }
       } catch (err) {

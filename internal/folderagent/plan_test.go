@@ -86,7 +86,8 @@ func TestBuildPlan_OrisDefaultWhenTheAgentNamesNothingAndSaysWhy(t *testing.T) {
 		plan.DefaultReason != "The agent named no step Ori can run, so this is Ori's default plan." {
 		t.Fatalf("plan = %+v", plan)
 	}
-	if names := lineNames(plan); names[0] != "Adds Albums to your Music Production Home" || !strings.Contains(strings.Join(names, "|"), "Connects REAPER tools to Albums") {
+	// The tools come before the Home's listing (see TheToolsRunBeforeTheHome…).
+	if names := lineNames(plan); names[0] != "Installs REAPER tools" || names[2] != "Adds Albums to your Music Production Home" {
 		t.Fatalf("default lines = %v", names)
 	}
 	if strings.Join(plan.Selected, ",") != "music-production-home,reaper-tools" {
@@ -99,6 +100,44 @@ func TestBuildPlan_OrisDefaultWhenTheAgentNamesNothingAndSaysWhy(t *testing.T) {
 	rec.Sections = &folderlook.Sections{Dropped: []string{folderlook.SectionPlan}}
 	if dropped := BuildPlan(rec, nil); !strings.HasPrefix(dropped.DefaultReason, "The agent's plan could not be shown") {
 		t.Fatalf("dropped = %q", dropped.DefaultReason)
+	}
+}
+
+// The Home step lists the songs and records which of them can be set up; that
+// depends on the project tools being installed. In one run the tools step must
+// therefore run before the Home step, whatever order the agent or the catalog
+// gave, or the listing records "no project tools" and the "to set up" count
+// stays at zero after the run.
+func TestBuildPlan_TheToolsRunBeforeTheHomeListsTheSongs(t *testing.T) {
+	cases := map[string]struct {
+		sections *folderlook.Sections
+		selected []string
+		homeHere bool
+	}{
+		"Ori's default, joining a Home": {homeHere: true},
+		"the agent's Home first":        {sections: &folderlook.Sections{Plan: "Home, then REAPER.", PlanSteps: []string{"music-production-home", "reaper-tools"}}},
+		"the owner's ticks":             {selected: []string{"music-production-home", "reaper-tools"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := planRecord()
+			if !tc.homeHere {
+				rec.Candidates[0].Action = folderlook.ActionInstall
+			}
+			rec.Candidates[1].Action = folderlook.ActionInstall
+			rec.Sections = tc.sections
+			plan := BuildPlan(rec, tc.selected)
+			if plan.Stage != foldermap.StageHome || len(plan.Candidates) != 2 {
+				t.Fatalf("stage=%q candidates=%+v", plan.Stage, plan.Candidates)
+			}
+			if plan.Candidates[0].Kind != folderlook.KindIntegration || plan.Candidates[1].Kind != folderlook.KindHomeProvider {
+				t.Fatalf("run order = %s, %s; the tools must come first", plan.Candidates[0].ID, plan.Candidates[1].ID)
+			}
+			names := lineNames(plan)
+			if names[0] != "Installs REAPER tools" || names[1] != "Connects REAPER tools to Albums" {
+				t.Fatalf("lines = %v", names)
+			}
+		})
 	}
 }
 

@@ -186,8 +186,9 @@ func TestTurn_ThePlanInTheAgentsWordsNamesTheStepsOriRuns(t *testing.T) {
 		!strings.Contains(ref, "[group]") || !strings.Contains(ref, "Ori's default plan, used if you name no step") {
 		t.Fatalf("reference = %s", ref)
 	}
-	// Set it up runs the agent's plan, Home and tools, as confirmed; the
-	// first step is working from the start.
+	// Set it up runs the agent's plan, Home and tools, as confirmed, with the
+	// tools first so the Home's listing can see them; the first step is working
+	// from the start.
 	started, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: plan.Digest})
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +198,7 @@ func TestTurn_ThePlanInTheAgentsWordsNamesTheStepsOriRuns(t *testing.T) {
 	}
 	h.svc.Wait()
 	run := h.setups.runs[0]
-	if run.Stage != foldermap.StageHome || len(run.Candidates) != 2 || run.Candidates[0].Kind != folderlook.KindHomeProvider || run.Candidates[1].Kind != folderlook.KindIntegration {
+	if run.Stage != foldermap.StageHome || len(run.Candidates) != 2 || run.Candidates[0].Kind != folderlook.KindIntegration || run.Candidates[1].Kind != folderlook.KindHomeProvider {
 		t.Fatalf("run = stage %q candidates %+v", run.Stage, run.Candidates)
 	}
 	if got := h.tickets.finished[view.TicketID]; !strings.Contains(got, "Plan: Put every song") {
