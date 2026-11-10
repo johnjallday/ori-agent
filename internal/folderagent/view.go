@@ -3,6 +3,7 @@ package folderagent
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -68,6 +69,56 @@ type View struct {
 	// NextTicket is the agent's first ticket, created when Set it up
 	// finished; Start this starts it.
 	NextTicket *NextTicketView `json:"next_ticket,omitempty"`
+	// Landing is where a watched run goes once it finished with every step
+	// done and its plan included the Home step: the Home's Map, asking it to
+	// open the projects sheet. Nil for every other run, which keeps Route.
+	Landing *Landing `json:"landing,omitempty"`
+}
+
+// Landing names the Home a finished run lands in, for the card's "Opening
+// <Name>…" line, and the route that opens its Map with the projects sheet.
+type Landing struct {
+	Route string `json:"route"`
+	Name  string `json:"name"`
+}
+
+// SetupProjectsParam is the query parameter that asks a Home's Map to open
+// its projects sheet once (the outer map's deep link uses the same one);
+// SetupBesideParam names the folder workspace whose tile the sheet opens
+// beside, when the map shows it.
+const (
+	SetupProjectsParam = "setup_projects"
+	SetupBesideParam   = "setup_beside"
+)
+
+// landingOf is the Home landing for a done run whose plan ran the Home step.
+func landingOf(rec *Record, plan Plan) *Landing {
+	if rec.State != StateSetUp || rec.Setup == nil || rec.Setup.Status != personalassistant.FolderSetupDone ||
+		rec.Setup.Receipt == nil || rec.Setup.Receipt.Home == nil {
+		return nil
+	}
+	home := rec.Setup.Receipt.Home
+	if !strings.HasPrefix(home.Route, "/workspaces/") || strings.ContainsAny(home.Route, "?#") {
+		return nil
+	}
+	ranHome := false
+	for _, s := range plan.Steps {
+		if s.Chosen && s.Kind == folderlook.StepHome {
+			ranHome = true
+		}
+	}
+	if !ranHome {
+		return nil
+	}
+	name := strings.TrimSpace(home.Name)
+	if name == "" {
+		name = "your Home"
+	}
+	query := url.Values{"mode": {"map"}, SetupProjectsParam: {"1"}}
+	if rec.WorkspaceID != "" {
+		query.Set(SetupBesideParam, rec.WorkspaceID)
+	}
+	return &Landing{Route: home.Route + "?" + query.Encode(), Name: name}
 }
 
 // NextTicketView is the receipt's line for the agent's first ticket.
@@ -153,6 +204,7 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	}
 	plan := BuildPlan(*rec, selected)
 	v.Plan = planViewOf(plan)
+	v.Landing = landingOf(rec, plan)
 	switch rec.State {
 	case StateReported:
 		v.Actions = []string{ActionSetUp, ActionKeep, ActionLookFurther}

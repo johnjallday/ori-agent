@@ -336,6 +336,31 @@ test("Home's other Commanders speak from their tiles; the drawer's own is left t
   assert.equal(a.content, null);
 });
 
+test('a balloon whose run Home follows out says where it is going', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const drawn = [];
+  const commanders = homeCommanders({
+    doc,
+    win: {},
+    reportView: folderAgentReportView,
+    renderCard: (view, options) => {
+      drawn.push(options.opening);
+      return doc.createElement('article');
+    },
+    act: async () => null
+  });
+  const done = raw({ workspace_id: 'ws-a', state: 'set_up', setup: { status: 'done', lines: [] } });
+  commanders.sync([done], '', new Map([['ws-a', 'Opening Music Production Home…']]));
+  const balloon = commanderBalloon('home:ws-a');
+  assert.equal(balloon.content.line, 'Opening Music Production Home…');
+  balloon.content.body(doc);
+  assert.equal(drawn.at(-1), true, 'the card draws its own Opening line');
+  // Without an opening, the same balloon keeps its own speech.
+  commanders.sync([raw({ workspace_id: 'ws-a' })], '');
+  assert.equal(commanderBalloon('home:ws-a').content.line, 'I have a plan for Albums · Review');
+});
+
 test('a balloon handed to the drawer is released, not cleared', () => {
   resetCommanderBalloons();
   const doc = fakeDocument();

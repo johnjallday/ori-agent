@@ -30,6 +30,7 @@ import {
   showMapDeepLinkTarget,
   setupProjectsDeepLink,
   setupSheetShouldOpen,
+  watchedRunsToOpen,
   searchForView,
   readCount,
   formatCount,
@@ -176,6 +177,33 @@ test('parseViewFromQuery: the query is authoritative when it carries a valid vie
   // Case and surrounding whitespace must not defeat a legitimate deep link.
   assert.equal(parseViewFromQuery('?view=TREE'), VIEW_TREE);
   assert.equal(parseViewFromQuery('?view=%20tree%20'), VIEW_TREE);
+});
+
+test('a run set up from a map balloon opens once it finished; a stopped one is let go', () => {
+  const running = id => ({ workspace_id: id, state: 'setting_up', setup: { status: 'running' } });
+  const done = id => ({
+    workspace_id: id,
+    state: 'set_up',
+    setup: { status: 'done' },
+    landing: { route: '/workspaces/home?mode=map&setup_projects=1', name: 'Music Production Home' }
+  });
+  const stopped = id => ({ workspace_id: id, state: 'set_up', setup: { status: 'stopped' } });
+  let runs = { watched: new Set(['ws-a', 'ws-b']), previous: { 'ws-a': running('ws-a') } };
+  // Still running: nothing opens; another agent's finished run, never watched, never opens.
+  let step = watchedRunsToOpen(runs.watched, runs.previous, [running('ws-a'), done('ws-c')]);
+  assert.deepEqual(step.open, []);
+  runs = step;
+  step = watchedRunsToOpen(runs.watched, runs.previous, [done('ws-a'), running('ws-b')]);
+  assert.deepEqual(
+    step.open.map(v => v.workspace_id),
+    ['ws-a']
+  );
+  assert.equal(step.watched.has('ws-a'), false, 'opened once');
+  runs = step;
+  // The next poll shows the same finished run: it does not open again.
+  step = watchedRunsToOpen(runs.watched, runs.previous, [done('ws-a'), stopped('ws-b')]);
+  assert.deepEqual(step.open, []);
+  assert.equal(step.watched.size, 0, 'a stopped run is no longer watched');
 });
 
 test('Show on map deep links name a district independently from explicit Move', () => {

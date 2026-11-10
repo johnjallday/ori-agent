@@ -132,6 +132,7 @@ export function folderAgentReportView(view) {
     workspace: String(view.workspace_name || folder),
     folder,
     route: String(view.route || ''),
+    landing: landingOf(view.landing),
     agent,
     // The walk's narration (base names only, bounded by the server): the
     // folder it is in, how many it has opened, and whether the agent's own
@@ -1248,8 +1249,9 @@ export function renderFolderAgentReport(
     });
     card.append(actions);
   }
-  if (opening && view.route) {
-    const status = el(doc, 'p', 'folder-agent-card__opening', `Opening ${view.workspace}…`);
+  const destination = folderAgentDestination(view);
+  if (opening && destination.route) {
+    const status = el(doc, 'p', 'folder-agent-card__opening', folderAgentOpeningLine(view));
     status.setAttribute('role', 'status');
     card.append(status);
   } else if (
@@ -1409,8 +1411,36 @@ export function setupFinished(previous, next) {
   );
 }
 
-// openFolderAgentPlace takes the user to the folder's workspace, where the
-// card's "Open <name>" link goes, once a run they watched has set it up. The
+// landingOf keeps a server landing only when it is one of the app's own
+// workspace pages, with the Home's name for the "Opening …" line.
+function landingOf(raw) {
+  const route = String(raw?.route || '');
+  if (!route.startsWith('/workspaces/')) return null;
+  return { route, name: String(raw?.name || '').trim() };
+}
+
+// folderAgentDestination is where a run the user watched goes once it
+// finished: the Home's Map with its projects sheet when the run included the
+// Home step (the server's landing), else the folder's own workspace. Every
+// follower (the card's loop, Needs you, the Create Workspace pane, the map's
+// balloons and the Home drawer) goes through openFolderAgentPlace, which asks
+// this, so they all land the same way. Takes a report view or a raw view.
+export function folderAgentDestination(view) {
+  const landing = view?.landing ? landingOf(view.landing) : null;
+  const folder = String(view?.workspace || view?.workspace_name || view?.folder_name || '');
+  if (landing) return { route: landing.route, name: landing.name || folder, landing: true };
+  return { route: String(view?.route || ''), name: folder, landing: false };
+}
+
+// folderAgentOpeningLine is the line a follower shows while it leaves for the
+// destination: "Opening Music Production Home…" (PRD FR8).
+export function folderAgentOpeningLine(view) {
+  const name = folderAgentDestination(view).name;
+  return name ? `Opening ${name}…` : 'Opening…';
+}
+
+// openFolderAgentPlace takes the user where a run they watched has set up
+// (folderAgentDestination: the Home it joined, or the folder's workspace). The
 // beat before leaving lets the finished list be seen. navigate is the page's
 // own way there; the default is the link's. Returns whether it will go.
 // On Home it also waits for the map behind the card to finish building the
@@ -1419,7 +1449,7 @@ export function openFolderAgentPlace(
   view,
   { navigate, delayMs = 900, motion = globalThis.window?.OriWorkspaceMap } = {}
 ) {
-  const route = String(view?.route || '');
+  const route = folderAgentDestination(view).route;
   if (!route) return false;
   const go =
     typeof navigate === 'function' ? navigate : target => globalThis.location?.assign?.(target);

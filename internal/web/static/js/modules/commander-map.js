@@ -383,7 +383,9 @@ export function homeCommanders({
   act
 } = {}) {
   const live = new Map();
-  const present = (id, raw) => {
+  // opening is the line a balloon says while Home leaves for where its run
+  // landed ("Opening Music Production Home…"), or false.
+  const present = (id, raw, opening = false) => {
     let entry = live.get(id);
     if (!entry) {
       entry = {
@@ -397,6 +399,7 @@ export function homeCommanders({
       renderCard(view, {
         compact,
         error,
+        opening: Boolean(opening),
         onAction: async (action, button, extra) => {
           if (button) button.disabled = true;
           const result = await act(view, action, extra);
@@ -410,20 +413,22 @@ export function homeCommanders({
       previous: null,
       followed: false,
       error,
-      opening: false,
+      opening,
       host: null,
       doc,
       card
     });
   };
   return {
-    sync(views, owned = '') {
+    // openings maps a workspace id to the line its balloon says while Home
+    // leaves for where that run landed.
+    sync(views, owned = '', openings = new Map()) {
       const keep = new Set();
       (Array.isArray(views) ? views : []).forEach(raw => {
         const id = String(raw?.workspace_id || '');
         if (!id || id === owned) return;
         keep.add(id);
-        present(id, raw);
+        present(id, raw, openings.get(id) || false);
       });
       [...live.keys()].forEach(id => {
         if (keep.has(id)) return;
@@ -504,7 +509,9 @@ export function commanderPresenter(
       const { view, raw, error, opening, card } = last;
       return {
         speaker: { name: view.agent, role: 'Commander' },
-        line: item.speech.line,
+        // A balloon leaving with its run says where it goes (a line); the
+        // workspace page's own follower passes true and keeps its speech.
+        line: typeof opening === 'string' && opening ? opening : item.speech.line,
         headline: item.speech.headline,
         announce: item.speech.announce,
         signature: `report|${JSON.stringify(raw)}|${error}|${opening}|${index}`,

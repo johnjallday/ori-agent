@@ -22,6 +22,7 @@ import {
   mountFolderAgentChoice,
   mountFolderAgentReports,
   openFolderAgentPlace,
+  folderAgentDestination,
   postFolderAgentAction,
   renderFolderAgentCard,
   renderFolderAgentReport,
@@ -1683,6 +1684,59 @@ test('a run watched to its end says it is opening the place and goes there; a st
   });
   await settle();
   assert.equal(text(staying, '.folder-agent-card__open'), 'Open Ori Music Demo');
+});
+
+test('a run that ran the Home step lands in the Home, named on the line; others keep the folder', async () => {
+  const HOME_ROUTE =
+    '/workspaces/music-production-home?mode=map&setup_beside=ws-1&setup_projects=1';
+  const landing = { route: HOME_ROUTE, name: 'Music Production Home' };
+  // Raw views (the drawer's poll) and report views (the card) alike.
+  assert.deepEqual(
+    folderAgentDestination({ route: '/workspaces/albums', workspace_name: 'Albums', landing }),
+    { route: HOME_ROUTE, name: 'Music Production Home', landing: true }
+  );
+  assert.deepEqual(folderAgentDestination(folderAgentReportView(setUp({ landing }))), {
+    route: HOME_ROUTE,
+    name: 'Music Production Home',
+    landing: true
+  });
+  assert.deepEqual(
+    folderAgentDestination({ route: '/workspaces/albums', workspace_name: 'Albums' }),
+    {
+      route: '/workspaces/albums',
+      name: 'Albums',
+      landing: false
+    }
+  );
+  // A landing off the app's own pages is never followed.
+  assert.equal(
+    folderAgentDestination({
+      route: '/workspaces/albums',
+      landing: { route: 'https://x.example/' }
+    }).route,
+    '/workspaces/albums'
+  );
+  const raw = [];
+  openFolderAgentPlace(
+    { route: '/workspaces/albums', landing },
+    { navigate: r => raw.push(r), delayMs: 0, motion: null }
+  );
+  assert.deepEqual(raw, [HOME_ROUTE]);
+
+  const doc = stubDocument();
+  const host = doc.createElement('section');
+  const states = [settingUp(), setUp({ landing })];
+  const went = [];
+  await mountWorkspaceFolderAgent(host, 'ws-1', {
+    doc,
+    fetchImpl: async () => okJSON({ folder_agent: states.shift() || null }),
+    pollMs: 1,
+    openDelayMs: 0,
+    navigate: route => went.push(route)
+  });
+  await settle();
+  assert.equal(text(host, '.folder-agent-card__opening'), 'Opening Music Production Home…');
+  assert.deepEqual(went, [HOME_ROUTE]);
 });
 
 test('Needs you follows a Set it up in place until it ends, then opens the place', async () => {

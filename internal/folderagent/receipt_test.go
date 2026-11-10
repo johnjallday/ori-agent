@@ -41,6 +41,50 @@ func TestSetUp_TheViewCarriesTheRunsCleanedReceiptAndItsOwnSelection(t *testing.
 	}
 }
 
+// A run that finished with its Home step lands in that Home's Map with the
+// projects sheet asked for; every other run keeps the folder's own route.
+func TestLanding_OnlyADoneRunWithTheHomeStepLandsInTheHome(t *testing.T) {
+	home := &WorkspaceRef{ID: "home-1", Name: "Music Production Home", Route: "/workspaces/music-production-home"}
+	// The Home's Map, the sheet asked for once, beside the folder's own tile.
+	const landed = "/workspaces/music-production-home?mode=map&setup_beside=ws-albums&setup_projects=1"
+	cases := map[string]struct {
+		selected []string
+		status   string
+		receipt  *SetupReceipt
+		want     string
+	}{
+		"Home created":                    {selected: []string{"music-production-home", "reaper-tools"}, status: "done", receipt: &SetupReceipt{Home: home, HomeCreated: true}, want: landed},
+		"Home joined":                     {selected: []string{"music-production-home"}, status: "done", receipt: &SetupReceipt{Home: home}, want: landed},
+		"group only":                      {selected: []string{"group"}, status: "done", receipt: &SetupReceipt{Group: true}},
+		"tools only":                      {selected: []string{"reaper-tools"}, status: "done", receipt: &SetupReceipt{Installed: []string{"Ori REAPER Plugin 0.11.0"}}},
+		"tools only, Home in the receipt": {selected: []string{"reaper-tools"}, status: "done", receipt: &SetupReceipt{Home: home}},
+		"stopped run":                     {selected: []string{"music-production-home", "reaper-tools"}, status: "stopped", receipt: &SetupReceipt{Home: home}},
+		"no Home route":                   {selected: []string{"music-production-home"}, status: "done", receipt: &SetupReceipt{Home: &WorkspaceRef{ID: "home-1", Name: "Music Production Home"}}},
+		"still running":                   {selected: []string{"music-production-home"}, status: "running", receipt: &SetupReceipt{Home: home}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := planRecord()
+			rec.WorkspaceID = "ws-albums"
+			rec.State = StateSetUp
+			if tc.status == "running" {
+				rec.State = StateSettingUp
+			}
+			rec.Setup = &Setup{Selected: tc.selected, Status: tc.status, Receipt: tc.receipt}
+			got := landingOf(&rec, BuildPlan(rec, tc.selected))
+			if tc.want == "" {
+				if got != nil {
+					t.Fatalf("landing = %+v, want none", got)
+				}
+				return
+			}
+			if got == nil || got.Route != tc.want || got.Name != "Music Production Home" {
+				t.Fatalf("landing = %+v, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestView_AfterARunThePlanFollowsTheRunsSelectionNotTheRecommendation(t *testing.T) {
 	h := newHarness(t, build(t, "Song.rpp"))
 	view := h.start(t, "")
