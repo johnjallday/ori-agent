@@ -93,7 +93,7 @@ func (h *Handler) ObserveWorkspaceGroupCreation(w http.ResponseWriter, r *http.R
 	link := canonical.GetAssistantProjectLink()
 	if snapshot.SelectedComposition == grouprequirements.CompositionGrouped {
 		if receipt.ProgramKey == nil || snapshot.ProgramKey == nil || snapshot.ProgramKey.Normalize() != receipt.ProgramKey.Normalize() ||
-			canonical.ParentID != operation.HomeWorkspaceID || link == nil || link.ID != operation.ProjectLinkID ||
+			!workspace.WorkspaceInsideStation(h.workspaceTaskStore.Get, canonical, operation.HomeWorkspaceID) || link == nil || link.ID != operation.ProjectLinkID ||
 			link.StationWorkspaceID != operation.HomeWorkspaceID || link.Key.Normalize() != receipt.ProgramKey.Normalize() ||
 			!reflect.DeepEqual(link.HomeProvider, snapshot.HomeProvider) || !reflect.DeepEqual(link.ProjectProvider, snapshot.ProjectProvider) {
 			respondGroupCreationResourceUnavailable(w)

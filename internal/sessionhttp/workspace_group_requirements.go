@@ -121,7 +121,7 @@ func (h *Handler) respondCreateWorkspaceGroupReplay(ctx context.Context, w http.
 		provenance.GroupRequirement.OperationDigest == operation.OperationDigest
 	if observed && plan.claim.Snapshot.SelectedComposition == grouprequirements.CompositionGrouped {
 		link := project.GetAssistantProjectLink()
-		observed = canonical.ParentID == operation.HomeWorkspaceID && link != nil &&
+		observed = agentworkspace.WorkspaceInsideStation(h.workspaceTaskStore.Get, canonical, operation.HomeWorkspaceID) && link != nil &&
 			link.ID == operation.ProjectLinkID && link.StationWorkspaceID == operation.HomeWorkspaceID
 		if observed {
 			home, homeErr := h.workspaceTaskStore.Get(operation.HomeWorkspaceID)
@@ -186,7 +186,7 @@ func (h *Handler) respondWorkspaceProjectGroupReplay(ctx context.Context, w http
 	}
 	if observed && plan.claim.Snapshot.SelectedComposition == grouprequirements.CompositionGrouped {
 		link := project.GetAssistantProjectLink()
-		observed = canonical.ParentID == operation.HomeWorkspaceID && link != nil &&
+		observed = agentworkspace.WorkspaceInsideStation(h.workspaceTaskStore.Get, canonical, operation.HomeWorkspaceID) && link != nil &&
 			link.ID == operation.ProjectLinkID && link.StationWorkspaceID == operation.HomeWorkspaceID
 		if observed {
 			home, homeErr := h.workspaceTaskStore.Get(operation.HomeWorkspaceID)
@@ -265,7 +265,8 @@ func (h *Handler) finalizeCreateWorkspaceGroupRequirement(ctx context.Context, w
 		return grouprequirements.ErrUnavailable
 	}
 	link := project.GetAssistantProjectLink()
-	if link == nil || link.ID != plan.claim.Operation.ProjectLinkID || link.StationWorkspaceID != station.ID || project.ParentID != station.ID {
+	if link == nil || link.ID != plan.claim.Operation.ProjectLinkID || link.StationWorkspaceID != station.ID ||
+		!agentworkspace.WorkspaceInsideStation(h.workspaceTaskStore.Get, project, station.ID) {
 		_ = h.groupRequirements.Mark(ctx, plan.claim.Operation, grouprequirements.OperationReconcileRequired)
 		return errors.New("required group consequences were not observed")
 	}

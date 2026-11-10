@@ -62,7 +62,8 @@ func (r handoffReceipts) Receipt(_ context.Context, homeID string, facts folders
 	if opened := facts.Opened; opened != nil {
 		// The song is read where the verifier reads it: its own folder record.
 		song, err := b.workspaceFileStore.Get(opened.WorkspaceID)
-		if err != nil || song == nil || song.ParentID != homeID || !workspace.IsCanonicalWorkspaceSlug(song.FolderSlug) {
+		if err != nil || song == nil || !workspace.WorkspaceInsideStation(b.workspaceFileStore.Get, song, homeID) ||
+			!workspace.IsCanonicalWorkspaceSlug(song.FolderSlug) {
 			return nil, errSetupUnavailable
 		}
 		label := strings.TrimSpace(r.label)

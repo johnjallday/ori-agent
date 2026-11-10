@@ -187,7 +187,7 @@ func (s *SyncStore) MoveWorkspaceFolder(workspaceID, parentID string) ([]MovedWo
 	if currentErr != nil {
 		return nil, currentErr
 	}
-	healingExactLink := current.AssistantProjectLink != nil && current.AssistantProjectLink.StationWorkspaceID == parentID
+	healingExactLink := AssistantLinkHealingMove(s.primary.Get, current, current.ParentID, parentID)
 	if protected, checkErr := storeContainsProtectedAssistantProgram(s.primary, workspaceID); checkErr != nil {
 		return nil, checkErr
 	} else if protected && !healingExactLink {

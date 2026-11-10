@@ -448,7 +448,9 @@ func (service *AssistantProgramStore) ensureProjectNesting(projectID, stationID 
 	if err != nil {
 		return err
 	}
-	if project.ParentID == stationID {
+	// A song already inside its station, flat or in a group, is where it
+	// belongs. Healing never pulls a nested song out to the station.
+	if WorkspaceInsideStation(service.store.Get, project, stationID) {
 		return nil
 	}
 	_, err = mover.MoveWorkspaceFolder(projectID, stationID)
@@ -500,7 +502,7 @@ func (service *AssistantProgramStore) RecordAcceptedCompletion(projectID, finger
 		return nil, false, ErrAssistantProgramUnavailable
 	}
 	linkedStation, stationErr := service.store.Get(link.StationWorkspaceID)
-	if stationErr != nil || linkedStation == nil || (service.hasRequiredGroupRequirement(project) && project.ParentID != link.StationWorkspaceID) {
+	if stationErr != nil || linkedStation == nil || (service.hasRequiredGroupRequirement(project) && !WorkspaceInsideStation(service.store.Get, project, link.StationWorkspaceID)) {
 		return nil, false, ErrAssistantProgramUnavailable
 	}
 	linkedState := linkedStation.GetAssistantProgramState()
@@ -656,7 +658,7 @@ func (service *AssistantProgramStore) LinkedProjects(stationID string) ([]*Works
 			continue
 		}
 		link := project.GetAssistantProjectLink()
-		if link == nil || (service.hasRequiredGroupRequirement(project) && project.ParentID != stationID) || link.StationWorkspaceID != stationID || link.Key.Normalize() != state.Key.Normalize() {
+		if link == nil || (service.hasRequiredGroupRequirement(project) && !WorkspaceInsideStation(service.store.Get, project, stationID)) || link.StationWorkspaceID != stationID || link.Key.Normalize() != state.Key.Normalize() {
 			continue
 		}
 		projects = append(projects, project)

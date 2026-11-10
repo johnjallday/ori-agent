@@ -425,7 +425,7 @@ func (s *Service) Observe(scope Scope, homeID, projectID string, mode projecttem
 				return false
 			}
 		} else {
-			if homeID == "" || link == nil || snapshot.ProgramKey == nil || project.ParentID != homeID ||
+			if homeID == "" || link == nil || snapshot.ProgramKey == nil || !workspace.WorkspaceInsideStation(s.store.Get, project, homeID) ||
 				link.StationWorkspaceID != homeID || link.ID != snapshot.ProjectLinkID ||
 				link.Key.Normalize() != snapshot.ProgramKey.Normalize() {
 				return false

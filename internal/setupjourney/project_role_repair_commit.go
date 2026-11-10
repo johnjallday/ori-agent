@@ -88,7 +88,7 @@ func (r *ProjectRoleRepairReviewer) CommitProjectRoleRepairOperation(ctx context
 	writeErr := r.workspaces.Update(projectID, func(current *workspace.Workspace) error {
 		link := current.GetAssistantProjectLink()
 		provenance := current.GetTemplateProvenance()
-		if current.ID != projectID || current.OwnerUserID != ownerID || current.ParentID != homeID ||
+		if current.ID != projectID || current.OwnerUserID != ownerID || !workspace.WorkspaceInsideStation(r.workspaces.Get, current, homeID) ||
 			current.Status != workspace.StatusActive || link == nil || provenance == nil ||
 			link.ID != inspection.LinkID || link.StateRevision != inspection.LinkRevision ||
 			link.StationWorkspaceID != homeID || len(link.ProjectRoles) != 0 || len(provenance.AssistantProjectRoles) != 0 ||

@@ -32,7 +32,12 @@ type repairCommitFixture struct {
 
 func newRepairCommitFixture(t *testing.T) *repairCommitFixture {
 	t.Helper()
-	store, primary, folder, installed, owner, homeID, projectID := oldSplitChildFixture(t)
+	return newRepairCommitFixtureAt(t, false)
+}
+
+func newRepairCommitFixtureAt(t *testing.T, nested bool) *repairCommitFixture {
+	t.Helper()
+	store, primary, folder, installed, owner, homeID, projectID := oldSplitChildFixtureAt(t, nested)
 	path := filepath.Join(t.TempDir(), "repair-commit.db")
 	db, err := database.Open(t.Context(), &database.Config{Path: path, WALMode: true})
 	if err != nil {

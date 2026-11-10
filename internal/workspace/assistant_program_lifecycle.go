@@ -452,7 +452,7 @@ func (service *AssistantProgramStore) reconnectResources(projectID string, allow
 	link := project.GetAssistantProjectLink()
 	member := containsAssistantProjectID(state.LinkedProjectIDs, project.ID)
 	if link != nil {
-		if !allowCompleted || !member || project.ParentID != station.ID || link.ID != snapshot.ProjectLinkID ||
+		if !allowCompleted || !member || !WorkspaceInsideStation(service.store.Get, project, station.ID) || link.ID != snapshot.ProjectLinkID ||
 			link.StationWorkspaceID != station.ID || link.Key.Normalize() != snapshot.ProgramKey.Normalize() {
 			return nil, nil, nil, nil, ErrAssistantTopologyConflict
 		}

@@ -51,7 +51,8 @@ func InspectMissingSplitProjectRoles(store workspace.Store, installed []plugin.I
 	project, projectErr := store.Get(projectID)
 	if homeErr != nil || projectErr != nil || home == nil || project == nil || home.ID != homeID || project.ID != projectID ||
 		home.OwnerUserID != ownerID || project.OwnerUserID != ownerID || home.Kind != "group" ||
-		home.Status != workspace.StatusActive || project.Status != workspace.StatusActive || project.ParentID != homeID {
+		home.Status != workspace.StatusActive || project.Status != workspace.StatusActive ||
+		!workspace.WorkspaceInsideStation(store.Get, project, homeID) {
 		return refuse()
 	}
 	state, link := home.GetAssistantProgramState(), project.GetAssistantProjectLink()
