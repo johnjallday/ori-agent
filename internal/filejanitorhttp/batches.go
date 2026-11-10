@@ -42,26 +42,34 @@ type candidateDTO struct {
 	StateReason string `json:"state_reason,omitempty"`
 	// Decision is the user's recorded choice, distinct from the proposed
 	// Category above.
-	Decision         string `json:"decision,omitempty"`
-	DecisionCategory string `json:"decision_category,omitempty"`
+	Decision          string `json:"decision,omitempty"`
+	DecisionCategory  string `json:"decision_category,omitempty"`
+	DecisionFromGroup bool   `json:"decision_from_group,omitempty"`
 }
 
 func toCandidateDTO(candidate filejanitor.JanitorCandidate, filingRootName string) candidateDTO {
 	dto := candidateDTO{
-		ID:               candidate.ID,
-		Name:             candidate.Display(),
-		Extension:        candidate.Extension,
-		MIMEType:         candidate.MIMEType,
-		Size:             candidate.Size,
-		Category:         string(candidate.Category),
-		Reason:           candidate.Reason,
-		Confidence:       string(candidate.Confidence),
-		Classifier:       string(candidate.Classifier),
-		NeedsReview:      candidate.NeedsReview,
-		State:            string(candidate.State),
-		StateReason:      candidate.StateReason,
-		Decision:         string(candidate.Decision),
-		DecisionCategory: string(candidate.DecisionCategory),
+		ID:                candidate.ID,
+		Name:              candidate.Display(),
+		Extension:         candidate.Extension,
+		MIMEType:          candidate.MIMEType,
+		Size:              candidate.Size,
+		Category:          string(candidate.Category),
+		Reason:            candidate.Reason,
+		Confidence:        string(candidate.Confidence),
+		Classifier:        string(candidate.Classifier),
+		NeedsReview:       candidate.NeedsReview,
+		State:             string(candidate.State),
+		StateReason:       candidate.StateReason,
+		Decision:          string(candidate.Decision),
+		DecisionCategory:  string(candidate.DecisionCategory),
+		DecisionFromGroup: candidate.DecisionGroupID != "",
+	}
+	if category, err := filejanitor.LookupCategory(string(candidate.Category)); err == nil {
+		dto.Category = string(category.ID)
+	}
+	if category, err := filejanitor.LookupCategory(string(candidate.DecisionCategory)); err == nil {
+		dto.DecisionCategory = string(category.ID)
 	}
 	if !candidate.ModifiedAt.IsZero() {
 		dto.ModifiedAt = candidate.ModifiedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
@@ -439,6 +447,8 @@ func (h *Handler) UpdateDecisions(w http.ResponseWriter, r *http.Request) {
 	changed, err := h.service.ApplyDecisions(workspaceID, updates)
 	if err != nil {
 		switch {
+		case errors.Is(err, filejanitor.ErrReviewConflict):
+			h.respondDraftError(w, err)
 		case errors.Is(err, filejanitor.ErrCandidateNotFound):
 			_ = orihttp.RespondNotFound(w, "candidate not found")
 		case errors.Is(err, filejanitor.ErrUnknownCategory):
@@ -538,7 +548,8 @@ func (h *Handler) PreviewMoves(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Decisions []decisionPayload `json:"decisions"`
+		Decisions      []decisionPayload `json:"decisions"`
+		ReviewRevision string            `json:"review_revision"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -558,7 +569,7 @@ func (h *Handler) PreviewMoves(w http.ResponseWriter, r *http.Request) {
 	}
 
 	preview, err := h.service.PreviewMoves(filejanitor.PreviewRequest{
-		WorkspaceID: workspaceID, UserID: userID, Items: items,
+		WorkspaceID: workspaceID, UserID: userID, Items: items, ReviewRevision: req.ReviewRevision,
 	})
 	if err != nil {
 		h.respondReviewError(w, err, "Failed to prepare the File Janitor preview")
@@ -723,6 +734,8 @@ func candidateExplanation(err error) string {
 // assumed no longer holds.
 func (h *Handler) respondReviewError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, filejanitor.ErrReviewConflict), errors.Is(err, filejanitor.ErrReviewDraftInvalid), errors.Is(err, filejanitor.ErrReviewBounds):
+		h.respondDraftError(w, err)
 	case errors.Is(err, filejanitor.ErrApprovalRequired):
 		_ = orihttp.RespondBadRequest(w, "an approval token is required")
 	case errors.Is(err, filejanitor.ErrApprovalConsumed):

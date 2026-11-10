@@ -123,6 +123,20 @@ func TestReviewGroups_ConservativeNameRules(t *testing.T) {
 	}
 }
 
+func TestReviewGroups_CategoryAliasesRemainBoundedWithoutInventingGroups(t *testing.T) {
+	batch, candidates := groupFixture("one.png", "two.wav", "three.zzz")
+	candidates[0].Category = " IMAGES "
+	candidates[1].Category = "AUDIO"
+	candidates[2].Category, candidates[2].NeedsReview, candidates[2].Confidence = "Other", false, ConfidenceHigh
+	got := mustGroup(t, batch, candidates)
+	for i, key := range []string{"filing-images", "audio", "unresolved"} {
+		group, _ := groupFor(t, got, candidates[i].ID)
+		if group.ID != reviewGroupID(key) {
+			t.Fatalf("category alias created a missing/invented group: %+v", group)
+		}
+	}
+}
+
 func TestReviewGroups_StableMembershipUnaffectedByDestination(t *testing.T) {
 	batch, candidates := groupFixture("report.pdf", "photo.png", "app.dmg")
 	before := mustGroup(t, batch, candidates)

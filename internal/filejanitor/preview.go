@@ -21,6 +21,9 @@ type PreviewRequest struct {
 	// UserID is the person the approval will be bound to.
 	UserID string
 	Items  []PreviewRequestItem
+	// ReviewRevision is required once this batch has a canonical draft, so an
+	// old client cannot issue unbound authority after another tab deselects.
+	ReviewRevision string
 }
 
 // PreviewRequestItem is one requested operation.
@@ -79,6 +82,9 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 	}
 	if len(req.Items) == 0 {
 		return Preview{}, fmt.Errorf("%w: select at least one file", ErrInvalidCandidate)
+	}
+	if len(req.Items) > MaxReviewChoicesPerBatch {
+		return Preview{}, ErrReviewBounds
 	}
 	settings, err := s.requireConfigured(workspaceID)
 	if err != nil {
@@ -221,6 +227,10 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 			})
 		}
 
+		reviewRevision, reviewScope, err := s.reviewApprovalBinding(*state, workspaceID, userID, batchID, req.ReviewRevision, plan)
+		if err != nil {
+			return err
+		}
 		token, tokenHash, err := newApprovalToken()
 		if err != nil {
 			return err
@@ -232,6 +242,8 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 			WorkspaceID:    workspaceID,
 			BatchID:        batchID,
 			PayloadHash:    PayloadHash(workspaceID, batchID, plan),
+			ReviewRevision: reviewRevision,
+			ReviewScope:    reviewScope,
 			IdempotencyKey: "apply-" + uuid.New().String(),
 			IssuedAt:       now,
 			ExpiresAt:      now.Add(ApprovalTTL),
@@ -354,6 +366,12 @@ func (s *Service) ConsumeApproval(workspaceID, userID, token string, plan []Plan
 			// The submitted plan is not the plan the user approved: a decision,
 			// a category, or a file's state changed.
 			return ErrApprovalInvalid
+		}
+		if record.ReviewRevision != "" || record.ReviewScope != "" {
+			revision, scope, err := s.reviewApprovalBinding(*state, workspaceID, userID, batchID, record.ReviewRevision, plan)
+			if err != nil || revision != record.ReviewRevision || scope != record.ReviewScope {
+				return ErrApprovalInvalid
+			}
 		}
 		state.Approvals[index].ConsumedAt = now
 		consumed = state.Approvals[index]

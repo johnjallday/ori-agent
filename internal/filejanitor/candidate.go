@@ -260,9 +260,13 @@ type JanitorCandidate struct {
 	// Decision is the user's choice, and DecisionCategory the category they
 	// chose (which may differ from the proposed Category). DecidedAt records
 	// when. These are the only fields that authorize anything.
-	Decision         Decision  `json:"decision,omitempty"`
-	DecisionCategory Category  `json:"decision_category,omitempty"`
-	DecidedAt        time.Time `json:"decided_at,omitempty"`
+	Decision         Decision `json:"decision,omitempty"`
+	DecisionCategory Category `json:"decision_category,omitempty"`
+	// DecisionGroupID records only the provenance of a canonical destination
+	// edit, not a second category or selection. Empty means a per-file/legacy
+	// edit. Keeping it here preserves exceptions through deselect/reselect.
+	DecisionGroupID string    `json:"decision_group_id,omitempty"`
+	DecidedAt       time.Time `json:"decided_at,omitempty"`
 }
 
 // EffectiveCategory returns the category an approved move would use: the user's
@@ -484,6 +488,9 @@ func (c JanitorCandidate) Validate() error {
 	}
 	if c.Fingerprint.Name != c.Name {
 		return fmt.Errorf("%w: fingerprint does not describe this file", ErrInvalidCandidate)
+	}
+	if c.DecisionGroupID != "" && !managedRootGeneration.MatchString(c.DecisionGroupID) {
+		return fmt.Errorf("%w: invalid destination provenance", ErrInvalidCandidate)
 	}
 	if c.Decision != DecisionNone && c.Decision != DecisionMove && c.Decision != DecisionTrash && c.Decision != DecisionSkip {
 		return fmt.Errorf("%w: unknown decision %q", ErrInvalidCandidate, c.Decision)

@@ -28,6 +28,67 @@
   color: var(--text-primary, #e8e8e8);
 }
 
+.fj-group-plan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem);
+  align-items: start;
+  gap: 1rem;
+}
+
+.fj-review-plan {
+  position: sticky;
+  top: 0;
+  margin-block: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+  border-radius: 10px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  overflow-wrap: anywhere;
+}
+
+.fj-group-select {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  color: var(--text-primary, #e8e8e8);
+  font-weight: 600;
+}
+
+.fj-group-select input {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.fj-group-choices .fj-category {
+  min-height: 44px;
+  max-width: 100%;
+}
+
+.fj-group-choices .fj-sub {
+  margin-block: 0.4rem;
+}
+
+.fj-draft-status {
+  flex: 1 1 15rem;
+  max-width: 36rem;
+}
+
+.fj-draft-status .fj-sub {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .fj-group-plan-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fj-review-plan {
+    position: static;
+    margin-top: 0;
+  }
+}
+
 .fj-group-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));

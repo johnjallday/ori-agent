@@ -29,9 +29,9 @@ function syntheticRoot(names: string[]) {
   return root;
 }
 
-async function workspace(request: APIRequestContext) {
+async function workspace(request: APIRequestContext, label = 'Group review') {
   const created = await request.post('/api/workspaces', {
-    data: { name: `Group review ${Date.now()} ${Math.random().toString(36).slice(2, 6)}` }
+    data: { name: `${label} ${Date.now()} ${Math.random().toString(36).slice(2, 6)}` }
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const body = await created.json();
@@ -46,8 +46,8 @@ async function workspace(request: APIRequestContext) {
   return { id: folder.id as string, slug: folder.folder_slug as string };
 }
 
-async function manualReview(request: APIRequestContext, names: string[]) {
-  const ws = await workspace(request);
+async function manualReview(request: APIRequestContext, names: string[], label?: string) {
+  const ws = await workspace(request, label);
   const root = syntheticRoot(names);
   const link = await request.post(`/api/workspaces/${ws.id}/directories`, {
     data: { name: 'Synthetic group inbox', path: root }
@@ -112,7 +112,7 @@ test('agentless real grouped entry pages a 206-member group without selecting or
   await expect(console.locator('.fj-group-accounting')).toContainText('206 candidates');
   await expect(console.locator('.fj-group-card')).toHaveCount(1);
   await expect(console.locator('.fj-group-samples li')).toHaveCount(3);
-  await expect(console.locator('.fj-group-count')).toHaveText('206 files');
+  await expect(console.locator('.fj-group-card .fj-group-count')).toHaveText('206 files');
   await expect(console.locator('.fj-row-item')).toHaveCount(0);
   await expect(console.locator('#fileJanitorApprove')).toBeDisabled();
   mkdirSync(evidence, { recursive: true });
@@ -179,6 +179,194 @@ test('206 mixed candidates have exclusive whole-batch accounting and reachable d
   await expect(console.locator('#fileJanitorView-all')).toHaveAttribute('aria-pressed', 'true');
   await expect(console.locator('#fileJanitorLinkedRow')).toBeVisible();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+});
+
+test('two group choices stage 49 exact moves and stay pinned when a newer review arrives', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const names = [
+    ...Array.from({ length: 18 }, (_, i) => `installer-${String(i).padStart(3, '0')}.dmg`),
+    ...Array.from({ length: 31 }, (_, i) => `image-${String(i).padStart(3, '0')}.png`)
+  ];
+  const ws = await manualReview(request, names, 'Group review 49 choices');
+  const console = await openReview(page, ws.slug);
+  const group = (label: string) =>
+    console.getByRole('checkbox', { name: `Select filing proposals in ${label}`, exact: true });
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await group('Installers').click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('18 files selected.');
+  await expect(group('Installers')).toBeChecked();
+  await group('Images').click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
+  await expect(console.locator('#fileJanitorApprove')).toHaveText('Review 49 moves');
+  mkdirSync(evidence, { recursive: true });
+  await console.locator('.fj-group-plan-layout').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${evidence}/02-group-selection.png`, fullPage: true });
+  const batchID = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
+    .batch_id;
+  const draft = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
+  expect(draft.choices).toHaveLength(49);
+  expect(draft.choices.every((choice: { operation: string }) => choice.operation === 'move')).toBe(
+    true
+  );
+  writeFileSync(join(ws.root, 'later-arrival.png'), 'Synthetic later arrival', { mode: 0o600 });
+  utimesSync(join(ws.root, 'later-arrival.png'), old, old);
+  await console.getByRole('button', { name: 'Scan now', exact: true }).click();
+  await expect(console).toContainText('A newer saved review is available');
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
+  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
+  await expect(page).toHaveURL(new RegExp(`batch_id=${batchID}`));
+  await page.reload();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
+  const newest = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
+    .batch_id;
+  expect(newest).not.toBe(batchID);
+  await console.locator('#fileJanitorBatchChoice').selectOption(newest);
+  await expect(console.locator('.fj-group-accounting')).toContainText('1 candidates');
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await console.locator('#fileJanitorBatchChoice').selectOption(batchID);
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
+  for (const name of [...names, 'later-arrival.png'])
+    expect(existsSync(join(ws.root, name))).toBe(true);
+  expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
+});
+
+test('large saved group choices preserve off-page exclusions, destination exceptions and group Undo', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const names = Array.from({ length: 206 }, (_, i) => `image-${String(i).padStart(4, '0')}.png`);
+  const ws = await manualReview(request, names, 'Group review durable choices');
+  const console = await openReview(page, ws.slug);
+  const selectGroup = console.getByRole('checkbox', {
+    name: 'Select filing proposals in Images',
+    exact: true
+  });
+  await console.getByRole('button', { name: 'See 206 files in Images', exact: true }).click();
+  const details = console.locator('#fileJanitorGroup-details');
+  const prior = details.getByRole('checkbox', { name: 'Select image-0000.png', exact: true });
+  await details
+    .getByRole('combobox', { name: 'Category for image-0000.png', exact: true })
+    .selectOption('documents');
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await expect(prior).toBeEnabled();
+  await prior.click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await selectGroup.click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('206 files selected.');
+  await details.getByRole('button', { name: 'Next group files', exact: true }).click();
+  await expect(details).toContainText('Showing 51–100 of 206');
+  await details.getByRole('checkbox', { name: 'Select image-0051.png', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('205 files selected.');
+  await expect(selectGroup).toHaveJSProperty('indeterminate', true);
+  await details.locator('.fj-group-title').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${evidence}/02-member-exception.png`, fullPage: true });
+  await console
+    .getByRole('combobox', { name: 'Destination for selected group files in Images', exact: true })
+    .selectOption('archives');
+  await expect(console.locator('.fj-review-plan')).toContainText('204 → Filed/Archives');
+  const batchID = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
+    .batch_id;
+  let draft = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
+  expect(
+    draft.choices.filter((choice: { category: string }) => choice.category === 'documents')
+  ).toHaveLength(1);
+  expect(
+    draft.choices.filter((choice: { category: string }) => choice.category === 'archives')
+  ).toHaveLength(204);
+  await console
+    .getByRole('button', {
+      name: 'Undo group mark for Images, keeping per-file choices',
+      exact: true
+    })
+    .click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await selectGroup.click(); // a new, explicit snapshot selection
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('206 files selected.');
+  await details.getByRole('checkbox', { name: 'Select image-0051.png', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('205 files selected.');
+  for (const range of ['101–150', '151–200']) {
+    await details.getByRole('button', { name: 'Next group files', exact: true }).click();
+    await expect(details).toContainText(`Showing ${range} of 206`);
+  }
+  await details.getByRole('checkbox', { name: 'Select image-0151.png', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('204 files selected.');
+  draft = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
+  expect(draft.choices).toHaveLength(204);
+  const members = await (await request.get(`${ws.base}/batches/${batchID}?limit=200`)).json();
+  const excludedIDs = members.candidates
+    .filter((candidate: { name: string }) =>
+      ['image-0051.png', 'image-0151.png'].includes(candidate.name)
+    )
+    .map((candidate: { id: string }) => candidate.id);
+  expect(excludedIDs).toHaveLength(2);
+  expect(
+    draft.choices.every(
+      (choice: { candidate_id: string }) => !excludedIDs.includes(choice.candidate_id)
+    )
+  ).toBe(true);
+  await page.reload();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('204 files selected.');
+  await expect(selectGroup).toHaveJSProperty('indeterminate', true);
+  expect(
+    (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft.choices
+  ).toEqual(draft.choices);
+  for (const name of names) expect(existsSync(join(ws.root, name))).toBe(true);
+  expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
+});
+
+test('injected save failure is unsaved and two real tabs resolve a canonical conflict by reloading', async ({
+  page,
+  request,
+  context
+}) => {
+  const ws = await manualReview(request, ['one.png', 'two.png']);
+  const console = await openReview(page, ws.slug);
+  const other = await context.newPage();
+  const second = await openReview(other, ws.slug);
+  const group = console.getByRole('checkbox', {
+    name: 'Select filing proposals in Images',
+    exact: true
+  });
+  await expect(group).toBeEnabled();
+  await expect(
+    second.getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
+  ).toBeEnabled();
+  let fail = true;
+  await page.route('**/file-janitor/batches/*/draft', route => {
+    if (route.request().method() === 'POST' && fail) {
+      fail = false;
+      return route.abort('failed');
+    }
+    return route.continue();
+  });
+  await group.click();
+  await expect(console.locator('#fileJanitorDraftStatus')).toContainText('not confirmed saved');
+  await expect(console.locator('#fileJanitorApprove')).toBeDisabled();
+  await console.getByRole('button', { name: 'Retry exact edit', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+  await second
+    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
+    .click();
+  await expect(second.locator('#fileJanitorDraftStatus')).toContainText('Review changed');
+  await expect(second.locator('#fileJanitorApprove')).toBeDisabled();
+  await other.screenshot({ path: `${evidence}/02-save-conflict.png`, fullPage: true });
+  await second.getByRole('button', { name: 'Reload saved choices', exact: true }).click();
+  await expect(second.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+  await second.getByRole('button', { name: 'See 2 files in Images', exact: true }).click();
+  await second.getByRole('checkbox', { name: 'Select one.png', exact: true }).click();
+  await expect(second.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await console.locator('#fileJanitorApprove').click();
+  await expect(console.locator('#fileJanitorDraftStatus')).toContainText('unavailable');
+  await expect(console.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await console.getByRole('button', { name: 'Reload saved choices', exact: true }).click();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  expect(existsSync(join(ws.root, 'one.png'))).toBe(true);
+  expect(existsSync(join(ws.root, 'two.png'))).toBe(true);
+  await other.close();
 });
 
 test('installed setup-required entry is not an empty saved review', async ({ page, request }) => {

@@ -50,6 +50,12 @@
   let lastCandidates = [];
   let reviewView = 'groups';
   let locatedCandidateID = '';
+  let draftEnabled = true;
+  let reviewDraft = null;
+  let draftLoadState = 'idle';
+  let draftRequest = 0;
+  let draftWriteChain = Promise.resolve();
+  let failedDraftEdit = null;
   let groupReview = null;
   let groupsLoadState = 'idle';
   let groupsRequest = 0;
@@ -174,6 +180,8 @@
     lastBatch = null;
     lastCandidates = [];
     resetGroupReview();
+    resetReviewDraft();
+    draftEnabled = true;
     reviewView = 'groups';
     locatedCandidateID = '';
     savedBatches = [];
@@ -334,6 +342,8 @@
     updateConfirmationAvailability();
     try {
       while (pendingDecisionWrites.size) await Promise.all([...pendingDecisionWrites]);
+      if (draftEnabled && !draftChoicesResolved())
+        throw new Error('Save or reload the current review choices before checking protection.');
       if (failedDecisionIDs.size)
         throw new Error(
           'A category change could not be saved. Retry that change before checking protection; review stays here.'
@@ -903,6 +913,23 @@
     return !departingForProtection && batchLoadState !== 'loading' && batchLoadState !== 'error';
   }
 
+  function draftChoicesResolved() {
+    return (
+      !draftEnabled ||
+      (draftLoadState === 'saved' &&
+        !failedDraftEdit &&
+        reviewDraft?.batch_id === lastBatch?.id &&
+        ['saved', 'empty'].includes(reviewDraft.state) &&
+        pendingDecisionWrites.size === 0 &&
+        (reviewView !== 'groups' ||
+          (groupsLoadState === 'loaded' && groupReview?.revision === reviewDraft.group_revision)))
+    );
+  }
+
+  function reviewEditsAvailable() {
+    return batchActionsAvailable() && !busy && draftChoicesResolved();
+  }
+
   function updateConfirmationAvailability() {
     const control = document.getElementById('fileJanitorConfirmApply');
     if (!control || !pendingPreview) return;
@@ -916,10 +943,11 @@
   }
 
   function categoryPicker(candidate) {
+    const editBinding = reviewEditBinding();
     const select = document.createElement('select');
     select.className = 'fj-category';
     select.id = 'fileJanitorCategory-' + candidateDOMToken(candidate.id);
-    select.disabled = !batchActionsAvailable();
+    select.disabled = !reviewEditsAvailable();
     select.setAttribute('aria-label', 'Category for ' + displayName(candidate));
     const chosen = candidate.decision_category || candidate.category || '';
     const options = categories.length
@@ -935,9 +963,18 @@
     // A category change is a decision, so it is recorded immediately rather
     // than held in the page: a reload must not lose the user's work (FR-74).
     select.addEventListener('change', () => {
-      void submitDecisions([
-        { candidate_id: candidate.id, decision: 'move', category: select.value }
-      ]);
+      if (draftEnabled) {
+        void submitReviewEdit(
+          'set_category',
+          { candidate_ids: [candidate.id], category: select.value },
+          null,
+          editBinding
+        );
+      } else {
+        void submitDecisions([
+          { candidate_id: candidate.id, decision: 'move', category: select.value }
+        ]);
+      }
     });
     return select;
   }
@@ -1008,6 +1045,7 @@
   }
 
   function candidateRow(candidate) {
+    const editBinding = reviewEditBinding();
     const token = candidateDOMToken(candidate.id);
     const row = el(
       'tr',
@@ -1036,7 +1074,7 @@
     checkbox.setAttribute('aria-label', 'Select ' + displayName(candidate));
     checkbox.disabled = candidate.state !== 'pending' && candidate.state !== 'approved';
     checkbox.disabled =
-      checkbox.disabled || trashMarked.has(candidate.id) || !batchActionsAvailable();
+      checkbox.disabled || trashMarked.has(candidate.id) || !reviewEditsAvailable();
     // A row Ori could not place confidently cannot be filed until the user
     // says where it goes. Leaving it selectable meant "Needs review" was
     // decoration: the row rode along in a bulk approval and was filed using
@@ -1049,6 +1087,17 @@
       );
     }
     checkbox.addEventListener('change', () => {
+      if (draftEnabled) {
+        const selecting = checkbox.checked;
+        checkbox.checked = selected.has(candidate.id);
+        void submitReviewEdit(
+          selecting ? 'select_files' : 'exclude_files',
+          { candidate_ids: [candidate.id] },
+          null,
+          editBinding
+        );
+        return;
+      }
       if (checkbox.checked) selected.add(candidate.id);
       else selected.delete(candidate.id);
       updateSelectionSummary();
@@ -1121,6 +1170,15 @@
         marked ? 'Trash ✓' : 'Trash',
         'fj-btn fj-btn-quiet' + (marked ? ' fj-btn-destructive' : ''),
         () => {
+          if (draftEnabled) {
+            void submitReviewEdit(
+              trashMarked.has(candidate.id) ? 'unmark_trash' : 'mark_trash',
+              { candidate_ids: [candidate.id] },
+              null,
+              editBinding
+            );
+            return;
+          }
           if (trashMarked.has(candidate.id)) trashMarked.delete(candidate.id);
           else {
             trashMarked.add(candidate.id);
@@ -1132,7 +1190,7 @@
         }
       );
       trashToggle.id = 'fileJanitorTrash-' + token;
-      trashToggle.disabled = !batchActionsAvailable();
+      trashToggle.disabled = !reviewEditsAvailable();
       trashToggle.setAttribute('aria-pressed', marked ? 'true' : 'false');
       trashToggle.setAttribute(
         'aria-label',
@@ -1143,7 +1201,7 @@
         void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
       });
       skip.id = 'fileJanitorSkip-' + token;
-      skip.disabled = !batchActionsAvailable();
+      skip.disabled = !reviewEditsAvailable();
       actionCell.appendChild(skip);
     } else if (candidate.state === 'skipped') {
       actionCell.appendChild(el('span', 'fj-muted', 'Dismissed'));
@@ -1163,7 +1221,11 @@
   // ruled on. Skipping or marking for Trash also resolves it; those are handled
   // by the state and trash checks beside this one.
   function unresolvedNeedsReview(candidate) {
-    return Boolean(candidate && candidate.needs_review && !candidate.decision_category);
+    return Boolean(
+      candidate &&
+      candidate.needs_review &&
+      (!candidate.decision_category || candidate.decision_from_group)
+    );
   }
 
   // dropIneligibleSelections removes IDs that can no longer be acted on.
@@ -1176,6 +1238,7 @@
   // THIS PAGE can be judged; ones on other pages are left alone and revalidated
   // by the server at approval time (FR-82).
   function dropIneligibleSelections() {
+    if (draftEnabled) return; // canonical draft reconciliation owns every page
     lastCandidates.forEach(candidate => {
       const eligible = candidate.state === 'pending' || candidate.state === 'approved';
       if (!eligible || unresolvedNeedsReview(candidate)) selected.delete(candidate.id);
@@ -1281,6 +1344,363 @@
     void loadBatch();
   }
 
+  function resetReviewDraft() {
+    draftRequest++;
+    reviewDraft = null;
+    draftLoadState = 'idle';
+    failedDraftEdit = null;
+    draftWriteChain = Promise.resolve();
+  }
+
+  function applyReviewDraft(view) {
+    if (
+      view?.batch_id !== lastBatch?.id ||
+      typeof view.revision !== 'string' ||
+      view.revision.length !== 64 ||
+      typeof view.group_revision !== 'string' ||
+      view.group_revision.length !== 64 ||
+      !Array.isArray(view.choices) ||
+      view.choices.length > 1000 ||
+      !Array.isArray(view.groups) ||
+      view.groups.length > 13 ||
+      !['empty', 'saved', 'invalid', 'stale'].includes(view.state)
+    )
+      throw new Error('Saved review choices are unavailable.');
+    if (['invalid', 'stale'].includes(view.state) && view.choices.length)
+      throw new Error('Invalid saved choices cannot be restored.');
+    for (const group of view.groups) {
+      if (
+        typeof group.id !== 'string' ||
+        ['eligible', 'selected', 'trash', 'group_marked'].some(
+          key => !Number.isSafeInteger(group[key]) || group[key] < 0
+        )
+      )
+        throw new Error('Saved group counts could not be validated.');
+    }
+    const ids = new Set();
+    for (const choice of view.choices) {
+      if (
+        typeof choice.candidate_id !== 'string' ||
+        !choice.candidate_id ||
+        (choice.operation === 'move' &&
+          (typeof choice.category !== 'string' || !choice.category)) ||
+        ids.has(choice.candidate_id) ||
+        !['move', 'trash'].includes(choice.operation)
+      )
+        throw new Error('Saved choices could not be validated.');
+      ids.add(choice.candidate_id);
+    }
+    if (reviewDraft && reviewDraft.revision !== view.revision) discardProtectionApproval();
+    reviewDraft = view;
+    selected = new Set(
+      view.choices.filter(choice => choice.operation === 'move').map(choice => choice.candidate_id)
+    );
+    trashMarked = new Set(
+      view.choices.filter(choice => choice.operation === 'trash').map(choice => choice.candidate_id)
+    );
+    draftLoadState = 'saved';
+  }
+
+  async function loadReviewDraft() {
+    if (!draftEnabled || draftLoadState === 'saving' || failedDraftEdit) return;
+    const scope = requestScope();
+    const batchID = lastBatch?.id;
+    if (!scope.id || !batchID) return;
+    const sequence = ++draftRequest;
+    const current = () =>
+      scopeCurrent(scope) && sequence === draftRequest && lastBatch?.id === batchID;
+    draftLoadState = 'loading';
+    try {
+      const response = await fetch(
+        apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID) + '/draft'
+      );
+      const body = await response.json();
+      if (!current()) return;
+      if (!response.ok) throw new Error('Saved choices unavailable');
+      applyReviewDraft(body.draft);
+    } catch (_) {
+      if (!current()) return;
+      draftLoadState = 'error';
+      selected.clear();
+      trashMarked.clear();
+      discardProtectionApproval();
+    }
+    if (current()) renderBatch();
+  }
+
+  function reviewEditBinding() {
+    return {
+      scope: requestScope(),
+      batchID: lastBatch?.id,
+      revision: reviewDraft?.revision,
+      groupRevision: reviewDraft?.group_revision
+    };
+  }
+
+  function reviewEditCallback(action, fields = {}) {
+    const binding = reviewEditBinding();
+    return () => void submitReviewEdit(action, fields, null, binding);
+  }
+
+  function submitReviewEdit(action, fields = {}, retry = null, displayed = null) {
+    // Every rendered mutation control carries the displayed exact snapshot.
+    // Detached controls must not select a similarly named group in a new batch.
+    if (
+      !displayed ||
+      !scopeCurrent(displayed.scope) ||
+      displayed.batchID !== lastBatch?.id ||
+      displayed.revision !== reviewDraft?.revision ||
+      displayed.groupRevision !== reviewDraft?.group_revision
+    )
+      return Promise.resolve(false);
+    const scope = requestScope();
+    const batchID = lastBatch?.id;
+    const clearingInvalid =
+      action === 'clear_all' &&
+      draftLoadState === 'saved' &&
+      ['invalid', 'stale'].includes(reviewDraft?.state);
+    if (!draftEnabled || !batchID || (!retry && !clearingInvalid && !reviewEditsAvailable()))
+      return Promise.resolve(false);
+    const request = retry || {
+      action,
+      ...fields,
+      expected_revision: displayed.revision,
+      expected_group_revision: displayed.groupRevision
+    };
+    const sequence = ++draftRequest;
+    const focusID = String(document.activeElement?.id || '');
+    discardProtectionApproval();
+    draftLoadState = 'saving';
+    failedDraftEdit = null;
+    const write = draftWriteChain.then(async () => {
+      if (!scopeCurrent(scope) || lastBatch?.id !== batchID) return false;
+      try {
+        const response = await fetch(
+          apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID) + '/draft',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request)
+          }
+        );
+        const body = await response.json().catch(() => ({}));
+        if (!scopeCurrent(scope) || lastBatch?.id !== batchID || sequence !== draftRequest)
+          return false;
+        if (!response.ok) {
+          const error = new Error(
+            body.error?.message || body.message || 'The edit is not confirmed saved.'
+          );
+          error.conflict = response.status === 409;
+          throw error;
+        }
+        applyReviewDraft(body.draft);
+        showError('');
+        await loadBatch();
+        return true;
+      } catch (error) {
+        if (!scopeCurrent(scope) || lastBatch?.id !== batchID || sequence !== draftRequest)
+          return false;
+        draftLoadState = error.conflict ? 'conflict' : 'error';
+        failedDraftEdit = { request, batchID, binding: displayed, message: error.message };
+        renderBatch();
+        return false;
+      }
+    });
+    draftWriteChain = write.catch(() => false);
+    pendingDecisionWrites.add(write);
+    const finished = () => {
+      pendingDecisionWrites.delete(write);
+      if (scopeCurrent(scope)) {
+        renderBatch();
+        const target =
+          document.getElementById(focusID) ||
+          (request.group_id &&
+            document.getElementById('fileJanitorGroup-select-' + request.group_id));
+        if (target && !target.disabled) target.focus?.();
+        else document.getElementById('fileJanitorDraftStatus')?.querySelector('button')?.focus?.();
+      }
+    };
+    void write.then(finished, finished);
+    renderBatch();
+    return write;
+  }
+
+  function reloadSavedChoices() {
+    showError('');
+    failedDraftEdit = null;
+    draftLoadState = 'idle';
+    discardProtectionApproval();
+    void loadBatch();
+  }
+
+  function draftSaveStatus() {
+    const node = el('div', 'fj-draft-status');
+    node.id = 'fileJanitorDraftStatus';
+    const problem = ['error', 'conflict'].includes(draftLoadState);
+    node.setAttribute('role', problem ? 'alert' : 'status');
+    node.setAttribute('aria-live', 'polite');
+    let message =
+      draftLoadState === 'saving'
+        ? 'Saving exact choices…'
+        : draftLoadState === 'saved'
+          ? 'Exact choices saved. Approval is still required.'
+          : 'Loading saved choices…';
+    if (problem)
+      message = failedDraftEdit
+        ? (draftLoadState === 'conflict'
+            ? 'Review changed. Reload saved choices before continuing. '
+            : 'This edit is not confirmed saved. ') + failedDraftEdit.message
+        : 'Saved choices are unavailable. Preview is disabled until they can be reloaded.';
+    if (draftLoadState === 'saved' && ['invalid', 'stale'].includes(reviewDraft?.state)) {
+      message =
+        'Old saved choices are invalid for this review. Clear them explicitly before choosing again.';
+      node.appendChild(button('Clear invalid choices', 'fj-btn', reviewEditCallback('clear_all')));
+    } else if (draftLoadState === 'saved' && reviewDraft?.removed_stale) {
+      message =
+        formatCount(reviewDraft.removed_stale) +
+        ' saved choices are no longer eligible and were removed. Remaining exact choices are saved.';
+    }
+    node.appendChild(el('p', 'fj-sub', message));
+    if (problem) {
+      if (failedDraftEdit && draftLoadState !== 'conflict') {
+        const failed = failedDraftEdit;
+        node.appendChild(
+          button(
+            'Retry exact edit',
+            'fj-btn',
+            () => void submitReviewEdit(failed.request.action, {}, failed.request, failed.binding)
+          )
+        );
+      }
+      node.appendChild(button('Reload saved choices', 'fj-btn', reloadSavedChoices));
+    }
+    return node;
+  }
+
+  function groupSelectionControls(group) {
+    const editBinding = reviewEditBinding();
+    const wrap = el('div', 'fj-group-choices');
+    const state = reviewDraft?.groups?.find(item => item.id === group.id);
+    if (!draftEnabled || !state) return wrap;
+    const label = el('label', 'fj-group-select');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'fileJanitorGroup-select-' + group.id;
+    checkbox.checked = state.eligible > 0 && state.selected === state.eligible;
+    checkbox.indeterminate = state.selected > 0 && state.selected < state.eligible;
+    checkbox.setAttribute('aria-label', 'Select filing proposals in ' + group.label);
+    checkbox.setAttribute(
+      'aria-checked',
+      checkbox.indeterminate ? 'mixed' : checkbox.checked ? 'true' : 'false'
+    );
+    checkbox.disabled = !reviewEditsAvailable() || !state.eligible;
+    checkbox.addEventListener('change', () => {
+      void submitReviewEdit(
+        checkbox.checked ? 'select_group' : 'deselect_group',
+        { group_id: group.id },
+        null,
+        editBinding
+      );
+    });
+    label.appendChild(checkbox);
+    label.appendChild(el('span', '', 'Select group'));
+    wrap.appendChild(label);
+    wrap.appendChild(
+      el(
+        'p',
+        'fj-sub',
+        state.selected +
+          ' of ' +
+          state.eligible +
+          ' filing proposals selected' +
+          (state.trash ? ' · ' + state.trash + ' explicitly marked for Trash separately' : '')
+      )
+    );
+    if (state.mixed_destinations)
+      wrap.appendChild(el('p', 'fj-sub', 'Mixed saved destinations; per-file exceptions stay.'));
+    if (!state.group_marked) return wrap;
+    const destination = document.createElement('select');
+    destination.id = 'fileJanitorGroup-category-' + group.id;
+    destination.className = 'fj-category';
+    destination.setAttribute(
+      'aria-label',
+      'Destination for selected group files in ' + group.label
+    );
+    destination.disabled = !reviewEditsAvailable() || !state.group_marked;
+    if (state.mixed_destinations) {
+      const mixed = document.createElement('option');
+      mixed.value = '';
+      mixed.textContent = 'Mixed saved destinations';
+      mixed.selected = true;
+      mixed.disabled = true;
+      destination.appendChild(mixed);
+    }
+    for (const category of categories) {
+      const option = document.createElement('option');
+      option.value = category.id;
+      option.textContent = category.label || category.id;
+      option.selected =
+        !state.mixed_destinations && category.id === (state.category || group.category);
+      destination.appendChild(option);
+    }
+    destination.addEventListener(
+      'change',
+      () =>
+        void submitReviewEdit(
+          'set_category',
+          { group_id: group.id, category: destination.value },
+          null,
+          editBinding
+        )
+    );
+    wrap.appendChild(destination);
+    wrap.appendChild(
+      el('p', 'fj-sub', 'Changes selected group-added files only; per-file exceptions stay.')
+    );
+    const undo = button(
+      'Undo group mark',
+      'fj-btn',
+      reviewEditCallback('clear_group', { group_id: group.id })
+    );
+    undo.id = 'fileJanitorGroup-undo-' + group.id;
+    undo.disabled = !reviewEditsAvailable() || !state.group_marked;
+    undo.setAttribute(
+      'aria-label',
+      'Undo group mark for ' + group.label + ', keeping per-file choices'
+    );
+    wrap.appendChild(undo);
+    return wrap;
+  }
+
+  function reviewPlanSidebar() {
+    const plan = el('aside', 'fj-review-plan');
+    plan.setAttribute('aria-label', 'Saved review plan');
+    plan.appendChild(el('h3', 'fj-group-title', 'Your selected changes'));
+    plan.appendChild(el('p', 'fj-group-count', selected.size + ' moves'));
+    plan.appendChild(el('p', 'fj-sub', trashMarked.size + ' explicitly marked for Trash'));
+    const destinations = new Map();
+    for (const choice of reviewDraft?.choices || []) {
+      if (choice.operation === 'move')
+        destinations.set(choice.category, (destinations.get(choice.category) || 0) + 1);
+    }
+    const list = el('ul', 'fj-group-samples');
+    for (const [category, count] of destinations) {
+      const definition = categories.find(item => item.id === category);
+      const label = definition?.folder_name
+        ? 'Filed/' + definition.folder_name
+        : definition?.label || category;
+      list.appendChild(el('li', '', count + ' → ' + label));
+    }
+    plan.appendChild(list);
+    plan.appendChild(
+      el('p', 'fj-sub', 'Saved choices are not approval. A fresh exact preview is still required.')
+    );
+    const clear = button('Clear selected changes', 'fj-btn', reviewEditCallback('clear_all'));
+    clear.disabled = !reviewEditsAvailable() || selected.size + trashMarked.size === 0;
+    plan.appendChild(clear);
+    return plan;
+  }
+
   function resetGroupReview() {
     groupsRequest++;
     groupMemberRequest++;
@@ -1320,7 +1740,7 @@
       groupReview = review;
       groupsLoadState = 'loaded';
       if (activeGroupID && review.groups.some(group => group.id === activeGroupID)) {
-        await loadGroupMembers(activeGroupID, groupOffset);
+        await loadGroupMembers(activeGroupID, groupOffset, false);
       } else {
         activeGroupID = '';
         groupMembers = [];
@@ -1335,7 +1755,8 @@
     if (current()) renderBatch();
   }
 
-  async function loadGroupMembers(groupID, offset = 0) {
+  async function loadGroupMembers(groupID, offset = 0, focus = true) {
+    const focusID = document.activeElement?.id;
     const scope = requestScope();
     const batchID = lastBatch?.id;
     const revision = groupReview?.revision;
@@ -1387,9 +1808,13 @@
     }
     if (current()) {
       renderBatch();
-      const panel = document.getElementById('fileJanitorGroup-details');
-      panel?.focus?.({ preventScroll: true });
-      panel?.scrollIntoView?.({ block: 'start' });
+      if (focus) {
+        const panel = document.getElementById('fileJanitorGroup-details');
+        panel?.focus?.({ preventScroll: true });
+        panel?.scrollIntoView?.({ block: 'start' });
+      } else {
+        document.getElementById(focusID)?.focus?.({ preventScroll: true });
+      }
     }
   }
 
@@ -1422,7 +1847,11 @@
     const select = document.createElement('select');
     select.id = 'fileJanitorBatchChoice';
     select.className = 'fj-input';
-    select.disabled = !batchActionsAvailable() || Boolean(pendingPreview);
+    select.disabled =
+      !batchActionsAvailable() ||
+      Boolean(pendingPreview) ||
+      pendingDecisionWrites.size > 0 ||
+      Boolean(failedDraftEdit);
     const choices = savedBatches.some(batch => batch.id === lastBatch.id)
       ? savedBatches
       : [lastBatch, ...savedBatches];
@@ -1552,6 +1981,23 @@
         'These are saved proposals, not a folder inventory. Grouping uses names and saved metadata; file details show the actual classification provenance.'
       )
     );
+    if (draftEnabled) {
+      const selectAll = button(
+        'Select all filing groups',
+        'fj-btn fj-btn-secondary',
+        reviewEditCallback('select_filing_groups')
+      );
+      selectAll.disabled = !reviewEditsAvailable() || counts.filing === 0;
+      section.appendChild(selectAll);
+      section.appendChild(
+        el(
+          'p',
+          'fj-sub',
+          'Only the exact filing proposals in this batch. Questions, unresolved files and Trash marks are excluded.'
+        )
+      );
+    }
+    const layout = el('div', 'fj-group-plan-layout');
     const grid = el('div', 'fj-group-grid');
     for (const group of groupReview.groups) {
       const card = el(
@@ -1564,7 +2010,9 @@
       );
       card.appendChild(el('h3', 'fj-group-title', group.label));
       card.appendChild(el('p', 'fj-group-count', formatCount(group.count) + ' files'));
-      if (group.destination) card.appendChild(el('p', 'fj-destination', group.destination));
+      if (group.kind === 'filing') card.appendChild(groupSelectionControls(group));
+      if (group.destination)
+        card.appendChild(el('p', 'fj-destination', 'Proposed: ' + group.destination));
       card.appendChild(el('p', 'fj-group-reason', group.reason));
       const samples = el('ul', 'fj-group-samples');
       for (const name of (group.samples || []).slice(0, 3))
@@ -1586,7 +2034,9 @@
       card.appendChild(details);
       grid.appendChild(card);
     }
-    section.appendChild(grid);
+    layout.appendChild(grid);
+    if (draftEnabled) layout.appendChild(reviewPlanSidebar());
+    section.appendChild(layout);
     if (!groupReview.groups.length)
       section.appendChild(
         el(
@@ -1643,7 +2093,8 @@
             'fj-btn',
             () => void loadGroupMembers(activeGroupID, offset)
           );
-          control.disabled = disabled;
+          control.disabled =
+            disabled || batchLoadState !== 'loaded' || groupsLoadState !== 'loaded';
           nav.appendChild(control);
         }
         panel.appendChild(nav);
@@ -1704,10 +2155,7 @@
     const protectionControl = document.getElementById('fileJanitorCheckProtection');
     if (protectionControl)
       protectionControl.disabled =
-        Boolean(protectionReturnRetry) ||
-        departingForProtection ||
-        busy ||
-        !batchActionsAvailable();
+        Boolean(protectionReturnRetry) || departingForProtection || busy || !reviewEditsAvailable();
     const node = document.getElementById('fileJanitorSelection');
     if (node) {
       const count = selected.size;
@@ -1732,7 +2180,7 @@
       if (trashes) parts.push(trashes + ' to Trash');
       approve.textContent =
         parts.length === 0 ? 'Review selected changes' : 'Review ' + parts.join(' and ');
-      approve.disabled = moves + trashes === 0 || !batchActionsAvailable();
+      approve.disabled = moves + trashes === 0 || !reviewEditsAvailable();
       approve.setAttribute('aria-disabled', approve.disabled ? 'true' : 'false');
       // Point the disabled control at the line that says why ("No files
       // selected."), so the reason is available to a screen reader reading the
@@ -1886,6 +2334,7 @@
     selection.setAttribute('role', 'status');
     selection.setAttribute('aria-live', 'polite');
     footer.appendChild(selection);
+    if (draftEnabled) footer.appendChild(draftSaveStatus());
 
     const approve = button(
       'Review selected changes',
@@ -3080,7 +3529,7 @@
     if (
       !id ||
       !lastBatch ||
-      !batchActionsAvailable() ||
+      !reviewEditsAvailable() ||
       busy ||
       departingForProtection ||
       selected.size + trashMarked.size === 0
@@ -3095,33 +3544,47 @@
     const control = document.getElementById('fileJanitorApprove');
     if (control) control.disabled = true;
     try {
-      const decisions = Array.from(selected).map(candidateId => {
-        const candidate =
-          lastCandidates.find(item => item.id === candidateId) ||
-          protectionCandidates.get(candidateId) ||
-          {};
-        // For a flagged row the user's own choice is the ONLY acceptable
-        // category. Falling back to candidate.category here would file it
-        // using the guess that was flagged as not trustworthy — the exact
-        // outcome the flag exists to prevent. Sending an empty category makes
-        // the server refuse it rather than this silently deciding.
-        const category = unresolvedNeedsReview(candidate)
-          ? ''
-          : candidate.decision_category || candidate.category || '';
-        return { candidate_id: candidateId, operation: 'move', category };
-      });
-      trashMarked.forEach(candidateId => {
-        decisions.push({ candidate_id: candidateId, operation: 'trash', category: '' });
-      });
+      const decisions = draftEnabled
+        ? reviewDraft.choices.map(choice => ({
+            candidate_id: choice.candidate_id,
+            operation: choice.operation,
+            category: choice.category || ''
+          }))
+        : Array.from(selected).map(candidateId => {
+            const candidate =
+              lastCandidates.find(item => item.id === candidateId) ||
+              protectionCandidates.get(candidateId) ||
+              {};
+            // For a flagged row the user's own choice is the ONLY acceptable
+            // category. Falling back to candidate.category here would file it
+            // using the guess that was flagged as not trustworthy — the exact
+            // outcome the flag exists to prevent. Sending an empty category makes
+            // the server refuse it rather than this silently deciding.
+            const category = unresolvedNeedsReview(candidate)
+              ? ''
+              : candidate.decision_category || candidate.category || '';
+            return { candidate_id: candidateId, operation: 'move', category };
+          });
+      if (!draftEnabled)
+        trashMarked.forEach(candidateId => {
+          decisions.push({ candidate_id: candidateId, operation: 'trash', category: '' });
+        });
       const response = await fetch(apiBase(id) + '/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decisions })
+        body: JSON.stringify({
+          decisions,
+          ...(draftEnabled ? { review_revision: reviewDraft.revision } : {})
+        })
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
-        throw new Error((apiError && apiError.message) || 'Ori could not prepare these moves.');
+        const error = new Error(
+          (apiError && apiError.message) || 'Ori could not prepare these moves.'
+        );
+        error.conflict = draftEnabled && response.status === 409;
+        throw error;
       }
       if (!scopeCurrent(scope) || lastBatch?.id !== batchId || approvalEpoch !== approvalGeneration)
         return;
@@ -3135,8 +3598,14 @@
       busy = false;
       renderConfirmation(pendingPreview);
     } catch (error) {
-      if (scopeCurrent(scope) && lastBatch?.id === batchId)
+      if (scopeCurrent(scope) && lastBatch?.id === batchId) {
         showError(error.message || 'Ori could not prepare these moves.');
+        if (error.conflict) {
+          draftLoadState = 'conflict';
+          discardProtectionApproval();
+          renderBatch();
+        }
+      }
     } finally {
       if (scopeCurrent(scope)) {
         busy = false;
@@ -3859,6 +4328,7 @@
 
   function close(options = {}) {
     if (!consoleOpen) return false;
+    discardProtectionApproval();
     consoleOpen = false;
     settingsOpen = false;
     consoleCloseButton = null;
@@ -4197,6 +4667,13 @@
     const before = url.search;
     if (consoleOpen) {
       url.searchParams.set('panel', CONSOLE_PANEL_PARAM);
+      if (
+        draftEnabled &&
+        consoleTab === 'review' &&
+        lastBatch?.id &&
+        linkedBatchID === lastBatch.id
+      )
+        url.searchParams.set('batch_id', lastBatch.id);
       if (consoleTab && consoleTab !== 'review') {
         url.searchParams.set('tab', consoleTab);
       } else {
@@ -4232,6 +4709,16 @@
     }
     const tab = validTab(params.get('tab'));
     const item = String(params.get('item') || '');
+    const requestedBatch = params.get('batch_id') || '';
+    const batch = /^[A-Za-z0-9_-]{1,128}$/.test(requestedBatch) ? requestedBatch : '';
+    if (draftEnabled && batch !== linkedBatchID) {
+      linkedBatchID = batch;
+      resetGroupReview();
+      resetReviewDraft();
+      selected.clear();
+      trashMarked.clear();
+      if (consoleOpen) void loadBatch();
+    }
     if (consoleOpen) {
       // The URL is authoritative here, and an absent `tab` means Review — that
       // is exactly how Review is encoded (it is the default, so it is omitted).
@@ -4834,6 +5321,10 @@
     const scope = requestScope();
     const id = scope.id;
     if (!id || busy || disposed) return;
+    const pinnedReview =
+      draftEnabled && lastBatch?.id && (consoleOpen || selected.size + trashMarked.size > 0)
+        ? lastBatch.id
+        : '';
     busy = true;
     scanning = true;
     scanFailed = false;
@@ -4857,10 +5348,15 @@
         throw new Error((apiError && apiError.message) || 'The scan could not run.');
       }
       if (!scopeCurrent(scope)) return;
-      linkedBatchID = '';
+      linkedBatchID = pinnedReview;
       setPreparationRoute('');
       await loadBatch();
       if (!scopeCurrent(scope)) return;
+      if (result.created && pinnedReview && result.batch?.id !== pinnedReview) {
+        reviewStatusMessage =
+          'A newer saved review is available in Saved review batch. Your current review and choices stayed here.';
+        renderBatch();
+      }
       if (!result.created) {
         if (!lastBatch) {
           emptyReviewState = 'scan_empty';
@@ -4879,6 +5375,7 @@
       if (scopeCurrent(scope)) {
         busy = false;
         scanning = false;
+        renderBatch();
         updateSelectionSummary();
         notifySubscribers();
         refreshActivity();
@@ -5077,6 +5574,7 @@
     // A different batch invalidates every decision made against the old one.
     if ((lastBatch && lastBatch.id) !== previousBatchID) {
       resetGroupReview();
+      resetReviewDraft();
       selected = new Set();
       trashMarked = new Set();
       expandedCandidates = new Set();
@@ -5107,13 +5605,14 @@
       // Resolve latest only once. A later scan is discoverable in the saved
       // batch picker, never an implicit replacement of the review in progress.
       if (!linkedBatchID) linkedBatchID = lastBatch.id;
-      await Promise.all([loadReviewGroups(), loadSavedBatches()]);
+      await Promise.all([loadReviewGroups(), loadSavedBatches(), loadReviewDraft()]);
       if (!current()) return;
     } else {
       resetGroupReview();
     }
     renderBatch();
     if (consoleOpen && consoleItem) focusRequestedItem();
+    if (draftEnabled && consoleOpen) syncUrl({ replace: true });
     refreshStats();
     // Status arrives before the paged batch on a cold workspace load. Once the
     // queue count is known, promote Watching to Review ready on the compact
@@ -5665,6 +6164,8 @@
       // Existing fixture callers exercise the detailed All files path. New
       // group tests explicitly select Groups, matching the production default.
       reviewView = 'all';
+      resetReviewDraft();
+      draftEnabled = false; // detailed legacy fixture; production always uses drafts
       lastCandidates = candidates || [];
       batchLoadState = 'loaded';
       batchLoaded = true;
@@ -5762,6 +6263,8 @@
       lastBatch = null;
       lastCandidates = [];
       resetGroupReview();
+      resetReviewDraft();
+      draftEnabled = true;
       reviewView = 'groups';
       locatedCandidateID = '';
       savedBatches = [];

@@ -83,10 +83,13 @@ func (s *Service) ReadReviewGroups(ctx context.Context, owner, workspaceID, batc
 // IDs, or the owner's identity in the response. ManagedRoot's JSON tags are all
 // private, so explicitly encode its values rather than hashing an empty object.
 func reviewScopeDigest(root ManagedRoot, install workspace.InstalledCapability) string {
-	data, _ := json.Marshal([]any{
+	data, err := json.Marshal([]any{
 		root.WorkspaceID, root.Owner, root.Generation, root.DirectoryReferenceID,
-		root.Path, root.BindingID, install.ID, install.Version, install.InstalledAt,
+		root.Path, root.BindingID, install.ID, install.Version, install.InstalledAt.UTC(),
 	})
+	if err != nil {
+		return "" // GroupReview rejects empty scope; never hash invalid identity as a common scope
+	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }

@@ -3794,6 +3794,17 @@ test('a flagged row cannot be selected until the user chooses a category', () =>
   assert.equal(confidentRow.all(n => n.className === 'fj-select')[0].disabled, false);
 });
 
+test('a prior group destination does not count as an individual answer to Needs review', () => {
+  const doc = setup();
+  const candidates = [
+    { ...candidatesFixture()[1], decision_category: 'documents', decision_from_group: true }
+  ];
+  renderReview(doc, batchFixture(), candidates);
+  const box = surface(doc).all(node => node.className === 'fj-select')[0];
+  assert.equal(box.disabled, true);
+  assert.match(box.getAttribute('title'), /Choose a category/);
+});
+
 test('choosing a category makes a flagged row selectable and keeps focus', async () => {
   const doc = setup();
   renderReview(doc);
@@ -4752,11 +4763,143 @@ async function groupedReviewFixture(count = 206) {
       }
     ]
   };
-  const state = { review, failGroups: false, batch, batches: [batch] };
+  const state = {
+    review,
+    failGroups: false,
+    batch,
+    batches: [batch],
+    generation: 0,
+    choices: [],
+    failNextEdit: false,
+    editGate: null
+  };
+  const draftView = () => {
+    const choices = state.choices.map(choice => ({
+      ...choice,
+      group_id: 'group-images',
+      category:
+        choice.operation === 'move'
+          ? candidates.find(candidate => candidate.id === choice.candidate_id)?.decision_category ||
+            'images'
+          : ''
+    }));
+    const categories = new Set(
+      candidates.map(candidate => candidate.decision_category || candidate.category)
+    );
+    return {
+      batch_id: state.batch.id,
+      revision: state.generation.toString(16).padStart(64, '0'),
+      group_revision: state.review.revision,
+      state: state.generation ? 'saved' : 'empty',
+      removed_stale: 0,
+      choices,
+      groups: state.review.groups.map(group => ({
+        id: group.id,
+        eligible: count - choices.filter(choice => choice.operation === 'trash').length,
+        selected: choices.filter(choice => choice.operation === 'move').length,
+        group_marked: choices.filter(choice => choice.source_group_id === group.id).length,
+        trash: choices.filter(choice => choice.operation === 'trash').length,
+        category: categories.size === 1 ? [...categories][0] : '',
+        mixed_destinations: categories.size > 1
+      }))
+    };
+  };
   globalThis.fetch = async (url, options) => {
     const target = String(url);
     calls.push({ target, options });
     const reply = body => ({ ok: true, json: async () => body });
+    if (target.endsWith('/draft')) {
+      if (options?.method !== 'POST') return reply({ draft: draftView() });
+      if (state.editGate) await state.editGate;
+      if (state.failNextEdit) {
+        state.failNextEdit = false;
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ message: 'Synthetic save failure' })
+        };
+      }
+      const request = JSON.parse(options.body);
+      if (
+        request.expected_revision !== draftView().revision ||
+        request.expected_group_revision !== state.review.revision
+      )
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ message: 'Synthetic concurrent edit conflict' })
+        };
+      const chosen = new Map(state.choices.map(choice => [choice.candidate_id, choice]));
+      switch (request.action) {
+        case 'select_group':
+        case 'select_filing_groups':
+          for (const candidate of candidates)
+            if (!chosen.has(candidate.id))
+              chosen.set(candidate.id, {
+                candidate_id: candidate.id,
+                operation: 'move',
+                source_group_id: 'group-images'
+              });
+          break;
+        case 'select_files':
+          for (const id of request.candidate_ids)
+            chosen.set(id, { candidate_id: id, operation: 'move', source_group_id: '' });
+          break;
+        case 'exclude_files':
+        case 'unmark_trash':
+          for (const id of request.candidate_ids) chosen.delete(id);
+          break;
+        case 'deselect_group':
+          for (const [id, choice] of chosen) if (choice.operation === 'move') chosen.delete(id);
+          break;
+        case 'clear_group':
+          for (const [id, choice] of chosen)
+            if (choice.source_group_id === request.group_id) chosen.delete(id);
+          break;
+        case 'clear_all':
+          chosen.clear();
+          break;
+        case 'mark_trash':
+          chosen.set(request.candidate_ids[0], {
+            candidate_id: request.candidate_ids[0],
+            operation: 'trash'
+          });
+          break;
+        case 'set_category':
+          for (const candidate of candidates) {
+            const choice = chosen.get(candidate.id);
+            if (
+              request.group_id
+                ? choice?.source_group_id === request.group_id
+                : request.candidate_ids.includes(candidate.id)
+            ) {
+              candidate.decision_category = request.category;
+              if (choice && !request.group_id) choice.source_group_id = '';
+            }
+          }
+          break;
+        default:
+          throw new Error('Unexpected mock draft action: ' + request.action);
+      }
+      state.choices = [...chosen.values()];
+      state.generation++;
+      return reply({ draft: draftView() });
+    }
+    if (target.endsWith('/preview'))
+      return reply({
+        preview: {
+          ...PREVIEW,
+          batch_id: batch.id,
+          move_count: state.choices.length,
+          trash_count: 0,
+          items: state.choices.map(choice => ({
+            candidate_id: choice.candidate_id,
+            name: choice.candidate_id,
+            operation: choice.operation,
+            destination: 'Filed/Images/' + choice.candidate_id
+          }))
+        }
+      });
     if (target.endsWith('/groups'))
       return state.failGroups
         ? { ok: false, json: async () => ({}) }
@@ -4786,7 +4929,7 @@ async function groupedReviewFixture(count = 206) {
   panel.render(statusFixture());
   panel.open({ source: 'folder-preparation', tab: 'review' });
   await panel._reloadBatch();
-  return { doc, calls, state, candidates };
+  return { doc, calls, state, candidates, draftView };
 }
 
 test('grouped entry is the default, shows complete bounded counts, and selects nothing', async () => {
@@ -4858,6 +5001,200 @@ test('a resolved concrete batch stays pinned and newer saved batches remain disc
   assert.ok(picker.children.some(option => option.value === 'batch-new'));
   assert.ok(picker.children.some(option => option.value === 'batch-1' && option.selected));
   assert.deepEqual(panel._selected(), []);
+});
+
+function filingGroupCheckbox(doc) {
+  return surface(doc).all(
+    node =>
+      node.tagName === 'INPUT' &&
+      node.getAttribute('aria-label') === 'Select filing proposals in Images'
+  )[0];
+}
+
+function changeCheckbox(node, checked) {
+  node.checked = checked;
+  node.dispatch('change');
+}
+
+test('group selection saves one exact request before enabling preview and preserves an off-page exception', async () => {
+  const { doc, calls, state } = await groupedReviewFixture();
+  let release;
+  state.editGate = new Promise(resolve => {
+    release = resolve;
+  });
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  assert.deepEqual(panel._selected(), [], 'a pending save cannot masquerade as selected');
+  assert.match(surface(doc).textContent, /Saving exact choices/);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  release();
+  await settle();
+  assert.equal(panel._selected().length, 206);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
+  const edits = calls.filter(call => call.options?.method === 'POST');
+  assert.equal(edits.length, 1, 'group selection must not post once per member');
+  const request = JSON.parse(edits[0].options.body);
+  assert.equal(request.action, 'select_group');
+  assert.equal(request.group_id, 'group-images');
+  assert.equal(request.candidate_ids, undefined, 'the server resolves the displayed snapshot');
+  doc.getElementById('fileJanitorGroup-group-images').click();
+  await settle();
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Next group files')[0]
+    .click();
+  await settle();
+  const row = rowsIn(surface(doc)).find(
+    row => row.getAttribute('data-candidate-id') === 'group-member-51'
+  );
+  changeCheckbox(row.all(node => node.className === 'fj-select')[0], false);
+  await settle();
+  assert.equal(panel._selected().length, 205);
+  assert.ok(!panel._selected().includes('group-member-51'));
+  assert.equal(filingGroupCheckbox(doc).indeterminate, true);
+  doc.getElementById('fileJanitorView-all').click();
+  doc.getElementById('fileJanitorView-groups').click();
+  await panel._reloadBatch();
+  assert.equal(panel._selected().length, 205);
+  assert.ok(!panel._selected().includes('group-member-51'));
+});
+
+test('category-only edits select nothing and group Undo preserves a prior per-file choice', async () => {
+  const { doc } = await groupedReviewFixture(3);
+  doc.getElementById('fileJanitorGroup-group-images').click();
+  await settle();
+  let row = rowsIn(surface(doc))[0];
+  const id = row.getAttribute('data-candidate-id');
+  const picker = row.all(node => node.className === 'fj-category')[0];
+  picker.value = 'archives';
+  picker.dispatch('change');
+  await settle();
+  assert.deepEqual(panel._selected(), [], 'changing destination is not selecting');
+  row = rowsIn(surface(doc))[0];
+  changeCheckbox(row.all(node => node.className === 'fj-select')[0], true);
+  await settle();
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  assert.equal(panel._selected().length, 3);
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Undo group mark')[0]
+    .click();
+  await settle();
+  assert.deepEqual(panel._selected(), [id]);
+  assert.equal(filingGroupCheckbox(doc).indeterminate, true);
+  assert.match(surface(doc).textContent, /Mixed saved destinations/);
+});
+
+test('a failed group save is explicitly unsaved, blocks preview and retries the exact request', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.failNextEdit = true;
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  assert.deepEqual(panel._selected(), []);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  assert.match(surface(doc).textContent, /not confirmed saved/);
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry exact edit')[0]
+    .click();
+  await settle();
+  assert.equal(panel._selected().length, 3);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
+});
+
+test('a malformed successful save response cannot invent durably saved choices', async () => {
+  const { doc, draftView } = await groupedReviewFixture(3);
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, options) =>
+    String(url).endsWith('/draft') && options?.method === 'POST'
+      ? Promise.resolve({
+          ok: true,
+          json: async () => ({ draft: { ...draftView(), revision: 'invalid' } })
+        })
+      : original(url, options);
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  assert.deepEqual(panel._selected(), []);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  assert.match(surface(doc).textContent, /not confirmed saved/);
+});
+
+test('a concurrent-tab conflict requires reload and never overwrites the winning exact choices', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.generation++;
+  state.choices = [{ candidate_id: 'group-member-1', operation: 'move', source_group_id: '' }];
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  assert.match(surface(doc).textContent, /Review changed/);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  assert.deepEqual(panel._selected(), []);
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Reload saved choices')[0]
+    .click();
+  await settle();
+  assert.deepEqual(panel._selected(), ['group-member-1']);
+  assert.equal(filingGroupCheckbox(doc).indeterminate, true);
+});
+
+test('a detached group control cannot select the same group name in another batch', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(3);
+  const old = filingGroupCheckbox(doc);
+  state.batch = batchFixture({ id: 'batch-new', summary: { total: 3, proposed: 3 } });
+  state.batches = [state.batch];
+  state.review = { ...state.review, batch_id: 'batch-new', revision: 'b'.repeat(64) };
+  panel._setLinkedBatchForTest('batch-new');
+  await panel._reloadBatch();
+  calls.length = 0;
+  changeCheckbox(old, true);
+  await settle();
+  assert.deepEqual(panel._selected(), []);
+  assert.ok(calls.every(call => call.options?.method !== 'POST'));
+  assert.equal(filingGroupCheckbox(doc).checked, false);
+});
+
+test('late saved-intent reads cannot overwrite a newer canonical return', async () => {
+  const { calls, state, draftView } = await groupedReviewFixture(3);
+  const original = globalThis.fetch;
+  const first = deferredReply();
+  const second = deferredReply();
+  const stale = draftView();
+  let reads = 0;
+  globalThis.fetch = (url, options) =>
+    String(url).endsWith('/draft') && !options?.method
+      ? ++reads === 1
+        ? first.promise
+        : second.promise
+      : original(url, options);
+  const older = panel._reloadBatch();
+  await settle();
+  const newer = panel._reloadBatch();
+  await settle();
+  state.generation++;
+  state.choices = [{ candidate_id: 'group-member-2', operation: 'move', source_group_id: '' }];
+  second.reply({ draft: draftView() });
+  await newer;
+  first.reply({ draft: stale });
+  await older;
+  assert.deepEqual(panel._selected(), ['group-member-2']);
+  assert.ok(calls.every(call => call.options?.method !== 'POST'));
+});
+
+test('close and reopen retain saved choices but never restore confirmation authority', async () => {
+  const { doc, calls } = await groupedReviewFixture(2);
+  changeCheckbox(filingGroupCheckbox(doc), true);
+  await settle();
+  doc.getElementById('fileJanitorApprove').click();
+  await settle();
+  const captured = doc.getElementById('fileJanitorConfirmApply');
+  assert.ok(captured);
+  const preview = calls.find(call => call.target.endsWith('/preview'));
+  assert.equal(JSON.parse(preview.options.body).review_revision.length, 64);
+  panel.close();
+  panel.open({ source: 'folder-preparation', tab: 'review' });
+  assert.equal(doc.getElementById('fileJanitorConfirmApply'), null);
+  assert.equal(panel._selected().length, 2);
+  calls.length = 0;
+  captured.click();
+  await settle();
+  assert.ok(calls.every(call => !call.target.endsWith('/apply')));
 });
 
 async function protectionReview(t, count = 3) {

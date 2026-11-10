@@ -78,7 +78,12 @@ saved candidates were classified without content access.
 - `GET /batches/{batchID}/draft`: current intent revision, scope-bound saved
   explicit choices, and removed/invalid-choice accounting. This is read-only:
   reconciliation is a projection; stale stored entries confer no authority and
-  are removed atomically on the next edit/preview transaction.
+  are removed atomically on the next edit/preview transaction. Returning saved
+  intent revalidates metadata for **selected names only**, using existing root
+  resolution and fingerprints: no enumeration, content opens or classification.
+  This is intentionally distinct from the pure proposal/group reads above.
+  Choice DTOs include a derived current `group_id` for off-page counts; it is
+  not persisted provenance or a rule for future group members.
 
 At most the category registry plus five question/unmatched cards are returned;
 there is no per-family unbounded card list. Member lookup/group construction
@@ -108,8 +113,11 @@ allowlisted fields (`group_id`, `candidate_ids`, `category`). Unknown fields,
 unknown actions, duplicate IDs, foreign members, invalid categories, and stale
 scope/revisions reject the **entire** transaction. No implicit partial selection.
 Actions: select group, select filing groups, select file, exclude file, set
-category, clear group choices, clear all choices, mark/unmark per-file Trash,
-Keep here, and targeted reconsider. There is no group Trash action.
+category, deselect group, clear group-added choices (Undo), clear all choices,
+mark/unmark per-file Trash, Keep here, and targeted reconsider. Deselect group
+removes all exact move choices in that group but leaves separate Trash marks;
+Undo removes only choices with that group's selection provenance. There is no
+group Trash action.
 
 Resolve group members under the canonical `UpdateScanState` lock. Group select
 and select-all use the exact revision displayed, not currently fetched member
@@ -124,7 +132,11 @@ oversized edits with a stable bounds error before writes; never truncate. Pendin
 choices survive pruning. Resolved/orphaned choices prune with their canonical
 batch/candidate; if pending work fills the cap, reject additional choices with a
 clear recovery rather than discarding old pending work. No client-side fetching
-of all pages is needed to select a 206-member group. Preview caps its exact plan
+of all pages is needed to select a 206-member group. Draft reads also return a
+fixed-vocabulary per-group selection/destination projection, including exact
+selected/Trash/group-added counts and mixed canonical destinations. These are
+read projections, not stored group booleans or another destination map.
+Preview caps its exact plan
 at 1,000 operations; above the cap requires an explicit smaller selection.
 
 ## Durable intent and schema
@@ -139,6 +151,12 @@ generation, and exact `choices`. Each choice stores `candidate_id`, fingerprint
 key, `operation` (`move` or explicit `trash`), and `source_group_id` (empty for
 an explicit per-file choice). The candidate's canonical `DecisionCategory`
 remains the single destination truth; the revision binds its current value.
+The candidate's additive `decision_group_id` stores destination-edit provenance
+only (never a second category). This distinguishes a prior per-file override
+from a group destination after deselect/reselect. Legacy schemas clear this new
+provenance on read; a legacy category edit remains a per-file override. Group
+destination controls edit selected group-added choices only, preserving prior
+per-file overrides; unselected member category edits remain per-file actions.
 A draft contains no token, acknowledgement, expiry, reusable approval, path, or
 second authoritative category map.
 
@@ -225,7 +243,9 @@ results, never replayed automatically. Retrying requires fresh explicit review.
   waits for category writes; return pages through every candidate and currently
   requires the batch to still be latest. Replace latest-only matching with the
   pinned concrete batch and canonical draft reconciliation, not replay of a
-  browser selection snapshot.
+  browser selection snapshot. Active concrete batch identity is now encoded in
+  the review URL; scanning announces newer work without replacing an open or
+  selected review. Reload restores that pinned batch, never confirmation.
 - Store locking and atomic rename already serialize canonical scan writes.
   Raw scan schema is currently normalized unconditionally; the draft migration
   must preserve unsupported-schema evidence before any write.

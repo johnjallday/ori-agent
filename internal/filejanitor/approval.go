@@ -71,6 +71,10 @@ type ApprovalRecord struct {
 	// PayloadHash binds the approval to the exact normalized plan the user saw,
 	// including each candidate's fingerprint at preview time.
 	PayloadHash string `json:"payload_hash"`
+	// ReviewRevision and ReviewScope bind grouped review to current exact
+	// saved intent. They are authority only here, never copied into a draft.
+	ReviewRevision string `json:"review_revision,omitempty"`
+	ReviewScope    string `json:"review_scope,omitempty"`
 	// IdempotencyKey identifies the apply this approval authorizes, so a retry
 	// of the same confirm is recognized rather than re-executed.
 	IdempotencyKey string    `json:"idempotency_key"`

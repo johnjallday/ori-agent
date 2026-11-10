@@ -93,6 +93,9 @@ type ApplyResult struct {
 // successes, and the caller gets an ordered outcome per file rather than a
 // single verdict for the batch (FR-88, FR-72).
 func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyResult, error) {
+	if len(req.Items) > MaxReviewChoicesPerBatch {
+		return ApplyResult{}, ErrReviewBounds
+	}
 	workspaceID := strings.TrimSpace(req.WorkspaceID)
 	settings, err := s.requireConfigured(workspaceID)
 	if err != nil {
@@ -105,6 +108,12 @@ func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyRe
 	if s.mover == nil {
 		return ApplyResult{}, fmt.Errorf("%w: no move mechanism is configured", ErrInvalidAction)
 	}
+
+	// Review edits use the same root boundary before their scan-state write.
+	// Acquire it before consuming authority: an edit that won first invalidates
+	// the preview; an apply already admitted completes before a later edit.
+	unlock := lockRoot(root)
+	defer unlock()
 
 	// Rebuild the plan from stored state. The request supplies IDs and
 	// categories; the fingerprints come from what Ori recorded, so a client
@@ -154,9 +163,6 @@ func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyRe
 		}
 		return ApplyResult{}, err
 	}
-
-	unlock := lockRoot(root)
-	defer unlock()
 
 	result := ApplyResult{}
 	for _, item := range plan {

@@ -214,14 +214,15 @@ func primaryReviewGroup(candidate JanitorCandidate, families map[string]versionE
 	if audioReviewCandidate(candidate) {
 		cautions = append(cautions, "audio")
 	}
-	if candidate.NeedsReview || candidate.Category == CategoryOther || candidate.Confidence == ConfidenceLow {
+	definition, categoryErr := LookupCategory(string(candidate.Category))
+	if candidate.NeedsReview || (categoryErr == nil && definition.ID == CategoryOther) || candidate.Confidence == ConfidenceLow {
 		cautions = append(cautions, "unresolved")
 	}
 	if len(cautions) > 0 {
 		return cautions[0], cautions
 	}
-	if ValidCategory(candidate.Category) {
-		return "filing-" + string(candidate.Category), nil
+	if categoryErr == nil {
+		return "filing-" + string(definition.ID), nil
 	}
 	return "unmatched", []string{"unmatched"}
 }
@@ -260,7 +261,7 @@ func versionFamily(name string) (string, bool) {
 }
 
 func audioReviewCandidate(candidate JanitorCandidate) bool {
-	if candidate.Category == CategoryAudio || strings.HasPrefix(strings.ToLower(candidate.MIMEType), "audio/") {
+	if strings.EqualFold(strings.TrimSpace(string(candidate.Category)), string(CategoryAudio)) || strings.HasPrefix(strings.ToLower(candidate.MIMEType), "audio/") {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(candidate.Name)) {
