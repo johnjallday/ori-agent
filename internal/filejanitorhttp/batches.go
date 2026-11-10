@@ -42,26 +42,35 @@ type candidateDTO struct {
 	StateReason string `json:"state_reason,omitempty"`
 	// Decision is the user's recorded choice, distinct from the proposed
 	// Category above.
-	Decision         string `json:"decision,omitempty"`
-	DecisionCategory string `json:"decision_category,omitempty"`
+	Decision          string `json:"decision,omitempty"`
+	DecisionCategory  string `json:"decision_category,omitempty"`
+	DecisionFromGroup bool   `json:"decision_from_group,omitempty"`
+	SkipRemembered    *bool  `json:"skip_remembered,omitempty"`
 }
 
 func toCandidateDTO(candidate filejanitor.JanitorCandidate, filingRootName string) candidateDTO {
 	dto := candidateDTO{
-		ID:               candidate.ID,
-		Name:             candidate.Display(),
-		Extension:        candidate.Extension,
-		MIMEType:         candidate.MIMEType,
-		Size:             candidate.Size,
-		Category:         string(candidate.Category),
-		Reason:           candidate.Reason,
-		Confidence:       string(candidate.Confidence),
-		Classifier:       string(candidate.Classifier),
-		NeedsReview:      candidate.NeedsReview,
-		State:            string(candidate.State),
-		StateReason:      candidate.StateReason,
-		Decision:         string(candidate.Decision),
-		DecisionCategory: string(candidate.DecisionCategory),
+		ID:                candidate.ID,
+		Name:              candidate.Display(),
+		Extension:         candidate.Extension,
+		MIMEType:          candidate.MIMEType,
+		Size:              candidate.Size,
+		Category:          string(candidate.Category),
+		Reason:            candidate.Reason,
+		Confidence:        string(candidate.Confidence),
+		Classifier:        string(candidate.Classifier),
+		NeedsReview:       candidate.NeedsReview,
+		State:             string(candidate.State),
+		StateReason:       candidate.StateReason,
+		Decision:          string(candidate.Decision),
+		DecisionCategory:  string(candidate.DecisionCategory),
+		DecisionFromGroup: candidate.DecisionGroupID != "",
+	}
+	if category, err := filejanitor.LookupCategory(string(candidate.Category)); err == nil {
+		dto.Category = string(category.ID)
+	}
+	if category, err := filejanitor.LookupCategory(string(candidate.DecisionCategory)); err == nil {
+		dto.DecisionCategory = string(category.ID)
 	}
 	if !candidate.ModifiedAt.IsZero() {
 		dto.ModifiedAt = candidate.ModifiedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
@@ -106,9 +115,22 @@ func (h *Handler) ListBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	end := min(offset+limit, total)
 
+	var page any = batches[offset:end]
+	if r.URL.Query().Get("summary_only") == "true" {
+		// The grouped-review batch chooser needs navigation/counts, not every
+		// candidate ID or ineligible filename from every retained scan.
+		summaries := make([]map[string]any, 0, end-offset)
+		for _, batch := range batches[offset:end] {
+			summaries = append(summaries, map[string]any{
+				"id": batch.ID, "state": batch.State, "summary": batch.Summary,
+				"started_at": batch.StartedAt, "completed_at": batch.CompletedAt,
+			})
+		}
+		page = summaries
+	}
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success": true,
-		"batches": batches[offset:end],
+		"batches": page,
 		"total":   total,
 		"limit":   limit,
 		"offset":  offset,
@@ -200,25 +222,56 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 	counts := candidateCounts(candidates)
 	matching := filterCandidates(candidates, filter)
 	filteredTotal := len(matching)
+	linkedFound := false
+	if candidateID := strings.TrimSpace(r.URL.Query().Get("candidate_id")); candidateID != "" {
+		// A candidate deep link locates its bounded page server-side, without
+		// fetching every page or exposing candidates from another batch.
+		for i, candidate := range matching {
+			if candidate.ID == candidateID {
+				offset = (i / limit) * limit
+				linkedFound = true
+				break
+			}
+		}
+	}
 	if offset > filteredTotal {
 		offset = filteredTotal
 	}
 	end := min(offset+limit, filteredTotal)
 	page := matching[offset:end]
 
+	dtos := candidateDTOs(page, settings.Settings.FilingRootName)
+	if counts["skipped"] > 0 {
+		skips, err := h.service.ListSkipped(workspaceID)
+		if err != nil {
+			h.respondError(w, err, "Failed to read saved Keep here choices")
+			return
+		}
+		remembered := make(map[string]bool, len(skips))
+		for _, skip := range skips {
+			remembered[skip.Key] = true
+		}
+		for i, candidate := range page {
+			if candidate.State == filejanitor.CandidateSkipped {
+				active := remembered[candidate.Fingerprint.Key()]
+				dtos[i].SkipRemembered = &active
+			}
+		}
+	}
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success":    true,
 		"batch":      batch,
-		"candidates": candidateDTOs(page, settings.Settings.FilingRootName),
+		"candidates": dtos,
 		// The counts describe the WHOLE batch, not the page. A review surface
 		// that reported "3 files" because three fit on a page would be lying
 		// about how much work is waiting (FR-109).
-		"total":          len(candidates),
-		"filtered_total": filteredTotal,
-		"counts":         counts,
-		"filter":         filter,
-		"limit":          limit,
-		"offset":         offset,
+		"total":                  len(candidates),
+		"filtered_total":         filteredTotal,
+		"linked_candidate_found": linkedFound,
+		"counts":                 counts,
+		"filter":                 filter,
+		"limit":                  limit,
+		"offset":                 offset,
 	})
 }
 
@@ -413,6 +466,8 @@ func (h *Handler) UpdateDecisions(w http.ResponseWriter, r *http.Request) {
 	changed, err := h.service.ApplyDecisions(workspaceID, updates)
 	if err != nil {
 		switch {
+		case errors.Is(err, filejanitor.ErrReviewConflict):
+			h.respondDraftError(w, err)
 		case errors.Is(err, filejanitor.ErrCandidateNotFound):
 			_ = orihttp.RespondNotFound(w, "candidate not found")
 		case errors.Is(err, filejanitor.ErrUnknownCategory):
@@ -512,7 +567,8 @@ func (h *Handler) PreviewMoves(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Decisions []decisionPayload `json:"decisions"`
+		Decisions      []decisionPayload `json:"decisions"`
+		ReviewRevision string            `json:"review_revision"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -532,7 +588,7 @@ func (h *Handler) PreviewMoves(w http.ResponseWriter, r *http.Request) {
 	}
 
 	preview, err := h.service.PreviewMoves(filejanitor.PreviewRequest{
-		WorkspaceID: workspaceID, UserID: userID, Items: items,
+		WorkspaceID: workspaceID, UserID: userID, Items: items, ReviewRevision: req.ReviewRevision,
 	})
 	if err != nil {
 		h.respondReviewError(w, err, "Failed to prepare the File Janitor preview")
@@ -697,6 +753,8 @@ func candidateExplanation(err error) string {
 // assumed no longer holds.
 func (h *Handler) respondReviewError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, filejanitor.ErrReviewConflict), errors.Is(err, filejanitor.ErrReviewDraftInvalid), errors.Is(err, filejanitor.ErrReviewBounds):
+		h.respondDraftError(w, err)
 	case errors.Is(err, filejanitor.ErrApprovalRequired):
 		_ = orihttp.RespondBadRequest(w, "an approval token is required")
 	case errors.Is(err, filejanitor.ErrApprovalConsumed):

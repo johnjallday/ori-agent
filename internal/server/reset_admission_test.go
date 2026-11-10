@@ -270,6 +270,14 @@ func TestResetAdmissionReviewedJanitorEndpointsStopBeforeAuthorityReadsOrWrites(
 	}))
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/setup-review"},
+		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/batches/batch-1/draft"},
+		{http.MethodPost, "/api/workspaces/ws-1/file-janitor/batches/batch-1/draft"},
+		{http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches/batch-1/draft"},
+		{http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/batches/batch-1/draft"},
+		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/batches/latest/groups"},
+		{http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches/latest/groups"},
+		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/batches/batch-1/groups/group-1/members"},
+		{http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches/batch-1/groups/group-1/members"},
 		{http.MethodPost, "/api/workspaces/ws-1/file-janitor/prepare-review"},
 		{http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/prepare-review"},
 		{http.MethodPost, "/api/workspaces/ws-1/file-janitor/stop-preparation"},

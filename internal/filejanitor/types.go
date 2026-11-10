@@ -137,6 +137,16 @@ type AssistedAutomationReceipt struct {
 	UpdatedAt         time.Time               `json:"updated_at"`
 }
 
+// ApprovedReferenceSpelling is metadata captured only during an explicit folder
+// grant. It binds an adopted alias spelling to that grant/reference generation,
+// letting saved-only readers recognize it without resolving symlinks. Execution
+// still resolves and validates the actual root. Missing legacy proof is inert.
+type ApprovedReferenceSpelling struct {
+	RootID      string `json:"root_id"`
+	ReferenceID string `json:"reference_id"`
+	Path        string `json:"path"`
+}
+
 type JanitorSettings struct {
 	// SchemaVersion is the revision this record was written with.
 	SchemaVersion int `json:"schema_version"`
@@ -146,7 +156,8 @@ type JanitorSettings struct {
 	WorkspaceID string `json:"workspace_id"`
 	// DirectoryReferenceID is the workspace directory reference created for the
 	// approved root. Empty until setup is confirmed.
-	DirectoryReferenceID string `json:"directory_reference_id,omitempty"`
+	DirectoryReferenceID string                     `json:"directory_reference_id,omitempty"`
+	ApprovedReference    *ApprovedReferenceSpelling `json:"approved_reference,omitempty"`
 	// RootConflictWorkspaceID names the workspace that already manages an
 	// overlapping folder, when reconciliation found a pre-existing conflict.
 	//

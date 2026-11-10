@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync, chmodSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -249,13 +249,30 @@ async function clearCommanderNudge(page: Page, url: string) {
   await clearBlockingModals(page);
 }
 
+// These existing journeys exercise per-file review. Group-first entry itself
+// is covered in file-janitor-group-review.spec.ts; choose All files explicitly.
+async function allFiles(page: Page, required = false) {
+  const toggle = page.locator('#fileJanitorView-all');
+  if (required) await expect(toggle).toBeVisible();
+  if (await toggle.isVisible()) await toggle.click();
+}
+
 async function openWorkspace(page: Page, workspaceId: string, query = '') {
   await clearCommanderNudge(page, workspacePath(workspaceId, query));
+  if (query.includes('panel=file-janitor')) {
+    await expect(console_(page)).toBeVisible();
+    await page
+      .locator('#fileJanitorView-all')
+      .waitFor({ state: 'visible', timeout: 1500 })
+      .catch(() => {});
+    await allFiles(page);
+  }
 }
 
 async function openConsoleFromCard(page: Page) {
   await page.locator('#fileJanitorCardOpen').click();
   await expect(console_(page)).toBeVisible({ timeout: 15000 });
+  await allFiles(page);
 }
 
 test('protection round trip keeps choices through chooser, creation, existing console and Back', async ({
@@ -317,6 +334,17 @@ test('protection round trip keeps choices through chooser, creation, existing co
   await page.locator('#fileJanitorCheckProtection').click();
   await page.getByRole('button', { name: 'Use restic', exact: true }).click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
+  // Confirm the actual blueprint in the shared creator before advancing; this
+  // legacy flow can initially show Blank while the catalog opens.
+  await page
+    .locator('#addFolderModal')
+    .getByRole('radio', { name: /^Backup & Recovery / })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).ProjectTemplateCard?.getSelectedTemplate?.()?.id)
+    )
+    .toBe('backup-and-recovery');
   await page.locator('#wizardNextBtn').click();
   await page.locator('#folderNameInput').fill(`Protection backup ${RUN}`);
   await page.locator('#wizardNextBtn').click();
@@ -328,9 +356,13 @@ test('protection round trip keeps choices through chooser, creation, existing co
   const pending = page
     .locator('#workspaceTeamRoster .workspace-team-row')
     .filter({ hasText: 'New · Needs setup' });
+  let helperIndex = 0;
   while (await pending.count()) {
     await pending.first().locator('[data-team-agent-setup]').click();
     await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page
+      .locator('[data-agent-create-field="name"]')
+      .fill(`Protection helper ${RUN}-${helperIndex++}`);
     await page.locator('#createAgentBtn').click();
     await expect(page.locator('#addAgentModal')).toBeHidden();
   }
@@ -341,6 +373,9 @@ test('protection round trip keeps choices through chooser, creation, existing co
       .getByRole('button', { name: /^Create an agent for / })
       .click();
     await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page
+      .locator('[data-agent-create-field="name"]')
+      .fill(`Protection helper ${RUN}-${helperIndex++}`);
     await page.locator('#createAgentBtn').click();
     await expect(page.locator('#addAgentModal')).toBeHidden();
     await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -353,7 +388,7 @@ test('protection round trip keeps choices through chooser, creation, existing co
   );
   await page.locator('#createFolderBtn').click();
   const created = await creation;
-  expect(created.ok(), await created.text()).toBeTruthy();
+  expect(created.ok(), created.ok() ? '' : await created.text()).toBeTruthy();
   await expect(page.locator('#backupRecoveryConsole')).toBeVisible({ timeout: 20000 });
   await clearBlockingModals(page);
   await expect(
@@ -370,6 +405,7 @@ test('protection round trip keeps choices through chooser, creation, existing co
     .locator('#backupRecoveryConsole')
     .getByRole('button', { name: 'Return to filing review' })
     .click();
+  await allFiles(page, true);
   await expect(moves).toBeChecked({ timeout: 20000 });
   await expect(category).toHaveValue('images');
   await expect(
@@ -391,6 +427,7 @@ test('protection round trip keeps choices through chooser, creation, existing co
   await page.locator('#fileJanitorCheckProtection').click();
   await expect(page.locator('#backupRecoveryConsole')).toBeVisible();
   await page.goBack();
+  await allFiles(page, true);
   await expect(moves).toBeChecked({ timeout: 20000 });
   await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
   expect(mutations.filter(line => !line.endsWith(' /api/workspaces'))).toEqual([]);
@@ -567,6 +604,7 @@ test.describe('File Janitor capability', () => {
     await expect(area).toContainText('File Janitor is paused');
     await page.locator('#workspaceNextAction').click();
     await page.locator('#fileJanitorScan').click();
+    await allFiles(page, true);
     await expect(consoleBody(page).locator('.fj-select')).toHaveCount(2);
     await page.keyboard.press('Escape');
     await expect(area).toContainText('2 files ready for review');
@@ -621,6 +659,11 @@ test.describe('File Janitor capability', () => {
     expect(new URL(page.url()).searchParams.get('source')).toBe('next-action');
     await page.getByRole('button', { name: 'Unmark second.csv for Trash', exact: true }).click();
     await consoleBody(page).locator('.fj-select').nth(1).check();
+    await consoleBody(page)
+      .locator('.fj-row-item')
+      .filter({ hasText: 'second.csv' })
+      .locator('.fj-category')
+      .selectOption('images');
     await page.locator('#fileJanitorApprove').click();
     await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
     await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
@@ -630,20 +673,29 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#fileJanitorConsole')).toBeHidden();
     await expect(page.locator('#workspaceNextAction')).toBeFocused();
     await page.locator('#workspaceNextAction').click();
+    await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+    await page.locator('#fileJanitorApprove').click();
     await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
     expect(operating.filter(url => /\/(apply|scan|decisions)$/.test(url))).toEqual([]);
-    // Only a synthetic fixture is changed after preview: the real apply must
-    // refuse that one file while recording the other successful move.
-    writeFileSync(join(root, 'second.csv'), 'changed after preview');
-    await page.locator('#fileJanitorConfirmApply').click();
-    await expect(consoleBody(page).locator('.fj-results')).toContainText('1 file filed');
+    // Use a real synthetic destination permission failure for a partial receipt.
+    // Changed inputs before confirmation now invalidate the whole exact token;
+    // that separate safety case is covered by the group-review suite.
+    const denied = join(root, 'Filed', 'Images');
+    mkdirSync(denied, { recursive: true });
+    chmodSync(denied, 0o500);
+    try {
+      await page.locator('#fileJanitorConfirmApply').click();
+      await expect(consoleBody(page).locator('.fj-results')).toContainText('1 file filed');
+    } finally {
+      chmodSync(denied, 0o750);
+    }
     await expect
       .poll(() =>
         page.evaluate(
           () => (window as any).FileJanitorConsole.getActionState().latestReceipt?.counts
         )
       )
-      .toEqual({ applied: 1, failed: 0, stale: 1 });
+      .toEqual({ applied: 1, failed: 1, stale: 0 });
     await expect(page.locator('#fileJanitorConsoleStatus')).not.toContainText(
       'files ready for review'
     );
@@ -801,7 +853,7 @@ test.describe('File Janitor capability', () => {
     await page.locator('[data-cmd-view-mode="tickets"]').click();
     await expect(page.locator('#fileJanitorMount')).toBeHidden();
 
-    await page.getByRole('button', { name: 'Details', exact: true }).click();
+    await page.locator('[data-cmd-view-mode="details"]').click();
     const summary = page.getByRole('group', { name: 'File Janitor' });
     await expect(summary).toBeVisible();
     const summaryBox = await summary.boundingBox();
@@ -821,7 +873,7 @@ test.describe('File Janitor capability', () => {
     await page.getByRole('button', { name: 'Map', exact: true }).click();
     await expect(page.locator('#fileJanitorMount')).toBeHidden();
     await page.goBack();
-    await expect(page.getByRole('button', { name: 'Details', exact: true })).toHaveAttribute(
+    await expect(page.locator('[data-cmd-view-mode="details"]')).toHaveAttribute(
       'aria-pressed',
       'true'
     );
@@ -867,6 +919,7 @@ test.describe('File Janitor capability', () => {
 
     // Scan from the console header.
     await page.locator('#fileJanitorScan').click();
+    await allFiles(page, true);
     await expect(consoleBody(page).locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
     const progress = consoleBody(page).locator('.fj-batch-progress');
     await expect(progress).toContainText('2 remaining of 2 candidates');
@@ -889,7 +942,12 @@ test.describe('File Janitor capability', () => {
     await expect(details).toHaveAttribute('aria-expanded', 'true');
     await expect(details).toHaveAccessibleName('Hide file details for invoice.pdf');
     const fileDetails = row.locator('.fj-file-details');
-    await expect(fileDetails.locator('dt')).toHaveText(['Type', 'Size', 'Modified']);
+    await expect(fileDetails.locator('dt')).toHaveText([
+      'Type',
+      'Size',
+      'Modified',
+      'Classification'
+    ]);
     await expect(fileDetails.locator('dd').nth(0)).toHaveText('.pdf');
     await expect(fileDetails.locator('dd').nth(1)).toHaveText('7 B');
     const [detailsBox, footerBox] = await Promise.all([
@@ -947,10 +1005,13 @@ test.describe('File Janitor capability', () => {
     await openWorkspace(page, workspaceId);
     await openConsoleFromCard(page);
     await page.locator('#fileJanitorScan').click();
+    await allFiles(page, true);
     const row = consoleBody(page).locator('.fj-row-item').filter({ hasText: 'invoice.pdf' });
     await expect(row).toBeVisible({ timeout: 15000 });
 
-    const latestBatch = `**/api/workspaces/${workspaceId}/file-janitor/batches/latest*`;
+    const activeBatch = new URL(page.url()).searchParams.get('batch_id');
+    expect(activeBatch).toBeTruthy();
+    const latestBatch = `**/api/workspaces/${workspaceId}/file-janitor/batches/${activeBatch}?*`;
     await page.route(latestBatch, route =>
       route.fulfill({
         status: 503,
@@ -988,6 +1049,7 @@ test.describe('File Janitor capability', () => {
     await openWorkspace(page, workspaceId);
     await openConsoleFromCard(page);
     await page.locator('#fileJanitorScan').click();
+    await allFiles(page, true);
 
     const row = consoleBody(page).locator('.fj-row-item').filter({ hasText: 'report.pdf' });
     await expect(row).toBeVisible({ timeout: 15000 });

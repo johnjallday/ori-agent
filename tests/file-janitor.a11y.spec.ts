@@ -118,6 +118,7 @@ test.describe('File Janitor console accessibility', () => {
       );
       await openConsole(page, id);
       await page.locator('#fileJanitorScan').click();
+      await page.locator('#fileJanitorView-all').click();
       const note = page.getByRole('region', { name: 'Optional folder protection' });
       await expect(note).toBeVisible();
       await expect(note).toContainText('Filing is not a backup');
@@ -180,6 +181,7 @@ test.describe('File Janitor console accessibility', () => {
         'dismissed for this folder'
       );
       await page.reload();
+      await page.locator('#fileJanitorView-all').click();
       await expect(page.locator('#fileJanitorCheckProtection')).toBeVisible();
       await expect(note).not.toContainText('Filing is not a backup');
       const select = page.getByRole('checkbox', {
@@ -212,6 +214,7 @@ test.describe('File Janitor console accessibility', () => {
       const id = await workspaceWithFolder(request, `Guidance ${theme} ${RUN}`, root);
       await openConsole(page, id);
       await page.locator('#fileJanitorScan').click();
+      await page.locator('#fileJanitorView-all').click();
       await expect(page.locator('.fj-select')).toHaveCount(2);
       await page.keyboard.press('Escape');
       const area = page.getByRole('region', { name: 'Next action', exact: true });
@@ -266,6 +269,7 @@ test.describe('File Janitor console accessibility', () => {
     await page.setViewportSize({ width: 1400, height: 900 });
     await openConsole(page, workspaceId);
     await page.locator('#fileJanitorScan').click();
+    await page.locator('#fileJanitorView-all').click();
     await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 
     // Compare the stacking directly rather than hit-testing a few points.
@@ -432,6 +436,7 @@ test.describe('File Janitor console accessibility', () => {
     await openConsole(page, workspaceId);
 
     await page.locator('#fileJanitorScan').click();
+    await page.locator('#fileJanitorView-all').click();
     const row = page.locator('.fj-row-item').filter({ hasText: 'invoice.pdf' });
     await expect(row).toBeVisible({ timeout: 15000 });
     await row.locator('.fj-select').check();
@@ -476,6 +481,7 @@ test.describe('File Janitor console accessibility', () => {
     await expect(reviewTab).toHaveAttribute('aria-selected', 'true');
     await expect(reviewTab).toBeFocused();
     await page.locator('#fileJanitorScan').click();
+    await page.locator('#fileJanitorView-all').click();
     await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 
     // Filters report pressed state, and every row control is labelled with the
@@ -498,6 +504,7 @@ test.describe('File Janitor console accessibility', () => {
     // scan finishing or a selection changing reaches a screen reader.
     await expect(page.locator('#fileJanitorConsoleStatus')).toHaveAttribute('aria-live', 'polite');
     await page.locator('#fileJanitorScan').click();
+    await page.locator('#fileJanitorView-all').click();
     await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#fileJanitorSelection')).toHaveAttribute('aria-live', 'polite');
   });
@@ -515,6 +522,7 @@ test.describe('File Janitor console accessibility', () => {
 
     await openConsole(page, workspaceId);
     await page.locator('#fileJanitorScan').click();
+    await page.locator('#fileJanitorView-all').click();
     const firstRow = page.locator('.fj-row-item').first();
     await expect(firstRow).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.fj-batch-progress')).toContainText('60 remaining of 60 candidates');
@@ -551,6 +559,7 @@ test.describe('File Janitor console accessibility', () => {
 
     await openConsole(page, workspaceId);
     await page.locator('#fileJanitorScan').click();
+    await page.locator('#fileJanitorView-all').click();
     await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 
     // Containment is asserted on the console's own boxes rather than on the

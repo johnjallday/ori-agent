@@ -190,7 +190,11 @@ async function openConsole(page: Page) {
   // races the deep link.
   const consoleHost = page.locator('#fileJanitorConsole');
   await consoleHost.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
-  if (await consoleHost.isVisible().catch(() => false)) return;
+  if (await consoleHost.isVisible().catch(() => false)) {
+    const toggle = page.locator('#fileJanitorView-all');
+    if (await toggle.isVisible()) await toggle.click();
+    return;
+  }
 
   const wizard = page.locator('#setupWizardDialog');
   if (await wizard.isVisible().catch(() => false)) {
@@ -200,10 +204,13 @@ async function openConsole(page: Page) {
 
   await page.locator('#fileJanitorCardOpen').click();
   await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
+  const toggle = page.locator('#fileJanitorView-all');
+  if (await toggle.isVisible()) await toggle.click();
 }
 
 async function scan(page: Page) {
   await page.locator('#fileJanitorScan').click();
+  await page.locator('#fileJanitorView-all').click();
   await expect(page.locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
 }
 
@@ -372,7 +379,7 @@ test.describe('Downloads Janitor', () => {
     const folderFact = page.locator('.fj-card-fact').filter({ hasText: 'Managed folder' });
     await expect(folderFact).toContainText(basename(root));
     await expect(folderFact.locator('.fj-card-fact-value')).toHaveAttribute('title', root);
-    await expect(page.locator('#fileJanitorActivity')).toHaveText('Watching');
+    await expect(page.locator('#fileJanitorActivity')).toHaveText(/^(Watching|Review ready)$/);
     // The destination is created eagerly; category folders are not.
     expect(existsSync(join(root, 'Filed'))).toBeTruthy();
     expect(readdirSync(join(root, 'Filed'))).toEqual([]);
@@ -429,8 +436,10 @@ test.describe('Downloads Janitor', () => {
     await row.locator('select').selectOption({ label: 'Archives' });
     await expect(row).toContainText('Filed/Archives');
 
-    await rowFor(page, 'advert.png').getByRole('button', { name: 'Skip' }).click();
-    await expect(rowFor(page, 'advert.png')).toContainText('Skipped');
+    await rowFor(page, 'advert.png')
+      .getByRole('button', { name: 'Keep here', exact: true })
+      .click();
+    await expect(rowFor(page, 'advert.png')).toContainText('Kept in this saved batch');
   });
 
   // ------------------------------------------------------------------- apply

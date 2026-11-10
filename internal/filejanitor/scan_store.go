@@ -19,7 +19,7 @@ import (
 const scanStateFileName = "scan-state.json"
 
 // ScanStateSchemaVersion is the on-disk revision of the scan record.
-const ScanStateSchemaVersion = 2
+const ScanStateSchemaVersion = 3
 
 // Retention bounds. Operational metadata accumulates on every scan, so it is
 // capped rather than kept forever — but pruning never discards work the user
@@ -120,6 +120,9 @@ type ScanState struct {
 	// authorizes happen in a single atomic write — a token cannot be spent
 	// without the state change it paid for, and vice versa.
 	Approvals []ApprovalRecord `json:"approvals,omitempty"`
+	// ReviewDrafts are exact saved user choices, never approval records. Legacy
+	// scan schemas load with no intent even if stray draft-shaped data exists.
+	ReviewDrafts []ReviewDraft `json:"review_drafts,omitempty"`
 	// Actions is the durable journal of every attempted mutation.
 	Actions []FileAction `json:"actions,omitempty"`
 	// ScanOperations are bounded operation-specific acknowledgments written in
@@ -270,6 +273,13 @@ func (s *Store) scanStatePath(workspaceID string) (string, error) {
 //
 // A record belonging to a different workspace is an error, never served.
 func (s *Store) LoadScanState(workspaceID string) (ScanState, error) {
+	return s.loadScanState(workspaceID, false)
+}
+
+// loadScanState's strict mode distinguishes unavailable/corrupt saved reviews
+// from a known empty scan record. Legacy callers retain their rescan fallback;
+// new read-only review projections must not present corrupt data as success.
+func (s *Store) loadScanState(workspaceID string, strict bool) (ScanState, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	path, err := s.scanStatePath(workspaceID)
 	if err != nil {
@@ -283,9 +293,48 @@ func (s *Store) LoadScanState(workspaceID string) (ScanState, error) {
 		}
 		return ScanState{}, fmt.Errorf("failed to read downloads janitor scan state: %w", err)
 	}
+	var header struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	if err := json.Unmarshal(data, &header); err == nil {
+		if header.SchemaVersion < 0 || header.SchemaVersion > ScanStateSchemaVersion {
+			return ScanState{}, ErrUnsupportedScanSchema
+		}
+	} else {
+		var typeError *json.UnmarshalTypeError
+		if errors.As(err, &typeError) {
+			return ScanState{}, ErrUnsupportedScanSchema
+		}
+	}
 	var stored ScanState
-	if err := json.Unmarshal(data, &stored); err != nil {
+	// Decode draft bytes separately: legacy schemas must never reinterpret a
+	// category-only decision (or stray future fields) as explicit selection.
+	type scanRecord ScanState
+	var encoded struct {
+		*scanRecord
+		Drafts json.RawMessage `json:"review_drafts"`
+	}
+	encoded.scanRecord = (*scanRecord)(&stored)
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		if strict {
+			return ScanState{}, ErrReviewUnavailable
+		}
 		return newScanState(workspaceID), nil
+	}
+	if stored.SchemaVersion < 0 || stored.SchemaVersion > ScanStateSchemaVersion {
+		// Refuse reads/writes rather than normalizing a future draft schema
+		// into current state and silently discarding its unknown intent.
+		return ScanState{}, ErrUnsupportedScanSchema
+	}
+	if stored.SchemaVersion >= 3 && len(encoded.Drafts) > 0 {
+		if err := json.Unmarshal(encoded.Drafts, &stored.ReviewDrafts); err != nil {
+			return ScanState{}, ErrReviewDraftInvalid
+		}
+	}
+	if stored.SchemaVersion < 3 {
+		for i := range stored.Candidates {
+			stored.Candidates[i].DecisionGroupID = "" // legacy category edits are per-file, never group provenance
+		}
 	}
 	if id := strings.TrimSpace(stored.WorkspaceID); id != "" && id != workspaceID {
 		return ScanState{}, fmt.Errorf("%w: scan state is for %s", ErrWorkspaceMismatch, id)
@@ -400,6 +449,19 @@ func validateScanState(state ScanState) error {
 			}
 		}
 	}
+	totalChoices := 0
+	for _, draft := range state.ReviewDrafts {
+		if len(draft.invalid) > 0 {
+			continue // retain unknown bytes inertly; never interpret as choices
+		}
+		if err := draft.validate(); err != nil {
+			return err
+		}
+		totalChoices += len(draft.Choices)
+	}
+	if totalChoices > MaxReviewChoicesPerWorkspace {
+		return ErrReviewBounds
+	}
 	return nil
 }
 
@@ -449,6 +511,7 @@ func pruneScanState(state ScanState, now time.Time) ScanState {
 		}
 	}
 	state.Candidates = candidates
+	pruneReviewDrafts(&state)
 
 	// Observations are pure scratch: age them out, then cap newest-first.
 	observations := make([]SettledObservation, 0, len(state.Observations))

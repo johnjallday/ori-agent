@@ -71,6 +71,10 @@ type ApprovalRecord struct {
 	// PayloadHash binds the approval to the exact normalized plan the user saw,
 	// including each candidate's fingerprint at preview time.
 	PayloadHash string `json:"payload_hash"`
+	// ReviewRevision and ReviewScope bind grouped review to current exact
+	// saved intent. They are authority only here, never copied into a draft.
+	ReviewRevision string `json:"review_revision,omitempty"`
+	ReviewScope    string `json:"review_scope,omitempty"`
 	// IdempotencyKey identifies the apply this approval authorizes, so a retry
 	// of the same confirm is recognized rather than re-executed.
 	IdempotencyKey string    `json:"idempotency_key"`
@@ -161,6 +165,21 @@ func pruneApprovals(approvals []ApprovalRecord, now time.Time) []ApprovalRecord 
 		kept = kept[len(kept)-MaxRetainedApprovals:]
 	}
 	return kept
+}
+
+// invalidateBatchApprovals revokes outstanding previews when saved review
+// intent changes. PayloadHash alone cannot detect a deselection if an old
+// client submits the preview's explicit category again. Consumed records stay
+// available for idempotent replay; unrelated batches retain their authority.
+// Call only inside the canonical scan-state transaction.
+func invalidateBatchApprovals(state *ScanState, batchID string) {
+	kept := make([]ApprovalRecord, 0, len(state.Approvals))
+	for _, approval := range state.Approvals {
+		if approval.BatchID != batchID || approval.Consumed() {
+			kept = append(kept, approval)
+		}
+	}
+	state.Approvals = kept
 }
 
 // ---------------------------------------------------------------- collisions

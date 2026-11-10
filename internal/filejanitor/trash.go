@@ -86,6 +86,9 @@ func (s *Service) trashOne(_ context.Context, settings JanitorSettings, root str
 		return ItemOutcome{CandidateID: item.CandidateID, Result: ResultFailed, Message: "That file is no longer in this batch."}
 	}
 
+	if err := s.validateExecutionScope(settings, root, approval); err != nil || state.IsSkipped(candidate.Fingerprint) || !validExecutionCandidate(candidate, item, approval, false) {
+		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: OperationTrash, Result: ResultStale, Message: "The folder, access or saved review changed. Nothing was removed; request a fresh review."}
+	}
 	remover := s.trashRemover()
 	if !remover.Supported() {
 		// Fail closed. A system without Trash gets no removal at all.
@@ -118,13 +121,18 @@ func (s *Service) trashOne(_ context.Context, settings JanitorSettings, root str
 		}
 	}
 	action = action.MarkApplying(now)
-	if err := s.appendAction(settings.WorkspaceID, action, CandidateApplying); err != nil {
+	if err := s.appendApprovedAction(settings, root, approval, item, action); err != nil {
 		return ItemOutcome{
 			CandidateID: candidate.ID, Name: candidate.Display(), Operation: OperationTrash,
 			Result: ResultFailed, Message: "Ori could not record this action, so it did not perform it.",
 		}
 	}
 
+	if err := s.executionHandoff(settings, root, approval, item); err != nil {
+		action = action.MarkStale("The folder, access or file changed before execution. Nothing was removed; request a fresh review.", s.clock())
+		_ = s.updateAction(settings.WorkspaceID, action, CandidateStale)
+		return outcomeFor(action)
+	}
 	token, trashErr := remover.MoveToTrash(sourcePath)
 	_, statErr := os.Lstat(sourcePath)
 	gone := os.IsNotExist(statErr)

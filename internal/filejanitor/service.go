@@ -637,6 +637,21 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		return Status{}, err
 	}
 
+	// Freeze the adopted spelling at the explicit grant boundary, never during
+	// a group/facts read or migration. Do not invent proof for old alias data.
+	ws, err := s.readWorkspace(workspaceID)
+	if err != nil || ws == nil {
+		return Status{}, setupErr(CodeFolderChanged, "The approved folder reference is unavailable. Review access again.", RepairChooseFolder, err)
+	}
+	ref, err := ws.GetDirectoryReference(referenceID)
+	if err != nil || ref == nil {
+		return Status{}, setupErr(CodeFolderChanged, "The approved folder reference changed. Review access again.", RepairChooseFolder, err)
+	}
+	resolvedReference, err := resolveSetupRoot(ref.Path)
+	if err != nil || resolvedReference != root {
+		return Status{}, setupErr(CodeFolderChanged, "The approved folder reference changed. Review access again.", RepairChooseFolder, err)
+	}
+	proof := &ApprovedReferenceSpelling{RootID: rootID, ReferenceID: referenceID, Path: ref.Path}
 	completedAt := s.clock()
 	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		if operation != nil {
@@ -657,6 +672,7 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		settings.RootPath = root
 		settings.FilingRootName = filingRootName
 		settings.DirectoryReferenceID = referenceID
+		settings.ApprovedReference = proof
 		settings.DailyScanLocalTime = dailyTime
 		settings.Timezone = timezone
 		settings.LastAssistedAutomation = nil

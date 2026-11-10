@@ -93,6 +93,9 @@ type ApplyResult struct {
 // successes, and the caller gets an ordered outcome per file rather than a
 // single verdict for the batch (FR-88, FR-72).
 func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyResult, error) {
+	if len(req.Items) > MaxReviewChoicesPerBatch {
+		return ApplyResult{}, ErrReviewBounds
+	}
 	workspaceID := strings.TrimSpace(req.WorkspaceID)
 	settings, err := s.requireConfigured(workspaceID)
 	if err != nil {
@@ -105,6 +108,12 @@ func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyRe
 	if s.mover == nil {
 		return ApplyResult{}, fmt.Errorf("%w: no move mechanism is configured", ErrInvalidAction)
 	}
+
+	// Review edits use the same root boundary before their scan-state write.
+	// Acquire it before consuming authority: an edit that won first invalidates
+	// the preview; an apply already admitted completes before a later edit.
+	unlock := lockRoot(root)
+	defer unlock()
 
 	// Rebuild the plan from stored state. The request supplies IDs and
 	// categories; the fingerprints come from what Ori recorded, so a client
@@ -154,9 +163,6 @@ func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyRe
 		}
 		return ApplyResult{}, err
 	}
-
-	unlock := lockRoot(root)
-	defer unlock()
 
 	result := ApplyResult{}
 	for _, item := range plan {
@@ -227,6 +233,10 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 		return ItemOutcome{CandidateID: item.CandidateID, Result: ResultFailed, Message: "That file is no longer in this batch."}
 	}
 
+	if err := s.validateExecutionScope(settings, root, approval); err != nil || state.IsSkipped(candidate.Fingerprint) || !validExecutionCandidate(candidate, item, approval, false) {
+		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultStale, Message: "The folder, access or saved review changed. Nothing was moved; request a fresh review."}
+	}
+
 	// 1-2. The source is derived from the stored candidate and revalidated
 	// against the filesystem immediately before the mutation. This is the check
 	// that actually protects the file: everything earlier can go stale.
@@ -276,10 +286,15 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultFailed, Message: "Ori could not record this action, so it did not perform it."}
 	}
 	action = action.MarkApplying(now)
-	if err := s.appendAction(settings.WorkspaceID, action, CandidateApplying); err != nil {
+	if err := s.appendApprovedAction(settings, root, approval, item, action); err != nil {
 		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultFailed, Message: "Ori could not record this action, so it did not perform it."}
 	}
 
+	if err := s.executionHandoff(settings, root, approval, item); err != nil {
+		action = action.MarkStale("The folder, access or file changed before execution. Nothing was moved; request a fresh review.", s.clock())
+		_ = s.updateAction(settings.WorkspaceID, action, CandidateStale)
+		return outcomeFor(action)
+	}
 	// 5. Mutate, then verify. The tool's own report is not the answer.
 	moveErr := s.mover.Move(ctx, settings.WorkspaceID, sourcePath, destinationPath)
 	applied, verifyErr := verifyMove(sourcePath, destinationPath, finalName)

@@ -407,8 +407,23 @@ func (s *Service) ApplyDecisions(workspaceID string, updates []DecisionUpdate) (
 	if len(updates) == 0 {
 		return nil, nil
 	}
+	settings, err := s.store.LoadSettings(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if settings.RootPath != "" {
+		unlock := lockRoot(settings.RootPath)
+		defer unlock()
+	}
 	var changed []JanitorCandidate
-	_, err := s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
+	_, err = s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
+		fresh, err := s.store.LoadSettings(workspaceID)
+		if err != nil {
+			return err
+		}
+		if fresh.RootID != settings.RootID || fresh.RootPath != settings.RootPath {
+			return ErrReviewConflict
+		}
 		touchedBatches := map[string]struct{}{}
 		for _, update := range updates {
 			index := -1
@@ -422,6 +437,7 @@ func (s *Service) ApplyDecisions(workspaceID string, updates []DecisionUpdate) (
 				return fmt.Errorf("%w: %s", ErrCandidateNotFound, update.CandidateID)
 			}
 			candidate := &state.Candidates[index]
+			previous := *candidate
 			if !candidate.Actionable() {
 				return fmt.Errorf("%w: %s is %s and cannot be changed", ErrCandidateNotFound, candidate.ID, candidate.State)
 			}
@@ -459,11 +475,16 @@ func (s *Service) ApplyDecisions(workspaceID string, updates []DecisionUpdate) (
 			default:
 				return fmt.Errorf("%w: unsupported decision %q", ErrInvalidCandidate, update.Decision)
 			}
+			candidate.DecisionGroupID = ""
+			if err := reconcileLegacyDraftDecision(state, previous, *candidate, update.Decision); err != nil {
+				return err
+			}
 			changed = append(changed, *candidate)
 			touchedBatches[candidate.BatchID] = struct{}{}
 		}
 		for batchID := range touchedBatches {
 			resummarizeBatch(state, batchID)
+			invalidateBatchApprovals(state, batchID)
 		}
 		return nil
 	})
