@@ -2934,6 +2934,17 @@ func FolderProjectFactText(folderName string) string {
 	return "You are working on a project in the folder " + strings.TrimSpace(folderName) + "."
 }
 
+// KnownFolderRoot resolves a server-known folder without scanning it or
+// accepting a browser path. Authority is the configured home plus the chip's
+// directory name, not a platform redirected-folder API.
+func (s *FolderDigestService) KnownFolderRoot(id string) (string, error) {
+	path, err := s.chipPath(id)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(path)
+}
+
 func (s *FolderDigestService) chipPath(id string) (string, error) {
 	id = strings.ToLower(strings.TrimSpace(id))
 	for _, chip := range folderChips {
@@ -2945,7 +2956,7 @@ func (s *FolderDigestService) chipPath(id string) (string, error) {
 			return "", ErrFolderChipMissing
 		}
 		path := filepath.Join(home, chip.Dir)
-		info, err := os.Lstat(path)
+		info, err := os.Stat(path)
 		if err != nil || !info.IsDir() {
 			return "", ErrFolderChipMissing
 		}

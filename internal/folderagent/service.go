@@ -184,6 +184,8 @@ type Deps struct {
 	Tickets    Tickets
 	Setups     Setups
 	Now        func() time.Time
+	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
+	KnownFolderRoot func(string) (string, error)
 	// Walk overrides the walk options (tests).
 	Walk foldermap.Options
 }
@@ -208,6 +210,11 @@ type choice struct {
 func NewService(deps Deps) *Service {
 	if deps.Now == nil {
 		deps.Now = time.Now
+	}
+	if deps.KnownFolderRoot == nil {
+		if folders, ok := deps.Folders.(interface{ KnownFolderRoot(string) (string, error) }); ok {
+			deps.KnownFolderRoot = folders.KnownFolderRoot
+		}
 	}
 	return &Service{deps: deps, choices: make(map[string]choice), running: make(map[string]bool)}
 }
@@ -437,13 +444,15 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	if s.deps.Setups != nil {
 		ready = s.deps.Setups.Readiness(ctx, rec.OwnerUserID)
 	}
+	identity := s.rootIdentity(workspaceID)
+	rec.RootPolicy, rec.PolicyBinding = identity.Policy, identity.Binding
 	facts := foldermap.FactsFrom(m)
-	candidates := folderlook.RequiredCandidates(facts, ready)
+	candidates := folderlook.CandidatesForPolicy(rec.RootPolicy, facts, ready)
 	model := s.resolveModel(ctx, rec)
 	// Source (d), the marketplace search, runs only for a turn that can rank
 	// it (PRD FR23), with the table's own words.
 	var found []folderlook.Candidate
-	if model.chat != nil && s.deps.Matches != nil {
+	if rec.RootPolicy == folderlook.RootOrdinary && model.chat != nil && s.deps.Matches != nil {
 		if words := folderlook.SearchWords(facts); len(words) > 0 {
 			declined := make(map[string]bool, len(rec.Declined))
 			for _, id := range rec.Declined {
@@ -457,7 +466,14 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	// The agent's looks may have found more: the facts are the host's again.
 	facts = foldermap.FactsFrom(m)
 	stage := foldermap.StageFor(facts)
-	required := folderlook.RequiredCandidates(facts, ready)
+	if rec.RootPolicy != folderlook.RootOrdinary {
+		stage = foldermap.StageFolder
+		if sections != nil {
+			sections.Plan, sections.PlanSteps = "", nil
+			sections.Goal, sections.Ticket, sections.TicketWhy, sections.Next = "", "", "", ""
+		}
+	}
+	required := folderlook.CandidatesForPolicy(rec.RootPolicy, facts, ready)
 	candidates = applyRanking(append(required, found...), sections)
 	candidates = keepShown(candidates)
 	existing := s.existingMembers(rec.WorkspaceID, root, stage, facts)
@@ -477,11 +493,16 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		logger.Warn("Folder agent could not save its look", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
 		return
 	}
+	updated = s.effectiveRecord(updated)
 	s.remember(updated)
 	if updated.TicketID != "" {
-		result := foldermap.FactsLine(facts) + "\n" + StageLine(updated.FolderName, facts, candidates)
+		result := foldermap.FactsLine(facts)
+		if policy := folderlook.PolicyLine(updated.RootPolicy); policy != "" {
+			result += "\n" + policy
+		}
+		result += "\n" + folderlook.DefaultLine(folderlook.StepsForPolicy(updated.RootPolicy, updated.FolderName, facts, candidates))
 		if sections != nil && sections.Plan != "" {
-			result += "\nPlan: " + folderlook.PlanWords(sections.Plan, folderlook.Steps(updated.FolderName, facts, candidates))
+			result += "\nPlan: " + folderlook.PlanWords(sections.Plan, folderlook.StepsForPolicy(updated.RootPolicy, updated.FolderName, facts, candidates))
 		}
 		if sections != nil && sections.WhatItIs != "" {
 			result = sections.WhatItIs + "\n" + result
@@ -618,11 +639,11 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 	chat, model := resolved.chat, resolved.name
 	s.narrate(rec.WorkspaceID, "")
 	ask := folderlook.AskAllowed(facts)
-	steps := folderlook.Steps(rec.FolderName, facts, candidates)
+	steps := folderlook.StepsForPolicy(rec.RootPolicy, rec.FolderName, facts, candidates)
 	reference := folderlook.BuildReference(folderlook.ReferenceInput{
 		FolderName: rec.FolderName, Brief: rec.Brief, Map: m, Facts: facts,
-		StageLine: StageLine(rec.FolderName, facts, candidates), Steps: steps, Candidates: candidates,
-		AskAllowed: ask, Hint: rec.Hint,
+		StageLine: folderlook.DefaultLine(steps), Steps: steps, Candidates: candidates,
+		AskAllowed: ask, Hint: rec.Hint, Policy: rec.RootPolicy,
 	})
 	var mu sync.Mutex
 	look := func(_ context.Context, folder string) (string, error) {
@@ -636,7 +657,16 @@ func (s *Service) runTurn(ctx context.Context, rec *Record, root string, m *fold
 			}
 			return "", errors.New("that folder could not be listed")
 		}
-		raw, err := json.Marshal(result)
+		var payload any = result
+		if policy := folderlook.PolicyLine(rec.RootPolicy); policy != "" {
+			// Put policy first so the turn's bounded tool output cannot truncate
+			// it away when a listing fills the result budget.
+			payload = struct {
+				Policy  string `json:"root_policy"`
+				Listing any    `json:"listing"`
+			}{policy, result}
+		}
+		raw, err := json.Marshal(payload)
 		return string(raw), err
 	}
 	result := folderlook.RunTurn(ctx, folderlook.TurnInput{
@@ -760,7 +790,7 @@ func (s *Service) Record(userID, workspaceID string) (*Record, error) {
 	if rec.OwnerUserID != userID {
 		return nil, ErrNotOwner
 	}
-	return rec, nil
+	return s.effectiveRecord(rec), nil
 }
 
 // View reads the report for one workspace.
@@ -865,12 +895,18 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	if err != nil {
 		return View{}, err
 	}
+	if !setUpAllowed(current) {
+		return View{}, ErrWrongState
+	}
 	selected, planDigest := req.Selected, req.PlanDigest
 	plan := BuildPlan(*current, selected)
 	if plan.Digest != planDigest {
 		return View{}, personalassistant.ErrFolderPlanChanged
 	}
 	if !plan.Runnable {
+		if current.RootPolicy != folderlook.RootOrdinary {
+			return View{}, personalassistant.ErrFolderPlanChanged
+		}
 		return View{}, ErrNothingToSet
 	}
 	if s.deps.Setups == nil {
@@ -879,6 +915,12 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 		if !setUpAllowed(r) {
 			return ErrWrongState
+		}
+		if current.RootPolicy != folderlook.RootOrdinary {
+			// Persist the choices actually confirmed, only on this mutation.
+			// Otherwise a legacy model goal could resurface after the safe run
+			// completed and its report became a historical receipt.
+			r.Candidates, r.Sections, r.Stage = current.Candidates, current.Sections, current.Stage
 		}
 		r.State = StateSettingUp
 		// The first step is under way from this moment; the run marks each
@@ -910,18 +952,21 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		defer s.wg.Done()
 		// The run outlives the request that confirmed it: the request's values
 		// travel with it, its cancellation does not.
-		result := s.deps.Setups.Run(context.WithoutCancel(ctx), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
-			_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
-				if r.Setup != nil {
-					r.Setup.Lines = lines
-				}
-				return nil
+		result := RunResult{Status: personalassistant.FolderSetupStopped, StopReason: personalassistant.FolderStopPlanChanged}
+		if s.CheckPlan(workspaceID, plan) == nil {
+			result = s.deps.Setups.Run(context.WithoutCancel(ctx), *rec, plan, func(lines []personalassistant.FolderPlanLine) {
+				_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
+					if r.Setup != nil {
+						r.Setup.Lines = lines
+					}
+					return nil
+				})
 			})
-		})
+		}
 		status, reason := result.Status, result.StopReason
 		nextID := ""
 		if status == personalassistant.FolderSetupDone {
-			nextID = s.createNextTicket(rec)
+			nextID = s.createNextTicket(s.effectiveRecord(rec))
 			// The first look is over: the agent works with the workspace's
 			// tools, including any the run just added.
 			if s.deps.Pins != nil {
@@ -972,7 +1017,10 @@ func (s *Service) Plan(userID, workspaceID string, selected []string) (PlanView,
 	if err != nil {
 		return PlanView{}, err
 	}
-	return *planViewOf(BuildPlan(*rec, selected)), nil
+	// Plan is a new preview, not the historical receipt returned by View.
+	copy := *rec
+	copy.State = StateReported
+	return *planViewOf(BuildPlan(*s.effectiveRecord(&copy), selected)), nil
 }
 
 // createNextTicket adds the agent's suggested first ticket to the backlog,

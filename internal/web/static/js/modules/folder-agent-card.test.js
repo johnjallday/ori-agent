@@ -1889,3 +1889,34 @@ test('Needs you follows a Set it up in place until it ends, then opens the place
   assert.equal(text(kept, '.folder-agent-card__opening'), 'Opening Ori Music Demo…');
   assert.deepEqual(stayed, ['/workspaces/ori-music-demo']);
 });
+
+test('Downloads shows factual counts beside model words and a normal keyboard-accessible chooser link', () => {
+  const view = folderAgentReportView(
+    reported({
+      policy_note: 'Downloads stays an inbox. Confirm folder access separately.',
+      explore_folder: true,
+      what_it_is: 'The agent found projects here.',
+      plan: { digest: 'fresh', runnable: true, selected: ['file-curator'], steps: [], lines: [] }
+    })
+  );
+  const card = renderFolderAgentReport(view, stubDocument());
+  assert.equal(text(card, '.folder-agent-card__facts'), view.facts);
+  assert.equal(text(card, '.folder-agent-card__note'), view.policyNote);
+  const link = card
+    .querySelectorAll('a')
+    .find(node => node.textContent === 'Explore a project folder…');
+  assert.equal(link.href, '/?panel=today&folder=show');
+  assert.equal(link.attributes.tabindex, undefined);
+  assert.deepEqual(link.listeners, {}); // Navigation only: no mutation or automatic selection.
+});
+
+test('ordinary reports do not acquire an inbox policy or project-folder action', () => {
+  const view = folderAgentReportView(reported());
+  assert.equal(view.policyNote, '');
+  assert.equal(view.exploreFolder, false);
+  const card = renderFolderAgentReport(view, stubDocument());
+  assert.equal(
+    card.querySelectorAll('a').some(node => node.textContent === 'Explore a project folder…'),
+    false
+  );
+});

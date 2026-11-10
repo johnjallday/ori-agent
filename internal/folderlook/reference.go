@@ -21,6 +21,7 @@ const (
 
 // ReferenceInput is the host's view of the folder for one turn.
 type ReferenceInput struct {
+	Policy     RootPolicy
 	FolderName string
 	Brief      string
 	Map        *foldermap.Map
@@ -53,6 +54,9 @@ func BuildReference(in ReferenceInput) string {
 		fmt.Fprintf(&b, "The owner answered your question: %s\n", clean(in.Hint))
 	}
 	fmt.Fprintf(&b, "Facts Ori found: %s\n", clean(foldermap.FactsLine(in.Facts)))
+	if line := PolicyLine(in.Policy); line != "" {
+		fmt.Fprintf(&b, "Host root policy: %s\n", line)
+	}
 	if len(in.Steps) == 0 {
 		b.WriteString("Steps Ori can run here: none. Say so under Plan and name no handle.\n")
 	} else {
@@ -109,8 +113,15 @@ func BuildReference(in ReferenceInput) string {
 	}
 	for _, c := range in.Candidates {
 		required := ""
-		if c.Required {
-			required = " (required, already in the plan)"
+		for _, step := range in.Steps {
+			if step.CandidateID == c.ID {
+				if step.Default {
+					required = " (in Ori's default plan)"
+				} else {
+					required = " (optional, not selected by default)"
+				}
+				break
+			}
 		}
 		fmt.Fprintf(&b, "- %s · %s · %s%s\n", c.ID, clean(c.Name), clean(c.Detail), required)
 	}

@@ -575,6 +575,11 @@ func (b *ServerBuilder) groupMembers(groupID string) []folderagent.WorkspaceRef 
 func (s folderAgentSetups) run(ctx context.Context, rec folderagent.Record, plan folderagent.Plan,
 	update func([]personalassistant.FolderPlanLine), made *folderagent.SetupReceipt) (string, string) {
 	b := s.builder
+	// Re-read the trusted anchor at the mutation boundary, before group,
+	// provider, library, placement, or capability dispatch can write anything.
+	if b.folderAgentService == nil || b.folderAgentService.CheckPlan(rec.WorkspaceID, plan) != nil {
+		return personalassistant.FolderSetupStopped, personalassistant.FolderStopPlanChanged
+	}
 	lines := append([]personalassistant.FolderPlanLine(nil), plan.Lines...)
 	// set moves every unfinished line of a kind; setLine one line by name. Each
 	// carries the runner's words for the line (empty keeps working words, and

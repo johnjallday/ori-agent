@@ -170,7 +170,12 @@ func newHarness(t *testing.T, folder string) *harness {
 	tickets := &fakeTickets{finished: map[string]string{}}
 	setups := &fakeSetups{}
 	store := NewStore(func(id string) (string, error) { return filepath.Join(sidecars, id), nil })
-	svc := NewService(Deps{Store: store, Folders: fakeFolders{path: folder}, Workspaces: ws, Tickets: tickets, Setups: setups})
+	downloads := filepath.Join(t.TempDir(), "Downloads")
+	if err := os.Mkdir(downloads, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(Deps{Store: store, Folders: fakeFolders{path: folder}, Workspaces: ws, Tickets: tickets, Setups: setups,
+		KnownFolderRoot: func(string) (string, error) { return downloads, nil }})
 	return &harness{svc: svc, ws: ws, tickets: tickets, setups: setups}
 }
 

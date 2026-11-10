@@ -151,6 +151,8 @@ export function folderAgentReportView(view) {
     progress: '',
     facts: String(view.facts_line || ''),
     stage: String(view.stage_line || ''),
+    policyNote: String(view.policy_note || ''),
+    exploreFolder: Boolean(view.explore_folder),
     tools: [],
     toolsSentence: String(view.tools_sentence || ''),
     modelSentence: String(view.model_sentence || ''),
@@ -1110,8 +1112,16 @@ export function renderFolderAgentReport(
   if (whatItIs) card.append(whatItIs);
   // The host's facts line stands in for the agent's sentence when there is
   // none; beside it, it would only repeat the counts.
-  if (view.facts && !view.whatItIs)
+  if (view.facts && (!view.whatItIs || view.policyNote))
     card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
+  if (view.policyNote) card.append(el(doc, 'p', 'folder-agent-card__note', view.policyNote));
+  if (view.exploreFolder) {
+    // The normal chooser performs a new explicit selection; opening it neither
+    // reanchors this workspace nor consents to a look or structural setup.
+    const explore = el(doc, 'a', 'folder-agent-card__open', 'Explore a project folder…');
+    explore.href = '/?panel=today&folder=show';
+    card.append(explore);
+  }
   // One list for the plan: while choosing, the plan's lines under their
   // steps with a box each; from Set it up on, the run's lines in the same
   // shape, with the agent's words above saying why.
