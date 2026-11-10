@@ -57,6 +57,52 @@ func TestGet_AWorkspaceWithoutAFolderRecordHasNoReport(t *testing.T) {
 	}
 }
 
+func emptyStoreHandler(t *testing.T) *Handler {
+	dir := t.TempDir()
+	service := folderagent.NewService(folderagent.Deps{Store: folderagent.NewStore(func(string) (string, error) { return dir, nil })})
+	return New(service, func(context.Context) (string, error) { return "u1", nil })
+}
+
+// The goal offer takes "use" (with an optional edited sentence) or "dismiss";
+// anything else, or an unknown field, is refused before the service is asked.
+// The service answers once (a second answer is ErrWrongState, a 409 above).
+func TestGoal_TakesUseOrDismissOnly(t *testing.T) {
+	cases := map[string]int{
+		`{"answer":"maybe"}`:                     http.StatusBadRequest,
+		`{}`:                                     http.StatusBadRequest,
+		`{"answer":"use","path":"/Users/me"}`:    http.StatusBadRequest,
+		`{"answer":"use"}`:                       http.StatusNotFound,
+		`{"answer":"use","goal":"Finish Album"}`: http.StatusNotFound,
+		`{"answer":"dismiss"}`:                   http.StatusNotFound,
+	}
+	for body, want := range cases {
+		req := httptest.NewRequest(http.MethodPost, "/folder-agent/ws-1/goal", strings.NewReader(body))
+		req.SetPathValue("workspaceID", "ws-1")
+		rec := httptest.NewRecorder()
+		emptyStoreHandler(t).Goal(rec, req)
+		if rec.Code != want {
+			t.Errorf("%s → %d %s, want %d", body, rec.Code, rec.Body.String(), want)
+		}
+	}
+}
+
+// An older card still sends the goal with Set it up: the body is accepted and
+// the goal ignored (folder-setup-ends-in-home FR15), so the request reaches
+// the service rather than failing as a bad request.
+func TestSetUp_AcceptsAndIgnoresAnOlderCardsGoal(t *testing.T) {
+	body := `{"plan_digest":"d","selected":[],"use_goal":true,"goal":"Finish the album"}`
+	req := httptest.NewRequest(http.MethodPost, "/folder-agent/ws-1/setup", strings.NewReader(body))
+	req.SetPathValue("workspaceID", "ws-1")
+	rec := httptest.NewRecorder()
+	emptyStoreHandler(t).SetUp(rec, req)
+	if rec.Code == http.StatusBadRequest {
+		t.Fatalf("an older card's body was refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := setUpOf(setUpRequest{PlanDigest: "d", UseGoal: true, Goal: "Finish"}); got.PlanDigest != "d" {
+		t.Fatalf("set up request = %+v", got)
+	}
+}
+
 func TestWriteError_PlainSentences(t *testing.T) {
 	cases := []struct {
 		err    error

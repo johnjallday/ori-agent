@@ -100,8 +100,9 @@ type Workspaces interface {
 	Exists(workspaceID string) bool
 	Route(workspaceID string) string
 	// SetGoal replaces the workspace goal (the one that drives Backlog
-	// suggestions).
+	// suggestions); Goal reads it ("" when none).
 	SetGoal(workspaceID, goal string) error
+	Goal(workspaceID string) string
 	// AnchorOwners maps each absolute folder that another workspace (not
 	// exclude) is anchored to onto that workspace.
 	AnchorOwners(folders []string, exclude string) map[string]WorkspaceRef
@@ -293,7 +294,10 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 	if err != nil {
 		return View{}, err
 	}
-	req.OwnerUserID, req.Name, req.AnchorPath, req.Mission = userID, s.freeName(ctx, folder), path, brief
+	// The brief is the agent's instruction for its look and stays on the
+	// record; it is not the workspace goal, which only the owner's answer to
+	// the goal offer sets (folder-setup-ends-in-home FR15–FR18).
+	req.OwnerUserID, req.Name, req.AnchorPath = userID, s.freeName(ctx, folder), path
 	created, err := s.deps.Workspaces.CreateAnchored(ctx, req)
 	if err != nil {
 		return View{}, err
@@ -850,11 +854,9 @@ func (s *Service) LookFurther(ctx context.Context, userID, workspaceID string, f
 type SetUpRequest struct {
 	PlanDigest string
 	// Selected are the optional candidates left selected; required ones
-	// always run.
+	// always run. Set it up writes no workspace goal: the suggested goal is
+	// offered once the run is done (AnswerGoal).
 	Selected []string
-	// Goal, when set, is the suggested goal line with "Use this goal"
-	// checked (possibly edited); it becomes the workspace goal (PRD FR28).
-	Goal *string
 }
 
 // SetUp confirms the plan and runs it in the background (PRD FR32).
@@ -864,13 +866,6 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		return View{}, err
 	}
 	selected, planDigest := req.Selected, req.PlanDigest
-	var goal string
-	if req.Goal != nil {
-		goal, err = personalassistant.NormalizeFolderBrief(*req.Goal)
-		if err != nil || folderlook.NamesPath(goal, nil) {
-			return View{}, fmt.Errorf("%w: %s", personalassistant.ErrValidation, "goal")
-		}
-	}
 	plan := BuildPlan(*current, selected)
 	if plan.Digest != planDigest {
 		return View{}, personalassistant.ErrFolderPlanChanged
@@ -910,11 +905,6 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		return View{}, err
 	}
 	s.pin(workspaceID, rec.AgentName, true)
-	if goal != "" {
-		if err := s.deps.Workspaces.SetGoal(workspaceID, goal); err != nil {
-			logger.Warn("Folder agent could not set the workspace goal", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
-		}
-	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -1018,6 +1008,77 @@ func (s *Service) StartNext(ctx context.Context, userID, workspaceID string) (Vi
 	})
 	if err != nil {
 		return View{}, err
+	}
+	return s.viewOf(ctx, rec), nil
+}
+
+// Answers to the suggested-goal offer.
+const (
+	GoalUsed      = "used"
+	GoalDismissed = "dismissed"
+)
+
+// goalOffered says whether the suggested goal is offered now: the run is done,
+// the agent suggested a goal, the owner has not answered, and the workspace has
+// no goal of its own (PRD FR17, FR19).
+func (s *Service) goalOffered(rec *Record) bool {
+	if rec == nil || rec.State != StateSetUp || rec.Setup == nil || rec.Setup.Status != personalassistant.FolderSetupDone ||
+		rec.Sections == nil || strings.TrimSpace(rec.Sections.Goal) == "" || rec.GoalAnswer != "" {
+		return false
+	}
+	if s.deps.Workspaces == nil {
+		return false
+	}
+	// A workspace started before this build carries its brief as its goal;
+	// that is not a goal the owner chose.
+	goal := strings.TrimSpace(s.deps.Workspaces.Goal(rec.WorkspaceID))
+	return goal == "" || goal == strings.TrimSpace(rec.Brief)
+}
+
+// AnswerGoal is the owner's answer to the goal offer: use sets the workspace
+// goal to the suggested sentence, or to edited when given (one line, at most
+// 300 characters, no path); otherwise the offer is dismissed and the goal
+// stays empty. The offer is answered once (PRD FR18).
+func (s *Service) AnswerGoal(ctx context.Context, userID, workspaceID string, use bool, edited *string) (View, error) {
+	current, err := s.Record(userID, workspaceID)
+	if err != nil {
+		return View{}, err
+	}
+	if !s.goalOffered(current) {
+		return View{}, ErrWrongState
+	}
+	goal := current.Sections.Goal
+	if use && edited != nil {
+		goal = *edited
+	}
+	answer := GoalDismissed
+	if use {
+		goal, err = personalassistant.NormalizeFolderBrief(goal)
+		if err != nil || goal == "" || folderlook.NamesPath(goal, nil) {
+			return View{}, fmt.Errorf("%w: %s", personalassistant.ErrValidation, "goal")
+		}
+		answer = GoalUsed
+	}
+	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
+		if r.GoalAnswer != "" {
+			return ErrWrongState
+		}
+		r.GoalAnswer = answer
+		return nil
+	})
+	if err != nil {
+		return View{}, err
+	}
+	if use {
+		if err := s.deps.Workspaces.SetGoal(workspaceID, goal); err != nil {
+			// The answer is not kept when the goal could not be written: the
+			// owner can try again.
+			_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
+				r.GoalAnswer = ""
+				return nil
+			})
+			return View{}, err
+		}
 	}
 	return s.viewOf(ctx, rec), nil
 }

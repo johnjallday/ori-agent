@@ -19,7 +19,10 @@ const ACTION_PATHS = {
   start_next: 'start-next',
   set_up: 'setup',
   keep: 'keep',
-  look_further: 'look-further'
+  look_further: 'look-further',
+  // The goal offer's answers (Use this goal / Save after Edit, and Not now).
+  use_goal: 'goal',
+  dismiss_goal: 'goal'
 };
 
 export function isFolderAgentKind(kind) {
@@ -159,9 +162,6 @@ export function folderAgentReportView(view) {
     nested: view.nested?.name ? `Inside ${view.nested.name}'s folder` : '',
     // The agent's words, as text (never markup), or the sentence in their place.
     whatItIs: String(view.what_it_is || ''),
-    suggestedGoal: String(view.suggested_goal || ''),
-    firstTicket: String(view.first_ticket || ''),
-    firstTicketWhy: String(view.first_ticket_why || ''),
     question: String(view.question || ''),
     askFolders: (Array.isArray(view.ask_folders) ? view.ask_folders : [])
       .filter(folder => folder?.name && folder?.ref)
@@ -170,8 +170,15 @@ export function folderAgentReportView(view) {
     nextTicket: view.next_ticket?.title
       ? { title: String(view.next_ticket.title), started: Boolean(view.next_ticket.started) }
       : null,
-    // The goal is offered while the report waits for an answer.
-    offersGoal: false
+    // The agent's suggested goal, offered once the place exists and only
+    // while the workspace has no goal and the owner has not answered
+    // (folder-setup-ends-in-home FR17–FR19). Never on the report card.
+    goalOffer: view.goal_offer?.goal
+      ? {
+          goal: String(view.goal_offer.goal),
+          maxRunes: Number(view.goal_offer.max_runes) > 0 ? Number(view.goal_offer.max_runes) : 300
+        }
+      : null
   };
   if (out.state === 'looking') {
     out.title = `${agent} is looking around ${folder}`;
@@ -200,7 +207,6 @@ export function folderAgentReportView(view) {
     // Set it up waits for a plan that can run; the card says why it cannot.
     if (!out.plan.runnable) out.actions = out.actions.filter(a => a.id !== 'set_up');
   }
-  out.offersGoal = Boolean(out.suggestedGoal) && out.actions.some(action => action.id === 'set_up');
   if (view.setup) {
     out.setup = {
       status: String(view.setup.status || ''),
@@ -952,6 +958,68 @@ function runPhase(setup) {
 // renderFolderAgentReport draws the receipt or the report. onAction(id,
 // button, extra) posts one action; the caller refreshes. opening says the
 // page is about to open the place: the link gives way to that word.
+// goalOfferSection is the Commander offering the agent's suggested goal once
+// the place exists (folder-setup-ends-in-home FR17, FR18): the sentence, then
+// Use this goal, Edit and Not now. Edit turns the sentence into a one-line
+// input (max_runes characters) with Save and Cancel, in place; Escape cancels.
+function goalOfferSection(doc, offer, onAction) {
+  const section = el(doc, 'section', 'folder-agent-card__goal-offer');
+  section.setAttribute('aria-label', 'Suggested goal');
+  const lead = el(doc, 'p', 'folder-agent-card__goal-lead', 'A goal for this place?');
+  const sentence = el(doc, 'p', 'folder-agent-card__goal-text', offer.goal);
+  const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__goal-actions');
+  const button = (label, action, primary = false) => {
+    const b = el(
+      doc,
+      'button',
+      primary ? 'btn btn-primary btn-sm' : 'btn btn-sm folder-agent-card__secondary',
+      label
+    );
+    b.type = 'button';
+    b.dataset.folderAgentAction = action;
+    return b;
+  };
+  const showOffer = () => {
+    const use = button('Use this goal', 'use_goal', true);
+    use.addEventListener('click', () => onAction?.('use_goal', use, {}));
+    const edit = button('Edit', 'edit_goal');
+    edit.addEventListener('click', showEdit);
+    const later = button('Not now', 'dismiss_goal');
+    later.addEventListener('click', () => onAction?.('dismiss_goal', later, {}));
+    section.replaceChildren(lead, sentence, row);
+    row.replaceChildren(use, edit, later);
+    return use;
+  };
+  function showEdit() {
+    const input = doc.createElement('input');
+    input.type = 'text';
+    input.className = 'folder-agent-card__goal-input';
+    input.maxLength = offer.maxRunes;
+    input.value = offer.goal;
+    input.setAttribute('aria-label', 'Goal');
+    const save = button('Save', 'use_goal', true);
+    const cancel = button('Cancel', 'cancel_goal');
+    const submit = () => {
+      const goal = String(input.value || '').trim();
+      if (goal) onAction?.('use_goal', save, { goal });
+    };
+    save.addEventListener('click', submit);
+    cancel.addEventListener('click', () => showOffer().focus?.());
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') submit();
+      if (event.key === 'Escape') {
+        event.stopPropagation?.();
+        showOffer().focus?.();
+      }
+    });
+    section.replaceChildren(lead, input, row);
+    row.replaceChildren(save, cancel);
+    input.focus?.();
+  }
+  showOffer();
+  return section;
+}
+
 export function renderFolderAgentReport(
   view,
   doc = document,
@@ -1123,51 +1191,9 @@ export function renderFolderAgentReport(
       el(doc, 'p', 'folder-agent-card__next', `Not opened yet: ${view.nextFolders.join(', ')}`)
     );
   }
-  // After setup: the goal (an editable line with "Use this goal" checked
-  // while the report waits; plain text afterwards) and the first ticket, as
-  // two compact rows.
-  let goalInput = null;
-  let goalUse = null;
-  const goalMissing = view.offersGoal || view.suggestedGoal ? null : leftOut('suggested_goal');
-  const ticketMissing = view.firstTicket ? null : leftOut('suggested_first_ticket');
-  if (view.offersGoal || view.suggestedGoal || view.firstTicket || goalMissing || ticketMissing) {
-    const after = el(doc, 'section', 'folder-agent-card__after');
-    after.append(el(doc, 'h4', 'folder-agent-card__heading', 'After setup'));
-    const goalRow = el(doc, 'div', 'folder-agent-card__after-row');
-    goalRow.append(el(doc, 'span', 'folder-agent-card__after-label', 'Goal'));
-    if (view.offersGoal) {
-      goalInput = doc.createElement('input');
-      goalInput.type = 'text';
-      goalInput.className = 'folder-agent-card__goal-input';
-      goalInput.maxLength = 300;
-      goalInput.value = view.suggestedGoal;
-      goalInput.setAttribute('aria-label', 'Suggested goal');
-      const label = el(doc, 'label', 'folder-agent-card__goal-use');
-      goalUse = doc.createElement('input');
-      goalUse.type = 'checkbox';
-      goalUse.checked = true;
-      label.append(goalUse, el(doc, 'span', '', 'Use this goal'));
-      goalRow.append(goalInput, label);
-    } else if (view.suggestedGoal) {
-      goalRow.append(el(doc, 'span', 'folder-agent-card__goal-text', view.suggestedGoal));
-    } else if (goalMissing) {
-      goalRow.append(goalMissing);
-    }
-    if (goalRow.children?.length !== 1 || goalMissing) after.append(goalRow);
-    if (view.firstTicket) {
-      const ticketRow = el(doc, 'div', 'folder-agent-card__after-row');
-      ticketRow.append(el(doc, 'span', 'folder-agent-card__after-label', 'First ticket'));
-      const ticket = el(doc, 'span', 'folder-agent-card__ticket');
-      ticket.append(el(doc, 'span', 'folder-agent-card__ticket-title', view.firstTicket));
-      if (view.firstTicketWhy)
-        ticket.append(el(doc, 'span', 'folder-agent-card__ticket-why', view.firstTicketWhy));
-      ticketRow.append(ticket);
-      after.append(ticketRow);
-    } else if (ticketMissing) {
-      after.append(ticketMissing);
-    }
-    card.append(after);
-  }
+  // The report card shows the steps and its actions only: the goal is offered
+  // once the place exists (goalOffer, below the receipt) and the first ticket
+  // appears in the receipt once it was added (folder-setup-ends-in-home FR14).
   // The one question, above the actions: pick a folder or answer in a line.
   if (view.question && view.actions.some(action => action.id === 'look_further')) {
     const ask = el(doc, 'section', 'folder-agent-card__question');
@@ -1215,6 +1241,7 @@ export function renderFolderAgentReport(
       )
     );
   }
+  if (view.goalOffer) card.append(goalOfferSection(doc, view.goalOffer, onAction));
   if (view.actions.length) {
     const actions = el(doc, 'div', 'folder-agent-card__actions');
     view.actions.forEach((action, index) => {
@@ -1234,15 +1261,8 @@ export function renderFolderAgentReport(
       button.dataset.folderAgentAction = action.id;
       if (action.id === 'set_up') setUpButton = button;
       button.addEventListener('click', () => {
-        // Set it up carries the goal line as the owner left it.
-        let extra;
-        if (action.id === 'set_up') {
-          extra = { selected: [...selected] };
-          if (goalInput) {
-            extra.use_goal = Boolean(goalUse?.checked);
-            extra.goal = String(goalInput.value || '');
-          }
-        }
+        // Set it up carries only the steps the owner left selected.
+        const extra = action.id === 'set_up' ? { selected: [...selected] } : undefined;
         return onAction?.(action.id, button, extra);
       });
       actions.append(button);
@@ -1385,7 +1405,12 @@ export async function postFolderAgentAction(
 ) {
   const url = folderAgentActionPath(view?.workspaceID, action);
   if (!url) return { error: 'That action is not available.' };
-  const body = action === 'set_up' ? { plan_digest: view.plan?.digest || '', ...extra } : extra;
+  let body = extra;
+  if (action === 'set_up') body = { plan_digest: view.plan?.digest || '', ...extra };
+  else if (action === 'use_goal') {
+    const goal = String(extra?.goal || '').trim();
+    body = goal ? { answer: 'use', goal } : { answer: 'use' };
+  } else if (action === 'dismiss_goal') body = { answer: 'dismiss' };
   const { ok, payload } = await post(url, body, fetchImpl);
   if (!ok) {
     return {

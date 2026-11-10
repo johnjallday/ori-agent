@@ -213,7 +213,9 @@ func (h *Handler) LookFurther(w http.ResponseWriter, r *http.Request) {
 type setUpRequest struct {
 	PlanDigest string   `json:"plan_digest"`
 	Selected   []string `json:"selected"`
-	// UseGoal is "Use this goal" checked; Goal the (possibly edited) line.
+	// UseGoal and Goal are what an older card sent with Set it up. They are
+	// accepted and ignored: Set it up writes no goal; the goal is offered
+	// once the run is done (Goal).
 	UseGoal bool   `json:"use_goal"`
 	Goal    string `json:"goal"`
 }
@@ -244,12 +246,44 @@ func (h *Handler) SetUp(w http.ResponseWriter, r *http.Request) {
 }
 
 func setUpOf(req setUpRequest) folderagent.SetUpRequest {
-	out := folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected}
-	if req.UseGoal && strings.TrimSpace(req.Goal) != "" {
-		goal := req.Goal
-		out.Goal = &goal
+	return folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected}
+}
+
+type goalRequest struct {
+	// Answer is "use" (Use this goal, or Save after Edit) or "dismiss" (Not
+	// now). Goal is the edited sentence; empty keeps the suggested one.
+	Answer string `json:"answer"`
+	Goal   string `json:"goal"`
+}
+
+// Goal answers the suggested-goal offer the done run shows.
+func (h *Handler) Goal(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.user(w, r)
+	if !ok {
+		return
 	}
-	return out
+	var req goalRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	var edited *string
+	switch req.Answer {
+	case "use":
+		if strings.TrimSpace(req.Goal) != "" {
+			goal := req.Goal
+			edited = &goal
+		}
+	case "dismiss":
+	default:
+		fail(w, http.StatusBadRequest, "Answer use or dismiss")
+		return
+	}
+	view, err := h.service.AnswerGoal(r.Context(), userID, r.PathValue("workspaceID"), req.Answer == "use", edited)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"folder_agent": view})
 }
 
 type planRequest struct {

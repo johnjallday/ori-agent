@@ -69,10 +69,20 @@ type View struct {
 	// NextTicket is the agent's first ticket, created when Set it up
 	// finished; Start this starts it.
 	NextTicket *NextTicketView `json:"next_ticket,omitempty"`
+	// GoalOffer is the agent's suggested goal, offered once the run is done
+	// and while the workspace has no goal and the owner has not answered
+	// (Use this goal, Edit, Not now). Nil otherwise.
+	GoalOffer *GoalOfferView `json:"goal_offer,omitempty"`
 	// Landing is where a watched run goes once it finished with every step
 	// done and its plan included the Home step: the Home's Map, asking it to
 	// open the projects sheet. Nil for every other run, which keeps Route.
 	Landing *Landing `json:"landing,omitempty"`
+}
+
+// GoalOfferView is the sentence the offer shows; MaxRunes bounds an edit.
+type GoalOfferView struct {
+	Goal     string `json:"goal"`
+	MaxRunes int    `json:"max_runes"`
 }
 
 // Landing names the Home a finished run lands in, for the card's "Opening
@@ -205,6 +215,9 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	plan := BuildPlan(*rec, selected)
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
+	if s.goalOffered(rec) {
+		v.GoalOffer = &GoalOfferView{Goal: rec.Sections.Goal, MaxRunes: personalassistant.BriefMaxRunes}
+	}
 	switch rec.State {
 	case StateReported:
 		v.Actions = []string{ActionSetUp, ActionKeep, ActionLookFurther}

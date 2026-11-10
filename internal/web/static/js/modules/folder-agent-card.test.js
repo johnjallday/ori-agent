@@ -450,13 +450,17 @@ test('Needs you mounts only folder agent reports and redraws an error in place',
   assert.equal(done, 0);
 });
 
-test('the agent sections render as text, the goal travels with Set it up', () => {
+// The report card is the steps and the actions: no "After setup", no goal
+// input, no first-ticket preview, and Set it up sends only the steps
+// (folder-setup-ends-in-home FR14).
+test('the report card shows what it is, the steps and its actions; Set it up sends only the steps', () => {
   const view = folderAgentReportView(
     reported({
       what_it_is: 'Seven songs and a sketch across two album folders.',
       suggested_goal: 'Keep these songs moving toward release.',
       first_ticket: 'List the five songs saved most recently.',
       first_ticket_why: 'Seeing what moved last shows where to start.',
+      left_out: { suggested_goal: 'left out', suggested_first_ticket: 'left out' },
       model_sentence: '',
       tools_sentence: '',
       plan: {
@@ -466,29 +470,101 @@ test('the agent sections render as text, the goal travels with Set it up', () =>
       }
     })
   );
-  assert.equal(view.offersGoal, true);
+  assert.equal(view.goalOffer, null, 'no goal offer on the report card');
   const calls = [];
   const card = renderFolderAgentReport(view, stubDocument(), {
     onAction: (action, _button, extra) => calls.push([action, extra])
   });
   assert.equal(text(card, '.folder-agent-card__what'), view.whatItIs);
-  assert.equal(text(card, '.folder-agent-card__ticket-title'), view.firstTicket);
-  assert.equal(text(card, '.folder-agent-card__ticket-why'), view.firstTicketWhy);
-  // The goal is the first "After setup" row: its label, the input, Use this goal.
-  const goal = card.querySelector('.folder-agent-card__after-row');
-  const [input, label] = goal.children.slice(1);
-  assert.equal(input.value, 'Keep these songs moving toward release.');
-  input.value = 'Finish two songs this month';
-  const setUp = () =>
-    card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
-  setUp().listeners.click();
-  assert.deepEqual(plain(calls[0]), [
-    'set_up',
-    { selected: [], use_goal: true, goal: 'Finish two songs this month' }
+  for (const gone of [
+    '.folder-agent-card__after',
+    '.folder-agent-card__goal-input',
+    '.folder-agent-card__goal-offer',
+    '.folder-agent-card__ticket-title',
+    '.folder-agent-card__degraded'
+  ]) {
+    assert.equal(card.querySelector(gone), null, gone);
+  }
+  assert.equal(card.querySelectorAll('input').filter(i => i.type === 'text').length, 0);
+  card
+    .querySelectorAll('button')
+    .find(b => b.dataset.folderAgentAction === 'set_up')
+    .listeners.click();
+  assert.deepEqual(plain(calls[0]), ['set_up', { selected: [] }]);
+});
+
+// After the run, the receipt keeps "First ticket" and Start this (FR20), and
+// the Commander offers the goal: Use this goal, Edit (Save, Cancel), Not now
+// (FR17, FR18).
+test('a done run offers the goal: use it, edit and save it, or not now', async () => {
+  const view = folderAgentReportView(
+    setUp({
+      goal_offer: { goal: 'Keep these songs moving toward release.', max_runes: 300 },
+      next_ticket: { id: 't1', title: 'List the five songs saved most recently.', started: false },
+      actions: ['start_next', 'look_further']
+    })
+  );
+  assert.deepEqual(view.goalOffer, {
+    goal: 'Keep these songs moving toward release.',
+    maxRunes: 300
+  });
+  const calls = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    onAction: (action, _button, extra) => calls.push([action, extra])
+  });
+  assert.equal(
+    text(card, '.folder-agent-card__next-ticket'),
+    'First ticket: List the five songs saved most recently.'
+  );
+  assert.ok(
+    card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'start_next')
+  );
+  const offer = card.querySelector('.folder-agent-card__goal-offer');
+  assert.equal(
+    text(offer, '.folder-agent-card__goal-text'),
+    'Keep these songs moving toward release.'
+  );
+  const pick = id => offer.querySelectorAll('button').find(b => b.dataset.folderAgentAction === id);
+  assert.deepEqual(
+    offer.querySelectorAll('button').map(b => b.textContent),
+    ['Use this goal', 'Edit', 'Not now']
+  );
+  pick('use_goal').listeners.click();
+  pick('dismiss_goal').listeners.click();
+  assert.deepEqual(plain(calls), [
+    ['use_goal', {}],
+    ['dismiss_goal', {}]
   ]);
-  label.children[0].checked = false;
-  setUp().listeners.click();
-  assert.equal(calls[1][1].use_goal, false);
+  // Edit: a one-line input with the sentence, Save and Cancel.
+  pick('edit_goal').listeners.click();
+  const input = offer.querySelector('.folder-agent-card__goal-input');
+  assert.equal(input.value, 'Keep these songs moving toward release.');
+  assert.equal(input.maxLength, 300);
+  assert.deepEqual(
+    offer.querySelectorAll('button').map(b => b.textContent),
+    ['Save', 'Cancel']
+  );
+  input.value = '  Finish two songs this month ';
+  pick('use_goal').listeners.click();
+  assert.deepEqual(plain(calls[2]), ['use_goal', { goal: 'Finish two songs this month' }]);
+  pick('cancel_goal').listeners.click();
+  assert.equal(offer.querySelector('.folder-agent-card__goal-input'), null);
+  assert.ok(pick('edit_goal'), 'Cancel brings the offer back');
+
+  // The answers post to the goal endpoint.
+  const posts = [];
+  const fetchImpl = async (url, init) => {
+    posts.push([url, JSON.parse(init.body)]);
+    return okJSON({ folder_agent: null });
+  };
+  await postFolderAgentAction(view, 'use_goal', fetchImpl, { goal: 'Finish it' });
+  await postFolderAgentAction(view, 'use_goal', fetchImpl, {});
+  await postFolderAgentAction(view, 'dismiss_goal', fetchImpl, {});
+  assert.deepEqual(posts, [
+    ['/api/personal-assistant/folder-agent/ws-1/goal', { answer: 'use', goal: 'Finish it' }],
+    ['/api/personal-assistant/folder-agent/ws-1/goal', { answer: 'use' }],
+    ['/api/personal-assistant/folder-agent/ws-1/goal', { answer: 'dismiss' }]
+  ]);
 });
 
 test('every offered step has a box; unticking one refreshes the plan and Set it up carries the handles', async () => {
@@ -1248,7 +1324,8 @@ test('a left-out part shows one muted sentence in its place', () => {
     .querySelectorAll('.folder-agent-card__degraded')
     .map(n => n.textContent)
     .filter(t => t === 'Demo Manager left this part out.');
-  assert.equal(muted.length, 2);
+  // Only "what it is" is on the report card now; the goal is offered later.
+  assert.equal(muted.length, 1);
   assert.equal(card.querySelector('.folder-agent-card__what'), null);
 });
 
@@ -1403,7 +1480,7 @@ test('the workspace page mount follows a look until the report arrives', async (
   assert.equal(none.hidden, true);
 });
 
-test('the compact card drops its title and keeps the plan, goal and actions with their handlers', () => {
+test('the compact card drops its title and keeps the plan and actions with their handlers', () => {
   const view = folderAgentReportView(
     reported({
       suggested_goal: 'Finish one song a week',
@@ -1417,10 +1494,7 @@ test('the compact card drops its title and keeps the plan, goal and actions with
   });
   assert.ok(card.className.includes('folder-agent-card--compact'));
   assert.equal(card.querySelector('.folder-agent-card__title'), null);
-  assert.equal(
-    card.querySelector('.folder-agent-card__goal-input').value,
-    'Finish one song a week'
-  );
+  assert.equal(card.querySelector('.folder-agent-card__goal-input'), null);
   const buttons = card.querySelectorAll('button').filter(b => b.dataset.folderAgentAction);
   assert.deepEqual(
     buttons.map(b => b.dataset.folderAgentAction),

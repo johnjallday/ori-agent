@@ -17,8 +17,6 @@ import (
 const (
 	// MaxScopedScans bounds the scoped scans one Set it up commits.
 	MaxScopedScans = 48
-	// HomeGoal is the folder workspace's goal once it joined a Home (FR39).
-	HomeGoal = "Watch this folder for the Home"
 )
 
 // LibraryScope is one scope the Home's library issued for the root: its id

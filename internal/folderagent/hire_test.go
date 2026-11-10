@@ -77,7 +77,7 @@ func TestHire_NewAgentCarriesNameModelAndMandate(t *testing.T) {
 	h.svc.Wait()
 	req := h.ws.created[0]
 	if req.BindExisting || req.AgentName != "Song Keeper" || req.Provider != "openai" || req.Model != "gpt-x" ||
-		req.Mandate != "Keep my songs moving" || req.Mission != "List the songs" || view.AgentName != "Song Keeper" {
+		req.Mandate != "Keep my songs moving" || req.Mission != "" || view.AgentName != "Song Keeper" {
 		t.Fatalf("create = %+v view agent %q", req, view.AgentName)
 	}
 	// No mandate: the brief is the mandate; no model sent: "No model yet".

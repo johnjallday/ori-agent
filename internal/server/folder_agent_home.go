@@ -307,8 +307,9 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	setLine(songsLine, personalassistant.FolderLineDone, fmt.Sprintf("Listed %d %s on the shelf", listed, foldermap.ShapeNoun(shape, listed)))
 	receipt.listed, receipt.listedNoun, receipt.unreached = listed, foldermap.ShapeNoun(shape, listed), len(unreached)
 
-	// Placement: the workspace inside the Home's district, its goal the
-	// Home's; its agent stays.
+	// Placement: the workspace inside the Home's district; its agent stays.
+	// No goal is written: the agent's suggested goal is offered once the run
+	// is done, and only the owner's answer sets one.
 	placeLine := line(folderagent.FolderPlanPlace)
 	setLine(placeLine, personalassistant.FolderLineWorking, "Placing "+rec.WorkspaceName)
 	mover, ok := b.workspaceStore.(interface {
@@ -323,9 +324,6 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 			setLine(placeLine, personalassistant.FolderLineFailed, "")
 			return stop(personalassistant.FolderStopFailed, err)
 		}
-	}
-	if err := (folderAgentWorkspaces{builder: b}).SetGoal(rec.WorkspaceID, folderagent.HomeGoal); err != nil {
-		logger.Warn("Folder agent could not set the Home goal", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
 	}
 	setLine(placeLine, personalassistant.FolderLineDone, "Placed "+rec.WorkspaceName+" inside your "+homeName)
 	return receipt, nil

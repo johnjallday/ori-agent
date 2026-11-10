@@ -272,18 +272,24 @@ func TestTurn_SkippedWhenTheModelIsMissingOrDown(t *testing.T) {
 	}
 }
 
-func TestSetUp_UsesTheGoalAndOffersTheFirstTicket(t *testing.T) {
+// Set it up writes no goal (folder-setup-ends-in-home FR15) and still adds the
+// agent's first ticket to the backlog, not started (FR20). The goal is set only
+// by the owner's answer to the offer, once (FR18).
+func TestSetUp_WritesNoGoalAndAddsTheFirstTicket(t *testing.T) {
 	h := newHarness(t, build(t, "Song.rpp"))
 	withTurns(h, &scriptedTurns{responses: []*llm.ChatResponse{{Content: demoReport}}})
 	view := h.start(t, "")
 	report, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
-	goal := "Finish this song by Friday"
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest, Goal: &goal}); err != nil {
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
-	if h.ws.goals[view.WorkspaceID] != goal {
-		t.Fatalf("goal = %q", h.ws.goals[view.WorkspaceID])
+	if goal, set := h.ws.goals[view.WorkspaceID]; set {
+		t.Fatalf("Set it up wrote the goal %q", goal)
+	}
+	rec, _ := h.svc.Record("u1", view.WorkspaceID)
+	if rec.Sections == nil || rec.Sections.Goal == "" {
+		t.Fatalf("the suggested goal was not kept for the offer: %+v", rec.Sections)
 	}
 	done, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
 	if done.NextTicket == nil || done.NextTicket.Started || done.Actions[0] != ActionStartNext {
@@ -303,8 +309,105 @@ func TestSetUp_UsesTheGoalAndOffersTheFirstTicket(t *testing.T) {
 	if _, err := h.svc.StartNext(context.Background(), "u1", view.WorkspaceID); !errors.Is(err, ErrWrongState) {
 		t.Fatalf("second start = %v", err)
 	}
+
+	// Edit then Save: a path is refused and nothing is answered; the edited
+	// sentence is kept; a second answer is refused.
 	bad := "Go to /Users/me"
-	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest, Goal: &bad}); !errors.Is(err, personalassistant.ErrValidation) {
+	if _, err := h.svc.AnswerGoal(context.Background(), "u1", view.WorkspaceID, true, &bad); !errors.Is(err, personalassistant.ErrValidation) {
 		t.Fatalf("a goal with a path = %v", err)
 	}
+	long := strings.Repeat("a", 301)
+	if _, err := h.svc.AnswerGoal(context.Background(), "u1", view.WorkspaceID, true, &long); !errors.Is(err, personalassistant.ErrValidation) {
+		t.Fatalf("a goal over 300 characters = %v", err)
+	}
+	edited := "  Finish this song   by Friday "
+	if _, err := h.svc.AnswerGoal(context.Background(), "u1", view.WorkspaceID, true, &edited); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.ws.goals[view.WorkspaceID]; got != "Finish this song by Friday" {
+		t.Fatalf("goal = %q", got)
+	}
+	if _, err := h.svc.AnswerGoal(context.Background(), "u1", view.WorkspaceID, false, nil); !errors.Is(err, ErrWrongState) {
+		t.Fatalf("a second answer = %v", err)
+	}
+}
+
+func TestAnswerGoal_UseKeepsTheSuggestionAndNotNowLeavesNoGoal(t *testing.T) {
+	run := func(t *testing.T) (*harness, string) {
+		h := newHarness(t, build(t, "Song.rpp"))
+		withTurns(h, &scriptedTurns{responses: []*llm.ChatResponse{{Content: demoReport}}})
+		view := h.start(t, "")
+		// Not offered before the run is done.
+		if _, err := h.svc.AnswerGoal(context.Background(), "u1", view.WorkspaceID, true, nil); !errors.Is(err, ErrWrongState) {
+			t.Fatalf("an answer before setup = %v", err)
+		}
+		report, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
+		if report.GoalOffer != nil {
+			t.Fatalf("offered on the report card: %+v", report.GoalOffer)
+		}
+		if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); err != nil {
+			t.Fatal(err)
+		}
+		h.svc.Wait()
+		return h, view.WorkspaceID
+	}
+	t.Run("use this goal", func(t *testing.T) {
+		h, id := run(t)
+		rec, _ := h.svc.Record("u1", id)
+		offered, _ := h.svc.View(context.Background(), "u1", id)
+		if offered.GoalOffer == nil || offered.GoalOffer.Goal != rec.Sections.Goal || offered.GoalOffer.MaxRunes != 300 {
+			t.Fatalf("goal offer after a done run = %+v", offered.GoalOffer)
+		}
+		answered, err := h.svc.AnswerGoal(context.Background(), "u1", id, true, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if answered.GoalOffer != nil {
+			t.Fatalf("the offer stayed after its answer: %+v", answered.GoalOffer)
+		}
+		if got := h.ws.goals[id]; got != rec.Sections.Goal {
+			t.Fatalf("goal = %q, want the suggestion %q", got, rec.Sections.Goal)
+		}
+	})
+	t.Run("not now", func(t *testing.T) {
+		h, id := run(t)
+		if _, err := h.svc.AnswerGoal(context.Background(), "u1", id, false, nil); err != nil {
+			t.Fatal(err)
+		}
+		if goal, set := h.ws.goals[id]; set {
+			t.Fatalf("Not now set the goal %q", goal)
+		}
+		if rec, _ := h.svc.Record("u1", id); rec.GoalAnswer != GoalDismissed {
+			t.Fatalf("answer = %q", rec.GoalAnswer)
+		}
+		if after, _ := h.svc.View(context.Background(), "u1", id); after.GoalOffer != nil {
+			t.Fatalf("Not now: the offer came back: %+v", after.GoalOffer)
+		}
+	})
+	// A workspace started before this build carries its brief as its goal:
+	// still offered, and Use this goal replaces it.
+	t.Run("an older workspace's brief as goal", func(t *testing.T) {
+		h, id := run(t)
+		rec, _ := h.svc.Record("u1", id)
+		_ = h.ws.SetGoal(id, rec.Brief)
+		if view, _ := h.svc.View(context.Background(), "u1", id); view.GoalOffer == nil {
+			t.Fatal("no offer over a brief that was copied into the goal")
+		}
+		if _, err := h.svc.AnswerGoal(context.Background(), "u1", id, true, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := h.ws.goals[id]; got != rec.Sections.Goal {
+			t.Fatalf("goal = %q", got)
+		}
+	})
+	t.Run("a goal of its own", func(t *testing.T) {
+		h, id := run(t)
+		_ = h.ws.SetGoal(id, "Mine")
+		if view, _ := h.svc.View(context.Background(), "u1", id); view.GoalOffer != nil {
+			t.Fatalf("offered over the owner's own goal: %+v", view.GoalOffer)
+		}
+		if _, err := h.svc.AnswerGoal(context.Background(), "u1", id, true, nil); !errors.Is(err, ErrWrongState) {
+			t.Fatalf("an offer over the owner's own goal = %v", err)
+		}
+	})
 }

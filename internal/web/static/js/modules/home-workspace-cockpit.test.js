@@ -31,6 +31,7 @@ import {
   setupProjectsDeepLink,
   setupSheetShouldOpen,
   watchedRunsToOpen,
+  speakingFolderAgents,
   searchForView,
   readCount,
   formatCount,
@@ -177,6 +178,19 @@ test('parseViewFromQuery: the query is authoritative when it carries a valid vie
   // Case and surrounding whitespace must not defeat a legitimate deep link.
   assert.equal(parseViewFromQuery('?view=TREE'), VIEW_TREE);
   assert.equal(parseViewFromQuery('?view=%20tree%20'), VIEW_TREE);
+});
+
+// The goal offer belongs to the folder's own workspace: Home's map never
+// voices a finished run, so it never covers the projects sheet there
+// (folder-setup-ends-in-home FR21).
+test("Home's map never speaks a done run's goal offer", () => {
+  const offering = {
+    workspace_id: 'ws-a',
+    state: 'set_up',
+    setup: { status: 'done' },
+    goal_offer: { goal: 'Finish the album' }
+  };
+  assert.deepEqual(speakingFolderAgents([offering]), []);
 });
 
 test('a run set up from a map balloon opens once it finished; a stopped one is let go', () => {
