@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -46,8 +48,16 @@ func newNestedSongFixture(t *testing.T) *nestedSongFixture {
 // Home through the ordinary link path.
 func (f *nestedSongFixture) linkSong(t *testing.T, id, parentID string) *Workspace {
 	t.Helper()
+	return f.linkSongWith(t, id, parentID, nil)
+}
+
+func (f *nestedSongFixture) linkSongWith(t *testing.T, id, parentID string, prepare func(*Workspace)) *Workspace {
+	t.Helper()
 	song := NewWorkspace(CreateWorkspaceParams{Name: id})
 	song.ID, song.OwnerUserID, song.ParentID = id, "owner-1", parentID
+	if prepare != nil {
+		prepare(song)
+	}
 	song.SetTemplateProvenance(&TemplateProvenance{
 		TemplateID:       "plugin:neutral:project",
 		PluginOwner:      &PluginTemplateOwner{PluginID: "neutral", PluginVersion: "1.0.0", BlueprintID: "project", BlueprintVersion: 1},
@@ -91,6 +101,58 @@ func TestNestedSong_StrayLinkedSongStillHealsIntoTheHome(t *testing.T) {
 	song := f.linkSong(t, "loose", "")
 	if song.ParentID != f.home.ID {
 		t.Fatalf("a top-level linked song heals to the Home as before, got parent %q", song.ParentID)
+	}
+}
+
+// anchorAlbums anchors the fixture's Albums group to a music folder and
+// returns a song folder inside it.
+func (f *nestedSongFixture) anchorAlbums(t *testing.T, kind string) string {
+	t.Helper()
+	music := t.TempDir()
+	songFolder := filepath.Join(music, "Album-1")
+	if err := os.MkdirAll(songFolder, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Update(f.albums.ID, func(albums *Workspace) error {
+		albums.Kind = kind
+		if albums.SharedData == nil {
+			albums.SharedData = map[string]any{}
+		}
+		albums.SharedData[AnchorDirectoryReferenceIDKey] = "albums-anchor"
+		return albums.AddDirectoryReference(DirectoryReference{ID: "albums-anchor", Name: "Albums", Path: music})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return songFolder
+}
+
+func attachSongFolder(folder string) func(*Workspace) {
+	return func(song *Workspace) {
+		song.SharedData = map[string]any{}
+		_ = song.AddDirectoryReference(DirectoryReference{ID: "song-folder", Name: "Album-1", Path: folder})
+		_ = SetProjectEntryLocator(song.SharedData, ProjectEntryLocator{SchemaVersion: ProjectEntryLocatorSchemaVersion,
+			Kind: ProjectEntryDirectoryReference, DirectoryReferenceID: "song-folder", RelativePath: "Album-1.rpp"})
+	}
+}
+
+// FR9: a stray linked song heals to the parent a new set-up would choose: the
+// covering folder workspace when it is already a group, else the station.
+func TestNestedSong_StraySongHealsIntoItsCoveringGroup(t *testing.T) {
+	f := newNestedSongFixture(t)
+	song := f.linkSongWith(t, "album-1", "", attachSongFolder(f.anchorAlbums(t, "group")))
+	if song.ParentID != f.albums.ID {
+		t.Fatalf("a stray covered song healed to %q, want the folder group %q", song.ParentID, f.albums.ID)
+	}
+}
+
+func TestNestedSong_StraySongHealsIntoTheHomeWhenItsFolderIsALeaf(t *testing.T) {
+	f := newNestedSongFixture(t)
+	song := f.linkSongWith(t, "album-1", "", attachSongFolder(f.anchorAlbums(t, "")))
+	if song.ParentID != f.home.ID {
+		t.Fatalf("healing promoted or used a leaf: parent %q, want the Home", song.ParentID)
+	}
+	if albums, _ := f.store.Get(f.albums.ID); albums.Kind == "group" {
+		t.Fatal("healing promoted a folder workspace")
 	}
 }
 

@@ -340,6 +340,9 @@ export async function runSetup({
     let workspaceId = '';
     let stage = 'connection';
     let created = false;
+    // Set only when the song was meant for its folder workspace and went
+    // directly into the Home instead; the server says why in one sentence.
+    let placementNote = '';
     try {
       const detail = await client.request(path);
       workspaceId = String(detail?.row?.workspace_id || '');
@@ -364,6 +367,7 @@ export async function runSetup({
           confirm: true
         });
         workspaceId = String(committed?.workspace_id || '');
+        placementNote = String(committed?.placement_note || '').trim();
         created = true;
       }
       let staffed = { state: 'not_requested' };
@@ -384,6 +388,7 @@ export async function runSetup({
         }
       }
       const result = { ...item, workspaceId, created, staffing: staffed };
+      if (placementNote) result.placementNote = placementNote;
       done.push(result);
       onProgress(item, 'done', result);
     } catch (error) {

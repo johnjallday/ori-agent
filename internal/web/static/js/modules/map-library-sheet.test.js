@@ -435,6 +435,23 @@ test('summarizeRun never calls a connected but unstaffed project fully set up', 
   );
 });
 
+test('summarizeRun adds the one placement reason for a song that went into the Home instead', () => {
+  const note =
+    'Album-1 went into your Music Home, not into Albums, because it has a running ticket.';
+  assert.equal(
+    summarizeRun(
+      { done: [{ placementNote: note }, {}], failed: null, remaining: [] },
+      null,
+      createPlan
+    ),
+    `2 projects are on the map. ${note}`
+  );
+  assert.equal(
+    summarizeRun({ done: [{}, {}], failed: null, remaining: [] }, null, createPlan),
+    '2 projects are on the map.'
+  );
+});
+
 test('sheetPosition sits beside the anchor, falls below when there is no room, and stays in view', () => {
   const size = { width: 440, height: 500 };
   const view = { width: 1400, height: 900 };

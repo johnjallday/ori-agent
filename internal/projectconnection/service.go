@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -124,12 +125,22 @@ type Preview struct {
 	OwnerDigest   string
 	selectedRoot  string
 	selectedEntry string
+	// coveringParentID is the folder workspace inside the Home whose anchored
+	// folder contains the selected song folder, chosen from server state.
+	// Empty means the song goes directly under the Home.
+	coveringParentID string
 }
 
 type CommitResult struct {
 	HomeWorkspaceID    string
 	ProjectWorkspaceID string
 	ModeID             projecttemplates.ProjectConnectionMode
+	// ParentWorkspaceID is where the project was placed: the Home, or a
+	// folder workspace inside it.
+	ParentWorkspaceID string `json:"parent_workspace_id,omitempty"`
+	// PlacementNote is one plain sentence, set only when the song was meant
+	// for a folder workspace and went directly into the Home instead.
+	PlacementNote string `json:"placement_note,omitempty"`
 }
 
 func NormalizeRequest(request Request) Request {
@@ -176,6 +187,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		ModeID: request.ModeID, WorkspaceName: request.WorkspaceName, ProjectName: request.ProjectName,
 	}}
 	groupOwnerDigest := ""
+	destinationHomeID := ""
 	if scope.Template.GroupRequirement != nil {
 		if s.grouping == nil {
 			return Preview{}, ErrUnavailable
@@ -196,6 +208,9 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		case grouprequirements.StateReadyGrouped:
 			preview.Projection.ParentWorkspaceName = evaluation.HomeName
 			preview.Projection.HomeWillBeCreated = evaluation.HomeWillBeCreated
+			if !evaluation.HomeWillBeCreated {
+				destinationHomeID = evaluation.HomeWorkspaceID
+			}
 		default:
 			if evaluation.State == grouprequirements.StateSourceUnavailable || evaluation.State == grouprequirements.StateTargetAmbiguous {
 				return Preview{}, ErrUnavailable
@@ -219,6 +234,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		preview.Projection.HomeWillBeCreated = errors.Is(stationErr, workspace.ErrAssistantStationNotFound)
 		if stationErr == nil && station != nil {
 			preview.Projection.ParentWorkspaceName = station.Name
+			destinationHomeID = station.ID
 		}
 	}
 	switch request.ModeID {
@@ -246,7 +262,17 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		preview.Projection.SelectedFolder = scan.Root
 		preview.Projection.EntryName = entry
 		preview.Projection.EntryCandidates = append([]string(nil), scan.Candidates...)
-		preview.OwnerDigest = digestStrings(templateIdentity(scope.Template), groupOwnerDigest, scan.Digest, entry)
+		ownerParts := []string{templateIdentity(scope.Template), groupOwnerDigest, scan.Digest, entry}
+		if destinationHomeID != "" {
+			// The reviewed destination is part of the review: a folder workspace
+			// that appears, leaves or moves before commit is a changed review.
+			// A song bound for the Home itself keeps today's exact digest.
+			if covering := s.coveringFolderWorkspace(destinationHomeID, scan.Root); covering != nil {
+				preview.coveringParentID = covering.ID
+				ownerParts = append(ownerParts, "parent:"+covering.ID)
+			}
+		}
+		preview.OwnerDigest = digestStrings(ownerParts...)
 	case projecttemplates.ProjectConnectionNewProject:
 		if strings.TrimSpace(request.SelectionToken) != "" || request.EntryName != "" || !validDisplayName(request.ProjectName) || !scope.Template.HasSkeleton {
 			return Preview{}, ErrInvalid
@@ -324,10 +350,17 @@ func (s *Service) Commit(ctx context.Context, scope Scope, request Request, revi
 		}
 	}
 
+	parentID, placementNote := "", ""
+	if home != nil {
+		parentID = home.ID
+		if current.coveringParentID != "" {
+			parentID, placementNote = s.prepareCoveringParent(current.coveringParentID, home, request.WorkspaceName)
+		}
+	}
 	childID := connectionChildID(scope.RunID)
 	_, childLookupErr := s.store.Get(childID)
 	childCreated := childLookupErr != nil
-	child, err := s.ensureChild(scope, request, current, home, childID, groupSnapshot)
+	child, err := s.ensureChild(scope, request, current, home, parentID, childID, groupSnapshot)
 	if err != nil {
 		s.rollbackNewState(scope.RunID, home, homeCreated, childID, childCreated)
 		return CommitResult{}, err
@@ -353,11 +386,48 @@ func (s *Service) Commit(ctx context.Context, scope Scope, request Request, revi
 		s.recordCreatedWorkspace(home.ID)
 	}
 	s.recordCreatedWorkspace(child.ID)
-	result := CommitResult{ProjectWorkspaceID: child.ID, ModeID: request.ModeID}
+	result := CommitResult{ProjectWorkspaceID: child.ID, ModeID: request.ModeID, ParentWorkspaceID: child.ParentID, PlacementNote: placementNote}
 	if home != nil {
 		result.HomeWorkspaceID = home.ID
 	}
 	return result, nil
+}
+
+// coveringFolderWorkspace reads the Home's subtree from the store and returns
+// the folder workspace that should hold a song from songFolder, or nil.
+func (s *Service) coveringFolderWorkspace(homeID, songFolder string) *workspace.Workspace {
+	ids, err := s.store.List()
+	if err != nil {
+		return nil
+	}
+	all := make([]*workspace.Workspace, 0, len(ids))
+	for _, id := range ids {
+		if candidate, getErr := s.store.Get(id); getErr == nil && candidate != nil {
+			all = append(all, candidate)
+		}
+	}
+	return workspace.CoveringFolderWorkspace(all, s.store.Get, homeID, songFolder)
+}
+
+// prepareCoveringParent makes the reviewed folder workspace able to hold the
+// song, inside the same set-up (FR2): a folder workspace that joined the Home
+// before nesting is still a plain workspace and is promoted in place first.
+// When promotion is refused, the song goes directly into the Home as before
+// and the returned note says why in one plain sentence. A promotion whose
+// song creation later fails leaves an empty group behind, which is harmless.
+func (s *Service) prepareCoveringParent(coveringID string, home *workspace.Workspace, songName string) (string, string) {
+	covering, err := s.store.Get(coveringID)
+	if err != nil || covering == nil || !workspace.ParentInsideStation(s.store.Get, covering.ID, covering.ParentID, home.ID) {
+		return home.ID, ""
+	}
+	if _, err := workspace.PromoteWorkspaceToGroup(s.store, covering.ID); err != nil {
+		reason := "it can't hold songs right now"
+		if errors.Is(err, workspace.ErrPromoteActiveWork) {
+			reason = "it has a running ticket"
+		}
+		return home.ID, fmt.Sprintf("%s went into your %s, not into %s, because %s.", songName, home.Name, covering.Name, reason)
+	}
+	return covering.ID, ""
 }
 
 // ObservedResult discovers and verifies the deterministic child consequence,
@@ -398,7 +468,8 @@ func (s *Service) ObservedResult(scope Scope, homeID, projectID string) (CommitR
 	if !s.Observe(scope, homeID, projectID, mode) {
 		return CommitResult{}, false
 	}
-	return CommitResult{HomeWorkspaceID: homeID, ProjectWorkspaceID: projectID, ModeID: mode}, true
+	// The placement note is a one-time receipt line; the parent is canonical.
+	return CommitResult{HomeWorkspaceID: homeID, ProjectWorkspaceID: projectID, ModeID: mode, ParentWorkspaceID: project.ParentID}, true
 }
 
 // Observe verifies the durable canonical consequences for reconciliation. It
@@ -485,17 +556,17 @@ func (s *Service) projectRecord(id string) (*workspace.Workspace, error) {
 	return project, nil
 }
 
-func (s *Service) ensureChild(scope Scope, request Request, preview Preview, home *workspace.Workspace, childID string, groupSnapshot *workspace.GroupRequirementSnapshot) (*workspace.Workspace, error) {
-	expectedParentID := ""
-	if home != nil {
-		expectedParentID = home.ID
-	}
+func (s *Service) ensureChild(scope Scope, request Request, preview Preview, home *workspace.Workspace, expectedParentID, childID string, groupSnapshot *workspace.GroupRequirementSnapshot) (*workspace.Workspace, error) {
 	if existing, err := s.store.Get(childID); err == nil && existing != nil {
 		existing, err = s.projectRecord(childID)
 		if err != nil {
 			return nil, ErrUnavailable
 		}
-		if existing.OwnerUserID != scope.OwnerUserID || existing.ParentID != expectedParentID || existing.SharedData[connectionRunKey] != scope.RunID {
+		// A retry may find this run's child where an earlier attempt placed it:
+		// directly under the Home after a refused promotion, or in the folder.
+		placed := existing.ParentID == expectedParentID ||
+			(home != nil && workspace.WorkspaceInsideStation(s.store.Get, existing, home.ID))
+		if existing.OwnerUserID != scope.OwnerUserID || !placed || existing.SharedData[connectionRunKey] != scope.RunID {
 			return nil, ErrChanged
 		}
 		if groupSnapshot != nil {
