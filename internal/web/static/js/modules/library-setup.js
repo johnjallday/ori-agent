@@ -8,9 +8,10 @@
 // the server's review names the file the person confirmed. The first failure
 // stops the rest; projects already committed stay on the map.
 //
-// Vocabulary (FR-19): "to set up", "on the map", "needs a file choice",
-// "needs the dashboard". Never "ready" — the workspace tiles say that about
-// tickets.
+// Vocabulary (FR-19; folder-setup-ends-in-home FR22): "on the shelf" for what
+// Ori has listed, "on the map" for what has a workspace, "to set up", "needs a
+// file choice", "can't be set up here". Never "ready" — the workspace tiles say
+// that about tickets — and never "dashboard".
 
 import { RECENT_SONGS_QUERY, libraryRequestError, readLibraryPayload } from './library-open.js';
 
@@ -19,15 +20,36 @@ export const SETUP_KINDS = Object.freeze({
   SETUP: 'setup', // one file, can be reviewed and committed now
   FILE_CHOICE: 'file_choice', // several candidate files, person picks one
   CONNECTED: 'connected', // already a workspace
-  DASHBOARD: 'dashboard' // needs a review only the dashboard offers
+  DASHBOARD: 'dashboard' // can't be set up from the sheet; the shelf says why
 });
 
 const KIND_LABELS = Object.freeze({
   setup: 'to set up',
   file_choice: 'needs a file choice',
   connected: 'on the map',
-  dashboard: 'needs the dashboard'
+  dashboard: "can't be set up here"
 });
+
+// Why a project can't be set up from the sheet, in plain words, by the
+// server's eligibility state (folder-setup-ends-in-home FR24). An unknown
+// state keeps the server's own sentence.
+const PLAIN_REASONS = Object.freeze({
+  unsupported_format: "Its project file is in a format the installed tools can't open.",
+  project_provider_unavailable: 'The tools for this kind of project are not installed.',
+  provider_ambiguous: 'More than one installed tool could open it. Choose one on the shelf.',
+  home_provider_unavailable: "The Home's own tools are not available right now.",
+  unavailable: 'The last scan did not find its folder.',
+  revoked_source: 'Ori no longer has permission to read its folder.',
+  folder_owned: 'Its folder already belongs to another workspace.',
+  link_needs_review: 'Its link to a workspace needs a check on the shelf.'
+});
+
+/** The plain sentence for a project that can't be set up from the sheet. */
+export function plainSetupReason(state, serverReason = '') {
+  const key = String(state || '');
+  if (Object.hasOwn(PLAIN_REASONS, key)) return PLAIN_REASONS[key];
+  return String(serverReason || '').trim() || "It can't be set up here.";
+}
 
 /** The short label a row shows for its bucket. */
 export function setupLabel(kind) {
@@ -71,7 +93,7 @@ export function bucketProject(row, eligibility) {
     files: [],
     workspaceId: '',
     state,
-    reason: String(eligibility?.reason || ''),
+    reason: plainSetupReason(state, eligibility?.reason),
     integration: eligibility?.integration_offer || null
   };
 }
@@ -157,15 +179,15 @@ export function setupTotals(rows) {
 }
 
 /**
- * The subtitle line: "6 found by the last scan · 1 already on the map · 1
- * needs the dashboard", zero parts left out.
+ * The subtitle line: "6 on the shelf · 1 already on the map · 1 can't be set
+ * up here", zero parts left out (folder-setup-ends-in-home FR23). "On the
+ * shelf" is every project the sheet lists, from any scan.
  */
 export function setupSubtitle(totals) {
   const t = totals || {};
-  const parts = [`${t.found || 0} found by the last scan`];
+  const parts = [`${t.found || 0} on the shelf`];
   if (t.connected > 0) parts.push(`${t.connected} already on the map`);
-  if (t.dashboard > 0)
-    parts.push(`${t.dashboard} ${t.dashboard === 1 ? 'needs' : 'need'} the dashboard`);
+  if (t.dashboard > 0) parts.push(`${t.dashboard} can't be set up here`);
   return parts.join(' · ');
 }
 
