@@ -41,6 +41,15 @@ func (h *Handler) allowWorkspaceRemoval(w http.ResponseWriter, r *http.Request, 
 	}
 	details := map[string]string{"workspace_id": blocked.ID, "station_workspace_id": homeID, "review_action": action}
 	home, err := h.store.GetWorkspace(r.Context(), homeID)
+	if folderMessage, ok := h.folderHoldsHomeSongsMessage(r.Context(), root.ID, root.Name, root.ParentID, blocked.ID, state); ok {
+		// A folder workspace inside the Home that holds its songs: one plain
+		// sentence, the same refusal code and the same review destination.
+		if err == nil && workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) && home.Status == session.WorkspaceStatusActive {
+			details["review_home_slug"] = home.FolderSlug
+		}
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError(assistantRemovalReviewRequired, folderMessage).WithDetails(details))
+		return false
+	}
 	if err == nil {
 		switch home.Status {
 		case session.WorkspaceStatusTrashed:
@@ -58,6 +67,39 @@ func (h *Handler) allowWorkspaceRemoval(w http.ResponseWriter, r *http.Request, 
 	}
 	_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError(assistantRemovalReviewRequired, message).WithDetails(details))
 	return false
+}
+
+// folderHoldsHomeSongsMessage names the case of a folder workspace inside a
+// Home whose subtree holds that Home's songs: "<Name> holds songs from your
+// <Home>. Remove them from the map first." It answers false for anything else
+// (the Home itself, a song, a group outside the Home), whose existing refusal
+// stays as it is.
+func (h *Handler) folderHoldsHomeSongsMessage(ctx context.Context, rootID, rootName, rootParentID, blockedID string, state workspaceAssistantState) (string, bool) {
+	if rootID == blockedID || state.State != nil || state.Link == nil || h.workspaceStore == nil {
+		return "", false
+	}
+	stationID := state.Link.StationWorkspaceID
+	if !workspace.ParentInsideStation(h.workspaceStore.Get, rootID, rootParentID, stationID) {
+		return "", false
+	}
+	home, err := h.store.GetWorkspace(ctx, stationID)
+	if err != nil || home == nil {
+		return "", false
+	}
+	return fmt.Sprintf("%s holds songs from your %s. Remove them from the map first.", rootName, home.Name), true
+}
+
+// folderMoveHoldsHomeSongsMessage is the move-side counterpart: the first
+// linked song in the moved subtree decides whether the plain refusal applies.
+func (h *Handler) folderMoveHoldsHomeSongsMessage(ctx context.Context, root *session.Workspace) (string, bool) {
+	if root == nil {
+		return "", false
+	}
+	blocked, state, err := h.workspaceRemovalBlocker(ctx, root)
+	if err != nil || blocked == nil {
+		return "", false
+	}
+	return h.folderHoldsHomeSongsMessage(ctx, root.ID, root.Name, root.ParentID, blocked.ID, state)
 }
 
 func (h *Handler) workspaceRemovalBlocker(ctx context.Context, root *session.Workspace) (*session.Workspace, workspaceAssistantState, error) {

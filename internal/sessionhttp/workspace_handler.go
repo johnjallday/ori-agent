@@ -2217,6 +2217,12 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 			if h.workspaceStore != nil {
 				moved, err := h.workspaceStore.MoveWorkspaceFolder(workspace.ID, newParentID)
 				if err != nil {
+					if errors.Is(err, agentworkspace.ErrAssistantProgramProtected) {
+						if message, ok := h.folderMoveHoldsHomeSongsMessage(r.Context(), workspace); ok {
+							_ = orihttp.RespondConflict(w, message)
+							return
+						}
+					}
 					handleWorkspaceMoveError(w, err)
 					return
 				}
