@@ -164,6 +164,34 @@ func TestCommit_ADestinationChangedSinceTheReviewIsRefused(t *testing.T) {
 	}
 }
 
+// FR19: a covering folder workspace changes only where a new song goes. A song
+// folder that already has its own workspace is still refused before anything
+// is placed or promoted.
+func TestPreview_AnOwnedSongFolderIsStillRefusedUnderAFolderWorkspace(t *testing.T) {
+	f := newNestedConnection(t)
+	albumsID := f.addFolderWorkspace(t, "")
+	owner := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Album-1 (mine)"})
+	owner.OwnerUserID = "owner-1"
+	owner.SharedData = map[string]any{workspace.AnchorDirectoryReferenceIDKey: "own"}
+	if err := owner.AddDirectoryReference(workspace.DirectoryReference{ID: "own", Name: "Album-1", Path: f.song}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Save(owner); err != nil {
+		t.Fatal(err)
+	}
+	token, err := f.service.selections.(*pathselection.Store).Issue(f.song)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: token, WorkspaceName: "Album-1"}
+	if _, err := f.service.Preview(context.Background(), f.scope, request); !errors.Is(err, ErrChanged) {
+		t.Fatalf("an owned song folder = %v, want the existing refusal (ErrChanged)", err)
+	}
+	if albums, _ := f.store.Get(albumsID); albums == nil || albums.Kind == "group" {
+		t.Fatal("a refused review promoted the folder workspace")
+	}
+}
+
 // A song with no covering folder workspace keeps today's exact review digest.
 func TestPreview_ASongForTheHomeKeepsItsDigest(t *testing.T) {
 	f := newNestedConnection(t)
