@@ -17,7 +17,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
-	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // folderAgentRootResolver hands the library the folder agent's own anchored
@@ -312,18 +311,14 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	// is done, and only the owner's answer sets one.
 	placeLine := line(folderagent.FolderPlanPlace)
 	setLine(placeLine, personalassistant.FolderLineWorking, "Placing "+rec.WorkspaceName)
-	mover, ok := b.workspaceStore.(interface {
-		MoveWorkspaceFolder(string, string) ([]workspace.MovedWorkspace, error)
-	})
+	store, ok := b.workspaceStore.(folderHomePlacementStore)
 	if !ok {
 		setLine(placeLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, errors.New("the workspace cannot be moved"))
 	}
-	if current, err := b.workspaceStore.Get(rec.WorkspaceID); err == nil && current != nil && current.ParentID != homeID {
-		if _, err := mover.MoveWorkspaceFolder(rec.WorkspaceID, homeID); err != nil {
-			setLine(placeLine, personalassistant.FolderLineFailed, "")
-			return stop(personalassistant.FolderStopFailed, err)
-		}
+	if err := placeFolderWorkspaceInHome(store, rec.WorkspaceID, homeID); err != nil {
+		setLine(placeLine, personalassistant.FolderLineFailed, "")
+		return stop(personalassistant.FolderStopFailed, err)
 	}
 	setLine(placeLine, personalassistant.FolderLineDone, "Placed "+rec.WorkspaceName+" inside your "+homeName)
 	return receipt, nil

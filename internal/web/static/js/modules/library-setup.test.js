@@ -236,6 +236,32 @@ test('runSetup without staffing only connects: no staffing, Open or role request
   );
 });
 
+test('runSetup keeps the server placement note only when it sends one', async () => {
+  const note =
+    'Album-1 went into your Music Home, not into Albums, because it has a running ticket.';
+  const client = fakeClient({
+    '/projects/e1': { revision: 1, row: { name: 'Album-1', connection: 'new' } },
+    '/projects/e1/activation': one,
+    'POST /projects/e1/activation/review': { token: 't1', project_file: 'Album-1.rpp' },
+    'POST /projects/e1/activation/commit': { workspace_id: 'ws-1', placement_note: note },
+    '/projects/e3': { revision: 1, row: { name: 'Album-3', connection: 'new' } },
+    '/projects/e3/activation': one,
+    'POST /projects/e3/activation/review': { token: 't3', project_file: 'Album-1.rpp' },
+    'POST /projects/e3/activation/commit': { workspace_id: 'ws-3' }
+  });
+  const result = await runSetup({
+    client,
+    items: [
+      { id: 'e1', name: 'Album-1', file: 'Album-1.rpp' },
+      { id: 'e3', name: 'Album-3', file: 'Album-1.rpp' }
+    ],
+    operationKey: () => 'k'
+  });
+  assert.equal(result.failed, null);
+  assert.equal(result.done[0].placementNote, note);
+  assert.equal('placementNote' in result.done[1], false);
+});
+
 const DIGEST = 'a'.repeat(64);
 
 function connectable(id, name, workspaceId) {

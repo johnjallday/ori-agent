@@ -59,13 +59,13 @@ func CanonicalUpdate(s Store, wsID string, fn func(*Workspace) error) error {
 	if err := fn(ws); err != nil {
 		return err
 	}
-	if assistantProgramTopologyWasGenericallyRemoved(beforeHome, beforeLink, beforeStation, beforeParent, ws) {
+	if assistantProgramTopologyWasGenericallyRemoved(s.Get, beforeHome, beforeLink, beforeStation, beforeParent, ws) {
 		return ErrAssistantProgramProtected
 	}
 	return s.Save(ws)
 }
 
-func assistantProgramTopologyWasGenericallyRemoved(beforeHome, beforeLink bool, beforeStation, beforeParent string, after *Workspace) bool {
+func assistantProgramTopologyWasGenericallyRemoved(lookup WorkspaceLookup, beforeHome, beforeLink bool, beforeStation, beforeParent string, after *Workspace) bool {
 	if after == nil {
 		return false
 	}
@@ -80,9 +80,12 @@ func assistantProgramTopologyWasGenericallyRemoved(beforeHome, beforeLink bool, 
 			return false
 		}
 		// Link creation may persist before the managed-folder projection. Moving
-		// that exact child to its already-recorded Home heals, rather than changes,
-		// authoritative topology.
-		if after.ParentID == beforeStation && after.Status != StatusTrashed {
+		// that exact child inside its already-recorded Home heals, rather than
+		// changes, authoritative topology. A child already inside the Home (flat
+		// or in a group) is never healed, so it can't be pulled out this way.
+		if after.Status != StatusTrashed && after.ParentID != beforeParent &&
+			ParentInsideStation(lookup, after.ID, after.ParentID, beforeStation) &&
+			!ParentInsideStation(lookup, after.ID, beforeParent, beforeStation) {
 			return false
 		}
 		return after.ParentID != beforeParent || after.Status == StatusTrashed

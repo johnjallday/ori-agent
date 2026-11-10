@@ -948,6 +948,35 @@ test('a trashed or missing Home still gets the recovery notice, not a disconnect
   assert.equal(h.calls.length, 1);
 });
 
+test('a folder that holds its Home’s songs shows the plain refusal, not a guided disconnect', async () => {
+  const rows = [
+    { id: 'home', name: 'Music Home', kind: 'group' },
+    { id: 'albums', name: 'Albums', kind: 'group', parent_id: 'home' },
+    { id: 'song', name: 'Song', parent_id: 'albums' }
+  ];
+  const h = ctxFor({
+    rows,
+    answers: [{ mode: 'group_only' }],
+    responses: {
+      'DELETE /api/workspaces/albums': reviewRequired({
+        workspace: 'song',
+        action: 'Remove songs from the map',
+        message: 'Albums holds songs from your Music Home. Remove them from the map first.'
+      })
+    }
+  });
+
+  assert.equal(await deleteWorkspace('albums', h.ctx), false);
+  const [notice] = h.stepsOf('notice');
+  assert.equal(
+    notice.message,
+    'Albums holds songs from your Music Home. Remove them from the map first.'
+  );
+  assert.equal(notice.action.label, 'Open Assistant Home');
+  assert.deepEqual(h.stepsOf('review'), [], 'no disconnect review is offered');
+  assert.equal(h.calls.length, 1, 'nothing but the refused delete was sent');
+});
+
 test('un-nesting a group only disconnects its linked member, then the group delete continues', async () => {
   const rows = [
     { id: 'g1', name: 'Marketing', kind: 'group' },

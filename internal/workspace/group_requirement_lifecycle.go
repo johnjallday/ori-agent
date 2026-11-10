@@ -71,7 +71,7 @@ func EvaluateGroupRequirementLifecycle(project *Workspace, lookup func(string) (
 		return status
 	}
 	link := project.GetAssistantProjectLink()
-	if lookup == nil || snapshot.ProgramKey == nil || project.ParentID != snapshot.HomeWorkspaceID || link == nil ||
+	if lookup == nil || snapshot.ProgramKey == nil || !WorkspaceInsideStation(lookup, project, snapshot.HomeWorkspaceID) || link == nil ||
 		link.ID != snapshot.ProjectLinkID || link.StationWorkspaceID != snapshot.HomeWorkspaceID ||
 		link.Key.Normalize() != snapshot.ProgramKey.Normalize() || !sameAssistantHomeOwner(link.HomeProvider, snapshot.HomeProvider) ||
 		!sameAssistantProjectOwner(link.ProjectProvider, snapshot.ProjectProvider) {

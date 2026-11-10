@@ -273,8 +273,9 @@ function selectorValue(value) {
 }
 
 // homeTileAnchor is where a folder workspace stands on Home's map (FR2): its
-// district's header once the Group stage made it a district, else its tile
-// (which, after the Home stage, sits inside the Home's district).
+// district's header once it is a group (the Group stage, or the Home stage,
+// which now draws it as a district inside the Home's), else its tile. Its goal
+// offer speaks from the same place, so it is one offer, answered once.
 export function homeTileAnchor(root, workspaceID) {
   const id = selectorValue(workspaceID);
   if (!root || !id) return null;

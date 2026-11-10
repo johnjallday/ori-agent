@@ -338,14 +338,14 @@ func (r *AssistantWorkspaceResolver) location(refs *HomeAssistantRouteContext, u
 // A portable reciprocal link is data about exact membership. In particular,
 // names, grouping alone, and half-links are never enough; compatibility for a
 // proposed mutation remains the setup service's separate responsibility.
-func exactWorkspaceProgramLink(project, home *workspace.Workspace, link *workspace.AssistantProjectLink, state *workspace.AssistantProgramState, userID string) bool {
+func exactWorkspaceProgramLink(lookup workspace.WorkspaceLookup, project, home *workspace.Workspace, link *workspace.AssistantProjectLink, state *workspace.AssistantProgramState, userID string) bool {
 	if state == nil || state.Declaration == nil || !state.Key.Valid() || state.Key.Normalize().OwnerUserID != userID || state.Key.Normalize() != link.Key.Normalize() || !slices.Contains(state.LinkedProjectIDs, project.ID) || link.ID != workspace.AssistantProjectLinkID(home.ID, project.ID) || link.DeclarationVersion != state.Declaration.SchemaVersion {
 		return false
 	}
 	if link.SchemaVersion != workspace.AssistantProjectLinkLegacySchemaVersion && link.SchemaVersion != workspace.AssistantProjectLinkSchemaVersion {
 		return false
 	}
-	if link.SchemaVersion >= workspace.AssistantProjectLinkSchemaVersion && (home.Kind != "group" || project.ParentID != home.ID) {
+	if link.SchemaVersion >= workspace.AssistantProjectLinkSchemaVersion && (home.Kind != "group" || !workspace.WorkspaceInsideStation(lookup, project, home.ID)) {
 		return false
 	}
 	if (link.HomeProvider == nil) != (state.HomeProvider == nil) {
@@ -384,7 +384,7 @@ func (r *AssistantWorkspaceResolver) overview(ctx context.Context, ws *workspace
 		home, err := r.Source.Get(link.StationWorkspaceID)
 		if err == nil && workspaceReadable(home, userID) {
 			state := home.GetAssistantProgramState()
-			if exactWorkspaceProgramLink(ws, home, link, state, userID) {
+			if exactWorkspaceProgramLink(r.Source.Get, ws, home, link, state, userID) {
 				out.ProgramLink = &assistantcontext.ProgramLink{Home: contextWorkspaceRef(home), LinkID: link.ID, Revision: link.StateRevision, ProgramID: workspaceContextText(state.Key.ProgramID, 100)}
 				out.Sources["program_link"] = assistantcontext.SourceStatus{Status: assistantcontext.Available}
 			}

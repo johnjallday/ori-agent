@@ -186,6 +186,11 @@ export function summarizeRun(result, staffing, plan) {
   const onMap = done.length + (failed?.workspaceId ? 1 : 0);
   const parts = [];
   if (onMap) parts.push(`${onMap} ${onMap === 1 ? 'project is' : 'projects are'} on the map.`);
+  // A song meant for its folder workspace that went directly into the Home
+  // carries the server's one plain reason; nothing else changes wording.
+  for (const item of done) {
+    if (item?.placementNote) parts.push(sentence(item.placementNote));
+  }
   if (staffing && done.length) {
     // "It has" has no subject when only some of the projects got it, so a run
     // that stopped says how many of how many.

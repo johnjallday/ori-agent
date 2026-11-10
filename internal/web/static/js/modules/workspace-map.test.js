@@ -10898,9 +10898,16 @@ test('a scoped mount draws only its group, without collapse controls, and unmoun
   );
   assert.doesNotMatch(container.innerHTML, /aria-label="Select for bulk action"[^>]* hidden>/);
   assert.match(container.innerHTML, /data-ws-selbar hidden/, 'the selection bar waits for a check');
-  // The page is the group: everything drawn is in it, so no district frame is
-  // drawn at all — no outline, no header, no ⤧/⋯ controls (PRD §10).
-  assert.doesNotMatch(container.innerHTML, /ws-map-district/);
+  // The page is the group: everything drawn is in it, so the group's own
+  // district frame is not drawn (PRD §10). A group inside it is a place on
+  // that ground (nest-songs FR12): Stems is drawn as a district holding Drums,
+  // with its name and count but none of the ⤧/⋯/collapse district controls.
+  assert.doesNotMatch(container.innerHTML, /data-group-id="g"/);
+  assert.match(
+    container.innerHTML,
+    /class="ws-map-district[^"]* is-nested[^"]*"[^>]*data-group-id="sub"/
+  );
+  assert.doesNotMatch(container.innerHTML, /data-group-drag|data-group-menu/);
   assert.doesNotMatch(container.innerHTML, /No members yet/, 'members are drawn, so no empty note');
 
   map.unmount(container);
@@ -10950,7 +10957,13 @@ test('the scoped district is still resolved for placement even though it is not 
     scoped.districts.some(d => d.id === 'g'),
     'the district record exists'
   );
-  for (const id of ['m1', 'sub', 'deep']) {
+  // Stems is a district inside Studio in both, so its saved building anchor no
+  // longer places anything: its frame follows Drums.
+  for (const layout of [scoped, home]) {
+    const stems = layout.districts.find(d => d.id === 'sub');
+    assert.equal(stems && stems.parentId, 'g', 'the sub-group is a district inside its group');
+  }
+  for (const id of ['m1', 'deep']) {
     const here = scoped.nodes.find(n => n.id === id);
     const there = home.nodes.find(n => n.id === id);
     assert.deepEqual({ x: here.x, y: here.y }, { x: there.x, y: there.y }, id + ' matches Home');
@@ -11677,11 +11690,15 @@ test('dragging an agent saves its own anchor beside the buildings, and never a m
   const { map, harness, patches } = await mountedScopedUnits();
   const boss = harness.unit('agent:g:boss');
   const live = harness.control('[data-map-live]');
-  boss.fire('pointerdown', tilePointer(100, 100));
-  boss.fire('pointermove', tilePointer(130, 110));
+  // Two cells up, onto open ground above the agents, measured in world units so
+  // the step does not depend on the zoom the opening fit chose (it now also
+  // frames the nested Stems district, so it is lower than it used to be).
+  const up = Math.round(2 * 170 * map.getCamera().zoom);
+  boss.fire('pointerdown', tilePointer(100, 400));
+  boss.fire('pointermove', tilePointer(100, 400 - up));
   assert.equal(boss.classList.contains('is-dragging'), true);
   assert.equal(boss.classList.contains('is-blocked'), false);
-  boss.fire('pointerup', tilePointer(130, 110));
+  boss.fire('pointerup', tilePointer(100, 400 - up));
   await flushDeep();
 
   assert.equal(patches.length, 1, 'one drop, one request');
@@ -13430,4 +13447,186 @@ test('placement motion is off by default and a DOM without layout draws the fina
     mapCSS,
     /prefers-reduced-motion: reduce\)\s*\{\s*\.ws-map-tile\.is-growing-in,\s*\.ws-map-district\.is-growing-in\s*\{\s*animation: none;/
   );
+});
+
+// ---------- nest-songs-under-folder: a folder workspace inside its Home ----------
+
+const NESTED_HOME = [
+  {
+    id: 'home',
+    kind: 'group',
+    name: 'Music Production Home',
+    entry_agent_name: 'Portfolio Manager',
+    group_template: { kind: 'managed_home', name: 'Music Production' }
+  },
+  {
+    id: 'albums',
+    kind: 'group',
+    parent_id: 'home',
+    name: 'Albums',
+    entry_agent_name: 'Albums Manager'
+  },
+  ...[1, 2, 3, 4, 5].map(n => ({ id: 'album-' + n, parent_id: 'albums', name: 'Album-' + n }))
+];
+
+function inside(inner, outer) {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+test('a group inside a Home is a district inside the Home’s district, with its songs inside it (FR12)', () => {
+  const layout = loadWorldLayout()(NESTED_HOME, {});
+  const home = layout.districts.find(d => d.id === 'home');
+  const albums = layout.districts.find(d => d.id === 'albums');
+  assert.ok(home && albums, 'both are districts');
+  assert.equal(albums.parentId, 'home');
+  assert.equal(home.parentId, '');
+  assert.equal(
+    layout.nodes.some(n => n.id === 'albums'),
+    false,
+    'Albums is a place, not a building'
+  );
+  const songs = layout.nodes.filter(n => n.id.startsWith('album-'));
+  assert.equal(songs.length, 5);
+  for (const song of songs) {
+    assert.equal(song.groupId, 'albums');
+    assert.ok(
+      inside({ x: song.x, y: song.y, width: 168, height: 160 }, albums),
+      song.id + ' inside Albums'
+    );
+  }
+  assert.ok(inside(albums, home), 'Albums sits inside the Home');
+  // Five songs fill a block three cells wide, and the frame keeps a header
+  // band above its first row, inside the frame.
+  assert.equal(new Set(songs.map(s => s.x)).size, 3, 'three columns, not one');
+  const firstRow = Math.min(...songs.map(s => s.y));
+  assert.ok(firstRow - albums.y >= 56, 'a header band above the first row');
+  assert.equal(home.memberCount, 1, 'the Home holds one workspace: Albums');
+  assert.equal(albums.memberCount, 5);
+  assert.equal(home.conflict, null, 'a sub-district is not a conflict for its parent');
+  assert.equal(albums.conflict, null);
+});
+
+test('a second folder workspace is a second district, and the Home’s own songs stay outside both', () => {
+  const rows = NESTED_HOME.concat([
+    { id: 'label', kind: 'group', parent_id: 'home', name: 'Label 2026' },
+    { id: 'label-song', parent_id: 'label', name: 'Label Song' },
+    { id: 'flat', parent_id: 'home', name: 'Older Song' }
+  ]);
+  const layout = loadWorldLayout()(rows, {});
+  const albums = layout.districts.find(d => d.id === 'albums');
+  const label = layout.districts.find(d => d.id === 'label');
+  assert.equal(label.parentId, 'home');
+  const flat = layout.nodes.find(n => n.id === 'flat');
+  assert.equal(flat.groupId, 'home');
+  const footprint = { x: flat.x, y: flat.y, width: 168, height: 160 };
+  const overlaps = (a, b) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  assert.equal(overlaps(footprint, albums) || overlaps(footprint, label), false);
+  assert.equal(overlaps(albums, label), false, 'two folder districts never overlap');
+  // Every song sits below its district's header band, never under a header.
+  for (const node of layout.nodes.filter(n => n.groupId === 'albums' || n.groupId === 'label')) {
+    const district = node.groupId === 'albums' ? albums : label;
+    assert.ok(node.y - district.y >= 56, node.id + ' clears its header band');
+  }
+  assert.ok(
+    layout.districts.every(d => d.conflict === null),
+    'no frame claims what is not in it'
+  );
+});
+
+test('nesting deeper than Home > folder > song is not drawn as districts (PRD non-goal)', () => {
+  const rows = NESTED_HOME.concat([
+    { id: 'deeper', kind: 'group', parent_id: 'albums', name: 'Deeper' },
+    { id: 'deepest', parent_id: 'deeper', name: 'Deepest' }
+  ]);
+  const layout = loadWorldLayout()(rows, {});
+  assert.equal(
+    layout.districts.some(d => d.id === 'deeper'),
+    false
+  );
+  assert.equal(
+    layout.nodes.find(n => n.id === 'deeper').groupId,
+    'albums',
+    'a building inside Albums'
+  );
+  assert.equal(layout.nodes.find(n => n.id === 'deepest').groupId, '', 'its members stay loose');
+});
+
+test('an empty folder workspace inside a Home still reads as a place (FR15)', () => {
+  const rows = NESTED_HOME.filter(row => !row.id.startsWith('album-'));
+  const layout = loadWorldLayout()(rows, {});
+  const home = layout.districts.find(d => d.id === 'home');
+  const albums = layout.districts.find(d => d.id === 'albums');
+  assert.ok(albums, 'an empty district, not a song tile');
+  assert.equal(albums.memberCount, 0);
+  assert.equal(layout.nodes.length, 0);
+  assert.ok(inside(albums, home));
+});
+
+test('collapsing a Home hides its folder districts and their songs with it', () => {
+  const layout = loadWorldLayout()(NESTED_HOME, {
+    groupPresentations: { home: { collapsed: true } }
+  });
+  assert.equal(
+    layout.districts.some(d => d.id === 'albums'),
+    false
+  );
+  assert.equal(layout.nodes.length, 0);
+  assert.equal(layout.hiddenNodes.length, 5);
+  assert.equal(layout.hiddenDistricts[0].id, 'albums');
+});
+
+test('the outer map draws a folder district inside the Home with its Commander named (FR12, FR13)', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, { workspaces: NESTED_HOME, hideChrome: true, noAutoSelect: true });
+  const html = container.innerHTML;
+  assert.match(
+    html,
+    /class="ws-map-district[^"]*" role="group" aria-label="Music Production Home group"/
+  );
+  assert.match(html, /class="ws-map-district[^"]* is-nested[^"]*"[^>]*data-group-id="albums"/);
+  // Five songs fill a 3-wide block, wide enough for a one-row header.
+  assert.doesNotMatch(html, /is-narrow"[^>]*data-group-id="albums"/);
+  assert.match(html, /ws-map-district-commander" title="Commander: Albums Manager"/);
+  assert.match(html, /aria-label="Albums group, 5 workspaces, commander Albums Manager"/);
+  // The Home's own header is unchanged: no commander line on a top district.
+  assert.doesNotMatch(html, /Commander: Portfolio Manager/);
+  // Home's map keeps every district control on the nested one too.
+  assert.match(html, /data-group-collapse="albums"/);
+  // The Home district comes first, so the nested one paints above it.
+  assert.ok(html.indexOf('data-group-id="home"') < html.indexOf('data-group-id="albums"'));
+});
+
+test('the Home’s own map draws Albums as a district holding its songs (FR12)', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, {
+    workspaces: NESTED_HOME,
+    scopeGroupId: 'home',
+    selectOnly: true,
+    hideChrome: true,
+    noAutoSelect: true
+  });
+  const html = container.innerHTML;
+  assert.doesNotMatch(html, /data-group-id="home"/, 'the page is the Home: its frame is not drawn');
+  assert.match(html, /is-nested[^"]*"[^>]*data-group-id="albums"/);
+  assert.match(html, /Commander: Albums Manager/);
+  for (let n = 1; n <= 5; n++) assert.match(html, new RegExp('data-ws-id="album-' + n + '"'));
+});
+
+test('framing new songs after Put on the map covers the folder district they landed in (FR14)', () => {
+  const layout = loadWorldLayout()(NESTED_HOME, {});
+  const map = loadOriWorkspaceMap();
+  const albums = layout.districts.find(d => d.id === 'albums');
+  const bounds = map.placedBounds(layout.nodes, ['album-1', 'album-5']);
+  assert.ok(bounds, 'the new tiles have bounds');
+  // The landing frames the Home district as well, which contains Albums.
+  const home = layout.districts.find(d => d.id === 'home');
+  assert.ok(inside(albums, home));
 });

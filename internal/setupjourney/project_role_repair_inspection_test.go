@@ -19,6 +19,13 @@ const roleRepairFixtureRunID = "8d483520-870a-465a-8f7b-0df688fb042e"
 
 func oldSplitChildFixture(t *testing.T) (*workspace.SyncStore, *workspace.InMemoryStore, *workspace.FileStore, []plugin.InstalledPlugin, string, string, string) {
 	t.Helper()
+	return oldSplitChildFixtureAt(t, false)
+}
+
+// oldSplitChildFixtureAt with nested=true puts the song inside an ordinary
+// folder group that sits inside the Home, instead of directly under the Home.
+func oldSplitChildFixtureAt(t *testing.T, nested bool) (*workspace.SyncStore, *workspace.InMemoryStore, *workspace.FileStore, []plugin.InstalledPlugin, string, string, string) {
+	t.Helper()
 	const owner = "local"
 	homeDeclaration := projecttemplates.AssistantProgramHome{
 		SchemaVersion: 1, Version: 1, ID: "music-home", StationName: "Music Home", DefaultPrimaryName: "Portfolio Manager",
@@ -66,7 +73,14 @@ func oldSplitChildFixture(t *testing.T) (*workspace.SyncStore, *workspace.InMemo
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = folder.Close() })
-	for _, item := range []*workspace.Workspace{home, child} {
+	items := []*workspace.Workspace{home, child}
+	if nested {
+		albums := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Albums"})
+		albums.OwnerUserID, albums.Kind, albums.ParentID = owner, "group", home.ID
+		child.ParentID = albums.ID
+		items = []*workspace.Workspace{home, albums, child}
+	}
+	for _, item := range items {
 		if err := primary.Save(item); err != nil {
 			t.Fatal(err)
 		}

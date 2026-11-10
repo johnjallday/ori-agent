@@ -448,11 +448,55 @@ func (service *AssistantProgramStore) ensureProjectNesting(projectID, stationID 
 	if err != nil {
 		return err
 	}
-	if project.ParentID == stationID {
+	// A song already inside its station, flat or in a group, is where it
+	// belongs. Healing never pulls a nested song out to the station.
+	if WorkspaceInsideStation(service.store.Get, project, stationID) {
 		return nil
 	}
-	_, err = mover.MoveWorkspaceFolder(projectID, stationID)
+	_, err = mover.MoveWorkspaceFolder(projectID, service.healingDestination(project, stationID))
 	return err
+}
+
+// healingDestination is where a stray linked song heals to: the folder
+// workspace inside the station that covers the song's attached folder when
+// that folder workspace is already a group (FR9), else the station itself.
+// Healing never promotes a workspace; only a reviewed set-up does that.
+func (service *AssistantProgramStore) healingDestination(project *Workspace, stationID string) string {
+	folder := attachedProjectFolder(project)
+	if folder == "" {
+		return stationID
+	}
+	ids, err := service.store.List()
+	if err != nil {
+		return stationID
+	}
+	all := make([]*Workspace, 0, len(ids))
+	for _, id := range ids {
+		if candidate, getErr := service.store.Get(id); getErr == nil && candidate != nil && candidate.ID != project.ID {
+			all = append(all, candidate)
+		}
+	}
+	if covering := CoveringFolderWorkspace(all, service.store.Get, stationID, folder); covering != nil && covering.Kind == groupWorkspaceKind {
+		return covering.ID
+	}
+	return stationID
+}
+
+// attachedProjectFolder is the external folder a project's entry points
+// into, or "" for a managed project that lives in its own workspace folder.
+func attachedProjectFolder(project *Workspace) string {
+	if project == nil {
+		return ""
+	}
+	locator, err := GetProjectEntryLocator(project.SharedData)
+	if err != nil || locator == nil || locator.Kind != ProjectEntryDirectoryReference {
+		return ""
+	}
+	reference, err := project.GetDirectoryReference(locator.DirectoryReferenceID)
+	if err != nil || reference == nil {
+		return ""
+	}
+	return reference.Path
 }
 
 func mergeAssistantStationRoster(existing, roster []AgentInstance) ([]AgentInstance, error) {
@@ -500,7 +544,7 @@ func (service *AssistantProgramStore) RecordAcceptedCompletion(projectID, finger
 		return nil, false, ErrAssistantProgramUnavailable
 	}
 	linkedStation, stationErr := service.store.Get(link.StationWorkspaceID)
-	if stationErr != nil || linkedStation == nil || (service.hasRequiredGroupRequirement(project) && project.ParentID != link.StationWorkspaceID) {
+	if stationErr != nil || linkedStation == nil || (service.hasRequiredGroupRequirement(project) && !WorkspaceInsideStation(service.store.Get, project, link.StationWorkspaceID)) {
 		return nil, false, ErrAssistantProgramUnavailable
 	}
 	linkedState := linkedStation.GetAssistantProgramState()
@@ -656,7 +700,7 @@ func (service *AssistantProgramStore) LinkedProjects(stationID string) ([]*Works
 			continue
 		}
 		link := project.GetAssistantProjectLink()
-		if link == nil || (service.hasRequiredGroupRequirement(project) && project.ParentID != stationID) || link.StationWorkspaceID != stationID || link.Key.Normalize() != state.Key.Normalize() {
+		if link == nil || (service.hasRequiredGroupRequirement(project) && !WorkspaceInsideStation(service.store.Get, project, stationID)) || link.StationWorkspaceID != stationID || link.Key.Normalize() != state.Key.Normalize() {
 			continue
 		}
 		projects = append(projects, project)

@@ -153,7 +153,7 @@ func (h *Handler) assistantProgramStation(workspaceID string) (*workspace.Worksp
 	if link.Key.Normalize() != state.Key.Normalize() || !containsWorkspaceID(state.LinkedProjectIDs, current.ID) {
 		return nil, current, workspace.ErrAssistantProgramVersionConflict
 	}
-	if required, ok := h.requiredGroupRequirementWorkspace(current.ID); ok && required.ParentID != station.ID {
+	if required, ok := h.requiredGroupRequirementWorkspace(current.ID); ok && !workspace.WorkspaceInsideStation(h.workspaceTaskStore.Get, required, station.ID) {
 		return nil, current, workspace.ErrAssistantProgramVersionConflict
 	}
 	return station, current, nil

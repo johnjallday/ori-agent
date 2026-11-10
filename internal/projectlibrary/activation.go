@@ -53,6 +53,9 @@ type ActivationResult struct {
 	WorkspaceID string `json:"workspace_id"`
 	LinkID      string `json:"link_id"`
 	Replay      bool   `json:"replay"`
+	// PlacementNote is the creator's one plain sentence when the song was
+	// meant for a folder workspace and went directly into the Home instead.
+	PlacementNote string `json:"placement_note,omitempty"`
 }
 
 func activationDigest(scope Scope, runID string, binding ActivationBinding) (string, error) {
@@ -453,7 +456,7 @@ func (s *ActivationService) commit(ctx context.Context, scope Scope, entryID, to
 	if err != nil {
 		return ActivationResult{}, err // Child remains recoverable; never create another run silently.
 	}
-	return ActivationResult{EntryID: entryID, WorkspaceID: child.ID, LinkID: accepted.LinkID}, nil
+	return ActivationResult{EntryID: entryID, WorkspaceID: child.ID, LinkID: accepted.LinkID, PlacementNote: result.PlacementNote}, nil
 }
 
 func (a *ActivationInspector) reciprocalLink(scope Scope, exact ExactLink) bool {

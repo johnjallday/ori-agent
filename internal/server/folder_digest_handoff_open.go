@@ -50,8 +50,9 @@ func (v folderHandoffVerifier) VerifiedHandoff(ctx context.Context, userID, offe
 		return refuse("the Home keeps no setup-open receipt for this offer")
 	}
 	project, err := b.workspaceFileStore.Get(receipt.ProjectWorkspaceID)
-	if err != nil || project == nil || project.OwnerUserID != userID || project.ParentID != homeID {
-		return refuse("the opened song is not a child of the Home")
+	if err != nil || project == nil || project.OwnerUserID != userID ||
+		!workspace.WorkspaceInsideStation(b.workspaceFileStore.Get, project, homeID) {
+		return refuse("the opened song is not inside the Home")
 	}
 	if !projectFolderIs(project, folderPath) {
 		return refuse("the opened song is not this folder's")

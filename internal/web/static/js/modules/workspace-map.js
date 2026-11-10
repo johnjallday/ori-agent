@@ -55,6 +55,18 @@
   // MinFrameWidth/MinFrameHeight in internal/workspacemap/presentation.go.
   var DISTRICT_MIN_W = CELL_W;
   var DISTRICT_MIN_H = CELL_H;
+  // A district drawn inside another carries its header INSIDE its own frame,
+  // in a band above its first row: a header above the frame (as a top-level
+  // district draws it) would land on its parent's header or on the building
+  // above it. A district at least NESTED_WIDE_W wide fits name, count,
+  // Commander and the three 44px controls on one row; a narrower one puts the
+  // controls on a second row.
+  var NESTED_WIDE_W = CELL_W * 3;
+  var NESTED_BAND_WIDE = 56;
+  var NESTED_BAND_NARROW = 100;
+  function nestedHeaderBand(width) {
+    return width >= NESTED_WIDE_W ? NESTED_BAND_WIDE : NESTED_BAND_NARROW;
+  }
   // Safe world bounds, mirroring internal/workspacemap/model.go. A coordinate
   // outside them is treated as unreadable and the record falls back to
   // automatic placement rather than being drawn somewhere impossible (FR-12).
@@ -1321,12 +1333,20 @@
     function isTopGroup(w) {
       return isGroup(w) && parentGroupId(w) === '';
     }
+    // A group directly inside a top-level group (a folder workspace inside its
+    // Home) is drawn as a district within its parent's district, with its own
+    // members inside it. One level only: a group inside a sub-district stays a
+    // building, and its members stay loose, as every nested group did before.
+    function isSubGroup(w) {
+      var pid = parentGroupId(w);
+      return isGroup(w) && pid !== '' && isTopGroup(byId[pid]);
+    }
 
     var membersByGroup = {};
     var roots = [];
     list.forEach(function (w) {
       var pid = parentGroupId(w);
-      if (pid && isTopGroup(byId[pid])) {
+      if (pid && (isTopGroup(byId[pid]) || isSubGroup(byId[pid]))) {
         (membersByGroup[pid] = membersByGroup[pid] || []).push(w);
       } else {
         roots.push(w);
@@ -1344,14 +1364,73 @@
       membersByGroup[g].sort(byHash);
     });
 
+    // A block of n member cells, as square as the column limit allows.
+    function memberBlock(n) {
+      var cells = Math.max(n, 1);
+      var w = Math.min(maxCols, Math.ceil(Math.sqrt(cells)));
+      return { w: w, h: Math.ceil(cells / w) };
+    }
+
     // each root becomes an "island" with a cell footprint
     var islands = roots.map(function (w) {
       if (isGroup(w)) {
         var members = membersByGroup[w.id] || [];
-        var n = Math.max(members.length, 1);
-        var gc = Math.min(maxCols, Math.ceil(Math.sqrt(n)));
-        var gr = Math.ceil(n / gc);
-        return { kind: 'group', ws: w, members: members, w: gc, h: gr };
+        var subs = members.filter(isSubGroup);
+        if (!subs.length) {
+          var block = memberBlock(members.length);
+          return { kind: 'group', ws: w, members: members, subs: [], w: block.w, h: block.h };
+        }
+        // Sub-districts first, each a block of its own members, then the
+        // parent's own buildings one cell each, shelf-packed inside the island.
+        var leaves = members.filter(function (m) {
+          return !isSubGroup(m);
+        });
+        var parts = subs
+          .map(function (sub) {
+            var own = membersByGroup[sub.id] || [];
+            var size = memberBlock(own.length);
+            return { sub: sub, members: own, w: size.w, h: size.h };
+          })
+          .concat(
+            leaves.map(function (leaf) {
+              return { leaf: leaf, w: 1, h: 1 };
+            })
+          );
+        var cellCount = parts.reduce(function (sum, part) {
+          return sum + part.w * part.h;
+        }, 0);
+        var width = Math.min(
+          maxCols,
+          Math.max(
+            Math.ceil(Math.sqrt(cellCount)),
+            parts.reduce(function (widest, part) {
+              return Math.max(widest, part.w);
+            }, 1)
+          )
+        );
+        var c = 0,
+          r = 0,
+          shelf = 0;
+        parts.forEach(function (part) {
+          if (c + part.w > width) {
+            r += shelf;
+            c = 0;
+            shelf = 0;
+          }
+          part.col = c;
+          part.row = r;
+          c += part.w;
+          shelf = Math.max(shelf, part.h);
+        });
+        return {
+          kind: 'group',
+          ws: w,
+          parts: parts,
+          members: [],
+          subs: subs,
+          w: width,
+          h: Math.max(1, r + shelf)
+        };
       }
       return { kind: 'ws', ws: w, members: [], w: 1, h: 1 };
     });
@@ -1374,7 +1453,41 @@
       }
       var baseCol = col,
         baseRow = shelfRow;
-      if (isl.kind === 'group') {
+      if (isl.kind === 'group' && isl.parts) {
+        districts.push({ id: isl.ws.id, ws: isl.ws, col: baseCol, row: baseRow, w: w, h: isl.h });
+        isl.parts.forEach(function (part) {
+          var partCol = baseCol + part.col;
+          var partRow = baseRow + part.row;
+          if (part.leaf) {
+            tiles.push({
+              id: part.leaf.id,
+              ws: part.leaf,
+              groupId: isl.ws.id,
+              col: partCol,
+              row: partRow
+            });
+            return;
+          }
+          districts.push({
+            id: part.sub.id,
+            ws: part.sub,
+            parentId: isl.ws.id,
+            col: partCol,
+            row: partRow,
+            w: part.w,
+            h: part.h
+          });
+          part.members.forEach(function (m, i) {
+            tiles.push({
+              id: m.id,
+              ws: m,
+              groupId: part.sub.id,
+              col: partCol + (i % part.w),
+              row: partRow + Math.floor(i / part.w)
+            });
+          });
+        });
+      } else if (isl.kind === 'group') {
         districts.push({ id: isl.ws.id, ws: isl.ws, col: baseCol, row: baseRow, w: w, h: isl.h });
         isl.members.forEach(function (m, i) {
           tiles.push({
@@ -1524,9 +1637,22 @@
     // left far below the arranged content would still push new records and the
     // Personal HQ site down there, and Fit all would still zoom out to reach
     // them.
+    // A sub-district (a group drawn inside its parent's district) names its
+    // parent here. Its members also belong to the parent's cluster and frame.
+    var districtParent = Object.create(null);
+    grid.districts.forEach(function (district) {
+      if (district.parentId) districtParent[district.id] = district.parentId;
+    });
     var populatedGroups = Object.create(null);
     grid.tiles.forEach(function (tile) {
-      if (tile.groupId) populatedGroups[tile.groupId] = true;
+      if (!tile.groupId) return;
+      populatedGroups[tile.groupId] = true;
+      if (districtParent[tile.groupId]) populatedGroups[districtParent[tile.groupId]] = true;
+    });
+    // A district holding a sub-district takes its frame from that district,
+    // even when neither holds a building yet.
+    Object.keys(districtParent).forEach(function (id) {
+      populatedGroups[districtParent[id]] = true;
     });
 
     var saved = Object.create(null);
@@ -1550,9 +1676,16 @@
     //    frame from its members, so handing it a fallback cell would claim
     //    space nothing draws in and shift every automatic placement after it.
     var districtAnchors = Object.create(null);
+    var deferredSubDistricts = [];
     grid.districts.forEach(function (district) {
       if (populatedGroups[district.id]) return;
       var anchor = saved[district.id];
+      if (!anchor && district.parentId) {
+        // An empty sub-district sits beside its parent's buildings, which are
+        // placed below; it takes its anchor once they have one.
+        deferredSubDistricts.push(district);
+        return;
+      }
       if (anchor) {
         // A saved district still occupies a cell, so claim the one it covers.
         // Otherwise the automatic scan would hand that cell to a building and
@@ -1574,6 +1707,9 @@
     var placedByGroup = Object.create(null);
     function recordCluster(groupId, anchor) {
       if (!groupId) return;
+      // A sub-district's building is also part of its parent's cluster, so the
+      // parent's next building goes beneath it rather than inside its frame.
+      if (districtParent[groupId]) recordCluster(districtParent[groupId], anchor);
       var cluster = placedByGroup[groupId];
       if (!cluster) {
         placedByGroup[groupId] = { minX: anchor.x, maxY: anchor.y };
@@ -1618,10 +1754,42 @@
       var members = homeMembers[tile.groupId];
       return members && members.length ? members.shift() : tile;
     });
+    // A sub-district's automatic buildings fill its block row by row, so it
+    // reads as a place (and its header has room) rather than a single column.
+    var districtCols = Object.create(null);
+    grid.districts.forEach(function (district) {
+      districtCols[district.id] = district.w;
+    });
+    var subBlocks = Object.create(null);
+    function placeInSubDistrict(tile) {
+      var block = subBlocks[tile.groupId];
+      if (!block) {
+        var cols = Math.max(1, districtCols[tile.groupId] || 1);
+        // Beneath its own saved buildings when it has some; otherwise below its
+        // parent's cluster (or at its seeded cell), lowered by its header band
+        // so the frame starts where the building above it ends.
+        var own = groupAffinityOrigin(tile.groupId, placedByGroup);
+        var parent = own ? null : groupAffinityOrigin(districtParent[tile.groupId], placedByGroup);
+        var base = own || parent || placer.cell(tile.col, tile.row);
+        var band = own ? 0 : nestedHeaderBand(cols * CELL_W);
+        block = subBlocks[tile.groupId] = {
+          origin: { x: base.x, y: base.y + band },
+          cols: cols,
+          next: 0
+        };
+      }
+      var index = block.next++;
+      return placer.place(
+        placer.cell(index % block.cols, Math.floor(index / block.cols), block.origin)
+      );
+    }
     var nodes = orderedTiles.map(function (tile) {
       var anchor = saved[tile.id];
       var isSaved = !!anchor;
-      if (!anchor) {
+      if (!anchor && tile.groupId && districtParent[tile.groupId]) {
+        anchor = placeInSubDistrict(tile);
+        recordCluster(tile.groupId, anchor);
+      } else if (!anchor) {
         // A member of a group whose cluster already sits somewhere joins that
         // cluster; everything else takes its seeded cell in the fallback grid.
         var affinity = tile.groupId ? groupAffinityOrigin(tile.groupId, placedByGroup) : null;
@@ -1641,6 +1809,17 @@
       };
     });
 
+    // An empty sub-district is still a place (FR15): it takes the cell beneath
+    // its parent's cluster, or its seeded cell when the parent has none yet.
+    deferredSubDistricts.forEach(function (district) {
+      var affinity = groupAffinityOrigin(district.parentId, placedByGroup);
+      var cell = placer.place(
+        affinity ? placer.cell(0, 0, affinity) : placer.cell(district.col, district.row)
+      );
+      recordCluster(district.parentId, cell);
+      districtAnchors[district.id] = { x: cell.x - DISTRICT_PAD_X, y: cell.y - DISTRICT_PAD_Y };
+    });
+
     // 4. District frames. Each district resolves ONE effective frame, and its
     //    top-left corner is both the visible outline and the logical anchor —
     //    there is no second hidden anchor that can enlarge what is drawn (#346
@@ -1655,28 +1834,60 @@
     });
     var presentations = opts.groupPresentations || null;
     var scope = opts.scope || null;
-    var districts = grid.districts.map(function (district) {
+    // Sub-districts resolve first: a parent's frame has to contain them.
+    var subFrames = Object.create(null);
+    var resolveOrder = grid.districts
+      .filter(function (district) {
+        return !!district.parentId;
+      })
+      .concat(
+        grid.districts.filter(function (district) {
+          return !district.parentId;
+        })
+      );
+    var resolved = Object.create(null);
+    resolveOrder.forEach(function (district) {
       var record = presentations
         ? safePresentation(presentations[district.id])
         : presentationFor(district.id);
       if (scope && scope.groupId === district.id) {
         record = scopedGroupPresentation(record, scope.nested);
       }
+      // A group's own page draws its sub-districts without a collapse control,
+      // so they are always drawn expanded there.
+      if (scope && district.parentId === scope.groupId && record.collapsed) {
+        record = Object.assign({}, record, { collapsed: false });
+      }
       var members = membersByGroup[district.id] || [];
+      var children = grid.districts.filter(function (candidate) {
+        return candidate.parentId === district.id;
+      });
       // A collapsed district resolves its expanded frame anyway: its corner is
       // where the summary sits, and expanding has to restore exactly the
       // rectangle that was there before (#346 FR-114, FR-116).
       var frame = effectiveDistrictFrame({
         anchor: districtAnchors[district.id],
         members: members,
-        presentation: record
+        presentation: record,
+        headerBand: !!district.parentId,
+        nested: children.map(function (child) {
+          return subFrames[child.id];
+        })
       });
+      if (district.parentId) subFrames[district.id] = frame;
+      resolved[district.id] = { record: record, members: members, frame: frame };
+    });
+    var districts = grid.districts.map(function (district) {
+      var record = resolved[district.id].record;
+      var members = resolved[district.id].members;
+      var frame = resolved[district.id].frame;
       var box = record.collapsed
         ? { x: frame.x, y: frame.y, width: DISTRICT_MIN_W, height: DISTRICT_MIN_H }
         : frame;
       return {
         id: district.id,
         ws: district.ws,
+        parentId: district.parentId || '',
         // The frame's corner IS the anchor (FR-17, FR-46).
         anchorX: box.x,
         anchorY: box.y,
@@ -1691,7 +1902,12 @@
         collapsed: record.collapsed,
         accent: record.accent,
         theme: record.theme,
-        memberCount: members.length,
+        // A sub-district is one of its parent's workspaces, as its building was.
+        memberCount:
+          members.length +
+          grid.districts.filter(function (candidate) {
+            return candidate.parentId === district.id;
+          }).length,
         saved: !!savedInput[district.id]
       };
     });
@@ -1706,6 +1922,19 @@
     districts.forEach(function (district) {
       if (district.collapsed) collapsedGroups[district.id] = true;
     });
+    // A collapsed parent hides its sub-districts, and with them their
+    // buildings, exactly as it hides its own.
+    var hiddenDistricts = districts.filter(function (district) {
+      return district.parentId && collapsedGroups[district.parentId];
+    });
+    hiddenDistricts.forEach(function (district) {
+      collapsedGroups[district.id] = true;
+    });
+    if (hiddenDistricts.length) {
+      districts = districts.filter(function (district) {
+        return !(district.parentId && collapsedGroups[district.parentId]);
+      });
+    }
     var hiddenNodes = nodes.filter(function (node) {
       return node.groupId && collapsedGroups[node.groupId];
     });
@@ -1763,6 +1992,9 @@
       // Kept for the movement path, which has to translate hidden descendants
       // atomically with the collapsed district they belong to (FR-113).
       hiddenNodes: hiddenNodes,
+      // Sub-districts a collapsed parent is hiding, kept so their buildings
+      // still move and pile with the parent.
+      hiddenDistricts: hiddenDistricts,
       districts: districts,
       hqSite: hqSite,
       bounds: bounds,
@@ -1839,6 +2071,29 @@
    */
   function effectiveDistrictFrame(input) {
     var members = memberBounds(input.members);
+    // A nested district's header band is part of what its contents require,
+    // added before any custom frame is unioned so a saved frame never grows by
+    // a band on each save.
+    if (input.headerBand && members) {
+      var band = nestedHeaderBand(members.width);
+      members = {
+        x: members.x,
+        y: members.y - band,
+        width: members.width,
+        height: members.height + band
+      };
+    }
+    // Sub-districts count as contents: the parent's frame wraps each one with
+    // the same padding it gives a building.
+    (input.nested || []).forEach(function (child) {
+      if (!child) return;
+      members = unionFrames(members, {
+        x: child.x - DISTRICT_PAD_X,
+        y: child.y - DISTRICT_PAD_Y,
+        width: child.width + DISTRICT_PAD_X * 2,
+        height: child.height + DISTRICT_PAD_Y * 2
+      });
+    });
     var record = input.presentation || defaultPresentation();
     var frame;
     if (record.sizingMode === 'custom' && record.frame) {
@@ -1910,8 +2165,15 @@
     if (!world || !frame) return { blocked: false, reason: '', name: '' };
 
     var hit = null;
+    // A sub-district and its buildings are the parent's contents, and the
+    // parent's frame is where a sub-district belongs: neither is a conflict.
+    var parentOf = Object.create(null);
+    (world.districts || []).forEach(function (district) {
+      if (district.parentId) parentOf[district.id] = district.parentId;
+    });
     world.nodes.forEach(function (node) {
-      if (hit || node.groupId === groupId) return;
+      if (hit || node.groupId === groupId || (node.groupId && parentOf[node.groupId] === groupId))
+        return;
       var footprint = { x: node.x, y: node.y, width: MEMBER_W, height: MEMBER_H };
       if (rectsOverlap(frame, footprint)) {
         hit = {
@@ -1924,7 +2186,14 @@
     if (hit) return hit;
 
     world.districts.forEach(function (district) {
-      if (hit || district.id === groupId) return;
+      if (
+        hit ||
+        district.id === groupId ||
+        parentOf[district.id] === groupId ||
+        parentOf[groupId] === district.id
+      ) {
+        return;
+      }
       if (rectsOverlap(frame, district)) {
         hit = {
           blocked: true,
@@ -2143,6 +2412,9 @@
       };
     }
     if (target.id === id) return { kind: 'none' };
+    // A dragged group carries its sub-districts, so landing over one of them
+    // is a reposition inside its own frame, not a move into a descendant.
+    if (target.parentId && target.parentId === id) return { kind: 'none' };
 
     // Already in it: this is a reposition, not a join. Membership comes from
     // the hierarchy record, not visual containment, so nested records work even
@@ -3058,11 +3330,18 @@
     // can never be interpolated into a rule (#346 FR-125, FR-194).
     var accent = safeAccent(d.accent);
     var theme = safeTheme(d.theme);
+    // A district inside another (a folder workspace inside its Home) names its
+    // Commander, its own entry agent, so it reads as a place with someone in
+    // charge rather than as one more building (FR13, FR15).
+    var nested = !!d.nested;
+    var commander = nested ? String(ws.entry_agent_name || '').trim() : '';
     return (
       '<div class="ws-map-district ws-map-accent-' +
       accent +
       ' ws-map-theme-' +
       theme +
+      (nested ? ' is-nested' : '') +
+      (nested && width < NESTED_WIDE_W ? ' is-narrow' : '') +
       (collapsed ? ' is-collapsed' : '') +
       (templateType && width < 320 ? ' is-compact' : '') +
       (conflict ? ' is-conflicted' : '') +
@@ -3099,7 +3378,7 @@
       escapeHtml(templateType ? name + ' — ' + templateType + ' template' : name) +
       '" ' +
       'aria-label="' +
-      escapeHtml(selectLabel) +
+      escapeHtml(commander ? selectLabel + ', commander ' + commander : selectLabel) +
       '">' +
       '<span class="ws-map-district-name">' +
       escapeHtml(name) +
@@ -3110,14 +3389,31 @@
       '<span class="ws-map-district-count">' +
       escapeHtml(countLabel) +
       '</span>' +
+      (commander
+        ? '<span class="ws-map-district-commander" title="' +
+          escapeHtml('Commander: ' + commander) +
+          '"><span aria-hidden="true">★ </span>' +
+          escapeHtml(commander) +
+          '</span>'
+        : '') +
       '</button>' +
       libraryBadgeHTML(ws.id) +
+      (d.bare ? '' : districtControlsHTML(ws.id, name, label, collapsed)) +
+      '</div>' +
+      districtConflictHTML(conflict) +
+      '</div>'
+    );
+  }
+
+  // The district's own three controls: collapse, move, actions.
+  function districtControlsHTML(id, name, label, collapsed) {
+    return (
       // Collapse is its own control with its own accurate label, distinct from
       // selecting, opening, moving, and deleting the group (#346 FR-109,
       // FR-145). aria-expanded lives here rather than on the outline because
       // this is the control that changes it (FR-110).
       '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
-      escapeHtml(ws.id) +
+      escapeHtml(id) +
       '" aria-expanded="' +
       (collapsed ? 'false' : 'true') +
       '" aria-label="' +
@@ -3138,7 +3434,7 @@
       // nothing about what would move. The name is what FR-140 asked for, and
       // the name is what changed.
       '<button type="button" class="ws-map-district-handle" data-group-drag="' +
-      escapeHtml(ws.id) +
+      escapeHtml(id) +
       '" aria-label="' +
       escapeHtml('Move group: ' + name) +
       '" title="' +
@@ -3148,26 +3444,27 @@
       // user who never right-clicks and a keyboard user both reach the group's
       // actions (FR-139, FR-149).
       '<button type="button" class="ws-map-district-more" data-group-menu="' +
-      escapeHtml(ws.id) +
+      escapeHtml(id) +
       '" aria-haspopup="menu" aria-expanded="false" aria-label="' +
       escapeHtml('Actions for ' + label) +
       '" title="' +
       escapeHtml('Actions for ' + name) +
-      '"><span aria-hidden="true">⋯</span></button>' +
-      '</div>' +
-      // Explanatory text, not a colour: it names what the frame has ended up
-      // around and what the user can do about it (FR-88, FR-163).
-      (conflict
-        ? '<p class="ws-map-district-conflict" role="status">' +
+      '"><span aria-hidden="true">⋯</span></button>'
+    );
+  }
+
+  // Explanatory text, not a colour: it names what the frame has ended up
+  // around and what the user can do about it (FR-88, FR-163).
+  function districtConflictHTML(conflict) {
+    return conflict
+      ? '<p class="ws-map-district-conflict" role="status">' +
           escapeHtml(
             'This group’s outline now reaches ' +
               conflict.name +
               ', which is not in it. Move or resize the group, or move its workspaces.'
           ) +
           '</p>'
-        : '') +
-      '</div>'
-    );
+      : '';
   }
 
   /**
@@ -3218,7 +3515,12 @@
             collapsed: district.collapsed,
             conflict: district.conflict,
             accent: district.accent,
-            theme: district.theme
+            theme: district.theme,
+            nested: !!district.parentId,
+            // A group's own page draws no district chrome (group-map-build PRD
+            // §10): a sub-district there shows who and what it holds, and its
+            // members open from their buildings.
+            bare: !!scopeGroupId
           },
           selectedId
         )
@@ -6357,10 +6659,31 @@
     var members = [id];
     if (lastWorldLayout && renderedDistrict(id)) {
       (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
-        if (node.groupId === id) members.push(node.id);
+        if (nodeInDistrict(node, id, lastWorldLayout)) members.push(node.id);
       });
     }
     return members;
+  }
+
+  /**
+   * Is this building inside the district, directly or inside one of its
+   * sub-districts? Membership stays the hierarchy's; this only answers what
+   * a district's frame, collapse and movement carry with them.
+   */
+  function nodeInDistrict(node, groupId, layout) {
+    if (!node || !groupId || !node.groupId) return false;
+    if (node.groupId === groupId) return true;
+    var world = layout || lastWorldLayout;
+    var parent = '';
+    ((world && world.districts) || []).forEach(function (district) {
+      if (district.id === node.groupId) parent = district.parentId || '';
+    });
+    if (!parent && world && world.hiddenDistricts) {
+      world.hiddenDistricts.forEach(function (district) {
+        if (district.id === node.groupId) parent = district.parentId || '';
+      });
+    }
+    return parent === groupId;
   }
 
   function pileParcels(targetId) {
@@ -7402,7 +7725,32 @@
     var members = lastWorldLayout.nodes.filter(function (node) {
       return node.groupId === groupId;
     });
-    return memberBounds(members);
+    var bounds = memberBounds(members);
+    // A nested district's own header band is contents as well.
+    var self = null;
+    lastWorldLayout.districts.forEach(function (district) {
+      if (district.id === groupId) self = district;
+    });
+    if (bounds && self && self.parentId) {
+      var band = nestedHeaderBand(bounds.width);
+      bounds = {
+        x: bounds.x,
+        y: bounds.y - band,
+        width: bounds.width,
+        height: bounds.height + band
+      };
+    }
+    // A sub-district is contents too: a resize may not clip it.
+    lastWorldLayout.districts.forEach(function (district) {
+      if (district.parentId !== groupId) return;
+      bounds = unionFrames(bounds, {
+        x: district.x - DISTRICT_PAD_X,
+        y: district.y - DISTRICT_PAD_Y,
+        width: district.width + DISTRICT_PAD_X * 2,
+        height: district.height + DISTRICT_PAD_Y * 2
+      });
+    });
+    return bounds;
   }
 
   function resizeOverlayEls(container) {
@@ -7722,7 +8070,7 @@
   function setGroupCollapsed(container, groupId, collapsed) {
     if (collapsed && lastWorldLayout) {
       lastWorldLayout.nodes.forEach(function (node) {
-        if (node.groupId === groupId) delete multiSelected[node.id];
+        if (nodeInDistrict(node, groupId, lastWorldLayout)) delete multiSelected[node.id];
       });
       // The action bar has to stop claiming those workspaces immediately, not
       // after the round-trip: they are about to disappear from the map, and a
@@ -8200,7 +8548,8 @@
     var projected = effectiveDistrictFrame({
       anchor: frame,
       members: members,
-      presentation: presentation
+      presentation: presentation,
+      headerBand: !!district.parentId
     });
     return frameConflict(projected, groupId, layout);
   }
@@ -9142,7 +9491,8 @@
     if (!lastWorldLayout) return [];
     var members = [];
     var visit = function (node, hidden) {
-      if (node.groupId !== groupId) return;
+      // Moving a district moves its sub-districts' buildings with it.
+      if (!nodeInDistrict(node, groupId, lastWorldLayout)) return;
       members.push({
         id: node.id,
         hidden: hidden,
