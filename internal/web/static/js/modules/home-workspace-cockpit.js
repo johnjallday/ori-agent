@@ -14,9 +14,12 @@ import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
 import {
   folderAgentReportView,
   folderAgentTileLine,
+  folderAgentOpeningLine,
   listFolderAgents,
+  openFolderAgentPlace,
   postFolderAgentAction,
-  renderFolderAgentReport
+  renderFolderAgentReport,
+  setupFinished
 } from './folder-agent-card.js';
 import { homeCommanders } from './commander-map.js';
 
@@ -27,6 +30,32 @@ const SPEAKING_STATES = new Set(['looking', 'setting_up', 'reported', 'failed'])
 
 export function speakingFolderAgents(views) {
   return (Array.isArray(views) ? views : []).filter(view => SPEAKING_STATES.has(view?.state));
+}
+
+// watchedRunsToOpen: the runs set up from a map balloon (watched, by
+// workspace id) that this poll shows finished, each to be opened the way every
+// follower opens one (openFolderAgentPlace: the Home it joined, or the folder).
+// A run that stopped is no longer watched. Pure: returns the views to open and
+// the next {previous, watched}. The listing drops a finished run from the
+// speaking ones, so this reads every view, before that filter.
+export function watchedRunsToOpen(watched, previous, views) {
+  const open = [];
+  const nextWatched = new Set(watched);
+  const nextPrevious = { ...previous };
+  (Array.isArray(views) ? views : []).forEach(view => {
+    const id = String(view?.workspace_id || '');
+    if (!id) return;
+    if (nextWatched.has(id)) {
+      if (setupFinished(previous[id], view)) {
+        open.push(view);
+        nextWatched.delete(id);
+      } else if (view.state === 'set_up') {
+        nextWatched.delete(id);
+      }
+    }
+    nextPrevious[id] = view;
+  });
+  return { open, watched: nextWatched, previous: nextPrevious };
 }
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import { workspaceUpdates, watchWorkspaceUpdatePage } from './workspace-updates.js';
@@ -5234,11 +5263,18 @@ import {
   // The folder agents' tile lines follow their looks: polled every two
   // seconds while one is looking or setting up, and once otherwise.
   let folderAgentTimer = 0;
+  // Runs set up from a balloon here: once one finishes, Home opens where it
+  // landed, as the drawer and the card do (folder-setup-ends-in-home FR11).
+  let watchedRuns = { watched: new Set(), previous: {} };
   const mapCommanders = homeCommanders({
     reportView: folderAgentReportView,
     renderCard: (view, options) => renderFolderAgentReport(view, document, options),
     act: async (view, action, extra) => {
       const result = await postFolderAgentAction(view, action, globalThis.fetch, extra);
+      if (action === 'set_up' && result?.view) {
+        watchedRuns.watched.add(view.workspaceID);
+        watchedRuns.previous[view.workspaceID] = result.view;
+      }
       // The tiles and the follow loop pick the change up the canonical way.
       window.dispatchEvent(
         new CustomEvent('ori:folder-agent-changed', { detail: { workspaceID: view.workspaceID } })
@@ -5275,12 +5311,28 @@ import {
     folderAgentSetups = Object.fromEntries(
       views.map(view => [view.workspace_id, view.setup?.finished_at || ''])
     );
+    const { open, ...nextRuns } = watchedRunsToOpen(
+      watchedRuns.watched,
+      watchedRuns.previous,
+      views
+    );
+    watchedRuns = nextRuns;
+    // One page can only go one place: the first that finished. Its balloon
+    // stays for that beat and says where Home is going.
+    const leaving = open[0] || null;
+    if (leaving) openFolderAgentPlace(leaving);
     // Each Commander with something to say speaks from its tile; the one the
     // drawer follows is the drawer's (it may open by itself).
     const owned =
       document.querySelector('#personalAssistantFolderAgent [data-workspace-id]')?.dataset
         ?.workspaceId || '';
-    mapCommanders.sync(speakingFolderAgents(views), owned);
+    const speaking = speakingFolderAgents(views);
+    if (leaving && !speaking.includes(leaving)) speaking.push(leaving);
+    mapCommanders.sync(
+      speaking,
+      owned,
+      new Map(leaving ? [[leaving.workspace_id, folderAgentOpeningLine(leaving)]] : [])
+    );
     const changed = JSON.stringify(next) !== JSON.stringify(state.folderAgentLines);
     const finished = Object.keys(state.folderAgentLines).some(id => !next[id]);
     state.folderAgentLines = next;

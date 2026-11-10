@@ -10,6 +10,7 @@ import {
   runSetup,
   setupLabel,
   setupSubtitle,
+  plainSetupReason,
   setupTotals,
   staffingDisclosure,
   staffingResultLabel,
@@ -50,8 +51,20 @@ test('bucketProject puts every eligibility state in one of four buckets', () => 
   ]) {
     const bucket = bucketProject({ id: 'a' }, { state, reason: 'why', project_files: ['x'] });
     assert.equal(bucket.kind, SETUP_KINDS.DASHBOARD, state || 'empty');
-    assert.equal(bucket.reason, 'why');
+    // Each known state says why in plain words; an unknown one keeps the
+    // server's own sentence.
+    assert.equal(bucket.reason, state ? plainSetupReason(state) : 'why', state || 'empty');
+    assert.doesNotMatch(bucket.reason, /blueprint|integration|dashboard|reviewed/i, state);
   }
+  assert.equal(
+    plainSetupReason(
+      'unsupported_format',
+      'No observed project file uses the installed blueprint…'
+    ),
+    "Its project file is in a format the installed tools can't open."
+  );
+  assert.equal(plainSetupReason('something_new', 'Server words.'), 'Server words.');
+  assert.equal(plainSetupReason('', ''), "It can't be set up here.");
   assert.equal(
     bucketProject({ id: 'a' }, { state: 'review_available', project_files: [] }).kind,
     SETUP_KINDS.DASHBOARD,
@@ -64,7 +77,7 @@ test('labels never say "ready"', () => {
   for (const kind of Object.values(SETUP_KINDS)) assert.doesNotMatch(setupLabel(kind), /ready/i);
   assert.equal(setupLabel('setup'), 'to set up');
   assert.equal(setupLabel('connected'), 'on the map');
-  assert.equal(setupLabel('bogus'), 'needs the dashboard');
+  assert.equal(setupLabel('bogus'), "can't be set up here");
   const source = readFileSync(new URL('./library-setup.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source.replace(/\/\/.*$/gm, ''), /'[^']*\bready\b[^']*'/i);
 });
@@ -83,13 +96,13 @@ test('totals and subtitle leave zero parts out', () => {
   assert.deepEqual(totals, { found: 5, setup: 2, file_choice: 1, connected: 1, dashboard: 1 });
   assert.equal(
     setupSubtitle(totals),
-    '5 found by the last scan · 1 already on the map · 1 needs the dashboard'
+    "5 on the shelf · 1 already on the map · 1 can't be set up here"
   );
   assert.equal(
     setupSubtitle({ found: 3, dashboard: 2 }),
-    '3 found by the last scan · 2 need the dashboard'
+    "3 on the shelf · 2 can't be set up here"
   );
-  assert.equal(setupSubtitle(setupTotals([])), '0 found by the last scan');
+  assert.equal(setupSubtitle(setupTotals([])), '0 on the shelf');
 });
 
 function fakeClient(handlers) {

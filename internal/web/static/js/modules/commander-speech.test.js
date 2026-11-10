@@ -101,6 +101,23 @@ test('the receipt and stopped lines', () => {
   assert.equal(commanderSpeech(null), null);
 });
 
+test('a done run with a goal offer asks about the goal (folder-setup-ends-in-home FR17)', () => {
+  const offering = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    goal_offer: { goal: 'Finish the album', max_runes: 300 }
+  });
+  const speech = commanderSpeech(offering);
+  assert.equal(speech.phase, 'goal');
+  assert.equal(speech.line, 'A goal for Albums? · Review');
+  assert.equal(speech.review, true);
+  assert.deepEqual(commanderOneLine(offering), {
+    phase: 'goal',
+    text: 'Albums Manager suggests a goal for Albums',
+    action: 'Review'
+  });
+});
+
 test('the one-line card words per phase (FR13)', () => {
   assert.deepEqual(commanderOneLine(view()), {
     phase: 'report',

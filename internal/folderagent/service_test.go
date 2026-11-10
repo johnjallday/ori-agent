@@ -95,6 +95,12 @@ func (w *fakeWorkspaces) SetGoal(id, goal string) error {
 	return nil
 }
 
+func (w *fakeWorkspaces) Goal(id string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.goals[id]
+}
+
 func (t *fakeTickets) CreateBacklog(ws, title, details, agent string) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -226,8 +232,12 @@ func TestStart_DemoFolderCreatesWorkspaceAgentTicketAndReport(t *testing.T) {
 	}
 	h.svc.Wait()
 	req := h.ws.created[0]
-	if req.Name != "Ori Music Demo" || req.AgentName != "Ori Music Demo Manager" || req.Mission != DefaultBrief || !filepath.IsAbs(req.AnchorPath) {
+	// The brief stays the agent's instruction; the workspace starts with no goal.
+	if req.Name != "Ori Music Demo" || req.AgentName != "Ori Music Demo Manager" || req.Mission != "" || !filepath.IsAbs(req.AnchorPath) {
 		t.Fatalf("create = %+v", req)
+	}
+	if rec, _ := h.svc.Record("u1", view.WorkspaceID); rec.Brief != DefaultBrief {
+		t.Fatalf("brief on the record = %q", rec.Brief)
 	}
 	if h.tickets.opened[0] != "Look around Ori Music Demo · Ori Music Demo Manager" {
 		t.Fatalf("ticket = %v", h.tickets.opened)
@@ -274,8 +284,8 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 	if report.StageLine != "Set it up: Install REAPER tools and connect them to Ori Music Demo" {
 		t.Fatalf("stage line = %q", report.StageLine)
 	}
-	if h.ws.created[0].Mission != "Mix this song" {
-		t.Fatalf("brief = %q", h.ws.created[0].Mission)
+	if rec, _ := h.svc.Record("u1", view.WorkspaceID); rec.Brief != "Mix this song" || h.ws.created[0].Mission != "" {
+		t.Fatalf("brief = %q, workspace goal = %q", rec.Brief, h.ws.created[0].Mission)
 	}
 	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: "stale"}); !errors.Is(err, personalassistant.ErrFolderPlanChanged) {
 		t.Fatalf("stale digest = %v", err)

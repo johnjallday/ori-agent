@@ -43,15 +43,12 @@ test('single-file rows are ticked by default; a file-choice row needs a file fir
   );
   assert.equal(view.buttonLabel, 'Put 2 on the map');
   assert.equal(view.buttonDisabled, false);
-  assert.equal(
-    view.subtitle,
-    '5 found by the last scan · 1 already on the map · 1 needs the dashboard'
-  );
+  assert.equal(view.subtitle, "5 on the shelf · 1 already on the map · 1 can't be set up here");
   assert.equal(view.items[4].reason, 'Needs a project integration');
   assert.equal(view.allConnected, false);
 });
 
-test('rows are ordered: to set up, then file choice, then on the map, then needs the dashboard', () => {
+test("rows are ordered: to set up, then file choice, then on the map, then can't be set up here", () => {
   const shuffled = [rows[4], rows[3], rows[2], rows[1], rows[0]];
   assert.deepEqual(
     sheetView(shuffled, {}).items.map(item => item.id),
@@ -481,4 +478,27 @@ test('sheetPosition sits beside the anchor, falls below when there is no room, a
 test('openLibrarySheet refuses without a document or Home id', () => {
   assert.equal(openLibrarySheet({ homeID: 'h', doc: null }), null);
   assert.equal(openLibrarySheet({ homeID: '', doc: {} }), null);
+});
+
+// One vocabulary (folder-setup-ends-in-home FR22–FR25): "shelf" and "on the
+// map"; no "dashboard" or "File-only" in anything the sheet says, one wording
+// for both shelf links, and the new assurance line.
+test('the sheet speaks of the shelf and the map, never the dashboard', () => {
+  const strings = file =>
+    readFileSync(new URL(file, import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')
+      .match(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g)
+      .join('\n');
+  for (const file of ['./map-library-sheet.js', './library-setup.js']) {
+    // The bucket's key and property reads are code, not words the sheet says.
+    const said = strings(file).replace(/'dashboard'|DASHBOARD|is-dashboard|\.dashboard\b/g, '');
+    assert.doesNotMatch(said, /dashboard|File-only/i, file);
+  }
+  const sheet = strings('./map-library-sheet.js');
+  assert.equal((sheet.match(/'Open the shelf'/g) || []).length, 2, 'row link and footer link');
+  assert.match(
+    sheet,
+    /Each workspace only reads its project file\. Your files stay where they are and are never changed\./
+  );
+  assert.match(sheet, /Put \$\{selected\.length\} on the map/);
 });

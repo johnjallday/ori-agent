@@ -232,6 +232,15 @@ type LibrarySummary struct {
 	// partial, failed or cancelled scan never moves it. Nil means no root has
 	// a complete scan yet.
 	LastCompleteScanAt *time.Time `json:"last_complete_scan_at,omitempty"`
+	// ToSetUp counts the shelf's projects the installed tools could set up
+	// now, across every connected root; NeedsFileChoice is the part of it
+	// whose folder holds several project files. The digest says what the last
+	// scan found with the tools installed at that moment; these say what the
+	// projects sheet offers today, so the map's chip and badge agree with it
+	// after a second folder joins the Home or tools are installed later. Nil
+	// when the installed tools could not be checked.
+	ToSetUp         *int `json:"to_set_up,omitempty"`
+	NeedsFileChoice *int `json:"needs_file_choice,omitempty"`
 }
 
 // lastCompleteScanAt is the finish time of the newest complete scan whose root
@@ -275,7 +284,41 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 			summary.ReadyProposals++
 		}
 	}
+	if s.installed != nil {
+		installed, listErr := s.installed.List()
+		if evidence := s.setupEvidence(scope, state, installed, listErr); evidence.note != setupNoteUnchecked {
+			ready, choice := shelfToSetUp(doc, state, evidence)
+			summary.ToSetUp, summary.NeedsFileChoice = &ready, &choice
+		}
+	}
 	return summary, nil
+}
+
+// shelfToSetUp counts, from the stored entries alone, the projects without a
+// link whose observation on a connected root is available (or ambiguous, a
+// file choice) in a format the evidence's tools attach. It reads no folder;
+// the sheet's per-project review repeats every check before anything is made.
+func shelfToSetUp(doc Document, state *workspace.AssistantProgramState, evidence setupEvidence) (ready, choice int) {
+	if evidence.note != "" {
+		return 0, 0
+	}
+	for _, entry := range doc.Entries {
+		if entry.Link != nil {
+			continue
+		}
+		for _, obs := range entry.Observations {
+			if !digestRootActive(doc, state, obs.RootID) ||
+				(obs.Availability != "available" && obs.Availability != "ambiguous") || !evidence.supports(obs.Alternates) {
+				continue
+			}
+			ready++
+			if obs.Availability == "ambiguous" {
+				choice++
+			}
+			break
+		}
+	}
+	return ready, choice
 }
 
 // digestWithLinks presents a stored digest against the Home's current links. A

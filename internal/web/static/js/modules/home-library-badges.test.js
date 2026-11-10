@@ -5,8 +5,11 @@ import {
   LIBRARY_BADGE_MIN_REFRESH_MS,
   createLibraryBadgeLoader,
   libraryBadgeView,
-  libraryHomeIds
+  libraryHomeIds,
+  libraryToSetUp
 } from './home-library-badges.js';
+import { setupProjectsChipHTML } from './workspace-overview.js';
+import { bucketProject, setupTotals } from './library-setup.js';
 
 const ROUTE = '/workspaces/music-home/assistant#projectLibraryProposals';
 const HOME = { id: 'home-1', name: 'Music Home', group_template: { kind: 'managed_home' } };
@@ -182,4 +185,86 @@ test('loader shares one request between concurrent calls and hides failed Homes'
   assert.equal(calls, 2, 'one summary read per Home, not per caller');
   assert.equal(first, second);
   assert.deepEqual(Object.keys(first), ['home-1']);
+});
+
+// The demo fixture after a folder run that installed the tools: Album-1..4
+// with one Song.rpp, Album-5 with Song.rpp and Alternate.rpp, one Logic
+// project the installed tools cannot open. The chip in the Home, the badge on
+// the outer map and the sheet's rows must all count the same 5.
+test('chip, badge and sheet agree on one library summary', () => {
+  const after = summary({
+    ready_proposals: 1,
+    digest: {
+      scan_id: 's',
+      projects: 6,
+      activatable: 5,
+      needs_file_choice: 1,
+      unsupported_format: 1
+    }
+  });
+  assert.equal(libraryToSetUp(after), 5);
+  assert.match(setupProjectsChipHTML({ toSetUp: libraryToSetUp(after) }, 2), /<b>5<\/b> to set up/);
+  assert.equal(libraryBadgeView(after, 'Music Production Home').text, '5 to set up · 1 to review');
+
+  const one = { state: 'review_available', project_files: ['Song.rpp'] };
+  const rows = [
+    ...[1, 2, 3, 4].map(() => bucketProject({}, one)),
+    bucketProject(
+      {},
+      { state: 'file_choice_required', project_files: ['Alternate.rpp', 'Song.rpp'] }
+    ),
+    bucketProject(
+      {},
+      { state: 'unsupported_format', reason: 'No observed project file uses the installed format.' }
+    )
+  ];
+  const totals = setupTotals(rows);
+  assert.equal(totals.setup + totals.file_choice, libraryToSetUp(after));
+  assert.equal(totals.file_choice, after.digest.needs_file_choice);
+  assert.equal(totals.dashboard, after.digest.unsupported_format);
+
+  // A note that is still true (no project tools) hides both, as before.
+  const noTools = summary({
+    digest: {
+      scan_id: 's',
+      projects: 6,
+      activatable: 0,
+      setup_note: 'project_provider_unavailable'
+    }
+  });
+  assert.equal(libraryToSetUp(noTools), 0);
+  assert.equal(setupProjectsChipHTML({ toSetUp: libraryToSetUp(noTools) }, 2), '');
+  assert.equal(libraryBadgeView(noTools), null);
+  // A malformed digest never counts.
+  assert.equal(libraryToSetUp({ digest: { activatable: '5' } }), 0);
+  assert.equal(libraryToSetUp(null), 0);
+});
+
+// A second folder joined the Home: the last scan's digest describes only that
+// folder (5), but the shelf also holds six songs listed earlier, now settable
+// because the tools arrived. The sheet offers all of them; so must the chip
+// and the badge, from the server's whole-shelf count.
+test('the whole-shelf count wins over the last scan, even over a stale note', () => {
+  const joined = summary({
+    ready_proposals: 3,
+    to_set_up: 11,
+    needs_file_choice: 1,
+    digest: {
+      scan_id: 's',
+      projects: 6,
+      activatable: 5,
+      needs_file_choice: 1,
+      unsupported_format: 1
+    }
+  });
+  assert.equal(libraryToSetUp(joined), 11);
+  assert.equal(libraryBadgeView(joined).text, '11 to set up · 3 to review');
+  assert.equal(libraryBadgeView(joined).count, 11);
+  assert.match(setupProjectsChipHTML({ toSetUp: libraryToSetUp(joined) }, 3), /<b>11<\/b>/);
+  const staleNote = summary({
+    to_set_up: 2,
+    digest: { scan_id: 's', activatable: 0, setup_note: 'project_provider_unavailable' }
+  });
+  assert.equal(libraryToSetUp(staleNote), 2);
+  assert.equal(libraryToSetUp(summary({ to_set_up: 0 })), 0);
 });

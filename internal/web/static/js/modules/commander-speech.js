@@ -98,6 +98,17 @@ export function commanderSpeech(view) {
           review: true
         };
       }
+      // The place exists: the agent's suggested goal waits for an answer
+      // (folder-setup-ends-in-home FR17).
+      if (view.goalOffer) {
+        return {
+          phase: 'goal',
+          line: `A goal for ${view.workspace}? · Review`,
+          headline: '',
+          announce: `I suggest a goal for ${view.workspace}`,
+          review: true
+        };
+      }
       return {
         phase: 'done',
         line: `${view.workspace} is set up · See what I made`,
@@ -142,6 +153,12 @@ export function commanderOneLine(view) {
       return {
         phase: speech.phase,
         text: `${view.workspace}: a step did not finish`,
+        action: 'Review'
+      };
+    case 'goal':
+      return {
+        phase: speech.phase,
+        text: `${agent} suggests a goal for ${view.workspace}`,
         action: 'Review'
       };
     case 'done':

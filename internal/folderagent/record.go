@@ -246,6 +246,10 @@ type Record struct {
 	Declined    []string `json:"declined,omitempty"`
 	NextStarted bool     `json:"next_started,omitempty"`
 	Setup       *Setup   `json:"setup,omitempty"`
+	// GoalAnswer is the owner's answer to the suggested-goal offer made once
+	// the run was done: GoalUsed or GoalDismissed; empty while it waits. The
+	// suggested goal itself stays in Sections.Goal.
+	GoalAnswer string `json:"goal_answer,omitempty"`
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
 

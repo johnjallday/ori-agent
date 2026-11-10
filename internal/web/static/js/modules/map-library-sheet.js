@@ -24,7 +24,7 @@ import {
 } from './library-setup.js';
 
 export const CONSENT_LINE =
-  'Each starts File-only. Source files stay where they are and are never changed.';
+  'Each workspace only reads its project file. Your files stay where they are and are never changed.';
 
 const SHEET_CLASS = 'ws-map-library-sheet';
 
@@ -667,7 +667,7 @@ export function openLibrarySheet({
         why.title = item.reason;
         row.append(why);
         if (shelfRoute) {
-          const link = el(doc, 'a', `${SHEET_CLASS}-link`, 'open the shelf');
+          const link = el(doc, 'a', `${SHEET_CLASS}-link`, 'Open the shelf');
           link.href = shelfRoute;
           row.append(link);
         }
@@ -1053,7 +1053,7 @@ export function openLibrarySheet({
       }
       footer.append(cancel);
       if (shelfRoute) {
-        const link = el(doc, 'a', `${SHEET_CLASS}-shelf`, 'Open the project shelf');
+        const link = el(doc, 'a', `${SHEET_CLASS}-shelf`, 'Open the shelf');
         link.href = shelfRoute;
         footer.append(link);
       }

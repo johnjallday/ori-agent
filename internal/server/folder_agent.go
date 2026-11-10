@@ -212,6 +212,15 @@ func (w folderAgentWorkspaces) SetGoal(workspaceID, goal string) error {
 	})
 }
 
+// Goal is the workspace goal, "" when it has none or cannot be read.
+func (w folderAgentWorkspaces) Goal(workspaceID string) string {
+	ws, err := w.builder.workspaceStore.Get(workspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return ws.Mission
+}
+
 // folderAgentHiring is the card's Hire section: the models a new agent can
 // have and the owner's own agents to reuse. Only tool-capable providers are
 // offered (the look calls tools). Cloud and CLI providers are registered only

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,25 @@ func roles(names ...string) []foldersetup.HomeRole {
 		out = append(out, foldersetup.HomeRole{RoleID: strings.ToLower(name), Name: name})
 	}
 	return out
+}
+
+// Set it up lists the songs on the Home's shelf and places the folder; song
+// workspaces stay a second, explicit confirmation in the projects sheet
+// (folder-setup-ends-in-home FR13). The run's code never reaches the library's
+// activation or the assistant program's activation, the only paths that make
+// a project workspace.
+func TestFolderAgentRun_NeverCreatesProjectWorkspaces(t *testing.T) {
+	for _, file := range []string{"folder_agent.go", "folder_agent_home.go", "folder_agent_group.go"} {
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range []string{"Activation", "ActivateAssistantProgram", "assistantLibraryActivator", "ActivationService"} {
+			if strings.Contains(string(source), call) {
+				t.Fatalf("%s mentions %s: a folder run must not set up song workspaces", file, call)
+			}
+		}
+	}
 }
 
 func TestHireFolderAgentRoles_EachNamedRoleIsItsOwnLine(t *testing.T) {

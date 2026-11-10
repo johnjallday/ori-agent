@@ -38,6 +38,21 @@ function count(value) {
 }
 
 /**
+ * How many projects a Home's library summary says can be set up now. The
+ * server's `to_set_up` counts the whole shelf with the tools installed today,
+ * which is what the projects sheet offers; an older server without it falls
+ * back to the last scan's digest (zero while that digest carries a setup
+ * note). The outer map's badge and the Home's own "N to set up" chip both read
+ * this, so they never disagree.
+ */
+export function libraryToSetUp(summary) {
+  if (!summary || typeof summary !== 'object') return 0;
+  if (Number.isInteger(summary.to_set_up)) return count(summary.to_set_up);
+  const digest = summary.digest && typeof summary.digest === 'object' ? summary.digest : null;
+  return digest && !digest.setup_note ? count(digest.activatable) : 0;
+}
+
+/**
  * The badge for one Home summary, or null when there is nothing to act on.
  *
  * Shown only when entries are ready for a setup review or suggestions are
@@ -53,8 +68,7 @@ function count(value) {
  */
 export function libraryBadgeView(summary, homeName = 'Home', now = Date.now()) {
   if (!summary || typeof summary !== 'object') return null;
-  const digest = summary.digest && typeof summary.digest === 'object' ? summary.digest : null;
-  const ready = digest && !digest.setup_note ? count(digest.activatable) : 0;
+  const ready = libraryToSetUp(summary);
   const review = count(summary.ready_proposals);
   const route = libraryShelfRoute(summary.route);
   const freshness = libraryFreshness(summary, now);

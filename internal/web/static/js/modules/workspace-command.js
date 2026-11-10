@@ -28,6 +28,13 @@ import {
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 import { workspaceNavigationHTML, workspaceSettingsHTML } from './workspace-command-chrome.js';
 import { WorkspacePanels } from './workspace-panels.js';
+import { libraryToSetUp } from './home-library-badges.js';
+import {
+  searchWithoutSetupArrival,
+  setupArrivalFromSearch,
+  setupArrivalShouldOpen,
+  setupArrivalTile
+} from './home-setup-arrival.js';
 import {
   readTicketURLState,
   writeTicketURLState,
@@ -332,6 +339,21 @@ export class WorkspaceCommandView {
     // not own, and the station can only open once the workspace has loaded.
     this._bootStation =
       typeof window !== 'undefined' ? stationFromSearch(window.location.search) : '';
+    // A folder setup that ran this Home's step lands here asking for the
+    // projects sheet once (home-setup-arrival.js). The parameters leave the
+    // address at once, so a reload or Back never asks again; the request
+    // lives on this view until the library summary has been read.
+    this._setupArrival =
+      typeof window !== 'undefined' ? setupArrivalFromSearch(window.location.search) : null;
+    if (this._setupArrival) {
+      try {
+        const url = new URL(window.location.href);
+        const search = searchWithoutSetupArrival(url.search);
+        window.history.replaceState(window.history.state, '', url.pathname + search + url.hash);
+      } catch {
+        /* the sheet still opens once; only the address keeps the parameters */
+      }
+    }
     this.viewMode = resolveEffectiveMode(
       this._urlBootState && this._urlBootState.mode,
       this.readCommandViewModePreference()
@@ -14075,10 +14097,10 @@ export class WorkspaceCommandView {
         );
         if (response.ok) {
           const summary = await response.json();
-          const digest = summary && summary.digest;
-          const toSetUp = digest && !digest.setup_note ? Number(digest.activatable) : 0;
-          if (Number.isInteger(toSetUp) && toSetUp > 0) {
-            next = { shelf: Number(digest.projects) || toSetUp, toSetUp };
+          // The outer map's badge reads the same count (home-library-badges.js).
+          const toSetUp = libraryToSetUp(summary);
+          if (toSetUp > 0) {
+            next = { shelf: Number(summary.digest.projects) || toSetUp, toSetUp };
           }
         }
       } catch (err) {
@@ -14086,10 +14108,38 @@ export class WorkspaceCommandView {
       }
     }
     if (this.workspaceId() !== workspaceId) return;
-    if (JSON.stringify(next) === JSON.stringify(this.libraryEmptyState || null)) return;
-    this.libraryEmptyState = next;
-    this.syncSetupProjectsChip();
-    if (this.active) this.syncDetachmentMap();
+    const arrival = this._setupArrival;
+    this._setupArrival = null;
+    if (JSON.stringify(next) !== JSON.stringify(this.libraryEmptyState || null)) {
+      this.libraryEmptyState = next;
+      this.syncSetupProjectsChip();
+      if (this.active) this.syncDetachmentMap();
+    }
+    if (setupArrivalShouldOpen({ arrival, toSetUp: next?.toSetUp })) this.openSetupArrival(arrival);
+  }
+
+  /**
+   * Opens the projects sheet a landing asked for, once: beside the folder's
+   * tile when the Home's map shows it, else beside the "N to set up" chip, with
+   * focus returning to the chip (as when the chip opens it). The map may still
+   * be re-mounting from the summary that was just read, so it waits a beat and
+   * retries briefly for the map and the chip to be drawn.
+   */
+  openSetupArrival(arrival, { delayMs = 300, retries = 20 } = {}) {
+    if (typeof window === 'undefined') return;
+    const attempt = left => {
+      const chip = this.container?.querySelector?.('[data-cmd-setup-projects]') || null;
+      const zone = this.container?.querySelector?.('[data-map-zone="detachment"]') || null;
+      const tile = setupArrivalTile(this.detachmentMapEl, arrival?.beside);
+      const ready = this.active && this.viewMode === 'map' && (tile || chip);
+      if (!ready) {
+        if (left > 0) window.setTimeout(() => attempt(left - 1), 200);
+        return;
+      }
+      if (tile) this.openLibrarySetupSheet(chip || tile, tile);
+      else this.openLibrarySetupSheet(chip, zone);
+    };
+    window.setTimeout(() => attempt(retries), delayMs);
   }
 
   // The toolbar's "N to set up" follows the shelf count in place, so an open
