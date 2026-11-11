@@ -15,10 +15,12 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8765',
     browserName: 'chromium',
-    // Linux's fractional glyph positioning can rasterize the same wrapped text
-    // differently across fresh browser contexts (PR #466's Today metadata).
-    // Pin the browser's font positioning, not the UI or comparison tolerance.
-    launchOptions: { args: ['--disable-font-subpixel-positioning'] },
+    // Pin font positioning and repaint whole tiles. Linux's incremental raster
+    // can retain a differently rounded button edge after the Map's Summary
+    // modal resizes it. Neither flag changes the UI or comparison tolerance.
+    launchOptions: {
+      args: ['--disable-font-subpixel-positioning', '--disable-partial-raster'],
+    },
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
     colorScheme: 'dark',
