@@ -463,6 +463,7 @@ const REPORT_KIND = {
   // premise.
   goal: 'report',
   premise: 'report',
+  withdrawn: 'report',
   done: 'done',
   running: 'live',
   looking: 'live'

@@ -72,6 +72,17 @@ test('a report waiting on its premise asks one question before any plan', () => 
     premise: { state: 'confirmed', sentence: 'A music production folder.' }
   });
   assert.equal(commanderSpeech(confirmed).phase, 'report');
+  // "It's something else" plans nothing; the line must not say it has a plan.
+  const withdrawn = view({
+    actions: ['keep', 'look_further'],
+    premise: {
+      state: 'something_else',
+      sentence: 'Nothing is installed or created.',
+      withdrawn: true
+    }
+  });
+  assert.equal(commanderSpeech(withdrawn).line, 'Nothing planned for Albums · Review');
+  assert.equal(commanderOneLine(withdrawn).text, 'Nothing is planned for Albums');
 });
 
 test('the report and cause lines (FR9, FR7)', () => {

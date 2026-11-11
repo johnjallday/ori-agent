@@ -86,6 +86,14 @@ func TestSteps_CatalogAcrossStagesWithReadableHandles(t *testing.T) {
 	}
 }
 
+func TestNameHandles_KeepsChipsOnlyForTheKeptSteps(t *testing.T) {
+	steps := []Step{{Handle: "group", Name: "a group"}, {Handle: "reaper-tools", Name: "REAPER tools"}}
+	got := NameHandles("Start with [group], then [reaper-tools] and [made-up].", steps, map[string]bool{"reaper-tools": true})
+	if got != "Start with a group, then [reaper-tools] and [made-up]." {
+		t.Fatalf("named = %q", got)
+	}
+}
+
 // The title rule (PRD FR23) follows the plugin's readiness, never the app check.
 func TestSteps_IntegrationTitleFollowsThePlugin(t *testing.T) {
 	song := foldermap.Facts{RootProject: &foldermap.Project{Shape: "audio", Format: "reaper", Marker: "*.rpp"}}

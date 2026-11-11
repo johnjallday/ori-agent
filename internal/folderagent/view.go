@@ -243,11 +243,15 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		plan.Runnable = false
 		v.StageLine = "Set up as confirmed. Nothing in the source folder was moved."
 		var ran []folderlook.Step
+		kept := map[string]bool{}
 		for _, step := range plan.Steps {
 			if step.Chosen {
 				ran = append(ran, step)
+				kept[step.Handle] = true
 			}
 		}
+		// The agent's words keep naming the steps that did not run.
+		plan.WordsRaw = folderlook.NameHandles(plan.WordsRaw, plan.Steps, kept)
 		plan.Steps = ran
 	}
 	v.Plan = planViewOf(plan)

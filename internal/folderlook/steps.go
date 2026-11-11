@@ -224,6 +224,24 @@ func PlanWords(text string, steps []Step) string {
 	return strings.TrimSpace(out)
 }
 
+// NameHandles writes each offered step's handle that keep does not hold as
+// the step's name, leaving the kept handles (the card's chips) and any other
+// token as they are. A finished card lists only the steps that ran; the
+// agent's words still name the others.
+func NameHandles(text string, steps []Step, keep map[string]bool) string {
+	names := make(map[string]string, len(steps))
+	for _, s := range steps {
+		names[s.Handle] = s.Name
+	}
+	return handlePattern.ReplaceAllStringFunc(text, func(token string) string {
+		handle := handlePattern.FindStringSubmatch(token)[1]
+		if name, ok := names[handle]; ok && !keep[handle] {
+			return name
+		}
+		return token
+	})
+}
+
 var handleNoise = regexp.MustCompile(`[^a-z0-9]+`)
 
 // handles issues unique, readable handles from candidate names.

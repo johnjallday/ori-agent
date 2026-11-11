@@ -68,6 +68,17 @@ export function commanderSpeech(view) {
           review: true
         };
       }
+      // "It's something else": nothing is planned until a look with the
+      // owner's own words (FR6).
+      if (view.premise?.withdrawn) {
+        return {
+          phase: 'withdrawn',
+          line: `Nothing planned for ${folder} · Review`,
+          headline: '',
+          announce: `Nothing is planned for ${folder}`,
+          review: true
+        };
+      }
       const line = `I have a plan for ${folder} · Review`;
       return {
         phase: 'report',
@@ -153,6 +164,12 @@ export function commanderOneLine(view) {
       return {
         phase: speech.phase,
         text: `${agent} has a question about ${folder}`,
+        action: 'Review'
+      };
+    case 'withdrawn':
+      return {
+        phase: speech.phase,
+        text: `Nothing is planned for ${folder}`,
         action: 'Review'
       };
     case 'cause':
