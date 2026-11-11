@@ -28,7 +28,12 @@ func TestRootIdentity_ExactPhysicalKnownRoot(t *testing.T) {
 	if err := os.Symlink(downloads, alias); err != nil {
 		t.Fatal(err)
 	}
-	known := func(string) (string, error) { return downloads, nil }
+	known := func(id string) (string, error) {
+		if id != "downloads" {
+			return "", errors.New("unknown known folder")
+		}
+		return downloads, nil
+	}
 	for _, tc := range []struct {
 		path string
 		want folderlook.RootPolicy
