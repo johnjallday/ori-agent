@@ -148,7 +148,13 @@ The capture-only Chromium configuration also pins font positioning with
 variation in unchanged wrapped text across fresh contexts; it does not change
 product DOM/CSS, mask pixels, or relax the exact same-environment comparison.
 The flag lives in `playwright.readme.config.ts`, not the application's browser
-configuration. Keep it consistent for both capture passes.
+configuration. It also uses `--disable-partial-raster` so Chromium repaints
+whole raster tiles rather than reusing an incrementally clipped button edge
+after the Map's Summary modal changes its width. CI observed a 262-pixel
+right-border difference with otherwise identical scenes. This is a capture-only
+renderer setting: no screenshot masking, product CSS override, retry-to-pass,
+or checksum tolerance is added. Keep both flags consistent for both capture
+passes.
 
 The repository pins `sharp` for WebP encoding. Its capture encoder uses fixed
 options: quality `82`, effort `6`, `smartSubsample: false`, alpha quality `100`,

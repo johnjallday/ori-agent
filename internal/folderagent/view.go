@@ -41,6 +41,8 @@ type View struct {
 	Progress     Progress `json:"progress"`
 	ProgressLine string   `json:"progress_line,omitempty"`
 
+	PolicyNote    string                 `json:"policy_note,omitempty"`
+	ExploreFolder bool                   `json:"explore_folder,omitempty"`
 	FactsLine     string                 `json:"facts_line,omitempty"`
 	StageLine     string                 `json:"stage_line,omitempty"`
 	Stage         foldermap.Stage        `json:"stage,omitempty"`
@@ -176,6 +178,7 @@ func planViewOf(plan Plan) *PlanView {
 }
 
 func (s *Service) viewOf(_ context.Context, rec *Record) View {
+	rec = s.effectiveRecord(rec)
 	v := View{
 		WorkspaceID: rec.WorkspaceID, WorkspaceName: rec.WorkspaceName, FolderName: rec.FolderName,
 		AgentName: rec.AgentName, TicketID: rec.TicketID, Brief: rec.Brief, State: rec.State,
@@ -198,12 +201,14 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	}
 	v.FactsLine = foldermap.FactsLine(rec.Facts)
 	v.Stage = rec.Stage
-	v.StageLine = StageLine(rec.FolderName, rec.Facts, rec.Candidates)
+	v.StageLine = folderlook.DefaultLine(folderlook.StepsForPolicy(rec.RootPolicy, rec.FolderName, rec.Facts, rec.Candidates))
+	v.PolicyNote = folderlook.PolicyLine(rec.RootPolicy)
+	v.ExploreFolder = rec.RootPolicy == folderlook.RootDownloads
 	v.Candidates = rec.Candidates
 	v.NextFolders = nextFolders(rec.Facts)
 	v.ModelSentence = modelSentence(rec)
 	sectionsInto(&v, rec)
-	if rec.Turn == nil || rec.Turn.Status != TurnFinished {
+	if rec.RootPolicy == folderlook.RootOrdinary && (rec.Turn == nil || rec.Turn.Status != TurnFinished) {
 		v.ToolsSentence = "Search for more tools needs a model"
 	}
 	// Once a run exists the plan shown is the one it was confirmed on, not
@@ -213,6 +218,21 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		selected = rec.Setup.Selected
 	}
 	plan := BuildPlan(*rec, selected)
+	if completed(rec) {
+		// A completed card is a receipt, not a newly generated offer catalog.
+		// Retain the confirmed lines and omit alternatives it never ran.
+		plan.Lines = rec.Setup.Lines
+		plan.Stage, v.Stage = rec.Setup.Stage, rec.Setup.Stage
+		plan.Runnable = false
+		v.StageLine = "Set up as confirmed. Nothing in the source folder was moved."
+		var ran []folderlook.Step
+		for _, step := range plan.Steps {
+			if step.Chosen {
+				ran = append(ran, step)
+			}
+		}
+		plan.Steps = ran
+	}
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
 	if s.goalOffered(rec) {
@@ -359,9 +379,10 @@ const (
 // Plan is a Set it up plan: the steps in effect, in order, and the host's
 // lines for them.
 type Plan struct {
-	Stage      foldermap.Stage
-	Lines      []personalassistant.FolderPlanLine
-	Candidates []folderlook.Candidate
+	Stage         foldermap.Stage
+	PolicyBinding string
+	Lines         []personalassistant.FolderPlanLine
+	Candidates    []folderlook.Candidate
 	// Selected are the handles of the steps in the plan, sorted.
 	Selected []string
 	Digest   string
@@ -389,8 +410,8 @@ type Plan struct {
 // when not nil, is the owner's own choice among the offered steps, by handle
 // (a candidate id is accepted too), and replaces both.
 func BuildPlan(rec Record, selected []string) Plan {
-	plan := Plan{Stage: rec.Stage, Source: PlanByOri}
-	steps := folderlook.Steps(rec.FolderName, rec.Facts, rec.Candidates)
+	plan := Plan{Stage: rec.Stage, Source: PlanByOri, PolicyBinding: rec.PolicyBinding}
+	steps := folderlook.StepsForPolicy(rec.RootPolicy, rec.FolderName, rec.Facts, rec.Candidates)
 	byHandle := make(map[string]int, len(steps))
 	handleOf := make(map[string]string, len(steps))
 	for i, s := range steps {
@@ -401,7 +422,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 		}
 	}
 	var agentOrder []string
-	if rec.Sections != nil {
+	if rec.Sections != nil && rec.RootPolicy == folderlook.RootOrdinary {
 		for _, h := range rec.Sections.PlanSteps {
 			if _, ok := byHandle[h]; ok {
 				agentOrder = append(agentOrder, h)
@@ -541,6 +562,18 @@ func BuildPlan(rec Record, selected []string) Plan {
 			plan.Unavailable = "Nothing is selected to set up."
 		}
 	}
+	if rec.RootPolicy != folderlook.RootOrdinary {
+		plan.DefaultReason = "Ori refreshed the setup choices for this folder. Review and confirm the current plan."
+		if rec.RootPolicy == folderlook.RootUnresolved {
+			plan.Unavailable = folderlook.PolicyLine(rec.RootPolicy)
+		}
+		for _, id := range selected {
+			if _, ok := handleOf[strings.TrimSpace(id)]; !ok {
+				plan.Runnable = false
+				plan.Unavailable = "The plan changed. Reopen the report and confirm the current choices."
+			}
+		}
+	}
 	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: assuranceLine(rec)})
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
@@ -655,6 +688,12 @@ func addOnLine(c folderlook.Candidate, workspaceName string) personalassistant.F
 
 func planDigest(plan Plan) string {
 	lines := append([]personalassistant.FolderPlanLine{{Kind: "stage", Name: string(plan.Stage)}, {Kind: "source", Name: plan.Source}}, plan.Lines...)
+	if plan.PolicyBinding != "" {
+		lines = append(lines, personalassistant.FolderPlanLine{Kind: "root_policy", Name: plan.PolicyBinding})
+	}
+	if !plan.Runnable {
+		lines = append(lines, personalassistant.FolderPlanLine{Kind: "unavailable", Name: plan.Unavailable})
+	}
 	for _, id := range plan.Selected {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: "selected", Name: id})
 	}

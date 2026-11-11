@@ -212,15 +212,18 @@ func (r *SetupReceipt) Clean() *SetupReceipt {
 
 // Record is one folder workspace's state.
 type Record struct {
-	Version       int    `json:"version"`
-	WorkspaceID   string `json:"workspace_id"`
-	OwnerUserID   string `json:"owner_user_id"`
-	FolderName    string `json:"folder_name"`
-	WorkspaceName string `json:"workspace_name"`
-	AgentName     string `json:"agent_name"`
-	TicketID      string `json:"ticket_id"`
-	Brief         string `json:"brief"`
-	State         State  `json:"state"`
+	// Current trusted identity is projected at runtime, never persisted.
+	RootPolicy    folderlook.RootPolicy `json:"-"`
+	PolicyBinding string                `json:"-"`
+	Version       int                   `json:"version"`
+	WorkspaceID   string                `json:"workspace_id"`
+	OwnerUserID   string                `json:"owner_user_id"`
+	FolderName    string                `json:"folder_name"`
+	WorkspaceName string                `json:"workspace_name"`
+	AgentName     string                `json:"agent_name"`
+	TicketID      string                `json:"ticket_id"`
+	Brief         string                `json:"brief"`
+	State         State                 `json:"state"`
 
 	Map        *foldermap.Map         `json:"map,omitempty"`
 	Facts      foldermap.Facts        `json:"facts"`

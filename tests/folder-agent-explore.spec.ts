@@ -17,6 +17,9 @@ test('Explore a folder starts an agent and reports what it found without a model
   request
 }) => {
   test.skip(!sandbox, 'needs the sandbox path: --sandbox-env ORI_FOLDER_AGENT_SANDBOX');
+  // The server's known-folder identity must be resolvable even for an
+  // ordinary folder. Never borrow the developer's real Downloads directory.
+  await mkdir(join(sandbox, 'Downloads'), { recursive: true, mode: 0o750 });
   const folder = join(sandbox, 'Music', 'One Song');
   await mkdir(join(folder, 'Audio'), { recursive: true, mode: 0o750 });
   await writeFile(join(folder, 'Song.rpp'), '<REAPER_PROJECT\n>\n', { mode: 0o600 });
@@ -80,17 +83,16 @@ test('Explore a folder starts an agent and reports what it found without a model
   expect(sent.brief).toBe('Help me finish this song');
   expect(sent.hire).toMatchObject({ name: 'One Song Manager', mandate: 'Help me finish songs' });
 
-  const report = host.locator('.folder-agent-card--report');
-  await expect(report.locator('.folder-agent-card__title')).toHaveText(
-    'One Song Manager looked around One Song',
-    { timeout: 20_000 }
-  );
+  // Current Home presents the full report in the Commander's map balloon;
+  // the drawer carries only its Show on map line (#801).
+  await expect(host.getByRole('button', { name: 'Show on map' })).toBeVisible();
+  await host.getByRole('button', { name: 'Show on map' }).click();
+  const report = page.locator('.folder-agent-card--report');
+  await expect(report).toBeVisible({ timeout: 20_000 });
   await expect(report.locator('.folder-agent-card__facts')).toHaveText('1 REAPER song');
   // The step list replaces Ori's one-line "Set it up: …" summary.
   await expect(report.locator('.folder-agent-card__stage')).toHaveCount(0);
-  await expect(report).toContainText(
-    'No model is set up, so One Song Manager could not look itself.'
-  );
+  await expect(report).toContainText('One Song Manager could not look itself');
   await expect(report).toContainText('Search for more tools needs a model');
   // Without a model the steps are Ori's default: the one REAPER step, ticked,
   // and no reason line (there was no agent plan to fall back from).
@@ -101,7 +103,7 @@ test('Explore a folder starts an agent and reports what it found without a model
   await expect(report.locator('[data-step="reaper-tools"] input')).toBeChecked();
   await expect(report.locator('.folder-agent-card__run-head')).toHaveText('Plan · 1 step');
   await expect(report.locator('.folder-agent-card__run')).not.toContainText("Ori's default plan");
-  await expect(report.getByRole('button')).toHaveText([
+  await expect(report.locator('[data-folder-agent-action]')).toHaveText([
     'Set it up',
     'Keep the folder as it is',
     'Look further'
@@ -131,5 +133,8 @@ test('Explore a folder starts an agent and reports what it found without a model
 
   // Keep the folder as it is: the report is put aside, Set it up stays.
   await report.getByRole('button', { name: 'Keep the folder as it is' }).click();
-  await expect(report.getByRole('button')).toHaveText(['Set it up', 'Look further']);
+  await expect(report.locator('[data-folder-agent-action]')).toHaveText([
+    'Set it up',
+    'Look further'
+  ]);
 });

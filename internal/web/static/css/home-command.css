@@ -3874,6 +3874,11 @@ a.quest-title:focus-visible {
   font-size: 12px;
 }
 
+.folder-agent-card__explore {
+  color: var(--hc-ink, var(--cozy-ink));
+  text-decoration: underline;
+}
+
 /* The place is about to open: the link's word, said rather than offered. */
 .folder-agent-card__opening {
   margin: 0;
