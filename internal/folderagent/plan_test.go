@@ -59,7 +59,7 @@ func TestBuildPlan_TheAgentsOrderWinsAndTheSecondOfAPairIsSetAside(t *testing.T)
 	names := lineNames(plan)
 	// The agent's order: REAPER before the group; the assurance line last.
 	if names[0] != "Installs REAPER tools" || names[1] != "Connects REAPER tools to Albums" || names[2] != "Turns Albums into a group" ||
-		names[3] != "Creates Album-1, linked to its own folder" || names[len(names)-1] != "Nothing in Albums is moved, copied or read" {
+		names[3] != "Creates Album-1, linked to its own folder" || names[len(names)-1] != "Nothing in Albums is moved, copied or read. Ori adds 1 plugin." {
 		t.Fatalf("lines = %v", names)
 	}
 	if plan.Words != rec.Sections.Plan || plan.DefaultReason != "" {
@@ -138,6 +138,158 @@ func TestBuildPlan_TheToolsRunBeforeTheHomeListsTheSongs(t *testing.T) {
 				t.Fatalf("lines = %v", names)
 			}
 		})
+	}
+}
+
+// The assurance says what Ori adds as well as what it leaves alone (PRD FR25).
+func TestBuildPlan_TheAssuranceNamesWhatOriAdds(t *testing.T) {
+	const kept = "Nothing in Albums is moved, copied or read"
+	cases := map[string]struct {
+		integration string
+		home        *folderlook.HomeFacts
+		homeAction  string
+		selected    []string
+		want        string
+	}{
+		"nothing added": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionAlreadyHere,
+			home: &folderlook.HomeFacts{ProviderReady: true, HomeExists: true, RolesKnown: true}, want: kept},
+		"one plugin, the app on this Mac": {integration: folderlook.ActionConnect, homeAction: folderlook.ActionAlreadyHere,
+			home: &folderlook.HomeFacts{ProviderReady: true, HomeExists: true, RolesKnown: true}, want: kept + ". Ori adds 1 plugin."},
+		"two plugins, a new Home and its agents": {integration: folderlook.ActionInstall, homeAction: folderlook.ActionInstall,
+			home: &folderlook.HomeFacts{ProviderName: "Music Project Management"}, selected: []string{"music-production-home", "reaper-tools"},
+			want: kept + ". Ori adds 2 plugins, Music Production Home, and its agents."},
+		"a new Home only": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionInstall,
+			home: &folderlook.HomeFacts{ProviderReady: true, RolesKnown: true}, selected: []string{"music-production-home"},
+			want: kept + ". Ori adds Music Production Home."},
+		"the Home left unticked": {integration: folderlook.ActionInstall, homeAction: folderlook.ActionInstall,
+			home: &folderlook.HomeFacts{}, selected: []string{"reaper-tools"}, want: kept + ". Ori adds 1 plugin."},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := planRecord()
+			rec.Candidates[0].Action, rec.Candidates[0].Home = tc.homeAction, tc.home
+			rec.Candidates[1].Action = tc.integration
+			plan := BuildPlan(rec, tc.selected)
+			if got := plan.Lines[len(plan.Lines)-1].Name; got != tc.want {
+				t.Fatalf("assurance = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// When Ori moves the tools ahead of where the agent named them, the card says
+// why under the agent's words (PRD FR26); never for Ori's own plan.
+func TestBuildPlan_TheReorderNoteFollowsTheAgentsOrder(t *testing.T) {
+	rec := planRecord()
+	rec.Sections = &folderlook.Sections{Plan: "Home, then REAPER.", PlanSteps: []string{"music-production-home", "reaper-tools"}}
+	if plan := BuildPlan(rec, nil); plan.ReorderNote != ReorderNote || planViewOf(plan).ReorderNote != ReorderNote {
+		t.Fatalf("home first: note = %q", plan.ReorderNote)
+	}
+	rec.Sections = &folderlook.Sections{Plan: "REAPER, then the Home.", PlanSteps: []string{"reaper-tools", "music-production-home"}}
+	if plan := BuildPlan(rec, nil); plan.ReorderNote != "" {
+		t.Fatalf("tools first: note = %q", plan.ReorderNote)
+	}
+	rec.Sections = nil
+	if plan := BuildPlan(rec, nil); plan.Source != PlanByOri || plan.ReorderNote != "" {
+		t.Fatalf("Ori's plan: source=%q note = %q", plan.Source, plan.ReorderNote)
+	}
+}
+
+// The install block lists only the plugins the ticked steps download and
+// install, in run order, with their reviewed release (PRD FR13–FR17).
+func TestBuildPlan_InstallsListThePluginsTheTickedStepsInstall(t *testing.T) {
+	reviewed := &folderlook.ReleaseFacts{Version: "0.9.1", Publisher: "Ori", SourceLabel: "owner/tools", SourceURL: "https://example.test/owner/tools"}
+	withPlugin := func(rec Record) Record {
+		rec.Candidates = append(rec.Candidates, folderlook.Candidate{ID: "plugin:mix", Kind: folderlook.KindPlugin, Name: "Mix Kit",
+			Source: folderlook.SourceSearch, Marketplace: "Community", Action: folderlook.ActionAdd, Ranked: true, Why: "Mixes faster."})
+		return rec
+	}
+	cases := map[string]struct {
+		integration string
+		home        *folderlook.HomeFacts
+		homeAction  string
+		addOn       bool
+		selected    []string
+		want        []string // step|line|name|version|app sentence
+	}{
+		"install: the app is not on this Mac": {integration: folderlook.ActionInstall, homeAction: folderlook.ActionAlreadyHere,
+			home: &folderlook.HomeFacts{ProviderReady: true, HomeExists: true},
+			want: []string{"reaper-tools|integration|REAPER tools|0.9.1|REAPER is not on this Mac yet; the tools install anyway and work once it is."}},
+		"connect: the app is here, its tools are not": {integration: folderlook.ActionConnect, homeAction: folderlook.ActionAlreadyHere,
+			home: &folderlook.HomeFacts{ProviderReady: true, HomeExists: true},
+			want: []string{"reaper-tools|integration|REAPER tools|0.9.1|REAPER is on this Mac; its Ori tools are not yet."}},
+		"already here: nothing listed": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionAlreadyHere,
+			home: &folderlook.HomeFacts{ProviderReady: true, HomeExists: true}},
+		"the Home provider not ready: listed after the tools": {integration: folderlook.ActionInstall, homeAction: folderlook.ActionInstall,
+			home:     &folderlook.HomeFacts{ProviderName: "Music Project Management", ProviderVersion: "0.5.0"},
+			selected: []string{"music-production-home", "reaper-tools"},
+			want: []string{"reaper-tools|integration|REAPER tools|0.9.1|REAPER is not on this Mac yet; the tools install anyway and work once it is.",
+				"music-production-home|provider|Music Project Management|0.5.0|"}},
+		"the Home step unticked: only the tools": {integration: folderlook.ActionInstall, homeAction: folderlook.ActionInstall,
+			home: &folderlook.HomeFacts{ProviderName: "Music Project Management"}, selected: []string{"reaper-tools"},
+			want: []string{"reaper-tools|integration|REAPER tools|0.9.1|REAPER is not on this Mac yet; the tools install anyway and work once it is."}},
+		"a search add-on": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionAlreadyHere,
+			home: &folderlook.HomeFacts{ProviderReady: true, HomeExists: true}, addOn: true,
+			selected: []string{"music-production-home", "mix-kit"}, want: []string{"mix-kit|add_on|Mix Kit||"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := planRecord()
+			rec.Candidates[0].Action, rec.Candidates[0].Home = tc.homeAction, tc.home
+			rec.Candidates[1].Action, rec.Candidates[1].Release = tc.integration, reviewed
+			rec.Candidates[1].Why = "Lets the agent work with the REAPER songs here."
+			if tc.addOn {
+				rec = withPlugin(rec)
+			}
+			plan := BuildPlan(rec, tc.selected)
+			var got []string
+			for _, e := range plan.Installs {
+				got = append(got, strings.Join([]string{e.Step, e.Line, e.Name, e.Version, e.AppSentence}, "|"))
+			}
+			if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
+				t.Fatalf("installs =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+			}
+			for _, e := range plan.Installs {
+				switch e.Line {
+				case "integration":
+					if e.Publisher != "Ori" || e.SourceLabel != "owner/tools" || e.SourceURL != reviewed.SourceURL || e.Why == "" {
+						t.Fatalf("integration entry = %+v", e)
+					}
+				case "provider":
+					if e.Why != "Provides your Music Production Home." {
+						t.Fatalf("provider entry = %+v", e)
+					}
+				case "add_on":
+					if !e.Search || e.Marketplace != "Community" || e.Why != "Mixes faster." {
+						t.Fatalf("add-on entry = %+v", e)
+					}
+				}
+				// Each entry names a step whose plan line of that kind the run marks.
+				found := false
+				for _, l := range plan.Lines {
+					found = found || (l.Step == e.Step && l.Kind == e.Line)
+				}
+				if !found {
+					t.Fatalf("no %s line under step %s: %+v", e.Line, e.Step, plan.Lines)
+				}
+			}
+			if view := planViewOf(plan); view.Installs == nil || len(view.Installs) != len(tc.want) {
+				t.Fatalf("view installs = %+v", view.Installs)
+			}
+		})
+	}
+}
+
+// The digest covers the install block: the same steps installing a different
+// release are a different plan (PRD FR21).
+func TestBuildPlan_TheDigestCoversTheInstalls(t *testing.T) {
+	rec := planRecord()
+	rec.Candidates[1].Release = &folderlook.ReleaseFacts{Version: "0.9.0", Publisher: "Ori"}
+	before := BuildPlan(rec, nil)
+	rec.Candidates[1].Release = &folderlook.ReleaseFacts{Version: "0.9.1", Publisher: "Ori"}
+	after := BuildPlan(rec, nil)
+	if strings.Join(before.Selected, ",") != strings.Join(after.Selected, ",") || before.Digest == after.Digest {
+		t.Fatalf("a changed install must change the digest: %s / %s", before.Digest, after.Digest)
 	}
 }
 

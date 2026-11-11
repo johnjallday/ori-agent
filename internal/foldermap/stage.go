@@ -100,10 +100,10 @@ func FormatName(marker string) string {
 	return ""
 }
 
-// FactsLine is the host's one-line summary: "7 <App> songs · 1 Logic Pro
-// song · 2 folders with songs · 1 empty folder". It names no path and no
-// file, and reads the same on every run over the same map.
-func FactsLine(f Facts) string {
+// FormatCounts are the projects by shape and format, most first, each worded
+// with its application when the table names one: "7 <App> songs",
+// "1 Logic Pro song".
+func FormatCounts(f Facts) []string {
 	markerFor := make(map[ShapeCount]string)
 	for _, p := range append(f.Members, rootProjects(f)...) {
 		key := ShapeCount{Shape: p.Shape, Format: p.Format}
@@ -119,6 +119,14 @@ func FactsLine(f Facts) string {
 		}
 		parts = append(parts, fmt.Sprintf("%d %s", s.Count, noun))
 	}
+	return parts
+}
+
+// FactsLine is the host's one-line summary: "7 <App> songs · 1 Logic Pro
+// song · 2 folders with songs · 1 empty folder". It names no path and no
+// file, and reads the same on every run over the same map.
+func FactsLine(f Facts) string {
+	parts := FormatCounts(f)
 	if n := len(f.ProjectAreas); n > 0 {
 		noun := "projects"
 		if totals := f.ShapeTotals(); len(totals) == 1 {

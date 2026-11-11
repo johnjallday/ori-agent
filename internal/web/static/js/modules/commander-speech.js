@@ -57,6 +57,17 @@ export function commanderSpeech(view) {
           review: true
         };
       }
+      // What the folder is comes first (confirm-and-visible-installs FR12):
+      // the balloon's card speaks the host's sentence with its two answers.
+      if (view.premise?.state === 'asked') {
+        return {
+          phase: 'premise',
+          line: `One question about ${folder} · Review`,
+          headline: '',
+          announce: `I have a question about ${folder}`,
+          review: true
+        };
+      }
       const line = `I have a plan for ${folder} · Review`;
       return {
         phase: 'report',
@@ -138,6 +149,12 @@ export function commanderOneLine(view) {
       };
     case 'report':
       return { phase: speech.phase, text: `${agent} has a plan for ${folder}`, action: 'Review' };
+    case 'premise':
+      return {
+        phase: speech.phase,
+        text: `${agent} has a question about ${folder}`,
+        action: 'Review'
+      };
     case 'cause':
       return { phase: speech.phase, text: `${agent} could not look itself`, action: 'Review' };
     case 'running': {

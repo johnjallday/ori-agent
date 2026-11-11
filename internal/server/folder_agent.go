@@ -48,6 +48,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Memory:     folderAgentMemory{store: workspace.NewMemoryStore(b.workspaceFileStore)},
 		Setups:     folderAgentSetups{builder: b},
 		Hiring:     folderAgentHiring{builder: b},
+		Homes:      folderAgentHomes{builder: b},
 	})
 	b.folderAgentService = service
 	b.folderAgentHandler = folderagenthttp.New(service, func(ctx context.Context) (string, error) {
@@ -105,6 +106,34 @@ func (b *ServerBuilder) folderAgentTodayItems(ctx context.Context, userID string
 		}
 	}
 	return needs, working, done
+}
+
+// folderAgentHomes resolves the workspace page a folder was fed from to the
+// reviewed Home provider it is a Home of: one of the owner's own groups, not
+// trashed or missing, carrying a Home provider the reviewed list knows.
+type folderAgentHomes struct{ builder *ServerBuilder }
+
+func (h folderAgentHomes) HomeProviderOf(_ context.Context, userID, workspaceID string) string {
+	b := h.builder
+	if b == nil || b.workspaceStore == nil {
+		return ""
+	}
+	ws, err := b.workspaceStore.Get(workspaceID)
+	if err != nil || ws == nil || ws.Kind != "group" || ws.OwnerUserID != userID {
+		return ""
+	}
+	if status := ws.GetStatus(); status == workspace.StatusTrashed || status == workspace.StatusMissing {
+		return ""
+	}
+	state := ws.GetAssistantProgramState()
+	if state == nil || state.HomeProvider == nil {
+		return ""
+	}
+	provider, ok := reviewedintegration.HomeProviderFor(state.HomeProvider.PluginID)
+	if !ok || (state.Key.ProgramID != "" && provider.ProgramID != state.Key.ProgramID) {
+		return ""
+	}
+	return provider.Key
 }
 
 type folderAgentWorkspaces struct{ builder *ServerBuilder }
@@ -500,13 +529,51 @@ func (s folderAgentSetups) Readiness(ctx context.Context, userID string) folderl
 	b := s.builder
 	home, _ := os.UserHomeDir()
 	ready := folderlook.Readiness{InstalledApps: folderdigest.DetectInstalledApps(home)}
+	// One read of an integration's install facts serves both its readiness
+	// and the version its install would put in place.
+	type integrationRead struct {
+		facts foldersetup.Plugin
+		err   error
+	}
+	reads := map[string]integrationRead{}
+	integrationFacts := func(entry reviewedintegration.Entry) (foldersetup.Plugin, error) {
+		if read, ok := reads[entry.Key]; ok {
+			return read.facts, read.err
+		}
+		facts, err := b.folderSetupHost.integrationFacts(ctx, userID, entry)
+		reads[entry.Key] = integrationRead{facts: facts, err: err}
+		return facts, err
+	}
 	ready.IntegrationReady = func(key string) bool {
 		entry, ok := reviewedintegration.Get(key)
 		if !ok || b.folderSetupHost == nil {
 			return false
 		}
-		facts, err := b.folderSetupHost.integrationFacts(ctx, userID, entry)
+		facts, err := integrationFacts(entry)
 		return err == nil && facts.State == personalassistant.FolderInstallReady
+	}
+	ready.Release = func(kind, key string) (folderlook.ReleaseFacts, bool) {
+		switch kind {
+		case folderlook.KindIntegration:
+			entry, ok := reviewedintegration.Get(key)
+			if !ok {
+				return folderlook.ReleaseFacts{}, false
+			}
+			out := folderlook.ReleaseFacts{Publisher: entry.PublisherLabel, SourceLabel: entry.SourceLabel, SourceURL: entry.SourceRepository}
+			if b.folderSetupHost != nil {
+				if facts, err := integrationFacts(entry); err == nil {
+					out.Version = facts.Version
+				}
+			}
+			return out, true
+		case folderlook.KindHomeProvider:
+			for _, provider := range reviewedintegration.HomeProviders() {
+				if provider.Key == key {
+					return folderlook.ReleaseFacts{Publisher: provider.PublisherLabel, SourceLabel: provider.SourceLabel, SourceURL: provider.SourceRepository}, true
+				}
+			}
+		}
+		return folderlook.ReleaseFacts{}, false
 	}
 	ready.HomeExists = func(providerKey string) bool {
 		exists, err := reviewedHomeExists(b, userID, providerKey)

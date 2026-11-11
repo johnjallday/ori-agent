@@ -367,6 +367,7 @@ func SystemPrompt(agentName string, askAllowed bool) string {
 	b.WriteString("- Never claim to have seen what was not listed. You never see file contents.\n")
 	b.WriteString("- Ori decides what counts as a project. Do not contradict its facts.\n")
 	b.WriteString("- Under Plan, say in your own words what should happen first and why, in one to four sentences. Name each step Ori should run by its handle in square brackets, in the order you want, only from the list \"Steps Ori can run here\". Write the handle where the step's name would go in the sentence, because the owner reads the step's name in its place (\"connect [project-tools] so the agent can open the files\"); never write the name beside its handle. Name a handle only for a step Ori should run; a step you leave out, call by its plain name with no brackets. Naming none is fine. Anything else you write under Plan is shown to the owner as your words and is not run.\n")
+	b.WriteString("- Ori runs every tools step before a Home step, so the Home can list what the tools open; when you name both, name the tools step first.\n")
 	b.WriteString("- Your suggested goal and first ticket are about the owner's own work in this folder after setup; never repeat a setup step as the goal or the ticket.\n")
 	b.WriteString("- Make the first ticket small and concrete about what this folder holds (for example its songs, drafts or projects by name).\n")
 	b.WriteString("- Use plain words; do not call anything \"ready\".\n")

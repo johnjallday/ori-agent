@@ -50,6 +50,30 @@ test('the look line moves but the announcement does not tick', () => {
   assert.equal(a.announce, 'Looking around Albums');
 });
 
+test('a report waiting on its premise asks one question before any plan', () => {
+  const asked = view({
+    premise: {
+      state: 'asked',
+      sentence: 'This looks like a music production folder: 6 REAPER songs.',
+      confirm: 'Manage them as songs',
+      other: "It's something else"
+    }
+  });
+  const speech = commanderSpeech(asked);
+  assert.equal(speech.phase, 'premise');
+  assert.equal(speech.line, 'One question about Albums · Review');
+  assert.equal(speech.review, true);
+  assert.deepEqual(commanderOneLine(asked), {
+    phase: 'premise',
+    text: 'Albums Manager has a question about Albums',
+    action: 'Review'
+  });
+  const confirmed = view({
+    premise: { state: 'confirmed', sentence: 'A music production folder.' }
+  });
+  assert.equal(commanderSpeech(confirmed).phase, 'report');
+});
+
 test('the report and cause lines (FR9, FR7)', () => {
   assert.equal(commanderSpeech(view()).line, 'I have a plan for Albums · Review');
   assert.equal(commanderSpeech(view()).phase, 'report');

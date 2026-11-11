@@ -459,8 +459,10 @@ const REPORT_KIND = {
   report: 'report',
   cause: 'cause',
   stopped: 'stopped',
-  // A goal offer asks the owner something, like a report.
+  // A goal offer asks the owner something, like a report; so does the
+  // premise.
   goal: 'report',
+  premise: 'report',
   done: 'done',
   running: 'live',
   looking: 'live'

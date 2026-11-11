@@ -68,6 +68,9 @@ type chooseRequest struct {
 	Chip           string `json:"chip"`
 	Picker         bool   `json:"picker"`
 	SelectionToken string `json:"selection_token"`
+	// FromWorkspaceID names the workspace page the folder is fed from; the
+	// server decides whether it is one of the owner's Homes.
+	FromWorkspaceID string `json:"from_workspace_id"`
 }
 
 // Choose resolves the folder and returns the card ({chip}, {picker:true} or
@@ -85,9 +88,9 @@ func (h *Handler) Choose(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "Choose a folder")
 		return
 	}
-	chosen, err := h.service.Choose(r.Context(), userID, personalassistant.FolderChoice{
+	chosen, err := h.service.ChooseFrom(r.Context(), userID, personalassistant.FolderChoice{
 		Chip: req.Chip, Picker: req.Picker, SelectionToken: req.SelectionToken,
-	})
+	}, req.FromWorkspaceID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -239,6 +242,13 @@ func (h *Handler) SetUp(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, folderagent.ErrPremiseOwed) {
+			current, _ := h.service.View(r.Context(), userID, r.PathValue("workspaceID"))
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error": "Confirm what this folder is first.", "code": "premise_owed", "folder_agent": current,
+			})
+			return
+		}
 		writeError(w, err)
 		return
 	}
@@ -247,6 +257,33 @@ func (h *Handler) SetUp(w http.ResponseWriter, r *http.Request) {
 
 func setUpOf(req setUpRequest) folderagent.SetUpRequest {
 	return folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected}
+}
+
+type premiseRequest struct {
+	// Answer is "confirmed" (Manage them as …) or "something_else".
+	Answer string `json:"answer"`
+}
+
+// Premise records the owner's answer to "This looks like a <kind> folder".
+func (h *Handler) Premise(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	var req premiseRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	view, err := h.service.AnswerPremise(r.Context(), userID, r.PathValue("workspaceID"), req.Answer)
+	if folderagent.ErrPremiseAnswer(err) {
+		fail(w, http.StatusBadRequest, "Answer confirmed or something_else")
+		return
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"folder_agent": view})
 }
 
 type goalRequest struct {

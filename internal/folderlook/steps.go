@@ -88,7 +88,10 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 			homeDefault = step.Default
 		case KindIntegration:
 			step.Kind = StepIntegration
-			if c.Action == ActionInstall {
+			// The title follows the plugin, not the application: the tools are
+			// downloaded and installed unless they are already in place, even
+			// when the application itself is on this Mac (PRD FR23).
+			if IntegrationInstalls(c) {
 				step.Title = fmt.Sprintf("Install %s and connect them to %s", c.Name, folderName)
 			} else {
 				step.Title = fmt.Sprintf("Connect %s to %s", c.Name, folderName)

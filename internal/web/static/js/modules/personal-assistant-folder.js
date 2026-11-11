@@ -31,6 +31,7 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
+import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
 import { commanderPresenter, homeCommanderMap } from './commander-map.js';
 import {
   chooseFolder,
@@ -6935,7 +6936,16 @@ async function chooseForAgent(body) {
   showStatus(body.picker ? 'Choose a folder in the dialog…' : '');
   render();
   try {
-    const result = await chooseFolder(body);
+    // The workspace page the folder is fed from: the server records a feed
+    // from inside one of the owner's Homes and does not ask that Home's
+    // premise again (confirm-and-visible-installs FR8).
+    let from = '';
+    try {
+      from = String(collectCurrentWorkspaceContext()?.workspace_id || '');
+    } catch (_) {
+      from = '';
+    }
+    const result = await chooseFolder(from ? { ...body, from_workspace_id: from } : body);
     if (result.error) {
       showStatus(result.error);
       return;

@@ -61,6 +61,39 @@ type Candidate struct {
 	// Home is what the host knew about a Home provider's candidate when it
 	// looked: the plan words one line per action from it.
 	Home *HomeFacts `json:"home,omitempty"`
+	// Release is what the host knows about the reviewed release an install
+	// would put in place, for the card's install block. Nil when it is not a
+	// reviewed plugin or the host could not tell.
+	Release *ReleaseFacts `json:"release,omitempty"`
+}
+
+// ReleaseFacts name a reviewed plugin release: its version when the host
+// knows it, its publisher, and where its source lives. Plain text and one
+// https link, never a local path.
+type ReleaseFacts struct {
+	Version     string `json:"version,omitempty"`
+	Publisher   string `json:"publisher,omitempty"`
+	SourceLabel string `json:"source_label,omitempty"`
+	SourceURL   string `json:"source_url,omitempty"`
+}
+
+// cleanRelease bounds what a host reported; a source link that is not a
+// plain https URL is dropped.
+func cleanRelease(in ReleaseFacts) *ReleaseFacts {
+	out := ReleaseFacts{
+		Version:     homeFactText(in.Version),
+		Publisher:   homeFactText(in.Publisher),
+		SourceLabel: strings.TrimSpace(in.SourceLabel),
+		SourceURL:   strings.TrimSpace(in.SourceURL),
+	}
+	if len(out.SourceLabel) > maxHomeFactText || strings.ContainsAny(out.SourceLabel, "\x00\r\n\\") {
+		out.SourceLabel = ""
+	}
+	if len(out.SourceURL) > 2*maxHomeFactText || !strings.HasPrefix(out.SourceURL, "https://") ||
+		strings.ContainsAny(out.SourceURL, " \t\x00\r\n\\\"'<>") {
+		out.SourceURL = ""
+	}
+	return &out
 }
 
 // HomeFacts are what the host knows about a Home provider and the owner's
@@ -133,6 +166,22 @@ type Readiness struct {
 	// false when the host could not tell (the plan then keeps its generic
 	// lines). Nil asks nothing.
 	Home func(providerKey string) (HomeFacts, bool)
+	// Release names the reviewed release of an integration (KindIntegration)
+	// or a Home provider (KindHomeProvider) by its key; false when the host
+	// does not know it. Nil asks nothing.
+	Release func(kind, key string) (ReleaseFacts, bool)
+}
+
+// releaseOf asks the host for a reviewed release, bounded; nil when unknown.
+func releaseOf(ready Readiness, kind, key string) *ReleaseFacts {
+	if ready.Release == nil || key == "" {
+		return nil
+	}
+	facts, ok := ready.Release(kind, key)
+	if !ok {
+		return nil
+	}
+	return cleanRelease(facts)
 }
 
 // RequiredCandidates are the candidates the stage needs (FR20): the
@@ -166,6 +215,10 @@ func RequiredCandidates(facts foldermap.Facts, ready Readiness) []Candidate {
 		}
 		if exists {
 			c.Action, c.Detail = ActionAlreadyHere, "adds this folder to your "+home
+		}
+		c.Release = releaseOf(ready, KindHomeProvider, p.HomeProviderKey)
+		if c.Release != nil && c.Release.Version == "" && c.Home != nil {
+			c.Release.Version = c.Home.ProviderVersion
 		}
 		out = append(out, c)
 		// The portfolio's own project format still needs its tools.
@@ -214,6 +267,9 @@ func integrationFor(p *foldermap.Project, ready Readiness) (Candidate, bool) {
 	if ready.IntegrationReady != nil && ready.IntegrationReady(row.Offer.IntegrationKey) {
 		c.Source, c.Action, c.Detail = SourceInstalled, ActionAlreadyHere, "already here"
 	}
+	if c.Action != ActionAlreadyHere {
+		c.Release = releaseOf(ready, KindIntegration, row.Offer.IntegrationKey)
+	}
 	return c, true
 }
 
@@ -229,6 +285,26 @@ func dominantProject(facts foldermap.Facts) *foldermap.Project {
 		}
 	}
 	return facts.RootProject
+}
+
+// IntegrationInstalls reports whether running an integration candidate
+// downloads and installs its plugin: every action but already here, whether
+// or not the application is on this Mac.
+func IntegrationInstalls(c Candidate) bool {
+	return c.Kind == KindIntegration && c.Action != ActionAlreadyHere
+}
+
+// AppToolsSentence says where the application and its tools stand, for an
+// integration that installs: the application on this Mac without its tools,
+// or neither yet. Empty when the candidate installs nothing or names no app.
+func AppToolsSentence(c Candidate) string {
+	if !IntegrationInstalls(c) || c.App == "" {
+		return ""
+	}
+	if c.Action == ActionConnect {
+		return c.App + " is on this Mac; its Ori tools are not yet."
+	}
+	return c.App + " is not on this Mac yet; the tools install anyway and work once it is."
 }
 
 func appInstalled(name string, apps []folderdigest.InstalledApp) bool {
