@@ -359,15 +359,19 @@ repository-reading and coordination tax. Optimize first by routing the smallest
 uncertain unit to the right model.
 
 1. Keep one primary integration owner for a feature branch.
-2. Prefer a model switch in the primary session when the work is short and the
-   existing context is valuable.
+2. Start the feature session on the balanced tier and keep it there, whatever
+   chips the groups carry (see _Model recommendations_). A mid-session model
+   switch needs a person and re-reads the whole context uncached, so do not
+   plan on one.
 3. Use a short-lived subagent for a bounded research spike, test matrix, focused
    review, or other output that can return as findings without editing shared
    product files.
 4. Use a persistent separate role only for a genuinely independent long-running
    workstream or repeated review responsibility.
-5. Route deep models to specific decision-bearing tasks. Once the contract or
-   pattern is settled, return implementation to the balanced or fast tier.
+5. Route deep models to specific decision-bearing tasks. For a deep chip or a
+   named hotspot, a findings-only deep-tier subagent settles the contract and
+   the owner implements it on the balanced tier. Escalate the same way when the
+   same check fails twice with no new approach.
 6. Allow only one active writer in a shared worktree. Delegated edits must be
    sequential and explicitly file-bounded; concurrent coding requires separate
    branches, file-disjoint ownership, independent verification, and a planned
@@ -522,10 +526,19 @@ Choose by uncertainty, not line count:
   performance-sensitive, or security-sensitive work
 
 When model names change, map these to fast, balanced, and deep-reasoning tiers.
-A separate agent on the same model is usually more expensive than a model switch
-because it must rebuild context. Use separate contexts for isolation or durable
-independent work, and subagents for narrow outputs. Budget the deep tier around
-unresolved decisions rather than whole parent groups whenever possible.
+
+Feature sessions start on Sonnet 5. The `[primary] model` default in
+`.herdr/devflow.toml` sets it for `wt start`; a session started by hand picks
+the same model. A chip is advice to the owner, not a launch setting: a deep chip
+means a deep-tier consult for that group's hotspot (see _Execution topology and
+delegation_), never a deep-tier session for the whole group. Start a session on
+the deep tier (`wt start --model`) only when most groups carry a deep chip.
+
+A separate agent on the same model is usually more expensive than staying in the
+owner's context because it must rebuild that context. Use separate contexts for
+isolation or durable independent work, and subagents for narrow outputs. Budget
+the deep tier around unresolved decisions rather than whole parent groups
+whenever possible.
 
 ## Continuous execution
 
