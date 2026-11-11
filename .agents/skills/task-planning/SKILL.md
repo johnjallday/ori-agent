@@ -406,6 +406,11 @@ worth keeping afterwards belongs in the PR body or the findings log.
   checklist or PRD. Keep one scribe for the whole feature.
 - **Exploration:** "where does this live" sweeps and file maps at the start of a
   group. Findings only, no edits.
+- **Deep consult:** a deep chip, a named hotspot, or the same check failing
+  twice. The owner sends one decision or one failure with what it has already
+  read and ruled out; the lane reads the code on the deep tier and returns a
+  contract of at most 60 lines. Read-only. The owner implements the contract
+  and resumes the same consult if an invariant proves wrong.
 
 Parent groups are never separate agents: implementation is edit-heavy and needs
 the owner's accumulated context. A harness without a lane runs that step inline
