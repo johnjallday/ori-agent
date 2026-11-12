@@ -445,19 +445,57 @@ jobs:
     needs: test-unit
 
     steps:
+      # Decide first, from booleans only, whether a provider key exists. Without
+      # one nothing below runs (no checkout, Go setup, download or test), and this
+      # step says so; a failed detection skips the rest and fails the job.
+      - name: Check provider eligibility
+        id: eligibility
+        shell: bash
+        env:
+          PROVIDER_SUITE: integration tests
+          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+          HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          case "${HAS_OPENAI_KEY:-}:${HAS_ANTHROPIC_KEY:-}" in
+            true:true | true:false | false:true)
+              echo "eligible=true" >> "$GITHUB_OUTPUT"
+              echo "reason=a provider API key is available to this run" >> "$GITHUB_OUTPUT"
+              ;;
+            false:false)
+              echo "eligible=false" >> "$GITHUB_OUTPUT"
+              echo "reason=no ANTHROPIC_API_KEY or OPENAI_API_KEY is available to this run" >> "$GITHUB_OUTPUT"
+              echo "Skipping ${PROVIDER_SUITE} (no API keys configured)"
+              echo "::notice title=Provider tests not run::${PROVIDER_SUITE} did NOT run: no ANTHROPIC_API_KEY or OPENAI_API_KEY is available to this run (expected for forks and Dependabot). This green check is not a provider-suite pass."
+              {
+                echo "### Provider ${PROVIDER_SUITE} did not run"
+                echo
+                echo "No ANTHROPIC_API_KEY or OPENAI_API_KEY is available to this run, so no checkout, Go setup, dependency download, build or test ran. This green check is **not** a provider-suite pass."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error title=Provider eligibility could not be determined::unexpected key availability result"
+              exit 1
+              ;;
+          esac
+
       - name: Checkout code
+        if: steps.eligibility.outputs.eligible == 'true'
         uses: actions/checkout@v5
 
       - name: Set up Go
+        if: steps.eligibility.outputs.eligible == 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
+        if: steps.eligibility.outputs.eligible == 'true'
         run: go mod download
 
       - name: Run integration tests
+        if: steps.eligibility.outputs.eligible == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -475,22 +513,60 @@ jobs:
     needs: test-unit
 
     steps:
+      # Same eligibility decision as the integration job: the server build below
+      # (about two minutes) is only worth paying for when the tests can run.
+      - name: Check provider eligibility
+        id: eligibility
+        shell: bash
+        env:
+          PROVIDER_SUITE: E2E tests
+          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+          HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          case "${HAS_OPENAI_KEY:-}:${HAS_ANTHROPIC_KEY:-}" in
+            true:true | true:false | false:true)
+              echo "eligible=true" >> "$GITHUB_OUTPUT"
+              echo "reason=a provider API key is available to this run" >> "$GITHUB_OUTPUT"
+              ;;
+            false:false)
+              echo "eligible=false" >> "$GITHUB_OUTPUT"
+              echo "reason=no ANTHROPIC_API_KEY or OPENAI_API_KEY is available to this run" >> "$GITHUB_OUTPUT"
+              echo "Skipping ${PROVIDER_SUITE} (no API keys configured)"
+              echo "::notice title=Provider tests not run::${PROVIDER_SUITE} did NOT run: no ANTHROPIC_API_KEY or OPENAI_API_KEY is available to this run (expected for forks and Dependabot). This green check is not a provider-suite pass."
+              {
+                echo "### Provider ${PROVIDER_SUITE} did not run"
+                echo
+                echo "No ANTHROPIC_API_KEY or OPENAI_API_KEY is available to this run, so no checkout, Go setup, dependency download, build or test ran. This green check is **not** a provider-suite pass."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error title=Provider eligibility could not be determined::unexpected key availability result"
+              exit 1
+              ;;
+          esac
+
       - name: Checkout code
+        if: steps.eligibility.outputs.eligible == 'true'
         uses: actions/checkout@v5
 
       - name: Set up Go
+        if: steps.eligibility.outputs.eligible == 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
+        if: steps.eligibility.outputs.eligible == 'true'
         run: go mod download
 
       - name: Build server
+        if: steps.eligibility.outputs.eligible == 'true'
         run: make build
 
       - name: Run E2E tests
+        if: steps.eligibility.outputs.eligible == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
