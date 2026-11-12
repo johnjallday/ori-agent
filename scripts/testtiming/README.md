@@ -24,13 +24,28 @@ successful-shard artifact transfer are required parts of the gate.
 
 `../unit-shards.py` uses deterministic longest-processing-time placement with
 stable ties. `../unit-shard-weights.json` contains rounded-up package seconds
-(only packages >=15 seconds) from Ubuntu run
-[38328061316](https://github.com/johnjallday/ori-agent/actions/runs/38328061316),
-with a 10-second default for all other/new packages. Weights affect placement,
-not selection: the authoritative list remains `list-unit-packages.sh`. These
-initial weights precede the assistantops/setupjourney fixture improvement and
-are deliberately conservative until hosted evidence supports rebalancing.
-Package times overlap and are not predicted shard wall times.
+(only packages above the 10-second default) with that default for every other or
+new package. Weights affect placement, not selection: the authoritative list
+remains `list-unit-packages.sh`. Package times overlap and are not predicted
+shard wall times.
+
+**Provenance of the current weights (provisional, 2026-11-12).** Hosted Linux
+package times from four successful runs (`dev` pushes 43253143983 and
+43234435294, pull-request runs 43245027953 and 43229866686, each with the
+canonical 210 packages exactly once): the median of each package's `go test
+-json` Elapsed across the runs. Four packages whose fixtures this change
+converted (`personalassistant`, `personalhq`, `learningmissions`,
+`projectlibrary`) were then multiplied by their local before/after ratio, taken
+from one interleaved race + atomic-coverage package run per side on a Darwin
+arm64 machine with Go 1.26.0 (0.459, 0.097, 0.161 and 0.778). That scaling is an
+estimate of the post-change cost, **not hosted evidence**: the first hosted
+runs of this change measure the real times, and the weights should be refreshed
+from them with the command above. The previous file (52 entries from an older
+run, before the assistantops/setupjourney fixture improvement, with
+`learningmissions` absent) had four shards that differ by about 1.8x under the
+post-change estimate; the refreshed file brings the same estimate within about
+1%. That is a placement-balance indicator computed from overlapping package
+seconds, never a prediction of shard wall time or a CI saving.
 
 ### Initial local trial (2026-10-13)
 
