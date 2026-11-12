@@ -7,6 +7,7 @@ import {
   commanderOneLine,
   commanderQueue,
   commanderSpeech,
+  folderLookEnded,
   lookLine,
   renderCommanderOneLine
 } from './commander-speech.js';
@@ -208,6 +209,23 @@ test('renderCommanderOneLine draws the line and its Review button', () => {
   row.children[1].listeners.click();
   assert.equal(reviewed, 1);
   assert.equal(renderCommanderOneLine(view({ state: 'kept' }), doc), null);
+});
+
+test('a look has ended for the person only when it goes from looking to a report or a failure (visual-hire FR22)', () => {
+  const state = name => ({ state: name });
+  // A plan to review or a question (reported) and a look that failed both count.
+  assert.equal(folderLookEnded(state('looking'), state('reported')), true);
+  assert.equal(folderLookEnded(state('looking'), state('failed')), true);
+  // Still looking, or a report that was already waiting, is not an ending.
+  assert.equal(folderLookEnded(state('looking'), state('looking')), false);
+  assert.equal(folderLookEnded(null, state('reported')), false);
+  assert.equal(folderLookEnded(state('reported'), state('reported')), false);
+  // A setup run's finish is not the look's.
+  assert.equal(folderLookEnded(state('setting_up'), state('set_up')), false);
+  assert.equal(folderLookEnded(state('setting_up'), state('failed')), false);
+  assert.equal(folderLookEnded(state('looking'), state('setting_up')), false);
+  assert.equal(folderLookEnded(state('looking'), null), false);
+  assert.equal(folderLookEnded(), false);
 });
 
 test('auto-open: only after the owner acted here, or a report arriving on this map (FR10)', () => {

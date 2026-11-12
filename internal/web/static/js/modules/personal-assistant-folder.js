@@ -38,6 +38,7 @@ import {
   homeMapShowing,
   revealHiredTile
 } from './commander-map.js';
+import { folderLookEnded } from './commander-speech.js';
 import {
   chooseFolder,
   fetchFolderAgent,
@@ -6881,6 +6882,15 @@ function folderAgentPresenter(workspaceID) {
   return mapPresenter.presenter;
 }
 
+// chatHoldsFolderPlan is whether the chat box holds the folder agent's plan: it
+// is open (not stepped aside) and the agent has something for the person, a
+// report (a plan to review, or a question) or a failed look (visual-hire FR22,
+// FR24). While the agent looks, or with the box closed, it holds nothing: the one
+// line in the chat and the plan in the Commander's balloon go on as before.
+export function chatHoldsFolderPlan({ open = false, suspended = false, state = '' } = {}) {
+  return open === true && suspended !== true && (state === 'reported' || state === 'failed');
+}
+
 function renderFolderAgent(els) {
   const host = folderAgentHost(els);
   if (!host) return;
@@ -6904,7 +6914,10 @@ function renderFolderAgent(els) {
         onAction: (action, button, extra) => void folderAgentAction(shown, action, button, extra)
       });
     // While the folder's tile is on Home's map, its Commander speaks there
-    // and this card shrinks to one line with Show on map (FR15).
+    // and this card shrinks to one line with Show on map (FR15) while the agent
+    // looks. When its look ends with a plan, a question or a failure and this box
+    // is open, the box shows the full card and the balloon keeps its one line, so
+    // the plan's controls exist in one place (visual-hire FR22, FR24).
     const presenter = folderAgentPresenter(shown.workspaceID);
     const drawn = presenter?.present({
       view: shown,
@@ -6915,7 +6928,13 @@ function renderFolderAgent(els) {
       opening,
       host,
       doc: document,
-      card
+      card,
+      chatHolds: () =>
+        chatHoldsFolderPlan({
+          open: window.PersonalAssistantPanel?.isOpen?.() === true,
+          suspended: window.PersonalAssistantPanel?.isSuspended?.() === true,
+          state: shown.state
+        })
     });
     state.agent.shown = shown;
     if (!drawn) host.replaceChildren(card(false));
@@ -7065,6 +7084,12 @@ function scheduleAgentPoll() {
       // The map behind the drawer builds the place as it is made, before the
       // run's end opens it, so the open waits for that motion.
       notifyPlacement(view, next);
+      // The look ended with something for the person: the chat box comes back to
+      // the width it had before the hire, once, unless the person has changed it
+      // since (visual-hire FR22, FR23). The panel answers 'kept' or 'none' and
+      // moves nothing then; a closed box stays closed.
+      if (folderLookEnded(view, next))
+        window.PersonalAssistantPanel?.restoreHireWidth?.(next.workspace_id);
       // A run watched to its end opens the place, as the card's link would;
       // a card no longer on the page opens nothing.
       const finished = setupFinished(view, next);

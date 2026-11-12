@@ -140,6 +140,120 @@ test('on the Map tab the header card is one line and the balloon carries the rep
   assert.deepEqual(map.calls.slice(-2), [['reveal'], ['expand', true]]);
 });
 
+// The chat box's answer to "do you hold the plan?" is asked on every draw.
+const withChat = (map, host, held, options) => ({
+  ...args(map, host, options),
+  chatHolds: () => held.value
+});
+
+test('while the chat box holds the plan its host shows the full card and the balloon keeps only its line (visual-hire FR22, FR24)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: false };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const reported = folderAgentReportView(raw());
+
+  // During the look the chat keeps its one line (FR16), as before.
+  presenter.present(withChat(map, host, held, { view: looking, followed: true }));
+  assert.equal(host.shown.className.includes('folder-agent-card--line'), true);
+
+  // Starting the look opens the balloon by itself (the owner just started it).
+  assert.equal(map.balloon.expanded, true);
+
+  // The look ends with a plan and the chat box is open: it takes the whole card,
+  // the balloon folds to its line with no plan in it and does not open again.
+  held.value = true;
+  const before = map.calls.length;
+  presenter.present(
+    withChat(map, host, held, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.expanded, false);
+  assert.deepEqual(
+    map.calls.slice(before).filter(([name]) => name === 'expand'),
+    []
+  );
+  assert.equal(
+    map.calls.slice(before).some(([name]) => name === 'collapse'),
+    true
+  );
+  assert.equal(map.balloon.content.body, null);
+  assert.equal(map.balloon.content.line, 'I have a plan for Albums · Review');
+  // The arrival is announced once, by the balloon's own line.
+  assert.ok(map.balloon.content.announce);
+  assert.match(map.balloon.content.signature, /\|true$/);
+});
+
+test('closing the chat box gives the plan back to the balloon, and opening it takes it again (visual-hire FR23, FR24)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: true };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const reported = folderAgentReportView(raw());
+  presenter.present(
+    withChat(map, host, held, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.content.body, null);
+
+  // The person closes the box: the chat's host has nothing to hold, the balloon
+  // carries the plan again (its body returns) as it did before this feature.
+  held.value = false;
+  map.fire();
+  assert.equal(typeof map.balloon.content.body, 'function');
+  assert.equal(map.balloon.content.body().kind, 'compact');
+  assert.equal(host.shown.className.includes('folder-agent-card--line'), true);
+
+  // They open it again: the plan goes back into the chat and out of the balloon.
+  held.value = true;
+  map.fire();
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.content.body, null);
+});
+
+test('a look that failed is held by the chat box the same way (visual-hire FR22)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: true };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const failed = folderAgentReportView(
+    raw({ state: 'failed', failure: 'The agent could not finish looking around.' })
+  );
+  presenter.present(withChat(map, host, held, { view: failed, previous: looking, followed: true }));
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.expanded, false);
+  assert.equal(map.balloon.content.body, null);
+});
+
+test('a closed chat box leaves the plan to the balloon, which opens by itself as before (visual-hire FR23)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: false };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const reported = folderAgentReportView(raw());
+  presenter.present(
+    withChat(map, host, held, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(host.shown.className.includes('folder-agent-card--line'), true);
+  assert.equal(map.balloon.content.body().kind, 'compact');
+  assert.deepEqual(map.calls.at(-1), ['expand', false]);
+  assert.equal(map.balloon.expanded, true);
+
+  // The workspace page passes no chat at all and is unchanged.
+  const page = fakeMap();
+  const pageHost = fakeHost();
+  commanderPresenter(page).present(
+    args(page, pageHost, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(pageHost.shown.className.includes('folder-agent-card--line'), true);
+  assert.equal(page.balloon.content.body().kind, 'compact');
+  assert.equal(page.balloon.expanded, true);
+});
+
 test('other tabs and narrow screens keep the full card (FR14, FR17)', () => {
   const map = fakeMap({ visible: false });
   const host = fakeHost();

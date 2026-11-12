@@ -553,6 +553,10 @@ export function commanderPresenter(
   let lastPhase = '';
   let hostMode = '';
   let pendingOpen = '';
+  // Whether the chat box holds the plan (visual-hire FR24). Asked live, on every
+  // draw, so opening or closing the box moves the plan between it and the balloon.
+  const chatHeld = () => typeof last?.chatHolds === 'function' && last.chatHolds() === true;
+  let lastHeld = false;
 
   const queue = () => {
     // The report goes first among equals: a look or a setup run in progress
@@ -583,6 +587,10 @@ export function commanderPresenter(
     };
     if (item.report) {
       const { view, raw, error, opening, card } = last;
+      // While the chat box shows the full plan the balloon keeps its line and its
+      // announcement but carries no body, so the plan's controls exist in one
+      // place (visual-hire FR24, FR25: the arrival is announced once, here).
+      const held = chatHeld();
       return {
         speaker: { name: view.agent, role: 'Commander' },
         // A balloon leaving with its run says where it goes (a line); the
@@ -590,11 +598,11 @@ export function commanderPresenter(
         line: typeof opening === 'string' && opening ? opening : item.speech.line,
         headline: item.speech.headline,
         announce: item.speech.announce,
-        signature: `report|${JSON.stringify(raw)}|${error}|${opening}|${index}`,
+        signature: `report|${JSON.stringify(raw)}|${error}|${opening}|${index}|${held}`,
         // A new phase (the plan becoming the run, the run the receipt)
         // starts at its top, not at the old scroll position.
         scrollKey: `report|${item.speech.phase}`,
-        body: () => card(true),
+        body: held ? null : () => card(true),
         more,
         onMore
       };
@@ -625,7 +633,11 @@ export function commanderPresenter(
   // draw: report says the folder agent's view is new (auto-open may apply).
   const draw = ({ report = false, refresh = false } = {}) => {
     const attached = map.attach({ onNarrow: revealHost });
-    if (report || refresh || !map.balloon.content) map.balloon.update(content());
+    const held = chatHeld();
+    // The plan moving between the chat box and the balloon redraws the balloon.
+    if (report || refresh || held !== lastHeld || !map.balloon.content)
+      map.balloon.update(content());
+    lastHeld = held;
     if (!last) {
       hostMode = '';
       return false;
@@ -639,6 +651,17 @@ export function commanderPresenter(
       return true;
     }
     const onMap = attached && map.visible() && !map.narrow();
+    // The chat box holds the full plan: it shows the whole card, and the balloon
+    // stays collapsed to its one line, so it never opens by itself over the plan
+    // (visual-hire FR22, FR24). A closed or stepped-aside box holds nothing, and
+    // the balloon carries the plan as before.
+    if (onMap && held) {
+      pendingOpen = '';
+      if (map.balloon.expanded) map.balloon.collapse({ returnFocus: false });
+      if (hostMode !== 'card' || fresh) host?.replaceChildren(card(false));
+      hostMode = 'card';
+      return true;
+    }
     // An opening the rules call for waits for the map when the anchor is not
     // drawn yet (a new folder's tile arrives with the next refresh).
     if (fresh && watched) {
