@@ -350,6 +350,9 @@ function lineView(line, defaultState = '') {
     step: String(line.step || ''),
     name: String(line.name || ''),
     detail: String(line.detail || ''),
+    // The host's mark: the outcome-line item this action belongs to, or ''
+    // for a detail. The card never works it out from the words.
+    outcome: String(line.outcome || ''),
     state: String(line.state || defaultState),
     progress: String(line.progress || ''),
     startedAt: timeOf(line.started_at),
@@ -725,6 +728,61 @@ function startRunClock(section) {
   timer?.unref?.();
 }
 
+// outcomeItems are a step's outcome-line items: the distinct outcomes the host
+// put on its actions, in order. Empty when the host marked none (an action
+// list with no outcome stays as it always was).
+function outcomeItems(actions) {
+  const items = [];
+  actions.forEach(action => {
+    if (action.outcome && !items.includes(action.outcome)) items.push(action.outcome);
+  });
+  return items;
+}
+
+// Steps whose actions the owner opened stay open when the card redraws (a tick
+// box or a swap re-plans); keyed by workspace and step.
+const openActionLists = new Set();
+let actionsSeq = 0;
+
+// renderOutcomes is a chosen step before Set it up: its outcome line, and
+// while some of its actions are not in it, a button that swaps the line for
+// every action in run order (FR1, FR3). Closed by default.
+function renderOutcomes(doc, view, row, shown, items, now) {
+  const summary = el(doc, 'span', 'folder-agent-card__outcomes', items.join(' · '));
+  // The line and its button share one row, the button wrapping below only
+  // when the line leaves no room; a row of its own keeps the Home drawer's
+  // broader "li > span" rule from running them into the step title.
+  const line = el(doc, 'span', 'folder-agent-card__outcome-row');
+  line.append(summary);
+  if (shown.length <= items.length) return [line];
+  const all = el(doc, 'span', 'folder-agent-card__actions-line');
+  shown.forEach((action, k) => {
+    if (k) all.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
+    all.append(renderAction(doc, action, now));
+  });
+  actionsSeq += 1;
+  all.id = `folder-agent-actions-${actionsSeq}`;
+  const toggle = el(doc, 'button', 'folder-agent-card__details-toggle');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-controls', all.id);
+  const key = `${view.workspaceID || ''}:${row.handle}`;
+  const show = open => {
+    summary.hidden = open;
+    all.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggle.textContent = open ? 'Show less' : `Show all ${shown.length} actions`;
+  };
+  show(openActionLists.has(key));
+  toggle.addEventListener('click', () => {
+    const open = Boolean(all.hidden);
+    if (open) openActionLists.add(key);
+    else openActionLists.delete(key);
+    show(open);
+  });
+  line.append(all, toggle);
+  return [line];
+}
+
 // renderPlan draws the plan as one list the owner can follow: the agent's
 // words (or Ori's reason for its default), a headline for where things
 // stand, one numbered row per chosen step with its actions under it, the
@@ -916,7 +974,12 @@ function renderPlan(
       body.append(marker);
     }
     const shown = row.actions.filter(action => !covered(action));
-    if (shown.length) {
+    // Before Set it up a chosen step reads as its outcomes; from the moment
+    // the run starts every action is shown with its live state (FR4).
+    const outcomes = phase === 'plan' && isChosen ? outcomeItems(shown) : [];
+    if (outcomes.length) {
+      body.append(...renderOutcomes(doc, view, row, shown, outcomes, now));
+    } else if (shown.length) {
       const actions = el(doc, 'span', 'folder-agent-card__actions-line');
       shown.forEach((action, k) => {
         if (k) actions.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));

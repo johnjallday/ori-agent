@@ -2393,3 +2393,230 @@ test("after It's something else the card offers a plain workspace or the owner's
     ['Look again']
   );
 });
+
+// Outcomes instead of actions (setup-card-clarity FR1–FR4): a chosen step reads
+// as the host's outcome items before Set it up; its every action is one
+// button away; from the run on, every action shows with its live state.
+const HOME = 'music-production-home';
+// The run's words for an action, and the shorter outcome item the host gives it.
+const creates = 'Creates your Music Production Home';
+const createsItem = 'Creates Music Production Home';
+const listsSongs = 'Lists 8 songs on its shelf';
+const listsItem = 'Lists 8 songs';
+const hiresAgents = "Hires the Home's agents";
+const homeLine = (kind, name, outcome = '') => ({
+  kind,
+  name,
+  step: HOME,
+  ...(outcome ? { outcome } : {})
+});
+const assurance = {
+  kind: 'folder',
+  name: 'Nothing in Ori Music Demo is moved, copied or read.'
+};
+// What the server sends for a new Home with its plugin not yet installed.
+const newHomeLines = [
+  homeLine('provider', 'Installs Music Project Management'),
+  homeLine('home', creates, createsItem),
+  homeLine('hire', "Fills the Home's roles", hiresAgents),
+  homeLine('library', 'Adds Ori Music Demo to your Music Production Home'),
+  homeLine('songs', listsSongs, listsItem),
+  homeLine('scopes', 'Looks into 2 folders for songs'),
+  homeLine('place', 'Places Ori Music Demo inside your Music Production Home'),
+  assurance
+];
+const homePlanOf = (lines, installs = [providerInstall]) => ({
+  digest: 'home',
+  runnable: true,
+  source: 'default',
+  selected: [HOME],
+  steps: [
+    {
+      handle: HOME,
+      kind: 'home',
+      name: 'Music Production Home',
+      title: 'Create your Music Production Home and put Ori Music Demo on its shelf (8 songs)',
+      chosen: true
+    }
+  ],
+  installs,
+  lines
+});
+const homeCard = (lines, installs, overrides = {}) =>
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({
+        model_sentence: '',
+        tools_sentence: '',
+        plan: homePlanOf(lines, installs),
+        ...overrides
+      })
+    ),
+    stubDocument(),
+    {}
+  );
+const outcomeText = card => text(card, '.folder-agent-card__outcomes');
+const detailsToggle = card => card.querySelector('.folder-agent-card__details-toggle');
+const actionNames = node =>
+  node.querySelectorAll('.folder-agent-card__action-name').map(n => n.textContent);
+
+test('a chosen step reads as three outcomes, with its other actions behind a closed button', () => {
+  const card = homeCard(newHomeLines);
+  assert.equal(outcomeText(card), `${createsItem} · ${hiresAgents} · ${listsItem}`);
+  // The line and its button share one row.
+  const row = card.querySelector('.folder-agent-card__outcome-row');
+  assert.ok(row.querySelector('.folder-agent-card__outcomes'));
+  assert.ok(row.querySelector('.folder-agent-card__details-toggle'));
+  // The install is the block's; the other six lines are the step's actions.
+  const toggle = detailsToggle(card);
+  assert.equal(toggle.tagName, 'BUTTON');
+  assert.equal(toggle.type, 'button');
+  assert.equal(toggle.textContent, 'Show all 6 actions');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  const all = card.querySelector('.folder-agent-card__actions-line');
+  assert.equal(toggle.attributes['aria-controls'], all.id);
+  assert.equal(all.hidden, true);
+  assert.equal(card.querySelector('.folder-agent-card__outcomes').hidden, false);
+  // The install is listed once, in the block.
+  assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
+  assert.ok(!actionNames(card).includes('Installs Music Project Management'));
+});
+
+test('opening the button shows every action in run order, and a redraw keeps it open', () => {
+  const view = reported({
+    model_sentence: '',
+    tools_sentence: '',
+    plan: homePlanOf(newHomeLines)
+  });
+  const draw = () => renderFolderAgentReport(folderAgentReportView(view), stubDocument(), {});
+  const card = draw();
+  const toggle = detailsToggle(card);
+  toggle.listeners.click();
+  assert.equal(toggle.attributes['aria-expanded'], 'true');
+  assert.equal(toggle.textContent, 'Show less');
+  assert.equal(card.querySelector('.folder-agent-card__outcomes').hidden, true);
+  const all = card.querySelector('.folder-agent-card__actions-line');
+  assert.equal(all.hidden, false);
+  assert.deepEqual(actionNames(all), [
+    creates,
+    "Fills the Home's roles",
+    'Adds Ori Music Demo to your Music Production Home',
+    listsSongs,
+    'Looks into 2 folders for songs',
+    'Places Ori Music Demo inside your Music Production Home'
+  ]);
+  // A redraw (a tick box, a swap) keeps what the owner opened.
+  const again = draw();
+  assert.equal(detailsToggle(again).attributes['aria-expanded'], 'true');
+  assert.equal(again.querySelector('.folder-agent-card__actions-line').hidden, false);
+  // Closing it again restores the outcome line.
+  detailsToggle(again).listeners.click();
+  assert.equal(detailsToggle(again).attributes['aria-expanded'], 'false');
+  assert.equal(detailsToggle(again).textContent, 'Show all 6 actions');
+  assert.equal(again.querySelector('.folder-agent-card__outcomes').hidden, false);
+  assert.equal(detailsToggle(draw()).attributes['aria-expanded'], 'false');
+});
+
+test('a Home that exists says nothing of creating it; hires appear only when there are some', () => {
+  // The Home is there and every role is filled: one item, nothing created.
+  const joined = homeCard(
+    [
+      homeLine('library', 'Adds Ori Music Demo to your Music Production Home'),
+      homeLine('songs', listsSongs, listsItem),
+      homeLine('place', 'Places Ori Music Demo inside your Music Production Home'),
+      assurance
+    ],
+    []
+  );
+  assert.equal(outcomeText(joined), listsItem);
+  assert.ok(!outcomeText(joined).includes('Creates'));
+  assert.ok(!outcomeText(joined).includes('Hires'));
+  assert.equal(detailsToggle(joined).textContent, 'Show all 3 actions');
+  // Two roles missing: two hire lines read as one item.
+  const hiring = homeCard(
+    [
+      homeLine('hire', 'Hires Portfolio Manager', 'Hires 2 agents'),
+      homeLine('hire', 'Hires Library Manager', 'Hires 2 agents'),
+      homeLine('library', 'Adds Ori Music Demo to your Music Production Home'),
+      homeLine('songs', listsSongs, listsItem),
+      homeLine('place', 'Places Ori Music Demo inside your Music Production Home'),
+      assurance
+    ],
+    []
+  );
+  assert.equal(outcomeText(hiring), `Hires 2 agents · ${listsItem}`);
+  assert.equal(detailsToggle(hiring).textContent, 'Show all 5 actions');
+});
+
+test('a step whose every action is an outcome has no button; a step with no marks shows its actions as before', () => {
+  const tools = renderFolderAgentReport(
+    folderAgentReportView(
+      reported({ model_sentence: '', tools_sentence: '', plan: installPlan(['reaper-tools']) })
+    ),
+    stubDocument(),
+    {}
+  );
+  // No marks: the actions stay on their muted line, nothing is hidden.
+  assert.equal(tools.querySelector('.folder-agent-card__outcomes'), null);
+  assert.equal(detailsToggle(tools), null);
+  assert.deepEqual(actionNames(tools.querySelector('.folder-agent-card__actions-line')), [
+    'Connects REAPER tools to Ori Music Demo'
+  ]);
+  // Marked: the connection is the one outcome and it is all there is to open.
+  const connects = 'Connects REAPER tools to Ori Music Demo';
+  const marked = installPlan(['reaper-tools']);
+  marked.lines = marked.lines.map(line =>
+    line.kind === 'workspace' ? { ...line, outcome: connects } : line
+  );
+  const card = renderFolderAgentReport(
+    folderAgentReportView(reported({ model_sentence: '', tools_sentence: '', plan: marked })),
+    stubDocument(),
+    {}
+  );
+  assert.equal(outcomeText(card), connects);
+  assert.equal(detailsToggle(card), null);
+  assert.equal(card.querySelector('.folder-agent-card__actions-line'), null);
+});
+
+test('from the moment the run starts every action shows with its live state and no button', () => {
+  const lines = newHomeLines.slice(0, -1).map((line, i) => ({
+    ...line,
+    state: i < 2 ? 'done' : i === 2 ? 'working' : 'waiting',
+    progress: i === 2 ? 'Hiring the Portfolio Manager' : ''
+  }));
+  const run = (state, status) =>
+    renderFolderAgentReport(
+      folderAgentReportView(
+        reported({
+          state,
+          actions: [],
+          model_sentence: '',
+          tools_sentence: '',
+          plan: homePlanOf(newHomeLines),
+          setup: { status, started_at: '2026-11-11T10:00:00Z', lines }
+        })
+      ),
+      stubDocument(),
+      {}
+    );
+  for (const card of [run('setting_up', 'running'), run('set_up', 'stopped')]) {
+    assert.equal(card.querySelector('.folder-agent-card__outcomes'), null);
+    assert.equal(detailsToggle(card), null);
+    // The install row is the block's; every other action is listed, in order.
+    assert.deepEqual(actionNames(card.querySelector('.folder-agent-card__actions-line')), [
+      creates,
+      "Fills the Home's roles",
+      'Adds Ori Music Demo to your Music Production Home',
+      listsSongs,
+      'Looks into 2 folders for songs',
+      'Places Ori Music Demo inside your Music Production Home'
+    ]);
+  }
+  // Each action keeps the state the run gave its line.
+  assert.deepEqual(
+    run('setting_up', 'running')
+      .querySelectorAll('.folder-agent-card__action')
+      .map(a => a.dataset.state),
+    ['done', 'working', 'waiting', 'waiting', 'waiting', 'waiting']
+  );
+});

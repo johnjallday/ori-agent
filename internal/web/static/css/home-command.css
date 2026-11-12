@@ -3485,6 +3485,51 @@ a.quest-title:focus-visible {
   line-height: 1.5;
 }
 
+/* Before Set it up a chosen step reads as its outcomes (at most three items,
+   written by the host); a button swaps the line for every action. The line
+   stays plain ink: it is the part to read. It sits in a row of its own, which
+   the Home drawer's broader ".personal-assistant-today__sections li > span"
+   rule cannot reach (it only matches the row's direct child), so the line
+   and its button never run into the step title in either host. */
+.folder-agent-card__outcome-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+}
+
+.folder-agent-card__outcomes {
+  color: var(--hc-ink, var(--cozy-ink));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Opened, the actions take the outcome line's place and the whole row's width;
+   the button wraps beneath them. */
+.folder-agent-card__outcome-row .folder-agent-card__actions-line {
+  flex-basis: 100%;
+}
+
+.folder-agent-card__outcomes[hidden],
+.folder-agent-card__actions-line[hidden] {
+  display: none;
+}
+
+.folder-agent-card__details-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.folder-agent-card__details-toggle:hover {
+  color: var(--hc-ink, var(--cozy-ink));
+}
+
 .folder-agent-card__action[data-state="done"]::before {
   content: "✓ ";
   color: var(--hc-signal, var(--cozy-moss));

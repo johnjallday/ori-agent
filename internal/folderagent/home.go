@@ -105,6 +105,21 @@ func HomeReceiptLine(listed, unreached int, facts foldermap.Facts) string {
 // roles before the Home exists (PRD FR5); the run names each role as it hires.
 const HomeRolesLine = "Fills the Home's roles"
 
+// HomeHiresOutcome is the outcome item for HomeRolesLine: the number of
+// agents is not known until the Home exists, so it is not stated.
+const HomeHiresOutcome = "Hires the Home's agents"
+
+// createsOutcome is the outcome item for the line that creates the Home. The
+// outcome items are kept short so the line fits one row of the card: the run
+// line itself keeps its full words under "Show all".
+func createsOutcome(homeName string) string { return "Creates " + homeName }
+
+// hiresOutcome is the outcome item shared by the n hire lines of a Home whose
+// missing roles are known: "Hires 3 agents".
+func hiresOutcome(n int) string {
+	return fmt.Sprintf("Hires %d %s", n, plural(n, "agent", "agents"))
+}
+
 // homeLines are the Home stage's plan lines (PRD FR1, FR37, FR38), one per
 // action the run takes: the provider's install when it is not ready, the
 // Home's creation when there is none, a hire per role the Home still lacks,
@@ -117,7 +132,8 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 	if facts == nil {
 		if home.Action != folderlook.ActionAlreadyHere {
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name,
-				Detail: "Its provider is checked against the reviewed release, and its roles are filled."})
+				Outcome: createsOutcome(name),
+				Detail:  "Its provider is checked against the reviewed release, and its roles are filled."})
 		}
 	} else {
 		if !facts.ProviderReady {
@@ -125,18 +141,23 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 			if provider == "" {
 				provider = "the " + name + "'s plugin"
 			}
+			// A detail: the install block lists the plugin once, for the button
+			// to confirm, so the outcome line does not repeat it.
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanProvider, Name: "Installs " + provider,
 				Detail: "The reviewed release, checked before it is installed."})
 		}
 		if !facts.HomeExists {
-			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name})
+			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name,
+				Outcome: createsOutcome(name)})
 		}
 		if facts.RolesKnown {
+			// One outcome item for every hire, whatever the number of roles.
+			hires := hiresOutcome(len(facts.MissingRoles))
 			for _, role := range facts.MissingRoles {
-				lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: "Hires " + role})
+				lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: "Hires " + role, Outcome: hires})
 			}
 		} else {
-			lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: HomeRolesLine,
+			lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: HomeRolesLine, Outcome: HomeHiresOutcome,
 				Detail: "Each role is named as it is hired."})
 		}
 	}
@@ -151,7 +172,8 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 		noun = foldermap.ShapeNoun(rec.Facts.Portfolio.Shape, songs)
 	}
 	lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanSongs,
-		Name: fmt.Sprintf("Lists %d %s on its shelf", songs, noun)})
+		Name:    fmt.Sprintf("Lists %d %s on its shelf", songs, noun),
+		Outcome: fmt.Sprintf("Lists %d %s", songs, noun)})
 	if n := len(ProjectParents(rec.Facts)); n > 0 {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanScopes,
 			Name:   fmt.Sprintf("Looks into %d %s for %s", n, plural(n, "folder", "folders"), foldermap.ShapeNoun(folderdigest.Shape(shapeOf(rec)), 2)),

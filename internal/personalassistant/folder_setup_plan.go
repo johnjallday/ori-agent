@@ -136,6 +136,13 @@ type FolderPlanLine struct {
 	// Step is the handle of the plan step this line carries out (the folder
 	// agent's plan groups its lines under their steps); empty elsewhere.
 	Step string `json:"step,omitempty"`
+	// Outcome is the item of the step's one-line outcome summary that this
+	// action contributes to, in the host's words ("Hires 3 agents"); actions
+	// that make up one item carry the same text. Empty marks the action a
+	// detail, shown only when the owner opens the step's actions. The host
+	// decides this, the card never reads it out of Name. It is presentation,
+	// not part of the plan's identity: the digest still covers every action.
+	Outcome string `json:"outcome,omitempty"`
 	// Progress is the runner's live words for this line ("Downloading <plugin>
 	// <version>" while working, the receipt words once done). Like
 	// State and the timestamps it is not part of the plan's identity.
@@ -181,7 +188,7 @@ func ValidateFolderPlanLine(line FolderPlanLine) error {
 	if line.Kind == "" {
 		return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
 	}
-	for _, text := range []string{line.Name, line.Detail, line.Progress} {
+	for _, text := range []string{line.Name, line.Detail, line.Outcome, line.Progress} {
 		if len(text) > folderSetupMaxText || strings.ContainsAny(text, "\x00\r\n") || looksLikeFilesystemPath(text) {
 			return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
 		}
@@ -531,7 +538,8 @@ type FolderPrerequisite struct {
 
 // FolderPlanDigest is the SHA-256 of the lines' canonical JSON: Kind, Name and
 // Detail only. State, Progress and the timestamps are excluded, so progress on
-// a line never changes what was consented to.
+// a line never changes what was consented to. Step and Outcome are excluded
+// too: they only decide where the card draws a line, never what it does.
 func FolderPlanDigest(lines []FolderPlanLine) string {
 	canonical := make([]FolderPlanLine, len(lines))
 	for i, line := range lines {

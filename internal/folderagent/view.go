@@ -632,12 +632,14 @@ func BuildPlan(rec Record, selected []string) Plan {
 		switch c.Kind {
 		case folderlook.KindIntegration:
 			if folderlook.IntegrationInstalls(c) {
+				// A detail: the install block lists the plugin once.
 				plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
 					Kind: personalassistant.FolderPlanIntegration, Name: "Installs " + c.Name, Detail: folderlook.AppToolsSentence(c),
 				})
 			}
+			connects := "Connects " + c.Name + " to " + rec.WorkspaceName
 			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
-				Kind: personalassistant.FolderPlanWorkspace, Name: "Connects " + c.Name + " to " + rec.WorkspaceName,
+				Kind: personalassistant.FolderPlanWorkspace, Name: connects, Outcome: connects,
 				Detail: rec.AgentName + " can use them in this workspace.",
 			})
 		case folderlook.KindHomeProvider:
@@ -645,17 +647,23 @@ func BuildPlan(rec Record, selected []string) Plan {
 		case folderlook.KindFileCurator:
 			// File Janitor goes into this workspace in place (the folder is
 			// already its anchor), and File Curator joins as its companion.
+			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, "Adds File Curator"
 			plan.Lines = append(plan.Lines,
 				personalassistant.FolderPlanLine{
-					Kind: FolderPlanCapability, Name: "Adds File Janitor to " + rec.WorkspaceName,
+					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
 					Detail: "Watching and the daily scan stay off until you turn them on in its setup.",
 				},
 				personalassistant.FolderPlanLine{
-					Kind: personalassistant.FolderPlanAgents, Name: "Adds File Curator",
+					Kind: personalassistant.FolderPlanAgents, Name: curator, Outcome: curator,
 					Detail: "It explains proposed filing; you approve every move.",
 				})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
-			plan.Lines = append(plan.Lines, addOnLine(c, rec.WorkspaceName))
+			line := addOnLine(c, rec.WorkspaceName)
+			// A plugin the install block lists is not repeated in the outcome.
+			if !installsPlugin(c) {
+				line.Outcome = line.Name
+			}
+			plan.Lines = append(plan.Lines, line)
 		}
 	}
 	// Each line carries the step it came from, so the card can show the steps
