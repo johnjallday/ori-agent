@@ -38,7 +38,19 @@ func (s *workSource) MatchTicket(_ context.Context, _ string, i Instance) error 
 
 func workFixture(t *testing.T) (*Service, *workSource, string, WorkRequest) {
 	t.Helper()
-	s, _ := testService(t)
+	return workFixtureOn(t, testService)
+}
+
+// freshWorkFixture is workFixture on a freshly initialized database, for the
+// restart tests.
+func freshWorkFixture(t *testing.T) (*Service, *workSource, string, WorkRequest) {
+	t.Helper()
+	return workFixtureOn(t, freshTestService)
+}
+
+func workFixtureOn(t *testing.T, newService serviceOpener) (*Service, *workSource, string, WorkRequest) {
+	t.Helper()
+	s, _ := newService(t)
 	offer := propose(t, s)
 	if _, err := s.Decide(t.Context(), "local", offer.Instance.ID, DecisionRequest{
 		MutationRequest: MutationRequest{OperationID: "accept", ExpectedRevision: 1}, InstanceRevision: 1, Decision: "accept"}); err != nil {

@@ -27,12 +27,32 @@ func (f sourceStub) Validate(ctx context.Context, owner string, d Definition) er
 	return nil
 }
 
-func testService(t *testing.T) (*Service, *database.DB) {
+// storeOpener is how a fixture gets its database: testStore (a private clone,
+// for ordinary tests) or freshTestStore (full initialization, for lifecycle
+// tests that close, reopen or reset).
+type storeOpener func(*testing.T) (*SQLiteStore, *database.DB, string)
+
+// serviceOpener is the same choice one level up: testService or freshTestService.
+type serviceOpener func(*testing.T) (*Service, *database.DB)
+
+func serviceOn(t *testing.T, open storeOpener) (*Service, *database.DB) {
 	t.Helper()
-	s, db, _ := testStore(t)
+	s, db, _ := open(t)
 	service := NewService(s, &resetstate.WorkGate{}, sourceStub{})
 	service.now = func() time.Time { return time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC) }
 	return service, db
+}
+
+func testService(t *testing.T) (*Service, *database.DB) {
+	t.Helper()
+	return serviceOn(t, testStore)
+}
+
+// freshTestService is testService on a freshly initialized database, for the
+// restart and reset tests.
+func freshTestService(t *testing.T) (*Service, *database.DB) {
+	t.Helper()
+	return serviceOn(t, freshTestStore)
 }
 
 func propose(t *testing.T, s *Service) Outcome {

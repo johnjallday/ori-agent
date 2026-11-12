@@ -20,7 +20,19 @@ func (s *reviewSource) Result(context.Context, string, Instance) (ResultProof, e
 
 func reviewFixture(t *testing.T) (*Service, *database.DB, Instance) {
 	t.Helper()
-	s, db := testService(t)
+	return reviewFixtureOn(t, testService)
+}
+
+// freshReviewFixture is reviewFixture on a freshly initialized database, for
+// the restart and reset tests.
+func freshReviewFixture(t *testing.T) (*Service, *database.DB, Instance) {
+	t.Helper()
+	return reviewFixtureOn(t, freshTestService)
+}
+
+func reviewFixtureOn(t *testing.T, newService serviceOpener) (*Service, *database.DB, Instance) {
+	t.Helper()
+	s, db := newService(t)
 	offer := propose(t, s)
 	i, proof := resultFixture()
 	proof.Ref.Incarnation = offer.Instance.Definition.Incarnation

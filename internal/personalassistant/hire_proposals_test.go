@@ -2,22 +2,15 @@ package personalassistant
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func newHireProposalsForTest(t *testing.T) *SQLiteHireProposals {
 	t.Helper()
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "proposals.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return NewSQLiteHireProposals(db)
+	return NewSQLiteHireProposals(openTestDB(t))
 }
 
 func sampleProposal(id, conversationID string) HireProposal {

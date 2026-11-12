@@ -65,7 +65,8 @@ func TestLearningResetScopesKeepWorkAndSeparateConsentFromEarnedHistory(t *testi
 }
 
 func TestFullAppRecordResetClearsAllLearningDomainsAndCannotReviveOldCallbacks(t *testing.T) {
-	s, _, i := reviewFixture(t)
+	s, _, i := freshReviewFixture(t)
+	requireFreshlyInitialized(t, s.store.db)
 	prepared := prepareReview(t, s, i)
 	if _, err := s.ReviewResult(t.Context(), "local", i.ID, ReviewRequest{MutationRequest: MutationRequest{OperationID: "consume", ExpectedRevision: 3}, InstanceRevision: 3, Action: "submit", ReviewID: prepared.Review.ID, Decision: "reject", Reason: "incorrect"}); err != nil {
 		t.Fatal(err)

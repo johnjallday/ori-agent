@@ -16,42 +16,15 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// Repeated query timing (the former 100-request p95 loop) is not run here; it is
+// BenchmarkQuery_PersistedThousandRecords. This test keeps what is correctness:
+// every record is reachable exactly once, a cursor is revision-bound, and the
+// first, middle, last and no-match shapes each return what they should.
 func TestQuery_BoundedRevisionCursorAtThousandRecords(t *testing.T) {
-	file, scope := libraryHome(t)
-	s := NewStore(file)
-	initializeLibrary(t, s, scope)
-	now := time.Now().UTC()
-	rootID, scanID := newID(), newID()
-	_, _, err := s.mutate(scope, 1,
-		operation{key: "query-fixture", action: "seed", digest: "fixture"},
-		func(doc *Document) (string, error) {
-			path := t.TempDir()
-			doc.Roots = append(doc.Roots, Root{ID: rootID, Path: path, FileIdentity: "fixture:root",
-				Revision: 1, ApprovedAt: now})
-			doc.Scans = append(doc.Scans, Scan{ID: scanID, RootID: rootID, RootRevision: 1,
-				RootDigest: rootDigest(scope, "scan_source", path, "fixture:root", 1),
-				Status:     "complete", StartedAt: now, FinishedAt: &now,
-				ResultDigest: strings.Repeat("0", 64)})
-			for i := 0; i < 1000; i++ {
-				fields := Fields{DisplayName: fmt.Sprintf("Song %04d", i), Revision: 0}
-				if i < 40 {
-					fields.Status, fields.Revision, fields.Source, fields.UpdatedAt = "active", 1, "test_edit", now
-				}
-				doc.Entries = append(doc.Entries, Entry{ID: fmt.Sprintf("entry-%04d", i), Revision: 1,
-					Fields: fields, Observations: []Observation{{RootID: rootID,
-						RelativeFolder: fmt.Sprintf("Folder-%04d", i), FileIdentity: fmt.Sprintf("fixture:%d", i),
-						Format: "reaper", Availability: "available", ScanID: scanID, ScannedAt: now}}})
-			}
-			return scanID, nil
-		})
-	if err != nil {
-		t.Fatal(err)
-	}
-	restarted, err := workspace.NewFileStore(filepath.Dir(filepath.Dir(file.GetFilesPath(scope.HomeID))))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s = NewStore(restarted)
+	fixture := newThousandRecordFixture(t)
+	scope := fixture.scope
+	s, closeStore := fixture.open(t)
+	t.Cleanup(closeStore)
 	query := Search{PageSize: 50, Sort: "name"}
 	// Measure one cold post-restart query, including file decode and all
 	// metadata projections. TotalAlloc is process-wide, so this is diagnostic
@@ -102,18 +75,26 @@ func TestQuery_BoundedRevisionCursorAtThousandRecords(t *testing.T) {
 	if len(seen) != 1000 || middleCursor == "" || lastCursor == "" {
 		t.Fatalf("pagination lost records or middle/last cursors: %d", len(seen))
 	}
-	var durations []time.Duration
-	measured := []Search{{PageSize: 50}, {PageSize: 50, Cursor: middleCursor},
-		{PageSize: 50, Cursor: lastCursor}, {Text: "no such project"}}
-	for i := 0; i < 100; i++ {
-		started := time.Now()
-		if _, err := s.Query(scope, measured[i%len(measured)]); err != nil {
-			t.Fatalf("measurement %d: %v", i, err)
-		}
-		durations = append(durations, time.Since(started))
+	// The four request shapes the persisted-query benchmark measures, once each
+	// and with real assertions (the default sort is name, so the rows are known):
+	// the first page, the pages that start at the middle and last cursors, and a
+	// search that matches nothing.
+	first, err := s.Query(scope, Search{PageSize: 50})
+	if err != nil || first.Total != 1000 || len(first.Rows) != 50 || first.Rows[0].Name != "Song 0000" || first.NextCursor == "" {
+		t.Fatalf("first page: %+v %v", first, err)
 	}
-	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-	t.Logf("100 real persisted query requests (1,000 rows, 40 edits): p95=%s; first/middle/last/no-match", durations[94])
+	middle, err := s.Query(scope, Search{PageSize: 50, Cursor: middleCursor})
+	if err != nil || len(middle.Rows) != 50 || middle.Rows[0].Name != "Song 0500" || middle.NextCursor == "" {
+		t.Fatalf("middle page: %+v %v", middle, err)
+	}
+	final, err := s.Query(scope, Search{PageSize: 50, Cursor: lastCursor})
+	if err != nil || len(final.Rows) != 50 || final.Rows[0].Name != "Song 0950" || final.NextCursor != "" {
+		t.Fatalf("last page: %+v %v", final, err)
+	}
+	none, err := s.Query(scope, Search{Text: "no such project"})
+	if err != nil || none.Total != 0 || len(none.Rows) != 0 || none.NextCursor != "" {
+		t.Fatalf("no-match search: %+v %v", none, err)
+	}
 	for _, invalid := range []Search{{PageSize: 51}, {Text: strings.Repeat("x", 121)},
 		{Sort: "../../secret"}, {Direction: "sideways"}, {Format: "unlisted"}, {RootID: "foreign"}} {
 		if _, err := s.Query(scope, invalid); err == nil {

@@ -13,6 +13,7 @@ import (
 // connection. External-owner fixtures remain independent canonical stores.
 func reopenLearning(t *testing.T, before *Service) *Service {
 	t.Helper()
+	requireFreshlyInitialized(t, before.store.db)
 	var sequence int
 	var name, path string
 	if err := before.store.db.QueryRowContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &path); err != nil || name != "main" || path == "" {
@@ -32,7 +33,7 @@ func reopenLearning(t *testing.T, before *Service) *Service {
 }
 
 func TestRestartAfterPhysicalTicketBeforeLearningFinalizationRecoversOnlyReservedIdentity(t *testing.T) {
-	s, host, id, req := workFixture(t)
+	s, host, id, req := freshWorkFixture(t)
 	if _, err := s.store.db.ExecContext(t.Context(), `CREATE TRIGGER fail_work_finish BEFORE UPDATE ON learning_operations WHEN NEW.kind='prepare_work' AND NEW.status='succeeded' BEGIN SELECT RAISE(ABORT,'injected finalization failure'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestRestartAfterPhysicalTicketBeforeLearningFinalizationRecoversOnlyReserve
 }
 
 func TestRestartAtReservedRunResultChallengeAndConsumedDecisionNeverManufacturesCredit(t *testing.T) {
-	s, _, instance := reviewFixture(t)
+	s, _, instance := freshReviewFixture(t)
 	source := s.source.(*reviewSource)
 	proof := source.proof
 	source.proof.Status = "executing"
@@ -130,7 +131,7 @@ func TestRestartAtReservedRunResultChallengeAndConsumedDecisionNeverManufactures
 }
 
 func TestRestartAfterModelResponseBeforeCommitRetainsUnknownReservationWithoutReplay(t *testing.T) {
-	s, _ := testService(t)
+	s, _ := freshTestService(t)
 	d, req := installDesigner(s)
 	if _, err := s.store.db.ExecContext(t.Context(), `CREATE TRIGGER fail_design_finish BEFORE UPDATE ON learning_operations WHEN NEW.kind='generate' AND NEW.status='succeeded' BEGIN SELECT RAISE(ABORT,'injected finalization failure'); END`); err != nil {
 		t.Fatal(err)

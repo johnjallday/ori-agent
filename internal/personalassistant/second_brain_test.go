@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderpath"
 	"github.com/johnjallday/ori-agent/internal/followup"
@@ -92,12 +91,9 @@ func newSecondBrainHarness(t *testing.T) *secondBrainHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := database.Open(context.Background(), &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	followUps := followup.NewService(followup.NewSQLiteStore(db))
+	// The follow-up database stays separate from the knowledge fixture's own
+	// (kf), as before; each is its own private clone.
+	followUps := followup.NewService(followup.NewSQLiteStore(openTestDB(t)))
 
 	clock := secondBrainNow
 	h := &secondBrainHarness{
@@ -126,6 +122,9 @@ func newSecondBrainHarness(t *testing.T) *secondBrainHarness {
 			return "look-" + string(rune('0'+ids))
 		},
 	})
+	// Background looks and syncs must finish before the follow-up database is
+	// closed and its directory removed (cleanups run last-registered first).
+	t.Cleanup(h.service.Wait)
 	return h
 }
 

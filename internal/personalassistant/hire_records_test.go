@@ -2,23 +2,16 @@ package personalassistant
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func newHireRecordsForTest(t *testing.T) *SQLiteHireRecords {
 	t.Helper()
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "hires.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return NewSQLiteHireRecords(db)
+	return NewSQLiteHireRecords(openTestDB(t))
 }
 
 func sampleHire(id, requestID, workspaceID string) HireRecord {
@@ -63,6 +56,32 @@ func TestHireRecords_CreateGetAndFindByRequestAndWorkspace(t *testing.T) {
 	}
 	if _, err := records.Get(t.Context(), "missing"); !errors.Is(err, ErrHireNotFound) {
 		t.Fatalf("missing hire: %v", err)
+	}
+}
+
+// openTestDB gives every caller a database of its own: a hire written through
+// one is invisible through the next (the same id can exist in both), and one
+// closing early neither disturbs the other nor makes its own cleanup fail.
+func TestOpenTestDBGivesEachCallerItsOwnDatabase(t *testing.T) {
+	dbA, dbB := openTestDB(t), openTestDB(t)
+	a, b := NewSQLiteHireRecords(dbA), NewSQLiteHireRecords(dbB)
+	if _, err := a.Create(t.Context(), sampleHire("hire-1", "req-1", "ws-1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Get(t.Context(), "hire-1"); !errors.Is(err, ErrHireNotFound) {
+		t.Fatalf("a write through one fixture reached another: %v", err)
+	}
+	if err := dbA.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Create(t.Context(), sampleHire("hire-1", "req-1", "ws-1")); err != nil {
+		t.Fatalf("second fixture unusable after the first closed (or shared its state): %v", err)
+	}
+	if got, err := b.Get(t.Context(), "hire-1"); err != nil || got.RequestID != "req-1" {
+		t.Fatalf("Get = %+v, %v", got, err)
+	}
+	if err := dbA.Close(); err != nil {
+		t.Fatalf("closing a fixture twice must stay harmless for its own cleanup: %v", err)
 	}
 }
 

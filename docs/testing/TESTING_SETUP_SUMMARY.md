@@ -101,6 +101,12 @@ Automated testing on GitHub Actions:
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 
+Without either key (the default, and always on forks and Dependabot PRs) the Integration and E2E
+jobs decide that in their first step and run nothing else: no checkout, Go setup, dependency
+download, server build or test. The job still reports green, and says so in its log, a notice
+annotation and the step summary: the provider suite did **not** run, so a green check there is not a
+provider-suite pass. A failure of that detection step fails the job.
+
 ### 6. Documentation
 
 **`TESTING.md`** - Comprehensive testing guide:
