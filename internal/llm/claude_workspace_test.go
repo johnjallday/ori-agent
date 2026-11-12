@@ -1,11 +1,109 @@
 package llm
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// Ori supplies its own key and workspace, so an Anthropic SDK profile on the
+// machine (written by `ant auth login`) must not add its workspace_id or
+// base_url to Ori's requests. A stale profile workspace made every Claude call
+// fail with 404 "Workspace … not found".
+func TestClaudeProvider_IgnoresTheMachineSDKProfile(t *testing.T) {
+	var sent []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		sent = append(sent, r.Header.Get("Anthropic-Workspace-Id"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-fixture",
+			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+
+	configDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configDir, "configs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	profile := `{"version":"1.0","authentication":{"type":"user_oauth"},"workspace_id":"wrkspc_fromTheMachineProfile"}`
+	if err := os.WriteFile(filepath.Join(configDir, "configs", "default.json"), []byte(profile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ANTHROPIC_CONFIG_DIR", configDir)
+	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+	// Unset, not empty: the SDK reads ANTHROPIC_PROFILE="" as a profile named ""
+	// and quietly skips the fallback profile, which would hide the leak.
+	// t.Setenv first so the original value is restored after the test.
+	for _, name := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"} {
+		t.Setenv(name, "")
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	provider := NewClaudeProvider(ClaudeProviderConfig("test-key", ""))
+	request := ChatRequest{Model: "claude-fixture", Messages: []Message{NewUserMessage("Hello")}}
+	if _, err := provider.Chat(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || sent[0] != "" {
+		t.Fatalf("anthropic-workspace-id sent %q, want none: the machine profile leaked into Ori's request", sent)
+	}
+}
+
+// Anthropic answers an unknown workspace with the same 404 not_found_error as
+// an unknown model, and a missing workspace with a generic 400
+// invalid_request_error. Both are provider-settings problems, so neither may be
+// reported as a missing model ("choose a different model") or a bad task.
+func TestClaudeProvider_WorkspaceErrorsPointAtTheWorkspaceSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		errorType string
+		message   string
+		category  ErrorCategory
+		action    UserAction
+		shown     string // a phrase the user-facing sentence must contain
+	}{
+		{name: "unknown workspace", status: http.StatusNotFound, errorType: "not_found_error",
+			message: "Workspace `182314a5-5af1-4215-acf5-d6a8e9e036dd` not found.", category: CategoryPermissionDenied, action: ActionConfigureProvider, shown: "did not find the workspace"},
+		{name: "no workspace for an organization key", status: http.StatusBadRequest, errorType: "invalid_request_error",
+			message: "API key is not scoped to a workspace, must include anthropic-workspace-id", category: CategoryPermissionDenied, action: ActionConfigureProvider, shown: "must name a workspace"},
+		{name: "unknown model", status: http.StatusNotFound, errorType: "not_found_error",
+			message: "model: claude-fixture", category: CategoryInvalidModel, action: ActionChooseModel},
+		{name: "ordinary bad request", status: http.StatusBadRequest, errorType: "invalid_request_error",
+			message: "messages: at least one message is required", category: CategoryInvalidRequest, action: ActionEditTask},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, `{"type":"error","error":{"type":"`+tc.errorType+`","message":"`+tc.message+`"}}`)
+			}))
+			defer server.Close()
+			t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+
+			provider := NewClaudeProvider(ClaudeProviderConfig("test-key", ""))
+			_, err := provider.Chat(t.Context(), ChatRequest{Model: "claude-fixture", Messages: []Message{NewUserMessage("Hello")}})
+			var typed *ProviderError
+			if !errors.As(err, &typed) {
+				t.Fatalf("error is not typed: %v", err)
+			}
+			if typed.Category != tc.category || typed.Action != tc.action || typed.Retryable || typed.HTTPStatus != tc.status {
+				t.Fatalf("classified %s action=%s retryable=%v status=%d, want %s/%s", typed.Category, typed.Action, typed.Retryable, typed.HTTPStatus, tc.category, tc.action)
+			}
+			if tc.shown != "" && (!strings.Contains(typed.Message, tc.shown) || !strings.Contains(typed.Message, "Workspace ID in Settings") || strings.Contains(typed.Message, "182314a5")) {
+				t.Fatalf("message = %q, want Ori's own sentence naming the Workspace ID setting", typed.Message)
+			}
+		})
+	}
+}
 
 // An API key that belongs to the whole organization is refused unless each
 // request names a workspace, so a configured workspace ID goes on every

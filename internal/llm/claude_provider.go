@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -109,10 +110,20 @@ func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
 
 func newClaudeClient(httpClient *http.Client, apiKey, workspaceID string) anthropic.Client {
 	opts := []option.RequestOption{
+		// Ori supplies the key and the workspace itself. Without this the SDK
+		// also loads the machine's own Anthropic profile
+		// (~/.config/anthropic) and sends that profile's workspace_id and
+		// base_url with Ori's key, which Anthropic answers with a 404.
+		option.WithoutEnvironmentDefaults(),
 		option.WithHTTPClient(httpClient),
 		option.WithAPIKey(apiKey),
 		// One shared retry budget, owned by Ori — see the OpenAI provider.
 		option.WithMaxRetries(0),
+	}
+	// The endpoint override is the one environment default Ori keeps; it is
+	// part of the provider's configuration (see claudeTextConfiguration).
+	if baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
 	}
 	if workspaceID != "" {
 		opts = append(opts, option.WithHeader("anthropic-workspace-id", workspaceID))
