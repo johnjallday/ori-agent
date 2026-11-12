@@ -502,6 +502,9 @@ const TILE_FACE_SIZE = 32;
 // lacks falls back to its own face. Answers { workspaceID: markup }.
 export function folderAgentTileFaces(views, records, win, pending = null) {
   const out = {};
+  // The role's ring and emblem are part of the face: until the role catalog is
+  // here there is no face rather than a wrong one.
+  if (!win?.RoleCatalog?.isLoaded?.()) return out;
   (Array.isArray(views) ? views : []).forEach(view => {
     if (!view?.workspace_id || !view.agent_name || !folderAgentTileLine(view)) return;
     if (pending?.has?.(String(view.agent_name))) return;
@@ -532,11 +535,43 @@ export async function fetchAgentRecords(fetchImpl) {
   }
 }
 
+const ROLE_CATALOG_SRC = '/js/modules/role-catalog.js';
+const roleCatalogLoads = new WeakMap();
+
+// ensureRoleCatalog makes the role catalog available on a page that did not load
+// it (only the Agents page does): the first time a face needs its ring and
+// emblem the script is added, once per window, so no page that never draws one
+// of these faces pays for the fetch it makes. Answers the catalog once it has
+// loaded, or null when it cannot be had (no window, no head, a script that
+// fails): the face then stays neutral rather than wrong.
+export function ensureRoleCatalog(doc, win) {
+  if (!win) return Promise.resolve(null);
+  const ready = () =>
+    Promise.resolve(win.RoleCatalog?.ready?.()).then(() => win.RoleCatalog || null);
+  if (win.RoleCatalog) return ready();
+  if (!roleCatalogLoads.has(win)) {
+    roleCatalogLoads.set(
+      win,
+      new Promise(resolve => {
+        const script = doc?.createElement?.('script');
+        if (!script || typeof doc.head?.appendChild !== 'function') return resolve(null);
+        script.src = ROLE_CATALOG_SRC;
+        script.async = true;
+        script.onload = () => resolve(null);
+        script.onerror = () => resolve(null);
+        doc.head.appendChild(script);
+        return undefined;
+      }).then(ready)
+    );
+  }
+  return roleCatalogLoads.get(win);
+}
+
 // watchFaces redraws when a catalog that shapes a face arrives or changes. A
 // character is only drawn once the catalog has it, and the role ring only once
-// the role catalog is here. The card stops listening when it is no longer on
-// the page.
-function watchFaces(card, win, redraw) {
+// the role catalog is here (fetched now if the page has not got it). The card
+// stops listening when it is no longer on the page.
+function watchFaces(card, win, redraw, doc = null) {
   if (!win) return;
   let stop = null;
   const again = () => {
@@ -550,7 +585,7 @@ function watchFaces(card, win, redraw) {
   const characters = win.CharacterCatalog;
   if (typeof characters?.onChange === 'function') stop = characters.onChange(again);
   characters?.load?.();
-  win.RoleCatalog?.ready?.()?.then?.(again);
+  void ensureRoleCatalog(doc, win).then(again);
 }
 
 // cardWindow is the window whose renderer and catalogs the card draws with.
@@ -747,7 +782,7 @@ function renderHire(doc, hire, win, fetchImpl) {
   fresh.addEventListener('focusin', chooseNew);
   const preselected = select(hire.mode);
   drawFaces();
-  watchFaces(box, win, drawFaces);
+  watchFaces(box, win, drawFaces, doc);
   // A saved manager of the same name is already chosen when the card opens
   // (FR12): bring it into view once the card is on the page.
   if (preselected && win?.requestAnimationFrame) {

@@ -17,6 +17,7 @@ import {
   formatFolderAgentDuration,
   tickFolderAgentClocks,
   folderAgentReportView,
+  ensureRoleCatalog,
   folderAgentSetUpLabel,
   folderAgentTileFaces,
   folderAgentTileLine,
@@ -744,6 +745,87 @@ test('a working agent wears its face on its tile only while the tile has a line 
     'ws-1',
     'ws-2'
   ]);
+});
+
+// A page double that records the scripts added to its head.
+function headDocument({ head = true } = {}) {
+  const added = [];
+  return {
+    added,
+    createElement: tag => ({ tag, src: '', async: false, onload: null, onerror: null }),
+    head: head ? { appendChild: node => added.push(node) } : undefined
+  };
+}
+
+test('the role catalog is fetched only when a face needs it, once per window, and never blocks a face (visual-hire FR4)', async () => {
+  // Already on the page (the Agents page loads it): nothing is added.
+  const have = faceWindow();
+  have.roles.resolve();
+  const owned = headDocument();
+  assert.equal(await ensureRoleCatalog(owned, have), have.RoleCatalog);
+  assert.deepEqual(owned.added, []);
+
+  // Not on the page: one script is added however many faces ask, and the answer
+  // is the catalog the script installed.
+  const bare = {};
+  const page = headDocument();
+  const first = ensureRoleCatalog(page, bare);
+  const second = ensureRoleCatalog(page, bare);
+  assert.equal(first, second);
+  assert.equal(page.added.length, 1);
+  assert.equal(page.added[0].src, '/js/modules/role-catalog.js');
+  const catalog = { ready: () => Promise.resolve() };
+  bare.RoleCatalog = catalog;
+  page.added[0].onload();
+  assert.equal(await first, catalog);
+  // Once it is there, later asks use it and add nothing.
+  assert.equal(await ensureRoleCatalog(page, bare), catalog);
+  assert.equal(page.added.length, 1);
+
+  // A script that fails, a page with no head, and no window all answer null.
+  const broken = headDocument();
+  const failing = ensureRoleCatalog(broken, {});
+  broken.added[0].onerror();
+  assert.equal(await failing, null);
+  assert.equal(await ensureRoleCatalog(headDocument({ head: false }), {}), null);
+  assert.equal(await ensureRoleCatalog(headDocument(), null), null);
+});
+
+test('a page without the role catalog loads it when the card is drawn, and the real face replaces the neutral one (visual-hire FR4)', async () => {
+  const win = faceWindow();
+  const roles = win.RoleCatalog;
+  delete win.RoleCatalog;
+  const doc = stubDocument();
+  const added = [];
+  doc.head = { appendChild: node => added.push(node) };
+  const card = renderFolderAgentCard(hireCardView(), doc, { win });
+  // The neutral face while it loads, and the page was asked for the script once.
+  assert.deepEqual(lastFace(win).input, { name: '' });
+  assert.equal(added.length, 1);
+  assert.equal(added[0].src, '/js/modules/role-catalog.js');
+  // The script arrives and installs the catalog: the face is redrawn as the Agents page draws it.
+  win.RoleCatalog = roles;
+  win.roles.resolve();
+  added[0].onload();
+  await settle();
+  assert.equal(lastFace(win).input.roleEmblem, 'compass');
+  assert.equal(faceOf(card).innerHTML, '<span data-face="Downloads Manager"></span>');
+});
+
+test('no face is drawn on a tile until the role catalog is here, and no page pays for it unless it draws one (visual-hire FR4)', () => {
+  const views = [{ workspace_id: 'ws-1', agent_name: 'Albums Manager', state: 'looking' }];
+  const records = new Map();
+  assert.deepEqual(Object.keys(folderAgentTileFaces(views, records, faceWindow())), ['ws-1']);
+  assert.deepEqual(folderAgentTileFaces(views, records, faceWindow({ rolesLoaded: false })), {});
+  const bare = faceWindow();
+  delete bare.RoleCatalog;
+  assert.deepEqual(folderAgentTileFaces(views, records, bare), {});
+
+  // The shared head must not load it (the README capture fails any page that makes a
+  // request it does not expect); the Agents page, which draws from it, does.
+  const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
+  assert.doesNotMatch(read('../../../templates/layout/head.tmpl'), /role-catalog\.js/);
+  assert.match(read('../../../templates/pages/agents-roster.tmpl'), /role-catalog\.js/);
 });
 
 test('a saved manager of the same name is chosen when the card opens, and the chosen face is scrolled into view', () => {

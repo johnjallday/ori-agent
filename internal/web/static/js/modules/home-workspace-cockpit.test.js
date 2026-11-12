@@ -2494,6 +2494,13 @@ test('Home gives the map the face of each working agent, read from the agents li
   assert.match(source, /const askedForAgents = new Set\(\)/);
   assert.match(source, /!agentRecords\.has\(name\) && !askedForAgents\.has\(name\)/);
   assert.match(source, /askedForAgents\.add\(name\);\s*pendingAgents\.add\(name\);/);
+  // The role catalog is not on Home: it is asked for once, the first time an agent
+  // works, and the tiles redraw when it is here.
+  assert.match(source, /let roleCatalogAsked = false/);
+  assert.match(
+    source,
+    /ensureRoleCatalog\(document, window\)\.then\(\(\) => refreshFolderAgentLines\(\)\)/
+  );
   // Until it answers a name is pending (no face rather than a wrong one); an answer
   // or a failure ends that and the tiles are drawn again.
   assert.match(

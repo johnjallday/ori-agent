@@ -12,6 +12,7 @@ import {
 } from './home-library-badges.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
 import {
+  ensureRoleCatalog,
   fetchAgentRecords,
   folderAgentReportView,
   folderAgentTileFaces,
@@ -5301,9 +5302,17 @@ import {
   let agentRecords = new Map();
   const askedForAgents = new Set();
   const pendingAgents = new Set();
+  // The role catalog gives a face its ring and emblem; Home does not load it, so
+  // the first time an agent works it is asked for, and the tiles redraw once it is
+  // here. Pages that never see an agent work never fetch it.
+  let roleCatalogAsked = false;
   function lookUpWorkingAgents(views) {
-    const names = views
-      .filter(view => view.agent_name && folderAgentTileLine(view))
+    const working = views.filter(view => view.agent_name && folderAgentTileLine(view));
+    if (working.length && !roleCatalogAsked) {
+      roleCatalogAsked = true;
+      void ensureRoleCatalog(document, window).then(() => refreshFolderAgentLines());
+    }
+    const names = working
       .map(view => String(view.agent_name))
       .filter(name => !agentRecords.has(name) && !askedForAgents.has(name));
     if (!names.length) return;
