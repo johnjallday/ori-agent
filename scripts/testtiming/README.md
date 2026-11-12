@@ -150,3 +150,106 @@ repeated matched medians; local Darwin fixture speedups are not Ubuntu evidence.
 If transfer/eviction outweighs reuse, revise this unit-only policy from that
 measurement rather than adding an incompatible fallback or deleting shared
 caches. Actions changes alone cannot demonstrate cache persistence.
+
+### Linux application-build cache: measured, not shipped
+
+A dedicated cache for the Linux server build (the `build` job as the one writer, an eligible
+`test-e2e` as a restore-only consumer) was designed and then measured before being added.
+In an owned, empty-cache `golang:1.26.0` container (linux/arm64 VM, a bound and not hosted
+evidence), `make build` took 70 s cold, 7 s warm and 17 s after a one-package edit, and the cache it
+would archive was 1.14 GiB raw, about 250 MiB compressed, per distinct source. Against that: `Build`
+(~150 s) is never the slowest job (the slowest Linux unit job runs 1,233-1,702 s), `test-e2e` is skipped
+when no provider key is configured (none is), and the repository's cache is already near its quota
+with critical-path unit archives of 0.6-1.1 GB. A new archive per pushed source would add eviction
+pressure for no median critical-path gain, so none was added.
+
+Revisit it only when provider keys are configured (then E2E's ~100 s build is on the critical path).
+The safe shape: one Linux writer (`build`, `push` events only, so PR merge refs do not publish),
+restore-only consumers gated on eligibility with byte-identical key and path strings, save only after a
+successful build and on a miss, a key with Go version, OS/arch/image family, dependency hash, non-race
+mode and source freshness, `continue-on-error` on restore and save, and no overlap with the
+`ori-unit-*` namespaces. Judge it from a hosted comparison of compatible runs (archive bytes,
+restore/save seconds, hit rates, and whether the unit caches still hit), and revert it if transfer or
+eviction costs more than the compilation it saves.
+
+`scripts/ci/cache_ownership_workflow_test.go` keeps the existing ownership one-sided: only
+`test-unit-run` publishes caches with an explicit step, and only it uses the `ori-unit-` keys.
+
+## Reproducible baseline and comparison procedure
+
+Use this when a change claims to make tests or CI faster. It reuses the tools above (the
+wrapper's artifacts, `go run ./scripts/testtiming`, `unit-shards.py`, the Actions API); no new
+reporter is needed. Its purpose is to attribute a difference to the real source, not to machine
+load, a warm cache or a lucky run.
+
+**1. Label every number.** State the source revision (a PR run's `metadata.txt` `revision` is
+the *merge* revision, not the feature head), the environment class (hosted Ubuntu amd64, hosted
+macOS arm64, local native Darwin arm64, local Linux container, emulated), the actual `go version`
+line (not the matrix label), the flags, the sample count, and the median and range. Never mix
+classes in one comparison. A local timing is never a hosted saving, and package seconds are never
+added into job time.
+
+**2. Hosted comparison** (the only evidence for CI time). Download artifacts with
+`gh run download <run-id> --dir <new empty dir>` (7-day retention; summarize before they expire)
+and read job and step timestamps with
+`gh api 'repos/<owner>/<repo>/actions/runs/<run-id>/jobs?per_page=100'`. Keep these apart:
+
+- *queue delay*: a job's `started_at` minus the earliest job `created_at` in the run (a run can
+  also wait in the concurrency group before any job exists, so measure from the first job);
+- *active time*: `completed_at` minus `started_at`; the critical path is the slowest Linux
+  `Unit execution` job, then the `Unit Tests` aggregation, then E2E;
+- *compile versus execute*: the wrapper's `test_command_seconds` includes compilation, `events.json`
+  has execution per package; cache restore/save/transfer come from the action logs;
+- *cold versus compatible-warm cache*: record the cache keys, hit/miss and archive bytes;
+- *source versus fixture versus scheduling changes*: compare per package, not only per job.
+
+Compare **medians by event type** (pull-request runs with pull-request runs, `dev` pushes with `dev`
+pushes) over at least three candidate runs against the pre-change baseline. Hosted runs vary a lot
+on identical code, so a single run proves nothing.
+
+**3. Controlled local before/after** (fixture and test changes). Pin the toolchain CI uses:
+`GOTOOLCHAIN=go1.26.0` (CI follows `go.mod`'s exact patch; a newer local Go is a different
+environment) and `TZ=UTC`. Take one sample per package, sequentially, never beside another
+test run: hold the machine-wide unit lock (source `scripts/ci-local.sh` and call
+`ci_local_with_unit_lock`, with `TZ=UTC` like the gates: the lock compares process start times as
+text, so a waiter and a holder in different zones make a live owner look dead), wait until no other
+`ori-test-run.*` test binary exists and the one-minute load is low, and record `uptime` and the top
+CPU processes before and after. Do not trust the lock alone: also watch for a second owned
+`ori-test-run.N` sandbox during the sample, and flag or repeat a sample taken under contention. Run each sample inside the owned sandbox with
+`ORI_SKIP_CACHE_PRUNE=1 ./scripts/run-test-command.sh bash -c 'exec go test "$@" > events.json' sample ...`
+so wrapper messages cannot corrupt the JSON, with the CI flags
+`-json -short -race -count=1 -covermode=atomic -coverprofile=<file> -timeout 30m [-run <regex>] <pkg>`,
+then `go run ./scripts/testtiming < events.json`. Do a compile-only warm-up first
+(`go test -race -covermode=atomic -count=1 -run '^$' <pkg>`) and record its seconds, so execution
+is not charged for compilation. Repeat each representative sample at least three times and report
+median and range; a difference inside the range of one condition is not a result. A "cold" sample
+uses an empty `GOCACHE` owned by the sample, never a cleared shared cache. A restored test result
+is not execution.
+
+**4. Parity, not only a percentage.** Compare, for the same package and flags, the set of test and
+subtest identities with their outcomes and skips, the migration chatter (`Running database
+migrations` / `Database initialized` events) and the covered production blocks as sets of
+`file:range` entries with a nonzero count. Normalize the random digits of `t.TempDir()` that some
+subtest names embed (for example `go-tmp/Test...<N>`), or every run looks different. Repeat the
+baseline to learn its own noise before judging a delta, and explain any remaining difference.
+
+**5. Sequencing.** Before opening the PR: offline contracts, controlled local comparisons and
+the full `make ci-local` gate. After `wt pr` pushes, the pull-request trigger supplies the first
+hosted candidate run (there is no dispatch trigger, and none is added to get one early). Collect at
+least three compatible candidate runs (normal pushes, or reruns an operator authorizes), compare
+medians as in step 2, and mark anything not yet observed NOT RUN. Never push early, never use
+`--skip-checks`, and never turn a local estimate into a claimed percentage.
+
+### Hosted baseline before the throughput change (2026-11-12)
+
+Twelve successful `ci.yml` runs from 2026-11-11 and 2026-11-12, all after the last workflow edit
+(2026-11-04), six `dev` pushes and six pull requests, four Linux shards each (canonical list: 210
+packages, split 51/53/53/53; the macOS leg runs 9). Medians (dev / PR): slowest Linux unit job
+1,569 / 1,572 s, wall (first job created to last completion) 1,735 / 1,743 s, E2E 134 / 139 s,
+Integration 25 / 28 s. Observed noise on identical code: the slowest Linux unit job 1,233-1,702 s,
+one shard 900-1,442 s, `personalassistant` 852-1,437 s, and covered blocks up to about 11 per shard
+(shard 2 covered 42,764-42,775 of 63,964 blocks with unchanged source). The slowest Linux shard
+was shard 2 in 7 of the 12 runs. One run's macOS aggregation leg waited 300 s for a runner while
+Integration/E2E waited behind it (`needs: test-unit`); that is queue delay, not execution. The
+curated tables and the per-run inventory are in the feature's findings and PR description.
+
