@@ -350,6 +350,9 @@ function lineView(line, defaultState = '') {
     step: String(line.step || ''),
     name: String(line.name || ''),
     detail: String(line.detail || ''),
+    // The host's mark: the outcome-line item this action belongs to, or ''
+    // for a detail. The card never works it out from the words.
+    outcome: String(line.outcome || ''),
     state: String(line.state || defaultState),
     progress: String(line.progress || ''),
     startedAt: timeOf(line.started_at),
@@ -725,6 +728,61 @@ function startRunClock(section) {
   timer?.unref?.();
 }
 
+// outcomeItems are a step's outcome-line items: the distinct outcomes the host
+// put on its actions, in order. Empty when the host marked none (an action
+// list with no outcome stays as it always was).
+function outcomeItems(actions) {
+  const items = [];
+  actions.forEach(action => {
+    if (action.outcome && !items.includes(action.outcome)) items.push(action.outcome);
+  });
+  return items;
+}
+
+// Steps whose actions the owner opened stay open when the card redraws (a tick
+// box or a swap re-plans); keyed by workspace and step.
+const openActionLists = new Set();
+let actionsSeq = 0;
+
+// renderOutcomes is a chosen step before Set it up: its outcome line, and
+// while some of its actions are not in it, a button that swaps the line for
+// every action in run order (FR1, FR3). Closed by default.
+function renderOutcomes(doc, view, row, shown, items, now) {
+  const summary = el(doc, 'span', 'folder-agent-card__outcomes', items.join(' · '));
+  // The line and its button share one row, the button wrapping below only
+  // when the line leaves no room; a row of its own keeps the Home drawer's
+  // broader "li > span" rule from running them into the step title.
+  const line = el(doc, 'span', 'folder-agent-card__outcome-row');
+  line.append(summary);
+  if (shown.length <= items.length) return [line];
+  const all = el(doc, 'span', 'folder-agent-card__actions-line');
+  shown.forEach((action, k) => {
+    if (k) all.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
+    all.append(renderAction(doc, action, now));
+  });
+  actionsSeq += 1;
+  all.id = `folder-agent-actions-${actionsSeq}`;
+  const toggle = el(doc, 'button', 'folder-agent-card__details-toggle');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-controls', all.id);
+  const key = `${view.workspaceID || ''}:${row.handle}`;
+  const show = open => {
+    summary.hidden = open;
+    all.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggle.textContent = open ? 'Show less' : `Show all ${shown.length} actions`;
+  };
+  show(openActionLists.has(key));
+  toggle.addEventListener('click', () => {
+    const open = Boolean(all.hidden);
+    if (open) openActionLists.add(key);
+    else openActionLists.delete(key);
+    show(open);
+  });
+  line.append(all, toggle);
+  return [line];
+}
+
 // renderPlan draws the plan as one list the owner can follow: the agent's
 // words (or Ori's reason for its default), a headline for where things
 // stand, one numbered row per chosen step with its actions under it, the
@@ -787,7 +845,14 @@ function renderPlan(
       actions: []
     });
   });
-  const offered = phase === 'plan' ? steps.filter(step => !chosen.has(step.handle)) : [];
+  // A step that cannot run with a chosen one is an alternative, not an
+  // optional row: it waits under "Other ways to set this up".
+  const alternatives = phase === 'plan' ? plan?.alternatives || [] : [];
+  const alternativeHandles = new Set(alternatives.map(alternative => alternative.step));
+  const offered =
+    phase === 'plan'
+      ? steps.filter(step => !chosen.has(step.handle) && !alternativeHandles.has(step.handle))
+      : [];
   const done = rows.filter(row => rowState(row) === 'done').length;
   const failedAt = rows.findIndex(row => rowState(row) === 'failed');
   const head = el(doc, 'p', 'folder-agent-card__run-head');
@@ -916,7 +981,12 @@ function renderPlan(
       body.append(marker);
     }
     const shown = row.actions.filter(action => !covered(action));
-    if (shown.length) {
+    // Before Set it up a chosen step reads as its outcomes; from the moment
+    // the run starts every action is shown with its live state (FR4).
+    const outcomes = phase === 'plan' && isChosen ? outcomeItems(shown) : [];
+    if (outcomes.length) {
+      body.append(...renderOutcomes(doc, view, row, shown, outcomes, now));
+    } else if (shown.length) {
       const actions = el(doc, 'span', 'folder-agent-card__actions-line');
       shown.forEach((action, k) => {
         if (k) actions.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
@@ -959,7 +1029,16 @@ function renderPlan(
     )
   );
   section.append(list);
+  // After the plan and before the install block: the other ways in, collapsed.
+  if (alternatives.length)
+    section.append(renderAlternatives(doc, alternatives, steps, selecting ? onTick : null));
   if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
+  // Before Set it up, who the ticked steps hire, directly under what they
+  // install: the button confirms both. Once the run starts its lines say it.
+  if (phase === 'plan') {
+    const hires = renderHires(doc, plan?.hires || [], plan?.hiresNote || '');
+    if (hires) section.append(hires);
+  }
   notes.forEach(line => {
     const note = el(doc, 'p', 'folder-agent-card__line folder-agent-card__line--note');
     note.dataset.state = line.state || 'waiting';
@@ -1067,6 +1146,116 @@ function renderInstalls(doc, installs, lines, phase) {
     list.append(item);
   });
   block.append(list);
+  return block;
+}
+
+// renderHires draws the hires block (setup-card-clarity FR6, FR7, FR9) before
+// Set it up: the agents the ticked steps will hire, one row each, read-only.
+// Name, then what it does, then the model it will run on (the order a narrow
+// card wraps them in), and a muted note when one of the owner's own agents
+// already holds the name. The one "Agents" link leads to where they can be
+// changed after they are hired. When the host cannot tell who the Home will
+// hire it says so in one sentence instead of rows; it draws nothing when
+// nobody is hired. The children are divs on purpose: the Home drawer restyles
+// the spans directly inside any list item.
+function renderHires(doc, hires, note) {
+  if (!hires.length && !note) return null;
+  const block = el(doc, 'section', 'folder-agent-card__hires');
+  if (!hires.length) {
+    block.append(el(doc, 'p', 'folder-agent-card__hires-note', note));
+    return block;
+  }
+  const n = hires.length;
+  const head = el(doc, 'div', 'folder-agent-card__hires-head');
+  head.append(
+    el(doc, 'h4', 'folder-agent-card__heading', `Hires ${n} ${plural(n, 'agent', 'agents')}`)
+  );
+  const agents = el(doc, 'a', 'folder-agent-card__install-link', 'Agents');
+  agents.href = '/agents';
+  head.append(agents);
+  block.append(head);
+  const list = el(doc, 'ul', 'folder-agent-card__hire-list');
+  hires.forEach(entry => {
+    const item = el(doc, 'li', 'folder-agent-card__hire');
+    item.dataset.step = entry.step;
+    item.append(
+      el(doc, 'div', 'folder-agent-card__line-name folder-agent-card__hire-name', entry.name)
+    );
+    if (entry.job)
+      item.append(
+        el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-job', entry.job)
+      );
+    item.append(
+      el(
+        doc,
+        'div',
+        'folder-agent-card__install-version folder-agent-card__hire-model',
+        entry.model || NO_MODEL_YET
+      )
+    );
+    if (entry.note)
+      item.append(
+        el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-note', entry.note)
+      );
+    list.append(item);
+  });
+  block.append(list);
+  return block;
+}
+
+// What a hire's model reads when the host sent none (the host says the same).
+const NO_MODEL_YET = 'No model yet';
+
+let alternativesSeq = 0;
+
+// renderAlternatives draws "Other ways to set this up" (setup-card-clarity
+// FR16, FR18): the steps that cannot run together with a chosen one, kept out
+// of the main list so the list holds the path being recommended. A real button
+// opens it (closed by default); each alternative shows its title, the host's one
+// line on what taking it gives up, and "Use this instead", which takes the same
+// path as ticking that step: the re-plan puts it in place of the step it
+// excludes and every part of the card follows the new plan. The children are
+// divs because the Home drawer restyles the spans directly inside any list item.
+function renderAlternatives(doc, alternatives, steps, onTick) {
+  const block = el(doc, 'section', 'folder-agent-card__alternatives');
+  alternativesSeq += 1;
+  const listId = `folder-agent-alternatives-${alternativesSeq}`;
+  const toggle = el(
+    doc,
+    'button',
+    'folder-agent-card__alternatives-toggle',
+    'Other ways to set this up'
+  );
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', listId);
+  const list = el(doc, 'ul', 'folder-agent-card__alternative-list');
+  list.id = listId;
+  list.hidden = true;
+  alternatives.forEach(alternative => {
+    const item = el(doc, 'li', 'folder-agent-card__alternative');
+    item.dataset.step = alternative.step;
+    item.append(el(doc, 'div', 'folder-agent-card__line-name', alternative.title));
+    if (alternative.tradeoff)
+      item.append(el(doc, 'div', 'folder-agent-card__line-detail', alternative.tradeoff));
+    if (onTick) {
+      const use = el(doc, 'button', 'folder-agent-card__alternative-use', 'Use this instead');
+      use.type = 'button';
+      use.dataset.altStep = alternative.step;
+      use.addEventListener('click', () => {
+        const excludes = steps.find(step => step.handle === alternative.step)?.excludes || '';
+        return onTick(alternative.step, true, excludes);
+      });
+      item.append(use);
+    }
+    list.append(item);
+  });
+  toggle.addEventListener('click', () => {
+    const open = Boolean(list.hidden);
+    list.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  block.append(toggle, list);
   return block;
 }
 
@@ -1219,9 +1408,16 @@ export function renderFolderAgentReport(
       // The box the owner just ticked keeps focus through the redraw (a
       // keyboard user would otherwise be dropped on the page body).
       const focused = doc.activeElement?.dataset?.stepHandle || '';
+      // "Use this instead" is gone after the swap; focus goes to the control
+      // that now holds the way the owner just left.
+      const swapped = Boolean(doc.activeElement?.dataset?.altStep);
       planHost.replaceChildren(
         renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick })
       );
+      if (swapped)
+        planHost
+          .querySelector?.('.folder-agent-card__alternatives-toggle')
+          ?.focus?.({ preventScroll: true });
       if (focused) {
         const again = Array.from(planHost.querySelectorAll?.('input[type="checkbox"]') || []).find(
           box => box.dataset?.stepHandle === focused
@@ -1633,6 +1829,28 @@ function planView(plan) {
         appSentence: String(entry?.app_sentence || '')
       }))
       .filter(entry => entry.name && entry.step),
+    // The agents the ticked steps will hire, by the name each is hired under,
+    // what it does and the model it runs on; or one sentence when the host
+    // cannot tell yet. The host decides both, the card only draws them.
+    hires: (Array.isArray(plan.hires) ? plan.hires : [])
+      .map(entry => ({
+        step: String(entry?.step || ''),
+        name: String(entry?.name || ''),
+        job: String(entry?.job || ''),
+        model: String(entry?.model || ''),
+        note: String(entry?.note || '')
+      }))
+      .filter(entry => entry.name),
+    hiresNote: String(plan.hires_note || ''),
+    // The other ways to set this folder up: steps that cannot run with a chosen
+    // one, each with the host's line on what taking it gives up.
+    alternatives: (Array.isArray(plan.alternatives) ? plan.alternatives : [])
+      .map(alternative => ({
+        step: String(alternative?.step || ''),
+        title: String(alternative?.title || ''),
+        tradeoff: String(alternative?.tradeoff || '')
+      }))
+      .filter(alternative => alternative.step && alternative.title),
     // Every step Ori offered, chosen or not; the owner can tick any of them.
     steps: (Array.isArray(plan.steps) ? plan.steps : [])
       .map(step => ({
@@ -1696,10 +1914,24 @@ export async function postFolderAgentAction(
   else if (action === 'premise_other') body = { answer: 'something_else' };
   const { ok, payload } = await post(url, body, fetchImpl);
   if (!ok) {
-    return {
-      error: String(payload?.error || 'That did not go through.'),
-      view: payload?.folder_agent || null
-    };
+    let refused = payload?.folder_agent || null;
+    // A plan that changed after it was shown (an agent took a name, a model was
+    // set) is redrawn on the owner's own choice of steps, not on Ori's default
+    // for the folder, so what changed is on the card to read before they press
+    // again. The server's own view stands if the re-plan cannot be had.
+    if (payload?.plan_changed && action === 'set_up' && refused && Array.isArray(extra?.selected)) {
+      try {
+        const again = await post(
+          `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}/plan`,
+          { selected: extra.selected },
+          fetchImpl
+        );
+        if (again.ok && again.payload?.plan) refused = { ...refused, plan: again.payload.plan };
+      } catch (_) {
+        // keep the server's view
+      }
+    }
+    return { error: String(payload?.error || 'That did not go through.'), view: refused };
   }
   // Home's map follows: a Set it up can turn a tile into a district or move
   // it into a Home.

@@ -109,16 +109,67 @@ type HomeFacts struct {
 	HomeExists bool `json:"home_exists,omitempty"`
 	// MissingRoles are the agents the Home still needs, by the names they
 	// would be hired under. RolesKnown is false when the host cannot know
-	// them before the Home exists; the plan then says "Fills the Home's roles".
+	// them (the release cannot be read, or its roles do not pass the bounds
+	// below); the plan then says "Fills the Home's roles".
 	MissingRoles []string `json:"missing_roles,omitempty"`
 	RolesKnown   bool     `json:"roles_known,omitempty"`
+	// Hires describes each of MissingRoles, index for index: the name it
+	// would be hired under, what it does and a name it would otherwise have
+	// had. The host fills it when the look runs, from the provider's reviewed
+	// release, so it is known before the Home exists. An older record has
+	// MissingRoles and no Hires.
+	Hires []HomeHire `json:"hires,omitempty"`
+}
+
+// HomeHire is one agent the Home step would hire, in plain words.
+type HomeHire struct {
+	// Name is the name the agent would be hired under.
+	Name string `json:"name"`
+	// Job is one line on what the role does, cut from the provider's own
+	// description by JobLine; empty when the provider gave none.
+	Job string `json:"job,omitempty"`
+	// Taken is the name the role would have had when one of the owner's
+	// agents already holds it: the run never adopts that agent, it hires a
+	// new one under Name. Empty when Name is the role's own name.
+	Taken string `json:"taken,omitempty"`
 }
 
 // Bounds of HomeFacts: a Home declares a handful of roles.
 const (
 	maxHomeRoles    = 8
 	maxHomeFactText = 100
+	// MaxJobLineRunes bounds a hire's job line, in characters.
+	MaxJobLineRunes = 100
 )
+
+// JobLine is a role's one-line job from the provider's own description: the
+// first sentence, cut at a word to at most MaxJobLineRunes characters with an
+// ellipsis. It is empty when the line would read like a path, so one odd
+// description leaves one job blank and never the whole roster. Runes are
+// counted, not bytes, so a name in another script is not cut short.
+func JobLine(description string) string {
+	text := strings.Join(strings.Fields(description), " ")
+	for i := 0; i < len(text); i++ {
+		if (text[i] == '.' || text[i] == '!' || text[i] == '?') && (i+1 == len(text) || text[i+1] == ' ') {
+			text = text[:i+1]
+			break
+		}
+	}
+	if runes := []rune(text); len(runes) > MaxJobLineRunes {
+		head := runes[:MaxJobLineRunes-1]
+		// Step back to the last whole word, unless the cut already fell on one.
+		if runes[MaxJobLineRunes-1] != ' ' {
+			if at := strings.LastIndex(string(head), " "); at > 0 {
+				head = []rune(string(head)[:at])
+			}
+		}
+		text = strings.TrimRight(string(head), " ,;:") + "…"
+	}
+	if strings.ContainsAny(text, "\x00/\\") || strings.HasPrefix(text, "~") {
+		return ""
+	}
+	return text
+}
 
 // homeFactText keeps one name or version: trimmed, one line, short, and not
 // shaped like a path.
@@ -131,23 +182,32 @@ func homeFactText(text string) string {
 }
 
 // cleanHomeFacts bounds what a host reported. A role name that does not pass
-// leaves the roles unknown rather than silently short.
+// leaves the roles unknown rather than silently short. A job line is bounded
+// on its own (JobLine) and never takes the roster down with it.
 func cleanHomeFacts(in HomeFacts) *HomeFacts {
+	// A record from before the hires were described carries names only.
+	hires := in.Hires
+	if hires == nil {
+		for _, role := range in.MissingRoles {
+			hires = append(hires, HomeHire{Name: role})
+		}
+	}
 	out := HomeFacts{
 		ProviderName:    homeFactText(in.ProviderName),
 		ProviderVersion: homeFactText(in.ProviderVersion),
 		ProviderReady:   in.ProviderReady,
 		HomeExists:      in.HomeExists,
-		RolesKnown:      in.RolesKnown && len(in.MissingRoles) <= maxHomeRoles,
+		RolesKnown:      in.RolesKnown && len(hires) <= maxHomeRoles,
 	}
 	if out.RolesKnown {
-		for _, role := range in.MissingRoles {
-			name := homeFactText(role)
+		for _, hire := range hires {
+			name := homeFactText(hire.Name)
 			if name == "" {
-				out.RolesKnown, out.MissingRoles = false, nil
+				out.RolesKnown, out.MissingRoles, out.Hires = false, nil, nil
 				break
 			}
 			out.MissingRoles = append(out.MissingRoles, name)
+			out.Hires = append(out.Hires, HomeHire{Name: name, Job: JobLine(hire.Job), Taken: homeFactText(hire.Taken)})
 		}
 	}
 	return &out

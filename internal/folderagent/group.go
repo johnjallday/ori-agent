@@ -51,8 +51,17 @@ func GroupMembers(rec Record) ([]GroupMember, int) {
 // groupLines are the Group stage's plan lines (PRD FR34, FR36).
 func groupLines(rec Record) []personalassistant.FolderPlanLine {
 	members, more := GroupMembers(rec)
-	lines := []personalassistant.FolderPlanLine{{Kind: FolderPlanPromote, Name: "Turns " + rec.WorkspaceName + " into a group",
+	turns := "Turns " + rec.WorkspaceName + " into a group"
+	lines := []personalassistant.FolderPlanLine{{Kind: FolderPlanPromote, Name: turns, Outcome: turns,
 		Detail: "Same workspace, same place on the map; " + rec.AgentName + " becomes its Group Manager."}}
+	created := 0
+	for _, m := range members {
+		if m.Existing == nil {
+			created++
+		}
+	}
+	// One outcome item for every workspace the run creates.
+	creates := fmt.Sprintf("Creates %d %s", created, plural(created, "workspace", "workspaces"))
 	software := 0
 	for _, m := range members {
 		if m.Existing != nil {
@@ -65,7 +74,7 @@ func groupLines(rec Record) []personalassistant.FolderPlanLine {
 			software++
 		}
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanMember,
-			Name: "Creates " + m.Name + ", " + detail})
+			Name: "Creates " + m.Name + ", " + detail, Outcome: creates})
 	}
 	if software > 0 {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanSoftware,

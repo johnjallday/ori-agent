@@ -3485,6 +3485,51 @@ a.quest-title:focus-visible {
   line-height: 1.5;
 }
 
+/* Before Set it up a chosen step reads as its outcomes (at most three items,
+   written by the host); a button swaps the line for every action. The line
+   stays plain ink: it is the part to read. It sits in a row of its own, which
+   the Home drawer's broader ".personal-assistant-today__sections li > span"
+   rule cannot reach (it only matches the row's direct child), so the line
+   and its button never run into the step title in either host. */
+.folder-agent-card__outcome-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+}
+
+.folder-agent-card__outcomes {
+  color: var(--hc-ink, var(--cozy-ink));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Opened, the actions take the outcome line's place and the whole row's width;
+   the button wraps beneath them. */
+.folder-agent-card__outcome-row .folder-agent-card__actions-line {
+  flex-basis: 100%;
+}
+
+.folder-agent-card__outcomes[hidden],
+.folder-agent-card__actions-line[hidden] {
+  display: none;
+}
+
+.folder-agent-card__details-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.folder-agent-card__details-toggle:hover {
+  color: var(--hc-ink, var(--cozy-ink));
+}
+
 .folder-agent-card__action[data-state="done"]::before {
   content: "✓ ";
   color: var(--hc-signal, var(--cozy-moss));
@@ -3859,13 +3904,16 @@ a.quest-title:focus-visible {
 
 /* The install block (confirm-and-visible-installs FR13–FR19): one row per
    plugin, wrapping as name and version; where it comes from; what it gives. */
-.folder-agent-card__installs {
+.folder-agent-card__installs,
+.folder-agent-card__hires {
   display: grid;
   gap: 6px;
   margin-top: 4px;
 }
 
-.folder-agent-card__install-list {
+.folder-agent-card__install-list,
+.folder-agent-card__hire-list,
+.folder-agent-card__alternative-list {
   display: grid;
   gap: 8px;
   margin: 0;
@@ -3873,7 +3921,9 @@ a.quest-title:focus-visible {
   list-style: none;
 }
 
-.folder-agent-card__install {
+.folder-agent-card__install,
+.folder-agent-card__hire,
+.folder-agent-card__alternative {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -3881,6 +3931,139 @@ a.quest-title:focus-visible {
   border: 1px solid var(--hc-line, var(--cozy-line));
   border-radius: 8px;
   overflow-wrap: anywhere;
+}
+
+/* "Other ways to set this up" (setup-card-clarity FR16): one quiet control after
+   the plan, closed by default; opened, each other way is a row like the install
+   block's, with what taking it gives up and a button to take it instead. */
+.folder-agent-card__alternatives {
+  display: grid;
+  gap: 6px;
+}
+
+.folder-agent-card__alternatives-toggle {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* An inline-block drops the space a plain " ▸" would start with, so the gap is
+   a margin. */
+.folder-agent-card__alternatives-toggle::after {
+  content: "▸";
+  display: inline-block;
+  margin-left: 0.4em;
+  text-decoration: none;
+}
+
+.folder-agent-card__alternatives-toggle[aria-expanded="true"]::after {
+  content: "▾";
+}
+
+.folder-agent-card__alternatives-toggle:hover {
+  color: var(--hc-ink, var(--cozy-ink));
+}
+
+.folder-agent-card__alternative-list[hidden] {
+  display: none;
+}
+
+.folder-agent-card__alternative-use {
+  justify-self: start;
+  margin-top: 4px;
+  padding: 2px 10px;
+  border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
+  border-radius: 999px;
+  background: none;
+  color: var(--hc-ink, var(--cozy-ink));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.folder-agent-card__alternative-use:hover {
+  border-color: var(--hc-ink, var(--cozy-ink));
+}
+
+/* The hires block (setup-card-clarity FR6): the install block's rows for the
+   agents a Home will hire. The heading and its one "Agents" link share a row.
+   A row reads name | model, with the job beneath, while there is room; in a
+   narrow card (the Commander's balloon) it wraps as name, job, then model.
+   The block is the query container, so the rows answer to the width they get,
+   not the window's. The children are divs: the Home drawer restyles the spans
+   directly inside any list item. */
+.folder-agent-card__hires {
+  container-type: inline-size;
+  /* The card's own gap already separates the blocks. */
+  margin-top: 0;
+}
+
+.folder-agent-card__hires-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 8px;
+}
+
+.folder-agent-card__hires-head .folder-agent-card__heading {
+  margin: 0;
+}
+
+.folder-agent-card__hires-note {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__hire {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name model"
+    "job job"
+    "note note";
+  column-gap: 8px;
+  align-items: baseline;
+}
+
+.folder-agent-card__hire-name {
+  grid-area: name;
+}
+
+.folder-agent-card__hire-job {
+  grid-area: job;
+}
+
+.folder-agent-card__hire-model {
+  grid-area: model;
+  justify-self: end;
+  text-align: right;
+}
+
+.folder-agent-card__hire-note {
+  grid-area: note;
+}
+
+@container (max-width: 400px) {
+  .folder-agent-card__hire {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "name"
+      "job"
+      "model"
+      "note";
+  }
+
+  .folder-agent-card__hire-model {
+    justify-self: start;
+    text-align: left;
+  }
 }
 
 .folder-agent-card__install-head,

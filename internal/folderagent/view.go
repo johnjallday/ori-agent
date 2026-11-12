@@ -177,6 +177,16 @@ type PlanView struct {
 	// Installs are the plugins the ticked steps download and install, in run
 	// order: the card's install block and the count on its button.
 	Installs []InstallEntry `json:"installs"`
+	// Hires are the agents the ticked steps hire, each by the name it will be
+	// hired under, with what it does and the model it will run on: the card's
+	// hires block. HiresNote stands in its place when the host cannot tell who
+	// the Home will hire (HiresUnnamed); never both.
+	Hires     []HireEntry `json:"hires"`
+	HiresNote string      `json:"hires_note,omitempty"`
+	// Alternatives are the other ways to set this folder up: each step that
+	// cannot run together with a chosen one, kept out of the main list and
+	// offered under "Other ways to set this up".
+	Alternatives []Alternative `json:"alternatives"`
 }
 
 func planViewOf(plan Plan) *PlanView {
@@ -188,10 +198,19 @@ func planViewOf(plan Plan) *PlanView {
 	if installs == nil {
 		installs = []InstallEntry{}
 	}
+	hires := plan.Hires
+	if hires == nil {
+		hires = []HireEntry{}
+	}
+	alternatives := plan.Alternatives
+	if alternatives == nil {
+		alternatives = []Alternative{}
+	}
 	return &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
 		Unavailable: plan.Unavailable, Selected: plan.Selected, Source: plan.Source, Words: plan.Words,
 		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason,
-		ReorderNote: plan.ReorderNote, Installs: installs}
+		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote,
+		Alternatives: alternatives}
 }
 
 func (s *Service) viewOf(_ context.Context, rec *Record) View {
@@ -253,6 +272,9 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		// The agent's words keep naming the steps that did not run.
 		plan.WordsRaw = folderlook.NameHandles(plan.WordsRaw, plan.Steps, kept)
 		plan.Steps = ran
+		// A receipt lists what the run did, not what it would hire, and a
+		// finished setup has no other way left to choose.
+		plan.Hires, plan.HiresNote, plan.Alternatives = nil, "", nil
 	}
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
@@ -441,6 +463,99 @@ type Plan struct {
 	ReorderNote string
 	// Installs are the plugins the plan downloads and installs, in run order.
 	Installs []InstallEntry
+	// Hires are the agents the plan hires, in run order; HiresNote says that
+	// the host cannot name them yet. See PlanView.
+	Hires     []HireEntry
+	HiresNote string
+	// Alternatives are the steps set aside because a chosen step excludes
+	// them; see PlanView. They are not part of the digest: choosing one is a
+	// new selection, and a new selection is a new plan.
+	Alternatives []Alternative
+}
+
+// Alternative is a step offered instead of the one the plan has chosen, for
+// the card's "Other ways to set this up". The host writes the trade-off.
+type Alternative struct {
+	// Step is the step's handle: choosing it re-plans with it in place of the
+	// step it excludes.
+	Step string `json:"step"`
+	// Title is what the step does; Tradeoff what taking it gives up.
+	Title    string `json:"title"`
+	Tradeoff string `json:"tradeoff"`
+}
+
+// alternativesOf lists every step that excludes a step the plan chose and is
+// not itself chosen, in the catalog's order. A step with nothing chosen
+// against it is not an alternative: it stays among the optional steps.
+func alternativesOf(steps []folderlook.Step, chosen map[string]bool) []Alternative {
+	var out []Alternative
+	for _, step := range steps {
+		if step.Chosen || step.Excludes == "" || !chosen[step.Excludes] {
+			continue
+		}
+		tradeoff := step.Tradeoff
+		if tradeoff == "" {
+			tradeoff = step.Why
+		}
+		out = append(out, Alternative{Step: step.Handle, Title: step.Title, Tradeoff: tradeoff})
+	}
+	return out
+}
+
+// What the hires block says when it has nothing to name.
+const (
+	// NoModelYet is a hire's model when no system model can run: the run then
+	// stops and asks for one, so the card says so before it does.
+	NoModelYet = "No model yet"
+	// HiresUnnamed stands in for the hires block when the host cannot learn
+	// the Home's roles (the release cannot be read): the run names each agent
+	// as it hires it. It is the fallback, never the normal case.
+	HiresUnnamed = "Hires the Home's agents; each is named as it is hired"
+)
+
+// HireEntry is one agent a plan hires, for the card's hires block. The host
+// builds it from the same names the run will use; the card only draws it.
+type HireEntry struct {
+	// Step is the handle of the step that hires it.
+	Step string `json:"step"`
+	// Name is the name it will be hired under; Job one line on what it does,
+	// empty when the provider gave none; Model the model it will run on, or
+	// NoModelYet.
+	Name  string `json:"name"`
+	Job   string `json:"job,omitempty"`
+	Model string `json:"model"`
+	// Note says what happens to the owner's own agent when one already holds
+	// the role's name: the run never adopts it, it hires a new one.
+	Note string `json:"note,omitempty"`
+}
+
+// homeHires are the agents the Home step hires, from the facts the look
+// recorded: one entry per missing role, named as the run names it. When the
+// roles are not known and the step creates the Home, it says so instead.
+func homeHires(rec Record, home folderlook.Candidate, step string) ([]HireEntry, string) {
+	facts := home.Home
+	if facts != nil && facts.RolesKnown {
+		model := strings.TrimSpace(rec.HomeHireModel)
+		if model == "" {
+			model = NoModelYet
+		}
+		var out []HireEntry
+		for i, name := range facts.MissingRoles {
+			entry := HireEntry{Step: step, Name: name, Model: model}
+			if i < len(facts.Hires) {
+				entry.Job = facts.Hires[i].Job
+				if taken := facts.Hires[i].Taken; taken != "" {
+					entry.Note = "Your existing " + taken + " stays as it is."
+				}
+			}
+			out = append(out, entry)
+		}
+		return out, ""
+	}
+	if hiresAgents(home) {
+		return nil, HiresUnnamed
+	}
+	return nil, ""
 }
 
 // InstallEntry is one plugin a plan downloads and installs, for the card's
@@ -597,6 +712,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 		s.Chosen = chosen[s.Handle]
 		plan.Steps[i] = s
 	}
+	plan.Alternatives = alternativesOf(plan.Steps, chosen)
 	candidates := make(map[string]folderlook.Candidate, len(rec.Candidates))
 	for _, c := range rec.Candidates {
 		candidates[c.ID] = c
@@ -632,30 +748,43 @@ func BuildPlan(rec Record, selected []string) Plan {
 		switch c.Kind {
 		case folderlook.KindIntegration:
 			if folderlook.IntegrationInstalls(c) {
+				// A detail: the install block lists the plugin once.
 				plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
 					Kind: personalassistant.FolderPlanIntegration, Name: "Installs " + c.Name, Detail: folderlook.AppToolsSentence(c),
 				})
 			}
+			connects := "Connects " + c.Name + " to " + rec.WorkspaceName
 			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
-				Kind: personalassistant.FolderPlanWorkspace, Name: "Connects " + c.Name + " to " + rec.WorkspaceName,
+				Kind: personalassistant.FolderPlanWorkspace, Name: connects, Outcome: connects,
 				Detail: rec.AgentName + " can use them in this workspace.",
 			})
 		case folderlook.KindHomeProvider:
 			plan.Lines = append(plan.Lines, homeLines(rec, c)...)
+			hires, note := homeHires(rec, c, h)
+			plan.Hires = append(plan.Hires, hires...)
+			if note != "" {
+				plan.HiresNote = note
+			}
 		case folderlook.KindFileCurator:
 			// File Janitor goes into this workspace in place (the folder is
 			// already its anchor), and File Curator joins as its companion.
+			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, "Adds File Curator"
 			plan.Lines = append(plan.Lines,
 				personalassistant.FolderPlanLine{
-					Kind: FolderPlanCapability, Name: "Adds File Janitor to " + rec.WorkspaceName,
+					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
 					Detail: "Watching and the daily scan stay off until you turn them on in its setup.",
 				},
 				personalassistant.FolderPlanLine{
-					Kind: personalassistant.FolderPlanAgents, Name: "Adds File Curator",
+					Kind: personalassistant.FolderPlanAgents, Name: curator, Outcome: curator,
 					Detail: "It explains proposed filing; you approve every move.",
 				})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
-			plan.Lines = append(plan.Lines, addOnLine(c, rec.WorkspaceName))
+			line := addOnLine(c, rec.WorkspaceName)
+			// A plugin the install block lists is not repeated in the outcome.
+			if !installsPlugin(c) {
+				line.Outcome = line.Name
+			}
+			plan.Lines = append(plan.Lines, line)
 		}
 	}
 	// Each line carries the step it came from, so the card can show the steps
@@ -693,7 +822,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 			}
 		}
 	}
-	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: assuranceLine(rec, plan.Candidates)})
+	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: assuranceLine(rec, plan.Candidates, len(plan.Hires))})
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan
@@ -753,34 +882,42 @@ func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[strin
 // assuranceLine is the note under every phase of the plan (PRD FR13). It names
 // the folder (its base name, never a path) so the promise is concrete, then
 // what the plan adds (PRD FR25): the plugins it installs, the Home it creates
-// and that Home's agents, naming only the parts that apply.
-func assuranceLine(rec Record, candidates []folderlook.Candidate) string {
+// and the agents it hires, naming only the parts that apply. hires is how many
+// agents the plan names (the hires block); 0 when it names none.
+func assuranceLine(rec Record, candidates []folderlook.Candidate, hires int) string {
 	folder := strings.TrimSpace(rec.FolderName)
 	line := "Nothing in " + folder + " is moved, copied or read"
 	if folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n") {
 		line = "Nothing is moved, copied or read"
 	}
-	if adds := addsSentence(candidates); adds != "" {
+	if adds := addsSentence(candidates, hires); adds != "" {
 		line += ". " + adds
 	}
 	return line
 }
 
 // addsSentence is the assurance's second half: "Ori adds 2 plugins, <Home>,
-// and its agents." Empty when the plan adds none of them.
-func addsSentence(candidates []folderlook.Candidate) string {
+// and 1 agent." Agents are counted when the plan names them, also for a Home
+// that already exists; when it cannot, a Home it creates still adds "its
+// agents". Empty when the plan adds none of them.
+func addsSentence(candidates []folderlook.Candidate, hires int) string {
 	var parts []string
 	if n := len(pluginInstalls(candidates)); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", n, plural(n, "plugin", "plugins")))
 	}
+	unnamed := false
 	for _, c := range candidates {
 		if c.Kind != folderlook.KindHomeProvider || !createsHome(c) {
 			continue
 		}
 		parts = append(parts, homeName(c))
-		if hiresAgents(c) {
-			parts = append(parts, "its agents")
-		}
+		unnamed = unnamed || hiresAgents(c)
+	}
+	switch {
+	case hires > 0:
+		parts = append(parts, fmt.Sprintf("%d %s", hires, plural(hires, "agent", "agents")))
+	case unnamed:
+		parts = append(parts, "its agents")
 	}
 	switch len(parts) {
 	case 0:
@@ -899,6 +1036,16 @@ func planDigest(plan Plan) string {
 	for _, e := range plan.Installs {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: "install", Name: e.Step + "\x00" + e.Name + "\x00" + e.Version,
 			Detail: e.Publisher + "\x00" + e.SourceURL + "\x00" + e.Marketplace})
+	}
+	// So is the hires block (setup-card-clarity FR11): the names, what each
+	// does and the model it runs on. A plan whose hires changed since the card
+	// was drawn (an agent took a name, a model was set) is refused and redrawn.
+	for _, e := range plan.Hires {
+		lines = append(lines, personalassistant.FolderPlanLine{Kind: "hire", Name: e.Step + "\x00" + e.Name,
+			Detail: e.Job + "\x00" + e.Model + "\x00" + e.Note})
+	}
+	if plan.HiresNote != "" {
+		lines = append(lines, personalassistant.FolderPlanLine{Kind: "hires_note", Name: plan.HiresNote})
 	}
 	return personalassistant.FolderPlanDigest(lines)
 }

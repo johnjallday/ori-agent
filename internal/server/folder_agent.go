@@ -500,6 +500,30 @@ func (t folderAgentTickets) Start(workspaceID, ticketID string) error {
 
 type folderAgentSetups struct{ builder *ServerBuilder }
 
+// HomeHireModel is the model the Home step's hires would run on, worded as the
+// Hire step words one: "<model> (<provider>)", the provider alone when the
+// system has no model named, and "" when no system model can run (the run then
+// stops and asks for one). Staffing gives every hire the system model, so this
+// reads the same place it does. It only reads settings and the provider
+// registry: no network, and nothing that can flap between two cards drawn
+// moments apart (a model listing is not consulted).
+func (s folderAgentSetups) HomeHireModel() string {
+	b := s.builder
+	if b == nil || b.llmFactory == nil {
+		return ""
+	}
+	provider, model := b.systemModel()
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	model = strings.TrimSpace(model)
+	if provider == "" || !b.llmFactory.HasProvider(provider) {
+		return ""
+	}
+	if model == "" {
+		return provider
+	}
+	return model + " (" + provider + ")"
+}
+
 // addFolderAgentFileCurator installs File Janitor in place on the folder's
 // workspace (the install writes its record only: no folder access, watcher or
 // schedule until its own setup) and adds File Curator as its companion. A

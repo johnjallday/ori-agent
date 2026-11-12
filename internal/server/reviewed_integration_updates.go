@@ -81,6 +81,11 @@ type verifiedRelease struct {
 	version string
 	source  string
 	report  plugin.TrustReport
+	// surfaces is what the inspected release declares (a Home's roles
+	// included), read only. The folder card words the agents a Home will hire
+	// from it before anything is installed. It is nil for a release that was
+	// not inspected here.
+	surfaces *plugin.SurfaceContribution
 }
 
 func (u *reviewedIntegrationUpdates) integrationRelease(entry reviewedintegration.Entry) reviewedRelease {
@@ -189,7 +194,8 @@ func (u *reviewedIntegrationUpdates) newestLoadable(ctx context.Context, target 
 		descriptor, report, inspectErr := u.inspect(candidate.Source, entry.SourceFormat)
 		switch target.verify(candidate.Version, candidate.Source, descriptor, report, inspectErr) {
 		case releaseLoadable:
-			return verifiedRelease{version: candidate.Version, source: candidate.Source, report: report}, true, nil
+			return verifiedRelease{version: candidate.Version, source: candidate.Source, report: report,
+				surfaces: descriptor.WorkspaceSurfaces}, true, nil
 		case releaseNeedsNewerHost:
 			continue
 		default:

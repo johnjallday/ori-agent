@@ -2393,3 +2393,673 @@ test("after It's something else the card offers a plain workspace or the owner's
     ['Look again']
   );
 });
+
+// Outcomes instead of actions (setup-card-clarity FR1–FR4): a chosen step reads
+// as the host's outcome items before Set it up; its every action is one
+// button away; from the run on, every action shows with its live state.
+const HOME = 'music-production-home';
+// The run's words for an action, and the shorter outcome item the host gives it.
+const creates = 'Creates your Music Production Home';
+const createsItem = 'Creates Music Production Home';
+const listsSongs = 'Lists 8 songs on its shelf';
+const listsItem = 'Lists 8 songs';
+const hiresAgents = "Hires the Home's agents";
+const homeLine = (kind, name, outcome = '') => ({
+  kind,
+  name,
+  step: HOME,
+  ...(outcome ? { outcome } : {})
+});
+const assurance = {
+  kind: 'folder',
+  name: 'Nothing in Ori Music Demo is moved, copied or read.'
+};
+// What the server sends for a new Home with its plugin not yet installed.
+const newHomeLines = [
+  homeLine('provider', 'Installs Music Project Management'),
+  homeLine('home', creates, createsItem),
+  homeLine('hire', "Fills the Home's roles", hiresAgents),
+  homeLine('library', 'Adds Ori Music Demo to your Music Production Home'),
+  homeLine('songs', listsSongs, listsItem),
+  homeLine('scopes', 'Looks into 2 folders for songs'),
+  homeLine('place', 'Places Ori Music Demo inside your Music Production Home'),
+  assurance
+];
+const homePlanOf = (lines, installs = [providerInstall]) => ({
+  digest: 'home',
+  runnable: true,
+  source: 'default',
+  selected: [HOME],
+  steps: [
+    {
+      handle: HOME,
+      kind: 'home',
+      name: 'Music Production Home',
+      title: 'Create your Music Production Home and put Ori Music Demo on its shelf (8 songs)',
+      chosen: true
+    }
+  ],
+  installs,
+  lines
+});
+const homeCard = (lines, installs, overrides = {}) =>
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({
+        model_sentence: '',
+        tools_sentence: '',
+        plan: homePlanOf(lines, installs),
+        ...overrides
+      })
+    ),
+    stubDocument(),
+    {}
+  );
+const outcomeText = card => text(card, '.folder-agent-card__outcomes');
+const detailsToggle = card => card.querySelector('.folder-agent-card__details-toggle');
+const actionNames = node =>
+  node.querySelectorAll('.folder-agent-card__action-name').map(n => n.textContent);
+
+test('a chosen step reads as three outcomes, with its other actions behind a closed button', () => {
+  const card = homeCard(newHomeLines);
+  assert.equal(outcomeText(card), `${createsItem} · ${hiresAgents} · ${listsItem}`);
+  // The line and its button share one row.
+  const row = card.querySelector('.folder-agent-card__outcome-row');
+  assert.ok(row.querySelector('.folder-agent-card__outcomes'));
+  assert.ok(row.querySelector('.folder-agent-card__details-toggle'));
+  // The install is the block's; the other six lines are the step's actions.
+  const toggle = detailsToggle(card);
+  assert.equal(toggle.tagName, 'BUTTON');
+  assert.equal(toggle.type, 'button');
+  assert.equal(toggle.textContent, 'Show all 6 actions');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  const all = card.querySelector('.folder-agent-card__actions-line');
+  assert.equal(toggle.attributes['aria-controls'], all.id);
+  assert.equal(all.hidden, true);
+  assert.equal(card.querySelector('.folder-agent-card__outcomes').hidden, false);
+  // The install is listed once, in the block.
+  assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
+  assert.ok(!actionNames(card).includes('Installs Music Project Management'));
+});
+
+test('opening the button shows every action in run order, and a redraw keeps it open', () => {
+  const view = reported({
+    model_sentence: '',
+    tools_sentence: '',
+    plan: homePlanOf(newHomeLines)
+  });
+  const draw = () => renderFolderAgentReport(folderAgentReportView(view), stubDocument(), {});
+  const card = draw();
+  const toggle = detailsToggle(card);
+  toggle.listeners.click();
+  assert.equal(toggle.attributes['aria-expanded'], 'true');
+  assert.equal(toggle.textContent, 'Show less');
+  assert.equal(card.querySelector('.folder-agent-card__outcomes').hidden, true);
+  const all = card.querySelector('.folder-agent-card__actions-line');
+  assert.equal(all.hidden, false);
+  assert.deepEqual(actionNames(all), [
+    creates,
+    "Fills the Home's roles",
+    'Adds Ori Music Demo to your Music Production Home',
+    listsSongs,
+    'Looks into 2 folders for songs',
+    'Places Ori Music Demo inside your Music Production Home'
+  ]);
+  // A redraw (a tick box, a swap) keeps what the owner opened.
+  const again = draw();
+  assert.equal(detailsToggle(again).attributes['aria-expanded'], 'true');
+  assert.equal(again.querySelector('.folder-agent-card__actions-line').hidden, false);
+  // Closing it again restores the outcome line.
+  detailsToggle(again).listeners.click();
+  assert.equal(detailsToggle(again).attributes['aria-expanded'], 'false');
+  assert.equal(detailsToggle(again).textContent, 'Show all 6 actions');
+  assert.equal(again.querySelector('.folder-agent-card__outcomes').hidden, false);
+  assert.equal(detailsToggle(draw()).attributes['aria-expanded'], 'false');
+});
+
+test('a Home that exists says nothing of creating it; hires appear only when there are some', () => {
+  // The Home is there and every role is filled: one item, nothing created.
+  const joined = homeCard(
+    [
+      homeLine('library', 'Adds Ori Music Demo to your Music Production Home'),
+      homeLine('songs', listsSongs, listsItem),
+      homeLine('place', 'Places Ori Music Demo inside your Music Production Home'),
+      assurance
+    ],
+    []
+  );
+  assert.equal(outcomeText(joined), listsItem);
+  assert.ok(!outcomeText(joined).includes('Creates'));
+  assert.ok(!outcomeText(joined).includes('Hires'));
+  assert.equal(detailsToggle(joined).textContent, 'Show all 3 actions');
+  // Two roles missing: two hire lines read as one item.
+  const hiring = homeCard(
+    [
+      homeLine('hire', 'Hires Portfolio Manager', 'Hires 2 agents'),
+      homeLine('hire', 'Hires Library Manager', 'Hires 2 agents'),
+      homeLine('library', 'Adds Ori Music Demo to your Music Production Home'),
+      homeLine('songs', listsSongs, listsItem),
+      homeLine('place', 'Places Ori Music Demo inside your Music Production Home'),
+      assurance
+    ],
+    []
+  );
+  assert.equal(outcomeText(hiring), `Hires 2 agents · ${listsItem}`);
+  assert.equal(detailsToggle(hiring).textContent, 'Show all 5 actions');
+});
+
+test('a step whose every action is an outcome has no button; a step with no marks shows its actions as before', () => {
+  const tools = renderFolderAgentReport(
+    folderAgentReportView(
+      reported({ model_sentence: '', tools_sentence: '', plan: installPlan(['reaper-tools']) })
+    ),
+    stubDocument(),
+    {}
+  );
+  // No marks: the actions stay on their muted line, nothing is hidden.
+  assert.equal(tools.querySelector('.folder-agent-card__outcomes'), null);
+  assert.equal(detailsToggle(tools), null);
+  assert.deepEqual(actionNames(tools.querySelector('.folder-agent-card__actions-line')), [
+    'Connects REAPER tools to Ori Music Demo'
+  ]);
+  // Marked: the connection is the one outcome and it is all there is to open.
+  const connects = 'Connects REAPER tools to Ori Music Demo';
+  const marked = installPlan(['reaper-tools']);
+  marked.lines = marked.lines.map(line =>
+    line.kind === 'workspace' ? { ...line, outcome: connects } : line
+  );
+  const card = renderFolderAgentReport(
+    folderAgentReportView(reported({ model_sentence: '', tools_sentence: '', plan: marked })),
+    stubDocument(),
+    {}
+  );
+  assert.equal(outcomeText(card), connects);
+  assert.equal(detailsToggle(card), null);
+  assert.equal(card.querySelector('.folder-agent-card__actions-line'), null);
+});
+
+test('from the moment the run starts every action shows with its live state and no button', () => {
+  const lines = newHomeLines.slice(0, -1).map((line, i) => ({
+    ...line,
+    state: i < 2 ? 'done' : i === 2 ? 'working' : 'waiting',
+    progress: i === 2 ? 'Hiring the Portfolio Manager' : ''
+  }));
+  const run = (state, status) =>
+    renderFolderAgentReport(
+      folderAgentReportView(
+        reported({
+          state,
+          actions: [],
+          model_sentence: '',
+          tools_sentence: '',
+          plan: homePlanOf(newHomeLines),
+          setup: { status, started_at: '2026-11-11T10:00:00Z', lines }
+        })
+      ),
+      stubDocument(),
+      {}
+    );
+  for (const card of [run('setting_up', 'running'), run('set_up', 'stopped')]) {
+    assert.equal(card.querySelector('.folder-agent-card__outcomes'), null);
+    assert.equal(detailsToggle(card), null);
+    // The install row is the block's; every other action is listed, in order.
+    assert.deepEqual(actionNames(card.querySelector('.folder-agent-card__actions-line')), [
+      creates,
+      "Fills the Home's roles",
+      'Adds Ori Music Demo to your Music Production Home',
+      listsSongs,
+      'Looks into 2 folders for songs',
+      'Places Ori Music Demo inside your Music Production Home'
+    ]);
+  }
+  // Each action keeps the state the run gave its line.
+  assert.deepEqual(
+    run('setting_up', 'running')
+      .querySelectorAll('.folder-agent-card__action')
+      .map(a => a.dataset.state),
+    ['done', 'working', 'waiting', 'waiting', 'waiting', 'waiting']
+  );
+});
+
+// Named hires (setup-card-clarity FR6, FR7, FR9, FR10, FR14): the agents a Home
+// step will hire, read-only, directly under the install block.
+const MODEL = 'claude-sonnet-5-5 (claude)';
+const hire = (name, extra = {}) => ({ step: HOME, name, model: MODEL, ...extra });
+const hiresCard = (hires, hiresNote = '', options = {}) =>
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({
+        model_sentence: '',
+        tools_sentence: '',
+        plan: {
+          ...homePlanOf(options.lines || newHomeLines, options.installs),
+          hires,
+          hires_note: hiresNote
+        },
+        ...(options.report || {})
+      })
+    ),
+    stubDocument(),
+    {}
+  );
+const hiresBlock = card => card.querySelector('.folder-agent-card__hires');
+const classesOf = node => node.className.split(' ');
+
+test('the hires block is absent when nobody is hired', () => {
+  assert.equal(hiresBlock(hiresCard([])), null);
+  // A plan from before the host named hires has none either.
+  const old = renderFolderAgentReport(
+    folderAgentReportView(
+      reported({ model_sentence: '', tools_sentence: '', plan: homePlanOf(newHomeLines) })
+    ),
+    stubDocument(),
+    {}
+  );
+  assert.equal(hiresBlock(old), null);
+});
+
+test('one hire: its name, what it does and its model, one link to Agents, nothing to change', () => {
+  const card = hiresCard([
+    hire('Portfolio Manager', { job: 'Coordinates status and priorities.' })
+  ]);
+  const block = hiresBlock(card);
+  assert.equal(text(block, '.folder-agent-card__heading'), 'Hires 1 agent');
+  const rows = block.querySelectorAll('.folder-agent-card__hire');
+  assert.equal(rows.length, 1);
+  assert.equal(text(rows[0], '.folder-agent-card__hire-name'), 'Portfolio Manager');
+  assert.equal(text(rows[0], '.folder-agent-card__hire-job'), 'Coordinates status and priorities.');
+  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(rows[0].dataset.step, HOME);
+  // The reading order, which a narrow card wraps in: name, job, model.
+  assert.deepEqual(
+    rows[0].children.map(child =>
+      classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
+    ),
+    ['folder-agent-card__hire-name', 'folder-agent-card__hire-job', 'folder-agent-card__hire-model']
+  );
+  // One link, to Agents; no rename, no model picker, no opt-out (decision 2A).
+  const links = block.querySelectorAll('a');
+  assert.deepEqual(
+    links.map(link => [link.textContent, link.href]),
+    [['Agents', '/agents']]
+  );
+  for (const tag of ['input', 'select', 'button', 'textarea'])
+    assert.equal(block.querySelectorAll(tag).length, 0, `a ${tag} in the hires block`);
+  assert.equal(block.querySelectorAll('.folder-agent-card__tool-pick').length, 0);
+});
+
+test('several hires keep their order; a missing job, model or note leaves its part out or says so', () => {
+  const card = hiresCard([
+    hire('Portfolio Manager', { job: 'Plans the work.' }),
+    hire('Library Manager 2', { note: 'Your existing Library Manager stays as it is.' }),
+    hire('Third', { model: '' })
+  ]);
+  const block = hiresBlock(card);
+  assert.equal(text(block, '.folder-agent-card__heading'), 'Hires 3 agents');
+  const rows = block.querySelectorAll('.folder-agent-card__hire');
+  assert.deepEqual(
+    rows.map(row => text(row, '.folder-agent-card__hire-name')),
+    ['Portfolio Manager', 'Library Manager 2', 'Third']
+  );
+  // No job from the provider: no empty job line.
+  assert.equal(rows[1].querySelector('.folder-agent-card__hire-job'), null);
+  // A taken name is hired beside the owner's own agent, and the row says so.
+  assert.equal(
+    text(rows[1], '.folder-agent-card__hire-note'),
+    'Your existing Library Manager stays as it is.'
+  );
+  assert.equal(rows[0].querySelector('.folder-agent-card__hire-note'), null);
+  // No model can run yet: the row says so, and the run will ask for one.
+  assert.equal(text(rows[2], '.folder-agent-card__hire-model'), 'No model yet');
+  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+});
+
+test('when the host cannot name the hires it says so in one sentence, with no rows and no link', () => {
+  const sentence = "Hires the Home's agents; each is named as it is hired";
+  const block = hiresBlock(hiresCard([], sentence));
+  assert.equal(text(block, '.folder-agent-card__hires-note'), sentence);
+  assert.equal(block.querySelectorAll('.folder-agent-card__hire').length, 0);
+  assert.equal(block.querySelector('.folder-agent-card__heading'), null);
+  assert.equal(block.querySelectorAll('a').length, 0);
+});
+
+test('the block sits directly under the install block, before the assurance, and in its place when nothing installs', () => {
+  const order = card =>
+    card
+      .querySelector('.folder-agent-card__run')
+      .children.map(child =>
+        classesOf(child).find(name => /__(plan|installs|hires|line)$/.test(name))
+      )
+      .filter(Boolean);
+  const withInstall = hiresCard([hire('Portfolio Manager')]);
+  const kinds = order(withInstall);
+  assert.deepEqual(kinds.slice(-4), [
+    'folder-agent-card__plan',
+    'folder-agent-card__installs',
+    'folder-agent-card__hires',
+    'folder-agent-card__line'
+  ]);
+  // The assurance note follows the block.
+  const run = withInstall.querySelector('.folder-agent-card__run');
+  const last = run.children[run.children.length - 1];
+  assert.equal(last.dataset.kind, 'folder');
+  // Nothing installs: the hires block follows the steps directly.
+  const noInstalls = order(hiresCard([hire('Portfolio Manager')], '', { installs: [] }));
+  assert.deepEqual(noInstalls.slice(-3), [
+    'folder-agent-card__plan',
+    'folder-agent-card__hires',
+    'folder-agent-card__line'
+  ]);
+  assert.equal(
+    hiresCard([hire('Portfolio Manager')], '', { installs: [] }).querySelector(
+      '.folder-agent-card__installs'
+    ),
+    null
+  );
+});
+
+test('the hires block is drawn before Set it up only: the run and its receipt list what happened', () => {
+  const lines = newHomeLines.slice(0, -1).map(line => ({ ...line, state: 'done' }));
+  for (const [state, status] of [
+    ['setting_up', 'running'],
+    ['set_up', 'done'],
+    ['set_up', 'stopped']
+  ]) {
+    const card = hiresCard([hire('Portfolio Manager')], '', {
+      report: {
+        state,
+        actions: [],
+        setup: { status, started_at: '2026-11-11T10:00:00Z', lines }
+      }
+    });
+    assert.equal(hiresBlock(card), null, `a hires block in the ${status} card`);
+  }
+});
+
+// One main path (setup-card-clarity FR15-FR20): a step that cannot run with a
+// chosen one is not in the main list; it waits under "Other ways to set this
+// up", collapsed, with what taking it gives up and "Use this instead".
+const GROUP = 'group';
+const HOME_TITLE =
+  'Create your Music Production Home and put Ori Music Demo on its shelf (8 songs)';
+const GROUP_TITLE = 'Turn Ori Music Demo into a group with one workspace per song (8)';
+const homeTradeoff =
+  'One shelf for every song across your folders; songs get workspaces when you open them.';
+const groupTradeoff =
+  'One workspace per song inside Ori Music Demo, and no Music Production Home: nothing lists songs across your other folders.';
+const swapPlan = chosen => ({
+  digest: `swap-${chosen}`,
+  runnable: true,
+  source: 'default',
+  selected: [chosen],
+  steps: [
+    {
+      handle: HOME,
+      kind: 'home',
+      name: 'Music Production Home',
+      title: HOME_TITLE,
+      excludes: GROUP,
+      chosen: chosen === HOME
+    },
+    {
+      handle: GROUP,
+      kind: 'group',
+      name: 'a group',
+      title: GROUP_TITLE,
+      excludes: HOME,
+      chosen: chosen === GROUP
+    }
+  ],
+  installs: chosen === HOME ? [providerInstall] : [],
+  hires: chosen === HOME ? [hire('Portfolio Manager')] : [],
+  alternatives:
+    chosen === HOME
+      ? [{ step: GROUP, title: GROUP_TITLE, tradeoff: groupTradeoff }]
+      : [{ step: HOME, title: HOME_TITLE, tradeoff: homeTradeoff }],
+  lines:
+    chosen === HOME
+      ? newHomeLines
+      : [
+          {
+            kind: 'promote',
+            step: GROUP,
+            name: 'Turns Ori Music Demo into a group',
+            outcome: 'Turns Ori Music Demo into a group'
+          },
+          {
+            kind: 'member',
+            step: GROUP,
+            name: 'Creates Album-1, linked to its own folder',
+            outcome: 'Creates 8 workspaces'
+          },
+          assurance
+        ]
+});
+const swapCard = (chosen, options = {}, report = {}) =>
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({ model_sentence: '', tools_sentence: '', plan: swapPlan(chosen), ...report })
+    ),
+    stubDocument(),
+    options
+  );
+const alternativesBlock = card => card.querySelector('.folder-agent-card__alternatives');
+const stepRows = card =>
+  card
+    .querySelectorAll('.folder-agent-card__line')
+    .filter(row => row.dataset.step)
+    .map(row => [row.dataset.step, row.dataset.chosen]);
+
+test('the other way is collapsed under "Other ways to set this up", not in the main list', () => {
+  const card = swapCard(HOME);
+  const block = alternativesBlock(card);
+  const toggle = block.querySelector('.folder-agent-card__alternatives-toggle');
+  assert.equal(toggle.tagName, 'BUTTON');
+  assert.equal(toggle.type, 'button');
+  assert.equal(toggle.textContent, 'Other ways to set this up');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  const list = block.querySelector('.folder-agent-card__alternative-list');
+  assert.equal(toggle.attributes['aria-controls'], list.id);
+  assert.equal(list.hidden, true);
+  // The main list holds only the chosen step: no unticked group row, no box.
+  assert.deepEqual(stepRows(card), [[HOME, 'true']]);
+  assert.ok(!card.querySelectorAll('input').some(box => box.dataset.stepHandle === GROUP));
+  // After the plan, before the install block.
+  const kinds = card
+    .querySelector('.folder-agent-card__run')
+    .children.map(child =>
+      classesOf(child).find(name => /__(plan|alternatives|installs|hires)$/.test(name))
+    )
+    .filter(Boolean);
+  assert.deepEqual(kinds, [
+    'folder-agent-card__plan',
+    'folder-agent-card__alternatives',
+    'folder-agent-card__installs',
+    'folder-agent-card__hires'
+  ]);
+});
+
+test('opening it shows the way, what it gives up and a button to take it instead', () => {
+  const card = swapCard(HOME);
+  const toggle = alternativesBlock(card).querySelector('.folder-agent-card__alternatives-toggle');
+  toggle.listeners.click();
+  assert.equal(toggle.attributes['aria-expanded'], 'true');
+  const rows = alternativesBlock(card).querySelectorAll('.folder-agent-card__alternative');
+  assert.equal(rows.length, 1);
+  assert.equal(text(rows[0], '.folder-agent-card__line-name'), GROUP_TITLE);
+  assert.equal(text(rows[0], '.folder-agent-card__line-detail'), groupTradeoff);
+  const use = rows[0].querySelectorAll('button');
+  assert.deepEqual(
+    use.map(b => b.textContent),
+    ['Use this instead']
+  );
+  assert.equal(use[0].type, 'button');
+  assert.equal(
+    alternativesBlock(card).querySelector('.folder-agent-card__alternative-list').hidden,
+    false
+  );
+  toggle.listeners.click();
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+});
+
+test('no other way, no control', () => {
+  // The install-block fixtures hold no alternatives.
+  assert.equal(alternativesBlock(installCard(['reaper-tools', HOME])), null);
+  const none = swapPlan(HOME);
+  none.alternatives = [];
+  const card = renderFolderAgentReport(
+    folderAgentReportView(reported({ model_sentence: '', tools_sentence: '', plan: none })),
+    stubDocument(),
+    {}
+  );
+  assert.equal(alternativesBlock(card), null);
+  // A plan from before the host listed alternatives has none either.
+  delete none.alternatives;
+  const old = renderFolderAgentReport(
+    folderAgentReportView(reported({ model_sentence: '', tools_sentence: '', plan: none })),
+    stubDocument(),
+    {}
+  );
+  assert.equal(alternativesBlock(old), null);
+});
+
+test('"Use this instead" swaps the plan in place and swapping back restores the first one', async () => {
+  const requests = [];
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    requests.push(body);
+    const chosen = body.selected.includes(GROUP) ? GROUP : HOME;
+    return { ok: true, status: 200, json: async () => ({ plan: swapPlan(chosen) }) };
+  };
+  const card = swapCard(HOME, { fetchImpl });
+  const setUp = card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
+  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.ok(hiresBlock(card));
+
+  // Take the group instead: the re-plan carries the group in place of the Home.
+  await alternativesBlock(card)
+    .querySelector('.folder-agent-card__alternative-use')
+    .listeners.click();
+  assert.deepEqual(requests, [{ selected: [GROUP] }]);
+  assert.deepEqual(stepRows(card), [[GROUP, 'true']]);
+  assert.equal(outcomeText(card), 'Turns Ori Music Demo into a group · Creates 8 workspaces');
+  // The plan no longer installs or hires anything: those blocks and the count on
+  // the button follow it without a reload.
+  assert.equal(card.querySelector('.folder-agent-card__installs'), null);
+  assert.equal(hiresBlock(card), null);
+  assert.equal(setUp.textContent, 'Set it up');
+  assert.equal(setUp.disabled, false);
+  // The Home is now the other way, collapsed again, with its own trade-off.
+  const toggle = alternativesBlock(card).querySelector('.folder-agent-card__alternatives-toggle');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  toggle.listeners.click();
+  const rows = alternativesBlock(card).querySelectorAll('.folder-agent-card__alternative');
+  assert.deepEqual(
+    rows.map(row => [row.dataset.step, text(row, '.folder-agent-card__line-detail')]),
+    [[HOME, homeTradeoff]]
+  );
+
+  // And back: the first plan returns, installs and hires with it.
+  await alternativesBlock(card)
+    .querySelector('.folder-agent-card__alternative-use')
+    .listeners.click();
+  assert.deepEqual(requests, [{ selected: [GROUP] }, { selected: [HOME] }]);
+  assert.deepEqual(stepRows(card), [[HOME, 'true']]);
+  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
+  assert.equal(hiresBlock(card).querySelectorAll('.folder-agent-card__hire').length, 1);
+  assert.equal(
+    alternativesBlock(card).querySelector('.folder-agent-card__alternative').dataset.step,
+    GROUP
+  );
+});
+
+test('a plan that changed after it was shown is redrawn on the owner’s own choice, not Ori’s default', async () => {
+  const calls = [];
+  const raw = reported({ model_sentence: '', tools_sentence: '', plan: swapPlan(GROUP) });
+  const owners = swapPlan(HOME);
+  const respond = replan => async (url, init) => {
+    calls.push([url, JSON.parse(init.body)]);
+    if (url.endsWith('/setup'))
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: 'The plan changed since it was shown. Review it again.',
+          plan_changed: true,
+          folder_agent: raw
+        })
+      };
+    return replan();
+  };
+  const view = folderAgentReportView(reported({ plan: swapPlan(HOME) }));
+
+  // The server refused, so the card gets its view back, with the plan for the
+  // steps the owner had ticked: the Home they chose, the hires they were shown.
+  let result = await postFolderAgentAction(
+    view,
+    'set_up',
+    respond(async () => ({ ok: true, status: 200, json: async () => ({ plan: owners }) })),
+    { selected: [HOME] }
+  );
+  assert.deepEqual(
+    calls.map(([url, body]) => [url.replace(/^.*folder-agent\/ws-1/, ''), body]),
+    [
+      ['/setup', { plan_digest: `swap-${HOME}`, selected: [HOME] }],
+      ['/plan', { selected: [HOME] }]
+    ]
+  );
+  assert.match(result.error, /plan changed/);
+  const redrawn = folderAgentReportView(result.view);
+  assert.deepEqual(redrawn.plan.selected, [HOME]);
+  assert.equal(redrawn.plan.hires.length, 1);
+  assert.equal(redrawn.plan.digest, `swap-${HOME}`);
+
+  // If that re-plan cannot be had, the server's own view stands.
+  calls.length = 0;
+  result = await postFolderAgentAction(
+    view,
+    'set_up',
+    respond(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    { selected: [HOME] }
+  );
+  assert.equal(folderAgentReportView(result.view).plan.digest, `swap-${GROUP}`);
+  result = await postFolderAgentAction(
+    view,
+    'set_up',
+    respond(async () => {
+      throw new Error('offline');
+    }),
+    { selected: [HOME] }
+  );
+  assert.equal(folderAgentReportView(result.view).plan.digest, `swap-${GROUP}`);
+
+  // Any other refusal is shown as before: no second request.
+  calls.length = 0;
+  result = await postFolderAgentAction(
+    view,
+    'set_up',
+    async (url, init) => {
+      calls.push([url, JSON.parse(init.body)]);
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'Answer the question first.', folder_agent: raw })
+      };
+    },
+    { selected: [HOME] }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(result.error, 'Answer the question first.');
+  assert.equal(folderAgentReportView(result.view).plan.digest, `swap-${GROUP}`);
+});
+
+test('a card that cannot act lists the other way without a button to take it', () => {
+  // No Set it up on this card (for example the owner has not answered the
+  // premise): the plan reads, nothing on it can be changed.
+  const card = swapCard(HOME, {}, { actions: ['keep', 'look_further'] });
+  const block = alternativesBlock(card);
+  assert.ok(block);
+  assert.equal(block.querySelectorAll('.folder-agent-card__alternative-use').length, 0);
+  assert.equal(block.querySelectorAll('.folder-agent-card__alternative').length, 1);
+});

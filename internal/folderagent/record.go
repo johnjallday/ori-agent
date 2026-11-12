@@ -271,6 +271,10 @@ type Record struct {
 	// the run was done: GoalUsed or GoalDismissed; empty while it waits. The
 	// suggested goal itself stays in Sections.Goal.
 	GoalAnswer string `json:"goal_answer,omitempty"`
+	// HomeHireModel is the model the Home step's hires would run on right now.
+	// It is read each time a plan is built (effectiveRecord) and never stored:
+	// a model set in Settings after the look shows on the next card.
+	HomeHireModel string `json:"-"`
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
 

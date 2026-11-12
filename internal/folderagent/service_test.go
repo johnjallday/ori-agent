@@ -139,10 +139,25 @@ type fakeSetups struct {
 	mu      sync.Mutex
 	runs    []Plan
 	receipt *SetupReceipt
+	// model is what HomeHireModel reports; "" is "no model can run".
+	model string
 }
 
 func (f *fakeSetups) Readiness(context.Context, string) folderlook.Readiness {
 	return folderlook.Readiness{}
+}
+
+// HomeHireModel makes the fake a HomeHireModeler.
+func (f *fakeSetups) HomeHireModel() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.model
+}
+
+func (f *fakeSetups) setModel(model string) {
+	f.mu.Lock()
+	f.model = model
+	f.mu.Unlock()
 }
 func (f *fakeSetups) Run(_ context.Context, _ Record, plan Plan, update func([]personalassistant.FolderPlanLine)) RunResult {
 	f.mu.Lock()

@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 )
 
@@ -39,9 +40,40 @@ func homeProviderPreviewDetail(err error) string {
 }
 
 func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (personalassistanthttp.FolderHomeProviderPreview, error) {
+	result, _, err := s.previewHome(ctx, key)
+	return result, err
+}
+
+// providerHome is the one Home a provider's declaration contributes and the
+// reviewed entry names (the same test CheckRelease applies to a release), or
+// nil when there is not exactly that one.
+func providerHome(contribution *plugin.SurfaceContribution, provider reviewedintegration.HomeProvider) *projecttemplates.AssistantProgramHome {
+	if contribution == nil {
+		return nil
+	}
+	var found *projecttemplates.AssistantProgramHome
+	for i := range contribution.AssistantProgramHomes {
+		home := &contribution.AssistantProgramHomes[i]
+		if home.ID != provider.ProgramID || home.SchemaVersion != provider.HomeSchemaVersion {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		found = home
+	}
+	return found
+}
+
+// previewHome is Preview, and also hands back the Home the reviewed release
+// declares (nil when it cannot be told), which Preview already inspects to
+// verify the release: the folder card names the agents that Home will hire
+// from it before the plugin is installed. An installed development copy is
+// read from its own record. Nothing here installs, enables or writes.
+func (s folderHomeProviderSetup) previewHome(ctx context.Context, key string) (personalassistanthttp.FolderHomeProviderPreview, *projecttemplates.AssistantProgramHome, error) {
 	b := s.builder
 	if b == nil || b.server == nil || b.server.reviewedReleases == nil || b.pluginHandler == nil {
-		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("the reviewed release reader is not available")
+		return personalassistanthttp.FolderHomeProviderPreview{}, nil, homeProviderPreviewError("the reviewed release reader is not available")
 	}
 	var provider *reviewedintegration.HomeProvider
 	for _, entry := range reviewedintegration.HomeProviders() {
@@ -52,7 +84,7 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 		}
 	}
 	if provider == nil {
-		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("the provider is not a reviewed one")
+		return personalassistanthttp.FolderHomeProviderPreview{}, nil, homeProviderPreviewError("the provider is not a reviewed one")
 	}
 	result := personalassistanthttp.FolderHomeProviderPreview{
 		PluginID: provider.PluginID,
@@ -60,27 +92,30 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 	if source := os.Getenv("ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE"); source != "" {
 		installed, err := b.pluginHandler.Manager().List()
 		if err != nil {
-			return result, homeProviderPreviewError("installed plugins could not be listed")
+			return result, nil, homeProviderPreviewError("installed plugins could not be listed")
 		}
 		for _, entry := range installed {
 			if folderHomeDevelopmentReady(entry, *provider, source) {
 				result.Installed, result.Ready, result.DevelopmentCopy, result.Version = true, true, true, entry.Version
-				return result, nil
+				return result, providerHome(entry.WorkspaceSurfaces, *provider), nil
 			}
 		}
 	}
 	release, ok, err := b.server.reviewedReleases.homeProviderInstall(ctx, *provider)
 	if err != nil {
 		// The resolver's own error is worded for its caller and is not repeated.
-		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("the reviewed release could not be verified")
+		return personalassistanthttp.FolderHomeProviderPreview{}, nil, homeProviderPreviewError("the reviewed release could not be verified")
 	}
 	if !ok {
-		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("no reviewed release this build can install")
+		return personalassistanthttp.FolderHomeProviderPreview{}, nil, homeProviderPreviewError("no reviewed release this build can install")
 	}
 	result.Version, result.Source, result.Disclosure = release.version, release.source, release.report
+	// The release is what a Set it up installs, or updates to, before it creates
+	// the Home; an installed copy at that same commit declares the same Home.
+	declared := providerHome(release.surfaces, *provider)
 	installed, err := b.pluginHandler.Manager().List()
 	if err != nil {
-		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("installed plugins could not be listed")
+		return personalassistanthttp.FolderHomeProviderPreview{}, nil, homeProviderPreviewError("installed plugins could not be listed")
 	}
 	for _, entry := range installed {
 		if entry.Name != provider.PluginID {
@@ -100,11 +135,11 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 		default:
 			// A plugin with this name alone is not evidence of the reviewed pin.
 			// Never enable an unrelated installation on a folder-card click.
-			return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("an installed plugin of that name is not the reviewed release")
+			return personalassistanthttp.FolderHomeProviderPreview{}, nil, homeProviderPreviewError("an installed plugin of that name is not the reviewed release")
 		}
-		return result, nil
+		return result, declared, nil
 	}
-	return result, nil
+	return result, declared, nil
 }
 
 type installedHomeProvider int
