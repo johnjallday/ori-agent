@@ -2,6 +2,7 @@ package folderagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -285,5 +286,39 @@ func TestSetUp_RefusesAPlanWhoseHiresChanged(t *testing.T) {
 	h.svc.Wait()
 	if len(h.setups.runs) != 1 || len(h.setups.runs[0].Hires) != 1 || h.setups.runs[0].Hires[0].Model != "another-model (claude)" {
 		t.Fatalf("the run was not given the confirmed hires: %+v", h.setups.runs)
+	}
+}
+
+// The card reads these keys from the plan the server sends; renaming one would
+// silently blank the hires block, so the wire shape is pinned.
+func TestPlanView_HiresWireShape(t *testing.T) {
+	rec := hiresRecord(newHomeFacts(folderlook.HomeHire{Name: "Portfolio Manager 2", Job: "Plans the work.", Taken: "Portfolio Manager"}), testModel)
+	raw, err := json.Marshal(planViewOf(homePlan(t, rec)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Hires     []map[string]string `json:"hires"`
+		HiresNote *string             `json:"hires_note"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"step": "music-production-home", "name": "Portfolio Manager 2", "job": "Plans the work.",
+		"model": testModel, "note": "Your existing Portfolio Manager stays as it is."}
+	if len(decoded.Hires) != 1 || !reflect.DeepEqual(decoded.Hires[0], want) || decoded.HiresNote != nil {
+		t.Fatalf("hires on the wire = %+v note = %v", decoded.Hires, decoded.HiresNote)
+	}
+	// The unknown-roles sentence travels as hires_note, with an empty list.
+	raw, err = json.Marshal(planViewOf(homePlan(t, hiresRecord(&folderlook.HomeFacts{ProviderName: "X", ProviderVersion: "1"}, testModel))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded.Hires, decoded.HiresNote = nil, nil
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Hires == nil || len(decoded.Hires) != 0 || decoded.HiresNote == nil || *decoded.HiresNote != HiresUnnamed {
+		t.Fatalf("fallback on the wire = %+v note = %v", decoded.Hires, decoded.HiresNote)
 	}
 }
