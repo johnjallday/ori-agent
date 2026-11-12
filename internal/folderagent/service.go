@@ -184,7 +184,10 @@ type Deps struct {
 	Tickets    Tickets
 	Setups     Setups
 	Homes      Homes
-	Now        func() time.Time
+	// Songs reads the Home's song-details consent for the offer to learn the
+	// songs. Nil makes no offer.
+	Songs Songs
+	Now   func() time.Time
 	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
 	KnownFolderRoot func(string) (string, error)
 	// Walk overrides the walk options (tests).
@@ -962,6 +965,9 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 			r.Candidates, r.Sections, r.Stage = current.Candidates, current.Sections, current.Stage
 		}
 		r.State = StateSettingUp
+		// Once the run is done the Commander offers to learn the songs; a
+		// folder set up before this build never is.
+		r.OffersSongs = true
 		// The first step is under way from this moment; the run marks each
 		// line as it reaches it.
 		lines := append([]personalassistant.FolderPlanLine(nil), plan.Lines...)
@@ -1107,13 +1113,17 @@ const (
 
 // goalOffered says whether the suggested goal is offered now: the run is done,
 // the agent suggested a goal, the owner has not answered, and the workspace has
-// no goal of its own (PRD FR17, FR19).
-func (s *Service) goalOffered(rec *Record) bool {
+// no goal of its own (PRD FR17, FR19). The Commander asks one thing at a time:
+// while the offer to learn the songs waits for an answer, the goal waits too.
+func (s *Service) goalOffered(ctx context.Context, rec *Record) bool {
 	if rec == nil || rec.State != StateSetUp || rec.Setup == nil || rec.Setup.Status != personalassistant.FolderSetupDone ||
 		rec.Sections == nil || strings.TrimSpace(rec.Sections.Goal) == "" || rec.GoalAnswer != "" {
 		return false
 	}
 	if s.deps.Workspaces == nil {
+		return false
+	}
+	if learningRunning(rec) || s.songsOffer(ctx, rec) != nil {
 		return false
 	}
 	// A workspace started before this build carries its brief as its goal;
@@ -1131,7 +1141,7 @@ func (s *Service) AnswerGoal(ctx context.Context, userID, workspaceID string, us
 	if err != nil {
 		return View{}, err
 	}
-	if !s.goalOffered(current) {
+	if !s.goalOffered(ctx, current) {
 		return View{}, ErrWrongState
 	}
 	goal := current.Sections.Goal
@@ -1195,10 +1205,15 @@ func (s *Service) SweepInterrupted() int {
 	closed := 0
 	for _, id := range ids {
 		rec, err := s.deps.Store.Read(id)
-		if err != nil || (rec.State != StateLooking && rec.State != StateSettingUp) {
+		if err != nil || (rec.State != StateLooking && rec.State != StateSettingUp && !learningRunning(rec)) {
 			continue
 		}
 		_, err = s.deps.Store.Update(id, func(r *Record) error {
+			// A reading of the songs a previous process left running is over;
+			// whatever it read is kept, and the goal offer is no longer held.
+			if learningRunning(r) {
+				r.Learning.Status, r.Learning.Song, r.Learning.FinishedAt = LearningStopped, "", s.deps.Now().UTC()
+			}
 			switch r.State {
 			case StateLooking:
 				if r.Map == nil {

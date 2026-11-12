@@ -274,6 +274,19 @@ type Record struct {
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
 
+	// OffersSongs is set when a Set it up run starts under a build that offers
+	// to learn the songs afterwards. A folder set up before that never gets the
+	// offer: its owner has already seen the card and the goal offer.
+	OffersSongs bool `json:"offers_songs,omitempty"`
+	// SongsAnswer is the owner's answer to the offer to learn the songs, made
+	// once the run was done: SongsLearn or SongsDismissed; empty while it waits
+	// (or was never made). It is stored here and only here, so the offer is
+	// made once per folder whatever the Home does later.
+	SongsAnswer string `json:"songs_answer,omitempty"`
+	// Learning is the first reading of the songs, started by "Learn them": how
+	// far it got and how it ended. Nil until the offer is accepted.
+	Learning *Learning `json:"learning,omitempty"`
+
 	// AsksPremise is set on every record created since the premise shipped. A
 	// record without it predates the question and is never asked (PRD FR11):
 	// its owner has already seen the card.

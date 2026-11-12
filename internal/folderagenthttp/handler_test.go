@@ -86,6 +86,30 @@ func TestGoal_TakesUseOrDismissOnly(t *testing.T) {
 	}
 }
 
+// The offer to learn the songs takes "learn" or "dismiss" only; anything else,
+// or an unknown field, is refused before the service is asked, so nothing is
+// granted or read on a malformed request.
+func TestSongs_TakesLearnOrDismissOnly(t *testing.T) {
+	cases := map[string]int{
+		`{"answer":"maybe"}`:                 http.StatusBadRequest,
+		`{"answer":"use"}`:                   http.StatusBadRequest,
+		`{}`:                                 http.StatusBadRequest,
+		`{"answer":"learn","path":"/Users"}`: http.StatusBadRequest,
+		`{"answer":"learn","scope":"names"}`: http.StatusBadRequest,
+		`{"answer":"learn"}`:                 http.StatusNotFound,
+		`{"answer":"dismiss"}`:               http.StatusNotFound,
+	}
+	for body, want := range cases {
+		req := httptest.NewRequest(http.MethodPost, "/folder-agent/ws-1/songs", strings.NewReader(body))
+		req.SetPathValue("workspaceID", "ws-1")
+		rec := httptest.NewRecorder()
+		emptyStoreHandler(t).Songs(rec, req)
+		if rec.Code != want {
+			t.Errorf("%s → %d %s, want %d", body, rec.Code, rec.Body.String(), want)
+		}
+	}
+}
+
 // An older card still sends the goal with Set it up: the body is accepted and
 // the goal ignored (folder-setup-ends-in-home FR15), so the request reaches
 // the service rather than failing as a bad request.

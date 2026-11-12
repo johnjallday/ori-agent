@@ -3,17 +3,12 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"path"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/folderagent"
-	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
-	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
@@ -232,79 +227,12 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	setLine(rootLine, personalassistant.FolderLineDone, "Added "+rec.FolderName+" to your "+homeName)
 
 	// The listings: the root, then the scopes leading to the songs.
-	songsLine, scopesLine := line(personalassistant.FolderPlanSongs), line(folderagent.FolderPlanScopes)
-	shape := folderdigest.Shape("")
-	if rec.Facts.Portfolio != nil {
-		shape = rec.Facts.Portfolio.Shape
-	}
-	setLine(songsLine, personalassistant.FolderLineWorking, "Listing "+foldermap.ShapeNoun(shape, 2))
-	listed, _, err := b.sessionHandler.ScanFolderAgentRoot(ctx, owner, homeID, rootID, key+"-scan")
+	listing, err := listFolderAgentSongs(ctx, b.sessionHandler, rec, owner, homeID, rootID, key,
+		line(personalassistant.FolderPlanSongs), line(folderagent.FolderPlanScopes), setLine)
 	if err != nil {
-		setLine(songsLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
 	}
-	needed := folderagent.ProjectParents(rec.Facts)
-	scanned, skipped, failures := map[string]bool{}, map[string]bool{}, map[string]int{}
-	scans := 0
-	if len(needed) > 0 {
-		setLine(scopesLine, personalassistant.FolderLineWorking, "")
-	}
-	for scans < folderagent.MaxScopedScans {
-		issued, err := b.sessionHandler.FolderAgentScopes(owner, homeID, rootID)
-		if err != nil {
-			break
-		}
-		scopes := make([]folderagent.LibraryScope, 0, len(issued))
-		for _, s := range issued {
-			scopes = append(scopes, folderagent.LibraryScope{ID: s.ID, RelativeFolder: s.RelativeFolder})
-		}
-		done := make(map[string]bool, len(scanned)+len(skipped))
-		for folder := range scanned {
-			done[folder] = true
-		}
-		for folder := range skipped {
-			done[folder] = true
-		}
-		next := folderagent.NextScopes(needed, scopes, done)
-		if len(next) == 0 {
-			break
-		}
-		for _, s := range next {
-			if scans >= folderagent.MaxScopedScans {
-				break
-			}
-			// The folder's own name, never its path.
-			setLine(scopesLine, personalassistant.FolderLineWorking, "Looking into "+path.Base(s.RelativeFolder))
-			scans++
-			count, _, err := b.sessionHandler.ScanFolderAgentScope(ctx, owner, homeID, rootID, s.ID, fmt.Sprintf("%s-scope-%d", key, scans))
-			if err != nil {
-				// Tried again in the next round; twice failed counts as not
-				// reached.
-				failures[s.RelativeFolder]++
-				if failures[s.RelativeFolder] >= 2 {
-					skipped[s.RelativeFolder] = true
-				}
-				logger.Warn("Folder agent scoped listing did not finish", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
-				continue
-			}
-			scanned[s.RelativeFolder] = true
-			listed = count
-		}
-	}
-	unreached := folderagent.Unreached(needed, scanned)
-	if len(needed) > 0 {
-		state := personalassistant.FolderLineDone
-		if len(unreached) > 0 {
-			state = personalassistant.FolderLineFailed
-		}
-		words := ""
-		if n := len(scanned); n > 0 && state == personalassistant.FolderLineDone {
-			words = fmt.Sprintf("Looked into %d %s", n, pluralWord(n, "folder", "folders"))
-		}
-		setLine(scopesLine, state, words)
-	}
-	setLine(songsLine, personalassistant.FolderLineDone, fmt.Sprintf("Listed %d %s on the shelf", listed, foldermap.ShapeNoun(shape, listed)))
-	receipt.listed, receipt.listedNoun, receipt.unreached = listed, foldermap.ShapeNoun(shape, listed), len(unreached)
+	receipt.listed, receipt.listedNoun, receipt.unreached = listing.listed, listing.noun, listing.unreached
 
 	// Placement: the workspace inside the Home's district; its agent stays.
 	// No goal is written: the agent's suggested goal is offered once the run

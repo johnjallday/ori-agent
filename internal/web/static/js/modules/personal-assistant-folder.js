@@ -37,6 +37,7 @@ import {
   chooseFolder,
   fetchFolderAgent,
   folderAgentCardView,
+  folderAgentLive,
   folderAgentReportView,
   notifyPlacement,
   openFolderAgentPlace,
@@ -7033,7 +7034,8 @@ function stopAgentPoll() {
 function scheduleAgentPoll() {
   stopAgentPoll();
   const view = state.agent.view;
-  if (!view || (view.state !== 'looking' && view.state !== 'setting_up')) return;
+  // A reading of the songs after "Learn them" runs in the background too.
+  if (!folderAgentLive(view)) return;
   state.agent.poll = setTimeout(async () => {
     state.agent.poll = 0;
     const next = await fetchFolderAgent(view.workspace_id).catch(() => null);

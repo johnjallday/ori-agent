@@ -120,8 +120,31 @@ export function commanderSpeech(view) {
           review: true
         };
       }
-      // The place exists: the agent's suggested goal waits for an answer
-      // (folder-setup-ends-in-home FR17).
+      // The Commander asks one thing at a time. While it reads the songs it
+      // says where it is, in the host's words (learn-the-songs FR14); once the
+      // place exists it asks to learn them first (FR2), and only then offers the
+      // goal. The announcement stays the same word while a reading runs, so a
+      // screen reader is not read every song.
+      if (view.learning?.status === 'running') {
+        return {
+          phase: 'learning',
+          line: view.learning.line,
+          headline: '',
+          announce: 'Learning the songs',
+          review: false
+        };
+      }
+      if (view.songsOffer) {
+        return {
+          phase: 'songs',
+          line: `${view.songsOffer.ask} · Review`,
+          headline: '',
+          announce: view.songsOffer.ask,
+          review: true
+        };
+      }
+      // The agent's suggested goal waits for an answer (folder-setup-ends-in-home
+      // FR17).
       if (view.goalOffer) {
         return {
           phase: 'goal',
@@ -189,6 +212,14 @@ export function commanderOneLine(view) {
         text: `${view.workspace}: a step did not finish`,
         action: 'Review'
       };
+    case 'songs':
+      return {
+        phase: speech.phase,
+        text: `${agent} asks to learn the ${view.songsOffer.noun}`,
+        action: 'Review'
+      };
+    case 'learning':
+      return { phase: speech.phase, text: view.learning.line, action: 'Review' };
     case 'goal':
       return {
         phase: speech.phase,

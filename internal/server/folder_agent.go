@@ -49,6 +49,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Setups:     folderAgentSetups{builder: b},
 		Hiring:     folderAgentHiring{builder: b},
 		Homes:      folderAgentHomes{builder: b},
+		Songs:      newFolderAgentSongs(b),
 	})
 	b.folderAgentService = service
 	b.folderAgentHandler = folderagenthttp.New(service, func(ctx context.Context) (string, error) {

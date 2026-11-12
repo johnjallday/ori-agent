@@ -81,6 +81,13 @@ type View struct {
 	// and while the workspace has no goal and the owner has not answered
 	// (Use this goal, Edit, Not now). Nil otherwise.
 	GoalOffer *GoalOfferView `json:"goal_offer,omitempty"`
+	// SongsOffer is the Commander's offer to learn the songs, made once after a
+	// Set it up run that put the folder in a Home, and before the goal offer
+	// (Learn them, Not now). Nil when none is waiting.
+	SongsOffer *SongsOfferView `json:"songs_offer,omitempty"`
+	// Learning is the reading of the songs once the owner said "Learn them":
+	// the line it shows while it runs, and how it ended. Nil before that.
+	Learning *LearningView `json:"learning,omitempty"`
 	// Landing is where a watched run goes once it finished with every step
 	// done and its plan included the Home step: the Home's Map, asking it to
 	// open the projects sheet. Nil for every other run, which keeps Route.
@@ -194,7 +201,7 @@ func planViewOf(plan Plan) *PlanView {
 		ReorderNote: plan.ReorderNote, Installs: installs}
 }
 
-func (s *Service) viewOf(_ context.Context, rec *Record) View {
+func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	rec = s.effectiveRecord(rec)
 	v := View{
 		WorkspaceID: rec.WorkspaceID, WorkspaceName: rec.WorkspaceName, FolderName: rec.FolderName,
@@ -256,7 +263,9 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	}
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
-	if s.goalOffered(rec) {
+	v.SongsOffer = s.songsOffer(ctx, rec)
+	v.Learning = learningView(rec)
+	if s.goalOffered(ctx, rec) {
 		v.GoalOffer = &GoalOfferView{Goal: rec.Sections.Goal, MaxRunes: personalassistant.BriefMaxRunes}
 	}
 	v.Premise = premiseView(rec)

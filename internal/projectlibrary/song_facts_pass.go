@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"path"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -56,6 +58,50 @@ type songFactsOutcome struct {
 	Saved                          int
 }
 
+// SongFactsProgress is where one scan's pass has got to, for a caller that
+// shows the reading as it happens ("Learning <song>… (2 of 7)"). Targets and
+// Done count within this pass; a scan that lists a folder's songs in several
+// scans runs one pass each, and the caller adds them up. Song is the song's
+// folder name, never a path. The last report of a pass has Finished set, with
+// Read the songs whose facts were saved and Stopped the reason it ended early
+// ("time", "bytes", "cancelled" or "authority"; empty when it ran to the end).
+type SongFactsProgress struct {
+	Song     string
+	Done     int
+	Targets  int
+	Read     int
+	Skipped  int
+	Finished bool
+	Stopped  string
+}
+
+type songFactsProgressKey struct{}
+
+// WithSongFactsProgress returns a context whose scans report their fact pass to
+// report. The callback runs inside the pass, under the root's access gate: it
+// must return at once and must not write to the library.
+func WithSongFactsProgress(ctx context.Context, report func(SongFactsProgress)) context.Context {
+	if report == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, songFactsProgressKey{}, report)
+}
+
+func songFactsProgressFrom(ctx context.Context) func(SongFactsProgress) {
+	report, _ := ctx.Value(songFactsProgressKey{}).(func(SongFactsProgress))
+	return report
+}
+
+// songFactsName is the name a progress report gives a song: its folder's name,
+// or, for a song kept directly in the root, its file's name without extension.
+func songFactsName(target songFactsTarget) string {
+	name := path.Base(target.Relative)
+	if target.Relative == "" || name == "." || name == "/" {
+		name = strings.TrimSuffix(path.Base(target.File.File), path.Ext(target.File.File))
+	}
+	return name
+}
+
 func (r *Roots) songFactsBudgetOrDefault() songFactsBudget {
 	if r.factsBudget.Duration > 0 && r.factsBudget.Bytes > 0 {
 		return r.factsBudget
@@ -80,6 +126,10 @@ func (r *Roots) readSongFactsAfterScan(ctx context.Context, scope Scope, scan Sc
 				"scan_id": scan.ID, "error": err.Error()})
 		}
 		outcome.Saved = saved
+	}
+	if report := songFactsProgressFrom(ctx); report != nil {
+		report(SongFactsProgress{Done: outcome.Targets, Targets: outcome.Targets, Read: outcome.Saved,
+			Skipped: outcome.Targets - outcome.Saved, Finished: true, Stopped: outcome.Stopped})
 	}
 	logger.Info("Project library read song facts", logger.Fields{"home_id": scope.HomeID, "scan_id": scan.ID,
 		"targets": outcome.Targets, "opened": outcome.Opened, "read": outcome.Read, "skipped": outcome.Skipped,
@@ -162,6 +212,7 @@ func (r *Roots) songFactsBatch(passCtx, ctx context.Context, scope Scope, root R
 	}
 	var reads []songFactsRead
 	stopped := ""
+	report := songFactsProgressFrom(ctx)
 	for _, target := range targets {
 		if stopped = songFactsStop(passCtx, ctx); stopped != "" {
 			break
@@ -173,6 +224,10 @@ func (r *Roots) songFactsBatch(passCtx, ctx context.Context, scope Scope, root R
 		if outcome.Bytes+target.File.Size > budget.Bytes {
 			stopped = "bytes"
 			break
+		}
+		if report != nil {
+			report(SongFactsProgress{Song: songFactsName(target), Done: outcome.Read + outcome.Skipped,
+				Targets: outcome.Targets, Read: outcome.Read, Skipped: outcome.Skipped})
 		}
 		read, ok := r.readOneSongFacts(root, target, outcome)
 		if !ok {

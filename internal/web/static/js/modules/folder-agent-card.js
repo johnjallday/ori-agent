@@ -23,6 +23,9 @@ const ACTION_PATHS = {
   // The goal offer's answers (Use this goal / Save after Edit, and Not now).
   use_goal: 'goal',
   dismiss_goal: 'goal',
+  // The offer to learn the songs (Learn them, Not now), asked before the goal.
+  learn_songs: 'songs',
+  dismiss_songs: 'songs',
   // The premise's answers (Manage them as …, and It's something else).
   premise_confirm: 'premise',
   premise_other: 'premise'
@@ -107,6 +110,9 @@ export function folderAgentTileLine(view) {
   if (!view) return '';
   if (view.state === 'looking') return String(view.progress_line || 'Looking around…');
   if (view.state === 'setting_up') return 'Setting up…';
+  // Reading the songs after "Learn them": the host's own line, "Learning <song>…
+  // (2 of 7)". It goes when the reading ends; the card keeps the closing line.
+  if (view.learning?.status === 'running' && view.learning.line) return String(view.learning.line);
   return '';
 }
 
@@ -185,6 +191,29 @@ export function folderAgentReportView(view) {
       ? {
           goal: String(view.goal_offer.goal),
           maxRunes: Number(view.goal_offer.max_runes) > 0 ? Number(view.goal_offer.max_runes) : 300
+        }
+      : null,
+    // The Commander's offer to learn the songs, made once after a setup that
+    // put the folder in a Home, and before the goal (learn-the-songs FR1–FR5).
+    // Every word is the host's; nothing is read until the owner says yes.
+    songsOffer: view.songs_offer?.ask
+      ? {
+          count: Number(view.songs_offer.count) || 0,
+          noun: String(view.songs_offer.noun || 'songs'),
+          ask: String(view.songs_offer.ask),
+          reads: String(view.songs_offer.reads || ''),
+          notRead: String(view.songs_offer.not_read || '')
+        }
+      : null,
+    // The reading of the songs once "Learn them" was said: the line to show
+    // while it runs, and how it ended (FR14).
+    learning: view.learning?.line
+      ? {
+          status: String(view.learning.status || ''),
+          line: String(view.learning.line),
+          done: Number(view.learning.done) || 0,
+          total: Number(view.learning.total) || 0,
+          notRead: String(view.learning.not_read || '')
         }
       : null
   };
@@ -1106,6 +1135,63 @@ function runPhase(setup) {
   return 'done';
 }
 
+// songsOfferSection is the Commander offering to learn the songs once the
+// place exists (learn-the-songs FR1, FR2): what it will read, then Learn them
+// and Not now. It comes before the goal offer, which waits for the answer. The
+// words are the host's and are drawn as text; nothing is read until Learn them.
+function songsOfferSection(doc, offer, onAction) {
+  const section = el(doc, 'section', 'folder-agent-card__songs-offer');
+  section.setAttribute('aria-label', 'Learn the songs');
+  section.append(el(doc, 'p', 'folder-agent-card__songs-lead', offer.ask));
+  if (offer.reads) section.append(el(doc, 'p', 'folder-agent-card__songs-reads', offer.reads));
+  if (offer.notRead) {
+    section.append(el(doc, 'p', 'folder-agent-card__songs-not-read', offer.notRead));
+  }
+  const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__songs-actions');
+  const button = (label, action, primary) => {
+    const b = el(
+      doc,
+      'button',
+      primary ? 'btn btn-primary btn-sm' : 'btn btn-sm folder-agent-card__secondary',
+      label
+    );
+    b.type = 'button';
+    b.dataset.folderAgentAction = action;
+    b.addEventListener('click', () => onAction?.(action, b, {}));
+    return b;
+  };
+  row.append(button('Learn them', 'learn_songs', true), button('Not now', 'dismiss_songs', false));
+  section.append(row);
+  return section;
+}
+
+// learningSection is the reading of the songs as it runs and once it ended
+// (FR14): the host's line ("Learning <song>… (2 of 7)", then "Learned 7 songs"),
+// a progress bar while it runs, and the songs that cannot be read this way.
+function learningSection(doc, learning) {
+  const section = el(doc, 'section', 'folder-agent-card__learning');
+  section.dataset.learningStatus = learning.status;
+  section.setAttribute('aria-label', 'Learning the songs');
+  const line = el(doc, 'p', 'folder-agent-card__learning-line', learning.line);
+  section.append(line);
+  if (learning.status === 'running') {
+    // The poll redraws this card; role=status announces the line as it changes.
+    line.setAttribute('role', 'status');
+    if (learning.total > 0) {
+      const bar = doc.createElement('progress');
+      bar.className = 'folder-agent-card__learning-bar';
+      bar.max = learning.total;
+      bar.value = Math.min(learning.done, learning.total);
+      bar.setAttribute('aria-label', 'Songs learned so far');
+      section.append(bar);
+    }
+  }
+  if (learning.notRead && learning.status !== 'running') {
+    section.append(el(doc, 'p', 'folder-agent-card__songs-not-read', learning.notRead));
+  }
+  return section;
+}
+
 // renderFolderAgentReport draws the receipt or the report. onAction(id,
 // button, extra) posts one action; the caller refreshes. opening says the
 // page is about to open the place: the link gives way to that word.
@@ -1490,6 +1576,10 @@ export function renderFolderAgentReport(
       )
     );
   }
+  // The Commander asks one thing at a time: the songs first, then the goal
+  // (learn-the-songs FR2, FR17). The reading's line stays once it ended.
+  if (view.learning) card.append(learningSection(doc, view.learning));
+  if (view.songsOffer) card.append(songsOfferSection(doc, view.songsOffer, onAction));
   if (view.goalOffer) card.append(goalOfferSection(doc, view.goalOffer, onAction));
   if (view.actions.length) {
     const actions = el(doc, 'div', 'folder-agent-card__actions');
@@ -1692,6 +1782,8 @@ export async function postFolderAgentAction(
     const goal = String(extra?.goal || '').trim();
     body = goal ? { answer: 'use', goal } : { answer: 'use' };
   } else if (action === 'dismiss_goal') body = { answer: 'dismiss' };
+  else if (action === 'learn_songs') body = { answer: 'learn' };
+  else if (action === 'dismiss_songs') body = { answer: 'dismiss' };
   else if (action === 'premise_confirm') body = { answer: 'confirmed' };
   else if (action === 'premise_other') body = { answer: 'something_else' };
   const { ok, payload } = await post(url, body, fetchImpl);
@@ -1803,9 +1895,20 @@ export function notifyPlacement(previous, next) {
   return true;
 }
 
-// followFolderAgent polls one folder agent while it looks or sets up and hands
-// each fresh view to onView(next, finished), finished marking the end of a run
-// it watched. Returns a stop function.
+// folderAgentLive says the agent is working in the background and a card should
+// keep following it: looking, setting up, or reading the songs after "Learn
+// them". Takes the server's view.
+export function folderAgentLive(view) {
+  return (
+    view?.state === 'looking' ||
+    view?.state === 'setting_up' ||
+    view?.learning?.status === 'running'
+  );
+}
+
+// followFolderAgent polls one folder agent while it looks, sets up or reads the
+// songs, and hands each fresh view to onView(next, finished), finished marking
+// the end of a run it watched. Returns a stop function.
 export function followFolderAgent(
   view,
   { fetchImpl = globalThis.fetch, isActive = () => true, pollMs = 1500, onView } = {}
@@ -1818,8 +1921,7 @@ export function followFolderAgent(
   };
   const tick = () => {
     stop();
-    if (!current?.workspace_id || (current.state !== 'looking' && current.state !== 'setting_up'))
-      return;
+    if (!current?.workspace_id || !folderAgentLive(current)) return;
     timer = setTimeout(async () => {
       timer = 0;
       if (!isActive()) return;
@@ -1894,7 +1996,7 @@ export function mountFolderAgentReports(
     if (!id) return;
     follows.get(id)?.();
     follows.delete(id);
-    if (raw.state !== 'looking' && raw.state !== 'setting_up') return;
+    if (!folderAgentLive(raw)) return;
     const options = {
       fetchImpl: fetcher,
       isActive: () => host.isConnected !== false,
@@ -1906,7 +2008,7 @@ export function mountFolderAgentReports(
           opening = openFolderAgentPlace(next, open);
         }
         replaceCard(id, draw(folderAgentReportView(next), '', opening));
-        if (next.state === 'looking' || next.state === 'setting_up') return;
+        if (folderAgentLive(next)) return;
         follows.delete(id);
         // The list's counts follow, unless the page is about to leave.
         if (!opening) onDone?.();
